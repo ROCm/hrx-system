@@ -16,6 +16,7 @@ loom_generated_cc_library(
     loom::py::loom::gen::ops::c_tables_llvmir_generator
   SRCS
     "registry.c"
+    "target.c"
     "target_records.c"
   GENERATED_SRC_FLAGS
     "--builders"
@@ -26,6 +27,7 @@ loom_generated_cc_library(
   HDRS
     "ops.h"
     "registry.h"
+    "target.h"
     "target_records.h"
   ARGS
     "--dialect=llvmir"

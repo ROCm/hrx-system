@@ -55,6 +55,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::symbol_facts
     loom::format::text::parser
     loom::ir
     loom::ops::llvmir

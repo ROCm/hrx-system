@@ -187,6 +187,7 @@ loom_cc_library(
     ::target_presets
     iree::base
     iree::io::stream
+    loom::analysis::symbol_facts
     loom::codegen::low::function
     loom::ir
     loom::ops::llvmir

@@ -7,9 +7,10 @@
 #include "loom/target/emit/llvmir/check/loom_check.h"
 
 #include "iree/io/vec_stream.h"
+#include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/function.h"
 #include "loom/ir/module.h"
-#include "loom/ops/llvmir/ops.h"
+#include "loom/ops/llvmir/target.h"
 #include "loom/target/emit/llvmir/bitcode_writer.h"
 #include "loom/target/emit/llvmir/module_emitter.h"
 #include "loom/target/emit/llvmir/target_env.h"
@@ -344,20 +345,6 @@ static iree_status_t loom_llvmir_loom_check_write_object(
   return status;
 }
 
-static iree_string_view_t loom_llvmir_loom_check_string_attr(
-    const loom_module_t* module, const loom_op_t* op, uint8_t attr_index) {
-  const loom_attribute_t attr = loom_op_attrs(op)[attr_index];
-  if (loom_attr_is_absent(attr)) {
-    return iree_string_view_empty();
-  }
-  const loom_string_id_t string_id = loom_attr_as_string_id(attr);
-  if (string_id == LOOM_STRING_ID_INVALID ||
-      string_id >= module->strings.count) {
-    return iree_string_view_empty();
-  }
-  return module->strings.entries[string_id];
-}
-
 static bool loom_llvmir_loom_check_lookup_symbol_id(
     const loom_module_t* module, iree_string_view_t symbol_name,
     loom_symbol_id_t* out_symbol_id) {
@@ -376,37 +363,52 @@ static bool loom_llvmir_loom_check_lookup_symbol_id(
   return true;
 }
 
-static const loom_op_t* loom_llvmir_loom_check_resolve_llvmir_target_op(
+static iree_status_t loom_llvmir_loom_check_resolve_target_facts(
     const loom_check_emit_provider_request_t* request,
-    iree_string_view_t symbol_name) {
+    iree_string_view_t symbol_name,
+    const loom_llvmir_target_facts_t** out_target_facts) {
+  *out_target_facts = NULL;
   loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   if (!loom_llvmir_loom_check_lookup_symbol_id(request->module, symbol_name,
                                                &symbol_id)) {
-    return NULL;
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "target symbol @%.*s is not an llvmir.target",
+                            (int)symbol_name.size, symbol_name.data);
   }
-  const loom_op_t* op = request->module->symbols.entries[symbol_id].defining_op;
-  return op != NULL && loom_llvmir_target_isa(op) ? op : NULL;
+  loom_symbol_fact_table_t fact_table = {0};
+  loom_symbol_fact_table_initialize(&fact_table, request->case_arena);
+  const loom_symbol_facts_base_t* base_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup(
+      &fact_table, request->module, symbol_id, &base_facts));
+  const loom_target_symbol_facts_t* target_facts =
+      loom_target_symbol_facts_cast(base_facts);
+  const loom_llvmir_target_facts_t* llvmir_facts =
+      target_facts != NULL
+          ? loom_llvmir_target_facts_cast(target_facts->projection)
+          : NULL;
+  if (llvmir_facts == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "target symbol @%.*s is not an llvmir.target",
+                            (int)symbol_name.size, symbol_name.data);
+  }
+  *out_target_facts = llvmir_facts;
+  return iree_ok_status();
 }
 
 static void loom_llvmir_loom_check_initialize_projection_profile(
-    const loom_check_emit_provider_request_t* request,
-    iree_string_view_t symbol_name, const loom_op_t* target_op,
+    iree_string_view_t symbol_name,
+    const loom_llvmir_target_facts_t* target_facts,
     loom_llvmir_target_profile_storage_t* out_storage) {
   out_storage->target_env = (loom_llvmir_target_env_t){
       .name = symbol_name,
-      .target_triple = loom_llvmir_loom_check_string_attr(
-          request->module, target_op, loom_llvmir_target_triple_ATTR_INDEX),
-      .data_layout = loom_llvmir_loom_check_string_attr(
-          request->module, target_op,
-          loom_llvmir_target_data_layout_ATTR_INDEX),
+      .target_triple = target_facts->target_triple,
+      .data_layout = target_facts->data_layout,
   };
   out_storage->profile = (loom_llvmir_target_profile_t){
       .name = symbol_name,
       .target_env = &out_storage->target_env,
-      .target_cpu = loom_llvmir_loom_check_string_attr(
-          request->module, target_op, loom_llvmir_target_cpu_ATTR_INDEX),
-      .target_features = loom_llvmir_loom_check_string_attr(
-          request->module, target_op, loom_llvmir_target_features_ATTR_INDEX),
+      .target_cpu = target_facts->target_cpu,
+      .target_features = target_facts->target_features,
   };
 }
 
@@ -423,15 +425,11 @@ static iree_status_t loom_llvmir_loom_check_resolve_object_profile(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "target symbol name is required");
     }
-    const loom_op_t* target_op =
-        loom_llvmir_loom_check_resolve_llvmir_target_op(request, symbol_name);
-    if (target_op == NULL) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "target symbol @%.*s is not an llvmir.target",
-                              (int)symbol_name.size, symbol_name.data);
-    }
+    const loom_llvmir_target_facts_t* target_facts = NULL;
+    IREE_RETURN_IF_ERROR(loom_llvmir_loom_check_resolve_target_facts(
+        request, symbol_name, &target_facts));
     loom_llvmir_loom_check_initialize_projection_profile(
-        request, symbol_name, target_op, out_profile_storage);
+        symbol_name, target_facts, out_profile_storage);
     *out_profile = &out_profile_storage->profile;
     return iree_ok_status();
   }

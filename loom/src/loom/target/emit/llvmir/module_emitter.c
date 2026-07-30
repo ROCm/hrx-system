@@ -19,6 +19,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/atomic.h"
 #include "loom/ops/llvmir/ops.h"
+#include "loom/ops/llvmir/target.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/llvmir/descriptors/descriptors.h"
 #include "loom/target/emit/llvmir/builder.h"
@@ -3656,14 +3657,6 @@ static iree_status_t loom_llvmir_emit_function_body(
   return iree_ok_status();
 }
 
-static iree_string_view_t loom_llvmir_emit_optional_string_attr(
-    const loom_module_t* module, const loom_op_t* op, uint8_t attr_index) {
-  if (attr_index >= op->attribute_count) return iree_string_view_empty();
-  const loom_attribute_t attr = loom_op_const_attrs(op)[attr_index];
-  if (attr.kind != LOOM_ATTR_STRING) return iree_string_view_empty();
-  return loom_llvmir_emit_string_or_empty(module, loom_attr_as_string_id(attr));
-}
-
 static uint32_t loom_llvmir_emit_workgroup_size_dimension_count(
     const loom_target_workgroup_size_t* size) {
   return (size->x != 0 ? 1u : 0u) + (size->y != 0 ? 1u : 0u) +
@@ -3680,20 +3673,13 @@ static iree_status_t loom_llvmir_emit_prepare_function_profile(
   iree_string_view_t data_layout = iree_string_view_empty();
   iree_string_view_t target_cpu = iree_string_view_empty();
   iree_string_view_t target_features = iree_string_view_empty();
-  if (state->target->target_op &&
-      loom_llvmir_target_isa(state->target->target_op)) {
-    target_triple = loom_llvmir_emit_optional_string_attr(
-        state->module, state->target->target_op,
-        loom_llvmir_target_triple_ATTR_INDEX);
-    data_layout = loom_llvmir_emit_optional_string_attr(
-        state->module, state->target->target_op,
-        loom_llvmir_target_data_layout_ATTR_INDEX);
-    target_cpu = loom_llvmir_emit_optional_string_attr(
-        state->module, state->target->target_op,
-        loom_llvmir_target_cpu_ATTR_INDEX);
-    target_features = loom_llvmir_emit_optional_string_attr(
-        state->module, state->target->target_op,
-        loom_llvmir_target_features_ATTR_INDEX);
+  const loom_llvmir_target_facts_t* target_facts =
+      loom_llvmir_target_facts_cast(state->target->target_facts);
+  if (target_facts != NULL) {
+    target_triple = target_facts->target_triple;
+    data_layout = target_facts->data_layout;
+    target_cpu = target_facts->target_cpu;
+    target_features = target_facts->target_features;
   }
 
   loom_llvmir_target_env_t projected_env = {

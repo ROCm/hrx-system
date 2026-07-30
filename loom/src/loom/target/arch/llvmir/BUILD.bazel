@@ -57,6 +57,7 @@ loom_cc_test(
     srcs = ["provider_test.cc"],
     deps = [
         ":provider",
+        "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/llvmir",

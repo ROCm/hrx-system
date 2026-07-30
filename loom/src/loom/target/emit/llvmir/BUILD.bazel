@@ -182,6 +182,7 @@ loom_cc_library(
         ":module_emitter",
         ":target_env",
         ":target_presets",
+        "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low:function",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/llvmir",
