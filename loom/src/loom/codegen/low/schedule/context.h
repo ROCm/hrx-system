@@ -312,6 +312,8 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_schedule_resource_summary_t* resource_summaries;
   // Union of descriptor resource flags referenced by scheduled nodes.
   loom_low_resource_flags_t used_resource_flags;
+  // Issue uses that establish matrix/vector coexecution retention state.
+  iree_host_size_t matrix_coexecution_source_use_count;
   // Number of populated scheduled_node_indices entries.
   iree_host_size_t scheduled_node_count;
   // Number of error diagnostics emitted while attempting scheduling.

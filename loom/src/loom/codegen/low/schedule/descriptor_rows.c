@@ -208,8 +208,16 @@ void loom_low_schedule_compact_resource_summaries(
     }
     // Retain the flag union while this mandatory compaction already touches
     // each used resource instead of adding work to every issue use.
-    state->used_resource_flags |=
-        state->resource_summaries[read_index].resource_flags;
+    const loom_low_schedule_resource_summary_t* summary =
+        &state->resource_summaries[read_index];
+    state->used_resource_flags |= summary->resource_flags;
+    if (iree_any_bit_set(summary->resource_flags,
+                         LOOM_LOW_RESOURCE_FLAG_MATRIX_COEXECUTION_SOURCE)) {
+      IREE_ASSERT_LE(
+          summary->use_count,
+          IREE_HOST_SIZE_MAX - state->matrix_coexecution_source_use_count);
+      state->matrix_coexecution_source_use_count += summary->use_count;
+    }
     state->resource_summaries[write_index++] =
         state->resource_summaries[read_index];
   }

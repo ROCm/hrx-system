@@ -211,27 +211,6 @@ static bool loom_amdgpu_matrix_coexecution_descriptor_is_source(
       LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX_COEXECUTION_SOURCE);
 }
 
-static iree_host_size_t loom_amdgpu_matrix_coexecution_source_capacity(
-    const loom_low_schedule_table_t* schedule) {
-  if (!iree_any_bit_set(schedule->used_resource_flags,
-                        LOOM_LOW_RESOURCE_FLAG_MATRIX_COEXECUTION_SOURCE)) {
-    return 0;
-  }
-  iree_host_size_t source_capacity = 0;
-  for (iree_host_size_t i = 0; i < schedule->resource_summary_count; ++i) {
-    const loom_low_schedule_resource_summary_t* summary =
-        &schedule->resource_summaries[i];
-    if (!iree_any_bit_set(summary->resource_flags,
-                          LOOM_LOW_RESOURCE_FLAG_MATRIX_COEXECUTION_SOURCE)) {
-      continue;
-    }
-    IREE_ASSERT_LE(summary->use_count, IREE_HOST_SIZE_MAX - source_capacity);
-    source_capacity += summary->use_count;
-  }
-  IREE_ASSERT_NE(source_capacity, 0);
-  return source_capacity;
-}
-
 static uint8_t loom_amdgpu_matrix_coexecution_saturating_add(uint8_t lhs,
                                                              uint16_t rhs,
                                                              uint8_t limit) {
@@ -837,7 +816,7 @@ iree_status_t loom_amdgpu_matrix_coexecution_allocate(
       loom_amdgpu_target_info_matrix_coexecution_profile(profile);
   if (profile_model->rule_count == 0) return iree_ok_status();
   const iree_host_size_t source_capacity =
-      loom_amdgpu_matrix_coexecution_source_capacity(schedule);
+      schedule->matrix_coexecution_source_use_count;
   if (source_capacity == 0) return iree_ok_status();
   const uint32_t vgpr_count =
       allocation->physical_extents
