@@ -14,6 +14,7 @@ package(
 )
 
 exports_files([
+    "ggml/linear_q6k_q8_1_x4.loom",
     "ggml/quantize_q8_1_x4.loom",
     "qwen3_moe/flash_attention_decode_f32_f16_wmma.loom",
     "qwen3_moe/flash_attention_decode_q128_f32_f16_wmma.loom",
@@ -66,6 +67,45 @@ iree_executable_test(
     ],
     data = [":routed_gate_up_swiglu_q4k_linked"],
     tags = ["hostonly"],
+)
+
+loom_link_module(
+    name = "linear_q6k_q8_1_x4_linked",
+    srcs = ["ggml/linear_q6k_q8_1_x4.loom"],
+    libraries = ["ggml/quantize_q8_1_x4.loom"],
+)
+
+iree_executable_test(
+    name = "linear_q6k_q8_1_x4_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :linear_q6k_q8_1_x4_linked)",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = [":linear_q6k_q8_1_x4_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "linear_q6k_q8_1_x4_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :linear_q6k_q8_1_x4_linked)",
+        "--case=@ggml_linear_q6k_q8_1_x4_nonzero_tail_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":linear_q6k_q8_1_x4_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
 )
 
 loom_link_module(
