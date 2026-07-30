@@ -101,4 +101,39 @@ TEST(QwenLoomSourceTest, RejectsUnknownPath) {
   EXPECT_THAT(status, StatusIs(iree::StatusCode::kNotFound));
 }
 
+TEST(QwenLoomSourceTest, EmbedsRewrittenFlashAttentionIndexExpressions) {
+  qwen_loom_source_module_t source_module;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_PREFILL_F32_F16),
+      &source_module));
+
+  EXPECT_TRUE(iree_string_view_equal(
+      source_module.source_identifier,
+      IREE_SV("qwen3_moe_flash_attention_prefill_f32_f16.loom")));
+  std::string source_text(
+      reinterpret_cast<const char*>(source_module.source_contents.data),
+      source_module.source_contents.data_length);
+  EXPECT_NE(
+      source_text.find("%tail_key_value_token_count = index.rem "
+                       "%bounded_key_value_token_count, %sixtyfour : index"),
+      std::string::npos);
+  EXPECT_NE(source_text.find(
+                "%full_tile_key_value_token_count = index.assume "
+                "%bounded_key_value_token_count "
+                "[range(%bounded_key_value_token_count, 64, 32768)] : index"),
+            std::string::npos);
+  EXPECT_NE(
+      source_text.find("%last_full_key_tile_start = index.sub "
+                       "%full_tile_key_value_token_count, %fifteen : index"),
+      std::string::npos);
+  EXPECT_NE(
+      source_text.find("%tail_key_count = scf.select %is_first_tail_tile, "
+                       "%first_tail_key_count, %second_tail_key_count : index"),
+      std::string::npos);
+  size_t subtraction_position = source_text.find("index.sub");
+  ASSERT_NE(subtraction_position, std::string::npos);
+  EXPECT_EQ(source_text.find("index.sub", subtraction_position + 1),
+            std::string::npos);
+}
+
 }  // namespace

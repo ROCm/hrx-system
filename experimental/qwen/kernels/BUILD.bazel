@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_test")
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
 
@@ -52,15 +53,39 @@ loom_link_module(
 )
 
 loom_link_module(
-    name = "flash_attention_prefill_f32_f16_runtime_module",
+    name = "flash_attention_prefill_f32_f16_runtime_module_unpatched",
     srcs = ["runtime_exports.loom"],
     libraries = [
         "//experimental/qwen_moe/kernels:qwen3_moe/flash_attention_f32_f16_wmma.loom",
     ],
     mode = "selective",
-    output = "qwen3_moe_flash_attention_prefill_f32_f16.loom",
+    output = "qwen3_moe_flash_attention_prefill_f32_f16_unpatched.loom",
     roots = ["@qwen3_moe_flash_attention_f32_f16_wmma"],
     strip_check = True,
+)
+
+iree_py_binary(
+    name = "flash_attention_source_rewrite",
+    srcs = ["flash_attention_source_rewrite.py"],
+    main = "flash_attention_source_rewrite.py",
+)
+
+iree_py_test(
+    name = "flash_attention_source_rewrite_test",
+    srcs = [
+        "flash_attention_source_rewrite.py",
+        "flash_attention_source_rewrite_test.py",
+    ],
+    main = "flash_attention_source_rewrite_test.py",
+)
+
+genrule(
+    name = "flash_attention_prefill_f32_f16_runtime_module",
+    srcs = [":flash_attention_prefill_f32_f16_runtime_module_unpatched"],
+    outs = ["qwen3_moe_flash_attention_prefill_f32_f16.loom"],
+    cmd = "$(location :flash_attention_source_rewrite) --input $(location :flash_attention_prefill_f32_f16_runtime_module_unpatched) --output $@",
+    message = "Rewriting bounded FlashAttention index expressions",
+    tools = [":flash_attention_source_rewrite"],
 )
 
 loom_link_module(
