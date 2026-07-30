@@ -145,4 +145,30 @@ TEST(QwenLoomSourceTest, EmbedsWorkaroundFlashAttentionSource) {
             std::string::npos);
 }
 
+TEST(QwenLoomSourceTest, EmbedsWorkaroundRouterProjectionSource) {
+  qwen_loom_source_module_t source_module;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_ROUTER_PROJECTION_F32), &source_module));
+
+  std::string source_text(
+      reinterpret_cast<const char*>(source_module.source_contents.data),
+      source_module.source_contents.data_length);
+  EXPECT_NE(source_text.find(
+                "export(\"qwen3_moe_router_projection_f32_four_row_wave32\") "
+                "@qwen3_moe_router_projection_f32_four_row_wave32"),
+            std::string::npos);
+  EXPECT_NE(source_text.find(
+                "%vector_channel_end = index.sub %hidden_size, %three : index"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("[%lane_channel to %vector_channel_end step "
+                             "%onetwentyeight]"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("%vector_channel = index.assume %channel "
+                             "[lt(%channel, %vector_channel_end)] : index"),
+            std::string::npos);
+  EXPECT_EQ(
+      source_text.find("[%lane_channel to %hidden_size step %onetwentyeight]"),
+      std::string::npos);
+}
+
 }  // namespace

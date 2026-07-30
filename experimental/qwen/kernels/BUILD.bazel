@@ -102,10 +102,7 @@ loom_link_module(
 
 loom_link_module(
     name = "router_projection_f32_runtime_module",
-    srcs = ["runtime_exports.loom"],
-    libraries = [
-        "//experimental/qwen_moe/kernels:router_projection_f32_linked",
-    ],
+    srcs = ["router_projection_f32_bringup_workaround.loom"],
     mode = "selective",
     output = "qwen3_moe_router_projection_f32.loom",
     roots = ["@qwen3_moe_router_projection_f32_four_row_wave32"],

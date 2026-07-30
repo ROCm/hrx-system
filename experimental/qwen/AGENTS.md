@@ -42,3 +42,8 @@ authoring API, or reusable infrastructure. It may patch only exact upstream
 source fragments for preserved defects, must fail on any source drift, and is
 deleted in full when those upstream fixes land. Never generalize it into
 templating, parameterization, module generation, or a second authoring path.
+
+Any Loom file named `*_bringup_workaround.loom` is likewise a temporary,
+minimal function fork rather than a new kernel variant. It carries only the
+blocked function and declarations required to verify it, and is deleted rather
+than evolved after the upstream fix.
