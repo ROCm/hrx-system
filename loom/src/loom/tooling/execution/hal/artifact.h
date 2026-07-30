@@ -131,9 +131,10 @@ struct loom_run_hal_artifact_provider_t {
   loom_target_pipeline_options_t default_pipeline_options;
   // Selects a concrete target supported by the active HAL device.
   loom_run_hal_select_device_target_fn_t select_device_target;
-  // Selects a concrete target for one authored function on the active HAL
-  // device. Recognized function-local target contracts take precedence over
-  // the device-preferred target selected by |select_device_target|.
+  // Selects the most specific concrete device target satisfying one authored
+  // function's target requirement. An exact device target refines a compatible
+  // generic authored target; a generic device target is used only when no
+  // compatible exact target is advertised.
   loom_run_hal_select_function_device_target_fn_t select_function_device_target;
   // Selects a concrete offline target by provider-owned key. This is used by
   // compilation tools that do not have an active HAL runtime device.

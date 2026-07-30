@@ -54,7 +54,6 @@ loom_cc_library(
         "//loom/src/loom/tooling/execution/hal:runtime",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/executable/amdgpu:executable_target",
         "//runtime/src/iree/hal/executable/amdgpu:target_id",
     ],
 )

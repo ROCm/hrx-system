@@ -20,7 +20,6 @@ loom_cc_library(
   DEPS
     iree::base
     iree::hal
-    iree::hal::executable::amdgpu::executable_target
     iree::hal::executable::amdgpu::target_id
     loom::ir
     loom::ops::op_defs

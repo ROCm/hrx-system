@@ -458,7 +458,7 @@ TEST_F(AmdgpuHalArtifactProviderTest,
 }
 
 TEST_F(AmdgpuHalArtifactProviderTest,
-       SelectFunctionDeviceTargetPreservesAuthoredGenericTarget) {
+       SelectFunctionDeviceTargetRefinesAuthoredGenericTarget) {
   ModulePtr module;
   IREE_ASSERT_OK(
       ParsePreparedArithmeticModule(IREE_SV("gfx11-generic"), &module));
@@ -469,6 +469,45 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   iree_hal_device_spec_t* device_spec = nullptr;
   IREE_ASSERT_OK(CreateAmdgpuExecutableDeviceSpec(
       /*include_exact_target=*/true, &device_spec));
+  fake_hal_device_t device = {};
+  InitializeFakeHalDevice(device_spec, &device);
+  const loom_run_hal_runtime_t runtime = {
+      /*.device=*/(iree_hal_device_t*)&device,
+      /*.device_group=*/nullptr,
+  };
+
+  loom_run_hal_device_target_t target = {};
+  IREE_ASSERT_OK(
+      loom_amdgpu_hal_artifact_provider.select_function_device_target(
+          &loom_amdgpu_hal_artifact_provider, &runtime, module.get(), function,
+          iree_allocator_system(), &target));
+
+  const loom_amdgpu_target_profile_t* target_profile =
+      loom_amdgpu_target_profile_cast(target.target_profile);
+  ASSERT_NE(target_profile, nullptr);
+  ASSERT_NE(target.hal_target, nullptr);
+  EXPECT_EQ(target.hal_target->kind, IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT);
+  EXPECT_TRUE(iree_string_view_equal(target.target_key, IREE_SV("gfx1151")));
+  EXPECT_TRUE(iree_string_view_equal(target_profile->identity.target->name,
+                                     IREE_SV("gfx1151")));
+
+  loom_amdgpu_hal_artifact_provider.deinitialize_device_target(
+      &loom_amdgpu_hal_artifact_provider, &target, iree_allocator_system());
+  iree_hal_device_spec_release(device_spec);
+}
+
+TEST_F(AmdgpuHalArtifactProviderTest,
+       SelectFunctionDeviceTargetFallsBackToCompatibleGenericTarget) {
+  ModulePtr module;
+  IREE_ASSERT_OK(
+      ParsePreparedArithmeticModule(IREE_SV("gfx11-generic"), &module));
+  ASSERT_NE(module.get(), nullptr);
+  const loom_func_like_t function = FindKernel(module.get());
+  ASSERT_TRUE(loom_func_like_isa(function));
+
+  iree_hal_device_spec_t* device_spec = nullptr;
+  IREE_ASSERT_OK(CreateAmdgpuExecutableDeviceSpec(
+      /*include_exact_target=*/false, &device_spec));
   fake_hal_device_t device = {};
   InitializeFakeHalDevice(device_spec, &device);
   const loom_run_hal_runtime_t runtime = {
