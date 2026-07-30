@@ -77,6 +77,221 @@ low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_f32x4_to_fp8(%input
 // ====
 
 amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_fptrunc_f16x4_to_fp8(%input: vector<4xf16>) -> (vector<4xf8E4M3>) {
+  %converted = vector.fptrunc %input : vector<4xf16> to vector<4xf8E4M3>
+  func.return %converted : vector<4xf8E4M3>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_f16x4_to_fp8(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = s_mov_b32 458759
+  %6 = s_mov_b32 524296
+  %7 = s_mov_b32 983055
+  %8 = s_mov_b32 1593859840
+  %9 = s_mov_b32 4128831
+  %10 = s_mov_b32 4290838464
+  %11 = s_mov_b32 1073758208
+  %12 = s_mov_b32 3221274624
+  %13 = s_mov_b32 3691043840
+  %14 = s_mov_b32 67044351
+  %15 = s_mov_b32 8323199
+  %16 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = v_pk_lshrrev_b16 %6, %16
+  %19 = v_and_b32_lit %16, 2147450879
+  %20 = v_pk_min_u16 %19, %8
+  %21 = v_pk_lshrrev_b16 %5, %20
+  %22 = v_and_b32_lit %21, 65537
+  %23 = v_pk_add_u16 %20, %22
+  %24 = v_pk_add_u16 %23, %9
+  %25 = v_pk_lshrrev_b16 %5, %24
+  %26 = v_pk_add_u16 %25, %10
+  %27 = v_pk_add_f16 %20, %11
+  %28 = v_pk_add_u16 %27, %12
+  %29 = v_pk_add_u16 %20, %13
+  %30 = v_pk_ashrrev_i16 %7, %29
+  %31 = v_bfi_b32 %30, %28, %26
+  %32 = v_pk_add_u16 %19, %14
+  %33 = v_pk_ashrrev_i16 %7, %32
+  %34 = v_bfi_b32 %33, %15, %31
+  %35 = v_bfi_b32_src0_lit %18, %34, 8388736
+  %36 = v_pk_lshrrev_b16 %6, %17
+  %37 = v_and_b32_lit %17, 2147450879
+  %38 = v_pk_min_u16 %37, %8
+  %39 = v_pk_lshrrev_b16 %5, %38
+  %40 = v_and_b32_lit %39, 65537
+  %41 = v_pk_add_u16 %38, %40
+  %42 = v_pk_add_u16 %41, %9
+  %43 = v_pk_lshrrev_b16 %5, %42
+  %44 = v_pk_add_u16 %43, %10
+  %45 = v_pk_add_f16 %38, %11
+  %46 = v_pk_add_u16 %45, %12
+  %47 = v_pk_add_u16 %38, %13
+  %48 = v_pk_ashrrev_i16 %7, %47
+  %49 = v_bfi_b32 %48, %46, %44
+  %50 = v_pk_add_u16 %37, %14
+  %51 = v_pk_ashrrev_i16 %7, %50
+  %52 = v_bfi_b32 %51, %15, %49
+  %53 = v_bfi_b32_src0_lit %36, %52, 8388736
+  %converted = v_perm_b32_src2_lit %35, %53, 33555972
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_fptrunc_f16x3_to_fp8(%input: vector<3xf16>) -> (vector<3xf8E4M3>) {
+  %converted = vector.fptrunc %input : vector<3xf16> to vector<3xf8E4M3>
+  func.return %converted : vector<3xf8E4M3>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_f16x3_to_fp8(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = s_mov_b32 458759
+  %6 = s_mov_b32 524296
+  %7 = s_mov_b32 983055
+  %8 = s_mov_b32 1593859840
+  %9 = s_mov_b32 4128831
+  %10 = s_mov_b32 4290838464
+  %11 = s_mov_b32 1073758208
+  %12 = s_mov_b32 3221274624
+  %13 = s_mov_b32 3691043840
+  %14 = s_mov_b32 67044351
+  %15 = s_mov_b32 8323199
+  %16 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = v_and_b32_lit %17, 65535
+  %19 = v_lshlrev_b32_src0_inline %18, 16
+  %20 = v_or_b32 %18, %19
+  %21 = v_pk_lshrrev_b16 %6, %16
+  %22 = v_and_b32_lit %16, 2147450879
+  %23 = v_pk_min_u16 %22, %8
+  %24 = v_pk_lshrrev_b16 %5, %23
+  %25 = v_and_b32_lit %24, 65537
+  %26 = v_pk_add_u16 %23, %25
+  %27 = v_pk_add_u16 %26, %9
+  %28 = v_pk_lshrrev_b16 %5, %27
+  %29 = v_pk_add_u16 %28, %10
+  %30 = v_pk_add_f16 %23, %11
+  %31 = v_pk_add_u16 %30, %12
+  %32 = v_pk_add_u16 %23, %13
+  %33 = v_pk_ashrrev_i16 %7, %32
+  %34 = v_bfi_b32 %33, %31, %29
+  %35 = v_pk_add_u16 %22, %14
+  %36 = v_pk_ashrrev_i16 %7, %35
+  %37 = v_bfi_b32 %36, %15, %34
+  %38 = v_bfi_b32_src0_lit %21, %37, 8388736
+  %39 = v_pk_lshrrev_b16 %6, %20
+  %40 = v_and_b32_lit %20, 2147450879
+  %41 = v_pk_min_u16 %40, %8
+  %42 = v_pk_lshrrev_b16 %5, %41
+  %43 = v_and_b32_lit %42, 65537
+  %44 = v_pk_add_u16 %41, %43
+  %45 = v_pk_add_u16 %44, %9
+  %46 = v_pk_lshrrev_b16 %5, %45
+  %47 = v_pk_add_u16 %46, %10
+  %48 = v_pk_add_f16 %41, %11
+  %49 = v_pk_add_u16 %48, %12
+  %50 = v_pk_add_u16 %41, %13
+  %51 = v_pk_ashrrev_i16 %7, %50
+  %52 = v_bfi_b32 %51, %49, %47
+  %53 = v_pk_add_u16 %40, %14
+  %54 = v_pk_ashrrev_i16 %7, %53
+  %55 = v_bfi_b32 %54, %15, %52
+  %56 = v_bfi_b32_src0_lit %39, %55, 8388736
+  %converted = v_perm_b32_src2_lit %38, %56, 33555972
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_fptrunc_f16x5_to_fp8(%input: vector<5xf16>) -> (vector<5xf8E4M3>) {
+  %converted = vector.fptrunc %input : vector<5xf16> to vector<5xf8E4M3>
+  func.return %converted : vector<5xf8E4M3>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_f16x5_to_fp8(%input: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+  %5 = s_mov_b32 458759
+  %6 = s_mov_b32 524296
+  %7 = s_mov_b32 983055
+  %8 = s_mov_b32 1593859840
+  %9 = s_mov_b32 4128831
+  %10 = s_mov_b32 4290838464
+  %11 = s_mov_b32 1073758208
+  %12 = s_mov_b32 3221274624
+  %13 = s_mov_b32 3691043840
+  %14 = s_mov_b32 67044351
+  %15 = s_mov_b32 8323199
+  %16 = v_mov_b32 1138753536
+  %17 = v_mov_b32 2139095040
+  %18 = v_mov_b32 1015021568
+  %19 = v_mov_b32 127
+  %20 = slice %input[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %21 = slice %input[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %22 = v_pk_lshrrev_b16 %6, %20
+  %23 = v_and_b32_lit %20, 2147450879
+  %24 = v_pk_min_u16 %23, %8
+  %25 = v_pk_lshrrev_b16 %5, %24
+  %26 = v_and_b32_lit %25, 65537
+  %27 = v_pk_add_u16 %24, %26
+  %28 = v_pk_add_u16 %27, %9
+  %29 = v_pk_lshrrev_b16 %5, %28
+  %30 = v_pk_add_u16 %29, %10
+  %31 = v_pk_add_f16 %24, %11
+  %32 = v_pk_add_u16 %31, %12
+  %33 = v_pk_add_u16 %24, %13
+  %34 = v_pk_ashrrev_i16 %7, %33
+  %35 = v_bfi_b32 %34, %32, %30
+  %36 = v_pk_add_u16 %23, %14
+  %37 = v_pk_ashrrev_i16 %7, %36
+  %38 = v_bfi_b32 %37, %15, %35
+  %39 = v_bfi_b32_src0_lit %22, %38, 8388736
+  %40 = v_pk_lshrrev_b16 %6, %21
+  %41 = v_and_b32_lit %21, 2147450879
+  %42 = v_pk_min_u16 %41, %8
+  %43 = v_pk_lshrrev_b16 %5, %42
+  %44 = v_and_b32_lit %43, 65537
+  %45 = v_pk_add_u16 %42, %44
+  %46 = v_pk_add_u16 %45, %9
+  %47 = v_pk_lshrrev_b16 %5, %46
+  %48 = v_pk_add_u16 %47, %10
+  %49 = v_pk_add_f16 %42, %11
+  %50 = v_pk_add_u16 %49, %12
+  %51 = v_pk_add_u16 %42, %13
+  %52 = v_pk_ashrrev_i16 %7, %51
+  %53 = v_bfi_b32 %52, %50, %48
+  %54 = v_pk_add_u16 %41, %14
+  %55 = v_pk_ashrrev_i16 %7, %54
+  %56 = v_bfi_b32 %55, %15, %53
+  %57 = v_bfi_b32_src0_lit %40, %56, 8388736
+  %58 = v_perm_b32_src2_lit %39, %57, 33555972
+  %59 = slice %input[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %60 = v_cvt_f32_f16 %59
+  %61 = v_and_b32_lit %60, 2147483647
+  %62 = v_min_u32 %16, %61
+  %63 = v_bfe_u32_offset_width_inline %62 {offset = 20, width = 1}
+  %64 = v_add3_u32_src2_lit %62, %63, 524287
+  %65 = v_lshrrev_b32_src0_inline %64, 20
+  %66 = v_add_u32_lit %65, 4294966336
+  %67 = v_add_f32_lit %62, 1182793728
+  %68 = v_add_u32_lit %67, 3112173568
+  %69 = v_cmp_lt_u32 %62, %18
+  %70 = v_cndmask_b32 %66, %68, %69
+  %71 = v_cmp_gt_u32 %61, %17
+  %72 = v_cndmask_b32 %70, %19, %71
+  %73 = v_lshrrev_b32_src0_inline %60, 24
+  %74 = v_bfi_b32_src0_lit %73, %72, 128
+  %75 = v_perm_b32_src2_lit %74, %74, 4
+  %77 = v_perm_b32_src2_lit %75, %75, 16778500
+  %converted = concat(%58, %77) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
 func.def target(@target) @scalar_fptrunc_f32_to_bf8(%input: f32) -> (f8E5M2) {
   %converted = scalar.fptrunc %input : f32 to f8E5M2
   func.return %converted : f8E5M2

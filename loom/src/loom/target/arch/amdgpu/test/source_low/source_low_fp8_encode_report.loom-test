@@ -78,6 +78,19 @@ COMPILE-REPORT: source_low[0] function=report_f32_to_fp8_software source_op=vect
 
 // ====
 
+amdgpu.target<gfx1100> @target
+func.def target(@target) @report_f16_to_fp8_software(%input: vector<4xf16>) -> (vector<4xf8E4M3>) {
+  %converted = vector.fptrunc %input : vector<4xf16> to vector<4xf8E4M3>
+  func.return %converted : vector<4xf8E4M3>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=50 rows=1
+COMPILE-REPORT: source_low[0] function=report_f16_to_fp8_software source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.f16_e4m3_software emitted_ops=50
+
+// ====
+
 amdgpu.target<gfx1151> @target
 func.def target(@target) @report_f16_to_bf8_software(%input: vector<4xf16>) -> (vector<4xf8E5M2>) {
   %converted = vector.fptrunc %input : vector<4xf16> to vector<4xf8E5M2>

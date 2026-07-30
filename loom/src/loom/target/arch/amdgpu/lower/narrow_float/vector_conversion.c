@@ -943,13 +943,17 @@ loom_amdgpu_lower_vector_fp8_encode_software_literal_permute(
 
   loom_value_id_t result_registers[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {
       0};
+  const bool has_packed_f16_e4m3 =
+      loom_amdgpu_fp8_encode_plan_has_packed_f16_e4m3(&plan->fp8_encode);
+  const bool has_packed_f16_e5m2 =
+      loom_amdgpu_fp8_encode_plan_has_packed_f16_e5m2(&plan->fp8_encode);
   for (uint32_t register_index = 0;
        register_index < plan->result_register_count; ++register_index) {
     const uint32_t lane_base = register_index * 4u;
     const uint32_t register_lane_count =
         iree_min(4u, plan->lane_count - lane_base);
     if (register_lane_count >= 3u &&
-        loom_amdgpu_fp8_encode_plan_has_packed_f16_e5m2(&plan->fp8_encode)) {
+        (has_packed_f16_e4m3 || has_packed_f16_e5m2)) {
       loom_value_id_t low_source_pair = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_fp8_encode_f16_pair(
           context, source_op, plan, low_source, source_lane_type, lane_type,
@@ -958,10 +962,19 @@ loom_amdgpu_lower_vector_fp8_encode_software_literal_permute(
       IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_fp8_encode_f16_pair(
           context, source_op, plan, low_source, source_lane_type, lane_type,
           lane_base + 2u, &high_source_pair));
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_software_f16_e5m2_pairs(
-          context, source_op, &plan->fp8_encode, emission_state,
-          low_source_pair, high_source_pair,
-          &result_registers[register_index]));
+      if (has_packed_f16_e4m3) {
+        IREE_RETURN_IF_ERROR(
+            loom_amdgpu_emit_fp8_encode_software_f16_e4m3_pairs(
+                context, source_op, &plan->fp8_encode, emission_state,
+                low_source_pair, high_source_pair,
+                &result_registers[register_index]));
+      } else {
+        IREE_RETURN_IF_ERROR(
+            loom_amdgpu_emit_fp8_encode_software_f16_e5m2_pairs(
+                context, source_op, &plan->fp8_encode, emission_state,
+                low_source_pair, high_source_pair,
+                &result_registers[register_index]));
+      }
       continue;
     }
 
