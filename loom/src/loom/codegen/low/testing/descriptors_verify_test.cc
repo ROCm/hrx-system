@@ -91,6 +91,7 @@ struct TestTables {
   loom_low_effect_t effects[1];
   loom_low_constraint_t constraints[1];
   loom_low_reg_class_t reg_classes[1];
+  loom_low_register_part_t register_parts[2];
   loom_low_reg_class_alt_t reg_class_alts[1];
   loom_low_schedule_class_t schedule_classes[2];
   loom_low_issue_use_t issue_uses[1];
@@ -337,6 +338,27 @@ void AddAddDescriptorConstraint(TestTables* tables,
   tables->descriptors[1].constraint_start = 0;
   tables->descriptors[1].constraint_count = 1;
   tables->set.constraint_count = 1;
+}
+
+void ConfigureAddStorageContinuation(TestTables* tables) {
+  tables->reg_classes[0].full_register_part_mask = 0x3;
+  tables->register_parts[0].name_string_offset = TEST_STRING_OFFSET(field_lhs);
+  tables->register_parts[0].reg_class_id = 0;
+  tables->register_parts[0].mask = 0x1;
+  tables->register_parts[1].name_string_offset = TEST_STRING_OFFSET(field_rhs);
+  tables->register_parts[1].reg_class_id = 0;
+  tables->register_parts[1].mask = 0x2;
+  tables->set.register_parts = tables->register_parts;
+  tables->set.register_part_count = IREE_ARRAYSIZE(tables->register_parts);
+
+  tables->operands[1].flags =
+      LOOM_LOW_OPERAND_FLAG_TIED | LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION;
+  tables->operands[1].register_part_id = 1;
+  tables->operands[2].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT |
+                              LOOM_LOW_OPERAND_FLAG_TIED |
+                              LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION;
+  tables->operands[2].register_part_id = 0;
+  AddAddDescriptorConstraint(tables, LOOM_LOW_CONSTRAINT_KIND_TIED, 0, 1);
 }
 
 void AddAddDescriptorEffect(TestTables* tables, loom_low_effect_kind_t kind,
@@ -866,6 +888,34 @@ TEST(LowDescriptorsTest, AcceptsTiedResultOperandConstraint) {
   AddAddDescriptorConstraint(&tables, LOOM_LOW_CONSTRAINT_KIND_TIED, 0, 1);
 
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsStorageContinuationConstraint) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  ConfigureAddStorageContinuation(&tables);
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsUnprojectedStorageContinuationConstraint) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  ConfigureAddStorageContinuation(&tables);
+  tables.operands[1].flags &= ~LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsOverlappingStorageContinuationParts) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  ConfigureAddStorageContinuation(&tables);
+  tables.register_parts[1].mask = tables.register_parts[0].mask;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
 }
 
 TEST(LowDescriptorsTest, AcceptsTiedDuplicateOperandEncodingField) {

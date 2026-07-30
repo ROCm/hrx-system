@@ -110,6 +110,11 @@ typedef uint16_t loom_low_operand_flags_t;
 // derives this projection after validating the result constraint, packet
 // effects, descriptor flags, and target-state behavior.
 #define LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE ((uint16_t)1u << 7)
+// Operand participates in a tied partial-write chain. The packet preserves the
+// disjoint register parts supplied by the tied input without reading them for
+// execution, and writes only the result's declared register part. The source
+// establishes issue order and storage identity but not completion dependence.
+#define LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION ((uint16_t)1u << 8)
 
 // Bitset of register-class alternative flags.
 typedef uint16_t loom_low_reg_class_alt_flags_t;

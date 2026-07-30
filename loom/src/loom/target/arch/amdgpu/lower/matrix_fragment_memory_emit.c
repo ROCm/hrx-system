@@ -60,6 +60,29 @@ static iree_status_t loom_amdgpu_emit_fragment_memory_packed_b16_load_packet(
     loom_type_t vgpr_type, loom_value_id_t low_soffset,
     loom_value_id_t* out_low_packet) {
   *out_low_packet = LOOM_VALUE_ID_INVALID;
+  if (plan->packed_b16_high_descriptor_ref != LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
+    loom_amdgpu_fragment_memory_address_t low_address;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_vaddr(
+        context, source_op, plan, packet->register_index,
+        /*element_index=*/0, packet->descriptor_ref, base_accumulator,
+        low_address_resource, vgpr_type, &low_address));
+    loom_value_id_t low_partial_packet = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_load_packet(
+        context, source_op, layout, plan, packet, /*element_index=*/0,
+        /*vector_lane_count=*/1, vgpr_type, &low_address, low_packet_resource,
+        low_soffset, &low_partial_packet));
+
+    loom_amdgpu_fragment_memory_address_t high_address;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fragment_memory_vaddr(
+        context, source_op, plan, packet->register_index,
+        /*element_index=*/1, plan->packed_b16_high_descriptor_ref,
+        base_accumulator, low_address_resource, vgpr_type, &high_address));
+    return loom_amdgpu_emit_fragment_load_high_half_packet(
+        context, source_op, layout, plan, packet, /*element_index=*/1,
+        /*vector_lane_count=*/1, vgpr_type, &high_address, low_partial_packet,
+        low_packet_resource, low_soffset, out_low_packet);
+  }
+
   loom_value_id_t low_elements[LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT] =
       {0};
   for (uint16_t element_index = 0;

@@ -1335,6 +1335,8 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
       packets[LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS];
   // Number of populated packet plans.
   uint16_t packet_count;
+  // High-half D16 load selected to complete packed B16 payload registers.
+  loom_amdgpu_descriptor_ref_t packed_b16_high_descriptor_ref;
   // Aggregate packet-local lowering strategy bits across all packets.
   loom_amdgpu_fragment_memory_packet_flags_t packet_flags;
   // Payload storage form selected for the fragment movement.

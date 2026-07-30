@@ -1151,6 +1151,7 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             encoding_name="ENC_MUBUF",
             resource_field_name="SRSRC",
             cache_fields=_GFX9_11_VECTOR_CACHE_FIELDS,
+            include_d16_hi_loads=True,
         ),
         *_buffer_atomic_overlays(
             encoding_name="ENC_MUBUF",
@@ -1195,6 +1196,7 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             saddr_off=_GLOBAL_SADDR_OFF,
             address_units=2,
             cache_fields=_GFX9_11_VECTOR_CACHE_FIELDS,
+            include_d16_hi_loads=True,
         ),
         *_global_memory_overlays(
             instruction_suffixes=_BYTE_MEMORY_INSTRUCTION_SUFFIXES,
@@ -1233,6 +1235,7 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             address_units=1,
             descriptor_key_suffix="_saddr",
             cache_fields=_GFX9_11_VECTOR_CACHE_FIELDS,
+            include_d16_hi_loads=True,
         ),
         *_scratch_memory_overlays(
             instruction_suffixes=_BYTE_MEMORY_INSTRUCTION_SUFFIXES,

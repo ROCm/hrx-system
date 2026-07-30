@@ -130,7 +130,10 @@ def _ds_load_u16_d16_overlays(
                         "src",
                         OperandRole.OPERAND,
                         _VGPR_ALT,
-                        flags=(OperandFlag.IMPLICIT,),
+                        flags=(
+                            OperandFlag.IMPLICIT,
+                            OperandFlag.STORAGE_CONTINUATION,
+                        ),
                         register_part=_REG_PART_VGPR_LOW16,
                     ),
                     role_exception_reason=(

@@ -5096,6 +5096,27 @@ def test_vmem_narrow_load_descriptors_cover_active_xml_families() -> None:
             assert b16_d16_vaddr_offset_key not in descriptors
 
 
+def test_d16_high_loads_preserve_tied_low_storage_without_consuming_it() -> None:
+    descriptors = {
+        descriptor.descriptor_key: descriptor for descriptor in _gfx11_core_overlays()
+    }
+    for descriptor_key in (
+        "amdgpu.ds_load_u16_d16_hi",
+        "amdgpu.buffer_load_b16_d16_hi",
+        "amdgpu.buffer_load_b16_d16_hi_vaddr_offset",
+        "amdgpu.global_load_b16_d16_hi",
+        "amdgpu.global_load_b16_d16_hi_saddr",
+    ):
+        descriptor = descriptors[descriptor_key]
+        result = descriptor.operands[0].descriptor_operand
+        source = descriptor.operands[1].descriptor_operand
+        assert result.register_part == _REG_PART_VGPR_HIGH16
+        assert source.register_part == _REG_PART_VGPR_LOW16
+        assert OperandFlag.IMPLICIT in source.flags
+        assert OperandFlag.STORAGE_CONTINUATION in source.flags
+        assert descriptor.constraints == (Constraint(ConstraintKind.TIED, 0, 1),)
+
+
 def test_cdna_smem_dwordx4_store_and_scratch_descriptors_cover_xml() -> None:
     rows = (
         (32, 1, "dword"),
