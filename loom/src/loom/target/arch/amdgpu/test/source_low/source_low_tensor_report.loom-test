@@ -25,14 +25,14 @@ kernel.def target(@target) @report_tensor_load_to_lds() {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64 workgroup_count=1x1x1 dispatch_workgroup_count=1 dispatch_workitem_count=64
 COMPILE-REPORT: source_low selected_ops=11 emitted_ops=44 rows=11
-COMPILE-REPORT: source_low[0] function=report_tensor_load_to_lds source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_tensor_load_to_lds source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[2] function=report_tensor_load_to_lds source_op=vector.constant selection=plan plan=3584 emitted_ops=5
-COMPILE-REPORT: source_low[3] function=report_tensor_load_to_lds source_op=vector.constant selection=plan plan=3584 emitted_ops=9
-COMPILE-REPORT: source_low[4] function=report_tensor_load_to_lds source_op=kernel.tensor.lds.descriptor selection=rule rule_set=7 rule=0 emitted_ops=0
-COMPILE-REPORT: source_low[5] function=report_tensor_load_to_lds source_op=buffer.view selection=rule rule_set=1 rule=0 emitted_ops=0
-COMPILE-REPORT: source_low[6] function=report_tensor_load_to_lds source_op=buffer.alloca selection=plan plan=3072 emitted_ops=2
-COMPILE-REPORT: source_low[7] function=report_tensor_load_to_lds source_op=buffer.view selection=rule rule_set=1 rule=0 emitted_ops=0
-COMPILE-REPORT: source_low[8] function=report_tensor_load_to_lds source_op=kernel.async.tensor.load.to.lds selection=plan plan=4108 plan_key=amdgpu.tensor_load_to_lds.d2 emitted_ops=27
-COMPILE-REPORT: source_low[9] function=report_tensor_load_to_lds source_op=kernel.async.group selection=rule rule_set=7 rule=1 emitted_ops=0
-COMPILE-REPORT: source_low[10] function=report_tensor_load_to_lds source_op=kernel.async.wait selection=plan plan=4106 emitted_ops=1
+COMPILE-REPORT: source_low[0] function=report_tensor_load_to_lds source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_tensor_load_to_lds source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_tensor_load_to_lds source_op=vector.constant selection=plan emitted_ops=5
+COMPILE-REPORT: source_low[3] function=report_tensor_load_to_lds source_op=vector.constant selection=plan emitted_ops=9
+COMPILE-REPORT: source_low[4] function=report_tensor_load_to_lds source_op=kernel.tensor.lds.descriptor selection=rule emitted_ops=0
+COMPILE-REPORT: source_low[5] function=report_tensor_load_to_lds source_op=buffer.view selection=rule emitted_ops=0
+COMPILE-REPORT: source_low[6] function=report_tensor_load_to_lds source_op=buffer.alloca selection=plan emitted_ops=2
+COMPILE-REPORT: source_low[7] function=report_tensor_load_to_lds source_op=buffer.view selection=rule emitted_ops=0
+COMPILE-REPORT: source_low[8] function=report_tensor_load_to_lds source_op=kernel.async.tensor.load.to.lds selection=plan plan_key=amdgpu.tensor_load_to_lds.d2 emitted_ops=27
+COMPILE-REPORT: source_low[9] function=report_tensor_load_to_lds source_op=kernel.async.group selection=rule emitted_ops=0
+COMPILE-REPORT: source_low[10] function=report_tensor_load_to_lds source_op=kernel.async.wait selection=plan emitted_ops=1

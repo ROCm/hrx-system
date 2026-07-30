@@ -88,10 +88,6 @@ bool loom_amdgpu_matrix_fragment_role_layout_packed_element_axis(
 bool loom_amdgpu_matrix_fragment_role_layout_uses_packed_b16_elements(
     const loom_matrix_fragment_role_layout_t* role_layout);
 
-// Returns true when |role_layout| requires scalar 16-bit memory packets.
-bool loom_amdgpu_matrix_fragment_role_layout_uses_scalar_b16_packets(
-    const loom_matrix_fragment_role_layout_t* role_layout);
-
 // Returns true when |blocks|, |rows|, and |columns| match the logical shape of
 // |role| in |layout|.
 bool loom_amdgpu_matrix_fragment_shape_matches(

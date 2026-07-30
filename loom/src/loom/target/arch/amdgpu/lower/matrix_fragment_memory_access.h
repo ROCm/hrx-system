@@ -38,6 +38,17 @@ iree_status_t loom_amdgpu_emit_fragment_load_packet(
     loom_value_id_t low_resource, loom_value_id_t low_soffset,
     loom_value_id_t* out_low_packet);
 
+// Emits a tied high-half D16 load completing a packed B16 payload register.
+iree_status_t loom_amdgpu_emit_fragment_load_high_half_packet(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_matrix_fragment_layout_t* layout,
+    const loom_amdgpu_fragment_memory_plan_t* plan,
+    const loom_amdgpu_fragment_memory_packet_plan_t* packet,
+    uint16_t element_index, uint32_t vector_lane_count, loom_type_t result_type,
+    const loom_amdgpu_fragment_memory_address_t* address,
+    loom_value_id_t low_partial_packet, loom_value_id_t low_resource,
+    loom_value_id_t low_soffset, loom_value_id_t* out_low_packet);
+
 // Expands a low-subword load result into a full VGPR value.
 iree_status_t loom_amdgpu_emit_fragment_memory_low_subword_load_packet(
     loom_low_lower_context_t* context, const loom_op_t* source_op,

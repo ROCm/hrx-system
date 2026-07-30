@@ -557,24 +557,6 @@ func.def target(@target) @vector_transpose_dynamic_shape_rejected(%n: index) {
 
 amdgpu.target<gfx11-generic> @target
 
-kernel.def target(@target) @fragment_rhs_dense_layout_rejected() {
-  %c1 = index.constant 1 : index
-  %c32 = index.constant 32 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
-} launch(%rhs_buffer: buffer) {
-  %base = index.constant 0 : offset
-  %k = index.constant 16 : index
-  %n = index.constant 16 : index
-  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xf16, #dense>
-  // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.packed_axis_stride"}
-  %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xf16, #dense> -> vector<16xf16>
-  kernel.return
-}
-
-// ====
-
-amdgpu.target<gfx11-generic> @target
-
 kernel.def target(@target) @fragment_payload_rejected() {
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index

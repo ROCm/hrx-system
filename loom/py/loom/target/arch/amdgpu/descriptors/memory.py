@@ -1023,6 +1023,70 @@ def _buffer_load_b16_d16_overlay(
     )
 
 
+def _buffer_load_b16_d16_hi_overlay(
+    *,
+    encoding_name: str,
+    resource_field_name: str,
+    offset_field_name: str = "OFFSET",
+    offset_bit_width: int = 12,
+    cache_fields: tuple[tuple[str, int], ...] = (),
+    vaddr_offset_descriptor_key: str | None = (
+        "amdgpu.buffer_load_b16_d16_hi_vaddr_offset"
+    ),
+) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.buffer_load_b16_d16_hi",
+        instruction_name="BUFFER_LOAD_SHORT_D16_HI",
+        mnemonic="buffer_load_d16_hi_b16",
+        encoding_name=encoding_name,
+        semantic_tag="memory.load.u16.d16.high",
+        schedule_class=_SCHEDULE_VMEM_LOAD,
+        operands=(
+            AmdgpuOperandOverlay(
+                "VDATA",
+                _vgpr_result(register_part=_REG_PART_VGPR_HIGH16),
+                size_exception_reason=_D16_PARTIAL_REGISTER_SIZE_REASON,
+            ),
+            AmdgpuOperandOverlay(
+                "VDATA",
+                Operand(
+                    "src",
+                    OperandRole.OPERAND,
+                    _VGPR_ALT,
+                    flags=(
+                        OperandFlag.IMPLICIT,
+                        OperandFlag.STORAGE_CONTINUATION,
+                    ),
+                    register_part=_REG_PART_VGPR_LOW16,
+                ),
+                role_exception_reason=(
+                    "the encoded destination register is also the tied "
+                    "source value carrying the low 16 bits"
+                ),
+                size_exception_reason=_D16_PARTIAL_REGISTER_SIZE_REASON,
+            ),
+            AmdgpuOperandOverlay(
+                resource_field_name, _sgpr_resource("resource", units=4)
+            ),
+            _mubuf_vaddr_operand(),
+            AmdgpuOperandOverlay("SOFFSET", _sgpr_operand("soffset")),
+        ),
+        implicit_operands=(_ignore_global_read_memory(16),),
+        immediate_fields=(offset_field_name, *_cache_field_names(cache_fields)),
+        immediates=(
+            _offset_immediate(offset_bit_width),
+            *_cache_immediates(cache_fields),
+        ),
+        fixed_encoding_fields=(("IDXEN", 0), ("OFFEN", 1)),
+        effects=(_global_read_effect(16),),
+        constraints=(Constraint(ConstraintKind.TIED, 0, 1),),
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
+        operand_forms=_buffer_operand_forms(
+            vaddr_offset_descriptor_key=vaddr_offset_descriptor_key,
+        ),
+    )
+
+
 def _buffer_load_b16_d16_vaddr_offset_overlay(
     *,
     encoding_name: str,
@@ -1069,6 +1133,82 @@ def _buffer_load_b16_d16_vaddr_offset_overlay(
             native_assembly_mnemonic="buffer_load_d16_b16",
             results=("dst",),
             operands=("resource", "vaddr"),
+            immediates=_memory_asm_immediate_names(cache_fields),
+            named_immediates=True,
+            native_assembly_values=_buffer_vaddr_offset_native_assembly_values(
+                payload_kind=NativeAsmValueKind.RESULT,
+                payload_field_name="dst",
+                fixed_soffset_native_spelling=fixed_soffset_native_spelling,
+            ),
+        ),
+    )
+
+
+def _buffer_load_b16_d16_hi_vaddr_offset_overlay(
+    *,
+    encoding_name: str,
+    resource_field_name: str,
+    offset_field_name: str = "OFFSET",
+    offset_bit_width: int = 12,
+    cache_fields: tuple[tuple[str, int], ...] = (),
+    fixed_soffset: AmdgpuFixedEncodingValue = _MUBUF_SOFFSET_INLINE_ZERO,
+    fixed_soffset_native_spelling: str = "0",
+) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.buffer_load_b16_d16_hi_vaddr_offset",
+        instruction_name="BUFFER_LOAD_SHORT_D16_HI",
+        mnemonic="buffer_load_d16_hi_b16",
+        encoding_name=encoding_name,
+        semantic_tag="memory.load.u16.d16.high",
+        schedule_class=_SCHEDULE_VMEM_LOAD,
+        operands=(
+            AmdgpuOperandOverlay(
+                "VDATA",
+                _vgpr_result(register_part=_REG_PART_VGPR_HIGH16),
+                size_exception_reason=_D16_PARTIAL_REGISTER_SIZE_REASON,
+            ),
+            AmdgpuOperandOverlay(
+                "VDATA",
+                Operand(
+                    "src",
+                    OperandRole.OPERAND,
+                    _VGPR_ALT,
+                    flags=(
+                        OperandFlag.IMPLICIT,
+                        OperandFlag.STORAGE_CONTINUATION,
+                    ),
+                    register_part=_REG_PART_VGPR_LOW16,
+                ),
+                role_exception_reason=(
+                    "the encoded destination register is also the tied "
+                    "source value carrying the low 16 bits"
+                ),
+                size_exception_reason=_D16_PARTIAL_REGISTER_SIZE_REASON,
+            ),
+            AmdgpuOperandOverlay(
+                resource_field_name, _sgpr_resource("resource", units=4)
+            ),
+            _mubuf_vaddr_operand(),
+        ),
+        implicit_operands=(_ignore_global_read_memory(16),),
+        immediate_fields=(offset_field_name, *_cache_field_names(cache_fields)),
+        immediates=(
+            _offset_immediate(offset_bit_width),
+            *_cache_immediates(cache_fields),
+        ),
+        fixed_encoding_fields=(
+            ("SOFFSET", fixed_soffset),
+            ("IDXEN", 0),
+            ("OFFEN", 1),
+        ),
+        effects=(_global_read_effect(16),),
+        constraints=(Constraint(ConstraintKind.TIED, 0, 1),),
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
+        asm_forms=_asm(
+            mnemonic="buffer_load_d16_hi_b16_vaddr_offset",
+            native_assembly_mnemonic="buffer_load_d16_hi_b16",
+            results=("dst",),
+            operands=("src", "resource", "vaddr"),
             immediates=_memory_asm_immediate_names(cache_fields),
             named_immediates=True,
             native_assembly_values=_buffer_vaddr_offset_native_assembly_values(
@@ -2508,6 +2648,7 @@ def _buffer_b16_memory_overlays(
     cache_fields: tuple[tuple[str, int], ...] = (),
     include_off_zero: bool = True,
     include_vaddr_offset: bool = True,
+    include_d16_hi_loads: bool = False,
     fixed_soffset: AmdgpuFixedEncodingValue = _MUBUF_SOFFSET_INLINE_ZERO,
     fixed_soffset_native_spelling: str = "0",
 ) -> tuple[AmdgpuDescriptorOverlay, ...]:
@@ -2538,6 +2679,24 @@ def _buffer_b16_memory_overlays(
         ),
         *(
             (
+                _buffer_load_b16_d16_hi_overlay(
+                    encoding_name=encoding_name,
+                    resource_field_name=resource_field_name,
+                    offset_field_name=offset_field_name,
+                    offset_bit_width=offset_bit_width,
+                    cache_fields=cache_fields,
+                    vaddr_offset_descriptor_key=(
+                        "amdgpu.buffer_load_b16_d16_hi_vaddr_offset"
+                        if include_vaddr_offset
+                        else None
+                    ),
+                ),
+            )
+            if include_d16_hi_loads
+            else ()
+        ),
+        *(
+            (
                 _buffer_load_b16_d16_vaddr_offset_overlay(
                     encoding_name=encoding_name,
                     resource_field_name=resource_field_name,
@@ -2549,6 +2708,21 @@ def _buffer_b16_memory_overlays(
                 ),
             )
             if include_vaddr_offset
+            else ()
+        ),
+        *(
+            (
+                _buffer_load_b16_d16_hi_vaddr_offset_overlay(
+                    encoding_name=encoding_name,
+                    resource_field_name=resource_field_name,
+                    offset_field_name=offset_field_name,
+                    offset_bit_width=offset_bit_width,
+                    cache_fields=cache_fields,
+                    fixed_soffset=fixed_soffset,
+                    fixed_soffset_native_spelling=fixed_soffset_native_spelling,
+                ),
+            )
+            if include_d16_hi_loads and include_vaddr_offset
             else ()
         ),
         _buffer_store_b16_overlay(
@@ -2764,6 +2938,99 @@ def _global_load_b16_d16_overlay(
             results=("dst",),
             operands=("addr",),
             immediates=_memory_asm_immediate_names(cache_fields),
+        ),
+    )
+
+
+def _global_load_b16_d16_hi_overlay(
+    *,
+    descriptor_key: str,
+    encoding_name: str,
+    address_field_name: str,
+    data_field_name: str,
+    offset_field_name: str,
+    offset_bit_width: int,
+    saddr_off: AmdgpuFixedEncodingValue | None,
+    address_units: int,
+    implicit_m0: bool = False,
+    cache_fields: tuple[tuple[str, int], ...] = (),
+) -> AmdgpuDescriptorOverlay:
+    implicit_operands: tuple[AmdgpuImplicitOperandOverlay, ...] = (
+        _ignore_global_read_memory(16),
+    )
+    if implicit_m0:
+        implicit_operands += (_implicit_m0_input(),)
+    operands: tuple[AmdgpuOperandOverlay, ...] = (
+        AmdgpuOperandOverlay(
+            data_field_name,
+            _vgpr_result(register_part=_REG_PART_VGPR_HIGH16),
+            size_exception_reason=_D16_PARTIAL_REGISTER_SIZE_REASON,
+        ),
+        AmdgpuOperandOverlay(
+            data_field_name,
+            Operand(
+                "src",
+                OperandRole.OPERAND,
+                _VGPR_ALT,
+                flags=(
+                    OperandFlag.IMPLICIT,
+                    OperandFlag.STORAGE_CONTINUATION,
+                ),
+                register_part=_REG_PART_VGPR_LOW16,
+            ),
+            role_exception_reason=(
+                "the encoded destination register is also the tied source "
+                "value carrying the low 16 bits"
+            ),
+            size_exception_reason=_D16_PARTIAL_REGISTER_SIZE_REASON,
+        ),
+        _global_addr_operand(
+            address_field_name, units=address_units, has_saddr=saddr_off is None
+        ),
+    )
+    fixed_encoding_fields: tuple[tuple[str, AmdgpuFixedEncodingValue], ...] = ()
+    if saddr_off is None:
+        operands += (AmdgpuOperandOverlay("SADDR", _sgpr_operand("saddr", units=2)),)
+    else:
+        fixed_encoding_fields = (("SADDR", saddr_off),)
+    asm_operands = ("src", "addr", "saddr") if saddr_off is None else ("src", "addr")
+    native_assembly_values = (
+        (_native_result("dst"), _native_operand("addr"), _native_operand("saddr"))
+        if saddr_off is None
+        else (_native_result("dst"), _native_operand("addr"))
+    )
+    if implicit_m0:
+        asm_operands += ("m0",)
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=descriptor_key,
+        instruction_name="GLOBAL_LOAD_SHORT_D16_HI",
+        mnemonic="global_load_d16_hi_b16",
+        encoding_name=encoding_name,
+        semantic_tag="memory.load.u16.d16.high",
+        schedule_class=_SCHEDULE_VMEM_LOAD,
+        operands=operands,
+        implicit_operands=implicit_operands,
+        immediate_fields=(offset_field_name, *_cache_field_names(cache_fields)),
+        immediates=(
+            _signed_offset_immediate(offset_bit_width),
+            *_cache_immediates(cache_fields),
+        ),
+        fixed_encoding_fields=fixed_encoding_fields,
+        effects=(_global_read_effect(16),),
+        constraints=(Constraint(ConstraintKind.TIED, 0, 1),),
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
+        asm_forms=_asm(
+            mnemonic=(
+                "global_load_d16_hi_b16_saddr"
+                if saddr_off is None
+                else "global_load_d16_hi_b16_vaddr"
+            ),
+            native_assembly_mnemonic="global_load_d16_hi_b16",
+            results=("dst",),
+            operands=asm_operands,
+            immediates=_memory_asm_immediate_names(cache_fields),
+            named_immediates=True,
+            native_assembly_values=native_assembly_values,
         ),
     )
 
@@ -3654,6 +3921,7 @@ def _global_b16_memory_overlays(
     load_mnemonic_suffixes: tuple[str, str] = ("u16", "i16"),
     implicit_m0: bool = False,
     cache_fields: tuple[tuple[str, int], ...] = (),
+    include_d16_hi_loads: bool = False,
 ) -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *_global_load_narrow_overlays(
@@ -3681,6 +3949,26 @@ def _global_b16_memory_overlays(
             address_units=address_units,
             implicit_m0=implicit_m0,
             cache_fields=cache_fields,
+        ),
+        *(
+            (
+                _global_load_b16_d16_hi_overlay(
+                    descriptor_key=(
+                        f"amdgpu.global_load_b16_d16_hi{descriptor_key_suffix}"
+                    ),
+                    encoding_name=encoding_name,
+                    address_field_name=address_field_name,
+                    data_field_name=load_data_field_name,
+                    offset_field_name=offset_field_name,
+                    offset_bit_width=offset_bit_width,
+                    saddr_off=saddr_off,
+                    address_units=address_units,
+                    implicit_m0=implicit_m0,
+                    cache_fields=cache_fields,
+                ),
+            )
+            if include_d16_hi_loads
+            else ()
         ),
         _global_store_b16_overlay(
             descriptor_key=f"amdgpu.global_store_b16{descriptor_key_suffix}",

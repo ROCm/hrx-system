@@ -732,6 +732,62 @@ static iree_status_t loom_low_verify_binary_constraint(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_verify_storage_continuation_pair(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_operand_t* result, const loom_low_operand_t* source) {
+  if (!iree_all_bits_set(result->flags,
+                         LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION) ||
+      !iree_all_bits_set(source->flags,
+                         LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low storage-continuation tie must project the flag onto both "
+        "operands");
+  }
+  if (!iree_all_bits_set(result->flags, LOOM_LOW_OPERAND_FLAG_TIED) ||
+      !iree_all_bits_set(source->flags, LOOM_LOW_OPERAND_FLAG_TIED)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low storage-continuation operands must project the tied flag");
+  }
+  if (!iree_all_bits_set(source->flags, LOOM_LOW_OPERAND_FLAG_IMPLICIT)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low storage-continuation source must be implicit");
+  }
+  if (result->unit_count != source->unit_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low storage-continuation result and source must have equal unit "
+        "counts");
+  }
+  if (result->register_part_id == LOOM_LOW_REGISTER_PART_NONE ||
+      source->register_part_id == LOOM_LOW_REGISTER_PART_NONE ||
+      result->register_part_id >= descriptor_set->register_part_count ||
+      source->register_part_id >= descriptor_set->register_part_count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low storage-continuation result and source must name valid register "
+        "parts");
+  }
+  const loom_low_register_part_t* result_part =
+      &descriptor_set->register_parts[result->register_part_id];
+  const loom_low_register_part_t* source_part =
+      &descriptor_set->register_parts[source->register_part_id];
+  if (result_part->reg_class_id != source_part->reg_class_id) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low storage-continuation result and source register parts must "
+        "belong to the same class");
+  }
+  if ((result_part->mask & source_part->mask) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low storage-continuation result and source register parts must be "
+        "disjoint");
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_verify_descriptor_constraints(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
@@ -816,6 +872,41 @@ static iree_status_t loom_low_verify_descriptor_constraints(
         break;
       default:
         break;
+    }
+  }
+
+  const loom_low_operand_t* operands =
+      &descriptor_set->operands[descriptor->operand_start];
+  for (uint16_t operand_index = 0; operand_index < descriptor->operand_count;
+       ++operand_index) {
+    const loom_low_operand_t* operand = &operands[operand_index];
+    if (!iree_any_bit_set(operand->flags,
+                          LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION)) {
+      continue;
+    }
+    uint16_t matching_tie_count = 0;
+    for (uint16_t i = 0; i < descriptor->constraint_count; ++i) {
+      const loom_low_constraint_t* constraint =
+          &descriptor_set->constraints[descriptor->constraint_start + i];
+      if (constraint->kind != LOOM_LOW_CONSTRAINT_KIND_TIED ||
+          (constraint->lhs_operand_index != operand_index &&
+           constraint->rhs_operand_index != operand_index)) {
+        continue;
+      }
+      ++matching_tie_count;
+      const loom_low_operand_t* result =
+          &operands[constraint->lhs_operand_index];
+      const loom_low_operand_t* source =
+          &operands[constraint->rhs_operand_index];
+      IREE_RETURN_IF_ERROR(loom_low_verify_storage_continuation_pair(
+          descriptor_set, result, source));
+    }
+    if (matching_tie_count != 1) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low storage-continuation operand row %" PRIu16
+          " must participate in exactly one tied constraint",
+          operand_index);
     }
   }
   return iree_ok_status();
@@ -1857,7 +1948,8 @@ static iree_status_t loom_low_verify_operand(
           LOOM_LOW_OPERAND_FLAG_EARLY_CLOBBER | LOOM_LOW_OPERAND_FLAG_OPTIONAL |
           LOOM_LOW_OPERAND_FLAG_STATE_READ | LOOM_LOW_OPERAND_FLAG_STATE_WRITE |
           LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE |
-          LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE,
+          LOOM_LOW_OPERAND_FLAG_REMATERIALIZABLE |
+          LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION,
       "operand", operand_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
       descriptor_set, operand->field_name_string_offset, "operand.field_name"));

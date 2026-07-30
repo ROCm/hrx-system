@@ -18,10 +18,10 @@ func.def target(@target) @report_cdna3_native_bf8_fp8_mfma(%lhs_data: vector<2xi
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
-COMPILE-REPORT: source_low[0] function=report_cdna3_native_bf8_fp8_mfma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_cdna3_native_bf8_fp8_mfma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[2] function=report_cdna3_native_bf8_fp8_mfma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[3] function=report_cdna3_native_bf8_fp8_mfma source_op=vector.mma selection=plan plan=3728 descriptor_key=amdgpu.v_mfma_f32_16x16x32_bf8_fp8 descriptor_semantic_tag=matrix.mfma.f32.16x16x32.bf8.fp8 emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_cdna3_native_bf8_fp8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_cdna3_native_bf8_fp8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_cdna3_native_bf8_fp8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_cdna3_native_bf8_fp8_mfma source_op=vector.mma selection=plan descriptor_key=amdgpu.v_mfma_f32_16x16x32_bf8_fp8 descriptor_semantic_tag=matrix.mfma.f32.16x16x32.bf8.fp8 emitted_ops=2
 
 // ====
 
@@ -42,10 +42,10 @@ func.def target(@target) @report_cdna3_native_fp8_fp8_mfma(%lhs_data: vector<2xi
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
-COMPILE-REPORT: source_low[0] function=report_cdna3_native_fp8_fp8_mfma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_cdna3_native_fp8_fp8_mfma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[2] function=report_cdna3_native_fp8_fp8_mfma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[3] function=report_cdna3_native_fp8_fp8_mfma source_op=vector.mma selection=plan plan=3728 descriptor_key=amdgpu.v_mfma_f32_16x16x32_fp8_fp8 descriptor_semantic_tag=matrix.mfma.f32.16x16x32.fp8.fp8 emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_cdna3_native_fp8_fp8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_cdna3_native_fp8_fp8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_cdna3_native_fp8_fp8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_cdna3_native_fp8_fp8_mfma source_op=vector.mma selection=plan descriptor_key=amdgpu.v_mfma_f32_16x16x32_fp8_fp8 descriptor_semantic_tag=matrix.mfma.f32.16x16x32.fp8.fp8 emitted_ops=2
 
 // ====
 
@@ -67,10 +67,10 @@ func.def target(@target) @report_cdna3_native_bf8_fp8_smfmac(%lhs_data: vector<2
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
-COMPILE-REPORT: source_low[0] function=report_cdna3_native_bf8_fp8_smfmac source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_cdna3_native_bf8_fp8_smfmac source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[2] function=report_cdna3_native_bf8_fp8_smfmac source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[3] function=report_cdna3_native_bf8_fp8_smfmac source_op=vector.mma selection=plan plan=3728 descriptor_key=amdgpu.v_smfmac_f32_16x16x64_bf8_fp8 descriptor_semantic_tag=matrix.smfmac.f32.16x16x64.bf8.fp8 emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_cdna3_native_bf8_fp8_smfmac source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_cdna3_native_bf8_fp8_smfmac source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_cdna3_native_bf8_fp8_smfmac source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_cdna3_native_bf8_fp8_smfmac source_op=vector.mma selection=plan descriptor_key=amdgpu.v_smfmac_f32_16x16x64_bf8_fp8 descriptor_semantic_tag=matrix.smfmac.f32.16x16x64.bf8.fp8 emitted_ops=2
 
 // ====
 
@@ -92,10 +92,10 @@ func.def target(@target) @report_cdna3_native_fp8_bf8_mfma_32x32(%lhs_data: vect
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
-COMPILE-REPORT: source_low[0] function=report_cdna3_native_fp8_bf8_mfma_32x32 source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_cdna3_native_fp8_bf8_mfma_32x32 source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[2] function=report_cdna3_native_fp8_bf8_mfma_32x32 source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[3] function=report_cdna3_native_fp8_bf8_mfma_32x32 source_op=vector.mma selection=plan plan=3728 descriptor_key=amdgpu.v_mfma_f32_32x32x16_fp8_bf8 descriptor_semantic_tag=matrix.mfma.f32.32x32x16.fp8.bf8 emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_cdna3_native_fp8_bf8_mfma_32x32 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_cdna3_native_fp8_bf8_mfma_32x32 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_cdna3_native_fp8_bf8_mfma_32x32 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_cdna3_native_fp8_bf8_mfma_32x32 source_op=vector.mma selection=plan descriptor_key=amdgpu.v_mfma_f32_32x32x16_fp8_bf8 descriptor_semantic_tag=matrix.mfma.f32.32x32x16.fp8.bf8 emitted_ops=2
 
 // ====
 
@@ -117,10 +117,10 @@ func.def target(@target) @report_cdna4_native_fp8_bf8_mfma(%lhs_data: vector<2xi
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
-COMPILE-REPORT: source_low[0] function=report_cdna4_native_fp8_bf8_mfma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_cdna4_native_fp8_bf8_mfma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[2] function=report_cdna4_native_fp8_bf8_mfma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[3] function=report_cdna4_native_fp8_bf8_mfma source_op=vector.mma selection=plan plan=3728 descriptor_key=amdgpu.v_mfma_f32_16x16x32_fp8_bf8 descriptor_semantic_tag=matrix.mfma.f32.16x16x32.fp8.bf8 emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_cdna4_native_fp8_bf8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_cdna4_native_fp8_bf8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_cdna4_native_fp8_bf8_mfma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_cdna4_native_fp8_bf8_mfma source_op=vector.mma selection=plan descriptor_key=amdgpu.v_mfma_f32_16x16x32_fp8_bf8 descriptor_semantic_tag=matrix.mfma.f32.16x16x32.fp8.bf8 emitted_ops=2
 
 // ====
 
@@ -142,10 +142,10 @@ func.def target(@target) @report_cdna4_native_fp8_bf8_smfmac(%lhs_data: vector<4
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
-COMPILE-REPORT: source_low[0] function=report_cdna4_native_fp8_bf8_smfmac source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_cdna4_native_fp8_bf8_smfmac source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[2] function=report_cdna4_native_fp8_bf8_smfmac source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[3] function=report_cdna4_native_fp8_bf8_smfmac source_op=vector.mma selection=plan plan=3728 descriptor_key=amdgpu.v_smfmac_f32_16x16x128_fp8_bf8 descriptor_semantic_tag=matrix.smfmac.f32.16x16x128.fp8.bf8 emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_cdna4_native_fp8_bf8_smfmac source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_cdna4_native_fp8_bf8_smfmac source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_cdna4_native_fp8_bf8_smfmac source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_cdna4_native_fp8_bf8_smfmac source_op=vector.mma selection=plan descriptor_key=amdgpu.v_smfmac_f32_16x16x128_fp8_bf8 descriptor_semantic_tag=matrix.smfmac.f32.16x16x128.fp8.bf8 emitted_ops=2
 
 // ====
 
@@ -166,10 +166,10 @@ func.def target(@target) @report_rdna4_native_fp8_fp8_wmma(%lhs_data: vector<2xi
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
-COMPILE-REPORT: source_low[0] function=report_rdna4_native_fp8_fp8_wmma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_rdna4_native_fp8_fp8_wmma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[2] function=report_rdna4_native_fp8_fp8_wmma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[3] function=report_rdna4_native_fp8_fp8_wmma source_op=vector.mma selection=plan plan=3728 descriptor_key=amdgpu.v_wmma_f32_16x16x16_fp8_fp8 descriptor_semantic_tag=matrix.wmma.f32.16x16x16.fp8.fp8 emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_rdna4_native_fp8_fp8_wmma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_rdna4_native_fp8_fp8_wmma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_rdna4_native_fp8_fp8_wmma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_rdna4_native_fp8_fp8_wmma source_op=vector.mma selection=plan descriptor_key=amdgpu.v_wmma_f32_16x16x16_fp8_fp8 descriptor_semantic_tag=matrix.wmma.f32.16x16x16.fp8.fp8 emitted_ops=2
 
 // ====
 
@@ -191,10 +191,10 @@ func.def target(@target) @report_rdna4_native_bf8_fp8_wmma(%lhs_data: vector<2xi
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
-COMPILE-REPORT: source_low[0] function=report_rdna4_native_bf8_fp8_wmma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_rdna4_native_bf8_fp8_wmma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[2] function=report_rdna4_native_bf8_fp8_wmma source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[3] function=report_rdna4_native_bf8_fp8_wmma source_op=vector.mma selection=plan plan=3728 descriptor_key=amdgpu.v_wmma_f32_16x16x16_bf8_fp8 descriptor_semantic_tag=matrix.wmma.f32.16x16x16.bf8.fp8 emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_rdna4_native_bf8_fp8_wmma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_rdna4_native_bf8_fp8_wmma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_rdna4_native_bf8_fp8_wmma source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_rdna4_native_bf8_fp8_wmma source_op=vector.mma selection=plan descriptor_key=amdgpu.v_wmma_f32_16x16x16_bf8_fp8 descriptor_semantic_tag=matrix.wmma.f32.16x16x16.bf8.fp8 emitted_ops=2
 
 // ====
 
@@ -216,10 +216,10 @@ func.def target(@target) @report_gfx1250_native_fp8_bf8_wmma_x64(%lhs_data: vect
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
-COMPILE-REPORT: source_low[0] function=report_gfx1250_native_fp8_bf8_wmma_x64 source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_gfx1250_native_fp8_bf8_wmma_x64 source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[2] function=report_gfx1250_native_fp8_bf8_wmma_x64 source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[3] function=report_gfx1250_native_fp8_bf8_wmma_x64 source_op=vector.mma selection=plan plan=3728 descriptor_key=amdgpu.v_wmma_f32_16x16x64_fp8_bf8 descriptor_semantic_tag=matrix.wmma.f32.16x16x64.fp8.bf8 emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_gfx1250_native_fp8_bf8_wmma_x64 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_gfx1250_native_fp8_bf8_wmma_x64 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_gfx1250_native_fp8_bf8_wmma_x64 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_gfx1250_native_fp8_bf8_wmma_x64 source_op=vector.mma selection=plan descriptor_key=amdgpu.v_wmma_f32_16x16x64_fp8_bf8 descriptor_semantic_tag=matrix.wmma.f32.16x16x64.fp8.bf8 emitted_ops=2
 
 // ====
 
@@ -240,7 +240,7 @@ func.def target(@target) @report_gfx1250_native_fp8_fp8_wmma_x64(%lhs_data: vect
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=4 emitted_ops=2 rows=4
-COMPILE-REPORT: source_low[0] function=report_gfx1250_native_fp8_fp8_wmma_x64 source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_gfx1250_native_fp8_fp8_wmma_x64 source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[2] function=report_gfx1250_native_fp8_fp8_wmma_x64 source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[3] function=report_gfx1250_native_fp8_fp8_wmma_x64 source_op=vector.mma selection=plan plan=3728 descriptor_key=amdgpu.v_wmma_f32_16x16x64_fp8_fp8 descriptor_semantic_tag=matrix.wmma.f32.16x16x64.fp8.fp8 emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_gfx1250_native_fp8_fp8_wmma_x64 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_gfx1250_native_fp8_fp8_wmma_x64 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_gfx1250_native_fp8_fp8_wmma_x64 source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_gfx1250_native_fp8_fp8_wmma_x64 source_op=vector.mma selection=plan descriptor_key=amdgpu.v_wmma_f32_16x16x64_fp8_fp8 descriptor_semantic_tag=matrix.wmma.f32.16x16x64.fp8.fp8 emitted_ops=2

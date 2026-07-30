@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise, permutations
 
@@ -824,6 +824,45 @@ def validate_descriptor_constraints(
                 rematerializable_results.add(lhs_operand_index)
 
     return tuple(sorted(rematerializable_results))
+
+
+def validate_descriptor_storage_continuations(
+    descriptor: Descriptor,
+    register_parts: Mapping[str, RegisterPart],
+) -> None:
+    """Validates tied partial writes that preserve disjoint source storage."""
+
+    for operand_index, operand in enumerate(descriptor.operands):
+        if OperandFlag.STORAGE_CONTINUATION not in operand.flags:
+            continue
+        description = f"descriptor '{descriptor.key}' storage-continuation operand '{operand.field_name}'"
+        if operand.role is OperandRole.RESULT:
+            raise ValueError(f"{description} authors a result projection; mark only the tied packet input")
+        if not operand_role_is_packet_input(operand.role):
+            raise ValueError(f"{description} must be a packet input")
+        if OperandFlag.IMPLICIT not in operand.flags:
+            raise ValueError(f"{description} must be implicit")
+
+        tied_results = [
+            descriptor.operands[constraint.lhs_operand_index] for constraint in descriptor.constraints if constraint.kind is ConstraintKind.TIED and constraint.rhs_operand_index == operand_index
+        ]
+        if len(tied_results) != 1:
+            raise ValueError(f"{description} must be tied to exactly one result")
+        result = tied_results[0]
+        if result.unit_count != operand.unit_count:
+            raise ValueError(f"{description} and tied result must have equal unit counts")
+        if operand.register_part is None or result.register_part is None:
+            raise ValueError(f"{description} and tied result must name register parts")
+        source_part = register_parts.get(operand.register_part)
+        result_part = register_parts.get(result.register_part)
+        if source_part is None:
+            raise ValueError(f"{description} references unknown register part '{operand.register_part}'")
+        if result_part is None:
+            raise ValueError(f"{description} tied result references unknown register part '{result.register_part}'")
+        if source_part.reg_class != result_part.reg_class:
+            raise ValueError(f"{description} and tied result use different register classes")
+        if source_part.mask & result_part.mask:
+            raise ValueError(f"{description} and tied result have overlapping register parts")
 
 
 def operands_may_share_encoding_field(

@@ -25,6 +25,7 @@ from loom.target.low_descriptors import (
     AsmImmediate,
     Constraint,
     ConstraintKind,
+    Descriptor,
     DescriptorAsmSurface,
     DescriptorCategory,
     DescriptorFlag,
@@ -65,6 +66,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_MUL_I32_DESCRIPTOR,
     TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
+    TEST_LOW_WRITE_HIGH16_I32_DESCRIPTOR,
     TEST_LOW_WRITE_LOW16_I32_DESCRIPTOR,
 )
 
@@ -559,6 +561,74 @@ def test_compiler_derives_tied_operand_projection_flags() -> None:
     assert OperandFlag.TIED in compiled.descriptors[0].operands[0].flags
     assert OperandFlag.TIED in compiled.descriptors[0].operands[1].flags
     assert OperandFlag.TIED not in compiled.descriptors[0].operands[2].flags
+
+
+def _storage_continuation_descriptor() -> Descriptor:
+    operands = list(TEST_LOW_WRITE_HIGH16_I32_DESCRIPTOR.operands)
+    operands[1] = replace(
+        operands[1],
+        flags=(
+            OperandFlag.IMPLICIT,
+            OperandFlag.STORAGE_CONTINUATION,
+        ),
+    )
+    return replace(
+        TEST_LOW_WRITE_HIGH16_I32_DESCRIPTOR,
+        operands=tuple(operands),
+    )
+
+
+def test_compiler_projects_storage_continuation_to_tied_result() -> None:
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(_storage_continuation_descriptor(),),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    result, source = compiled.descriptors[0].operands[:2]
+    assert OperandFlag.STORAGE_CONTINUATION in result.flags
+    assert OperandFlag.STORAGE_CONTINUATION in source.flags
+    assert OperandFlag.TIED in result.flags
+    assert OperandFlag.TIED in source.flags
+
+
+def test_compiler_rejects_authored_storage_continuation_result_projection() -> None:
+    descriptor = _storage_continuation_descriptor()
+    operands = list(descriptor.operands)
+    operands[0] = replace(
+        operands[0],
+        flags=(OperandFlag.STORAGE_CONTINUATION,),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(replace(descriptor, operands=tuple(operands)),),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("authors a result projection; mark only the tied packet input"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_rejects_overlapping_storage_continuation_parts() -> None:
+    descriptor = _storage_continuation_descriptor()
+    operands = list(descriptor.operands)
+    operands[1] = replace(
+        operands[1],
+        register_part=operands[0].register_part,
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(replace(descriptor, operands=tuple(operands)),),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("and tied result have overlapping register parts"),
+    ):
+        compiler.compile_descriptor_set(descriptor_set)
 
 
 @pytest.mark.parametrize(

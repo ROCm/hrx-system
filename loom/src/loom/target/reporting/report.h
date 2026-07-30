@@ -1060,12 +1060,6 @@ typedef struct loom_target_compile_report_source_low_row_t {
   uint32_t source_op_kind;
   // Selection mechanism used for this source operation.
   loom_target_compile_report_source_low_selection_kind_t selection_kind;
-  // Policy rule-set ordinal for table-driven rules, or UINT16_MAX otherwise.
-  uint16_t rule_set_index;
-  // Rule-table ordinal inside |rule_set_index|, or UINT16_MAX otherwise.
-  uint16_t rule_index;
-  // Target-owned plan id for callback selections, or UINT64_MAX otherwise.
-  uint64_t plan_id;
   // Stable target-owned key identifying the selected plan variant, if any.
   iree_string_view_t plan_key;
   // First low descriptor key emitted by this source op, if any.
@@ -1599,16 +1593,6 @@ typedef struct loom_target_compile_report_legalization_row_t {
   loom_target_compile_report_legalization_outcome_t legalization_outcome;
   // Read-only target-contract query outcome observed before rewriting.
   loom_target_compile_report_contract_outcome_t contract_outcome;
-  // Active target-contract fragment binding ordinal, or UINT16_MAX.
-  uint16_t binding_index;
-  // Composed target-contract case ordinal, or UINT16_MAX.
-  uint16_t case_index;
-  // Policy rule-set ordinal selected or rejected, or UINT16_MAX.
-  uint16_t rule_set_index;
-  // Policy rule ordinal selected or rejected, or UINT16_MAX.
-  uint16_t rule_index;
-  // Diagnostic row ordinal retained by the rejected rule, or UINT16_MAX.
-  uint16_t diagnostic_index;
   // Low descriptor key selected by the accepted rule, or empty.
   iree_string_view_t descriptor_key;
   // Compact target-independent rejection flags.

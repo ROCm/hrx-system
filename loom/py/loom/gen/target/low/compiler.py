@@ -234,13 +234,14 @@ def derive_descriptor_projections(descriptor: Descriptor) -> Descriptor:
 
     for constraint in descriptor.constraints:
         if constraint.kind is ConstraintKind.TIED:
-            for operand_index in (
-                constraint.lhs_operand_index,
-                constraint.rhs_operand_index,
-            ):
-                assert operand_index is not None
-                if OperandFlag.TIED not in operand_flags[operand_index]:
-                    operand_flags[operand_index].append(OperandFlag.TIED)
+            result_index = constraint.lhs_operand_index
+            operand_index = constraint.rhs_operand_index
+            assert operand_index is not None
+            for tied_index in (result_index, operand_index):
+                if OperandFlag.TIED not in operand_flags[tied_index]:
+                    operand_flags[tied_index].append(OperandFlag.TIED)
+            if OperandFlag.STORAGE_CONTINUATION in operand_flags[operand_index] and OperandFlag.STORAGE_CONTINUATION not in operand_flags[result_index]:
+                operand_flags[result_index].append(OperandFlag.STORAGE_CONTINUATION)
         elif constraint.kind is ConstraintKind.EARLY_CLOBBER:
             flags = operand_flags[constraint.lhs_operand_index]
             if OperandFlag.EARLY_CLOBBER not in flags:
@@ -800,6 +801,10 @@ def compile_descriptor_set(
             result_count,
         )
         rematerializable_results_by_descriptor[descriptor.key] = validation.validate_descriptor_constraints(descriptor)
+        validation.validate_descriptor_storage_continuations(
+            descriptor,
+            register_part_inputs,
+        )
         projected_descriptors_by_key[descriptor.key] = derive_descriptor_projections(descriptor)
     validation.validate_physical_descriptor_set(spec)
 

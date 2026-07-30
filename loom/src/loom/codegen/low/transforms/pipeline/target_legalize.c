@@ -916,11 +916,6 @@ static iree_status_t loom_low_target_legalize_record_report_row(
               action, legalizer_strategy),
       .contract_outcome = loom_low_target_legalize_report_contract_outcome(
           query_result->outcome),
-      .binding_index = query_result->binding_index,
-      .case_index = query_result->case_index,
-      .rule_set_index = query_result->rule_set_index,
-      .rule_index = query_result->rule_index,
-      .diagnostic_index = query_result->diagnostic_index,
       .descriptor_key =
           loom_low_target_legalize_report_descriptor_key(state, query_result),
       .source_rejection_bits = query_result->source_rejection_bits,

@@ -394,43 +394,13 @@ static iree_status_t loom_target_compile_report_format_source_low_rows(
           loom_target_compile_report_source_low_selection_name(
               row->selection_kind);
       const iree_string_view_t plan_key = row->plan_key;
-      if (row->selection_kind ==
-          LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_SELECTION_RULE) {
-        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-            builder,
-            "COMPILE-REPORT: source_low[%" PRIhsz
-            "] function=%.*s source_op=%.*s selection=%.*s rule_set=%u "
-            "rule=%u",
-            row_index, (int)function_name.size, function_name.data,
-            (int)source_op_name.size, source_op_name.data,
-            (int)selection_name.size, selection_name.data, row->rule_set_index,
-            row->rule_index));
-        if (!iree_string_view_is_empty(plan_key)) {
-          IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-              builder, " plan_key=%.*s", (int)plan_key.size, plan_key.data));
-        }
-        IREE_RETURN_IF_ERROR(
-            loom_target_compile_report_append_source_low_descriptor_fields(
-                row, builder));
-        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-            builder, " emitted_ops=%u", row->emitted_low_op_count));
-        if (row->execution_count_plus_one !=
-                LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_EXECUTION_COUNT_PLUS_ONE_UNKNOWN &&
-            row->execution_count_plus_one != 2) {
-          IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-              builder, " execution_count=%" PRIu64,
-              row->execution_count_plus_one - 1));
-        }
-        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
-        continue;
-      }
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           "COMPILE-REPORT: source_low[%" PRIhsz
-          "] function=%.*s source_op=%.*s selection=%.*s plan=%" PRIu64,
+          "] function=%.*s source_op=%.*s selection=%.*s",
           row_index, (int)function_name.size, function_name.data,
           (int)source_op_name.size, source_op_name.data,
-          (int)selection_name.size, selection_name.data, row->plan_id));
+          (int)selection_name.size, selection_name.data));
       if (!iree_string_view_is_empty(plan_key)) {
         IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
             builder, " plan_key=%.*s", (int)plan_key.size, plan_key.data));
@@ -983,8 +953,7 @@ static iree_status_t loom_target_compile_report_format_legalization_rows(
           "COMPILE-REPORT: target_legalization[%" PRIhsz
           "] function=%.*s source_op=%.*s mode=%.*s policy=%.*s "
           "action=%.*s outcome=%.*s contract=%.*s legalizer=%.*s strategy=%.*s "
-          "bundle=%.*s config=%.*s binding=%u case=%u rule_set=%u rule=%u "
-          "diagnostic=%u",
+          "bundle=%.*s config=%.*s",
           row_index, (int)function_name.size, function_name.data,
           (int)source_op_name.size, source_op_name.data, (int)mode_name.size,
           mode_name.data, (int)policy_name.size, policy_name.data,
@@ -993,9 +962,7 @@ static iree_status_t loom_target_compile_report_format_legalization_rows(
           (int)outcome_name.size, outcome_name.data, (int)legalizer_name.size,
           legalizer_name.data, (int)strategy_name.size, strategy_name.data,
           (int)target_bundle_name.size, target_bundle_name.data,
-          (int)target_config_name.size, target_config_name.data,
-          row->binding_index, row->case_index, row->rule_set_index,
-          row->rule_index, row->diagnostic_index));
+          (int)target_config_name.size, target_config_name.data));
       if (!iree_string_view_is_empty(row->descriptor_key)) {
         IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
             builder, " descriptor_key=%.*s", (int)row->descriptor_key.size,

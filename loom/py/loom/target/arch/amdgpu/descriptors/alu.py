@@ -4128,6 +4128,59 @@ def _v_pk_fma_f16_literal_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
+def _v_pk_add_f16_overlay() -> AmdgpuDescriptorOverlay:
+    return _v_pk_binary_overlay(
+        descriptor_key="amdgpu.v_pk_add_f16",
+        instruction_name="V_PK_ADD_F16",
+        mnemonic="v_pk_add_f16",
+        semantic_tag="float.add.pk2.f16",
+    )
+
+
+def _v_pk_minnum_f16_overlay(
+    *,
+    instruction_name: str = "V_PK_MIN_F16",
+    mnemonic: str = "v_pk_min_f16",
+) -> AmdgpuDescriptorOverlay:
+    return _v_pk_binary_overlay(
+        descriptor_key="amdgpu.v_pk_minnum_f16",
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
+        semantic_tag="float.minnum.pk2.f16",
+    )
+
+
+def _v_pk_maxnum_f16_overlay(
+    *,
+    instruction_name: str = "V_PK_MAX_F16",
+    mnemonic: str = "v_pk_max_f16",
+) -> AmdgpuDescriptorOverlay:
+    return _v_pk_binary_overlay(
+        descriptor_key="amdgpu.v_pk_maxnum_f16",
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
+        semantic_tag="float.maxnum.pk2.f16",
+    )
+
+
+def _v_pk_minimum_f16_overlay() -> AmdgpuDescriptorOverlay:
+    return _v_pk_binary_overlay(
+        descriptor_key="amdgpu.v_pk_minimum_f16",
+        instruction_name="V_PK_MINIMUM_F16",
+        mnemonic="v_pk_minimum_f16",
+        semantic_tag="float.minimum.pk2.f16",
+    )
+
+
+def _v_pk_maximum_f16_overlay() -> AmdgpuDescriptorOverlay:
+    return _v_pk_binary_overlay(
+        descriptor_key="amdgpu.v_pk_maximum_f16",
+        instruction_name="V_PK_MAXIMUM_F16",
+        mnemonic="v_pk_maximum_f16",
+        semantic_tag="float.maximum.pk2.f16",
+    )
+
+
 def _v_pk_mul_f16_overlay() -> AmdgpuDescriptorOverlay:
     return _v_pk_binary_overlay(
         descriptor_key="amdgpu.v_pk_mul_f16",
@@ -4360,6 +4413,26 @@ def _v_pk_fma_f32_overlay() -> AmdgpuDescriptorOverlay:
         instruction_name="V_PK_FMA_F32",
         mnemonic="v_pk_fma_f32",
         semantic_tag="float.fma.pk2.f32",
+        units=2,
+    )
+
+
+def _v_pk_add_f32_overlay() -> AmdgpuDescriptorOverlay:
+    return _v_pk_binary_overlay(
+        descriptor_key="amdgpu.v_pk_add_f32",
+        instruction_name="V_PK_ADD_F32",
+        mnemonic="v_pk_add_f32",
+        semantic_tag="float.add.pk2.f32",
+        units=2,
+    )
+
+
+def _v_pk_mul_f32_overlay() -> AmdgpuDescriptorOverlay:
+    return _v_pk_binary_overlay(
+        descriptor_key="amdgpu.v_pk_mul_f32",
+        instruction_name="V_PK_MUL_F32",
+        mnemonic="v_pk_mul_f32",
+        semantic_tag="float.mul.pk2.f32",
         units=2,
     )
 
@@ -6004,10 +6077,17 @@ __all__ = (
     "_v_fmamk_f16_overlay",
     "_v_fmamk_f32_overlay",
     "_v_pk_ashrrev_i16_overlay",
+    "_v_pk_add_f16_overlay",
+    "_v_pk_add_f32_overlay",
     "_v_pk_add_bf16_overlay",
     "_v_pk_fma_f16_overlay",
     "_v_pk_fma_f16_literal_overlays",
+    "_v_pk_maximum_f16_overlay",
+    "_v_pk_maxnum_f16_overlay",
+    "_v_pk_minimum_f16_overlay",
+    "_v_pk_minnum_f16_overlay",
     "_v_pk_mul_f16_overlay",
+    "_v_pk_mul_f32_overlay",
     "_v_pk_fma_bf16_overlay",
     "_v_pk_mul_bf16_overlay",
     "_v_pk_add_u16_overlay",

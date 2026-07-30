@@ -789,8 +789,8 @@ typedef enum loom_amdgpu_subgroup_reduce_crosslane_kind_e {
 typedef enum loom_amdgpu_subgroup_reduce_publication_kind_e {
   // Publish a correct reduced VGPR payload to every active subgroup lane.
   LOOM_AMDGPU_SUBGROUP_REDUCE_PUBLICATION_ALL_LANES = 0,
-  // Publish a correct reduced VGPR payload only for lane-zero-guarded uses.
-  LOOM_AMDGPU_SUBGROUP_REDUCE_PUBLICATION_LEADER_LANE = 1,
+  // Combine 32-lane halves through SGPRs and broadcast the completed payload.
+  LOOM_AMDGPU_SUBGROUP_REDUCE_PUBLICATION_SCALAR_BROADCAST = 1,
 } loom_amdgpu_subgroup_reduce_publication_kind_t;
 
 typedef struct loom_amdgpu_subgroup_reduce_plan_t {
@@ -1246,6 +1246,15 @@ typedef enum loom_amdgpu_fragment_memory_payload_form_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_STORE_EXTEND_F16_TO_F32 = 4,
 } loom_amdgpu_fragment_memory_payload_form_t;
 
+typedef enum loom_amdgpu_fragment_memory_packetization_e {
+  // Fragment registers load or store through native 32-bit packet groups.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE = 0,
+  // Each fragment register transfers one meaningful low 16-bit element.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_SCALAR_B16 = 1,
+  // Two independently addressed 16-bit elements are packed per register.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16 = 2,
+} loom_amdgpu_fragment_memory_packetization_t;
+
 typedef enum loom_amdgpu_fragment_memory_epilogue_strategy_e {
   // No special result-fragment store epilogue strategy is selected.
   LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_NONE = 0,
@@ -1326,10 +1335,14 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
       packets[LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS];
   // Number of populated packet plans.
   uint16_t packet_count;
+  // High-half D16 load selected to complete packed B16 payload registers.
+  loom_amdgpu_descriptor_ref_t packed_b16_high_descriptor_ref;
   // Aggregate packet-local lowering strategy bits across all packets.
   loom_amdgpu_fragment_memory_packet_flags_t packet_flags;
   // Payload storage form selected for the fragment movement.
   loom_amdgpu_fragment_memory_payload_form_t payload_form;
+  // Memory packetization selected from fragment and physical view layouts.
+  loom_amdgpu_fragment_memory_packetization_t packetization;
   // Result-fragment store epilogue strategy selected from layout and packet
   // facts.
   loom_amdgpu_fragment_memory_epilogue_strategy_t epilogue_strategy;

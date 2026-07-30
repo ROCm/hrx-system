@@ -428,6 +428,12 @@ TEST(BenchmarkReportTest, WritesHalTimingCountsAndWarnings) {
       LookupObject(timing_interpretation, IREE_SV("score")),
       IREE_SV("operation_timing_ns")));
   EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(timing_interpretation, IREE_SV("score_time_domain")),
+      IREE_SV("host_wall")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(timing_interpretation, IREE_SV("score_meaning")),
+      IREE_SV("host_queue_completion_normalized_logical_operation_time")));
+  EXPECT_TRUE(iree_string_view_equal(
       LookupObject(timing_interpretation, IREE_SV("score_unit")),
       IREE_SV("logical_operation")));
   iree_string_view_t warnings =
@@ -446,7 +452,7 @@ TEST(BenchmarkReportTest, WritesHalTimingCountsAndWarnings) {
   iree_string_builder_deinitialize(&builder);
 }
 
-TEST(BenchmarkReportTest, LabelsOverlappedProfiledDispatchBatches) {
+TEST(BenchmarkReportTest, PromotesOnlySerializedProfiledDispatchBatches) {
   loom_testbench_benchmark_plan_t benchmark_plan = {};
   benchmark_plan.name = IREE_SV("kernel_latency");
   loom_testbench_case_plan_t case_plan = {};
@@ -503,6 +509,26 @@ TEST(BenchmarkReportTest, LabelsOverlappedProfiledDispatchBatches) {
   row->total_duration_ns = 1600;
   row->minimum_duration_ns = 80;
   row->maximum_duration_ns = 120;
+  profile->dispatch_distribution.available = true;
+  profile->dispatch_distribution.complete = true;
+  profile->dispatch_distribution.comparable = true;
+  profile->dispatch_distribution.homogeneous_function = true;
+  profile->dispatch_distribution.source_row_type =
+      IREE_HAL_PROFILE_STATISTICS_ROW_TYPE_DISPATCH_COMMAND_OPERATION;
+  profile->dispatch_distribution.physical_device_ordinal = 0;
+  profile->dispatch_distribution.time_domain =
+      IREE_HAL_PROFILE_STATISTICS_TIME_DOMAIN_DEVICE_TICK;
+  profile->dispatch_distribution.executable_id = 1;
+  profile->dispatch_distribution.function_ordinal = 0;
+  profile->dispatch_distribution.source_sample_count = 16;
+  profile->dispatch_distribution.duration_ns.count = 16;
+  profile->dispatch_distribution.duration_ns.total_ns = 1600;
+  profile->dispatch_distribution.duration_ns.minimum_ns = 80;
+  profile->dispatch_distribution.duration_ns.maximum_ns = 120;
+  profile->dispatch_distribution.duration_ns.mean_ns = 100.0;
+  profile->dispatch_distribution.duration_ns.p50_ns = 96;
+  profile->dispatch_distribution.duration_ns.p90_ns = 112;
+  profile->dispatch_distribution.duration_ns.p90_to_p50_delta_ppm = 166666;
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -520,7 +546,9 @@ TEST(BenchmarkReportTest, LabelsOverlappedProfiledDispatchBatches) {
       LookupObject(measurement, IREE_SV("timing_interpretation"));
   EXPECT_TRUE(iree_string_view_equal(
       LookupObject(timing_interpretation, IREE_SV("score_meaning")),
-      IREE_SV("throughput_normalized_batch_time")));
+      IREE_SV("host_queue_completion_throughput_normalized_batch_time")));
+  EXPECT_TRUE(iree_string_view_is_empty(
+      TryLookupObject(timing_interpretation, IREE_SV("device_score"))));
   EXPECT_TRUE(iree_string_view_equal(
       LookupObject(timing_interpretation, IREE_SV("profiled_dispatch_overlap")),
       IREE_SV("true")));
@@ -551,6 +579,49 @@ TEST(BenchmarkReportTest, LabelsOverlappedProfiledDispatchBatches) {
       LookupObject(duration_ns, IREE_SV("count")), IREE_SV("16")));
   EXPECT_TRUE(iree_string_view_equal(LookupObject(duration_ns, IREE_SV("mean")),
                                      IREE_SV("100.000")));
+  iree_string_view_t dispatch_distribution =
+      LookupObject(profiled_dispatch, IREE_SV("dispatch_distribution"));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(dispatch_distribution, IREE_SV("complete")),
+      IREE_SV("true")));
+  iree_string_view_t distribution_duration_ns =
+      LookupObject(dispatch_distribution, IREE_SV("duration_ns"));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(distribution_duration_ns, IREE_SV("p50")), IREE_SV("96")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(distribution_duration_ns, IREE_SV("p90")), IREE_SV("112")));
+
+  row->last_end_time = 2100;
+  iree_string_builder_reset(&builder);
+  IREE_ASSERT_OK(iree_benchmark_loom_write_benchmark_result_json(
+      &benchmark_plan, &case_plan, &policy, &result,
+      /*correctness_sample_count=*/1,
+      /*correctness_failed_sample_count=*/0, &stream));
+  iree_string_view_t serialized_root =
+      ParseJsonDocument(iree_string_builder_view(&builder));
+  iree_string_view_t serialized_measurement =
+      LookupObject(serialized_root, IREE_SV("measurement"));
+  iree_string_view_t serialized_interpretation =
+      LookupObject(serialized_measurement, IREE_SV("timing_interpretation"));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(serialized_interpretation, IREE_SV("device_score")),
+      IREE_SV(
+          "profiled_dispatch_timing.dispatch_distribution.duration_ns.p50")));
+  EXPECT_TRUE(
+      iree_string_view_equal(LookupObject(serialized_interpretation,
+                                          IREE_SV("device_score_time_domain")),
+                             IREE_SV("device_tick_scaled_ns")));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(serialized_interpretation, IREE_SV("device_score_meaning")),
+      IREE_SV("same_workload_profiled_replay_physical_dispatch_p50")));
+  EXPECT_TRUE(
+      iree_string_view_equal(LookupObject(serialized_interpretation,
+                                          IREE_SV("device_score_sample_count")),
+                             IREE_SV("16")));
+  iree_string_view_t serialized_warnings =
+      LookupObject(serialized_interpretation, IREE_SV("warnings"));
+  EXPECT_FALSE(JsonArrayContainsString(serialized_warnings,
+                                       IREE_SV("profiled_dispatch_overlap")));
 
   iree_string_builder_deinitialize(&builder);
 }
