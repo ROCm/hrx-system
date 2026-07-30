@@ -3678,6 +3678,7 @@ static iree_status_t iree_hal_vulkan_queue_pending_submission_create(
   }
   if (kind == IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_HOST_CALL) {
     submission->host_call.call = call;
+    iree_hal_resource_retain(submission->host_call.call.resource);
     memcpy(submission->host_call.args, args,
            sizeof(submission->host_call.args));
     submission->host_call.flags = flags;
@@ -3776,7 +3777,9 @@ static void iree_hal_vulkan_queue_pending_submission_destroy(
       }
       break;
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_BARRIER:
+      break;
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_HOST_CALL:
+      iree_hal_resource_release(submission->host_call.call.resource);
       break;
   }
 
