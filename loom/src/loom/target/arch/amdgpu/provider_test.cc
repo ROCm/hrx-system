@@ -138,15 +138,21 @@ class AmdgpuProviderTest : public ::testing::Test {
     };
   }
 
-  loom_target_record_view_t Target(const loom_module_t* module,
-                                   loom_symbol_ref_t target_ref) {
+  const loom_target_symbol_facts_t* Target(const loom_module_t* module,
+                                           loom_symbol_ref_t target_ref) {
     const loom_symbol_facts_base_t* base_facts = nullptr;
     IREE_CHECK_OK(loom_symbol_fact_table_lookup_ref(&fact_table_, module,
                                                     target_ref, &base_facts));
     const loom_target_symbol_facts_t* target_facts =
         loom_target_symbol_facts_cast(base_facts);
     IREE_ASSERT(target_facts != nullptr);
-    return loom_target_record_view_make(module, target_facts);
+    return target_facts;
+  }
+
+  bool Satisfies(const loom_target_symbol_facts_t* effective,
+                 const loom_target_symbol_facts_t* requirement) {
+    return loom_target_facts_satisfy_requirement(effective->projection,
+                                                 requirement->projection);
   }
 
   const loom_op_t* TargetOpFromRef(const loom_module_t* module,
@@ -355,7 +361,7 @@ TEST_F(AmdgpuProviderTest, MaterializesEveryProfileTargetKind) {
     EXPECT_TRUE(iree_string_view_equal(
         loom_amdgpu_target_record_processor_name(target_op), processor->name));
 
-    const loom_target_record_view_t target = Target(module.get(), target_ref);
+    const loom_target_symbol_facts_t* target = Target(module.get(), target_ref);
     loom_amdgpu_target_identity_t record_identity = {};
     loom_amdgpu_target_record_resolve_identity(target_op, &record_identity);
     EXPECT_EQ(record_identity.target, target_profile.identity.target);
@@ -366,10 +372,10 @@ TEST_F(AmdgpuProviderTest, MaterializesEveryProfileTargetKind) {
 
     loom_amdgpu_target_properties_t record_properties = {};
     loom_amdgpu_target_record_resolve_properties(
-        target_op, &target.facts->storage.bundle, &record_properties);
+        target_op, &target->storage.bundle, &record_properties);
     EXPECT_EQ(record_properties.target, target_profile.properties.target);
     EXPECT_EQ(record_properties.processor, target_profile.properties.processor);
-    EXPECT_EQ(record_properties.common, &target.facts->storage.bundle);
+    EXPECT_EQ(record_properties.common, &target->storage.bundle);
     EXPECT_EQ(record_properties.instruction_constraints,
               target_profile.properties.instruction_constraints);
     EXPECT_TRUE(loom_target_snapshot_satisfies_requirement(
@@ -426,10 +432,11 @@ TEST_F(AmdgpuProviderTest,
 
         const loom_op_t* target_op = TargetOpFromRef(module.get(), refs[i]);
         EXPECT_EQ(loom_amdgpu_target_record_target(target_op), targets[i]);
-        const loom_target_record_view_t target = Target(module.get(), refs[i]);
+        const loom_target_symbol_facts_t* target =
+            Target(module.get(), refs[i]);
         loom_amdgpu_target_properties_t properties = {};
         loom_amdgpu_target_record_resolve_properties(
-            target_op, &target.facts->storage.bundle, &properties);
+            target_op, &target->storage.bundle, &properties);
         EXPECT_EQ(properties.target, targets[i]);
         EXPECT_EQ(properties.instruction_constraints,
                   targets[i]->instruction_constraints);
@@ -499,6 +506,8 @@ TEST_F(AmdgpuProviderTest, SatisfiesCanonicalProcessorRequirements) {
   ModulePtr module =
       Parse(IREE_SV("amdgpu.target<gfx1151> @gfx1151_a\n"
                     "amdgpu.target<gfx1151> @gfx1151_b\n"
+                    "amdgpu.target<gfx1151> @gfx1151_explicit_wave32 "
+                    "{subgroup_size = 32}\n"
                     "amdgpu.target<gfx1150> @gfx1150\n"
                     "amdgpu.target<gfx11-generic> @gfx11_generic\n"
                     "amdgpu.target<gfx11-generic> @gfx11_wave32 "
@@ -513,56 +522,63 @@ TEST_F(AmdgpuProviderTest, SatisfiesCanonicalProcessorRequirements) {
                     "{contract_set_key = \"amdgpu.gfx11.generic.core\"}\n"
                     "amdgpu.target<gfx1170> @gfx1170\n"));
 
-  const loom_target_record_view_t gfx1151_a =
+  const loom_target_symbol_facts_t* gfx1151_a =
       Target(module.get(), FindSymbolRef(module.get(), IREE_SV("gfx1151_a")));
-  const loom_target_record_view_t gfx1151_b =
+  const loom_target_symbol_facts_t* gfx1151_b =
       Target(module.get(), FindSymbolRef(module.get(), IREE_SV("gfx1151_b")));
-  const loom_target_record_view_t gfx1150 =
+  const loom_target_symbol_facts_t* gfx1151_explicit_wave32 =
+      Target(module.get(),
+             FindSymbolRef(module.get(), IREE_SV("gfx1151_explicit_wave32")));
+  const loom_target_symbol_facts_t* gfx1150 =
       Target(module.get(), FindSymbolRef(module.get(), IREE_SV("gfx1150")));
-  const loom_target_record_view_t gfx11_generic = Target(
+  const loom_target_symbol_facts_t* gfx11_generic = Target(
       module.get(), FindSymbolRef(module.get(), IREE_SV("gfx11_generic")));
-  const loom_target_record_view_t gfx11_wave32 = Target(
+  const loom_target_symbol_facts_t* gfx11_wave32 = Target(
       module.get(), FindSymbolRef(module.get(), IREE_SV("gfx11_wave32")));
-  const loom_target_record_view_t gfx11_wave64 = Target(
+  const loom_target_symbol_facts_t* gfx11_wave64 = Target(
       module.get(), FindSymbolRef(module.get(), IREE_SV("gfx11_wave64")));
-  const loom_target_record_view_t gfx11_small_workgroup =
+  const loom_target_symbol_facts_t* gfx11_small_workgroup =
       Target(module.get(),
              FindSymbolRef(module.get(), IREE_SV("gfx11_small_workgroup")));
-  const loom_target_record_view_t gfx11_feature = Target(
+  const loom_target_symbol_facts_t* gfx11_feature = Target(
       module.get(), FindSymbolRef(module.get(), IREE_SV("gfx11_feature")));
-  const loom_target_record_view_t gfx11_explicit_contract =
+  const loom_target_symbol_facts_t* gfx11_explicit_contract =
       Target(module.get(),
              FindSymbolRef(module.get(), IREE_SV("gfx11_explicit_contract")));
-  const loom_target_record_view_t gfx1170 =
+  const loom_target_symbol_facts_t* gfx1170 =
       Target(module.get(), FindSymbolRef(module.get(), IREE_SV("gfx1170")));
 
-  const loom_op_t* generic_op = gfx11_generic.facts->target.op;
-  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_, gfx1151_a,
-                                                gfx1151_a));
-  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_, gfx1151_a,
-                                                gfx1151_b));
-  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_, gfx1151_a,
-                                                gfx11_generic));
-  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_, gfx1151_a,
-                                                gfx11_wave32));
-  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_, gfx1151_a,
-                                                gfx11_small_workgroup));
-  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_,
-                                                 gfx11_generic, gfx1151_a));
-  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_,
-                                                 gfx1151_a, gfx1150));
-  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_, gfx1170,
-                                                 gfx11_generic));
-  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_, gfx1151_a,
-                                                gfx11_wave64));
-  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_,
-                                                 gfx1151_a, gfx11_feature));
-  EXPECT_FALSE(loom_target_satisfies_requirement(
-      &target_environment_, gfx1151_a, gfx11_explicit_contract));
+  const loom_amdgpu_target_facts_t* gfx1151_a_facts =
+      loom_amdgpu_target_facts_cast(gfx1151_a->projection);
+  const loom_amdgpu_target_facts_t* gfx1151_explicit_wave32_facts =
+      loom_amdgpu_target_facts_cast(gfx1151_explicit_wave32->projection);
+  const loom_amdgpu_target_facts_t* gfx11_generic_facts =
+      loom_amdgpu_target_facts_cast(gfx11_generic->projection);
+  const loom_amdgpu_target_facts_t* gfx11_explicit_contract_facts =
+      loom_amdgpu_target_facts_cast(gfx11_explicit_contract->projection);
+  ASSERT_NE(gfx1151_a_facts, nullptr);
+  ASSERT_NE(gfx1151_explicit_wave32_facts, nullptr);
+  ASSERT_NE(gfx11_generic_facts, nullptr);
+  ASSERT_NE(gfx11_explicit_contract_facts, nullptr);
+  EXPECT_EQ(gfx1151_a_facts->base.storage.snapshot.subgroup_size,
+            gfx1151_explicit_wave32_facts->base.storage.snapshot.subgroup_size);
+  EXPECT_FALSE(gfx1151_a_facts->subgroup_size_authored);
+  EXPECT_TRUE(gfx1151_explicit_wave32_facts->subgroup_size_authored);
+  EXPECT_FALSE(gfx11_generic_facts->contract_set_key_authored);
+  EXPECT_TRUE(gfx11_explicit_contract_facts->contract_set_key_authored);
 
-  EXPECT_EQ(gfx11_generic.facts->target.op, generic_op);
-  EXPECT_EQ(loom_amdgpu_target_kind(generic_op),
-            LOOM_AMDGPU_TARGET_KIND_GFX11_GENERIC);
+  EXPECT_TRUE(Satisfies(gfx1151_a, gfx1151_a));
+  EXPECT_TRUE(Satisfies(gfx1151_a, gfx1151_b));
+  EXPECT_TRUE(Satisfies(gfx1151_a, gfx11_generic));
+  EXPECT_TRUE(Satisfies(gfx1151_a, gfx11_wave32));
+  EXPECT_TRUE(Satisfies(gfx1151_a, gfx11_small_workgroup));
+  EXPECT_FALSE(Satisfies(gfx11_generic, gfx1151_a));
+  EXPECT_FALSE(Satisfies(gfx1151_a, gfx1150));
+  EXPECT_FALSE(Satisfies(gfx1170, gfx11_generic));
+  EXPECT_TRUE(Satisfies(gfx1151_a, gfx11_wave64));
+  EXPECT_FALSE(Satisfies(gfx1151_explicit_wave32, gfx11_wave64));
+  EXPECT_FALSE(Satisfies(gfx1151_a, gfx11_feature));
+  EXPECT_FALSE(Satisfies(gfx1151_a, gfx11_explicit_contract));
 }
 
 TEST_F(AmdgpuProviderTest, PreservesTargetIdFeatureRequirements) {
@@ -571,23 +587,18 @@ TEST_F(AmdgpuProviderTest, PreservesTargetIdFeatureRequirements) {
                     "amdgpu.target<gfx942> @xnack_on {xnack = on}\n"
                     "amdgpu.target<gfx942> @xnack_off {xnack = off}\n"));
 
-  const loom_target_record_view_t any =
+  const loom_target_symbol_facts_t* any =
       Target(module.get(), FindSymbolRef(module.get(), IREE_SV("any")));
-  const loom_target_record_view_t xnack_on =
+  const loom_target_symbol_facts_t* xnack_on =
       Target(module.get(), FindSymbolRef(module.get(), IREE_SV("xnack_on")));
-  const loom_target_record_view_t xnack_off =
+  const loom_target_symbol_facts_t* xnack_off =
       Target(module.get(), FindSymbolRef(module.get(), IREE_SV("xnack_off")));
 
-  EXPECT_TRUE(
-      loom_target_satisfies_requirement(&target_environment_, xnack_on, any));
-  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_, xnack_on,
-                                                xnack_on));
-  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_, xnack_on,
-                                                 xnack_off));
-  EXPECT_FALSE(
-      loom_target_satisfies_requirement(&target_environment_, any, xnack_on));
-  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_,
-                                                 xnack_off, xnack_on));
+  EXPECT_TRUE(Satisfies(xnack_on, any));
+  EXPECT_TRUE(Satisfies(xnack_on, xnack_on));
+  EXPECT_FALSE(Satisfies(xnack_on, xnack_off));
+  EXPECT_FALSE(Satisfies(any, xnack_on));
+  EXPECT_FALSE(Satisfies(xnack_off, xnack_on));
 }
 
 TEST_F(AmdgpuProviderTest, PreservesTargetOverlayRequirements) {
@@ -596,27 +607,20 @@ TEST_F(AmdgpuProviderTest, PreservesTargetOverlayRequirements) {
                     "amdgpu.target<gfx1250> @gfx1250_b0\n"
                     "amdgpu.target<gfx12-5-generic> @gfx12_5_generic\n"));
 
-  const loom_target_record_view_t gfx1250_a0 =
+  const loom_target_symbol_facts_t* gfx1250_a0 =
       Target(module.get(), FindSymbolRef(module.get(), IREE_SV("gfx1250_a0")));
-  const loom_target_record_view_t gfx1250_b0 =
+  const loom_target_symbol_facts_t* gfx1250_b0 =
       Target(module.get(), FindSymbolRef(module.get(), IREE_SV("gfx1250_b0")));
-  const loom_target_record_view_t gfx12_5_generic = Target(
+  const loom_target_symbol_facts_t* gfx12_5_generic = Target(
       module.get(), FindSymbolRef(module.get(), IREE_SV("gfx12_5_generic")));
 
-  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_,
-                                                gfx1250_a0, gfx1250_a0));
-  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_,
-                                                gfx1250_b0, gfx1250_b0));
-  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_,
-                                                 gfx1250_a0, gfx1250_b0));
-  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_,
-                                                 gfx1250_b0, gfx1250_a0));
-  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_,
-                                                gfx1250_a0, gfx12_5_generic));
-  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_,
-                                                gfx1250_b0, gfx12_5_generic));
-  EXPECT_FALSE(loom_target_satisfies_requirement(&target_environment_,
-                                                 gfx12_5_generic, gfx1250_a0));
+  EXPECT_TRUE(Satisfies(gfx1250_a0, gfx1250_a0));
+  EXPECT_TRUE(Satisfies(gfx1250_b0, gfx1250_b0));
+  EXPECT_FALSE(Satisfies(gfx1250_a0, gfx1250_b0));
+  EXPECT_FALSE(Satisfies(gfx1250_b0, gfx1250_a0));
+  EXPECT_TRUE(Satisfies(gfx1250_a0, gfx12_5_generic));
+  EXPECT_TRUE(Satisfies(gfx1250_b0, gfx12_5_generic));
+  EXPECT_FALSE(Satisfies(gfx12_5_generic, gfx1250_a0));
 }
 
 TEST_F(AmdgpuProviderTest, ExhaustsSupportedRecordSatisfactionRelation) {
@@ -625,7 +629,7 @@ TEST_F(AmdgpuProviderTest, ExhaustsSupportedRecordSatisfactionRelation) {
     const loom_amdgpu_target_info_t* target_info;
 
     // Indexed materialized target record for the target.
-    loom_target_record_view_t target;
+    const loom_target_symbol_facts_t* target;
   };
 
   ModulePtr module = Parse(IREE_SV(""));
@@ -643,8 +647,8 @@ TEST_F(AmdgpuProviderTest, ExhaustsSupportedRecordSatisfactionRelation) {
     IREE_ASSERT_OK(loom_target_environment_materialize_effective_target(
         &target_environment_, module.get(), &profile.base,
         /*authored_target_op=*/nullptr, &target_ref));
-    const loom_target_record_view_t target = Target(module.get(), target_ref);
-    ASSERT_TRUE(loom_target_record_view_is_valid(target));
+    const loom_target_symbol_facts_t* target = Target(module.get(), target_ref);
+    ASSERT_TRUE(target != nullptr && target->projection != nullptr);
     records.push_back({
         /*.target_info=*/target_info,
         /*.target=*/target,
@@ -657,9 +661,7 @@ TEST_F(AmdgpuProviderTest, ExhaustsSupportedRecordSatisfactionRelation) {
       const bool expected =
           loom_amdgpu_target_satisfies_code_object_requirement(
               effective.target_info, requirement.target_info);
-      EXPECT_EQ(loom_target_satisfies_requirement(
-                    &target_environment_, effective.target, requirement.target),
-                expected)
+      EXPECT_EQ(Satisfies(effective.target, requirement.target), expected)
           << "effective "
           << std::string(effective.target_info->name.data,
                          effective.target_info->name.size)

@@ -17,6 +17,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/target/facts.h"
 #include "loom/ops/test/ops.h"
 #include "loom/target/materialization.h"
 #include "loom/target/provider.h"
@@ -90,20 +91,6 @@ static iree_status_t BuildTestEffectiveTargetRecord(
       out_target_op);
 }
 
-static bool TestTargetSatisfiesRequirement(
-    loom_target_record_view_t effective_target,
-    loom_target_record_view_t target_requirement) {
-  const loom_test_target_kind_t effective_kind =
-      static_cast<loom_test_target_kind_t>(loom_attr_as_enum(
-          loom_target_like_selector(effective_target.facts->target)));
-  const loom_test_target_kind_t requirement_kind =
-      static_cast<loom_test_target_kind_t>(loom_attr_as_enum(
-          loom_target_like_selector(target_requirement.facts->target)));
-  return effective_kind == requirement_kind ||
-         (effective_kind == LOOM_TEST_TARGET_KIND_LOW_CORE &&
-          requirement_kind == LOOM_TEST_TARGET_KIND_QUIRKY);
-}
-
 static const loom_target_provider_t kTestProvider = {
     /*.profile_type=*/&kTestProfileType,
     /*.register_context=*/nullptr,
@@ -120,16 +107,12 @@ static const loom_target_provider_t kTestProvider = {
     /*.contribute_pipeline=*/nullptr,
     /*.materialization=*/
     {
+        /*.op_kind=*/LOOM_OP_TEST_TARGET,
         /*.symbol_stem=*/TestMaterializationSymbolStem,
         /*.record_matches_effective_target=*/
         TestRecordMatchesEffectiveTarget,
         /*.build_effective_target_record=*/
         BuildTestEffectiveTargetRecord,
-    },
-    /*.record_semantics=*/
-    {
-        /*.op_kind=*/LOOM_OP_TEST_TARGET,
-        /*.satisfies_requirement=*/TestTargetSatisfiesRequirement,
     },
 };
 
@@ -264,7 +247,8 @@ class TargetSpecializationTest : public ::testing::Test {
 TEST_F(TargetSpecializationTest,
        BindsSeveralFunctionsWithoutChangingUnrequestedFunctions) {
   ModulePtr module = Parse(R"(
-test.target<quirky> @family
+test.target<low_core> @family
+test.target<quirky> @unrequested_family
 
 func.def public target(@family) @generic() {
   func.return
@@ -274,7 +258,7 @@ func.def public @targetless() {
   func.return
 }
 
-func.def public target(@family) @unrequested() {
+func.def public target(@unrequested_family) @unrequested() {
   func.return
 }
 )");
@@ -348,12 +332,12 @@ func.def public target(@exact) @entry() {
 TEST_F(TargetSpecializationTest,
        MaterializesDistinctTargetsForDistinctAuthoredFunctionFacts) {
   ModulePtr module = Parse(R"(
-test.target<quirky> @left_requirement {
+test.target<low_core> @left_requirement {
   abi = hal_kernel,
   export_symbol = "left_kernel",
   linkage = dso_local
 }
-test.target<quirky> @right_requirement {
+test.target<low_core> @right_requirement {
   abi = object_function,
   export_symbol = "right_function",
   linkage = default

@@ -22,6 +22,7 @@ extern "C" {
 #endif
 
 typedef struct loom_target_profile_t loom_target_profile_t;
+typedef struct loom_target_fact_type_t loom_target_fact_type_t;
 
 typedef uint8_t loom_target_codegen_format_t;
 typedef enum loom_target_codegen_format_e {
@@ -358,6 +359,33 @@ typedef struct loom_target_projection_t {
 static_assert(sizeof(loom_target_projection_t) == 6,
               "loom_target_projection_t must be exactly 6 bytes");
 
+enum {
+  // Maximum attr index representable by the target authorship set.
+  LOOM_TARGET_AUTHORED_ATTR_CAPACITY = UINT8_MAX + 1,
+  // Number of words required to represent every target attr index.
+  LOOM_TARGET_AUTHORED_ATTR_WORD_COUNT =
+      LOOM_TARGET_AUTHORED_ATTR_CAPACITY / 64,
+};
+
+// Presence of authored target attrs after verified projection.
+typedef struct loom_target_authored_attr_set_t {
+  // Attr-indexed presence words.
+  uint64_t words[LOOM_TARGET_AUTHORED_ATTR_WORD_COUNT];
+} loom_target_authored_attr_set_t;
+
+// Records authored presence for |attr_index|.
+static inline void loom_target_authored_attr_set_insert(
+    loom_target_authored_attr_set_t* set, uint8_t attr_index) {
+  set->words[attr_index / 64] |= (uint64_t)1 << (attr_index % 64);
+}
+
+// Returns whether |attr_index| was explicitly authored.
+static inline bool loom_target_authored_attr_set_contains(
+    const loom_target_authored_attr_set_t* set, uint8_t attr_index) {
+  return iree_any_bit_set(set->words[attr_index / 64],
+                          (uint64_t)1 << (attr_index % 64));
+}
+
 typedef struct loom_target_like_descriptor_t {
   // Direct selector-indexed bundle table for a target-like op family.
   const loom_target_bundle_table_t* bundle_table;
@@ -365,6 +393,8 @@ typedef struct loom_target_like_descriptor_t {
   const loom_target_projection_t* projections;
   // Number of entries in |projections|.
   uint8_t projection_count;
+  // Static type of facts projected from this target-like op.
+  const loom_target_fact_type_t* fact_type;
 } loom_target_like_descriptor_t;
 
 typedef struct loom_target_bundle_storage_t {

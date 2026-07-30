@@ -76,22 +76,28 @@ class SpirvProviderTest : public ::testing::Test {
     };
   }
 
-  loom_target_record_view_t Target(loom_symbol_fact_table_t* fact_table,
-                                   const loom_module_t* module,
-                                   loom_symbol_ref_t target_ref) {
+  const loom_target_symbol_facts_t* Target(loom_symbol_fact_table_t* fact_table,
+                                           const loom_module_t* module,
+                                           loom_symbol_ref_t target_ref) {
     const loom_symbol_facts_base_t* base_facts = nullptr;
     IREE_CHECK_OK(loom_symbol_fact_table_lookup_ref(fact_table, module,
                                                     target_ref, &base_facts));
     const loom_target_symbol_facts_t* target_facts =
         loom_target_symbol_facts_cast(base_facts);
     IREE_ASSERT(target_facts != nullptr);
-    return loom_target_record_view_make(module, target_facts);
+    return target_facts;
   }
 
-  loom_target_record_view_t Requirement(const loom_module_t* module,
-                                        iree_string_view_t name) {
+  const loom_target_symbol_facts_t* Requirement(const loom_module_t* module,
+                                                iree_string_view_t name) {
     return Target(&requirement_fact_table_, module,
                   FindSymbolRef(module, name));
+  }
+
+  bool Satisfies(const loom_target_symbol_facts_t* effective,
+                 const loom_target_symbol_facts_t* requirement) {
+    return loom_target_facts_satisfy_requirement(effective->projection,
+                                                 requirement->projection);
   }
 
   // Block pool shared by parsed modules and analysis storage.
@@ -159,42 +165,35 @@ TEST_F(SpirvProviderTest, MaterializedProfileSatisfiesStructuredRequirements) {
   IREE_ASSERT_OK(loom_target_environment_materialize_effective_target(
       &target_environment_, effective_module.get(), &profile.base,
       /*authored_target_op=*/nullptr, &effective_ref));
-  const loom_target_record_view_t effective =
+  const loom_target_symbol_facts_t* effective =
       Target(&effective_fact_table_, effective_module.get(), effective_ref);
-  ASSERT_TRUE(loom_target_record_view_is_valid(effective));
-  EXPECT_EQ(loom_spirv_target_abi(effective.facts->target.op),
+  ASSERT_TRUE(effective != nullptr && effective->projection != nullptr);
+  EXPECT_EQ(effective->projection->storage.export_plan.abi_kind,
             LOOM_TARGET_ABI_HAL_KERNEL);
 
-  const loom_target_record_view_t baseline_a =
+  const loom_target_symbol_facts_t* baseline_a =
       Requirement(requirements.get(), IREE_SV("baseline_a"));
-  const loom_target_record_view_t baseline_b =
+  const loom_target_symbol_facts_t* baseline_b =
       Requirement(requirements.get(), IREE_SV("baseline_b"));
-  const loom_op_t* baseline_op = baseline_a.facts->target.op;
-  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_, effective,
-                                                baseline_a));
-  EXPECT_TRUE(loom_target_satisfies_requirement(&target_environment_, effective,
-                                                baseline_b));
-  EXPECT_TRUE(loom_target_satisfies_requirement(
-      &target_environment_, effective,
-      Requirement(requirements.get(), IREE_SV("fitting"))));
-  EXPECT_FALSE(loom_target_satisfies_requirement(
-      &target_environment_, effective,
-      Requirement(requirements.get(), IREE_SV("too_large"))));
-  EXPECT_FALSE(loom_target_satisfies_requirement(
-      &target_environment_, effective,
-      Requirement(requirements.get(), IREE_SV("subgroup64"))));
-  EXPECT_FALSE(loom_target_satisfies_requirement(
-      &target_environment_, effective,
-      Requirement(requirements.get(), IREE_SV("index64"))));
-  EXPECT_TRUE(loom_target_satisfies_requirement(
-      &target_environment_, effective,
-      Requirement(requirements.get(), IREE_SV("float16"))));
-  EXPECT_FALSE(loom_target_satisfies_requirement(
-      &target_environment_, effective,
-      Requirement(requirements.get(), IREE_SV("float64"))));
+  EXPECT_TRUE(Satisfies(effective, baseline_a));
+  EXPECT_TRUE(Satisfies(effective, baseline_b));
+  EXPECT_TRUE(Satisfies(effective,
+                        Requirement(requirements.get(), IREE_SV("fitting"))));
+  EXPECT_FALSE(Satisfies(
+      effective, Requirement(requirements.get(), IREE_SV("too_large"))));
+  EXPECT_FALSE(Satisfies(
+      effective, Requirement(requirements.get(), IREE_SV("subgroup64"))));
+  EXPECT_FALSE(Satisfies(effective,
+                         Requirement(requirements.get(), IREE_SV("index64"))));
+  EXPECT_TRUE(Satisfies(effective,
+                        Requirement(requirements.get(), IREE_SV("float16"))));
+  EXPECT_FALSE(Satisfies(effective,
+                         Requirement(requirements.get(), IREE_SV("float64"))));
 
-  EXPECT_EQ(baseline_a.facts->target.op, baseline_op);
-  EXPECT_EQ(loom_spirv_target_abi(baseline_op), LOOM_TARGET_ABI_UNKNOWN);
+  EXPECT_EQ(baseline_a->projection->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_SHADER_ENTRY_POINT);
+  EXPECT_FALSE(loom_target_facts_attr_is_authored(
+      baseline_a->projection, loom_spirv_target_abi_ATTR_INDEX));
 }
 
 TEST_F(SpirvProviderTest, MaterializesByDurableProjectionIdentity) {
@@ -264,12 +263,12 @@ TEST_F(SpirvProviderTest, MaterializesByDurableProjectionIdentity) {
       /*authored_target_op=*/nullptr, &distinct_copy_ref));
   EXPECT_EQ(distinct_copy_ref.symbol_id, distinct_ref.symbol_id);
 
-  const loom_target_record_view_t first_target =
+  const loom_target_symbol_facts_t* first_target =
       Target(&effective_fact_table_, module.get(), first_ref);
-  const loom_target_record_view_t distinct_target =
+  const loom_target_symbol_facts_t* distinct_target =
       Target(&effective_fact_table_, module.get(), distinct_ref);
-  EXPECT_EQ(first_target.facts->storage.snapshot.subgroup_size, 32u);
-  EXPECT_EQ(distinct_target.facts->storage.snapshot.subgroup_size, 64u);
+  EXPECT_EQ(first_target->storage.snapshot.subgroup_size, 32u);
+  EXPECT_EQ(distinct_target->storage.snapshot.subgroup_size, 64u);
 }
 
 }  // namespace

@@ -36,8 +36,6 @@ loom_cc_library(
     loom::pass::types
     loom::pass::value_facts
     loom::rewrite::rewriter
-    loom::target::pass_environment
-    loom::target::provider
   PUBLIC
 )
 

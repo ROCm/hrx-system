@@ -111,16 +111,52 @@ target.generic<reference> @gpu {
 
   const loom_target_symbol_facts_t* facts =
       LookupTarget(module.get(), IREE_SV("gpu"));
-  EXPECT_EQ(facts->storage.snapshot.max_workgroup_size.x, 256u);
-  EXPECT_EQ(facts->storage.snapshot.max_workgroup_size.y, 8u);
-  EXPECT_EQ(facts->storage.snapshot.max_workgroup_size.z, 4u);
-  EXPECT_EQ(facts->storage.snapshot.max_flat_workgroup_size, 1024u);
-  EXPECT_EQ(facts->storage.snapshot.max_workgroup_storage_bytes, 65536u);
-  EXPECT_EQ(facts->storage.snapshot.subgroup_size, 32u);
-  EXPECT_EQ(facts->storage.snapshot.max_grid_size.x, 4096u);
-  EXPECT_EQ(facts->storage.snapshot.max_grid_size.y, 2048u);
-  EXPECT_EQ(facts->storage.snapshot.max_grid_size.z, 1024u);
-  EXPECT_EQ(facts->storage.snapshot.max_flat_grid_size, 8589934592ull);
+  ASSERT_NE(facts->projection, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(facts->projection->fact_type->name,
+                                     IREE_SV("target.generic")));
+  EXPECT_TRUE(loom_target_facts_attr_is_authored(
+      facts->projection, loom_target_generic_subgroup_size_ATTR_INDEX));
+  EXPECT_FALSE(loom_target_facts_attr_is_authored(
+      facts->projection, loom_target_generic_codegen_format_ATTR_INDEX));
+  const loom_target_bundle_storage_t& storage = facts->projection->storage;
+  EXPECT_EQ(storage.snapshot.max_workgroup_size.x, 256u);
+  EXPECT_EQ(storage.snapshot.max_workgroup_size.y, 8u);
+  EXPECT_EQ(storage.snapshot.max_workgroup_size.z, 4u);
+  EXPECT_EQ(storage.snapshot.max_flat_workgroup_size, 1024u);
+  EXPECT_EQ(storage.snapshot.max_workgroup_storage_bytes, 65536u);
+  EXPECT_EQ(storage.snapshot.subgroup_size, 32u);
+  EXPECT_EQ(storage.snapshot.max_grid_size.x, 4096u);
+  EXPECT_EQ(storage.snapshot.max_grid_size.y, 2048u);
+  EXPECT_EQ(storage.snapshot.max_grid_size.z, 1024u);
+  EXPECT_EQ(storage.snapshot.max_flat_grid_size, 8589934592ull);
+}
+
+TEST_F(TargetFactsTest, StructuralSatisfactionUsesFactsNotSymbolIdentity) {
+  ModulePtr module = ParseModule(R"(
+target.generic<reference> @effective {
+  max_workgroup_size_x = 256
+}
+target.generic<reference> @equivalent {
+  max_workgroup_size_x = 256
+}
+target.generic<reference> @smaller_requirement {
+  max_workgroup_size_x = 128
+}
+)");
+
+  const loom_target_facts_t* effective =
+      LookupTarget(module.get(), IREE_SV("effective"))->projection;
+  const loom_target_facts_t* equivalent =
+      LookupTarget(module.get(), IREE_SV("equivalent"))->projection;
+  const loom_target_facts_t* smaller_requirement =
+      LookupTarget(module.get(), IREE_SV("smaller_requirement"))->projection;
+
+  EXPECT_NE(effective, equivalent);
+  EXPECT_TRUE(loom_target_facts_satisfy_requirement(effective, equivalent));
+  EXPECT_TRUE(
+      loom_target_facts_satisfy_requirement(effective, smaller_requirement));
+  EXPECT_FALSE(
+      loom_target_facts_satisfy_requirement(smaller_requirement, effective));
 }
 
 TEST_F(TargetFactsTest, MaterializedProjectionRoundTripsDurableFields) {

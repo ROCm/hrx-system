@@ -233,6 +233,7 @@ __all__ = [
     "MemoryAccessInterface",
     "MemoryAccessOperationKind",
     "RegionBranchInterface",
+    "TargetFactSatisfaction",
     "TargetLikeInterface",
     # Op declaration.
     "Op",
@@ -3412,6 +3413,14 @@ class FuncLikeInterface(NamedTuple):
     args_as_operands: bool = False
 
 
+@unique
+class TargetFactSatisfaction(Enum):
+    """Satisfaction relation for generated common target facts."""
+
+    IDENTITY = "identity"
+    STRUCTURAL = "structural"
+
+
 class TargetLikeInterface(NamedTuple):
     """Interface for ops that define target environment records.
 
@@ -3434,6 +3443,12 @@ class TargetLikeInterface(NamedTuple):
     # present, the C generator emits the TargetLike descriptor and projection
     # table instead of requiring hand-authored descriptor metadata.
     bundle_table: str | None = None
+    # Optional C symbol for a family-owned target fact type. When absent, the C
+    # generator emits a common fact type private to this op.
+    fact_type: str | None = None
+    # Satisfaction relation used by a generated common fact type. Family-owned
+    # fact types carry their relation in the named descriptor instead.
+    fact_satisfaction: TargetFactSatisfaction = TargetFactSatisfaction.IDENTITY
     # Common target attrs owned by the authored function contract during
     # specialization. Target-family identity, capabilities, and limits remain
     # profile-owned unless listed here.

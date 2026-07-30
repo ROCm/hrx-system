@@ -65,6 +65,24 @@ static iree_status_t loom_target_symbol_fact_compute(
   if (row_bundle == NULL) {
     return iree_ok_status();
   }
+  const loom_target_fact_type_t* fact_type = descriptor->fact_type;
+  IREE_ASSERT(fact_type != NULL);
+  IREE_ASSERT(fact_type->storage_size >= sizeof(loom_target_facts_t));
+
+  loom_target_facts_t* projection = NULL;
+  IREE_RETURN_IF_ERROR(loom_symbol_fact_context_allocate(
+      context, fact_type->storage_size, (void**)&projection));
+  memset(projection, 0, fact_type->storage_size);
+  projection->fact_type = fact_type;
+  projection->selector = selector;
+  const bool resolved = loom_target_record_projection_resolve(
+      module, target, module->strings.entries[symbol->name_id],
+      &projection->storage, &projection->authored_attrs);
+  IREE_ASSERT(resolved);
+  (void)resolved;
+  if (fact_type->project != NULL) {
+    fact_type->project(module, target.op, projection);
+  }
 
   loom_target_symbol_facts_t* facts = NULL;
   IREE_RETURN_IF_ERROR(loom_symbol_fact_context_allocate(
@@ -73,6 +91,7 @@ static iree_status_t loom_target_symbol_fact_compute(
 
   facts->base.domain = domain;
   facts->base.symbol_kind = symbol->kind;
+  facts->projection = projection;
   facts->target = target;
   facts->symbol = (loom_symbol_ref_t){
       .module_id = 0,
@@ -82,10 +101,8 @@ static iree_status_t loom_target_symbol_fact_compute(
 
   facts->selector = selector;
   facts->row_bundle = row_bundle;
-  const bool resolved = loom_target_record_projection_resolve(
-      module, target, facts->name, &facts->storage);
-  IREE_ASSERT(resolved);
-  (void)resolved;
+  facts->storage = projection->storage;
+  loom_target_bundle_storage_rebind(&facts->storage);
 
   *out_facts = &facts->base;
   return iree_ok_status();
@@ -101,4 +118,107 @@ const loom_target_symbol_facts_t* loom_target_symbol_facts_cast(
     return NULL;
   }
   return (const loom_target_symbol_facts_t*)facts;
+}
+
+bool loom_target_facts_satisfy_requirement(
+    const loom_target_facts_t* effective,
+    const loom_target_facts_t* requirement) {
+  IREE_ASSERT_ARGUMENT(effective);
+  IREE_ASSERT_ARGUMENT(requirement);
+  if (effective == requirement) {
+    return true;
+  }
+  if (effective->fact_type != requirement->fact_type ||
+      effective->fact_type->satisfies_requirement == NULL) {
+    return false;
+  }
+  return effective->fact_type->satisfies_requirement(effective, requirement);
+}
+
+bool loom_target_facts_structural_satisfy_requirement(
+    const loom_target_facts_t* effective,
+    const loom_target_facts_t* requirement) {
+  IREE_ASSERT_ARGUMENT(effective);
+  IREE_ASSERT_ARGUMENT(requirement);
+  if (effective->fact_type != requirement->fact_type ||
+      effective->selector != requirement->selector) {
+    return false;
+  }
+  return loom_target_snapshot_satisfies_requirement(
+             &effective->storage.snapshot, &requirement->storage.snapshot) &&
+         iree_string_view_equal(effective->storage.config.contract_set_key,
+                                requirement->storage.config.contract_set_key) &&
+         iree_all_bits_set(effective->storage.config.contract_feature_bits,
+                           requirement->storage.config.contract_feature_bits);
+}
+
+static bool loom_target_limit_satisfies(uint64_t effective_limit,
+                                        uint64_t required_limit) {
+  return required_limit == 0 || effective_limit >= required_limit;
+}
+
+bool loom_target_snapshot_satisfies_requirement(
+    const loom_target_snapshot_t* effective_snapshot,
+    const loom_target_snapshot_t* target_requirement) {
+  IREE_ASSERT_ARGUMENT(effective_snapshot);
+  IREE_ASSERT_ARGUMENT(target_requirement);
+  return effective_snapshot->codegen_format ==
+             target_requirement->codegen_format &&
+         effective_snapshot->artifact_format ==
+             target_requirement->artifact_format &&
+         effective_snapshot->default_pointer_bitwidth ==
+             target_requirement->default_pointer_bitwidth &&
+         effective_snapshot->index_bitwidth ==
+             target_requirement->index_bitwidth &&
+         effective_snapshot->offset_bitwidth ==
+             target_requirement->offset_bitwidth &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_workgroup_size.x,
+             target_requirement->max_workgroup_size.x) &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_workgroup_size.y,
+             target_requirement->max_workgroup_size.y) &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_workgroup_size.z,
+             target_requirement->max_workgroup_size.z) &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_flat_workgroup_size,
+             target_requirement->max_flat_workgroup_size) &&
+         (target_requirement->subgroup_size == 0 ||
+          effective_snapshot->subgroup_size ==
+              target_requirement->subgroup_size) &&
+         loom_target_limit_satisfies(effective_snapshot->max_grid_size.x,
+                                     target_requirement->max_grid_size.x) &&
+         loom_target_limit_satisfies(effective_snapshot->max_grid_size.y,
+                                     target_requirement->max_grid_size.y) &&
+         loom_target_limit_satisfies(effective_snapshot->max_grid_size.z,
+                                     target_requirement->max_grid_size.z) &&
+         loom_target_limit_satisfies(effective_snapshot->max_flat_grid_size,
+                                     target_requirement->max_flat_grid_size) &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_workgroup_count.x,
+             target_requirement->max_workgroup_count.x) &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_workgroup_count.y,
+             target_requirement->max_workgroup_count.y) &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_workgroup_count.z,
+             target_requirement->max_workgroup_count.z) &&
+         loom_target_limit_satisfies(
+             effective_snapshot->max_workgroup_storage_bytes,
+             target_requirement->max_workgroup_storage_bytes) &&
+         effective_snapshot->memory_spaces.generic ==
+             target_requirement->memory_spaces.generic &&
+         effective_snapshot->memory_spaces.global ==
+             target_requirement->memory_spaces.global &&
+         effective_snapshot->memory_spaces.workgroup ==
+             target_requirement->memory_spaces.workgroup &&
+         effective_snapshot->memory_spaces.constant ==
+             target_requirement->memory_spaces.constant &&
+         effective_snapshot->memory_spaces.private_memory ==
+             target_requirement->memory_spaces.private_memory &&
+         effective_snapshot->memory_spaces.host ==
+             target_requirement->memory_spaces.host &&
+         effective_snapshot->memory_spaces.descriptor ==
+             target_requirement->memory_spaces.descriptor;
 }

@@ -130,6 +130,7 @@ from loom.dsl import (
     SameShape,
     SameType,
     Successor,
+    TargetFactSatisfaction,
     TargetLikeInterface,
     TotalBitCountEqual,
     TypeConstraint,
@@ -500,6 +501,8 @@ class TestInterfaces:
         assert interface.selector == "kind"
         assert interface.extensions is None
         assert interface.descriptor is None
+        assert interface.fact_type is None
+        assert interface.fact_satisfaction == TargetFactSatisfaction.IDENTITY
         assert interface.specialization_authored_attrs == ()
 
     def test_memory_access_interface_uses_soft_field_defaults(self) -> None:

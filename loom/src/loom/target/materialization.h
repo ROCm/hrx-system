@@ -32,12 +32,14 @@ typedef struct loom_target_record_extension_attr_t {
 // Resolves the generated row and authored overrides of |target| into owned
 // bundle storage.
 //
-// |record_name| supplies diagnostic-only bundle names. Returns false when the
-// target selector does not name a generated row. Verified internal target
-// records always resolve.
+// |record_name| supplies diagnostic-only bundle names. When provided,
+// |out_authored_attrs| receives the projected attrs explicitly present on the
+// target. Returns false when the target selector does not name a generated
+// row. Verified internal target records always resolve.
 bool loom_target_record_projection_resolve(
     const loom_module_t* module, loom_target_like_t target,
-    iree_string_view_t record_name, loom_target_bundle_storage_t* out_storage);
+    iree_string_view_t record_name, loom_target_bundle_storage_t* out_storage,
+    loom_target_authored_attr_set_t* out_authored_attrs);
 
 // Returns whether the durable common projection of |target_op| equals the
 // specialization of |selected_bundle| by |authored_target_op|.

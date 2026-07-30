@@ -187,6 +187,7 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::func
+    loom::ops::target
     loom::ops::test
     loom::target::test::target_record_table
     loom::testing::module_ptr
@@ -400,7 +401,6 @@ loom_cc_library(
     loom::codegen::low::verify
     loom::ir
     loom::ops::op_defs
-    loom::ops::target
     loom::pass::environment
     loom::pass::registry
     loom::target::reporting::artifact_manifest

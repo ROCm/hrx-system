@@ -71,25 +71,6 @@ static iree_status_t RegisterFakeTargetContext(loom_context_t* context) {
   return loom_test_dialect_register(context);
 }
 
-static bool FakeTargetSatisfiesRequirement(
-    loom_target_record_view_t effective_target,
-    loom_target_record_view_t target_requirement) {
-  if (loom_test_target_kind(effective_target.facts->target.op) !=
-      loom_test_target_kind(target_requirement.facts->target.op)) {
-    return false;
-  }
-  const loom_target_bundle_storage_t* effective_storage =
-      &effective_target.facts->storage;
-  const loom_target_bundle_storage_t* requirement_storage =
-      &target_requirement.facts->storage;
-  return loom_target_snapshot_satisfies_requirement(
-             &effective_storage->snapshot, &requirement_storage->snapshot) &&
-         iree_string_view_equal(effective_storage->config.contract_set_key,
-                                requirement_storage->config.contract_set_key) &&
-         iree_all_bits_set(effective_storage->config.contract_feature_bits,
-                           requirement_storage->config.contract_feature_bits);
-}
-
 static iree_string_view_t FakeTargetMaterializationSymbolStem(
     const loom_target_profile_t* profile) {
   return loom_target_profile_has_type(profile, &kFakeTargetProfileType)
@@ -138,16 +119,12 @@ static const loom_target_provider_t kFakeTargetProvider = {
     /*.contribute_pipeline=*/nullptr,
     /*.materialization=*/
     {
+        /*.op_kind=*/LOOM_OP_TEST_TARGET,
         /*.symbol_stem=*/FakeTargetMaterializationSymbolStem,
         /*.record_matches_effective_target=*/
         FakeTargetRecordMatchesEffectiveTarget,
         /*.build_effective_target_record=*/
         BuildFakeTargetEffectiveRecord,
-    },
-    /*.record_semantics=*/
-    {
-        /*.op_kind=*/LOOM_OP_TEST_TARGET,
-        /*.satisfies_requirement=*/FakeTargetSatisfiesRequirement,
     },
 };
 

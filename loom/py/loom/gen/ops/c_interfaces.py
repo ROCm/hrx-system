@@ -23,6 +23,7 @@ from loom.dsl import (
     MemoryAccessOperationKind,
     Op,
     RegionBranchInterface,
+    TargetFactSatisfaction,
     TargetLikeInterface,
 )
 from loom.fields import compute_layout
@@ -531,9 +532,21 @@ def _target_like_projection_entries(op: Op, iface: TargetLikeInterface) -> list[
 def emit_target_like_descriptor(op: Op, iface: TargetLikeInterface, lines: list[str]) -> None:
     if iface.bundle_table is None:
         return
+    if iface.fact_type is not None and iface.fact_satisfaction != TargetFactSatisfaction.IDENTITY:
+        raise ValueError(f"TargetLikeInterface on {op.name!r}: an external fact type owns its satisfaction relation")
     descriptor = c_symbols.normalize_c_symbol_reference(iface.descriptor or f"{c_prefix(op)}_target_like_descriptor")
     bundle_table = c_symbols.normalize_c_symbol_reference(iface.bundle_table)
     prefix = c_prefix(op)
+    if iface.fact_type is None:
+        fact_type = f"{prefix}_fact_type"
+        lines.append(f"static const loom_target_fact_type_t {fact_type} = {{")
+        lines.append(f'    .name = IREE_SVL("{op.name}"),')
+        lines.append("    .storage_size = sizeof(loom_target_facts_t),")
+        if iface.fact_satisfaction == TargetFactSatisfaction.STRUCTURAL:
+            lines.append("    .satisfies_requirement = loom_target_facts_structural_satisfy_requirement,")
+        lines.append("};")
+    else:
+        fact_type = c_symbols.normalize_c_symbol_reference(iface.fact_type)
     projections = _target_like_projection_entries(op, iface)
     projection_array = "NULL"
     if projections:
@@ -547,6 +560,7 @@ def emit_target_like_descriptor(op: Op, iface: TargetLikeInterface, lines: list[
     if projection_array != "NULL":
         lines.append(f"    .projections = {projection_array},")
         lines.append(f"    .projection_count = IREE_ARRAYSIZE({projection_array}),")
+    lines.append(f"    .fact_type = &{fact_type},")
     lines.append("};")
     lines.append("")
 
@@ -613,4 +627,14 @@ def target_like_bundle_table_symbols(ops: Sequence[Op]) -> list[str]:
         if iface is None or iface.bundle_table is None:
             continue
         symbols.add(c_symbols.normalize_c_symbol_reference(iface.bundle_table))
+    return sorted(symbols)
+
+
+def target_like_fact_type_symbols(ops: Sequence[Op]) -> list[str]:
+    symbols: set[str] = set()
+    for op in ops:
+        iface = c_queries.find_interface(op, TargetLikeInterface)
+        if iface is None or iface.fact_type is None:
+            continue
+        symbols.add(c_symbols.normalize_c_symbol_reference(iface.fact_type))
     return sorted(symbols)

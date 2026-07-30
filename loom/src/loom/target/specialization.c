@@ -103,8 +103,9 @@ static iree_status_t loom_target_specialization_resolve_function(
 
 static iree_status_t loom_target_specialization_lookup_target(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
-    loom_symbol_ref_t target_ref, loom_target_record_view_t* out_target) {
-  *out_target = (loom_target_record_view_t){0};
+    loom_symbol_ref_t target_ref,
+    const loom_target_symbol_facts_t** out_target) {
+  *out_target = NULL;
   const loom_symbol_facts_base_t* base_facts = NULL;
   IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
       fact_table, module, target_ref, &base_facts));
@@ -115,21 +116,21 @@ static iree_status_t loom_target_specialization_lookup_target(
         "verified function target has no indexed target facts");
     IREE_BUILTIN_UNREACHABLE();
   }
-  *out_target = loom_target_record_view_make(module, target_facts);
+  *out_target = target_facts;
   return iree_ok_status();
 }
 
 static iree_status_t loom_target_specialization_emit_conflict(
     iree_diagnostic_emitter_t diagnostic_emitter, const loom_module_t* module,
     const loom_target_resolved_specialization_t* specialization,
-    loom_target_record_view_t authored_target,
-    loom_target_record_view_t effective_target) {
+    const loom_target_symbol_facts_t* authored_target,
+    const loom_target_symbol_facts_t* effective_target) {
   const iree_string_view_t function_name =
       module->strings.entries[specialization->function_name_id];
   const loom_diagnostic_param_t params[] = {
       loom_param_string(function_name),
-      loom_param_string(authored_target.facts->name),
-      loom_param_string(effective_target.facts->name),
+      loom_param_string(authored_target->name),
+      loom_param_string(effective_target->name),
   };
   const loom_diagnostic_emission_t emission = {
       .op = specialization->function.op,
@@ -141,8 +142,8 @@ static iree_status_t loom_target_specialization_emit_conflict(
 }
 
 static iree_status_t loom_target_specialization_validate_requirements(
-    const loom_target_environment_t* environment, const loom_module_t* module,
-    loom_target_resolved_specialization_t* specializations,
+    const loom_module_t* module,
+    const loom_target_resolved_specialization_t* specializations,
     iree_host_size_t specialization_count,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
     uint32_t* out_error_count) {
@@ -159,15 +160,15 @@ static iree_status_t loom_target_specialization_validate_requirements(
       continue;
     }
 
-    loom_target_record_view_t effective_target = {0};
+    const loom_target_symbol_facts_t* effective_target = NULL;
     IREE_RETURN_IF_ERROR(loom_target_specialization_lookup_target(
         module, &fact_table, specialization->effective_target_ref,
         &effective_target));
-    loom_target_record_view_t authored_target = {0};
+    const loom_target_symbol_facts_t* authored_target = NULL;
     IREE_RETURN_IF_ERROR(loom_target_specialization_lookup_target(
         module, &fact_table, authored_target_ref, &authored_target));
-    if (loom_target_satisfies_requirement(environment, effective_target,
-                                          authored_target)) {
+    if (loom_target_facts_satisfy_requirement(effective_target->projection,
+                                              authored_target->projection)) {
       continue;
     }
 
@@ -258,8 +259,8 @@ iree_status_t loom_target_specialize_functions(
   }
 
   IREE_RETURN_IF_ERROR(loom_target_specialization_validate_requirements(
-      environment, module, specializations, requests.count, diagnostic_emitter,
-      arena, &out_result->error_count));
+      module, specializations, requests.count, diagnostic_emitter, arena,
+      &out_result->error_count));
   if (out_result->error_count != 0) {
     return iree_ok_status();
   }

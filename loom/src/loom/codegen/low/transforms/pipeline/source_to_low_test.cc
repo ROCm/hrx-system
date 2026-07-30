@@ -329,14 +329,14 @@ TEST_F(LowLowerPassTest,
 TEST_F(LowLowerPassTest,
        DurableFunctionTargetPrunesOffTargetProvidersBeforeLowering) {
   ModulePtr module = Parse(IREE_SV(
-      "func.template<demo.targeted> target(@gfx12) priority(20) "
-      "@gfx12_bad(%value: i32) -> (i32) {\n"
+      "func.template<demo.targeted> target(@quirky) priority(20) "
+      "@quirky_bad(%value: i32) -> (i32) {\n"
       "  test.use %value : i32\n"
       "  func.return %value : i32\n"
       "}\n"
       "\n"
-      "func.template<demo.targeted> target(@gfx11) priority(10) "
-      "@gfx11_good(%value: i32) -> (i32) {\n"
+      "func.template<demo.targeted> target(@low_core) priority(10) "
+      "@low_core_good(%value: i32) -> (i32) {\n"
       "  %doubled = scalar.addi %value, %value : i32\n"
       "  func.return %doubled : i32\n"
       "}\n"
@@ -346,21 +346,21 @@ TEST_F(LowLowerPassTest,
       "  func.return %value : i32\n"
       "}\n"
       "\n"
-      "test.target<low_core> @gfx11\n"
-      "test.target<low_core> @gfx12\n"
+      "test.target<low_core> @low_core\n"
+      "test.target<quirky> @quirky\n"
       "\n"
-      "func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {\n"
+      "func.def public target(@low_core) @entry(%arg: i32) -> (i32) {\n"
       "  %result = func.apply<demo.targeted>(%arg) : (i32) -> (i32)\n"
       "  func.return %result : i32\n"
       "}\n"));
   IREE_ASSERT_OK(RunFlatPipeline(
       module.get(), IREE_SV("select-templates,inline-callables,symbol-dce")));
-  EXPECT_FALSE(HasSymbol(module.get(), IREE_SV("gfx12_bad")));
+  EXPECT_FALSE(HasSymbol(module.get(), IREE_SV("quirky_bad")));
   EXPECT_FALSE(HasSymbol(module.get(), IREE_SV("fallback")));
 
   IREE_ASSERT_OK(RunFlatPipeline(module.get(), IREE_SV("source-to-low")));
-  const loom_symbol_ref_t gfx11_ref =
-      FindSymbolRef(module.get(), IREE_SV("gfx11"));
+  const loom_symbol_ref_t low_core_ref =
+      FindSymbolRef(module.get(), IREE_SV("low_core"));
   const loom_symbol_ref_t entry_ref =
       FindSymbolRef(module.get(), IREE_SV("entry"));
   ASSERT_TRUE(loom_symbol_ref_is_valid(entry_ref));
@@ -370,8 +370,8 @@ TEST_F(LowLowerPassTest,
   ASSERT_TRUE(loom_low_func_def_isa(entry_symbol->defining_op));
   const loom_symbol_ref_t lowered_target =
       loom_low_func_def_target(entry_symbol->defining_op);
-  EXPECT_EQ(lowered_target.module_id, gfx11_ref.module_id);
-  EXPECT_EQ(lowered_target.symbol_id, gfx11_ref.symbol_id);
+  EXPECT_EQ(lowered_target.module_id, low_core_ref.module_id);
+  EXPECT_EQ(lowered_target.symbol_id, low_core_ref.symbol_id);
 }
 
 TEST_F(LowLowerPassTest,
