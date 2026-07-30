@@ -18201,6 +18201,7 @@ HIPAPI hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode,
   hipError_t alloc_result =
       iree_hip_malloc_from_pool(stream_graph->context, pool, params->bytesize,
                                 /*stream=*/NULL, &params->dptr);
+  hrx_mem_pool_release(pool);
   if (alloc_result != hipSuccess) {
     iree_status_ignore(iree_hal_streaming_graph_destroy_node(node));
     HIP_RETURN_ERROR(alloc_result);
@@ -22775,6 +22776,10 @@ HIPAPI hipError_t hipMallocFromPoolAsync(void** ptr, size_t size,
   if (stream_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(stream_result);
+  }
+  if (size == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
   }
 
   struct hipMemPool_st* pool_handle = NULL;
