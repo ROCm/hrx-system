@@ -19,7 +19,7 @@
 #include "loom/codegen/low/verify.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/ir.h"
-#include "loom/ops/target/facts.h"
+#include "loom/target/facts.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/types.h"
 #include "loom/verify/verify.h"

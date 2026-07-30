@@ -279,6 +279,7 @@ def _target_projection_test_op(
     specialization_authored_attrs: tuple[str, ...] = (),
     *,
     fact_type: str | None = None,
+    fact_projector: str | None = None,
     fact_satisfaction: TargetFactSatisfaction = TargetFactSatisfaction.IDENTITY,
 ) -> Op:
     kind = EnumDef("TargetKind", [EnumCase("generic", 0)])
@@ -302,6 +303,7 @@ def _target_projection_test_op(
                 selector="kind",
                 bundle_table="loom_test_target_bundles",
                 fact_type=fact_type,
+                fact_projector=fact_projector,
                 fact_satisfaction=fact_satisfaction,
                 specialization_authored_attrs=specialization_authored_attrs,
             )
@@ -316,11 +318,11 @@ def test_generate_target_projection_distinguishes_profile_and_authored_fields() 
         [_target_projection_test_op(("subgroup_size",))],
     )
 
-    assert ("snapshot.max_workgroup_size.x), 2, LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32, LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE}") in tables_c
-    assert ("snapshot.subgroup_size), 3, LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
-    assert ("export_plan.abi_kind), 4, LOOM_TARGET_PROJECTION_VALUE_ENUM_U8, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
-    assert ("export_plan.export_symbol), 5, LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
-    assert ("export_plan.linkage), 6, LOOM_TARGET_PROJECTION_VALUE_ENUM_U8, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
+    assert ("snapshot.max_workgroup_size.x), 2, LOOM_TARGET_FACT_FIELD_MAX_WORKGROUP_SIZE_X, LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32, LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE}") in tables_c
+    assert ("snapshot.subgroup_size), 3, LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE, LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
+    assert ("export_plan.abi_kind), 4, LOOM_TARGET_FACT_FIELD_ABI, LOOM_TARGET_PROJECTION_VALUE_ENUM_U8, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
+    assert ("export_plan.export_symbol), 5, LOOM_TARGET_FACT_FIELD_EXPORT_SYMBOL, LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
+    assert ("export_plan.linkage), 6, LOOM_TARGET_FACT_FIELD_LINKAGE, LOOM_TARGET_PROJECTION_VALUE_ENUM_U8, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
 
 
 def test_generate_target_projection_emits_typed_fact_contract() -> None:
@@ -342,12 +344,28 @@ def test_generate_target_projection_accepts_family_owned_fact_type() -> None:
     tables_c = generate_tables_c(
         "test",
         0,
-        [_target_projection_test_op(fact_type="loom_test_custom_fact_type")],
+        [
+            _target_projection_test_op(
+                fact_type="loom_test_custom_fact_type",
+                fact_projector="loom_test_custom_fact_projector",
+            )
+        ],
     )
 
     assert "extern const loom_target_fact_type_t loom_test_custom_fact_type;" in tables_c
+    assert "extern const loom_target_fact_projector_t loom_test_custom_fact_projector;" in tables_c
     assert "static const loom_target_fact_type_t" not in tables_c
     assert ".fact_type = &loom_test_custom_fact_type," in tables_c
+    assert ".fact_projector = &loom_test_custom_fact_projector," in tables_c
+
+
+def test_generate_target_projection_rejects_projector_without_family_facts() -> None:
+    with _raises_value_error(r"family fact projector requires an external fact type"):
+        generate_tables_c(
+            "test",
+            0,
+            [_target_projection_test_op(fact_projector="loom_test_fact_projector")],
+        )
 
 
 def test_generate_target_projection_rejects_split_fact_ownership() -> None:

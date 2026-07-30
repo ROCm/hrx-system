@@ -254,6 +254,10 @@ def generate_tables_c(
     if target_like_fact_type_symbols:
         lines.extend(f"extern const loom_target_fact_type_t {symbol};" for symbol in target_like_fact_type_symbols)
         lines.append("")
+    target_like_fact_projector_symbols = c_interfaces.target_like_fact_projector_symbols(ops)
+    if target_like_fact_projector_symbols:
+        lines.extend(f"extern const loom_target_fact_projector_t {symbol};" for symbol in target_like_fact_projector_symbols)
+        lines.append("")
 
     emitted_enum_case_name_arrays: set[str] = set()
 

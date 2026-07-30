@@ -99,14 +99,10 @@ TEST(LlvmirProviderTest, ProjectsTargetFactsWithProviderRegisteredDialect) {
       iree_string_view_equal(llvmir_facts->target_cpu, IREE_SV("generic")));
   EXPECT_TRUE(
       iree_string_view_equal(llvmir_facts->target_features, IREE_SV("+sse2")));
-  EXPECT_TRUE(loom_target_facts_attr_is_authored(
-      &llvmir_facts->base, loom_llvmir_target_triple_ATTR_INDEX));
-  EXPECT_TRUE(loom_target_facts_attr_is_authored(
-      &llvmir_facts->base, loom_llvmir_target_data_layout_ATTR_INDEX));
-  EXPECT_TRUE(loom_target_facts_attr_is_authored(
-      &llvmir_facts->base, loom_llvmir_target_cpu_ATTR_INDEX));
-  EXPECT_TRUE(loom_target_facts_attr_is_authored(
-      &llvmir_facts->base, loom_llvmir_target_features_ATTR_INDEX));
+  EXPECT_TRUE(llvmir_facts->authored.target_triple);
+  EXPECT_TRUE(llvmir_facts->authored.data_layout);
+  EXPECT_TRUE(llvmir_facts->authored.target_cpu);
+  EXPECT_TRUE(llvmir_facts->authored.target_features);
 
   iree_arena_deinitialize(&fact_arena);
   module.reset();

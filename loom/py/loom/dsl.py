@@ -3426,9 +3426,9 @@ class TargetLikeInterface(NamedTuple):
 
     The symbol field names the defining symbol attr. The selector field names
     the typed attr selecting the generated target row, such as a processor or
-    generic target kind. The extensions field names an optional dict
-    attr carrying target-specific extension data. Descriptor names a C-side
-    projection descriptor owned by the target family.
+    generic target kind. The extensions field names an optional dict attr
+    carrying target-specific extension data. Generated descriptor metadata
+    binds the target op to its fact type and optional family fact projector.
     """
 
     # Symbol attr that names the target record.
@@ -3446,6 +3446,9 @@ class TargetLikeInterface(NamedTuple):
     # Optional C symbol for a family-owned target fact type. When absent, the C
     # generator emits a common fact type private to this op.
     fact_type: str | None = None
+    # Optional C symbol for the target-op adapter that projects family-owned
+    # attributes into the typed fact extension.
+    fact_projector: str | None = None
     # Satisfaction relation used by a generated common fact type. Family-owned
     # fact types carry their relation in the named descriptor instead.
     fact_satisfaction: TargetFactSatisfaction = TargetFactSatisfaction.IDENTITY

@@ -27,6 +27,22 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "facts",
+    srcs = ["facts.c"],
+    hdrs = ["facts.h"],
+    deps = [
+        ":types",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "projection",
+    hdrs = ["projection.h"],
+    deps = [":facts"],
+)
+
+loom_cc_library(
     name = "profile",
     hdrs = ["profile.h"],
     deps = [
@@ -40,6 +56,8 @@ loom_cc_library(
     srcs = ["materialization.c"],
     hdrs = ["materialization.h"],
     deps = [
+        ":facts",
+        ":projection",
         ":types",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
@@ -200,6 +218,7 @@ loom_cc_library(
     srcs = ["function_contract.c"],
     hdrs = ["function_contract.h"],
     deps = [
+        ":facts",
         ":launch",
         ":types",
         "//loom/src/loom/analysis:symbol_facts",
@@ -483,6 +502,7 @@ loom_cc_library(
     srcs = ["entry_selection.c"],
     hdrs = ["entry_selection.h"],
     deps = [
+        ":facts",
         ":function_contract",
         ":low_descriptor_registry",
         ":types",

@@ -32,6 +32,18 @@ typedef struct loom_llvmir_target_facts_t {
 
   // LLVM target feature string passed to LLVM tools when authored.
   iree_string_view_t target_features;
+
+  // Authorship of LLVMIR-family facts projected from the target witness.
+  struct {
+    // True when the target triple was explicitly authored.
+    bool target_triple;
+    // True when the data layout was explicitly authored.
+    bool data_layout;
+    // True when the target CPU was explicitly authored.
+    bool target_cpu;
+    // True when the target feature string was explicitly authored.
+    bool target_features;
+  } authored;
 } loom_llvmir_target_facts_t;
 
 // Static fact type used by generated llvmir.target metadata.

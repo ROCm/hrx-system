@@ -148,10 +148,10 @@ static void loom_amdgpu_target_facts_project(const loom_module_t* module,
   loom_amdgpu_target_record_resolve_identity(target_op, &facts->identity);
   loom_amdgpu_target_properties_resolve(
       &facts->identity, &facts->base.storage.bundle, &facts->properties);
-  facts->subgroup_size_authored = loom_target_facts_attr_is_authored(
-      &facts->base, loom_amdgpu_target_subgroup_size_ATTR_INDEX);
-  facts->contract_set_key_authored = loom_target_facts_attr_is_authored(
-      &facts->base, loom_amdgpu_target_contract_set_key_ATTR_INDEX);
+  facts->subgroup_size_authored = loom_target_facts_field_is_authored(
+      &facts->base, LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE);
+  facts->contract_set_key_authored = loom_target_facts_field_is_authored(
+      &facts->base, LOOM_TARGET_FACT_FIELD_CONTRACT_SET_KEY);
 }
 
 static bool loom_amdgpu_target_facts_satisfy_requirement(
@@ -210,10 +210,13 @@ static bool loom_amdgpu_target_facts_satisfy_requirement(
              requirement->base.storage.config.contract_feature_bits);
 }
 
+const loom_target_fact_projector_t loom_amdgpu_target_fact_projector = {
+    .project = loom_amdgpu_target_facts_project,
+};
+
 const loom_target_fact_type_t loom_amdgpu_target_fact_type = {
     .name = IREE_SVL("amdgpu"),
     .storage_size = sizeof(loom_amdgpu_target_facts_t),
-    .project = loom_amdgpu_target_facts_project,
     .satisfies_requirement = loom_amdgpu_target_facts_satisfy_requirement,
 };
 

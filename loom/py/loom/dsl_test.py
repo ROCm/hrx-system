@@ -502,6 +502,7 @@ class TestInterfaces:
         assert interface.extensions is None
         assert interface.descriptor is None
         assert interface.fact_type is None
+        assert interface.fact_projector is None
         assert interface.fact_satisfaction == TargetFactSatisfaction.IDENTITY
         assert interface.specialization_authored_attrs == ()
 

@@ -192,8 +192,8 @@ TEST_F(SpirvProviderTest, MaterializedProfileSatisfiesStructuredRequirements) {
 
   EXPECT_EQ(baseline_a->projection->storage.export_plan.abi_kind,
             LOOM_TARGET_ABI_SHADER_ENTRY_POINT);
-  EXPECT_FALSE(loom_target_facts_attr_is_authored(
-      baseline_a->projection, loom_spirv_target_abi_ATTR_INDEX));
+  EXPECT_FALSE(loom_target_facts_field_is_authored(baseline_a->projection,
+                                                   LOOM_TARGET_FACT_FIELD_ABI));
 }
 
 TEST_F(SpirvProviderTest, MaterializesByDurableProjectionIdentity) {

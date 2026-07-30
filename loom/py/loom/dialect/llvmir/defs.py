@@ -81,6 +81,7 @@ llvmir_target = Op(
             selector="kind",
             bundle_table="loom_llvmir_target_bundles",
             fact_type="loom_llvmir_target_fact_type",
+            fact_projector="loom_llvmir_target_fact_projector",
         )
     ],
     symbol_def=SymbolDefinition(

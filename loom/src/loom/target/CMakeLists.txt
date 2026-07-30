@@ -21,6 +21,29 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    facts
+  HDRS
+    "facts.h"
+  SRCS
+    "facts.c"
+  DEPS
+    ::types
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    projection
+  HDRS
+    "projection.h"
+  DEPS
+    ::facts
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     profile
   HDRS
     "profile.h"
@@ -38,6 +61,8 @@ loom_cc_library(
   SRCS
     "materialization.c"
   DEPS
+    ::facts
+    ::projection
     ::types
     iree::base
     loom::ir
@@ -223,6 +248,7 @@ loom_cc_library(
   SRCS
     "function_contract.c"
   DEPS
+    ::facts
     ::launch
     ::types
     iree::base
@@ -529,6 +555,7 @@ loom_cc_library(
   SRCS
     "entry_selection.c"
   DEPS
+    ::facts
     ::function_contract
     ::low_descriptor_registry
     ::types

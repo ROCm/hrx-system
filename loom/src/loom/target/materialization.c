@@ -12,6 +12,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
+#include "loom/target/projection.h"
 
 static bool loom_target_record_projection_bundle_is_valid(
     const loom_target_bundle_t* bundle) {
@@ -83,12 +84,12 @@ static void loom_target_record_projection_apply_authored_specialization(
 bool loom_target_record_projection_resolve(
     const loom_module_t* module, loom_target_like_t target,
     iree_string_view_t record_name, loom_target_bundle_storage_t* out_storage,
-    loom_target_authored_attr_set_t* out_authored_attrs) {
+    loom_target_fact_field_set_t* out_authored_fields) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(out_storage);
   *out_storage = (loom_target_bundle_storage_t){0};
-  if (out_authored_attrs != NULL) {
-    *out_authored_attrs = (loom_target_authored_attr_set_t){0};
+  if (out_authored_fields != NULL) {
+    *out_authored_fields = 0;
   }
   if (!loom_target_like_isa(target)) {
     return false;
@@ -108,10 +109,11 @@ bool loom_target_record_projection_resolve(
                                                    out_storage);
   for (uint8_t i = 0; i < descriptor->projection_count; ++i) {
     const loom_target_projection_t* projection = &descriptor->projections[i];
-    if (out_authored_attrs != NULL && !loom_attr_is_absent(loom_op_const_attrs(
-                                          target.op)[projection->attr_index])) {
-      loom_target_authored_attr_set_insert(out_authored_attrs,
-                                           projection->attr_index);
+    if (out_authored_fields != NULL &&
+        !loom_attr_is_absent(
+            loom_op_const_attrs(target.op)[projection->attr_index])) {
+      loom_target_fact_field_set_insert(out_authored_fields,
+                                        projection->fact_field);
     }
     loom_target_record_projection_apply_attr(module, target.op, projection,
                                              out_storage);
@@ -158,7 +160,7 @@ bool loom_target_record_projection_matches_bundle(
   loom_target_bundle_storage_t existing_storage = {0};
   if (!loom_target_record_projection_resolve(
           module, target, iree_string_view_empty(), &existing_storage,
-          /*out_authored_attrs=*/NULL)) {
+          /*out_authored_fields=*/NULL)) {
     return false;
   }
   loom_target_bundle_storage_t selected_storage = {0};

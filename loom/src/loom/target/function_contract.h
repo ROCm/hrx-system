@@ -19,7 +19,7 @@
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/func_symbol_facts.h"
-#include "loom/ops/target/facts.h"
+#include "loom/target/facts.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus

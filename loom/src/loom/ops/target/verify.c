@@ -9,6 +9,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/target/ops.h"
+#include "loom/target/projection.h"
 
 static iree_status_t loom_target_emit(iree_diagnostic_emitter_t emitter,
                                       const loom_op_t* op,

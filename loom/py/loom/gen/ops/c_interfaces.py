@@ -504,8 +504,8 @@ def _validate_memory_access_interface(op: Op, iface: MemoryAccessInterface, inte
     _memory_access_operation_kind(op, iface, interface_name)
 
 
-def _target_like_projection_entries(op: Op, iface: TargetLikeInterface) -> list[tuple[int, str, str, str]]:
-    entries: list[tuple[int, str, str, str]] = []
+def _target_like_projection_entries(op: Op, iface: TargetLikeInterface) -> list[tuple[int, str, str, str, str]]:
+    entries: list[tuple[int, str, str, str, str]] = []
     authored_attrs = set(iface.specialization_authored_attrs)
     if len(authored_attrs) != len(iface.specialization_authored_attrs):
         raise ValueError(f"TargetLikeInterface on {op.name!r}: duplicate specialization authored attrs")
@@ -522,7 +522,8 @@ def _target_like_projection_entries(op: Op, iface: TargetLikeInterface) -> list[
         if attr_def.name in authored_attrs:
             specialization = "LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED"
         attr_index = c_queries.resolve_attr_index(op, attr_def.name, "TargetLikeInterface")
-        entries.append((attr_index, value_kind, storage_field, specialization))
+        fact_field = f"LOOM_TARGET_FACT_FIELD_{attr_def.name.upper()}"
+        entries.append((attr_index, fact_field, value_kind, storage_field, specialization))
     absent_authored_attrs = authored_attrs - projected_attr_names
     if absent_authored_attrs:
         raise ValueError(f"TargetLikeInterface on {op.name!r}: specialization authored attrs are not declared by the op {sorted(absent_authored_attrs)}")
@@ -534,6 +535,8 @@ def emit_target_like_descriptor(op: Op, iface: TargetLikeInterface, lines: list[
         return
     if iface.fact_type is not None and iface.fact_satisfaction != TargetFactSatisfaction.IDENTITY:
         raise ValueError(f"TargetLikeInterface on {op.name!r}: an external fact type owns its satisfaction relation")
+    if iface.fact_projector is not None and iface.fact_type is None:
+        raise ValueError(f"TargetLikeInterface on {op.name!r}: a family fact projector requires an external fact type")
     descriptor = c_symbols.normalize_c_symbol_reference(iface.descriptor or f"{c_prefix(op)}_target_like_descriptor")
     bundle_table = c_symbols.normalize_c_symbol_reference(iface.bundle_table)
     prefix = c_prefix(op)
@@ -552,8 +555,8 @@ def emit_target_like_descriptor(op: Op, iface: TargetLikeInterface, lines: list[
     if projections:
         projection_array = f"{prefix}_target_projections"
         lines.append(f"static const loom_target_projection_t {projection_array}[] = {{")
-        for attr_index, value_kind, storage_field, specialization in projections:
-            lines.append(f"    {{offsetof(loom_target_bundle_storage_t, {storage_field}), {attr_index}, {value_kind}, {specialization}}},")
+        for attr_index, fact_field, value_kind, storage_field, specialization in projections:
+            lines.append(f"    {{offsetof(loom_target_bundle_storage_t, {storage_field}), {attr_index}, {fact_field}, {value_kind}, {specialization}}},")
         lines.append("};")
     lines.append(f"static const loom_target_like_descriptor_t {descriptor} = {{")
     lines.append(f"    .bundle_table = &{bundle_table},")
@@ -561,6 +564,9 @@ def emit_target_like_descriptor(op: Op, iface: TargetLikeInterface, lines: list[
         lines.append(f"    .projections = {projection_array},")
         lines.append(f"    .projection_count = IREE_ARRAYSIZE({projection_array}),")
     lines.append(f"    .fact_type = &{fact_type},")
+    if iface.fact_projector is not None:
+        fact_projector = c_symbols.normalize_c_symbol_reference(iface.fact_projector)
+        lines.append(f"    .fact_projector = &{fact_projector},")
     lines.append("};")
     lines.append("")
 
@@ -637,4 +643,14 @@ def target_like_fact_type_symbols(ops: Sequence[Op]) -> list[str]:
         if iface is None or iface.fact_type is None:
             continue
         symbols.add(c_symbols.normalize_c_symbol_reference(iface.fact_type))
+    return sorted(symbols)
+
+
+def target_like_fact_projector_symbols(ops: Sequence[Op]) -> list[str]:
+    symbols: set[str] = set()
+    for op in ops:
+        iface = c_queries.find_interface(op, TargetLikeInterface)
+        if iface is None or iface.fact_projector is None:
+            continue
+        symbols.add(c_symbols.normalize_c_symbol_reference(iface.fact_projector))
     return sorted(symbols)

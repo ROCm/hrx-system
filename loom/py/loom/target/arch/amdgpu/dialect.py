@@ -73,6 +73,7 @@ amdgpu_target = Op(
             selector="kind",
             bundle_table="loom_amdgpu_target_bundles",
             fact_type="loom_amdgpu_target_fact_type",
+            fact_projector="loom_amdgpu_target_fact_projector",
             specialization_authored_attrs=("subgroup_size",),
         )
     ],

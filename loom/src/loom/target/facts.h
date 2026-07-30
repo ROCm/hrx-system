@@ -1,0 +1,149 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Immutable typed target facts.
+//
+// Target facts are compiler analysis state, independent of the target IR that
+// may have authored them. Authored target-op projection is confined to the
+// target symbol fact domain.
+
+#ifndef LOOM_TARGET_FACTS_H_
+#define LOOM_TARGET_FACTS_H_
+
+#include "iree/base/api.h"
+#include "loom/target/types.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct loom_target_facts_t loom_target_facts_t;
+
+// Target-neutral fields whose explicit authorship can affect specialization.
+typedef uint8_t loom_target_fact_field_t;
+enum loom_target_fact_field_e {
+  LOOM_TARGET_FACT_FIELD_CODEGEN_FORMAT = 0,
+  LOOM_TARGET_FACT_FIELD_ARTIFACT_FORMAT,
+  LOOM_TARGET_FACT_FIELD_DEFAULT_POINTER_BITWIDTH,
+  LOOM_TARGET_FACT_FIELD_INDEX_BITWIDTH,
+  LOOM_TARGET_FACT_FIELD_OFFSET_BITWIDTH,
+  LOOM_TARGET_FACT_FIELD_MAX_WORKGROUP_SIZE_X,
+  LOOM_TARGET_FACT_FIELD_MAX_WORKGROUP_SIZE_Y,
+  LOOM_TARGET_FACT_FIELD_MAX_WORKGROUP_SIZE_Z,
+  LOOM_TARGET_FACT_FIELD_MAX_FLAT_WORKGROUP_SIZE,
+  LOOM_TARGET_FACT_FIELD_MAX_WORKGROUP_STORAGE_BYTES,
+  LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE,
+  LOOM_TARGET_FACT_FIELD_MAX_GRID_SIZE_X,
+  LOOM_TARGET_FACT_FIELD_MAX_GRID_SIZE_Y,
+  LOOM_TARGET_FACT_FIELD_MAX_GRID_SIZE_Z,
+  LOOM_TARGET_FACT_FIELD_MAX_FLAT_GRID_SIZE,
+  LOOM_TARGET_FACT_FIELD_MAX_WORKGROUP_COUNT_X,
+  LOOM_TARGET_FACT_FIELD_MAX_WORKGROUP_COUNT_Y,
+  LOOM_TARGET_FACT_FIELD_MAX_WORKGROUP_COUNT_Z,
+  LOOM_TARGET_FACT_FIELD_MEMORY_SPACE_GENERIC,
+  LOOM_TARGET_FACT_FIELD_MEMORY_SPACE_GLOBAL,
+  LOOM_TARGET_FACT_FIELD_MEMORY_SPACE_WORKGROUP,
+  LOOM_TARGET_FACT_FIELD_MEMORY_SPACE_CONSTANT,
+  LOOM_TARGET_FACT_FIELD_MEMORY_SPACE_PRIVATE,
+  LOOM_TARGET_FACT_FIELD_MEMORY_SPACE_HOST,
+  LOOM_TARGET_FACT_FIELD_MEMORY_SPACE_DESCRIPTOR,
+  LOOM_TARGET_FACT_FIELD_ABI,
+  LOOM_TARGET_FACT_FIELD_EXPORT_SYMBOL,
+  LOOM_TARGET_FACT_FIELD_LINKAGE,
+  LOOM_TARGET_FACT_FIELD_CONTRACT_SET_KEY,
+  LOOM_TARGET_FACT_FIELD_CONTRACT_FEATURE_BITS,
+  LOOM_TARGET_FACT_FIELD_COUNT_,
+};
+static_assert(LOOM_TARGET_FACT_FIELD_COUNT_ <= 64,
+              "target fact authorship must fit in one word");
+
+// Set of target-neutral fact fields.
+typedef uint64_t loom_target_fact_field_set_t;
+
+// Records explicit authorship of |field|.
+static inline void loom_target_fact_field_set_insert(
+    loom_target_fact_field_set_t* set, loom_target_fact_field_t field) {
+  *set |= UINT64_C(1) << field;
+}
+
+// Returns whether |field| is present in |set|.
+static inline bool loom_target_fact_field_set_contains(
+    loom_target_fact_field_set_t set, loom_target_fact_field_t field) {
+  return iree_any_bit_set(set, UINT64_C(1) << field);
+}
+
+// Returns whether one effective fact value satisfies a same-type requirement.
+typedef bool (*loom_target_fact_satisfies_requirement_fn_t)(
+    const loom_target_facts_t* effective,
+    const loom_target_facts_t* requirement);
+
+// Static type descriptor for one target-family fact representation.
+struct loom_target_fact_type_t {
+  // Stable target-family name used in diagnostics and pass predicates.
+  iree_string_view_t name;
+
+  // Size of the family-owned facts object beginning with loom_target_facts_t.
+  iree_host_size_t storage_size;
+
+  // Optional satisfaction relation for distinct same-type fact values.
+  loom_target_fact_satisfies_requirement_fn_t satisfies_requirement;
+};
+
+// Typed target-neutral facts projected from available target information.
+//
+// Target-family fact structures embed this as their first field. Static type
+// identity, selection provenance, and owned projected values replace
+// downstream access to target IR.
+struct loom_target_facts_t {
+  // Static fact-family type and checked-dispatch identity.
+  const loom_target_fact_type_t* fact_type;
+
+  // Typed selector value that chose the generated base row.
+  uint8_t selector;
+
+  // Target-neutral fields explicitly present in the authored target witness.
+  loom_target_fact_field_set_t authored_fields;
+
+  // Owned common target projection after authored attrs are applied.
+  loom_target_bundle_storage_t storage;
+};
+
+// Returns whether |field| was explicitly present in the authored target
+// witness.
+static inline bool loom_target_facts_field_is_authored(
+    const loom_target_facts_t* facts, loom_target_fact_field_t field) {
+  return loom_target_fact_field_set_contains(facts->authored_fields, field);
+}
+
+// Returns whether |effective| satisfies every requirement in |requirement|.
+//
+// Distinct values must have the same static fact type. Family relations
+// dispatch directly through that type and never inspect target IR or scan a
+// provider registry.
+bool loom_target_facts_satisfy_requirement(
+    const loom_target_facts_t* effective,
+    const loom_target_facts_t* requirement);
+
+// Common structural relation for target families whose selector, snapshot,
+// and configuration fully define compatibility. Function ABI and export facts
+// do not participate.
+bool loom_target_facts_structural_satisfy_requirement(
+    const loom_target_facts_t* effective,
+    const loom_target_facts_t* requirement);
+
+// Returns whether |effective_snapshot| satisfies the structural requirements
+// in |target_requirement|. Representation widths and address spaces must
+// match, fixed subgroup sizes must agree, and effective capacity limits must
+// meet or exceed nonzero required limits.
+bool loom_target_snapshot_satisfies_requirement(
+    const loom_target_snapshot_t* effective_snapshot,
+    const loom_target_snapshot_t* target_requirement);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+#endif  // LOOM_TARGET_FACTS_H_
