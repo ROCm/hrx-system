@@ -72,6 +72,8 @@ void loom_target_compile_report_deinitialize(
   loom_target_compile_report_row_list_deinitialize(
       allocator, &report->source_low_memory_strategy_summaries);
   loom_target_compile_report_row_list_deinitialize(
+      allocator, &report->source_low_bank_service_summaries);
+  loom_target_compile_report_row_list_deinitialize(
       allocator, &report->math_legalization_rows);
   loom_target_compile_report_row_list_deinitialize(
       allocator, &report->target_legalization_rows);
@@ -103,6 +105,7 @@ static bool loom_target_compile_report_has_rows(
          report->source_low_memory_argument_summaries.count != 0 ||
          report->source_low_memory_argument_packet_summaries.count != 0 ||
          report->source_low_memory_strategy_summaries.count != 0 ||
+         report->source_low_bank_service_summaries.count != 0 ||
          report->math_legalization_rows.count != 0 ||
          report->target_legalization_rows.count != 0 ||
          report->target_capability_rows.count != 0;
@@ -157,6 +160,8 @@ iree_status_t loom_target_compile_report_clone(
       (loom_target_compile_report_row_list_t){0};
   target.source_low_memory_strategy_summaries =
       (loom_target_compile_report_row_list_t){0};
+  target.source_low_bank_service_summaries =
+      (loom_target_compile_report_row_list_t){0};
   target.math_legalization_rows = (loom_target_compile_report_row_list_t){0};
   target.target_legalization_rows = (loom_target_compile_report_row_list_t){0};
   target.target_capability_rows = (loom_target_compile_report_row_list_t){0};
@@ -181,6 +186,7 @@ iree_status_t loom_target_compile_report_clone(
       source->source_low_memory_argument_summaries.count == 0 &&
       source->source_low_memory_argument_packet_summaries.count == 0 &&
       source->source_low_memory_strategy_summaries.count == 0 &&
+      source->source_low_bank_service_summaries.count == 0 &&
       source->math_legalization_rows.count == 0 &&
       source->target_legalization_rows.count == 0 &&
       source->target_capability_rows.count == 0) {
@@ -325,6 +331,12 @@ iree_status_t loom_target_compile_report_clone(
         &source->source_low_memory_strategy_summaries,
         sizeof(loom_target_compile_report_source_low_memory_strategy_summary_t),
         allocator, &target.source_low_memory_strategy_summaries);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_target_compile_report_row_list_clone(
+        &source->source_low_bank_service_summaries,
+        sizeof(loom_target_compile_report_source_low_bank_service_summary_t),
+        allocator, &target.source_low_bank_service_summaries);
   }
   if (iree_status_is_ok(status)) {
     status = loom_target_compile_report_row_list_clone(
@@ -1084,6 +1096,8 @@ static void loom_target_compile_report_merge_entry_summary(
       loom_target_compile_report_accumulate_source_low_memory_summaries(
           &report->source_low_memory_summary,
           &entry_report->source_low_memory_summary);
+      loom_target_compile_report_accumulate_bank_service_summaries(
+          &report->bank_service_summary, &entry_report->bank_service_summary);
     }
     return;
   }
@@ -1200,6 +1214,8 @@ static void loom_target_compile_report_merge_entry_summary(
   loom_target_compile_report_accumulate_source_low_memory_summaries(
       &report->source_low_memory_summary,
       &entry_report->source_low_memory_summary);
+  loom_target_compile_report_accumulate_bank_service_summaries(
+      &report->bank_service_summary, &entry_report->bank_service_summary);
   if (iree_any_bit_set(entry_report->detail_flags,
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_RESOURCES)) {
     if (report_had_target_resources) {
@@ -1273,6 +1289,7 @@ loom_target_compile_report_entry_from_report(
       .emission_breakdown = entry_report->emission_breakdown,
       .private_memory_bytes = entry_report->private_memory_bytes,
       .local_memory_bytes = entry_report->local_memory_bytes,
+      .bank_service_summary = entry_report->bank_service_summary,
       .static_instruction_mix = entry_report->static_instruction_mix,
       .dynamic_instruction_mix = entry_report->dynamic_instruction_mix,
       .target_resources = entry_report->target_resources,

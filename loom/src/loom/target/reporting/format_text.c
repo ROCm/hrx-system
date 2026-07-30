@@ -593,6 +593,16 @@ static iree_status_t loom_target_compile_report_format_summary(
           loom_target_compile_report_format_text_source_low_memory_summary(
               summary, &report->workload, builder));
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
+      if (report->bank_service_summary.modeled_packet_count != 0) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder,
+            "COMPILE-REPORT: source_low_bank_service_summary groups=%" PRIhsz,
+            report->source_low_bank_service_summaries.count));
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_append_bank_service_summary_text_fields(
+                &report->bank_service_summary, builder));
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
+      }
     }
   }
 
@@ -828,6 +838,16 @@ static iree_status_t loom_target_compile_report_format_entry_rows(
           row->wait_counter_row_count, row->wait_reason_summary_row_count,
           row->wait_action_row_count, row->target_capability_row_count,
           row->target_insertion_row_count));
+      if (row->bank_service_summary.modeled_packet_count != 0) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder,
+            "COMPILE-REPORT: entry_bank_service[%" PRIhsz "] function=%.*s",
+            row_index, (int)function_name.size, function_name.data));
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_append_bank_service_summary_text_fields(
+                &row->bank_service_summary, builder));
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
+      }
       if (iree_any_bit_set(row->detail_flags,
                            LOOM_TARGET_COMPILE_REPORT_DETAIL_LOW_PLANNING)) {
         IREE_RETURN_IF_ERROR(iree_string_builder_append_format(

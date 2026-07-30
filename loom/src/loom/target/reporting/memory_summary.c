@@ -350,6 +350,29 @@ static void loom_target_compile_report_forget_memory_interval_unique_accounting(
   summary->unique_byte_count = 0;
 }
 
+void loom_target_compile_report_accumulate_bank_service_summaries(
+    loom_target_compile_report_bank_service_summary_t* target,
+    const loom_target_compile_report_bank_service_summary_t* source) {
+  target->modeled_packet_count += source->modeled_packet_count;
+  target->exact_packet_count += source->exact_packet_count;
+  target->unknown_packet_count += source->unknown_packet_count;
+  target->conflict_free_packet_count += source->conflict_free_packet_count;
+  target->conflicted_packet_count += source->conflicted_packet_count;
+  target->required_round_count += source->required_round_count;
+  target->uncontended_round_count += source->uncontended_round_count;
+  target->extra_round_count += source->extra_round_count;
+  target->exact_dynamic_packet_count += source->exact_dynamic_packet_count;
+  target->unknown_dynamic_packet_count += source->unknown_dynamic_packet_count;
+  target->dynamic_packet_count += source->dynamic_packet_count;
+  target->dynamic_required_round_count += source->dynamic_required_round_count;
+  target->dynamic_uncontended_round_count +=
+      source->dynamic_uncontended_round_count;
+  target->dynamic_extra_round_count += source->dynamic_extra_round_count;
+  target->maximum_request_multiplicity =
+      iree_max(target->maximum_request_multiplicity,
+               source->maximum_request_multiplicity);
+}
+
 void loom_target_compile_report_accumulate_source_low_memory_summaries(
     loom_target_compile_report_source_low_memory_summary_t* target,
     const loom_target_compile_report_source_low_memory_summary_t* source) {
@@ -793,6 +816,229 @@ loom_target_compile_report_record_source_low_memory_strategy_summary_row(
       report->allocator, row);
 }
 
+static bool loom_target_compile_report_source_low_bank_service_summaries_match(
+    const loom_target_compile_report_source_low_bank_service_summary_t* lhs,
+    const loom_target_compile_report_source_low_bank_service_summary_t* rhs) {
+  return iree_string_view_equal(lhs->function_name, rhs->function_name) &&
+         iree_string_view_equal(lhs->source_op_name, rhs->source_op_name) &&
+         lhs->source_op_kind == rhs->source_op_kind &&
+         iree_string_view_equal(lhs->source_root_name, rhs->source_root_name) &&
+         lhs->source_root_argument_index == rhs->source_root_argument_index &&
+         iree_string_view_equal(lhs->memory_space, rhs->memory_space) &&
+         iree_string_view_equal(lhs->operation_kind, rhs->operation_kind) &&
+         iree_string_view_equal(lhs->packet_key, rhs->packet_key) &&
+         iree_string_view_equal(lhs->strategy_key, rhs->strategy_key) &&
+         iree_string_view_equal(lhs->model_key, rhs->model_key) &&
+         iree_string_view_equal(lhs->model_revision, rhs->model_revision) &&
+         iree_string_view_equal(lhs->model_evidence, rhs->model_evidence) &&
+         iree_string_view_equal(lhs->request_policy, rhs->request_policy) &&
+         lhs->wave_size == rhs->wave_size &&
+         lhs->bank_count == rhs->bank_count &&
+         lhs->bank_word_byte_count == rhs->bank_word_byte_count &&
+         lhs->packet_word_count == rhs->packet_word_count;
+}
+
+static loom_target_compile_report_source_low_bank_service_summary_t*
+loom_target_compile_report_find_source_low_bank_service_summary(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_bank_service_summary_t* row) {
+  for (loom_target_compile_report_vec_t* vec =
+           report->source_low_bank_service_summaries.head;
+       vec != NULL; vec = vec->next) {
+    loom_target_compile_report_source_low_bank_service_summary_t* summaries =
+        (loom_target_compile_report_source_low_bank_service_summary_t*)
+            loom_target_compile_report_vec_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      loom_target_compile_report_source_low_bank_service_summary_t* summary =
+          &summaries[i];
+      if (loom_target_compile_report_source_low_bank_service_summaries_match(
+              summary, row)) {
+        return summary;
+      }
+    }
+  }
+  return NULL;
+}
+
+static void loom_target_compile_report_merge_unknown_bank_service_reason(
+    loom_target_compile_report_source_low_bank_service_summary_t* target,
+    iree_string_view_t source_reason, bool source_has_mixed_reasons,
+    uint64_t source_unknown_packet_count) {
+  if (source_unknown_packet_count == 0) {
+    return;
+  }
+  if (target->summary.unknown_packet_count == 0) {
+    target->unknown_reason = source_reason;
+    target->has_mixed_unknown_reasons = source_has_mixed_reasons;
+    return;
+  }
+  if (target->has_mixed_unknown_reasons || source_has_mixed_reasons ||
+      !iree_string_view_equal(target->unknown_reason, source_reason)) {
+    target->unknown_reason = iree_string_view_empty();
+    target->has_mixed_unknown_reasons = true;
+  }
+}
+
+static void loom_target_compile_report_accumulate_bank_service_summary(
+    loom_target_compile_report_bank_service_summary_t* summary,
+    const loom_target_compile_report_source_low_memory_row_t* row) {
+  const loom_target_compile_report_bank_service_t* bank_service =
+      &row->bank_service;
+  if (iree_string_view_is_empty(bank_service->model_key)) {
+    return;
+  }
+
+  ++summary->modeled_packet_count;
+  if (!iree_string_view_equal(bank_service->proof, IREE_SV("exact"))) {
+    ++summary->unknown_packet_count;
+    ++summary->unknown_dynamic_packet_count;
+    return;
+  }
+
+  ++summary->exact_packet_count;
+  if (iree_string_view_equal(bank_service->classification,
+                             IREE_SV("conflict-free"))) {
+    ++summary->conflict_free_packet_count;
+  } else if (iree_string_view_equal(bank_service->classification,
+                                    IREE_SV("conflicted"))) {
+    ++summary->conflicted_packet_count;
+  }
+  summary->required_round_count += bank_service->required_rounds;
+  summary->uncontended_round_count += bank_service->uncontended_rounds;
+  summary->extra_round_count += bank_service->extra_rounds;
+  summary->maximum_request_multiplicity =
+      iree_max(summary->maximum_request_multiplicity,
+               bank_service->maximum_request_multiplicity);
+
+  if (row->execution_count_plus_one ==
+      LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_MEMORY_EXECUTION_COUNT_PLUS_ONE_UNKNOWN) {
+    ++summary->unknown_dynamic_packet_count;
+    return;
+  }
+
+  const uint64_t execution_count = row->execution_count_plus_one - 1;
+  uint64_t dynamic_required_round_count = 0;
+  uint64_t dynamic_uncontended_round_count = 0;
+  uint64_t dynamic_extra_round_count = 0;
+  const bool dynamic_counts_ok =
+      iree_checked_mul_u64(bank_service->required_rounds, execution_count,
+                           &dynamic_required_round_count) &&
+      iree_checked_mul_u64(bank_service->uncontended_rounds, execution_count,
+                           &dynamic_uncontended_round_count) &&
+      iree_checked_mul_u64(bank_service->extra_rounds, execution_count,
+                           &dynamic_extra_round_count);
+  uint64_t new_dynamic_packet_count = summary->dynamic_packet_count;
+  uint64_t new_dynamic_required_round_count =
+      summary->dynamic_required_round_count;
+  uint64_t new_dynamic_uncontended_round_count =
+      summary->dynamic_uncontended_round_count;
+  uint64_t new_dynamic_extra_round_count = summary->dynamic_extra_round_count;
+  const bool dynamic_accumulation_ok =
+      dynamic_counts_ok &&
+      iree_checked_add_u64(new_dynamic_packet_count, execution_count,
+                           &new_dynamic_packet_count) &&
+      iree_checked_add_u64(new_dynamic_required_round_count,
+                           dynamic_required_round_count,
+                           &new_dynamic_required_round_count) &&
+      iree_checked_add_u64(new_dynamic_uncontended_round_count,
+                           dynamic_uncontended_round_count,
+                           &new_dynamic_uncontended_round_count) &&
+      iree_checked_add_u64(new_dynamic_extra_round_count,
+                           dynamic_extra_round_count,
+                           &new_dynamic_extra_round_count);
+  if (!dynamic_accumulation_ok) {
+    ++summary->unknown_dynamic_packet_count;
+    return;
+  }
+
+  ++summary->exact_dynamic_packet_count;
+  summary->dynamic_packet_count = new_dynamic_packet_count;
+  summary->dynamic_required_round_count = new_dynamic_required_round_count;
+  summary->dynamic_uncontended_round_count =
+      new_dynamic_uncontended_round_count;
+  summary->dynamic_extra_round_count = new_dynamic_extra_round_count;
+}
+
+static loom_target_compile_report_source_low_bank_service_summary_t
+loom_target_compile_report_source_low_bank_service_summary_from_row(
+    const loom_target_compile_report_source_low_memory_row_t* row) {
+  const loom_target_compile_report_bank_service_t* bank_service =
+      &row->bank_service;
+  return (loom_target_compile_report_source_low_bank_service_summary_t){
+      .function_name = row->function_name,
+      .source_op_name = row->source_op_name,
+      .source_op_kind = row->source_op_kind,
+      .source_root_name = row->source_root_name,
+      .source_root_argument_index = row->source_root_argument_index,
+      .memory_space = row->memory_space,
+      .operation_kind = row->operation_kind,
+      .packet_key = row->packet_key,
+      .strategy_key = row->strategy_key,
+      .model_key = bank_service->model_key,
+      .model_revision = bank_service->model_revision,
+      .model_evidence = bank_service->model_evidence,
+      .request_policy = bank_service->request_policy,
+      .wave_size = bank_service->wave_size,
+      .bank_count = bank_service->bank_count,
+      .bank_word_byte_count = bank_service->bank_word_byte_count,
+      .packet_word_count = bank_service->packet_word_count,
+  };
+}
+
+static iree_status_t
+loom_target_compile_report_record_source_low_bank_service_summary_row(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_bank_service_summary_t* row) {
+  loom_target_compile_report_source_low_bank_service_summary_t* summary =
+      loom_target_compile_report_find_source_low_bank_service_summary(report,
+                                                                      row);
+  if (summary != NULL) {
+    loom_target_compile_report_merge_unknown_bank_service_reason(
+        summary, row->unknown_reason, row->has_mixed_unknown_reasons,
+        row->summary.unknown_packet_count);
+    loom_target_compile_report_accumulate_bank_service_summaries(
+        &summary->summary, &row->summary);
+    return iree_ok_status();
+  }
+  return loom_target_compile_report_row_list_append(
+      &report->source_low_bank_service_summaries, sizeof(*row),
+      report->allocator, row);
+}
+
+static iree_status_t
+loom_target_compile_report_record_source_low_bank_service_summary(
+    loom_target_compile_report_t* report,
+    const loom_target_compile_report_source_low_memory_row_t* row) {
+  if (iree_string_view_is_empty(row->bank_service.model_key)) {
+    return iree_ok_status();
+  }
+  loom_target_compile_report_source_low_bank_service_summary_t key =
+      loom_target_compile_report_source_low_bank_service_summary_from_row(row);
+  loom_target_compile_report_source_low_bank_service_summary_t* summary =
+      loom_target_compile_report_find_source_low_bank_service_summary(report,
+                                                                      &key);
+  if (summary == NULL) {
+    loom_target_compile_report_merge_unknown_bank_service_reason(
+        &key, row->bank_service.unknown_reason,
+        /*source_has_mixed_reasons=*/false,
+        iree_string_view_equal(row->bank_service.proof, IREE_SV("exact")) ? 0
+                                                                          : 1);
+    loom_target_compile_report_accumulate_bank_service_summary(&key.summary,
+                                                               row);
+    return loom_target_compile_report_row_list_append(
+        &report->source_low_bank_service_summaries, sizeof(key),
+        report->allocator, &key);
+  }
+  loom_target_compile_report_merge_unknown_bank_service_reason(
+      summary, row->bank_service.unknown_reason,
+      /*source_has_mixed_reasons=*/false,
+      iree_string_view_equal(row->bank_service.proof, IREE_SV("exact")) ? 0
+                                                                        : 1);
+  loom_target_compile_report_accumulate_bank_service_summary(&summary->summary,
+                                                             row);
+  return iree_ok_status();
+}
+
 iree_status_t loom_target_compile_report_merge_source_low_memory_details(
     loom_target_compile_report_t* target,
     const loom_target_compile_report_t* source) {
@@ -846,6 +1092,18 @@ iree_status_t loom_target_compile_report_merge_source_low_memory_details(
     for (iree_host_size_t i = 0; i < vec->count; ++i) {
       IREE_RETURN_IF_ERROR(
           loom_target_compile_report_record_source_low_memory_strategy_summary_row(
+              target, &rows[i]));
+    }
+  }
+  for (const loom_target_compile_report_vec_t* vec =
+           source->source_low_bank_service_summaries.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_source_low_bank_service_summary_t* rows =
+        (const loom_target_compile_report_source_low_bank_service_summary_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_record_source_low_bank_service_summary_row(
               target, &rows[i]));
     }
   }
@@ -1117,6 +1375,8 @@ iree_status_t loom_target_compile_report_record_source_low_memory_row(
   loom_target_compile_report_accumulate_source_low_memory_summary(
       &report->source_low_memory_summary, row, no_unique_delta,
       no_unique_delta);
+  loom_target_compile_report_accumulate_bank_service_summary(
+      &report->bank_service_summary, row);
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_record_source_low_memory_root_summary(
           report, row, unique_delta, direction_unique_delta));
@@ -1135,5 +1395,8 @@ iree_status_t loom_target_compile_report_record_source_low_memory_row(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_record_source_low_memory_strategy_summary(
           report, row));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_record_source_low_bank_service_summary(report,
+                                                                        row));
   return iree_ok_status();
 }

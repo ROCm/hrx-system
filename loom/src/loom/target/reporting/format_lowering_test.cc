@@ -162,6 +162,41 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   const iree_string_view_t source_low =
       LookupObject(root, IREE_SV("source_low"));
   ExpectObjectUint64Equals(source_low, IREE_SV("selected_op_count"), 4);
+  const iree_string_view_t memory_summary =
+      LookupObject(source_low, IREE_SV("memory"));
+  const iree_string_view_t bank_service_summary =
+      LookupObject(memory_summary, IREE_SV("bank_service"));
+  ExpectObjectUint64Equals(bank_service_summary,
+                           IREE_SV("modeled_packet_count"), 1);
+  ExpectObjectUint64Equals(bank_service_summary, IREE_SV("exact_packet_count"),
+                           1);
+  const iree_string_view_t structural_bank_service =
+      LookupObject(bank_service_summary, IREE_SV("structural"));
+  ExpectObjectUint64Equals(structural_bank_service,
+                           IREE_SV("conflicted_packet_count"), 1);
+  ExpectObjectUint64Equals(structural_bank_service,
+                           IREE_SV("extra_round_count"), 2);
+  const iree_string_view_t dynamic_bank_service =
+      LookupObject(bank_service_summary, IREE_SV("dynamic"));
+  ExpectObjectUint64Equals(dynamic_bank_service, IREE_SV("packet_count"), 1);
+  ExpectObjectUint64Equals(dynamic_bank_service, IREE_SV("extra_round_count"),
+                           2);
+  ExpectObjectUint64Equals(memory_summary, IREE_SV("bank_service_group_count"),
+                           1);
+  const iree_string_view_t bank_service_group = LookupArrayElement(
+      LookupObject(memory_summary, IREE_SV("bank_service_groups")),
+      /*index=*/0);
+  ExpectObjectValueEquals(bank_service_group, IREE_SV("function"),
+                          IREE_SV("branchy"));
+  ExpectObjectValueEquals(bank_service_group, IREE_SV("source_root"),
+                          IREE_SV("lhs"));
+  const iree_string_view_t group_model =
+      LookupObject(bank_service_group, IREE_SV("model"));
+  ExpectObjectValueEquals(group_model, IREE_SV("key"),
+                          IREE_SV("test.ds_read_b128"));
+  const iree_string_view_t group_summary =
+      LookupObject(bank_service_group, IREE_SV("summary"));
+  ExpectObjectUint64Equals(group_summary, IREE_SV("exact_packet_count"), 1);
   const iree_string_view_t selection_row = LookupArrayElement(
       LookupObject(source_low, IREE_SV("rows")), /*index=*/0);
   ExpectObjectValueEquals(selection_row, IREE_SV("plan_key"),
