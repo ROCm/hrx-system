@@ -25,15 +25,15 @@ COMPILE-REPORT: source_low selected_ops=9 emitted_ops=7 rows=9
 COMPILE-REPORT: source_low_selection[0] function=report_fixed_trip_matrix_loop source_op=index.cmp selection=rule descriptor_key=amdgpu.s_cmp_lt_i32 descriptor_semantic_tag=integer.compare.slt.i32 selected_ops=1 emitted_ops=1 exact_dynamic_ops=1 unknown_dynamic_ops=0 dynamic_selected_ops=3 dynamic_emitted_ops=3
 COMPILE-REPORT: source_low_selection[1] function=report_fixed_trip_matrix_loop source_op=vector.mma selection=plan descriptor_key=amdgpu.v_wmma_f32_16x16x16_bf16 descriptor_semantic_tag=matrix.wmma.f32.16x16x16.bf16 selected_ops=1 emitted_ops=2 exact_dynamic_ops=1 unknown_dynamic_ops=0 dynamic_selected_ops=2 dynamic_emitted_ops=4
 COMPILE-REPORT: source_low_selection[2] function=report_fixed_trip_matrix_loop source_op=index.add selection=rule descriptor_key=amdgpu.s_add_u32 descriptor_semantic_tag=integer.add.u32 selected_ops=1 emitted_ops=1 exact_dynamic_ops=1 unknown_dynamic_ops=0 dynamic_selected_ops=2 dynamic_emitted_ops=2
-COMPILE-REPORT: source_low[0] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan plan=3840 emitted_ops=1
-COMPILE-REPORT: source_low[1] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan plan=3840 emitted_ops=1
-COMPILE-REPORT: source_low[2] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan plan=3840 emitted_ops=1
-COMPILE-REPORT: source_low[3] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[4] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[5] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[6] function=report_fixed_trip_matrix_loop source_op=index.cmp selection=rule rule_set=4 rule=56 descriptor_key=amdgpu.s_cmp_lt_i32 descriptor_semantic_tag=integer.compare.slt.i32 emitted_ops=1 execution_count=3
-COMPILE-REPORT: source_low[7] function=report_fixed_trip_matrix_loop source_op=vector.mma selection=plan plan=3728 descriptor_key=amdgpu.v_wmma_f32_16x16x16_bf16 descriptor_semantic_tag=matrix.wmma.f32.16x16x16.bf16 emitted_ops=2 execution_count=2
-COMPILE-REPORT: source_low[8] function=report_fixed_trip_matrix_loop source_op=index.add selection=rule rule_set=3 rule=65 descriptor_key=amdgpu.s_add_u32 descriptor_semantic_tag=integer.add.u32 emitted_ops=1 execution_count=2
+COMPILE-REPORT: source_low[0] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan emitted_ops=1
+COMPILE-REPORT: source_low[1] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan emitted_ops=1
+COMPILE-REPORT: source_low[2] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan emitted_ops=1
+COMPILE-REPORT: source_low[3] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[4] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[5] function=report_fixed_trip_matrix_loop source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[6] function=report_fixed_trip_matrix_loop source_op=index.cmp selection=rule descriptor_key=amdgpu.s_cmp_lt_i32 descriptor_semantic_tag=integer.compare.slt.i32 emitted_ops=1 execution_count=3
+COMPILE-REPORT: source_low[7] function=report_fixed_trip_matrix_loop source_op=vector.mma selection=plan descriptor_key=amdgpu.v_wmma_f32_16x16x16_bf16 descriptor_semantic_tag=matrix.wmma.f32.16x16x16.bf16 emitted_ops=2 execution_count=2
+COMPILE-REPORT: source_low[8] function=report_fixed_trip_matrix_loop source_op=index.add selection=rule descriptor_key=amdgpu.s_add_u32 descriptor_semantic_tag=integer.add.u32 emitted_ops=1 execution_count=2
 
 // ====
 
@@ -64,18 +64,18 @@ COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- ex
 COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64 workgroup_count=1x1x1 dispatch_workgroup_count=1 dispatch_workitem_count=64
 COMPILE-REPORT: source_low selected_ops=12 emitted_ops=22 rows=12
 COMPILE-REPORT: source_low_memory roots=2 arguments=2 argument_packets=3 strategies=2 packets=17 loads=16 stores=1 scalar_packets=17 vector_packets=0 source_lanes=17 source_bytes=34 read_bytes=32 write_bytes=2 issued_read_bytes=32 issued_write_bytes=2 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=0 strided_vector_packets=0 unknown_stride_vector_packets=0 exact_dynamic_packets=17 unknown_dynamic_packets=0 dynamic_packets=17 dynamic_source_bytes=34 dynamic_read_bytes=32 dynamic_write_bytes=2 dynamic_issued_read_bytes=32 dynamic_issued_write_bytes=2 dynamic_issued_read_unknown_widths=0 dynamic_issued_write_unknown_widths=0 dispatch_source_read_bytes=2048 dispatch_source_write_bytes=128 dispatch_source_total_bytes=2176 dispatch_issued_read_bytes=2048 dispatch_issued_write_bytes=128 dispatch_issued_total_bytes=2176 interval_envelope={packets:17,begin_min_bytes:0,end_max_bytes:3906,byte_count:3906} read_interval_envelope={packets:16,begin_min_bytes:64,end_max_bytes:3906,byte_count:3842} write_interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:128,byte_count:128}
-COMPILE-REPORT: source_low[0] function=report_strided_packed_b16_fragment_load source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_strided_packed_b16_fragment_load source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[2] function=report_strided_packed_b16_fragment_load source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[3] function=report_strided_packed_b16_fragment_load source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[4] function=report_strided_packed_b16_fragment_load source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[5] function=report_strided_packed_b16_fragment_load source_op=index.constant selection=plan plan=3840 emitted_ops=0
-COMPILE-REPORT: source_low[6] function=report_strided_packed_b16_fragment_load source_op=buffer.view selection=rule rule_set=1 rule=0 emitted_ops=0
-COMPILE-REPORT: source_low[7] function=report_strided_packed_b16_fragment_load source_op=buffer.view selection=rule rule_set=1 rule=0 emitted_ops=0
-COMPILE-REPORT: source_low[8] function=report_strided_packed_b16_fragment_load source_op=vector.fragment.load selection=plan plan=3603 plan_key=strided_d16_packed_b16_fragment_load emitted_ops=19
-COMPILE-REPORT: source_low[9] function=report_strided_packed_b16_fragment_load source_op=vector.extract selection=plan plan=3592 emitted_ops=1
-COMPILE-REPORT: source_low[10] function=report_strided_packed_b16_fragment_load source_op=kernel.workitem.id selection=plan plan=4112 emitted_ops=0
-COMPILE-REPORT: source_low[11] function=report_strided_packed_b16_fragment_load source_op=view.store selection=plan plan=3331 emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_strided_packed_b16_fragment_load source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_strided_packed_b16_fragment_load source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[2] function=report_strided_packed_b16_fragment_load source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[3] function=report_strided_packed_b16_fragment_load source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[4] function=report_strided_packed_b16_fragment_load source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[5] function=report_strided_packed_b16_fragment_load source_op=index.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[6] function=report_strided_packed_b16_fragment_load source_op=buffer.view selection=rule emitted_ops=0
+COMPILE-REPORT: source_low[7] function=report_strided_packed_b16_fragment_load source_op=buffer.view selection=rule emitted_ops=0
+COMPILE-REPORT: source_low[8] function=report_strided_packed_b16_fragment_load source_op=vector.fragment.load selection=plan plan_key=strided_d16_packed_b16_fragment_load emitted_ops=19
+COMPILE-REPORT: source_low[9] function=report_strided_packed_b16_fragment_load source_op=vector.extract selection=plan emitted_ops=1
+COMPILE-REPORT: source_low[10] function=report_strided_packed_b16_fragment_load source_op=kernel.workitem.id selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[11] function=report_strided_packed_b16_fragment_load source_op=view.store selection=plan emitted_ops=2
 COMPILE-REPORT: source_low_memory[0] function=report_strided_packed_b16_fragment_load source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b16_d16_saddr source_root=rhs_buffer source_root_argument_index=0 strategy=strided_d16_packed_b16_fragment_load storage={element_format:f16} source_interval={begin_min_bytes:64,begin_max_bytes:64,end_min_bytes:66,end_max_bytes:66,exact_length_bytes:2} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=64 element_bytes=2 vector_lanes=1 issued_read_bytes=2 issued_write_bytes=0 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=0 vector_lane_stride_bytes=2
 COMPILE-REPORT: source_low_memory[1] function=report_strided_packed_b16_fragment_load source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b16_d16_hi_saddr source_root=rhs_buffer source_root_argument_index=0 strategy=strided_d16_packed_b16_fragment_load storage={element_format:f16} source_interval={begin_min_bytes:320,begin_max_bytes:320,end_min_bytes:322,end_max_bytes:322,exact_length_bytes:2} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=320 element_bytes=2 vector_lanes=1 issued_read_bytes=2 issued_write_bytes=0 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=0 vector_lane_stride_bytes=2
 COMPILE-REPORT: source_low_memory[2] function=report_strided_packed_b16_fragment_load source_op=vector.fragment.load memory_space=global operation=load packet=amdgpu.global_load_b16_d16_saddr source_root=rhs_buffer source_root_argument_index=0 strategy=strided_d16_packed_b16_fragment_load storage={element_format:f16} source_interval={begin_min_bytes:576,begin_max_bytes:576,end_min_bytes:578,end_max_bytes:578,exact_length_bytes:2} address_form=global_saddr dynamic_term_kind=vaddr fallback_reason=- static_offset_bytes=576 element_bytes=2 vector_lanes=1 issued_read_bytes=2 issued_write_bytes=0 issued_read_unknown_widths=0 issued_write_unknown_widths=0 dynamic_stride_bytes=0 vector_lane_stride_bytes=2

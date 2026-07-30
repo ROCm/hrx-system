@@ -201,12 +201,6 @@ static iree_status_t loom_target_compile_report_format_source_low_row_json(
       &object, IREE_SV("selection"),
       loom_target_compile_report_source_low_selection_name(
           row->selection_kind)));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_optional_u16_field(
-      &object, IREE_SV("rule_set_index"), row->rule_set_index));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_optional_u16_field(
-      &object, IREE_SV("rule_index"), row->rule_index));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_optional_u64_field(
-      &object, IREE_SV("plan_id"), row->plan_id));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           &object, IREE_SV("plan_key"), row->plan_key));
@@ -1400,16 +1394,6 @@ static iree_status_t loom_target_compile_report_format_legalization_row_json(
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("contract_outcome"),
       loom_target_compile_report_contract_outcome_name(row->contract_outcome)));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_optional_u16_field(
-      &object, IREE_SV("binding_index"), row->binding_index));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_optional_u16_field(
-      &object, IREE_SV("case_index"), row->case_index));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_optional_u16_field(
-      &object, IREE_SV("rule_set_index"), row->rule_set_index));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_optional_u16_field(
-      &object, IREE_SV("rule_index"), row->rule_index));
-  IREE_RETURN_IF_ERROR(loom_target_compile_report_json_write_optional_u16_field(
-      &object, IREE_SV("diagnostic_index"), row->diagnostic_index));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           &object, IREE_SV("descriptor_key"), row->descriptor_key));

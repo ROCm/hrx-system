@@ -69,9 +69,6 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   selection.source_op_kind = 42;
   selection.selection_kind =
       LOOM_TARGET_COMPILE_REPORT_SOURCE_LOW_SELECTION_RULE;
-  selection.rule_set_index = 0;
-  selection.rule_index = 1;
-  selection.plan_id = UINT64_MAX;
   selection.plan_key = IREE_SVL("test.scalar_addi.strategy.native");
   selection.descriptor_key = IREE_SVL("test.add.i32");
   selection.descriptor_semantic_tag = IREE_SVL("integer.add.i32");
@@ -253,11 +250,6 @@ TEST(CompileReportFormatTest, FormatsMathAndTargetLegalization) {
       LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_OUTCOME_REFERENCE_FALLBACK;
   legalization.contract_outcome =
       LOOM_TARGET_COMPILE_REPORT_CONTRACT_OUTCOME_UNSUPPORTED;
-  legalization.binding_index = 0;
-  legalization.case_index = 2;
-  legalization.rule_set_index = 3;
-  legalization.rule_index = 4;
-  legalization.diagnostic_index = UINT16_MAX;
   legalization.descriptor_key = IREE_SVL("test.legalized.descriptor");
   legalization.source_rejection_bits = 0x1;
   legalization.source_rejection_detail = kTestSourceRejectionDetail;

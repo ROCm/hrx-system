@@ -11,8 +11,8 @@ func.def target(@target) @report_scalar_arcp_reciprocal_div(%rhs: f32) -> (f32) 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=2 emitted_ops=1 rows=2
-COMPILE-REPORT: source_low[0] function=report_scalar_arcp_reciprocal_div source_op=scalar.constant selection=plan plan=597 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_scalar_arcp_reciprocal_div source_op=scalar.divf selection=rule rule_set=0 rule=400 plan_key=amdgpu.scalar_divf.strategy.arcp_one_rcp descriptor_key=amdgpu.v_rcp_f32 descriptor_semantic_tag=float.reciprocal.f32 emitted_ops=1
+COMPILE-REPORT: source_low[0] function=report_scalar_arcp_reciprocal_div source_op=scalar.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_scalar_arcp_reciprocal_div source_op=scalar.divf selection=rule plan_key=amdgpu.scalar_divf.strategy.arcp_one_rcp descriptor_key=amdgpu.v_rcp_f32 descriptor_semantic_tag=float.reciprocal.f32 emitted_ops=1
 
 // ====
 
@@ -26,7 +26,7 @@ func.def target(@target) @report_scalar_arcp_div(%lhs: f32, %rhs: f32) -> (f32) 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=2 rows=1
-COMPILE-REPORT: source_low[0] function=report_scalar_arcp_div source_op=scalar.divf selection=rule rule_set=0 rule=402 plan_key=amdgpu.scalar_divf.strategy.arcp_rcp_mul descriptor_key=amdgpu.v_rcp_f32 descriptor_semantic_tag=float.reciprocal.f32 emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_scalar_arcp_div source_op=scalar.divf selection=rule plan_key=amdgpu.scalar_divf.strategy.arcp_rcp_mul descriptor_key=amdgpu.v_rcp_f32 descriptor_semantic_tag=float.reciprocal.f32 emitted_ops=2
 
 // ====
 
@@ -41,8 +41,8 @@ func.def target(@target) @report_scalar_arcp_literal_lhs_div(%rhs: f32) -> (f32)
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=2 emitted_ops=2 rows=2
-COMPILE-REPORT: source_low[0] function=report_scalar_arcp_literal_lhs_div source_op=scalar.constant selection=plan plan=597 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_scalar_arcp_literal_lhs_div source_op=scalar.divf selection=rule rule_set=0 rule=401 plan_key=amdgpu.scalar_divf.strategy.arcp_lhs_lit_rcp_mul descriptor_key=amdgpu.v_rcp_f32 descriptor_semantic_tag=float.reciprocal.f32 emitted_ops=2
+COMPILE-REPORT: source_low[0] function=report_scalar_arcp_literal_lhs_div source_op=scalar.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_scalar_arcp_literal_lhs_div source_op=scalar.divf selection=rule plan_key=amdgpu.scalar_divf.strategy.arcp_lhs_lit_rcp_mul descriptor_key=amdgpu.v_rcp_f32 descriptor_semantic_tag=float.reciprocal.f32 emitted_ops=2
 
 // ====
 
@@ -56,7 +56,7 @@ func.def target(@target) @report_scalar_exact_div(%lhs: f32, %rhs: f32) -> (f32)
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=12 rows=1
-COMPILE-REPORT: source_low[0] function=report_scalar_exact_div source_op=scalar.divf selection=rule rule_set=0 rule=403 plan_key=amdgpu.scalar_divf.strategy.exact_fixup descriptor_key=amdgpu.v_div_scale_f32 descriptor_semantic_tag=float.div.scale.f32 emitted_ops=12
+COMPILE-REPORT: source_low[0] function=report_scalar_exact_div source_op=scalar.divf selection=rule plan_key=amdgpu.scalar_divf.strategy.exact_fixup descriptor_key=amdgpu.v_div_scale_f32 descriptor_semantic_tag=float.div.scale.f32 emitted_ops=12
 
 // ====
 
@@ -71,8 +71,8 @@ func.def target(@target) @report_vector_arcp_reciprocal_div(%rhs: vector<2xf32>)
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=2 emitted_ops=5 rows=2
-COMPILE-REPORT: source_low[0] function=report_vector_arcp_reciprocal_div source_op=vector.constant selection=plan plan=3584 emitted_ops=0
-COMPILE-REPORT: source_low[1] function=report_vector_arcp_reciprocal_div source_op=vector.divf selection=rule rule_set=0 rule=109 plan_key=amdgpu.vector_divf.strategy.arcp_one_rcp descriptor_key=amdgpu.v_rcp_f32 descriptor_semantic_tag=float.reciprocal.f32 emitted_ops=5
+COMPILE-REPORT: source_low[0] function=report_vector_arcp_reciprocal_div source_op=vector.constant selection=plan emitted_ops=0
+COMPILE-REPORT: source_low[1] function=report_vector_arcp_reciprocal_div source_op=vector.divf selection=rule plan_key=amdgpu.vector_divf.strategy.arcp_one_rcp descriptor_key=amdgpu.v_rcp_f32 descriptor_semantic_tag=float.reciprocal.f32 emitted_ops=5
 
 // ====
 
@@ -86,7 +86,7 @@ func.def target(@target) @report_vector_arcp_div(%lhs: vector<2xf32>, %rhs: vect
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=12 rows=1
-COMPILE-REPORT: source_low[0] function=report_vector_arcp_div source_op=vector.divf selection=rule rule_set=0 rule=111 plan_key=amdgpu.vector_divf.strategy.arcp_rcp_mul descriptor_key=amdgpu.v_rcp_f32 descriptor_semantic_tag=float.reciprocal.f32 emitted_ops=12
+COMPILE-REPORT: source_low[0] function=report_vector_arcp_div source_op=vector.divf selection=rule plan_key=amdgpu.vector_divf.strategy.arcp_rcp_mul descriptor_key=amdgpu.v_rcp_f32 descriptor_semantic_tag=float.reciprocal.f32 emitted_ops=12
 
 // ====
 
@@ -100,7 +100,7 @@ func.def target(@target) @report_vector_exact_div(%lhs: vector<1xf32>, %rhs: vec
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=12 rows=1
-COMPILE-REPORT: source_low[0] function=report_vector_exact_div source_op=vector.divf selection=rule rule_set=0 rule=112 plan_key=amdgpu.vector_divf.strategy.exact_fixup descriptor_key=amdgpu.v_div_scale_f32 descriptor_semantic_tag=float.div.scale.f32 emitted_ops=12
+COMPILE-REPORT: source_low[0] function=report_vector_exact_div source_op=vector.divf selection=rule plan_key=amdgpu.vector_divf.strategy.exact_fixup descriptor_key=amdgpu.v_div_scale_f32 descriptor_semantic_tag=float.div.scale.f32 emitted_ops=12
 
 // ====
 
@@ -114,7 +114,7 @@ func.def target(@target) @report_scalar_roundeven(%input: f32) -> (f32) {
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=1 rows=1
-COMPILE-REPORT: source_low[0] function=report_scalar_roundeven source_op=scalar.roundevenf selection=rule rule_set=0 rule=433 plan_key=amdgpu.scalar_roundevenf.strategy.rndne descriptor_key=amdgpu.v_rndne_f32 descriptor_semantic_tag=float.round_even.f32 emitted_ops=1
+COMPILE-REPORT: source_low[0] function=report_scalar_roundeven source_op=scalar.roundevenf selection=rule plan_key=amdgpu.scalar_roundevenf.strategy.rndne descriptor_key=amdgpu.v_rndne_f32 descriptor_semantic_tag=float.round_even.f32 emitted_ops=1
 
 // ====
 
@@ -128,7 +128,7 @@ func.def target(@target) @report_scalar_round_afn(%input: f32) -> (f32) {
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=1 rows=1
-COMPILE-REPORT: source_low[0] function=report_scalar_round_afn source_op=scalar.roundf selection=rule rule_set=0 rule=432 plan_key=amdgpu.scalar_roundf.strategy.afn_rndne descriptor_key=amdgpu.v_rndne_f32 descriptor_semantic_tag=float.round_even.f32 emitted_ops=1
+COMPILE-REPORT: source_low[0] function=report_scalar_round_afn source_op=scalar.roundf selection=rule plan_key=amdgpu.scalar_roundf.strategy.afn_rndne descriptor_key=amdgpu.v_rndne_f32 descriptor_semantic_tag=float.round_even.f32 emitted_ops=1
 
 // ====
 
@@ -142,7 +142,7 @@ func.def target(@target) @report_vector_roundeven(%input: vector<2xf32>) -> (vec
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=5 rows=1
-COMPILE-REPORT: source_low[0] function=report_vector_roundeven source_op=vector.roundevenf selection=rule rule_set=0 rule=168 plan_key=amdgpu.vector_roundevenf.strategy.rndne descriptor_key=amdgpu.v_rndne_f32 descriptor_semantic_tag=float.round_even.f32 emitted_ops=5
+COMPILE-REPORT: source_low[0] function=report_vector_roundeven source_op=vector.roundevenf selection=rule plan_key=amdgpu.vector_roundevenf.strategy.rndne descriptor_key=amdgpu.v_rndne_f32 descriptor_semantic_tag=float.round_even.f32 emitted_ops=5
 
 // ====
 
@@ -156,4 +156,4 @@ func.def target(@target) @report_vector_round_afn(%input: vector<2xf32>) -> (vec
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=5 rows=1
-COMPILE-REPORT: source_low[0] function=report_vector_round_afn source_op=vector.roundf selection=rule rule_set=0 rule=167 plan_key=amdgpu.vector_roundf.strategy.afn_rndne descriptor_key=amdgpu.v_rndne_f32 descriptor_semantic_tag=float.round_even.f32 emitted_ops=5
+COMPILE-REPORT: source_low[0] function=report_vector_round_afn source_op=vector.roundf selection=rule plan_key=amdgpu.vector_roundf.strategy.afn_rndne descriptor_key=amdgpu.v_rndne_f32 descriptor_semantic_tag=float.round_even.f32 emitted_ops=5

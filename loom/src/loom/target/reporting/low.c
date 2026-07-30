@@ -442,9 +442,6 @@ iree_status_t loom_target_compile_report_record_low_lowering(
           .selection_kind =
               loom_target_compile_report_source_low_selection_kind(
                   source_row->selection_kind),
-          .rule_set_index = source_row->rule_set_index,
-          .rule_index = source_row->rule_index,
-          .plan_id = source_row->plan_id,
           .plan_key = source_row->plan_key,
           .descriptor_key = source_row->descriptor_key,
           .descriptor_semantic_tag = source_row->descriptor_semantic_tag,
