@@ -17,6 +17,7 @@ from loom.gen.target.arch.amdgpu.encoding.amdgpu_encoding_tables import (
     _identifier_seed_without_fields,
     _project_encoding_contract,
     _replace_encoding_fields,
+    _with_vop3_unused_source_defaults,
 )
 from loom.target.arch.amdgpu.isa_xml import AmdgpuIsaEncoding
 from loom.target.low_descriptors import Descriptor
@@ -99,6 +100,43 @@ def test_identifier_seed_retains_unwritten_format_bits() -> None:
     rhs_seed = _identifier_seed_without_fields(0xD2BE0000, (opcode_field,))
 
     assert lhs_seed != rhs_seed
+
+
+def test_vop3_encoding_seeds_default_unwritten_sources_to_inline_zero() -> None:
+    source_fields = (
+        _field("SRC0", _bit_range(32, 9)),
+        _field("SRC1", _bit_range(41, 9)),
+        _field("SRC2", _bit_range(50, 9)),
+    )
+    encoding = AmdgpuIsaEncoding(
+        name="ENC_VOP3",
+        order=0,
+        bit_count=64,
+        identifier_mask=0,
+        identifier_values=((0x1FF << 32) | (0x1FF << 41) | (0x1FF << 50),),
+        fields=source_fields,
+    )
+
+    (defaulted_encoding,) = _with_vop3_unused_source_defaults((encoding,), 0x80)
+
+    assert defaulted_encoding.identifier_values == ((0x80 << 32) | (0x80 << 41) | (0x80 << 50),)
+
+
+def test_vop3_source_defaults_leave_other_encoding_families_unchanged() -> None:
+    encoding = AmdgpuIsaEncoding(
+        name="ENC_VINTERP",
+        order=0,
+        bit_count=64,
+        identifier_mask=0,
+        identifier_values=(0,),
+        fields=(
+            _field("SRC0", _bit_range(32, 9)),
+            _field("SRC1", _bit_range(41, 9)),
+            _field("SRC2", _bit_range(50, 9)),
+        ),
+    )
+
+    assert _with_vop3_unused_source_defaults((encoding,), 0x80) == (encoding,)
 
 
 def test_encoding_field_replacement_preserves_field_order() -> None:

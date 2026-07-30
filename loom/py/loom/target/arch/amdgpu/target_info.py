@@ -369,6 +369,8 @@ class AmdgpuDescriptorSetIsaInfo:
     isa_xml_key: str
     isa_architecture_name: str
     isa_architecture_id: int
+    # OPR_SRC predefined value seeded into unwritten VOP3 source fields.
+    vop3_unused_source_value: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -403,18 +405,21 @@ AMDGPU_DESCRIPTOR_SET_ISA_RDNA3 = AmdgpuDescriptorSetIsaInfo(
     isa_xml_key="rdna3",
     isa_architecture_name="AMD RDNA 3",
     isa_architecture_id=8,
+    vop3_unused_source_value="0",
 )
 
 AMDGPU_DESCRIPTOR_SET_ISA_RDNA3_5 = AmdgpuDescriptorSetIsaInfo(
     isa_xml_key="rdna3_5",
     isa_architecture_name="AMD RDNA 3.5",
     isa_architecture_id=9,
+    vop3_unused_source_value="0",
 )
 
 AMDGPU_DESCRIPTOR_SET_ISA_RDNA4 = AmdgpuDescriptorSetIsaInfo(
     isa_xml_key="rdna4",
     isa_architecture_name="AMD RDNA 4",
     isa_architecture_id=10,
+    vop3_unused_source_value="0",
 )
 
 # Kernel metadata fields written directly by the native AMDGPU emitter.
