@@ -1,0 +1,39 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_binary(
+    name = "qwen-layer-cli",
+    srcs = ["main.c"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+    deps = [
+        "//experimental/qwen/runtime:model",
+        "//experimental/qwen/runtime:program",
+        "//experimental/qwen/runtime:request",
+        "//experimental/qwen/tooling:layer_data",
+        "//experimental/qwen/tooling:runtime",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/tooling:device_util",
+    ],
+)
