@@ -526,6 +526,17 @@ void iree_hal_memory_tlsf_restore(
 void iree_hal_memory_tlsf_query_stats(const iree_hal_memory_tlsf_t* tlsf,
                                       iree_hal_memory_tlsf_stats_t* out_stats);
 
+// Queries the dependency metadata of a fully free allocator range.
+//
+// Returns true only when the entire managed range has coalesced into one free
+// block. |out_death_frontier| points into TLSF-owned storage and remains valid
+// until the next allocator operation. |out_block_flags| reports whether the
+// coalesced frontier is tainted and therefore cannot prove safe reuse.
+bool iree_hal_memory_tlsf_query_full_free_block(
+    const iree_hal_memory_tlsf_t* tlsf,
+    const iree_async_frontier_t** out_death_frontier,
+    iree_hal_memory_tlsf_block_flags_t* out_block_flags);
+
 // Returns the length of the largest free block. O(1) via bitmap scan: finds
 // the highest populated FL/SL bin and reads the head block's actual length.
 // Returns 0 if no free blocks exist.
