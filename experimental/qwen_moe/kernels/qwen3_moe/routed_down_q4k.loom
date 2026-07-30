@@ -1,0 +1,278 @@
+// Fuses the Qwen3 MoE Q4_K down projection with route weighting, top-8
+// reduction, and residual publication. The input contains one Q8_1 x4 row per
+// [token, route], while weights remain in GGUF's raw
+// [expert, output, K / 256, 144 bytes] layout.
+//
+// Route IDs retain an independent physical stride because llama.cpp selects a
+// top-8 view from its 128-entry argsort storage. Normalized route weights are
+// compact [token, route]. The output enters containing the residual and is
+// updated in place, so the fused boundary never materializes an unweighted or
+// route-indexed [token, route, hidden] down-projection tensor.
+//
+// One wave owns one output channel and contracts all selected routes in
+// registers. The 32 lanes cover two Q4_K blocks per iteration. Qwen's K=768
+// down projection therefore has a deliberate half-wave tail on its third and
+// final block; inactive lanes never address a synthetic fourth block.
+func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
+
+func.decl @qwen3_moe_q4k_q8_1_chunk(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group: index, %q4_half: index, %q8_values: vector<16xi8>, %q8_d: f32, %q8_s: f32) -> (f32)
+
+kernel.def @qwen3_moe_routed_down_q4k_q8_1_x4(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index) {
+  %eight = index.constant 8 : index
+  %seven = index.constant 7 : index
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %padded_output_size = index.add %output_size, %seven : index
+  %output_tiles = index.div %padded_output_size, %eight : index
+  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %route_weights: buffer, %weight: buffer, %output: buffer) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
+  %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
+  %bounded_route_id_stride = index.assume %route_id_stride [range(%route_id_stride, 1, 512)] : index
+  %bounded_expert_count = index.assume %expert_count [range(%expert_count, 1, 512)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token0 = kernel.workgroup.id<y> : index
+  %subgroup0 = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %onetwentyeight = index.constant 128 : index
+  %onehundredfortyfour = index.constant 144 : index
+  %twofiftysix = index.constant 256 : index
+  %fivehundredeleven = index.constant 511 : index
+  %fiveonetwo = index.constant 512 : index
+  %q8_group_bytes = index.constant 144 : offset
+  %q8_payload_byte_add = index.constant 16 : offset
+  %one_byte = index.constant 1 : offset
+  %zero_i32 = scalar.constant 0 : i32
+  %zero_f32 = scalar.constant 0.0 : f32
+  %zero_offset = index.constant 0 : offset
+  %token, %launch_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
+  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
+  %channel_base = index.mul %channel_tile, %eight : index
+  %channel = index.add %channel_base, %subgroup : index
+  %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
+  %lane_i32 = index.cast %lane : index to i32
+  %is_lane_zero = scalar.cmpi eq, %lane_i32, %zero_i32 : i32
+  %route_id_element_count = index.mul %bounded_token_count, %bounded_route_id_stride : index
+  %route_weight_element_count = index.mul %bounded_token_count, %bounded_route_count : index
+  %output_element_count = index.mul %launch_token_count, %bounded_output_size : index
+  %q4_block_count = index.div %bounded_input_size, %twofiftysix : index
+  %weight_row_byte_count = index.mul %q4_block_count, %onehundredfortyfour : index
+  %q8_group_count = index.div %bounded_input_size, %onetwentyeight : index
+  %q8_row_byte_count = index.mul %q8_group_count, %onehundredfortyfour : index
+  %padded_input_size = index.add %bounded_input_size, %fivehundredeleven : index
+  %iteration_count = index.div %padded_input_size, %fiveonetwo : index
+  %q4_group0 = index.div %lane, %two : index
+  %q4_group1 = index.rem %q4_group0, %eight : index
+  %q4_group = index.assume %q4_group1 [range(%q4_group1, 0, 7)] : index
+  %q4_half0 = index.rem %lane, %two : index
+  %q4_half = index.assume %q4_half0 [range(%q4_half0, 0, 1)] : index
+  %lane_q4_block = index.div %lane, %sixteen : index
+  %lane_q8_group = index.div %lane, %eight : index
+  %q8_inner_block0 = index.div %lane, %two : index
+  %q8_inner_block1 = index.rem %q8_inner_block0, %four : index
+  %q8_inner_block = index.assume %q8_inner_block1 [range(%q8_inner_block1, 0, 3)] : index
+  %q8_inner_word_base = index.mul %q8_inner_block, %eight : index
+  %q8_half_word_add = index.mul %q4_half, %four : index
+  %q8_word_index0 = index.add %q8_inner_word_base, %q8_half_word_add : index
+  %q8_word_index = index.assume %q8_word_index0 [range(%q8_word_index0, 0, 28)] : index
+  %q8_ds_index = index.mul %q8_inner_block, %two : index
+  %q8_s_index = index.add %q8_ds_index, %one : index
+  %q8_noalias, %route_id_noalias, %route_weight_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %route_ids, %route_weights, %weight, %output : buffer, buffer, buffer, buffer, buffer
+  %route_id_view = buffer.view %route_id_noalias[%zero_offset] : buffer -> view<[%route_id_element_count]xi32, #dense>
+  %route_weight_view = buffer.view %route_weight_noalias[%zero_offset] : buffer -> view<[%route_weight_element_count]xf32, #dense>
+  %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<[%output_element_count]xf32, #dense>
+  %lane_has_route = index.cmp ult, %lane, %bounded_route_count : index
+  %lane_within_route_stride = index.cmp ult, %lane, %bounded_route_id_stride : index
+  %loads_route_metadata = scalar.andi %lane_has_route, %lane_within_route_stride : i1
+  %lane_expert_i32, %lane_route_weight = scf.if %loads_route_metadata -> (i32, f32) {
+    %route_lane0, %metadata_route_count = index.assume %lane, %bounded_route_count [lt(%lane, %bounded_route_count)] : index, index
+    %route_lane, %metadata_route_id_stride = index.assume %route_lane0, %bounded_route_id_stride [lt(%route_lane0, %bounded_route_id_stride)] : index, index
+    %route_id_row_base = index.mul %token, %metadata_route_id_stride : index
+    %route_id_index = index.add %route_id_row_base, %route_lane : index
+    %route_weight_row_base = index.mul %token, %metadata_route_count : index
+    %route_weight_index = index.add %route_weight_row_base, %route_lane : index
+    %expert_i32 = view.load %route_id_view[%route_id_index] : view<[%route_id_element_count]xi32, #dense> -> i32
+    %route_weight = view.load %route_weight_view[%route_weight_index] : view<[%route_weight_element_count]xf32, #dense> -> f32
+    scf.yield %expert_i32, %route_weight : i32, f32
+  } else {
+    scf.yield %zero_i32, %zero_f32 : i32, f32
+  }
+  %routed_lane_sum = scf.if %valid_channel -> (f32) {
+    %sum = scf.for %route = [%zero to %bounded_route_count step %one](%route_acc = %zero_f32 : f32) -> (f32) unroll {
+      %route_i32 = index.cast %route : index to i32
+      %expert_i32 = kernel.subgroup.broadcast %lane_expert_i32 from %route_i32 : i32, i32
+      %expert0 = index.cast %expert_i32 : i32 to index
+      %expert1 = index.assume %expert0 [range(%expert0, 0, 511)] : index
+      %expert, %weight_expert_count = index.assume %expert1, %bounded_expert_count [lt(%expert1, %bounded_expert_count)] : index, index
+      %expert_output_base = index.mul %expert, %bounded_output_size : index
+      %expert_channel = index.add %expert_output_base, %channel : index
+      %weight_row_byte_index = index.mul %expert_channel, %weight_row_byte_count : index
+      %weight_row_byte_base = index.scale %weight_row_byte_index, %one_byte : index, offset -> offset
+      %q8_row_base0 = index.mul %token, %bounded_route_count : index
+      %q8_row = index.add %q8_row_base0, %route : index
+      %q8_row_byte_index = index.mul %q8_row, %q8_row_byte_count : index
+      %q8_row_byte_base = index.scale %q8_row_byte_index, %one_byte : index, offset -> offset
+      %route_lane_sum = scf.for %iteration = [%zero to %iteration_count step %one](%iteration_acc = %zero_f32 : f32) -> (f32) unroll {
+        %iteration_q4_block = index.mul %iteration, %two : index
+        %q4_block0 = index.add %iteration_q4_block, %lane_q4_block : index
+        %valid_q4_block = index.cmp ult, %q4_block0, %q4_block_count : index
+        %contribution = scf.if %valid_q4_block -> (f32) {
+          %q4_block, %bounded_q4_block_count = index.assume %q4_block0, %q4_block_count [lt(%q4_block0, %q4_block_count)] : index, index
+          %iteration_q8_group = index.mul %iteration, %four : index
+          %q8_group0 = index.add %iteration_q8_group, %lane_q8_group : index
+          %q8_group, %bounded_q8_group_count = index.assume %q8_group0, %q8_group_count [lt(%q8_group0, %q8_group_count)] : index, index
+          %q8_group_byte_add = index.scale %q8_group, %q8_group_bytes : index, offset -> offset
+          %q8_group_byte_base = index.add %q8_row_byte_base, %q8_group_byte_add : offset
+          %q8_payload_byte_base = index.add %q8_group_byte_base, %q8_payload_byte_add : offset
+          %q8_ds_view = buffer.view %q8_noalias[%q8_group_byte_base] : buffer -> view<8xf16, #dense>
+          %q8_words_view = buffer.view %q8_noalias[%q8_payload_byte_base] : buffer -> view<32xi32, #dense>
+          %q8_d_f16 = view.load %q8_ds_view[%q8_ds_index] : view<8xf16, #dense> -> f16
+          %q8_s_f16 = view.load %q8_ds_view[%q8_s_index] : view<8xf16, #dense> -> f16
+          %q8_d = scalar.extf %q8_d_f16 : f16 to f32
+          %q8_s = scalar.extf %q8_s_f16 : f16 to f32
+          %q8_words = vector.load %q8_words_view[%q8_word_index] : view<32xi32, #dense> -> vector<4xi32>
+          %q8_values = vector.bitcast %q8_words : vector<4xi32> to vector<16xi8>
+          %dot = func.call @qwen3_moe_q4k_q8_1_chunk(%weight_noalias, %weight_row_byte_base, %q4_block, %q4_group, %q4_half, %q8_values, %q8_d, %q8_s) : (buffer, offset, index, index, index, vector<16xi8>, f32, f32) -> (f32)
+          scf.yield %dot : f32
+        } else {
+          scf.yield %zero_f32 : f32
+        }
+        %next = scalar.addf %iteration_acc, %contribution : f32
+        scf.yield %next : f32
+      }
+      %route_weight = kernel.subgroup.broadcast %lane_route_weight from %route_i32 : f32, i32
+      %weighted_lane = scalar.mulf<reassoc|nnan|ninf|nsz> %route_lane_sum, %route_weight : f32
+      %next = scalar.addf<reassoc|nnan|ninf|nsz> %route_acc, %weighted_lane : f32
+      scf.yield %next : f32
+    }
+    scf.yield %sum : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %routed_sum = kernel.subgroup.reduce<addf> %routed_lane_sum : f32
+  %writes_output = scalar.andi %valid_channel, %is_lane_zero : i1
+  scf.if %writes_output {
+    %token_output_base = index.mul %token, %bounded_output_size : index
+    %output_index = index.add %token_output_base, %channel : index
+    %residual = view.load %output_view[%output_index] : view<[%output_element_count]xf32, #dense> -> f32
+    %result = scalar.addf %residual, %routed_sum : f32
+    view.store %result, %output_view[%output_index] : f32, view<[%output_element_count]xf32, #dense>
+  }
+  kernel.return
+}
+
+// Two selected experts exercise the noncompact route-ID stride, normalized
+// weighted reduction, in-place residual update, the odd Q4_K block tail at
+// K=768, and the output tile tail. Uniform 0xaa bytes decode to a deterministic
+// nonzero row.
+check.case public @qwen3_moe_routed_down_q4k_q8_1_x4_nonzero_residual_case {
+  %token_count = check.literal value(1) : index
+  %input_size = check.literal value(768) : index
+  %route_count = check.literal value(2) : index
+  %route_id_stride = check.literal value(4) : index
+  %expert_count = check.literal value(2) : index
+  %output_size = check.literal value(9) : index
+  %routed_input = check.generate.fill value(0.00390625) : tensor<2x768xf32>
+  %q8_input = check.generate.fill value(0) : tensor<2x864xi8>
+  %route_ids = check.generate.iota offset(0) step(1) period(2) : tensor<1x4xi32>
+  %route_weights = check.generate.fill value(0.5) : tensor<1x2xf32>
+  %weight = check.generate.fill value(-86) : tensor<2x9x3x144xi8>
+  %output = check.generate.fill value(1.0) : tensor<1x9xf32>
+  %expected = check.generate.fill value(-58.0394287109375) : tensor<1x9xf32>
+  %routed_row_count = check.literal value(2) : index
+  func.call @ggml_quantize_q8_1_x4_f32(%routed_row_count, %input_size, %routed_input, %q8_input) : (index, index, tensor<2x768xf32>, tensor<2x864xi8>)
+  func.call @qwen3_moe_routed_down_q4k_q8_1_x4(%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %q8_input, %route_ids, %route_weights, %weight, %output) : (index, index, index, index, index, index, tensor<2x864xi8>, tensor<1x4xi32>, tensor<1x2xf32>, tensor<2x9x3x144xi8>, tensor<1x9xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.25) rtol(9.9999999999999995e-07) nan(same) : tensor<1x9xf32>
+  check.return
+}
+
+// Two tokens use different route-weight sums so token, route, packed-row, and
+// output addressing cannot collapse to the single-token case.
+check.case public @qwen3_moe_routed_down_q4k_q8_1_x4_nonzero_prefill_case {
+  %token_count = check.literal value(2) : index
+  %input_size = check.literal value(768) : index
+  %route_count = check.literal value(2) : index
+  %route_id_stride = check.literal value(4) : index
+  %expert_count = check.literal value(2) : index
+  %output_size = check.literal value(1) : index
+  %routed_row_count = check.literal value(4) : index
+  %routed_input = check.generate.fill value(0.00390625) : tensor<2x2x768xf32>
+  %q8_input = check.generate.fill value(0) : tensor<2x2x864xi8>
+  %route_ids = check.generate.iota offset(0) step(1) period(2) : tensor<2x4xi32>
+  %route_weights = check.generate.iota offset(0.25) step(0.25) period(4) : tensor<2x2xf32>
+  %weight = check.generate.fill value(-86) : tensor<2x1x3x144xi8>
+  %output = check.generate.fill value(1.0) : tensor<2x1xf32>
+  %expected = check.generate.iota offset(-43.279571533203125) step(-59.0394287109375) : tensor<2x1xf32>
+  func.call @ggml_quantize_q8_1_x4_f32(%routed_row_count, %input_size, %routed_input, %q8_input) : (index, index, tensor<2x2x768xf32>, tensor<2x2x864xi8>)
+  func.call @qwen3_moe_routed_down_q4k_q8_1_x4(%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %q8_input, %route_ids, %route_weights, %weight, %output) : (index, index, index, index, index, index, tensor<2x2x864xi8>, tensor<2x4xi32>, tensor<2x2xf32>, tensor<2x1x3x144xi8>, tensor<2x1xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.25) rtol(9.9999999999999995e-07) nan(same) : tensor<2x1xf32>
+  check.return
+}
+
+check.case public @qwen3_moe_routed_down_q4k_q8_1_x4_benchmark_case {
+  %token_count = check.param.choice values([1, 17, 32, 63, 128, 129, 512]) name("token_count") : index
+  %input_size = check.literal value(768) : index
+  %route_count = check.literal value(8) : index
+  %route_id_stride = check.literal value(128) : index
+  %expert_count = check.literal value(128) : index
+  %output_size = check.literal value(2048) : index
+  %q8_input = check.generate.fill value(0) : tensor<[%token_count]x8x864xi8>
+  %route_ids = check.generate.iota offset(0) step(1) period(127) : tensor<[%token_count]x128xi32>
+  %route_weights = check.generate.fill value(0.125) : tensor<[%token_count]x8xf32>
+  %weight = check.generate.fill value(0) : tensor<128x2048x3x144xi8>
+  %output = check.generate.fill value(1.0) : tensor<[%token_count]x2048xf32>
+  %expected = check.generate.fill value(1.0) : tensor<[%token_count]x2048xf32>
+  func.call @qwen3_moe_routed_down_q4k_q8_1_x4(%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %q8_input, %route_ids, %route_weights, %weight, %output) : (index, index, index, index, index, index, tensor<[%token_count]x8x864xi8>, tensor<[%token_count]x128xi32>, tensor<[%token_count]x8xf32>, tensor<128x2048x3x144xi8>, tensor<[%token_count]x2048xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x2048xf32>
+  check.return
+}
+
+check.case public @qwen3_moe_routed_down_q4k_q8_1_x4_pipeline_benchmark_case {
+  %token_count = check.param.choice values([1, 17, 32, 63, 128, 129, 512]) name("token_count") : index
+  %input_size = check.literal value(768) : index
+  %route_count = check.literal value(8) : index
+  %route_id_stride = check.literal value(128) : index
+  %expert_count = check.literal value(128) : index
+  %output_size = check.literal value(2048) : index
+  // Each 768-element route contains six complete Q8_1 x4 groups, so packing
+  // the eight contiguous routes as one 6,144-element token row preserves the
+  // exact per-route physical layout without a derived testbench scalar.
+  %routed_input_size = check.literal value(6144) : index
+  %routed_input = check.generate.fill value(0.0) : tensor<[%token_count]x8x768xf32>
+  %q8_input = check.generate.fill value(1) : tensor<[%token_count]x8x864xi8>
+  %route_ids = check.generate.iota offset(0) step(1) period(127) : tensor<[%token_count]x128xi32>
+  %route_weights = check.generate.fill value(0.125) : tensor<[%token_count]x8xf32>
+  %weight = check.generate.fill value(0) : tensor<128x2048x3x144xi8>
+  %output = check.generate.fill value(1.0) : tensor<[%token_count]x2048xf32>
+  %expected = check.generate.fill value(1.0) : tensor<[%token_count]x2048xf32>
+  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %routed_input_size, %routed_input, %q8_input) : (index, index, tensor<[%token_count]x8x768xf32>, tensor<[%token_count]x8x864xi8>)
+  func.call @qwen3_moe_routed_down_q4k_q8_1_x4(%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %q8_input, %route_ids, %route_weights, %weight, %output) : (index, index, index, index, index, index, tensor<[%token_count]x8x864xi8>, tensor<[%token_count]x128xi32>, tensor<[%token_count]x8xf32>, tensor<128x2048x3x144xi8>, tensor<[%token_count]x2048xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x2048xf32>
+  check.return
+}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_q8_1_x4_nonzero_residual_case> @qwen3_moe_routed_down_q4k_q8_1_x4_small
+
+check.benchmark<@qwen3_moe_routed_down_q4k_q8_1_x4_benchmark_case> @qwen3_moe_routed_down_q4k_q8_1_x4_decode {token_count = 1}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_q8_1_x4_benchmark_case> @qwen3_moe_routed_down_q4k_q8_1_x4_prefill_32 {token_count = 32}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_q8_1_x4_benchmark_case> @qwen3_moe_routed_down_q4k_q8_1_x4_prefill_128 {token_count = 128}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_q8_1_x4_benchmark_case> @qwen3_moe_routed_down_q4k_q8_1_x4_prefill_512 {token_count = 512}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_q8_1_x4_pipeline_benchmark_case> @qwen3_moe_routed_down_q4k_q8_1_x4_pipeline_decode {token_count = 1}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_q8_1_x4_pipeline_benchmark_case> @qwen3_moe_routed_down_q4k_q8_1_x4_pipeline_prefill_32 {token_count = 32}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_q8_1_x4_pipeline_benchmark_case> @qwen3_moe_routed_down_q4k_q8_1_x4_pipeline_prefill_128 {token_count = 128}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_q8_1_x4_pipeline_benchmark_case> @qwen3_moe_routed_down_q4k_q8_1_x4_pipeline_prefill_512 {token_count = 512}
