@@ -74,9 +74,9 @@ iree_status_t loom_amdgpu_artifact_target_key_format_arena(
 // Formats the AMDHSA code-object target ID projected from |identity| into
 // |arena|.
 //
-// Only feature states represented by the AMDHSA ABI are emitted. Structured
-// ASIC revision remains in the enclosing artifact identity and is projected
-// through generated per-revision metadata when required by the ABI.
+// The canonical target is projected to its backend processor and only feature
+// states represented by the AMDHSA ABI are emitted. Target-overlay semantics
+// remain in the enclosing artifact identity.
 iree_status_t loom_amdgpu_amdhsa_code_object_target_id_format(
     const loom_amdgpu_target_identity_t* identity,
     iree_arena_allocator_t* arena, iree_string_view_t* out_target_id);

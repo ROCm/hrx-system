@@ -6,8 +6,6 @@
 
 #include "loom/tooling/target/amdgpu/artifact_provider.h"
 
-#include <inttypes.h>
-
 #include "iree/hal/executable/amdgpu/executable_target.h"
 #include "iree/hal/executable/amdgpu/target_id.h"
 #include "loom/target/arch/amdgpu/ops/target.h"
@@ -68,12 +66,12 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_parse_target_profile(
   iree_hal_amdgpu_target_identity_t hal_identity = {0};
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_parse_artifact_key(
       target_key, &hal_identity));
-  const loom_amdgpu_processor_info_t* processor = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_lookup_processor(
-      hal_identity.processor, &processor));
+  const loom_amdgpu_target_info_t* target = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_target_info_lookup_target(hal_identity.target, &target));
 
   loom_amdgpu_target_identity_t identity = {
-      .processor = processor,
+      .target = target,
       .amdhsa_features =
           {
               .sramecc = loom_amdgpu_hal_artifact_provider_map_feature_state(
@@ -82,11 +80,6 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_parse_target_profile(
                   hal_identity.amdhsa_features.xnack),
           },
   };
-  if (hal_identity.asic_revision.specified) {
-    identity.asic_revision = loom_amdgpu_target_info_find_asic_revision(
-        processor, hal_identity.asic_revision.value);
-    IREE_ASSERT(identity.asic_revision != NULL);
-  }
   return loom_amdgpu_target_profile_initialize(&identity, out_profile);
 }
 
@@ -228,20 +221,14 @@ loom_amdgpu_hal_artifact_provider_select_function_device_target(
   *out_target = (loom_run_hal_device_target_t){0};
 
   const loom_symbol_ref_t target_ref = loom_func_like_target(function);
-  const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_processor_from_ref(module, target_ref);
-  if (processor == NULL) {
+  loom_amdgpu_target_identity_t identity = {0};
+  if (!loom_amdgpu_target_identity_from_ref(module, target_ref, &identity)) {
     return loom_amdgpu_hal_artifact_provider_select_device_target(
         provider, runtime, allocator, out_target);
   }
-  const loom_op_t* target_op =
-      module->symbols.entries[target_ref.symbol_id].defining_op;
-  IREE_ASSERT(target_op != NULL);
-  loom_amdgpu_target_identity_t amdhsa = {0};
-  loom_amdgpu_target_record_resolve_identity(target_op, &amdhsa);
   loom_amdgpu_target_profile_t profile = {0};
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_target_profile_initialize(&amdhsa, &profile));
+      loom_amdgpu_target_profile_initialize(&identity, &profile));
 
   const iree_hal_device_spec_t* device_spec =
       iree_hal_device_spec(runtime->device);
@@ -299,9 +286,8 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_select_target_key(
       target_key, /*hal_target=*/NULL, allocator, &selected, out_target));
   const loom_amdgpu_target_profile_t* target_profile =
       loom_amdgpu_target_profile_cast(out_target->target_profile);
-  const loom_amdgpu_processor_info_t* processor =
-      target_profile ? target_profile->identity.processor : NULL;
-  if (!selected || processor == NULL) {
+  if (!selected || target_profile == NULL ||
+      target_profile->identity.target == NULL) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "AMDGPU target '%.*s' cannot be emitted as HSACO "
                             "by Loom",

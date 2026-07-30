@@ -490,12 +490,13 @@ static iree_status_t loom_amdgpu_hal_kernel_library_project_manifest_target(
   (void)module;
   loom_amdgpu_target_identity_t identity = {0};
   loom_amdgpu_target_record_resolve_identity(entry->target_op, &identity);
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_target_processor(identity.target);
+  IREE_ASSERT(processor != NULL);
 
   inout_target->family = IREE_SV("amdgpu");
-  inout_target->processor = identity.processor->name;
-  if (identity.asic_revision != NULL) {
-    inout_target->processor_revision = identity.asic_revision->name;
-  }
+  inout_target->selector = identity.target->name;
+  inout_target->processor = processor->name;
   IREE_RETURN_IF_ERROR(loom_amdgpu_amdhsa_code_object_target_id_format(
       &identity, arena, &inout_target->code_object_target));
 

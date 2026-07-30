@@ -81,6 +81,124 @@ iree_status_t loom_amdgpu_target_info_lookup_processor(
                           (int)processor_name.size, processor_name.data);
 }
 
+iree_host_size_t loom_amdgpu_target_info_target_count(void) {
+  return loom_amdgpu_target_info_target_info_count;
+}
+
+const loom_amdgpu_target_info_t* loom_amdgpu_target_info_target_at(
+    iree_host_size_t index) {
+  if (index >= loom_amdgpu_target_info_target_info_count) {
+    return NULL;
+  }
+  return &loom_amdgpu_target_info_target_infos[index];
+}
+
+const loom_amdgpu_target_info_t* loom_amdgpu_target_info_find_target(
+    iree_string_view_t target_name) {
+  if (iree_string_view_is_empty(target_name)) {
+    return NULL;
+  }
+  for (iree_host_size_t i = 0; i < loom_amdgpu_target_info_target_info_count;
+       ++i) {
+    const loom_amdgpu_target_info_t* target =
+        &loom_amdgpu_target_info_target_infos[i];
+    if (iree_string_view_equal(target->name, target_name)) {
+      return target;
+    }
+  }
+  return NULL;
+}
+
+const loom_amdgpu_target_info_t* loom_amdgpu_target_info_find_target_by_kind(
+    uint32_t target_kind) {
+  if (target_kind == 0 ||
+      target_kind > loom_amdgpu_target_info_target_info_count) {
+    return NULL;
+  }
+  const loom_amdgpu_target_info_t* target =
+      &loom_amdgpu_target_info_target_infos[target_kind - 1];
+  IREE_ASSERT(target->target_kind == target_kind);
+  return target;
+}
+
+const loom_amdgpu_processor_info_t* loom_amdgpu_target_info_target_processor(
+    const loom_amdgpu_target_info_t* target) {
+  return target != NULL
+             ? loom_amdgpu_target_info_processor_at(target->processor_ordinal)
+             : NULL;
+}
+
+iree_status_t loom_amdgpu_target_info_lookup_target(
+    iree_string_view_t target_name,
+    const loom_amdgpu_target_info_t** out_target) {
+  IREE_ASSERT_ARGUMENT(out_target);
+  *out_target = NULL;
+  if (iree_string_view_is_empty(target_name)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU target is required");
+  }
+  const loom_amdgpu_target_info_t* target =
+      loom_amdgpu_target_info_find_target(target_name);
+  if (target != NULL) {
+    *out_target = target;
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "AMDGPU target '%.*s' is not supported",
+                          (int)target_name.size, target_name.data);
+}
+
+bool loom_amdgpu_target_info_requires_physical_resolution(
+    const loom_amdgpu_processor_info_t* processor) {
+  IREE_ASSERT_ARGUMENT(processor);
+  for (iree_host_size_t i = 0;
+       i < loom_amdgpu_target_info_physical_target_info_count; ++i) {
+    if (loom_amdgpu_target_info_physical_target_infos[i].processor_ordinal ==
+        processor->ordinal) {
+      return true;
+    }
+  }
+  return false;
+}
+
+iree_status_t loom_amdgpu_target_info_lookup_physical_target(
+    const loom_amdgpu_processor_info_t* processor, uint32_t asic_revision,
+    const loom_amdgpu_target_info_t** out_target) {
+  IREE_ASSERT_ARGUMENT(processor);
+  IREE_ASSERT_ARGUMENT(out_target);
+  *out_target = NULL;
+  bool has_physical_targets = false;
+  for (iree_host_size_t i = 0;
+       i < loom_amdgpu_target_info_physical_target_info_count; ++i) {
+    const loom_amdgpu_physical_target_info_t* physical_target =
+        &loom_amdgpu_target_info_physical_target_infos[i];
+    if (physical_target->processor_ordinal != processor->ordinal) {
+      continue;
+    }
+    has_physical_targets = true;
+    if (physical_target->asic_revision == asic_revision) {
+      *out_target = loom_amdgpu_target_info_find_target_by_kind(
+          physical_target->target_kind);
+      IREE_ASSERT(*out_target != NULL);
+      return iree_ok_status();
+    }
+  }
+  if (has_physical_targets) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU processor '%.*s' has unknown physical ASIC revision %" PRIu32,
+        (int)processor->name.size, processor->name.data, asic_revision);
+  }
+  *out_target = loom_amdgpu_target_info_find_target(processor->name);
+  if (*out_target != NULL) {
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_UNAVAILABLE,
+      "AMDGPU processor '%.*s' has no supported compiler target",
+      (int)processor->name.size, processor->name.data);
+}
+
 bool loom_amdgpu_processor_satisfies_code_object_requirement(
     const loom_amdgpu_processor_info_t* effective_processor,
     const loom_amdgpu_processor_info_t* required_processor) {
@@ -91,6 +209,21 @@ bool loom_amdgpu_processor_satisfies_code_object_requirement(
              required_processor->ordinal &&
          effective_processor->generic_code_object.introduction_version <=
              required_processor->properties.elf.generic_version;
+}
+
+bool loom_amdgpu_target_satisfies_code_object_requirement(
+    const loom_amdgpu_target_info_t* effective_target,
+    const loom_amdgpu_target_info_t* required_target) {
+  if (effective_target->target_kind == required_target->target_kind) {
+    return true;
+  }
+  const loom_amdgpu_processor_info_t* effective_processor =
+      loom_amdgpu_target_info_target_processor(effective_target);
+  const loom_amdgpu_processor_info_t* required_processor =
+      loom_amdgpu_target_info_target_processor(required_target);
+  return required_processor->properties.elf.generic_version != 0 &&
+         loom_amdgpu_processor_satisfies_code_object_requirement(
+             effective_processor, required_processor);
 }
 
 iree_status_t loom_amdgpu_target_info_lookup_descriptor_set(
@@ -294,35 +427,6 @@ iree_status_t loom_amdgpu_target_info_parse_amdhsa_target_id(
       .features = features,
   };
   return iree_ok_status();
-}
-
-const loom_amdgpu_processor_asic_revision_info_t*
-loom_amdgpu_target_info_find_asic_revision(
-    const loom_amdgpu_processor_info_t* processor, uint32_t value) {
-  IREE_ASSERT_ARGUMENT(processor);
-  for (uint16_t i = 0; i < processor->asic_revisions.count; ++i) {
-    const loom_amdgpu_processor_asic_revision_info_t* revision =
-        &processor->asic_revisions.entries[i];
-    if (revision->value == value) {
-      return revision;
-    }
-  }
-  return NULL;
-}
-
-iree_status_t loom_amdgpu_target_info_lookup_asic_revision(
-    const loom_amdgpu_processor_info_t* processor, uint32_t value,
-    const loom_amdgpu_processor_asic_revision_info_t** out_revision) {
-  IREE_ASSERT_ARGUMENT(processor);
-  IREE_ASSERT_ARGUMENT(out_revision);
-  *out_revision = loom_amdgpu_target_info_find_asic_revision(processor, value);
-  if (*out_revision != NULL || processor->asic_revisions.count == 0) {
-    return iree_ok_status();
-  }
-  return iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "AMDGPU processor '%.*s' has unknown physical ASIC revision %" PRIu32,
-      (int)processor->name.size, processor->name.data, value);
 }
 
 static void loom_amdgpu_target_info_apply_feature_selection(

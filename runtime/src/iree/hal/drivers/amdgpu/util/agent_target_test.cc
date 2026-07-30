@@ -110,19 +110,19 @@ TEST(AgentTargetTest, FindsCompatibleAlternateIsa) {
   iree_hal_amdgpu_agent_target_deinitialize(&target);
 }
 
-TEST(AgentTargetTest, QualifiesFinitePhysicalRevisions) {
+TEST(AgentTargetTest, ResolvesPhysicalTargets) {
   iree_hal_amdgpu_agent_target_t a0_target;
   IREE_ASSERT_OK(InitializeSingleTarget(hsa_agent_t{42}, hsa_isa_t{7},
                                         IREE_SV("amdgcn-amd-amdhsa--gfx1250"),
                                         /*asic_revision=*/0, &a0_target));
-  EXPECT_EQ(FormatTargetId(a0_target.primary_isa), "gfx1250:asic-revision=a0");
+  EXPECT_EQ(FormatTargetId(a0_target.primary_isa), "gfx1250-a0");
   iree_hal_amdgpu_agent_target_deinitialize(&a0_target);
 
   iree_hal_amdgpu_agent_target_t b0_target;
   IREE_ASSERT_OK(InitializeSingleTarget(hsa_agent_t{42}, hsa_isa_t{7},
                                         IREE_SV("amdgcn-amd-amdhsa--gfx1250"),
                                         /*asic_revision=*/1, &b0_target));
-  EXPECT_EQ(FormatTargetId(b0_target.primary_isa), "gfx1250:asic-revision=b0");
+  EXPECT_EQ(FormatTargetId(b0_target.primary_isa), "gfx1250");
   iree_hal_amdgpu_agent_target_deinitialize(&b0_target);
 }
 

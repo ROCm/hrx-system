@@ -84,13 +84,13 @@ static const loom_target_export_plan_t kAmdgpuHalExportPlan = {
 #undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
 
 #define LOOM_AMDGPU_TARGET_RECORD_INFO(record_suffix, target_kind_value, \
-                                       processor_name_literal, \
+                                       target_name_literal, \
                                        descriptor_set_ordinal_value, \
                                        bundle_suffix) \
   static const loom_amdgpu_target_record_info_t \
       kAmdgpuTargetRecordInfo##record_suffix = { \
           .target_kind = target_kind_value, \
-          .processor_name = IREE_SVL(processor_name_literal), \
+          .target_name = IREE_SVL(target_name_literal), \
           .descriptor_set_ordinal = descriptor_set_ordinal_value, \
           .bundle = &kAmdgpuLowTargetBundle##bundle_suffix##Core, \
       };
@@ -100,7 +100,7 @@ static const loom_target_export_plan_t kAmdgpuHalExportPlan = {
 static const loom_target_bundle_t* const kAmdgpuTargetBundleValues[] = {
   NULL,
 #define LOOM_AMDGPU_TARGET_RECORD_INFO(record_suffix, target_kind_value, \
-                                       processor_name_literal, \
+                                       target_name_literal, \
                                        descriptor_set_ordinal_value, \
                                        bundle_suffix) \
   &kAmdgpuLowTargetBundle##bundle_suffix##Core,
@@ -116,7 +116,7 @@ const loom_target_bundle_table_t loom_amdgpu_target_bundles = {
 static const loom_amdgpu_target_record_info_t* const kAmdgpuTargetRecordInfos[] = {
   NULL,
 #define LOOM_AMDGPU_TARGET_RECORD_INFO(record_suffix, target_kind_value, \
-                                       processor_name_literal, \
+                                       target_name_literal, \
                                        descriptor_set_ordinal_value, \
                                        bundle_suffix) \
   &kAmdgpuTargetRecordInfo##record_suffix,
@@ -144,13 +144,12 @@ const loom_amdgpu_target_record_info_t* loom_amdgpu_target_record_info_for_kind(
 }
 
 const loom_amdgpu_target_record_info_t*
-loom_amdgpu_target_record_info_for_processor(
-    iree_string_view_t processor_name) {
+loom_amdgpu_target_record_info_for_target(iree_string_view_t target_name) {
   for (iree_host_size_t i = 1; i < IREE_ARRAYSIZE(kAmdgpuTargetRecordInfos);
        ++i) {
     const loom_amdgpu_target_record_info_t* info = kAmdgpuTargetRecordInfos[i];
     if (info != NULL &&
-        iree_string_view_equal(info->processor_name, processor_name)) {
+        iree_string_view_equal(info->target_name, target_name)) {
       return info;
     }
   }

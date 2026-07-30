@@ -9,8 +9,8 @@ LLVM generic code objects carry a version in the high byte of ELF ``e_flags``.
 Each exact processor in a generic family records the first generic version that
 can execute on it. A generic code object is compatible with that processor when
 its emitted version is greater than or equal to the processor's introduction
-version. Target-ID feature support and ASIC revisions are distinct physical and
-artifact identity facts shared by build tools, HAL, and compilers.
+version. Target-ID feature support, target overlays, and physical
+target resolution are shared by build tools, HAL, and compilers.
 
 This module is deliberately independent of Loom and the runtime generators so
 all consumers share the same identity facts without an import cycle.
@@ -32,14 +32,6 @@ class AmdgpuGenericCodeObjectInfo:
 
 
 @dataclass(frozen=True, slots=True)
-class AmdgpuAsicRevisionInfo:
-    """One finite physical ASIC revision supported by an exact processor."""
-
-    value: int
-    name: str
-
-
-@dataclass(frozen=True, slots=True)
 class AmdgpuExactTargetInfo:
     """Identity, compatibility, and qualification facts for an exact target."""
 
@@ -47,25 +39,33 @@ class AmdgpuExactTargetInfo:
     code_object_processor: str
     generic_introduction_version: int
     target_id_features: tuple[str, ...] = ()
-    asic_revisions: tuple[AmdgpuAsicRevisionInfo, ...] = ()
-    default_asic_revision: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class AmdgpuDeviceBinaryTargetMatch:
-    """One exact physical target selecting a device-library artifact."""
+class AmdgpuTargetOverlayInfo:
+    """One canonical target that overlays a backend processor."""
+
+    target: str
+    processor: str
+    compile_options: tuple[str, ...] = ()
+    link_options: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuPhysicalTargetInfo:
+    """Maps one physical processor revision to its canonical target."""
 
     processor: str
     asic_revision: int
+    target: str
 
 
 @dataclass(frozen=True, slots=True)
 class AmdgpuDeviceBinaryTarget:
-    """One independently named builtin device-library artifact."""
+    """One derived builtin device-library artifact target."""
 
     name: str
-    architecture: str
-    target_matches: tuple[AmdgpuDeviceBinaryTargetMatch, ...] = ()
+    processor: str
     compile_options: tuple[str, ...] = ()
     link_options: tuple[str, ...] = ()
 
@@ -177,32 +177,36 @@ AMDGPU_EXACT_TARGET_INFOS = (
     AmdgpuExactTargetInfo("gfx1172", "gfx1172", 0),
     AmdgpuExactTargetInfo("gfx1200", "gfx12-generic", 1),
     AmdgpuExactTargetInfo("gfx1201", "gfx12-generic", 1),
-    AmdgpuExactTargetInfo(
-        "gfx1250",
-        "gfx12-5-generic",
-        1,
-        asic_revisions=(
-            AmdgpuAsicRevisionInfo(value=0, name="a0"),
-            AmdgpuAsicRevisionInfo(value=1, name="b0"),
-        ),
-        default_asic_revision=1,
-    ),
+    AmdgpuExactTargetInfo("gfx1250", "gfx12-5-generic", 1),
     AmdgpuExactTargetInfo("gfx1251", "gfx12-5-generic", 1),
 )
 
 
-# Device-binary variants are artifact identities, not public processor names.
-# Each row binds one artifact to the exact physical targets that cannot safely
-# consume their normal code-object-family artifact.
-AMDGPU_DEVICE_BINARY_VARIANTS = (
-    AmdgpuDeviceBinaryTarget(
-        name="gfx1250-a0",
-        architecture="gfx1250",
-        target_matches=(
-            AmdgpuDeviceBinaryTargetMatch(processor="gfx1250", asic_revision=0),
-        ),
+# Target overlays bind a canonical target identity to one exact backend
+# processor and any final backend-invocation options it requires. Compiler
+# semantics remain structured facts on the canonical target row.
+AMDGPU_TARGET_OVERLAY_INFOS = (
+    AmdgpuTargetOverlayInfo(
+        target="gfx1250-a0",
+        processor="gfx1250",
         compile_options=("-mllvm", "-amdgpu-gfx1250-b0-specific=false"),
         link_options=("-plugin-opt=-amdgpu-gfx1250-b0-specific=false",),
+    ),
+)
+
+# Physical discovery resolves directly to a canonical target. Processors absent
+# from this table ignore their reported ASIC revision because the revision does
+# not participate in their target identity.
+AMDGPU_PHYSICAL_TARGET_INFOS = (
+    AmdgpuPhysicalTargetInfo(
+        processor="gfx1250",
+        asic_revision=0,
+        target="gfx1250-a0",
+    ),
+    AmdgpuPhysicalTargetInfo(
+        processor="gfx1250",
+        asic_revision=1,
+        target="gfx1250",
     ),
 )
 
@@ -219,6 +223,36 @@ def exact_target_info(processor: str) -> AmdgpuExactTargetInfo | None:
         if info.exact_processor == processor:
             return info
     return None
+
+
+def target_overlay_info(target: str) -> AmdgpuTargetOverlayInfo | None:
+    for info in AMDGPU_TARGET_OVERLAY_INFOS:
+        if info.target == target:
+            return info
+    return None
+
+
+def target_processor(target: str) -> str | None:
+    """Returns the backend processor selected by a canonical target."""
+    overlay = target_overlay_info(target)
+    if overlay is not None:
+        return overlay.processor
+    if exact_target_info(target) is not None or generic_code_object_info(target):
+        return target
+    return None
+
+
+def physical_target_info(
+    processor: str, asic_revision: int
+) -> AmdgpuPhysicalTargetInfo | None:
+    for info in AMDGPU_PHYSICAL_TARGET_INFOS:
+        if info.processor == processor and info.asic_revision == asic_revision:
+            return info
+    return None
+
+
+def processor_has_physical_target_infos(processor: str) -> bool:
+    return any(info.processor == processor for info in AMDGPU_PHYSICAL_TARGET_INFOS)
 
 
 def generic_code_object_info(
@@ -270,8 +304,9 @@ def validate_target_map_data(
         AMDGPU_GENERIC_CODE_OBJECT_INFOS
     ),
     exact_infos: Sequence[AmdgpuExactTargetInfo] = AMDGPU_EXACT_TARGET_INFOS,
-    device_binary_variants: Sequence[AmdgpuDeviceBinaryTarget] = (
-        AMDGPU_DEVICE_BINARY_VARIANTS
+    target_overlays: Sequence[AmdgpuTargetOverlayInfo] = AMDGPU_TARGET_OVERLAY_INFOS,
+    physical_targets: Sequence[AmdgpuPhysicalTargetInfo] = (
+        AMDGPU_PHYSICAL_TARGET_INFOS
     ),
 ) -> None:
     generic_versions: dict[str, int] = {}
@@ -337,66 +372,6 @@ def validate_target_map_data(
                 "declared generic processor"
             )
 
-        revision_values: set[int] = set()
-        revision_names: set[str] = set()
-        previous_revision_value: int | None = None
-        for revision in info.asic_revisions:
-            if revision.value < 0 or revision.value > (2**32) - 1:
-                raise ValueError(
-                    f"AMDGPU processor {info.exact_processor} ASIC revision "
-                    f"{revision.value} is outside the uint32 range"
-                )
-            if revision.value in revision_values:
-                raise ValueError(
-                    f"AMDGPU processor {info.exact_processor} repeats ASIC "
-                    f"revision {revision.value}"
-                )
-            if (
-                previous_revision_value is not None
-                and revision.value < previous_revision_value
-            ):
-                raise ValueError(
-                    f"AMDGPU processor {info.exact_processor} ASIC revisions "
-                    "are not in ascending value order"
-                )
-            if not revision.name:
-                raise ValueError(
-                    f"AMDGPU processor {info.exact_processor} ASIC revision "
-                    f"{revision.value} has no canonical name"
-                )
-            if not revision.name[0].isalnum() or any(
-                not (
-                    "a" <= character <= "z"
-                    or "0" <= character <= "9"
-                    or character in "-._"
-                )
-                for character in revision.name
-            ):
-                raise ValueError(
-                    f"AMDGPU processor {info.exact_processor} ASIC revision "
-                    f"name {revision.name!r} is not a canonical artifact "
-                    "coordinate"
-                )
-            if revision.name in revision_names:
-                raise ValueError(
-                    f"AMDGPU processor {info.exact_processor} repeats ASIC "
-                    f"revision name {revision.name}"
-                )
-            revision_values.add(revision.value)
-            revision_names.add(revision.name)
-            previous_revision_value = revision.value
-        if info.asic_revisions:
-            if info.default_asic_revision not in revision_values:
-                raise ValueError(
-                    f"AMDGPU processor {info.exact_processor} default ASIC "
-                    f"revision {info.default_asic_revision} is not declared"
-                )
-        elif info.default_asic_revision is not None:
-            raise ValueError(
-                f"AMDGPU processor {info.exact_processor} has a default ASIC "
-                "revision but declares no revisions"
-            )
-
     unreferenced_generic_processors = sorted(
         set(generic_versions) - referenced_generic_processors
     )
@@ -406,48 +381,96 @@ def validate_target_map_data(
             + ", ".join(unreferenced_generic_processors)
         )
 
-    variant_names: set[str] = set()
-    claimed_targets: set[AmdgpuDeviceBinaryTargetMatch] = set()
-    for variant in device_binary_variants:
-        if variant.name in variant_names:
-            raise ValueError(f"duplicate AMDGPU device binary variant: {variant.name}")
-        variant_names.add(variant.name)
-        if variant.architecture not in exact_processors | generic_processors:
+    base_targets = exact_processors | generic_processors
+    overlay_targets: set[str] = set()
+    for overlay in target_overlays:
+        if overlay.target in base_targets or overlay.target in overlay_targets:
+            raise ValueError(f"duplicate AMDGPU target overlay: {overlay.target}")
+        if (
+            not overlay.target
+            or not overlay.target[0].isalnum()
+            or any(
+                not (
+                    "a" <= character <= "z"
+                    or "0" <= character <= "9"
+                    or character in "-._"
+                )
+                for character in overlay.target
+            )
+        ):
             raise ValueError(
-                f"device binary variant {variant.name} references unknown "
-                f"architecture {variant.architecture}"
+                f"AMDGPU target overlay {overlay.target!r} is not a canonical "
+                "target coordinate"
             )
-        if not variant.target_matches:
+        overlay_targets.add(overlay.target)
+
+    canonical_targets = base_targets | overlay_targets
+
+    for overlay in target_overlays:
+        if overlay.processor not in exact_processors:
             raise ValueError(
-                f"device binary variant {variant.name} has no physical target matches"
+                f"AMDGPU target overlay {overlay.target} references unknown "
+                f"exact processor {overlay.processor}"
             )
-        for target_match in variant.target_matches:
-            if target_match.processor not in exact_processors:
-                raise ValueError(
-                    f"device binary variant {variant.name} references unknown "
-                    f"exact target {target_match.processor}"
-                )
-            exact_info = next(
-                info
-                for info in exact_infos
-                if info.exact_processor == target_match.processor
+
+    target_processors = {
+        **{target: target for target in base_targets},
+        **{overlay.target: overlay.processor for overlay in target_overlays},
+    }
+    previous_physical_key: tuple[str, int] | None = None
+    physical_keys: set[tuple[str, int]] = set()
+    physical_processors: set[str] = set()
+    physical_base_targets: set[str] = set()
+    for physical_target in physical_targets:
+        key = (physical_target.processor, physical_target.asic_revision)
+        if physical_target.processor not in exact_processors:
+            raise ValueError(
+                "AMDGPU physical target references unknown exact processor "
+                f"{physical_target.processor}"
             )
-            supported_revisions = {
-                revision.value for revision in exact_info.asic_revisions
-            }
-            if target_match.asic_revision not in supported_revisions:
-                raise ValueError(
-                    f"device binary variant {variant.name} selects unsupported "
-                    f"ASIC revision {target_match.asic_revision} for "
-                    f"{target_match.processor}"
-                )
-            if target_match in claimed_targets:
-                raise ValueError(
-                    f"AMDGPU physical target {target_match.processor} ASIC "
-                    f"revision {target_match.asic_revision} is claimed by more "
-                    "than one device binary variant"
-                )
-            claimed_targets.add(target_match)
+        if (
+            physical_target.asic_revision < 0
+            or physical_target.asic_revision > (2**32) - 1
+        ):
+            raise ValueError(
+                f"AMDGPU processor {physical_target.processor} ASIC revision "
+                f"{physical_target.asic_revision} is outside the uint32 range"
+            )
+        if previous_physical_key is not None and key < previous_physical_key:
+            raise ValueError(
+                "AMDGPU physical targets are not in canonical processor and "
+                "ASIC revision order"
+            )
+        if key in physical_keys:
+            raise ValueError(
+                f"AMDGPU processor {physical_target.processor} repeats ASIC "
+                f"revision {physical_target.asic_revision}"
+            )
+        if physical_target.target not in canonical_targets:
+            raise ValueError(
+                f"AMDGPU physical target {physical_target.processor} ASIC "
+                f"revision {physical_target.asic_revision} selects unknown "
+                f"target {physical_target.target}"
+            )
+        if target_processors[physical_target.target] != physical_target.processor:
+            raise ValueError(
+                f"AMDGPU physical target {physical_target.processor} ASIC "
+                f"revision {physical_target.asic_revision} selects target "
+                f"{physical_target.target} from another processor"
+            )
+        physical_keys.add(key)
+        physical_processors.add(physical_target.processor)
+        if physical_target.target == physical_target.processor:
+            physical_base_targets.add(physical_target.processor)
+        previous_physical_key = key
+
+    missing_physical_base_targets = sorted(physical_processors - physical_base_targets)
+    if missing_physical_base_targets:
+        raise ValueError(
+            "AMDGPU processors with physical target mappings have no revision "
+            "selecting their canonical base target: "
+            + ", ".join(missing_physical_base_targets)
+        )
 
 
 validate_target_map_data()

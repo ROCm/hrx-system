@@ -14,6 +14,8 @@ from dataclasses import dataclass, replace
 from build_tools.amdgpu.target_map_data import (
     AMDGPU_EXACT_TARGET_INFOS,
     AMDGPU_GENERIC_CODE_OBJECT_INFOS,
+    AMDGPU_PHYSICAL_TARGET_INFOS,
+    AMDGPU_TARGET_OVERLAY_INFOS,
 )
 
 from loom.target.arch.amdgpu.lds_bank_service import (
@@ -36,18 +38,18 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE,
     AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC,
     AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
-    AmdgpuProcessorAsicRevisionSemantics,
+    AMDGPU_TARGET_INFOS,
     amdgpu_descriptor_set_info_by_generator_target,
     amdgpu_descriptor_set_storage_info_by_generator_target,
     amdgpu_descriptor_set_view_infos_by_storage_generator_target,
     amdgpu_generic_code_object_compatibility_info,
-    amdgpu_processor_default_instruction_constraints,
-    processor_info,
+    amdgpu_target_info_by_name,
+    amdgpu_target_instruction_constraints,
     validate_amdgpu_code_object_processor_rows,
     validate_amdgpu_descriptor_set_isa_xml,
     validate_amdgpu_generic_contracts,
-    validate_amdgpu_processor_revision_rows,
     validate_amdgpu_target_id_processor_rows,
+    validate_amdgpu_target_rows,
 )
 
 
@@ -240,133 +242,132 @@ def test_generic_contracts_are_portable_member_intersections() -> None:
     )
 
 
-def test_instruction_constraints_separate_default_and_revision_behavior() -> None:
+def test_instruction_constraints_are_attached_to_canonical_targets() -> None:
     processors = {info.processor: info for info in AMDGPU_PROCESSOR_INFOS}
     gfx1250 = processors["gfx1250"]
-    revisions = {revision.name: revision for revision in gfx1250.asic_revisions}
+    gfx12_5_generic = processors["gfx12-5-generic"]
+    gfx1250_target = amdgpu_target_info_by_name("gfx1250")
+    gfx1250_a0_target = amdgpu_target_info_by_name("gfx1250-a0")
+    gfx12_5_generic_target = amdgpu_target_info_by_name("gfx12-5-generic")
+    assert gfx1250_target is not None
+    assert gfx1250_a0_target is not None
+    assert gfx12_5_generic_target is not None
 
+    a0_constraints = gfx1250_a0_target.semantics.instruction_constraints
     assert gfx1250.instructions.base_constraints == 0
-    assert revisions["a0"].instruction_constraints != 0
+    assert amdgpu_target_instruction_constraints(gfx1250_target, gfx1250) == 0
     assert (
-        revisions["a0"].instruction_constraints
-        & ~AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS
-        == 0
+        amdgpu_target_instruction_constraints(gfx1250_a0_target, gfx1250)
+        == a0_constraints
     )
-    assert revisions["b0"].instruction_constraints == 0
-    assert gfx1250.default_asic_revision == revisions["b0"].value
-    assert amdgpu_processor_default_instruction_constraints(gfx1250) == 0
+    assert a0_constraints != 0
+    assert a0_constraints & ~AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS == 0
     assert (
-        amdgpu_processor_default_instruction_constraints(processors["gfx12-5-generic"])
-        == 0
+        amdgpu_target_instruction_constraints(gfx12_5_generic_target, gfx12_5_generic)
+        == a0_constraints
     )
 
 
 def test_lds_bank_service_models_are_structural_target_data() -> None:
     processors = {info.processor: info for info in AMDGPU_PROCESSOR_INFOS}
     gfx1250 = processors["gfx1250"]
+    gfx1250_a0 = amdgpu_target_info_by_name("gfx1250-a0")
+    assert gfx1250_a0 is not None
 
     assert (
         gfx1250.features.lds_bank_service_models
         == AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES
     )
-    assert all(
-        revision.lds_bank_service_models == gfx1250.features.lds_bank_service_models
-        for revision in gfx1250.asic_revisions
-    )
+    assert gfx1250_a0.semantics.lds_bank_service_models is None
     assert processors["gfx1251"].features.lds_bank_service_models == ()
     assert processors["gfx12-5-generic"].features.lds_bank_service_models == ()
 
 
-def test_revision_semantics_join_canonical_revision_identity() -> None:
-    processor = processor_info(
-        "gfx1250",
-        0x049,
-        asic_revision_semantics=(
-            AmdgpuProcessorAsicRevisionSemantics(
-                value=0,
-                instruction_constraints=(
-                    AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT
-                ),
-                kernel_metadata_extensions=((".test_revision", "A0"),),
-            ),
-        ),
-    )
+def test_physical_targets_resolve_to_canonical_target_rows() -> None:
+    targets = {target.target: target for target in AMDGPU_TARGET_INFOS}
+    mappings = {
+        (physical.processor, physical.asic_revision): physical.target
+        for physical in AMDGPU_PHYSICAL_TARGET_INFOS
+    }
 
-    assert tuple(
-        (revision.value, revision.name) for revision in processor.asic_revisions
-    ) == ((0, "a0"), (1, "b0"))
-    assert processor.asic_revisions[0].instruction_constraints == (
-        AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT
-    )
-    assert processor.asic_revisions[0].kernel_metadata_extensions == (
-        (".test_revision", "A0"),
-    )
-    assert processor.asic_revisions[1].instruction_constraints == 0
-    assert processor.asic_revisions[1].kernel_metadata_extensions == ()
+    assert mappings == {
+        ("gfx1250", 0): "gfx1250-a0",
+        ("gfx1250", 1): "gfx1250",
+    }
+    for physical in AMDGPU_PHYSICAL_TARGET_INFOS:
+        assert targets[physical.target].processor == physical.processor
 
 
-def test_revision_semantics_reject_unknown_canonical_revision() -> None:
-    with _raises_value_error("semantic overlays for unknown ASIC revisions: 7"):
-        processor_info(
-            "gfx1250",
-            0x049,
-            asic_revision_semantics=(AmdgpuProcessorAsicRevisionSemantics(value=7),),
+def test_target_semantics_are_keyed_by_canonical_target() -> None:
+    gfx1250 = amdgpu_target_info_by_name("gfx1250")
+    gfx1250_a0 = amdgpu_target_info_by_name("gfx1250-a0")
+    assert gfx1250 is not None
+    assert gfx1250_a0 is not None
+
+    assert gfx1250.semantics.kernel_metadata_extensions == (
+        (".gfx1250_revision", "B0"),
+    )
+    assert gfx1250_a0.semantics.kernel_metadata_extensions == (
+        (".gfx1250_revision", "A0"),
+    )
+
+
+def test_target_rows_reject_noncanonical_overlay_identity() -> None:
+    targets = list(AMDGPU_TARGET_INFOS)
+    overlay_index = next(
+        index for index, target in enumerate(targets) if target.target == "gfx1250-a0"
+    )
+    targets[overlay_index] = replace(
+        targets[overlay_index],
+        target="gfx1250-experimental",
+    )
+
+    with _raises_value_error("omit canonical overlays"):
+        validate_amdgpu_target_rows(
+            AMDGPU_PROCESSOR_INFOS,
+            targets,
         )
 
 
-def test_revision_semantics_reject_noncanonical_order() -> None:
-    with _raises_value_error("semantic overlays are not in ascending value order"):
-        processor_info(
-            "gfx1250",
-            0x049,
-            asic_revision_semantics=(
-                AmdgpuProcessorAsicRevisionSemantics(value=1),
-                AmdgpuProcessorAsicRevisionSemantics(value=0),
-            ),
-        )
-
-
-def test_generic_contracts_reject_nonportable_instruction_constraints() -> None:
-    processors = list(AMDGPU_PROCESSOR_INFOS)
+def test_generic_contracts_reject_duplicated_member_constraints() -> None:
+    targets = list(AMDGPU_TARGET_INFOS)
     generic_index = next(
-        index
-        for index, info in enumerate(processors)
-        if info.processor == "gfx12-5-generic"
+        index for index, info in enumerate(targets) if info.target == "gfx12-5-generic"
     )
-    generic = processors[generic_index]
-    processors[generic_index] = replace(
+    generic = targets[generic_index]
+    targets[generic_index] = replace(
         generic,
-        instructions=replace(
-            generic.instructions,
-            base_constraints=(
+        semantics=replace(
+            generic.semantics,
+            instruction_constraints=(
                 AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT
             ),
         ),
     )
 
-    with _raises_value_error(
-        "gfx12-5-generic instruction constraints do not match the union"
-    ):
-        validate_amdgpu_generic_contracts(processors, AMDGPU_DESCRIPTOR_SET_INFOS)
+    with _raises_value_error("duplicates derived member instruction constraints"):
+        validate_amdgpu_generic_contracts(
+            AMDGPU_PROCESSOR_INFOS,
+            AMDGPU_DESCRIPTOR_SET_INFOS,
+            targets,
+        )
 
 
-def test_revision_models_reject_nonportable_processor_base() -> None:
-    processors = list(AMDGPU_PROCESSOR_INFOS)
-    processor_index = next(
-        index for index, info in enumerate(processors) if info.processor == "gfx1250"
+def test_physical_target_models_reject_nonportable_processor_base() -> None:
+    targets = list(AMDGPU_TARGET_INFOS)
+    target_index = next(
+        index for index, info in enumerate(targets) if info.target == "gfx1250-a0"
     )
-    processor = processors[processor_index]
-    revisions = list(processor.asic_revisions)
-    revisions[0] = replace(revisions[0], lds_bank_service_models=())
-    processors[processor_index] = replace(
-        processor,
-        asic_revisions=tuple(revisions),
+    target = targets[target_index]
+    targets[target_index] = replace(
+        target,
+        semantics=replace(target.semantics, lds_bank_service_models=()),
     )
 
     with _raises_value_error(
-        "gfx1250 LDS bank-service models do not match the ASIC-revision intersection"
+        "gfx1250 LDS bank-service models do not match its physical target intersection"
     ):
-        validate_amdgpu_processor_revision_rows(processors)
+        validate_amdgpu_target_rows(AMDGPU_PROCESSOR_INFOS, targets)
 
 
 def test_generic_models_reject_nonportable_member_model() -> None:
@@ -462,22 +463,30 @@ def test_processor_rows_cover_canonical_target_id_qualification() -> None:
     )
 
 
-def test_processor_rows_cover_canonical_physical_revisions() -> None:
-    validate_amdgpu_processor_revision_rows(AMDGPU_PROCESSOR_INFOS)
+def test_target_rows_cover_canonical_target_map() -> None:
+    validate_amdgpu_target_rows(AMDGPU_PROCESSOR_INFOS, AMDGPU_TARGET_INFOS)
+    processor_names = {processor.processor for processor in AMDGPU_PROCESSOR_INFOS}
+    target_names = {target.target for target in AMDGPU_TARGET_INFOS}
+    assert all(target.processor in processor_names for target in AMDGPU_TARGET_INFOS)
+    assert {
+        info.target
+        for info in AMDGPU_TARGET_OVERLAY_INFOS
+        if info.processor in target_names
+    }.issubset(target_names)
 
 
-def test_processor_revisions_reject_noncanonical_default() -> None:
-    processors = list(AMDGPU_PROCESSOR_INFOS)
-    processor_index = next(
-        index for index, info in enumerate(processors) if info.processor == "gfx1250"
+def test_target_rows_reject_non_dense_enum_values() -> None:
+    targets = list(AMDGPU_TARGET_INFOS)
+    target_index = next(
+        index for index, info in enumerate(targets) if info.target == "gfx1250-a0"
     )
-    processors[processor_index] = replace(
-        processors[processor_index],
-        default_asic_revision=0,
+    targets[target_index] = replace(
+        targets[target_index],
+        enum_value=100,
     )
 
-    with _raises_value_error("default ASIC revision disagrees"):
-        validate_amdgpu_processor_revision_rows(processors)
+    with _raises_value_error("dense and one-based"):
+        validate_amdgpu_target_rows(AMDGPU_PROCESSOR_INFOS, targets)
 
 
 def test_code_object_relation_rejects_missing_canonical_processor() -> None:
@@ -496,44 +505,40 @@ def test_target_id_qualification_rejects_missing_canonical_processor() -> None:
         validate_amdgpu_target_id_processor_rows(processors)
 
 
-def test_revision_kernel_metadata_extensions_reject_invalid_rows() -> None:
-    processors = list(AMDGPU_PROCESSOR_INFOS)
-    processor_index = next(
-        index for index, info in enumerate(processors) if info.processor == "gfx1250"
+def test_target_kernel_metadata_extensions_reject_invalid_rows() -> None:
+    targets = list(AMDGPU_TARGET_INFOS)
+    target_index = next(
+        index for index, info in enumerate(targets) if info.target == "gfx1250-a0"
     )
-    processor = processors[processor_index]
-    revisions = list(processor.asic_revisions)
-    revisions[0] = replace(
-        revisions[0],
-        kernel_metadata_extensions=(
-            (".z_revision", "A0"),
-            (".a_revision", "A0"),
+    target = targets[target_index]
+    targets[target_index] = replace(
+        target,
+        semantics=replace(
+            target.semantics,
+            kernel_metadata_extensions=(
+                (".z_target", "A0"),
+                (".a_target", "A0"),
+            ),
         ),
-    )
-    processors[processor_index] = replace(
-        processor,
-        asic_revisions=tuple(revisions),
     )
 
     with _raises_value_error("metadata keys are not unique and sorted"):
-        validate_amdgpu_processor_revision_rows(processors)
+        validate_amdgpu_target_rows(AMDGPU_PROCESSOR_INFOS, targets)
 
 
-def test_revision_kernel_metadata_extensions_reject_standard_field_collision() -> None:
-    processors = list(AMDGPU_PROCESSOR_INFOS)
-    processor_index = next(
-        index for index, info in enumerate(processors) if info.processor == "gfx1250"
+def test_target_kernel_metadata_extensions_reject_standard_field_collision() -> None:
+    targets = list(AMDGPU_TARGET_INFOS)
+    target_index = next(
+        index for index, info in enumerate(targets) if info.target == "gfx1250-a0"
     )
-    processor = processors[processor_index]
-    revisions = list(processor.asic_revisions)
-    revisions[0] = replace(
-        revisions[0],
-        kernel_metadata_extensions=((".wavefront_size", "32"),),
-    )
-    processors[processor_index] = replace(
-        processor,
-        asic_revisions=tuple(revisions),
+    target = targets[target_index]
+    targets[target_index] = replace(
+        target,
+        semantics=replace(
+            target.semantics,
+            kernel_metadata_extensions=((".wavefront_size", "32"),),
+        ),
     )
 
     with _raises_value_error("replaces a standard kernel metadata field"):
-        validate_amdgpu_processor_revision_rows(processors)
+        validate_amdgpu_target_rows(AMDGPU_PROCESSOR_INFOS, targets)

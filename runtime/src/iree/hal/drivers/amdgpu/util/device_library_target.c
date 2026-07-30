@@ -9,17 +9,14 @@
 typedef struct iree_hal_amdgpu_device_library_target_variant_t {
   // Embedded device-library artifact suffix.
   iree_string_view_t artifact;
-  // Exact physical processor selecting the artifact.
-  iree_string_view_t processor;
-  // Physical HSA ASIC revision selecting the artifact.
-  uint32_t asic_revision;
+  // Canonical target selecting the artifact.
+  iree_string_view_t target;
 } iree_hal_amdgpu_device_library_target_variant_t;
 
 static const iree_hal_amdgpu_device_library_target_variant_t
     iree_hal_amdgpu_device_library_target_variants[] = {
-#define IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT(artifact, processor, \
-                                                  asic_revision)       \
-  {IREE_SVL(artifact), IREE_SVL(processor), asic_revision},
+#define IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT(artifact, target) \
+  {IREE_SVL(artifact), IREE_SVL(target)},
 #include "iree/hal/drivers/amdgpu/util/device_library_target_map.inl"
 #undef IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT
 };
@@ -82,29 +79,19 @@ iree_hal_amdgpu_device_library_target_append_identity_candidate(
       candidates);
 }
 
-static iree_status_t
+static iree_string_view_t
 iree_hal_amdgpu_device_library_target_lookup_variant_for_physical_target(
-    const iree_hal_amdgpu_target_identity_t* physical_identity,
-    iree_string_view_t* out_artifact, bool* out_requires_qualification) {
-  *out_artifact = iree_string_view_empty();
-  *out_requires_qualification = false;
+    const iree_hal_amdgpu_target_identity_t* physical_identity) {
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(iree_hal_amdgpu_device_library_target_variants);
        ++i) {
     const iree_hal_amdgpu_device_library_target_variant_t* variant =
         &iree_hal_amdgpu_device_library_target_variants[i];
-    if (!iree_string_view_equal(variant->processor,
-                                physical_identity->processor)) {
-      continue;
+    if (iree_string_view_equal(variant->target, physical_identity->target)) {
+      return variant->artifact;
     }
-    if (physical_identity->asic_revision.specified &&
-        physical_identity->asic_revision.value == variant->asic_revision) {
-      *out_artifact = variant->artifact;
-      return iree_ok_status();
-    }
-    *out_requires_qualification |= !physical_identity->asic_revision.specified;
   }
-  return iree_ok_status();
+  return iree_string_view_empty();
 }
 
 iree_status_t iree_hal_amdgpu_device_library_target_candidates_from_agent_isa(
@@ -116,14 +103,12 @@ iree_status_t iree_hal_amdgpu_device_library_target_candidates_from_agent_isa(
   IREE_ASSERT_ARGUMENT(out_candidates);
   memset(out_candidates, 0, sizeof(*out_candidates));
 
-  // A qualified artifact suppresses every fallback ISA for its physical
+  // A target-overlay artifact suppresses every fallback ISA for its physical
   // target. Otherwise a lower-priority generic ISA could reintroduce the
   // incompatible family artifact this variant exists to replace.
-  iree_string_view_t variant_artifact = iree_string_view_empty();
-  bool requires_qualification = false;
-  IREE_RETURN_IF_ERROR(
+  const iree_string_view_t variant_artifact =
       iree_hal_amdgpu_device_library_target_lookup_variant_for_physical_target(
-          physical_identity, &variant_artifact, &requires_qualification));
+          physical_identity);
   if (!iree_string_view_is_empty(variant_artifact)) {
     if (iree_hal_amdgpu_target_identity_equal(physical_identity,
                                               isa_identity)) {
@@ -131,17 +116,6 @@ iree_status_t iree_hal_amdgpu_device_library_target_candidates_from_agent_isa(
           variant_artifact, out_candidates);
     }
     return iree_ok_status();
-  }
-  if (requires_qualification) {
-    char artifact_key_buffer[64] = {0};
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_format_artifact_key(
-        physical_identity, sizeof(artifact_key_buffer), artifact_key_buffer,
-        /*out_buffer_length=*/NULL));
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "physical target `%s` requires ASIC revision qualification for device "
-        "library selection",
-        artifact_key_buffer);
   }
 
   // Try the most specific runtime binary names first. Direct arch names beat

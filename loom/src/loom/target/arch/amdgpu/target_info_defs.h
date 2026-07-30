@@ -461,29 +461,6 @@ typedef struct loom_amdgpu_metadata_string_property_set_t {
   uint16_t count;
 } loom_amdgpu_metadata_string_property_set_t;
 
-typedef struct loom_amdgpu_processor_asic_revision_info_t {
-  // Physical HSA ASIC revision value.
-  uint32_t value;
-  // Canonical human-readable revision name such as `a0`.
-  iree_string_view_t name;
-  // Instruction constraints active for this physical revision.
-  loom_amdgpu_instruction_constraint_bits_t instruction_constraints;
-  // Complete LDS bank-service model set selected for this physical revision.
-  loom_amdgpu_lds_bank_service_model_set_ordinal_t
-      lds_bank_service_model_set_ordinal;
-  // AMDHSA kernel metadata projected by this physical revision.
-  loom_amdgpu_metadata_string_property_set_t kernel_metadata_extensions;
-} loom_amdgpu_processor_asic_revision_info_t;
-
-typedef struct loom_amdgpu_processor_asic_revision_set_t {
-  // Generated finite revision rows for this processor.
-  const loom_amdgpu_processor_asic_revision_info_t* entries;
-  // Number of revision rows in |entries|.
-  uint16_t count;
-  // Revision-row ordinal selected for offline compilation by default.
-  uint16_t default_ordinal;
-} loom_amdgpu_processor_asic_revision_set_t;
-
 typedef struct loom_amdgpu_processor_generic_code_object_info_t {
   // Dense ordinal of the compatible generic processor, or NONE.
   uint16_t processor_ordinal;
@@ -520,7 +497,7 @@ typedef struct loom_amdgpu_processor_kernel_entry_info_t {
 } loom_amdgpu_processor_kernel_entry_info_t;
 
 typedef struct loom_amdgpu_processor_instruction_info_t {
-  // Constraints active for every ASIC revision of this processor.
+  // Constraints active for the processor's same-named base target.
   loom_amdgpu_instruction_constraint_bits_t base_constraints;
 } loom_amdgpu_processor_instruction_info_t;
 
@@ -529,7 +506,7 @@ typedef struct loom_amdgpu_processor_feature_info_t {
   loom_amdgpu_matrix_feature_profile_t matrix;
   // Target-local scheduling and hazard facts for this processor.
   loom_amdgpu_processor_scheduling_bits_t scheduling;
-  // Processor-wide LDS bank-service models shared by every ASIC revision.
+  // LDS bank-service models selected by the processor's base target.
   loom_amdgpu_lds_bank_service_model_set_ordinal_t
       lds_bank_service_model_set_ordinal;
 } loom_amdgpu_processor_feature_info_t;
@@ -554,7 +531,7 @@ typedef struct loom_amdgpu_processor_properties_t {
   loom_amdgpu_processor_kernel_descriptor_info_t kernel_descriptor;
   // Hardware kernel-entry behavior selected for this processor.
   loom_amdgpu_processor_kernel_entry_info_t kernel_entry;
-  // Instruction constraints and revision-feature effects.
+  // Instruction constraints active for the processor's base target.
   loom_amdgpu_processor_instruction_info_t instructions;
   // Instruction and scheduling feature profiles for this processor.
   loom_amdgpu_processor_feature_info_t features;
@@ -568,13 +545,38 @@ typedef struct loom_amdgpu_processor_info_t {
   uint16_t ordinal;
   // AMDHSA target-ID qualification facts for this processor identity.
   loom_amdgpu_processor_target_id_info_t target_id;
-  // Finite physical ASIC revisions and the offline default.
-  loom_amdgpu_processor_asic_revision_set_t asic_revisions;
   // Versioned generic code-object relation for this exact processor identity.
   loom_amdgpu_processor_generic_code_object_info_t generic_code_object;
   // Compiler-semantic properties selected by this processor identity.
   loom_amdgpu_processor_properties_t properties;
 } loom_amdgpu_processor_info_t;
+
+// One exact, generic, or overlay compiler target.
+typedef struct loom_amdgpu_target_info_t {
+  // Canonical target selector such as `gfx1151` or `gfx1250-a0`.
+  iree_string_view_t name;
+  // Numeric selector value used by amdgpu.target.
+  uint32_t target_kind;
+  // Dense ordinal of the backend processor selected by this target.
+  uint16_t processor_ordinal;
+  // Complete instruction constraints active for this target.
+  loom_amdgpu_instruction_constraint_bits_t instruction_constraints;
+  // Complete LDS bank-service model set selected for this target.
+  loom_amdgpu_lds_bank_service_model_set_ordinal_t
+      lds_bank_service_model_set_ordinal;
+  // AMDHSA kernel metadata projected by this target.
+  loom_amdgpu_metadata_string_property_set_t kernel_metadata_extensions;
+} loom_amdgpu_target_info_t;
+
+// One physical device observation mapped to a canonical compiler target.
+typedef struct loom_amdgpu_physical_target_info_t {
+  // Dense ordinal of the HSA-reported processor.
+  uint16_t processor_ordinal;
+  // Physical ASIC revision reported by HSA.
+  uint32_t asic_revision;
+  // Canonical target selector resolved for the physical device.
+  uint32_t target_kind;
+} loom_amdgpu_physical_target_info_t;
 
 typedef struct loom_amdgpu_amdhsa_target_id_t {
   // Processor row selected by the target-id processor component.
@@ -701,6 +703,43 @@ iree_status_t loom_amdgpu_target_info_lookup_processor(
     iree_string_view_t processor,
     const loom_amdgpu_processor_info_t** out_processor);
 
+// Returns the number of known AMDGPU compiler target rows.
+iree_host_size_t loom_amdgpu_target_info_target_count(void);
+
+// Returns the |index|-th known AMDGPU compiler target row, or NULL.
+const loom_amdgpu_target_info_t* loom_amdgpu_target_info_target_at(
+    iree_host_size_t index);
+
+// Finds a compiler target by canonical selector, or NULL.
+const loom_amdgpu_target_info_t* loom_amdgpu_target_info_find_target(
+    iree_string_view_t target);
+
+// Finds a compiler target by amdgpu.target selector value, or NULL.
+const loom_amdgpu_target_info_t* loom_amdgpu_target_info_find_target_by_kind(
+    uint32_t target_kind);
+
+// Returns the backend processor selected by |target|, or NULL.
+const loom_amdgpu_processor_info_t* loom_amdgpu_target_info_target_processor(
+    const loom_amdgpu_target_info_t* target);
+
+// Looks up a compiler target by canonical selector.
+iree_status_t loom_amdgpu_target_info_lookup_target(
+    iree_string_view_t target, const loom_amdgpu_target_info_t** out_target);
+
+// Returns whether |processor| requires ASIC revision to resolve its canonical
+// target.
+bool loom_amdgpu_target_info_requires_physical_resolution(
+    const loom_amdgpu_processor_info_t* processor);
+
+// Resolves an HSA processor and physical ASIC revision to a compiler target.
+//
+// Processors without physical target rows ignore |asic_revision| and resolve
+// to their same-named target. Processors with physical rows reject unknown
+// revisions instead of guessing target semantics.
+iree_status_t loom_amdgpu_target_info_lookup_physical_target(
+    const loom_amdgpu_processor_info_t* processor, uint32_t asic_revision,
+    const loom_amdgpu_target_info_t** out_target);
+
 // Returns true when |effective_processor| refines |required_processor| under
 // AMDGPU's versioned code-object processor relation.
 //
@@ -711,6 +750,16 @@ iree_status_t loom_amdgpu_target_info_lookup_processor(
 bool loom_amdgpu_processor_satisfies_code_object_requirement(
     const loom_amdgpu_processor_info_t* effective_processor,
     const loom_amdgpu_processor_info_t* required_processor);
+
+// Returns true when |effective_target| satisfies |required_target|.
+//
+// Overlay and exact targets satisfy only identical exact requirements. Their
+// backend processors may additionally satisfy a generated generic code-object
+// target. A shared backend processor does not imply exact-target
+// substitutability.
+bool loom_amdgpu_target_satisfies_code_object_requirement(
+    const loom_amdgpu_target_info_t* effective_target,
+    const loom_amdgpu_target_info_t* required_target);
 
 // Looks up a supported AMDGPU target-low descriptor set by key.
 iree_status_t loom_amdgpu_target_info_lookup_descriptor_set(
@@ -725,7 +774,8 @@ iree_status_t loom_amdgpu_target_info_lookup_descriptor_set_by_ordinal(
 // Initializes AMDHSA feature states from generated processor support facts.
 //
 // Supported features are unconstrained and unsupported features are explicit.
-// Physical ASIC revision rules are applied separately.
+// Physical observations resolve to a canonical target before identity
+// construction.
 void loom_amdgpu_amdhsa_feature_states_initialize(
     const loom_amdgpu_processor_info_t* processor,
     loom_amdgpu_amdhsa_feature_states_t* out_features);
@@ -735,20 +785,6 @@ void loom_amdgpu_amdhsa_feature_states_initialize(
 iree_status_t loom_amdgpu_target_info_parse_amdhsa_target_id(
     iree_string_view_t target_id,
     loom_amdgpu_amdhsa_target_id_t* out_target_id);
-
-// Finds the finite physical ASIC revision row selected by |value|, or NULL.
-const loom_amdgpu_processor_asic_revision_info_t*
-loom_amdgpu_target_info_find_asic_revision(
-    const loom_amdgpu_processor_info_t* processor, uint32_t value);
-
-// Looks up the finite physical ASIC revision row selected by |value|.
-//
-// Processors without revision-specific semantics return NULL. A processor with
-// revision rows rejects unknown physical values instead of guessing that a
-// later revision has existing semantics.
-iree_status_t loom_amdgpu_target_info_lookup_asic_revision(
-    const loom_amdgpu_processor_info_t* processor, uint32_t value,
-    const loom_amdgpu_processor_asic_revision_info_t** out_revision);
 
 // Resolves the AMDGPU ELF e_flags implied by |target_id|.
 iree_status_t loom_amdgpu_target_info_amdhsa_target_id_elf_flags(

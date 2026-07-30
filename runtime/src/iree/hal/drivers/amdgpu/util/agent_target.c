@@ -123,14 +123,14 @@ static iree_status_t iree_hal_amdgpu_agent_target_initialize_identity(
   return status;
 }
 
-static iree_status_t iree_hal_amdgpu_agent_target_apply_asic_revision(
+static iree_status_t iree_hal_amdgpu_agent_target_resolve_physical_targets(
     uint32_t asic_revision, iree_hal_amdgpu_agent_target_t* target) {
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < target->isa_count && iree_status_is_ok(status); ++i) {
     iree_hal_amdgpu_agent_isa_target_t* isa_target =
         i == 0 ? &target->primary_isa : &target->additional_isas[i - 1];
-    status = iree_hal_amdgpu_target_identity_apply_asic_revision(
+    status = iree_hal_amdgpu_target_identity_resolve_physical_target(
         asic_revision, &isa_target->identity);
   }
   return status;
@@ -144,7 +144,7 @@ iree_status_t iree_hal_amdgpu_agent_target_initialize(
   IREE_ASSERT_ARGUMENT(out_target);
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_agent_target_initialize_identity(
       agent, isa_count, isa_values, host_allocator, out_target));
-  iree_status_t status = iree_hal_amdgpu_agent_target_apply_asic_revision(
+  iree_status_t status = iree_hal_amdgpu_agent_target_resolve_physical_targets(
       asic_revision, out_target);
   if (!iree_status_is_ok(status)) {
     iree_hal_amdgpu_agent_target_deinitialize(out_target);
@@ -199,28 +199,28 @@ iree_status_t iree_hal_amdgpu_agent_target_query(
 
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_agent_target_initialize_identity(
       agent, isa_list.count, isa_values, host_allocator, out_target));
-  bool requires_asic_revision = false;
+  bool requires_physical_resolution = false;
   for (iree_host_size_t i = 0; i < out_target->isa_count; ++i) {
     const iree_hal_amdgpu_agent_isa_target_t* isa_target =
         iree_hal_amdgpu_agent_target_isa_at(out_target, i);
-    if (iree_hal_amdgpu_target_identity_requires_asic_revision(
+    if (iree_hal_amdgpu_target_identity_requires_physical_resolution(
             &isa_target->identity)) {
-      requires_asic_revision = true;
+      requires_physical_resolution = true;
       break;
     }
   }
 
   iree_status_t status = iree_ok_status();
   uint32_t asic_revision = 0;
-  if (requires_asic_revision) {
+  if (requires_physical_resolution) {
     status = iree_hsa_agent_get_info(
         IREE_LIBHSA(libhsa), agent,
         (hsa_agent_info_t)IREE_HAL_AMDGPU_AGENT_INFO_ASIC_REVISION,
         &asic_revision);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amdgpu_agent_target_apply_asic_revision(asic_revision,
-                                                              out_target);
+    status = iree_hal_amdgpu_agent_target_resolve_physical_targets(
+        asic_revision, out_target);
   }
   if (!iree_status_is_ok(status)) {
     iree_hal_amdgpu_agent_target_deinitialize(out_target);

@@ -14,11 +14,13 @@ typedef enum iree_hal_amdgpu_target_feature_support_bit_e {
 typedef uint32_t iree_hal_amdgpu_target_feature_support_flags_t;
 
 typedef struct iree_hal_amdgpu_target_mapping_t {
-  // Exact or generic HSA ISA processor name.
+  // Canonical exact, generic, or overlay target selector.
+  iree_string_view_t target;
+  // Backend processor selected by |target|.
   iree_string_view_t processor;
-  // Code-object processor selected for an exact processor.
+  // Code-object processor selected for an exact target.
   iree_string_view_t code_object_processor;
-  // First generic code-object version supporting an exact processor.
+  // First generic code-object version supporting an exact target.
   uint32_t generic_introduction_version;
   // Bitset of iree_hal_amdgpu_target_feature_support_bit_t values.
   iree_hal_amdgpu_target_feature_support_flags_t supported_features;
@@ -26,20 +28,23 @@ typedef struct iree_hal_amdgpu_target_mapping_t {
   iree_hal_amdgpu_wavefront_size_support_t wavefront;
 } iree_hal_amdgpu_target_mapping_t;
 
-typedef struct iree_hal_amdgpu_asic_revision_mapping_t {
-  // Exact processor owning this revision row.
+typedef struct iree_hal_amdgpu_physical_target_mapping_t {
+  // HSA ISA processor owning this physical target mapping.
   iree_string_view_t processor;
-  // Structured revision identity.
-  iree_hal_amdgpu_asic_revision_t revision;
-} iree_hal_amdgpu_asic_revision_mapping_t;
+  // Physical ASIC revision reported by HSA.
+  uint32_t asic_revision;
+  // Canonical target selected by |processor| and |asic_revision|.
+  iree_string_view_t target;
+} iree_hal_amdgpu_physical_target_mapping_t;
 
 static const iree_hal_amdgpu_target_mapping_t
     iree_hal_amdgpu_target_mappings[] = {
-#define IREE_AMDGPU_TARGET_MAPPING(processor, code_object_processor,           \
+#define IREE_AMDGPU_TARGET_MAPPING(target, processor, code_object_processor,   \
                                    generic_introduction_version,               \
                                    supported_features, default_wavefront_size, \
                                    explicit_supported_wavefront_sizes)         \
-  {IREE_SVL(processor),                                                        \
+  {IREE_SVL(target),                                                           \
+   IREE_SVL(processor),                                                        \
    IREE_SVL(code_object_processor),                                            \
    generic_introduction_version,                                               \
    supported_features,                                                         \
@@ -48,12 +53,12 @@ static const iree_hal_amdgpu_target_mapping_t
 #undef IREE_AMDGPU_TARGET_MAPPING
 };
 
-static const iree_hal_amdgpu_asic_revision_mapping_t
-    iree_hal_amdgpu_asic_revision_mappings[] = {
-#define IREE_AMDGPU_ASIC_REVISION(processor, value, name) \
-  {IREE_SVL(processor), {true, value, IREE_SVL(name)}},
+static const iree_hal_amdgpu_physical_target_mapping_t
+    iree_hal_amdgpu_physical_target_mappings[] = {
+#define IREE_AMDGPU_PHYSICAL_TARGET(processor, asic_revision, target) \
+  {IREE_SVL(processor), asic_revision, IREE_SVL(target)},
 #include "iree/hal/executable/amdgpu/target_id_map.inl"
-#undef IREE_AMDGPU_ASIC_REVISION
+#undef IREE_AMDGPU_PHYSICAL_TARGET
 };
 
 static bool iree_hal_amdgpu_parse_decimal_digit(char c, uint32_t* out_value) {
@@ -92,12 +97,6 @@ static bool iree_hal_amdgpu_parse_decimal_number(iree_string_view_t value,
   return true;
 }
 
-static bool iree_hal_amdgpu_gfxip_version_equal(
-    iree_hal_amdgpu_gfxip_version_t lhs, iree_hal_amdgpu_gfxip_version_t rhs) {
-  return lhs.major == rhs.major && lhs.minor == rhs.minor &&
-         lhs.stepping == rhs.stepping;
-}
-
 static bool iree_hal_amdgpu_parse_exact_processor(
     iree_string_view_t processor,
     iree_hal_amdgpu_gfxip_version_t* out_version) {
@@ -134,53 +133,38 @@ static bool iree_hal_amdgpu_parse_exact_processor(
 }
 
 static const iree_hal_amdgpu_target_mapping_t*
-iree_hal_amdgpu_target_lookup_mapping(iree_string_view_t processor) {
+iree_hal_amdgpu_target_lookup_mapping(iree_string_view_t target) {
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(iree_hal_amdgpu_target_mappings); ++i) {
-    if (iree_string_view_equal(processor,
-                               iree_hal_amdgpu_target_mappings[i].processor)) {
+    if (iree_string_view_equal(target,
+                               iree_hal_amdgpu_target_mappings[i].target)) {
       return &iree_hal_amdgpu_target_mappings[i];
     }
   }
   return NULL;
 }
 
-static const iree_hal_amdgpu_asic_revision_t*
-iree_hal_amdgpu_target_find_asic_revision_by_value(iree_string_view_t processor,
-                                                   uint32_t value) {
+static const iree_hal_amdgpu_physical_target_mapping_t*
+iree_hal_amdgpu_target_find_physical_mapping(iree_string_view_t processor,
+                                             uint32_t asic_revision) {
   for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(iree_hal_amdgpu_asic_revision_mappings); ++i) {
-    const iree_hal_amdgpu_asic_revision_mapping_t* mapping =
-        &iree_hal_amdgpu_asic_revision_mappings[i];
+       i < IREE_ARRAYSIZE(iree_hal_amdgpu_physical_target_mappings); ++i) {
+    const iree_hal_amdgpu_physical_target_mapping_t* mapping =
+        &iree_hal_amdgpu_physical_target_mappings[i];
     if (iree_string_view_equal(processor, mapping->processor) &&
-        mapping->revision.value == value) {
-      return &mapping->revision;
+        mapping->asic_revision == asic_revision) {
+      return mapping;
     }
   }
   return NULL;
 }
 
-static const iree_hal_amdgpu_asic_revision_t*
-iree_hal_amdgpu_target_find_asic_revision_by_name(iree_string_view_t processor,
-                                                  iree_string_view_t name) {
-  for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(iree_hal_amdgpu_asic_revision_mappings); ++i) {
-    const iree_hal_amdgpu_asic_revision_mapping_t* mapping =
-        &iree_hal_amdgpu_asic_revision_mappings[i];
-    if (iree_string_view_equal(processor, mapping->processor) &&
-        iree_string_view_equal(name, mapping->revision.name)) {
-      return &mapping->revision;
-    }
-  }
-  return NULL;
-}
-
-static bool iree_hal_amdgpu_target_has_asic_revisions(
+static bool iree_hal_amdgpu_target_has_physical_mappings(
     iree_string_view_t processor) {
   for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(iree_hal_amdgpu_asic_revision_mappings); ++i) {
+       i < IREE_ARRAYSIZE(iree_hal_amdgpu_physical_target_mappings); ++i) {
     if (iree_string_view_equal(
-            processor, iree_hal_amdgpu_asic_revision_mappings[i].processor)) {
+            processor, iree_hal_amdgpu_physical_target_mappings[i].processor)) {
       return true;
     }
   }
@@ -204,7 +188,7 @@ iree_hal_amdgpu_target_identity_feature_state(
 static void iree_hal_amdgpu_target_identity_apply_known_feature_support(
     iree_hal_amdgpu_target_identity_t* identity) {
   const iree_hal_amdgpu_target_mapping_t* mapping =
-      iree_hal_amdgpu_target_lookup_mapping(identity->processor);
+      iree_hal_amdgpu_target_lookup_mapping(identity->target);
   if (mapping == NULL) return;
 
   if (identity->amdhsa_features.sramecc ==
@@ -264,6 +248,7 @@ static iree_status_t iree_hal_amdgpu_target_identity_parse_processor_name(
                             "AMDGPU target ID has an empty processor name");
   }
 
+  out_identity->target = processor;
   out_identity->processor = processor;
   if (iree_hal_amdgpu_parse_generic_processor(processor,
                                               &out_identity->version)) {
@@ -278,6 +263,21 @@ static iree_status_t iree_hal_amdgpu_target_identity_parse_processor_name(
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                           "unsupported AMDGPU target processor syntax: %.*s",
                           (int)processor.size, processor.data);
+}
+
+static iree_status_t iree_hal_amdgpu_target_identity_parse_target_name(
+    iree_string_view_t target,
+    iree_hal_amdgpu_target_identity_t* out_identity) {
+  const iree_hal_amdgpu_target_mapping_t* mapping =
+      iree_hal_amdgpu_target_lookup_mapping(target);
+  if (mapping == NULL) {
+    return iree_hal_amdgpu_target_identity_parse_processor_name(target,
+                                                                out_identity);
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_parse_processor_name(
+      mapping->processor, out_identity));
+  out_identity->target = mapping->target;
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amdgpu_target_identity_parse_feature(
@@ -313,7 +313,7 @@ static iree_status_t iree_hal_amdgpu_target_identity_parse_feature(
                             (int)feature.size, feature.data);
   }
   const iree_hal_amdgpu_target_mapping_t* mapping =
-      iree_hal_amdgpu_target_lookup_mapping(identity->processor);
+      iree_hal_amdgpu_target_lookup_mapping(identity->target);
   if (mapping != NULL &&
       !iree_any_bit_set(mapping->supported_features, feature_support)) {
     return iree_make_status(
@@ -333,25 +333,35 @@ static iree_status_t iree_hal_amdgpu_target_identity_parse_feature(
   return iree_ok_status();
 }
 
+typedef enum iree_hal_amdgpu_target_name_kind_e {
+  IREE_HAL_AMDGPU_TARGET_NAME_KIND_TARGET = 0,
+  IREE_HAL_AMDGPU_TARGET_NAME_KIND_PROCESSOR,
+} iree_hal_amdgpu_target_name_kind_t;
+
 static iree_status_t iree_hal_amdgpu_target_identity_parse_bare(
-    iree_string_view_t value, bool allow_asic_revision,
+    iree_string_view_t value, iree_hal_amdgpu_target_name_kind_t name_kind,
     iree_hal_amdgpu_target_identity_t* out_identity) {
   memset(out_identity, 0, sizeof(*out_identity));
   out_identity->amdhsa_features.sramecc =
       IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY;
   out_identity->amdhsa_features.xnack =
       IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY;
-  iree_string_view_t processor = value;
+  iree_string_view_t name = value;
   iree_string_view_t coordinates = iree_string_view_empty();
-  if (iree_string_view_split(value, ':', &processor, &coordinates) != -1) {
+  if (iree_string_view_split(value, ':', &name, &coordinates) != -1) {
     if (iree_string_view_is_empty(coordinates) ||
         value.data[value.size - 1] == ':') {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "AMDGPU target coordinate is empty");
     }
   }
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_parse_processor_name(
-      processor, out_identity));
+  if (name_kind == IREE_HAL_AMDGPU_TARGET_NAME_KIND_PROCESSOR) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_parse_processor_name(
+        name, out_identity));
+  } else {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdgpu_target_identity_parse_target_name(name, out_identity));
+  }
 
   while (!iree_string_view_is_empty(coordinates)) {
     iree_string_view_t coordinate = iree_string_view_empty();
@@ -360,33 +370,8 @@ static iree_status_t iree_hal_amdgpu_target_identity_parse_bare(
                                &remaining_coordinates) == -1) {
       coordinate = coordinates;
     }
-    iree_string_view_t revision_name = coordinate;
-    if (iree_string_view_consume_prefix(&revision_name,
-                                        IREE_SV("asic-revision="))) {
-      if (!allow_asic_revision) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "ASIC revision is not part of an AMDHSA target ID");
-      }
-      if (out_identity->asic_revision.specified) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "duplicate AMDGPU ASIC revision coordinate");
-      }
-      const iree_hal_amdgpu_asic_revision_t* revision =
-          iree_hal_amdgpu_target_find_asic_revision_by_name(
-              out_identity->processor, revision_name);
-      if (revision == NULL) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "AMDGPU processor '%.*s' has no ASIC revision '%.*s'",
-            (int)out_identity->processor.size, out_identity->processor.data,
-            (int)revision_name.size, revision_name.data);
-      }
-      out_identity->asic_revision = *revision;
-    } else {
-      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_parse_feature(
-          coordinate, out_identity));
-    }
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_parse_feature(
+        coordinate, out_identity));
     coordinates = remaining_coordinates;
   }
   iree_hal_amdgpu_target_identity_apply_known_feature_support(out_identity);
@@ -413,7 +398,7 @@ iree_hal_amdgpu_target_identity_parse_artifact_key(
     iree_string_view_t value, iree_hal_amdgpu_target_identity_t* out_identity) {
   IREE_ASSERT_ARGUMENT(out_identity);
   return iree_hal_amdgpu_target_identity_parse_bare(
-      value, /*allow_asic_revision=*/true, out_identity);
+      value, IREE_HAL_AMDGPU_TARGET_NAME_KIND_TARGET, out_identity);
 }
 
 IREE_API_EXPORT iree_status_t
@@ -426,43 +411,42 @@ iree_hal_amdgpu_target_identity_parse_hsa_isa_name(
                             "AMDGPU HSA ISA name requires the AMDHSA prefix");
   }
   return iree_hal_amdgpu_target_identity_parse_bare(
-      value, /*allow_asic_revision=*/false, out_identity);
+      value, IREE_HAL_AMDGPU_TARGET_NAME_KIND_PROCESSOR, out_identity);
 }
 
-IREE_API_EXPORT bool iree_hal_amdgpu_target_identity_requires_asic_revision(
+IREE_API_EXPORT bool
+iree_hal_amdgpu_target_identity_requires_physical_resolution(
     const iree_hal_amdgpu_target_identity_t* identity) {
   IREE_ASSERT_ARGUMENT(identity);
-  return iree_hal_amdgpu_target_has_asic_revisions(identity->processor);
+  return iree_hal_amdgpu_target_has_physical_mappings(identity->processor);
 }
 
 IREE_API_EXPORT iree_status_t
-iree_hal_amdgpu_target_identity_apply_asic_revision(
+iree_hal_amdgpu_target_identity_resolve_physical_target(
     uint32_t asic_revision, iree_hal_amdgpu_target_identity_t* identity) {
   IREE_ASSERT_ARGUMENT(identity);
-  if (!iree_hal_amdgpu_target_has_asic_revisions(identity->processor)) {
+  if (!iree_hal_amdgpu_target_has_physical_mappings(identity->processor)) {
     return iree_ok_status();
   }
 
-  const iree_hal_amdgpu_asic_revision_t* revision =
-      iree_hal_amdgpu_target_find_asic_revision_by_value(identity->processor,
-                                                         asic_revision);
-  if (revision == NULL) {
+  const iree_hal_amdgpu_physical_target_mapping_t* mapping =
+      iree_hal_amdgpu_target_find_physical_mapping(identity->processor,
+                                                   asic_revision);
+  if (mapping == NULL) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU processor '%.*s' has unknown physical ASIC revision %u",
         (int)identity->processor.size, identity->processor.data, asic_revision);
   }
-  if (identity->asic_revision.specified &&
-      identity->asic_revision.value != revision->value) {
+  if (!iree_string_view_equal(identity->target, identity->processor) &&
+      !iree_string_view_equal(identity->target, mapping->target)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU target identity ASIC revision '%.*s' contradicts physical "
-        "revision '%.*s'",
-        (int)identity->asic_revision.name.size,
-        identity->asic_revision.name.data, (int)revision->name.size,
-        revision->name.data);
+        "AMDGPU target '%.*s' contradicts physical target '%.*s'",
+        (int)identity->target.size, identity->target.data,
+        (int)mapping->target.size, mapping->target.data);
   }
-  identity->asic_revision = *revision;
+  identity->target = mapping->target;
   return iree_ok_status();
 }
 
@@ -477,9 +461,7 @@ IREE_API_EXPORT bool iree_hal_amdgpu_target_identity_equal(
          lhs->generic_version == rhs->generic_version &&
          lhs->amdhsa_features.sramecc == rhs->amdhsa_features.sramecc &&
          lhs->amdhsa_features.xnack == rhs->amdhsa_features.xnack &&
-         lhs->asic_revision.specified == rhs->asic_revision.specified &&
-         (!lhs->asic_revision.specified ||
-          lhs->asic_revision.value == rhs->asic_revision.value) &&
+         iree_string_view_equal(lhs->target, rhs->target) &&
          iree_string_view_equal(lhs->processor, rhs->processor);
 }
 
@@ -526,9 +508,9 @@ iree_hal_amdgpu_target_identity_format_artifact_key(
     iree_host_size_t buffer_capacity, char* buffer,
     iree_host_size_t* out_buffer_length) {
   IREE_ASSERT_ARGUMENT(identity);
-  if (IREE_UNLIKELY(iree_string_view_is_empty(identity->processor))) {
+  if (IREE_UNLIKELY(iree_string_view_is_empty(identity->target))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU target identity has no processor name");
+                            "AMDGPU target identity has no target selector");
   }
 
   iree_hal_amdgpu_target_identity_formatter_t formatter = {
@@ -538,17 +520,11 @@ iree_hal_amdgpu_target_identity_format_artifact_key(
   };
   if (buffer != NULL && buffer_capacity > 0) buffer[0] = 0;
   iree_hal_amdgpu_target_identity_formatter_append(&formatter,
-                                                   identity->processor);
+                                                   identity->target);
   iree_hal_amdgpu_target_identity_formatter_append_feature(
       &formatter, IREE_SV("sramecc"), identity->amdhsa_features.sramecc);
   iree_hal_amdgpu_target_identity_formatter_append_feature(
       &formatter, IREE_SV("xnack"), identity->amdhsa_features.xnack);
-  if (identity->asic_revision.specified) {
-    iree_hal_amdgpu_target_identity_formatter_append(
-        &formatter, IREE_SV(":asic-revision="));
-    iree_hal_amdgpu_target_identity_formatter_append(
-        &formatter, identity->asic_revision.name);
-  }
   if (out_buffer_length != NULL) {
     *out_buffer_length = formatter.length;
   }
@@ -560,10 +536,10 @@ iree_hal_amdgpu_target_identity_format_artifact_key(
 }
 
 static bool iree_hal_amdgpu_target_lookup_code_object_processor(
-    iree_string_view_t exact_processor,
+    iree_string_view_t exact_target,
     iree_string_view_t* out_code_object_processor) {
   const iree_hal_amdgpu_target_mapping_t* mapping =
-      iree_hal_amdgpu_target_lookup_mapping(exact_processor);
+      iree_hal_amdgpu_target_lookup_mapping(exact_target);
   if (mapping == NULL) return false;
   *out_code_object_processor = mapping->code_object_processor;
   return true;
@@ -583,7 +559,7 @@ iree_hal_amdgpu_target_identity_project_code_object(
                             "exact processor target ID");
   }
   iree_string_view_t code_object_processor = exact_identity->processor;
-  iree_hal_amdgpu_target_lookup_code_object_processor(exact_identity->processor,
+  iree_hal_amdgpu_target_lookup_code_object_processor(exact_identity->target,
                                                       &code_object_processor);
   if (iree_string_view_equal(code_object_processor,
                              exact_identity->processor)) {
@@ -593,8 +569,6 @@ iree_hal_amdgpu_target_identity_project_code_object(
         code_object_processor, out_code_object_identity));
   }
   out_code_object_identity->amdhsa_features = exact_identity->amdhsa_features;
-  out_code_object_identity->asic_revision =
-      (iree_hal_amdgpu_asic_revision_t){0};
   return iree_ok_status();
 }
 
@@ -622,7 +596,7 @@ iree_hal_amdgpu_target_identity_lookup_wavefront_size_support(
     return false;
   }
   const iree_hal_amdgpu_target_mapping_t* mapping =
-      iree_hal_amdgpu_target_lookup_mapping(exact_identity->processor);
+      iree_hal_amdgpu_target_lookup_mapping(exact_identity->target);
   if (mapping == NULL) return false;
   *out_support = mapping->wavefront;
   return true;
@@ -649,15 +623,15 @@ iree_hal_amdgpu_target_identity_check_compatible(
       IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_COMPATIBLE;
   if (artifact_identity->kind == IREE_HAL_AMDGPU_TARGET_KIND_EXACT) {
     if (agent_identity->kind != IREE_HAL_AMDGPU_TARGET_KIND_EXACT ||
-        !iree_hal_amdgpu_gfxip_version_equal(artifact_identity->version,
-                                             agent_identity->version)) {
-      compatibility |= IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_PROCESSOR;
+        !iree_string_view_equal(artifact_identity->target,
+                                agent_identity->target)) {
+      compatibility |= IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_TARGET;
     }
   } else {
     uint32_t minimum_generic_version = 1;
     if (agent_identity->kind == IREE_HAL_AMDGPU_TARGET_KIND_EXACT) {
       const iree_hal_amdgpu_target_mapping_t* mapping =
-          iree_hal_amdgpu_target_lookup_mapping(agent_identity->processor);
+          iree_hal_amdgpu_target_lookup_mapping(agent_identity->target);
       if (mapping == NULL ||
           !iree_string_view_equal(artifact_identity->processor,
                                   mapping->code_object_processor)) {
@@ -686,13 +660,6 @@ iree_hal_amdgpu_target_identity_check_compatible(
           artifact_identity->amdhsa_features.xnack,
           agent_identity->amdhsa_features.xnack)) {
     compatibility |= IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_XNACK;
-  }
-  if (artifact_identity->asic_revision.specified &&
-      (!agent_identity->asic_revision.specified ||
-       artifact_identity->asic_revision.value !=
-           agent_identity->asic_revision.value)) {
-    compatibility |=
-        IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_ASIC_REVISION;
   }
   return compatibility;
 }
@@ -723,11 +690,10 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_target_compatibility_format(
     iree_hal_amdgpu_target_compatibility_formatter_append_reason(
         &formatter, &reason_count, IREE_SV("compatible"));
   }
-  if (iree_any_bit_set(
-          compatibility,
-          IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_PROCESSOR)) {
+  if (iree_any_bit_set(compatibility,
+                       IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_TARGET)) {
     iree_hal_amdgpu_target_compatibility_formatter_append_reason(
-        &formatter, &reason_count, IREE_SV("processor"));
+        &formatter, &reason_count, IREE_SV("target"));
   }
   if (iree_any_bit_set(
           compatibility,
@@ -750,12 +716,6 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_target_compatibility_format(
                        IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_XNACK)) {
     iree_hal_amdgpu_target_compatibility_formatter_append_reason(
         &formatter, &reason_count, IREE_SV("xnack"));
-  }
-  if (iree_any_bit_set(
-          compatibility,
-          IREE_HAL_AMDGPU_TARGET_COMPATIBILITY_MISMATCH_ASIC_REVISION)) {
-    iree_hal_amdgpu_target_compatibility_formatter_append_reason(
-        &formatter, &reason_count, IREE_SV("ASIC revision"));
   }
   if (out_buffer_length != NULL) {
     *out_buffer_length = formatter.length;

@@ -28,8 +28,9 @@ static const char kSourceText[] =
     "}\n";
 
 typedef struct emit_amdgpu_offline_state_t {
-  // AMDGPU processor key, such as `gfx11-generic`, `gfx1151`, or `gfx942`.
-  const char* processor;
+  // AMDGPU target selector, such as `gfx11-generic`, `gfx1250-a0`, or
+  // `gfx942`.
+  const char* target;
 
   // Optional output path supplied by the caller.
   const char* output_path;
@@ -52,7 +53,7 @@ typedef struct emit_amdgpu_offline_state_t {
   // Mutable module compiled and emitted by this invocation.
   loomc_module_t* module;
 
-  // Offline AMDGPU processor target profile.
+  // Offline AMDGPU target profile.
   loomc_target_profile_t* target_profile;
 
   // Invocation-ready target selection derived from the profile.
@@ -91,12 +92,11 @@ static void print_result_diagnostics(const loomc_result_t* result) {
 
 static void print_usage(FILE* file) {
   fprintf(file,
-          "Usage: emit_amdgpu_offline [processor [output.hsaco "
+          "Usage: emit_amdgpu_offline [target [output.hsaco "
           "[manifest.json]]]\n");
-  fprintf(
-      file,
-      "  processor    AMDGPU processor key, such as gfx11-generic, gfx1151, "
-      "or gfx942.\n");
+  fprintf(file,
+          "  target       AMDGPU target selector, such as gfx11-generic, "
+          "gfx1250-a0, or gfx942.\n");
   fprintf(file,
           "  output.hsaco Optional path for the emitted AMDGPU HSACO ELF "
           "artifact.\n");
@@ -104,15 +104,15 @@ static void print_usage(FILE* file) {
           "  manifest.json Optional path for the emitted artifact manifest "
           "JSON sidecar.\n");
   fprintf(file,
-          "Omitting processor uses gfx11-generic. The example always compiles "
+          "Omitting target uses gfx11-generic. The example always compiles "
           "the embedded targetless_store_i32 kernel.\n");
 }
 
 static void emit_amdgpu_offline_state_initialize(
-    emit_amdgpu_offline_state_t* state, const char* processor,
+    emit_amdgpu_offline_state_t* state, const char* target,
     const char* output_path, const char* manifest_output_path) {
   memset(state, 0, sizeof(*state));
-  state->processor = processor;
+  state->target = target;
   state->output_path = output_path;
   state->manifest_output_path = manifest_output_path;
 }
@@ -210,7 +210,7 @@ static loomc_status_t create_target_profile_and_selection(
       .identifier = loomc_make_cstring_view("offline-amdgpu"),
       .identity =
           {
-              .processor = loomc_make_cstring_view(state->processor),
+              .target = loomc_make_cstring_view(state->target),
           },
   };
   loomc_status_t status = loomc_target_profile_create_amdgpu(
@@ -424,9 +424,9 @@ static loomc_status_t summarize_and_maybe_write_artifact(
 }
 
 static loomc_status_t run_emit_amdgpu_offline_example(
-    const char* processor, const char* output_path, const char* manifest_path) {
+    const char* target, const char* output_path, const char* manifest_path) {
   emit_amdgpu_offline_state_t state;
-  emit_amdgpu_offline_state_initialize(&state, processor, output_path,
+  emit_amdgpu_offline_state_initialize(&state, target, output_path,
                                        manifest_path);
 
   loomc_status_t status = create_resources(&state);
@@ -461,11 +461,11 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  const char* processor = argc > 1 ? argv[1] : "gfx11-generic";
+  const char* target = argc > 1 ? argv[1] : "gfx11-generic";
   const char* output_path = argc > 2 ? argv[2] : NULL;
   const char* manifest_path = argc > 3 ? argv[3] : NULL;
   loomc_status_t status =
-      run_emit_amdgpu_offline_example(processor, output_path, manifest_path);
+      run_emit_amdgpu_offline_example(target, output_path, manifest_path);
   if (loomc_status_is_ok(status)) {
     return 0;
   }

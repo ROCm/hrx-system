@@ -23,25 +23,33 @@ from pathlib import Path
 
 if __package__:
     from .target_map_data import (
-        AMDGPU_DEVICE_BINARY_VARIANTS,
         AMDGPU_EXACT_TARGET_INFOS,
         AMDGPU_GENERIC_CODE_OBJECT_INFOS,
+        AMDGPU_PHYSICAL_TARGET_INFOS,
+        AMDGPU_TARGET_OVERLAY_INFOS,
         TARGET_ID_FEATURE_SRAMECC,
         TARGET_ID_FEATURE_XNACK,
         AmdgpuDeviceBinaryTarget,
         target_id_features_for_processor,
         validate_target_map_data,
     )
+    from .target_map_data import (
+        target_processor as _target_processor,
+    )
 else:
     from target_map_data import (
-        AMDGPU_DEVICE_BINARY_VARIANTS,
         AMDGPU_EXACT_TARGET_INFOS,
         AMDGPU_GENERIC_CODE_OBJECT_INFOS,
+        AMDGPU_PHYSICAL_TARGET_INFOS,
+        AMDGPU_TARGET_OVERLAY_INFOS,
         TARGET_ID_FEATURE_SRAMECC,
         TARGET_ID_FEATURE_XNACK,
         AmdgpuDeviceBinaryTarget,
         target_id_features_for_processor,
         validate_target_map_data,
+    )
+    from target_map_data import (
+        target_processor as _target_processor,
     )
 
 DEFAULT_TARGET_SELECTIONS = (
@@ -228,6 +236,11 @@ def exact_targets():
     return [info.exact_processor for info in AMDGPU_EXACT_TARGET_INFOS]
 
 
+def target_processor(target):
+    """Returns the backend processor selected by a canonical target."""
+    return _target_processor(target)
+
+
 def code_object_targets():
     values = []
     for info in AMDGPU_EXACT_TARGET_INFOS:
@@ -247,7 +260,7 @@ def device_binary_targets():
             values.append(
                 AmdgpuDeviceBinaryTarget(
                     name=info.code_object_processor,
-                    architecture=info.code_object_processor,
+                    processor=info.code_object_processor,
                 )
             )
             names.add(info.code_object_processor)
@@ -267,9 +280,14 @@ def device_binary_target(name):
 
 def device_binary_variants_for_exact(exact_target):
     return [
-        variant
-        for variant in AMDGPU_DEVICE_BINARY_VARIANTS
-        if any(match.processor == exact_target for match in variant.target_matches)
+        AmdgpuDeviceBinaryTarget(
+            name=overlay.target,
+            processor=exact_target,
+            compile_options=overlay.compile_options,
+            link_options=overlay.link_options,
+        )
+        for overlay in AMDGPU_TARGET_OVERLAY_INFOS
+        if overlay.processor == exact_target
     ]
 
 
@@ -285,6 +303,7 @@ def expand_device_binary_target_selections(selections):
     """Expands public target selectors to ordered device-binary target names."""
     exact = set(exact_targets())
     code_objects = set(code_object_targets())
+    overlays = {overlay.target for overlay in AMDGPU_TARGET_OVERLAY_INFOS}
     exact_to_code_object = {
         info.exact_processor: info.code_object_processor
         for info in AMDGPU_EXACT_TARGET_INFOS
@@ -303,7 +322,9 @@ def expand_device_binary_target_selections(selections):
         append_unique(expanded_targets, [exact_to_code_object[exact_target]])
 
     for selection in selections:
-        if selection in code_objects:
+        if selection in overlays:
+            append_unique(expanded_targets, [selection])
+        elif selection in code_objects:
             for exact_target in exact_targets_for_code_object(selection):
                 append_exact(exact_target)
         elif selection in exact:
@@ -312,7 +333,7 @@ def expand_device_binary_target_selections(selections):
             for exact_target in families[selection]:
                 append_exact(exact_target)
         else:
-            available = sorted(code_objects | exact | set(families))
+            available = sorted(overlays | code_objects | exact | set(families))
             raise ValueError(
                 "unknown AMDGPU target selector '{}'. Available selectors "
                 "include: {}".format(selection, ", ".join(available))
@@ -351,20 +372,9 @@ def validate_target_map():
         raise ValueError("duplicate AMDGPU target families in target map")
 
     exact_set = set(exact)
-    code_object_set = set(code_object_targets())
     device_binary_names = device_binary_target_names()
     if len(set(device_binary_names)) != len(device_binary_names):
         raise ValueError("duplicate AMDGPU device binary targets in target map")
-    public_selectors = exact_set | code_object_set | set(families)
-    variant_name_list = [variant.name for variant in AMDGPU_DEVICE_BINARY_VARIANTS]
-    variant_names = set(variant_name_list)
-    conflicting_variant_names = sorted(variant_names & public_selectors)
-    if conflicting_variant_names:
-        raise ValueError(
-            "device binary variants conflict with public target selectors: {}".format(
-                ", ".join(conflicting_variant_names)
-            )
-        )
     elf_machine_feature_targets = set(ELF_MACHINE_FEATURE_SUPPORT)
     elf_machine_processors = [processor for _, processor in ELF_MACHINE_PROCESSORS]
     elf_machine_processor_set = set(elf_machine_processors)
@@ -652,7 +662,7 @@ def render_target_id_inl(repo_root):
         generated_header("//", output_path),
         "//",
         "// Define IREE_AMDGPU_TARGET_MAPPING and/or",
-        "// IREE_AMDGPU_ASIC_REVISION before including this file.",
+        "// IREE_AMDGPU_PHYSICAL_TARGET before including this file.",
         "",
         "// clang-format off",
         "#if defined(IREE_AMDGPU_TARGET_MAPPING)",
@@ -663,24 +673,48 @@ def render_target_id_inl(repo_root):
     }
     processor_info_rows, supports_wavefront_size = import_loom_target_info(repo_root)
     processor_infos = {info.processor: info for info in processor_info_rows}
-    target_rows = [
-        (
-            info.exact_processor,
-            info.code_object_processor,
-            info.generic_introduction_version,
-            info.target_id_features,
-        )
-        for info in AMDGPU_EXACT_TARGET_INFOS
-    ] + [
-        (
-            info.processor,
-            info.processor,
-            0,
-            info.target_id_features,
-        )
-        for info in AMDGPU_GENERIC_CODE_OBJECT_INFOS
-    ]
+    target_rows = (
+        [
+            (
+                info.exact_processor,
+                info.exact_processor,
+                info.code_object_processor,
+                info.generic_introduction_version,
+                info.target_id_features,
+            )
+            for info in AMDGPU_EXACT_TARGET_INFOS
+        ]
+        + [
+            (
+                info.processor,
+                info.processor,
+                info.processor,
+                0,
+                info.target_id_features,
+            )
+            for info in AMDGPU_GENERIC_CODE_OBJECT_INFOS
+        ]
+        + [
+            (
+                overlay.target,
+                processor,
+                exact_info.code_object_processor,
+                exact_info.generic_introduction_version,
+                exact_info.target_id_features,
+            )
+            for overlay in AMDGPU_TARGET_OVERLAY_INFOS
+            for processor in (overlay.processor,)
+            for exact_info in (
+                next(
+                    info
+                    for info in AMDGPU_EXACT_TARGET_INFOS
+                    if info.exact_processor == processor
+                ),
+            )
+        ]
+    )
     for (
+        target,
         processor,
         code_object_processor,
         generic_introduction_version,
@@ -691,7 +725,8 @@ def render_target_id_inl(repo_root):
         if not feature_flags:
             feature_flags = "IREE_HAL_AMDGPU_TARGET_FEATURE_SUPPORT_NONE"
         lines.append(
-            'IREE_AMDGPU_TARGET_MAPPING("{}", "{}", {}, {}, {}, {})'.format(
+            'IREE_AMDGPU_TARGET_MAPPING("{}", "{}", "{}", {}, {}, {}, {})'.format(
+                target,
                 processor,
                 code_object_processor,
                 generic_introduction_version,
@@ -704,19 +739,18 @@ def render_target_id_inl(repo_root):
         [
             "#endif  // IREE_AMDGPU_TARGET_MAPPING",
             "",
-            "#if defined(IREE_AMDGPU_ASIC_REVISION)",
+            "#if defined(IREE_AMDGPU_PHYSICAL_TARGET)",
         ]
     )
-    for info in AMDGPU_EXACT_TARGET_INFOS:
-        for revision in info.asic_revisions:
-            lines.append(
-                'IREE_AMDGPU_ASIC_REVISION("{}", {}, "{}")'.format(
-                    info.exact_processor,
-                    revision.value,
-                    revision.name,
-                )
+    for info in AMDGPU_PHYSICAL_TARGET_INFOS:
+        lines.append(
+            'IREE_AMDGPU_PHYSICAL_TARGET("{}", {}, "{}")'.format(
+                info.processor,
+                info.asic_revision,
+                info.target,
             )
-    lines.extend(["#endif  // IREE_AMDGPU_ASIC_REVISION", ""])
+        )
+    lines.extend(["#endif  // IREE_AMDGPU_PHYSICAL_TARGET", ""])
     return "\n".join(lines)
 
 
@@ -728,20 +762,18 @@ def render_device_library_target_map_inl():
         generated_header("//", output_path),
         "//",
         "// Define IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT(",
-        "//     artifact, processor, asic_revision) before including this file.",
+        "//     artifact, target) before including this file.",
         "",
         "// clang-format off",
         "#if defined(IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT)",
     ]
-    for variant in AMDGPU_DEVICE_BINARY_VARIANTS:
-        for target_match in variant.target_matches:
-            lines.append(
-                'IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT("{}", "{}", {})'.format(
-                    variant.name,
-                    target_match.processor,
-                    target_match.asic_revision,
-                )
+    for overlay in AMDGPU_TARGET_OVERLAY_INFOS:
+        lines.append(
+            'IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT("{}", "{}")'.format(
+                overlay.target,
+                overlay.target,
             )
+        )
     lines.extend(
         [
             "#endif  // IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT",

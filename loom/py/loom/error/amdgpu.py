@@ -1000,24 +1000,6 @@ ERR_AMDGPU_045 = ErrorDef(
     ),
 )
 
-# ERR_AMDGPU_046: ASIC revision is not valid for the selected processor.
-ERR_AMDGPU_046 = ErrorDef(
-    domain=ErrorDomain.AMDGPU,
-    code=46,
-    severity=Severity.ERROR,
-    summary="ASIC revision is not valid for the selected processor.",
-    message=(
-        "AMDGPU target '@{target_name}' selects ASIC revision "
-        "{revision} for processor '{processor}'"
-    ),
-    params=(
-        ErrorParam("target_name", ParamKind.STRING),
-        ErrorParam("revision", ParamKind.I64),
-        ErrorParam("processor", ParamKind.STRING),
-    ),
-    fix_hint=("Select one of the processor's generated ASIC revision rows"),
-)
-
 # ERR_AMDGPU_047: target instruction constraint requires legalization.
 ERR_AMDGPU_047 = ErrorDef(
     domain=ErrorDomain.AMDGPU,
@@ -1026,8 +1008,8 @@ ERR_AMDGPU_047 = ErrorDef(
     summary="AMDGPU instruction constraint requires legalization.",
     message=(
         "AMDGPU descriptor '{descriptor_name}' in '@{function_name}' violates "
-        "{constraint_kind} constraint '{constraint_key}' for processor "
-        "'{processor}' revision '{revision}' in descriptor set "
+        "{constraint_kind} constraint '{constraint_key}' for target "
+        "'{target}' in descriptor set "
         "'{descriptor_set_name}' and requires legalization "
         "'{legalization_key}'"
     ),
@@ -1035,8 +1017,7 @@ ERR_AMDGPU_047 = ErrorDef(
         ErrorParam("function_name", ParamKind.STRING),
         ErrorParam("descriptor_name", ParamKind.STRING),
         ErrorParam("descriptor_set_name", ParamKind.STRING),
-        ErrorParam("processor", ParamKind.STRING),
-        ErrorParam("revision", ParamKind.STRING),
+        ErrorParam("target", ParamKind.STRING),
         ErrorParam("constraint_kind", ParamKind.STRING),
         ErrorParam("constraint_key", ParamKind.STRING),
         ErrorParam("legalization_key", ParamKind.STRING),
@@ -1131,7 +1112,6 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_043,
     ERR_AMDGPU_044,
     ERR_AMDGPU_045,
-    ERR_AMDGPU_046,
     ERR_AMDGPU_047,
     ERR_AMDGPU_048,
     ERR_AMDGPU_049,

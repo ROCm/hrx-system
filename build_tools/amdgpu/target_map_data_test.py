@@ -7,18 +7,21 @@
 import unittest
 
 from build_tools.amdgpu.target_map_data import (
-    AMDGPU_DEVICE_BINARY_VARIANTS,
     AMDGPU_EXACT_TARGET_INFOS,
     AMDGPU_GENERIC_CODE_OBJECT_INFOS,
+    AMDGPU_PHYSICAL_TARGET_INFOS,
+    AMDGPU_TARGET_OVERLAY_INFOS,
     TARGET_ID_FEATURE_SRAMECC,
     TARGET_ID_FEATURE_XNACK,
-    AmdgpuAsicRevisionInfo,
-    AmdgpuDeviceBinaryTarget,
-    AmdgpuDeviceBinaryTargetMatch,
     AmdgpuExactTargetInfo,
     AmdgpuGenericCodeObjectInfo,
+    AmdgpuPhysicalTargetInfo,
+    AmdgpuTargetOverlayInfo,
     generic_code_object_current_version,
+    physical_target_info,
+    processor_has_physical_target_infos,
     target_id_features_for_processor,
+    target_processor,
     validate_target_map_data,
 )
 
@@ -47,6 +50,7 @@ class TargetMapDataTest(unittest.TestCase):
                 (AmdgpuGenericCodeObjectInfo("gfx-test-generic", 1),),
                 (AmdgpuExactTargetInfo("gfx-test", "gfx-test-generic", 2),),
                 (),
+                (),
             )
 
     def test_rejects_undeclared_generic_family(self):
@@ -54,6 +58,7 @@ class TargetMapDataTest(unittest.TestCase):
             validate_target_map_data(
                 (AmdgpuGenericCodeObjectInfo("gfx-test-generic", 1),),
                 (AmdgpuExactTargetInfo("gfx-test", "gfx-undeclared-generic", 1),),
+                (),
                 (),
             )
 
@@ -65,6 +70,7 @@ class TargetMapDataTest(unittest.TestCase):
                     AmdgpuGenericCodeObjectInfo("gfx-unused-generic", 1),
                 ),
                 (AmdgpuExactTargetInfo("gfx-test", "gfx-test-generic", 1),),
+                (),
                 (),
             )
 
@@ -79,154 +85,127 @@ class TargetMapDataTest(unittest.TestCase):
         )
         self.assertEqual(target_id_features_for_processor("gfx1151"), ())
 
-    def test_asic_revisions_are_finite_and_have_an_explicit_default(self):
-        gfx1250 = next(
-            info
-            for info in AMDGPU_EXACT_TARGET_INFOS
-            if info.exact_processor == "gfx1250"
-        )
+    def test_target_overlay_selects_one_backend_processor(self):
         self.assertEqual(
-            gfx1250.asic_revisions,
+            AMDGPU_TARGET_OVERLAY_INFOS,
             (
-                AmdgpuAsicRevisionInfo(0, "a0"),
-                AmdgpuAsicRevisionInfo(1, "b0"),
+                AmdgpuTargetOverlayInfo(
+                    target="gfx1250-a0",
+                    processor="gfx1250",
+                    compile_options=(
+                        "-mllvm",
+                        "-amdgpu-gfx1250-b0-specific=false",
+                    ),
+                    link_options=("-plugin-opt=-amdgpu-gfx1250-b0-specific=false",),
+                ),
             ),
         )
-        self.assertEqual(gfx1250.default_asic_revision, 1)
-        self.assertEqual(gfx1250.target_id_features, ())
+        self.assertEqual(target_processor("gfx1250-a0"), "gfx1250")
+        self.assertEqual(target_processor("gfx1250"), "gfx1250")
+        self.assertEqual(target_processor("gfx12-5-generic"), "gfx12-5-generic")
+        self.assertIsNone(target_processor("gfx-future"))
 
-    def test_rejects_undeclared_default_asic_revision(self):
-        with self.assertRaisesRegex(ValueError, "default ASIC revision.*not declared"):
+    def test_rejects_overlay_for_unknown_processor(self):
+        with self.assertRaisesRegex(ValueError, "unknown exact processor"):
             validate_target_map_data(
                 (),
-                (
-                    AmdgpuExactTargetInfo(
-                        "gfx-test",
-                        "gfx-test",
-                        0,
-                        asic_revisions=(AmdgpuAsicRevisionInfo(0, "a0"),),
-                        default_asic_revision=1,
-                    ),
-                ),
+                (AmdgpuExactTargetInfo("gfx-test", "gfx-test", 0),),
+                (AmdgpuTargetOverlayInfo("gfx-test-a0", "gfx-future"),),
                 (),
             )
+
+    def test_physical_revision_resolves_to_a_canonical_target(self):
+        self.assertTrue(processor_has_physical_target_infos("gfx1250"))
+        self.assertFalse(processor_has_physical_target_infos("gfx1100"))
+        self.assertEqual(
+            physical_target_info("gfx1250", 0),
+            AmdgpuPhysicalTargetInfo("gfx1250", 0, "gfx1250-a0"),
+        )
+        self.assertEqual(
+            physical_target_info("gfx1250", 1),
+            AmdgpuPhysicalTargetInfo("gfx1250", 1, "gfx1250"),
+        )
+        self.assertIsNone(physical_target_info("gfx1250", 2))
+        self.assertIsNone(physical_target_info("gfx1100", 4))
 
     def test_rejects_out_of_range_asic_revision(self):
         with self.assertRaisesRegex(ValueError, "outside the uint32 range"):
             validate_target_map_data(
                 (),
-                (
-                    AmdgpuExactTargetInfo(
-                        "gfx-test",
-                        "gfx-test",
-                        0,
-                        asic_revisions=(AmdgpuAsicRevisionInfo(2**32, "future"),),
-                        default_asic_revision=2**32,
-                    ),
-                ),
+                (AmdgpuExactTargetInfo("gfx-test", "gfx-test", 0),),
                 (),
+                (AmdgpuPhysicalTargetInfo("gfx-test", 2**32, "gfx-test"),),
             )
 
-    def test_rejects_noncanonical_asic_revision_order(self):
-        with self.assertRaisesRegex(ValueError, "ascending value order"):
+    def test_rejects_noncanonical_physical_target_order(self):
+        with self.assertRaisesRegex(ValueError, "canonical processor and ASIC"):
             validate_target_map_data(
                 (),
-                (
-                    AmdgpuExactTargetInfo(
-                        "gfx-test",
-                        "gfx-test",
-                        0,
-                        asic_revisions=(
-                            AmdgpuAsicRevisionInfo(1, "b0"),
-                            AmdgpuAsicRevisionInfo(0, "a0"),
-                        ),
-                        default_asic_revision=1,
-                    ),
-                ),
-                (),
-            )
-
-    def test_rejects_variant_with_unsupported_asic_revision(self):
-        with self.assertRaisesRegex(ValueError, "unsupported ASIC revision"):
-            validate_target_map_data(
+                (AmdgpuExactTargetInfo("gfx-test", "gfx-test", 0),),
                 (),
                 (
-                    AmdgpuExactTargetInfo(
-                        "gfx-test",
-                        "gfx-test",
-                        0,
-                        asic_revisions=(AmdgpuAsicRevisionInfo(0, "a0"),),
-                        default_asic_revision=0,
-                    ),
-                ),
-                (
-                    AmdgpuDeviceBinaryTarget(
-                        "gfx-test-qualified",
-                        "gfx-test",
-                        (AmdgpuDeviceBinaryTargetMatch("gfx-test", 1),),
-                    ),
+                    AmdgpuPhysicalTargetInfo("gfx-test", 1, "gfx-test"),
+                    AmdgpuPhysicalTargetInfo("gfx-test", 0, "gfx-test"),
                 ),
             )
 
     def test_multiple_revisioned_processors_are_data_only(self):
         exact_infos = (
-            AmdgpuExactTargetInfo(
-                "gfx-test-a",
-                "gfx-test-a",
-                0,
-                asic_revisions=(
-                    AmdgpuAsicRevisionInfo(0, "a0"),
-                    AmdgpuAsicRevisionInfo(1, "b0"),
-                ),
-                default_asic_revision=1,
-            ),
-            AmdgpuExactTargetInfo(
-                "gfx-test-b",
-                "gfx-test-b",
-                0,
-                asic_revisions=(
-                    AmdgpuAsicRevisionInfo(7, "c0"),
-                    AmdgpuAsicRevisionInfo(9, "d0"),
-                ),
-                default_asic_revision=9,
-            ),
+            AmdgpuExactTargetInfo("gfx-test-a", "gfx-test-a", 0),
+            AmdgpuExactTargetInfo("gfx-test-b", "gfx-test-b", 0),
         )
-        variants = (
-            AmdgpuDeviceBinaryTarget(
-                "gfx-test-a-a0",
-                "gfx-test-a",
-                (AmdgpuDeviceBinaryTargetMatch("gfx-test-a", 0),),
-            ),
-            AmdgpuDeviceBinaryTarget(
-                "gfx-test-b-c0",
-                "gfx-test-b",
-                (AmdgpuDeviceBinaryTargetMatch("gfx-test-b", 7),),
-            ),
+        overlays = (
+            AmdgpuTargetOverlayInfo("gfx-test-a-a0", "gfx-test-a"),
+            AmdgpuTargetOverlayInfo("gfx-test-b-c0", "gfx-test-b"),
+        )
+        physical_targets = (
+            AmdgpuPhysicalTargetInfo("gfx-test-a", 0, "gfx-test-a-a0"),
+            AmdgpuPhysicalTargetInfo("gfx-test-a", 1, "gfx-test-a"),
+            AmdgpuPhysicalTargetInfo("gfx-test-b", 7, "gfx-test-b-c0"),
+            AmdgpuPhysicalTargetInfo("gfx-test-b", 9, "gfx-test-b"),
         )
 
-        validate_target_map_data((), exact_infos, variants)
+        validate_target_map_data((), exact_infos, overlays, physical_targets)
 
-    def test_rejects_noncanonical_asic_revision_name(self):
-        with self.assertRaisesRegex(ValueError, "canonical artifact coordinate"):
+    def test_rejects_noncanonical_overlay_name(self):
+        with self.assertRaisesRegex(ValueError, "canonical target coordinate"):
             validate_target_map_data(
                 (),
-                (
-                    AmdgpuExactTargetInfo(
-                        "gfx-test",
-                        "gfx-test",
-                        0,
-                        asic_revisions=(AmdgpuAsicRevisionInfo(0, "A 0"),),
-                        default_asic_revision=0,
-                    ),
-                ),
+                (AmdgpuExactTargetInfo("gfx-test", "gfx-test", 0),),
+                (AmdgpuTargetOverlayInfo("gfx-test A0", "gfx-test"),),
                 (),
             )
 
-    def test_canonical_device_binary_variants_validate(self):
+    def test_rejects_physical_target_from_another_processor(self):
+        with self.assertRaisesRegex(ValueError, "from another processor"):
+            validate_target_map_data(
+                (),
+                (
+                    AmdgpuExactTargetInfo("gfx-test-a", "gfx-test-a", 0),
+                    AmdgpuExactTargetInfo("gfx-test-b", "gfx-test-b", 0),
+                ),
+                (AmdgpuTargetOverlayInfo("gfx-test-a-a0", "gfx-test-a"),),
+                (
+                    AmdgpuPhysicalTargetInfo("gfx-test-b", 0, "gfx-test-a-a0"),
+                    AmdgpuPhysicalTargetInfo("gfx-test-b", 1, "gfx-test-b"),
+                ),
+            )
+
+    def test_rejects_physical_mapping_without_canonical_base_revision(self):
+        with self.assertRaisesRegex(ValueError, "no revision selecting"):
+            validate_target_map_data(
+                (),
+                (AmdgpuExactTargetInfo("gfx-test", "gfx-test", 0),),
+                (AmdgpuTargetOverlayInfo("gfx-test-a0", "gfx-test"),),
+                (AmdgpuPhysicalTargetInfo("gfx-test", 0, "gfx-test-a0"),),
+            )
+
+    def test_canonical_target_overlays_validate(self):
         validate_target_map_data(
             AMDGPU_GENERIC_CODE_OBJECT_INFOS,
             AMDGPU_EXACT_TARGET_INFOS,
-            AMDGPU_DEVICE_BINARY_VARIANTS,
+            AMDGPU_TARGET_OVERLAY_INFOS,
+            AMDGPU_PHYSICAL_TARGET_INFOS,
         )
 
 

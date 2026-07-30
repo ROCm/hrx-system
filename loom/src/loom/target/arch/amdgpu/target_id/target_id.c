@@ -76,12 +76,9 @@ static iree_status_t loom_amdgpu_target_id_append_feature(
       state == LOOM_AMDGPU_TARGET_FEATURE_ON ? IREE_SV("+") : IREE_SV("-"));
 }
 
-static iree_status_t loom_amdgpu_amdhsa_target_id_append(
-    const loom_amdgpu_target_identity_t* identity, iree_string_view_t prefix,
+static iree_status_t loom_amdgpu_target_id_features_append(
+    const loom_amdgpu_target_identity_t* identity,
     iree_string_builder_t* builder) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_string(builder, prefix));
-  IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_string(builder, identity->processor->name));
   IREE_RETURN_IF_ERROR(loom_amdgpu_target_id_append_feature(
       IREE_SV("sramecc"), identity->amdhsa_features.sramecc, builder));
   return loom_amdgpu_target_id_append_feature(
@@ -91,15 +88,9 @@ static iree_status_t loom_amdgpu_amdhsa_target_id_append(
 iree_status_t loom_amdgpu_artifact_target_key_append(
     const loom_amdgpu_target_identity_t* identity,
     iree_string_builder_t* builder) {
-  IREE_RETURN_IF_ERROR(loom_amdgpu_amdhsa_target_id_append(
-      identity, iree_string_view_empty(), builder));
-  if (identity->asic_revision == NULL) {
-    return iree_ok_status();
-  }
   IREE_RETURN_IF_ERROR(
-      iree_string_builder_append_cstring(builder, ":asic-revision="));
-  return iree_string_builder_append_string(builder,
-                                           identity->asic_revision->name);
+      iree_string_builder_append_string(builder, identity->target->name));
+  return loom_amdgpu_target_id_features_append(identity, builder);
 }
 
 iree_status_t loom_amdgpu_artifact_target_key_format(
@@ -165,8 +156,14 @@ iree_status_t loom_amdgpu_artifact_target_key_format_arena(
 static iree_status_t loom_amdgpu_amdhsa_code_object_target_id_append(
     const loom_amdgpu_target_identity_t* identity,
     iree_string_builder_t* builder) {
-  return loom_amdgpu_amdhsa_target_id_append(
-      identity, loom_amdgpu_target_info_amdhsa_target_id_prefix, builder);
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_target_processor(identity->target);
+  IREE_ASSERT(processor != NULL);
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
+      builder, loom_amdgpu_target_info_amdhsa_target_id_prefix));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_string(builder, processor->name));
+  return loom_amdgpu_target_id_features_append(identity, builder);
 }
 
 iree_status_t loom_amdgpu_amdhsa_code_object_target_id_format(

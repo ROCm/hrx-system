@@ -13,28 +13,23 @@ const loom_target_profile_type_t loom_amdgpu_target_profile_type = {
 };
 
 void loom_amdgpu_target_identity_initialize(
-    const loom_amdgpu_processor_info_t* processor,
+    const loom_amdgpu_target_info_t* target,
     loom_amdgpu_target_identity_t* out_identity) {
-  IREE_ASSERT_ARGUMENT(processor);
+  IREE_ASSERT_ARGUMENT(target);
   IREE_ASSERT_ARGUMENT(out_identity);
-  *out_identity = (loom_amdgpu_target_identity_t){.processor = processor};
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_target_processor(target);
+  IREE_ASSERT(processor != NULL);
+  *out_identity = (loom_amdgpu_target_identity_t){.target = target};
   loom_amdgpu_amdhsa_feature_states_initialize(processor,
                                                &out_identity->amdhsa_features);
-  if (processor->asic_revisions.count != 0) {
-    IREE_ASSERT(processor->asic_revisions.default_ordinal <
-                processor->asic_revisions.count);
-    out_identity->asic_revision =
-        &processor->asic_revisions
-             .entries[processor->asic_revisions.default_ordinal];
-  }
 }
 
 bool loom_amdgpu_target_identity_equal(
     const loom_amdgpu_target_identity_t* lhs,
     const loom_amdgpu_target_identity_t* rhs) {
-  if (lhs == NULL || rhs == NULL || lhs->processor == NULL ||
-      lhs->processor != rhs->processor ||
-      lhs->asic_revision != rhs->asic_revision) {
+  if (lhs == NULL || rhs == NULL || lhs->target == NULL ||
+      lhs->target != rhs->target) {
     return false;
   }
 
@@ -59,19 +54,17 @@ bool loom_amdgpu_target_identity_equal(
 bool loom_amdgpu_target_identity_satisfies_requirement(
     const loom_amdgpu_target_identity_t* effective,
     const loom_amdgpu_target_identity_t* requirement) {
-  if (effective == NULL || effective->processor == NULL ||
-      requirement == NULL || requirement->processor == NULL ||
-      !loom_amdgpu_processor_satisfies_code_object_requirement(
-          effective->processor, requirement->processor)) {
-    return false;
-  }
-  if (requirement->asic_revision != NULL &&
-      effective->asic_revision != requirement->asic_revision) {
+  if (effective == NULL || effective->target == NULL || requirement == NULL ||
+      requirement->target == NULL ||
+      !loom_amdgpu_target_satisfies_code_object_requirement(
+          effective->target, requirement->target)) {
     return false;
   }
 
+  const loom_amdgpu_processor_info_t* requirement_processor =
+      loom_amdgpu_target_info_target_processor(requirement->target);
   loom_amdgpu_target_id_feature_support_flags_t remaining_features =
-      requirement->processor->target_id.supported_features;
+      requirement_processor->target_id.supported_features;
   IREE_ASSERT(iree_all_bits_set(
       LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_KNOWN_FLAGS, remaining_features));
   while (remaining_features != 0) {
@@ -136,31 +129,24 @@ void loom_amdgpu_target_properties_resolve(
     const loom_target_bundle_t* common,
     loom_amdgpu_target_properties_t* out_properties) {
   IREE_ASSERT_ARGUMENT(identity);
-  IREE_ASSERT_ARGUMENT(identity->processor);
+  IREE_ASSERT_ARGUMENT(identity->target);
   IREE_ASSERT_ARGUMENT(common);
   IREE_ASSERT_ARGUMENT(out_properties);
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_target_processor(identity->target);
+  IREE_ASSERT(processor != NULL);
   const loom_amdgpu_processor_properties_t* processor_properties =
-      &identity->processor->properties;
-  loom_amdgpu_instruction_constraint_bits_t instruction_constraints =
-      processor_properties->instructions.base_constraints;
-  loom_amdgpu_lds_bank_service_model_set_ordinal_t
-      lds_bank_service_model_set_ordinal =
-          processor_properties->features.lds_bank_service_model_set_ordinal;
-  if (identity->asic_revision != NULL) {
-    instruction_constraints |= identity->asic_revision->instruction_constraints;
-    lds_bank_service_model_set_ordinal =
-        identity->asic_revision->lds_bank_service_model_set_ordinal;
-  }
+      &processor->properties;
   *out_properties = (loom_amdgpu_target_properties_t){
+      .target = identity->target,
       .processor = processor_properties,
       .common = common,
       .amdhsa_features = identity->amdhsa_features,
-      .instruction_constraints = instruction_constraints,
-      .lds_bank_service_model_set_ordinal = lds_bank_service_model_set_ordinal,
+      .instruction_constraints = identity->target->instruction_constraints,
+      .lds_bank_service_model_set_ordinal =
+          identity->target->lds_bank_service_model_set_ordinal,
       .kernel_metadata_extensions =
-          identity->asic_revision != NULL
-              ? identity->asic_revision->kernel_metadata_extensions
-              : (loom_amdgpu_metadata_string_property_set_t){0},
+          identity->target->kernel_metadata_extensions,
   };
 }
 
@@ -168,54 +154,38 @@ iree_status_t loom_amdgpu_target_profile_initialize(
     const loom_amdgpu_target_identity_t* identity,
     loom_amdgpu_target_profile_t* out_profile) {
   IREE_ASSERT_ARGUMENT(identity);
-  IREE_ASSERT_ARGUMENT(identity->processor);
+  IREE_ASSERT_ARGUMENT(identity->target);
   IREE_ASSERT_ARGUMENT(out_profile);
   *out_profile = (loom_amdgpu_target_profile_t){0};
 
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_target_processor(identity->target);
+  IREE_ASSERT(processor != NULL);
   loom_amdgpu_target_identity_t normalized_identity = {0};
-  loom_amdgpu_target_identity_initialize(identity->processor,
+  loom_amdgpu_target_identity_initialize(identity->target,
                                          &normalized_identity);
   IREE_RETURN_IF_ERROR(loom_amdgpu_target_profile_normalize_feature(
-      identity->processor, IREE_SV("sramecc"),
+      processor, IREE_SV("sramecc"),
       LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC,
       normalized_identity.amdhsa_features.sramecc,
       identity->amdhsa_features.sramecc,
       &normalized_identity.amdhsa_features.sramecc));
   IREE_RETURN_IF_ERROR(loom_amdgpu_target_profile_normalize_feature(
-      identity->processor, IREE_SV("xnack"),
-      LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
+      processor, IREE_SV("xnack"), LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
       normalized_identity.amdhsa_features.xnack,
       identity->amdhsa_features.xnack,
       &normalized_identity.amdhsa_features.xnack));
-  if (identity->asic_revision != NULL) {
-    bool revision_belongs_to_processor = false;
-    for (uint16_t i = 0; i < identity->processor->asic_revisions.count; ++i) {
-      if (identity->asic_revision ==
-          &identity->processor->asic_revisions.entries[i]) {
-        revision_belongs_to_processor = true;
-        break;
-      }
-    }
-    if (!revision_belongs_to_processor) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU ASIC revision does not belong to processor '%.*s'",
-          (int)identity->processor->name.size, identity->processor->name.data);
-    }
-    normalized_identity.asic_revision = identity->asic_revision;
-  }
-
   const loom_target_bundle_t* target_bundle =
       loom_amdgpu_target_bundle_for_descriptor_set(
-          identity->processor->properties.descriptor_set.ordinal);
+          processor->properties.descriptor_set.ordinal);
   if (target_bundle == NULL) {
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,
         "AMDGPU processor '%.*s' has no Loom target bundle for descriptor "
         "set '%.*s'",
-        (int)identity->processor->name.size, identity->processor->name.data,
-        (int)identity->processor->properties.descriptor_set.key.size,
-        identity->processor->properties.descriptor_set.key.data);
+        (int)processor->name.size, processor->name.data,
+        (int)processor->properties.descriptor_set.key.size,
+        processor->properties.descriptor_set.key.data);
   }
 
   loom_amdgpu_target_properties_t properties = {0};

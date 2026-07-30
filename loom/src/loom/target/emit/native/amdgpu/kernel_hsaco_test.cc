@@ -348,12 +348,13 @@ TEST(AmdgpuKernelHsacoTest, RejectsFeatureDistinctContributionTargets) {
                             stream.get(), arena.arena()));
 }
 
-TEST(AmdgpuKernelHsacoTest, RejectsRevisionDistinctContributions) {
-  const loom_amdgpu_processor_info_t* processor = nullptr;
-  IREE_ASSERT_OK(
-      loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx1250"), &processor));
-  ASSERT_NE(processor, nullptr);
-  ASSERT_GE(processor->asic_revisions.count, 2u);
+TEST(AmdgpuKernelHsacoTest, RejectsDistinctTargetContributions) {
+  const loom_amdgpu_target_info_t* targets[] = {
+      loom_amdgpu_target_info_find_target(IREE_SV("gfx1250-a0")),
+      loom_amdgpu_target_info_find_target(IREE_SV("gfx1250")),
+  };
+  ASSERT_NE(targets[0], nullptr);
+  ASSERT_NE(targets[1], nullptr);
 
   const uint8_t text[] = {0x00, 0x00, 0x81, 0xbf};
   loom_amdgpu_kernel_hsaco_contribution_t contributions[] = {
@@ -363,14 +364,12 @@ TEST(AmdgpuKernelHsacoTest, RejectsRevisionDistinctContributions) {
                    iree_make_const_byte_span(text, sizeof(text))),
   };
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(contributions); ++i) {
-    contributions[i].artifact_target_key =
-        i == 0 ? IREE_SV("gfx1250:asic-revision=a0")
-               : IREE_SV("gfx1250:asic-revision=b0");
+    contributions[i].artifact_target_key = targets[i]->name;
     contributions[i].code_object_target_id =
         IREE_SV("amdgcn-amd-amdhsa--gfx1250");
     contributions[i].processor = IREE_SV("gfx1250");
     contributions[i].kernel.metadata.target_extensions =
-        processor->asic_revisions.entries[i].kernel_metadata_extensions;
+        targets[i]->kernel_metadata_extensions;
   }
 
   StreamPtr stream = CreateStream();

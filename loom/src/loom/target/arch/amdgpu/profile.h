@@ -22,14 +22,11 @@ extern const loom_target_profile_type_t loom_amdgpu_target_profile_type;
 
 // Complete structured identity retained by an AMDGPU target profile.
 typedef struct loom_amdgpu_target_identity_t {
-  // Exact or generic processor identity selected for this profile.
-  const loom_amdgpu_processor_info_t* processor;
+  // Exact, generic, or overlay target selected for this profile.
+  const loom_amdgpu_target_info_t* target;
 
   // Normalized AMDHSA target-ID feature states.
   loom_amdgpu_amdhsa_feature_states_t amdhsa_features;
-
-  // Exact physical ASIC revision, or NULL when none applies.
-  const loom_amdgpu_processor_asic_revision_info_t* asic_revision;
 } loom_amdgpu_target_identity_t;
 
 // Immutable compiler-semantic properties resolved for one AMDGPU target.
@@ -41,6 +38,9 @@ typedef struct loom_amdgpu_target_identity_t {
 // IR. AMDHSA feature states retain target-ID and code-object policy without
 // reparsing an external string.
 typedef struct loom_amdgpu_target_properties_t {
+  // Canonical target selecting all target-local semantic overlays.
+  const loom_amdgpu_target_info_t* target;
+
   // Static compiler properties selected by the exact or generic processor.
   const loom_amdgpu_processor_properties_t* processor;
 
@@ -66,24 +66,23 @@ typedef struct loom_amdgpu_target_profile_t {
   // Target-neutral family identity and bundle projection.
   loom_target_profile_t base;
 
-  // Structured processor, AMDHSA feature, and ASIC-revision identity.
+  // Structured target and AMDHSA feature identity.
   loom_amdgpu_target_identity_t identity;
 
   // Compiler-semantic projection resolved from |identity|.
   loom_amdgpu_target_properties_t properties;
 } loom_amdgpu_target_profile_t;
 
-// Initializes the normalized default target identity for |processor|.
+// Initializes the normalized default identity for |target|.
 //
 // Supported AMDHSA modes remain unconstrained and unsupported modes are
-// explicit. Processors with finite ASIC revisions select their generated
-// offline default until physical discovery or authoring overrides it.
+// explicit.
 void loom_amdgpu_target_identity_initialize(
-    const loom_amdgpu_processor_info_t* processor,
+    const loom_amdgpu_target_info_t* target,
     loom_amdgpu_target_identity_t* out_identity);
 
-// Returns whether two identities select the same processor and every known
-// target-ID feature state.
+// Returns whether two identities select the same canonical target and every
+// known target-ID feature state.
 bool loom_amdgpu_target_identity_equal(
     const loom_amdgpu_target_identity_t* lhs,
     const loom_amdgpu_target_identity_t* rhs);

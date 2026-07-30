@@ -74,13 +74,9 @@ static const loom_named_attr_t* FindAttr(loom_module_t* module,
 }
 
 static loom_amdgpu_target_identity_t MakeTargetIdentity(
-    const loom_amdgpu_processor_info_t* processor,
-    const loom_amdgpu_processor_asic_revision_info_t* revision = nullptr) {
+    const loom_amdgpu_target_info_t* target) {
   loom_amdgpu_target_identity_t identity = {};
-  loom_amdgpu_target_identity_initialize(processor, &identity);
-  if (revision != nullptr) {
-    identity.asic_revision = revision;
-  }
+  loom_amdgpu_target_identity_initialize(target, &identity);
   return identity;
 }
 
@@ -335,12 +331,15 @@ TEST_F(AmdgpuProviderTest, MaterializesEverySelectedTargetKind) {
     ASSERT_NE(target_record, nullptr) << "target kind " << target_kind;
     EXPECT_EQ(target_record->target_kind, target_kind);
 
-    const loom_amdgpu_processor_info_t* processor = nullptr;
-    IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_processor(
-        target_record->processor_name, &processor));
+    const loom_amdgpu_target_info_t* target_info = nullptr;
+    IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_target(
+        target_record->target_name, &target_info));
+    ASSERT_NE(target_info, nullptr);
+    const loom_amdgpu_processor_info_t* processor =
+        loom_amdgpu_target_info_target_processor(target_info);
     ASSERT_NE(processor, nullptr);
     const loom_amdgpu_target_identity_t identity =
-        MakeTargetIdentity(processor);
+        MakeTargetIdentity(target_info);
     loom_amdgpu_target_profile_t target_profile = {};
     IREE_ASSERT_OK(
         loom_amdgpu_target_profile_initialize(&identity, &target_profile));
@@ -354,25 +353,25 @@ TEST_F(AmdgpuProviderTest, MaterializesEverySelectedTargetKind) {
     const loom_op_t* target_op = TargetOpFromRef(module.get(), target_ref);
     ASSERT_TRUE(loom_amdgpu_target_isa(target_op));
     EXPECT_EQ(loom_amdgpu_target_kind(target_op), target_kind);
+    EXPECT_EQ(loom_amdgpu_target_record_target(target_op), target_info);
+    EXPECT_TRUE(iree_string_view_equal(
+        loom_amdgpu_target_record_target_name(target_op), target_info->name));
     EXPECT_TRUE(iree_string_view_equal(
         loom_amdgpu_target_record_processor_name(target_op), processor->name));
-    EXPECT_EQ(loom_amdgpu_target_record_asic_revision(target_op),
-              target_profile.identity.asic_revision);
 
     const loom_target_record_view_t target = Target(module.get(), target_ref);
     loom_amdgpu_target_identity_t record_identity = {};
     loom_amdgpu_target_record_resolve_identity(target_op, &record_identity);
-    EXPECT_EQ(record_identity.processor, target_profile.identity.processor);
+    EXPECT_EQ(record_identity.target, target_profile.identity.target);
     EXPECT_EQ(record_identity.amdhsa_features.sramecc,
               target_profile.identity.amdhsa_features.sramecc);
     EXPECT_EQ(record_identity.amdhsa_features.xnack,
               target_profile.identity.amdhsa_features.xnack);
-    EXPECT_EQ(record_identity.asic_revision,
-              target_profile.identity.asic_revision);
 
     loom_amdgpu_target_properties_t record_properties = {};
     loom_amdgpu_target_record_resolve_properties(
         target_op, &target.facts->storage.bundle, &record_properties);
+    EXPECT_EQ(record_properties.target, target_profile.properties.target);
     EXPECT_EQ(record_properties.processor, target_profile.properties.processor);
     EXPECT_EQ(record_properties.common, &target.facts->storage.bundle);
     EXPECT_EQ(record_properties.instruction_constraints,
@@ -398,52 +397,54 @@ TEST_F(AmdgpuProviderTest, MaterializesEverySelectedTargetKind) {
   }
 }
 
-TEST_F(AmdgpuProviderTest, MaterializesEveryRevisionAsDistinctRecord) {
+TEST_F(AmdgpuProviderTest,
+       MaterializesTargetsSharingAProcessorAsDistinctRecords) {
   ModulePtr module;
-  IREE_ASSERT_OK(AllocateModule(IREE_SV("materialize_revisions"), &module));
+  IREE_ASSERT_OK(AllocateModule(IREE_SV("materialize_overlays"), &module));
 
-  const iree_host_size_t processor_count =
-      loom_amdgpu_target_info_processor_count();
-  for (iree_host_size_t processor_ordinal = 0;
-       processor_ordinal < processor_count; ++processor_ordinal) {
-    const loom_amdgpu_processor_info_t* processor =
-        loom_amdgpu_target_info_processor_at(processor_ordinal);
-    ASSERT_NE(processor, nullptr);
-    if (loom_amdgpu_target_bundle_for_descriptor_set(
-            processor->properties.descriptor_set.ordinal) == nullptr) {
-      continue;
-    }
-    loom_symbol_ref_t previous_ref = loom_symbol_ref_null();
-    for (uint16_t revision_ordinal = 0;
-         revision_ordinal < processor->asic_revisions.count;
-         ++revision_ordinal) {
-      const loom_amdgpu_processor_asic_revision_info_t* revision =
-          &processor->asic_revisions.entries[revision_ordinal];
-      const loom_amdgpu_target_identity_t identity =
-          MakeTargetIdentity(processor, revision);
-      loom_amdgpu_target_profile_t profile = {};
-      IREE_ASSERT_OK(
-          loom_amdgpu_target_profile_initialize(&identity, &profile));
-      loom_symbol_ref_t target_ref = loom_symbol_ref_null();
-      IREE_ASSERT_OK(loom_target_environment_materialize_selection(
-          &target_environment_, module.get(),
-          loom_target_selection_t{/*.profile=*/&profile.base}, &target_ref));
-      if (loom_symbol_ref_is_valid(previous_ref)) {
-        EXPECT_NE(target_ref.symbol_id, previous_ref.symbol_id);
+  iree_host_size_t shared_processor_pair_count = 0;
+  const iree_host_size_t target_count = loom_amdgpu_target_info_target_count();
+  for (iree_host_size_t lhs_ordinal = 0; lhs_ordinal < target_count;
+       ++lhs_ordinal) {
+    const loom_amdgpu_target_info_t* lhs =
+        loom_amdgpu_target_info_target_at(lhs_ordinal);
+    ASSERT_NE(lhs, nullptr);
+    for (iree_host_size_t rhs_ordinal = lhs_ordinal + 1;
+         rhs_ordinal < target_count; ++rhs_ordinal) {
+      const loom_amdgpu_target_info_t* rhs =
+          loom_amdgpu_target_info_target_at(rhs_ordinal);
+      ASSERT_NE(rhs, nullptr);
+      if (lhs->processor_ordinal != rhs->processor_ordinal) {
+        continue;
       }
-      previous_ref = target_ref;
 
-      const loom_op_t* target_op = TargetOpFromRef(module.get(), target_ref);
-      EXPECT_EQ(loom_amdgpu_target_record_asic_revision(target_op), revision);
-      const loom_target_record_view_t target = Target(module.get(), target_ref);
-      loom_amdgpu_target_properties_t properties = {};
-      loom_amdgpu_target_record_resolve_properties(
-          target_op, &target.facts->storage.bundle, &properties);
-      EXPECT_EQ(properties.instruction_constraints,
-                processor->properties.instructions.base_constraints |
-                    revision->instruction_constraints);
+      loom_symbol_ref_t refs[2] = {};
+      const loom_amdgpu_target_info_t* targets[] = {lhs, rhs};
+      for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(targets); ++i) {
+        const loom_amdgpu_target_identity_t identity =
+            MakeTargetIdentity(targets[i]);
+        loom_amdgpu_target_profile_t profile = {};
+        IREE_ASSERT_OK(
+            loom_amdgpu_target_profile_initialize(&identity, &profile));
+        IREE_ASSERT_OK(loom_target_environment_materialize_selection(
+            &target_environment_, module.get(),
+            loom_target_selection_t{/*.profile=*/&profile.base}, &refs[i]));
+
+        const loom_op_t* target_op = TargetOpFromRef(module.get(), refs[i]);
+        EXPECT_EQ(loom_amdgpu_target_record_target(target_op), targets[i]);
+        const loom_target_record_view_t target = Target(module.get(), refs[i]);
+        loom_amdgpu_target_properties_t properties = {};
+        loom_amdgpu_target_record_resolve_properties(
+            target_op, &target.facts->storage.bundle, &properties);
+        EXPECT_EQ(properties.target, targets[i]);
+        EXPECT_EQ(properties.instruction_constraints,
+                  targets[i]->instruction_constraints);
+      }
+      EXPECT_NE(refs[0].symbol_id, refs[1].symbol_id);
+      ++shared_processor_pair_count;
     }
   }
+  EXPECT_GT(shared_processor_pair_count, 0u);
 }
 
 TEST_F(AmdgpuProviderTest, ReusesAuthoredFeatureRecordAndSeparatesVariant) {
@@ -451,13 +452,12 @@ TEST_F(AmdgpuProviderTest, ReusesAuthoredFeatureRecordAndSeparatesVariant) {
       Parse(IREE_SV("amdgpu.target<gfx942> @authored "
                     "{sramecc = on, xnack = off}\n"));
 
-  const loom_amdgpu_processor_info_t* processor = nullptr;
+  const loom_amdgpu_target_info_t* target = nullptr;
   IREE_ASSERT_OK(
-      loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx942"), &processor));
-  ASSERT_NE(processor, nullptr);
+      loom_amdgpu_target_info_lookup_target(IREE_SV("gfx942"), &target));
+  ASSERT_NE(target, nullptr);
 
-  loom_amdgpu_target_identity_t authored_identity =
-      MakeTargetIdentity(processor);
+  loom_amdgpu_target_identity_t authored_identity = MakeTargetIdentity(target);
   authored_identity.amdhsa_features.sramecc = LOOM_AMDGPU_TARGET_FEATURE_ON;
   authored_identity.amdhsa_features.xnack = LOOM_AMDGPU_TARGET_FEATURE_OFF;
   loom_amdgpu_target_profile_t authored_profile = {};
@@ -472,8 +472,7 @@ TEST_F(AmdgpuProviderTest, ReusesAuthoredFeatureRecordAndSeparatesVariant) {
       FindSymbolRef(module.get(), IREE_SV("authored"));
   EXPECT_EQ(authored_ref.symbol_id, expected_authored_ref.symbol_id);
 
-  loom_amdgpu_target_identity_t variant_identity =
-      MakeTargetIdentity(processor);
+  loom_amdgpu_target_identity_t variant_identity = MakeTargetIdentity(target);
   variant_identity.amdhsa_features.sramecc = LOOM_AMDGPU_TARGET_FEATURE_OFF;
   variant_identity.amdhsa_features.xnack = LOOM_AMDGPU_TARGET_FEATURE_ON;
   loom_amdgpu_target_profile_t variant_profile = {};
@@ -600,12 +599,10 @@ TEST_F(AmdgpuProviderTest, PreservesTargetIdFeatureRequirements) {
                                                  xnack_off, xnack_on));
 }
 
-TEST_F(AmdgpuProviderTest, PreservesExactRevisionRequirements) {
+TEST_F(AmdgpuProviderTest, PreservesTargetOverlayRequirements) {
   ModulePtr module =
-      Parse(IREE_SV("amdgpu.target<gfx1250> @gfx1250_a0 "
-                    "{asic_revision = 0}\n"
-                    "amdgpu.target<gfx1250> @gfx1250_b0 "
-                    "{asic_revision = 1}\n"
+      Parse(IREE_SV("amdgpu.target<gfx1250-a0> @gfx1250_a0\n"
+                    "amdgpu.target<gfx1250> @gfx1250_b0\n"
                     "amdgpu.target<gfx12-5-generic> @gfx12_5_generic\n"));
 
   const loom_target_record_view_t gfx1250_a0 =
@@ -633,29 +630,23 @@ TEST_F(AmdgpuProviderTest, PreservesExactRevisionRequirements) {
 
 TEST_F(AmdgpuProviderTest, ExhaustsSupportedRecordSatisfactionRelation) {
   struct MaterializedRecord {
-    // Generated processor row represented by the target record.
-    const loom_amdgpu_processor_info_t* processor;
+    // Generated canonical target row represented by the record.
+    const loom_amdgpu_target_info_t* target_info;
 
-    // Indexed materialized target record for the processor.
+    // Indexed materialized target record for the target.
     loom_target_record_view_t target;
   };
 
   ModulePtr module = Parse(IREE_SV(""));
   std::vector<MaterializedRecord> records;
-  const iree_host_size_t processor_count =
-      loom_amdgpu_target_info_processor_count();
-  for (iree_host_size_t i = 0; i < processor_count; ++i) {
-    const loom_amdgpu_processor_info_t* processor =
-        loom_amdgpu_target_info_processor_at(i);
-    ASSERT_NE(processor, nullptr);
-    if (loom_amdgpu_target_bundle_for_descriptor_set(
-            processor->properties.descriptor_set.ordinal) == nullptr) {
-      continue;
-    }
-
+  const iree_host_size_t target_count = loom_amdgpu_target_info_target_count();
+  for (iree_host_size_t i = 0; i < target_count; ++i) {
+    const loom_amdgpu_target_info_t* target_info =
+        loom_amdgpu_target_info_target_at(i);
+    ASSERT_NE(target_info, nullptr);
     loom_amdgpu_target_profile_t profile = {};
     const loom_amdgpu_target_identity_t identity =
-        MakeTargetIdentity(processor);
+        MakeTargetIdentity(target_info);
     IREE_ASSERT_OK(loom_amdgpu_target_profile_initialize(&identity, &profile));
     const loom_target_selection_t selection = {
         /*.profile=*/&profile.base,
@@ -666,7 +657,7 @@ TEST_F(AmdgpuProviderTest, ExhaustsSupportedRecordSatisfactionRelation) {
     const loom_target_record_view_t target = Target(module.get(), target_ref);
     ASSERT_TRUE(loom_target_record_view_is_valid(target));
     records.push_back({
-        /*.processor=*/processor,
+        /*.target_info=*/target_info,
         /*.target=*/target,
     });
   }
@@ -675,17 +666,17 @@ TEST_F(AmdgpuProviderTest, ExhaustsSupportedRecordSatisfactionRelation) {
   for (const MaterializedRecord& effective : records) {
     for (const MaterializedRecord& requirement : records) {
       const bool expected =
-          loom_amdgpu_processor_satisfies_code_object_requirement(
-              effective.processor, requirement.processor);
+          loom_amdgpu_target_satisfies_code_object_requirement(
+              effective.target_info, requirement.target_info);
       EXPECT_EQ(loom_target_satisfies_requirement(
                     &target_environment_, effective.target, requirement.target),
                 expected)
           << "effective "
-          << std::string(effective.processor->name.data,
-                         effective.processor->name.size)
+          << std::string(effective.target_info->name.data,
+                         effective.target_info->name.size)
           << ", requirement "
-          << std::string(requirement.processor->name.data,
-                         requirement.processor->name.size);
+          << std::string(requirement.target_info->name.data,
+                         requirement.target_info->name.size);
     }
   }
 }

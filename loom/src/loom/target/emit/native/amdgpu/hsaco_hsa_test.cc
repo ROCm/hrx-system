@@ -129,17 +129,17 @@ iree_status_t FormatTargetRecordForProfile(
   IREE_ASSERT_ARGUMENT(profile);
   IREE_ASSERT_ARGUMENT(out_target_record);
   *out_target_record = {};
-  const loom_amdgpu_processor_info_t* processor = profile->identity.processor;
+  const loom_amdgpu_target_info_t* target = profile->identity.target;
   const loom_amdgpu_target_record_info_t* record_info =
-      loom_amdgpu_target_record_info_for_processor(processor->name);
+      loom_amdgpu_target_record_info_for_target(target->name);
   if (record_info == nullptr) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "AMDGPU HSA processor '%.*s' has no target record",
-                            (int)processor->name.size, processor->name.data);
+                            "AMDGPU HSA target '%.*s' has no target record",
+                            (int)target->name.size, target->name.data);
   }
   std::string target_record = "amdgpu.target<";
-  target_record.append(record_info->processor_name.data,
-                       record_info->processor_name.size);
+  target_record.append(record_info->target_name.data,
+                       record_info->target_name.size);
   target_record += "> @gfx_target";
   bool has_attrs = false;
   const auto append_attr = [&](const char* name, iree_string_view_t value) {
@@ -160,12 +160,6 @@ iree_status_t FormatTargetRecordForProfile(
   if (xnack == LOOM_AMDGPU_TARGET_FEATURE_OFF ||
       xnack == LOOM_AMDGPU_TARGET_FEATURE_ON) {
     append_attr("xnack", loom_amdgpu_target_feature_state_attr_name(xnack));
-  }
-  if (profile->identity.asic_revision != nullptr) {
-    const std::string revision_value =
-        std::to_string(profile->identity.asic_revision->value);
-    append_attr("asic_revision", iree_make_string_view(revision_value.data(),
-                                                       revision_value.size()));
   }
   if (has_attrs) {
     target_record += "}";
@@ -646,31 +640,6 @@ bool TryFindFirstGpuAgent(const HsaApi& api, hsa_agent_t* out_agent,
   return true;
 }
 
-bool TryParseAmdhsaProcessor(const std::string& target_id,
-                             std::string* out_processor,
-                             std::string* out_feature_suffix,
-                             std::string* out_error) {
-  IREE_ASSERT_ARGUMENT(out_processor);
-  IREE_ASSERT_ARGUMENT(out_feature_suffix);
-  IREE_ASSERT_ARGUMENT(out_error);
-  *out_processor = {};
-  *out_feature_suffix = {};
-  *out_error = {};
-  loom_amdgpu_amdhsa_target_id_t parsed_target_id = {};
-  iree_status_t status = loom_amdgpu_target_info_parse_amdhsa_target_id(
-      iree_make_string_view(target_id.data(), target_id.size()),
-      &parsed_target_id);
-  if (!iree_status_is_ok(status)) {
-    *out_error = StatusToStringAndFree(status);
-    return false;
-  }
-  out_processor->assign(parsed_target_id.processor->name.data,
-                        parsed_target_id.processor->name.size);
-  out_feature_suffix->assign(parsed_target_id.feature_suffix.data,
-                             parsed_target_id.feature_suffix.size);
-  return true;
-}
-
 struct AmdgpuHsaTarget {
   // HSA GPU agent that owns the queried target ISA.
   hsa_agent_t agent = {};
@@ -678,12 +647,8 @@ struct AmdgpuHsaTarget {
   std::string agent_name;
   // Full HSA target id reported by the runtime for |agent|.
   std::string isa_name;
-  // AMDGPU processor parsed out of |isa_name|.
-  std::string processor;
-  // Target-feature suffix parsed out of |isa_name|.
-  std::string feature_suffix;
-  // HSA-reported ASIC revision when target identity derives from it.
-  uint32_t asic_revision = 0;
+  // Canonical AMDGPU target identity resolved from physical HSA facts.
+  loom_amdgpu_target_identity_t identity = {};
 };
 
 bool TryDiscoverCurrentAmdgpuTarget(const HsaApi& api,
@@ -716,36 +681,44 @@ bool TryDiscoverCurrentAmdgpuTarget(const HsaApi& api,
     return false;
   }
 
-  std::string processor;
-  std::string feature_suffix;
-  std::string parse_error;
-  if (!TryParseAmdhsaProcessor(isa_search.isa_name, &processor, &feature_suffix,
-                               &parse_error)) {
-    *out_skip_reason = parse_error;
+  loom_amdgpu_amdhsa_target_id_t target_id = {};
+  iree_status_t target_status = loom_amdgpu_target_info_parse_amdhsa_target_id(
+      iree_make_string_view(isa_search.isa_name.data(),
+                            isa_search.isa_name.size()),
+      &target_id);
+  if (!iree_status_is_ok(target_status)) {
+    *out_skip_reason = StatusToStringAndFree(target_status);
     return false;
   }
-  uint32_t asic_revision = 0;
-  const loom_amdgpu_processor_info_t* processor_info =
-      loom_amdgpu_target_info_find_processor(
-          iree_make_string_view(processor.data(), processor.size()));
-  if (processor_info != nullptr && processor_info->asic_revisions.count != 0) {
+  uint32_t physical_asic_revision = 0;
+  if (loom_amdgpu_target_info_requires_physical_resolution(
+          target_id.processor)) {
     status = CallHsa(api.hsa_agent_get_info, agent,
                      (hsa_agent_info_t)HSA_AMD_AGENT_INFO_ASIC_REVISION,
-                     &asic_revision);
+                     &physical_asic_revision);
     if (status != HSA_STATUS_SUCCESS) {
       ADD_FAILURE() << "hsa_agent_get_info(ASIC_REVISION) failed: "
                     << HsaStatusString(api, status);
       return false;
     }
   }
+  const loom_amdgpu_target_info_t* target = nullptr;
+  target_status = loom_amdgpu_target_info_lookup_physical_target(
+      target_id.processor, physical_asic_revision, &target);
+  if (!iree_status_is_ok(target_status)) {
+    *out_skip_reason = StatusToStringAndFree(target_status);
+    return false;
+  }
 
   *out_target = {
       /*.agent=*/agent,
       /*.agent_name=*/std::move(agent_name),
       /*.isa_name=*/std::move(isa_search.isa_name),
-      /*.processor=*/std::move(processor),
-      /*.feature_suffix=*/std::move(feature_suffix),
-      /*.asic_revision=*/asic_revision,
+      /*.identity=*/
+      {
+          /*.target=*/target,
+          /*.amdhsa_features=*/target_id.features,
+      },
   };
   return true;
 }
@@ -930,33 +903,26 @@ iree_status_t PrepareTargetProfileForLowHsaco(
     loom_amdgpu_target_profile_t* out_target_profile) {
   IREE_ASSERT_ARGUMENT(out_target_profile);
   *out_target_profile = {};
-  loom_amdgpu_amdhsa_target_id_t target_id = {};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_parse_amdhsa_target_id(
-      iree_make_string_view(target.isa_name.data(), target.isa_name.size()),
-      &target_id));
-  const loom_amdgpu_processor_info_t* processor = target_id.processor;
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_target_processor(target.identity.target);
+  IREE_ASSERT(processor != nullptr);
   if (!loom_amdgpu_processor_properties_support_hsaco(&processor->properties)) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "AMDGPU processor '%s' does not have native "
-                            "HSACO support",
-                            target.processor.c_str());
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "AMDGPU target '%.*s' does not have native HSACO support",
+        (int)target.identity.target->name.size,
+        target.identity.target->name.data);
   }
   const loom_amdgpu_target_record_info_t* record_info =
-      loom_amdgpu_target_record_info_for_processor(processor->name);
+      loom_amdgpu_target_record_info_for_target(target.identity.target->name);
   if (record_info == nullptr) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "AMDGPU processor '%s' has no target-low record",
-                            target.processor.c_str());
+                            "AMDGPU target '%.*s' has no target-low record",
+                            (int)target.identity.target->name.size,
+                            target.identity.target->name.data);
   }
-  const loom_amdgpu_processor_asic_revision_info_t* asic_revision = nullptr;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_target_info_lookup_asic_revision(
-      processor, target.asic_revision, &asic_revision));
-  const loom_amdgpu_target_identity_t identity = {
-      /*.processor=*/target_id.processor,
-      /*.amdhsa_features=*/target_id.features,
-      /*.asic_revision=*/asic_revision,
-  };
-  return loom_amdgpu_target_profile_initialize(&identity, out_target_profile);
+  return loom_amdgpu_target_profile_initialize(&target.identity,
+                                               out_target_profile);
 }
 
 iree_status_t EmitWorkitemStoreKernelForAmdgpu(const AmdgpuHsaTarget& target,
@@ -1001,7 +967,8 @@ iree_status_t EmitB128CopyKernelForAmdgpu(const AmdgpuHsaTarget& target,
   IREE_RETURN_IF_ERROR(
       PrepareTargetProfileForLowHsaco(target, &target_profile));
   const loom_amdgpu_processor_info_t* processor =
-      target_profile.identity.processor;
+      loom_amdgpu_target_info_target_processor(target_profile.identity.target);
+  IREE_ASSERT(processor != nullptr);
 
   std::string source =
       "low.kernel.def target(@gfx_target) @loom_kernel() {\n"
@@ -1092,7 +1059,8 @@ iree_status_t EmitRuntimeGlobalKernelForAmdgpu(const AmdgpuHsaTarget& target,
   IREE_RETURN_IF_ERROR(
       PrepareTargetProfileForLowHsaco(target, &target_profile));
   const loom_amdgpu_processor_info_t* processor =
-      target_profile.identity.processor;
+      loom_amdgpu_target_info_target_processor(target_profile.identity.target);
+  IREE_ASSERT(processor != nullptr);
 
   const uint8_t s_endpgm[] = {0x00, 0x00, 0x81, 0xbf};
   const loom_amdgpu_hsaco_kernel_t kernel = {

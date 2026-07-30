@@ -50,10 +50,11 @@ typedef enum loom_amdgpu_target_kind_e {
   LOOM_AMDGPU_TARGET_KIND_GFX1201 = 21,
   LOOM_AMDGPU_TARGET_KIND_GFX1251 = 22,
   LOOM_AMDGPU_TARGET_KIND_GFX9_4_GENERIC = 23,
-  LOOM_AMDGPU_TARGET_KIND_COUNT_ = 24,
+  LOOM_AMDGPU_TARGET_KIND_GFX1250_A0 = 24,
+  LOOM_AMDGPU_TARGET_KIND_COUNT_ = 25,
 } loom_amdgpu_target_kind_t;
 
-// LOOM_OP_AMDGPU_TARGET: AMDGPU processor target record. The selector chooses one exact or generic processor row; optional attrs preserve authored common facts, target-ID feature states, and physical stepping.
+// LOOM_OP_AMDGPU_TARGET: AMDGPU target record. The selector chooses one exact, generic, or overlay target row; optional attrs preserve authored common facts and target-ID feature states.
 // amdgpu.target<gfx11-generic> @gfx11_generic
 LOOM_DEFINE_ISA(loom_amdgpu_target_isa, LOOM_OP_AMDGPU_TARGET)
 LOOM_DEFINE_ATTR_SYMBOL(loom_amdgpu_target_symbol, 0)
@@ -89,9 +90,8 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_amdgpu_target_linkage, 29, loom_target_linkage_
 LOOM_DEFINE_ATTR_I64(loom_amdgpu_target_hal_buffer_resource_flags, 30)
 LOOM_DEFINE_ATTR_STRING(loom_amdgpu_target_contract_set_key, 31)
 LOOM_DEFINE_ATTR_I64(loom_amdgpu_target_contract_feature_bits, 32)
-LOOM_DEFINE_ATTR_I64(loom_amdgpu_target_asic_revision, 33)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_amdgpu_target_sramecc, 34, loom_amdgpu_target_feature_state_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_amdgpu_target_xnack, 35, loom_amdgpu_target_feature_state_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_amdgpu_target_sramecc, 33, loom_amdgpu_target_feature_state_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_amdgpu_target_xnack, 34, loom_amdgpu_target_feature_state_t)
 // Build flag values use macros because C enums cannot portably represent
 // values wider than int.
 #define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CODEGEN_FORMAT (UINT64_C(1) << 0)
@@ -142,9 +142,8 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_amdgpu_target_xnack, 35, loom_amdgpu_target_fea
 #define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CONTRACT_SET_KEY (UINT64_C(1) << 29)
 #define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_CONTRACT_FEATURE_BITS \
   (UINT64_C(1) << 30)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_ASIC_REVISION (UINT64_C(1) << 31)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_SRAMECC (UINT64_C(1) << 32)
-#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_XNACK (UINT64_C(1) << 33)
+#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_SRAMECC (UINT64_C(1) << 31)
+#define LOOM_AMDGPU_TARGET_BUILD_FLAG_HAS_XNACK (UINT64_C(1) << 32)
 typedef uint64_t loom_amdgpu_target_build_flags_t;
 iree_status_t loom_amdgpu_target_build(
     loom_builder_t* builder,
@@ -182,7 +181,6 @@ iree_status_t loom_amdgpu_target_build(
     loom_optional int64_t hal_buffer_resource_flags,
     loom_optional loom_string_id_t contract_set_key,
     loom_optional int64_t contract_feature_bits,
-    loom_optional int64_t asic_revision,
     loom_optional uint8_t sramecc,
     loom_optional uint8_t xnack,
     loom_location_id_t location,

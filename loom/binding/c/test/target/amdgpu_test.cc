@@ -195,15 +195,15 @@ low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) @loom_kernel() {
 }
 
 TargetProfilePtr CreateTargetProfile(
-    loomc_target_environment_t* target_environment, const char* processor) {
+    loomc_target_environment_t* target_environment, const char* target) {
   loomc_amdgpu_profile_options_t profile_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
       /*.structure_size=*/sizeof(profile_options),
       /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view(processor),
+      /*.identifier=*/loomc_make_cstring_view(target),
       /*.identity=*/
       {
-          /*.processor=*/loomc_make_cstring_view(processor),
+          /*.target=*/loomc_make_cstring_view(target),
       },
   };
   loomc_target_profile_t* profile = nullptr;
@@ -214,8 +214,8 @@ TargetProfilePtr CreateTargetProfile(
 }
 
 TargetSelectionPtr CreateTargetSelection(
-    loomc_target_environment_t* target_environment, const char* processor) {
-  TargetProfilePtr profile = CreateTargetProfile(target_environment, processor);
+    loomc_target_environment_t* target_environment, const char* target) {
+  TargetProfilePtr profile = CreateTargetProfile(target_environment, target);
   loomc_target_selection_t* selection = nullptr;
   loomc_status_t status = loomc_target_selection_create_from_profile(
       profile.get(), loomc_allocator_system(), &selection);
@@ -223,28 +223,22 @@ TargetSelectionPtr CreateTargetSelection(
   return TargetSelectionPtr(selection);
 }
 
-TEST(AmdgpuTargetTest, TargetProfilePreservesAsicRevision) {
+TEST(AmdgpuTargetTest, TargetProfilePreservesCanonicalTarget) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
-  struct TestCase {
-    loomc_amdgpu_asic_revision_t requested_revision;
-    uint32_t expected_revision;
+  const char* target_names[] = {
+      "gfx1250-a0",
+      "gfx1250",
+      "gfx12-5-generic",
   };
-  const TestCase test_cases[] = {
-      {{/*.specified=*/false, /*.value=*/0}, 1},
-      {{/*.specified=*/true, /*.value=*/0}, 0},
-      {{/*.specified=*/true, /*.value=*/1}, 1},
-  };
-  for (const TestCase& test_case : test_cases) {
+  for (const char* target_name : target_names) {
     loomc_amdgpu_profile_options_t options = {
         /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
         /*.structure_size=*/sizeof(options),
         /*.next=*/nullptr,
-        /*.identifier=*/loomc_make_cstring_view("gfx1250-test"),
+        /*.identifier=*/{},
         /*.identity=*/
         {
-            /*.processor=*/loomc_make_cstring_view("gfx1250"),
-            /*.amdhsa_features=*/{},
-            /*.asic_revision=*/test_case.requested_revision,
+            /*.target=*/loomc_make_cstring_view(target_name),
         },
     };
     loomc_target_profile_t* profile = nullptr;
@@ -256,28 +250,20 @@ TEST(AmdgpuTargetTest, TargetProfilePreservesAsicRevision) {
     loomc_amdgpu_target_identity_t identity = {};
     LOOMC_EXPECT_OK(loomc_amdgpu_target_profile_query_identity(
         profile_ptr.get(), &identity));
-    EXPECT_EQ(ToString(identity.processor), "gfx1250");
-    EXPECT_TRUE(identity.asic_revision.specified);
-    EXPECT_EQ(identity.asic_revision.value, test_case.expected_revision);
+    EXPECT_EQ(ToString(identity.target), target_name);
   }
 }
 
-TEST(AmdgpuTargetTest, RejectsUnknownAsicRevision) {
+TEST(AmdgpuTargetTest, RejectsUnknownTarget) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   loomc_amdgpu_profile_options_t options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
       /*.structure_size=*/sizeof(options),
       /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("gfx1250-unknown"),
+      /*.identifier=*/{},
       /*.identity=*/
       {
-          /*.processor=*/loomc_make_cstring_view("gfx1250"),
-          /*.amdhsa_features=*/{},
-          /*.asic_revision=*/
-          {
-              /*.specified=*/true,
-              /*.value=*/2,
-          },
+          /*.target=*/loomc_make_cstring_view("gfx1250-a1"),
       },
   };
   loomc_target_profile_t* profile = nullptr;
@@ -297,7 +283,7 @@ TEST(AmdgpuTargetTest, TargetProfilePreservesTargetIdFeatureStates) {
       /*.identifier=*/loomc_make_cstring_view("gfx942-features"),
       /*.identity=*/
       {
-          /*.processor=*/loomc_make_cstring_view("gfx942"),
+          /*.target=*/loomc_make_cstring_view("gfx942"),
           /*.amdhsa_features=*/
           {
               /*.sramecc=*/LOOMC_AMDGPU_TARGET_FEATURE_ON,
@@ -313,17 +299,16 @@ TEST(AmdgpuTargetTest, TargetProfilePreservesTargetIdFeatureStates) {
   loomc_amdgpu_target_identity_t identity = {};
   LOOMC_EXPECT_OK(
       loomc_amdgpu_target_profile_query_identity(profile_ptr.get(), &identity));
-  EXPECT_EQ(ToString(identity.processor), "gfx942");
+  EXPECT_EQ(ToString(identity.target), "gfx942");
   EXPECT_EQ(identity.amdhsa_features.sramecc, LOOMC_AMDGPU_TARGET_FEATURE_ON);
   EXPECT_EQ(identity.amdhsa_features.xnack, LOOMC_AMDGPU_TARGET_FEATURE_OFF);
-  EXPECT_FALSE(identity.asic_revision.specified);
 }
 
 TEST(AmdgpuTargetTest,
      TargetProfileDistinguishesUnconstrainedAndUnsupportedFeatures) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   struct TestCase {
-    const char* processor;
+    const char* target;
     loomc_amdgpu_target_feature_state_t expected_state;
   };
   const TestCase test_cases[] = {
@@ -332,13 +317,12 @@ TEST(AmdgpuTargetTest,
   };
   for (const TestCase& test_case : test_cases) {
     TargetProfilePtr profile =
-        CreateTargetProfile(target_environment.get(), test_case.processor);
+        CreateTargetProfile(target_environment.get(), test_case.target);
     loomc_amdgpu_target_identity_t identity = {};
     LOOMC_EXPECT_OK(
         loomc_amdgpu_target_profile_query_identity(profile.get(), &identity));
     EXPECT_EQ(identity.amdhsa_features.sramecc, test_case.expected_state);
     EXPECT_EQ(identity.amdhsa_features.xnack, test_case.expected_state);
-    EXPECT_FALSE(identity.asic_revision.specified);
   }
 }
 
@@ -351,7 +335,7 @@ TEST(AmdgpuTargetTest, TargetProfileRejectsUnsupportedFeatureSelection) {
       /*.identifier=*/loomc_make_cstring_view("gfx1151-sramecc"),
       /*.identity=*/
       {
-          /*.processor=*/loomc_make_cstring_view("gfx1151"),
+          /*.target=*/loomc_make_cstring_view("gfx1151"),
           /*.amdhsa_features=*/
           {
               /*.sramecc=*/LOOMC_AMDGPU_TARGET_FEATURE_ON,
@@ -366,28 +350,24 @@ TEST(AmdgpuTargetTest, TargetProfileRejectsUnsupportedFeatureSelection) {
   EXPECT_EQ(profile, nullptr);
 }
 
-TEST(AmdgpuTargetTest, HsaAdapterPreservesQualifiedIdentity) {
+TEST(AmdgpuTargetTest, HsaAdapterResolvesCanonicalIdentity) {
   loomc_amdgpu_target_identity_t identity = {};
   LOOMC_EXPECT_OK(loomc_amdgpu_target_identity_from_hsa_isa_name(
       loomc_make_cstring_view("amdgcn-amd-amdhsa--gfx942:sramecc+:xnack-"),
       /*asic_revision=*/0, &identity));
-  EXPECT_EQ(ToString(identity.processor), "gfx942");
+  EXPECT_EQ(ToString(identity.target), "gfx942");
   EXPECT_EQ(identity.amdhsa_features.sramecc, LOOMC_AMDGPU_TARGET_FEATURE_ON);
   EXPECT_EQ(identity.amdhsa_features.xnack, LOOMC_AMDGPU_TARGET_FEATURE_OFF);
-  EXPECT_FALSE(identity.asic_revision.specified);
 
   LOOMC_EXPECT_OK(loomc_amdgpu_target_identity_from_hsa_isa_name(
       loomc_make_cstring_view("amdgcn-amd-amdhsa--gfx1250"),
       /*asic_revision=*/0, &identity));
-  EXPECT_EQ(ToString(identity.processor), "gfx1250");
-  EXPECT_TRUE(identity.asic_revision.specified);
-  EXPECT_EQ(identity.asic_revision.value, 0u);
+  EXPECT_EQ(ToString(identity.target), "gfx1250-a0");
 
   LOOMC_EXPECT_OK(loomc_amdgpu_target_identity_from_hsa_isa_name(
       loomc_make_cstring_view("amdgcn-amd-amdhsa--gfx1250"),
       /*asic_revision=*/1, &identity));
-  EXPECT_TRUE(identity.asic_revision.specified);
-  EXPECT_EQ(identity.asic_revision.value, 1u);
+  EXPECT_EQ(ToString(identity.target), "gfx1250");
 }
 
 TEST(AmdgpuTargetTest, HsaAdapterRejectsUnknownRevision) {

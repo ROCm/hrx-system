@@ -159,19 +159,23 @@ class AmdgpuDeviceBinariesTest(unittest.TestCase):
             ),
         )
 
+    def test_device_binary_expansion_accepts_canonical_overlay(self):
+        self.assertEqual(
+            ["gfx1250-a0"],
+            amdgpu_device_binaries.expand_target_selections(["gfx1250-a0"]),
+        )
+
     def test_resolve_device_binary_targets_rejects_public_selectors(self):
         with self.assertRaisesRegex(
             RuntimeError, "unknown AMDGPU device binary target.*gfx1250"
         ):
             amdgpu_device_binaries.resolve_device_binary_targets(["gfx1250"])
 
-    def test_gfx1250_a0_build_applies_revision_options_to_both_codegen_stages(
+    def test_gfx1250_a0_build_applies_overlay_options_to_both_codegen_stages(
         self,
     ):
         target = amdgpu_device_binaries.resolve_device_binary_targets(["gfx1250-a0"])[0]
-        self.assertEqual(len(target.target_matches), 1)
-        self.assertEqual(target.target_matches[0].processor, "gfx1250")
-        self.assertEqual(target.target_matches[0].asic_revision, 0)
+        self.assertEqual(target.processor, "gfx1250")
         toolchain = amdgpu_device_binaries.Toolchain(
             clang=Path("/tools/clang"),
             llvm_link=Path("/tools/llvm-link"),

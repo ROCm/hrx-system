@@ -297,8 +297,8 @@ typedef struct emit_amdgpu_hsa_state_t {
   // Structured Loom AMDHSA target derived from HSA agent facts.
   loomc_amdgpu_target_identity_t target_identity;
 
-  // HSA-reported GPU ASIC revision.
-  uint32_t asic_revision;
+  // Physical ASIC revision observed from the selected HSA GPU agent.
+  uint32_t physical_asic_revision;
 
   // Queue used for one raw AQL dispatch.
   hsa_queue_t* queue;
@@ -336,7 +336,7 @@ typedef struct emit_amdgpu_hsa_state_t {
   // Mutable module compiled and emitted by this invocation.
   loomc_module_t* module;
 
-  // Live HSA-derived AMDGPU processor target profile.
+  // Live HSA-derived AMDGPU target profile.
   loomc_target_profile_t* target_profile;
 
   // Invocation-ready target selection derived from the profile.
@@ -991,7 +991,7 @@ static loomc_status_t discover_hsa_target(emit_amdgpu_hsa_state_t* state) {
   EMIT_AMDGPU_HSA_CALL_STATUS(
       hsa_status, &state->api, hsa_agent_get_info, state->gpu_agent,
       (hsa_agent_info_t)HSA_AMD_AGENT_INFO_ASIC_REVISION,
-      &state->asic_revision);
+      &state->physical_asic_revision);
   LOOMC_RETURN_IF_ERROR(hsa_status_to_loomc_status(
       &state->api, hsa_status, "hsa_agent_get_info(ASIC_REVISION)"));
 
@@ -1013,7 +1013,7 @@ static loomc_status_t discover_hsa_target(emit_amdgpu_hsa_state_t* state) {
   snprintf(state->isa_name, sizeof(state->isa_name), "%s", isa_search.isa_name);
 
   loomc_status_t parse_status = loomc_amdgpu_target_identity_from_hsa_isa_name(
-      loomc_make_cstring_view(state->isa_name), state->asic_revision,
+      loomc_make_cstring_view(state->isa_name), state->physical_asic_revision,
       &state->target_identity);
   if (!loomc_status_is_ok(parse_status)) {
     emit_amdgpu_hsa_state_skip_from_loomc_status(
@@ -1090,7 +1090,7 @@ static loomc_status_t create_target_profile_and_selection(
       &state->target_profile);
   if (!loomc_status_is_ok(status)) {
     emit_amdgpu_hsa_state_skip_from_loomc_status(
-        state, "Loom cannot emit HSACO for the HSA-selected AMDGPU processor",
+        state, "Loom cannot emit HSACO for the HSA-selected AMDGPU target",
         status);
     return loomc_ok_status();
   }
@@ -1164,11 +1164,11 @@ static loomc_status_t deserialize_source(emit_amdgpu_hsa_state_t* state) {
 static loomc_status_t compile_module_to_prepared_low(
     emit_amdgpu_hsa_state_t* state) {
   printf(
-      "hsa cpu_agent=%s gpu_agent=%s isa=%s processor=%.*s "
-      "asic_revision=%" PRIu32 "\n",
+      "hsa cpu_agent=%s gpu_agent=%s isa=%s target=%.*s "
+      "physical_asic_revision=%" PRIu32 "\n",
       state->cpu_agent_name, state->gpu_agent_name, state->isa_name,
-      (int)state->target_identity.processor.size,
-      state->target_identity.processor.data, state->asic_revision);
+      (int)state->target_identity.target.size,
+      state->target_identity.target.data, state->physical_asic_revision);
   loomc_target_selection_options_t target_options = {
       .type = LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
       .structure_size = sizeof(target_options),

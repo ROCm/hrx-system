@@ -6,7 +6,6 @@
 
 #include "loomc/target/amdgpu.h"
 
-#include <inttypes.h>
 #include <string.h>
 
 #include "iree/base/api.h"
@@ -59,10 +58,10 @@ static loomc_status_t loomc_amdgpu_profile_options_validate(
   }
   LOOMC_RETURN_IF_ERROR(loomc_amdgpu_validate_string_view(options->identifier));
   LOOMC_RETURN_IF_ERROR(
-      loomc_amdgpu_validate_string_view(options->identity.processor));
-  if (loomc_string_view_is_empty(options->identity.processor)) {
+      loomc_amdgpu_validate_string_view(options->identity.target));
+  if (loomc_string_view_is_empty(options->identity.target)) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
-                             "AMDGPU profile options require processor");
+                             "AMDGPU profile options require target");
   }
   switch (options->identity.amdhsa_features.sramecc) {
     case LOOMC_AMDGPU_TARGET_FEATURE_ANY:
@@ -119,51 +118,30 @@ loomc_amdgpu_target_feature_state_from_internal(
   }
 }
 
-static iree_status_t loomc_amdgpu_target_identity_to_internal(
+static void loomc_amdgpu_target_identity_to_internal(
     const loomc_amdgpu_target_identity_t* identity,
-    const loom_amdgpu_processor_info_t* processor,
+    const loom_amdgpu_target_info_t* target,
     loom_amdgpu_target_identity_t* out_identity) {
-  loom_amdgpu_target_identity_initialize(processor, out_identity);
+  loom_amdgpu_target_identity_initialize(target, out_identity);
   out_identity->amdhsa_features = (loom_amdgpu_amdhsa_feature_states_t){
       .sramecc = loomc_amdgpu_target_feature_state_to_internal(
           identity->amdhsa_features.sramecc),
       .xnack = loomc_amdgpu_target_feature_state_to_internal(
           identity->amdhsa_features.xnack),
   };
-  if (identity->asic_revision.specified) {
-    const loom_amdgpu_processor_asic_revision_info_t* revision =
-        loom_amdgpu_target_info_find_asic_revision(
-            processor, identity->asic_revision.value);
-    if (revision == NULL) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU processor '%.*s' has no ASIC revision %" PRIu32,
-          (int)processor->name.size, processor->name.data,
-          identity->asic_revision.value);
-    }
-    out_identity->asic_revision = revision;
-  }
-  return iree_ok_status();
 }
 
 static void loomc_amdgpu_target_identity_from_internal(
     const loom_amdgpu_target_identity_t* identity,
     loomc_amdgpu_target_identity_t* out_identity) {
   *out_identity = (loomc_amdgpu_target_identity_t){
-      .processor = loomc_string_view_from_iree(identity->processor->name),
+      .target = loomc_string_view_from_iree(identity->target->name),
       .amdhsa_features =
           {
               .sramecc = loomc_amdgpu_target_feature_state_from_internal(
                   identity->amdhsa_features.sramecc),
               .xnack = loomc_amdgpu_target_feature_state_from_internal(
                   identity->amdhsa_features.xnack),
-          },
-      .asic_revision =
-          {
-              .specified = identity->asic_revision != NULL,
-              .value = identity->asic_revision != NULL
-                           ? identity->asic_revision->value
-                           : 0,
           },
   };
 }
@@ -401,36 +379,34 @@ loomc_status_t loomc_target_profile_create_amdgpu(
   }
   LOOMC_RETURN_IF_ERROR(loomc_amdgpu_profile_options_validate(options));
 
-  const loom_amdgpu_processor_info_t* processor = NULL;
+  const loom_amdgpu_target_info_t* target = NULL;
   LOOMC_RETURN_IF_ERROR(
-      loomc_status_from_iree(loom_amdgpu_target_info_lookup_processor(
-          iree_string_view_from_loomc(options->identity.processor),
-          &processor)));
+      loomc_status_from_iree(loom_amdgpu_target_info_lookup_target(
+          iree_string_view_from_loomc(options->identity.target), &target)));
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_target_processor(target);
+  IREE_ASSERT(processor != NULL);
   if (!loom_amdgpu_processor_properties_support_hsaco(&processor->properties)) {
     return loomc_make_status(LOOMC_STATUS_UNAVAILABLE,
-                             "AMDGPU processor cannot be emitted as HSACO");
+                             "AMDGPU target cannot be emitted as HSACO");
   }
 
   loom_amdgpu_target_profile_t* target_profile = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_allocator_malloc(
       allocator, sizeof(*target_profile), (void**)&target_profile));
   loom_amdgpu_target_identity_t identity = {0};
-  loomc_status_t status =
-      loomc_status_from_iree(loomc_amdgpu_target_identity_to_internal(
-          &options->identity, processor, &identity));
-  if (loomc_status_is_ok(status)) {
-    status = loomc_status_from_iree(
-        loom_amdgpu_target_profile_initialize(&identity, target_profile));
-  }
+  loomc_amdgpu_target_identity_to_internal(&options->identity, target,
+                                           &identity);
+  loomc_status_t status = loomc_status_from_iree(
+      loom_amdgpu_target_profile_initialize(&identity, target_profile));
   if (!loomc_status_is_ok(status)) {
     loomc_allocator_free(allocator, target_profile);
     return status;
   }
 
   const loomc_string_view_t identifier =
-      loomc_string_view_is_empty(options->identifier)
-          ? options->identity.processor
-          : options->identifier;
+      loomc_string_view_is_empty(options->identifier) ? options->identity.target
+                                                      : options->identifier;
   return loomc_target_profile_create(
       target_environment, identifier, &target_profile->base,
       loomc_amdgpu_target_profile_deinitialize, allocator, out_profile);
@@ -474,14 +450,13 @@ loomc_status_t loomc_amdgpu_target_identity_from_hsa_isa_name(
   LOOMC_RETURN_IF_ERROR(
       loomc_status_from_iree(loom_amdgpu_target_info_parse_amdhsa_target_id(
           iree_string_view_from_loomc(hsa_isa_name), &target_id)));
-  const loom_amdgpu_processor_asic_revision_info_t* revision = NULL;
+  const loom_amdgpu_target_info_t* target = NULL;
   LOOMC_RETURN_IF_ERROR(
-      loomc_status_from_iree(loom_amdgpu_target_info_lookup_asic_revision(
-          target_id.processor, asic_revision, &revision)));
+      loomc_status_from_iree(loom_amdgpu_target_info_lookup_physical_target(
+          target_id.processor, asic_revision, &target)));
   const loom_amdgpu_target_identity_t internal_identity = {
-      .processor = target_id.processor,
+      .target = target,
       .amdhsa_features = target_id.features,
-      .asic_revision = revision,
   };
   loomc_amdgpu_target_identity_from_internal(&internal_identity, out_identity);
   return loomc_ok_status();

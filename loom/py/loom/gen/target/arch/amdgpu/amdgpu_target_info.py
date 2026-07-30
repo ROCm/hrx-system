@@ -24,6 +24,10 @@ def _ensure_runtime_py_on_path() -> None:
 
 _ensure_runtime_py_on_path()
 
+from build_tools.amdgpu.target_map_data import (  # noqa: E402
+    AMDGPU_PHYSICAL_TARGET_INFOS,
+)
+
 from loom.gen.support.c import c_string_arg as _c_string_arg  # noqa: E402
 from loom.gen.support.c import c_string_literal as _c_string_literal  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
@@ -123,18 +127,22 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_WAVEFRONT_SIZE_KNOWN_FLAGS,
     AmdgpuDescriptorSetInfo,
     AmdgpuProcessorInfo,
+    AmdgpuTargetInfo,
     AmdgpuVectorMemoryCachePolicyEncodingInfo,
     amdgpu_descriptor_set_ordinal,
     amdgpu_generic_code_object_compatibility_info,
     amdgpu_lds_bank_service_model_sets,
+    amdgpu_processor_ordinal,
+    amdgpu_target_instruction_constraints,
     kernel_descriptor_profile_supports_wavefront_size,
     sorted_descriptor_set_infos,
     sorted_processor_infos,
+    sorted_target_infos,
     validate_amdgpu_code_object_processor_rows,
     validate_amdgpu_descriptor_set_isa_xml,
     validate_amdgpu_generic_contracts,
-    validate_amdgpu_processor_revision_rows,
     validate_amdgpu_target_id_processor_rows,
+    validate_amdgpu_target_rows,
 )
 
 
@@ -156,6 +164,10 @@ class _AmdgpuDescriptorSetRow:
 
 def _u16_expr(value: int) -> str:
     return f"UINT16_C({value})"
+
+
+def _u32_expr(value: int) -> str:
+    return f"UINT32_C({value})"
 
 
 def _c_ident(value: str) -> str:
@@ -627,10 +639,11 @@ def _lds_bank_service_model_initializer(
 
 def _emit_lds_bank_service_model_rows() -> str:
     processors = sorted_processor_infos()
+    targets = sorted_target_infos()
     validate_amdgpu_lds_bank_service_model_infos(amdgpu_descriptor_ref_keys())
-    validate_amdgpu_processor_revision_rows(processors)
+    validate_amdgpu_target_rows(processors, targets)
     model_infos_by_key = amdgpu_lds_bank_service_model_info_by_key()
-    model_sets = amdgpu_lds_bank_service_model_sets(processors)
+    model_sets = amdgpu_lds_bank_service_model_sets(processors, targets)
     validate_amdgpu_lds_bank_service_model_coverage(model_sets)
 
     lines = _lds_bank_service_fragment_header()
@@ -1063,6 +1076,16 @@ def _emit_tables_header() -> str:
         "extern const iree_host_size_t",
         "    loom_amdgpu_target_info_processor_info_count;",
         "",
+        "extern const loom_amdgpu_target_info_t",
+        "    loom_amdgpu_target_info_target_infos[];",
+        "extern const iree_host_size_t",
+        "    loom_amdgpu_target_info_target_info_count;",
+        "",
+        "extern const loom_amdgpu_physical_target_info_t",
+        "    loom_amdgpu_target_info_physical_target_infos[];",
+        "extern const iree_host_size_t",
+        "    loom_amdgpu_target_info_physical_target_info_count;",
+        "",
         f"#endif  // {guard}",
     ]
     return "\n".join(lines) + "\n"
@@ -1129,50 +1152,74 @@ def _processor_generic_code_object_fields(
     )
 
 
-def _processor_asic_revision_array_name(info: AmdgpuProcessorInfo) -> str:
-    return "loom_amdgpu_target_info_" + info.processor.replace("-", "_") + "_asic_revisions"
+def _target_kernel_metadata_extension_array_name(info: AmdgpuTargetInfo) -> str:
+    return "loom_amdgpu_target_info_" + info.target.replace("-", "_") + "_kernel_metadata_extensions"
 
 
-def _processor_asic_revision_kernel_metadata_extension_array_name(info: AmdgpuProcessorInfo, revision_value: int) -> str:
-    return "loom_amdgpu_target_info_" + info.processor.replace("-", "_") + f"_asic_revision_{revision_value}_kernel_metadata_extensions"
-
-
-def _emit_processor_asic_revision_rows(
+def _emit_target_rows(
+    targets: Sequence[AmdgpuTargetInfo],
     processors: Sequence[AmdgpuProcessorInfo],
     model_set_ordinals: Mapping[tuple[str, ...], int],
 ) -> list[str]:
     lines: list[str] = []
-    for info in processors:
-        if not info.asic_revisions:
+    processors_by_name = {info.processor: info for info in processors}
+    for info in targets:
+        metadata_extensions = info.semantics.kernel_metadata_extensions
+        if not metadata_extensions:
             continue
-        for revision in info.asic_revisions:
-            if not revision.kernel_metadata_extensions:
-                continue
-            metadata_array_name = _processor_asic_revision_kernel_metadata_extension_array_name(info, revision.value)
-            lines.append(f"static const loom_amdgpu_metadata_string_property_t {metadata_array_name}[] = {{")
-            for key, value in revision.kernel_metadata_extensions:
-                lines.append(f"  {{.key = IREE_SVL({_c_string_arg(key)}), .value = IREE_SVL({_c_string_arg(value)})}},")
-            lines.extend(["};", ""])
-        lines.append(f"static const loom_amdgpu_processor_asic_revision_info_t {_processor_asic_revision_array_name(info)}[] = {{")
-        for revision in info.asic_revisions:
-            metadata_array_name = _processor_asic_revision_kernel_metadata_extension_array_name(info, revision.value)
-            metadata_entries = metadata_array_name if revision.kernel_metadata_extensions else "NULL"
-            metadata_count = f"IREE_ARRAYSIZE({metadata_array_name})" if revision.kernel_metadata_extensions else "0"
-            lines.extend(
-                [
-                    "  {",
-                    f"    .value = UINT32_C({revision.value}),",
-                    f"    .name = IREE_SVL({_c_string_arg(revision.name)}),",
-                    f"    .instruction_constraints = {_instruction_constraint_bits_expr(revision.instruction_constraints)},",
-                    f"    .lds_bank_service_model_set_ordinal = {_lds_bank_service_model_set_ordinal_expr(revision.lds_bank_service_models, model_set_ordinals)},",
-                    "    .kernel_metadata_extensions = {",
-                    f"      .entries = {metadata_entries},",
-                    f"      .count = {metadata_count},",
-                    "    },",
-                    "  },",
-                ]
-            )
+        metadata_array_name = _target_kernel_metadata_extension_array_name(info)
+        lines.append(f"static const loom_amdgpu_metadata_string_property_t {metadata_array_name}[] = {{")
+        for key, value in metadata_extensions:
+            lines.append(f"  {{.key = IREE_SVL({_c_string_arg(key)}), .value = IREE_SVL({_c_string_arg(value)})}},")
         lines.extend(["};", ""])
+
+    lines.append("const loom_amdgpu_target_info_t loom_amdgpu_target_info_target_infos[] = {")
+    for info in targets:
+        processor = processors_by_name[info.processor]
+        model_keys = info.semantics.lds_bank_service_models if info.semantics.lds_bank_service_models is not None else processor.features.lds_bank_service_models
+        metadata_extensions = info.semantics.kernel_metadata_extensions
+        metadata_array_name = _target_kernel_metadata_extension_array_name(info)
+        metadata_entries = metadata_array_name if metadata_extensions else "NULL"
+        metadata_count = f"IREE_ARRAYSIZE({metadata_array_name})" if metadata_extensions else "0"
+        lines.extend(
+            [
+                "  {",
+                f"    .name = IREE_SVL({_c_string_arg(info.target)}),",
+                f"    .target_kind = {_u32_expr(info.enum_value)},",
+                f"    .processor_ordinal = {_u16_expr(amdgpu_processor_ordinal(info.processor))},",
+                f"    .instruction_constraints = {_instruction_constraint_bits_expr(amdgpu_target_instruction_constraints(info, processor))},",
+                f"    .lds_bank_service_model_set_ordinal = {_lds_bank_service_model_set_ordinal_expr(model_keys, model_set_ordinals)},",
+                "    .kernel_metadata_extensions = {",
+                f"      .entries = {metadata_entries},",
+                f"      .count = {metadata_count},",
+                "    },",
+                "  },",
+            ]
+        )
+    lines.extend(["};", ""])
+    return lines
+
+
+def _emit_physical_target_rows(
+    targets: Sequence[AmdgpuTargetInfo],
+) -> list[str]:
+    targets_by_name = {info.target: info for info in targets}
+    supported_processors = {info.processor for info in targets}
+    lines = ["const loom_amdgpu_physical_target_info_t loom_amdgpu_target_info_physical_target_infos[] = {"]
+    for info in AMDGPU_PHYSICAL_TARGET_INFOS:
+        if info.processor not in supported_processors:
+            continue
+        target = targets_by_name[info.target]
+        lines.extend(
+            [
+                "  {",
+                f"    .processor_ordinal = {_u16_expr(amdgpu_processor_ordinal(info.processor))},",
+                f"    .asic_revision = {_u32_expr(info.asic_revision)},",
+                f"    .target_kind = {_u32_expr(target.enum_value)},",
+                "  },",
+            ]
+        )
+    lines.extend(["};", ""])
     return lines
 
 
@@ -1191,8 +1238,6 @@ def _emit_processor_rows(
             generic_introduction_version,
         ) = _processor_generic_code_object_fields(info, processor_ordinals)
         generic_processor_ordinal_expr = "LOOM_AMDGPU_PROCESSOR_ORDINAL_NONE" if generic_processor_ordinal is None else _u16_expr(generic_processor_ordinal)
-        asic_revision_entries = _processor_asic_revision_array_name(info) if info.asic_revisions else "NULL"
-        default_asic_revision_ordinal = next(ordinal for ordinal, revision in enumerate(info.asic_revisions) if revision.value == info.default_asic_revision) if info.asic_revisions else 0
         lines.extend(
             [
                 "  {",
@@ -1200,11 +1245,6 @@ def _emit_processor_rows(
                 f"    .ordinal = {_u16_expr(processor_ordinal)},",
                 "    .target_id = {",
                 f"      .supported_features = {_target_id_feature_support_flags_expr(info.target_id.supported_features)},",
-                "    },",
-                "    .asic_revisions = {",
-                f"      .entries = {asic_revision_entries},",
-                f"      .count = {_u16_expr(len(info.asic_revisions))},",
-                f"      .default_ordinal = {_u16_expr(default_asic_revision_ordinal)},",
                 "    },",
                 "    .generic_code_object = {",
                 f"      .processor_ordinal = {generic_processor_ordinal_expr},",
@@ -1255,9 +1295,10 @@ def _emit_processor_rows(
 
 def _emit_tables_source(
     processors: Sequence[AmdgpuProcessorInfo],
+    targets: Sequence[AmdgpuTargetInfo],
     descriptor_set_rows: Sequence[_AmdgpuDescriptorSetRow],
 ) -> str:
-    model_sets = amdgpu_lds_bank_service_model_sets(processors)
+    model_sets = amdgpu_lds_bank_service_model_sets(processors, targets)
     model_set_ordinals = {model_keys: ordinal for ordinal, model_keys in enumerate(model_sets)}
     lines = [
         "// Copyright 2026 The IREE Authors",
@@ -1277,8 +1318,9 @@ def _emit_tables_source(
         "// clang-format off",
     ]
     lines.extend(_emit_descriptor_set_rows(descriptor_set_rows))
-    lines.extend(_emit_processor_asic_revision_rows(processors, model_set_ordinals))
     lines.extend(_emit_processor_rows(processors, model_set_ordinals))
+    lines.extend(_emit_target_rows(targets, processors, model_set_ordinals))
+    lines.extend(_emit_physical_target_rows(targets))
     lines.append("// clang-format on")
     lines.append("")
     lines.extend(
@@ -1290,6 +1332,15 @@ def _emit_tables_source(
             "const iree_host_size_t",
             "    loom_amdgpu_target_info_processor_info_count =",
             "        IREE_ARRAYSIZE(loom_amdgpu_target_info_processor_infos);",
+            "",
+            "const iree_host_size_t",
+            "    loom_amdgpu_target_info_target_info_count =",
+            "        IREE_ARRAYSIZE(loom_amdgpu_target_info_target_infos);",
+            "",
+            "const iree_host_size_t",
+            "    loom_amdgpu_target_info_physical_target_info_count =",
+            "        IREE_ARRAYSIZE(",
+            "            loom_amdgpu_target_info_physical_target_infos);",
         ]
     )
     return "\n".join(lines) + "\n"
@@ -1303,6 +1354,7 @@ def write_target_info_to_paths(
 ) -> None:
     descriptor_sets = sorted_descriptor_set_infos()
     processors = sorted_processor_infos()
+    targets = sorted_target_infos()
     isa_specs = _parse_isa_xml_arguments(isa_xml_arguments)
     descriptor_set_rows = _materialize_descriptor_set_rows(descriptor_sets, isa_specs)
     _validate_descriptor_sets(descriptor_sets)
@@ -1311,14 +1363,14 @@ def write_target_info_to_paths(
     validate_amdgpu_lds_bank_service_model_infos(amdgpu_descriptor_ref_keys())
     validate_amdgpu_code_object_processor_rows(processors)
     validate_amdgpu_target_id_processor_rows(processors)
-    validate_amdgpu_processor_revision_rows(processors)
-    model_sets = amdgpu_lds_bank_service_model_sets(processors)
+    validate_amdgpu_target_rows(processors, targets)
+    model_sets = amdgpu_lds_bank_service_model_sets(processors, targets)
     validate_amdgpu_lds_bank_service_model_coverage(model_sets)
     if len(model_sets) >= AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE:
         raise ValueError("AMDGPU LDS bank-service model-set ordinals must fit uint16_t")
     header = _emit_header(descriptor_sets)
     tables_header = _emit_tables_header()
-    source = _emit_tables_source(processors, descriptor_set_rows)
+    source = _emit_tables_source(processors, targets, descriptor_set_rows)
     header_path.parent.mkdir(parents=True, exist_ok=True)
     source_path.parent.mkdir(parents=True, exist_ok=True)
     tables_header_path.parent.mkdir(parents=True, exist_ok=True)

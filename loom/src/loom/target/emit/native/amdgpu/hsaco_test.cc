@@ -778,23 +778,22 @@ TEST(AmdgpuHsacoTest, RejectsInvalidTextFixups) {
   }
 }
 
-TEST(AmdgpuHsacoTest, WritesSupportedProcessorCodeObjectFlags) {
+TEST(AmdgpuHsacoTest, WritesEveryTargetCodeObjectFlags) {
   const uint8_t s_endpgm[] = {0x00, 0x00, 0x81, 0xbf};
-  iree_host_size_t supported_count = 0;
-  const iree_host_size_t processor_count =
-      loom_amdgpu_target_info_processor_count();
-  for (iree_host_size_t i = 0; i < processor_count; ++i) {
+  const iree_host_size_t target_count = loom_amdgpu_target_info_target_count();
+  for (iree_host_size_t i = 0; i < target_count; ++i) {
+    const loom_amdgpu_target_info_t* target =
+        loom_amdgpu_target_info_target_at(i);
+    ASSERT_NE(target, nullptr);
     const loom_amdgpu_processor_info_t* processor =
-        loom_amdgpu_target_info_processor_at(i);
+        loom_amdgpu_target_info_target_processor(target);
     ASSERT_NE(processor, nullptr);
-    if (!loom_amdgpu_processor_properties_support_hsaco(
-            &processor->properties)) {
-      continue;
-    }
-    ++supported_count;
+    ASSERT_TRUE(
+        loom_amdgpu_processor_properties_support_hsaco(&processor->properties))
+        << StringViewToString(target->name);
 
     loom_amdgpu_target_identity_t identity = {};
-    loom_amdgpu_target_identity_initialize(processor, &identity);
+    loom_amdgpu_target_identity_initialize(target, &identity);
     loom_amdgpu_metadata_kernel_t metadata =
         MinimalKernel(IREE_SV("loom_kernel"), IREE_SV("loom_kernel.kd"));
     metadata.wavefront_size = processor->properties.wavefront.default_size;
@@ -820,18 +819,18 @@ TEST(AmdgpuHsacoTest, WritesSupportedProcessorCodeObjectFlags) {
     TestArena arena;
     IREE_ASSERT_OK(
         loom_amdgpu_hsaco_write_file(&file, stream.get(), arena.arena()))
-        << StringViewToString(processor->name);
+        << StringViewToString(target->name);
     const std::string bytes = StreamBytes(stream.get());
 
     ASSERT_GE(bytes.size(), 64u) << StringViewToString(processor->name);
     EXPECT_EQ((uint8_t)bytes[8], LOOM_NATIVE_ELF_ABI_VERSION_AMDGPU_HSA_V6)
-        << StringViewToString(processor->name);
+        << StringViewToString(target->name);
     EXPECT_EQ(LoadLeU32(bytes, 48),
               processor->properties.elf.machine_flags |
                   processor->properties.elf.feature_flags |
                   (processor->properties.elf.generic_version
                    << LOOM_AMDGPU_ELF_GENERIC_VERSION_OFFSET_V6))
-        << StringViewToString(processor->name);
+        << StringViewToString(target->name);
 
     iree_hal_amdgpu_target_identity_t decoded_target_id = {};
     IREE_ASSERT_OK(iree_hal_amdgpu_code_object_target_id_from_elf(
@@ -839,23 +838,23 @@ TEST(AmdgpuHsacoTest, WritesSupportedProcessorCodeObjectFlags) {
         &decoded_target_id));
     EXPECT_TRUE(
         iree_string_view_equal(decoded_target_id.processor, processor->name))
-        << StringViewToString(processor->name);
+        << StringViewToString(target->name);
     EXPECT_EQ(decoded_target_id.kind, processor->properties.elf.generic_version
                                           ? IREE_HAL_AMDGPU_TARGET_KIND_GENERIC
                                           : IREE_HAL_AMDGPU_TARGET_KIND_EXACT)
-        << StringViewToString(processor->name);
+        << StringViewToString(target->name);
     EXPECT_EQ(decoded_target_id.generic_version,
               processor->properties.elf.generic_version)
-        << StringViewToString(processor->name);
+        << StringViewToString(target->name);
 
     const std::vector<Section> sections = ReadSections(bytes);
     const Section& note = FindSection(sections, ".note");
     const std::string note_contents =
         bytes.substr((size_t)note.offset, (size_t)note.size);
     EXPECT_NE(note_contents.find(target_id), std::string::npos)
-        << StringViewToString(processor->name);
+        << StringViewToString(target->name);
   }
-  EXPECT_GE(supported_count, 9u);
+  EXPECT_GE(target_count, 9u);
 }
 
 TEST(AmdgpuHsacoTest, WritesNativeKernargLayoutsWithoutHalCompaction) {

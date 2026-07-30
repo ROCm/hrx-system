@@ -32,6 +32,24 @@ TEST(AmdgpuTargetInfoTest, IteratesProcessors) {
   }
 }
 
+TEST(AmdgpuTargetInfoTest, IteratesCanonicalTargets) {
+  const iree_host_size_t count = loom_amdgpu_target_info_target_count();
+  ASSERT_GT(count, 0u);
+  EXPECT_EQ(loom_amdgpu_target_info_target_at(count), nullptr);
+
+  for (iree_host_size_t index = 0; index < count; ++index) {
+    const loom_amdgpu_target_info_t* target =
+        loom_amdgpu_target_info_target_at(index);
+    ASSERT_NE(target, nullptr);
+    EXPECT_FALSE(iree_string_view_is_empty(target->name));
+    EXPECT_EQ(target->target_kind, index + 1);
+    EXPECT_EQ(loom_amdgpu_target_info_find_target(target->name), target);
+    EXPECT_EQ(loom_amdgpu_target_info_find_target_by_kind(target->target_kind),
+              target);
+    EXPECT_NE(loom_amdgpu_target_info_target_processor(target), nullptr);
+  }
+}
+
 TEST(AmdgpuTargetInfoTest, ExhaustsCodeObjectSatisfactionRelation) {
   const iree_host_size_t count = loom_amdgpu_target_info_processor_count();
   for (iree_host_size_t effective_index = 0; effective_index < count;
@@ -284,61 +302,53 @@ TEST(AmdgpuTargetInfoTest, DistinguishesUnconstrainedAndUnsupportedFeatures) {
   EXPECT_EQ(target_id.features.xnack, LOOM_AMDGPU_TARGET_FEATURE_UNSUPPORTED);
 }
 
-TEST(AmdgpuTargetInfoTest, ExhaustsGeneratedAsicRevisionRows) {
-  const iree_host_size_t processor_count =
-      loom_amdgpu_target_info_processor_count();
-  for (iree_host_size_t processor_ordinal = 0;
-       processor_ordinal < processor_count; ++processor_ordinal) {
-    const loom_amdgpu_processor_info_t* processor =
-        loom_amdgpu_target_info_processor_at(processor_ordinal);
-    ASSERT_NE(processor, nullptr);
-    const loom_amdgpu_processor_asic_revision_set_t revisions =
-        processor->asic_revisions;
-    if (revisions.count == 0) {
-      EXPECT_EQ(revisions.entries, nullptr);
-      continue;
-    }
-
-    ASSERT_NE(revisions.entries, nullptr);
-    ASSERT_LT(revisions.default_ordinal, revisions.count);
-    for (uint16_t revision_ordinal = 0; revision_ordinal < revisions.count;
-         ++revision_ordinal) {
-      const loom_amdgpu_processor_asic_revision_info_t* revision =
-          &revisions.entries[revision_ordinal];
-      EXPECT_FALSE(iree_string_view_is_empty(revision->name));
-      EXPECT_EQ(loom_amdgpu_target_info_find_asic_revision(processor,
-                                                           revision->value),
-                revision);
-      const loom_amdgpu_processor_asic_revision_info_t* found_revision =
-          nullptr;
-      IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_asic_revision(
-          processor, revision->value, &found_revision));
-      EXPECT_EQ(found_revision, revision);
-      for (uint16_t previous_ordinal = 0; previous_ordinal < revision_ordinal;
-           ++previous_ordinal) {
-        const loom_amdgpu_processor_asic_revision_info_t* previous =
-            &revisions.entries[previous_ordinal];
-        EXPECT_NE(previous->value, revision->value);
-        EXPECT_FALSE(iree_string_view_equal(previous->name, revision->name));
-      }
-    }
-  }
-}
-
-TEST(AmdgpuTargetInfoTest, ResolvesRevisionSemanticRows) {
+TEST(AmdgpuTargetInfoTest, ResolvesPhysicalObservationsToCanonicalTargets) {
   const loom_amdgpu_processor_info_t* processor =
       loom_amdgpu_target_info_find_processor(IREE_SV("gfx1250"));
   ASSERT_NE(processor, nullptr);
-  ASSERT_EQ(processor->asic_revisions.count, 2u);
-
-  const loom_amdgpu_processor_asic_revision_info_t* a0 =
-      loom_amdgpu_target_info_find_asic_revision(processor, 0);
-  const loom_amdgpu_processor_asic_revision_info_t* b0 =
-      loom_amdgpu_target_info_find_asic_revision(processor, 1);
+  EXPECT_TRUE(loom_amdgpu_target_info_requires_physical_resolution(processor));
+  const loom_amdgpu_target_info_t* a0 = nullptr;
+  IREE_ASSERT_OK(
+      loom_amdgpu_target_info_lookup_physical_target(processor, 0, &a0));
+  const loom_amdgpu_target_info_t* b0 = nullptr;
+  IREE_ASSERT_OK(
+      loom_amdgpu_target_info_lookup_physical_target(processor, 1, &b0));
   ASSERT_NE(a0, nullptr);
   ASSERT_NE(b0, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(a0->name, IREE_SV("a0")));
-  EXPECT_NE(processor->properties.features.lds_bank_service_model_set_ordinal,
+  EXPECT_TRUE(iree_string_view_equal(a0->name, IREE_SV("gfx1250-a0")));
+  EXPECT_TRUE(iree_string_view_equal(b0->name, IREE_SV("gfx1250")));
+
+  const loom_amdgpu_target_info_t* unknown = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_amdgpu_target_info_lookup_physical_target(processor, 2, &unknown));
+  EXPECT_EQ(unknown, nullptr);
+
+  const loom_amdgpu_processor_info_t* same_named_processor =
+      loom_amdgpu_target_info_find_processor(IREE_SV("gfx1151"));
+  ASSERT_NE(same_named_processor, nullptr);
+  EXPECT_FALSE(loom_amdgpu_target_info_requires_physical_resolution(
+      same_named_processor));
+  const loom_amdgpu_target_info_t* same_named_target = nullptr;
+  IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_physical_target(
+      same_named_processor, UINT32_MAX, &same_named_target));
+  ASSERT_NE(same_named_target, nullptr);
+  EXPECT_TRUE(
+      iree_string_view_equal(same_named_target->name, IREE_SV("gfx1151")));
+}
+
+TEST(AmdgpuTargetInfoTest, ResolvesOverlayTargetSemantics) {
+  const loom_amdgpu_target_info_t* a0 =
+      loom_amdgpu_target_info_find_target(IREE_SV("gfx1250-a0"));
+  const loom_amdgpu_target_info_t* b0 =
+      loom_amdgpu_target_info_find_target(IREE_SV("gfx1250"));
+  ASSERT_NE(a0, nullptr);
+  ASSERT_NE(b0, nullptr);
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_target_processor(a0);
+  ASSERT_NE(processor, nullptr);
+  EXPECT_EQ(processor, loom_amdgpu_target_info_target_processor(b0));
+  EXPECT_NE(a0->lds_bank_service_model_set_ordinal,
             LOOM_AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE);
   EXPECT_NE(a0->instruction_constraints, 0u);
   EXPECT_EQ(a0->instruction_constraints &
@@ -350,15 +360,13 @@ TEST(AmdgpuTargetInfoTest, ResolvesRevisionSemanticRows) {
                              IREE_SV(".gfx1250_revision")));
   EXPECT_TRUE(iree_string_view_equal(
       a0->kernel_metadata_extensions.entries[0].value, IREE_SV("A0")));
-  EXPECT_TRUE(iree_string_view_equal(b0->name, IREE_SV("b0")));
   EXPECT_EQ(b0->instruction_constraints, 0u);
-  EXPECT_EQ(processor->asic_revisions.default_ordinal, 1u);
-
-  const loom_amdgpu_processor_asic_revision_info_t* unknown = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_amdgpu_target_info_lookup_asic_revision(processor, 2, &unknown));
-  EXPECT_EQ(unknown, nullptr);
+  ASSERT_EQ(b0->kernel_metadata_extensions.count, 1u);
+  EXPECT_TRUE(
+      iree_string_view_equal(b0->kernel_metadata_extensions.entries[0].key,
+                             IREE_SV(".gfx1250_revision")));
+  EXPECT_TRUE(iree_string_view_equal(
+      b0->kernel_metadata_extensions.entries[0].value, IREE_SV("B0")));
 }
 
 TEST(AmdgpuTargetInfoTest, EncodesAmdhsaTargetIdFeatureSuffixElfFlags) {

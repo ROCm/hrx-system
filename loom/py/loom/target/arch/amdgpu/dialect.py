@@ -10,7 +10,6 @@ from loom.assembly import AttrDict, SymbolRef, TemplateParam
 from loom.dialect.target import target_record_attrs
 from loom.dsl import (
     ATTR_TYPE_ENUM,
-    ATTR_TYPE_I64,
     SYMBOL_DEFINE,
     AttrDef,
     Dialect,
@@ -21,7 +20,7 @@ from loom.dsl import (
     SymbolDefinition,
     TargetLikeInterface,
 )
-from loom.target.arch.amdgpu.target_info import sorted_target_record_infos
+from loom.target.arch.amdgpu.target_info import sorted_target_infos
 
 amdgpu_ops = Dialect(
     "amdgpu",
@@ -35,8 +34,8 @@ amdgpu_ops = Dialect(
 AmdgpuTargetKind = EnumDef(
     "AmdgpuTargetKind",
     [
-        EnumCase(info.processor, info.enum_value, doc=info.doc)
-        for info in sorted_target_record_infos()
+        EnumCase(info.target, info.enum_value, doc=info.doc)
+        for info in sorted_target_infos()
     ],
     doc="AMDGPU target row selected by amdgpu.target.",
 )
@@ -63,9 +62,9 @@ amdgpu_target = Op(
     "amdgpu.target",
     group=amdgpu_ops,
     doc=(
-        "AMDGPU processor target record. The selector chooses one exact or "
-        "generic processor row; optional attrs preserve authored common facts, "
-        "target-ID feature states, and physical stepping."
+        "AMDGPU target record. The selector chooses one exact, generic, or "
+        "overlay target row; optional attrs preserve authored common facts "
+        "and target-ID feature states."
     ),
     traits=[SYMBOL_DEFINE],
     interfaces=[
@@ -84,12 +83,6 @@ amdgpu_target = Op(
     ),
     attrs=[
         *target_record_attrs(AmdgpuTargetKind),
-        AttrDef(
-            "asic_revision",
-            ATTR_TYPE_I64,
-            optional=True,
-            doc="Physical HSA ASIC revision selected by this target record.",
-        ),
         AttrDef(
             "sramecc",
             ATTR_TYPE_ENUM,
@@ -115,7 +108,7 @@ amdgpu_target = Op(
         "amdgpu.target<gfx11-generic> @gfx11_generic",
         "amdgpu.target<gfx942> @gfx942 {subgroup_size = 64}",
         "amdgpu.target<gfx950> @gfx950 {subgroup_size = 64}",
-        "amdgpu.target<gfx1250> @gfx1250_a0 {asic_revision = 0}",
+        "amdgpu.target<gfx1250-a0> @gfx1250_a0",
         "amdgpu.target<gfx942> @gfx942_xnack {xnack = on}",
     ],
 )

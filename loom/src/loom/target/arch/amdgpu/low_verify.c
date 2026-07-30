@@ -24,10 +24,8 @@ typedef struct loom_amdgpu_low_verify_state_t {
   iree_string_view_t function_name;
   // Normalized compiler-semantic properties for the resolved target record.
   loom_amdgpu_target_properties_t properties;
-  // Borrowed exact processor identity used only as diagnostic context.
-  iree_string_view_t processor_name;
-  // Canonical ASIC revision name used only as diagnostic context.
-  iree_string_view_t asic_revision_name;
+  // Canonical target selector used only as diagnostic context.
+  iree_string_view_t target_name;
 } loom_amdgpu_low_verify_state_t;
 
 static iree_status_t loom_amdgpu_low_verify_begin_function(
@@ -44,19 +42,12 @@ static iree_status_t loom_amdgpu_low_verify_begin_function(
   loom_amdgpu_low_verify_state_t* state = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
       loom_low_verify_context_arena(context), sizeof(*state), (void**)&state));
-  const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_record_processor(target->target_op);
-  IREE_ASSERT(processor != NULL);
-  const loom_amdgpu_processor_asic_revision_info_t* asic_revision =
-      loom_amdgpu_target_record_asic_revision(target->target_op);
   *state = (loom_amdgpu_low_verify_state_t){
       .target = target,
       .function_name = loom_low_diagnostic_function_name(
           loom_low_verify_context_module(context),
           loom_low_verify_context_function_op(context)),
-      .processor_name = processor->name,
-      .asic_revision_name =
-          asic_revision != NULL ? asic_revision->name : IREE_SV("none"),
+      .target_name = loom_amdgpu_target_record_target_name(target->target_op),
   };
   loom_amdgpu_target_record_resolve_properties(
       target->target_op, &target->bundle_storage.bundle, &state->properties);
@@ -90,8 +81,7 @@ static iree_status_t loom_amdgpu_low_verify_instruction_constraints(
             loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
                                       packet->key_attr_index)),
         loom_param_string(state->target->descriptor_set_key),
-        loom_param_string(state->processor_name),
-        loom_param_string(state->asic_revision_name),
+        loom_param_string(state->target_name),
         loom_param_string(
             loom_amdgpu_instruction_constraint_kind_name(constraint.kind)),
         loom_param_string(constraint.constraint_key),

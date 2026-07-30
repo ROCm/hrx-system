@@ -19,6 +19,14 @@
 extern "C" {
 #endif
 
+// Returns the canonical AMDGPU target name selected by |target_op|, or empty.
+iree_string_view_t loom_amdgpu_target_record_target_name(
+    const loom_op_t* target_op);
+
+// Returns the AMDGPU target row selected by |target_op|, or NULL.
+const loom_amdgpu_target_info_t* loom_amdgpu_target_record_target(
+    const loom_op_t* target_op);
+
 // Returns the AMDGPU processor name selected by |target_op|, or empty.
 iree_string_view_t loom_amdgpu_target_record_processor_name(
     const loom_op_t* target_op);
@@ -41,10 +49,6 @@ void loom_amdgpu_target_record_resolve_identity(
 void loom_amdgpu_target_record_resolve_properties(
     const loom_op_t* target_op, const loom_target_bundle_t* common,
     loom_amdgpu_target_properties_t* out_properties);
-
-// Returns the physical ASIC revision selected by |target_op|, or NULL.
-const loom_amdgpu_processor_asic_revision_info_t*
-loom_amdgpu_target_record_asic_revision(const loom_op_t* target_op);
 
 // Builds a target record carrying every durable fact from |profile|.
 iree_status_t loom_amdgpu_target_record_build_for_profile(

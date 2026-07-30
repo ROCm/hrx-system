@@ -9,13 +9,11 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import replace
 
 from loom.gen.target.arch.amdgpu import amdgpu_target_info
 from loom.target.arch.amdgpu import target_info as amdgpu_target_info_data
 from loom.target.arch.amdgpu.lds_bank_service import (
     AMDGPU_LDS_BANK_SERVICE_MODEL_INFOS,
-    AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES,
     validate_amdgpu_lds_bank_service_model_coverage,
 )
 from loom.target.arch.amdgpu.target_info import (
@@ -32,7 +30,6 @@ from loom.target.arch.amdgpu.target_info import (
     AmdgpuDescriptorSetIsaInfo,
     AmdgpuDescriptorSetVectorMemoryInfo,
     AmdgpuKernelDescriptorVgprGranules,
-    AmdgpuProcessorAsicRevisionInfo,
     AmdgpuProcessorKernelDescriptorInfo,
     processor_info,
 )
@@ -117,14 +114,9 @@ def test_target_info_table_source_is_data_only() -> None:
             conditional_branch_scc1=5,
         ),
     )
-    processor = processor_info(
-        "gfx-test",
-        0x001,
-        descriptor_set_key=descriptor_set_info.key,
-    )
-
     source = amdgpu_target_info._emit_tables_source(
-        processors=(processor,),
+        processors=amdgpu_target_info.sorted_processor_infos(),
+        targets=amdgpu_target_info.sorted_target_infos(),
         descriptor_set_rows=(descriptor_row,),
     )
 
@@ -138,10 +130,7 @@ def test_target_info_table_source_is_data_only() -> None:
     assert ".generic_version = UINT32_C(0)," in source
     assert ".target_id = {" in source
     assert (".supported_features = LOOM_AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE,") in source
-    assert ".asic_revisions = {" in source
-    assert ".entries = NULL," in source
-    assert ".count = UINT16_C(0)," in source
-    assert ".default_ordinal = UINT16_C(0)," in source
+    assert ".asic_revisions = {" not in source
     assert ".generic_code_object = {" in source
     assert ".processor_ordinal = LOOM_AMDGPU_PROCESSOR_ORDINAL_NONE," in source
     assert ".introduction_version = UINT16_C(0)," in source
@@ -149,32 +138,11 @@ def test_target_info_table_source_is_data_only() -> None:
     assert ".kernel_entry = {" in source
     assert ".instructions = {" in source
     assert (".lds_bank_service_model_set_ordinal = LOOM_AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE,") in source
+    assert "loom_amdgpu_target_info_target_infos[]" in source
+    assert "loom_amdgpu_target_info_physical_target_infos[]" in source
 
 
-def test_multiple_revisioned_processors_generate_data_rows_only() -> None:
-    processors_by_name = {info.processor: info for info in amdgpu_target_info_data.AMDGPU_PROCESSOR_INFOS}
-    template = processors_by_name["gfx1250"]
-    processors = (
-        replace(template, processor="gfx-test-a"),
-        replace(
-            template,
-            processor="gfx-test-b",
-            asic_revisions=(
-                AmdgpuProcessorAsicRevisionInfo(
-                    value=7,
-                    name="c0",
-                    lds_bank_service_models=(AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES),
-                    kernel_metadata_extensions=((".test_revision", "C0"),),
-                ),
-                AmdgpuProcessorAsicRevisionInfo(
-                    value=9,
-                    name="d0",
-                    kernel_metadata_extensions=((".test_revision", "D0"),),
-                ),
-            ),
-            default_asic_revision=9,
-        ),
-    )
+def test_overlay_and_physical_targets_generate_data_rows_only() -> None:
     descriptor_set_info = amdgpu_target_info.sorted_descriptor_set_infos()[0]
     descriptor_row = amdgpu_target_info._AmdgpuDescriptorSetRow(
         info=descriptor_set_info,
@@ -189,19 +157,27 @@ def test_multiple_revisioned_processors_generate_data_rows_only() -> None:
     )
 
     source = amdgpu_target_info._emit_tables_source(
-        processors=processors,
+        processors=amdgpu_target_info.sorted_processor_infos(),
+        targets=amdgpu_target_info.sorted_target_infos(),
         descriptor_set_rows=(descriptor_row,),
     )
 
-    assert "loom_amdgpu_target_info_gfx_test_a_asic_revisions[]" in source
-    assert "loom_amdgpu_target_info_gfx_test_b_asic_revisions[]" in source
-    assert ".value = UINT32_C(7)," in source
-    assert '.name = IREE_SVL("c0"),' in source
-    assert ".lds_bank_service_model_set_ordinal = UINT16_C(0)," in source
-    assert '.key = IREE_SVL(".test_revision"),' in source
-    assert ".default_ordinal = UINT16_C(1)," in source
+    assert "loom_amdgpu_target_info_gfx1250_a0_kernel_metadata_extensions[]" in source
+    assert '.name = IREE_SVL("gfx1250-a0"),' in source
+    assert '.key = IREE_SVL(".gfx1250_revision"),' in source
+    assert ".asic_revision = UINT32_C(0)," in source
+    assert ".target_kind = UINT32_C(24)," in source
     assert "\nif " not in source
     assert "\nreturn " not in source
+
+
+def test_physical_targets_are_limited_to_supported_compiler_targets() -> None:
+    gfx1151 = next(target for target in amdgpu_target_info.sorted_target_infos() if target.target == "gfx1151")
+
+    source = "\n".join(amdgpu_target_info._emit_physical_target_rows((gfx1151,)))
+
+    assert ".asic_revision" not in source
+    assert ".target_kind" not in source
 
 
 def test_generic_code_object_fields_cover_canonical_map() -> None:

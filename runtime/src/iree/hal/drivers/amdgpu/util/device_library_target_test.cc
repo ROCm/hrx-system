@@ -16,8 +16,6 @@
 namespace iree::hal::amdgpu {
 namespace {
 
-using iree::testing::status::StatusIs;
-
 static iree_hal_amdgpu_target_identity_t ParseIdentity(
     const char* target_name) {
   iree_hal_amdgpu_target_identity_t identity;
@@ -26,10 +24,10 @@ static iree_hal_amdgpu_target_identity_t ParseIdentity(
   return identity;
 }
 
-static iree_hal_amdgpu_target_identity_t QualifiedIdentity(
+static iree_hal_amdgpu_target_identity_t ResolvedPhysicalIdentity(
     const char* target_name, uint32_t asic_revision) {
   iree_hal_amdgpu_target_identity_t identity = ParseIdentity(target_name);
-  IREE_CHECK_OK(iree_hal_amdgpu_target_identity_apply_asic_revision(
+  IREE_CHECK_OK(iree_hal_amdgpu_target_identity_resolve_physical_target(
       asic_revision, &identity));
   return identity;
 }
@@ -51,7 +49,7 @@ static std::vector<std::string> CandidateValues(
 
 static std::vector<std::string> CandidateValues(const char* target_name,
                                                 uint32_t asic_revision = 0) {
-  const auto identity = QualifiedIdentity(target_name, asic_revision);
+  const auto identity = ResolvedPhysicalIdentity(target_name, asic_revision);
   return CandidateValues(identity, identity);
 }
 
@@ -76,9 +74,9 @@ TEST(DeviceLibraryTargetTest, Gfx1250A0SelectsOnlyExactVariant) {
 
 TEST(DeviceLibraryTargetTest, Gfx1250A0RejectsGenericAlternateIsa) {
   const auto physical_identity =
-      QualifiedIdentity("amdgcn-amd-amdhsa--gfx1250", 0);
+      ResolvedPhysicalIdentity("amdgcn-amd-amdhsa--gfx1250", 0);
   const auto generic_isa_identity =
-      QualifiedIdentity("amdgcn-amd-amdhsa--gfx12-5-generic", 0);
+      ResolvedPhysicalIdentity("amdgcn-amd-amdhsa--gfx12-5-generic", 0);
 
   EXPECT_TRUE(CandidateValues(physical_identity, generic_isa_identity).empty());
 }
@@ -86,20 +84,9 @@ TEST(DeviceLibraryTargetTest, Gfx1250A0RejectsGenericAlternateIsa) {
 TEST(DeviceLibraryTargetTest, Gfx1250B0IncludesGenericFallback) {
   const auto values = CandidateValues("amdgcn-amd-amdhsa--gfx1250", 1);
 
-  ASSERT_EQ(values.size(), 3u);
-  EXPECT_EQ(values[0], "gfx1250:asic-revision=b0");
-  EXPECT_EQ(values[1], "gfx1250");
-  EXPECT_EQ(values[2], "gfx12-5-generic");
-}
-
-TEST(DeviceLibraryTargetTest, RejectsUnqualifiedGfx1250PhysicalIdentity) {
-  const auto identity = ParseIdentity("amdgcn-amd-amdhsa--gfx1250");
-  iree_hal_amdgpu_device_library_target_candidate_list_t candidates = {0};
-
-  EXPECT_THAT(
-      Status(iree_hal_amdgpu_device_library_target_candidates_from_agent_isa(
-          &identity, &identity, &candidates)),
-      StatusIs(StatusCode::kFailedPrecondition));
+  ASSERT_EQ(values.size(), 2u);
+  EXPECT_EQ(values[0], "gfx1250");
+  EXPECT_EQ(values[1], "gfx12-5-generic");
 }
 
 TEST(DeviceLibraryTargetTest, MatchesOnlyWholeFileArchSegments) {

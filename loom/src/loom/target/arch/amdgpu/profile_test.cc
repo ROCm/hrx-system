@@ -13,13 +13,20 @@
 namespace loom {
 namespace {
 
+static const loom_amdgpu_target_info_t* LookupTarget(const char* name) {
+  const loom_amdgpu_target_info_t* target = nullptr;
+  IREE_CHECK_OK(loom_amdgpu_target_info_lookup_target(
+      iree_make_cstring_view(name), &target));
+  return target;
+}
+
 TEST(AmdgpuTargetProfileTest, PreservesStructuredTargetFacts) {
-  const loom_amdgpu_processor_info_t* processor = nullptr;
-  IREE_ASSERT_OK(
-      loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx942"), &processor));
+  const loom_amdgpu_target_info_t* target = LookupTarget("gfx942");
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_target_processor(target);
   ASSERT_NE(processor, nullptr);
   const loom_amdgpu_target_identity_t identity = {
-      /*.processor=*/processor,
+      /*.target=*/target,
       /*.amdhsa_features=*/
       {
           /*.sramecc=*/LOOM_AMDGPU_TARGET_FEATURE_ON,
@@ -31,7 +38,7 @@ TEST(AmdgpuTargetProfileTest, PreservesStructuredTargetFacts) {
   IREE_ASSERT_OK(loom_amdgpu_target_profile_initialize(&identity, &profile));
 
   EXPECT_EQ(loom_amdgpu_target_profile_cast(&profile.base), &profile);
-  EXPECT_EQ(profile.identity.processor, processor);
+  EXPECT_EQ(profile.identity.target, target);
   EXPECT_EQ(profile.identity.amdhsa_features.sramecc,
             LOOM_AMDGPU_TARGET_FEATURE_ON);
   EXPECT_EQ(profile.identity.amdhsa_features.xnack,
@@ -39,6 +46,7 @@ TEST(AmdgpuTargetProfileTest, PreservesStructuredTargetFacts) {
   EXPECT_EQ(loom_target_profile_bundle(&profile.base),
             loom_amdgpu_target_bundle_for_descriptor_set(
                 processor->properties.descriptor_set.ordinal));
+  EXPECT_EQ(profile.properties.target, target);
   EXPECT_EQ(profile.properties.processor, &processor->properties);
   EXPECT_EQ(profile.properties.common,
             loom_target_profile_bundle(&profile.base));
@@ -49,12 +57,10 @@ TEST(AmdgpuTargetProfileTest, PreservesStructuredTargetFacts) {
 }
 
 TEST(AmdgpuTargetProfileTest, RejectsUnsupportedTargetFeatures) {
-  const loom_amdgpu_processor_info_t* gfx1151 = nullptr;
-  IREE_ASSERT_OK(
-      loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx1151"), &gfx1151));
+  const loom_amdgpu_target_info_t* gfx1151 = LookupTarget("gfx1151");
   loom_amdgpu_target_profile_t profile = {};
   const loom_amdgpu_target_identity_t default_identity = {
-      /*.processor=*/gfx1151,
+      /*.target=*/gfx1151,
   };
   IREE_ASSERT_OK(
       loom_amdgpu_target_profile_initialize(&default_identity, &profile));
@@ -70,108 +76,65 @@ TEST(AmdgpuTargetProfileTest, RejectsUnsupportedTargetFeatures) {
       loom_amdgpu_target_profile_initialize(&invalid_identity, &profile));
 }
 
-TEST(AmdgpuTargetProfileTest, ResolvesEveryGeneratedRevisionRow) {
+TEST(AmdgpuTargetProfileTest, ResolvesEveryGeneratedTargetRow) {
   const loom_target_bundle_t common = {};
-  const iree_host_size_t processor_count =
-      loom_amdgpu_target_info_processor_count();
-  for (iree_host_size_t processor_ordinal = 0;
-       processor_ordinal < processor_count; ++processor_ordinal) {
+  const iree_host_size_t target_count = loom_amdgpu_target_info_target_count();
+  ASSERT_NE(target_count, 0u);
+  for (iree_host_size_t target_ordinal = 0; target_ordinal < target_count;
+       ++target_ordinal) {
+    const loom_amdgpu_target_info_t* target =
+        loom_amdgpu_target_info_target_at(target_ordinal);
+    ASSERT_NE(target, nullptr);
     const loom_amdgpu_processor_info_t* processor =
-        loom_amdgpu_target_info_processor_at(processor_ordinal);
+        loom_amdgpu_target_info_target_processor(target);
     ASSERT_NE(processor, nullptr);
+
     loom_amdgpu_target_identity_t identity = {};
-    loom_amdgpu_target_identity_initialize(processor, &identity);
+    loom_amdgpu_target_identity_initialize(target, &identity);
+    EXPECT_EQ(identity.target, target);
 
     loom_amdgpu_target_properties_t properties = {};
     loom_amdgpu_target_properties_resolve(&identity, &common, &properties);
+    EXPECT_EQ(properties.target, target);
     EXPECT_EQ(properties.processor, &processor->properties);
     EXPECT_EQ(properties.common, &common);
     EXPECT_EQ(properties.instruction_constraints,
-              processor->properties.instructions.base_constraints |
-                  (identity.asic_revision != nullptr
-                       ? identity.asic_revision->instruction_constraints
-                       : 0));
+              target->instruction_constraints);
     EXPECT_EQ(properties.lds_bank_service_model_set_ordinal,
-              identity.asic_revision != nullptr
-                  ? identity.asic_revision->lds_bank_service_model_set_ordinal
-                  : processor->properties.features
-                        .lds_bank_service_model_set_ordinal);
-    if (processor->asic_revisions.count == 0) {
-      EXPECT_EQ(identity.asic_revision, nullptr);
-      EXPECT_EQ(properties.kernel_metadata_extensions.entries, nullptr);
-      EXPECT_EQ(properties.kernel_metadata_extensions.count, 0u);
-      continue;
-    }
+              target->lds_bank_service_model_set_ordinal);
+    EXPECT_EQ(properties.kernel_metadata_extensions.entries,
+              target->kernel_metadata_extensions.entries);
+    EXPECT_EQ(properties.kernel_metadata_extensions.count,
+              target->kernel_metadata_extensions.count);
 
-    ASSERT_LT(processor->asic_revisions.default_ordinal,
-              processor->asic_revisions.count);
-    EXPECT_EQ(identity.asic_revision,
-              &processor->asic_revisions
-                   .entries[processor->asic_revisions.default_ordinal]);
-    for (uint16_t revision_ordinal = 0;
-         revision_ordinal < processor->asic_revisions.count;
-         ++revision_ordinal) {
-      const loom_amdgpu_processor_asic_revision_info_t* revision =
-          &processor->asic_revisions.entries[revision_ordinal];
-      identity.asic_revision = revision;
-      loom_amdgpu_target_properties_resolve(&identity, &common, &properties);
-      EXPECT_EQ(properties.instruction_constraints,
-                processor->properties.instructions.base_constraints |
-                    revision->instruction_constraints);
-      EXPECT_EQ(properties.lds_bank_service_model_set_ordinal,
-                revision->lds_bank_service_model_set_ordinal);
-      EXPECT_EQ(properties.kernel_metadata_extensions.entries,
-                revision->kernel_metadata_extensions.entries);
-      EXPECT_EQ(properties.kernel_metadata_extensions.count,
-                revision->kernel_metadata_extensions.count);
-
-      loom_amdgpu_target_profile_t profile = {};
-      IREE_ASSERT_OK(
-          loom_amdgpu_target_profile_initialize(&identity, &profile));
-      EXPECT_EQ(profile.identity.asic_revision, revision);
-      EXPECT_EQ(profile.properties.instruction_constraints,
-                properties.instruction_constraints);
-      EXPECT_EQ(profile.properties.lds_bank_service_model_set_ordinal,
-                properties.lds_bank_service_model_set_ordinal);
-      EXPECT_EQ(profile.properties.kernel_metadata_extensions.entries,
-                properties.kernel_metadata_extensions.entries);
-      EXPECT_EQ(profile.properties.kernel_metadata_extensions.count,
-                properties.kernel_metadata_extensions.count);
-    }
+    loom_amdgpu_target_profile_t profile = {};
+    IREE_ASSERT_OK(loom_amdgpu_target_profile_initialize(&identity, &profile));
+    EXPECT_EQ(profile.identity.target, target);
+    EXPECT_EQ(profile.properties.target, target);
+    EXPECT_EQ(profile.properties.instruction_constraints,
+              properties.instruction_constraints);
+    EXPECT_EQ(profile.properties.lds_bank_service_model_set_ordinal,
+              properties.lds_bank_service_model_set_ordinal);
+    EXPECT_EQ(profile.properties.kernel_metadata_extensions.entries,
+              properties.kernel_metadata_extensions.entries);
+    EXPECT_EQ(profile.properties.kernel_metadata_extensions.count,
+              properties.kernel_metadata_extensions.count);
   }
 }
 
-TEST(AmdgpuTargetProfileTest, RejectsRevisionFromAnotherProcessor) {
-  const loom_amdgpu_processor_info_t* revisioned_processor =
-      loom_amdgpu_target_info_find_processor(IREE_SV("gfx1250"));
-  const loom_amdgpu_processor_info_t* other_processor =
-      loom_amdgpu_target_info_find_processor(IREE_SV("gfx1151"));
-  ASSERT_NE(revisioned_processor, nullptr);
-  ASSERT_GT(revisioned_processor->asic_revisions.count, 0u);
-  ASSERT_NE(other_processor, nullptr);
-
-  const loom_amdgpu_target_identity_t misplaced_revision = {
-      /*.processor=*/other_processor,
-      /*.amdhsa_features=*/{},
-      /*.asic_revision=*/&revisioned_processor->asic_revisions.entries[0],
-  };
-  loom_amdgpu_target_profile_t profile = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_amdgpu_target_profile_initialize(&misplaced_revision, &profile));
-}
-
 TEST(AmdgpuTargetProfileTest, ExhaustsTargetFeatureSatisfactionRelation) {
-  const iree_host_size_t processor_count =
-      loom_amdgpu_target_info_processor_count();
-  ASSERT_NE(processor_count, 0u);
-  for (iree_host_size_t i = 0; i < processor_count; ++i) {
+  const iree_host_size_t target_count = loom_amdgpu_target_info_target_count();
+  ASSERT_NE(target_count, 0u);
+  for (iree_host_size_t i = 0; i < target_count; ++i) {
+    const loom_amdgpu_target_info_t* target =
+        loom_amdgpu_target_info_target_at(i);
+    ASSERT_NE(target, nullptr);
     const loom_amdgpu_processor_info_t* processor =
-        loom_amdgpu_target_info_processor_at(i);
+        loom_amdgpu_target_info_target_processor(target);
     ASSERT_NE(processor, nullptr);
 
     loom_amdgpu_target_identity_t base_identity = {};
-    loom_amdgpu_target_identity_initialize(processor, &base_identity);
+    loom_amdgpu_target_identity_initialize(target, &base_identity);
     EXPECT_TRUE(
         loom_amdgpu_target_identity_equal(&base_identity, &base_identity));
     EXPECT_TRUE(loom_amdgpu_target_identity_satisfies_requirement(
@@ -234,28 +197,34 @@ TEST(AmdgpuTargetProfileTest, ExhaustsTargetFeatureSatisfactionRelation) {
           &effective, &requirement));
     }
 
-    for (uint16_t effective_revision_ordinal = 0;
-         effective_revision_ordinal < processor->asic_revisions.count;
-         ++effective_revision_ordinal) {
-      loom_amdgpu_target_identity_t effective = base_identity;
-      effective.asic_revision =
-          &processor->asic_revisions.entries[effective_revision_ordinal];
-      for (uint16_t required_revision_ordinal = 0;
-           required_revision_ordinal < processor->asic_revisions.count;
-           ++required_revision_ordinal) {
-        loom_amdgpu_target_identity_t requirement = base_identity;
-        requirement.asic_revision =
-            &processor->asic_revisions.entries[required_revision_ordinal];
-        const bool revisions_match =
-            effective_revision_ordinal == required_revision_ordinal;
-        EXPECT_EQ(loom_amdgpu_target_identity_equal(&effective, &requirement),
-                  revisions_match);
-        EXPECT_EQ(loom_amdgpu_target_identity_satisfies_requirement(
-                      &effective, &requirement),
-                  revisions_match);
-      }
+    for (iree_host_size_t other_ordinal = 0; other_ordinal < target_count;
+         ++other_ordinal) {
+      const loom_amdgpu_target_info_t* other_target =
+          loom_amdgpu_target_info_target_at(other_ordinal);
+      ASSERT_NE(other_target, nullptr);
+      loom_amdgpu_target_identity_t other_identity = {};
+      loom_amdgpu_target_identity_initialize(other_target, &other_identity);
+      EXPECT_EQ(
+          loom_amdgpu_target_identity_equal(&base_identity, &other_identity),
+          target == other_target);
     }
   }
+}
+
+TEST(AmdgpuTargetProfileTest, OverlayTargetsRemainExact) {
+  loom_amdgpu_target_identity_t a0 = {};
+  loom_amdgpu_target_identity_initialize(LookupTarget("gfx1250-a0"), &a0);
+  loom_amdgpu_target_identity_t b0 = {};
+  loom_amdgpu_target_identity_initialize(LookupTarget("gfx1250"), &b0);
+  loom_amdgpu_target_identity_t generic = {};
+  loom_amdgpu_target_identity_initialize(LookupTarget("gfx12-5-generic"),
+                                         &generic);
+
+  EXPECT_FALSE(loom_amdgpu_target_identity_equal(&a0, &b0));
+  EXPECT_FALSE(loom_amdgpu_target_identity_satisfies_requirement(&a0, &b0));
+  EXPECT_FALSE(loom_amdgpu_target_identity_satisfies_requirement(&b0, &a0));
+  EXPECT_TRUE(loom_amdgpu_target_identity_satisfies_requirement(&a0, &generic));
+  EXPECT_TRUE(loom_amdgpu_target_identity_satisfies_requirement(&b0, &generic));
 }
 
 }  // namespace

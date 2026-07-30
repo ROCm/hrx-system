@@ -185,7 +185,7 @@ def iree_amdgpu_selectors_for_device_binary_target(device_binary_target):
     """Returns every selector that requests a device-binary target.
 
     Args:
-      device_binary_target: Code-object fallback or qualified artifact target.
+      device_binary_target: Code-object fallback or target-overlay artifact.
 
     Returns:
       Public target selectors that require the device-binary artifact.

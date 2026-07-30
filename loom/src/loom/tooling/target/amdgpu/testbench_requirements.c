@@ -50,7 +50,9 @@ static iree_status_t loom_amdgpu_hal_testbench_query_descriptor_set_requirement(
   const loom_amdgpu_target_profile_t* target_profile =
       loom_amdgpu_target_profile_cast(target.target_profile);
   const loom_amdgpu_processor_info_t* processor =
-      target_profile ? target_profile->identity.processor : NULL;
+      target_profile != NULL ? loom_amdgpu_target_info_target_processor(
+                                   target_profile->identity.target)
+                             : NULL;
   const bool satisfied =
       processor != NULL &&
       iree_string_view_equal(processor->properties.descriptor_set.key,

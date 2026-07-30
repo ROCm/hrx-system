@@ -6,7 +6,7 @@
 
 """Immutable AMDGPU LDS bank-service model data.
 
-Processor and ASIC-revision rows select tuples of model keys. The C table
+Processor and canonical target rows select tuples of model keys. The C table
 generator interns those tuples into dense model-set ordinals and emits the
 structural models consumed by lowering. Adding another target that shares an
 existing model therefore changes target data only.

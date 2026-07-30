@@ -38,7 +38,7 @@ typedef struct iree_hal_amdgpu_agent_isa_target_t {
   char isa_name_storage[128];
   // HSA ISA name borrowing from |isa_name_storage|.
   iree_string_view_t isa_name;
-  // Parsed and stepping-qualified target identity borrowing from
+  // Parsed canonical target identity borrowing from
   // |isa_name_storage|.
   iree_hal_amdgpu_target_identity_t identity;
 } iree_hal_amdgpu_agent_isa_target_t;
@@ -64,8 +64,8 @@ typedef struct iree_hal_amdgpu_agent_target_t {
 // Initializes |out_target| from already queried HSA identity values.
 //
 // This is the pure representation boundary used by tests and the HSA query
-// path. ISA names are copied into the record. |asic_revision| is applied only
-// to processors whose target contract defines revision-specific behavior.
+// path. ISA names are copied into the record. |asic_revision| resolves
+// processors with physical target mappings to their canonical targets.
 iree_status_t iree_hal_amdgpu_agent_target_initialize(
     hsa_agent_t agent, iree_host_size_t isa_count,
     const iree_hal_amdgpu_agent_isa_value_t* isa_values, uint32_t asic_revision,

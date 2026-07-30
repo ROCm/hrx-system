@@ -499,7 +499,7 @@ static iree_status_t iree_hal_hip_device_spec_populate_executables(
                          " target ID '%.*s'",
                          i, (int)gcn_arch_name.size, gcn_arch_name.data);
     IREE_RETURN_IF_ERROR(
-        iree_hal_amdgpu_target_identity_apply_asic_revision(
+        iree_hal_amdgpu_target_identity_resolve_physical_target(
             params->physical_devices[i].facts.architecture.asic_revision,
             &exact_identity),
         "qualifying HIP physical device %" PRIhsz " ASIC revision", i);

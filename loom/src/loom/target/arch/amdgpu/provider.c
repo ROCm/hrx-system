@@ -46,10 +46,11 @@ static const loom_low_verify_provider_t* kLoomAmdgpuLowVerifyProviders[] = {
     &loom_amdgpu_low_verify_provider,
 };
 
-// Processor rows establish AMDGPU code-object refinement. Target-ID features
-// then refine that relation without coupling policy to a particular feature or
-// stepping name. Common indexed facts preserve structured representation,
-// subgroup, and capacity requirements independently of the family relation.
+// Canonical target rows establish AMDGPU code-object refinement. Target-ID
+// features then refine that relation without coupling policy to a particular
+// feature or stepping name. Common indexed facts preserve structured
+// representation, subgroup, and capacity requirements independently of the
+// family relation.
 static bool loom_amdgpu_provider_satisfies_requirement(
     loom_target_record_view_t effective_target,
     loom_target_record_view_t target_requirement) {
@@ -94,8 +95,8 @@ static iree_string_view_t loom_amdgpu_provider_materialization_symbol_stem(
     const loom_target_profile_t* base_profile) {
   const loom_amdgpu_target_profile_t* profile =
       loom_amdgpu_target_profile_cast(base_profile);
-  return profile != NULL && profile->identity.processor != NULL
-             ? profile->identity.processor->name
+  return profile != NULL && profile->identity.target != NULL
+             ? profile->identity.target->name
              : iree_string_view_empty();
 }
 
@@ -104,9 +105,8 @@ static bool loom_amdgpu_provider_record_matches_profile(
     const loom_target_profile_t* base_profile) {
   const loom_amdgpu_target_profile_t* profile =
       loom_amdgpu_target_profile_cast(base_profile);
-  if (profile == NULL || profile->identity.processor == NULL ||
-      loom_amdgpu_target_record_processor(target_op) !=
-          profile->identity.processor) {
+  if (profile == NULL || profile->identity.target == NULL ||
+      loom_amdgpu_target_record_target(target_op) != profile->identity.target) {
     return false;
   }
 
@@ -124,7 +124,7 @@ static iree_status_t loom_amdgpu_provider_build_profile_record(
     loom_op_t** out_target_op) {
   const loom_amdgpu_target_profile_t* profile =
       loom_amdgpu_target_profile_cast(base_profile);
-  if (profile == NULL || profile->identity.processor == NULL) {
+  if (profile == NULL || profile->identity.target == NULL) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU target materialization requires a complete AMDGPU profile");

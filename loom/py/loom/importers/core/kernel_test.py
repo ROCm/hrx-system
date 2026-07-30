@@ -16,7 +16,7 @@ from loom.importers.core import (
 )
 from loom.ir import I32
 from loom.target.arch.amdgpu.target_info import (
-    AMDGPU_TARGET_RECORD_INFOS,
+    AMDGPU_TARGET_INFOS,
     amdgpu_processor_info_by_name,
 )
 from loom.verify import verify_module
@@ -121,32 +121,31 @@ kernel.def target(@hip_mcpu_gfx1100) export(\"kernel\") @kernel() {
     )
 
 
-def test_create_kernel_module_uses_every_amdgpu_target_record() -> None:
-    for target_record in AMDGPU_TARGET_RECORD_INFOS:
-        processor = target_record.processor
-        symbol = processor.replace("-", "_")
+def test_create_kernel_module_uses_every_amdgpu_target() -> None:
+    for target in AMDGPU_TARGET_INFOS:
+        symbol = target.target.replace("-", "_")
         assert _printed_kernel_module_for_target_preset(
-            f"hip -mcpu={processor}"
-        ).startswith(f"amdgpu.target<{processor}> @hip_mcpu_{symbol}\n")
+            f"hip -mcpu={target.target}"
+        ).startswith(f"amdgpu.target<{target.target}> @hip_mcpu_{symbol}\n")
 
 
 def test_target_preset_amdgpu_subgroup_size_uses_processor_facts() -> None:
-    for target_record in AMDGPU_TARGET_RECORD_INFOS:
-        processor = amdgpu_processor_info_by_name(target_record.processor)
+    for target in AMDGPU_TARGET_INFOS:
+        processor = amdgpu_processor_info_by_name(target.processor)
         assert processor is not None
         assert (
-            target_preset_amdgpu_subgroup_size(f"hip -mcpu={target_record.processor}")
+            target_preset_amdgpu_subgroup_size(f"hip -mcpu={target.target}")
             == processor.wavefront.default_size
         )
     assert target_preset_amdgpu_subgroup_size("reference") is None
 
 
 def test_target_preset_amdgpu_matrix_profile_uses_processor_facts() -> None:
-    for target_record in AMDGPU_TARGET_RECORD_INFOS:
-        processor = amdgpu_processor_info_by_name(target_record.processor)
+    for target in AMDGPU_TARGET_INFOS:
+        processor = amdgpu_processor_info_by_name(target.processor)
         assert processor is not None
         assert (
-            target_preset_amdgpu_matrix_profile(f"hip -mcpu={target_record.processor}")
+            target_preset_amdgpu_matrix_profile(f"hip -mcpu={target.target}")
             == processor.features.matrix
         )
     assert target_preset_amdgpu_matrix_profile("reference") is None
