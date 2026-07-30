@@ -171,7 +171,7 @@ kernel.def target(@qwen3_moe_attention_gfx11_wave64) @qwen3_moe_flash_attention_
     %score_key_origin = index.assume %score_key_origin0 [lt(%score_key_origin0, %last_full_key_tile_start)] : index
     %score_init_values = vector.constant 0.0 : vector<4xf32>
     %score_init = vector.fragment<init> %score_init_values shape [%m, %n] : vector<4xf32>
-    %score_fragment = scf.for %head_tile = [%zero to %onetwentyeight step %sixteen](%score_accumulator = %score_init : vector<4xf32>) -> (vector<4xf32>) unroll {
+    %score_fragment = scf.for %head_tile = [%zero to %onetwentyeight step %sixteen](%score_accumulator = %score_init : vector<4xf32>) -> (vector<4xf32>) unroll schedule(recurrence) {
       %key_channel = index.add %key_value_head_base, %head_tile : index
       %key_fragment = vector.fragment.load<lhs> %key_view[%score_key_origin, %key_channel] shape [%m, %k] : view<[%bounded_key_value_token_count]x[%key_value_width]xf16, #dense> -> vector<16xf16>
       %query_fragment = vector.fragment.load<rhs> %query_transposed_view[%head_tile, %zero] shape [%k, %n] : view<128x16xf16, %query_transposed_layout> -> vector<16xf16>
@@ -263,7 +263,7 @@ kernel.def target(@qwen3_moe_attention_gfx11_wave64) @qwen3_moe_flash_attention_
       %value_channel0 = index.add %key_value_head_base, %output_tile_channel : index
       %value_channel = index.add %value_channel0, %subgroup_product_channel : index
       %product_init = vector.fragment<init> %zero_f16x8 shape [%m, %n] : vector<8xf16>
-      %product_fragment = scf.for %key_tile = [%zero to %sixtyfour step %sixteen](%product_accumulator = %product_init : vector<8xf16>) -> (vector<8xf16>) unroll {
+      %product_fragment = scf.for %key_tile = [%zero to %sixtyfour step %sixteen](%product_accumulator = %product_init : vector<8xf16>) -> (vector<8xf16>) unroll schedule(recurrence) {
         %value_token0 = index.add %key_origin, %key_tile : index
         %value_token = index.assume %value_token0 [lt(%value_token0, %last_full_key_tile_start)] : index
         %probability_fragment = vector.fragment.load<lhs> %probability_stage_view[%zero, %key_tile] shape [%m, %k] : view<16x64xf16, %probability_transposed_layout> -> vector<16xf16>
