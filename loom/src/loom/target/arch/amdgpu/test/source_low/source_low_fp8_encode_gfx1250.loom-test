@@ -14,24 +14,20 @@ low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_f32x4_to_fp8(%input
   %8 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %9 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %10 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %11 = v_cmp_gt_f32 %7, %5
-  %12 = v_cndmask_b32 %7, %5, %11
-  %13 = v_cmp_lt_f32 %12, %6
-  %14 = v_cndmask_b32 %12, %6, %13
-  %15 = v_cmp_gt_f32 %8, %5
-  %16 = v_cndmask_b32 %8, %5, %15
-  %17 = v_cmp_lt_f32 %16, %6
-  %18 = v_cndmask_b32 %16, %6, %17
-  %19 = v_cvt_pk_fp8_f32_low %14, %18
-  %20 = v_cmp_gt_f32 %9, %5
-  %21 = v_cndmask_b32 %9, %5, %20
-  %22 = v_cmp_lt_f32 %21, %6
-  %23 = v_cndmask_b32 %21, %6, %22
-  %24 = v_cmp_gt_f32 %10, %5
-  %25 = v_cndmask_b32 %10, %5, %24
-  %26 = v_cmp_lt_f32 %25, %6
-  %27 = v_cndmask_b32 %25, %6, %26
-  %converted = v_cvt_pk_fp8_f32_high %19, %23, %27
+  %11 = v_med3_num_f32 %7, %5, %6
+  %12 = v_cmp_u_f32 %7, %7
+  %13 = v_cndmask_b32 %11, %7, %12
+  %14 = v_med3_num_f32 %8, %5, %6
+  %15 = v_cmp_u_f32 %8, %8
+  %16 = v_cndmask_b32 %14, %8, %15
+  %17 = v_cvt_pk_fp8_f32_low %13, %16
+  %18 = v_med3_num_f32 %9, %5, %6
+  %19 = v_cmp_u_f32 %9, %9
+  %20 = v_cndmask_b32 %18, %9, %19
+  %21 = v_med3_num_f32 %10, %5, %6
+  %22 = v_cmp_u_f32 %10, %10
+  %23 = v_cndmask_b32 %21, %10, %22
+  %converted = v_cvt_pk_fp8_f32_high %17, %20, %23
   return %converted
 }
 
@@ -77,20 +73,17 @@ low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_f16x3_to_fp8(%input
   %11 = v_cvt_f32_f16 %10
   %12 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %13 = v_cvt_f32_f16 %12
-  %14 = v_cmp_gt_f32 %8, %5
-  %15 = v_cndmask_b32 %8, %5, %14
-  %16 = v_cmp_lt_f32 %15, %6
-  %17 = v_cndmask_b32 %15, %6, %16
-  %18 = v_cmp_gt_f32 %11, %5
-  %19 = v_cndmask_b32 %11, %5, %18
-  %20 = v_cmp_lt_f32 %19, %6
-  %21 = v_cndmask_b32 %19, %6, %20
-  %22 = v_cvt_pk_fp8_f32_low %17, %21
-  %23 = v_cmp_gt_f32 %13, %5
-  %24 = v_cndmask_b32 %13, %5, %23
-  %25 = v_cmp_lt_f32 %24, %6
-  %26 = v_cndmask_b32 %24, %6, %25
-  %converted = v_cvt_pk_fp8_f32_high %22, %26, %26
+  %14 = v_med3_num_f32 %8, %5, %6
+  %15 = v_cmp_u_f32 %8, %8
+  %16 = v_cndmask_b32 %14, %8, %15
+  %17 = v_med3_num_f32 %11, %5, %6
+  %18 = v_cmp_u_f32 %11, %11
+  %19 = v_cndmask_b32 %17, %11, %18
+  %20 = v_cvt_pk_fp8_f32_low %16, %19
+  %21 = v_med3_num_f32 %13, %5, %6
+  %22 = v_cmp_u_f32 %13, %13
+  %23 = v_cndmask_b32 %21, %13, %22
+  %converted = v_cvt_pk_fp8_f32_high %20, %23, %23
   return %converted
 }
 

@@ -323,8 +323,8 @@ bool loom_amdgpu_select_fp8_encode_plan(
       kind == LOOM_AMDGPU_FP8_ENCODE_KIND_F32_PAIR_SATURATE_E4M3) {
     const loom_amdgpu_descriptor_ref_t saturation_refs[] = {
         LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
-        LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_OGT_F32,
-        LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_OLT_F32,
+        LOOM_AMDGPU_DESCRIPTOR_REF_V_MED3_NUM_F32,
+        LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_UNO_F32,
         LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32,
     };
     can_use_native = loom_amdgpu_fp8_encode_has_refs(
@@ -702,23 +702,20 @@ static iree_status_t loom_amdgpu_emit_fp8_e4m3_saturate(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_encode_emission_state_t* state,
     loom_value_id_t source, loom_value_id_t* out_value) {
-  loom_value_id_t positive_overflow = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_OGT_F32, source,
-      state->positive_maximum, state->mask_type, &positive_overflow));
-  loom_value_id_t positive_saturated = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_select(
-      context, source_op, source, state->positive_maximum, positive_overflow,
-      state->lane_type, &positive_saturated));
+  loom_low_lower_resolved_descriptor_t descriptor = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_MED3_NUM_F32, &descriptor));
+  loom_value_id_t clamped = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_ternary(
+      context, source_op, &descriptor, source, state->positive_maximum,
+      state->negative_maximum, state->lane_type, &clamped));
 
-  loom_value_id_t negative_overflow = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t is_nan = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_binary(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_OLT_F32,
-      positive_saturated, state->negative_maximum, state->mask_type,
-      &negative_overflow));
-  return loom_amdgpu_emit_vgpr_select(
-      context, source_op, positive_saturated, state->negative_maximum,
-      negative_overflow, state->lane_type, out_value);
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_UNO_F32, source,
+      source, state->mask_type, &is_nan));
+  return loom_amdgpu_emit_vgpr_select(context, source_op, clamped, source,
+                                      is_nan, state->lane_type, out_value);
 }
 
 static iree_status_t loom_amdgpu_prepare_fp8_encode_fnuz_bridge_lane(

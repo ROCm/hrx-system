@@ -1004,6 +1004,29 @@ def _v_binary_f32_operand_forms(
     )
 
 
+def _v_med3_num_f32_overlay(
+    *,
+    instruction_name: str = "V_MED3_F32",
+    mnemonic: str = "v_med3_f32",
+) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_med3_num_f32",
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
+        encoding_name="ENC_VOP3",
+        semantic_tag="float.med3_num.f32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("a")),
+            AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("b")),
+            AmdgpuOperandOverlay("SRC2", _sgpr_vgpr_operand("c")),
+        ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _v_add_u32_literal_overlay(instruction_name: str) -> AmdgpuDescriptorOverlay:
     return _v_binary_literal_overlay(
         descriptor_key="amdgpu.v_add_u32.lit",
@@ -6402,6 +6425,7 @@ __all__ = (
     "_v_madmk_f16_overlay",
     "_v_mad_u32_u24_literal_overlay",
     "_v_mad_u32_u24_overlay",
+    "_v_med3_num_f32_overlay",
     "_v_log_f32_overlay",
     "_v_max_f32_literal_overlay",
     "_v_max_f32_overlay",

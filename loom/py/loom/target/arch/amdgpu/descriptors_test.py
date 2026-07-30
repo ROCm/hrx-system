@@ -3333,6 +3333,29 @@ def test_packed_float_descriptors_follow_target_numeric_semantics() -> None:
             assert descriptor.fixed_encoding_fields == (("OP_SEL_HI", 0x3),)
 
 
+def test_f32_med3_descriptors_follow_target_numeric_semantics() -> None:
+    for descriptor_set, instruction_name, mnemonic in (
+        (_gfx940_core_overlays(), "V_MED3_F32", "v_med3_f32"),
+        (_gfx950_core_overlays(), "V_MED3_F32", "v_med3_f32"),
+        (_gfx11_core_overlays(), "V_MED3_F32", "v_med3_f32"),
+        (_gfx12_core_overlays(), "V_MED3_NUM_F32", "v_med3_num_f32"),
+        (_gfx125x_core_overlays(), "V_MED3_NUM_F32", "v_med3_num_f32"),
+    ):
+        descriptors = {
+            descriptor.descriptor_key: descriptor for descriptor in descriptor_set
+        }
+        descriptor = descriptors["amdgpu.v_med3_num_f32"]
+        assert descriptor.instruction_name == instruction_name
+        assert descriptor.mnemonic == mnemonic
+        assert descriptor.semantic_tag == "float.med3_num.f32"
+        assert tuple(operand.xml_field_name for operand in descriptor.operands) == (
+            "VDST",
+            "SRC0",
+            "SRC1",
+            "SRC2",
+        )
+
+
 def test_packed_fma_mad_rdna_literal_forms_cover_source_positions() -> None:
     source_fields = {
         "src0": ("SRC0", "a", ("VDST", "SRC1", "SRC2")),
