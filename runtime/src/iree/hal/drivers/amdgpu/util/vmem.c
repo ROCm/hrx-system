@@ -192,27 +192,40 @@ iree_status_t iree_hal_amdgpu_vmem_translate_memory_type(
   }
 }
 
-iree_status_t iree_hal_amdgpu_vmem_query_alloc_granule(
+iree_status_t iree_hal_amdgpu_vmem_query_alloc_granularity(
     const iree_hal_amdgpu_libhsa_t* libhsa, hsa_amd_memory_pool_t memory_pool,
-    iree_device_size_t* out_allocation_granule) {
+    iree_hal_amdgpu_vmem_granularity_t* out_granularity) {
   IREE_ASSERT_ARGUMENT(libhsa);
-  IREE_ASSERT_ARGUMENT(out_allocation_granule);
-  *out_allocation_granule = 0;
+  IREE_ASSERT_ARGUMENT(out_granularity);
+  *out_granularity = (iree_hal_amdgpu_vmem_granularity_t){0};
 
-  size_t alloc_rec_granule = 0;
+  size_t minimum = 0;
   IREE_RETURN_IF_ERROR(iree_hsa_amd_memory_pool_get_info(
       IREE_LIBHSA(libhsa), memory_pool,
-      HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE, &alloc_rec_granule));
-  if (alloc_rec_granule == 0 ||
-      !iree_device_size_is_power_of_two(alloc_rec_granule)) {
+      HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE, &minimum));
+  if (minimum == 0 || !iree_device_size_is_power_of_two(minimum)) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
-        "invalid HSA VMM allocation granule for an AMDGPU memory pool: "
+        "invalid minimum HSA VMM allocation granule for an AMDGPU memory pool: "
         "%" PRIhsz,
-        (iree_host_size_t)alloc_rec_granule);
+        (iree_host_size_t)minimum);
   }
 
-  *out_allocation_granule = (iree_device_size_t)alloc_rec_granule;
+  size_t recommended = 0;
+  IREE_RETURN_IF_ERROR(iree_hsa_amd_memory_pool_get_info(
+      IREE_LIBHSA(libhsa), memory_pool,
+      HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE, &recommended));
+  if (recommended < minimum || !iree_device_size_is_power_of_two(recommended)) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "invalid recommended HSA VMM allocation granule for an AMDGPU memory "
+        "pool: "
+        "%" PRIhsz,
+        (iree_host_size_t)recommended);
+  }
+
+  out_granularity->minimum = (iree_device_size_t)minimum;
+  out_granularity->recommended = (iree_device_size_t)recommended;
   return iree_ok_status();
 }
 
@@ -314,15 +327,15 @@ iree_status_t iree_hal_amdgpu_vmem_ringbuffer_initialize(
                                                      &hsa_memory_type));
 
   // hsa_amd_vmem_handle_create wants values aligned to this value.
-  iree_device_size_t alloc_rec_granule = 0;
+  iree_hal_amdgpu_vmem_granularity_t granularity;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_amdgpu_vmem_query_alloc_granule(libhsa, memory_pool,
-                                                   &alloc_rec_granule));
+      z0, iree_hal_amdgpu_vmem_query_alloc_granularity(libhsa, memory_pool,
+                                                       &granularity));
 
   // Round up capacity and alignment to the allocation granule.
-  const size_t alignment = (size_t)alloc_rec_granule;
+  const size_t alignment = (size_t)granularity.recommended;
   const size_t capacity =
-      (size_t)iree_device_align(min_capacity, alloc_rec_granule);
+      (size_t)iree_device_align(min_capacity, granularity.recommended);
   out_ringbuffer->capacity = capacity;
 
   // Reserve the virtual address space for the 3x the capacity. We'll map the

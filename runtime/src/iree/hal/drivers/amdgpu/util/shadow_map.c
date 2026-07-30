@@ -444,9 +444,10 @@ iree_status_t iree_hal_amdgpu_shadow_map_initialize_hsa(
   IREE_ASSERT_ARGUMENT(out_map);
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_shadow_map_validate_hsa_params(params));
 
-  iree_device_size_t allocation_granule = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_vmem_query_alloc_granule(
-      params->libhsa, params->memory_pool, &allocation_granule));
+  iree_hal_amdgpu_vmem_granularity_t granularity;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_vmem_query_alloc_granularity(
+      params->libhsa, params->memory_pool, &granularity));
+  const iree_device_size_t allocation_granule = granularity.recommended;
 
   iree_device_size_t slab_size = params->requested_slab_size;
   if (slab_size < allocation_granule) slab_size = allocation_granule;

@@ -664,17 +664,18 @@ static iree_status_t iree_hal_amdgpu_allocator_resolve_virtual_memory_placement(
         memory_placement.memory_pool->allocation_flags);
   }
 
-  iree_device_size_t allocation_granule = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_vmem_query_alloc_granule(
+  iree_hal_amdgpu_vmem_granularity_t granularity;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_vmem_query_alloc_granularity(
       allocator->libhsa, memory_placement.memory_pool->memory_pool,
-      &allocation_granule));
+      &granularity));
   *out_placement = (iree_hal_amdgpu_virtual_memory_placement_t){
       .memory_pool = memory_placement.memory_pool->memory_pool,
       .device = (iree_hal_device_t*)allocator->logical_device,
       .queue_affinity = params->queue_affinity,
       .memory_type = memory_placement.memory_type,
       .buffer_usage = params->usage,
-      .allocation_granule = allocation_granule,
+      .minimum_granule = granularity.minimum,
+      .recommended_granule = granularity.recommended,
       .max_allocation_size = memory_placement.memory_pool->max_allocation_size,
   };
   return iree_ok_status();
@@ -762,8 +763,11 @@ iree_status_t iree_hal_amdgpu_allocator_create(
   }
 
   if (iree_status_is_ok(status)) {
+    iree_hal_allocator_statistics_t* statistics = NULL;
+    IREE_STATISTICS(statistics = &allocator->statistics);
     status = iree_hal_amdgpu_virtual_memory_state_create(
-        libhsa, topology, host_allocator, &allocator->virtual_memory);
+        libhsa, topology, (iree_hal_device_t*)logical_device, statistics,
+        host_allocator, &allocator->virtual_memory);
   }
 
   if (iree_status_is_ok(status)) {
@@ -1929,8 +1933,8 @@ static iree_status_t iree_hal_amdgpu_allocator_virtual_memory_query_granularity(
   IREE_RETURN_IF_ERROR(
       iree_hal_amdgpu_allocator_resolve_virtual_memory_placement(
           allocator, &params, &placement));
-  *out_minimum_page_size = placement.allocation_granule;
-  *out_recommended_page_size = placement.allocation_granule;
+  *out_minimum_page_size = placement.minimum_granule;
+  *out_recommended_page_size = placement.recommended_granule;
   return iree_ok_status();
 }
 

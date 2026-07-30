@@ -122,6 +122,21 @@ void iree_hal_amdgpu_buffer_set_profile_allocation(
 // callers should use iree_hal_buffer_allocated_buffer() to unwrap first.
 void* iree_hal_amdgpu_buffer_device_pointer(iree_hal_buffer_t* buffer);
 
+// Returns true if |buffer| is a direct AMDGPU buffer using exactly
+// |release_callback| to release its backing storage.
+bool iree_hal_amdgpu_buffer_uses_release_callback(
+    iree_hal_buffer_t* buffer,
+    iree_hal_buffer_release_callback_t release_callback);
+
+// Disarms callback-owned storage that has already been released externally.
+//
+// |buffer| must be a direct AMDGPU buffer using exactly |release_callback|.
+// The backing pointer and callback are cleared so destroying the remaining
+// buffer wrapper performs no storage operation.
+void iree_hal_amdgpu_buffer_disarm_storage(
+    iree_hal_buffer_t* buffer,
+    iree_hal_buffer_release_callback_t release_callback);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

@@ -38,20 +38,25 @@ typedef struct iree_hal_amdgpu_virtual_memory_placement_t {
   // HAL buffer usage exposed by the virtual buffer.
   iree_hal_buffer_usage_t buffer_usage;
 
-  // Minimum HSA VMM granule for this memory pool.
-  iree_device_size_t allocation_granule;
+  // Smallest legal HSA VMM allocation and mapping multiple.
+  iree_device_size_t minimum_granule;
+
+  // Preferred HSA VMM allocation multiple for reducing fragmentation.
+  iree_device_size_t recommended_granule;
 
   // Maximum physical allocation size accepted by this memory pool.
   iree_device_size_t max_allocation_size;
 } iree_hal_amdgpu_virtual_memory_placement_t;
 
-// Creates generic virtual-memory bookkeeping for one AMDGPU allocator.
+// Creates the virtual-memory context for one AMDGPU allocator.
 iree_status_t iree_hal_amdgpu_virtual_memory_state_create(
     const iree_hal_amdgpu_libhsa_t* libhsa,
-    const iree_hal_amdgpu_topology_t* topology, iree_allocator_t host_allocator,
+    const iree_hal_amdgpu_topology_t* topology, iree_hal_device_t* device,
+    iree_hal_allocator_statistics_t* statistics,
+    iree_allocator_t host_allocator,
     iree_hal_amdgpu_virtual_memory_state_t** out_state);
 
-// Destroys allocator-owned VMM bookkeeping after all handles are released.
+// Destroys an allocator-owned VMM context after all handles are released.
 void iree_hal_amdgpu_virtual_memory_state_destroy(
     iree_hal_amdgpu_virtual_memory_state_t* state);
 
