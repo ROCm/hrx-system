@@ -259,12 +259,22 @@ IREE_API_EXPORT iree_status_t iree_hal_format_element_type(
 IREE_API_EXPORT iree_status_t
 iree_hal_append_element_type_string(iree_hal_element_type_t element_type,
                                     iree_string_builder_t* string_builder) {
-  char temp[8];
   iree_host_size_t length = 0;
+  iree_status_t status =
+      iree_hal_format_element_type(element_type, 0, NULL, &length);
+  if (!iree_status_is_out_of_range(status)) {
+    return status;
+  }
+  iree_status_free(status);
+
+  char* buffer = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_hal_format_element_type(element_type, sizeof(temp), temp, &length));
-  return iree_string_builder_append_string(string_builder,
-                                           iree_make_string_view(temp, length));
+      iree_string_builder_append_inline(string_builder, length, &buffer));
+  if (buffer != NULL) {
+    IREE_RETURN_IF_ERROR(iree_hal_format_element_type(
+        element_type, length + /*NUL=*/1, buffer, NULL));
+  }
+  return iree_ok_status();
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_parse_shape_and_element_type(
