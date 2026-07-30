@@ -201,6 +201,32 @@ typedef struct loom_amdgpu_scalar_i64_ctpop_plan_t {
   loom_amdgpu_scalar_i64_ctpop_kind_t kind;
 } loom_amdgpu_scalar_i64_ctpop_plan_t;
 
+typedef enum loom_amdgpu_scalar_cttz_kind_e {
+  LOOM_AMDGPU_SCALAR_CTTZ_KIND_NONE = 0,
+  LOOM_AMDGPU_SCALAR_CTTZ_KIND_SGPR_B32 = 1,
+  LOOM_AMDGPU_SCALAR_CTTZ_KIND_SGPR_B64 = 2,
+  LOOM_AMDGPU_SCALAR_CTTZ_KIND_VGPR_B32 = 3,
+  LOOM_AMDGPU_SCALAR_CTTZ_KIND_VGPR_B64 = 4,
+} loom_amdgpu_scalar_cttz_kind_t;
+
+typedef uint8_t loom_amdgpu_scalar_cttz_flags_t;
+
+// The source value is known to be nonzero, so native CTZ needs no zero repair.
+#define LOOM_AMDGPU_SCALAR_CTTZ_FLAG_SOURCE_NONZERO ((uint8_t)1u << 0)
+
+typedef struct loom_amdgpu_scalar_cttz_plan_t {
+  // Source integer whose trailing zero bits are counted.
+  loom_value_id_t source;
+  // Result integer receiving the trailing-zero count.
+  loom_value_id_t result;
+  // Register-bank and physical-width lowering strategy.
+  loom_amdgpu_scalar_cttz_kind_t kind;
+  // Declared source width governing the zero result.
+  uint8_t semantic_bit_width;
+  // Fact-derived lowering properties.
+  loom_amdgpu_scalar_cttz_flags_t flags;
+} loom_amdgpu_scalar_cttz_plan_t;
+
 typedef enum loom_amdgpu_scalar_conversion_kind_e {
   LOOM_AMDGPU_SCALAR_CONVERSION_KIND_NONE = 0,
   LOOM_AMDGPU_SCALAR_CONVERSION_KIND_ALIAS,

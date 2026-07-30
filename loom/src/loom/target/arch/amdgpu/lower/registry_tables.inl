@@ -93,6 +93,13 @@ static const loom_amdgpu_lower_dispatch_row_t
                 loom_amdgpu_emit_scalar_i64_ctpop_dispatch,
                 loom_amdgpu_low_legality_verify_scalar_i64_ctpop, 1,
                 LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_CTTZI)] =
+            LOOM_AMDGPU_VALUE_DATA_SOURCE_POLICY_ROW(
+                LOOM_OP_SCALAR_CTTZI, loom_amdgpu_scalar_cttz_plan_t,
+                loom_amdgpu_select_scalar_cttz_dispatch,
+                loom_amdgpu_emit_scalar_cttz_dispatch,
+                loom_amdgpu_low_legality_verify_scalar_cttz, 1,
+                LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_MULI)] =
             LOOM_AMDGPU_GENERATED_PRESELECT_DATA_SOURCE_POLICY_ROW(
                 LOOM_OP_SCALAR_MULI, loom_amdgpu_scalar_i64_alu_plan_t,
