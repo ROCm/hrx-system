@@ -522,8 +522,8 @@ AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE = {
         AmdgpuMatrixCoexecutionRuleInfo(
             source=AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
             latency_cycles=4,
-            matrix_issue_distance=5,
-            vector_issue_distance=4,
+            matrix_issue_distance=2,
+            vector_issue_distance=1,
         ),
         AmdgpuMatrixCoexecutionRuleInfo(
             source=AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
