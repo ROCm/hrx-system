@@ -59,7 +59,11 @@ compact route-ID rows structural while the generic authored kernel omits its
 required `route_count <= route_id_stride` relation. The Qwen program fixes both
 values to eight. This fork retains that exact behavior, carries one function,
 and is deleted when the upstream kernel establishes and validates its generic
-stride contract.
+stride contract. The same fork temporarily selects the authored wide
+four-subgroup geometry because source-to-low compilation cannot see the
+workload-evaluated decode-or-prefill launch choice. Prefill measurements remain
+representative of that geometry; decode measurements do not until the fork is
+deleted.
 
 Later milestones repeat the proven layer shape across the model, add embedding
 and vocabulary projection, and introduce reusable prefill and decode programs.

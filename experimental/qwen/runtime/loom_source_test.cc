@@ -192,6 +192,17 @@ TEST(QwenLoomSourceTest, EmbedsWorkaroundRouterTop8Source) {
   EXPECT_EQ(source_text.find("%route_id_token_base = index.mul %token, "
                              "%bounded_route_id_stride"),
             std::string::npos);
+  EXPECT_NE(source_text.find(
+                "kernel.launch.config workgroups(%wide_workgroup_count, %one, "
+                "%one) workgroup_size(%wide_workgroup_size, %one, %one)"),
+            std::string::npos);
+  EXPECT_NE(source_text.find(
+                "%token_base = index.mul %token_workgroup, %four : index"),
+            std::string::npos);
+  EXPECT_EQ(source_text.find("%workgroup_count = scf.select"),
+            std::string::npos);
+  EXPECT_EQ(source_text.find("%subgroup_count = scf.select"),
+            std::string::npos);
 }
 
 }  // namespace

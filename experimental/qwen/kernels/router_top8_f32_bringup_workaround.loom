@@ -8,21 +8,18 @@
 // second router implementation. The owned model always publishes compact
 // route-ID rows with route_id_stride == route_count == 8, so the function makes
 // that compact storage structural instead of relying on the generic upstream
-// kernel's currently missing route_count <= route_id_stride contract. Delete
-// this fork when the authored kernel represents and verifies that relation.
+// kernel's currently missing route_count <= route_id_stride contract. The
+// compile boundary also cannot specialize the authored decode-or-prefill launch
+// choice, so this fork temporarily uses the wide prefill geometry. Delete this
+// fork when both upstream contracts are represented and verified.
 kernel.def target(@qwen3_moe_router_gfx11_wave64) export("qwen3_moe_router_top8_f32") @qwen3_moe_router_top8_f32(%token_count: index, %route_id_stride: index) {
   %one = index.constant 1 : index
   %three = index.constant 3 : index
   %four = index.constant 4 : index
-  %wave_size = index.constant 64 : index
   %wide_workgroup_size = index.constant 256 : index
-  %uses_decode_geometry = index.cmp eq, %token_count, %one : index
-  %subgroup_count = scf.select %uses_decode_geometry, %one, %four : index
-  %workgroup_size = scf.select %uses_decode_geometry, %wave_size, %wide_workgroup_size : index
   %padded_token_count = index.add %token_count, %three : index
   %wide_workgroup_count = index.div %padded_token_count, %four : index
-  %workgroup_count = scf.select %uses_decode_geometry, %token_count, %wide_workgroup_count : index
-  kernel.launch.config workgroups(%workgroup_count, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%wide_workgroup_count, %one, %one) workgroup_size(%wide_workgroup_size, %one, %one) : index
 } launch(%token_count: index, %route_id_stride: index, %logits: buffer, %route_ids: buffer, %route_weights: buffer) {
   %expert_count0 = config.get @qwen3_moe.router.expert_count : index
   %route_count0 = config.get @qwen3_moe.router.route_count : index
@@ -39,9 +36,7 @@ kernel.def target(@qwen3_moe_router_gfx11_wave64) export("qwen3_moe_router_top8_
   %negative_large = scalar.constant -3.4028234663852885e+38 : f32
   %largest_i32 = scalar.constant 2147483647 : i32
   %zero_offset = index.constant 0 : offset
-  %uses_decode_geometry = index.cmp eq, %bounded_token_count, %one : index
-  %subgroup_count = scf.select %uses_decode_geometry, %one, %four : index
-  %token_base = index.mul %token_workgroup, %subgroup_count : index
+  %token_base = index.mul %token_workgroup, %four : index
   %token0 = index.add %token_base, %subgroup : index
   %valid_token = index.cmp ult, %token0, %bounded_token_count : index
   %safe_token0 = scf.select %valid_token, %token0, %zero : index
