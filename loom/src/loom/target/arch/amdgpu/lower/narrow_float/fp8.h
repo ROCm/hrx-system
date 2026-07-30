@@ -130,6 +130,8 @@ typedef uint32_t loom_amdgpu_fp8_packed_u16_repairs_t;
 enum {
   LOOM_AMDGPU_FP8_U16_BYTE_COUNT = 2u,
   LOOM_AMDGPU_FP8_U16_BYTE_TABLE_WORD_COUNT = 2u,
+  // Number of FP8 lanes stored in one physical VGPR.
+  LOOM_AMDGPU_FP8_REGISTER_BYTE_COUNT = 4u,
 };
 
 enum {
@@ -148,12 +150,15 @@ typedef struct loom_amdgpu_fp8_native_descriptor_refs_t {
   loom_amdgpu_descriptor_ref_t lane;
   // Packed pair native conversion descriptor.
   loom_amdgpu_descriptor_ref_t pair;
+  // Scalar native conversion descriptors indexed by source-register byte.
+  loom_amdgpu_descriptor_ref_t byte_select[LOOM_AMDGPU_FP8_REGISTER_BYTE_COUNT];
 } loom_amdgpu_fp8_native_descriptor_refs_t;
 
 typedef enum loom_amdgpu_fp8_native_descriptor_flag_bits_e {
   LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_NONE = 0u,
   LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_LANE = 1u << 0,
   LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_PAIR = 1u << 1,
+  LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_BYTE_SELECT_FAMILY = 1u << 2,
 } loom_amdgpu_fp8_native_descriptor_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_native_descriptor_flags_t;
 

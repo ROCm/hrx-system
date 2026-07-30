@@ -47,6 +47,7 @@ class _Fp8NativeDescriptorRefRow:
     result_type: ScalarTypeKind
     lane_descriptor_key: str | None
     pair_descriptor_key: str
+    byte_select_descriptor_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -350,12 +351,14 @@ _FP8_NATIVE_DESCRIPTOR_REF_ROWS = (
         ScalarTypeKind.F16,
         None,
         "amdgpu.v_cvt_pk_f16_bf8.ocp",
+        tuple(f"amdgpu.v_cvt_f16_bf8.ocp.byte{byte_selector}" for byte_selector in range(4)),
     ),
     _Fp8NativeDescriptorRefRow(
         "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN",
         ScalarTypeKind.F16,
         None,
         "amdgpu.v_cvt_pk_f16_fp8.ocp",
+        tuple(f"amdgpu.v_cvt_f16_fp8.ocp.byte{byte_selector}" for byte_selector in range(4)),
     ),
 )
 
@@ -558,6 +561,8 @@ def _fp8_native_descriptor_ref_initializer(
     row: _Fp8NativeDescriptorRefRow,
     descriptor_ref_key_set: set[str] | None = None,
 ) -> str:
+    if len(row.byte_select_descriptor_keys) not in (0, 4):
+        raise ValueError(f"AMDGPU FP8 native conversion descriptor table byte-select family has {len(row.byte_select_descriptor_keys)} entries instead of 4")
     lane_descriptor_ref = (
         "LOOM_AMDGPU_DESCRIPTOR_REF_NONE"
         if row.lane_descriptor_key is None
@@ -572,6 +577,16 @@ def _fp8_native_descriptor_ref_initializer(
         row.pair_descriptor_key,
         descriptor_ref_key_set,
     )
+    byte_select_descriptor_refs = tuple(
+        required_descriptor_ref_constant_name(
+            "AMDGPU FP8 native conversion descriptor table",
+            descriptor_key,
+            descriptor_ref_key_set,
+        )
+        for descriptor_key in row.byte_select_descriptor_keys
+    )
+    if not byte_select_descriptor_refs:
+        byte_select_descriptor_refs = ("LOOM_AMDGPU_DESCRIPTOR_REF_NONE",) * 4
     return "\n".join(
         [
             "LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(",
@@ -579,7 +594,8 @@ def _fp8_native_descriptor_ref_initializer(
             f"    {_FP8_FORMAT_INDEX_BY_NAME[row.source_format]},",
             f"    {row.source_format},",
             f"    {_scalar_type_constant_name(row.result_type)},",
-            f"    {lane_descriptor_ref}, {pair_descriptor_ref}),",
+            f"    {lane_descriptor_ref}, {pair_descriptor_ref},",
+            f"    {', '.join(byte_select_descriptor_refs)}),",
         ]
     )
 

@@ -1910,6 +1910,7 @@ def _gfx1250_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             if not (overlay.semantic_tag or "").startswith("matrix.wmma.")
         ),
         _s_getreg_b32_cluster_workgroup_flat_id_overlay(),
+        *_v_cvt_f16_packed8_byte_overlays("ocp"),
         *_v_cvt_pk_f16_packed8_overlays("ocp"),
         *_v_cvt_scale_pk8_overlays(),
         _v_cvt_pk_bf16_f32_overlay(),
@@ -2121,6 +2122,24 @@ _GFX1250_SUPPLEMENTAL_INSTRUCTIONS = (
     *(
         _gfx1250_supplemental_cvt_scale_pk8_instruction(*row)
         for row in _GFX1250_CVT_SCALE_PK8_ROWS
+    ),
+    _gfx1250_supplemental_instruction(
+        name="V_CVT_F16_FP8",
+        encoding_name="ENC_VOP3",
+        opcode=0x1F7,
+        operands=(
+            _gfx1250_supplemental_vop3_result("FMT_NUM_F16", size_bits=16),
+            _gfx1250_supplemental_vop3_source(2, "SRC0", "FMT_NUM_UINT", size_bits=32),
+        ),
+    ),
+    _gfx1250_supplemental_instruction(
+        name="V_CVT_F16_BF8",
+        encoding_name="ENC_VOP3",
+        opcode=0x1F8,
+        operands=(
+            _gfx1250_supplemental_vop3_result("FMT_NUM_F16", size_bits=16),
+            _gfx1250_supplemental_vop3_source(2, "SRC0", "FMT_NUM_UINT", size_bits=32),
+        ),
     ),
     _gfx1250_supplemental_instruction(
         name="V_CVT_PK_F16_FP8",

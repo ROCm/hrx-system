@@ -4,6 +4,14 @@ amdgpu.target<gfx1250> @target
 low.func.def target(@target) @gfx1250_native_packed_float_ops(%low: reg<amdgpu.vgpr>, %high: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>, %packed8: reg<amdgpu.vgpr x2>, %packed4: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
   %f16_fp8 = v_cvt_pk_f16_fp8 %low
   %f16_bf8 = v_cvt_pk_f16_bf8 %high
+  %f16_fp8_byte0 = v_cvt_f16_fp8_byte0 %low
+  %f16_fp8_byte1 = v_cvt_f16_fp8_byte1 %low
+  %f16_fp8_byte2 = v_cvt_f16_fp8_byte2 %low
+  %f16_fp8_byte3 = v_cvt_f16_fp8_byte3 %low
+  %f16_bf8_byte0 = v_cvt_f16_bf8_byte0 %high
+  %f16_bf8_byte1 = v_cvt_f16_bf8_byte1 %high
+  %f16_bf8_byte2 = v_cvt_f16_bf8_byte2 %high
+  %f16_bf8_byte3 = v_cvt_f16_bf8_byte3 %high
   %packed = v_cvt_pk_bf16_f32 %low, %high
   %scaled_f16_fp4 = v_cvt_scale_pk8_f16_fp4 %packed4, %scale
   %scaled_bf16_fp4 = v_cvt_scale_pk8_bf16_fp4 %packed4, %scale
@@ -22,8 +30,16 @@ low.func.def target(@target) @gfx1250_native_packed_float_ops(%low: reg<amdgpu.v
 
 // ----
   v_cvt_pk_f16_fp8 v6, v0
+  v_cvt_pk_f16_bf8 v6, v1
+  v_cvt_f16_fp8 v6, v0
+  v_cvt_f16_fp8 v6, v0, byte_sel:1
+  v_cvt_f16_fp8 v6, v0, byte_sel:2
+  v_cvt_f16_fp8 v6, v0, byte_sel:3
   v_cvt_pk_bf16_f32 v0, v0, v1
-  v_cvt_pk_f16_bf8 v1, v1
+  v_cvt_f16_bf8 v6, v1
+  v_cvt_f16_bf8 v6, v1, byte_sel:1
+  v_cvt_f16_bf8 v6, v1, byte_sel:2
+  v_cvt_f16_bf8 v1, v1, byte_sel:3
   v_cvt_scale_pk8_f16_fp4 v[8:11], v2, v3, scale_sel:0
   v_cvt_scale_pk8_bf16_fp4 v[8:11], v2, v3, scale_sel:0
   v_cvt_scale_pk8_f32_fp4 v[8:15], v2, v3, scale_sel:0

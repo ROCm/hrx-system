@@ -60,6 +60,10 @@ def test_fp8_native_descriptor_refs_emit_data_only() -> None:
     assert "LOOM_SCALAR_TYPE_F16" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_FP8_OCP" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_FP8_FNUZ" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F16_FP8_OCP_BYTE0" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F16_FP8_OCP_BYTE3" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F16_BF8_OCP_BYTE0" in source
+    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F16_BF8_OCP_BYTE3" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_F16_FP8_OCP" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_F32_BF8_FNUZ" in source
     assert "switch " not in source
@@ -321,6 +325,31 @@ def test_fp8_native_descriptor_refs_reject_missing_descriptor_ref() -> None:
                 ),
             ),
             descriptor_ref_key_set={"amdgpu.v_cvt_pk_f32_fp8.ocp"},
+        )
+
+
+def test_fp8_native_descriptor_refs_reject_partial_byte_select_family() -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"AMDGPU FP8 native conversion descriptor table byte-select family "
+            r"has 1 entries instead of 4"
+        ),
+    ):
+        amdgpu_narrow_float_tables._emit_fp8_native_descriptor_ref_rows(
+            rows=(
+                _Fp8NativeDescriptorRefRow(
+                    "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
+                    ScalarTypeKind.F16,
+                    None,
+                    "amdgpu.v_cvt_pk_f16_fp8.ocp",
+                    ("amdgpu.v_cvt_f16_fp8.ocp.byte0",),
+                ),
+            ),
+            descriptor_ref_key_set={
+                "amdgpu.v_cvt_pk_f16_fp8.ocp",
+                "amdgpu.v_cvt_f16_fp8.ocp.byte0",
+            },
         )
 
 
