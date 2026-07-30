@@ -332,6 +332,7 @@ def test_generate_target_projection_emits_typed_fact_contract() -> None:
 
     assert '#include "loom/ops/target/facts.h"' in tables_c
     assert "static const loom_target_fact_type_t loom_test_target_fact_type = {" in tables_c
+    assert '.name = IREE_SVL("test"),' in tables_c
     assert ".storage_size = sizeof(loom_target_facts_t)," in tables_c
     assert ".satisfies_requirement = loom_target_facts_structural_satisfy_requirement," in tables_c
     assert ".fact_type = &loom_test_target_fact_type," in tables_c

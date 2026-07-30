@@ -151,13 +151,27 @@ TEST_F(TargetPredicateTest, VerifiesTargetPredicateAttrs) {
   ModulePtr module = ParseModule(R"(
 pass.pipeline<module> @pipeline pipeline {
   for func {
-    where target(target = "test_target", target_op = "test.target", codegen = "low_native", abi = "object_function") {
+    where target(target = "test_target", family = "test", codegen = "low_native", abi = "object_function") {
     }
   }
 }
 )");
 
   IREE_ASSERT_OK(VerifyPipeline(module.get(), IREE_SV("pipeline")));
+}
+
+TEST_F(TargetPredicateTest, RejectsTargetOpPredicateAttr) {
+  ModulePtr module = ParseModule(R"(
+pass.pipeline<module> @pipeline pipeline {
+  for func {
+    where target(target_op = "test.target") {
+    }
+  }
+}
+)");
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        VerifyPipeline(module.get(), IREE_SV("pipeline")));
 }
 
 TEST_F(TargetPredicateTest, MatchesResolvedTargetContract) {
@@ -167,7 +181,7 @@ test.target<quirky> @other_target
 
 pass.pipeline<module> @pipeline pipeline {
   for func {
-    where target(target = "@test_target", target_op = "test.target", bundle = "test_target", snapshot = "test_target", codegen = "low_native", artifact_format = "elf", abi = "object_function", config = "test_target", contract = "test.low.core") {
+    where target(target = "@test_target", family = "test", bundle = "test_target", snapshot = "test_target", codegen = "low_native", artifact_format = "elf", abi = "object_function", config = "test_target", contract = "test.low.core") {
     }
   }
 }
@@ -184,6 +198,27 @@ func.def target(@other_target) abi(object_function) @rejected() {
   loom_op_t* where_op =
       FirstWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
   EXPECT_TRUE(Evaluate(module.get(), where_op, IREE_SV("matched")));
+  EXPECT_FALSE(Evaluate(module.get(), where_op, IREE_SV("rejected")));
+}
+
+TEST_F(TargetPredicateTest, RejectsDifferentTargetFamily) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @test_target
+
+pass.pipeline<module> @pipeline pipeline {
+  for func {
+    where target(family = "amdgpu") {
+    }
+  }
+}
+
+func.def target(@test_target) @rejected() {
+  func.return
+}
+)");
+
+  loom_op_t* where_op =
+      FirstWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
   EXPECT_FALSE(Evaluate(module.get(), where_op, IREE_SV("rejected")));
 }
 

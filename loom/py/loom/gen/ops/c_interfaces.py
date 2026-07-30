@@ -540,7 +540,7 @@ def emit_target_like_descriptor(op: Op, iface: TargetLikeInterface, lines: list[
     if iface.fact_type is None:
         fact_type = f"{prefix}_fact_type"
         lines.append(f"static const loom_target_fact_type_t {fact_type} = {{")
-        lines.append(f'    .name = IREE_SVL("{op.name}"),')
+        lines.append(f'    .name = IREE_SVL("{op.group.name}"),')
         lines.append("    .storage_size = sizeof(loom_target_facts_t),")
         if iface.fact_satisfaction == TargetFactSatisfaction.STRUCTURAL:
             lines.append("    .satisfies_requirement = loom_target_facts_structural_satisfy_requirement,")

@@ -21,7 +21,7 @@
 static bool loom_target_pass_predicate_is_supported_attr(
     iree_string_view_t name) {
   return iree_string_view_equal(name, IREE_SV("target")) ||
-         iree_string_view_equal(name, IREE_SV("target_op")) ||
+         iree_string_view_equal(name, IREE_SV("family")) ||
          iree_string_view_equal(name, IREE_SV("bundle")) ||
          iree_string_view_equal(name, IREE_SV("snapshot")) ||
          iree_string_view_equal(name, IREE_SV("codegen")) ||
@@ -158,8 +158,6 @@ typedef struct loom_target_pass_predicate_target_facts_t {
   const loom_func_symbol_facts_t* func;
   // Effective target record symbol selected for |func|.
   loom_symbol_ref_t target_ref;
-  // Target record op named by |target_ref|.
-  const loom_op_t* target_op;
   // Target record facts named by |target_ref|.
   const loom_target_symbol_facts_t* target;
   // True after function contract resolution has run.
@@ -209,9 +207,6 @@ static iree_status_t loom_target_pass_predicate_resolve_facts(
   if (!out_facts->target) {
     return iree_ok_status();
   }
-  out_facts->target_op =
-      context->target_module->symbols.entries[out_facts->target_ref.symbol_id]
-          .defining_op;
 
   *out_valid = true;
   return iree_ok_status();
@@ -245,12 +240,9 @@ static iree_status_t loom_target_pass_predicate_match_attr(
         expected);
     return iree_ok_status();
   }
-  if (iree_string_view_equal(name, IREE_SV("target_op"))) {
-    if (facts->target_op == NULL) {
-      return iree_ok_status();
-    }
+  if (iree_string_view_equal(name, IREE_SV("family"))) {
     *out_match = iree_string_view_equal(
-        loom_op_name(context->target_module, facts->target_op), expected);
+        facts->target->projection->fact_type->name, expected);
     return iree_ok_status();
   }
   if (iree_string_view_equal(name, IREE_SV("bundle"))) {

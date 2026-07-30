@@ -113,7 +113,7 @@ target.generic<reference> @gpu {
       LookupTarget(module.get(), IREE_SV("gpu"));
   ASSERT_NE(facts->projection, nullptr);
   EXPECT_TRUE(iree_string_view_equal(facts->projection->fact_type->name,
-                                     IREE_SV("target.generic")));
+                                     IREE_SV("target")));
   EXPECT_TRUE(loom_target_facts_attr_is_authored(
       facts->projection, loom_target_generic_subgroup_size_ATTR_INDEX));
   EXPECT_FALSE(loom_target_facts_attr_is_authored(

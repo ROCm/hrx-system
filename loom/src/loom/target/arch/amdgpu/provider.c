@@ -142,8 +142,7 @@ static iree_status_t loom_amdgpu_provider_contribute_pipeline(
 
   loom_named_attr_t attrs[3] = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_provider_build_string_attr(
-      contribution->builder, IREE_SV("target_op"), IREE_SV("amdgpu.target"),
-      &attrs[0]));
+      contribution->builder, IREE_SV("family"), IREE_SV("amdgpu"), &attrs[0]));
   IREE_RETURN_IF_ERROR(loom_amdgpu_provider_build_string_attr(
       contribution->builder, IREE_SV("codegen"), IREE_SV("low_native"),
       &attrs[1]));

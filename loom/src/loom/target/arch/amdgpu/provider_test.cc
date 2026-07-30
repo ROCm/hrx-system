@@ -275,12 +275,11 @@ TEST_F(AmdgpuProviderTest, ContributesHalKernelAbiMaterialization) {
 
   loom_named_attr_slice_t attrs = loom_pass_where_attrs(where_op);
   ASSERT_EQ(attrs.count, 3u);
-  const loom_named_attr_t* target_op_attr =
-      FindAttr(module.get(), attrs, IREE_SV("target_op"));
-  ASSERT_NE(target_op_attr, nullptr);
+  const loom_named_attr_t* family_attr =
+      FindAttr(module.get(), attrs, IREE_SV("family"));
+  ASSERT_NE(family_attr, nullptr);
   EXPECT_TRUE(iree_string_view_equal(
-      AttrStringValue(module.get(), target_op_attr->value),
-      IREE_SV("amdgpu.target")));
+      AttrStringValue(module.get(), family_attr->value), IREE_SV("amdgpu")));
   const loom_named_attr_t* codegen_attr =
       FindAttr(module.get(), attrs, IREE_SV("codegen"));
   ASSERT_NE(codegen_attr, nullptr);

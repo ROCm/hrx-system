@@ -41,7 +41,7 @@ typedef bool (*loom_target_fact_satisfies_requirement_fn_t)(
 
 // Static type descriptor for one target-family fact representation.
 struct loom_target_fact_type_t {
-  // Stable fact-family name used in diagnostics.
+  // Stable target-family name used in diagnostics and pass predicates.
   iree_string_view_t name;
 
   // Size of the family-owned facts object beginning with loom_target_facts_t.
