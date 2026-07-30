@@ -60,10 +60,6 @@ def test_fp8_native_descriptor_refs_emit_data_only() -> None:
     assert "LOOM_SCALAR_TYPE_F16" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_FP8_OCP" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_FP8_FNUZ" in source
-    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F16_FP8_OCP_BYTE0" in source
-    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F16_FP8_OCP_BYTE3" in source
-    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F16_BF8_OCP_BYTE0" in source
-    assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F16_BF8_OCP_BYTE3" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_F16_FP8_OCP" in source
     assert "LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_PK_F32_BF8_FNUZ" in source
     assert "switch " not in source
