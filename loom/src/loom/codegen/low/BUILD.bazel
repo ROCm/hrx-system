@@ -137,7 +137,6 @@ loom_cc_library(
         "//loom/src/loom/target:registers",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
     ],
 )
 

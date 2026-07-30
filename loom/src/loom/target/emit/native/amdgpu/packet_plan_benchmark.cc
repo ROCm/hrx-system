@@ -518,10 +518,12 @@ class PacketPlanFixture {
       std::abort();
     }
 
+    loom_symbol_fact_table_t symbol_facts = {};
+    loom_symbol_fact_table_initialize(&symbol_facts, &frame_arena_);
     loom_low_resolved_target_t resolved_target = {};
     AbortOnError(loom_low_resolve_function_target(
-        module_, low_function, &target_registry_.registry, /*emitter=*/{},
-        &resolved_target));
+        module_, &symbol_facts, low_function, &target_registry_.registry,
+        /*emitter=*/{}, &resolved_target));
     if (resolved_target.descriptor_set == nullptr) {
       std::abort();
     }

@@ -352,6 +352,11 @@ static loomc_status_t loomc_module_select_single_low_descriptor_set_key(
       target_environment != NULL
           ? &target_environment->low_descriptor_registry.registry
           : NULL;
+  iree_arena_allocator_t fact_arena;
+  iree_arena_initialize(internal_module->arena.block_pool, &fact_arena);
+  loom_symbol_fact_table_t symbol_facts = {0};
+  loom_symbol_fact_table_initialize(&symbol_facts, &fact_arena);
+  loomc_status_t status = loomc_ok_status();
   const loom_op_t* op = NULL;
   loom_block_for_each_op(block, op) {
     if (!loomc_module_is_low_function_op(op)) {
@@ -362,15 +367,18 @@ static loomc_status_t loomc_module_select_single_low_descriptor_set_key(
       continue;
     }
     loom_low_resolved_target_t target = {0};
-    LOOMC_RETURN_IF_ERROR(
-        loomc_status_from_iree(loom_low_resolve_function_target(
-            internal_module, op, registry, (iree_diagnostic_emitter_t){0},
-            &target)));
+    status = loomc_status_from_iree(loom_low_resolve_function_target(
+        internal_module, &symbol_facts, op, registry,
+        (iree_diagnostic_emitter_t){0}, &target));
+    if (!loomc_status_is_ok(status)) {
+      break;
+    }
     if (target.descriptor_set == NULL) {
-      return loomc_make_status(
+      status = loomc_make_status(
           LOOMC_STATUS_FAILED_PRECONDITION,
           "module text serialization could not resolve a target-low "
           "descriptor set for one or more low functions");
+      break;
     }
     if (!*out_found_descriptor_set) {
       *out_descriptor_set_key =
@@ -381,13 +389,15 @@ static loomc_status_t loomc_module_select_single_low_descriptor_set_key(
     if (!loomc_string_view_equal(
             *out_descriptor_set_key,
             loomc_string_view_from_iree(target.descriptor_set_key))) {
-      return loomc_make_status(
+      status = loomc_make_status(
           LOOMC_STATUS_INVALID_ARGUMENT,
           "module text serialization found multiple target-low descriptor "
           "sets; pass low_asm_descriptor_set_key or request generic text");
+      break;
     }
   }
-  return loomc_ok_status();
+  iree_arena_deinitialize(&fact_arena);
+  return status;
 }
 
 static loomc_status_t loomc_module_text_print_options(

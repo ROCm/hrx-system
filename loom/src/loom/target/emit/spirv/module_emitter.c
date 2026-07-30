@@ -1680,7 +1680,7 @@ static iree_status_t loom_spirv_emit_low_function_into_module(
   }
 
   loom_low_resolved_target_t target = {0};
-  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target_with_facts(
+  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       module_state->module, &module_state->symbol_facts, low_function_op,
       module_state->descriptor_registry, module_state->diagnostic_emitter,
       &target));

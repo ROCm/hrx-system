@@ -114,20 +114,14 @@ typedef struct loom_low_resolved_descriptor_packet_t {
   const loom_low_descriptor_t* descriptor;
 } loom_low_resolved_descriptor_packet_t;
 
-// Resolves the target record payloads and descriptor set for |low_func_op|.
+// Resolves the target record payloads and descriptor set for |low_func_op|
+// using caller-owned symbol facts.
+//
 // User IR failures are emitted through |emitter| and leave
 // out_target->descriptor_set NULL. Infrastructure failures are returned as
 // status. |low_func_op| must be a target-low function definition or
-// declaration.
+// declaration. The arena backing |symbol_facts| must outlive |out_target|.
 iree_status_t loom_low_resolve_function_target(
-    const loom_module_t* module, const loom_op_t* low_func_op,
-    const loom_low_descriptor_registry_t* registry,
-    iree_diagnostic_emitter_t emitter, loom_low_resolved_target_t* out_target);
-
-// Resolves the target record payloads and descriptor set for |low_func_op|
-// using caller-owned symbol facts. This is the batched form for module-scope
-// analyses that resolve many low functions against one fact table.
-iree_status_t loom_low_resolve_function_target_with_facts(
     const loom_module_t* module, loom_symbol_fact_table_t* symbol_facts,
     const loom_op_t* low_func_op,
     const loom_low_descriptor_registry_t* registry,

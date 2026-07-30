@@ -9,7 +9,6 @@
 #include <inttypes.h>
 #include <stdint.h>
 
-#include "iree/base/internal/arena.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
@@ -274,7 +273,7 @@ static iree_status_t loom_low_resolve_func_target(
   return iree_ok_status();
 }
 
-iree_status_t loom_low_resolve_function_target_with_facts(
+iree_status_t loom_low_resolve_function_target(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
     const loom_op_t* low_func_op,
     const loom_low_descriptor_registry_t* registry,
@@ -308,20 +307,6 @@ iree_status_t loom_low_resolve_function_target_with_facts(
   return loom_low_emit_symbol_kind_mismatch(
       emitter, module, low_func_op, target_ref, target_symbol,
       target_attr_index, IREE_SV("target record"));
-}
-
-iree_status_t loom_low_resolve_function_target(
-    const loom_module_t* module, const loom_op_t* low_func_op,
-    const loom_low_descriptor_registry_t* registry,
-    iree_diagnostic_emitter_t emitter, loom_low_resolved_target_t* out_target) {
-  iree_arena_allocator_t arena;
-  iree_arena_initialize(module->arena.block_pool, &arena);
-  loom_symbol_fact_table_t fact_table = {0};
-  loom_symbol_fact_table_initialize(&fact_table, &arena);
-  iree_status_t status = loom_low_resolve_function_target_with_facts(
-      module, &fact_table, low_func_op, registry, emitter, out_target);
-  iree_arena_deinitialize(&arena);
-  return status;
 }
 
 iree_status_t loom_low_resolve_descriptor_packet(

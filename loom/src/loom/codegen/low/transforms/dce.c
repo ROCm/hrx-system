@@ -71,9 +71,12 @@ static iree_status_t loom_low_dce_function(
     const loom_low_descriptor_registry_t* descriptor_registry,
     iree_diagnostic_emitter_t emitter) {
   loom_op_t* low_func_op = function.op;
+  loom_symbol_fact_table_t symbol_facts = {0};
+  loom_symbol_fact_table_initialize(&symbol_facts, pass->arena);
   loom_low_resolved_target_t target = {0};
-  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-      module, low_func_op, descriptor_registry, emitter, &target));
+  IREE_RETURN_IF_ERROR(
+      loom_low_resolve_function_target(module, &symbol_facts, low_func_op,
+                                       descriptor_registry, emitter, &target));
   if (!target.descriptor_set) {
     return iree_ok_status();
   }

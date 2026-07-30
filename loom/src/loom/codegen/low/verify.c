@@ -1954,7 +1954,7 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
       .user_data = state,
   };
   loom_low_resolved_target_t target = {0};
-  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target_with_facts(
+  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       state->module, &state->symbol_facts, low_func_op, state->registry,
       counting_emitter, &target));
   loom_region_t* body = loom_low_verify_function_body(low_func_op);

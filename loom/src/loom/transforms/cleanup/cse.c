@@ -758,9 +758,11 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry =
         loom_low_pass_capability_descriptor_registry(low_capability);
     if (descriptor_registry) {
+      loom_symbol_fact_table_t symbol_facts = {0};
+      loom_symbol_fact_table_initialize(&symbol_facts, pass->arena);
       IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-          module, function.op, descriptor_registry, pass->diagnostic_emitter,
-          &low_target));
+          module, &symbol_facts, function.op, descriptor_registry,
+          pass->diagnostic_emitter, &low_target));
       if (low_target.descriptor_set) {
         low_target_ptr = &low_target;
       }

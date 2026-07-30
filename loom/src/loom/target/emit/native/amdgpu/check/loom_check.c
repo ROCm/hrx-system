@@ -65,6 +65,8 @@ typedef struct loom_amdgpu_loom_check_emit_options_t {
 typedef struct loom_amdgpu_loom_check_spill_lowering_context_t {
   // Target-low descriptor registry visible to this check runner.
   const loom_low_descriptor_registry_t* descriptor_registry;
+  // Case-scoped facts reused while spill lowering preserves target bindings.
+  loom_symbol_fact_table_t* symbol_facts;
 } loom_amdgpu_loom_check_spill_lowering_context_t;
 
 static bool loom_amdgpu_loom_check_emit_provider_matches(
@@ -321,7 +323,8 @@ static iree_status_t loom_amdgpu_loom_check_lower_spill_traffic(
       (const loom_amdgpu_loom_check_spill_lowering_context_t*)user_data;
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-      module, low_function_op, context->descriptor_registry, emitter, &target));
+      module, context->symbol_facts, low_function_op,
+      context->descriptor_registry, emitter, &target));
   if (target.descriptor_set == NULL) {
     return iree_ok_status();
   }
@@ -334,6 +337,7 @@ static iree_status_t loom_amdgpu_loom_check_lower_spill_traffic(
 
 static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
     const loom_check_emit_provider_request_t* request,
+    loom_symbol_fact_table_t* symbol_facts,
     iree_string_view_t function_symbol_name,
     const loom_target_residency_model_t** out_residency_model,
     loom_low_schedule_pair_affinity_list_t* out_affinities,
@@ -364,8 +368,8 @@ static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
   }
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-      request->module, low_function, &request->low_registry->registry, emitter,
-      &target));
+      request->module, symbol_facts, low_function,
+      &request->low_registry->registry, emitter, &target));
   if (target.descriptor_set == NULL) {
     return iree_ok_status();
   }
@@ -435,8 +439,11 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_loom_check_parse_emit_options(request, &options));
   loom_low_emission_frame_t frame = {0};
+  loom_symbol_fact_table_t symbol_facts = {0};
+  loom_symbol_fact_table_initialize(&symbol_facts, request->case_arena);
   loom_amdgpu_loom_check_spill_lowering_context_t spill_lowering_context = {
       .descriptor_registry = &request->low_registry->registry,
+      .symbol_facts = &symbol_facts,
   };
   const loom_low_emission_frame_spill_free_options_t spill_free_options = {
       .materialization_options =
@@ -461,7 +468,7 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
   loom_low_schedule_structural_state_read_list_t schedule_state_reads =
       loom_low_schedule_structural_state_read_list_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_loom_check_build_schedule_models(
-      request, options.function_symbol_name, &residency_model,
+      request, &symbol_facts, options.function_symbol_name, &residency_model,
       &schedule_pair_affinities, &schedule_state_reads));
   if (request->diagnostic_collector != NULL &&
       request->diagnostic_collector->count != 0) {

@@ -1044,9 +1044,12 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
   loom_target_residency_direct_resource_table_t pressure_cliffs = {0};
   uint32_t best_tier = 0;
   if (pressure_cliff_spec_count != 0) {
+    loom_symbol_fact_table_t symbol_facts = {0};
+    loom_symbol_fact_table_initialize(&symbol_facts, analysis_arena);
     loom_low_resolved_target_t target = {0};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-        module, low_function, descriptor_registry, emitter, &target));
+        module, &symbol_facts, low_function, descriptor_registry, emitter,
+        &target));
     if (!target.descriptor_set) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
@@ -1463,6 +1466,11 @@ static iree_status_t loom_check_emit_select_single_low_descriptor_set_key(
   *out_descriptor_set_key = iree_string_view_empty();
   *out_found = false;
 
+  iree_arena_allocator_t fact_arena;
+  iree_arena_initialize(module->arena.block_pool, &fact_arena);
+  loom_symbol_fact_table_t symbol_facts = {0};
+  loom_symbol_fact_table_initialize(&symbol_facts, &fact_arena);
+  iree_status_t status = iree_ok_status();
   const loom_block_t* block = loom_region_const_entry_block(module->body);
   const loom_op_t* op = NULL;
   loom_block_for_each_op(block, op) {
@@ -1470,8 +1478,11 @@ static iree_status_t loom_check_emit_select_single_low_descriptor_set_key(
       continue;
     }
     loom_low_resolved_target_t target = {0};
-    IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-        module, op, descriptor_registry, emitter, &target));
+    status = loom_low_resolve_function_target(
+        module, &symbol_facts, op, descriptor_registry, emitter, &target);
+    if (!iree_status_is_ok(status)) {
+      break;
+    }
     if (target.descriptor_set == NULL) {
       continue;
     }
@@ -1482,14 +1493,16 @@ static iree_status_t loom_check_emit_select_single_low_descriptor_set_key(
     }
     if (!iree_string_view_equal(*out_descriptor_set_key,
                                 target.descriptor_set_key)) {
-      return iree_make_status(
+      status = iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "source-low output=low requires all lowered funcs to use the same "
           "target-low descriptor set");
+      break;
     }
   }
 
-  return iree_ok_status();
+  iree_arena_deinitialize(&fact_arena);
+  return status;
 }
 
 static iree_string_view_t loom_check_emit_diagnostic_source_low_pipeline(
