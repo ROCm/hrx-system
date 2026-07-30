@@ -22,7 +22,8 @@ iree_status_t loom_amdgpu_select_vector_bitcast_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_vector_bitcast_plan_t* out_plan, bool* out_selected);
 
-// Lowers a source vector.bitcast op as an AMDGPU register reinterpretation.
+// Lowers a source vector.bitcast as a register reinterpretation, materializing
+// an SGPR payload in VGPRs when the result's consumers require vector storage.
 iree_status_t loom_amdgpu_lower_vector_bitcast(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_vector_bitcast_plan_t* plan);
