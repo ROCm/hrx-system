@@ -48,4 +48,12 @@ TEST(QwenRequestStorageTest, RejectsTokenCountBeyondCapacity) {
           /*token_count=*/512, /*context_capacity=*/128, &layout));
 }
 
+TEST(QwenRequestStorageTest, AlignsDecodeMaskForVectorLoads) {
+  qwen_request_storage_layout_t layout;
+  IREE_ASSERT_OK(qwen_request_storage_layout_calculate(
+      /*token_count=*/1, /*context_capacity=*/512, &layout));
+
+  EXPECT_EQ(layout.attention_mask.offset % 16, 0u);
+}
+
 }  // namespace

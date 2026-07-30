@@ -90,9 +90,9 @@ iree_status_t qwen_request_storage_layout_calculate(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Qwen attention-mask byte length overflows");
   }
-  IREE_RETURN_IF_ERROR(
-      qwen_request_storage_append(mask_byte_length, /*F16 alignment=*/2,
-                                  &cursor, &out_layout->attention_mask));
+  IREE_RETURN_IF_ERROR(qwen_request_storage_append(
+      mask_byte_length, /*FlashAttention vector alignment=*/16, &cursor,
+      &out_layout->attention_mask));
   out_layout->reset_upload_byte_length = cursor;
 
   iree_device_size_t all_layer_cache_byte_length = 0;
