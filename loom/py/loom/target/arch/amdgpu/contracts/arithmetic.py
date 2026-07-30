@@ -88,6 +88,8 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_cvt_f32_f16",
     "amdgpu.v_cvt_f32_fp8.ocp",
     "amdgpu.v_cvt_f32_bf8.ocp",
+    "amdgpu.v_cvt_f16_fp8.ocp.byte0",
+    "amdgpu.v_cvt_f16_bf8.ocp.byte0",
     "amdgpu.v_cvt_f16_f32",
     "amdgpu.v_pk_fmac_f16",
     "amdgpu.v_pk_fma_f16",
@@ -3727,6 +3729,18 @@ def _rules() -> tuple[ContractCase, ...]:
                 _F8E5M2,
                 _F32,
                 "amdgpu.v_cvt_f32_bf8.ocp",
+            ),
+            _cast_rule(
+                scalar_conversion.scalar_extf,
+                _F8E4M3,
+                _F16,
+                "amdgpu.v_cvt_f16_fp8.ocp.byte0",
+            ),
+            _cast_rule(
+                scalar_conversion.scalar_extf,
+                _F8E5M2,
+                _F16,
+                "amdgpu.v_cvt_f16_bf8.ocp.byte0",
             ),
             _bf16_extf_rule(),
             _cast_rule(

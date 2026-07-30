@@ -2709,6 +2709,68 @@ low.func.def target(@target) abi(hal_kernel) @gfx1200_vector_decode_f8e4m3fnuz_t
 
 // ====
 
+amdgpu.target<gfx12-5-generic> @target
+kernel.def target(@target) @gfx12_5_scalar_extf_f8e4m3_to_f16() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E4M3, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf16, #dense>
+  %packed = view.load %input_view[%lane] : view<64xf8E4M3, #dense> -> f8E4M3
+  %value = scalar.extf %packed : f8E4M3 to f16
+  view.store %value, %output_view[%lane] : f16, view<64xf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx12_5_scalar_extf_f8e4m3_to_f16() asm<amdgpu.gfx12_5.generic.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
+  %packed = global_load_i8_saddr %lane, %input_view
+  %value = v_cvt_f16_fp8_byte0 %packed
+  %15 = v_bfe_u32_offset_0_width_16_low16 %value
+  %16 = v_lshlrev_b32_src0_inline %lane, 1
+  global_store_short_saddr %16, %15, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx12-5-generic> @target
+kernel.def target(@target) @gfx12_5_scalar_extf_f8e5m2_to_f16() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf8E5M2, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf16, #dense>
+  %packed = view.load %input_view[%lane] : view<64xf8E5M2, #dense> -> f8E5M2
+  %value = scalar.extf %packed : f8E5M2 to f16
+  view.store %value, %output_view[%lane] : f16, view<64xf16, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @gfx12_5_scalar_extf_f8e5m2_to_f16() asm<amdgpu.gfx12_5.generic.core> {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
+  %packed = global_load_i8_saddr %lane, %input_view
+  %value = v_cvt_f16_bf8_byte0 %packed
+  %15 = v_bfe_u32_offset_0_width_16_low16 %value
+  %16 = v_lshlrev_b32_src0_inline %lane, 1
+  global_store_short_saddr %16, %15, %output_view
+  return
+}
+
+// ====
+
 amdgpu.target<gfx1200> @target
 func.def target(@target) @gfx1200_vector_decode_f8e5m2fnuz_to_f32(%input: buffer, %base: offset) -> (vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
