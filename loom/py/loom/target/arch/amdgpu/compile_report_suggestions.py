@@ -90,6 +90,7 @@ class AmdgpuCompileReportSuggestionProvider:
             )
             if wave_suggestion is not None:
                 suggestions.append(wave_suggestion)
+        suggestions.extend(_suggest_fragment_packet_expansion(document))
         suggestions.extend(_suggest_lds_bank_service(document, options))
         return CompileReportSuggestionResult(
             provider_name=self.provider_name,
@@ -258,6 +259,275 @@ def _suggest_nondefault_wave_size(
             ),
         ),
     )
+
+
+def _suggest_fragment_packet_expansion(
+    document: CompileReportDocument,
+) -> tuple[CompileReportSuggestion, ...]:
+    source_low_value = document.report.get("source_low")
+    if source_low_value is None:
+        return ()
+    source_low = _report_object(source_low_value, "source_low")
+    selection_summaries_value = source_low.get("selection_summaries")
+    memory_value = source_low.get("memory")
+    if selection_summaries_value is None or memory_value is None:
+        return ()
+    selection_summaries = _report_object(
+        selection_summaries_value,
+        "source_low.selection_summaries",
+    )
+    selection_rows = _report_indexed_rows(
+        selection_summaries,
+        "source_low.selection_summaries",
+    )
+    memory = _report_object(memory_value, "source_low.memory")
+    argument_packet_rows = _report_indexed_rows(
+        memory,
+        "source_low.memory",
+        rows_key="argument_packets",
+        count_key="argument_packet_count",
+    )
+    strategy_rows = _report_indexed_rows(
+        memory,
+        "source_low.memory",
+        rows_key="strategies",
+        count_key="strategy_count",
+    )
+
+    suggestions = []
+    for selection_position, selection in enumerate(selection_rows):
+        source_operation = _optional_report_string(
+            selection.get("source_op"),
+            (f"source_low.selection_summaries.rows[{selection_position}].source_op"),
+        )
+        if source_operation not in (
+            "vector.fragment.load",
+            "vector.fragment.store",
+        ):
+            continue
+        strategy = _optional_report_string(
+            selection.get("plan_key"),
+            (f"source_low.selection_summaries.rows[{selection_position}].plan_key"),
+        )
+        if strategy is None:
+            continue
+        function_name = _optional_report_string(
+            selection.get("function"),
+            (f"source_low.selection_summaries.rows[{selection_position}].function"),
+        )
+        selected_operation_count = _report_integer(
+            selection.get("selected_op_count"),
+            (
+                "source_low.selection_summaries."
+                f"rows[{selection_position}].selected_op_count"
+            ),
+        )
+        emitted_low_operation_count = _report_integer(
+            selection.get("emitted_low_op_count"),
+            (
+                "source_low.selection_summaries."
+                f"rows[{selection_position}].emitted_low_op_count"
+            ),
+        )
+        if selected_operation_count == 0:
+            continue
+
+        matched_packet_rows = []
+        packet_row_path = "source_low.memory.argument_packets"
+        for packet_position, packet_row in enumerate(argument_packet_rows):
+            packet_strategy = _optional_report_string(
+                packet_row.get("strategy"),
+                (f"source_low.memory.argument_packets[{packet_position}].strategy"),
+            )
+            packet_function = _optional_report_string(
+                packet_row.get("function"),
+                (f"source_low.memory.argument_packets[{packet_position}].function"),
+            )
+            if packet_strategy != strategy or packet_function != function_name:
+                continue
+            matched_packet_rows.append((packet_position, packet_row))
+        if not matched_packet_rows:
+            packet_row_path = "source_low.memory.strategies"
+            for packet_position, packet_row in enumerate(strategy_rows):
+                packet_strategy = _optional_report_string(
+                    packet_row.get("strategy"),
+                    f"{packet_row_path}[{packet_position}].strategy",
+                )
+                packet_function = _optional_report_string(
+                    packet_row.get("function"),
+                    f"{packet_row_path}[{packet_position}].function",
+                )
+                if packet_strategy == strategy and packet_function == function_name:
+                    matched_packet_rows.append((packet_position, packet_row))
+
+        packet_groups: dict[
+            tuple[str | None, str | None, str | None],
+            list[tuple[int, dict[str, object]]],
+        ] = {}
+        for packet_position, packet_row in matched_packet_rows:
+            memory_space = _optional_report_string(
+                packet_row.get("memory_space"),
+                f"{packet_row_path}[{packet_position}].memory_space",
+            )
+            operation = _optional_report_string(
+                packet_row.get("operation"),
+                f"{packet_row_path}[{packet_position}].operation",
+            )
+            source_root = _optional_report_string(
+                packet_row.get("source_root"),
+                f"{packet_row_path}[{packet_position}].source_root",
+            )
+            group_key = (source_root, memory_space, operation)
+            packet_groups.setdefault(group_key, []).append(
+                (packet_position, packet_row)
+            )
+
+        for (
+            source_root,
+            memory_space,
+            operation,
+        ), packet_group in packet_groups.items():
+            packet_count = 0
+            scalar_packet_count = 0
+            contiguous_vector_packet_count = 0
+            packet_names = []
+            storage_formats = []
+            packet_evidence = []
+            for packet_position, packet_row in packet_group:
+                packet_path = f"{packet_row_path}[{packet_position}]"
+                packet_name = _report_string(
+                    packet_row.get("packet"),
+                    f"{packet_path}.packet",
+                )
+                packet_names.append(packet_name)
+                storage = _report_object(
+                    packet_row.get("storage"),
+                    f"{packet_path}.storage",
+                )
+                storage_format = _optional_report_string(
+                    storage.get("element_format"),
+                    f"{packet_path}.storage.element_format",
+                )
+                if storage_format is not None:
+                    storage_formats.append(storage_format)
+                row_packet_count = _report_integer(
+                    packet_row.get("packet_count"),
+                    f"{packet_path}.packet_count",
+                )
+                row_scalar_packet_count = _report_integer(
+                    packet_row.get("scalar_packet_count"),
+                    f"{packet_path}.scalar_packet_count",
+                )
+                row_contiguous_vector_packet_count = _report_integer(
+                    packet_row.get("contiguous_vector_packet_count"),
+                    f"{packet_path}.contiguous_vector_packet_count",
+                )
+                packet_count += row_packet_count
+                scalar_packet_count += row_scalar_packet_count
+                contiguous_vector_packet_count += row_contiguous_vector_packet_count
+                packet_evidence.extend(
+                    (
+                        CompileReportSuggestionEvidence(
+                            path=f"{packet_path}.packet",
+                            value=packet_name,
+                        ),
+                        CompileReportSuggestionEvidence(
+                            path=f"{packet_path}.packet_count",
+                            value=row_packet_count,
+                        ),
+                        CompileReportSuggestionEvidence(
+                            path=f"{packet_path}.scalar_packet_count",
+                            value=row_scalar_packet_count,
+                        ),
+                        CompileReportSuggestionEvidence(
+                            path=(f"{packet_path}.contiguous_vector_packet_count"),
+                            value=row_contiguous_vector_packet_count,
+                        ),
+                    )
+                )
+            if (
+                packet_count < 16
+                or scalar_packet_count * 4 < packet_count * 3
+                or contiguous_vector_packet_count != 0
+            ):
+                continue
+
+            selection_path = (
+                f"source_low.selection_summaries.rows[{selection_position}]"
+            )
+            evidence = [
+                CompileReportSuggestionEvidence(
+                    path=f"{selection_path}.plan_key",
+                    value=strategy,
+                ),
+                CompileReportSuggestionEvidence(
+                    path=f"{selection_path}.selected_op_count",
+                    value=selected_operation_count,
+                ),
+                CompileReportSuggestionEvidence(
+                    path=f"{selection_path}.emitted_low_op_count",
+                    value=emitted_low_operation_count,
+                ),
+                *packet_evidence,
+            ]
+            entry = _entry_for_function(document, function_name)
+            if entry is not None:
+                entry_index = _report_integer(
+                    entry.get("index"),
+                    "entries.rows[].index",
+                )
+                entry_path = f"entries.rows[{entry_index}]"
+                wait_plan = _object_at(entry, "wait_plan")
+                if wait_plan is not None:
+                    full_drain_count = _integer(wait_plan.get("full_drain_count"))
+                    if full_drain_count is not None:
+                        evidence.append(
+                            CompileReportSuggestionEvidence(
+                                path=(f"{entry_path}.wait_plan.full_drain_count"),
+                                value=full_drain_count,
+                            )
+                        )
+                instruction_mix = _object_at(entry, "static_instruction_mix")
+                if instruction_mix is not None:
+                    register_move_count = _integer(
+                        instruction_mix.get("register_move_count")
+                    )
+                    if register_move_count is not None:
+                        evidence.append(
+                            CompileReportSuggestionEvidence(
+                                path=(
+                                    f"{entry_path}.static_instruction_mix."
+                                    "register_move_count"
+                                ),
+                                value=register_move_count,
+                            )
+                        )
+
+            location = "/".join(
+                value
+                for value in (source_operation, source_root, memory_space)
+                if value is not None
+            )
+            packet_summary = ", ".join(dict.fromkeys(packet_names))
+            storage_summary = "/".join(dict.fromkeys(storage_formats))
+            suggestions.append(
+                CompileReportSuggestion(
+                    suggestion_id="amdgpu.fragment_packet_expansion",
+                    entry_name=_entry_name_for_function(document, function_name),
+                    action=(
+                        f"Inspect operand layout and packing for {location} "
+                        f"{storage_summary or 'storage'}: the {strategy} plan "
+                        f"emits {packet_count} scalar "
+                        f"{operation or 'memory'} packets ({packet_summary}) and "
+                        "no contiguous vector packets. "
+                        "If narrow packets are layout-required, bound their live "
+                        "window and reduce full drains and register moves before "
+                        "benchmarking."
+                    ),
+                    evidence=tuple(evidence),
+                )
+            )
+    return tuple(suggestions)
 
 
 def _suggest_lds_bank_service(
@@ -451,6 +721,53 @@ def _entry_name_for_function(
     if len(document.entries) == 1:
         return compile_report_entry_identity(document.entries[0]).display_name()
     return "<report>"
+
+
+def _entry_for_function(
+    document: CompileReportDocument,
+    function_name: str | None,
+) -> dict[str, object] | None:
+    if function_name is None:
+        return document.entries[0] if len(document.entries) == 1 else None
+    for entry in document.entries:
+        if function_name in (
+            entry.get("function"),
+            entry.get("source_function"),
+            entry.get("target_export"),
+            entry.get("target_export_symbol"),
+        ):
+            return entry
+    return None
+
+
+def _report_indexed_rows(
+    parent: dict[str, object],
+    path: str,
+    *,
+    rows_key: str = "rows",
+    count_key: str = "count",
+) -> tuple[dict[str, object], ...]:
+    rows_value = parent.get(rows_key)
+    if rows_value is None:
+        return ()
+    if not isinstance(rows_value, list):
+        raise CompileReportError(f"{path}.{rows_key}: expected array")
+    count = _report_integer(parent.get(count_key), f"{path}.{count_key}")
+    if count != len(rows_value):
+        raise CompileReportError(
+            f"{path}.{count_key}: expected {len(rows_value)}, got {count}"
+        )
+    rows = []
+    for position, row_value in enumerate(rows_value):
+        row_path = f"{path}.{rows_key}[{position}]"
+        row = _report_object(row_value, row_path)
+        index = _report_integer(row.get("index"), f"{row_path}.index")
+        if index != position:
+            raise CompileReportError(
+                f"{row_path}.index: expected {position}, got {index}"
+            )
+        rows.append(row)
+    return tuple(rows)
 
 
 def _report_object(value: object, path: str) -> dict[str, object]:
