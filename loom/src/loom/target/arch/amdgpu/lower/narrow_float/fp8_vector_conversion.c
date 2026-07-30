@@ -156,20 +156,9 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_f32_software_lane(
       lane_index, &low_byte));
   const loom_amdgpu_fp8_decode_value_flags_t value_flags =
       loom_amdgpu_vector_fp8_decode_value_flags(value_flag_cache, lane_index);
-  IREE_RETURN_IF_ERROR(loom_amdgpu_try_emit_fp8_not_subnormal_to_f32_lane(
+  return loom_amdgpu_emit_fp8_to_f32_lane(
       context, source_op, *decode_plan, low_byte, value_flags, result_lane_type,
-      *mask_type, out_low_lane));
-  if (*out_low_lane != LOOM_VALUE_ID_INVALID) {
-    return iree_ok_status();
-  }
-
-  loom_value_id_t bf16_lane = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_to_bf16_lane(
-      context, source_op, *decode_plan, low_byte, value_flags, result_lane_type,
-      *sgpr_type, *mask_type, &bf16_lane));
-  return loom_amdgpu_emit_vgpr_shift(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT, 16,
-      bf16_lane, result_lane_type, out_low_lane);
+      *sgpr_type, *mask_type, out_low_lane);
 }
 
 static iree_status_t loom_amdgpu_emit_fp8_lane_to_f32_native(
