@@ -92,7 +92,6 @@ static iree_status_t loom_target_symbol_fact_compute(
   facts->base.domain = domain;
   facts->base.symbol_kind = symbol->kind;
   facts->projection = projection;
-  facts->target = target;
   facts->symbol = (loom_symbol_ref_t){
       .module_id = 0,
       .symbol_id = symbol_id,

@@ -81,9 +81,6 @@ typedef struct loom_target_symbol_facts_t {
   // Typed target facts projected from the authored target witness.
   const loom_target_facts_t* projection;
 
-  // Borrowed typed target operation defining the record.
-  loom_target_like_t target;
-
   // Module-local symbol reference for the target definition.
   loom_symbol_ref_t symbol;
 
