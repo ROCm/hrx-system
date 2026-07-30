@@ -36,6 +36,7 @@
 #include "loom/target/arch/amdgpu/planning/vopd_plan.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
+#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/kernel_emission.h"
 #include "loom/target/emit/native/amdgpu/kernel_hsaco.h"
@@ -44,6 +45,7 @@
 #include "loom/target/emit/native/amdgpu/spill_lowering.h"
 #include "loom/target/entry_selection.h"
 #include "loom/target/function_contract.h"
+#include "loom/target/profile.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/low.h"
 
@@ -367,45 +369,45 @@ loom_amdgpu_hal_kernel_library_record_processor_capabilities(
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hal_kernel_library_record_target_capability_string(
           report, function_name, namespace_name, IREE_SV("descriptor_set"),
-          processor->descriptor_set.key));
+          processor->properties.descriptor_set.key));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hal_kernel_library_record_target_capability_u64(
           report, function_name, namespace_name,
           IREE_SV("wavefront_default_size"),
-          processor->wavefront.default_size));
+          processor->properties.wavefront.default_size));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hal_kernel_library_record_target_capability_bool(
           report, function_name, namespace_name, IREE_SV("wavefront_32"),
-          iree_any_bit_set(processor->wavefront.supported_sizes,
+          iree_any_bit_set(processor->properties.wavefront.supported_sizes,
                            LOOM_AMDGPU_WAVEFRONT_SIZE_FLAG_32)));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hal_kernel_library_record_target_capability_bool(
           report, function_name, namespace_name, IREE_SV("wavefront_64"),
-          iree_any_bit_set(processor->wavefront.supported_sizes,
+          iree_any_bit_set(processor->properties.wavefront.supported_sizes,
                            LOOM_AMDGPU_WAVEFRONT_SIZE_FLAG_64)));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hal_kernel_library_record_target_capability_string(
           report, function_name, namespace_name,
           IREE_SV("kernel_descriptor_profile"),
           loom_amdgpu_hal_kernel_library_kernel_descriptor_profile_name(
-              processor->kernel_descriptor.profile)));
+              processor->properties.kernel_descriptor.profile)));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hal_kernel_library_record_target_capability_u64(
           report, function_name, namespace_name,
           IREE_SV("kernel_descriptor_flags"),
-          processor->kernel_descriptor.flags));
+          processor->properties.kernel_descriptor.flags));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hal_kernel_library_record_target_capability_string(
           report, function_name, namespace_name,
           IREE_SV("matrix_feature_profile"),
           loom_amdgpu_hal_kernel_library_matrix_feature_profile_name(
-              processor->features.matrix)));
+              processor->properties.features.matrix)));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hal_kernel_library_record_matrix_feature_capabilities(
-          processor->features.matrix, function_name, report));
+          processor->properties.features.matrix, function_name, report));
   return loom_amdgpu_hal_kernel_library_record_target_capability_u64(
       report, function_name, namespace_name, IREE_SV("scheduling_bits"),
-      processor->features.scheduling);
+      processor->properties.features.scheduling);
 }
 
 static iree_status_t loom_amdgpu_hal_kernel_library_write_hsaco(
@@ -469,6 +471,60 @@ static iree_status_t loom_amdgpu_hal_kernel_library_set_contents(
   }
   return status;
 }
+
+static void loom_amdgpu_hal_kernel_library_append_manifest_feature(
+    loom_amdgpu_target_feature_state_t state, iree_string_view_t off_name,
+    iree_string_view_t on_name, iree_string_view_t* feature_names,
+    iree_host_size_t* inout_feature_name_count) {
+  if (state == LOOM_AMDGPU_TARGET_FEATURE_OFF) {
+    feature_names[(*inout_feature_name_count)++] = off_name;
+  } else if (state == LOOM_AMDGPU_TARGET_FEATURE_ON) {
+    feature_names[(*inout_feature_name_count)++] = on_name;
+  }
+}
+
+static iree_status_t loom_amdgpu_hal_kernel_library_project_manifest_target(
+    const loom_module_t* module, const loom_target_entry_t* entry,
+    iree_arena_allocator_t* arena,
+    loom_target_artifact_manifest_target_t* inout_target) {
+  (void)module;
+  loom_amdgpu_target_identity_t identity = {0};
+  loom_amdgpu_target_record_resolve_identity(entry->target_op, &identity);
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_target_processor(identity.target);
+  IREE_ASSERT(processor != NULL);
+
+  inout_target->family = IREE_SV("amdgpu");
+  inout_target->selector = identity.target->name;
+  inout_target->processor = processor->name;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_amdhsa_code_object_target_id_format(
+      &identity, arena, &inout_target->code_object_target));
+
+  iree_string_view_t feature_names[2] = {0};
+  iree_host_size_t feature_name_count = 0;
+  loom_amdgpu_hal_kernel_library_append_manifest_feature(
+      identity.amdhsa_features.sramecc, IREE_SV("sramecc-"),
+      IREE_SV("sramecc+"), feature_names, &feature_name_count);
+  loom_amdgpu_hal_kernel_library_append_manifest_feature(
+      identity.amdhsa_features.xnack, IREE_SV("xnack-"), IREE_SV("xnack+"),
+      feature_names, &feature_name_count);
+  if (feature_name_count != 0) {
+    iree_string_view_t* stored_feature_names = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, feature_name_count, sizeof(*stored_feature_names),
+        (void**)&stored_feature_names));
+    memcpy(stored_feature_names, feature_names,
+           feature_name_count * sizeof(*stored_feature_names));
+    inout_target->feature_names = stored_feature_names;
+    inout_target->feature_name_count = feature_name_count;
+  }
+  return iree_ok_status();
+}
+
+static const loom_target_artifact_manifest_target_projection_t
+    kLoomAmdgpuHalKernelLibraryManifestTargetProjection = {
+        .project = loom_amdgpu_hal_kernel_library_project_manifest_target,
+};
 
 static iree_status_t loom_amdgpu_hal_kernel_library_lookup_func_facts(
     const loom_module_t* module, loom_symbol_ref_t func_ref,
@@ -635,7 +691,6 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
     loom_module_t* module,
     const loom_target_low_descriptor_registry_t* low_registry,
     const loom_amdgpu_hal_kernel_library_kernel_plan_t* plan,
-    loom_target_selection_t target_selection,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     iree_arena_allocator_t* table_arena, iree_string_builder_t* target_listing,
     loom_target_compile_report_t* report,
@@ -668,11 +723,6 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   loom_amdgpu_storage_lease_provider(&storage_lease_provider);
   const loom_low_emission_frame_options_t frame_options = {
       .descriptor_registry = &low_registry->registry,
-      .target_selection =
-          {
-              .bundle = &plan->entry->bundle_storage.bundle,
-              .data = target_selection.data,
-          },
       .residency_model = residency_model,
       .schedule_pair_affinities = schedule_pair_affinities,
       .schedule_structural_state_reads = schedule_state_reads,
@@ -878,7 +928,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
     loom_module_t* module, const loom_target_entry_options_t* target_options,
     const loom_target_low_descriptor_registry_t* low_registry,
     loom_low_verify_provider_list_t low_verify_provider_list,
-    loom_target_entry_list_t entries, loom_target_selection_t target_selection,
+    loom_target_entry_list_t entries,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     iree_arena_allocator_t* table_arena, loom_target_compile_report_t* report,
     const loom_amdgpu_hal_kernel_library_options_t* options, bool* out_emitted,
@@ -970,7 +1020,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
       loom_low_verify_scratch_for_module(module);
   if (iree_status_is_ok(status) && !diagnostics_failed) {
     status = loom_target_entry_verify_low_module(
-        module, low_registry, diagnostic_emitter, target_selection, max_errors,
+        module, low_registry, diagnostic_emitter, max_errors,
         low_verify_provider_list, &low_verify_scratch, &low_verify_result);
     if (iree_status_is_ok(status) && low_verify_result.error_count != 0) {
       diagnostics_failed = true;
@@ -994,8 +1044,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
        i < entries.count && iree_status_is_ok(status) && !diagnostics_failed;
        ++i) {
     status = loom_amdgpu_hal_kernel_library_build_kernel_contribution(
-        module, low_registry, &plans[i], target_selection, diagnostic_emitter,
-        table_arena, target_listing_initialized ? &target_listing : NULL,
+        module, low_registry, &plans[i], diagnostic_emitter, table_arena,
+        target_listing_initialized ? &target_listing : NULL,
         entry_reports != NULL ? &entry_reports[i] : NULL, &contributions[i]);
   }
   if (iree_status_is_ok(status) && !diagnostics_failed) {
@@ -1027,10 +1077,12 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
     }
     if (iree_status_is_ok(status)) {
       status = loom_amdgpu_hal_kernel_library_set_contents(
-          contributions[0].target, hsaco, allocator, out_library);
+          contributions[0].artifact_target_key, hsaco, allocator, out_library);
     }
     if (iree_status_is_ok(status)) {
       hsaco = iree_const_byte_span_empty();
+      out_library->target_bundle_storage = entries.values[0].bundle_storage;
+      loom_target_bundle_storage_rebind(&out_library->target_bundle_storage);
       if (capture_target_listing &&
           iree_string_builder_size(&target_listing) != 0) {
         out_library->target_listing_format = IREE_SV("amdgpu-assembly");
@@ -1045,6 +1097,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
             options->artifact_manifest;
         manifest_options.artifact_name = options->artifact_name;
         manifest_options.artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
+        manifest_options.target_projection =
+            &kLoomAmdgpuHalKernelLibraryManifestTargetProjection;
         manifest_options.flags =
             LOOM_TARGET_ARTIFACT_MANIFEST_COLLECT_FLAG_ARTIFACT_BYTE_LENGTH;
         manifest_options.artifact_byte_length = out_library->hsaco_data_length;
@@ -1094,15 +1148,12 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
     report->artifact_kind =
         LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_KERNEL_LIBRARY;
   }
-  const loom_target_selection_t target_selection =
-      options ? options->target_selection : loom_target_selection_empty();
   const loom_target_entry_options_t target_options = {
       .diagnostic_sink =
           options ? options->diagnostic_sink : (loom_diagnostic_sink_t){0},
       .source_resolver =
           options ? options->source_resolver : (loom_source_resolver_t){0},
       .max_errors = options ? options->max_errors : 0,
-      .effective_target_bundle = target_selection.bundle,
   };
   loom_target_environment_t target_environment = {0};
   iree_status_t status = loom_target_environment_initialize(
@@ -1156,8 +1207,8 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
     status = loom_amdgpu_hal_kernel_library_entries(
         module, &target_options, &low_registry,
         loom_target_environment_low_verify_provider_list(&target_environment),
-        entries, target_selection, &diagnostic_emitter, &table_arena, report,
-        options, out_emitted, out_library, allocator);
+        entries, &diagnostic_emitter, &table_arena, report, options,
+        out_emitted, out_library, allocator);
   }
   if (iree_status_is_ok(status) && *out_emitted && report != NULL) {
     loom_target_compile_report_record_artifact_size(

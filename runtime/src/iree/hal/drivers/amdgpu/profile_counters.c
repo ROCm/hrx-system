@@ -730,7 +730,7 @@ static void iree_hal_amdgpu_profile_counter_select_default_descriptors(
       uint32_t event_id = 0;
       if (!iree_hal_amdgpu_profile_counter_resolve_event_id(
               descriptor,
-              physical_device->agent_target->primary_isa.target_id.version,
+              physical_device->agent_target->primary_isa.identity.version,
               &event_id)) {
         supported_on_all_devices = false;
         break;
@@ -1005,7 +1005,7 @@ static iree_status_t iree_hal_amdgpu_profile_counter_initialize_set(
       .name = iree_make_string_view(string_storage, set_name.size),
   };
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_profile_counter_initialize_selection(
-      selection, physical_device->agent_target->primary_isa.target_id.version,
+      selection, physical_device->agent_target->primary_isa.identity.version,
       default_descriptors, default_descriptor_count, out_counter_set));
   *inout_counter_storage += out_counter_set->counter_count;
   *inout_event_storage += out_counter_set->counter_count;

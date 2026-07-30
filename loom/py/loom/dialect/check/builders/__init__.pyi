@@ -92,6 +92,7 @@ class CheckBuilder(DialectBuilder):
         *,
         offset: Any,
         step: Any,
+        period: int | None = ...,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,

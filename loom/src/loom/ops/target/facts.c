@@ -10,6 +10,7 @@
 
 #include "loom/ir/module.h"
 #include "loom/ops/target/ops.h"
+#include "loom/target/materialization.h"
 
 static const loom_target_snapshot_t kGenericReferenceSnapshot = {
     .name = IREE_SVL("target-generic-reference"),
@@ -47,49 +48,6 @@ const loom_target_bundle_table_t loom_target_generic_target_bundles = {
     .count = IREE_ARRAYSIZE(kGenericTargetBundleValues),
 };
 
-static void loom_target_bundle_storage_initialize_from_bundle(
-    loom_target_bundle_storage_t* storage, iree_string_view_t name,
-    const loom_target_bundle_t* bundle) {
-  storage->snapshot = *bundle->snapshot;
-  storage->export_plan = *bundle->export_plan;
-  storage->config = *bundle->config;
-  storage->snapshot.name = name;
-  storage->export_plan.name = name;
-  storage->config.name = name;
-  storage->bundle = (loom_target_bundle_t){
-      .name = name,
-      .snapshot = &storage->snapshot,
-      .export_plan = &storage->export_plan,
-      .config = &storage->config,
-  };
-}
-
-static void loom_target_projection_apply(
-    const loom_module_t* module, const loom_op_t* op,
-    const loom_target_projection_t* projection,
-    loom_target_bundle_storage_t* storage) {
-  loom_attribute_t attr = loom_op_attrs(op)[projection->attr_index];
-  if (loom_attr_is_absent(attr)) return;
-
-  uint8_t* storage_base = (uint8_t*)storage;
-  void* destination = storage_base + projection->storage_offset;
-  switch (projection->value_kind) {
-    case LOOM_TARGET_PROJECTION_VALUE_ENUM_U8:
-      *(uint8_t*)destination = (uint8_t)loom_attr_as_enum(attr);
-      break;
-    case LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32:
-      *(uint32_t*)destination = (uint32_t)loom_attr_as_i64(attr);
-      break;
-    case LOOM_TARGET_PROJECTION_VALUE_I64_TO_U64:
-      *(uint64_t*)destination = (uint64_t)loom_attr_as_i64(attr);
-      break;
-    case LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW:
-      *(iree_string_view_t*)destination =
-          module->strings.entries[loom_attr_as_string_id(attr)];
-      break;
-  }
-}
-
 static iree_status_t loom_target_symbol_fact_compute(
     const loom_symbol_fact_domain_t* domain,
     loom_symbol_fact_context_t* context, const loom_module_t* module,
@@ -104,7 +62,9 @@ static iree_status_t loom_target_symbol_fact_compute(
   const uint8_t selector = loom_attr_as_enum(loom_target_like_selector(target));
   const loom_target_bundle_t* row_bundle =
       loom_target_bundle_table_lookup(descriptor->bundle_table, selector);
-  if (!row_bundle) return iree_ok_status();
+  if (row_bundle == NULL) {
+    return iree_ok_status();
+  }
 
   loom_target_symbol_facts_t* facts = NULL;
   IREE_RETURN_IF_ERROR(loom_symbol_fact_context_allocate(
@@ -113,6 +73,7 @@ static iree_status_t loom_target_symbol_fact_compute(
 
   facts->base.domain = domain;
   facts->base.symbol_kind = symbol->kind;
+  facts->target = target;
   facts->symbol = (loom_symbol_ref_t){
       .module_id = 0,
       .symbol_id = symbol_id,
@@ -121,12 +82,10 @@ static iree_status_t loom_target_symbol_fact_compute(
 
   facts->selector = selector;
   facts->row_bundle = row_bundle;
-  loom_target_bundle_storage_initialize_from_bundle(
-      &facts->storage, facts->name, facts->row_bundle);
-  for (uint8_t i = 0; i < descriptor->projection_count; ++i) {
-    loom_target_projection_apply(module, target.op, &descriptor->projections[i],
-                                 &facts->storage);
-  }
+  const bool resolved = loom_target_record_projection_resolve(
+      module, target, facts->name, &facts->storage);
+  IREE_ASSERT(resolved);
+  (void)resolved;
 
   *out_facts = &facts->base;
   return iree_ok_status();

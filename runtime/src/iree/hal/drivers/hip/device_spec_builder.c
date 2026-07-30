@@ -492,19 +492,21 @@ static iree_status_t iree_hal_hip_device_spec_populate_executables(
                               " did not report a GCN architecture",
                               i);
     }
-    iree_hal_amdgpu_target_id_t exact_target_id;
+    iree_hal_amdgpu_target_identity_t exact_identity;
+    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_parse_artifact_key(
+                             gcn_arch_name, &exact_identity),
+                         "parsing HIP physical device %" PRIhsz
+                         " target ID '%.*s'",
+                         i, (int)gcn_arch_name.size, gcn_arch_name.data);
     IREE_RETURN_IF_ERROR(
-        iree_hal_amdgpu_target_id_parse(
-            gcn_arch_name,
-            IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_ARCH_ONLY |
-                IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_FEATURE_SUFFIXES,
-            &exact_target_id),
-        "parsing HIP physical device %" PRIhsz " target ID '%.*s'", i,
-        (int)gcn_arch_name.size, gcn_arch_name.data);
+        iree_hal_amdgpu_target_identity_resolve_physical_target(
+            params->physical_devices[i].facts.architecture.asic_revision,
+            &exact_identity),
+        "qualifying HIP physical device %" PRIhsz " ASIC revision", i);
     const iree_hal_physical_device_affinity_t target_affinity = 1ull << i;
     IREE_RETURN_IF_ERROR(
         iree_hal_amdgpu_device_spec_builder_add_executable_targets(
-            builder, &exact_target_id, target_affinity));
+            builder, &exact_identity, target_affinity));
   }
   return iree_ok_status();
 }

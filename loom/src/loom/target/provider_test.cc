@@ -76,6 +76,20 @@ static iree_status_t ContributePreparation(
                                 loom_named_attr_slice_empty(), &run_op);
 }
 
+static bool AlwaysSatisfiesTargetRequirement(
+    loom_target_record_view_t effective_target,
+    loom_target_record_view_t target_requirement) {
+  (void)effective_target;
+  (void)target_requirement;
+  return true;
+}
+
+static iree_string_view_t MaterializationSymbolStem(
+    const loom_target_profile_t* profile) {
+  (void)profile;
+  return IREE_SV("target");
+}
+
 struct PipelineBuildData {
   const loom_target_environment_t* environment;
 };
@@ -131,6 +145,7 @@ class TargetProviderTest : public ::testing::Test {
 
 TEST_F(TargetProviderTest, ContributesPassIrByPhase) {
   static const loom_target_provider_t materialization_provider = {
+      /*.profile_type=*/{},
       /*.register_context=*/{},
       /*.initialize_low_descriptor_registry=*/{},
       /*.initialize_low_lower_policy_registry=*/{},
@@ -145,6 +160,7 @@ TEST_F(TargetProviderTest, ContributesPassIrByPhase) {
       /*.contribute_pipeline=*/ContributeMaterialization,
   };
   static const loom_target_provider_t preparation_provider = {
+      /*.profile_type=*/{},
       /*.register_context=*/{},
       /*.initialize_low_descriptor_registry=*/{},
       /*.initialize_low_lower_policy_registry=*/{},
@@ -218,6 +234,7 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
       /*.descriptor_count=*/IREE_ARRAYSIZE(second_descriptors),
   };
   static const loom_target_provider_t first_provider = {
+      /*.profile_type=*/{},
       /*.register_context=*/{},
       /*.initialize_low_descriptor_registry=*/{},
       /*.initialize_low_lower_policy_registry=*/{},
@@ -231,6 +248,7 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
       /*.pass_registry=*/&first_registry,
   };
   static const loom_target_provider_t second_provider = {
+      /*.profile_type=*/{},
       /*.register_context=*/{},
       /*.initialize_low_descriptor_registry=*/{},
       /*.initialize_low_lower_policy_registry=*/{},
@@ -268,6 +286,40 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
   EXPECT_EQ(descriptor->info, &TargetBetaPassInfo);
 
   loom_target_environment_deinitialize(&environment);
+}
+
+TEST_F(TargetProviderTest, RejectsAmbiguousRecordSemanticsOwnership) {
+  loom_target_provider_t first_provider = {};
+  first_provider.record_semantics = {
+      /*.op_kind=*/LOOM_OP_KIND(LOOM_DIALECT_TEST, 0),
+      /*.satisfies_requirement=*/AlwaysSatisfiesTargetRequirement,
+  };
+  loom_target_provider_t second_provider = {};
+  second_provider.record_semantics = first_provider.record_semantics;
+  const loom_target_provider_t* const providers[] = {
+      &first_provider,
+      &second_provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
+}
+
+TEST_F(TargetProviderTest, RejectsPartialMaterializationContract) {
+  loom_target_provider_t provider = {};
+  provider.materialization.symbol_stem = MaterializationSymbolStem;
+  const loom_target_provider_t* const providers[] = {
+      &provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
 }
 
 }  // namespace

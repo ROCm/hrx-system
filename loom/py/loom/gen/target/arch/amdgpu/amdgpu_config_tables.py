@@ -39,7 +39,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AmdgpuDescriptorSetInfo,
     sorted_descriptor_set_infos,
     sorted_processor_infos,
-    sorted_target_record_infos,
+    sorted_target_infos,
 )
 
 
@@ -47,15 +47,15 @@ def _selected_descriptor_set_infos() -> tuple[AmdgpuDescriptorSetInfo, ...]:
     processors_by_name = {info.processor: info for info in sorted_processor_infos()}
     descriptor_sets_by_key = {info.key: info for info in sorted_descriptor_set_infos()}
     descriptor_set_keys: list[str] = []
-    for record in sorted_target_record_infos():
-        processor = processors_by_name.get(record.processor)
+    for target in sorted_target_infos():
+        processor = processors_by_name.get(target.processor)
         if processor is None:
-            raise ValueError(f"AMDGPU target record '{record.processor}' has no processor row")
+            raise ValueError(f"AMDGPU target '{target.target}' has no processor row '{target.processor}'")
         descriptor_set_key = processor.descriptor_set.key
         if not descriptor_set_key:
-            raise ValueError(f"AMDGPU target record '{record.processor}' has no descriptor-set key")
+            raise ValueError(f"AMDGPU target '{target.target}' has no descriptor-set key")
         if descriptor_set_key not in descriptor_sets_by_key:
-            raise ValueError(f"AMDGPU target record '{record.processor}' references unknown descriptor set '{descriptor_set_key}'")
+            raise ValueError(f"AMDGPU target '{target.target}' references unknown descriptor set '{descriptor_set_key}'")
         if descriptor_set_key not in descriptor_set_keys:
             descriptor_set_keys.append(descriptor_set_key)
     if not descriptor_set_keys:

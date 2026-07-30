@@ -2909,8 +2909,8 @@ TEST(MatrixContractTest, ProcessorFeatureBitsMatchEveryTargetInfoProfile) {
 
     loom_amdgpu_matrix_feature_bits_t expected_feature_bits = 0;
     const bool has_matrix_profile =
-        loom_amdgpu_matrix_feature_bits_from_profile(processor->features.matrix,
-                                                     &expected_feature_bits);
+        loom_amdgpu_matrix_feature_bits_from_profile(
+            processor->properties.features.matrix, &expected_feature_bits);
 
     loom_amdgpu_matrix_feature_bits_t actual_feature_bits = 0;
     iree_status_t status = loom_amdgpu_matrix_feature_bits_from_processor(

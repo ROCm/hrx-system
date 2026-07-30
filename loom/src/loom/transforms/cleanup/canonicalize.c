@@ -1899,8 +1899,8 @@ iree_status_t loom_canonicalizer_run_function(
       if (options && options->seed_facts) {
         seed_facts.context.target_bundle =
             options->seed_facts->context.target_bundle;
-        seed_facts.context.target_data =
-            options->seed_facts->context.target_data;
+        seed_facts.context.target_profile =
+            options->seed_facts->context.target_profile;
       }
     }
     if (iree_status_is_ok(status) && options && options->seed_facts) {

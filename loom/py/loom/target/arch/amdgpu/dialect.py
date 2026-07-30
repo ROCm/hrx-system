@@ -20,7 +20,7 @@ from loom.dsl import (
     SymbolDefinition,
     TargetLikeInterface,
 )
-from loom.target.arch.amdgpu.target_info import sorted_target_record_infos
+from loom.target.arch.amdgpu.target_info import sorted_target_infos
 
 amdgpu_ops = Dialect(
     "amdgpu",
@@ -34,21 +34,27 @@ amdgpu_ops = Dialect(
 AmdgpuTargetKind = EnumDef(
     "AmdgpuTargetKind",
     [
-        EnumCase(info.processor, info.enum_value, doc=info.doc)
-        for info in sorted_target_record_infos()
+        EnumCase(info.target, info.enum_value, doc=info.doc)
+        for info in sorted_target_infos()
     ],
     doc="AMDGPU target row selected by amdgpu.target.",
 )
 
-AmdgpuGfx1250Revision = EnumDef(
-    "AmdgpuGfx1250Revision",
+AmdgpuTargetFeatureState = EnumDef(
+    "AmdgpuTargetFeatureState",
     [
-        EnumCase("a0", 1, doc="gfx1250 A0 silicon behavior and errata."),
-        EnumCase("b0", 2, doc="gfx1250 B0 silicon behavior."),
+        EnumCase("any", 0, doc="Feature state is unconstrained."),
+        EnumCase(
+            "unsupported",
+            1,
+            doc="Feature is unsupported by the selected processor.",
+        ),
+        EnumCase("off", 2, doc="Feature is explicitly disabled."),
+        EnumCase("on", 3, doc="Feature is explicitly enabled."),
     ],
-    doc="gfx1250 silicon revision selected by amdgpu.target.",
-    c_type="loom_amdgpu_gfx1250_revision_t",
-    c_const_prefix="LOOM_AMDGPU_GFX1250_REVISION",
+    doc="Normalized state of one AMDHSA target-ID feature.",
+    c_type="loom_amdgpu_target_feature_state_t",
+    c_const_prefix="LOOM_AMDGPU_TARGET_FEATURE",
     c_include="loom/target/arch/amdgpu/target_info.h",
 )
 
@@ -56,9 +62,9 @@ amdgpu_target = Op(
     "amdgpu.target",
     group=amdgpu_ops,
     doc=(
-        "AMDGPU processor target record. The selector chooses one exact or "
-        "generic processor row; optional attrs structurally override authored "
-        "common target fields."
+        "AMDGPU target record. The selector chooses one exact, generic, or "
+        "overlay target row; optional attrs preserve authored common facts "
+        "and target-ID feature states."
     ),
     traits=[SYMBOL_DEFINE],
     interfaces=[
@@ -66,6 +72,7 @@ amdgpu_target = Op(
             symbol="symbol",
             selector="kind",
             bundle_table="loom_amdgpu_target_bundles",
+            specialization_authored_attrs=("subgroup_size",),
         )
     ],
     symbol_def=SymbolDefinition(
@@ -78,10 +85,18 @@ amdgpu_target = Op(
     attrs=[
         *target_record_attrs(AmdgpuTargetKind),
         AttrDef(
-            "gfx1250_revision",
+            "sramecc",
             ATTR_TYPE_ENUM,
-            enum_def=AmdgpuGfx1250Revision,
+            enum_def=AmdgpuTargetFeatureState,
             optional=True,
+            doc="Required AMDHSA SRAM ECC target-ID feature state.",
+        ),
+        AttrDef(
+            "xnack",
+            ATTR_TYPE_ENUM,
+            enum_def=AmdgpuTargetFeatureState,
+            optional=True,
+            doc="Required AMDHSA XNACK target-ID feature state.",
         ),
     ],
     verify="loom_amdgpu_target_record_verify",
@@ -94,7 +109,8 @@ amdgpu_target = Op(
         "amdgpu.target<gfx11-generic> @gfx11_generic",
         "amdgpu.target<gfx942> @gfx942 {subgroup_size = 64}",
         "amdgpu.target<gfx950> @gfx950 {subgroup_size = 64}",
-        "amdgpu.target<gfx1250> @gfx1250 {gfx1250_revision = a0}",
+        "amdgpu.target<gfx1250-a0> @gfx1250_a0",
+        "amdgpu.target<gfx942> @gfx942_xnack {xnack = on}",
     ],
 )
 

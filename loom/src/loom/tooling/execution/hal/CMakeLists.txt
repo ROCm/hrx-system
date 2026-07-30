@@ -22,6 +22,7 @@ loom_cc_library(
     loom::error::diagnostic
     loom::ir
     loom::target::pipeline_options
+    loom::target::profile
     loom::target::provider
     loom::target::reporting::report
     loom::target::types
@@ -176,6 +177,7 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::ops::func
     loom::target::low_descriptor_registry_core_test
+    loom::target::profile
     loom::target::types
     loom::tooling::execution::session
 )
@@ -226,6 +228,7 @@ loom_cc_test(
     loom::ops::kernel
     loom::ops::test
     loom::target::low_descriptor_registry_core_test
+    loom::target::profile
     loom::testing::module_ptr
     loom::tooling::execution::session
     loom::tooling::testbench

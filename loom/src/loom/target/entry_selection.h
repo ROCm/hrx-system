@@ -40,10 +40,6 @@ typedef struct loom_target_entry_options_t {
   // Maximum diagnostics to emit before the active subsystem stops walking.
   // Zero lets callers use a backend-defined default.
   uint32_t max_errors;
-  // Optional device- or environment-selected bundle used after the entry's
-  // module target record has passed compatibility checks. Function-local ABI
-  // contracts are re-applied to this bundle before the entry is returned.
-  const loom_target_bundle_t* effective_target_bundle;
 } loom_target_entry_options_t;
 
 typedef struct loom_target_entry_t {
@@ -134,7 +130,7 @@ iree_status_t loom_target_entry_verify_low_module(
     const loom_module_t* module,
     const loom_target_low_descriptor_registry_t* low_registry,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
-    loom_target_selection_t target_selection, uint32_t max_errors,
+    uint32_t max_errors,
     loom_low_verify_provider_list_t low_verify_provider_list,
     loom_low_verify_scratch_t* scratch, loom_low_verify_result_t* out_result);
 

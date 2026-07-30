@@ -114,6 +114,40 @@ loom_cc_test(
 endif()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    profile
+  HDRS
+    "profile.h"
+  SRCS
+    "profile.c"
+  DEPS
+    ::target_info_defs
+    iree::base
+    loom::target::arch::amdgpu::records::target_records
+    loom::target::profile
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
+    profile_test
+  SRCS
+    "profile_test.cc"
+  DEPS
+    ::profile
+    ::target_info
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::arch::amdgpu::records::target_records
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_test(
   NAME
     registers_test
@@ -251,14 +285,15 @@ loom_cc_library(
   NAME
     low_verify
   HDRS
-    "gfx1250_a0_errata.h"
+    "instruction_constraints.h"
     "low_verify.h"
   SRCS
-    "gfx1250_a0_errata.c"
+    "instruction_constraints.c"
     "low_verify.c"
   DEPS
     ::error_defs
     ::low_aliases
+    ::target_info_defs
     iree::base
     loom::codegen::low::descriptors
     loom::codegen::low::diagnostics
@@ -287,6 +322,7 @@ loom_cc_library(
     ::low_verify
     ::math_policy
     ::pass_registry
+    ::profile
     ::target_info
     iree::base
     loom::ir
@@ -295,7 +331,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::diagnostics::packet_diagnostics
     loom::target::arch::amdgpu::lower
     loom::target::arch::amdgpu::ops
-    loom::target::arch::amdgpu::records::target_records
+    loom::target::materialization
     loom::target::provider
   PUBLIC
 )
@@ -308,22 +344,30 @@ loom_cc_test(
   SRCS
     "provider_test.cc"
   DEPS
+    ::profile
     ::provider
     iree::base
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::codegen::low::pipeline::pass_environment
+    loom::format::text::parser
     loom::ir
+    loom::ops::func
     loom::ops::op_registry
     loom::ops::pass
+    loom::ops::target
     loom::pass::builder
     loom::pass::registry
     loom::pass::testing::registry_verify
+    loom::pass::tooling
     loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info
     loom::target::provider
     loom::testing::module_ptr
+    loom::transforms::symbol::template_selection
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
 )

@@ -46,7 +46,7 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass:value_facts",
-        "//loom/src/loom/target:selection",
+        "//loom/src/loom/target:pass_environment",
         "//runtime/src/iree/base",
     ],
 )

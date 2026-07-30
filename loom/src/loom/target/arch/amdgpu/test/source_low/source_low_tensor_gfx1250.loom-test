@@ -1,6 +1,6 @@
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx12-5-generic> @target
+amdgpu.target<gfx1250> @target
 kernel.def target(@target) @tensor_load_to_lds_d4() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -22,7 +22,7 @@ kernel.def target(@target) @tensor_load_to_lds_d4() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @tensor_load_to_lds_d4() asm<amdgpu.gfx12_5.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @tensor_load_to_lds_d4() asm<amdgpu.rdna4.gfx125x.core> {
   %15 = v_mov_b32 0
   %29 = storage {byte_alignment = 256, byte_length = 16384} : low.storage<workgroup>
   %32 = v_readfirstlane_b32 %15
@@ -56,7 +56,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx12-5-generic> @target
+amdgpu.target<gfx1250> @target
 kernel.def target(@target) @tensor_load_to_lds_d2() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -78,7 +78,7 @@ kernel.def target(@target) @tensor_load_to_lds_d2() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @tensor_load_to_lds_d2() asm<amdgpu.gfx12_5.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @tensor_load_to_lds_d2() asm<amdgpu.rdna4.gfx125x.core> {
   %15 = v_mov_b32 0
   %29 = storage {byte_alignment = 256, byte_length = 16384} : low.storage<workgroup>
   %32 = v_readfirstlane_b32 %15
@@ -102,7 +102,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
-amdgpu.target<gfx12-5-generic> @target
+amdgpu.target<gfx1250> @target
 kernel.def target(@target) @tensor_load_two_stage_wait_depth() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index
@@ -129,7 +129,7 @@ kernel.def target(@target) @tensor_load_two_stage_wait_depth() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @tensor_load_two_stage_wait_depth() asm<amdgpu.gfx12_5.generic.core> {
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @tensor_load_two_stage_wait_depth() asm<amdgpu.rdna4.gfx125x.core> {
   %19 = v_mov_b32 0
   %33 = storage {byte_alignment = 256, byte_length = 16384} : low.storage<workgroup>
   %36 = v_readfirstlane_b32 %19

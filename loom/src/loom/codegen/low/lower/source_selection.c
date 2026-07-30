@@ -9,11 +9,11 @@
 #include <string.h>
 
 #include "loom/analysis/symbol_facts.h"
-#include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/target/facts.h"
 #include "loom/target/function_contract.h"
+#include "loom/target/profile.h"
 
 static iree_status_t loom_low_source_selection_lookup_func_facts(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
@@ -43,14 +43,6 @@ static iree_status_t loom_low_source_selection_lookup_target_facts(
       fact_table, module, target_ref, &base_facts));
   *out_target_facts = loom_target_symbol_facts_cast(base_facts);
   return iree_ok_status();
-}
-
-static iree_string_view_t loom_low_source_selection_target_bundle_name(
-    const loom_target_bundle_t* target_bundle) {
-  if (target_bundle == NULL || iree_string_view_is_empty(target_bundle->name)) {
-    return IREE_SV("<unnamed>");
-  }
-  return target_bundle->name;
 }
 
 static iree_string_view_t loom_low_source_selection_symbol_ref_name(
@@ -106,7 +98,7 @@ static iree_status_t loom_low_source_selection_find_candidate_targets(
     const loom_low_source_selection_options_t* options,
     loom_low_source_selection_t* selection) {
   if (!options->collect_target_candidates ||
-      selection->target_source != LOOM_TARGET_SELECTION_SOURCE_INVOCATION ||
+      selection->target_source != LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION ||
       selection->target_bundle == NULL) {
     return iree_ok_status();
   }
@@ -146,61 +138,6 @@ static iree_status_t loom_low_source_selection_find_candidate_targets(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_source_selection_emit_target_conflict(
-    iree_diagnostic_emitter_t diagnostic_emitter,
-    const loom_func_symbol_facts_t* func_facts,
-    const loom_target_bundle_t* authored_target,
-    const loom_target_bundle_t* selected_target) {
-  const loom_diagnostic_param_t params[] = {
-      loom_param_string(func_facts->name),
-      loom_param_string(
-          loom_low_source_selection_target_bundle_name(authored_target)),
-      loom_param_string(
-          loom_low_source_selection_target_bundle_name(selected_target)),
-  };
-  const loom_diagnostic_emission_t emission = {
-      .op = func_facts->func_op,
-      .error = LOOM_ERR_TARGET_052,
-      .params = params,
-      .param_count = IREE_ARRAYSIZE(params),
-  };
-  return iree_diagnostic_emit(diagnostic_emitter, &emission);
-}
-
-static iree_status_t loom_low_source_selection_apply_target_selection(
-    const loom_low_source_selection_options_t* options,
-    const loom_func_symbol_facts_t* func_facts, bool* inout_contract_valid,
-    loom_low_source_selection_t* selection) {
-  if (!*inout_contract_valid) {
-    selection->target_data = NULL;
-    return iree_ok_status();
-  }
-  if (loom_target_selection_is_empty(options->target_selection)) {
-    selection->target_data = NULL;
-    return iree_ok_status();
-  }
-  if (options->target_selection.bundle == NULL) {
-    selection->target_data = options->target_selection.data;
-    return iree_ok_status();
-  }
-  if (!loom_target_function_contract_bundles_compatible(
-          &selection->target_bundle_storage.bundle,
-          options->target_selection.bundle)) {
-    *inout_contract_valid = false;
-    selection->target_data = NULL;
-    IREE_RETURN_IF_ERROR(loom_low_source_selection_emit_target_conflict(
-        options->diagnostic_emitter, func_facts,
-        &selection->target_bundle_storage.bundle,
-        options->target_selection.bundle));
-    return iree_ok_status();
-  }
-  loom_target_function_contract_apply_compatible_selection(
-      options->target_selection.bundle, &selection->target_bundle_storage);
-  selection->target_bundle = &selection->target_bundle_storage.bundle;
-  selection->target_data = options->target_selection.data;
-  return iree_ok_status();
-}
-
 typedef uint8_t loom_low_source_selection_filter_t;
 
 #define LOOM_LOW_SOURCE_SELECTION_FILTER_FUNCTION ((uint8_t)1u << 0)
@@ -236,13 +173,15 @@ static iree_status_t loom_low_source_selection_try_symbol(
                          LOOM_LOW_SOURCE_SELECTION_FILTER_IMPORT_DECL)) {
     return iree_ok_status();
   }
-  loom_symbol_ref_t target_ref = func_facts->target_symbol;
-  loom_target_selection_source_t target_source =
-      LOOM_TARGET_SELECTION_SOURCE_AUTHORED;
-  if (!loom_symbol_ref_is_valid(target_ref)) {
-    target_ref = options->target_ref;
-    target_source = LOOM_TARGET_SELECTION_SOURCE_INVOCATION;
-  }
+  const loom_func_like_t function =
+      loom_func_like_cast(module, func_facts->func_op);
+  const loom_target_profile_t* target_profile =
+      loom_target_specialization_context_lookup(options->specialization_context,
+                                                module, function);
+  const loom_symbol_ref_t target_ref = func_facts->target_symbol;
+  const loom_target_binding_source_t target_source =
+      target_profile != NULL ? LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION
+                             : LOOM_TARGET_BINDING_SOURCE_AUTHORED;
   if (!loom_symbol_ref_is_valid(target_ref)) {
     return iree_ok_status();
   }
@@ -261,11 +200,7 @@ static iree_status_t loom_low_source_selection_try_symbol(
     return iree_ok_status();
   }
   out_selection->target_bundle = &out_selection->target_bundle_storage.bundle;
-  IREE_RETURN_IF_ERROR(loom_low_source_selection_apply_target_selection(
-      options, func_facts, &contract_valid, out_selection));
-  if (!contract_valid) {
-    return iree_ok_status();
-  }
+  out_selection->target_profile = target_profile;
   const loom_low_lower_policy_t* policy =
       loom_low_lower_policy_registry_lookup_for_bundle(
           options->policy_registry, out_selection->target_bundle);
@@ -278,7 +213,7 @@ static iree_status_t loom_low_source_selection_try_symbol(
   }
 
   out_selection->kind = kind;
-  out_selection->func = loom_func_like_cast(module, func_facts->func_op);
+  out_selection->func = function;
   out_selection->function_name = func_facts->name;
   out_selection->target_source = target_source;
   out_selection->target_ref = target_ref;

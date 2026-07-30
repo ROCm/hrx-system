@@ -45,8 +45,6 @@ using TargetEnvironmentPtr =
     HandlePtr<loomc_target_environment_t, loomc_target_environment_release>;
 using TargetProfilePtr =
     HandlePtr<loomc_target_profile_t, loomc_target_profile_release>;
-using TargetSelectionPtr =
-    HandlePtr<loomc_target_selection_t, loomc_target_selection_release>;
 using WorkspacePtr = HandlePtr<loomc_workspace_t, loomc_workspace_release>;
 
 struct WorkerSlot {
@@ -122,15 +120,12 @@ class TargetCompileScenario : public CompileScenario {
 
   iree_status_t CompileModuleToPreparedLow(WorkspacePtr& workspace,
                                            ModulePtr& module,
+                                           loomc_string_view_t function_symbol,
                                            loomc_string_view_t module_name,
                                            loomc_config_options_t config);
 
   loomc_target_environment_t* target_environment() const {
     return target_environment_.get();
-  }
-
-  loomc_target_selection_t* target_selection() const {
-    return target_selection_.get();
   }
 
  private:
@@ -139,9 +134,6 @@ class TargetCompileScenario : public CompileScenario {
 
   // Concrete immutable target facts shared by all jobs in the scenario.
   TargetProfilePtr target_profile_;
-
-  // Invocation-ready target selection shared by all jobs in the scenario.
-  TargetSelectionPtr target_selection_;
 };
 
 using CompileScenarioFactory = std::unique_ptr<CompileScenario> (*)(

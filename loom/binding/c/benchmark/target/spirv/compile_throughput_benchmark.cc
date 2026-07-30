@@ -120,16 +120,10 @@ class SpirvScenarioBase : public TargetCompileScenario {
 
   iree_status_t EmitSpirvArtifact(WorkspacePtr& workspace, ModulePtr& module,
                                   loomc_string_view_t identifier) {
-    loomc_target_selection_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.target_selection=*/target_selection(),
-    };
     loomc_spirv_emit_options_t spirv_options = {
         /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS,
         /*.structure_size=*/sizeof(spirv_options),
-        /*.next=*/&target_options,
+        /*.next=*/nullptr,
     };
     loomc_emit_options_t emit_options = {
         /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
@@ -229,8 +223,8 @@ class SpirvTunerFlowScenario final : public SpirvScenarioBase {
     };
 
     IREE_RETURN_IF_ERROR(CompileModuleToPreparedLow(
-        workspace, module, loomc_make_cstring_view("spirv_tuner_kernel"),
-        config_options));
+        workspace, module, loomc_make_cstring_view("i32_memory_chain"),
+        loomc_make_cstring_view("spirv_tuner_kernel"), config_options));
     return EmitSpirvArtifact(workspace, module,
                              loomc_make_cstring_view("i32_memory_chain.spv"));
   }
@@ -306,8 +300,8 @@ class SpirvI32ChainScenario final : public SpirvScenarioBase {
     };
 
     IREE_RETURN_IF_ERROR(CompileModuleToPreparedLow(
-        workspace, module, loomc_make_cstring_view("spirv_i32_chain"),
-        config_options));
+        workspace, module, loomc_make_cstring_view("i32_memory_chain"),
+        loomc_make_cstring_view("spirv_i32_chain"), config_options));
     return EmitSpirvArtifact(workspace, module,
                              loomc_make_cstring_view("i32_chain.spv"));
   }

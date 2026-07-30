@@ -22,7 +22,6 @@
 #include "module.h"
 #include "result.h"
 #include "source.h"
-#include "target.h"
 #include "workspace.h"
 
 enum {
@@ -132,11 +131,10 @@ static loomc_status_t loomc_link_validate_options(
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "link options structure_size is too small");
   }
-  loomc_target_selection_t* target_selection = NULL;
-  LOOMC_RETURN_IF_ERROR(
-      loomc_target_selection_options_resolve(options->next, &target_selection));
-  LOOMC_RETURN_IF_ERROR(loomc_target_selection_validate_environment(
-      target_selection, loomc_context_target_environment(linker->context)));
+  if (options->next != NULL) {
+    return loomc_make_status(LOOMC_STATUS_UNIMPLEMENTED,
+                             "link option extensions are not supported");
+  }
   if (options->link_index == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "link_index must not be NULL");
@@ -598,14 +596,6 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
   *out_result = NULL;
   LOOMC_RETURN_IF_ERROR(
       loomc_link_validate_options(linker, workspace, options));
-  loomc_target_selection_t* target_selection = NULL;
-  LOOMC_RETURN_IF_ERROR(
-      loomc_target_selection_options_resolve(options->next, &target_selection));
-  const loom_target_selection_t internal_target_selection =
-      loomc_target_selection_loom_target_selection(target_selection);
-  const loom_target_environment_t* internal_target_environment =
-      loomc_target_environment_loom_target_environment(
-          loomc_context_target_environment(linker->context));
 
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED,
@@ -726,18 +716,6 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
         .allocator = linker->allocator,
     };
     status = loomc_config_apply_to_module(&config_apply_options);
-  }
-  before_diagnostics = loomc_result_diagnostic_count(result);
-  if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
-      internal_target_environment != NULL &&
-      !loom_target_selection_is_empty(internal_target_selection)) {
-    loom_symbol_ref_t target_ref = loom_symbol_ref_null();
-    operation_status = loom_target_environment_materialize_selection(
-        internal_target_environment, linked_module, internal_target_selection,
-        &target_ref);
-    status = loomc_link_translate_operation_status(
-        result, before_diagnostics, loomc_make_cstring_view("LINK/TARGET"),
-        operation_status);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_module_set_loom_module(module, linked_module);

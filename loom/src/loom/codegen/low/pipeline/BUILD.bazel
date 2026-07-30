@@ -54,7 +54,7 @@ loom_cc_library(
         "//loom/src/loom/pass:environment",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/target:math_policy",
-        "//loom/src/loom/target:selection",
+        "//loom/src/loom/target:pass_environment",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
     ],

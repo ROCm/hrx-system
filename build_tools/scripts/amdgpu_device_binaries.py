@@ -411,7 +411,7 @@ def expand_target_selections(selections: Sequence[str]) -> list[str]:
 
 def resolve_device_binary_targets(
     target_names: Sequence[str],
-) -> list[amdgpu_target_map.DeviceBinaryTarget]:
+) -> list[amdgpu_target_map.AmdgpuDeviceBinaryTarget]:
     targets = []
     seen = set()
     unknown_targets = []
@@ -593,7 +593,7 @@ def minimize_code_object(
 
 def build_target(
     *,
-    target: amdgpu_target_map.DeviceBinaryTarget,
+    target: amdgpu_target_map.AmdgpuDeviceBinaryTarget,
     source_paths: Sequence[Path],
     repo_root: Path,
     binary_root: Path | None,
@@ -631,7 +631,7 @@ def build_target(
             compile_source(
                 source_path=source_path,
                 output_path=object_path,
-                arch=target.architecture,
+                arch=target.processor,
                 repo_root=repo_root,
                 binary_root=binary_root,
                 toolchain=toolchain,
@@ -670,7 +670,7 @@ def build_target(
         link_code_object(
             input_path=linked_bitcode_path,
             output_path=linked_code_object_path,
-            arch=target.architecture,
+            arch=target.processor,
             version_script=version_script,
             toolchain=toolchain,
             linkopts=[*linkopts, *target.link_options],
@@ -870,10 +870,10 @@ def main(argv: Sequence[str]) -> int:
     device_binary_targets = resolve_device_binary_targets(device_binary_target_names)
     source_paths = load_device_source_paths(repo_root)
     toolchain = detect_toolchain(args)
-    architectures = list(
-        dict.fromkeys(target.architecture for target in device_binary_targets)
+    processors = list(
+        dict.fromkeys(target.processor for target in device_binary_targets)
     )
-    validate_toolchain_targets(toolchain, architectures)
+    validate_toolchain_targets(toolchain, processors)
 
     eprint("AMDGPU device binary generator")
     eprint(f"  repo root: {repo_root}")
@@ -891,7 +891,7 @@ def main(argv: Sequence[str]) -> int:
 
     outputs = []
     for target in device_binary_targets:
-        eprint(f"Building {target.name} for {target.architecture}...")
+        eprint(f"Building {target.name} for {target.processor}...")
         outputs.append(
             build_target(
                 target=target,

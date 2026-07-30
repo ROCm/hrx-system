@@ -196,9 +196,8 @@ static iree_status_t loom_ireevm_archive_emit_build_plan(
       loom_low_verify_scratch_for_module(state->module);
   IREE_RETURN_IF_ERROR(loom_target_entry_verify_low_module(
       state->module, &state->low_registry, &state->diagnostic_emitter,
-      loom_target_selection_empty(), state->max_errors,
-      loom_low_verify_provider_list_empty(), &low_verify_scratch,
-      &low_verify_result));
+      state->max_errors, loom_low_verify_provider_list_empty(),
+      &low_verify_scratch, &low_verify_result));
   if (low_verify_result.error_count != 0) {
     return iree_ok_status();
   }

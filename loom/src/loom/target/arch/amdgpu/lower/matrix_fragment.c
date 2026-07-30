@@ -253,7 +253,7 @@ loom_amdgpu_matrix_fragment_feature_bits_from_target_ref(
     return 0;
   }
   loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
-  (void)loom_amdgpu_matrix_feature_bits_from_profile(processor->features.matrix,
-                                                     &feature_bits);
+  (void)loom_amdgpu_matrix_feature_bits_from_profile(
+      processor->properties.features.matrix, &feature_bits);
   return feature_bits;
 }

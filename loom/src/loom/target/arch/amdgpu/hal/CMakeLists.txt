@@ -12,13 +12,25 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
-    kernel_abi
+    binding_descriptor
   HDRS
     "binding_descriptor.h"
+  DEPS
+
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
+    kernel_abi
+  HDRS
     "kernel_abi.h"
   SRCS
     "kernel_abi.c"
   DEPS
+    ::binding_descriptor
     iree::base
     iree::base::internal::arena
     loom::codegen::low::allocation
@@ -45,6 +57,7 @@ loom_cc_library(
   SRCS
     "binding_materialization.c"
   DEPS
+    ::binding_descriptor
     ::kernel_abi
     iree::base
     iree::base::internal::arena

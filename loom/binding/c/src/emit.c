@@ -41,9 +41,6 @@ typedef struct loomc_emit_resolved_options_t {
   // Artifact classes requested by the caller.
   loomc_emit_artifact_flags_t artifact_flags;
 
-  // Target selection requested by the caller.
-  loomc_target_selection_t* target_selection;
-
   // Artifact manifest mode requested by the caller.
   loomc_artifact_manifest_mode_t artifact_manifest_mode;
 
@@ -334,20 +331,10 @@ static loomc_status_t loomc_emit_resolve_options(
     const loomc_descriptor_prefix_t* prefix =
         (const loomc_descriptor_prefix_t*)next;
     switch (prefix->type) {
-      case LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS: {
-        if (out_options->target_selection != NULL) {
-          return loomc_make_status(
-              LOOMC_STATUS_INVALID_ARGUMENT,
-              "emit option chain contains duplicate target selection options");
-        }
-        const loomc_target_selection_options_t* target_options =
-            (const loomc_target_selection_options_t*)next;
-        LOOMC_RETURN_IF_ERROR(
-            loomc_target_selection_options_validate(target_options));
-        out_options->target_selection = target_options->target_selection;
-        next = target_options->next;
-        break;
-      }
+      case LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS:
+        return loomc_make_status(
+            LOOMC_STATUS_UNIMPLEMENTED,
+            "target specialization options are not supported during emission");
       case LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS: {
         const loomc_artifact_manifest_options_t* manifest_options =
             (const loomc_artifact_manifest_options_t*)next;
@@ -772,11 +759,6 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
     status = loomc_emit_resolve_options(options, result, allocator,
                                         &resolved_options);
   }
-  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
-    status = loomc_target_selection_validate_environment(
-        resolved_options.target_selection, target_environment);
-  }
-
   const loom_target_environment_t* internal_target_environment =
       loomc_target_environment_loom_target_environment(target_environment);
   const loom_target_emitter_t* emitter = NULL;
@@ -812,9 +794,6 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
         status = loomc_emit_make_manifest_identifier(
             &resolved_options, emitter, allocator, &manifest_identifier);
       }
-      const loom_target_selection_t target_selection =
-          loomc_target_selection_loom_target_selection(
-              resolved_options.target_selection);
       if (loomc_status_is_ok(status) && resolved_options.compile_report_mode !=
                                             LOOMC_COMPILE_REPORT_MODE_NONE) {
         status = loomc_emit_make_compile_report_identifier(
@@ -832,15 +811,12 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
         compile_report.requested_detail_flags =
             loomc_emit_compile_report_requested_detail_flags(
                 resolved_options.compile_report_mode);
-        loom_target_compile_report_record_target_bundle(
-            &compile_report, target_selection.bundle);
       }
       const loom_target_emit_request_t request = {
           .target_environment = internal_target_environment,
           .low_descriptor_registry =
               &pass_environment->low_descriptor_registry.registry,
           .module = internal_module,
-          .target_selection = target_selection,
           .option_chain = resolved_options.option_chain,
           .identifier = iree_string_view_from_loomc(
               loomc_emit_identifier(&resolved_options, emitter)),

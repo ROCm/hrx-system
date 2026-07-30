@@ -292,8 +292,8 @@ typedef struct loom_amdgpu_wait_state_builder_t {
   iree_arena_allocator_t* arena;
   // Arena that owns analysis facts discarded after plan construction.
   iree_arena_allocator_t* transient_arena;
-  // Processor facts selected by the low target, or NULL if unavailable.
-  const loom_amdgpu_processor_info_t* processor;
+  // Processor properties selected by the low target, or NULL if unavailable.
+  const loom_amdgpu_processor_properties_t* processor_properties;
   // Cached processor scheduling and fixed-wait hazard feature bits.
   loom_amdgpu_processor_scheduling_bits_t processor_scheduling;
   // True when the selected processor and descriptor set can emit S_DELAY_ALU.
@@ -578,9 +578,9 @@ loom_amdgpu_wait_state_matrix_wait_profile(
     const loom_amdgpu_wait_state_builder_t* builder) {
   loom_amdgpu_matrix_wait_profile_t wait_profile =
       LOOM_AMDGPU_MATRIX_WAIT_PROFILE_MFMA_PRE_GFX950;
-  if (builder->processor != NULL &&
+  if (builder->processor_properties != NULL &&
       !loom_amdgpu_matrix_wait_profile_from_feature_profile(
-          builder->processor->features.matrix, &wait_profile)) {
+          builder->processor_properties->features.matrix, &wait_profile)) {
     return LOOM_AMDGPU_MATRIX_WAIT_PROFILE_UNKNOWN;
   }
   return wait_profile;
@@ -632,7 +632,8 @@ static bool loom_amdgpu_wait_state_has_scheduling(
 
 static bool loom_amdgpu_wait_state_target_has_delay_alu(
     const loom_amdgpu_wait_state_builder_t* builder) {
-  if (builder->processor == NULL || builder->descriptor_set == NULL ||
+  if (builder->processor_properties == NULL ||
+      builder->descriptor_set == NULL ||
       !loom_amdgpu_wait_state_has_scheduling(
           builder, LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU)) {
     return false;
@@ -2425,10 +2426,13 @@ static iree_status_t loom_amdgpu_wait_state_build_hazard_plan(
 static iree_status_t loom_amdgpu_wait_state_plan_build_with_scratch(
     loom_amdgpu_wait_state_builder_t* builder) {
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_allocate(builder));
-  builder->processor = loom_amdgpu_target_processor_from_resolved_target(
-      &builder->schedule->target);
+  builder->processor_properties =
+      loom_amdgpu_target_processor_properties_from_resolved_target(
+          &builder->schedule->target);
   builder->processor_scheduling =
-      builder->processor != NULL ? builder->processor->features.scheduling : 0;
+      builder->processor_properties != NULL
+          ? builder->processor_properties->features.scheduling
+          : 0;
   builder->has_delay_alu = loom_amdgpu_wait_state_target_has_delay_alu(builder);
   builder->delay_alu_epoch = 1;
   for (iree_host_size_t block_index = 0;

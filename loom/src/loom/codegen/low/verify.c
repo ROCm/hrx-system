@@ -22,7 +22,6 @@
 typedef struct loom_low_verify_state_t {
   const loom_module_t* module;
   const loom_low_descriptor_registry_t* registry;
-  loom_target_selection_t target_selection;
   iree_diagnostic_emitter_t emitter;
   loom_low_verify_provider_list_t provider_list;
   loom_low_verify_scratch_t* scratch;
@@ -1954,7 +1953,7 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target_with_facts(
       state->module, &state->symbol_facts, low_func_op, state->registry,
-      state->target_selection, counting_emitter, &target));
+      counting_emitter, &target));
   loom_region_t* body = loom_low_verify_function_body(low_func_op);
   if (target.descriptor_set == NULL || loom_low_verify_should_stop(state)) {
     return iree_ok_status();
@@ -2014,7 +2013,6 @@ iree_status_t loom_low_verify_module(const loom_module_t* module,
   loom_low_verify_state_t state = {
       .module = module,
       .registry = options->descriptor_registry,
-      .target_selection = options->target_selection,
       .emitter = options->emitter,
       .provider_list = options->provider_list,
       .scratch = scratch,

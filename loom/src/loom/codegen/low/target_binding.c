@@ -207,9 +207,8 @@ static bool loom_low_get_function_target_ref(const loom_op_t* low_func_op,
 static iree_status_t loom_low_resolve_func_target(
     const loom_module_t* module, const loom_op_t* low_func_op,
     const loom_low_descriptor_registry_t* registry,
-    loom_target_selection_t target_selection, iree_diagnostic_emitter_t emitter,
-    loom_symbol_fact_table_t* fact_table, uint16_t target_attr_index,
-    loom_low_resolved_target_t* out_target) {
+    iree_diagnostic_emitter_t emitter, loom_symbol_fact_table_t* fact_table,
+    uint16_t target_attr_index, loom_low_resolved_target_t* out_target) {
   if (registry == NULL) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -236,26 +235,17 @@ static iree_status_t loom_low_resolve_func_target(
         emitter, module, low_func_op, func_facts->target_symbol,
         out_target->target_symbol, target_attr_index, IREE_SV("target record"));
   }
-  iree_string_view_t contract_target_name = out_target->target_name;
   bool contract_valid = false;
   if (iree_status_is_ok(status)) {
     status = loom_target_function_contract_resolve(
         module, fact_table, func_facts, emitter, &contract_valid,
         &out_target->bundle_storage);
   }
-  if (iree_status_is_ok(status) && contract_valid &&
-      target_selection.bundle != NULL &&
-      loom_target_function_contract_bundles_compatible(
-          &out_target->bundle_storage.bundle, target_selection.bundle)) {
-    loom_target_function_contract_apply_compatible_selection(
-        target_selection.bundle, &out_target->bundle_storage);
-    contract_target_name = out_target->bundle_storage.bundle.name;
-  }
   loom_target_workgroup_size_t workgroup_size = {0};
   if (iree_status_is_ok(status) && contract_valid &&
       loom_low_kernel_def_static_workgroup_size(low_func_op, &workgroup_size)) {
     status = loom_target_function_contract_apply_hal_workgroup_size(
-        func_facts, contract_target_name, &workgroup_size, emitter,
+        func_facts, out_target->target_name, &workgroup_size, emitter,
         &out_target->bundle_storage, &contract_valid);
   }
   if (iree_status_is_ok(status) && contract_valid) {
@@ -288,8 +278,7 @@ iree_status_t loom_low_resolve_function_target_with_facts(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
     const loom_op_t* low_func_op,
     const loom_low_descriptor_registry_t* registry,
-    loom_target_selection_t target_selection, iree_diagnostic_emitter_t emitter,
-    loom_low_resolved_target_t* out_target) {
+    iree_diagnostic_emitter_t emitter, loom_low_resolved_target_t* out_target) {
   *out_target = (loom_low_resolved_target_t){0};
   loom_symbol_ref_t target_ref = loom_symbol_ref_null();
   uint16_t target_attr_index = 0;
@@ -312,9 +301,9 @@ iree_status_t loom_low_resolve_function_target_with_facts(
   out_target->target_name = loom_low_symbol_name(module, target_ref);
 
   if (loom_symbol_implements(target_symbol, LOOM_SYMBOL_INTERFACE_TARGET)) {
-    return loom_low_resolve_func_target(module, low_func_op, registry,
-                                        target_selection, emitter, fact_table,
-                                        target_attr_index, out_target);
+    return loom_low_resolve_func_target(module, low_func_op, registry, emitter,
+                                        fact_table, target_attr_index,
+                                        out_target);
   }
   return loom_low_emit_symbol_kind_mismatch(
       emitter, module, low_func_op, target_ref, target_symbol,
@@ -324,15 +313,13 @@ iree_status_t loom_low_resolve_function_target_with_facts(
 iree_status_t loom_low_resolve_function_target(
     const loom_module_t* module, const loom_op_t* low_func_op,
     const loom_low_descriptor_registry_t* registry,
-    loom_target_selection_t target_selection, iree_diagnostic_emitter_t emitter,
-    loom_low_resolved_target_t* out_target) {
+    iree_diagnostic_emitter_t emitter, loom_low_resolved_target_t* out_target) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(module->arena.block_pool, &arena);
   loom_symbol_fact_table_t fact_table = {0};
   loom_symbol_fact_table_initialize(&fact_table, &arena);
   iree_status_t status = loom_low_resolve_function_target_with_facts(
-      module, &fact_table, low_func_op, registry, target_selection, emitter,
-      out_target);
+      module, &fact_table, low_func_op, registry, emitter, out_target);
   iree_arena_deinitialize(&arena);
   return status;
 }

@@ -113,6 +113,7 @@ loom_cc_library(
     loom::ops::low
     loom::ops::target
     loom::target::function_contract
+    loom::target::profile
     loom::target::registers
     loom::target::types
   PUBLIC
@@ -795,7 +796,6 @@ loom_cc_test(
     loom::ops::target
     loom::ops::test
     loom::target::test::low_registry
-    loom::target::test::target_record_table
     loom::testing::diagnostic_matchers
     loom::testing::module_ptr
 )

@@ -18,20 +18,39 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from build_tools.amdgpu.target_map_data import (
-    AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS,
+    AMDGPU_EXACT_TARGET_INFOS,
+    AMDGPU_GENERIC_CODE_OBJECT_INFOS,
+    AMDGPU_PHYSICAL_TARGET_INFOS,
+    AMDGPU_TARGET_ID_FEATURE_ORDER,
+    AMDGPU_TARGET_OVERLAY_INFOS,
+    TARGET_ID_FEATURE_SRAMECC,
+    TARGET_ID_FEATURE_XNACK,
+    AmdgpuExactTargetInfo,
     generic_code_object_current_version,
+    target_id_features_for_processor,
+    target_processor,
 )
 
 from loom.dialect.cache import CacheScope, CacheTemporal
+from loom.target.arch.amdgpu.lds_bank_service import (
+    AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES,
+    amdgpu_lds_bank_service_model_info_by_key,
+    validate_amdgpu_lds_bank_service_model_selection,
+)
 
 AMDGPU_AMDHSA_TARGET_TRIPLE = "amdgcn-amd-amdhsa"
+AMDGPU_PROCESSOR_ORDINAL_NONE = (2**16) - 1
 AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE = (2**16) - 1
+AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE = (2**16) - 1
 
 AMDGPU_KERNEL_DESCRIPTOR_PROFILE_NONE = "none"
 AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX9 = "gfx9"
 AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11 = "gfx11"
 AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX12 = "gfx12"
 AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125 = "gfx125"
+
+AMDGPU_KERNEL_ENTRY_PROFILE_NONE = "none"
+AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY = "initial_vmem_replay"
 
 AMDGPU_MATRIX_FEATURE_PROFILE_NONE = "none"
 AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908 = "mfma_gfx908"
@@ -127,12 +146,45 @@ AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS = {
 
 AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION = 1 << 0
 AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE = 1 << 1
-AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE = 1 << 2
 AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS = (
     AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
     | AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE
-    | AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
 )
+
+AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT = 1 << 0
+AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION = 1 << 1
+AMDGPU_INSTRUCTION_CONSTRAINT_CLUSTER_MULTICAST_MASK_PRESERVATION = 1 << 2
+AMDGPU_INSTRUCTION_CONSTRAINT_TENSOR_MULTICAST_MASK_PRESERVATION = 1 << 3
+AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K64_SCALE_PREFIX = 1 << 4
+AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K128_SPLIT = 1 << 5
+AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_F4_32X16_SPLIT = 1 << 6
+AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_SCALE_ENCODING = 1 << 7
+AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING = 1 << 8
+AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING = 1 << 9
+AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS = (
+    AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT
+    | AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION
+    | AMDGPU_INSTRUCTION_CONSTRAINT_CLUSTER_MULTICAST_MASK_PRESERVATION
+    | AMDGPU_INSTRUCTION_CONSTRAINT_TENSOR_MULTICAST_MASK_PRESERVATION
+    | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K64_SCALE_PREFIX
+    | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K128_SPLIT
+    | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_F4_32X16_SPLIT
+    | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_SCALE_ENCODING
+    | AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING
+    | AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING
+)
+
+AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE = 0
+AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC = 1 << 0
+AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK = 1 << 1
+AMDGPU_TARGET_ID_FEATURE_SUPPORT_KNOWN_FLAGS = (
+    AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC | AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK
+)
+AMDGPU_TARGET_ID_FEATURE_SUPPORT_FLAGS_BY_NAME = {
+    TARGET_ID_FEATURE_SRAMECC: AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC,
+    TARGET_ID_FEATURE_XNACK: AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
+}
+
 AMDGPU_DEFAULT_MAX_WORKGROUP_STORAGE_BYTES = 64 * 1024
 AMDGPU_CDNA4_MAX_WORKGROUP_STORAGE_BYTES = 160 * 1024
 AMDGPU_GFX125X_MAX_WORKGROUP_STORAGE_BYTES = 320 * 1024
@@ -329,6 +381,27 @@ AMDGPU_DESCRIPTOR_SET_ISA_RDNA4 = AmdgpuDescriptorSetIsaInfo(
     isa_architecture_id=10,
 )
 
+# Kernel metadata fields written directly by the native AMDGPU emitter.
+# Target rows may add external extension fields but may not replace these
+# standard fields.
+AMDGPU_STANDARD_KERNEL_METADATA_KEYS = frozenset(
+    (
+        ".args",
+        ".cluster_dims",
+        ".group_segment_fixed_size",
+        ".kernarg_segment_align",
+        ".kernarg_segment_size",
+        ".max_flat_workgroup_size",
+        ".name",
+        ".private_segment_fixed_size",
+        ".reqd_workgroup_size",
+        ".sgpr_count",
+        ".symbol",
+        ".vgpr_count",
+        ".wavefront_size",
+    )
+)
+
 
 @dataclass(frozen=True, slots=True)
 class AmdgpuProcessorDescriptorSetInfo:
@@ -340,6 +413,18 @@ class AmdgpuProcessorElfInfo:
     machine_flags: int
     feature_flags: int = 0
     generic_version: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuProcessorTargetIdInfo:
+    supported_features: int = AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuTargetSemantics:
+    instruction_constraints: int = 0
+    lds_bank_service_models: tuple[str, ...] | None = None
+    kernel_metadata_extensions: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,9 +448,20 @@ class AmdgpuProcessorKernelDescriptorInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class AmdgpuProcessorKernelEntryInfo:
+    profile: str = AMDGPU_KERNEL_ENTRY_PROFILE_NONE
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuProcessorInstructionInfo:
+    base_constraints: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class AmdgpuProcessorFeatureInfo:
     matrix: str = AMDGPU_MATRIX_FEATURE_PROFILE_NONE
     scheduling: int = 0
+    lds_bank_service_models: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -423,8 +519,11 @@ class AmdgpuProcessorInfo:
     flags: int
     descriptor_set: AmdgpuProcessorDescriptorSetInfo
     elf: AmdgpuProcessorElfInfo
+    target_id: AmdgpuProcessorTargetIdInfo
     wavefront: AmdgpuProcessorWavefrontInfo
     kernel_descriptor: AmdgpuProcessorKernelDescriptorInfo
+    kernel_entry: AmdgpuProcessorKernelEntryInfo = AmdgpuProcessorKernelEntryInfo()
+    instructions: AmdgpuProcessorInstructionInfo = AmdgpuProcessorInstructionInfo()
     features: AmdgpuProcessorFeatureInfo = AmdgpuProcessorFeatureInfo()
     limits: AmdgpuProcessorLimitInfo = AmdgpuProcessorLimitInfo()
     occupancy: AmdgpuProcessorOccupancyInfo = AmdgpuProcessorOccupancyInfo()
@@ -434,6 +533,8 @@ AMDGPU_OCCUPANCY_NONE = AmdgpuProcessorOccupancyInfo()
 
 
 AMDGPU_KERNEL_DESCRIPTOR_INFO_NONE = AmdgpuProcessorKernelDescriptorInfo()
+AMDGPU_KERNEL_ENTRY_INFO_NONE = AmdgpuProcessorKernelEntryInfo()
+AMDGPU_PROCESSOR_INSTRUCTION_INFO_NONE = AmdgpuProcessorInstructionInfo()
 AMDGPU_KERNEL_DESCRIPTOR_INFO_PACKED_WORKITEM_ID = AmdgpuProcessorKernelDescriptorInfo(
     flags=AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID,
 )
@@ -456,6 +557,10 @@ AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA4_GFX125 = AmdgpuProcessorKernelDescriptorInfo
     profile=AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125,
     flags=AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAGS_RDNA4,
     vgpr_granules=AmdgpuKernelDescriptorVgprGranules(wave32=16, wave64=8),
+)
+
+AMDGPU_KERNEL_ENTRY_INFO_INITIAL_VMEM_REPLAY = AmdgpuProcessorKernelEntryInfo(
+    profile=AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY
 )
 
 # These facts mirror LLVM's AMDGPU::IsaInfo occupancy model:
@@ -592,11 +697,13 @@ AMDGPU_OCCUPANCY_GFX125X = AmdgpuProcessorOccupancyInfo(
 
 
 @dataclass(frozen=True, slots=True)
-class AmdgpuTargetRecordInfo:
+class AmdgpuTargetInfo:
+    target: str
     processor: str
     enum_value: int
     doc: str
     default_for_descriptor_set: bool = False
+    semantics: AmdgpuTargetSemantics = AmdgpuTargetSemantics()
 
 
 class AmdgpuIsaArchitectureInfo(Protocol):
@@ -655,6 +762,28 @@ AMDGPU_VECTOR_MEMORY_CACHE_POLICY_TEMPORAL_TH: tuple[tuple[str, int], ...] = (
 )
 
 
+def amdgpu_target_id_feature_support_flags(
+    target_id_features: Sequence[str],
+) -> int:
+    flags = AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE
+    for feature in target_id_features:
+        try:
+            flags |= AMDGPU_TARGET_ID_FEATURE_SUPPORT_FLAGS_BY_NAME[feature]
+        except KeyError as exc:
+            raise ValueError(f"unknown AMDGPU target-ID feature '{feature}'") from exc
+    return flags
+
+
+def amdgpu_processor_target_id_info(
+    processor: str,
+) -> AmdgpuProcessorTargetIdInfo:
+    return AmdgpuProcessorTargetIdInfo(
+        supported_features=amdgpu_target_id_feature_support_flags(
+            target_id_features_for_processor(processor)
+        )
+    )
+
+
 def processor_info(
     processor: str,
     elf_machine_flags: int,
@@ -666,8 +795,13 @@ def processor_info(
     kernel_descriptor: AmdgpuProcessorKernelDescriptorInfo = (
         AMDGPU_KERNEL_DESCRIPTOR_INFO_NONE
     ),
+    kernel_entry: AmdgpuProcessorKernelEntryInfo = AMDGPU_KERNEL_ENTRY_INFO_NONE,
+    instructions: AmdgpuProcessorInstructionInfo = (
+        AMDGPU_PROCESSOR_INSTRUCTION_INFO_NONE
+    ),
     matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
     scheduling_bits: int = 0,
+    lds_bank_service_models: tuple[str, ...] = (),
     max_workgroup_storage_bytes: int = 0,
     flags: int = 0,
     occupancy: AmdgpuProcessorOccupancyInfo = AMDGPU_OCCUPANCY_NONE,
@@ -687,11 +821,15 @@ def processor_info(
             feature_flags=elf_feature_flags,
             generic_version=elf_generic_version,
         ),
+        target_id=amdgpu_processor_target_id_info(processor),
         wavefront=AmdgpuProcessorWavefrontInfo(default_size=default_wavefront_size),
         kernel_descriptor=kernel_descriptor,
+        kernel_entry=kernel_entry,
+        instructions=instructions,
         features=AmdgpuProcessorFeatureInfo(
             matrix=matrix_feature_profile,
             scheduling=scheduling_bits,
+            lds_bank_service_models=lds_bank_service_models,
         ),
         limits=AmdgpuProcessorLimitInfo(
             max_workgroup_storage_bytes=max_workgroup_storage_bytes,
@@ -831,22 +969,25 @@ def gfx125x_processor_info(
     elf_feature_flags: int = 0,
     elf_generic_version: int = 0,
     processor_flags: int = 0,
+    instructions: AmdgpuProcessorInstructionInfo = (
+        AMDGPU_PROCESSOR_INSTRUCTION_INFO_NONE
+    ),
     matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
+    lds_bank_service_models: tuple[str, ...] = (),
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor=processor,
-        flags=(
-            AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
-            | AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE
-            | processor_flags
-        ),
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION | processor_flags,
         descriptor_set_key=descriptor_set_key,
         elf_machine_flags=elf_machine_flags,
         elf_feature_flags=elf_feature_flags,
         elf_generic_version=elf_generic_version,
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA4_GFX125,
+        kernel_entry=AMDGPU_KERNEL_ENTRY_INFO_INITIAL_VMEM_REPLAY,
+        instructions=instructions,
         matrix_feature_profile=matrix_feature_profile,
+        lds_bank_service_models=lds_bank_service_models,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
         max_workgroup_storage_bytes=AMDGPU_GFX125X_MAX_WORKGROUP_STORAGE_BYTES,
         occupancy=AMDGPU_OCCUPANCY_GFX125X,
@@ -1086,6 +1227,9 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         0x049,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         processor_flags=AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
+        lds_bank_service_models=(
+            AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES
+        ),
     ),
     gfx125x_processor_info(
         "gfx1251",
@@ -1155,132 +1299,179 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
 )
 
 
-AMDGPU_TARGET_RECORD_INFOS: tuple[AmdgpuTargetRecordInfo, ...] = (
-    AmdgpuTargetRecordInfo(
+AMDGPU_TARGET_INFOS: tuple[AmdgpuTargetInfo, ...] = (
+    AmdgpuTargetInfo(
+        target="gfx942",
         processor="gfx942",
         enum_value=1,
         doc="CDNA 3 gfx942 target row.",
         default_for_descriptor_set=True,
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx950",
         processor="gfx950",
         enum_value=2,
         doc="CDNA 4 gfx950 target row.",
         default_for_descriptor_set=True,
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1100",
         processor="gfx1100",
         enum_value=3,
         doc="RDNA 3 gfx1100 target row.",
         default_for_descriptor_set=True,
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1200",
         processor="gfx1200",
         enum_value=4,
         doc="RDNA 4 gfx1200 target row.",
         default_for_descriptor_set=True,
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1250",
         processor="gfx1250",
         enum_value=5,
         doc="RDNA 4 gfx1250 target row.",
         default_for_descriptor_set=True,
+        semantics=AmdgpuTargetSemantics(
+            kernel_metadata_extensions=((".gfx1250_revision", "B0"),),
+        ),
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1150",
         processor="gfx1150",
         enum_value=6,
         doc="RDNA 3.5 gfx1150 target row.",
         default_for_descriptor_set=True,
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx11-generic",
         processor="gfx11-generic",
         enum_value=7,
         doc="GFX11 generic code-object target row.",
         default_for_descriptor_set=True,
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx12-generic",
         processor="gfx12-generic",
         enum_value=8,
         doc="GFX12 generic code-object target row.",
         default_for_descriptor_set=True,
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx12-5-generic",
         processor="gfx12-5-generic",
         enum_value=9,
         doc="GFX12.5 generic code-object target row.",
         default_for_descriptor_set=True,
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx940",
         processor="gfx940",
         enum_value=10,
         doc="CDNA 3 gfx940 target row.",
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx941",
         processor="gfx941",
         enum_value=11,
         doc="CDNA 3 gfx941 target row.",
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1101",
         processor="gfx1101",
         enum_value=12,
         doc="RDNA 3 gfx1101 target row.",
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1102",
         processor="gfx1102",
         enum_value=13,
         doc="RDNA 3 gfx1102 target row.",
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1103",
         processor="gfx1103",
         enum_value=14,
         doc="RDNA 3 gfx1103 target row.",
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1151",
         processor="gfx1151",
         enum_value=15,
         doc="RDNA 3.5 gfx1151 target row.",
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1152",
         processor="gfx1152",
         enum_value=16,
         doc="RDNA 3.5 gfx1152 target row.",
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1153",
         processor="gfx1153",
         enum_value=17,
         doc="RDNA 3.5 gfx1153 target row.",
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1170",
         processor="gfx1170",
         enum_value=18,
         doc="RDNA 3.5 gfx1170 target row.",
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1171",
         processor="gfx1171",
         enum_value=19,
         doc="RDNA 3.5 gfx1171 target row.",
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1172",
         processor="gfx1172",
         enum_value=20,
         doc="RDNA 3.5 gfx1172 target row.",
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1201",
         processor="gfx1201",
         enum_value=21,
         doc="RDNA 4 gfx1201 target row.",
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx1251",
         processor="gfx1251",
         enum_value=22,
         doc="RDNA 4 gfx1251 target row.",
         default_for_descriptor_set=True,
     ),
-    AmdgpuTargetRecordInfo(
+    AmdgpuTargetInfo(
+        target="gfx9-4-generic",
         processor="gfx9-4-generic",
         enum_value=23,
         doc="GFX9.4 generic code-object target row.",
         default_for_descriptor_set=True,
+    ),
+    AmdgpuTargetInfo(
+        target="gfx1250-a0",
+        processor="gfx1250",
+        enum_value=24,
+        doc="RDNA 4 gfx1250 A0 target-overlay row.",
+        semantics=AmdgpuTargetSemantics(
+            instruction_constraints=(
+                AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT
+                | AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION
+                | AMDGPU_INSTRUCTION_CONSTRAINT_CLUSTER_MULTICAST_MASK_PRESERVATION
+                | AMDGPU_INSTRUCTION_CONSTRAINT_TENSOR_MULTICAST_MASK_PRESERVATION
+                | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K64_SCALE_PREFIX
+                | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_FP8_BF8_K128_SPLIT
+                | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_F4_32X16_SPLIT
+                | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_SCALE_ENCODING
+                | AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING
+                | AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING
+            ),
+            kernel_metadata_extensions=((".gfx1250_revision", "A0"),),
+        ),
     ),
 )
 
@@ -1317,8 +1508,8 @@ def amdgpu_processor_occupancy_model(
     raise ValueError(f"unsupported AMDGPU wave size {wave_size}")
 
 
-def sorted_target_record_infos() -> tuple[AmdgpuTargetRecordInfo, ...]:
-    return tuple(sorted(AMDGPU_TARGET_RECORD_INFOS, key=lambda info: info.enum_value))
+def sorted_target_infos() -> tuple[AmdgpuTargetInfo, ...]:
+    return tuple(sorted(AMDGPU_TARGET_INFOS, key=lambda info: info.enum_value))
 
 
 def amdgpu_processor_info_by_name(processor: str) -> AmdgpuProcessorInfo | None:
@@ -1326,6 +1517,323 @@ def amdgpu_processor_info_by_name(processor: str) -> AmdgpuProcessorInfo | None:
         if info.processor == processor:
             return info
     return None
+
+
+def _amdgpu_target_local_instruction_constraints(
+    target: AmdgpuTargetInfo,
+    processor: AmdgpuProcessorInfo,
+) -> int:
+    return (
+        processor.instructions.base_constraints
+        | target.semantics.instruction_constraints
+    )
+
+
+def amdgpu_target_instruction_constraints(
+    target: AmdgpuTargetInfo,
+    processor: AmdgpuProcessorInfo,
+    *,
+    processors: Sequence[AmdgpuProcessorInfo] = AMDGPU_PROCESSOR_INFOS,
+    targets: Sequence[AmdgpuTargetInfo] = AMDGPU_TARGET_INFOS,
+) -> int:
+    """Returns conservative restrictions active for one compiler target."""
+
+    constraints = _amdgpu_target_local_instruction_constraints(target, processor)
+    if processor.elf.generic_version == 0:
+        return constraints
+
+    processors_by_name = {info.processor: info for info in processors}
+    targets_by_name = {info.target: info for info in targets}
+    for compatibility in AMDGPU_EXACT_TARGET_INFOS:
+        if (
+            compatibility.code_object_processor != processor.processor
+            or compatibility.generic_introduction_version
+            > processor.elf.generic_version
+        ):
+            continue
+        member = processors_by_name.get(compatibility.exact_processor)
+        if member is None:
+            raise ValueError(
+                f"AMDGPU generic target {target.target} has no processor row "
+                f"for member {compatibility.exact_processor}"
+            )
+        physical_target_names = tuple(
+            physical_target.target
+            for physical_target in AMDGPU_PHYSICAL_TARGET_INFOS
+            if physical_target.processor == member.processor
+        )
+        if not physical_target_names:
+            physical_target_names = (member.processor,)
+        for member_target_name in physical_target_names:
+            member_target = targets_by_name.get(member_target_name)
+            if member_target is None:
+                raise ValueError(
+                    f"AMDGPU generic target {target.target} has no target row "
+                    f"for member {member_target_name}"
+                )
+            constraints |= _amdgpu_target_local_instruction_constraints(
+                member_target, member
+            )
+    return constraints
+
+
+def amdgpu_lds_bank_service_model_sets(
+    processors: Sequence[AmdgpuProcessorInfo],
+    targets: Sequence[AmdgpuTargetInfo] = AMDGPU_TARGET_INFOS,
+) -> tuple[tuple[str, ...], ...]:
+    """Returns the interned non-empty model sets selected by target rows."""
+
+    processors_by_name = {processor.processor: processor for processor in processors}
+    model_sets = {
+        model_keys
+        for target in targets
+        for model_keys in (
+            target.semantics.lds_bank_service_models
+            if target.semantics.lds_bank_service_models is not None
+            else processors_by_name[target.processor].features.lds_bank_service_models,
+        )
+        if model_keys
+    }
+    return tuple(sorted(model_sets))
+
+
+def amdgpu_generic_code_object_compatibility_info(
+    exact_processor: str,
+) -> AmdgpuExactTargetInfo | None:
+    for info in AMDGPU_EXACT_TARGET_INFOS:
+        if info.exact_processor != exact_processor:
+            continue
+        if info.generic_introduction_version != 0:
+            return info
+        return None
+    return None
+
+
+def validate_amdgpu_code_object_processor_rows(
+    processors: Sequence[AmdgpuProcessorInfo],
+) -> None:
+    processors_by_name = {info.processor: info for info in processors}
+    required_processor_names = {
+        info.exact_processor for info in AMDGPU_EXACT_TARGET_INFOS
+    } | {info.processor for info in AMDGPU_GENERIC_CODE_OBJECT_INFOS}
+    missing_processor_names = sorted(
+        required_processor_names - processors_by_name.keys()
+    )
+    if missing_processor_names:
+        raise ValueError(
+            "AMDGPU target-info table is missing canonical code-object "
+            f"processors: {', '.join(missing_processor_names)}"
+        )
+
+    expected_generic_processor_names = {
+        info.processor for info in AMDGPU_GENERIC_CODE_OBJECT_INFOS
+    }
+    actual_generic_processor_names = {
+        info.processor for info in processors if info.elf.generic_version != 0
+    }
+    if actual_generic_processor_names != expected_generic_processor_names:
+        missing_generic_processor_names = sorted(
+            expected_generic_processor_names - actual_generic_processor_names
+        )
+        unexpected_processor_names = sorted(
+            actual_generic_processor_names - expected_generic_processor_names
+        )
+        raise ValueError(
+            "AMDGPU target-info generic code-object processors disagree with "
+            f"the canonical map; missing: "
+            f"{', '.join(missing_generic_processor_names) or 'none'}; "
+            f"unexpected: {', '.join(unexpected_processor_names) or 'none'}"
+        )
+
+    for generic_info in AMDGPU_GENERIC_CODE_OBJECT_INFOS:
+        processor = processors_by_name[generic_info.processor]
+        if processor.elf.generic_version != generic_info.current_version:
+            raise ValueError(
+                f"AMDGPU generic processor {generic_info.processor} has "
+                f"target-info version {processor.elf.generic_version}, "
+                f"expected canonical version {generic_info.current_version}"
+            )
+
+
+def validate_amdgpu_target_id_processor_rows(
+    processors: Sequence[AmdgpuProcessorInfo],
+) -> None:
+    expected_feature_names = set(AMDGPU_TARGET_ID_FEATURE_ORDER)
+    mapped_feature_names = set(AMDGPU_TARGET_ID_FEATURE_SUPPORT_FLAGS_BY_NAME)
+    if mapped_feature_names != expected_feature_names:
+        raise ValueError(
+            "Loom AMDGPU target-ID feature projection disagrees with the "
+            "canonical target map"
+        )
+
+    processors_by_name = {info.processor: info for info in processors}
+    required_processor_names = {
+        info.exact_processor for info in AMDGPU_EXACT_TARGET_INFOS
+    } | {info.processor for info in AMDGPU_GENERIC_CODE_OBJECT_INFOS}
+    missing_processor_names = sorted(
+        required_processor_names - processors_by_name.keys()
+    )
+    if missing_processor_names:
+        raise ValueError(
+            "AMDGPU target-info table is missing canonical target-ID "
+            f"processors: {', '.join(missing_processor_names)}"
+        )
+
+    for processor in required_processor_names:
+        actual = processors_by_name[processor].target_id
+        expected = amdgpu_processor_target_id_info(processor)
+        if actual != expected:
+            raise ValueError(
+                f"AMDGPU processor {processor} target-ID qualification "
+                "disagrees with the canonical target map"
+            )
+
+
+def validate_amdgpu_target_rows(
+    processors: Sequence[AmdgpuProcessorInfo],
+    targets: Sequence[AmdgpuTargetInfo] = AMDGPU_TARGET_INFOS,
+) -> None:
+    """Validates Loom semantics attached to canonical target rows."""
+
+    processors_by_name = {processor.processor: processor for processor in processors}
+    targets_by_name = {target.target: target for target in targets}
+    if len(targets_by_name) != len(targets):
+        raise ValueError("AMDGPU target rows repeat a target identity")
+    target_enum_values = tuple(target.enum_value for target in targets)
+    if len(set(target_enum_values)) != len(target_enum_values):
+        raise ValueError("AMDGPU target rows repeat a target enum value")
+    if tuple(sorted(target_enum_values)) != tuple(range(1, len(targets) + 1)):
+        raise ValueError("AMDGPU target enum values must be dense and one-based")
+    expected_overlay_targets = {
+        overlay.target
+        for overlay in AMDGPU_TARGET_OVERLAY_INFOS
+        if overlay.processor in targets_by_name
+    }
+    missing_overlay_targets = sorted(expected_overlay_targets - targets_by_name.keys())
+    if missing_overlay_targets:
+        raise ValueError(
+            "AMDGPU target rows omit canonical overlays: "
+            + ", ".join(missing_overlay_targets)
+        )
+    for physical_target in AMDGPU_PHYSICAL_TARGET_INFOS:
+        if physical_target.processor not in targets_by_name:
+            continue
+        if physical_target.target not in targets_by_name:
+            raise ValueError(
+                f"AMDGPU physical target {physical_target.processor} revision "
+                f"{physical_target.asic_revision} selects target "
+                f"{physical_target.target} without Loom semantics"
+            )
+
+    lds_model_infos_by_key = amdgpu_lds_bank_service_model_info_by_key()
+    for processor in processors:
+        validate_amdgpu_lds_bank_service_model_selection(
+            f"AMDGPU processor {processor.processor}",
+            processor.features.lds_bank_service_models,
+            lds_model_infos_by_key,
+        )
+
+    for target in targets:
+        processor = processors_by_name.get(target.processor)
+        if processor is None:
+            raise ValueError(
+                f"AMDGPU target {target.target} references unknown processor "
+                f"{target.processor}"
+            )
+        canonical_processor = target_processor(target.target)
+        if canonical_processor is None:
+            raise ValueError(
+                f"AMDGPU target {target.target} is not in the canonical target map"
+            )
+        if canonical_processor != target.processor:
+            raise ValueError(
+                f"AMDGPU target {target.target} resolves to processor "
+                f"{canonical_processor}, not {target.processor}"
+            )
+
+        effective_models = (
+            target.semantics.lds_bank_service_models
+            if target.semantics.lds_bank_service_models is not None
+            else processor.features.lds_bank_service_models
+        )
+        validate_amdgpu_lds_bank_service_model_selection(
+            f"AMDGPU target {target.target}",
+            effective_models,
+            lds_model_infos_by_key,
+        )
+        constraints = amdgpu_target_instruction_constraints(
+            target, processor, processors=processors, targets=targets
+        )
+        unknown_constraints = constraints & ~AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS
+        if unknown_constraints:
+            raise ValueError(
+                f"AMDGPU target {target.target} uses unknown "
+                f"instruction constraints 0x{unknown_constraints:x}"
+            )
+        previous_metadata_key: str | None = None
+        for key, value in target.semantics.kernel_metadata_extensions:
+            if (
+                not key
+                or key[0] != "."
+                or any(
+                    ord(character) <= ord(" ") or character in ("'", "\\")
+                    for character in key
+                )
+            ):
+                raise ValueError(
+                    f"AMDGPU target {target.target} has invalid metadata key {key!r}"
+                )
+            if not value or any(
+                ord(character) <= ord(" ") or character in ("'", "\\")
+                for character in value
+            ):
+                raise ValueError(
+                    f"AMDGPU target {target.target} has invalid metadata value "
+                    f"{value!r}"
+                )
+            if previous_metadata_key is not None and previous_metadata_key >= key:
+                raise ValueError(
+                    f"AMDGPU target {target.target} metadata keys are not unique "
+                    "and sorted"
+                )
+            if key in AMDGPU_STANDARD_KERNEL_METADATA_KEYS:
+                raise ValueError(
+                    f"AMDGPU target {target.target} metadata key {key!r} "
+                    "replaces a standard kernel metadata field"
+                )
+            previous_metadata_key = key
+
+    physical_targets_by_processor: dict[str, list[AmdgpuTargetInfo]] = {}
+    for physical_target in AMDGPU_PHYSICAL_TARGET_INFOS:
+        if physical_target.processor not in targets_by_name:
+            continue
+        physical_targets_by_processor.setdefault(physical_target.processor, []).append(
+            targets_by_name[physical_target.target]
+        )
+    for processor_name, physical_targets in physical_targets_by_processor.items():
+        processor = processors_by_name[processor_name]
+        first_target = physical_targets[0]
+        first_models = (
+            first_target.semantics.lds_bank_service_models
+            if first_target.semantics.lds_bank_service_models is not None
+            else processor.features.lds_bank_service_models
+        )
+        portable_model_keys = set(first_models)
+        for target in physical_targets[1:]:
+            target_models = (
+                target.semantics.lds_bank_service_models
+                if target.semantics.lds_bank_service_models is not None
+                else processor.features.lds_bank_service_models
+            )
+            portable_model_keys.intersection_update(target_models)
+        portable_models = tuple(
+            model_key for model_key in first_models if model_key in portable_model_keys
+        )
+        if processor.features.lds_bank_service_models != portable_models:
+            raise ValueError(
+                f"AMDGPU processor {processor_name} LDS bank-service models do "
+                "not match its physical target intersection"
+            )
 
 
 def _occupancy_rounded_units(units: int, granularity: int) -> int:
@@ -1468,9 +1976,11 @@ def _validate_portable_occupancy_model(
 def validate_amdgpu_generic_contracts(
     processors: Sequence[AmdgpuProcessorInfo],
     descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
+    targets: Sequence[AmdgpuTargetInfo] = AMDGPU_TARGET_INFOS,
 ) -> None:
     processors_by_name = {info.processor: info for info in processors}
     descriptor_sets_by_key = {info.key: info for info in descriptor_sets}
+    targets_by_name = {info.target: info for info in targets}
     for descriptor_set in descriptor_sets:
         if not descriptor_set.member_generator_targets:
             continue
@@ -1488,7 +1998,7 @@ def validate_amdgpu_generic_contracts(
         generic_processor = generic_processors[0]
         exact_members = tuple(
             processors_by_name[compatibility.exact_processor]
-            for compatibility in AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+            for compatibility in AMDGPU_EXACT_TARGET_INFOS
             if (
                 compatibility.code_object_processor == generic_processor.processor
                 and compatibility.generic_introduction_version
@@ -1598,6 +2108,72 @@ def validate_amdgpu_generic_contracts(
                 f"AMDGPU generic processor {generic_processor.processor} "
                 "kernel descriptor facts do not match every member"
             )
+        if any(
+            member.kernel_entry != generic_processor.kernel_entry
+            for member in exact_members
+        ):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} "
+                "kernel entry facts do not match every member"
+            )
+
+        portable_instruction_constraints = (
+            generic_processor.instructions.base_constraints
+        )
+        for member in exact_members:
+            physical_target_names = tuple(
+                physical_target.target
+                for physical_target in AMDGPU_PHYSICAL_TARGET_INFOS
+                if physical_target.processor == member.processor
+            )
+            member_targets = (
+                tuple(targets_by_name[target] for target in physical_target_names)
+                if physical_target_names
+                else (targets_by_name[member.processor],)
+            )
+            for member_target in member_targets:
+                portable_instruction_constraints |= (
+                    _amdgpu_target_local_instruction_constraints(member_target, member)
+                )
+        generic_target = targets_by_name[generic_processor.processor]
+        if generic_target.semantics.instruction_constraints != 0:
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} "
+                "duplicates derived member instruction constraints"
+            )
+        if (
+            amdgpu_target_instruction_constraints(
+                generic_target,
+                generic_processor,
+                processors=processors,
+                targets=targets,
+            )
+            != portable_instruction_constraints
+        ):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} "
+                "instruction constraints do not match the union of member "
+                "restrictions"
+            )
+
+        portable_lds_model_keys = set(exact_members[0].features.lds_bank_service_models)
+        for member in exact_members[1:]:
+            portable_lds_model_keys.intersection_update(
+                member.features.lds_bank_service_models
+            )
+        portable_lds_bank_service_models = tuple(
+            model_key
+            for model_key in exact_members[0].features.lds_bank_service_models
+            if model_key in portable_lds_model_keys
+        )
+        if (
+            generic_processor.features.lds_bank_service_models
+            != portable_lds_bank_service_models
+        ):
+            raise ValueError(
+                f"AMDGPU generic processor {generic_processor.processor} LDS "
+                "bank-service models do not match the member intersection"
+            )
 
         scheduling_bits = 0
         for member in exact_members:
@@ -1674,19 +2250,17 @@ def validate_amdgpu_generic_contracts(
             )
 
 
-def amdgpu_target_record_info_for_processor(
-    processor: str,
-) -> AmdgpuTargetRecordInfo | None:
-    for info in AMDGPU_TARGET_RECORD_INFOS:
-        if info.processor == processor:
+def amdgpu_target_info_by_name(target: str) -> AmdgpuTargetInfo | None:
+    for info in AMDGPU_TARGET_INFOS:
+        if info.target == target:
             return info
     return None
 
 
-def amdgpu_default_target_record_info_for_descriptor_set(
+def amdgpu_default_target_info_for_descriptor_set(
     descriptor_set_key: str,
-) -> AmdgpuTargetRecordInfo | None:
-    for info in AMDGPU_TARGET_RECORD_INFOS:
+) -> AmdgpuTargetInfo | None:
+    for info in AMDGPU_TARGET_INFOS:
         processor_info = amdgpu_processor_info_by_name(info.processor)
         if (
             info.default_for_descriptor_set

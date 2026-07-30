@@ -37,19 +37,13 @@ static iree_status_t iree_hal_amdgpu_executable_resolve_isa_target(
   IREE_ASSERT_ARGUMENT(out_isa_target);
   *out_isa_target = NULL;
 
-  if (!iree_string_view_starts_with(target_key, IREE_SV("gfx")) &&
-      !iree_string_view_starts_with(target_key,
-                                    IREE_SV("amdgcn-amd-amdhsa--"))) {
+  if (!iree_string_view_starts_with(target_key, IREE_SV("gfx"))) {
     return iree_ok_status();
   }
 
-  iree_hal_amdgpu_target_id_t requested_target_id;
-  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_parse(
-      target_key,
-      IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_HSA_PREFIX |
-          IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_ARCH_ONLY |
-          IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_FEATURE_SUFFIXES,
-      &requested_target_id));
+  iree_hal_amdgpu_target_identity_t requested_target_id;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_parse_artifact_key(
+      target_key, &requested_target_id));
 
   *out_isa_target = iree_hal_amdgpu_agent_target_find_compatible_isa(
       agent_target, &requested_target_id);
@@ -125,16 +119,17 @@ static iree_status_t iree_hal_amdgpu_executable_select_physical_devices(
 }
 
 static iree_status_t iree_hal_amdgpu_executable_format_target_id_for_message(
-    const iree_hal_amdgpu_target_id_t* target_id,
+    const iree_hal_amdgpu_target_identity_t* target_id,
     iree_host_size_t buffer_capacity, char* buffer) {
-  return iree_hal_amdgpu_target_id_format(target_id, buffer_capacity, buffer,
-                                          /*out_buffer_length=*/NULL);
+  return iree_hal_amdgpu_target_identity_format_artifact_key(
+      target_id, buffer_capacity, buffer,
+      /*out_buffer_length=*/NULL);
 }
 
 static iree_status_t iree_hal_amdgpu_executable_preflight_agent_code_object(
     const iree_hal_amdgpu_physical_device_t* physical_device,
     iree_host_size_t physical_device_ordinal,
-    const iree_hal_amdgpu_target_id_t* code_object_target_id) {
+    const iree_hal_amdgpu_target_identity_t* code_object_target_id) {
   const iree_hal_amdgpu_agent_target_t* agent_target =
       physical_device->agent_target;
   if (iree_hal_amdgpu_agent_target_find_compatible_isa(agent_target,
@@ -142,15 +137,15 @@ static iree_status_t iree_hal_amdgpu_executable_preflight_agent_code_object(
     return iree_ok_status();
   }
   const iree_hal_amdgpu_target_compatibility_t primary_compatibility =
-      iree_hal_amdgpu_target_id_check_compatible(
-          code_object_target_id, &agent_target->primary_isa.target_id);
+      iree_hal_amdgpu_target_identity_check_compatible(
+          code_object_target_id, &agent_target->primary_isa.identity);
 
   char code_object_target[128] = {0};
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_format_target_id_for_message(
       code_object_target_id, sizeof(code_object_target), code_object_target));
   char primary_agent_target[128] = {0};
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_executable_format_target_id_for_message(
-      &agent_target->primary_isa.target_id, sizeof(primary_agent_target),
+      &agent_target->primary_isa.identity, sizeof(primary_agent_target),
       primary_agent_target));
   char mismatch_reasons[128] = {0};
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_compatibility_format(
@@ -170,7 +165,7 @@ static iree_status_t iree_hal_amdgpu_executable_preflight_code_object(
     iree_const_byte_span_t code_object_data,
     iree_host_size_t physical_device_count,
     iree_hal_amdgpu_physical_device_t* const* physical_device_list) {
-  iree_hal_amdgpu_target_id_t code_object_target_id;
+  iree_hal_amdgpu_target_identity_t code_object_target_id;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_code_object_target_id_from_elf(
       code_object_data, &code_object_target_id));
   for (iree_host_size_t i = 0; i < physical_device_count; ++i) {
@@ -2091,7 +2086,7 @@ iree_status_t iree_hal_amdgpu_executable_create(
               &physical_devices, load_params->executable_data,
               physical_device_count, physical_device_list));
   const iree_hal_amdgpu_gfxip_version_t gfxip_version =
-      isa_target->target_id.version;
+      isa_target->identity.version;
 
   iree_status_t status = iree_hal_amdgpu_executable_create_from_raw_hsaco(
       device, libhsa, topology, &physical_devices, load_params, executable_id,

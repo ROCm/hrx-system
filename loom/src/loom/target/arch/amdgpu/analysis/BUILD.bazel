@@ -8,6 +8,7 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
+    "loom_generated_textual_header",
 )
 
 package(
@@ -16,12 +17,22 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+loom_generated_textual_header(
+    name = "lds_bank_service_model_rows_gen",
+    generator = "//loom/py/loom/gen/target/arch/amdgpu:target_info",
+    output = "lds_bank_service_model_rows.inl",
+    output_flag = "--lds-bank-service-model-rows",
+)
+
 loom_cc_library(
     name = "lds_bank_service",
     srcs = ["lds_bank_service.c"],
     hdrs = ["lds_bank_service.h"],
+    textual_hdrs = [":lds_bank_service_model_rows.inl"],
     visibility = ["//loom/src/loom/target/arch/amdgpu/lower:__pkg__"],
     deps = [
+        "//loom/src/loom/target/arch/amdgpu:target_info_defs",
+        "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
         "//runtime/src/iree/base",
     ],
 )
@@ -31,6 +42,7 @@ loom_cc_test(
     srcs = ["lds_bank_service_test.cc"],
     deps = [
         ":lds_bank_service",
+        "//loom/src/loom/target/arch/amdgpu:target_info",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

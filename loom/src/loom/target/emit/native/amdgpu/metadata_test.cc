@@ -123,7 +123,7 @@ loom_amdgpu_metadata_kernel_t MinimalKernel() {
       /*.has_required_workgroup_size=*/true,
       /*.workgroup_cluster_size=*/{},
       /*.has_workgroup_cluster_size=*/false,
-      /*.gfx1250_revision=*/LOOM_AMDGPU_GFX1250_REVISION_UNSPECIFIED,
+      /*.target_extensions=*/{},
       /*.arguments=*/nullptr,
       /*.argument_count=*/0,
   };
@@ -200,9 +200,7 @@ TEST(AmdgpuMetadataTest, AppendsWorkgroupClusterDimensions) {
   loom_amdgpu_metadata_kernel_t kernel = MinimalKernel();
   kernel.workgroup_cluster_size = {/*.x=*/1, /*.y=*/2, /*.z=*/1};
   kernel.has_workgroup_cluster_size = true;
-  kernel.gfx1250_revision = LOOM_AMDGPU_GFX1250_REVISION_B0;
   loom_amdgpu_code_object_metadata_t metadata = MetadataForKernel(&kernel);
-  metadata.target = IREE_SV("amdgcn-amd-amdhsa--gfx1250");
 
   iree_string_builder_t text_builder;
   iree_string_builder_initialize(iree_allocator_system(), &text_builder);
@@ -230,22 +228,17 @@ TEST(AmdgpuMetadataTest, AppendsWorkgroupClusterDimensions) {
   EXPECT_NE(bytes.find(encoded_cluster_dims), std::string::npos);
 }
 
-TEST(AmdgpuMetadataTest, AppendsGfx1250SiliconRevision) {
-  struct RevisionCase {
-    // Typed revision supplied to the metadata writer.
-    loom_amdgpu_gfx1250_revision_t revision;
-    // AMDHSA metadata spelling for |revision|.
-    const char* spelling;
-  };
-  const RevisionCase cases[] = {
-      {LOOM_AMDGPU_GFX1250_REVISION_A0, "A0"},
-      {LOOM_AMDGPU_GFX1250_REVISION_B0, "B0"},
-  };
-  for (const RevisionCase& test_case : cases) {
+TEST(AmdgpuMetadataTest, AppendsEveryGeneratedTargetMetadataProperty) {
+  iree_host_size_t property_count = 0;
+  for (iree_host_size_t target_ordinal = 0;
+       target_ordinal < loom_amdgpu_target_info_target_count();
+       ++target_ordinal) {
+    const loom_amdgpu_target_info_t* target =
+        loom_amdgpu_target_info_target_at(target_ordinal);
+    ASSERT_NE(target, nullptr);
     loom_amdgpu_metadata_kernel_t kernel = MinimalKernel();
-    kernel.gfx1250_revision = test_case.revision;
+    kernel.target_extensions = target->kernel_metadata_extensions;
     loom_amdgpu_code_object_metadata_t metadata = MetadataForKernel(&kernel);
-    metadata.target = IREE_SV("amdgcn-amd-amdhsa--gfx1250");
 
     iree_string_builder_t text_builder;
     iree_string_builder_initialize(iree_allocator_system(), &text_builder);
@@ -253,9 +246,6 @@ TEST(AmdgpuMetadataTest, AppendsGfx1250SiliconRevision) {
         loom_amdgpu_metadata_append_assembly(&metadata, &text_builder));
     const std::string text = BuilderString(text_builder);
     iree_string_builder_deinitialize(&text_builder);
-    const std::string expected_text =
-        std::string("      .gfx1250_revision: ") + test_case.spelling + "\n";
-    EXPECT_TRUE(Contains(text, expected_text.c_str())) << text;
 
     iree_string_builder_t msgpack_builder;
     iree_string_builder_initialize(iree_allocator_system(), &msgpack_builder);
@@ -263,37 +253,22 @@ TEST(AmdgpuMetadataTest, AppendsGfx1250SiliconRevision) {
         loom_amdgpu_metadata_append_msgpack(&metadata, &msgpack_builder));
     const std::string bytes = BuilderString(msgpack_builder);
     iree_string_builder_deinitialize(&msgpack_builder);
-    std::string encoded_revision("\xb1.gfx1250_revision\xa2", 19);
-    encoded_revision.append(test_case.spelling, 2);
-    EXPECT_NE(bytes.find(encoded_revision), std::string::npos);
+
+    for (uint16_t property_ordinal = 0;
+         property_ordinal < target->kernel_metadata_extensions.count;
+         ++property_ordinal) {
+      const loom_amdgpu_metadata_string_property_t* property =
+          &target->kernel_metadata_extensions.entries[property_ordinal];
+      const std::string key(property->key.data, property->key.size);
+      const std::string value(property->value.data, property->value.size);
+      const std::string expected_text = "      " + key + ": " + value + "\n";
+      EXPECT_NE(text.find(expected_text), std::string::npos) << text;
+      EXPECT_NE(bytes.find(key), std::string::npos);
+      EXPECT_NE(bytes.find(value), std::string::npos);
+      ++property_count;
+    }
   }
-}
-
-TEST(AmdgpuMetadataTest, RejectsIncoherentGfx1250SiliconRevisions) {
-  loom_amdgpu_metadata_kernel_t kernels[] = {MinimalKernel(), MinimalKernel()};
-  loom_amdgpu_code_object_metadata_t metadata = {
-      /*.target=*/IREE_SV("amdgcn-amd-amdhsa--gfx1250"),
-      /*.kernels=*/kernels,
-      /*.kernel_count=*/IREE_ARRAYSIZE(kernels),
-  };
-  iree_string_builder_t builder;
-  iree_string_builder_initialize(iree_allocator_system(), &builder);
-
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_amdgpu_metadata_append_msgpack(&metadata, &builder));
-  kernels[0].gfx1250_revision = LOOM_AMDGPU_GFX1250_REVISION_A0;
-  kernels[1].gfx1250_revision = LOOM_AMDGPU_GFX1250_REVISION_B0;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_amdgpu_metadata_append_msgpack(&metadata, &builder));
-  metadata.target = IREE_SV("amdgcn-amd-amdhsa--gfx1100");
-  kernels[1].gfx1250_revision = LOOM_AMDGPU_GFX1250_REVISION_A0;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_amdgpu_metadata_append_msgpack(&metadata, &builder));
-
-  iree_string_builder_deinitialize(&builder);
+  EXPECT_GT(property_count, 0u);
 }
 
 TEST(AmdgpuMetadataTest, RejectsInvalidWorkgroupClusterDimensions) {
@@ -364,7 +339,11 @@ TEST(AmdgpuMetadataTest, AppendsCanonicalMsgpackMapOrder) {
   kernel.arguments = arguments;
   kernel.argument_count = IREE_ARRAYSIZE(arguments);
   loom_amdgpu_code_object_metadata_t metadata = MetadataForKernel(&kernel);
-  kernel.gfx1250_revision = LOOM_AMDGPU_GFX1250_REVISION_B0;
+  const loom_amdgpu_target_info_t* target = nullptr;
+  IREE_ASSERT_OK(
+      loom_amdgpu_target_info_lookup_target(IREE_SV("gfx1250"), &target));
+  ASSERT_NE(target, nullptr);
+  kernel.target_extensions = target->kernel_metadata_extensions;
   metadata.target = IREE_SV("amdgcn-amd-amdhsa--gfx1250");
 
   iree_string_builder_t builder;

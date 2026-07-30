@@ -9,7 +9,7 @@
 #include "loom/analysis/vector_memory_footprint.h"
 #include "loom/ops/op_defs.h"
 #include "loom/pass/value_facts.h"
-#include "loom/target/selection.h"
+#include "loom/target/pass_environment.h"
 
 #define LOOM_VECTOR_MEMORY_FOOTPRINT_STATISTICS(V, statistics_type) \
   V(statistics_type, ops_checked, "ops-checked",                    \

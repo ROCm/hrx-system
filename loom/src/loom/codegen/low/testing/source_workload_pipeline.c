@@ -126,7 +126,7 @@ static iree_status_t loom_low_source_workload_prepare_low_functions(
           options->descriptor_registry, /*lower_policy_registry=*/NULL,
           /*legality_provider_list=*/NULL, /*legalizer_provider_list=*/NULL,
           /*math_policy_registry=*/NULL, /*compile_report=*/NULL,
-          loom_target_selection_empty(), loom_symbol_ref_null(),
+          /*target_environment=*/NULL, /*specialization_context=*/NULL,
           &environment_storage);
   loom_pass_program_t program = {0};
   if (iree_status_is_ok(status)) {
@@ -213,7 +213,7 @@ iree_status_t loom_low_source_workload_run_pipeline(
           &value_facts, module,
           loom_pass_value_fact_scope_function_for_target(
               selection->func, selection->target_bundle,
-              selection->target_data),
+              selection->target_profile),
           &fact_table);
       if (!iree_status_is_ok(status)) {
         break;
@@ -221,7 +221,7 @@ iree_status_t loom_low_source_workload_run_pipeline(
       const loom_low_lower_options_t lower_options = {
           .target_ref = selection->target_ref,
           .bundle = selection->target_bundle,
-          .target_data = selection->target_data,
+          .target_profile = selection->target_profile,
           .descriptor_registry = options->descriptor_registry,
           .policy = selection->policy,
           .fact_table = fact_table,

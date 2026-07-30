@@ -170,8 +170,6 @@ void loom_llvmir_target_profile_storage_initialize_from_bundle(
     out_storage->profile.kernel.subgroup_size =
         snapshot->subgroup_size != 0 ? snapshot->subgroup_size
                                      : projected_profile->kernel.subgroup_size;
-    out_storage->profile.kernel.binding_resource_flags =
-        export_plan->hal_kernel.buffer_resource_flags;
   }
 }
 

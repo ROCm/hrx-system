@@ -21,6 +21,7 @@
 #include "loom/error/diagnostic.h"
 #include "loom/ir/module.h"
 #include "loom/target/pipeline_options.h"
+#include "loom/target/profile.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/report.h"
 #include "loom/target/types.h"
@@ -40,18 +41,18 @@ typedef struct loom_run_hal_device_target_t {
   // Exact target row borrowed from the active HAL device spec. NULL for
   // offline target selections that cannot be loaded into a device.
   const iree_hal_executable_target_t* hal_target;
-  // Provider-owned target-selection payload. Usually points at static target
-  // info. NULL requests emission from the module's authored target records.
-  const void* data;
-  // Per-device target-bundle storage owned by this selection. If a selection
-  // containing this storage is copied, the copy must rebind the storage before
-  // publishing |target_bundle|.
-  loom_target_bundle_storage_t target_storage;
-  // Target-neutral bundle resolved for the selected device target.
-  const loom_target_bundle_t* target_bundle;
+  // Provider-owned structured target profile. NULL requests emission from the
+  // module's authored target records.
+  const loom_target_profile_t* target_profile;
   // Provider-facing target key selected for emission and diagnostics, if any.
   iree_string_view_t target_key;
 } loom_run_hal_device_target_t;
+
+// Returns the target-neutral bundle projected by |target|, or NULL.
+static inline const loom_target_bundle_t* loom_run_hal_device_target_bundle(
+    const loom_run_hal_device_target_t* target) {
+  return target ? loom_target_profile_bundle(target->target_profile) : NULL;
+}
 
 // Loadable HAL artifact bytes ready for iree_hal_device_load_executable.
 typedef struct loom_run_hal_artifact_t {
@@ -130,9 +131,10 @@ struct loom_run_hal_artifact_provider_t {
   loom_target_pipeline_options_t default_pipeline_options;
   // Selects a concrete target supported by the active HAL device.
   loom_run_hal_select_device_target_fn_t select_device_target;
-  // Selects a concrete target for one authored function on the active HAL
-  // device. Recognized function-local target contracts take precedence over
-  // the device-preferred target selected by |select_device_target|.
+  // Selects the most specific concrete device target satisfying one authored
+  // function's target requirement. An exact device target refines a compatible
+  // generic authored target; a generic device target is used only when no
+  // compatible exact target is advertised.
   loom_run_hal_select_function_device_target_fn_t select_function_device_target;
   // Selects a concrete offline target by provider-owned key. This is used by
   // compilation tools that do not have an active HAL runtime device.

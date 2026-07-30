@@ -10,15 +10,32 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_textual_header(
+  NAME
+    lds_bank_service_model_rows_gen
+  GENERATOR
+    loom::py::loom::gen::target::arch::amdgpu::target_info
+  OUTPUT
+    "lds_bank_service_model_rows.inl"
+  OUTPUT_FLAG
+    "--lds-bank-service-model-rows"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
     lds_bank_service
   HDRS
     "lds_bank_service.h"
+  TEXTUAL_HDRS
+    "lds_bank_service_model_rows.inl"
   SRCS
     "lds_bank_service.c"
   DEPS
     iree::base
+    loom::target::arch::amdgpu::refs::target_refs
+    loom::target::arch::amdgpu::target_info_defs
   PUBLIC
 )
 endif()
@@ -33,6 +50,7 @@ loom_cc_test(
     ::lds_bank_service
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::target::arch::amdgpu::target_info
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
 )

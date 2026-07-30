@@ -409,14 +409,19 @@ iree_status_t loom_spirv_vulkan_hal_target_profile_storage_initialize(
         /*vector_properties=*/NULL, /*vector_property_count=*/0, allocator,
         &out_storage->cooperative_properties);
   }
+  if (iree_status_is_ok(status)) {
+    status = loom_spirv_vulkan_hal_profile_initialize_target_bundle(
+        facts, &out_storage->target_bundle_storage);
+  }
   iree_allocator_free(allocator, matrix_rows);
   if (!iree_status_is_ok(status)) {
     loom_spirv_vulkan_hal_target_profile_storage_deinitialize(out_storage,
                                                               allocator);
     return status;
   }
-  out_storage->profile.cooperative_properties =
-      &out_storage->cooperative_properties.set;
+  loom_spirv_target_profile_initialize(
+      &out_storage->target_bundle_storage.bundle,
+      &out_storage->cooperative_properties.set, &out_storage->profile);
   return iree_ok_status();
 }
 

@@ -21,6 +21,32 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    profile
+  HDRS
+    "profile.h"
+  DEPS
+    ::types
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    materialization
+  HDRS
+    "materialization.h"
+  SRCS
+    "materialization.c"
+  DEPS
+    ::types
+    iree::base
+    loom::ir
+    loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     residency
   HDRS
     "residency.h"
@@ -99,13 +125,15 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
-    selection
+    pass_environment
   HDRS
-    "selection.h"
+    "pass_environment.h"
   SRCS
-    "selection.c"
+    "pass_environment.c"
   DEPS
     ::function_contract
+    ::profile
+    ::specialization
     ::types
     iree::base
     iree::base::internal::arena
@@ -118,6 +146,50 @@ loom_cc_library(
     loom::pass::environment
     loom::pass::types
   PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    specialization
+  HDRS
+    "specialization.h"
+  SRCS
+    "specialization.c"
+  DEPS
+    ::profile
+    ::provider
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::symbol_facts
+    loom::error::emitter
+    loom::error::error_defs
+    loom::ir
+    loom::ops::op_defs
+    loom::ops::target
+    loom::rewrite::rewriter
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    specialization_test
+  SRCS
+    "specialization_test.cc"
+  DEPS
+    ::materialization
+    ::provider
+    ::specialization
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::error::error_defs
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func
+    loom::ops::test
+    loom::target::test::target_record_table
+    loom::testing::module_ptr
 )
 
 loom_cc_test(
@@ -133,11 +205,11 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
-    selection_test
+    pass_environment_test
   SRCS
-    "selection_test.cc"
+    "pass_environment_test.cc"
   DEPS
-    ::selection
+    ::pass_environment
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -319,13 +391,16 @@ loom_cc_library(
     ::low_descriptor_registry
     ::low_legality
     ::low_packet_diagnostics
+    ::materialization
     ::math_policy
+    ::profile
     iree::base
     iree::base::internal::arena
     loom::codegen::low::lower
     loom::codegen::low::verify
     loom::ir
     loom::ops::op_defs
+    loom::ops::target
     loom::pass::environment
     loom::pass::registry
     loom::target::reporting::artifact_manifest
@@ -392,7 +467,7 @@ loom_cc_library(
     "predicate.c"
   DEPS
     ::function_contract
-    ::selection
+    ::pass_environment
     ::types
     iree::base
     iree::base::internal::arena
@@ -441,7 +516,7 @@ loom_cc_test(
     loom::ops::test
     loom::pass::environment
     loom::pass::verify
-    loom::target::selection
+    loom::target::pass_environment
     loom::target::test::target_record_table
     loom::testing::module_ptr
 )

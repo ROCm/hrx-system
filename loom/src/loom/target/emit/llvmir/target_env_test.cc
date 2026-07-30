@@ -113,8 +113,8 @@ void ExpectDerivedProfileMatchesStatic(
             static_profile->kernel.flat_workgroup_size_min);
   EXPECT_EQ(derived_profile->kernel.flat_workgroup_size_max,
             static_profile->kernel.flat_workgroup_size_max);
-  EXPECT_EQ(derived_profile->kernel.binding_resource_flags,
-            static_profile->kernel.binding_resource_flags);
+  EXPECT_EQ(derived_profile->kernel.binding_resource_control,
+            static_profile->kernel.binding_resource_control);
 }
 
 TEST(LlvmIrTargetEnvTest, X86ObjectProfileNamesObjectAbi) {

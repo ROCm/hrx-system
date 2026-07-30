@@ -42,8 +42,6 @@ typedef struct loom_spirv_emit_module_state_t {
   loom_module_t* module;
   // Low descriptor registry used to resolve target-bound packets.
   const loom_low_descriptor_registry_t* descriptor_registry;
-  // Runtime-selected target overlay, or empty for source-selected targets.
-  loom_target_selection_t target_selection;
   // Structured diagnostic emitter for target-resolution failures.
   iree_diagnostic_emitter_t diagnostic_emitter;
   // Case/module scratch arena.
@@ -1681,8 +1679,8 @@ static iree_status_t loom_spirv_emit_low_function_into_module(
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target_with_facts(
       module_state->module, &module_state->symbol_facts, low_function_op,
-      module_state->descriptor_registry, module_state->target_selection,
-      module_state->diagnostic_emitter, &target));
+      module_state->descriptor_registry, module_state->diagnostic_emitter,
+      &target));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_validate_target(&target));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_module_prepare_contract(
       module_state, &target, allocator));
@@ -1703,7 +1701,6 @@ static iree_status_t loom_spirv_emit_low_function_into_module(
 static void loom_spirv_emit_module_state_initialize(
     loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    loom_target_selection_t target_selection,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* scratch_arena,
     loom_spirv_emit_module_state_t* out_state) {
@@ -1714,7 +1711,6 @@ static void loom_spirv_emit_module_state_initialize(
   *out_state = (loom_spirv_emit_module_state_t){
       .module = module,
       .descriptor_registry = descriptor_registry,
-      .target_selection = target_selection,
       .diagnostic_emitter = diagnostic_emitter,
       .scratch_arena = scratch_arena,
   };
@@ -1752,7 +1748,6 @@ static iree_status_t loom_spirv_emit_module_state_finalize(
 static iree_status_t loom_spirv_emit_low_module_initialize(
     loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    loom_target_selection_t target_selection,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* scratch_arena,
     loom_spirv_module_binary_t* out_module,
@@ -1761,8 +1756,8 @@ static iree_status_t loom_spirv_emit_low_module_initialize(
 
   *out_module = (loom_spirv_module_binary_t){0};
   loom_spirv_emit_module_state_initialize(module, descriptor_registry,
-                                          target_selection, diagnostic_emitter,
-                                          scratch_arena, out_state);
+                                          diagnostic_emitter, scratch_arena,
+                                          out_state);
   return iree_ok_status();
 }
 
@@ -1809,7 +1804,6 @@ static bool loom_spirv_emit_low_module_options_selects_entry(
 iree_status_t loom_spirv_emit_low_module(
     loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    loom_target_selection_t target_selection,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* scratch_arena,
     const loom_spirv_emit_low_module_options_t* options,
@@ -1818,8 +1812,8 @@ iree_status_t loom_spirv_emit_low_module(
   iree_status_t status = iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_spirv_emit_low_module_options_validate(options));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_low_module_initialize(
-      module, descriptor_registry, target_selection, diagnostic_emitter,
-      scratch_arena, out_module, &state));
+      module, descriptor_registry, diagnostic_emitter, scratch_arena,
+      out_module, &state));
   loom_symbol_t* symbol = NULL;
   loom_module_for_each_symbol(module, symbol) {
     if (!loom_low_function_def_isa(symbol->defining_op) ||

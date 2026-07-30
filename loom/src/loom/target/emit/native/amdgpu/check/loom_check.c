@@ -306,8 +306,7 @@ static iree_status_t loom_amdgpu_loom_check_lower_spill_traffic(
       (const loom_amdgpu_loom_check_spill_lowering_context_t*)user_data;
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-      module, low_function_op, context->descriptor_registry,
-      (loom_target_selection_t){0}, emitter, &target));
+      module, low_function_op, context->descriptor_registry, emitter, &target));
   if (target.descriptor_set == NULL) {
     return iree_ok_status();
   }
@@ -350,8 +349,8 @@ static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
   }
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-      request->module, low_function, &request->low_registry->registry,
-      loom_target_selection_empty(), emitter, &target));
+      request->module, low_function, &request->low_registry->registry, emitter,
+      &target));
   if (target.descriptor_set == NULL) {
     return iree_ok_status();
   }

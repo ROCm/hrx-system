@@ -21,6 +21,7 @@ iree_py_library(
     name = "target_info",
     srcs = [
         "__init__.py",
+        "lds_bank_service.py",
         "names.py",
         "target_info.py",
     ],
@@ -33,10 +34,34 @@ iree_py_library(
 )
 
 iree_py_library(
+    name = "target_identity",
+    srcs = ["target_identity.py"],
+    deps = [
+        ":target_info",
+        ":target_map_data",
+    ],
+)
+
+iree_py_test(
+    name = "target_identity_test",
+    srcs = [
+        "target_identity_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.amdgpu.target_identity_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":target_identity",
+        ":target_info",
+        ":target_map_data",
+    ],
+)
+
+iree_py_library(
     name = "compile_report_suggestions",
     srcs = ["compile_report_suggestions.py"],
     deps = [
-        ":target_info",
+        ":target_identity",
         "//loom/py/loom/reporting",
     ],
 )

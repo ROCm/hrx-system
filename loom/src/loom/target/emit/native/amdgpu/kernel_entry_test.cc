@@ -37,14 +37,7 @@ class TestArena {
   iree_arena_allocator_t arena_ = {0};
 };
 
-const loom_amdgpu_processor_info_t* FindProcessor(const char* name) {
-  const loom_amdgpu_processor_info_t* processor = nullptr;
-  IREE_CHECK_OK(loom_amdgpu_target_info_lookup_processor(
-      iree_make_cstring_view(name), &processor));
-  return processor;
-}
-
-TEST(AmdgpuKernelEntryTest, SelectsGfx125xHardwareEnvelope) {
+TEST(AmdgpuKernelEntryTest, SelectsInitialVmemReplayEnvelope) {
   static const uint8_t kExpectedText[] = {
       0x00, 0x40, 0x17, 0xee, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
       0x00, 0x00, 0x00, 0x7e, 0x41, 0x06, 0x80, 0xb9, 0x01, 0x00, 0x00, 0x00,
@@ -53,33 +46,30 @@ TEST(AmdgpuKernelEntryTest, SelectsGfx125xHardwareEnvelope) {
       "  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE\n"
       "  v_nop\n"
       "  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1\n";
-  static constexpr const char* kProcessors[] = {
-      "gfx1250",
-      "gfx1251",
-      "gfx12-5-generic",
-  };
+  loom_amdgpu_processor_properties_t properties = {};
+  properties.kernel_entry.profile =
+      LOOM_AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY;
 
-  for (const char* processor_name : kProcessors) {
-    SCOPED_TRACE(processor_name);
-    const loom_amdgpu_kernel_entry_envelope_t* envelope =
-        loom_amdgpu_kernel_entry_envelope_for_processor(
-            FindProcessor(processor_name));
-    EXPECT_EQ(std::string(envelope->assembly.data, envelope->assembly.size),
-              kExpectedAssembly);
-    ASSERT_EQ(envelope->text.data_length, sizeof(kExpectedText));
-    EXPECT_EQ(std::string(reinterpret_cast<const char*>(envelope->text.data),
-                          envelope->text.data_length),
-              std::string(reinterpret_cast<const char*>(kExpectedText),
-                          sizeof(kExpectedText)));
-    EXPECT_EQ(envelope->instruction_count, 3u);
-    EXPECT_EQ(envelope->minimum_sgpr_count, 2u);
-    EXPECT_EQ(envelope->minimum_vgpr_count, 1u);
-  }
+  const loom_amdgpu_kernel_entry_envelope_t* envelope =
+      loom_amdgpu_kernel_entry_envelope_for_properties(&properties);
+  EXPECT_EQ(std::string(envelope->assembly.data, envelope->assembly.size),
+            kExpectedAssembly);
+  ASSERT_EQ(envelope->text.data_length, sizeof(kExpectedText));
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(envelope->text.data),
+                        envelope->text.data_length),
+            std::string(reinterpret_cast<const char*>(kExpectedText),
+                        sizeof(kExpectedText)));
+  EXPECT_EQ(envelope->instruction_count, 3u);
+  EXPECT_EQ(envelope->minimum_sgpr_count, 2u);
+  EXPECT_EQ(envelope->minimum_vgpr_count, 1u);
 }
 
 TEST(AmdgpuKernelEntryTest, PrependsTextAndDisplacesBodyFixups) {
+  loom_amdgpu_processor_properties_t properties = {};
+  properties.kernel_entry.profile =
+      LOOM_AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY;
   const loom_amdgpu_kernel_entry_envelope_t* envelope =
-      loom_amdgpu_kernel_entry_envelope_for_processor(FindProcessor("gfx1250"));
+      loom_amdgpu_kernel_entry_envelope_for_properties(&properties);
   const uint8_t body[] = {0xaa, 0xbb, 0xcc, 0xdd, 0x00, 0x00, 0x00, 0x00};
   const loom_amdgpu_hsaco_text_fixup_t body_fixup = {
       /*.kind=*/LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO,
@@ -114,8 +104,10 @@ TEST(AmdgpuKernelEntryTest, PrependsTextAndDisplacesBodyFixups) {
 }
 
 TEST(AmdgpuKernelEntryTest, EmptyEnvelopePreservesBodyStorage) {
+  loom_amdgpu_processor_properties_t properties = {};
+  properties.kernel_entry.profile = LOOM_AMDGPU_KERNEL_ENTRY_PROFILE_NONE;
   const loom_amdgpu_kernel_entry_envelope_t* envelope =
-      loom_amdgpu_kernel_entry_envelope_for_processor(FindProcessor("gfx1200"));
+      loom_amdgpu_kernel_entry_envelope_for_properties(&properties);
   const uint8_t body[] = {0x00, 0x00, 0xb0, 0xbf};
   const loom_amdgpu_hsaco_text_fixup_t body_fixup = {
       /*.kind=*/LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO,

@@ -187,11 +187,23 @@ loom_cc_library(
 
 loom_cc_library(
     name = "profile",
+    srcs = ["profile.c"],
     hdrs = ["profile.h"],
     visibility = _SPIRV_C_API_VISIBILITY + _SPIRV_LOWER_VISIBILITY + _SPIRV_TOOLING_VISIBILITY,
     deps = [
         ":cooperative_properties",
+        "//loom/src/loom/target:profile",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "profile_test",
+    srcs = ["profile_test.cc"],
+    deps = [
+        ":profile",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -249,14 +261,37 @@ loom_cc_library(
     deps = [
         ":low_verify",
         ":math_policy",
+        ":profile",
         "//loom/src/loom/ir",
-        "//loom/src/loom/pass:builder",
+        "//loom/src/loom/target:materialization",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/spirv/descriptors:low_registry",
         "//loom/src/loom/target/arch/spirv/lower",
         "//loom/src/loom/target/arch/spirv/ops",
-        "//loom/src/loom/target/arch/spirv/records:target_records",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "provider_test",
+    srcs = ["provider_test.cc"],
+    deps = [
+        ":features",
+        ":profile",
+        ":provider",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/spirv/ops",
+        "//loom/src/loom/target/arch/spirv/records:target_records",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

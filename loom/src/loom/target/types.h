@@ -21,6 +21,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_target_profile_t loom_target_profile_t;
+
 typedef uint8_t loom_target_codegen_format_t;
 typedef enum loom_target_codegen_format_e {
   LOOM_TARGET_CODEGEN_FORMAT_UNKNOWN = 0,
@@ -246,8 +248,6 @@ typedef struct loom_target_hal_kernel_abi_t {
   uint32_t flat_workgroup_size_min;
   // Optimization upper flat workgroup size advertised to the backend.
   uint32_t flat_workgroup_size_max;
-  // ABI-required raw buffer resource flags for global binding resources.
-  uint32_t buffer_resource_flags;
 } loom_target_hal_kernel_abi_t;
 
 typedef struct loom_target_export_plan_t {
@@ -285,49 +285,28 @@ typedef struct loom_target_bundle_t {
   const loom_target_config_t* config;
 } loom_target_bundle_t;
 
-typedef struct loom_target_selection_t {
-  // Runtime-selected effective target bundle, or NULL when source IR target
-  // records alone select the target contract.
-  const loom_target_bundle_t* bundle;
-  // Target-owned immutable payload associated with |bundle| or with the source
-  // selected target bundle when |bundle| is NULL. Core compiler code passes
-  // this through and never interprets it.
-  const void* data;
-} loom_target_selection_t;
-
-typedef uint8_t loom_target_selection_source_t;
+typedef uint8_t loom_target_binding_source_t;
 enum {
-  // No target selection source is known.
-  LOOM_TARGET_SELECTION_SOURCE_UNKNOWN = 0,
+  // No target binding source is known.
+  LOOM_TARGET_BINDING_SOURCE_UNKNOWN = 0,
   // The source function authored its target record explicitly.
-  LOOM_TARGET_SELECTION_SOURCE_AUTHORED = 1,
-  // The source function inherited the invocation-selected target record.
-  LOOM_TARGET_SELECTION_SOURCE_INVOCATION = 2,
+  LOOM_TARGET_BINDING_SOURCE_AUTHORED = 1,
+  // The source function was bound by an invocation specialization request.
+  LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION = 2,
 };
 
 // Returns the stable report spelling for |source|.
-static inline iree_string_view_t loom_target_selection_source_name(
-    loom_target_selection_source_t source) {
+static inline iree_string_view_t loom_target_binding_source_name(
+    loom_target_binding_source_t source) {
   switch (source) {
-    case LOOM_TARGET_SELECTION_SOURCE_AUTHORED:
+    case LOOM_TARGET_BINDING_SOURCE_AUTHORED:
       return IREE_SV("authored");
-    case LOOM_TARGET_SELECTION_SOURCE_INVOCATION:
-      return IREE_SV("invocation");
-    case LOOM_TARGET_SELECTION_SOURCE_UNKNOWN:
+    case LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION:
+      return IREE_SV("specialization");
+    case LOOM_TARGET_BINDING_SOURCE_UNKNOWN:
     default:
       return IREE_SV("unknown");
   }
-}
-
-// Returns an empty selected target overlay.
-static inline loom_target_selection_t loom_target_selection_empty(void) {
-  return (loom_target_selection_t){0};
-}
-
-// Returns true when |selection| has no selected target overlay.
-static inline bool loom_target_selection_is_empty(
-    loom_target_selection_t selection) {
-  return selection.bundle == NULL && selection.data == NULL;
 }
 
 typedef struct loom_target_bundle_table_t {
@@ -357,6 +336,14 @@ enum loom_target_projection_value_bits_e {
 };
 typedef uint8_t loom_target_projection_value_kind_t;
 
+typedef uint8_t loom_target_projection_specialization_t;
+enum {
+  // Structured target profiles own this field during specialization.
+  LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE = 0,
+  // An explicit authored value survives profile specialization.
+  LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED = 1,
+};
+
 typedef struct loom_target_projection_t {
   // Byte offset into loom_target_bundle_storage_t for the destination field.
   uint16_t storage_offset;
@@ -364,10 +351,12 @@ typedef struct loom_target_projection_t {
   uint8_t attr_index;
   // Projection operation used to copy the present attr payload.
   loom_target_projection_value_kind_t value_kind;
+  // Source that owns this field when specializing an authored target.
+  loom_target_projection_specialization_t specialization;
 } loom_target_projection_t;
 
-static_assert(sizeof(loom_target_projection_t) == 4,
-              "loom_target_projection_t must be exactly 4 bytes");
+static_assert(sizeof(loom_target_projection_t) == 6,
+              "loom_target_projection_t must be exactly 6 bytes");
 
 typedef struct loom_target_like_descriptor_t {
   // Direct selector-indexed bundle table for a target-like op family.

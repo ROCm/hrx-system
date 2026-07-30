@@ -286,7 +286,8 @@ uint32_t loom_amdgpu_target_native_subgroup_width(
   IREE_ASSERT(processor != NULL,
               "AMDGPU subgroup communication requires an AMDGPU processor "
               "target record");
-  const uint32_t default_wavefront_size = processor->wavefront.default_size;
+  const uint32_t default_wavefront_size =
+      processor->properties.wavefront.default_size;
   IREE_ASSERT(loom_amdgpu_wavefront_size_is_valid(default_wavefront_size),
               "AMDGPU subgroup communication selected a processor with an "
               "invalid default wavefront size");
@@ -629,8 +630,9 @@ static bool loom_amdgpu_uses_packed_workitem_id(
     IREE_ASSERT_UNREACHABLE("selected AMDGPU processor target record");
     IREE_BUILTIN_UNREACHABLE();
   }
-  return loom_amdgpu_processor_kernel_descriptor_has_flags(
-      processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID);
+  return loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
+      &processor->properties,
+      LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID);
 }
 
 static iree_string_view_t loom_amdgpu_workgroup_id_source_name(

@@ -1800,13 +1800,13 @@ static iree_status_t loom_llvmir_test_populate_amdgpu_intrinsics(
 
   loom_llvmir_value_id_t stride_zero = LOOM_LLVMIR_VALUE_ID_INVALID;
   loom_llvmir_value_id_t records = LOOM_LLVMIR_VALUE_ID_INVALID;
-  loom_llvmir_value_id_t flags = LOOM_LLVMIR_VALUE_ID_INVALID;
+  loom_llvmir_value_id_t control = LOOM_LLVMIR_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_llvmir_module_add_integer_constant(
       module, i16_type, 0, &stride_zero));
   IREE_RETURN_IF_ERROR(loom_llvmir_module_add_integer_constant(
       module, i64_type, resource_record_count, &records));
   IREE_RETURN_IF_ERROR(loom_llvmir_module_add_integer_constant(
-      module, i32_type, profile->kernel.binding_resource_flags, &flags));
+      module, i32_type, profile->kernel.binding_resource_control, &control));
 
   loom_llvmir_block_t* entry = NULL;
   IREE_RETURN_IF_ERROR(
@@ -1828,7 +1828,7 @@ static iree_status_t loom_llvmir_test_populate_amdgpu_intrinsics(
   loom_llvmir_value_id_t x_resource = LOOM_LLVMIR_VALUE_ID_INVALID;
   loom_llvmir_value_id_t y_resource = LOOM_LLVMIR_VALUE_ID_INVALID;
   loom_llvmir_value_id_t z_resource = LOOM_LLVMIR_VALUE_ID_INVALID;
-  loom_llvmir_value_id_t resource_args[] = {x, stride_zero, records, flags};
+  loom_llvmir_value_id_t resource_args[] = {x, stride_zero, records, control};
   IREE_RETURN_IF_ERROR(loom_llvmir_build_call(
       entry,
       &(loom_llvmir_call_desc_t){

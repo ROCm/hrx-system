@@ -121,6 +121,7 @@ TEST(LoomcIreeHalTargetTest, RejectsInvalidArguments) {
       /*.next=*/nullptr,
       /*.identifier=*/loomc_make_cstring_view("invalid"),
       /*.device=*/nullptr,
+      /*.physical_device_affinity=*/0,
       /*.providers=*/nullptr,
       /*.provider_count=*/0,
   };
@@ -138,6 +139,7 @@ TEST(LoomcIreeHalTargetTest, EmptyProviderTableReturnsFailedResult) {
       /*.next=*/nullptr,
       /*.identifier=*/loomc_make_cstring_view("empty"),
       /*.device=*/FakeDevice(),
+      /*.physical_device_affinity=*/0,
       /*.providers=*/nullptr,
       /*.provider_count=*/0,
   };
@@ -177,6 +179,7 @@ TEST(LoomcIreeHalTargetTest, UnsupportedProvidersReturnFailedResult) {
       /*.next=*/nullptr,
       /*.identifier=*/loomc_make_cstring_view("unsupported"),
       /*.device=*/FakeDevice(),
+      /*.physical_device_affinity=*/0,
       /*.providers=*/providers,
       /*.provider_count=*/2,
   };
@@ -209,6 +212,7 @@ TEST(LoomcIreeHalTargetTest, OneEnabledRouteCreatesProfile) {
       /*.next=*/nullptr,
       /*.identifier=*/loomc_make_cstring_view("enabled"),
       /*.device=*/FakeDevice(),
+      /*.physical_device_affinity=*/0,
       /*.providers=*/providers,
       /*.provider_count=*/1,
   };
@@ -257,6 +261,7 @@ TEST(LoomcIreeHalTargetTest, MultipleRoutesStopAtFirstSupportedProvider) {
       /*.next=*/nullptr,
       /*.identifier=*/loomc_make_cstring_view("multi"),
       /*.device=*/FakeDevice(),
+      /*.physical_device_affinity=*/0,
       /*.providers=*/providers,
       /*.provider_count=*/3,
   };

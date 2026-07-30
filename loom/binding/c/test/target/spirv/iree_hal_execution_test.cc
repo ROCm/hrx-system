@@ -82,20 +82,13 @@ loomc_status_t ValidateSpirvVulkanProfile(
 loomc_status_t EmitSpirvModule(loomc_target_environment_t* target_environment,
                                loomc_workspace_t* workspace,
                                loomc_module_t* module,
-                               loomc_target_selection_t* target_selection,
                                loomc_string_view_t artifact_format,
                                loomc_string_view_t artifact_identifier,
                                loomc_result_t** out_result) {
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/target_selection,
-  };
   loomc_spirv_emit_options_t spirv_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS,
       /*.structure_size=*/sizeof(spirv_options),
-      /*.next=*/&target_options,
+      /*.next=*/nullptr,
   };
   loomc_emit_options_t emit_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,

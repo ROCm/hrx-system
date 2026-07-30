@@ -31,17 +31,17 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE,
     AmdgpuDescriptorSetInfo,
     AmdgpuProcessorInfo,
-    AmdgpuTargetRecordInfo,
+    AmdgpuTargetInfo,
     amdgpu_descriptor_set_ordinal,
     sorted_descriptor_set_infos,
     sorted_processor_infos,
-    sorted_target_record_infos,
+    sorted_target_infos,
 )
 
 
 @dataclass(frozen=True, slots=True)
 class _AmdgpuTargetRecordRow:
-    info: AmdgpuTargetRecordInfo
+    info: AmdgpuTargetInfo
     processor: AmdgpuProcessorInfo
     descriptor_set: AmdgpuDescriptorSetInfo
     descriptor_set_ordinal: int
@@ -93,14 +93,14 @@ def _lookup_descriptor_set(
 
 
 def _materialize_rows(
-    target_records: Sequence[AmdgpuTargetRecordInfo],
+    targets: Sequence[AmdgpuTargetInfo],
     processors: Sequence[AmdgpuProcessorInfo],
     descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
 ) -> tuple[_AmdgpuTargetRecordRow, ...]:
     processors_by_name = {processor.processor: processor for processor in processors}
     descriptor_sets_by_key = {info.key: info for info in descriptor_sets}
     rows: list[_AmdgpuTargetRecordRow] = []
-    for info in target_records:
+    for info in targets:
         processor = _lookup_processor(processors_by_name, info.processor)
         descriptor_set = _lookup_descriptor_set(descriptor_sets_by_key, processor)
         rows.append(
@@ -120,16 +120,16 @@ def _validate_target_record_infos(rows: Sequence[_AmdgpuTargetRecordRow]) -> Non
     enum_values = [row.info.enum_value for row in rows]
     if enum_values != list(range(1, len(enum_values) + 1)):
         raise ValueError("AMDGPU target record enum values must be a dense one-based range")
-    processors = [row.info.processor for row in rows]
-    if len(processors) != len(set(processors)):
-        raise ValueError("AMDGPU target record processors must be unique")
+    targets = [row.info.target for row in rows]
+    if len(targets) != len(set(targets)):
+        raise ValueError("AMDGPU target record identities must be unique")
 
     defaults_by_descriptor_set: dict[str, list[_AmdgpuTargetRecordRow]] = {}
     for row in rows:
         if row.processor.limits.max_workgroup_storage_bytes == 0:
-            raise ValueError(f"AMDGPU target record '{row.info.processor}' requires a max workgroup storage limit")
+            raise ValueError(f"AMDGPU target record '{row.info.target}' requires a max workgroup storage limit")
         if row.descriptor_set_ordinal >= AMDGPU_DESCRIPTOR_SET_ORDINAL_NONE:
-            raise ValueError(f"AMDGPU target record '{row.info.processor}' has an invalid descriptor-set ordinal {row.descriptor_set_ordinal}")
+            raise ValueError(f"AMDGPU target record '{row.info.target}' has an invalid descriptor-set ordinal {row.descriptor_set_ordinal}")
         if row.info.default_for_descriptor_set:
             defaults_by_descriptor_set.setdefault(row.descriptor_set.key, []).append(row)
     for descriptor_set_key in {row.descriptor_set.key for row in rows}:
@@ -144,8 +144,8 @@ def _validate_target_record_infos(rows: Sequence[_AmdgpuTargetRecordRow]) -> Non
             if actual_limit != expected_limit:
                 raise ValueError(
                     f"AMDGPU descriptor set '{descriptor_set_key}' has inconsistent max workgroup storage limits: "
-                    f"default target record '{defaults[0].info.processor}' has {expected_limit}, "
-                    f"target record '{row.info.processor}' has {actual_limit}"
+                    f"default target record '{defaults[0].info.target}' has {expected_limit}, "
+                    f"target record '{row.info.target}' has {actual_limit}"
                 )
 
 
@@ -154,11 +154,11 @@ def _validate_target_record_coverage(
     processors: Sequence[AmdgpuProcessorInfo],
 ) -> None:
     expected_processors = {processor.processor for processor in processors if processor.descriptor_set.key}
-    actual_processors = {row.info.processor for row in rows}
-    if actual_processors == expected_processors:
+    actual_base_processors = {row.info.processor for row in rows if row.info.target == row.info.processor}
+    if actual_base_processors == expected_processors:
         return
-    missing_processors = sorted(expected_processors - actual_processors)
-    unexpected_processors = sorted(actual_processors - expected_processors)
+    missing_processors = sorted(expected_processors - actual_base_processors)
+    unexpected_processors = sorted(actual_base_processors - expected_processors)
     raise ValueError(f"AMDGPU target records do not match descriptor-backed processors: missing={missing_processors}, unexpected={unexpected_processors}")
 
 
@@ -199,7 +199,7 @@ def _emit_tables(rows: Sequence[_AmdgpuTargetRecordRow]) -> str:
         "//   LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(symbol_suffix, bundle_name,",
         "//       snapshot_name, descriptor_set_key, wavefront_size,",
         "//       max_workgroup_storage_bytes)",
-        "//   LOOM_AMDGPU_TARGET_RECORD_INFO(record_suffix, target_kind, processor,",
+        "//   LOOM_AMDGPU_TARGET_RECORD_INFO(record_suffix, target_kind, target,",
         "//       descriptor_set_ordinal, bundle_suffix)",
         "//   LOOM_AMDGPU_TARGET_RECORD_DEFAULT(descriptor_set_ordinal, record_suffix)",
         "//   LOOM_AMDGPU_TARGET_RECORD_DEFAULT_ABSENT(descriptor_set_ordinal)",
@@ -224,9 +224,9 @@ def _emit_tables(rows: Sequence[_AmdgpuTargetRecordRow]) -> str:
     lines.extend(
         (
             "LOOM_AMDGPU_TARGET_RECORD_INFO("
-            f"{_c_symbol_suffix(row.info.processor)}, "
+            f"{_c_symbol_suffix(row.info.target)}, "
             f"{_u32_expr(row.info.enum_value)}, "
-            f"{_c_string_arg(row.info.processor)}, "
+            f"{_c_string_arg(row.info.target)}, "
             f"{_u16_expr(row.descriptor_set_ordinal)}, "
             f"{_c_symbol_suffix(row.descriptor_set.generator_target)})"
         )
@@ -240,7 +240,7 @@ def _emit_tables(rows: Sequence[_AmdgpuTargetRecordRow]) -> str:
         if row is None:
             lines.append(f"LOOM_AMDGPU_TARGET_RECORD_DEFAULT_ABSENT({_u16_expr(descriptor_set_ordinal)})")
         else:
-            lines.append(f"LOOM_AMDGPU_TARGET_RECORD_DEFAULT({_u16_expr(descriptor_set_ordinal)}, {_c_symbol_suffix(row.info.processor)})")
+            lines.append(f"LOOM_AMDGPU_TARGET_RECORD_DEFAULT({_u16_expr(descriptor_set_ordinal)}, {_c_symbol_suffix(row.info.target)})")
     lines.append("#endif  // LOOM_AMDGPU_TARGET_RECORD_DEFAULT && LOOM_AMDGPU_TARGET_RECORD_DEFAULT_ABSENT")
     lines.append("")
     return "\n".join(lines)
@@ -248,7 +248,7 @@ def _emit_tables(rows: Sequence[_AmdgpuTargetRecordRow]) -> str:
 
 def write_target_record_tables_to_path(tables_path: Path) -> None:
     rows = _materialize_rows(
-        sorted_target_record_infos(),
+        sorted_target_infos(),
         sorted_processor_infos(),
         sorted_descriptor_set_infos(),
     )

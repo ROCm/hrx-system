@@ -28,7 +28,7 @@
 /// compilation.
 ///
 /// @par Example
-/// Create a reusable Vulkan-style SPIR-V profile and target selection:
+/// Create a reusable Vulkan-style SPIR-V target profile:
 ///
 /// @code{.c}
 /// loomc_spirv_feature_fact_t facts[] = {

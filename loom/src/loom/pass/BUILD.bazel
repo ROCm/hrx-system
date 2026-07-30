@@ -330,6 +330,7 @@ loom_cc_test(
         ":value_facts",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/pass/test:harness",
+        "//loom/src/loom/target:profile",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

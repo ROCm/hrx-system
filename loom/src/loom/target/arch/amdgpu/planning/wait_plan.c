@@ -181,8 +181,8 @@ typedef struct loom_amdgpu_wait_plan_builder_t {
   const loom_low_allocation_table_t* allocation;
   // Arena that owns all output and scratch arrays.
   iree_arena_allocator_t* arena;
-  // Processor facts selected by the low target, or NULL if unavailable.
-  const loom_amdgpu_processor_info_t* processor;
+  // Processor properties selected by the low target, or NULL if unavailable.
+  const loom_amdgpu_processor_properties_t* processor_properties;
   // Generated wait-packet descriptors selected by the low target.
   loom_amdgpu_wait_packet_target_t wait_packet_target;
   // Per-node counter classification.
@@ -528,8 +528,8 @@ static bool loom_amdgpu_wait_plan_needs_trans_result_state(
 
 static bool loom_amdgpu_wait_plan_needs_sgpr_read_state(
     const loom_amdgpu_wait_plan_builder_t* builder) {
-  return loom_amdgpu_processor_has_scheduling(
-      builder->processor,
+  return loom_amdgpu_processor_properties_have_scheduling(
+      builder->processor_properties,
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR);
 }
 
@@ -1649,9 +1649,10 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
   const loom_low_schedule_table_t* schedule = builder->schedule;
   const loom_low_descriptor_set_t* descriptor_set =
       schedule->target.descriptor_set;
-  const bool has_valu_trans_use_depctr = loom_amdgpu_processor_has_scheduling(
-      builder->processor,
-      LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR);
+  const bool has_valu_trans_use_depctr =
+      loom_amdgpu_processor_properties_have_scheduling(
+          builder->processor_properties,
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR);
   bool supports_xcnt = false;
   for (uint32_t i = 0; i < descriptor_set->descriptor_count; ++i) {
     if (loom_amdgpu_wait_plan_descriptor_has_xcnt_source_lease(
@@ -2218,8 +2219,8 @@ static bool loom_amdgpu_wait_plan_storage_release_is_ordered_vmem_reuse(
     loom_amdgpu_wait_plan_reason_t reason) {
   if (reason != LOOM_AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE ||
       action->release_class_id != LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD ||
-      !loom_amdgpu_processor_has_scheduling(
-          builder->processor,
+      !loom_amdgpu_processor_properties_have_scheduling(
+          builder->processor_properties,
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER)) {
     return false;
   }
@@ -3045,8 +3046,8 @@ static iree_status_t loom_amdgpu_wait_plan_handle_vmem_result_reuse(
   const bool same_class_writes_are_ordered =
       current_order_class != LOOM_AMDGPU_VMEM_RESULT_ORDER_NONE &&
       current_order_class != LOOM_AMDGPU_VMEM_RESULT_ORDER_UNKNOWN &&
-      loom_amdgpu_processor_has_scheduling(
-          builder->processor,
+      loom_amdgpu_processor_properties_have_scheduling(
+          builder->processor_properties,
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER);
   const loom_value_ordinal_t* result_ordinals =
       loom_low_schedule_node_const_result_ordinals(node);
@@ -3381,8 +3382,9 @@ iree_status_t loom_amdgpu_wait_plan_build(
       .schedule = schedule,
       .allocation = allocation,
       .arena = arena,
-      .processor =
-          loom_amdgpu_target_processor_from_resolved_target(&schedule->target),
+      .processor_properties =
+          loom_amdgpu_target_processor_properties_from_resolved_target(
+              &schedule->target),
   };
   loom_amdgpu_wait_packet_analyze_target(schedule->target.descriptor_set,
                                          &builder.wait_packet_target);

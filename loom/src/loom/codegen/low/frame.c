@@ -156,8 +156,7 @@ static iree_status_t loom_low_emission_frame_build_with_diagnostic_emitter(
   loom_low_function_model_t model = {0};
   if (iree_status_is_ok(status)) {
     status = loom_low_function_model_initialize(
-        module, low_func_op, options->descriptor_registry,
-        options->target_selection, diagnostic_emitter,
+        module, low_func_op, options->descriptor_registry, diagnostic_emitter,
         LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, arena, &model);
   }
   loom_low_schedule_options_t schedule_options = {

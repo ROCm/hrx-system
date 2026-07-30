@@ -23,7 +23,7 @@ extern "C" {
 // remains valid for the lifetime of the process.
 iree_status_t iree_hal_amdgpu_code_object_target_id_from_elf(
     iree_const_byte_span_t elf_data,
-    iree_hal_amdgpu_target_id_t* out_target_id);
+    iree_hal_amdgpu_target_identity_t* out_target_id);
 
 #ifdef __cplusplus
 }  // extern "C"

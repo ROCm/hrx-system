@@ -31,7 +31,6 @@ using IreeHalTargetProfileValidateFn = loomc_status_t (*)(
 using IreeHalTargetModuleEmitFn = loomc_status_t (*)(
     loomc_target_environment_t* target_environment,
     loomc_workspace_t* workspace, loomc_module_t* module,
-    loomc_target_selection_t* target_selection,
     loomc_string_view_t artifact_format,
     loomc_string_view_t artifact_identifier, loomc_result_t** out_result);
 

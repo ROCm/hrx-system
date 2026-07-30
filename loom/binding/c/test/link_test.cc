@@ -26,7 +26,10 @@
 #include "loom/ops/op_registry.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
+#include "loom/target/materialization.h"
+#include "loom/target/profile.h"
 #include "loom/target/provider.h"
+#include "loom/target/test/target_records.h"
 #include "loom/target/types.h"
 #include "loom/verify/verify.h"
 #include "loomc/compile.h"
@@ -55,96 +58,72 @@ using TargetEnvironmentPtr =
     HandlePtr<loomc_target_environment_t, loomc_target_environment_release>;
 using TargetProfilePtr =
     HandlePtr<loomc_target_profile_t, loomc_target_profile_release>;
-using TargetSelectionPtr =
-    HandlePtr<loomc_target_selection_t, loomc_target_selection_release>;
 
-static const loom_target_snapshot_t kFakeTargetSnapshot = {
-    /*.name=*/IREE_SVL("fake-link-target"),
-    /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
-    /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+static const loom_target_profile_type_t kFakeTargetProfileType = {
+    /*.name=*/IREE_SVL("fake-link"),
 };
 
-static const loom_target_export_plan_t kFakeTargetExportPlan = {
-    /*.name=*/IREE_SVL("fake-link-target"),
-    /*.export_symbol=*/IREE_SVL(""),
-    /*.abi_kind=*/LOOM_TARGET_ABI_OBJECT_FUNCTION,
-};
-
-static const loom_target_config_t kFakeTargetConfig = {
-    /*.name=*/IREE_SVL("fake-link-target"),
-};
-
-static const loom_target_bundle_t kFakeTargetBundle = {
-    /*.name=*/IREE_SVL("fake-link-target"),
-    /*.snapshot=*/&kFakeTargetSnapshot,
-    /*.export_plan=*/&kFakeTargetExportPlan,
-    /*.config=*/&kFakeTargetConfig,
+static loom_target_profile_t kFakeTargetProfile = {
+    /*.type=*/&kFakeTargetProfileType,
 };
 
 static iree_status_t RegisterFakeTargetContext(loom_context_t* context) {
   return loom_test_dialect_register(context);
 }
 
-static iree_status_t MaterializeFakeTargetSelection(
-    const loom_target_provider_t* provider,
-    const loom_target_selection_materialization_request_t* request,
-    bool* out_materialized, loom_symbol_ref_t* out_target_ref) {
-  (void)provider;
-  *out_materialized = false;
-  *out_target_ref = loom_symbol_ref_null();
-  if (request->target_selection.bundle != &kFakeTargetBundle) {
-    return iree_ok_status();
+static bool FakeTargetSatisfiesRequirement(
+    loom_target_record_view_t effective_target,
+    loom_target_record_view_t target_requirement) {
+  if (loom_test_target_kind(effective_target.facts->target.op) !=
+      loom_test_target_kind(target_requirement.facts->target.op)) {
+    return false;
   }
+  const loom_target_bundle_storage_t* effective_storage =
+      &effective_target.facts->storage;
+  const loom_target_bundle_storage_t* requirement_storage =
+      &target_requirement.facts->storage;
+  return loom_target_snapshot_satisfies_requirement(
+             &effective_storage->snapshot, &requirement_storage->snapshot) &&
+         iree_string_view_equal(effective_storage->config.contract_set_key,
+                                requirement_storage->config.contract_set_key) &&
+         iree_all_bits_set(effective_storage->config.contract_feature_bits,
+                           requirement_storage->config.contract_feature_bits);
+}
 
-  loom_string_id_t symbol_name_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_module_intern_string(
-      request->module, IREE_SV("selected_link_target"), &symbol_name_id));
-  loom_symbol_id_t symbol_id =
-      loom_module_find_symbol(request->module, symbol_name_id);
-  if (symbol_id == LOOM_SYMBOL_ID_INVALID) {
-    IREE_RETURN_IF_ERROR(
-        loom_module_add_symbol(request->module, symbol_name_id, &symbol_id));
-  }
-  *out_target_ref = {
-      /*.module_id=*/0,
-      /*.symbol_id=*/symbol_id,
-  };
-  if (request->module->symbols.entries[symbol_id].defining_op != nullptr) {
-    *out_materialized = true;
-    return iree_ok_status();
-  }
+static iree_string_view_t FakeTargetMaterializationSymbolStem(
+    const loom_target_profile_t* profile) {
+  return loom_target_profile_has_type(profile, &kFakeTargetProfileType)
+             ? IREE_SV("selected_link_target")
+             : iree_string_view_empty();
+}
 
-  loom_block_t* module_block = loom_module_block(request->module);
-  loom_builder_t builder = {};
-  loom_builder_initialize(request->module, &request->module->arena,
-                          module_block, &builder);
-  if (module_block->first_op != nullptr) {
-    loom_builder_set_before(&builder, module_block->first_op);
+static bool FakeTargetRecordMatchesEffectiveTarget(
+    const loom_module_t* module, const loom_op_t* target_op,
+    const loom_target_profile_t* profile, const loom_op_t* authored_target_op) {
+  return loom_target_profile_has_type(profile, &kFakeTargetProfileType) &&
+         loom_test_target_kind(target_op) == LOOM_TEST_TARGET_KIND_LOW_CORE &&
+         loom_target_record_projection_matches_bundle(
+             module, target_op, profile->target_bundle, authored_target_op);
+}
+
+static iree_status_t BuildFakeTargetEffectiveRecord(
+    loom_builder_t* builder, const loom_target_profile_t* profile,
+    const loom_op_t* authored_target_op, loom_symbol_ref_t symbol,
+    loom_location_id_t location, loom_op_t** out_target_op) {
+  if (!loom_target_profile_has_type(profile, &kFakeTargetProfileType)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "fake target materialization requires a fake target profile");
   }
-  loom_op_t* target_op = nullptr;
-  IREE_RETURN_IF_ERROR(loom_test_target_build(
-      &builder, /*build_flags=*/0, LOOM_TEST_TARGET_KIND_LOW_CORE,
-      *out_target_ref, /*codegen_format=*/0, /*artifact_format=*/0,
-      /*default_pointer_bitwidth=*/0, /*index_bitwidth=*/0,
-      /*offset_bitwidth=*/0, /*max_workgroup_size_x=*/0,
-      /*max_workgroup_size_y=*/0, /*max_workgroup_size_z=*/0,
-      /*max_flat_workgroup_size=*/0, /*subgroup_size=*/0,
-      /*max_grid_size_x=*/0, /*max_grid_size_y=*/0,
-      /*max_grid_size_z=*/0, /*max_flat_grid_size=*/0,
-      /*max_workgroup_count_x=*/0, /*max_workgroup_count_y=*/0,
-      /*max_workgroup_count_z=*/0, /*memory_space_generic=*/0,
-      /*memory_space_global=*/0, /*memory_space_workgroup=*/0,
-      /*memory_space_constant=*/0, /*memory_space_private=*/0,
-      /*memory_space_host=*/0, /*memory_space_descriptor=*/0, /*abi=*/0,
-      /*export_symbol=*/LOOM_STRING_ID_INVALID, /*linkage=*/0,
-      /*hal_buffer_resource_flags=*/0,
-      /*contract_set_key=*/LOOM_STRING_ID_INVALID,
-      /*contract_feature_bits=*/0, LOOM_LOCATION_UNKNOWN, &target_op));
-  *out_materialized = true;
-  return iree_ok_status();
+  return loom_target_record_projection_build(
+      builder, LOOM_OP_TEST_TARGET, LOOM_TEST_TARGET_KIND_LOW_CORE, symbol,
+      profile->target_bundle, authored_target_op,
+      /*extension_attrs=*/nullptr,
+      /*extension_attr_count=*/0, location, out_target_op);
 }
 
 static const loom_target_provider_t kFakeTargetProvider = {
+    /*.profile_type=*/&kFakeTargetProfileType,
     /*.register_context=*/RegisterFakeTargetContext,
     /*.initialize_low_descriptor_registry=*/nullptr,
     /*.initialize_low_lower_policy_registry=*/nullptr,
@@ -157,7 +136,19 @@ static const loom_target_provider_t kFakeTargetProvider = {
     /*.emitter_list=*/{},
     /*.pass_registry=*/nullptr,
     /*.contribute_pipeline=*/nullptr,
-    /*.materialize_selection=*/MaterializeFakeTargetSelection,
+    /*.materialization=*/
+    {
+        /*.symbol_stem=*/FakeTargetMaterializationSymbolStem,
+        /*.record_matches_effective_target=*/
+        FakeTargetRecordMatchesEffectiveTarget,
+        /*.build_effective_target_record=*/
+        BuildFakeTargetEffectiveRecord,
+    },
+    /*.record_semantics=*/
+    {
+        /*.op_kind=*/LOOM_OP_TEST_TARGET,
+        /*.satisfies_requirement=*/FakeTargetSatisfiesRequirement,
+    },
 };
 
 static const loom_target_provider_t* const kFakeTargetProviders[] = {
@@ -308,31 +299,16 @@ TargetEnvironmentPtr CreateFakeTargetEnvironment() {
 
 TargetProfilePtr CreateFakeTargetProfile(
     loomc_target_environment_t* target_environment) {
-  loomc_target_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("fake-link-profile"),
-  };
-  loom_target_selection_t selection = {
-      /*.bundle=*/&kFakeTargetBundle,
-      /*.data=*/nullptr,
-  };
+  kFakeTargetProfile.target_bundle = loom_target_bundle_table_lookup(
+      &loom_test_target_bundles, LOOM_TEST_TARGET_KIND_LOW_CORE);
+  IREE_ASSERT(kFakeTargetProfile.target_bundle != nullptr);
   loomc_target_profile_t* profile = nullptr;
-  loomc_status_t status = loomc_target_profile_create_from_selection(
-      target_environment, &options, selection, /*payload_type=*/nullptr,
-      /*payload=*/nullptr, /*deinitialize=*/nullptr, loomc_allocator_system(),
-      &profile);
+  loomc_status_t status = loomc_target_profile_create(
+      target_environment, loomc_make_cstring_view("fake-link-profile"),
+      &kFakeTargetProfile,
+      /*deinitialize=*/nullptr, loomc_allocator_system(), &profile);
   LOOMC_EXPECT_OK(status);
   return TargetProfilePtr(profile);
-}
-
-TargetSelectionPtr CreateTargetSelection(loomc_target_profile_t* profile) {
-  loomc_target_selection_t* selection = nullptr;
-  loomc_status_t status = loomc_target_selection_create_from_profile(
-      profile, loomc_allocator_system(), &selection);
-  LOOMC_EXPECT_OK(status);
-  return TargetSelectionPtr(selection);
 }
 
 SourcePtr CreateSource(loomc_source_format_t format, const char* identifier,
@@ -873,18 +849,23 @@ func.def public @entry() -> (index) {
   EXPECT_EQ(second_text.find("4096"), std::string::npos);
 }
 
-TEST(LinkTest, LinkModuleMaterializesInvocationTargetOnLinkedOutput) {
+TEST(LinkTest, LinkModulePreservesAuthoredTargetSet) {
   TargetEnvironmentPtr target_environment = CreateFakeTargetEnvironment();
-  TargetProfilePtr profile = CreateFakeTargetProfile(target_environment.get());
-  TargetSelectionPtr target_selection = CreateTargetSelection(profile.get());
   ContextPtr context = CreateContext(target_environment.get());
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr source = CreateTextSource("multi_root.loom", R"(
-func.def public @first() {
+test.target<low_core> @first_target
+test.target<quirky> @second_target
+
+func.def public target(@first_target) @first() {
   func.return
 }
 
-func.def public @second() {
+func.def public target(@second_target) @second() {
+  func.return
+}
+
+func.def public @targetless() {
   func.return
 }
 )");
@@ -895,16 +876,10 @@ func.def public @second() {
   FinishIndex(builder.get(), &link_index);
   LinkerPtr linker = CreateLinker(context.get());
   WorkspacePtr workspace = CreateWorkspace();
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/target_selection.get(),
-  };
   loomc_link_options_t options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
       /*.structure_size=*/0,
-      /*.next=*/&target_options,
+      /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
       /*.root_symbols=*/nullptr,
@@ -922,17 +897,25 @@ func.def public @second() {
   VerifyModule(internal_module);
   EXPECT_TRUE(ModuleHasSymbol(internal_module, "first"));
   EXPECT_TRUE(ModuleHasSymbol(internal_module, "second"));
-  EXPECT_TRUE(ModuleHasSymbol(internal_module, "selected_link_target"));
+  EXPECT_TRUE(ModuleHasSymbol(internal_module, "targetless"));
+  EXPECT_TRUE(ModuleHasSymbol(internal_module, "first_target"));
+  EXPECT_TRUE(ModuleHasSymbol(internal_module, "second_target"));
 
   std::string linked_text = SerializeModuleToText(module.get());
-  EXPECT_NE(linked_text.find("test.target<low_core> @selected_link_target"),
+  EXPECT_NE(linked_text.find("test.target<low_core> @first_target"),
             std::string::npos);
+  EXPECT_NE(linked_text.find("test.target<quirky> @second_target"),
+            std::string::npos);
+  EXPECT_NE(linked_text.find("func.def public target(@first_target) @first"),
+            std::string::npos);
+  EXPECT_NE(linked_text.find("func.def public target(@second_target) @second"),
+            std::string::npos);
+  EXPECT_NE(linked_text.find("func.def public @targetless"), std::string::npos);
 }
 
-TEST(LinkTest, LinkAndCompileSelectsTargetApplicableProviderThroughCOptions) {
+TEST(LinkTest, LinkThenCompileSpecializesEntryForTemplateSelection) {
   TargetEnvironmentPtr target_environment = CreateFakeTargetEnvironment();
   TargetProfilePtr profile = CreateFakeTargetProfile(target_environment.get());
-  TargetSelectionPtr target_selection = CreateTargetSelection(profile.get());
   ContextPtr context = CreateContext(target_environment.get());
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr root_source = CreateTextSource("root.loom", R"(
@@ -943,7 +926,7 @@ func.def public @entry(%arg: i32) -> (i32) {
 )");
   SourcePtr provider_source = CreateTextSource("providers.loom", R"(
 test.target<low_core> @selected_link_target
-test.target<low_core> @other_target
+test.target<quirky> @other_target
 
 func.template<demo.capi_selected> target(@selected_link_target) priority(20) @selected_provider(%value: i32) -> (i32) {
   %selected = test.addi %value, %value : i32
@@ -967,19 +950,13 @@ func.template<demo.capi_selected> priority(1) @fallback_provider(%value: i32) ->
   FinishIndex(builder.get(), &link_index);
   LinkerPtr linker = CreateLinker(context.get());
   WorkspacePtr workspace = CreateWorkspace();
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/target_selection.get(),
-  };
   loomc_string_view_t roots[] = {
       loomc_make_cstring_view("@entry"),
   };
   loomc_link_options_t link_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
       /*.structure_size=*/0,
-      /*.next=*/&target_options,
+      /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
       /*.root_symbols=*/roots,
@@ -1002,6 +979,17 @@ func.template<demo.capi_selected> priority(1) @fallback_provider(%value: i32) ->
   CompilerPtr compiler = CreateCompiler(context.get());
   PassProgramPtr pass_program = CreatePassProgramFromPipelineText(
       context.get(), "select-templates,inline-callables,symbol-dce");
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("entry"),
+      /*.target_profile=*/profile.get(),
+  };
+  loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
+  };
   loomc_compile_options_t compile_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
       /*.structure_size=*/sizeof(compile_options),
@@ -1028,8 +1016,8 @@ func.template<demo.capi_selected> priority(1) @fallback_provider(%value: i32) ->
   const std::string compiled_text = SerializeModuleToText(module.get());
   EXPECT_NE(compiled_text.find("test.target<low_core> @selected_link_target"),
             std::string::npos);
-  EXPECT_NE(compiled_text.find("test.addi %arg, %arg : i32"),
-            std::string::npos);
+  EXPECT_NE(compiled_text.find("test.addi %arg, %arg : i32"), std::string::npos)
+      << compiled_text;
   EXPECT_EQ(compiled_text.find("func.apply<demo.capi_selected>"),
             std::string::npos);
   EXPECT_EQ(compiled_text.find("@selected_provider"), std::string::npos);

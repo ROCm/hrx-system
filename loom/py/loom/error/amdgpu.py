@@ -1000,45 +1000,51 @@ ERR_AMDGPU_045 = ErrorDef(
     ),
 )
 
-# ERR_AMDGPU_046: gfx1250 revision targets a different processor.
-ERR_AMDGPU_046 = ErrorDef(
-    domain=ErrorDomain.AMDGPU,
-    code=46,
-    severity=Severity.ERROR,
-    summary="gfx1250 revision targets a different processor.",
-    message=(
-        "AMDGPU target '@{target_name}' selects gfx1250 revision "
-        "'{revision}' for processor '{processor}'"
-    ),
-    params=(
-        ErrorParam("target_name", ParamKind.STRING),
-        ErrorParam("revision", ParamKind.STRING),
-        ErrorParam("processor", ParamKind.STRING),
-    ),
-    fix_hint=("Remove the gfx1250 revision or select the gfx1250 processor"),
-)
-
-# ERR_AMDGPU_047: gfx1250 A0 packet requires stepping legalization.
+# ERR_AMDGPU_047: target instruction constraint requires legalization.
 ERR_AMDGPU_047 = ErrorDef(
     domain=ErrorDomain.AMDGPU,
     code=47,
     severity=Severity.ERROR,
-    summary="gfx1250 A0 packet requires stepping legalization.",
+    summary="AMDGPU instruction constraint requires legalization.",
     message=(
-        "AMDGPU descriptor '{descriptor_name}' in '@{function_name}' is not "
-        "legal for gfx1250 revision '{revision}' in descriptor set "
-        "'{descriptor_set_name}': erratum '{erratum_key}' requires "
-        "legalization '{legalization_key}'"
+        "AMDGPU descriptor '{descriptor_name}' in '@{function_name}' violates "
+        "{constraint_kind} constraint '{constraint_key}' for target "
+        "'{target}' in descriptor set "
+        "'{descriptor_set_name}' and requires legalization "
+        "'{legalization_key}'"
     ),
     params=(
         ErrorParam("function_name", ParamKind.STRING),
         ErrorParam("descriptor_name", ParamKind.STRING),
         ErrorParam("descriptor_set_name", ParamKind.STRING),
-        ErrorParam("revision", ParamKind.STRING),
-        ErrorParam("erratum_key", ParamKind.STRING),
+        ErrorParam("target", ParamKind.STRING),
+        ErrorParam("constraint_kind", ParamKind.STRING),
+        ErrorParam("constraint_key", ParamKind.STRING),
         ErrorParam("legalization_key", ParamKind.STRING),
     ),
-    fix_hint=("Apply the named gfx1250 A0 legalization before native emission"),
+    fix_hint=("Apply the named target legalization before native emission"),
+)
+
+# ERR_AMDGPU_048: target feature state is incompatible with the processor.
+ERR_AMDGPU_048 = ErrorDef(
+    domain=ErrorDomain.AMDGPU,
+    code=48,
+    severity=Severity.ERROR,
+    summary="AMDGPU target feature state is incompatible with the processor.",
+    message=(
+        "AMDGPU target '@{target_name}' selects target feature '{feature}' "
+        "state '{state}' for processor '{processor}'"
+    ),
+    params=(
+        ErrorParam("target_name", ParamKind.STRING),
+        ErrorParam("feature", ParamKind.STRING),
+        ErrorParam("state", ParamKind.STRING),
+        ErrorParam("processor", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Select an enabled or disabled state only for processor-supported "
+        "target features"
+    ),
 )
 
 # ERR_AMDGPU_049: AMDGPU storage address result type is unsupported.
@@ -1063,7 +1069,6 @@ ERR_AMDGPU_049 = ErrorDef(
     ),
     fix_hint="Materialize AMDGPU storage addresses as one VGPR",
 )
-
 
 ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_001,
@@ -1107,7 +1112,7 @@ ALL_AMDGPU_ERRORS = (
     ERR_AMDGPU_043,
     ERR_AMDGPU_044,
     ERR_AMDGPU_045,
-    ERR_AMDGPU_046,
     ERR_AMDGPU_047,
+    ERR_AMDGPU_048,
     ERR_AMDGPU_049,
 )

@@ -137,8 +137,8 @@ typedef struct loom_amdgpu_vopd_plan_builder_t {
   const loom_low_schedule_table_t* schedule;
   // Allocation table supplying physical register assignments.
   const loom_low_allocation_table_t* allocation;
-  // Processor facts for architecture-specific packetization hazards.
-  const loom_amdgpu_processor_info_t* processor;
+  // Processor properties for architecture-specific packetization hazards.
+  const loom_amdgpu_processor_properties_t* processor_properties;
   // Optional address-state transitions that block second-component fusion.
   const loom_amdgpu_address_state_plan_t* address_state;
   // Optional planned wait packets that block second-component fusion.
@@ -758,8 +758,8 @@ static bool loom_amdgpu_vopd_schedule_has_trans_result_packet(
 
 static iree_status_t loom_amdgpu_vopd_plan_allocate_trans_result_guard(
     loom_amdgpu_vopd_plan_builder_t* builder) {
-  if (!loom_amdgpu_processor_has_scheduling(
-          builder->processor,
+  if (!loom_amdgpu_processor_properties_have_scheduling(
+          builder->processor_properties,
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR) ||
       !loom_amdgpu_vopd_schedule_has_trans_result_packet(builder)) {
     return iree_ok_status();
@@ -2114,8 +2114,9 @@ iree_status_t loom_amdgpu_vopd_plan_build(
   loom_amdgpu_vopd_plan_builder_t builder = {
       .schedule = schedule,
       .allocation = allocation,
-      .processor =
-          loom_amdgpu_target_processor_from_resolved_target(&schedule->target),
+      .processor_properties =
+          loom_amdgpu_target_processor_properties_from_resolved_target(
+              &schedule->target),
       .address_state = address_state,
       .wait_packets = wait_packets,
       .arena = arena,

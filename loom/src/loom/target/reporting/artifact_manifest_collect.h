@@ -31,6 +31,18 @@ enum loom_target_artifact_manifest_collect_flag_bits_e {
   LOOM_TARGET_ARTIFACT_MANIFEST_COLLECT_FLAG_ARTIFACT_BYTE_LENGTH = 1u << 0,
 };
 
+typedef iree_status_t(
+    IREE_API_PTR* loom_target_artifact_manifest_project_target_fn_t)(
+    const loom_module_t* module, const loom_target_entry_t* entry,
+    iree_arena_allocator_t* arena,
+    loom_target_artifact_manifest_target_t* inout_target);
+
+// Family-owned projection of structured target facts into manifest fields.
+typedef struct loom_target_artifact_manifest_target_projection_t {
+  // Projects target-family identity from |entry| into |inout_target|.
+  loom_target_artifact_manifest_project_target_fn_t project;
+} loom_target_artifact_manifest_target_projection_t;
+
 typedef struct loom_target_artifact_manifest_collect_options_t {
   // Selected manifest detail mode.
   loom_target_artifact_manifest_mode_t mode;
@@ -47,6 +59,10 @@ typedef struct loom_target_artifact_manifest_collect_options_t {
   // Emitted artifact format. UNKNOWN falls back to the first selected entry's
   // target snapshot format when entries are present.
   loom_target_artifact_format_t artifact_format;
+
+  // Optional target-family projection for identity fields that cannot be
+  // derived from the target-neutral bundle.
+  const loom_target_artifact_manifest_target_projection_t* target_projection;
 } loom_target_artifact_manifest_collect_options_t;
 
 // Initializes collection options with manifest collection disabled.

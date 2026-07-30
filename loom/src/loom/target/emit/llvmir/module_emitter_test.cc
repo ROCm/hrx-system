@@ -71,7 +71,7 @@ static const loom_llvmir_target_profile_t kTestKernelProfile = {
         /*.flat_workgroup_size_min=*/1,
         /*.flat_workgroup_size_max=*/1024,
         /*.subgroup_size=*/{},
-        /*.binding_resource_flags=*/{},
+        /*.binding_resource_control=*/{},
         /*.flat_workgroup_size_attr_name=*/
         IREE_SVL("loom-test-flat-work-group-size"),
         /*.uniform_workgroup_size_attr_name=*/
@@ -178,9 +178,8 @@ class LlvmirModuleEmitterTest : public ::testing::Test {
     loom_llvmir_emit_low_module_options_initialize(&options);
     options.target_profile_registry = &target_profile_registry;
     iree_status_t status = loom_llvmir_emit_low_module(
-        module, &low_registry_.registry, loom_target_selection_empty(),
-        capture->emitter(), &scratch_arena, &options, &raw_module,
-        iree_allocator_system());
+        module, &low_registry_.registry, capture->emitter(), &scratch_arena,
+        &options, &raw_module, iree_allocator_system());
     if (iree_status_is_ok(status) && raw_module != nullptr) {
       out_module->reset(raw_module);
     }

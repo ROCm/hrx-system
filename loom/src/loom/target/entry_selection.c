@@ -226,12 +226,11 @@ iree_status_t loom_target_entry_verify_low_module(
     const loom_module_t* module,
     const loom_target_low_descriptor_registry_t* low_registry,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
-    loom_target_selection_t target_selection, uint32_t max_errors,
+    uint32_t max_errors,
     loom_low_verify_provider_list_t low_verify_provider_list,
     loom_low_verify_scratch_t* scratch, loom_low_verify_result_t* out_result) {
   const loom_low_verify_options_t low_verify_options = {
       .descriptor_registry = &low_registry->registry,
-      .target_selection = target_selection,
       .emitter = loom_target_entry_emitter(diagnostic_emitter),
       .provider_list = low_verify_provider_list,
       .max_errors = max_errors,
@@ -401,30 +400,6 @@ static iree_status_t loom_target_entry_try_entry(
     IREE_RETURN_IF_ERROR(loom_target_entry_emit_incompatible_bundle(
         diagnostic_emitter, &entry, pipeline_name));
     return iree_ok_status();
-  }
-
-  const loom_target_bundle_t* effective_target_bundle =
-      options ? options->effective_target_bundle : NULL;
-  if (effective_target_bundle != NULL) {
-    if (!loom_target_function_contract_bundles_compatible(
-            &entry.bundle_storage.bundle, effective_target_bundle)) {
-      if (!require_compatible) {
-        return iree_ok_status();
-      }
-      IREE_RETURN_IF_ERROR(loom_target_entry_emit_incompatible_bundle(
-          diagnostic_emitter, &entry, pipeline_name));
-      return iree_ok_status();
-    }
-    loom_target_function_contract_apply_compatible_selection(
-        effective_target_bundle, &entry.bundle_storage);
-    if (!predicate.fn(predicate.user_data, &entry)) {
-      if (!require_compatible) {
-        return iree_ok_status();
-      }
-      IREE_RETURN_IF_ERROR(loom_target_entry_emit_incompatible_bundle(
-          diagnostic_emitter, &entry, pipeline_name));
-      return iree_ok_status();
-    }
   }
 
   loom_target_entry_assign_entry(&entry, out_entry);

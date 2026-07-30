@@ -34,7 +34,8 @@ loom_cc_library(
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/rewrite:rewriter",
-        "//loom/src/loom/target:selection",
+        "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/target:provider",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -54,7 +55,7 @@ loom_cc_library(
         "//loom/src/loom/pass:types",
         "//loom/src/loom/rewrite:callable",
         "//loom/src/loom/rewrite:rewriter",
-        "//loom/src/loom/target:selection",
+        "//loom/src/loom/target:pass_environment",
         "//runtime/src/iree/base",
     ],
 )
@@ -111,7 +112,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:symbol_liveness",
         "//loom/src/loom/ir",
         "//loom/src/loom/pass:types",
-        "//loom/src/loom/target:selection",
+        "//loom/src/loom/target:pass_environment",
         "//runtime/src/iree/base",
     ],
 )

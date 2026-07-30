@@ -8,30 +8,32 @@
 
 #include <string.h>
 
-// GFX125x hardware entrypoints require an unclaused VMEM followed by V_NOP.
-// Replay mode establishes the multi-group XNACK behavior assumed by XCNT wait
-// insertion before the scheduled body performs any VGPR-MSB transitions.
-static const char loom_amdgpu_gfx125x_entry_assembly[] =
+// This entry profile uses an unclaused VMEM followed by V_NOP. Replay mode
+// establishes the multi-group XNACK behavior assumed by XCNT wait insertion
+// before the scheduled body performs any VGPR-MSB transitions.
+static const char loom_amdgpu_initial_vmem_replay_entry_assembly[] =
     "  global_prefetch_b8 v0, s[0:1] scope:SCOPE_SE\n"
     "  v_nop\n"
     "  s_setreg_imm32_b32 hwreg(HW_REG_WAVE_MODE, 25, 1), 1\n";
 
-static const uint8_t loom_amdgpu_gfx125x_entry_text[] = {
+static const uint8_t loom_amdgpu_initial_vmem_replay_entry_text[] = {
     0x00, 0x40, 0x17, 0xee, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x7e, 0x41, 0x06, 0x80, 0xb9, 0x01, 0x00, 0x00, 0x00,
 };
 
 static const loom_amdgpu_kernel_entry_envelope_t
-    loom_amdgpu_gfx125x_entry_envelope = {
+    loom_amdgpu_initial_vmem_replay_entry_envelope = {
         .assembly =
             {
-                .data = loom_amdgpu_gfx125x_entry_assembly,
-                .size = sizeof(loom_amdgpu_gfx125x_entry_assembly) - 1u,
+                .data = loom_amdgpu_initial_vmem_replay_entry_assembly,
+                .size =
+                    sizeof(loom_amdgpu_initial_vmem_replay_entry_assembly) - 1u,
             },
         .text =
             {
-                .data = loom_amdgpu_gfx125x_entry_text,
-                .data_length = sizeof(loom_amdgpu_gfx125x_entry_text),
+                .data = loom_amdgpu_initial_vmem_replay_entry_text,
+                .data_length =
+                    sizeof(loom_amdgpu_initial_vmem_replay_entry_text),
             },
         .instruction_count = 3u,
         .minimum_sgpr_count = 2u,
@@ -42,13 +44,17 @@ static const loom_amdgpu_kernel_entry_envelope_t
     loom_amdgpu_empty_entry_envelope = {0};
 
 const loom_amdgpu_kernel_entry_envelope_t*
-loom_amdgpu_kernel_entry_envelope_for_processor(
-    const loom_amdgpu_processor_info_t* processor) {
-  if (loom_amdgpu_processor_info_has_flags(
-          processor, LOOM_AMDGPU_PROCESSOR_INFO_FLAG_GFX125X_ENTRY_ENVELOPE)) {
-    return &loom_amdgpu_gfx125x_entry_envelope;
+loom_amdgpu_kernel_entry_envelope_for_properties(
+    const loom_amdgpu_processor_properties_t* properties) {
+  switch (properties->kernel_entry.profile) {
+    case LOOM_AMDGPU_KERNEL_ENTRY_PROFILE_NONE:
+      return &loom_amdgpu_empty_entry_envelope;
+    case LOOM_AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY:
+      return &loom_amdgpu_initial_vmem_replay_entry_envelope;
+    default:
+      IREE_CHECK_UNREACHABLE("unknown AMDGPU kernel entry profile");
+      return &loom_amdgpu_empty_entry_envelope;
   }
-  return &loom_amdgpu_empty_entry_envelope;
 }
 
 iree_status_t loom_amdgpu_kernel_entry_prepend_text(

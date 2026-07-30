@@ -112,6 +112,7 @@ loom_cc_library(
     loom::sanitizer::options
     loom::target::pipeline
     loom::target::predicate
+    loom::target::profile
     loom::target::provider
     loom::target::reporting::artifact_manifest
     loom::target::reporting::format

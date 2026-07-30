@@ -95,8 +95,8 @@ loom_cc_library(
     loom::rewrite::remap
     loom::rewrite::rewriter
     loom::target::launch
+    loom::target::pass_environment
     loom::target::reporting::report
-    loom::target::selection
     loom::util::walk
   PUBLIC
 )

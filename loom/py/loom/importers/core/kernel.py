@@ -257,9 +257,17 @@ def target_preset_amdgpu_matrix_profile(target_preset: str) -> str | None:
     selection = _amdgpu_target_selection(target_preset)
     if selection is None:
         return None
-    from loom.target.arch.amdgpu.target_info import amdgpu_processor_info_by_name
+    from loom.target.arch.amdgpu.target_info import (
+        amdgpu_processor_info_by_name,
+        amdgpu_target_info_by_name,
+    )
 
-    processor_info = amdgpu_processor_info_by_name(selection.kind)
+    target_info = amdgpu_target_info_by_name(selection.kind)
+    processor_info = (
+        amdgpu_processor_info_by_name(target_info.processor)
+        if target_info is not None
+        else None
+    )
     return processor_info.features.matrix if processor_info is not None else None
 
 
@@ -268,9 +276,17 @@ def target_preset_amdgpu_subgroup_size(target_preset: str) -> int | None:
     selection = _amdgpu_target_selection(target_preset)
     if selection is None:
         return None
-    from loom.target.arch.amdgpu.target_info import amdgpu_processor_info_by_name
+    from loom.target.arch.amdgpu.target_info import (
+        amdgpu_processor_info_by_name,
+        amdgpu_target_info_by_name,
+    )
 
-    processor_info = amdgpu_processor_info_by_name(selection.kind)
+    target_info = amdgpu_target_info_by_name(selection.kind)
+    processor_info = (
+        amdgpu_processor_info_by_name(target_info.processor)
+        if target_info is not None
+        else None
+    )
     return processor_info.wavefront.default_size if processor_info is not None else None
 
 
@@ -297,15 +313,13 @@ def _amdgpu_target_selection(target_preset: str) -> _AmdgpuTargetSelection | Non
     if target_cpu is None:
         return None
     from loom.target.arch.amdgpu.dialect import AmdgpuTargetKind
-    from loom.target.arch.amdgpu.target_info import (
-        amdgpu_target_record_info_for_processor,
-    )
+    from loom.target.arch.amdgpu.target_info import amdgpu_target_info_by_name
 
     available_kinds = {case.keyword for case in AmdgpuTargetKind.cases}
 
-    target_record = amdgpu_target_record_info_for_processor(target_cpu)
-    if target_record is not None and target_record.processor in available_kinds:
-        return _AmdgpuTargetSelection(kind=target_record.processor)
+    target_info = amdgpu_target_info_by_name(target_cpu)
+    if target_info is not None and target_info.target in available_kinds:
+        return _AmdgpuTargetSelection(kind=target_info.target)
     return None
 
 

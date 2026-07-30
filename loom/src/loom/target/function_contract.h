@@ -9,7 +9,7 @@
 // Generic func symbol facts carry only function-local structure: target symbol,
 // ABI/export syntax, and signature/import facts. This target layer resolves the
 // referenced target-record facts and overlays the func-owned contract onto the
-// selected target bundle for lowering, packaging, and execution.
+// durable target bundle for lowering, packaging, and execution.
 
 #ifndef LOOM_TARGET_FUNCTION_CONTRACT_H_
 #define LOOM_TARGET_FUNCTION_CONTRACT_H_
@@ -25,31 +25,16 @@
 extern "C" {
 #endif
 
-// Returns true when |selected_bundle| can refine |module_bundle| without
-// changing the target family, artifact format, or target-low descriptor
-// contract selected by the module IR.
+// Returns true when |effective_bundle| and |requirement_bundle| use the same
+// codegen representation, artifact format, and target-low descriptor contract.
 //
-// Runtime/device target selection uses this to apply concrete limits and
-// feature bits after a source module has selected a compatible target record.
-// The comparison intentionally ignores ABI/export facts and target feature
-// bits: ABI/export selection belongs to the authored function/target contract,
-// while feature bits are the primary facts a selected device bundle is expected
-// to refine.
+// Device compatibility checks and specialization reporting use this coarse
+// contract-shape relation only after target identity has been resolved. The
+// comparison intentionally ignores function-owned ABI/export facts and
+// target-specific feature and limit facts.
 bool loom_target_function_contract_bundles_compatible(
-    const loom_target_bundle_t* module_bundle,
-    const loom_target_bundle_t* selected_bundle);
-
-// Refines |bundle_storage|'s target snapshot and feature bits with a compatible
-// runtime-selected bundle while preserving authored target identity, target
-// contract selection, the already resolved function-local export plan, and
-// authored fixed execution facts.
-//
-// Callers must first validate compatibility with
-// loom_target_function_contract_bundles_compatible. This helper only performs
-// the structural overlay used by source selection and low target binding.
-void loom_target_function_contract_apply_compatible_selection(
-    const loom_target_bundle_t* selected_bundle,
-    loom_target_bundle_storage_t* bundle_storage);
+    const loom_target_bundle_t* effective_bundle,
+    const loom_target_bundle_t* requirement_bundle);
 
 // Resolves |func_facts|'s target record and materializes the effective target
 // bundle selected by the func-like symbol.
@@ -71,9 +56,7 @@ iree_status_t loom_target_function_contract_resolve(
 // Materializes the effective target bundle by overlaying |func_facts|'s
 // function-owned ABI/export attrs onto |base_bundle|.
 //
-// This is the contract resolver used when a compile front door has already
-// selected an effective target bundle, such as a HAL-device-derived runtime
-// target. |target_name| is used only for diagnostics. Returns status only for
+// |target_name| is used only for diagnostics. Returns status only for
 // infrastructure failures; invalid user IR emits diagnostics and sets
 // |out_valid| false.
 iree_status_t loom_target_function_contract_resolve_from_bundle(

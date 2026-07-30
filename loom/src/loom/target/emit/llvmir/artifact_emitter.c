@@ -153,8 +153,8 @@ static iree_status_t loom_llvmir_artifact_emit(
       request->option_chain, &emit_options));
   iree_status_t status = loom_llvmir_emit_low_module(
       request->module, request->low_descriptor_registry,
-      request->target_selection, request->diagnostic_emitter,
-      request->scratch_arena, &emit_options, &module, request->allocator);
+      request->diagnostic_emitter, request->scratch_arena, &emit_options,
+      &module, request->allocator);
   if (iree_status_is_ok(status) && module == NULL) {
     return iree_ok_status();
   }

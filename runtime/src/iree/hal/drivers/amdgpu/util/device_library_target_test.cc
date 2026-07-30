@@ -16,29 +16,28 @@
 namespace iree::hal::amdgpu {
 namespace {
 
-using iree::testing::status::StatusIs;
-
-static iree_hal_amdgpu_target_id_t ParseTargetId(const char* target_name) {
-  iree_hal_amdgpu_target_id_t target_id;
-  IREE_CHECK_OK(iree_hal_amdgpu_target_id_parse_hsa_isa_name(
-      iree_make_cstring_view(target_name), &target_id));
-  return target_id;
+static iree_hal_amdgpu_target_identity_t ParseIdentity(
+    const char* target_name) {
+  iree_hal_amdgpu_target_identity_t identity;
+  IREE_CHECK_OK(iree_hal_amdgpu_target_identity_parse_hsa_isa_name(
+      iree_make_cstring_view(target_name), &identity));
+  return identity;
 }
 
-static iree_hal_amdgpu_target_id_t QualifiedTargetId(const char* target_name,
-                                                     uint32_t asic_revision) {
-  iree_hal_amdgpu_target_id_t target_id = ParseTargetId(target_name);
-  IREE_CHECK_OK(
-      iree_hal_amdgpu_target_id_apply_asic_revision(asic_revision, &target_id));
-  return target_id;
+static iree_hal_amdgpu_target_identity_t ResolvedPhysicalIdentity(
+    const char* target_name, uint32_t asic_revision) {
+  iree_hal_amdgpu_target_identity_t identity = ParseIdentity(target_name);
+  IREE_CHECK_OK(iree_hal_amdgpu_target_identity_resolve_physical_target(
+      asic_revision, &identity));
+  return identity;
 }
 
 static std::vector<std::string> CandidateValues(
-    const iree_hal_amdgpu_target_id_t& physical_target_id,
-    const iree_hal_amdgpu_target_id_t& isa_target_id) {
+    const iree_hal_amdgpu_target_identity_t& physical_identity,
+    const iree_hal_amdgpu_target_identity_t& isa_identity) {
   iree_hal_amdgpu_device_library_target_candidate_list_t candidates = {0};
   IREE_CHECK_OK(iree_hal_amdgpu_device_library_target_candidates_from_agent_isa(
-      &physical_target_id, &isa_target_id, &candidates));
+      &physical_identity, &isa_identity, &candidates));
   std::vector<std::string> values;
   values.reserve(candidates.count);
   for (iree_host_size_t i = 0; i < candidates.count; ++i) {
@@ -50,8 +49,8 @@ static std::vector<std::string> CandidateValues(
 
 static std::vector<std::string> CandidateValues(const char* target_name,
                                                 uint32_t asic_revision = 0) {
-  const auto target_id = QualifiedTargetId(target_name, asic_revision);
-  return CandidateValues(target_id, target_id);
+  const auto identity = ResolvedPhysicalIdentity(target_name, asic_revision);
+  return CandidateValues(identity, identity);
 }
 
 TEST(DeviceLibraryTargetTest,
@@ -74,32 +73,20 @@ TEST(DeviceLibraryTargetTest, Gfx1250A0SelectsOnlyExactVariant) {
 }
 
 TEST(DeviceLibraryTargetTest, Gfx1250A0RejectsGenericAlternateIsa) {
-  const auto physical_target_id =
-      QualifiedTargetId("amdgcn-amd-amdhsa--gfx1250", 0);
-  const auto generic_isa_target_id =
-      QualifiedTargetId("amdgcn-amd-amdhsa--gfx12-5-generic", 0);
+  const auto physical_identity =
+      ResolvedPhysicalIdentity("amdgcn-amd-amdhsa--gfx1250", 0);
+  const auto generic_isa_identity =
+      ResolvedPhysicalIdentity("amdgcn-amd-amdhsa--gfx12-5-generic", 0);
 
-  EXPECT_TRUE(
-      CandidateValues(physical_target_id, generic_isa_target_id).empty());
+  EXPECT_TRUE(CandidateValues(physical_identity, generic_isa_identity).empty());
 }
 
 TEST(DeviceLibraryTargetTest, Gfx1250B0IncludesGenericFallback) {
   const auto values = CandidateValues("amdgcn-amd-amdhsa--gfx1250", 1);
 
-  ASSERT_EQ(values.size(), 3u);
-  EXPECT_EQ(values[0], "gfx1250:gfx1250-b0-specific+");
-  EXPECT_EQ(values[1], "gfx1250");
-  EXPECT_EQ(values[2], "gfx12-5-generic");
-}
-
-TEST(DeviceLibraryTargetTest, RejectsUnqualifiedGfx1250PhysicalIdentity) {
-  const auto target_id = ParseTargetId("amdgcn-amd-amdhsa--gfx1250");
-  iree_hal_amdgpu_device_library_target_candidate_list_t candidates = {0};
-
-  EXPECT_THAT(
-      Status(iree_hal_amdgpu_device_library_target_candidates_from_agent_isa(
-          &target_id, &target_id, &candidates)),
-      StatusIs(StatusCode::kFailedPrecondition));
+  ASSERT_EQ(values.size(), 2u);
+  EXPECT_EQ(values[0], "gfx1250");
+  EXPECT_EQ(values[1], "gfx12-5-generic");
 }
 
 TEST(DeviceLibraryTargetTest, MatchesOnlyWholeFileArchSegments) {

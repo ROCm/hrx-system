@@ -10,15 +10,16 @@ extern const loom_amdgpu_occupancy_model_t* const
     kLoomAmdgpuOccupancyModelsByProcessor
         [][LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_COUNT];
 
-const loom_amdgpu_occupancy_model_t* loom_amdgpu_occupancy_model_for_processor(
-    const loom_amdgpu_processor_info_t* processor, uint32_t wave_size) {
-  IREE_ASSERT(processor != NULL);
+const loom_amdgpu_occupancy_model_t* loom_amdgpu_occupancy_model_for_properties(
+    const loom_amdgpu_processor_properties_t* properties, uint32_t wave_size) {
+  IREE_ASSERT(properties != NULL);
   IREE_ASSERT(wave_size == 32 || wave_size == 64);
   const loom_amdgpu_occupancy_wave_slot_t wave_slot =
       wave_size == 32 ? LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_32
                       : LOOM_AMDGPU_OCCUPANCY_WAVE_SLOT_64;
   const loom_amdgpu_occupancy_model_t* model =
-      kLoomAmdgpuOccupancyModelsByProcessor[processor->ordinal][wave_slot];
+      kLoomAmdgpuOccupancyModelsByProcessor[properties->occupancy_model_ordinal]
+                                           [wave_slot];
   IREE_ASSERT(model != NULL);
   return model;
 }

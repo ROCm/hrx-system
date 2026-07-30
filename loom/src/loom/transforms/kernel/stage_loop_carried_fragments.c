@@ -29,8 +29,8 @@
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/launch.h"
+#include "loom/target/pass_environment.h"
 #include "loom/target/reporting/report.h"
-#include "loom/target/selection.h"
 #include "loom/util/walk.h"
 
 //===----------------------------------------------------------------------===//

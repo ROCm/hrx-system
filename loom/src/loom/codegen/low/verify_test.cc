@@ -19,7 +19,6 @@
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/target/test/low_registry.h"
-#include "loom/target/test/target_records.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/testing/module_ptr.h"
 
@@ -71,23 +70,10 @@ class LowVerifyTest : public ::testing::Test {
     return ModulePtr(module);
   }
 
-  static void InitializeTargetBundleStorage(
-      const loom_target_bundle_t* bundle,
-      loom_target_bundle_storage_t* out_storage) {
-    *out_storage = {};
-    out_storage->snapshot = *bundle->snapshot;
-    out_storage->export_plan = *bundle->export_plan;
-    out_storage->config = *bundle->config;
-    out_storage->bundle = *bundle;
-    loom_target_bundle_storage_rebind(out_storage);
-  }
-
-  void VerifyModule(loom_module_t* module, loom_target_selection_t selection,
-                    DiagnosticEmissionCapture* capture,
+  void VerifyModule(loom_module_t* module, DiagnosticEmissionCapture* capture,
                     loom_low_verify_result_t* out_result) {
     loom_low_verify_options_t options = {};
     options.descriptor_registry = &registry_.registry;
-    options.target_selection = selection;
     options.emitter = capture->emitter();
     options.provider_list = loom_low_verify_provider_list_empty();
     options.max_errors = 20;
@@ -112,32 +98,23 @@ low.func.def target(@target) @uses_workgroup_storage() {
 )");
   DiagnosticEmissionCapture capture;
   loom_low_verify_result_t result = {};
-  VerifyModule(module.get(), loom_target_selection_empty(), &capture, &result);
+  VerifyModule(module.get(), &capture, &result);
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_TRUE(capture.emissions.empty());
 }
 
-TEST_F(LowVerifyTest, RejectsWorkgroupStorageAboveSelectedTargetLimit) {
+TEST_F(LowVerifyTest, RejectsWorkgroupStorageAboveDurableTargetLimit) {
   ModulePtr module = ParseModule(R"(
-test.target<low_core> @target
+test.target<low_core> @target {max_workgroup_storage_bytes = 64}
 low.func.def target(@target) @uses_workgroup_storage() {
   %storage = low.storage.reserve {byte_alignment = 16, byte_length = 80} : low.storage<workgroup>
   low.return
 }
 )");
-  ASSERT_GT(loom_test_target_bundles.count, 1u);
-  loom_target_bundle_storage_t selected_storage;
-  InitializeTargetBundleStorage(loom_test_target_bundles.values[1],
-                                &selected_storage);
-  selected_storage.snapshot.max_workgroup_storage_bytes = 64;
-  const loom_target_selection_t selection = {
-      /*.bundle=*/&selected_storage.bundle,
-      /*.data=*/nullptr,
-  };
 
   DiagnosticEmissionCapture capture;
   loom_low_verify_result_t result = {};
-  VerifyModule(module.get(), selection, &capture, &result);
+  VerifyModule(module.get(), &capture, &result);
   EXPECT_EQ(result.error_count, 1u);
   ASSERT_EQ(capture.emissions.size(), 1u);
 
@@ -183,7 +160,7 @@ low.func.def target(@target) @ordinal_key_mismatch(%lhs: reg<test.i32>, %rhs: re
 
   DiagnosticEmissionCapture capture;
   loom_low_verify_result_t result = {};
-  VerifyModule(module.get(), loom_target_selection_empty(), &capture, &result);
+  VerifyModule(module.get(), &capture, &result);
   EXPECT_EQ(result.error_count, 1u);
   ASSERT_EQ(capture.emissions.size(), 1u);
 

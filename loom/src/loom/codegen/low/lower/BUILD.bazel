@@ -101,6 +101,8 @@ loom_cc_library(
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/target:function_contract",
+        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target:specialization",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

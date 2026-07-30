@@ -19,7 +19,8 @@
 #include "loom/target/arch/amdgpu/ops/registry.h"
 #include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/pass_registry.h"
-#include "loom/target/arch/amdgpu/records/target_records.h"
+#include "loom/target/arch/amdgpu/profile.h"
+#include "loom/target/materialization.h"
 
 static const loom_target_low_legality_provider_t*
     kLoomAmdgpuLowLegalityProviders[] = {
@@ -45,173 +46,110 @@ static const loom_low_verify_provider_t* kLoomAmdgpuLowVerifyProviders[] = {
     &loom_amdgpu_low_verify_provider,
 };
 
-static bool loom_amdgpu_provider_matches_selection_bundle(
-    const loom_target_bundle_t* candidate_bundle) {
-  if (candidate_bundle == NULL) {
+// Canonical target rows establish AMDGPU code-object refinement. Target-ID
+// features then refine that relation without coupling policy to a particular
+// feature or stepping name. Common indexed facts preserve structured
+// representation, subgroup, and capacity requirements independently of the
+// family relation.
+static bool loom_amdgpu_provider_satisfies_requirement(
+    loom_target_record_view_t effective_target,
+    loom_target_record_view_t target_requirement) {
+  loom_amdgpu_target_identity_t effective_identity = {0};
+  loom_amdgpu_target_record_resolve_identity(effective_target.facts->target.op,
+                                             &effective_identity);
+  loom_amdgpu_target_identity_t requirement_identity = {0};
+  loom_amdgpu_target_record_resolve_identity(
+      target_requirement.facts->target.op, &requirement_identity);
+  if (!loom_amdgpu_target_identity_satisfies_requirement(
+          &effective_identity, &requirement_identity)) {
     return false;
   }
-  const iree_host_size_t descriptor_set_count =
-      loom_amdgpu_target_info_descriptor_set_count();
-  for (iree_host_size_t i = 0; i < descriptor_set_count; ++i) {
-    const loom_amdgpu_descriptor_set_info_t* descriptor_set =
-        loom_amdgpu_target_info_descriptor_set_at((uint16_t)i);
-    if (descriptor_set == NULL) {
-      continue;
+
+  const loom_target_bundle_storage_t* effective_storage =
+      &effective_target.facts->storage;
+  const loom_target_bundle_storage_t* requirement_storage =
+      &target_requirement.facts->storage;
+  const loom_amdgpu_processor_info_t* effective_processor =
+      loom_amdgpu_target_info_target_processor(effective_identity.target);
+  IREE_ASSERT(effective_processor != NULL);
+
+  // AMDGPU processors may support more than one wavefront size. The target
+  // bundle carries the default used when the author does not choose one, while
+  // an explicit authored subgroup is a function-local codegen choice.
+  loom_target_snapshot_t effective_snapshot = effective_storage->snapshot;
+  const uint32_t required_subgroup_size =
+      requirement_storage->snapshot.subgroup_size;
+  if (required_subgroup_size != 0) {
+    if (!loom_amdgpu_processor_properties_support_wavefront_size(
+            &effective_processor->properties, required_subgroup_size)) {
+      return false;
     }
-    const loom_target_bundle_t* amdgpu_bundle =
-        loom_amdgpu_target_bundle_for_descriptor_set(descriptor_set->ordinal);
-    if (amdgpu_bundle == candidate_bundle ||
-        (amdgpu_bundle != NULL &&
-         iree_string_view_equal(amdgpu_bundle->name, candidate_bundle->name))) {
-      return true;
-    }
+    effective_snapshot.subgroup_size = required_subgroup_size;
   }
-  return false;
+
+  // Processor refinement deliberately changes a generic descriptor-set
+  // contract into the exact processor contract. An explicitly overridden
+  // contract key remains a requirement instead of being silently discarded.
+  const loom_attribute_t required_contract_set_key =
+      loom_op_attrs(target_requirement.facts->target
+                        .op)[loom_amdgpu_target_contract_set_key_ATTR_INDEX];
+  if (!loom_attr_is_absent(required_contract_set_key) &&
+      !iree_string_view_equal(effective_storage->config.contract_set_key,
+                              requirement_storage->config.contract_set_key)) {
+    return false;
+  }
+
+  // ABI and export facts belong to each function contract. Target
+  // applicability preserves structural target constraints and requires all
+  // authored target feature bits.
+  return loom_target_snapshot_satisfies_requirement(
+             &effective_snapshot, &requirement_storage->snapshot) &&
+         iree_all_bits_set(effective_storage->config.contract_feature_bits,
+                           requirement_storage->config.contract_feature_bits);
 }
 
-static iree_status_t loom_amdgpu_provider_validate_materialized_target_symbol(
-    const loom_module_t* module, iree_string_view_t symbol_name,
-    const loom_amdgpu_target_profile_t* profile, loom_symbol_ref_t target_ref,
-    bool* out_reusable) {
-  *out_reusable = false;
-
-  const loom_symbol_t* symbol = &module->symbols.entries[target_ref.symbol_id];
-  if (symbol->defining_op == NULL) {
-    return iree_ok_status();
-  }
-  if (!loom_amdgpu_target_isa(symbol->defining_op)) {
-    return iree_make_status(
-        IREE_STATUS_ALREADY_EXISTS,
-        "AMDGPU target materialization symbol '@%.*s' already names a "
-        "non-AMDGPU target op",
-        (int)symbol_name.size, symbol_name.data);
-  }
-
-  const iree_string_view_t existing_processor =
-      loom_amdgpu_target_record_processor_name(symbol->defining_op);
-  if (!iree_string_view_equal(existing_processor, profile->processor->name)) {
-    return iree_make_status(
-        IREE_STATUS_ALREADY_EXISTS,
-        "AMDGPU target materialization symbol '@%.*s' selects processor "
-        "'%.*s', but the selected profile requires '%.*s'",
-        (int)symbol_name.size, symbol_name.data, (int)existing_processor.size,
-        existing_processor.data, (int)profile->processor->name.size,
-        profile->processor->name.data);
-  }
-
-  const loom_amdgpu_gfx1250_revision_t existing_revision =
-      loom_amdgpu_target_record_effective_gfx1250_revision(symbol->defining_op);
-  if (existing_revision != profile->gfx1250_revision) {
-    return iree_make_status(
-        IREE_STATUS_ALREADY_EXISTS,
-        "AMDGPU target materialization symbol '@%.*s' selects gfx1250 "
-        "revision %u, but the selected profile requires revision %u",
-        (int)symbol_name.size, symbol_name.data, (unsigned)existing_revision,
-        (unsigned)profile->gfx1250_revision);
-  }
-
-  *out_reusable = true;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_provider_resolve_profile_target_ref(
-    loom_module_t* module, const loom_amdgpu_target_profile_t* profile,
-    loom_symbol_ref_t* out_target_ref) {
-  *out_target_ref = loom_symbol_ref_null();
-  if (module == NULL || module->body == NULL ||
-      module->body->block_count == 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU target materialization requires a module "
-                            "with a body block");
-  }
-  if (profile == NULL || profile->processor == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU target materialization requires a selected processor");
-  }
-  const loom_amdgpu_processor_info_t* processor = profile->processor;
-  if (iree_string_view_is_empty(processor->name)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU target materialization selected a processor row with no "
-        "processor name");
-  }
-
-  loom_string_id_t symbol_name_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_module_intern_string(module, processor->name, &symbol_name_id));
-  uint16_t symbol_id = loom_module_find_symbol(module, symbol_name_id);
-  if (symbol_id == LOOM_SYMBOL_ID_INVALID) {
-    IREE_RETURN_IF_ERROR(
-        loom_module_add_symbol(module, symbol_name_id, &symbol_id));
-  }
-  *out_target_ref = (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id};
-
-  bool reusable = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_provider_validate_materialized_target_symbol(
-      module, processor->name, profile, *out_target_ref, &reusable));
-  if (reusable) {
-    return iree_ok_status();
-  }
-
-  loom_block_t* module_block = loom_module_block(module);
-  loom_builder_t builder = {0};
-  loom_builder_initialize(module, &module->arena, module_block, &builder);
-  if (module_block->first_op != NULL) {
-    loom_builder_set_before(&builder, module_block->first_op);
-  }
-
-  loom_op_t* target_op = NULL;
-  return loom_amdgpu_target_record_build_for_profile(
-      &builder, profile, *out_target_ref, LOOM_LOCATION_UNKNOWN, &target_op);
-}
-
-static iree_status_t loom_amdgpu_provider_materialize_selection(
-    const loom_target_provider_t* provider,
-    const loom_target_selection_materialization_request_t* request,
-    bool* out_materialized, loom_symbol_ref_t* out_target_ref) {
-  (void)provider;
-  *out_materialized = false;
-  *out_target_ref = loom_symbol_ref_null();
-  if (!loom_amdgpu_provider_matches_selection_bundle(
-          request->target_selection.bundle)) {
-    return iree_ok_status();
-  }
-
+static iree_string_view_t loom_amdgpu_provider_materialization_symbol_stem(
+    const loom_target_profile_t* base_profile) {
   const loom_amdgpu_target_profile_t* profile =
-      (const loom_amdgpu_target_profile_t*)request->target_selection.data;
-  if (profile == NULL || profile->processor == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU target materialization requires processor profile data");
-  }
-  const loom_amdgpu_processor_info_t* processor = profile->processor;
-  const loom_target_bundle_t* expected_bundle =
-      loom_amdgpu_target_bundle_for_descriptor_set(
-          processor->descriptor_set.ordinal);
-  if (expected_bundle == NULL) {
-    return iree_make_status(
-        IREE_STATUS_UNAVAILABLE,
-        "AMDGPU processor '%.*s' has no materializable target bundle",
-        (int)processor->name.size, processor->name.data);
-  }
-  if (expected_bundle != request->target_selection.bundle &&
-      !iree_string_view_equal(expected_bundle->name,
-                              request->target_selection.bundle->name)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU selected processor '%.*s' belongs to target bundle '%.*s', "
-        "but the selected profile provided '%.*s'",
-        (int)processor->name.size, processor->name.data,
-        (int)expected_bundle->name.size, expected_bundle->name.data,
-        (int)request->target_selection.bundle->name.size,
-        request->target_selection.bundle->name.data);
+      loom_amdgpu_target_profile_cast(base_profile);
+  return profile != NULL && profile->identity.target != NULL
+             ? profile->identity.target->name
+             : iree_string_view_empty();
+}
+
+static bool loom_amdgpu_provider_record_matches_effective_target(
+    const loom_module_t* module, const loom_op_t* target_op,
+    const loom_target_profile_t* base_profile,
+    const loom_op_t* authored_target_op) {
+  const loom_amdgpu_target_profile_t* profile =
+      loom_amdgpu_target_profile_cast(base_profile);
+  if (profile == NULL || profile->identity.target == NULL ||
+      loom_amdgpu_target_record_target(target_op) != profile->identity.target) {
+    return false;
   }
 
-  IREE_RETURN_IF_ERROR(loom_amdgpu_provider_resolve_profile_target_ref(
-      request->module, profile, out_target_ref));
-  *out_materialized = true;
-  return iree_ok_status();
+  loom_amdgpu_target_identity_t record_identity = {0};
+  loom_amdgpu_target_record_resolve_identity(target_op, &record_identity);
+  return loom_amdgpu_target_identity_equal(&record_identity,
+                                           &profile->identity) &&
+         loom_target_record_projection_matches_bundle(
+             module, target_op, profile->base.target_bundle,
+             authored_target_op);
+}
+
+static iree_status_t loom_amdgpu_provider_build_effective_target_record(
+    loom_builder_t* builder, const loom_target_profile_t* base_profile,
+    const loom_op_t* authored_target_op, loom_symbol_ref_t symbol,
+    loom_location_id_t location, loom_op_t** out_target_op) {
+  const loom_amdgpu_target_profile_t* profile =
+      loom_amdgpu_target_profile_cast(base_profile);
+  if (profile == NULL || profile->identity.target == NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "AMDGPU target materialization requires a complete AMDGPU profile");
+  }
+  return loom_amdgpu_target_record_build_for_profile(
+      builder, profile, authored_target_op, symbol, location, out_target_op);
 }
 
 static iree_status_t loom_amdgpu_provider_build_string_attr(
@@ -282,6 +220,7 @@ static iree_status_t loom_amdgpu_provider_contribute_pipeline(
 }
 
 const loom_target_provider_t loom_amdgpu_target_provider = {
+    .profile_type = &loom_amdgpu_target_profile_type,
     .register_context = loom_amdgpu_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_amdgpu_low_descriptor_registry_initialize,
@@ -316,7 +255,19 @@ const loom_target_provider_t loom_amdgpu_target_provider = {
         },
     .pass_registry = &loom_amdgpu_pass_registry,
     .contribute_pipeline = loom_amdgpu_provider_contribute_pipeline,
-    .materialize_selection = loom_amdgpu_provider_materialize_selection,
+    .materialization =
+        {
+            .symbol_stem = loom_amdgpu_provider_materialization_symbol_stem,
+            .record_matches_effective_target =
+                loom_amdgpu_provider_record_matches_effective_target,
+            .build_effective_target_record =
+                loom_amdgpu_provider_build_effective_target_record,
+        },
+    .record_semantics =
+        {
+            .op_kind = LOOM_OP_AMDGPU_TARGET,
+            .satisfies_requirement = loom_amdgpu_provider_satisfies_requirement,
+        },
 };
 
 static const loom_target_provider_t* const kLoomAmdgpuTargetProviders[] = {

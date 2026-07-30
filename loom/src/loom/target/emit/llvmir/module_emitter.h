@@ -51,7 +51,6 @@ void loom_llvmir_emit_low_module_options_initialize(
 iree_status_t loom_llvmir_emit_low_module(
     loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    loom_target_selection_t target_selection,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* scratch_arena,
     const loom_llvmir_emit_low_module_options_t* options,

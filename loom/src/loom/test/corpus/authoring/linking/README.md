@@ -28,14 +28,14 @@ python dev.py bazel run //loom/src/loom/tools/loom-link:loom-link -- \
 | `linking.test.json` | Production CLI proof for source linking, bytecode-library linking, and AMDGPU artifact compilation from linked bytecode. |
 
 The kernel deliberately has no authored `target(@...)`. It is portable source
-until a compile or JIT invocation selects a target. The provider library carries
+until a compile or JIT invocation specializes it. The provider library carries
 `amdgpu.target<gfx1100> @gfx1100` and `amdgpu.target<gfx1200> @gfx1200` records
 so target-specialized providers can say which target they apply to. When the
-compiler is invoked with `--target=gfx1100`, the AMDGPU target provider
-materializes or reuses `@gfx1100` as the invocation target. Template selection
-then resolves `func.apply<authoring.link.scale_i32>` against the effective
-target: authored function target first, invocation-selected target second, and
-generic fallback when no target-specific provider applies.
+compiler is invoked with `--target=gfx1100`, it specializes the requested
+kernel function to a materialized or reused `@gfx1100` target record. Template
+selection then resolves `func.apply<authoring.link.scale_i32>` against that
+function's durable target. Other functions and target records in the linked
+module remain unchanged.
 
 ## Inspecting a Library
 
@@ -124,7 +124,7 @@ stage.
 
 ## Compiling an AMDGPU Artifact
 
-Compile the linked bytecode with an invocation target:
+Compile the linked bytecode with a function specialization target:
 
 ```bash
 loom-compile linked.loombc \
@@ -136,18 +136,20 @@ loom-compile linked.loombc \
   --compile-report=summary
 ```
 
-`--target=gfx1100` is not a source rewrite. It selects the compiler target
-context for this invocation, materializes the matching target record when
-needed, selects target-applicable providers, lowers targetless roots with that
-effective target, and emits the requested artifacts.
+`--target=gfx1100` does not establish a module-global target. The command-line
+driver maps the requested profile to the HAL kernel entries it is compiling,
+materializes the exact target record once, and writes that durable target onto
+those functions before target-aware passes run. A module may still contain
+unrequested functions for other targets.
 
-The loomc C API uses the same model with `loomc_target_selection_options_t`.
-When an embedder splits linking and compilation into separate calls, pass the
-target-selection option on both `loomc_link_options_t.next` and
-`loomc_compile_options_t.next`. The link phase then materializes the
-module-local target record and keeps the provider candidates needed by the
-selected target context, while the compile phase uses the same selection for
-template selection, pass predicates, lowering, reporting, and emission.
+The loomc C API expresses the same operation with
+`loomc_target_specialization_options_t` attached only to
+`loomc_compile_options_t.next`. Each borrowed row pairs one function symbol
+with one structured target profile. Plain loading and linking preserve all
+authored targets and never accept a specialization option; emission consumes
+the durable targets in prepared IR and never accepts an override. Embedders can
+therefore link a multi-target library once, clone or filter it as appropriate,
+and specialize different function versions in later compile invocations.
 
 The artifact manifest is the sidecar a packager or benchmark database should
 keep with `scale_i32.hsaco`. The compile report is the per-invocation feedback
@@ -156,8 +158,8 @@ the command line or C API.
 
 ## Debugging Selection
 
-Use pass IR dumps during compilation to see which provider was selected for an
-invocation target:
+Use pass IR dumps during compilation to see which provider was selected for a
+specialized function:
 
 ```bash
 loom-compile linked.loombc \

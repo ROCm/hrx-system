@@ -137,10 +137,10 @@ typedef struct loomc_compiler_options_t {
 /// diagnostics and artifacts. Per-kernel configuration values materialize into
 /// the module before the selected pass program runs. These values live here
 /// rather than on the prepared compiler so autotuning and JIT sweeps can vary
-/// config without constructing many compiler handles. Target selections are
-/// supplied through `loomc_target_selection_options_t` on `next` so the same
-/// compiler can be reused across source-selected, partial-target, and concrete
-/// target invocations.
+/// config without constructing many compiler handles. Per-function target
+/// specializations are supplied through
+/// `loomc_target_specialization_options_t` on `next`, so one invocation can
+/// compile several function versions for different exact targets.
 typedef struct loomc_compile_options_t {
   /// Structure type. Must be `LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS` when
   /// nonzero.
@@ -150,7 +150,7 @@ typedef struct loomc_compile_options_t {
   loomc_host_size_t structure_size;
 
   /// Extension chain for compile invocation options such as
-  /// `loomc_target_selection_options_t`.
+  /// `loomc_target_specialization_options_t`.
   const void* next;
 
   /// Runtime artifact module name for this invocation. Empty uses the
@@ -224,12 +224,12 @@ LOOMC_API_EXPORT loomc_status_t loomc_compiler_create(
 /// shared workspaces and modules is synchronized externally. The compiler and
 /// pass program are immutable after creation.
 ///
-/// @par Target Selection
-/// `loomc_target_selection_options_t` may be attached to
-/// `loomc_compile_options_t::next`. The selected profile must be compatible
-/// with the compiler context's target environment. Omitting the extension or
-/// passing an explicit empty selection runs the invocation without a concrete
-/// target overlay.
+/// @par Target Specialization
+/// `loomc_target_specialization_options_t` may be attached to
+/// `loomc_compile_options_t::next`. Each row binds one function version to one
+/// complete profile compatible with the compiler context's target environment.
+/// Unrequested functions retain their authored targets, including generic
+/// targets, and targetless functions remain targetless.
 LOOMC_API_EXPORT loomc_status_t loomc_compile_module(
     loomc_compiler_t* compiler, loomc_workspace_t* workspace,
     const loomc_pass_program_t* pass_program, loomc_module_t* module,

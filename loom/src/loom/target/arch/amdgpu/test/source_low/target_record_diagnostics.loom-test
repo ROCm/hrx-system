@@ -20,5 +20,10 @@ amdgpu.target<gfx1100> @gfx1100_zero {subgroup_size = 0}
 
 // ====
 
-// ERROR@+1: AMDGPU/046 {target_name="gfx1100_a0", revision="a0", processor="gfx1100"}
-amdgpu.target<gfx1100> @gfx1100_a0 {gfx1250_revision = a0}
+// ERROR@+1: AMDGPU/048 {target_name="gfx1151_xnack", feature="xnack", state="on", processor="gfx1151"}
+amdgpu.target<gfx1151> @gfx1151_xnack {xnack = on}
+
+// ====
+
+// ERROR@+1: AMDGPU/048 {target_name="gfx942_sramecc", feature="sramecc", state="unsupported", processor="gfx942"}
+amdgpu.target<gfx942> @gfx942_sramecc {sramecc = unsupported}

@@ -236,17 +236,17 @@ static iree_status_t iree_hal_amdgpu_system_query_gpu_agent_targets(
           iree_hal_amdgpu_agent_target_isa_at(&out_targets[0], j);
       const iree_hal_amdgpu_agent_isa_target_t* actual_isa =
           iree_hal_amdgpu_agent_target_isa_at(&out_targets[i], j);
-      if (iree_hal_amdgpu_target_id_equal(&expected_isa->target_id,
-                                          &actual_isa->target_id)) {
+      if (iree_hal_amdgpu_target_identity_equal(&expected_isa->identity,
+                                                &actual_isa->identity)) {
         continue;
       }
       char expected_target[128] = {0};
-      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_format(
-          &expected_isa->target_id, sizeof(expected_target), expected_target,
+      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_format_artifact_key(
+          &expected_isa->identity, sizeof(expected_target), expected_target,
           /*out_buffer_length=*/NULL));
       char actual_target[128] = {0};
-      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_id_format(
-          &actual_isa->target_id, sizeof(actual_target), actual_target,
+      IREE_RETURN_IF_ERROR(iree_hal_amdgpu_target_identity_format_artifact_key(
+          &actual_isa->identity, sizeof(actual_target), actual_target,
           /*out_buffer_length=*/NULL));
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,

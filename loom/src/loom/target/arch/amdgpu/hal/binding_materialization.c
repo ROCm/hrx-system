@@ -840,7 +840,6 @@ static iree_status_t loom_amdgpu_hal_binding_materialize_resources(
 static iree_status_t
 loom_amdgpu_hal_binding_materialize_buffer_descriptor_pseudo(
     loom_rewriter_t* rewriter, loom_op_t* op,
-    const loom_target_bundle_t* target_bundle,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, loom_type_t sgpr_type,
     loom_type_t sgpr_x2_type) {
@@ -878,13 +877,12 @@ loom_amdgpu_hal_binding_materialize_buffer_descriptor_pseudo(
         rewriter, descriptor_set, range_word, sgpr_type, op->location, &range,
         NULL));
   }
-  loom_value_id_t flags = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t control = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_build_s_mov_b32(
-      rewriter, descriptor_set,
-      target_bundle->export_plan->hal_kernel.buffer_resource_flags, sgpr_type,
-      op->location, &flags, NULL));
+      rewriter, descriptor_set, LOOM_AMDGPU_HAL_BINDING_RESOURCE_CONTROL,
+      sgpr_type, op->location, &control, NULL));
 
-  const loom_value_id_t sources[] = {pointer, range, flags};
+  const loom_value_id_t sources[] = {pointer, range, control};
   loom_op_t* concat_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_concat_build(
       &rewriter->builder, sources, IREE_ARRAYSIZE(sources),
@@ -901,7 +899,6 @@ loom_amdgpu_hal_binding_materialize_buffer_descriptor_pseudo(
 static iree_status_t
 loom_amdgpu_hal_binding_materialize_buffer_descriptors_with_types(
     loom_rewriter_t* rewriter, loom_op_t* function_op,
-    const loom_target_bundle_t* target_bundle,
     const loom_low_descriptor_set_t* descriptor_set, loom_type_t sgpr_type,
     loom_type_t sgpr_x2_type, iree_host_size_t* out_materialized_count) {
   *out_materialized_count = 0;
@@ -934,8 +931,7 @@ loom_amdgpu_hal_binding_materialize_buffer_descriptors_with_types(
           continue;
         }
         status = loom_amdgpu_hal_binding_materialize_buffer_descriptor_pseudo(
-            rewriter, op, target_bundle, descriptor_set, descriptor, sgpr_type,
-            sgpr_x2_type);
+            rewriter, op, descriptor_set, descriptor, sgpr_type, sgpr_x2_type);
         if (iree_status_is_ok(status)) {
           ++*out_materialized_count;
         }
@@ -948,17 +944,15 @@ loom_amdgpu_hal_binding_materialize_buffer_descriptors_with_types(
 
 iree_status_t loom_amdgpu_hal_binding_materialize_buffer_descriptors(
     loom_module_t* module, loom_op_t* function_op,
-    const loom_target_bundle_t* target_bundle,
     const loom_low_descriptor_set_t* descriptor_set,
     iree_host_size_t* out_materialized_count,
     iree_arena_allocator_t* scratch_arena) {
-  if (module == NULL || function_op == NULL || target_bundle == NULL ||
-      descriptor_set == NULL || out_materialized_count == NULL ||
-      scratch_arena == NULL) {
+  if (module == NULL || function_op == NULL || descriptor_set == NULL ||
+      out_materialized_count == NULL || scratch_arena == NULL) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU HAL descriptor materialization requires a module, function, "
-        "target bundle, descriptor set, output count, and scratch arena");
+        "descriptor set, output count, and scratch arena");
   }
   *out_materialized_count = 0;
   if (!loom_low_function_def_isa(function_op)) {
@@ -979,24 +973,23 @@ iree_status_t loom_amdgpu_hal_binding_materialize_buffer_descriptors(
       loom_rewriter_initialize(&rewriter, module, scratch_arena));
   iree_status_t status =
       loom_amdgpu_hal_binding_materialize_buffer_descriptors_with_types(
-          &rewriter, function_op, target_bundle, descriptor_set, sgpr_type,
-          sgpr_x2_type, out_materialized_count);
+          &rewriter, function_op, descriptor_set, sgpr_type, sgpr_x2_type,
+          out_materialized_count);
   loom_rewriter_deinitialize(&rewriter);
   return status;
 }
 
 iree_status_t loom_amdgpu_hal_binding_materialize(
     loom_module_t* module, loom_op_t* function_op,
-    const loom_target_bundle_t* target_bundle,
     const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_hal_binding_materialization_result_t* out_result,
     iree_arena_allocator_t* scratch_arena) {
-  if (module == NULL || function_op == NULL || target_bundle == NULL ||
-      descriptor_set == NULL || out_result == NULL || scratch_arena == NULL) {
+  if (module == NULL || function_op == NULL || descriptor_set == NULL ||
+      out_result == NULL || scratch_arena == NULL) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU HAL binding materialization requires a module, function, "
-        "target bundle, descriptor set, output result, and scratch arena");
+        "descriptor set, output result, and scratch arena");
   }
   *out_result = (loom_amdgpu_hal_binding_materialization_result_t){0};
   if (!loom_low_function_def_isa(function_op)) {
@@ -1068,8 +1061,8 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
   }
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_hal_binding_materialize_buffer_descriptors_with_types(
-        &rewriter, function_op, target_bundle, descriptor_set, sgpr_type,
-        sgpr_x2_type, &out_result->materialized_descriptor_count);
+        &rewriter, function_op, descriptor_set, sgpr_type, sgpr_x2_type,
+        &out_result->materialized_descriptor_count);
   }
 
   out_result->changed =

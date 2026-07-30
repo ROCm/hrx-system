@@ -43,8 +43,6 @@ using TargetEnvironmentPtr =
     HandlePtr<loomc_target_environment_t, loomc_target_environment_release>;
 using TargetProfilePtr =
     HandlePtr<loomc_target_profile_t, loomc_target_profile_release>;
-using TargetSelectionPtr =
-    HandlePtr<loomc_target_selection_t, loomc_target_selection_release>;
 using WorkspacePtr = HandlePtr<loomc_workspace_t, loomc_workspace_release>;
 
 void PrintIreeStatus(const char* label, iree_status_t status) {
@@ -234,6 +232,8 @@ loomc_status_t CreateHalTargetProfile(
       /*.next=*/nullptr,
       /*.identifier=*/target.target_profile_identifier,
       /*.device=*/device,
+      /*.physical_device_affinity=*/
+      target.executable_target_selection.physical_device_affinity,
       /*.providers=*/target.profile_providers,
       /*.provider_count=*/target.profile_provider_count,
   };
@@ -251,19 +251,12 @@ loomc_status_t CreateHalTargetProfile(
 
 loomc_status_t CreateTargetPipeline(const IreeHalKernelExecutionTarget& target,
                                     loomc_context_t* context,
-                                    loomc_target_selection_t* target_selection,
                                     PassProgramPtr* out_pass_program,
                                     ResultPtr* out_result) {
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/target_selection,
-  };
   loomc_target_pipeline_options_t pipeline_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
       /*.structure_size=*/sizeof(pipeline_options),
-      /*.next=*/&target_options,
+      /*.next=*/nullptr,
       /*.identifier=*/target.target_pipeline_identifier,
       /*.kind=*/target.target_pipeline_kind,
       /*.control_flow_lowering=*/target.control_flow_lowering,
@@ -301,13 +294,18 @@ loomc_status_t CompileModule(const IreeHalKernelExecutionTarget& target,
                              loomc_compiler_t* compiler,
                              loomc_workspace_t* workspace,
                              loomc_pass_program_t* pass_program,
-                             loomc_target_selection_t* target_selection,
+                             loomc_target_profile_t* target_profile,
                              loomc_module_t* module, ResultPtr* out_result) {
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/target.kernel_function_symbol,
+      /*.target_profile=*/target_profile,
+  };
+  loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
       /*.structure_size=*/sizeof(target_options),
       /*.next=*/nullptr,
-      /*.target_selection=*/target_selection,
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
   };
   loomc_compile_options_t compile_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
@@ -331,10 +329,9 @@ iree_status_t AllocateStorageBuffer(iree_hal_device_t* device,
                                     iree_device_size_t buffer_size,
                                     iree_hal_buffer_t** out_buffer) {
   iree_hal_buffer_params_t params = {0};
-  params.type =
-      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-  params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
-                 IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
+  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  params.usage =
+      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
   return iree_hal_allocator_allocate_buffer(iree_hal_device_allocator(device),
                                             params, buffer_size, out_buffer);
 }
@@ -503,13 +500,6 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
     GTEST_SKIP() << profile_skip_reason;
   }
 
-  TargetSelectionPtr target_selection;
-  loomc_target_selection_t* target_selection_handle = nullptr;
-  LOOMC_ASSERT_OK(loomc_target_selection_create_from_profile(
-      target_profile.get(), loomc_allocator_system(),
-      &target_selection_handle));
-  target_selection.reset(target_selection_handle);
-
   ModulePtr module;
   LOOMC_ASSERT_OK(DeserializeSource(context.get(), workspace.get(),
                                     source.get(), &module, &result));
@@ -555,13 +545,13 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
   compiler.reset(compiler_handle);
 
   PassProgramPtr pass_program;
-  LOOMC_ASSERT_OK(CreateTargetPipeline(
-      target, context.get(), target_selection.get(), &pass_program, &result));
+  LOOMC_ASSERT_OK(
+      CreateTargetPipeline(target, context.get(), &pass_program, &result));
   ASSERT_TRUE(ResultSucceeded(result.get(), "target pipeline creation"));
   result.reset();
 
   LOOMC_ASSERT_OK(CompileModule(target, compiler.get(), workspace.get(),
-                                pass_program.get(), target_selection.get(),
+                                pass_program.get(), target_profile.get(),
                                 module.get(), &result));
   ASSERT_TRUE(ResultSucceeded(result.get(), "module compilation"));
   result.reset();
@@ -569,8 +559,7 @@ void RunIreeHalKernelExecutionTest(const IreeHalKernelExecutionTarget& target) {
   loomc_result_t* emit_result = nullptr;
   loomc_status_t emit_status = target.emit_module(
       target_environment.get(), workspace.get(), module.get(),
-      target_selection.get(), target.artifact_format,
-      target.artifact_identifier, &emit_result);
+      target.artifact_format, target.artifact_identifier, &emit_result);
   result.reset(emit_result);
   LOOMC_ASSERT_OK(emit_status);
   ASSERT_TRUE(ResultSucceeded(result.get(), "artifact emission"));

@@ -28,10 +28,6 @@ extern "C" {
 #endif
 
 typedef struct loom_amdgpu_hal_kernel_library_options_t {
-  // Optional runtime/device target selection applied to compatible module
-  // target records before entry selection, verification, scheduling, and
-  // allocation.
-  loom_target_selection_t target_selection;
   // Optional AMDGPU runtime support globals emitted into the HSACO.
   loom_amdgpu_runtime_global_flags_t runtime_globals;
   // Optional caller-owned code-object data symbols emitted into the HSACO.
@@ -62,6 +58,8 @@ typedef struct loom_amdgpu_hal_kernel_library_options_t {
 typedef struct loom_amdgpu_hal_kernel_library_t {
   // Allocator-owned AMDGPU target key used to emit the artifact.
   iree_string_view_t target_key;
+  // Durable target bundle resolved from the emitted entries.
+  loom_target_bundle_storage_t target_bundle_storage;
   // Allocator-owned HSACO ELF image bytes.
   uint8_t* hsaco_data;
   // Number of bytes in |hsaco_data|.

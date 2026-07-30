@@ -419,19 +419,28 @@ iree_status_t loom_amdgpu_kernel_record_build(
                             "AMDGPU kernel emission requires an AMDGPU "
                             "processor target record");
   }
+  loom_amdgpu_target_identity_t target_identity = {0};
+  loom_amdgpu_target_record_resolve_identity(schedule->target.target_op,
+                                             &target_identity);
+  loom_amdgpu_target_properties_t target_properties = {0};
+  loom_amdgpu_target_properties_resolve(&target_identity,
+                                        &schedule->target.bundle_storage.bundle,
+                                        &target_properties);
   const uint32_t wavefront_size =
       schedule->target.bundle_storage.snapshot.subgroup_size;
-  IREE_ASSERT(
-      loom_amdgpu_processor_supports_wavefront_size(processor, wavefront_size));
+  IREE_ASSERT(loom_amdgpu_processor_properties_support_wavefront_size(
+      &processor->properties, wavefront_size));
 
   const uint32_t user_sgpr_count = abi_verify->user_sgpr_count;
   loom_amdgpu_kernel_descriptor_flags_t descriptor_flags = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_collect_descriptor_flags(
       schedule, abi_verify,
-      loom_amdgpu_processor_kernel_descriptor_has_flags(
-          processor, LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID),
-      loom_amdgpu_processor_info_has_flags(
-          processor, LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE),
+      loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
+          &processor->properties,
+          LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID),
+      loom_amdgpu_processor_properties_have_flags(
+          &processor->properties,
+          LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE),
       &descriptor_flags));
   uint32_t system_vgpr_workitem_id = 0;
   IREE_RETURN_IF_ERROR(
@@ -439,7 +448,7 @@ iree_status_t loom_amdgpu_kernel_record_build(
           descriptor_flags, &system_vgpr_workitem_id));
 
   const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
-      loom_amdgpu_kernel_entry_envelope_for_processor(processor);
+      loom_amdgpu_kernel_entry_envelope_for_properties(&processor->properties);
   uint32_t next_free_sgpr = preflight->next_free_sgpr > user_sgpr_count
                                 ? preflight->next_free_sgpr
                                 : user_sgpr_count;
@@ -451,9 +460,12 @@ iree_status_t loom_amdgpu_kernel_record_build(
     next_free_vgpr = entry_envelope->minimum_vgpr_count;
   }
 
-  iree_string_view_t target_id = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_amdgpu_amdhsa_target_id_format(
-      processor, iree_string_view_empty(), scratch_arena, &target_id));
+  iree_string_view_t artifact_target_key = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_target_key_format_arena(
+      &target_identity, scratch_arena, &artifact_target_key));
+  iree_string_view_t code_object_target_id = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_amdhsa_code_object_target_id_format(
+      &target_identity, scratch_arena, &code_object_target_id));
   iree_string_view_t descriptor_symbol = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_concat3(
       symbol, IREE_SV(".kd"), iree_string_view_empty(), &descriptor_symbol,
@@ -477,7 +489,8 @@ iree_status_t loom_amdgpu_kernel_record_build(
   *out_record = (loom_amdgpu_kernel_record_t){
       .symbol = symbol,
       .descriptor_symbol = descriptor_symbol,
-      .target_id = target_id,
+      .artifact_target_key = artifact_target_key,
+      .code_object_target_id = code_object_target_id,
       .processor = processor,
       .abi_layout = *abi_layout,
       .storage_layout = storage_layout,
@@ -501,9 +514,7 @@ iree_status_t loom_amdgpu_kernel_record_build(
               .has_required_workgroup_size = has_required_workgroup_size,
               .workgroup_cluster_size = workgroup_cluster_size,
               .has_workgroup_cluster_size = has_workgroup_cluster_size,
-              .gfx1250_revision =
-                  loom_amdgpu_target_record_effective_gfx1250_revision(
-                      schedule->target.target_op),
+              .target_extensions = target_properties.kernel_metadata_extensions,
               .arguments = arguments,
               .argument_count = abi_layout->parameter_count,
           },

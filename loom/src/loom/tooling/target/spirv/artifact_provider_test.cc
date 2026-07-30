@@ -23,6 +23,7 @@
 #include "loom/ops/op_registry.h"
 #include "loom/target/arch/spirv/descriptors/low_registry.h"
 #include "loom/target/arch/spirv/ops/registry.h"
+#include "loom/target/arch/spirv/profile.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/tooling/execution/hal/runtime.h"
 #include "loom/tooling/target/spirv/vulkan_profile.h"
@@ -297,18 +298,21 @@ TEST_F(SpirvVulkanHalArtifactProviderTest, SelectsRawBdaDeviceTarget) {
   IREE_ASSERT_OK(SelectBaselineTarget());
   const loom_run_hal_device_target_t& target = target_;
 
-  ASSERT_NE(target.target_bundle, nullptr);
-  EXPECT_EQ(target.target_bundle, &target.target_storage.bundle);
+  const loom_spirv_target_profile_t* target_profile =
+      loom_spirv_target_profile_cast(target.target_profile);
+  ASSERT_NE(target_profile, nullptr);
+  const loom_target_bundle_t* target_bundle =
+      loom_run_hal_device_target_bundle(&target);
+  ASSERT_NE(target_bundle, nullptr);
   EXPECT_TRUE(iree_string_view_equal(target.target_key,
                                      IREE_SV("spirv-vulkan1.3-bda-hal")));
-  EXPECT_EQ(target.target_bundle->snapshot->codegen_format,
+  EXPECT_EQ(target_bundle->snapshot->codegen_format,
             LOOM_TARGET_CODEGEN_FORMAT_SPIRV);
-  EXPECT_EQ(target.target_bundle->snapshot->artifact_format,
+  EXPECT_EQ(target_bundle->snapshot->artifact_format,
             LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY);
-  EXPECT_EQ(target.target_bundle->snapshot->default_pointer_bitwidth, 64u);
-  EXPECT_EQ(target.target_bundle->snapshot->offset_bitwidth, 64u);
-  EXPECT_EQ(target.target_bundle->export_plan->abi_kind,
-            LOOM_TARGET_ABI_HAL_KERNEL);
+  EXPECT_EQ(target_bundle->snapshot->default_pointer_bitwidth, 64u);
+  EXPECT_EQ(target_bundle->snapshot->offset_bitwidth, 64u);
+  EXPECT_EQ(target_bundle->export_plan->abi_kind, LOOM_TARGET_ABI_HAL_KERNEL);
 }
 
 TEST_F(SpirvVulkanHalArtifactProviderTest, EmitsRawBdaSpirvArtifact) {
@@ -334,7 +338,13 @@ TEST_F(SpirvVulkanHalArtifactProviderTest, EmitsRawBdaSpirvArtifact) {
   EXPECT_EQ(artifact.hal_target, target.hal_target);
   EXPECT_TRUE(
       iree_string_view_equal(artifact.target_key, IREE_SV("vulkan1.3+bda")));
-  EXPECT_EQ(artifact.target_bundle, target.target_bundle);
+  ASSERT_NE(artifact.target_bundle, nullptr);
+  EXPECT_EQ(artifact.target_bundle->snapshot->codegen_format,
+            LOOM_TARGET_CODEGEN_FORMAT_SPIRV);
+  EXPECT_EQ(artifact.target_bundle->snapshot->artifact_format,
+            LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY);
+  EXPECT_EQ(artifact.target_bundle->export_plan->abi_kind,
+            LOOM_TARGET_ABI_HAL_KERNEL);
   EXPECT_EQ(artifact.target_artifact_format,
             LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY);
   EXPECT_EQ(artifact.target_artifact_data.data, artifact.executable_data.data);

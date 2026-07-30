@@ -119,7 +119,7 @@ class TargetConfig:
         self._descriptor_set_infos = {
             info.key: info for info in target_info.AMDGPU_DESCRIPTOR_SET_INFOS
         }
-        self._target_records = target_info.sorted_target_record_infos()
+        self._targets = target_info.sorted_target_infos()
         self._validate()
         self._supported_processor_infos = self._compute_supported_processor_infos()
         self._supported_exact_processor_infos = [
@@ -150,7 +150,7 @@ class TargetConfig:
             exact_targets, code_object_targets
         )
         self._validate_generic_descriptor_membership()
-        self._validate_target_records(exact_targets, code_object_targets)
+        self._validate_targets()
         self._validate_descriptor_set_defaults(descriptor_backed_keys)
 
     def _validate_processor_infos(
@@ -230,7 +230,7 @@ class TargetConfig:
             exact_members = [
                 compatibility_info.exact_processor
                 for compatibility_info in (
-                    self._root_target_map.AMDGPU_CODE_OBJECT_COMPATIBILITY_INFOS
+                    self._root_target_map.AMDGPU_EXACT_TARGET_INFOS
                 )
                 if (
                     compatibility_info.code_object_processor
@@ -260,51 +260,50 @@ class TargetConfig:
                     f"{member_generator_targets}"
                 )
 
-    def _validate_target_records(
-        self, exact_targets: set[str], code_object_targets: set[str]
-    ) -> None:
-        seen_processors: set[str] = set()
-        for record in self._target_records:
-            if record.processor in seen_processors:
-                raise ValueError(f"duplicate target record for {record.processor}")
-            seen_processors.add(record.processor)
-            if is_generic_processor(record):
-                if record.processor not in code_object_targets:
-                    raise ValueError(
-                        f"Loom AMDGPU target record {record.processor} is absent "
-                        "from the shared AMDGPU code-object target map"
-                    )
-            elif record.processor not in exact_targets:
+    def _validate_targets(self) -> None:
+        seen_targets: set[str] = set()
+        for target in self._targets:
+            if target.target in seen_targets:
+                raise ValueError(f"duplicate target row for {target.target}")
+            seen_targets.add(target.target)
+            canonical_processor = self._root_target_map.target_processor(target.target)
+            if canonical_processor is None:
                 raise ValueError(
-                    f"Loom AMDGPU target record {record.processor} is absent from "
-                    "the shared AMDGPU exact target map"
+                    f"Loom AMDGPU target {target.target} is absent from the "
+                    "shared AMDGPU target map"
                 )
-            processor_info = self._processor_infos.get(record.processor)
+            if canonical_processor != target.processor:
+                raise ValueError(
+                    f"Loom AMDGPU target {target.target} selects processor "
+                    f"{target.processor}, expected {canonical_processor}"
+                )
+            processor_info = self._processor_infos.get(target.processor)
             if processor_info is None:
                 raise ValueError(
-                    f"Loom AMDGPU target record {record.processor} has no processor row"
+                    f"Loom AMDGPU target {target.target} has no processor row "
+                    f"{target.processor}"
                 )
             descriptor_set_key = processor_descriptor_set_key(processor_info)
             if not descriptor_set_key:
                 raise ValueError(
-                    f"Loom AMDGPU target record {record.processor} has no "
-                    "descriptor-set key"
+                    f"Loom AMDGPU target {target.target} has no descriptor-set key"
                 )
             if descriptor_set_key not in self._descriptor_set_infos:
                 raise ValueError(
-                    f"Loom AMDGPU target record {record.processor} references "
+                    f"Loom AMDGPU target {target.target} references "
                     f"unknown descriptor set {descriptor_set_key}"
                 )
 
     def _validate_descriptor_set_defaults(
         self, descriptor_backed_keys: set[str]
     ) -> None:
-        target_record_descriptor_set_keys = {
-            processor_descriptor_set_key(self._processor_infos[record.processor])
-            for record in self._target_records
+        default_target_descriptor_set_keys = {
+            processor_descriptor_set_key(self._processor_infos[target.processor])
+            for target in self._targets
+            if target.default_for_descriptor_set
         }
         missing_defaults = sorted(
-            descriptor_backed_keys - target_record_descriptor_set_keys
+            descriptor_backed_keys - default_target_descriptor_set_keys
         )
         if missing_defaults:
             raise ValueError(
@@ -345,10 +344,10 @@ class TargetConfig:
     @property
     def descriptor_set_keys(self) -> list[str]:
         keys: list[str] = []
-        for record in self._target_records:
-            if is_generic_processor(record):
+        for target in self._targets:
+            if target.target != target.processor or is_generic_processor(target):
                 continue
-            key = processor_descriptor_set_key(self._processor_infos[record.processor])
+            key = processor_descriptor_set_key(self._processor_infos[target.processor])
             if key not in keys:
                 keys.append(key)
         for processor_name in self._root_target_map.code_object_targets():

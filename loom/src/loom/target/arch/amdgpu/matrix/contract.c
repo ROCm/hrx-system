@@ -221,7 +221,7 @@ iree_status_t loom_amdgpu_matrix_feature_bits_from_processor(
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_target_info_lookup_processor(processor, &processor_info));
   if (loom_amdgpu_matrix_feature_bits_from_profile(
-          processor_info->features.matrix, out_feature_bits)) {
+          processor_info->properties.features.matrix, out_feature_bits)) {
     return iree_ok_status();
   }
   return iree_make_status(

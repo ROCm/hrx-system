@@ -17,14 +17,14 @@ extern "C" {
 #endif
 
 enum loomc_option_chain_allowed_bit_e {
-  LOOMC_OPTION_CHAIN_ALLOW_TARGET_SELECTION = 1u << 0,
+  LOOMC_OPTION_CHAIN_ALLOW_TARGET_SPECIALIZATION = 1u << 0,
   LOOMC_OPTION_CHAIN_ALLOW_SANITIZER = 1u << 1,
 };
 typedef uint32_t loomc_option_chain_allowed_t;
 
 typedef struct loomc_option_chain_t {
-  // Target selection descriptor found in the option chain, or NULL.
-  loomc_target_selection_t* target_selection;
+  // Target specialization descriptor found in the option chain, or NULL.
+  const loomc_target_specialization_options_t* target_specialization;
   // True when a sanitizer descriptor was present in the option chain.
   bool has_sanitizer;
   // Sanitizer options found in the option chain.

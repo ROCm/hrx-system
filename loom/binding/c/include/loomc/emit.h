@@ -113,7 +113,6 @@ typedef enum loomc_emit_artifact_flag_bits_e {
 /// Callers zero-initialize this descriptor, set `type` to
 /// `LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS`, set `structure_size` to
 /// `sizeof(loomc_emit_options_t)`, and fill the requested fields. Attach
-/// `loomc_target_selection_options_t`,
 /// `loomc_artifact_manifest_options_t`, `loomc_compile_report_options_t`,
 /// `loomc_option_dict_t`, and target-specific descriptors through `next`.
 typedef struct loomc_emit_options_t {
@@ -123,7 +122,7 @@ typedef struct loomc_emit_options_t {
   /// Size of this structure in bytes.
   loomc_host_size_t structure_size;
 
-  /// Extension chain for target selection and emission options.
+  /// Extension chain for emission options.
   const void* next;
 
   /// Artifact format to emit. Empty selects the only linked emitter and fails
@@ -142,9 +141,10 @@ typedef struct loomc_emit_options_t {
 ///
 /// The module must already be in the target-low form expected by the selected
 /// emitter. This function does not run compile passes or link additional
-/// modules. The operation may mutate invocation-local scratch state inside
-/// `module`; callers that need to emit the same module concurrently should
-/// pass distinct module handles.
+/// modules, and target specialization options are not accepted. Every emitted
+/// function carries its durable target in the prepared IR. The operation may
+/// mutate invocation-local scratch state inside `module`; callers that need to
+/// emit the same module concurrently should pass distinct module handles.
 ///
 /// @param target_environment Target environment that contains one or more
 /// linked emitters.

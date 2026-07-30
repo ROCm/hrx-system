@@ -1099,7 +1099,8 @@ TEST_F(BuilderTest, TargetLikeInterfaceReadsTargetRecordFields) {
       /*default_pointer_bitwidth=*/0, /*index_bitwidth=*/0,
       /*offset_bitwidth=*/0, /*max_workgroup_size_x=*/0,
       /*max_workgroup_size_y=*/0, /*max_workgroup_size_z=*/0,
-      /*max_flat_workgroup_size=*/0, /*subgroup_size=*/0,
+      /*max_flat_workgroup_size=*/0, /*max_workgroup_storage_bytes=*/0,
+      /*subgroup_size=*/0,
       /*max_grid_size_x=*/0, /*max_grid_size_y=*/0, /*max_grid_size_z=*/0,
       /*max_flat_grid_size=*/0,
       /*max_workgroup_count_x=*/0, /*max_workgroup_count_y=*/0,
@@ -1108,7 +1109,6 @@ TEST_F(BuilderTest, TargetLikeInterfaceReadsTargetRecordFields) {
       /*memory_space_constant=*/0, /*memory_space_private=*/0,
       /*memory_space_host=*/0, /*memory_space_descriptor=*/0, /*abi=*/0,
       /*export_symbol=*/LOOM_STRING_ID_INVALID, /*linkage=*/0,
-      /*hal_buffer_resource_flags=*/0,
       /*contract_set_key=*/LOOM_STRING_ID_INVALID, /*contract_feature_bits=*/0,
       LOOM_LOCATION_UNKNOWN, &op));
 

@@ -55,18 +55,18 @@ static std::array<uint8_t, 64> MakeElf64AmdgpuHsa(uint8_t abi_version,
   return elf;
 }
 
-static iree_hal_amdgpu_target_id_t ParseCodeObjectTarget(
+static iree_hal_amdgpu_target_identity_t ParseCodeObjectTarget(
     const std::array<uint8_t, 64>& elf) {
-  iree_hal_amdgpu_target_id_t target_id;
+  iree_hal_amdgpu_target_identity_t target_id;
   IREE_CHECK_OK(iree_hal_amdgpu_code_object_target_id_from_elf(
       iree_make_const_byte_span(elf.data(), elf.size()), &target_id));
   return target_id;
 }
 
 static std::string FormatTargetId(
-    const iree_hal_amdgpu_target_id_t* target_id) {
+    const iree_hal_amdgpu_target_identity_t* target_id) {
   char buffer[64] = {0};
-  IREE_CHECK_OK(iree_hal_amdgpu_target_id_format(
+  IREE_CHECK_OK(iree_hal_amdgpu_target_identity_format_artifact_key(
       target_id, sizeof(buffer), buffer, /*out_buffer_length=*/nullptr));
   return std::string(buffer);
 }
@@ -78,8 +78,10 @@ TEST(CodeObjectTargetTest, ParsesV5FeatureStates) {
   auto target_id = ParseCodeObjectTarget(elf);
   EXPECT_EQ(target_id.kind, IREE_HAL_AMDGPU_TARGET_KIND_EXACT);
   EXPECT_EQ(target_id.generic_version, 0u);
-  EXPECT_EQ(target_id.sramecc, IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON);
-  EXPECT_EQ(target_id.xnack, IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF);
+  EXPECT_EQ(target_id.amdhsa_features.sramecc,
+            IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ON);
+  EXPECT_EQ(target_id.amdhsa_features.xnack,
+            IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF);
   EXPECT_EQ(FormatTargetId(&target_id), "gfx942:sramecc+:xnack-");
 }
 
@@ -89,8 +91,10 @@ TEST(CodeObjectTargetTest, ParsesV5AnyAndUnsupportedFeatures) {
                          kElfMachineGfx1100 | kElfFeatureSrameccAnyV4 |
                              kElfFeatureXnackUnsupportedV4);
   auto target_id = ParseCodeObjectTarget(elf);
-  EXPECT_EQ(target_id.sramecc, IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY);
-  EXPECT_EQ(target_id.xnack, IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_UNSUPPORTED);
+  EXPECT_EQ(target_id.amdhsa_features.sramecc,
+            IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_ANY);
+  EXPECT_EQ(target_id.amdhsa_features.xnack,
+            IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_UNSUPPORTED);
   EXPECT_EQ(FormatTargetId(&target_id), "gfx1100");
 }
 
@@ -108,15 +112,17 @@ TEST(CodeObjectTargetTest, ParsesV3SupportedAbsentFeaturesAsOff) {
   const auto elf = MakeElf64AmdgpuHsa(kElfAbiVersionV3, kElfMachineAmdgpu,
                                       kElfMachineGfx906);
   auto target_id = ParseCodeObjectTarget(elf);
-  EXPECT_EQ(target_id.sramecc, IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF);
-  EXPECT_EQ(target_id.xnack, IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF);
+  EXPECT_EQ(target_id.amdhsa_features.sramecc,
+            IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF);
+  EXPECT_EQ(target_id.amdhsa_features.xnack,
+            IREE_HAL_AMDGPU_TARGET_FEATURE_STATE_OFF);
   EXPECT_EQ(FormatTargetId(&target_id), "gfx906:sramecc-:xnack-");
 }
 
 TEST(CodeObjectTargetTest, RejectsV6GenericWithoutVersion) {
   const auto elf = MakeElf64AmdgpuHsa(kElfAbiVersionV6, kElfMachineAmdgpu,
                                       kElfMachineGfx11Generic);
-  iree_hal_amdgpu_target_id_t target_id;
+  iree_hal_amdgpu_target_identity_t target_id;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_amdgpu_code_object_target_id_from_elf(
@@ -126,7 +132,7 @@ TEST(CodeObjectTargetTest, RejectsV6GenericWithoutVersion) {
 TEST(CodeObjectTargetTest, RejectsUnsupportedMachineValue) {
   const auto elf =
       MakeElf64AmdgpuHsa(kElfAbiVersionV5, kElfMachineAmdgpu, 0x027);
-  iree_hal_amdgpu_target_id_t target_id;
+  iree_hal_amdgpu_target_identity_t target_id;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_amdgpu_code_object_target_id_from_elf(
@@ -136,7 +142,7 @@ TEST(CodeObjectTargetTest, RejectsUnsupportedMachineValue) {
 TEST(CodeObjectTargetTest, RejectsNonAmdgpuElfMachine) {
   const auto elf =
       MakeElf64AmdgpuHsa(kElfAbiVersionV5, /*machine=*/3, kElfMachineGfx1100);
-  iree_hal_amdgpu_target_id_t target_id;
+  iree_hal_amdgpu_target_identity_t target_id;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_amdgpu_code_object_target_id_from_elf(

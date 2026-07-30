@@ -21,6 +21,7 @@
 #include "loom/codegen/low/verify.h"
 #include "loom/ir/context.h"
 #include "loom/ir/ir.h"
+#include "loom/ops/target/facts.h"
 #include "loom/pass/environment.h"
 #include "loom/pass/registry.h"
 #include "loom/target/legalization.h"
@@ -29,6 +30,7 @@
 #include "loom/target/low_legality.h"
 #include "loom/target/low_packet_diagnostics.h"
 #include "loom/target/math_policy.h"
+#include "loom/target/profile.h"
 #include "loom/target/reporting/artifact_manifest.h"
 #include "loom/target/reporting/report.h"
 
@@ -56,24 +58,110 @@ typedef struct loom_builder_t loom_builder_t;
 typedef struct loom_target_environment_t loom_target_environment_t;
 typedef struct loom_target_provider_t loom_target_provider_t;
 
-// Target materialization request passed to target providers.
-typedef struct loom_target_selection_materialization_request_t {
-  // Composed target environment receiving the request.
-  const loom_target_environment_t* target_environment;
+// Borrowed view of one indexed target record and its owning module. The module
+// and symbol-fact arena must outlive the view and every query using it.
+typedef struct loom_target_record_view_t {
+  // Module that owns |facts|.
+  const loom_module_t* module;
 
-  // Mutable module that will receive any materialized target record.
-  loom_module_t* module;
+  // Indexed typed facts for the target record.
+  const loom_target_symbol_facts_t* facts;
+} loom_target_record_view_t;
 
-  // Invocation-selected target bundle and target-owned payload.
-  loom_target_selection_t target_selection;
-} loom_target_selection_materialization_request_t;
+// Creates a borrowed target record view.
+static inline loom_target_record_view_t loom_target_record_view_make(
+    const loom_module_t* module, const loom_target_symbol_facts_t* facts) {
+  return (loom_target_record_view_t){
+      /*.module=*/module,
+      /*.facts=*/facts,
+  };
+}
 
-// Materializes a provider-owned target selection into a module-local target
-// record.
-typedef iree_status_t (*loom_target_provider_materialize_selection_fn_t)(
-    const loom_target_provider_t* provider,
-    const loom_target_selection_materialization_request_t* request,
-    bool* out_materialized, loom_symbol_ref_t* out_target_ref);
+// Returns true when |view| contains a target record.
+static inline bool loom_target_record_view_is_valid(
+    loom_target_record_view_t view) {
+  return view.module != NULL && view.facts != NULL &&
+         loom_target_like_isa(view.facts->target);
+}
+
+// Returns whether an effective target satisfies an authored target
+// requirement.
+//
+// Identical record views satisfy by identity. Distinct records must have the
+// same target op kind and a provider in |environment| that owns the relation.
+// Views may belong to different modules. The query never mutates either
+// record. |environment| may be NULL when only identity satisfaction is
+// required.
+bool loom_target_satisfies_requirement(
+    const loom_target_environment_t* environment,
+    loom_target_record_view_t effective_target,
+    loom_target_record_view_t target_requirement);
+
+// Returns whether |effective_snapshot| satisfies the structural requirements
+// in |target_requirement|. Representation widths and address spaces must
+// match, fixed subgroup sizes must agree, and effective capacity limits must
+// meet or exceed nonzero required limits. Names, ABI/export plans, target
+// configuration, and family identity are outside this structural comparison.
+bool loom_target_snapshot_satisfies_requirement(
+    const loom_target_snapshot_t* effective_snapshot,
+    const loom_target_snapshot_t* target_requirement);
+
+// Target-family satisfaction callback for distinct target records.
+typedef bool (*loom_target_provider_satisfies_requirement_fn_t)(
+    loom_target_record_view_t effective_target,
+    loom_target_record_view_t target_requirement);
+
+// Provider-owned semantics for one target-record op kind.
+typedef struct loom_target_provider_record_semantics_t {
+  // Target op kind whose records are owned by this provider.
+  loom_op_kind_t op_kind;
+
+  // Infallible satisfaction relation for distinct verified records of
+  // |op_kind|. The indexed records are borrowed and may belong to different
+  // modules.
+  loom_target_provider_satisfies_requirement_fn_t satisfies_requirement;
+} loom_target_provider_record_semantics_t;
+
+// Returns the diagnostic symbol-name stem for a materialized profile record.
+//
+// The returned name is never used as semantic identity. Common materialization
+// reuses an equal record under any name and uniquifies this stem when another
+// symbol already occupies it.
+typedef iree_string_view_t (
+    *loom_target_provider_materialization_symbol_stem_fn_t)(
+    const loom_target_profile_t* profile);
+
+// Returns whether |target_op| has the same provider-owned durable projection
+// as |profile| refined by |authored_target_op|.
+//
+// Common materialization calls this only for records whose op kind matches the
+// provider's record semantics. The profile type is the provider's registered
+// |profile_type|. |authored_target_op| is NULL for a targetless function.
+typedef bool (*loom_target_provider_record_matches_effective_target_fn_t)(
+    const loom_module_t* module, const loom_op_t* target_op,
+    const loom_target_profile_t* profile, const loom_op_t* authored_target_op);
+
+// Builds one provider-owned durable target record for |profile| refined by
+// |authored_target_op|.
+typedef iree_status_t (
+    *loom_target_provider_build_effective_target_record_fn_t)(
+    loom_builder_t* builder, const loom_target_profile_t* profile,
+    const loom_op_t* authored_target_op, loom_symbol_ref_t symbol,
+    loom_location_id_t location, loom_op_t** out_target_op);
+
+// Provider-owned projection hooks used by common target materialization.
+typedef struct loom_target_provider_materialization_t {
+  // Produces an incidental symbol-name stem for a new target record.
+  loom_target_provider_materialization_symbol_stem_fn_t symbol_stem;
+
+  // Compares one existing record with a refined structured target profile.
+  loom_target_provider_record_matches_effective_target_fn_t
+      record_matches_effective_target;
+
+  // Builds a record carrying the complete durable refined projection.
+  loom_target_provider_build_effective_target_record_fn_t
+      build_effective_target_record;
+} loom_target_provider_materialization_t;
 
 // Target emission artifact storage release callback.
 typedef void (*loom_target_emit_artifact_release_fn_t)(
@@ -137,9 +225,6 @@ typedef struct loom_target_emit_request_t {
 
   // Mutable module containing already-prepared target-low IR.
   loom_module_t* module;
-
-  // Invocation target selection overlay.
-  loom_target_selection_t target_selection;
 
   // Embedding-owned option chain borrowed for the duration of the call.
   const void* option_chain;
@@ -238,6 +323,9 @@ typedef iree_status_t (*loom_target_provider_pipeline_contribution_fn_t)(
 
 // Target-owned compiler capability contribution linked into a tool or driver.
 struct loom_target_provider_t {
+  // Target-family profile representation owned by this provider, or NULL when
+  // the provider contributes no profile-driven semantics.
+  const loom_target_profile_type_t* profile_type;
   // Optional function that registers target-owned dialects.
   loom_target_provider_context_registration_fn_t register_context;
   // Optional function that initializes target-low descriptor-set providers.
@@ -267,8 +355,10 @@ struct loom_target_provider_t {
   const loom_pass_registry_t* pass_registry;
   // Optional pass-pipeline contribution callback.
   loom_target_provider_pipeline_contribution_fn_t contribute_pipeline;
-  // Optional invocation-target materialization callback.
-  loom_target_provider_materialize_selection_fn_t materialize_selection;
+  // Optional structured target-record materialization hooks.
+  loom_target_provider_materialization_t materialization;
+  // Optional target-record semantics owned by this provider.
+  loom_target_provider_record_semantics_t record_semantics;
 };
 
 // Static target provider table linked into a binary or embedding.
@@ -425,12 +515,18 @@ iree_status_t loom_target_environment_contribute_pipeline(
     loom_target_pipeline_phase_t phase,
     loom_pass_environment_t pass_environment, loom_builder_t* builder);
 
-// Materializes |target_selection| into |module| using the first provider that
-// recognizes the selection. Empty selections return a null target ref.
-iree_status_t loom_target_environment_materialize_selection(
+// Materializes the effective target formed by refining |target_profile| with
+// |authored_target_op| into |module| using the provider owning its profile
+// type.
+//
+// An existing provider-owned record with the same complete durable projection
+// is reused regardless of its symbol name. Otherwise a new record receives a
+// collision-free incidental symbol name. |authored_target_op| may be NULL for
+// a targetless function.
+iree_status_t loom_target_environment_materialize_effective_target(
     const loom_target_environment_t* environment, loom_module_t* module,
-    loom_target_selection_t target_selection,
-    loom_symbol_ref_t* out_target_ref);
+    const loom_target_profile_t* target_profile,
+    const loom_op_t* authored_target_op, loom_symbol_ref_t* out_target_ref);
 
 #ifdef __cplusplus
 }  // extern "C"

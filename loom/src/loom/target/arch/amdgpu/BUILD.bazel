@@ -25,6 +25,8 @@ package(
 
 _AMDGPU_CHECK_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/check:__pkg__"]
 
+_AMDGPU_ANALYSIS_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/analysis:__pkg__"]
+
 _AMDGPU_ENCODING_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/encoding:__pkg__"]
 
 _AMDGPU_HAL_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/hal:__pkg__"]
@@ -96,8 +98,10 @@ loom_cc_library(
     name = "target_info_defs",
     hdrs = ["target_info_defs.h"],
     visibility = (
+        _AMDGPU_ANALYSIS_VISIBILITY +
         _AMDGPU_LOWER_VISIBILITY +
         _AMDGPU_MATRIX_VISIBILITY +
+        _AMDGPU_NATIVE_VISIBILITY +
         _AMDGPU_PLANNING_VISIBILITY +
         _AMDGPU_TOOLING_VISIBILITY + [
             "//loom/src/loom/target/emit/llvmir/amdgpu:__pkg__",
@@ -130,6 +134,7 @@ loom_generated_cc_library(
     ],
     source = "target_info_tables.c",
     visibility = (
+        _AMDGPU_ANALYSIS_VISIBILITY +
         _AMDGPU_ENCODING_VISIBILITY +
         _AMDGPU_HAL_VISIBILITY +
         _AMDGPU_LOWER_VISIBILITY +
@@ -153,6 +158,37 @@ loom_cc_test(
     srcs = ["target_info_test.cc"],
     deps = [
         ":target_info",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "profile",
+    srcs = ["profile.c"],
+    hdrs = ["profile.h"],
+    visibility = (
+        _AMDGPU_BINDING_VISIBILITY +
+        _AMDGPU_OPS_VISIBILITY +
+        _AMDGPU_PROVIDER_VISIBILITY +
+        _AMDGPU_TARGET_ID_VISIBILITY +
+        _AMDGPU_TOOLING_VISIBILITY
+    ),
+    deps = [
+        ":target_info_defs",
+        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target/arch/amdgpu/records:target_records",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "profile_test",
+    srcs = ["profile_test.cc"],
+    deps = [
+        ":profile",
+        ":target_info",
+        "//loom/src/loom/target/arch/amdgpu/records:target_records",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -259,16 +295,17 @@ loom_cc_library(
 loom_cc_library(
     name = "low_verify",
     srcs = [
-        "gfx1250_a0_errata.c",
+        "instruction_constraints.c",
         "low_verify.c",
     ],
     hdrs = [
-        "gfx1250_a0_errata.h",
+        "instruction_constraints.h",
         "low_verify.h",
     ],
     deps = [
         ":error_defs",
         ":low_aliases",
+        ":target_info_defs",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:packet",
@@ -293,15 +330,16 @@ loom_cc_library(
         ":low_verify",
         ":math_policy",
         ":pass_registry",
+        ":profile",
         ":target_info",
         "//loom/src/loom/ir",
         "//loom/src/loom/pass:builder",
+        "//loom/src/loom/target:materialization",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
         "//loom/src/loom/target/arch/amdgpu/diagnostics:packet_diagnostics",
         "//loom/src/loom/target/arch/amdgpu/lower",
         "//loom/src/loom/target/arch/amdgpu/ops",
-        "//loom/src/loom/target/arch/amdgpu/records:target_records",
         "//runtime/src/iree/base",
     ],
 )
@@ -310,18 +348,26 @@ loom_cc_test(
     name = "provider_test",
     srcs = ["provider_test.cc"],
     deps = [
+        ":profile",
         ":provider",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/pass",
+        "//loom/src/loom/ops/target",
         "//loom/src/loom/pass:builder",
         "//loom/src/loom/pass:registry",
+        "//loom/src/loom/pass:tooling",
         "//loom/src/loom/pass/testing:registry_verify",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/ops",
         "//loom/src/loom/target/arch/amdgpu/records:target_records",
         "//loom/src/loom/testing:module_ptr",
+        "//loom/src/loom/transforms/symbol:template_selection",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

@@ -63,6 +63,10 @@ LOOMC_TARGET_AMDGPU_PUBLIC_HDRS = [
     "include/loomc/target/amdgpu/profile.h",
 ]
 
+LOOMC_TARGET_AMDGPU_IREE_HAL_PUBLIC_HDRS = [
+    "include/loomc/target/amdgpu/iree_hal.h",
+]
+
 LOOMC_TARGET_LLVMIR_PUBLIC_HDRS = [
     "include/loomc/target/llvmir.h",
     "include/loomc/target/llvmir/base.h",
@@ -94,6 +98,7 @@ _LOOMC_FULL_COMPATIBLE_WITH = loom_config_compatible_with([
 ])
 
 exports_files(
+    LOOMC_TARGET_AMDGPU_IREE_HAL_PUBLIC_HDRS +
     LOOMC_TARGET_AMDGPU_PUBLIC_HDRS +
     LOOMC_TARGET_IREE_HAL_PUBLIC_HDRS +
     LOOMC_TARGET_LLVMIR_PUBLIC_HDRS +
@@ -183,6 +188,7 @@ loom_cc_library(
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:pipeline",
         "//loom/src/loom/target:predicate",
+        "//loom/src/loom/target:profile",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/reporting:artifact_manifest",

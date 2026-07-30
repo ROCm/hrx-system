@@ -230,7 +230,7 @@ static FrameAnalysis AnalyzeFrame(const loom_low_emission_frame_t& frame) {
 
 static std::string BuildMemoryControlSource() {
   return R"(
-amdgpu.target<gfx1250> @target {gfx1250_revision = b0}
+amdgpu.target<gfx1250> @target
 
 low.kernel.def target(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) export("memory_control") workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @memory_control() {
   %lane = low.live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
@@ -250,7 +250,7 @@ low.kernel.def target(@target) abi_layout({constant_count = 0, direct_arg_count 
 static std::string BuildMatrixSource(const FixtureSpec& spec) {
   std::ostringstream source;
   source << R"(
-amdgpu.target<gfx1250> @target {gfx1250_revision = b0}
+amdgpu.target<gfx1250> @target
 
 low.kernel.def target(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) export(")"
          << spec.name
@@ -491,7 +491,6 @@ class PacketPlanFixture {
     }
     loom_low_verify_options_t verify_options = {
         /*.descriptor_registry=*/&target_registry_.registry,
-        /*.target_selection=*/{},
         /*.emitter=*/{},
         /*.provider_list=*/{},
         /*.max_errors=*/20,
@@ -507,8 +506,8 @@ class PacketPlanFixture {
 
     loom_low_resolved_target_t resolved_target = {};
     AbortOnError(loom_low_resolve_function_target(
-        module_, low_function, &target_registry_.registry,
-        loom_target_selection_empty(), /*emitter=*/{}, &resolved_target));
+        module_, low_function, &target_registry_.registry, /*emitter=*/{},
+        &resolved_target));
     if (resolved_target.descriptor_set == nullptr) {
       std::abort();
     }
@@ -532,7 +531,6 @@ class PacketPlanFixture {
     loom_amdgpu_storage_lease_provider(&storage_lease_provider);
     const loom_low_emission_frame_options_t frame_options = {
         /*.descriptor_registry=*/&target_registry_.registry,
-        /*.target_selection=*/{},
         /*.memory_access_table=*/loom_low_memory_access_table_empty(),
         /*.residency_model=*/
         loom_amdgpu_occupancy_residency_model(&resolved_target),

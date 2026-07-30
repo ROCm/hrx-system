@@ -35,7 +35,7 @@ static uint32_t loom_amdgpu_kernel_assembly_flag(
 
 static bool loom_amdgpu_kernel_assembly_supports_wgp_mode(
     const loom_amdgpu_processor_info_t* processor) {
-  switch (processor->kernel_descriptor.profile) {
+  switch (processor->properties.kernel_descriptor.profile) {
     case LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11:
     case LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX12:
       return true;
@@ -51,20 +51,20 @@ static iree_status_t loom_amdgpu_kernel_assembly_append_metadata(
     const loom_amdgpu_kernel_record_t* record, iree_string_builder_t* builder) {
   const loom_amdgpu_metadata_kernel_t* kernel = &record->metadata;
   const bool has_architected_flat_scratch =
-      loom_amdgpu_processor_kernel_descriptor_has_flags(
-          record->processor,
+      loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
+          &record->processor->properties,
           LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH);
   const bool uses_gfx10_sgpr_encoding =
-      loom_amdgpu_processor_kernel_descriptor_has_flags(
-          record->processor,
+      loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
+          &record->processor->properties,
           LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_GFX10_SGPR_ENCODING);
   const bool has_accum_offset =
-      loom_amdgpu_processor_kernel_descriptor_has_flags(
-          record->processor,
+      loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
+          &record->processor->properties,
           LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ACCUM_OFFSET);
   const bool has_dx10_clamp_and_ieee_mode =
-      loom_amdgpu_processor_kernel_descriptor_has_flags(
-          record->processor,
+      loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
+          &record->processor->properties,
           LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_DX10_CLAMP_AND_IEEE_MODE);
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, "\n.rodata\n.p2align 6\n"));
@@ -197,23 +197,23 @@ static iree_status_t loom_amdgpu_kernel_assembly_append_metadata(
                                           "  .amdhsa_forward_progress %u\n",
                                           1u, 1u));
   }
-  if (record->processor->kernel_descriptor.profile ==
+  if (record->processor->properties.kernel_descriptor.profile ==
       LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX11) {
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder,
                                            "  .amdhsa_shared_vgpr_count 0\n"
                                            "  .amdhsa_inst_pref_size 0\n"));
   }
-  if (record->processor->kernel_descriptor.profile ==
+  if (record->processor->properties.kernel_descriptor.profile ==
           LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX12 ||
-      record->processor->kernel_descriptor.profile ==
+      record->processor->properties.kernel_descriptor.profile ==
           LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
         builder,
         "  .amdhsa_inst_pref_size 0\n"
         "  .amdhsa_round_robin_scheduling 0\n"));
   }
-  if (record->processor->kernel_descriptor.profile ==
+  if (record->processor->properties.kernel_descriptor.profile ==
       LOOM_AMDGPU_KERNEL_DESCRIPTOR_PROFILE_GFX125) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
         builder, "  .amdhsa_named_barrier_count 0\n"));
@@ -231,7 +231,7 @@ static iree_status_t loom_amdgpu_kernel_assembly_append_metadata(
       iree_string_builder_append_cstring(builder, ".end_amdhsa_kernel\n"));
 
   const loom_amdgpu_code_object_metadata_t metadata = {
-      .target = record->target_id,
+      .target = record->code_object_target_id,
       .kernels = &record->metadata,
       .kernel_count = 1,
   };
@@ -253,9 +253,10 @@ static iree_status_t loom_amdgpu_kernel_assembly_emit(
       schedule, allocation, &record_options, &record, scratch_arena));
 
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, ".text\n"));
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      builder, ".amdgcn_target \"%.*s\"\n", (int)record.target_id.size,
-      record.target_id.data));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_format(builder, ".amdgcn_target \"%.*s\"\n",
+                                        (int)record.code_object_target_id.size,
+                                        record.code_object_target_id.data));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       builder, ".amdhsa_code_object_version %u\n\n",
       LOOM_AMDGPU_KERNEL_ASSEMBLY_CODE_OBJECT_VERSION));
@@ -270,7 +271,8 @@ static iree_status_t loom_amdgpu_kernel_assembly_emit(
       record.symbol.data, (int)record.symbol.size, record.symbol.data,
       (int)record.symbol.size, record.symbol.data));
   const loom_amdgpu_kernel_entry_envelope_t* entry_envelope =
-      loom_amdgpu_kernel_entry_envelope_for_processor(record.processor);
+      loom_amdgpu_kernel_entry_envelope_for_properties(
+          &record.processor->properties);
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_string(builder, entry_envelope->assembly));
   const loom_amdgpu_assembly_fragment_options_t assembly_options = {

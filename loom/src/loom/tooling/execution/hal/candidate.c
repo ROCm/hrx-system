@@ -57,7 +57,7 @@ static void loom_run_hal_candidate_record_report_status(
   report->backend_name = candidate->provider->name;
   report->target_family_name = candidate->provider->target_family_name;
   if (candidate->compiled) {
-    report->target_key = candidate->device_target.target_key;
+    report->target_key = candidate->artifact.target_key;
     report->artifact_format = loom_target_artifact_format_name(
         candidate->artifact.target_artifact_format);
     loom_target_compile_report_record_artifact_size(
@@ -88,7 +88,11 @@ static iree_status_t loom_run_hal_candidate_emit_selected_target(
       &candidate->artifact);
   if (iree_status_is_ok(status) && candidate->compiled &&
       candidate->artifact.target_bundle == NULL) {
-    candidate->artifact.target_bundle = candidate->device_target.target_bundle;
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "HAL artifact provider '%.*s' emitted an artifact without its durable "
+        "target bundle",
+        (int)provider->name.size, provider->name.data);
   }
   return status;
 }

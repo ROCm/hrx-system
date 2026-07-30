@@ -6,6 +6,7 @@
 
 #include "loom/tooling/target/amdgpu/testbench_requirements.h"
 
+#include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
 #include "loom/tooling/execution/hal/testbench_actual.h"
 
@@ -46,13 +47,16 @@ static iree_status_t loom_amdgpu_hal_testbench_query_descriptor_set_requirement(
   IREE_RETURN_IF_ERROR(context->artifact_provider->select_device_target(
       context->artifact_provider, &context->runtime, context->host_allocator,
       &target));
-  const loom_amdgpu_target_profile_t* profile =
-      (const loom_amdgpu_target_profile_t*)target.data;
+  const loom_amdgpu_target_profile_t* target_profile =
+      loom_amdgpu_target_profile_cast(target.target_profile);
   const loom_amdgpu_processor_info_t* processor =
-      profile != NULL ? profile->processor : NULL;
+      target_profile != NULL ? loom_amdgpu_target_info_target_processor(
+                                   target_profile->identity.target)
+                             : NULL;
   const bool satisfied =
-      processor != NULL && iree_string_view_equal(processor->descriptor_set.key,
-                                                  required_descriptor_set);
+      processor != NULL &&
+      iree_string_view_equal(processor->properties.descriptor_set.key,
+                             required_descriptor_set);
   out_result->state =
       satisfied ? LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_SATISFIED
                 : LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNSATISFIED;

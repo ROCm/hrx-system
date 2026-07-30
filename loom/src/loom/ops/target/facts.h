@@ -29,6 +29,9 @@ typedef struct loom_target_symbol_facts_t {
   // Common symbol-fact header.
   loom_symbol_facts_base_t base;
 
+  // Borrowed typed target operation defining the record.
+  loom_target_like_t target;
+
   // Module-local symbol reference for the target definition.
   loom_symbol_ref_t symbol;
 

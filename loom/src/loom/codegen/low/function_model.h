@@ -61,9 +61,8 @@ typedef struct loom_low_function_model_t {
 iree_status_t loom_low_function_model_initialize(
     loom_module_t* module, const loom_op_t* low_func_op,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    loom_target_selection_t target_selection, iree_diagnostic_emitter_t emitter,
-    loom_low_function_model_flags_t flags, iree_arena_allocator_t* arena,
-    loom_low_function_model_t* out_model);
+    iree_diagnostic_emitter_t emitter, loom_low_function_model_flags_t flags,
+    iree_arena_allocator_t* arena, loom_low_function_model_t* out_model);
 
 // Releases the module value-ordinal scratch map owned by |model|.
 void loom_low_function_model_deinitialize(loom_low_function_model_t* model);

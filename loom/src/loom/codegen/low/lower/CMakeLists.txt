@@ -83,6 +83,8 @@ loom_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::target
     loom::target::function_contract
+    loom::target::profile
+    loom::target::specialization
     loom::target::types
   PUBLIC
 )

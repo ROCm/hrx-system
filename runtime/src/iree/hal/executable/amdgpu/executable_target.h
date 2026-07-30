@@ -15,13 +15,13 @@ extern "C" {
 #endif  // __cplusplus
 
 // Adds canonical exact and compatible generic AMDGPU executable targets for
-// |exact_target_id| to |builder|.
+// |exact_identity| to |builder|.
 //
 // The generic target is omitted when the target map requires exact code
 // objects. Repeated targets are merged by the device spec builder.
 iree_status_t iree_hal_amdgpu_device_spec_builder_add_executable_targets(
     iree_hal_device_spec_builder_t* builder,
-    const iree_hal_amdgpu_target_id_t* exact_target_id,
+    const iree_hal_amdgpu_target_identity_t* exact_identity,
     iree_hal_physical_device_affinity_t physical_device_affinity);
 
 // Selects the device target compatible with an AMDGPU executable artifact.

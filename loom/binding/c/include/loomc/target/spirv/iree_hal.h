@@ -34,6 +34,7 @@
 ///     .structure_size = sizeof(loomc_spirv_iree_hal_profile_options_t),
 ///     .identifier = loomc_make_cstring_view("jit-vulkan"),
 ///     .device = device,
+///     .physical_device_affinity = 0,
 /// };
 /// loomc_target_profile_t* profile = NULL;
 /// loomc_result_t* result = NULL;
@@ -68,6 +69,9 @@ typedef struct loomc_spirv_iree_hal_profile_options_t {
 
   /// IREE HAL device borrowed for the duration of the call.
   iree_hal_device_t* device;
+
+  /// Optional physical-device set the selected profile must fully cover.
+  iree_hal_physical_device_affinity_t physical_device_affinity;
 
 } loomc_spirv_iree_hal_profile_options_t;
 

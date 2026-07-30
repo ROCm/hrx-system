@@ -139,6 +139,12 @@ TARGET_COMMON_OVERRIDE_ATTRS = [
     AttrDef("max_workgroup_size_y", ATTR_TYPE_I64, optional=True),
     AttrDef("max_workgroup_size_z", ATTR_TYPE_I64, optional=True),
     AttrDef("max_flat_workgroup_size", ATTR_TYPE_I64, optional=True),
+    AttrDef(
+        "max_workgroup_storage_bytes",
+        ATTR_TYPE_I64,
+        optional=True,
+        doc="Maximum function-local workgroup storage in bytes.",
+    ),
     AttrDef("subgroup_size", ATTR_TYPE_I64, optional=True),
     AttrDef("max_grid_size_x", ATTR_TYPE_I64, optional=True),
     AttrDef("max_grid_size_y", ATTR_TYPE_I64, optional=True),
@@ -169,7 +175,6 @@ TARGET_COMMON_OVERRIDE_ATTRS = [
         open_enum=True,
         optional=True,
     ),
-    AttrDef("hal_buffer_resource_flags", ATTR_TYPE_I64, optional=True),
     AttrDef("contract_set_key", ATTR_TYPE_STRING, optional=True),
     AttrDef("contract_feature_bits", ATTR_TYPE_I64, optional=True),
 ]

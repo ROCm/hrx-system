@@ -1080,8 +1080,8 @@ typedef struct loom_target_compile_report_source_low_row_t {
 typedef struct loom_target_compile_report_source_low_target_row_t {
   // Source function symbol selected for source-to-low lowering.
   iree_string_view_t function_name;
-  // Whether the effective target came from source IR or invocation selection.
-  loom_target_selection_source_t target_source;
+  // Whether the effective target was authored or bound by specialization.
+  loom_target_binding_source_t target_source;
   // Module target symbol used as the effective target record.
   iree_string_view_t target_symbol_name;
   // Effective target bundle name selected for the source function.
@@ -1675,7 +1675,7 @@ typedef struct loom_target_compile_report_t {
   iree_string_view_t backend_name;
   // Target family name selected by the backend, if any.
   iree_string_view_t target_family_name;
-  // Backend-facing target key selected for compilation, if any.
+  // Backend-facing target key carried by the emitted artifact, if any.
   iree_string_view_t target_key;
   // Resolved target record name selected for compilation, if any.
   iree_string_view_t target_bundle_name;

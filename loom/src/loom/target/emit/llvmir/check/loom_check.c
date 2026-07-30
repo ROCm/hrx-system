@@ -533,7 +533,6 @@ iree_status_t loom_llvmir_loom_check_emit_provider_execute(
   if (iree_status_is_ok(status)) {
     status = loom_llvmir_emit_low_module(
         request->module, &request->low_registry->registry,
-        loom_target_selection_empty(),
         (iree_diagnostic_emitter_t){
             .fn = loom_check_diagnostic_emitter_capture_emit,
             .user_data = &diagnostic_capture,

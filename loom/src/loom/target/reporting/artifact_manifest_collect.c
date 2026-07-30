@@ -526,7 +526,8 @@ static void loom_target_artifact_manifest_collect_target_details(
 }
 
 static iree_status_t loom_target_artifact_manifest_collect_targets(
-    loom_target_entry_list_t entries, loom_target_artifact_manifest_mode_t mode,
+    const loom_module_t* module, loom_target_entry_list_t entries,
+    const loom_target_artifact_manifest_collect_options_t* options,
     iree_arena_allocator_t* arena,
     loom_target_artifact_manifest_target_t** out_targets,
     iree_host_size_t* out_target_count,
@@ -554,10 +555,16 @@ static iree_status_t loom_target_artifact_manifest_collect_targets(
     targets[target_count++] = (loom_target_artifact_manifest_target_t){
         .name = target_name,
     };
-    if (loom_target_artifact_manifest_collect_mode_includes_details(mode)) {
+    loom_target_artifact_manifest_target_t* target = &targets[target_count - 1];
+    if (loom_target_artifact_manifest_collect_mode_includes_details(
+            options->mode)) {
       loom_target_artifact_manifest_collect_target_details(
-          &entries.values[i].bundle_storage.snapshot,
-          &targets[target_count - 1]);
+          &entries.values[i].bundle_storage.snapshot, target);
+    }
+    if (options->target_projection != NULL &&
+        options->target_projection->project != NULL) {
+      IREE_RETURN_IF_ERROR(options->target_projection->project(
+          module, &entries.values[i], arena, target));
     }
   }
 
@@ -848,7 +855,7 @@ iree_status_t loom_target_artifact_manifest_collect_from_entries(
   iree_host_size_t target_count = 0;
   iree_string_view_t* target_name_refs = NULL;
   IREE_RETURN_IF_ERROR(loom_target_artifact_manifest_collect_targets(
-      entries, options->mode, arena, &targets, &target_count,
+      module, entries, options, arena, &targets, &target_count,
       &target_name_refs));
 
   loom_target_artifact_manifest_function_t* functions = NULL;

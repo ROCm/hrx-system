@@ -17,8 +17,8 @@ namespace {
 static std::string FormatTargetId(
     const iree_hal_amdgpu_agent_isa_target_t& isa_target) {
   char buffer[128] = {0};
-  IREE_CHECK_OK(iree_hal_amdgpu_target_id_format(
-      &isa_target.target_id, sizeof(buffer), buffer,
+  IREE_CHECK_OK(iree_hal_amdgpu_target_identity_format_artifact_key(
+      &isa_target.identity, sizeof(buffer), buffer,
       /*out_buffer_length=*/nullptr));
   return buffer;
 }
@@ -98,12 +98,9 @@ TEST(AgentTargetTest, FindsCompatibleAlternateIsa) {
   IREE_ASSERT_OK(iree_hal_amdgpu_agent_target_initialize(
       hsa_agent_t{42}, IREE_ARRAYSIZE(isa_values), isa_values,
       /*asic_revision=*/0, iree_allocator_system(), &target));
-  iree_hal_amdgpu_target_id_t requested_target;
-  IREE_ASSERT_OK(iree_hal_amdgpu_target_id_parse(
-      IREE_SV("gfx942:sramecc+:xnack+"),
-      IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_ARCH_ONLY |
-          IREE_HAL_AMDGPU_TARGET_ID_PARSE_FLAG_ALLOW_FEATURE_SUFFIXES,
-      &requested_target));
+  iree_hal_amdgpu_target_identity_t requested_target;
+  IREE_ASSERT_OK(iree_hal_amdgpu_target_identity_parse_artifact_key(
+      IREE_SV("gfx942:sramecc+:xnack+"), &requested_target));
 
   const iree_hal_amdgpu_agent_isa_target_t* compatible_isa =
       iree_hal_amdgpu_agent_target_find_compatible_isa(&target,
@@ -113,32 +110,29 @@ TEST(AgentTargetTest, FindsCompatibleAlternateIsa) {
   iree_hal_amdgpu_agent_target_deinitialize(&target);
 }
 
-TEST(AgentTargetTest, QualifiesGfx1250Revision) {
+TEST(AgentTargetTest, ResolvesPhysicalTargets) {
   iree_hal_amdgpu_agent_target_t a0_target;
   IREE_ASSERT_OK(InitializeSingleTarget(hsa_agent_t{42}, hsa_isa_t{7},
                                         IREE_SV("amdgcn-amd-amdhsa--gfx1250"),
                                         /*asic_revision=*/0, &a0_target));
-  EXPECT_EQ(FormatTargetId(a0_target.primary_isa),
-            "gfx1250:gfx1250-b0-specific-");
+  EXPECT_EQ(FormatTargetId(a0_target.primary_isa), "gfx1250-a0");
   iree_hal_amdgpu_agent_target_deinitialize(&a0_target);
 
   iree_hal_amdgpu_agent_target_t b0_target;
   IREE_ASSERT_OK(InitializeSingleTarget(hsa_agent_t{42}, hsa_isa_t{7},
                                         IREE_SV("amdgcn-amd-amdhsa--gfx1250"),
                                         /*asic_revision=*/1, &b0_target));
-  EXPECT_EQ(FormatTargetId(b0_target.primary_isa),
-            "gfx1250:gfx1250-b0-specific+");
+  EXPECT_EQ(FormatTargetId(b0_target.primary_isa), "gfx1250");
   iree_hal_amdgpu_agent_target_deinitialize(&b0_target);
 }
 
-TEST(AgentTargetTest, RejectsContradictoryRevision) {
+TEST(AgentTargetTest, RejectsUnknownPhysicalRevision) {
   iree_hal_amdgpu_agent_target_t target;
   IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_FAILED_PRECONDITION,
-      InitializeSingleTarget(
-          hsa_agent_t{42}, hsa_isa_t{7},
-          IREE_SV("amdgcn-amd-amdhsa--gfx1250:gfx1250-b0-specific+"),
-          /*asic_revision=*/0, &target));
+      IREE_STATUS_INVALID_ARGUMENT,
+      InitializeSingleTarget(hsa_agent_t{42}, hsa_isa_t{7},
+                             IREE_SV("amdgcn-amd-amdhsa--gfx1250"),
+                             /*asic_revision=*/2, &target));
 }
 
 TEST(AgentTargetTest, RejectsEmptyAndOversizedNames) {

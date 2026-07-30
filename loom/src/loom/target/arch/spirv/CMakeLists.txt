@@ -212,10 +212,28 @@ loom_cc_library(
     profile
   HDRS
     "profile.h"
+  SRCS
+    "profile.c"
   DEPS
     ::cooperative_properties
     iree::base
+    loom::target::profile
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_test(
+  NAME
+    profile_test
+  SRCS
+    "profile_test.cc"
+  DEPS
+    ::profile
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
 )
 endif()
 
@@ -289,15 +307,43 @@ loom_cc_library(
   DEPS
     ::low_verify
     ::math_policy
+    ::profile
     iree::base
     loom::ir
-    loom::pass::builder
     loom::target::arch::spirv::descriptors::low_registry
     loom::target::arch::spirv::lower
     loom::target::arch::spirv::ops
-    loom::target::arch::spirv::records::target_records
+    loom::target::materialization
     loom::target::provider
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_test(
+  NAME
+    provider_test
+  SRCS
+    "provider_test.cc"
+  DEPS
+    ::features
+    ::profile
+    ::provider
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::format::text::parser
+    loom::ir
+    loom::ops::op_registry
+    loom::ops::target
+    loom::target::arch::spirv::ops
+    loom::target::arch::spirv::records::target_records
+    loom::target::provider
+    loom::testing::module_ptr
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
 )
 endif()
 

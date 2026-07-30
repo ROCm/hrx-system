@@ -394,6 +394,9 @@ static iree_status_t loom_target_artifact_manifest_format_target_json(
           &object, "family", target->family));
   IREE_RETURN_IF_ERROR(
       loom_target_artifact_manifest_json_write_optional_string_field(
+          &object, "selector", target->selector));
+  IREE_RETURN_IF_ERROR(
+      loom_target_artifact_manifest_json_write_optional_string_field(
           &object, "processor", target->processor));
   IREE_RETURN_IF_ERROR(
       loom_target_artifact_manifest_json_write_optional_string_field(

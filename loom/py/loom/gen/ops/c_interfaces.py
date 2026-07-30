@@ -214,37 +214,37 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
 )
 
 
-_TARGET_PROJECTION_FIELDS: dict[str, tuple[str, str]] = {
-    "codegen_format": ("LOOM_TARGET_PROJECTION_VALUE_ENUM_U8", "snapshot.codegen_format"),
-    "artifact_format": ("LOOM_TARGET_PROJECTION_VALUE_ENUM_U8", "snapshot.artifact_format"),
-    "default_pointer_bitwidth": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.default_pointer_bitwidth"),
-    "index_bitwidth": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.index_bitwidth"),
-    "offset_bitwidth": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.offset_bitwidth"),
-    "max_workgroup_size_x": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_size.x"),
-    "max_workgroup_size_y": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_size.y"),
-    "max_workgroup_size_z": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_size.z"),
-    "max_flat_workgroup_size": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_flat_workgroup_size"),
-    "subgroup_size": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.subgroup_size"),
-    "max_grid_size_x": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_grid_size.x"),
-    "max_grid_size_y": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_grid_size.y"),
-    "max_grid_size_z": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_grid_size.z"),
-    "max_flat_grid_size": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U64", "snapshot.max_flat_grid_size"),
-    "max_workgroup_count_x": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_count.x"),
-    "max_workgroup_count_y": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_count.y"),
-    "max_workgroup_count_z": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_count.z"),
-    "memory_space_generic": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.memory_spaces.generic"),
-    "memory_space_global": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.memory_spaces.global"),
-    "memory_space_workgroup": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.memory_spaces.workgroup"),
-    "memory_space_constant": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.memory_spaces.constant"),
-    "memory_space_private": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.memory_spaces.private_memory"),
-    "memory_space_host": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.memory_spaces.host"),
-    "memory_space_descriptor": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.memory_spaces.descriptor"),
-    "abi": ("LOOM_TARGET_PROJECTION_VALUE_ENUM_U8", "export_plan.abi_kind"),
-    "export_symbol": ("LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW", "export_plan.export_symbol"),
-    "linkage": ("LOOM_TARGET_PROJECTION_VALUE_ENUM_U8", "export_plan.linkage"),
-    "hal_buffer_resource_flags": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "export_plan.hal_kernel.buffer_resource_flags"),
-    "contract_set_key": ("LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW", "config.contract_set_key"),
-    "contract_feature_bits": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U64", "config.contract_feature_bits"),
+_TARGET_PROJECTION_FIELDS: dict[str, tuple[str, str, str]] = {
+    "codegen_format": ("LOOM_TARGET_PROJECTION_VALUE_ENUM_U8", "snapshot.codegen_format", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "artifact_format": ("LOOM_TARGET_PROJECTION_VALUE_ENUM_U8", "snapshot.artifact_format", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "default_pointer_bitwidth": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.default_pointer_bitwidth", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "index_bitwidth": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.index_bitwidth", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "offset_bitwidth": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.offset_bitwidth", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "max_workgroup_size_x": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_size.x", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "max_workgroup_size_y": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_size.y", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "max_workgroup_size_z": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_size.z", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "max_flat_workgroup_size": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_flat_workgroup_size", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "max_workgroup_storage_bytes": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U64", "snapshot.max_workgroup_storage_bytes", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "subgroup_size": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.subgroup_size", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "max_grid_size_x": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_grid_size.x", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "max_grid_size_y": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_grid_size.y", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "max_grid_size_z": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_grid_size.z", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "max_flat_grid_size": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U64", "snapshot.max_flat_grid_size", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "max_workgroup_count_x": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_count.x", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "max_workgroup_count_y": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_count.y", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "max_workgroup_count_z": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.max_workgroup_count.z", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "memory_space_generic": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.memory_spaces.generic", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "memory_space_global": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.memory_spaces.global", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "memory_space_workgroup": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.memory_spaces.workgroup", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "memory_space_constant": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.memory_spaces.constant", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "memory_space_private": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.memory_spaces.private_memory", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "memory_space_host": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.memory_spaces.host", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "memory_space_descriptor": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32", "snapshot.memory_spaces.descriptor", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "abi": ("LOOM_TARGET_PROJECTION_VALUE_ENUM_U8", "export_plan.abi_kind", "LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED"),
+    "export_symbol": ("LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW", "export_plan.export_symbol", "LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED"),
+    "linkage": ("LOOM_TARGET_PROJECTION_VALUE_ENUM_U8", "export_plan.linkage", "LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED"),
+    "contract_set_key": ("LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW", "config.contract_set_key", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
+    "contract_feature_bits": ("LOOM_TARGET_PROJECTION_VALUE_I64_TO_U64", "config.contract_feature_bits", "LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE"),
 }
 
 
@@ -503,15 +503,28 @@ def _validate_memory_access_interface(op: Op, iface: MemoryAccessInterface, inte
     _memory_access_operation_kind(op, iface, interface_name)
 
 
-def _target_like_projection_entries(op: Op) -> list[tuple[int, str, str]]:
-    entries: list[tuple[int, str, str]] = []
+def _target_like_projection_entries(op: Op, iface: TargetLikeInterface) -> list[tuple[int, str, str, str]]:
+    entries: list[tuple[int, str, str, str]] = []
+    authored_attrs = set(iface.specialization_authored_attrs)
+    if len(authored_attrs) != len(iface.specialization_authored_attrs):
+        raise ValueError(f"TargetLikeInterface on {op.name!r}: duplicate specialization authored attrs")
+    unknown_authored_attrs = authored_attrs - _TARGET_PROJECTION_FIELDS.keys()
+    if unknown_authored_attrs:
+        raise ValueError(f"TargetLikeInterface on {op.name!r}: unknown specialization authored attrs {sorted(unknown_authored_attrs)}")
+    projected_attr_names: set[str] = set()
     for attr_def in op.attrs:
         projection = _TARGET_PROJECTION_FIELDS.get(attr_def.name)
         if projection is None:
             continue
-        value_kind, storage_field = projection
+        projected_attr_names.add(attr_def.name)
+        value_kind, storage_field, specialization = projection
+        if attr_def.name in authored_attrs:
+            specialization = "LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED"
         attr_index = c_queries.resolve_attr_index(op, attr_def.name, "TargetLikeInterface")
-        entries.append((attr_index, value_kind, storage_field))
+        entries.append((attr_index, value_kind, storage_field, specialization))
+    absent_authored_attrs = authored_attrs - projected_attr_names
+    if absent_authored_attrs:
+        raise ValueError(f"TargetLikeInterface on {op.name!r}: specialization authored attrs are not declared by the op {sorted(absent_authored_attrs)}")
     return entries
 
 
@@ -521,13 +534,13 @@ def emit_target_like_descriptor(op: Op, iface: TargetLikeInterface, lines: list[
     descriptor = c_symbols.normalize_c_symbol_reference(iface.descriptor or f"{c_prefix(op)}_target_like_descriptor")
     bundle_table = c_symbols.normalize_c_symbol_reference(iface.bundle_table)
     prefix = c_prefix(op)
-    projections = _target_like_projection_entries(op)
+    projections = _target_like_projection_entries(op, iface)
     projection_array = "NULL"
     if projections:
         projection_array = f"{prefix}_target_projections"
         lines.append(f"static const loom_target_projection_t {projection_array}[] = {{")
-        for attr_index, value_kind, storage_field in projections:
-            lines.append(f"    {{offsetof(loom_target_bundle_storage_t, {storage_field}), {attr_index}, {value_kind}}},")
+        for attr_index, value_kind, storage_field, specialization in projections:
+            lines.append(f"    {{offsetof(loom_target_bundle_storage_t, {storage_field}), {attr_index}, {value_kind}, {specialization}}},")
         lines.append("};")
     lines.append(f"static const loom_target_like_descriptor_t {descriptor} = {{")
     lines.append(f"    .bundle_table = &{bundle_table},")
