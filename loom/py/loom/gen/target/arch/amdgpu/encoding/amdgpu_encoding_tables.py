@@ -642,26 +642,44 @@ def _compile_encoding_contract(
     )
 
 
+def _project_encoding_contract(
+    contract: _EncodingContract,
+    descriptor_keys: Sequence[str],
+) -> _EncodingContract:
+    descriptors_by_key = {descriptor.descriptor_key: descriptor for descriptor in contract.descriptors}
+    descriptors: list[_DescriptorEncodingContract] = []
+    for descriptor_key in descriptor_keys:
+        descriptor = descriptors_by_key.get(descriptor_key)
+        if descriptor is None:
+            raise ValueError(f"AMDGPU encoding storage contract is missing view descriptor '{descriptor_key}'")
+        descriptors.append(descriptor)
+    return replace(contract, descriptors=tuple(descriptors))
+
+
 def _validate_view_encoding_contract(
     storage_target: str,
     storage_spec: AmdgpuIsaFactSource,
+    storage_contract: _EncodingContract,
     view_info: AmdgpuDescriptorSetInfo,
     view_descriptor_set: DescriptorSet,
     isa_specs: Mapping[str, AmdgpuIsaFactSource],
 ) -> None:
-    storage_contract = _compile_encoding_contract(
-        storage_target,
-        storage_spec,
-        view_descriptor_set,
+    view_storage_contract = _project_encoding_contract(
+        storage_contract,
+        tuple(descriptor.key for descriptor in view_descriptor_set.descriptors if descriptor.encoding_format_id != 0),
     )
     for isa_info in view_info.isa_infos:
         member_spec = isa_specs[isa_info.isa_xml_key]
-        member_contract = _compile_encoding_contract(
-            storage_target,
-            member_spec,
-            view_descriptor_set,
+        member_contract = (
+            view_storage_contract
+            if member_spec is storage_spec
+            else _compile_encoding_contract(
+                storage_target,
+                member_spec,
+                view_descriptor_set,
+            )
         )
-        if member_contract != storage_contract:
+        if member_contract != view_storage_contract:
             raise ValueError(
                 f"AMDGPU encoding view '{view_info.key}' does not have a common encoding contract across storage ISA '{storage_spec.source_name}' and member ISA '{member_spec.source_name}'"
             )
@@ -1003,6 +1021,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError(f"AMDGPU encoding target '{args.target}' is missing ISA XML key '{storage_isa_info.isa_xml_key}'") from exc
     if spec.architecture_name != storage_isa_info.isa_architecture_name or spec.architecture_id != storage_isa_info.isa_architecture_id:
         raise ValueError(f"{spec.source_name}: AMDGPU encoding target '{args.target}' expects {storage_isa_info.isa_architecture_name} architecture id {storage_isa_info.isa_architecture_id}")
+    storage_descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
+        args.target,
+        isa_specs,
+    )
+    storage_contract = _compile_encoding_contract(
+        args.target,
+        spec,
+        storage_descriptor_set,
+    )
     for view_info in view_infos:
         view_descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
             view_info.generator_target,
@@ -1011,6 +1038,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _validate_view_encoding_contract(
             args.target,
             spec,
+            storage_contract,
             view_info,
             view_descriptor_set,
             isa_specs,

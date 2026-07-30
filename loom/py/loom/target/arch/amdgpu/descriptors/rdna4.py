@@ -953,29 +953,6 @@ def _with_gfx1251_matrix_schedules(
     return tuple(result)
 
 
-_GFX125X_EXACT_MATRIX_SCHEDULE_CLASS_NAMES = frozenset(
-    (
-        _SCHEDULE_GFX125X_MATRIX_XDL_FAST,
-        _SCHEDULE_GFX125X_MATRIX_XDL,
-        _SCHEDULE_GFX125X_MATRIX_XDL_SLOW,
-    )
-)
-
-
-def _with_matrix_schedule_classes(
-    schedule_classes: tuple[ScheduleClass, ...],
-    replacements: tuple[ScheduleClass, ...],
-) -> tuple[ScheduleClass, ...]:
-    return (
-        *(
-            schedule_class
-            for schedule_class in schedule_classes
-            if schedule_class.name not in _GFX125X_EXACT_MATRIX_SCHEDULE_CLASS_NAMES
-        ),
-        *replacements,
-    )
-
-
 _GFX1251_MATRIX_SCHEDULE_CLASSES = (
     ScheduleClass(
         _SCHEDULE_GFX1251_MATRIX_XDL,
@@ -1092,6 +1069,8 @@ _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
             hazards=_matrix_hazards(_RESOURCE_GFX125X_XDL),
             model_quality=ModelQuality.EXACT,
         ),
+        *_GFX1251_MATRIX_SCHEDULE_CLASSES,
+        *_GFX125X_GENERIC_MATRIX_SCHEDULE_CLASSES,
         ScheduleClass(
             _SCHEDULE_TENSOR_LOAD_LDS,
             latency_kind=LatencyKind.VARIABLE,
@@ -1166,10 +1145,7 @@ _AMDGPU_RDNA4_GFX1251_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     register_parts=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.register_parts,
     enum_domains=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.enum_domains,
     resources=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.resources,
-    schedule_classes=_with_matrix_schedule_classes(
-        _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
-        _GFX1251_MATRIX_SCHEDULE_CLASSES,
-    ),
+    schedule_classes=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
     descriptors=_with_gfx1251_matrix_schedules(
         _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.descriptors
     ),
@@ -1191,10 +1167,7 @@ _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE = (
 )
 _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE = replace(
     _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
-    schedule_classes=_with_matrix_schedule_classes(
-        _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
-        _GFX125X_GENERIC_MATRIX_SCHEDULE_CLASSES,
-    ),
+    schedule_classes=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
     descriptors=_with_gfx1251_matrix_schedules(
         tuple(
             descriptor
