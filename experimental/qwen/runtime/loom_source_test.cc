@@ -171,4 +171,27 @@ TEST(QwenLoomSourceTest, EmbedsWorkaroundRouterProjectionSource) {
       std::string::npos);
 }
 
+TEST(QwenLoomSourceTest, EmbedsWorkaroundRouterTop8Source) {
+  qwen_loom_source_module_t source_module;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_ROUTER_TOP8_F32), &source_module));
+
+  std::string source_text(
+      reinterpret_cast<const char*>(source_module.source_contents.data),
+      source_module.source_contents.data_length);
+  EXPECT_NE(source_text.find("%route_id_storage_count = index.mul "
+                             "%launch_token_count, %route_count : index"),
+            std::string::npos);
+  EXPECT_NE(source_text.find(
+                "%route_id_token_base = index.mul %token, %route_count : "
+                "index"),
+            std::string::npos);
+  EXPECT_EQ(source_text.find("%route_id_storage_count = index.mul "
+                             "%launch_token_count, %bounded_route_id_stride"),
+            std::string::npos);
+  EXPECT_EQ(source_text.find("%route_id_token_base = index.mul %token, "
+                             "%bounded_route_id_stride"),
+            std::string::npos);
+}
+
 }  // namespace

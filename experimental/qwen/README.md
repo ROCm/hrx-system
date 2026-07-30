@@ -54,6 +54,13 @@ config declarations required to verify that function. Delete it when the
 compiler can prove the original stepped loop. It is not a new production kernel
 variant and must not accumulate unrelated router work.
 
+`kernels/router_top8_f32_bringup_workaround.loom` makes the owned model's
+compact route-ID rows structural while the generic authored kernel omits its
+required `route_count <= route_id_stride` relation. The Qwen program fixes both
+values to eight. This fork retains that exact behavior, carries one function,
+and is deleted when the upstream kernel establishes and validates its generic
+stride contract.
+
 Later milestones repeat the proven layer shape across the model, add embedding
 and vocabulary projection, and introduce reusable prefill and decode programs.
 The layer runner remains a first-class optimization surface so model work can

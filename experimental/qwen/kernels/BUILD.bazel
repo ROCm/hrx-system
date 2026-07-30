@@ -111,10 +111,7 @@ loom_link_module(
 
 loom_link_module(
     name = "router_top8_f32_runtime_module",
-    srcs = ["runtime_exports.loom"],
-    libraries = [
-        "//experimental/qwen_moe/kernels:router_top8_f32_linked",
-    ],
+    srcs = ["router_top8_f32_bringup_workaround.loom"],
     mode = "selective",
     output = "qwen3_moe_router_top8_f32.loom",
     roots = ["@qwen3_moe_router_top8_f32"],
