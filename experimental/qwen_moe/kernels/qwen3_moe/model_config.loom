@@ -1,0 +1,8 @@
+// Qwen model-wide configuration shared across independently linked kernels.
+//
+// Layer-local storage formats and schedule choices remain with their owning
+// kernels. These values describe the semantic model contract and therefore
+// have one symbol definition regardless of how many kernels consume them.
+config.decl @qwen3_moe.model.hidden_size : %value: index where [range(%value, 128, 32768), mul(%value, 128)]
+
+config.decl @qwen3_moe.model.rms_epsilon : f32
