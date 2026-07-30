@@ -25,6 +25,8 @@ func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %i
 
 func.decl @qwen3_moe_build_expert_table(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %route_ids: buffer, %expert_table: buffer)
 
+func.decl @qwen3_moe_build_expert_partition_table(%token_count: index, %route_count: index, %expert_count: index, %expert_table: buffer, %partition_table: buffer)
+
 func.decl @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer)
 
 // Decodes the four adjacent Q4_K values owned by one load packet. This follows
@@ -413,22 +415,23 @@ kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_
   %expert_count = config.get @qwen3_moe.routed_gate_up.expert_count : index
   %output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
   %one = index.constant 1 : index
+  %thirtyone = index.constant 31 : index
   %thirtytwo = index.constant 32 : index
   %sixtythree = index.constant 63 : index
   %sixtyfour = index.constant 64 : index
   %twofiftysix = index.constant 256 : index
   %padded_output_size = index.add %output_size, %sixtythree : index
   %output_tiles = index.div %padded_output_size, %sixtyfour : index
-  // Size the route grid for the average number of 32-row expert partitions.
-  // Skewed experts consume additional partitions through the strided loop in
-  // the kernel body instead of making every expert pay for the worst case.
+  // The exact partition count lives in device memory. The rounding bound keeps
+  // it below assignment_partitions + expert_count, so launching the larger
+  // term lets every workgroup consume at most two strided descriptors.
   %assignment_count = index.mul %token_count, %route_count : index
-  %route_tile_capacity = index.mul %expert_count, %thirtytwo : index
-  %route_tile_padding = index.sub %route_tile_capacity, %one : index
-  %padded_assignment_count = index.add %assignment_count, %route_tile_padding : index
-  %route_tiles = index.div %padded_assignment_count, %route_tile_capacity : index
-  kernel.launch.config workgroups(%output_tiles, %route_tiles, %expert_count) workgroup_size(%twofiftysix, %one, %one) : index
-} launch(%token_count: index, %input: buffer, %expert_table: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+  %rounded_assignment_count = index.add %assignment_count, %thirtyone : index
+  %assignment_partition_count = index.div %rounded_assignment_count, %thirtytwo : index
+  %has_more_assignment_partitions = index.cmp ugt, %assignment_partition_count, %expert_count : index
+  %launch_partition_count = scf.select %has_more_assignment_partitions, %assignment_partition_count, %expert_count : index
+  kernel.launch.config workgroups(%output_tiles, %launch_partition_count, %one) workgroup_size(%twofiftysix, %one, %one) : index
+} launch(%token_count: index, %input: buffer, %expert_table: buffer, %partition_table: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
   %input_size = config.get @qwen3_moe.routed_gate_up.input_size : index
   %route_count = config.get @qwen3_moe.routed_gate_up.route_count : index
   %expert_count = config.get @qwen3_moe.routed_gate_up.expert_count : index
@@ -438,8 +441,7 @@ kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_
   %bounded_expert_count = index.assume %expert_count [range(%expert_count, 1, 128)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 4096)] : index
   %channel_tile = kernel.workgroup.id<x> : index
-  %route_tile = kernel.workgroup.id<y> : index
-  %expert = kernel.workgroup.id<z> : index
+  %partition_ordinal = kernel.workgroup.id<y> : index
   %workitem = kernel.workitem.id<x> : index
   %subgroup0 = kernel.subgroup.id : index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
@@ -450,6 +452,7 @@ kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_
   %four = index.constant 4 : index
   %eight = index.constant 8 : index
   %sixteen = index.constant 16 : index
+  %thirtyone = index.constant 31 : index
   %thirtytwo = index.constant 32 : index
   %forty = index.constant 40 : index
   %sixtyfour = index.constant 64 : index
@@ -463,6 +466,13 @@ kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_
   %wave_result_stage_bytes = index.constant 512 : offset
   %result_stage_bytes = index.constant 4096 : offset
   %zero_i32 = scalar.constant 0 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %five_i32 = scalar.constant 5 : i32
+  %seven_i32 = scalar.constant 7 : i32
+  %thirteen_i32 = scalar.constant 13 : i32
+  %thirtyone_i32 = scalar.constant 31 : i32
+  %sixtythree_i32 = scalar.constant 63 : i32
+  %onetwentyseven_i32 = scalar.constant 127 : i32
   %minus_one_i32 = scalar.constant -1 : i32
   %zero_f16x4 = vector.constant 0.0 : vector<4xf16>
   %zero_accumulator = vector.constant 0.0 : vector<16xf16>
@@ -470,15 +480,21 @@ kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %assignment_count = index.mul %bounded_token_count, %bounded_route_count : index
+  %rounded_assignment_count = index.add %assignment_count, %thirtyone : index
+  %assignment_partition_count = index.div %rounded_assignment_count, %thirtytwo : index
+  %maximum_partition_count = index.add %assignment_partition_count, %bounded_expert_count : index
+  %has_more_assignment_partitions = index.cmp ugt, %assignment_partition_count, %bounded_expert_count : index
+  %launch_partition_count = scf.select %has_more_assignment_partitions, %assignment_partition_count, %bounded_expert_count : index
   %assignment_table_byte_base = index.scale %bounded_expert_count, %four_bytes : index, offset -> offset
   %q4_block_count = index.div %input_size, %twofiftysix : index
   %weight_row_bytes = index.mul %q4_block_count, %q4_block_bytes : index
   %weight_expert_bytes = index.mul %bounded_output_size, %weight_row_bytes : index
   %output_row_count = index.mul %bounded_token_count, %bounded_route_count : index
-  %input_noalias, %expert_table_noalias, %gate_weight_noalias, %up_weight_noalias, %output_noalias = buffer.assume.noalias %input, %expert_table, %gate_weight, %up_weight, %output : buffer, buffer, buffer, buffer, buffer
+  %input_noalias, %expert_table_noalias, %partition_table_noalias, %gate_weight_noalias, %up_weight_noalias, %output_noalias = buffer.assume.noalias %input, %expert_table, %partition_table, %gate_weight, %up_weight, %output : buffer, buffer, buffer, buffer, buffer, buffer
   %input_view = buffer.view %input_noalias[%zero_offset] : buffer -> view<[%bounded_token_count]x[%input_size]xf32, #dense>
-  %count_view = buffer.view %expert_table_noalias[%zero_offset] : buffer -> view<[%bounded_expert_count]xi32, #dense>
   %assignment_view = buffer.view %expert_table_noalias[%assignment_table_byte_base] : buffer -> view<[%bounded_expert_count]x[%bounded_token_count]xi32, #dense>
+  %partition_count_view = buffer.view %partition_table_noalias[%zero_offset] : buffer -> view<1xi32, #dense>
+  %partition_descriptor_view = buffer.view %partition_table_noalias[%four_bytes] : buffer -> view<[%maximum_partition_count]xi32, #dense>
   %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<[%output_row_count]x[%bounded_output_size]xf32, #dense>
   %weight_stage = buffer.alloca %weight_stage_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %activation_stage = buffer.alloca %activation_stage_bytes {base_alignment = 16, memory_space = workgroup} : buffer
@@ -494,30 +510,47 @@ kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_
   %result_fragment_view = buffer.view %result_stage[%wave_result_stage_offset] : buffer -> view<16x16xf16, %result_fragment_layout>
   %result_physical_view = buffer.view %result_stage[%wave_result_stage_offset] : buffer -> view<16x16xf16, #dense>
   %channel_tile_base = index.mul %channel_tile, %sixtyfour : index
-  %initial_route_tile_base = index.mul %route_tile, %thirtytwo : index
-  %route_tile_capacity = index.mul %bounded_expert_count, %thirtytwo : index
-  %route_tile_padding = index.sub %route_tile_capacity, %one : index
-  %padded_assignment_count = index.add %assignment_count, %route_tile_padding : index
-  %route_partition_count = index.div %padded_assignment_count, %route_tile_capacity : index
-  %route_partition_step = index.mul %route_partition_count, %thirtytwo : index
-  %bounded_expert, %table_expert_count = index.assume %expert, %bounded_expert_count [lt(%expert, %bounded_expert_count)] : index, index
   %is_workitem_zero = index.cmp eq, %workitem, %zero : index
-  %lane_expert_route_count = scf.if %is_workitem_zero -> (i32) {
-    %loaded = view.load %count_view[%bounded_expert] : view<[%bounded_expert_count]xi32, #dense> -> i32
+  %lane_partition_count_i32 = scf.if %is_workitem_zero -> (i32) {
+    %loaded = view.load %partition_count_view[%zero] : view<1xi32, #dense> -> i32
     scf.yield %loaded : i32
   } else {
     scf.yield %zero_i32 : i32
   }
-  %expert_route_count_reduced = kernel.workgroup.reduce<addi> %lane_expert_route_count : i32
-  %expert_route_count_i32 = kernel.subgroup.broadcast.first %expert_route_count_reduced : i32
-  %expert_route_count0 = index.cast %expert_route_count_i32 : i32 to index
-  %expert_route_count = index.assume %expert_route_count0 [range(%expert_route_count0, 0, 2048)] : index
-  scf.for %route_tile_base = [%initial_route_tile_base to %expert_route_count step %route_partition_step] {
+  %partition_count_reduced = kernel.workgroup.reduce<addi> %lane_partition_count_i32 : i32
+  %partition_count_i32 = kernel.subgroup.broadcast.first %partition_count_reduced : i32
+  %partition_count0 = index.cast %partition_count_i32 : i32 to index
+  %partition_count, %partition_capacity = index.assume %partition_count0, %maximum_partition_count [lt(%partition_count0, %maximum_partition_count)] : index, index
+  scf.for %active_partition = [%partition_ordinal to %partition_count step %launch_partition_count] {
+    %descriptor_ordinal, %descriptor_count = index.assume %active_partition, %partition_count [lt(%active_partition, %partition_count)] : index, index
+    %table_descriptor_ordinal, %table_descriptor_capacity = index.assume %descriptor_ordinal, %maximum_partition_count [lt(%descriptor_ordinal, %maximum_partition_count)] : index, index
+    %lane_descriptor_i32 = scf.if %is_workitem_zero -> (i32) {
+      %loaded = view.load %partition_descriptor_view[%table_descriptor_ordinal] : view<[%maximum_partition_count]xi32, #dense> -> i32
+      scf.yield %loaded : i32
+    } else {
+      scf.yield %zero_i32 : i32
+    }
+    %descriptor_reduced_i32 = kernel.workgroup.reduce<addi> %lane_descriptor_i32 : i32
+    %descriptor_i32 = kernel.subgroup.broadcast.first %descriptor_reduced_i32 : i32
+    %expert_i32 = scalar.andi %descriptor_i32, %onetwentyseven_i32 : i32
+    %partition_shifted_i32 = scalar.shrui %descriptor_i32, %seven_i32 : i32
+    %partition_i32 = scalar.andi %partition_shifted_i32, %sixtythree_i32 : i32
+    %route_tile_base_i32 = scalar.shli %partition_i32, %five_i32 : i32
+    %row_count_shifted_i32 = scalar.shrui %descriptor_i32, %thirteen_i32 : i32
+    %row_count_minus_one_i32 = scalar.andi %row_count_shifted_i32, %thirtyone_i32 : i32
+    %partition_row_count_i32 = scalar.addi %row_count_minus_one_i32, %one_i32 : i32
+    %expert0 = index.cast %expert_i32 : i32 to index
+    %expert1 = index.assume %expert0 [range(%expert0, 0, 127)] : index
+    %bounded_expert, %table_expert_count = index.assume %expert1, %bounded_expert_count [lt(%expert1, %bounded_expert_count)] : index, index
+    %route_tile_base0 = index.cast %route_tile_base_i32 : i32 to index
+    %route_tile_base = index.assume %route_tile_base0 [range(%route_tile_base0, 0, 2047)] : index
+    %partition_row_count0 = index.cast %partition_row_count_i32 : i32 to index
+    %partition_row_count = index.assume %partition_row_count0 [range(%partition_row_count0, 1, 32)] : index
     %loads_route = index.cmp ult, %workitem, %thirtytwo : index
     scf.if %loads_route {
       %local_route = index.assume %workitem [range(%workitem, 0, 31)] : index
       %assignment_ordinal = index.add %route_tile_base, %local_route : index
-      %valid_row = index.cmp ult, %assignment_ordinal, %expert_route_count : index
+      %valid_row = index.cmp ult, %local_route, %partition_row_count : index
       %assignment_i32 = scf.if %valid_row -> (i32) {
         %bounded_assignment_ordinal, %table_token_count = index.assume %assignment_ordinal, %bounded_token_count [lt(%assignment_ordinal, %bounded_token_count)] : index, index
         %loaded = view.load %assignment_view[%bounded_expert, %bounded_assignment_ordinal] : view<[%bounded_expert_count]x[%bounded_token_count]xi32, #dense> -> i32
@@ -648,7 +681,6 @@ kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_
       vector.store.mask %values, %output_view[%bounded_assignment, %channel], %mask : vector<8xf32>, view<[%output_row_count]x[%bounded_output_size]xf32, #dense>, vector<8xi1>
     }
     kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   }
   kernel.return
 }
@@ -708,6 +740,7 @@ check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_differential_cas
   %q8_input = check.generate.fill value(0) : tensor<67x576xi8>
   %route_ids = check.generate.iota offset(0) step(1) period(4) : tensor<67x4xi32>
   %expert_table = check.generate.fill value(-1) : tensor<272xi32>
+  %partition_table = check.generate.fill value(-1) : tensor<10xi32>
   %gate_weight = check.generate.fill value(34) : tensor<4x33x2x144xi8>
   %up_weight = check.generate.fill value(35) : tensor<4x33x2x144xi8>
   %gate_projection = check.generate.fill value(0.0) : tensor<67x2x33xf32>
@@ -717,11 +750,12 @@ check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_differential_cas
   %fused_actual = check.generate.fill value(1.0) : tensor<67x2x33xf32>
   func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %q8_input) : (index, index, tensor<67x512xf32>, tensor<67x576xi8>)
   func.call @qwen3_moe_build_expert_table(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table) : (index, index, index, index, tensor<67x4xi32>, tensor<272xi32>)
+  func.call @qwen3_moe_build_expert_partition_table(%token_count, %route_count, %expert_count, %expert_table, %partition_table) : (index, index, index, tensor<272xi32>, tensor<10xi32>)
   func.call @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count, %route_count, %route_stride, %expert_count, %output_size, %q8_input, %route_ids, %gate_weight, %up_weight, %expected) : (index, index, index, index, index, tensor<67x576xi8>, tensor<67x4xi32>, tensor<4x33x2x144xi8>, tensor<4x33x2x144xi8>, tensor<67x2x33xf32>)
   func.call @qwen3_moe_routed_linear_q4k_f16_wmma(%token_count, %input, %expert_table, %gate_weight, %gate_projection) : (index, tensor<67x512xf32>, tensor<272xi32>, tensor<4x33x2x144xi8>, tensor<67x2x33xf32>)
   func.call @qwen3_moe_routed_linear_q4k_f16_wmma(%token_count, %input, %expert_table, %up_weight, %up_projection) : (index, tensor<67x512xf32>, tensor<272xi32>, tensor<4x33x2x144xi8>, tensor<67x2x33xf32>)
   func.call @qwen3_moe_routed_swiglu_f32(%token_count, %gate_projection, %up_projection, %actual) : (index, tensor<67x2x33xf32>, tensor<67x2x33xf32>, tensor<67x2x33xf32>)
-  func.call @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma(%token_count, %input, %expert_table, %gate_weight, %up_weight, %fused_actual) : (index, tensor<67x512xf32>, tensor<272xi32>, tensor<4x33x2x144xi8>, tensor<4x33x2x144xi8>, tensor<67x2x33xf32>)
+  func.call @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma(%token_count, %input, %expert_table, %partition_table, %gate_weight, %up_weight, %fused_actual) : (index, tensor<67x512xf32>, tensor<272xi32>, tensor<10xi32>, tensor<4x33x2x144xi8>, tensor<4x33x2x144xi8>, tensor<67x2x33xf32>)
   check.expect.close actual(%actual) expected(%expected) atol(0.01) rtol(0.01) nan(same) : tensor<67x2x33xf32>
   check.expect.close actual(%fused_actual) expected(%expected) atol(0.01) rtol(0.01) nan(same) : tensor<67x2x33xf32>
   check.return
@@ -763,12 +797,15 @@ check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_benchmark_
   %route_ids = check.generate.iota offset(0) step(1) period(128) : tensor<[%token_count]x8xi32>
   // One count per expert followed by 2048 assignment slots per expert.
   %expert_table = check.generate.fill value(-1) : tensor<262272xi32>
+  // One exact count followed by at most 640 packed descriptors.
+  %partition_table = check.generate.fill value(-1) : tensor<641xi32>
   %gate_weight = check.generate.fill value(0) : tensor<128x768x8x144xi8>
   %up_weight = check.generate.fill value(0) : tensor<128x768x8x144xi8>
   %output = check.generate.fill value(1.0) : tensor<[%token_count]x8x768xf32>
   %expected = check.generate.fill value(0.0) : tensor<[%token_count]x8x768xf32>
   func.call @qwen3_moe_build_expert_table(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table) : (index, index, index, index, tensor<[%token_count]x8xi32>, tensor<262272xi32>)
-  func.call @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma(%token_count, %input, %expert_table, %gate_weight, %up_weight, %output) : (index, tensor<[%token_count]x2048xf32>, tensor<262272xi32>, tensor<128x768x8x144xi8>, tensor<128x768x8x144xi8>, tensor<[%token_count]x8x768xf32>)
+  func.call @qwen3_moe_build_expert_partition_table(%token_count, %route_count, %expert_count, %expert_table, %partition_table) : (index, index, index, tensor<262272xi32>, tensor<641xi32>)
+  func.call @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma(%token_count, %input, %expert_table, %partition_table, %gate_weight, %up_weight, %output) : (index, tensor<[%token_count]x2048xf32>, tensor<262272xi32>, tensor<641xi32>, tensor<128x768x8x144xi8>, tensor<128x768x8x144xi8>, tensor<[%token_count]x8x768xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x8x768xf32>
   check.return
 }
