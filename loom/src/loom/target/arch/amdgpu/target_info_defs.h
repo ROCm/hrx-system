@@ -373,12 +373,16 @@ typedef enum loom_amdgpu_descriptor_set_info_flag_bits_e {
   // Descriptor set supports native packed BF16 add, multiply, and FMA.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC =
       UINT64_C(1) << 3,
+  // VOP3 packets may read two distinct scalar-source registers.
+  LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOP3_TWO_SCALAR_SOURCES = UINT64_C(1)
+                                                                 << 4,
   // Descriptor-set info flags known by the AMDGPU target package.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_KNOWN_FLAGS =
       LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING |
       LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION |
       LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS |
-      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC,
+      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC |
+      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOP3_TWO_SCALAR_SOURCES,
 } loom_amdgpu_descriptor_set_info_flag_bits_t;
 
 // Bitset of loom_amdgpu_descriptor_set_info_flag_bits_t values.

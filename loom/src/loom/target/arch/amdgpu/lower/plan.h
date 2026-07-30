@@ -114,6 +114,8 @@ typedef enum loom_amdgpu_vector_16bit_float_conversion_kind_e {
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_DECODE = 3,
 } loom_amdgpu_vector_16bit_float_conversion_kind_t;
 
+typedef struct loom_amdgpu_fp4_decode_recipe_t loom_amdgpu_fp4_decode_recipe_t;
+
 typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   // Source vector value being converted.
   loom_value_id_t source;
@@ -153,6 +155,8 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   uint32_t storage_register_count;
   // Number of 32-bit result registers occupied by the result vector.
   uint32_t result_register_count;
+  // Function-local packed FP4 decode recipe, or NULL for other conversions.
+  const loom_amdgpu_fp4_decode_recipe_t* fp4_decode_recipe;
   // Native packed FP8 encode strategy for an FP8-result truncation.
   loom_amdgpu_fp8_encode_plan_t fp8_encode;
 } loom_amdgpu_vector_16bit_float_conversion_plan_t;
