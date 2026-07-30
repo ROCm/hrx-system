@@ -1285,6 +1285,12 @@ iree_status_t qwen_program_issue(
         "Qwen request model, token count, and context capacity must match "
         "the prepared program");
   }
+  if (qwen_request_input_kind(request) !=
+      QWEN_REQUEST_INPUT_KIND_HIDDEN_STATE) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "Qwen layer program requires a hidden-state request reset");
+  }
   if (program->timeline_value > IREE_HAL_SEMAPHORE_MAX_VALUE - 3 ||
       qwen_request_timeline_value(request) == IREE_HAL_SEMAPHORE_MAX_VALUE) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -1424,7 +1430,8 @@ iree_status_t qwen_program_issue(
   }
 
   program->timeline_value = program_complete_value;
-  qwen_request_commit_program_signal(request, request_complete_value);
+  qwen_request_commit_program_signal(request, request_complete_value,
+                                     QWEN_REQUEST_RESULT_KIND_HIDDEN_STATE);
   return iree_ok_status();
 }
 

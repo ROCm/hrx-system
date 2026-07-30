@@ -29,10 +29,34 @@ typedef struct qwen_request_control_t {
 static_assert(sizeof(qwen_request_control_t) == sizeof(int32_t),
               "Qwen request control must be exactly one I32 word");
 
+// Authoritative input representation established by the latest reset.
+typedef enum qwen_request_input_kind_e {
+  // No reset has established valid request input.
+  QWEN_REQUEST_INPUT_KIND_INVALID = 0,
+  // Dense F32 hidden states for a layer program.
+  QWEN_REQUEST_INPUT_KIND_HIDDEN_STATE = 1,
+  // Validated I32 token IDs for a full-model program.
+  QWEN_REQUEST_INPUT_KIND_TOKEN_IDS = 2,
+} qwen_request_input_kind_t;
+
+// Host-readable result representation published by the latest program issue.
+typedef enum qwen_request_result_kind_e {
+  // No program has published a result after the latest reset.
+  QWEN_REQUEST_RESULT_KIND_INVALID = 0,
+  // Dense F32 hidden states from a layer program.
+  QWEN_REQUEST_RESULT_KIND_HIDDEN_STATE = 1,
+  // One selected I32 token from a full-model program.
+  QWEN_REQUEST_RESULT_KIND_SELECTED_TOKEN = 2,
+} qwen_request_result_kind_t;
+
 // Deterministic request-local persistent storage layout.
 typedef struct qwen_request_storage_layout_t {
   // Dense F32 residual stream read and updated by a layer program.
   qwen_request_span_t hidden_state;
+  // Validated I32 token IDs consumed by the embedding producer.
+  qwen_request_span_t token_ids;
+  // Authoritative I32 token selected by the latest full-model issue.
+  qwen_request_span_t selected_token;
   // Compact control record uploaded by request reset.
   qwen_request_span_t control;
   // Device-derived I32 logical position for each physical token.
@@ -47,7 +71,7 @@ typedef struct qwen_request_storage_layout_t {
   qwen_request_span_t key_cache;
   // All layer-local F16 value caches.
   qwen_request_span_t value_cache;
-  // Byte length uploaded by qwen_request_reset_hidden_state.
+  // Byte length uploaded by either request reset operation.
   iree_device_size_t reset_upload_byte_length;
   // Complete request-state binding length visible to recorded dispatches.
   iree_device_size_t dispatch_state_byte_length;
@@ -83,12 +107,17 @@ iree_hal_semaphore_t* qwen_request_timeline_semaphore(
 // Returns the latest request timeline value reserved by a submitted operation.
 uint64_t qwen_request_timeline_value(const qwen_request_t* request);
 
+// Returns the input representation established by the latest reset.
+qwen_request_input_kind_t qwen_request_input_kind(
+    const qwen_request_t* request);
+
 // Commits a successfully submitted program result to the request timeline.
 //
 // |signal_value| must be exactly one greater than the current timeline value
 // and must be published by the terminal queue operation before this call.
 void qwen_request_commit_program_signal(qwen_request_t* request,
-                                        uint64_t signal_value);
+                                        uint64_t signal_value,
+                                        qwen_request_result_kind_t result_kind);
 
 // Permanently fails the request timeline after a partial submission failure.
 void qwen_request_fail(qwen_request_t* request, iree_status_t status);

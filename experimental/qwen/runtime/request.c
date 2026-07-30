@@ -28,7 +28,7 @@ struct qwen_request_t {
   qwen_model_t* model;
   // Device-local request storage.
   iree_hal_buffer_t* storage_buffer;
-  // Host-visible layer-output staging buffer.
+  // Host-visible result staging buffer.
   iree_hal_buffer_t* output_staging_buffer;
   // Persistent mapping of |output_staging_buffer|.
   iree_hal_buffer_mapping_t output_staging_mapping;
@@ -38,8 +38,12 @@ struct qwen_request_t {
   iree_hal_semaphore_t* timeline_semaphore;
   // Latest reserved value on |timeline_semaphore|.
   uint64_t timeline_value;
-  // Timeline value that last published a complete layer output.
-  uint64_t output_ready_value;
+  // Timeline value that last published a complete program result.
+  uint64_t result_ready_value;
+  // Input representation established by the latest successful reset.
+  qwen_request_input_kind_t input_kind;
+  // Result representation published by the latest successful program issue.
+  qwen_request_result_kind_t result_kind;
   // Exact physical token count.
   iree_host_size_t token_count;
   // Exact K/V row capacity.
@@ -230,22 +234,11 @@ void qwen_request_release(qwen_request_t* request) {
   }
 }
 
-iree_status_t qwen_request_reset_hidden_state(
-    qwen_request_t* request, iree_const_byte_span_t hidden_state_data,
+static iree_status_t qwen_request_submit_reset(
+    qwen_request_t* request, qwen_request_input_kind_t input_kind,
+    iree_const_byte_span_t input_data, qwen_request_span_t target_span,
     iree_hal_semaphore_list_t wait_semaphore_list,
     iree_hal_semaphore_list_t signal_semaphore_list) {
-  if (!request) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Qwen request is required");
-  }
-  if (hidden_state_data.data_length !=
-      request->storage_layout.hidden_state.length) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "Qwen hidden-state input has %" PRIhsz " bytes; expected %" PRIu64,
-        hidden_state_data.data_length,
-        (uint64_t)request->storage_layout.hidden_state.length);
-  }
   if (request->timeline_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "Qwen request timeline is exhausted");
@@ -258,8 +251,8 @@ iree_status_t qwen_request_reset_hidden_state(
       (void**)&upload_data));
   memset(upload_data, 0,
          (iree_host_size_t)request->storage_layout.reset_upload_byte_length);
-  memcpy(upload_data + request->storage_layout.hidden_state.offset,
-         hidden_state_data.data, hidden_state_data.data_length);
+  memcpy(upload_data + target_span.offset, input_data.data,
+         input_data.data_length);
   qwen_request_control_t* control =
       (qwen_request_control_t*)(upload_data +
                                 request->storage_layout.control.offset);
@@ -297,9 +290,90 @@ iree_status_t qwen_request_reset_hidden_state(
 
   if (iree_status_is_ok(status)) {
     request->timeline_value = next_timeline_value;
-    request->output_ready_value = 0;
+    request->input_kind = input_kind;
+    request->result_ready_value = 0;
+    request->result_kind = QWEN_REQUEST_RESULT_KIND_INVALID;
   }
   return status;
+}
+
+iree_status_t qwen_request_reset_hidden_state(
+    qwen_request_t* request, iree_const_byte_span_t hidden_state_data,
+    iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list) {
+  if (!request) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen request is required");
+  }
+  if (hidden_state_data.data_length !=
+      request->storage_layout.hidden_state.length) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Qwen hidden-state input has %" PRIhsz " bytes; expected %" PRIu64,
+        hidden_state_data.data_length,
+        (uint64_t)request->storage_layout.hidden_state.length);
+  }
+  return qwen_request_submit_reset(
+      request, QWEN_REQUEST_INPUT_KIND_HIDDEN_STATE, hidden_state_data,
+      request->storage_layout.hidden_state, wait_semaphore_list,
+      signal_semaphore_list);
+}
+
+iree_status_t qwen_request_reset_tokens(
+    qwen_request_t* request, iree_tokenizer_token_id_list_t token_ids,
+    iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list) {
+  if (!request) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen request is required");
+  }
+  if (token_ids.count != request->token_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen token-ID input has %" PRIhsz
+                            " values; expected %" PRIhsz,
+                            token_ids.count, request->token_count);
+  }
+  if (token_ids.count != 0 && !token_ids.values) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen token-ID values are required");
+  }
+  for (iree_host_size_t i = 0; i < token_ids.count; ++i) {
+    const iree_tokenizer_token_id_t token_id = token_ids.values[i];
+    if (token_id < 0 || token_id >= QWEN_MODEL_VOCABULARY_SIZE) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "Qwen token ID %" PRId32 " at index %" PRIhsz
+                              " is outside [0, %d)",
+                              token_id, i, QWEN_MODEL_VOCABULARY_SIZE);
+    }
+  }
+  const iree_const_byte_span_t token_id_data = iree_make_const_byte_span(
+      token_ids.values, token_ids.count * sizeof(token_ids.values[0]));
+  return qwen_request_submit_reset(request, QWEN_REQUEST_INPUT_KIND_TOKEN_IDS,
+                                   token_id_data,
+                                   request->storage_layout.token_ids,
+                                   wait_semaphore_list, signal_semaphore_list);
+}
+
+static iree_status_t qwen_request_require_result(
+    qwen_request_t* request, qwen_request_result_kind_t expected_kind,
+    iree_string_view_t result_name) {
+  if (request->result_ready_value == 0 ||
+      request->result_kind != expected_kind) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "Qwen request has no completed %.*s result",
+                            (int)result_name.size, result_name.data);
+  }
+  uint64_t completed_value = 0;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_semaphore_query(request->timeline_semaphore, &completed_value));
+  if (completed_value < request->result_ready_value) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "Qwen %.*s result timeline value %" PRIu64
+                            " has not completed; current value is %" PRIu64,
+                            (int)result_name.size, result_name.data,
+                            request->result_ready_value, completed_value);
+  }
+  return iree_ok_status();
 }
 
 iree_status_t qwen_request_read_hidden_state(qwen_request_t* request,
@@ -315,24 +389,31 @@ iree_status_t qwen_request_read_hidden_state(qwen_request_t* request,
         target_data.data_length,
         (uint64_t)request->storage_layout.hidden_state.length);
   }
-  if (request->output_ready_value == 0) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "Qwen request has no completed layer output");
-  }
-  uint64_t completed_value = 0;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_semaphore_query(request->timeline_semaphore, &completed_value));
-  if (completed_value < request->output_ready_value) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "Qwen layer output timeline value %" PRIu64
-                            " has not completed; current value is %" PRIu64,
-                            request->output_ready_value, completed_value);
-  }
+  IREE_RETURN_IF_ERROR(qwen_request_require_result(
+      request, QWEN_REQUEST_RESULT_KIND_HIDDEN_STATE, IREE_SV("hidden-state")));
   IREE_RETURN_IF_ERROR(iree_hal_buffer_mapping_invalidate_range(
       &request->output_staging_mapping, /*byte_offset=*/0,
       request->storage_layout.hidden_state.length));
   memcpy(target_data.data, request->output_staging_mapping.contents.data,
          target_data.data_length);
+  return iree_ok_status();
+}
+
+iree_status_t qwen_request_read_selected_token(
+    qwen_request_t* request, iree_tokenizer_token_id_t* out_token_id) {
+  if (!request || !out_token_id) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Qwen request and selected-token output are required");
+  }
+  IREE_RETURN_IF_ERROR(qwen_request_require_result(
+      request, QWEN_REQUEST_RESULT_KIND_SELECTED_TOKEN,
+      IREE_SV("selected-token")));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_mapping_invalidate_range(
+      &request->output_staging_mapping, /*byte_offset=*/0,
+      sizeof(*out_token_id)));
+  memcpy(out_token_id, request->output_staging_mapping.contents.data,
+         sizeof(*out_token_id));
   return iree_ok_status();
 }
 
@@ -376,12 +457,20 @@ uint64_t qwen_request_timeline_value(const qwen_request_t* request) {
   return request ? request->timeline_value : 0;
 }
 
-void qwen_request_commit_program_signal(qwen_request_t* request,
-                                        uint64_t signal_value) {
+qwen_request_input_kind_t qwen_request_input_kind(
+    const qwen_request_t* request) {
+  return request ? request->input_kind : QWEN_REQUEST_INPUT_KIND_INVALID;
+}
+
+void qwen_request_commit_program_signal(
+    qwen_request_t* request, uint64_t signal_value,
+    qwen_request_result_kind_t result_kind) {
   IREE_ASSERT_ARGUMENT(request);
   IREE_ASSERT(signal_value == request->timeline_value + 1);
+  IREE_ASSERT(result_kind != QWEN_REQUEST_RESULT_KIND_INVALID);
   request->timeline_value = signal_value;
-  request->output_ready_value = signal_value;
+  request->result_ready_value = signal_value;
+  request->result_kind = result_kind;
 }
 
 void qwen_request_fail(qwen_request_t* request, iree_status_t status) {

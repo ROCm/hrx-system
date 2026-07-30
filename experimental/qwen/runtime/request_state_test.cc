@@ -19,8 +19,14 @@ TEST(QwenRequestStorageTest, PacksPrefill512WithoutOverlap) {
 
   EXPECT_EQ(layout.hidden_state.offset, 0u);
   EXPECT_EQ(layout.hidden_state.length, 4u * 1024u * 1024u);
-  EXPECT_GE(layout.control.offset,
+  EXPECT_GE(layout.token_ids.offset,
             layout.hidden_state.offset + layout.hidden_state.length);
+  EXPECT_EQ(layout.token_ids.length, 512u * sizeof(int32_t));
+  EXPECT_GE(layout.selected_token.offset,
+            layout.token_ids.offset + layout.token_ids.length);
+  EXPECT_EQ(layout.selected_token.length, sizeof(int32_t));
+  EXPECT_GE(layout.control.offset,
+            layout.selected_token.offset + layout.selected_token.length);
   EXPECT_EQ(layout.control.length, sizeof(qwen_request_control_t));
   EXPECT_EQ(layout.reset_upload_byte_length,
             layout.control.offset + layout.control.length);

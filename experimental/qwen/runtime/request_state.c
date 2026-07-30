@@ -57,6 +57,18 @@ iree_status_t qwen_request_storage_layout_calculate(
       hidden_state_byte_length, QWEN_REQUEST_STORAGE_ALIGNMENT, &cursor,
       &out_layout->hidden_state));
 
+  iree_device_size_t token_ids_byte_length = 0;
+  if (!iree_device_size_checked_mul((iree_device_size_t)token_count,
+                                    sizeof(int32_t), &token_ids_byte_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen token-ID storage byte length overflows");
+  }
+  IREE_RETURN_IF_ERROR(qwen_request_storage_append(token_ids_byte_length,
+                                                   _Alignof(int32_t), &cursor,
+                                                   &out_layout->token_ids));
+  IREE_RETURN_IF_ERROR(
+      qwen_request_storage_append(sizeof(int32_t), _Alignof(int32_t), &cursor,
+                                  &out_layout->selected_token));
   IREE_RETURN_IF_ERROR(qwen_request_storage_append(
       sizeof(qwen_request_control_t), _Alignof(qwen_request_control_t), &cursor,
       &out_layout->control));

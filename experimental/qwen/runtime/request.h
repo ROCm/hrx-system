@@ -10,6 +10,7 @@
 #include "experimental/qwen/runtime/model.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "iree/tokenizer/types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,11 +18,12 @@ extern "C" {
 
 // Mutable request-local Qwen execution state.
 //
-// A request owns hidden states, all layer K/V caches, control data, and
-// host-visible output staging. Request operations form one internal timeline;
-// callers may add dependencies and observe completion with their own timeline.
-// Requests are thread-compatible: callers externally synchronize reset, issue,
-// and read operations on the same request or use distinct request objects.
+// A request owns token IDs, hidden states, all layer K/V caches, the selected
+// token, control data, and host-visible result staging. Request operations form
+// one internal timeline; callers may add dependencies and observe completion
+// with their own timeline. Requests are thread-compatible: callers externally
+// synchronize reset, issue, and read operations on the same request or use
+// distinct request objects.
 typedef struct qwen_request_t qwen_request_t;
 
 // Options controlling request-local persistent storage.
@@ -68,6 +70,18 @@ IREE_API_EXPORT iree_status_t qwen_request_reset_hidden_state(
     iree_hal_semaphore_list_t wait_semaphore_list,
     iree_hal_semaphore_list_t signal_semaphore_list);
 
+// Asynchronously resets a base-zero full-model request from token IDs.
+//
+// |token_ids| must contain exactly token_count values. Every value is validated
+// in [0, QWEN_MODEL_VOCABULARY_SIZE) before any queue operation is submitted.
+// The reset captures the host data before returning, establishes
+// context_base = 0, and publishes caller signals after the device upload
+// completes.
+IREE_API_EXPORT iree_status_t qwen_request_reset_tokens(
+    qwen_request_t* request, iree_tokenizer_token_id_list_t token_ids,
+    iree_hal_semaphore_list_t wait_semaphore_list,
+    iree_hal_semaphore_list_t signal_semaphore_list);
+
 // Copies the completed layer output into |target_data|.
 //
 // The caller must first observe the signal from qwen_program_issue.
@@ -76,6 +90,14 @@ IREE_API_EXPORT iree_status_t qwen_request_reset_hidden_state(
 // performs the host copy.
 IREE_API_EXPORT iree_status_t qwen_request_read_hidden_state(
     qwen_request_t* request, iree_byte_span_t target_data);
+
+// Reads the token selected by a completed full-model program.
+//
+// The caller must first observe the signal from qwen_program_issue. This
+// invalidates the four-byte host staging span when required by the HAL memory
+// type and copies the authoritative I32 token into |out_token_id|.
+IREE_API_EXPORT iree_status_t qwen_request_read_selected_token(
+    qwen_request_t* request, iree_tokenizer_token_id_t* out_token_id);
 
 // Returns the exact physical token count owned by |request|.
 IREE_API_EXPORT iree_host_size_t
