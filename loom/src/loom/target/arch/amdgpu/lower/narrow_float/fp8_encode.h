@@ -16,6 +16,35 @@
 extern "C" {
 #endif
 
+typedef struct loom_amdgpu_fp8_encode_packed_f16_e5m2_state_t {
+  // Scalar constant-materialization packet.
+  loom_low_lower_resolved_descriptor_t constant_descriptor;
+  // Literal-mask bitwise packet clearing both F16 sign bits.
+  loom_low_lower_resolved_descriptor_t magnitude_mask_descriptor;
+  // Packed unsigned 16-bit addition packet.
+  loom_low_lower_resolved_descriptor_t add_descriptor;
+  // Packed logical right-shift packet.
+  loom_low_lower_resolved_descriptor_t logical_shift_descriptor;
+  // Packed arithmetic right-shift packet.
+  loom_low_lower_resolved_descriptor_t arithmetic_shift_descriptor;
+  // Register-mask bitfield insertion packet.
+  loom_low_lower_resolved_descriptor_t select_descriptor;
+  // Literal-mask bitfield insertion packet.
+  loom_low_lower_resolved_descriptor_t sign_insert_descriptor;
+  // Literal-selector byte permutation packet.
+  loom_low_lower_resolved_descriptor_t pack_descriptor;
+  // Interned immediate attribute shared by packed SGPR constants.
+  loom_string_id_t imm32_attr_name_id;
+  // Packed per-lane shift of eight bits.
+  loom_value_id_t lane_shift;
+  // Packed RNE bias and canonical E5M2 NaN payload.
+  loom_value_id_t rounding_bias_and_nan;
+  // Packed bias raising the sign bit exactly for F16 NaN magnitudes.
+  loom_value_id_t nan_condition_bias;
+  // Packed arithmetic shift converting condition sign bits to lane masks.
+  loom_value_id_t condition_mask_shift;
+} loom_amdgpu_fp8_encode_packed_f16_e5m2_state_t;
+
 typedef struct loom_amdgpu_fp8_encode_emission_state_t {
   // VGPR type used by source and result packet values.
   loom_type_t lane_type;
@@ -53,6 +82,8 @@ typedef struct loom_amdgpu_fp8_encode_emission_state_t {
   uint32_t subnormal_magic;
   // Two's-complement removal of subnormal_magic from the rounded bit pattern.
   uint32_t subnormal_adjustment;
+  // State for pairwise F16-to-E5M2 software encoding.
+  loom_amdgpu_fp8_encode_packed_f16_e5m2_state_t packed_f16_e5m2;
 } loom_amdgpu_fp8_encode_emission_state_t;
 
 // Selects the strongest exact FP8 encode strategy present in |descriptor_set|.
@@ -63,6 +94,10 @@ bool loom_amdgpu_select_fp8_encode_plan(
 
 // Returns true when |plan| encodes independent lanes in software.
 bool loom_amdgpu_fp8_encode_plan_is_software(
+    const loom_amdgpu_fp8_encode_plan_t* plan);
+
+// Returns true when complete F16 pairs can use packed E5M2 software encoding.
+bool loom_amdgpu_fp8_encode_plan_has_packed_f16_e5m2(
     const loom_amdgpu_fp8_encode_plan_t* plan);
 
 // Returns true when |plan| bridges exact OCP semantics through native FNUZ.
@@ -103,6 +138,14 @@ iree_status_t loom_amdgpu_emit_fp8_encode_software_packed_lanes(
     const loom_amdgpu_fp8_encode_plan_t* plan,
     const loom_amdgpu_fp8_encode_emission_state_t* state,
     const loom_value_id_t* source_lanes, uint32_t source_lane_count,
+    loom_value_id_t* out_packed);
+
+// Encodes two packed F16 source pairs and gathers their four E5M2 bytes.
+iree_status_t loom_amdgpu_emit_fp8_encode_software_f16_e5m2_pairs(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_encode_plan_t* plan,
+    const loom_amdgpu_fp8_encode_emission_state_t* state,
+    loom_value_id_t low_source_pair, loom_value_id_t high_source_pair,
     loom_value_id_t* out_packed);
 
 // Encodes one to four F32 lanes through native FNUZ pair conversions. The last

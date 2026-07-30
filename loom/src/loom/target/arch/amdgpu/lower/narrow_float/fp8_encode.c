@@ -21,6 +21,14 @@
 #define LOOM_AMDGPU_FP8_NAN_ENCODING UINT32_C(0x7F)
 #define LOOM_AMDGPU_FP8_LOW_PAIR_SIGN_MASK UINT32_C(0x00008080)
 #define LOOM_AMDGPU_FP8_HIGH_PAIR_SIGN_MASK UINT32_C(0x80800000)
+#define LOOM_AMDGPU_FP8_PACKED_F16_SIGN_MASK UINT32_C(0x00800080)
+#define LOOM_AMDGPU_FP8_PACKED_F16_E5M2_LANE_SHIFT UINT32_C(0x00080008)
+#define LOOM_AMDGPU_FP8_PACKED_F16_E5M2_ROUNDING_BIAS_AND_NAN \
+  UINT32_C(0x007F007F)
+#define LOOM_AMDGPU_FP8_PACKED_F16_E5M2_NAN_CONDITION_BIAS UINT32_C(0x03FF03FF)
+#define LOOM_AMDGPU_FP8_PACKED_F16_E5M2_CONDITION_MASK_SHIFT \
+  UINT32_C(0x000F000F)
+#define LOOM_AMDGPU_FP8_PACKED_F16_E5M2_PACK_SELECTOR UINT32_C(0x02000604)
 
 static bool loom_amdgpu_fp8_encode_has_refs(
     const loom_low_descriptor_set_t* descriptor_set,
@@ -35,6 +43,12 @@ bool loom_amdgpu_fp8_encode_plan_is_software(
   return plan->kind == LOOM_AMDGPU_FP8_ENCODE_KIND_F32_SOFTWARE_E4M3 ||
          plan->kind == LOOM_AMDGPU_FP8_ENCODE_KIND_F32_SOFTWARE_E5M2 ||
          plan->kind == LOOM_AMDGPU_FP8_ENCODE_KIND_F16_SOFTWARE_E5M2;
+}
+
+bool loom_amdgpu_fp8_encode_plan_has_packed_f16_e5m2(
+    const loom_amdgpu_fp8_encode_plan_t* plan) {
+  return iree_any_bit_set(plan->flags,
+                          LOOM_AMDGPU_FP8_ENCODE_PLAN_FLAG_PACKED_F16_E5M2);
 }
 
 static bool loom_amdgpu_fp8_encode_plan_is_f32_software(
@@ -161,6 +175,19 @@ static bool loom_amdgpu_select_software_fp8_encode_plan(
 
   if (source_type == LOOM_SCALAR_TYPE_F16 &&
       result_type == LOOM_SCALAR_TYPE_F8E5M2) {
+    const loom_amdgpu_descriptor_ref_t packed_required_refs[] = {
+        LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
+        LOOM_AMDGPU_DESCRIPTOR_REF_V_BFI_B32,
+        LOOM_AMDGPU_DESCRIPTOR_REF_V_BFI_B32_SRC0_LIT,
+        LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_ADD_U16,
+        LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_ASHRREV_I16,
+        LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_LSHRREV_B16,
+    };
+    const bool has_packed_f16_e5m2 =
+        packed_i8_permute.kind ==
+            LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_LITERAL_SELECTOR &&
+        loom_amdgpu_fp8_encode_has_refs(descriptor_set, packed_required_refs,
+                                        IREE_ARRAYSIZE(packed_required_refs));
     const loom_amdgpu_descriptor_ref_t required_refs[] = {
         LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
         LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
@@ -192,6 +219,9 @@ static bool loom_amdgpu_select_software_fp8_encode_plan(
                                         IREE_ARRAYSIZE(required_refs))) {
       *out_plan = (loom_amdgpu_fp8_encode_plan_t){
           .kind = LOOM_AMDGPU_FP8_ENCODE_KIND_F16_SOFTWARE_E5M2,
+          .flags = has_packed_f16_e5m2
+                       ? LOOM_AMDGPU_FP8_ENCODE_PLAN_FLAG_PACKED_F16_E5M2
+                       : LOOM_AMDGPU_FP8_ENCODE_PLAN_FLAG_NONE,
           .round_add_descriptor_ref = round_add_descriptor_ref,
           .sign_insert_descriptor_ref = sign_insert_descriptor_ref,
           .packed_i8_permute = packed_i8_permute,
@@ -356,6 +386,59 @@ bool loom_amdgpu_select_fp8_encode_plan(
       descriptor_set, source_type, result_type, out_plan);
 }
 
+static iree_status_t loom_amdgpu_initialize_fp8_encode_packed_f16_e5m2_emission(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_fp8_encode_packed_f16_e5m2_state_t* out_state) {
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
+      &out_state->constant_descriptor));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_AND_B32_LIT,
+      &out_state->magnitude_mask_descriptor));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_ADD_U16,
+      &out_state->add_descriptor));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_LSHRREV_B16,
+      &out_state->logical_shift_descriptor));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_PK_ASHRREV_I16,
+      &out_state->arithmetic_shift_descriptor));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_BFI_B32,
+      &out_state->select_descriptor));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_BFI_B32_SRC0_LIT,
+      &out_state->sign_insert_descriptor));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_PERM_B32_SRC2_LIT,
+      &out_state->pack_descriptor));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_intern(context, IREE_SV("imm32"),
+                                          &out_state->imm32_attr_name_id));
+
+  loom_type_t constant_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_type(context, &constant_type));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_const_u32(
+      context, source_op, &out_state->constant_descriptor,
+      out_state->imm32_attr_name_id, LOOM_AMDGPU_FP8_PACKED_F16_E5M2_LANE_SHIFT,
+      constant_type, &out_state->lane_shift));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_const_u32(
+      context, source_op, &out_state->constant_descriptor,
+      out_state->imm32_attr_name_id,
+      LOOM_AMDGPU_FP8_PACKED_F16_E5M2_ROUNDING_BIAS_AND_NAN, constant_type,
+      &out_state->rounding_bias_and_nan));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_const_u32(
+      context, source_op, &out_state->constant_descriptor,
+      out_state->imm32_attr_name_id,
+      LOOM_AMDGPU_FP8_PACKED_F16_E5M2_NAN_CONDITION_BIAS, constant_type,
+      &out_state->nan_condition_bias));
+  return loom_amdgpu_emit_resolved_const_u32(
+      context, source_op, &out_state->constant_descriptor,
+      out_state->imm32_attr_name_id,
+      LOOM_AMDGPU_FP8_PACKED_F16_E5M2_CONDITION_MASK_SHIFT, constant_type,
+      &out_state->condition_mask_shift);
+}
+
 iree_status_t loom_amdgpu_initialize_fp8_encode_emission(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_encode_plan_t* plan, uint32_t encoded_lane_count,
@@ -374,7 +457,20 @@ iree_status_t loom_amdgpu_initialize_fp8_encode_emission(
       .high_sign_permute_selector = LOOM_VALUE_ID_INVALID,
       .low_sign_mask = LOOM_VALUE_ID_INVALID,
       .high_sign_mask = LOOM_VALUE_ID_INVALID,
+      .packed_f16_e5m2 =
+          {
+              .lane_shift = LOOM_VALUE_ID_INVALID,
+              .rounding_bias_and_nan = LOOM_VALUE_ID_INVALID,
+              .nan_condition_bias = LOOM_VALUE_ID_INVALID,
+              .condition_mask_shift = LOOM_VALUE_ID_INVALID,
+          },
   };
+  if (encoded_lane_count >= 3u &&
+      loom_amdgpu_fp8_encode_plan_has_packed_f16_e5m2(plan)) {
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_initialize_fp8_encode_packed_f16_e5m2_emission(
+            context, source_op, &out_state->packed_f16_e5m2));
+  }
   if (loom_amdgpu_fp8_encode_plan_is_fnuz_bridge(plan)) {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_make_sgpr_range_type(context, 2, &out_state->mask_type));
@@ -444,11 +540,18 @@ iree_status_t loom_amdgpu_initialize_fp8_encode_emission(
   }
 
   if (loom_amdgpu_fp8_encode_plan_is_software(plan)) {
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_make_sgpr_range_type(context, 2, &out_state->mask_type));
     if (plan->kind == LOOM_AMDGPU_FP8_ENCODE_KIND_F16_SOFTWARE_E5M2) {
       out_state->mantissa_shift = 8;
       out_state->rounding_bias = UINT32_C(0x7F);
+      const uint32_t packed_tail_lane_count = encoded_lane_count % 4u;
+      const bool needs_lane_encoding =
+          !loom_amdgpu_fp8_encode_plan_has_packed_f16_e5m2(plan) ||
+          packed_tail_lane_count == 1u || packed_tail_lane_count == 2u;
+      if (!needs_lane_encoding) {
+        return iree_ok_status();
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_amdgpu_make_sgpr_range_type(context, 2, &out_state->mask_type));
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
           context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
           UINT32_C(0x7C00), lane_type, &out_state->infinity_magnitude));
@@ -457,6 +560,8 @@ iree_status_t loom_amdgpu_initialize_fp8_encode_emission(
           LOOM_AMDGPU_FP8_NAN_ENCODING, lane_type, &out_state->nan_encoding);
     }
 
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_make_sgpr_range_type(context, 2, &out_state->mask_type));
     uint32_t maximum_magnitude = 0;
     uint32_t minimum_normal_magnitude = 0;
     switch (plan->kind) {
@@ -714,6 +819,81 @@ iree_status_t loom_amdgpu_emit_fp8_encode_software_f16_e5m2_lane(
   return loom_amdgpu_emit_fp8_encode_sign(context, source_op, plan, state,
                                           source, /*sign_shift=*/8,
                                           magnitude_encoding, out_encoded);
+}
+
+static iree_status_t loom_amdgpu_emit_fp8_encode_software_f16_e5m2_pair(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_encode_emission_state_t* state,
+    loom_value_id_t source_pair, loom_value_id_t* out_encoded_pair) {
+  const loom_amdgpu_fp8_encode_packed_f16_e5m2_state_t* packed_state =
+      &state->packed_f16_e5m2;
+
+  loom_value_id_t shifted_source = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_binary(
+      context, source_op, &packed_state->logical_shift_descriptor,
+      packed_state->lane_shift, source_pair, state->lane_type,
+      &shifted_source));
+  loom_value_id_t magnitude = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_unary_immediate(
+      context, source_op, &packed_state->magnitude_mask_descriptor, source_pair,
+      UINT32_C(0x7FFF7FFF), state->lane_type, &magnitude));
+  loom_value_id_t rounding_lsb = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_unary_immediate(
+      context, source_op, &packed_state->magnitude_mask_descriptor,
+      shifted_source, UINT32_C(0x00010001), state->lane_type, &rounding_lsb));
+
+  loom_value_id_t rounded = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_binary(
+      context, source_op, &packed_state->add_descriptor, magnitude,
+      rounding_lsb, state->lane_type, &rounded));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_binary(
+      context, source_op, &packed_state->add_descriptor, rounded,
+      packed_state->rounding_bias_and_nan, state->lane_type, &rounded));
+  loom_value_id_t finite_encoding = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_binary(
+      context, source_op, &packed_state->logical_shift_descriptor,
+      packed_state->lane_shift, rounded, state->lane_type, &finite_encoding));
+
+  loom_value_id_t nan_condition = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_binary(
+      context, source_op, &packed_state->add_descriptor, magnitude,
+      packed_state->nan_condition_bias, state->lane_type, &nan_condition));
+  loom_value_id_t nan_mask = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_binary(
+      context, source_op, &packed_state->arithmetic_shift_descriptor,
+      packed_state->condition_mask_shift, nan_condition, state->lane_type,
+      &nan_mask));
+  loom_value_id_t magnitude_encoding = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_resolved_vgpr_ternary(
+      context, source_op, &packed_state->select_descriptor, nan_mask,
+      packed_state->rounding_bias_and_nan, finite_encoding, state->lane_type,
+      &magnitude_encoding));
+  return loom_amdgpu_emit_resolved_vgpr_binary_immediate(
+      context, source_op, &packed_state->sign_insert_descriptor, shifted_source,
+      magnitude_encoding, LOOM_AMDGPU_FP8_PACKED_F16_SIGN_MASK,
+      state->lane_type, out_encoded_pair);
+}
+
+iree_status_t loom_amdgpu_emit_fp8_encode_software_f16_e5m2_pairs(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_encode_plan_t* plan,
+    const loom_amdgpu_fp8_encode_emission_state_t* state,
+    loom_value_id_t low_source_pair, loom_value_id_t high_source_pair,
+    loom_value_id_t* out_packed) {
+  IREE_ASSERT_EQ(plan->kind, LOOM_AMDGPU_FP8_ENCODE_KIND_F16_SOFTWARE_E5M2);
+  IREE_ASSERT(loom_amdgpu_fp8_encode_plan_has_packed_f16_e5m2(plan));
+
+  loom_value_id_t low_encoded_pair = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_software_f16_e5m2_pair(
+      context, source_op, state, low_source_pair, &low_encoded_pair));
+  loom_value_id_t high_encoded_pair = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_software_f16_e5m2_pair(
+      context, source_op, state, high_source_pair, &high_encoded_pair));
+  return loom_amdgpu_emit_resolved_vgpr_binary_immediate(
+      context, source_op, &state->packed_f16_e5m2.pack_descriptor,
+      low_encoded_pair, high_encoded_pair,
+      LOOM_AMDGPU_FP8_PACKED_F16_E5M2_PACK_SELECTOR, state->lane_type,
+      out_packed);
 }
 
 iree_status_t loom_amdgpu_emit_fp8_encode_duplicate_f16_lane(

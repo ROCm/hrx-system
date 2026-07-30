@@ -8,36 +8,36 @@ func.def target(@target) @vector_fptrunc_f16x3_to_bf8(%input: vector<3xf16>) -> 
 
 // ----
 low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_f16x3_to_bf8(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3_5.core> {
-  %5 = v_mov_b32 31744
-  %6 = v_mov_b32 127
-  %7 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %9 = v_lshrrev_b32_src0_inline %7, 16
+  %5 = s_mov_b32 524296
+  %6 = s_mov_b32 8323199
+  %7 = s_mov_b32 67044351
+  %8 = s_mov_b32 983055
+  %9 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %10 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %11 = v_perm_b32_src2_lit %7, %9, 261
-  %12 = v_perm_b32_src2_lit %10, %10, 17104896
-  %13 = v_and_b32_lit %7, 32767
-  %14 = v_bfe_u32_offset_width_inline %13 {offset = 8, width = 1}
-  %15 = v_add3_u32_src2_lit %13, %14, 127
-  %16 = v_lshrrev_b32_src0_inline %15, 8
-  %17 = v_cmp_gt_u32 %13, %5
-  %18 = v_cndmask_b32 %16, %6, %17
-  %19 = v_and_b32_lit %9, 32767
-  %20 = v_bfe_u32_offset_width_inline %19 {offset = 8, width = 1}
-  %21 = v_add3_u32_src2_lit %19, %20, 127
-  %22 = v_lshrrev_b32_src0_inline %21, 8
-  %23 = v_cmp_gt_u32 %19, %5
-  %24 = v_cndmask_b32 %22, %6, %23
-  %25 = v_and_b32_lit %10, 32767
-  %26 = v_bfe_u32_offset_width_inline %25 {offset = 8, width = 1}
-  %27 = v_add3_u32_src2_lit %25, %26, 127
-  %28 = v_lshrrev_b32_src0_inline %27, 8
-  %29 = v_cmp_gt_u32 %25, %5
-  %30 = v_cndmask_b32 %28, %6, %29
-  %31 = v_perm_b32_src2_lit %18, %24, 4
-  %32 = v_perm_b32_src2_lit %30, %30, 4
-  %33 = v_perm_b32_src2_lit %31, %32, 16778500
-  %34 = v_bfi_b32_src0_lit %11, %33, 32896
-  %converted = v_bfi_b32_src0_lit %12, %34, 2155872256
+  %11 = v_and_b32_lit %10, 65535
+  %12 = v_lshlrev_b32_src0_inline %11, 16
+  %13 = v_or_b32 %11, %12
+  %14 = v_pk_lshrrev_b16 %5, %9
+  %15 = v_and_b32_lit %9, 2147450879
+  %16 = v_and_b32_lit %14, 65537
+  %17 = v_pk_add_u16 %15, %16
+  %18 = v_pk_add_u16 %17, %6
+  %19 = v_pk_lshrrev_b16 %5, %18
+  %20 = v_pk_add_u16 %15, %7
+  %21 = v_pk_ashrrev_i16 %8, %20
+  %22 = v_bfi_b32 %21, %6, %19
+  %23 = v_bfi_b32_src0_lit %14, %22, 8388736
+  %24 = v_pk_lshrrev_b16 %5, %13
+  %25 = v_and_b32_lit %13, 2147450879
+  %26 = v_and_b32_lit %24, 65537
+  %27 = v_pk_add_u16 %25, %26
+  %28 = v_pk_add_u16 %27, %6
+  %29 = v_pk_lshrrev_b16 %5, %28
+  %30 = v_pk_add_u16 %25, %7
+  %31 = v_pk_ashrrev_i16 %8, %30
+  %32 = v_bfi_b32 %31, %6, %29
+  %33 = v_bfi_b32_src0_lit %24, %32, 8388736
+  %converted = v_perm_b32_src2_lit %23, %33, 33555972
   return %converted
 }
 

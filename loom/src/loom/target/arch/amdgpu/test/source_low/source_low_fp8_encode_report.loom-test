@@ -86,8 +86,8 @@ func.def target(@target) @report_f16_to_bf8_software(%input: vector<4xf16>) -> (
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=1 emitted_ops=39 rows=1
-COMPILE-REPORT: source_low[0] function=report_f16_to_bf8_software source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.f16_e5m2_software emitted_ops=39
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=27 rows=1
+COMPILE-REPORT: source_low[0] function=report_f16_to_bf8_software source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.f16_e5m2_software emitted_ops=27
 
 // ====
 

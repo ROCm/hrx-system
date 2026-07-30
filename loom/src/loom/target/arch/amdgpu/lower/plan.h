@@ -81,9 +81,18 @@ typedef enum loom_amdgpu_fp8_encode_kind_e {
   LOOM_AMDGPU_FP8_ENCODE_KIND_F16_SOFTWARE_E5M2 = 8,
 } loom_amdgpu_fp8_encode_kind_t;
 
+typedef enum loom_amdgpu_fp8_encode_plan_flag_bits_e {
+  LOOM_AMDGPU_FP8_ENCODE_PLAN_FLAG_NONE = 0u,
+  // Packed 16-bit packets can encode complete F16 E5M2 lane groups.
+  LOOM_AMDGPU_FP8_ENCODE_PLAN_FLAG_PACKED_F16_E5M2 = 1u << 0,
+} loom_amdgpu_fp8_encode_plan_flag_bits_t;
+typedef uint32_t loom_amdgpu_fp8_encode_plan_flags_t;
+
 typedef struct loom_amdgpu_fp8_encode_plan_t {
   // Exact encoding strategy selected from the target descriptor set.
   loom_amdgpu_fp8_encode_kind_t kind;
+  // Optional packet-sequence capabilities refining the selected strategy.
+  loom_amdgpu_fp8_encode_plan_flags_t flags;
   // Descriptor writing the low encoded byte pair of a result register.
   loom_amdgpu_descriptor_ref_t low_descriptor_ref;
   // Descriptor continuing a result register with its high encoded byte pair.
