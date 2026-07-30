@@ -308,7 +308,7 @@ iree_status_t loom_ireevm_module_plan_build(
     bool contract_valid = false;
     status = loom_target_function_contract_resolve(
         module, fact_table, func_facts, diagnostic_emitter, &contract_valid,
-        &bundle_storage);
+        /*out_target_facts=*/NULL, &bundle_storage);
     if (!iree_status_is_ok(status)) {
       break;
     }

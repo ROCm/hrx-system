@@ -266,13 +266,6 @@ static void loom_target_entry_from_facts(
       .module_id = 0,
       .symbol_id = symbol_id,
   };
-  out_entry->target_ref = func_facts->target_symbol;
-  if (func_facts->target_symbol.module_id == 0 &&
-      func_facts->target_symbol.symbol_id < module->symbols.count) {
-    out_entry->target_symbol =
-        &module->symbols.entries[func_facts->target_symbol.symbol_id];
-    out_entry->target_op = out_entry->target_symbol->defining_op;
-  }
 }
 
 static void loom_target_entry_assign_entry(const loom_target_entry_t* source,
@@ -389,7 +382,7 @@ static iree_status_t loom_target_entry_try_entry(
   IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve(
       module, fact_table, func_facts,
       loom_target_entry_emitter(diagnostic_emitter), &contract_valid,
-      &entry.bundle_storage));
+      &entry.target_facts, &entry.bundle_storage));
   if (!contract_valid) {
     return iree_ok_status();
   }

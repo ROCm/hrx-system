@@ -600,6 +600,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       /*.module=*/{},
       /*.function_op=*/{}, /*.target=*/
       {
+          /*.target_facts=*/{},
           /*.target_symbol=*/{},
           /*.target_op=*/{},
           /*.bundle_storage=*/{},
@@ -614,6 +615,7 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           /*.module=*/module,
           /*.function_op=*/{}, /*.target=*/
           {
+              /*.target_facts=*/{},
               /*.target_symbol=*/{},
               /*.target_op=*/{},
               /*.bundle_storage=*/{},

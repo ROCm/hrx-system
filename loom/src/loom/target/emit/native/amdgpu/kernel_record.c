@@ -412,20 +412,16 @@ iree_status_t loom_amdgpu_kernel_record_build(
 
   const loom_target_hal_kernel_abi_t* hal_kernel =
       &schedule->target.bundle_storage.export_plan.hal_kernel;
-  const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_processor_from_resolved_target(&schedule->target);
-  if (processor == NULL) {
+  const loom_amdgpu_target_facts_t* target_facts =
+      loom_amdgpu_target_facts_cast(schedule->target.target_facts);
+  if (target_facts == NULL) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AMDGPU kernel emission requires an AMDGPU "
                             "processor target record");
   }
-  loom_amdgpu_target_identity_t target_identity = {0};
-  loom_amdgpu_target_record_resolve_identity(schedule->target.target_op,
-                                             &target_identity);
-  loom_amdgpu_target_properties_t target_properties = {0};
-  loom_amdgpu_target_properties_resolve(&target_identity,
-                                        &schedule->target.bundle_storage.bundle,
-                                        &target_properties);
+  const loom_amdgpu_processor_info_t* processor =
+      loom_amdgpu_target_info_target_processor(target_facts->identity.target);
+  IREE_ASSERT(processor != NULL);
   const uint32_t wavefront_size =
       schedule->target.bundle_storage.snapshot.subgroup_size;
   IREE_ASSERT(loom_amdgpu_processor_properties_support_wavefront_size(
@@ -462,10 +458,10 @@ iree_status_t loom_amdgpu_kernel_record_build(
 
   iree_string_view_t artifact_target_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_artifact_target_key_format_arena(
-      &target_identity, scratch_arena, &artifact_target_key));
+      &target_facts->identity, scratch_arena, &artifact_target_key));
   iree_string_view_t code_object_target_id = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_amdhsa_code_object_target_id_format(
-      &target_identity, scratch_arena, &code_object_target_id));
+      &target_facts->identity, scratch_arena, &code_object_target_id));
   iree_string_view_t descriptor_symbol = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_concat3(
       symbol, IREE_SV(".kd"), iree_string_view_empty(), &descriptor_symbol,
@@ -514,7 +510,8 @@ iree_status_t loom_amdgpu_kernel_record_build(
               .has_required_workgroup_size = has_required_workgroup_size,
               .workgroup_cluster_size = workgroup_cluster_size,
               .has_workgroup_cluster_size = has_workgroup_cluster_size,
-              .target_extensions = target_properties.kernel_metadata_extensions,
+              .target_extensions =
+                  target_facts->properties.kernel_metadata_extensions,
               .arguments = arguments,
               .argument_count = abi_layout->parameter_count,
           },

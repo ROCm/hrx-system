@@ -238,7 +238,7 @@ static iree_status_t loom_low_resolve_func_target(
   if (iree_status_is_ok(status)) {
     status = loom_target_function_contract_resolve(
         module, fact_table, func_facts, emitter, &contract_valid,
-        &out_target->bundle_storage);
+        &out_target->target_facts, &out_target->bundle_storage);
   }
   loom_target_workgroup_size_t workgroup_size = {0};
   if (iree_status_is_ok(status) && contract_valid &&

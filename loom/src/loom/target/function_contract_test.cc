@@ -89,10 +89,12 @@ class TargetFunctionContractTest : public ::testing::Test {
                        const loom_func_symbol_facts_t* facts,
                        loom_target_bundle_storage_t* out_storage) {
     bool valid = false;
+    const loom_target_facts_t* target_facts = nullptr;
     IREE_CHECK_OK(loom_target_function_contract_resolve(
         module, &fact_table_, facts, iree_diagnostic_emitter_t{}, &valid,
-        out_storage));
+        &target_facts, out_storage));
     ASSERT_TRUE(valid);
+    ASSERT_NE(target_facts, nullptr);
   }
 
   // Block pool shared by parser, module allocation, and analysis storage.

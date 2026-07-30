@@ -19,6 +19,7 @@
 #include "loom/codegen/low/verify.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/ir.h"
+#include "loom/ops/target/facts.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/types.h"
 #include "loom/verify/verify.h"
@@ -49,12 +50,8 @@ typedef struct loom_target_entry_t {
   iree_string_view_t func_name;
   // Module-local symbol reference for |func|.
   loom_symbol_ref_t func_ref;
-  // Module-local target record symbol referenced by |func|.
-  loom_symbol_ref_t target_ref;
-  // Borrowed target record symbol entry referenced by |target_ref|.
-  const loom_symbol_t* target_symbol;
-  // Borrowed target record op referenced by |target_ref|.
-  loom_op_t* target_op;
+  // Immutable facts projected from the target record.
+  const loom_target_facts_t* target_facts;
   // Materialized target bundle selected by |func|. The export plan is the
   // func-owned effective export plan, not a shared target-record backreference.
   loom_target_bundle_storage_t bundle_storage;

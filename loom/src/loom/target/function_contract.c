@@ -336,12 +336,19 @@ iree_status_t loom_target_function_contract_resolve(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
     const loom_func_symbol_facts_t* func_facts,
     iree_diagnostic_emitter_t diagnostic_emitter, bool* out_valid,
+    const loom_target_facts_t** out_target_facts,
     loom_target_bundle_storage_t* out_bundle_storage) {
+  if (out_target_facts != NULL) {
+    *out_target_facts = NULL;
+  }
   const loom_target_symbol_facts_t* target = NULL;
   IREE_RETURN_IF_ERROR(loom_target_function_contract_lookup_target(
       module, fact_table, func_facts, diagnostic_emitter, out_valid, &target));
   if (!*out_valid) {
     return iree_ok_status();
+  }
+  if (out_target_facts != NULL) {
+    *out_target_facts = target->projection;
   }
   return loom_target_function_contract_resolve_from_bundle(
       module, func_facts, target->name, &target->projection->storage.bundle,

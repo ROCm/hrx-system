@@ -20,6 +20,7 @@
 #include "loom/codegen/low/descriptors.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/ops/target/facts.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -28,6 +29,8 @@ extern "C" {
 
 // Resolved low target context for one low function.
 typedef struct loom_low_resolved_target_t {
+  // Immutable facts projected from the target record.
+  const loom_target_facts_t* target_facts;
   // Symbol defining the low function target record.
   const loom_symbol_t* target_symbol;
   // Defining op for |target_symbol|.

@@ -57,15 +57,19 @@ bool loom_amdgpu_target_identity_from_ref(
 const loom_amdgpu_processor_info_t*
 loom_amdgpu_target_processor_from_resolved_target(
     const loom_low_resolved_target_t* target) {
-  return loom_amdgpu_target_processor_from_op(target->target_op);
+  const loom_amdgpu_target_facts_t* target_facts =
+      loom_amdgpu_target_facts_cast(target->target_facts);
+  return target_facts != NULL ? loom_amdgpu_target_info_target_processor(
+                                    target_facts->identity.target)
+                              : NULL;
 }
 
 const loom_amdgpu_processor_properties_t*
 loom_amdgpu_target_processor_properties_from_resolved_target(
     const loom_low_resolved_target_t* target) {
-  const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_processor_from_resolved_target(target);
-  return processor != NULL ? &processor->properties : NULL;
+  const loom_amdgpu_target_facts_t* target_facts =
+      loom_amdgpu_target_facts_cast(target->target_facts);
+  return target_facts != NULL ? target_facts->properties.processor : NULL;
 }
 
 static iree_status_t loom_amdgpu_target_id_append_feature(

@@ -13,6 +13,7 @@
 #include "loom/target/arch/amdgpu/hal/binding_materialization.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
 #include "loom/target/arch/amdgpu/ops/ops.h"
+#include "loom/target/arch/amdgpu/ops/target.h"
 
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_STATISTICS(V, statistics_type) \
   V(statistics_type, errors, "errors",                            \
@@ -61,7 +62,7 @@ static bool loom_amdgpu_materialize_hal_kernel_abi_matches(
   return target->descriptor_set != NULL &&
          target->bundle_storage.export_plan.abi_kind ==
              LOOM_TARGET_ABI_HAL_KERNEL &&
-         loom_amdgpu_target_isa(target->target_op);
+         loom_amdgpu_target_facts_cast(target->target_facts) != NULL;
 }
 
 iree_status_t loom_amdgpu_materialize_hal_kernel_abi_run(

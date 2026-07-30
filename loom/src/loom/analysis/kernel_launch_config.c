@@ -97,7 +97,7 @@ static iree_status_t loom_kernel_launch_config_resolve_target_bundle(
   bool contract_valid = false;
   IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve(
       module, &symbol_facts, func_facts, emitter, &contract_valid,
-      out_storage));
+      /*out_target_facts=*/NULL, out_storage));
   *out_valid = contract_valid;
   if (contract_valid) {
     *out_bundle = &out_storage->bundle;
