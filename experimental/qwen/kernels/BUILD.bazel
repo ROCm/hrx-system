@@ -1,0 +1,151 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
+
+package(
+    default_visibility = ["//experimental/qwen:__subpackages__"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_link_module(
+    name = "attention_prepare_quantized_runtime_module",
+    srcs = ["runtime_exports.loom"],
+    libraries = [
+        "//experimental/qwen_moe/kernels:attention_prepare_quantized_linked",
+    ],
+    mode = "selective",
+    output = "qwen3_moe_attention_prepare_quantized.loom",
+    roots = [
+        "@qwen3_moe_attention_rmsnorm_quantize_q8_1_x4",
+        "@qwen3_moe_rmsnorm_f32",
+    ],
+    strip_check = True,
+)
+
+loom_link_module(
+    name = "attention_qkv_quantized_runtime_module",
+    srcs = ["runtime_exports.loom"],
+    libraries = [
+        "//experimental/qwen_moe/kernels:attention_qkv_quantized_linked",
+    ],
+    mode = "selective",
+    output = "qwen3_moe_attention_qkv_quantized.loom",
+    roots = ["@qwen3_moe_attention_qkv_quantized"],
+    strip_check = True,
+)
+
+loom_link_module(
+    name = "attention_postprocess_f32_f16_runtime_module",
+    srcs = ["runtime_exports.loom"],
+    libraries = [
+        "//experimental/qwen_moe/kernels:attention_postprocess_f32_f16_linked",
+    ],
+    mode = "selective",
+    output = "qwen3_moe_attention_postprocess_f32_f16.loom",
+    roots = ["@qwen3_moe_attention_postprocess_f32_f16"],
+    strip_check = True,
+)
+
+loom_link_module(
+    name = "flash_attention_prefill_f32_f16_runtime_module",
+    srcs = ["runtime_exports.loom"],
+    libraries = [
+        "//experimental/qwen_moe/kernels:qwen3_moe/flash_attention_f32_f16_wmma.loom",
+    ],
+    mode = "selective",
+    output = "qwen3_moe_flash_attention_prefill_f32_f16.loom",
+    roots = ["@qwen3_moe_flash_attention_f32_f16_wmma"],
+    strip_check = True,
+)
+
+loom_link_module(
+    name = "dense_linear_quantized_f16_runtime_module",
+    srcs = ["runtime_exports.loom"],
+    libraries = [
+        "//experimental/qwen_moe/kernels:dense_linear_quantized_f16_wmma_linked",
+    ],
+    mode = "selective",
+    output = "qwen3_moe_dense_linear_quantized_f16.loom",
+    roots = ["@qwen3_moe_dense_linear_q4k_f16_wmma"],
+    strip_check = True,
+)
+
+loom_link_module(
+    name = "router_projection_f32_runtime_module",
+    srcs = ["runtime_exports.loom"],
+    libraries = [
+        "//experimental/qwen_moe/kernels:router_projection_f32_linked",
+    ],
+    mode = "selective",
+    output = "qwen3_moe_router_projection_f32.loom",
+    roots = ["@qwen3_moe_router_projection_f32_four_row_wave32"],
+    strip_check = True,
+)
+
+loom_link_module(
+    name = "router_top8_f32_runtime_module",
+    srcs = ["runtime_exports.loom"],
+    libraries = [
+        "//experimental/qwen_moe/kernels:router_top8_f32_linked",
+    ],
+    mode = "selective",
+    output = "qwen3_moe_router_top8_f32.loom",
+    roots = ["@qwen3_moe_router_top8_f32"],
+    strip_check = True,
+)
+
+loom_link_module(
+    name = "routed_gate_up_f16_runtime_module",
+    srcs = ["runtime_exports.loom"],
+    libraries = [
+        "//experimental/qwen_moe/kernels:routed_gate_up_swiglu_q4k_f16_wmma_linked",
+    ],
+    mode = "selective",
+    output = "qwen3_moe_routed_gate_up_f16.loom",
+    roots = [
+        "@qwen3_moe_build_expert_partition_table",
+        "@qwen3_moe_build_expert_table",
+        "@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma",
+    ],
+    strip_check = True,
+)
+
+loom_link_module(
+    name = "routed_down_f16_runtime_module",
+    srcs = ["runtime_exports.loom"],
+    libraries = [
+        "//experimental/qwen_moe/kernels:routed_down_quantized_f16_wmma_linked",
+    ],
+    mode = "selective",
+    output = "qwen3_moe_routed_down_f16.loom",
+    roots = [
+        "@qwen3_moe_routed_down_q4k_f16_wmma_grouped",
+        "@qwen3_moe_routed_down_q6k_f16_wmma_grouped",
+        "@qwen3_moe_routed_down_weighted_reduce_f16_f32",
+    ],
+    strip_check = True,
+)
+
+iree_c_embed_data(
+    name = "runtime_modules",
+    srcs = [
+        ":attention_postprocess_f32_f16_runtime_module",
+        ":attention_prepare_quantized_runtime_module",
+        ":attention_qkv_quantized_runtime_module",
+        ":dense_linear_quantized_f16_runtime_module",
+        ":flash_attention_prefill_f32_f16_runtime_module",
+        ":routed_down_f16_runtime_module",
+        ":routed_gate_up_f16_runtime_module",
+        ":router_projection_f32_runtime_module",
+        ":router_top8_f32_runtime_module",
+    ],
+    c_file_output = "runtime_modules.c",
+    flatten = True,
+    h_file_output = "runtime_modules.h",
+    identifier = "qwen_loom_runtime_modules",
+)

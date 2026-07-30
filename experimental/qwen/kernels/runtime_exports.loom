@@ -1,0 +1,30 @@
+// Runtime ABI declarations for Qwen-owned dispatches. Linking these
+// declarations with the authored definitions preserves the kernel corpus while
+// supplying HAL-visible export contracts in runtime-only linked copies.
+func.decl target(@qwen3_moe_attention_prepare_gfx11_wave32) export("qwen3_moe_rmsnorm_f32") @qwen3_moe_rmsnorm_f32(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.decl target(@qwen3_moe_attention_prepare_gfx11_wave32) export("qwen3_moe_attention_rmsnorm_quantize_q8_1_x4") @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.decl target(@qwen3_moe_attention_qkv_gfx11_wave32) export("qwen3_moe_attention_qkv_quantized") @qwen3_moe_attention_qkv_quantized(%token_count: index, %q8_input: buffer, %query_weight: buffer, %key_weight: buffer, %value_weight: buffer, %query_output: buffer, %key_output: buffer, %value_output: buffer)
+
+func.decl target(@qwen3_moe_attention_postprocess_gfx11_wave32) export("qwen3_moe_attention_postprocess_f32_f16") @qwen3_moe_attention_postprocess_f32_f16(%token_count: index, %cache_row_count: index, %positions: buffer, %key_cache_indices: buffer, %value_cache_indices: buffer, %query_input: buffer, %key_input: buffer, %value_input: buffer, %query_norm_weight: buffer, %key_norm_weight: buffer, %inverse_frequencies: buffer, %query_output: buffer, %key_cache: buffer, %value_cache: buffer)
+
+func.decl target(@qwen3_moe_attention_gfx11_wave64) export("qwen3_moe_flash_attention_f32_f16_wmma") @qwen3_moe_flash_attention_f32_f16_wmma(%query_token_count: index, %key_value_token_count: index, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer)
+
+func.decl target(@qwen3_moe_dense_gfx11_wave64) export("qwen3_moe_dense_linear_q4k_f16_wmma") @qwen3_moe_dense_linear_q4k_f16_wmma(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.decl target(@qwen3_moe_router_projection_gfx11_wave32) export("qwen3_moe_router_projection_f32_four_row_wave32") @qwen3_moe_router_projection_f32_four_row_wave32(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.decl target(@qwen3_moe_router_gfx11_wave64) export("qwen3_moe_router_top8_f32") @qwen3_moe_router_top8_f32(%token_count: index, %route_id_stride: index, %logits: buffer, %route_ids: buffer, %route_weights: buffer)
+
+func.decl target(@qwen3_moe_gfx11_wave32) export("qwen3_moe_build_expert_table") @qwen3_moe_build_expert_table(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %route_ids: buffer, %expert_table: buffer)
+
+func.decl target(@qwen3_moe_gfx11_wave32) export("qwen3_moe_build_expert_partition_table") @qwen3_moe_build_expert_partition_table(%token_count: index, %route_count: index, %expert_count: index, %expert_table: buffer, %partition_table: buffer)
+
+func.decl target(@qwen3_moe_gfx11_wave32) export("qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma") @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma(%token_count: index, %input: buffer, %expert_table: buffer, %partition_table: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer)
+
+func.decl target(@qwen3_moe_routed_down_gfx11_wave64) export("qwen3_moe_routed_down_q4k_f16_wmma_grouped") @qwen3_moe_routed_down_q4k_f16_wmma_grouped(%token_count: index, %input: buffer, %expert_table: buffer, %weight: buffer, %output: buffer)
+
+func.decl target(@qwen3_moe_routed_down_gfx11_wave64) export("qwen3_moe_routed_down_q6k_f16_wmma_grouped") @qwen3_moe_routed_down_q6k_f16_wmma_grouped(%token_count: index, %input: buffer, %expert_table: buffer, %weight: buffer, %output: buffer)
+
+func.decl target(@qwen3_moe_routed_down_gfx11_wave64) export("qwen3_moe_routed_down_weighted_reduce_f16_f32") @qwen3_moe_routed_down_weighted_reduce_f16_f32(%token_count: index, %route_weights: buffer, %routed_output: buffer, %output: buffer)
