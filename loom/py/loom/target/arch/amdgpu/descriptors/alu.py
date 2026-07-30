@@ -4085,7 +4085,7 @@ def _v_pk_binary_overlay(
             AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand(lhs_name, units=units)),
             AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand(rhs_name, units=units)),
         ),
-        fixed_encoding_fields=(("OP_SEL_HI", 0x3),),
+        fixed_encoding_fields=(("OP_SEL_HI", 0x7),),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 

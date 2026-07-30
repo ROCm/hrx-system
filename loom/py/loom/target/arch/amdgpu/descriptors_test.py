@@ -3152,7 +3152,7 @@ def test_gfx125x_packed_bf16_descriptors_are_arch_scoped() -> None:
             operand.descriptor_operand.unit_count
             for operand in binary_descriptor.operands
         ) == (1, 1, 1)
-        assert binary_descriptor.fixed_encoding_fields == (("OPSEL_HI", 0x3),)
+        assert binary_descriptor.fixed_encoding_fields == (("OPSEL_HI", 0x7),)
 
     fma_descriptor = descriptors["amdgpu.v_pk_fma_bf16"]
     assert fma_descriptor.encoding_name == "ENC_VOP3P"
@@ -3288,7 +3288,7 @@ def test_packed_binary_descriptors_pin_lane_container_widths() -> None:
             assert tuple(
                 operand.descriptor_operand.unit_count for operand in descriptor.operands
             ) == (1, 1, 1)
-            assert descriptor.fixed_encoding_fields == ((op_sel_hi_field, 0x3),)
+            assert descriptor.fixed_encoding_fields == ((op_sel_hi_field, 0x7),)
 
 
 def test_packed_float_descriptors_follow_target_numeric_semantics() -> None:
@@ -3316,7 +3316,7 @@ def test_packed_float_descriptors_follow_target_numeric_semantics() -> None:
         assert tuple(
             operand.descriptor_operand.unit_count for operand in descriptor.operands
         ) == (1, 1, 1)
-        assert descriptor.fixed_encoding_fields == (("OPSEL_HI", 0x3),)
+        assert descriptor.fixed_encoding_fields == (("OPSEL_HI", 0x7),)
 
     for descriptor_set in (_gfx940_core_overlays(), _gfx950_core_overlays()):
         descriptors = {
@@ -3330,7 +3330,7 @@ def test_packed_float_descriptors_follow_target_numeric_semantics() -> None:
             assert tuple(
                 operand.descriptor_operand.unit_count for operand in descriptor.operands
             ) == (2, 2, 2)
-            assert descriptor.fixed_encoding_fields == (("OP_SEL_HI", 0x3),)
+            assert descriptor.fixed_encoding_fields == (("OP_SEL_HI", 0x7),)
 
 
 def test_f32_med3_descriptors_follow_target_numeric_semantics() -> None:
