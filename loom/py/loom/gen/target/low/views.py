@@ -9,8 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
-from typing import Protocol
+from dataclasses import replace
 
 from loom.gen.target.low import compiler, validation
 from loom.gen.target.low.compiled import (
@@ -19,56 +18,7 @@ from loom.gen.target.low.compiled import (
     CompiledOperandForm,
     DescriptorSetView,
 )
-from loom.target.low_descriptors import (
-    Descriptor,
-    DescriptorSet,
-    Hazard,
-    InstructionClass,
-    IssueUse,
-    PressureDelta,
-    RegClass,
-    Resource,
-    ScheduleClass,
-)
-
-
-class _NamedTableItem(Protocol):
-    name: str
-
-
-@dataclass(frozen=True, slots=True)
-class _ViewScheduleTables:
-    schedule_classes: tuple[ScheduleClass, ...]
-    issue_uses: tuple[IssueUse, ...]
-    hazards: tuple[Hazard, ...]
-    pressure_deltas: tuple[PressureDelta, ...]
-    schedule_rows: tuple[dict[str, int], ...]
-    uses_storage_schedule_classes: bool
-
-
-def _overlay_view_table[NamedTableItemT: _NamedTableItem](
-    storage_items: Sequence[NamedTableItemT],
-    view_items: Sequence[NamedTableItemT],
-) -> tuple[NamedTableItemT, ...]:
-    view_items_by_name = {item.name: item for item in view_items}
-    return tuple(view_items_by_name.get(storage_item.name, storage_item) for storage_item in storage_items)
-
-
-def _validate_shared_view_table[NamedTableItemT: _NamedTableItem](
-    storage_items: Sequence[NamedTableItemT],
-    view_items: Sequence[NamedTableItemT],
-    *,
-    view_spec: DescriptorSet,
-    storage_spec: DescriptorSet,
-    table_name: str,
-) -> None:
-    storage_items_by_name = {item.name: item for item in storage_items}
-    for view_item in view_items:
-        storage_item = storage_items_by_name.get(view_item.name)
-        if storage_item is None:
-            continue
-        if view_item != storage_item:
-            raise ValueError(f"descriptor set view '{view_spec.key}' {table_name} '{view_item.name}' differs from storage set '{storage_spec.key}'")
+from loom.target.low_descriptors import Descriptor, DescriptorSet, InstructionClass
 
 
 def _descriptor_refs_for_ordinals(
@@ -168,96 +118,34 @@ def _validate_view_descriptors_match_storage(
     return tuple(projected_descriptors)
 
 
-def _compile_view_schedule_tables(
+def _view_instruction_classes(
     compiled: CompiledDescriptorSet,
     view_spec: DescriptorSet,
     descriptors: Sequence[Descriptor],
-    reg_classes: Sequence[RegClass],
-    resources: Sequence[Resource],
-) -> _ViewScheduleTables:
+    descriptor_ordinals: Sequence[int],
+) -> tuple[tuple[InstructionClass, ...], ...]:
     storage_schedule_classes = {schedule_class.name: schedule_class for schedule_class in compiled.schedule_classes}
     view_schedule_classes = {schedule_class.name: schedule_class for schedule_class in view_spec.schedule_classes}
-    if any(descriptor.schedule_class is None for descriptor in descriptors):
-        raise ValueError(f"descriptor set view '{view_spec.key}' has a descriptor without a schedule class")
-    used_schedule_class_names = {descriptor.schedule_class for descriptor in descriptors if descriptor.schedule_class is not None}
-
-    schedule_classes: list[ScheduleClass] = []
-    for storage_schedule_class in compiled.schedule_classes:
-        if storage_schedule_class.name not in used_schedule_class_names:
-            schedule_classes.append(storage_schedule_class)
-            continue
-        view_schedule_class = view_schedule_classes.get(storage_schedule_class.name)
+    resources = {resource.name: resource for resource in compiled.resources}
+    result: list[tuple[InstructionClass, ...]] = []
+    for descriptor, storage_descriptor_ordinal in zip(descriptors, descriptor_ordinals, strict=True):
+        storage_descriptor = compiled.descriptors[storage_descriptor_ordinal]
+        view_schedule_class = view_schedule_classes.get(descriptor.schedule_class)
         if view_schedule_class is None:
-            raise ValueError(f"descriptor set view '{view_spec.key}' references unknown schedule class '{storage_schedule_class.name}'")
-        schedule_classes.append(view_schedule_class)
-
-    missing_schedule_class_names = sorted(used_schedule_class_names - storage_schedule_classes.keys())
-    if missing_schedule_class_names:
-        raise ValueError(f"descriptor set view '{view_spec.key}' schedule classes are absent from storage set '{compiled.spec.key}': {', '.join(missing_schedule_class_names)}")
-
-    resource_names = {resource.name for resource in resources}
-    reg_class_names = {reg_class.name for reg_class in reg_classes}
-    for schedule_class in schedule_classes:
-        if schedule_class.name not in used_schedule_class_names:
-            continue
-        referenced_resource_names = {issue_use.resource for issue_use in schedule_class.issue_uses}
-        referenced_resource_names.update(hazard.resource for hazard in schedule_class.hazards if hazard.resource is not None)
-        for resource_name in referenced_resource_names:
-            if resource_name not in resource_names:
-                raise ValueError(f"descriptor set view '{view_spec.key}' schedule class '{schedule_class.name}' references resource '{resource_name}' absent from storage set '{compiled.spec.key}'")
-        for pressure_delta in schedule_class.pressure_deltas:
-            reg_class_name = pressure_delta.reg_class
-            if reg_class_name not in reg_class_names:
-                raise ValueError(
-                    f"descriptor set view '{view_spec.key}' schedule class '{schedule_class.name}' references register class '{reg_class_name}' absent from storage set '{compiled.spec.key}'"
-                )
-
-    issue_uses: list[IssueUse] = []
-    hazards: list[Hazard] = []
-    pressure_deltas: list[PressureDelta] = []
-    schedule_rows: list[dict[str, int]] = []
-    for schedule_class in schedule_classes:
-        issue_use_start = len(issue_uses)
-        issue_uses.extend(schedule_class.issue_uses)
-        hazard_start = len(hazards)
-        hazards.extend(schedule_class.hazards)
-        pressure_delta_start = len(pressure_deltas)
-        pressure_deltas.extend(schedule_class.pressure_deltas)
-        schedule_rows.append(
-            {
-                "issue_use_start": issue_use_start,
-                "issue_use_count": len(schedule_class.issue_uses),
-                "hazard_start": hazard_start,
-                "hazard_count": len(schedule_class.hazards),
-                "pressure_delta_start": pressure_delta_start,
-                "pressure_delta_count": len(schedule_class.pressure_deltas),
-            }
+            raise ValueError(f"descriptor set view '{view_spec.key}' descriptor '{descriptor.key}' references unknown schedule class '{descriptor.schedule_class}'")
+        storage_schedule_class = storage_schedule_classes.get(descriptor.schedule_class)
+        if storage_schedule_class is None:
+            raise ValueError(f"descriptor set view '{view_spec.key}' schedule class '{descriptor.schedule_class}' is absent from storage set '{compiled.spec.key}'")
+        if descriptor.schedule_class != storage_descriptor.schedule_class and view_schedule_class != storage_schedule_class:
+            raise ValueError(f"descriptor set view '{view_spec.key}' schedule class '{descriptor.schedule_class}' differs from storage set '{compiled.spec.key}'")
+        result.append(
+            compiler.derive_instruction_classes(
+                descriptor,
+                storage_schedule_class,
+                resources,
+            )
         )
-    return _ViewScheduleTables(
-        schedule_classes=tuple(schedule_classes),
-        issue_uses=tuple(issue_uses),
-        hazards=tuple(hazards),
-        pressure_deltas=tuple(pressure_deltas),
-        schedule_rows=tuple(schedule_rows),
-        uses_storage_schedule_classes=tuple(schedule_classes) == tuple(compiled.schedule_classes),
-    )
-
-
-def _view_instruction_classes(
-    descriptors: Sequence[Descriptor],
-    schedule_classes: Sequence[ScheduleClass],
-    resources: Sequence[Resource],
-) -> tuple[tuple[InstructionClass, ...], ...]:
-    schedule_classes_by_name = {schedule_class.name: schedule_class for schedule_class in schedule_classes}
-    resources_by_name = {resource.name: resource for resource in resources}
-    return tuple(
-        compiler.derive_instruction_classes(
-            descriptor,
-            schedule_classes_by_name[descriptor.schedule_class],
-            resources_by_name,
-        )
-        for descriptor in descriptors
-    )
+    return tuple(result)
 
 
 def _view_descriptors_match_storage(
@@ -265,14 +153,7 @@ def _view_descriptors_match_storage(
     descriptors: Sequence[Descriptor],
     descriptor_ordinals: Sequence[int],
 ) -> bool:
-    return all(
-        descriptor == compiled.descriptors[storage_descriptor_ordinal]
-        for descriptor, storage_descriptor_ordinal in zip(
-            descriptors,
-            descriptor_ordinals,
-            strict=True,
-        )
-    )
+    return all(descriptor == compiled.descriptors[storage_descriptor_ordinal] for descriptor, storage_descriptor_ordinal in zip(descriptors, descriptor_ordinals, strict=True))
 
 
 def _view_asm_forms_match_storage(
@@ -345,42 +226,11 @@ def descriptor_set_view_for_spec(
         view_spec,
         descriptor_ordinal_tuple,
     )
-    reg_classes = _overlay_view_table(
-        compiled.reg_classes,
-        view_spec.reg_classes,
-    )
-    resources = _overlay_view_table(
-        compiled.resources,
-        view_spec.resources,
-    )
-    for reg_class in reg_classes:
-        if reg_class.spill_class is not None and reg_class.spill_class not in compiled.reg_class_ids:
-            raise ValueError(f"descriptor set view '{view_spec.key}' register class '{reg_class.name}' references spill class '{reg_class.spill_class}' absent from storage set '{compiled.spec.key}'")
-    _validate_shared_view_table(
-        compiled.register_parts,
-        view_spec.register_parts,
-        view_spec=view_spec,
-        storage_spec=compiled.spec,
-        table_name="register part",
-    )
-    _validate_shared_view_table(
-        compiled.enum_domains,
-        view_spec.enum_domains,
-        view_spec=view_spec,
-        storage_spec=compiled.spec,
-        table_name="enum domain",
-    )
-    schedule_tables = _compile_view_schedule_tables(
+    instruction_classes = _view_instruction_classes(
         compiled,
         view_spec,
         descriptors,
-        reg_classes,
-        resources,
-    )
-    instruction_classes = _view_instruction_classes(
-        descriptors,
-        schedule_tables.schedule_classes,
-        resources,
+        descriptor_ordinal_tuple,
     )
     _validate_view_operand_forms_closed(
         compiled,
@@ -402,13 +252,6 @@ def descriptor_set_view_for_spec(
             spec=view_spec,
             descriptors=descriptors,
             instruction_classes=instruction_classes,
-            reg_classes=reg_classes,
-            resources=resources,
-            schedule_classes=schedule_tables.schedule_classes,
-            issue_uses=schedule_tables.issue_uses,
-            hazards=schedule_tables.hazards,
-            pressure_deltas=schedule_tables.pressure_deltas,
-            schedule_rows=schedule_tables.schedule_rows,
             descriptor_ordinals=descriptor_ordinal_tuple,
             descriptor_refs=_descriptor_refs_for_ordinals(
                 compiled.descriptors,
@@ -419,7 +262,6 @@ def descriptor_set_view_for_spec(
             asm_forms=compiled.asm_forms,
             operand_forms=compiled.operand_forms,
             uses_storage_descriptor_tables=True,
-            uses_storage_schedule_classes=(schedule_tables.uses_storage_schedule_classes),
             uses_storage_asm_form_tables=True,
             uses_storage_operand_form_tables=True,
         )
@@ -450,13 +292,6 @@ def descriptor_set_view_for_spec(
         spec=view_spec,
         descriptors=descriptors,
         instruction_classes=instruction_classes,
-        reg_classes=reg_classes,
-        resources=resources,
-        schedule_classes=schedule_tables.schedule_classes,
-        issue_uses=schedule_tables.issue_uses,
-        hazards=schedule_tables.hazards,
-        pressure_deltas=schedule_tables.pressure_deltas,
-        schedule_rows=schedule_tables.schedule_rows,
         descriptor_ordinals=descriptor_ordinal_tuple,
         descriptor_refs=_descriptor_refs_for_ordinals(
             compiled.descriptors,
@@ -470,7 +305,6 @@ def descriptor_set_view_for_spec(
         asm_forms=asm_forms,
         operand_forms=operand_forms,
         uses_storage_descriptor_tables=False,
-        uses_storage_schedule_classes=(schedule_tables.uses_storage_schedule_classes),
         uses_storage_asm_form_tables=False,
         uses_storage_operand_form_tables=False,
     )

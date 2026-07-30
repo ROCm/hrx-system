@@ -108,13 +108,6 @@ class DescriptorSetView:
     spec: DescriptorSet
     descriptors: tuple[Descriptor, ...]
     instruction_classes: tuple[tuple[InstructionClass, ...], ...]
-    reg_classes: tuple[RegClass, ...]
-    resources: tuple[Resource, ...]
-    schedule_classes: tuple[ScheduleClass, ...]
-    issue_uses: tuple[IssueUse, ...]
-    hazards: tuple[Hazard, ...]
-    pressure_deltas: tuple[PressureDelta, ...]
-    schedule_rows: tuple[dict[str, int], ...]
     descriptor_ordinals: tuple[int, ...]
     descriptor_refs: list[tuple[str, int]]
     descriptor_rows: list[dict[str, int]]
@@ -122,7 +115,6 @@ class DescriptorSetView:
     asm_forms: list[CompiledAsmForm]
     operand_forms: list[CompiledOperandForm]
     uses_storage_descriptor_tables: bool
-    uses_storage_schedule_classes: bool
     uses_storage_asm_form_tables: bool
     uses_storage_operand_form_tables: bool
 

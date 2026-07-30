@@ -34,10 +34,3 @@ def test_encoding_field_ids_fragment_is_row_data_only() -> None:
     assert len(lines) == len(AMDGPU_ENCODING_FIELD_NAMES)
     assert lines[0] == _encoding_field_row(AMDGPU_ENCODING_FIELD_NAMES[0])
     assert lines[-1] == _encoding_field_row(AMDGPU_ENCODING_FIELD_NAMES[-1])
-
-
-def test_selected_descriptor_sets_include_target_local_contracts() -> None:
-    selected_keys = {descriptor_set.key for descriptor_set in amdgpu_config_tables._selected_descriptor_set_infos()}
-
-    assert "amdgpu.rdna4.gfx125x.core" in selected_keys
-    assert "amdgpu.rdna4.gfx1250_a0.core" in selected_keys

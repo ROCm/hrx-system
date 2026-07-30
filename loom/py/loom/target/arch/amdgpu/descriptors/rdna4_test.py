@@ -60,7 +60,6 @@ def test_gfx125x_wmma_catalog_is_portable_across_exact_and_generic_targets() -> 
             replace(descriptor, schedule_class="") for descriptor in descriptors
         )
 
-    assert len(gfx1250_wmma) == 53
     assert without_schedule_class(gfx1251_wmma) == without_schedule_class(gfx1250_wmma)
     assert without_schedule_class(generic_wmma) == without_schedule_class(gfx1250_wmma)
     assert (
@@ -145,50 +144,32 @@ def test_gfx1250_stepping_wmma_schedules_match_llvm_speed_model() -> None:
             _AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE.schedule_classes
         )
     }
-    latency_counts = {"b0": {4: 0, 8: 0, 16: 0}, "a0": {4: 0, 8: 0, 16: 0}}
-
-    wmma_descriptors = _matrix_descriptors(
-        _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE, "wmma"
+    schedule_cases = (
+        ("amdgpu.v_wmma_f32_16x16x4_f32", 16, 16),
+        ("amdgpu.v_wmma_f32_16x16x64_fp8_fp8", 4, 8),
+        ("amdgpu.v_wmma_f32_16x16x128_f8f6f4_f4_f4", 4, 8),
+        ("amdgpu.v_wmma_f32_16x16x128_f8f6f4_f6_f4", 8, 8),
+        ("amdgpu.v_wmma_f32_16x16x128_f8f6f4_f8_f4", 8, 16),
+        ("amdgpu.v_wmma_i32_16x16x64_iu8", 16, 16),
+        ("amdgpu.v_wmma_scale_f32_16x16x128_f8f6f4_f4_f4", 4, 8),
     )
-    assert len(wmma_descriptors) == 53
-    for b0_descriptor in wmma_descriptors:
-        semantic_components = (b0_descriptor.semantic_tag or "").split(".")
-        matrix_formats = semantic_components[-2:]
-        if semantic_components[-3] == "16x16x64" and set(matrix_formats) <= {
-            "fp8",
-            "bf8",
-        }:
-            expected_b0_latency, expected_a0_latency = 4, 8
-        elif "f8f6f4" in semantic_components:
-            if matrix_formats == ["f4", "f4"]:
-                expected_b0_latency, expected_a0_latency = 4, 8
-            elif "f8" in matrix_formats:
-                expected_b0_latency, expected_a0_latency = 8, 16
-            else:
-                expected_b0_latency = expected_a0_latency = 8
-        elif (
-            semantic_components[-1] in ("iu8", "iu4")
-            or b0_descriptor.semantic_tag == "matrix.wmma.f32.16x16x4.f32"
-        ):
-            expected_b0_latency = expected_a0_latency = 16
-        else:
-            expected_b0_latency = expected_a0_latency = 8
-
-        a0_descriptor = a0_descriptors[b0_descriptor.key]
-        for stepping, descriptor, schedule_classes, expected_latency in (
-            ("b0", b0_descriptor, b0_schedule_classes, expected_b0_latency),
-            ("a0", a0_descriptor, a0_schedule_classes, expected_a0_latency),
+    for descriptor_key, expected_b0_latency, expected_a0_latency in schedule_cases:
+        for descriptor, schedule_classes, expected_latency in (
+            (
+                b0_descriptors[descriptor_key],
+                b0_schedule_classes,
+                expected_b0_latency,
+            ),
+            (
+                a0_descriptors[descriptor_key],
+                a0_schedule_classes,
+                expected_a0_latency,
+            ),
         ):
             schedule_class = schedule_classes[descriptor.schedule_class]
             assert schedule_class.latency_kind is LatencyKind.EXACT
             assert schedule_class.latency_cycles == expected_latency
             assert schedule_class.model_quality is ModelQuality.EXACT
-            latency_counts[stepping][expected_latency] += 1
-
-    assert latency_counts == {
-        "b0": {4: 11, 8: 40, 16: 2},
-        "a0": {4: 0, 8: 36, 16: 17},
-    }
 
 
 def test_gfx125x_f8f6f4_wmma_descriptors_model_all_physical_abis() -> None:

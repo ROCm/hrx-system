@@ -996,7 +996,6 @@ def test_descriptor_set_view_selects_shared_schedule_class() -> None:
     )
 
     assert not compiled_view.uses_storage_descriptor_tables
-    assert compiled_view.uses_storage_schedule_classes
     assert compiled_view.descriptors[0].schedule_class == vector_schedule.name
     assert compiled_view.instruction_classes == ((InstructionClass.VECTOR_ALU,),)
 
@@ -1027,17 +1026,18 @@ def test_shared_source_retains_view_only_schedule_class() -> None:
     assert "loom_test_low_schedule_view_core_descriptor_set" in source
 
 
-def test_descriptor_set_view_retains_local_schedule_definition() -> None:
-    scalar_schedule = TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes[1]
+def test_descriptor_set_view_rejects_local_schedule_definition() -> None:
+    vector_schedule = TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes[2]
+    vector_multiply = replace(
+        TEST_LOW_MUL_I32_DESCRIPTOR,
+        schedule_class=vector_schedule.name,
+    )
+    storage_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR, vector_multiply),
+    )
     view_schedule_classes = tuple(
-        replace(
-            schedule_class,
-            latency_cycles=3,
-            issue_uses=(replace(schedule_class.issue_uses[0], cycles=2),),
-        )
-        if schedule_class.name == scalar_schedule.name
-        else schedule_class
-        for schedule_class in TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes
+        replace(schedule_class, latency_cycles=3) if schedule_class.name == vector_schedule.name else schedule_class for schedule_class in TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes
     )
     view = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -1046,77 +1046,22 @@ def test_descriptor_set_view_retains_local_schedule_definition() -> None:
         c_table_prefix="TestLowScheduleViewCore",
         c_enum_prefix="TEST_LOW_SCHEDULE_VIEW_CORE",
         schedule_classes=view_schedule_classes,
-        descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR,),
+        descriptors=(
+            replace(
+                TEST_LOW_ADD_I32_DESCRIPTOR,
+                schedule_class=vector_schedule.name,
+            ),
+        ),
     )
 
-    compiled = compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
-    compiled_view = views.descriptor_set_view_for_spec(compiled, view)
-
-    scalar_schedule_id = compiled.schedule_class_ids[scalar_schedule.name]
-    assert not compiled_view.uses_storage_schedule_classes
-    assert compiled_view.schedule_classes[scalar_schedule_id].latency_cycles == 3
-    assert compiled_view.schedule_classes[scalar_schedule_id].issue_uses[0].cycles == 2
-
-    source = generate_descriptor_set_shared_source(
-        TEST_LOW_CORE_DESCRIPTOR_SET,
-        (view,),
-    )
-    assert (".schedule_classes = kTestLowScheduleViewCoreScheduleClasses,") in source
-    assert (".issue_uses = kTestLowScheduleViewCoreIssueUses,") in source
-
-
-def test_descriptor_set_view_retains_local_resource_definition() -> None:
-    scalar_schedule = TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes[1]
-    scalar_resource_name = scalar_schedule.issue_uses[0].resource
-    view_resources = tuple(replace(resource, capacity_per_cycle=2) if resource.name == scalar_resource_name else resource for resource in TEST_LOW_CORE_DESCRIPTOR_SET.resources)
-    view = replace(
-        TEST_LOW_CORE_DESCRIPTOR_SET,
-        key="test.low.schedule_view.core",
-        function_name="loom_test_low_schedule_view_core_descriptor_set",
-        c_table_prefix="TestLowScheduleViewCore",
-        c_enum_prefix="TEST_LOW_SCHEDULE_VIEW_CORE",
-        resources=view_resources,
-        descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR,),
-    )
-
-    compiled = compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
-    compiled_view = views.descriptor_set_view_for_spec(compiled, view)
-
-    resource_id = compiled.resource_ids[scalar_resource_name]
-    assert compiled_view.resources[resource_id].capacity_per_cycle == 2
-
-    source = generate_descriptor_set_shared_source(
-        TEST_LOW_CORE_DESCRIPTOR_SET,
-        (view,),
-    )
-    assert ".resources = kTestLowScheduleViewCoreResources," in source
-
-
-def test_descriptor_set_view_retains_local_register_class_definition() -> None:
-    reg_class_name = TEST_LOW_ADD_I32_DESCRIPTOR.operands[0].reg_alts[0].reg_class
-    assert reg_class_name is not None
-    view_reg_classes = tuple(replace(reg_class, target_bank_id=7) if reg_class.name == reg_class_name else reg_class for reg_class in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes)
-    view = replace(
-        TEST_LOW_CORE_DESCRIPTOR_SET,
-        key="test.low.register_view.core",
-        function_name="loom_test_low_register_view_core_descriptor_set",
-        c_table_prefix="TestLowRegisterViewCore",
-        c_enum_prefix="TEST_LOW_REGISTER_VIEW_CORE",
-        reg_classes=view_reg_classes,
-        descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR,),
-    )
-
-    compiled = compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
-    compiled_view = views.descriptor_set_view_for_spec(compiled, view)
-
-    reg_class_id = compiled.reg_class_ids[reg_class_name]
-    assert compiled_view.reg_classes[reg_class_id].target_bank_id == 7
-
-    source = generate_descriptor_set_shared_source(
-        TEST_LOW_CORE_DESCRIPTOR_SET,
-        (view,),
-    )
-    assert ".reg_classes = kTestLowRegisterViewCoreRegClasses," in source
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set view 'test.low.schedule_view.core' schedule class 'test.vector.alu' differs from storage set 'test.low.core'"),
+    ):
+        views.descriptor_set_view_for_spec(
+            compiler.compile_descriptor_set(storage_set),
+            view,
+        )
 
 
 def test_shared_source_emits_prefix_view_local_asm_forms() -> None:
