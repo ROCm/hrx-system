@@ -26,6 +26,11 @@ _TAIL_REMAINING_SUBTRACTION = (
     "%bounded_key_value_token_count, %tail_key_origin : index\n"
     "    %tail_key_count = index.min %tail_remaining, %thirtytwo : index"
 )
+_DYNAMIC_TAIL_STAGE_ALLOCATION = (
+    "  %tail_key_value_stage = buffer.alloca "
+    "%tail_key_value_stage_bytes "
+    "{base_alignment = 16, memory_space = workgroup} : buffer"
+)
 _COMPLETE_SOURCE = "\n".join(
     (
         _EXPORT,
@@ -33,6 +38,7 @@ _COMPLETE_SOURCE = "\n".join(
         _FULL_TILE_BOUND_SUBTRACTION,
         _TAIL_SCORE_WAVE,
         _TAIL_REMAINING_SUBTRACTION,
+        _DYNAMIC_TAIL_STAGE_ALLOCATION,
         "",
     )
 )
@@ -77,6 +83,12 @@ class FlashAttentionSourceRewriteTest(unittest.TestCase):
             "%first_tail_key_count, %second_tail_key_count : index",
             rewritten_source,
         )
+        self.assertIn(
+            "%tail_key_value_stage = buffer.alloca "
+            "%tail_key_value_stage_capacity "
+            "{base_alignment = 16, memory_space = workgroup} : buffer",
+            rewritten_source,
+        )
         self.assertEqual(rewritten_source.count("index.sub"), 1)
         self.assertIn(_EXPORT, rewritten_source)
 
@@ -101,14 +113,19 @@ class FlashAttentionSourceRewriteTest(unittest.TestCase):
             (_FULL_TILE_BOUND_SUBTRACTION, "full-tile bound subtraction"),
             (_TAIL_SCORE_WAVE, "tail-tile count anchor"),
             (_TAIL_REMAINING_SUBTRACTION, "tail-remaining subtraction"),
+            (_DYNAMIC_TAIL_STAGE_ALLOCATION, "tail-stage allocation"),
         )
         for original_text, description in expected_failures:
             with self.subTest(description=description):
-                drifted_text = (
-                    original_text.replace("index.sub", "index.add")
-                    if "index.sub" in original_text
-                    else original_text.replace("%two", "%three")
-                )
+                if "index.sub" in original_text:
+                    drifted_text = original_text.replace("index.sub", "index.add")
+                elif "tail_key_value_stage_bytes" in original_text:
+                    drifted_text = original_text.replace(
+                        "%tail_key_value_stage_bytes",
+                        "%tail_key_value_stage_capacity",
+                    )
+                else:
+                    drifted_text = original_text.replace("%two", "%three")
                 drifted_source = _COMPLETE_SOURCE.replace(original_text, drifted_text)
                 if "index.sub" in original_text:
                     drifted_source += "  %replacement = index.sub %a, %b : index\n"

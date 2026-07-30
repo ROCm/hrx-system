@@ -84,7 +84,7 @@ genrule(
     srcs = [":flash_attention_prefill_f32_f16_runtime_module_unpatched"],
     outs = ["qwen3_moe_flash_attention_prefill_f32_f16.loom"],
     cmd = "$(location :flash_attention_source_rewrite) --input $(location :flash_attention_prefill_f32_f16_runtime_module_unpatched) --output $@",
-    message = "Rewriting bounded FlashAttention index expressions",
+    message = "Rewriting bounded FlashAttention expressions",
     tools = [":flash_attention_source_rewrite"],
 )
 

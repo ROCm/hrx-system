@@ -101,7 +101,7 @@ TEST(QwenLoomSourceTest, RejectsUnknownPath) {
   EXPECT_THAT(status, StatusIs(iree::StatusCode::kNotFound));
 }
 
-TEST(QwenLoomSourceTest, EmbedsRewrittenFlashAttentionIndexExpressions) {
+TEST(QwenLoomSourceTest, EmbedsRewrittenFlashAttentionSource) {
   qwen_loom_source_module_t source_module;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
       IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_PREFILL_F32_F16),
@@ -130,6 +130,15 @@ TEST(QwenLoomSourceTest, EmbedsRewrittenFlashAttentionIndexExpressions) {
       source_text.find("%tail_key_count = scf.select %is_first_tail_tile, "
                        "%first_tail_key_count, %second_tail_key_count : index"),
       std::string::npos);
+  EXPECT_NE(
+      source_text.find("%tail_key_value_stage = buffer.alloca "
+                       "%tail_key_value_stage_capacity "
+                       "{base_alignment = 16, memory_space = workgroup} : "
+                       "buffer"),
+      std::string::npos);
+  EXPECT_EQ(source_text.find("%tail_key_value_stage = buffer.alloca "
+                             "%tail_key_value_stage_bytes"),
+            std::string::npos);
   size_t subtraction_position = source_text.find("index.sub");
   ASSERT_NE(subtraction_position, std::string::npos);
   EXPECT_EQ(source_text.find("index.sub", subtraction_position + 1),

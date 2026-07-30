@@ -51,6 +51,16 @@ _TAIL_TILE_COUNT_SELECTION = (
     "    %tail_key_count = scf.select %is_first_tail_tile, "
     "%first_tail_key_count, %second_tail_key_count : index"
 )
+_DYNAMIC_TAIL_STAGE_ALLOCATION = (
+    "  %tail_key_value_stage = buffer.alloca "
+    "%tail_key_value_stage_bytes "
+    "{base_alignment = 16, memory_space = workgroup} : buffer"
+)
+_FIXED_TAIL_STAGE_ALLOCATION = (
+    "  %tail_key_value_stage = buffer.alloca "
+    "%tail_key_value_stage_capacity "
+    "{base_alignment = 16, memory_space = workgroup} : buffer"
+)
 
 
 def _require_exactly_once(source: str, text: str, description: str) -> None:
@@ -91,6 +101,11 @@ def rewrite_flash_attention_source(source: str) -> str:
             _TAIL_REMAINING_SUBTRACTION,
             _TAIL_TILE_COUNT_SELECTION,
             "FlashAttention tail-remaining subtraction",
+        ),
+        (
+            _DYNAMIC_TAIL_STAGE_ALLOCATION,
+            _FIXED_TAIL_STAGE_ALLOCATION,
+            "FlashAttention tail-stage allocation",
         ),
     )
     rewritten_source = source
