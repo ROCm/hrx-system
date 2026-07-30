@@ -14,6 +14,7 @@ package(
 )
 
 exports_files([
+    "ggml/linear_q6k_f32.loom",
     "ggml/linear_q6k_q8_1_x4.loom",
     "ggml/quantize_q8_1_x4.loom",
     "qwen3_moe/attention_postprocess_f32_f16.loom",
@@ -406,6 +407,47 @@ loom_link_module(
     libraries = ["ggml/quantize_q8_1_x4.loom"],
 )
 
+loom_link_module(
+    name = "linear_q6k_f32_linked",
+    srcs = ["ggml/linear_q6k_f32.loom"],
+    libraries = [":linear_q6k_q8_1_x4_linked"],
+)
+
+iree_executable_test(
+    name = "linear_q6k_f32_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :linear_q6k_f32_linked)",
+        "--benchmark=@ggml_linear_q6k_f32_wave64_dense_v_decode",
+        "--dry-run",
+        "--output-format=jsonl",
+        "--sample-compilation=per_sample",
+    ],
+    data = [":linear_q6k_f32_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "linear_q6k_f32_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :linear_q6k_f32_linked)",
+        "--case=@ggml_linear_q6k_f32_differential_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":linear_q6k_f32_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
 iree_executable_test(
     name = "linear_q6k_q8_1_x4_plan_test",
     src = "//loom/src/loom/tools/iree-benchmark-loom",
@@ -585,6 +627,7 @@ loom_link_module(
     name = "routed_down_q6k_linked",
     srcs = ["qwen3_moe/routed_down_q6k.loom"],
     libraries = [
+        "ggml/linear_q6k_f32.loom",
         "ggml/linear_q6k_q8_1_x4.loom",
         "ggml/quantize_q8_1_x4.loom",
     ],
@@ -600,6 +643,27 @@ iree_executable_test(
     ],
     data = [":routed_down_q6k_linked"],
     tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "routed_down_q6k_f32_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :routed_down_q6k_linked)",
+        "--case=@qwen3_moe_routed_down_q6k_f32_wave64_differential_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":routed_down_q6k_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
 )
 
 iree_executable_test(
@@ -1175,10 +1239,13 @@ test_suite(
         ":flash_attention_f32_f16_wmma_plan_test",
         ":flash_attention_f32_f16_wmma_query_tail_hal_test",
         ":flash_attention_f32_f16_wmma_selected_row_hal_test",
+        ":linear_q6k_f32_hal_test",
+        ":linear_q6k_f32_plan_test",
         ":quantize_q8_1_x4_hal_test",
         ":quantize_q8_1_x4_plan_test",
         ":routed_down_q4k_f16_wmma_hal_test",
         ":routed_down_q6k_f16_wmma_hal_test",
+        ":routed_down_q6k_f32_hal_test",
         ":routed_down_quantized_f16_wmma_plan_test",
         ":routed_gate_up_swiglu_q4k_f16_wmma_hal_test",
         ":routed_gate_up_swiglu_q4k_f16_wmma_plan_test",
