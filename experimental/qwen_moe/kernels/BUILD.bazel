@@ -25,12 +25,104 @@ exports_files([
     "qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom",
     "qwen3_moe/flash_attention_f32_f16_wmma.loom",
     "qwen3_moe/model_config.loom",
+    "qwen3_moe/router_projection_f32.loom",
+    "qwen3_moe/router_top8_f32.loom",
     "qwen3_moe/routed_down_q4k.loom",
     "qwen3_moe/routed_down_quantized_f16_wmma.loom",
     "qwen3_moe/routed_down_q6k.loom",
     "qwen3_moe/routed_gate_up_swiglu_q4k.loom",
     "qwen3_moe/routed_linear_q4k_f16_wmma.loom",
 ])
+
+loom_link_module(
+    name = "router_projection_f32_linked",
+    srcs = ["qwen3_moe/router_projection_f32.loom"],
+    libraries = ["qwen3_moe/model_config.loom"],
+)
+
+iree_executable_test(
+    name = "router_projection_f32_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :router_projection_f32_linked)",
+        "--benchmark=@qwen3_moe_router_projection_f32_decode",
+        "--config=qwen3_moe.model.hidden_size=2048",
+        "--config=qwen3_moe.router.expert_count=128",
+        "--dry-run",
+        "--output-format=jsonl",
+        "--sample-compilation=per_sample",
+    ],
+    data = [":router_projection_f32_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "router_projection_f32_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :router_projection_f32_linked)",
+        "--config=qwen3_moe.model.hidden_size=128",
+        "--config=qwen3_moe.router.expert_count=32",
+        "--case=@qwen3_moe_router_projection_f32_differential_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":router_projection_f32_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+loom_link_module(
+    name = "router_top8_f32_linked",
+    srcs = ["qwen3_moe/router_top8_f32.loom"],
+    libraries = ["qwen3_moe/model_config.loom"],
+)
+
+iree_executable_test(
+    name = "router_top8_f32_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :router_top8_f32_linked)",
+        "--benchmark=@qwen3_moe_router_top8_f32_decode",
+        "--config=qwen3_moe.router.expert_count=128",
+        "--config=qwen3_moe.router.route_count=8",
+        "--dry-run",
+        "--output-format=jsonl",
+        "--sample-compilation=per_sample",
+    ],
+    data = [":router_top8_f32_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "router_top8_f32_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :router_top8_f32_linked)",
+        "--config=qwen3_moe.router.expert_count=128",
+        "--config=qwen3_moe.router.route_count=8",
+        "--case=@qwen3_moe_router_top8_f32_repeated_maxima_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":router_top8_f32_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
 
 loom_link_module(
     name = "attention_postprocess_f32_f16_linked",
@@ -1092,5 +1184,9 @@ test_suite(
         ":routed_gate_up_swiglu_q4k_f16_wmma_plan_test",
         ":routed_gate_up_swiglu_q4k_hal_test",
         ":routed_gate_up_swiglu_q4k_plan_test",
+        ":router_projection_f32_hal_test",
+        ":router_projection_f32_plan_test",
+        ":router_top8_f32_hal_test",
+        ":router_top8_f32_plan_test",
     ],
 )
