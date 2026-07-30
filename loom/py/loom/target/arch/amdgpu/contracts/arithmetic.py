@@ -68,6 +68,8 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_fma_f32",
     "amdgpu.v_fmaak_f32",
     "amdgpu.v_fmamk_f32",
+    "amdgpu.v_pk_add_f32",
+    "amdgpu.v_pk_mul_f32",
     "amdgpu.v_pk_fma_f32",
     "amdgpu.v_exp_f32",
     "amdgpu.v_log_f32",
@@ -89,6 +91,12 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_cvt_f16_f32",
     "amdgpu.v_pk_fmac_f16",
     "amdgpu.v_pk_fma_f16",
+    "amdgpu.v_pk_add_f16",
+    "amdgpu.v_pk_mul_f16",
+    "amdgpu.v_pk_minnum_f16",
+    "amdgpu.v_pk_maxnum_f16",
+    "amdgpu.v_pk_minimum_f16",
+    "amdgpu.v_pk_maximum_f16",
     "amdgpu.v_pk_add_bf16",
     "amdgpu.v_pk_mul_bf16",
     "amdgpu.v_pk_fma_bf16",
@@ -198,6 +206,11 @@ _VEC_F16_PACKED = Vector(
 _VEC_BF16_PACKED_STORAGE = Vector(
     "bf16",
     minimum_lanes=1,
+    maximum_lanes="LOOM_AMDGPU_MAX_PACKED_16BIT_FLOAT_LANES",
+)
+_VEC_BF16_PACKED = Vector(
+    "bf16",
+    minimum_lanes=2,
     maximum_lanes="LOOM_AMDGPU_MAX_PACKED_16BIT_FLOAT_LANES",
 )
 _VEC_BF16_PACKED_REGISTER = Vector("bf16", lanes=2)
@@ -481,7 +494,11 @@ def _type_diagnostic(type_pattern: TypePattern) -> GuardDiagnostic:
         return _VEC_I1_DIAGNOSTIC
     if type_pattern in (_VEC_F16_PACKED, _VEC_F16_PACKED_STORAGE):
         return _VEC_F16_PACKED_DIAGNOSTIC
-    if type_pattern in (_VEC_BF16_PACKED_STORAGE, _VEC_BF16_PACKED_REGISTER):
+    if type_pattern in (
+        _VEC_BF16_PACKED,
+        _VEC_BF16_PACKED_STORAGE,
+        _VEC_BF16_PACKED_REGISTER,
+    ):
         return _VEC_BF16_PACKED_DIAGNOSTIC
     if type_pattern in (_VEC_I16_PACKED, _VEC_I16_PACKED_STORAGE):
         return _VEC_I16_PACKED_DIAGNOSTIC
@@ -3021,7 +3038,7 @@ def _packed_bf16_vector_fma_rule() -> DescriptorRule:
         source_op=vector.vector_fmaf,
         descriptor=descriptor,
         guards=(
-            *_typed_guards(("a", "b", "c", "result"), _VEC_BF16_PACKED_REGISTER),
+            *_typed_guards(("a", "b", "c", "result"), _VEC_BF16_PACKED),
             Guard.value_static_dim0_multiple(
                 "result",
                 2,
@@ -3038,23 +3055,28 @@ def _packed_bf16_vector_fma_rule() -> DescriptorRule:
                     "c": ValueRef.operand("c"),
                 },
                 results={"dst": ValueRef.result("result")},
-                form=DescriptorEmitForm.OP,
+                form=DescriptorEmitForm.PER_LANE,
             ),
         ),
     )
 
 
-def _packed_bf16_binary_rule(source_op: Op, descriptor_key: str) -> DescriptorRule:
+def _packed_float_binary_rule(
+    source_op: Op,
+    descriptor_key: str,
+    type_pattern: TypePattern,
+    diagnostic: GuardDiagnostic,
+) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     return DescriptorRule(
         source_op=source_op,
         descriptor=descriptor,
         guards=(
-            *_typed_guards(("lhs", "rhs", "result"), _VEC_BF16_PACKED_REGISTER),
+            *_typed_guards(("lhs", "rhs", "result"), type_pattern),
             Guard.value_static_dim0_multiple(
                 "result",
                 2,
-                diagnostic=_VEC_BF16_PACKED_DIAGNOSTIC,
+                diagnostic=diagnostic,
             ),
             Guard.descriptor_available(descriptor),
         ),
@@ -3066,7 +3088,7 @@ def _packed_bf16_binary_rule(source_op: Op, descriptor_key: str) -> DescriptorRu
                     "rhs": ValueRef.operand("rhs"),
                 },
                 results={"dst": ValueRef.result("result")},
-                form=DescriptorEmitForm.OP,
+                form=DescriptorEmitForm.PER_LANE,
             ),
         ),
     )
@@ -3218,8 +3240,66 @@ def _rules() -> tuple[ContractCase, ...]:
     rules: list[ContractCase] = []
     rules.extend(
         (
-            _packed_bf16_binary_rule(vector.vector_addf, "amdgpu.v_pk_add_bf16"),
-            _packed_bf16_binary_rule(vector.vector_mulf, "amdgpu.v_pk_mul_bf16"),
+            _packed_float_binary_rule(
+                vector.vector_addf,
+                "amdgpu.v_pk_add_f16",
+                _VEC_F16_PACKED,
+                _VEC_F16_PACKED_DIAGNOSTIC,
+            ),
+            _packed_float_binary_rule(
+                vector.vector_mulf,
+                "amdgpu.v_pk_mul_f16",
+                _VEC_F16_PACKED,
+                _VEC_F16_PACKED_DIAGNOSTIC,
+            ),
+            _packed_float_binary_rule(
+                vector.vector_minnumf,
+                "amdgpu.v_pk_minnum_f16",
+                _VEC_F16_PACKED,
+                _VEC_F16_PACKED_DIAGNOSTIC,
+            ),
+            _packed_float_binary_rule(
+                vector.vector_maxnumf,
+                "amdgpu.v_pk_maxnum_f16",
+                _VEC_F16_PACKED,
+                _VEC_F16_PACKED_DIAGNOSTIC,
+            ),
+            _packed_float_binary_rule(
+                vector.vector_minimumf,
+                "amdgpu.v_pk_minimum_f16",
+                _VEC_F16_PACKED,
+                _VEC_F16_PACKED_DIAGNOSTIC,
+            ),
+            _packed_float_binary_rule(
+                vector.vector_maximumf,
+                "amdgpu.v_pk_maximum_f16",
+                _VEC_F16_PACKED,
+                _VEC_F16_PACKED_DIAGNOSTIC,
+            ),
+            _packed_float_binary_rule(
+                vector.vector_addf,
+                "amdgpu.v_pk_add_f32",
+                _VEC_F32,
+                _VEC_F32_PACKED_EVEN_LANES_DIAGNOSTIC,
+            ),
+            _packed_float_binary_rule(
+                vector.vector_mulf,
+                "amdgpu.v_pk_mul_f32",
+                _VEC_F32,
+                _VEC_F32_PACKED_EVEN_LANES_DIAGNOSTIC,
+            ),
+            _packed_float_binary_rule(
+                vector.vector_addf,
+                "amdgpu.v_pk_add_bf16",
+                _VEC_BF16_PACKED,
+                _VEC_BF16_PACKED_DIAGNOSTIC,
+            ),
+            _packed_float_binary_rule(
+                vector.vector_mulf,
+                "amdgpu.v_pk_mul_bf16",
+                _VEC_BF16_PACKED,
+                _VEC_BF16_PACKED_DIAGNOSTIC,
+            ),
         )
     )
     for source_op, descriptor_key in (

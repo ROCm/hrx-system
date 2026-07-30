@@ -3175,7 +3175,10 @@ def test_gfx1250_packed_fp8_to_f16_sources_use_low_half_window() -> None:
 
 def test_packed_binary_descriptors_pin_lane_container_widths() -> None:
     packed_keys = (
+        "amdgpu.v_pk_add_f16",
         "amdgpu.v_pk_mul_f16",
+        "amdgpu.v_pk_minnum_f16",
+        "amdgpu.v_pk_maxnum_f16",
         "amdgpu.v_pk_add_u16",
         "amdgpu.v_pk_sub_i16",
         "amdgpu.v_pk_mul_lo_u16",
@@ -3209,6 +3212,48 @@ def test_packed_binary_descriptors_pin_lane_container_widths() -> None:
                 operand.descriptor_operand.unit_count for operand in descriptor.operands
             ) == (1, 1, 1)
             assert descriptor.fixed_encoding_fields == ((op_sel_hi_field, 0x3),)
+
+
+def test_packed_float_descriptors_follow_target_numeric_semantics() -> None:
+    for descriptor_set, minimum_name, maximum_name in (
+        (_gfx940_core_overlays(), "V_PK_MIN_F16", "V_PK_MAX_F16"),
+        (_gfx950_core_overlays(), "V_PK_MIN_F16", "V_PK_MAX_F16"),
+        (_gfx11_core_overlays(), "V_PK_MIN_F16", "V_PK_MAX_F16"),
+        (_gfx12_core_overlays(), "V_PK_MIN_NUM_F16", "V_PK_MAX_NUM_F16"),
+    ):
+        descriptors = {
+            descriptor.descriptor_key: descriptor for descriptor in descriptor_set
+        }
+        assert descriptors["amdgpu.v_pk_minnum_f16"].instruction_name == minimum_name
+        assert descriptors["amdgpu.v_pk_maxnum_f16"].instruction_name == maximum_name
+
+    rdna4_descriptors = {
+        descriptor.descriptor_key: descriptor for descriptor in _gfx12_core_overlays()
+    }
+    for descriptor_key, instruction_name in (
+        ("amdgpu.v_pk_minimum_f16", "V_PK_MINIMUM_F16"),
+        ("amdgpu.v_pk_maximum_f16", "V_PK_MAXIMUM_F16"),
+    ):
+        descriptor = rdna4_descriptors[descriptor_key]
+        assert descriptor.instruction_name == instruction_name
+        assert tuple(
+            operand.descriptor_operand.unit_count for operand in descriptor.operands
+        ) == (1, 1, 1)
+        assert descriptor.fixed_encoding_fields == (("OPSEL_HI", 0x3),)
+
+    for descriptor_set in (_gfx940_core_overlays(), _gfx950_core_overlays()):
+        descriptors = {
+            descriptor.descriptor_key: descriptor for descriptor in descriptor_set
+        }
+        for descriptor_key in (
+            "amdgpu.v_pk_add_f32",
+            "amdgpu.v_pk_mul_f32",
+        ):
+            descriptor = descriptors[descriptor_key]
+            assert tuple(
+                operand.descriptor_operand.unit_count for operand in descriptor.operands
+            ) == (2, 2, 2)
+            assert descriptor.fixed_encoding_fields == (("OP_SEL_HI", 0x3),)
 
 
 def test_packed_fma_mad_rdna_literal_forms_cover_source_positions() -> None:

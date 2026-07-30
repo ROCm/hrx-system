@@ -12,7 +12,7 @@ func.def target(@target) @scalar_ieee_minimum_rejected(%lhs: f32, %rhs: f32) -> 
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @vector_ieee_maximum_rejected(%lhs: vector<2xf32>, %rhs: vector<2xf32>) -> (vector<2xf32>) {
-  // ERROR@+1: TARGET/001 {op_name="vector.maximumf"}
+  // ERROR@+1: TARGET/003 {subject_role="type", subject_name="vector<f16>", constraint_key="amdgpu.arithmetic.vector_f16_packed"}
   %max = vector.maximumf %lhs, %rhs : vector<2xf32>
   func.return %max : vector<2xf32>
 }

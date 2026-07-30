@@ -188,6 +188,37 @@ def test_packed_bf16_arithmetic_rules_publish_native_pk_ops() -> None:
     )
 
 
+def test_packed_f16_arithmetic_rules_publish_native_pk_ops() -> None:
+    compiled = _compiled_arithmetic_rules()
+
+    arithmetic_cases = (
+        (vector.vector_addf, "amdgpu.v_pk_add_f16", "amdgpu.v_add_f32"),
+        (vector.vector_mulf, "amdgpu.v_pk_mul_f16", "amdgpu.v_mul_f32"),
+        (vector.vector_minnumf, "amdgpu.v_pk_minnum_f16", "amdgpu.v_min_f32"),
+        (vector.vector_maxnumf, "amdgpu.v_pk_maxnum_f16", "amdgpu.v_max_f32"),
+    )
+    for source_op, packed_descriptor, scalar_descriptor in arithmetic_cases:
+        positions = _descriptor_sequence_positions(compiled, source_op)
+        assert positions[(packed_descriptor,)] < positions[(scalar_descriptor,)]
+
+    minimum_positions = _descriptor_sequence_positions(compiled, vector.vector_minimumf)
+    assert minimum_positions[("amdgpu.v_pk_minimum_f16",)] == 0
+
+    maximum_positions = _descriptor_sequence_positions(compiled, vector.vector_maximumf)
+    assert maximum_positions[("amdgpu.v_pk_maximum_f16",)] == 0
+
+
+def test_packed_f32_arithmetic_rules_publish_native_pk_ops() -> None:
+    compiled = _compiled_arithmetic_rules()
+
+    for source_op, packed_descriptor, scalar_descriptor in (
+        (vector.vector_addf, "amdgpu.v_pk_add_f32", "amdgpu.v_add_f32"),
+        (vector.vector_mulf, "amdgpu.v_pk_mul_f32", "amdgpu.v_mul_f32"),
+    ):
+        positions = _descriptor_sequence_positions(compiled, source_op)
+        assert positions[(packed_descriptor,)] < positions[(scalar_descriptor,)]
+
+
 def test_vector_extract_rules_publish_contract_only_shape_rows() -> None:
     compiled = _compiled_arithmetic_rules()
     rules = _rules_for_source_op(compiled, vector.vector_extract)

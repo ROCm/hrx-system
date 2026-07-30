@@ -211,8 +211,11 @@ low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_f8e4m3fnuz_th
   %208 = v_cmp_eq_i32 %190, %186
   %209 = v_cndmask_b32 %205, %185, %208
   %210 = v_lshlrev_b32_src0_inline %209, 16
-  %215 = v_mul_f32 %189, %scale
-  %218 = v_mul_f32 %210, %scale
-  %rounded = v_cvt_pk_bf16_f32 %215, %218
+  %wide = concat(%189, %210) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %scale_vector = concat(%scale, %scale) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %scaled = v_pk_mul_f32 %wide, %scale_vector
+  %214 = slice %scaled[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %215 = slice %scaled[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rounded = v_cvt_pk_bf16_f32 %214, %215
   return %rounded
 }
