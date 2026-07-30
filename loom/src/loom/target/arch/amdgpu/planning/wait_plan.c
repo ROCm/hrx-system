@@ -179,8 +179,10 @@ typedef struct loom_amdgpu_wait_plan_builder_t {
   const loom_low_schedule_table_t* schedule;
   // Optional physical assignment table for post-allocation hazards.
   const loom_low_allocation_table_t* allocation;
-  // Arena that owns all output and scratch arrays.
+  // Arena that owns tables retained by the completed plan.
   iree_arena_allocator_t* arena;
+  // Arena that owns builder state discarded after plan construction.
+  iree_arena_allocator_t* transient_arena;
   // Processor properties selected by the low target, or NULL if unavailable.
   const loom_amdgpu_processor_properties_t* processor_properties;
   // Generated wait-packet descriptors selected by the low target.
@@ -444,7 +446,7 @@ static iree_status_t loom_amdgpu_wait_plan_build_storage_release_action_index(
       allocation->storage_release_actions,
       allocation->storage_release_action_count,
       LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_NODE,
-      schedule->node_count, builder->arena,
+      schedule->node_count, builder->transient_arena,
       &builder->storage_release_action_index);
 }
 
@@ -453,19 +455,19 @@ static iree_status_t loom_amdgpu_wait_plan_allocate(
   const loom_low_schedule_table_t* schedule = builder->schedule;
   if (schedule->node_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->arena, schedule->node_count, sizeof(*builder->node_states),
-        (void**)&builder->node_states));
+        builder->transient_arena, schedule->node_count,
+        sizeof(*builder->node_states), (void**)&builder->node_states));
     memset(builder->node_states, 0,
            schedule->node_count * sizeof(*builder->node_states));
 
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->arena, schedule->node_count, sizeof(*builder->frontier_nodes),
-        (void**)&builder->frontier_nodes));
+        builder->transient_arena, schedule->node_count,
+        sizeof(*builder->frontier_nodes), (void**)&builder->frontier_nodes));
     memset(builder->frontier_nodes, 0,
            schedule->node_count * sizeof(*builder->frontier_nodes));
 
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->arena, schedule->node_count,
+        builder->transient_arena, schedule->node_count,
         sizeof(*builder->current_block_drained_counter_masks),
         (void**)&builder->current_block_drained_counter_masks));
     memset(builder->current_block_drained_counter_masks, 0,
@@ -473,7 +475,7 @@ static iree_status_t loom_amdgpu_wait_plan_allocate(
                sizeof(*builder->current_block_drained_counter_masks));
 
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->arena, schedule->node_count,
+        builder->transient_arena, schedule->node_count,
         sizeof(*builder->current_block_drained_epochs),
         (void**)&builder->current_block_drained_epochs));
     memset(
@@ -481,7 +483,7 @@ static iree_status_t loom_amdgpu_wait_plan_allocate(
         schedule->node_count * sizeof(*builder->current_block_drained_epochs));
 
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->arena, schedule->node_count,
+        builder->transient_arena, schedule->node_count,
         sizeof(*builder->first_dependency_link_by_consumer),
         (void**)&builder->first_dependency_link_by_consumer));
     for (iree_host_size_t i = 0; i < schedule->node_count; ++i) {
@@ -593,7 +595,7 @@ static iree_status_t loom_amdgpu_wait_plan_allocate_physical_state(
   }
   if (builder->physical_registers.vgpr_count != 0 && needs_trans_result_state) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->arena, builder->physical_registers.vgpr_count,
+        builder->transient_arena, builder->physical_registers.vgpr_count,
         sizeof(*builder->trans_result_vgprs),
         (void**)&builder->trans_result_vgprs));
     memset(builder->trans_result_vgprs, 0,
@@ -603,7 +605,7 @@ static iree_status_t loom_amdgpu_wait_plan_allocate_physical_state(
   }
   if (builder->physical_registers.sgpr_count != 0 && needs_sgpr_read_state) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->arena, builder->physical_registers.sgpr_count,
+        builder->transient_arena, builder->physical_registers.sgpr_count,
         sizeof(*builder->sgpr_read_registers),
         (void**)&builder->sgpr_read_registers));
     memset(builder->sgpr_read_registers, 0,
@@ -632,7 +634,7 @@ static iree_status_t loom_amdgpu_wait_plan_append_action(
   if (builder->action_stream.tail == NULL) {
     void* segment = NULL;
     IREE_RETURN_IF_ERROR(loom_segmented_storage_append(
-        &builder->action_stream.segments, builder->arena, &segment));
+        &builder->action_stream.segments, builder->transient_arena, &segment));
     builder->action_stream.tail =
         (loom_amdgpu_wait_plan_action_segment_t*)segment;
   }
@@ -684,7 +686,7 @@ static iree_status_t loom_amdgpu_wait_plan_ensure_dependency_link_capacity(
     return iree_ok_status();
   }
   return iree_arena_grow_array(
-      builder->arena, builder->dependency_link_count,
+      builder->transient_arena, builder->dependency_link_count,
       iree_max(required_capacity, (iree_host_size_t)16),
       sizeof(*builder->dependency_links), &builder->dependency_link_capacity,
       (void**)&builder->dependency_links);
@@ -829,27 +831,28 @@ static iree_status_t loom_amdgpu_wait_plan_build_block_arg_sources(
 
   uint32_t* block_arg_offsets = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      builder->arena, schedule->block_count, sizeof(*block_arg_offsets),
-      (void**)&block_arg_offsets));
+      builder->transient_arena, schedule->block_count,
+      sizeof(*block_arg_offsets), (void**)&block_arg_offsets));
   loom_amdgpu_wait_plan_compute_block_arg_offsets(schedule, block_arg_offsets);
 
   loom_value_ordinal_t* block_arg_ordinals = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      builder->arena, block_arg_count, sizeof(*block_arg_ordinals),
+      builder->transient_arena, block_arg_count, sizeof(*block_arg_ordinals),
       (void**)&block_arg_ordinals));
   loom_amdgpu_wait_plan_initialize_block_arg_ordinals(
       schedule, block_arg_offsets, block_arg_count, block_arg_ordinals);
 
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      builder->arena, schedule->value_count,
+      builder->transient_arena, schedule->value_count,
       sizeof(*builder->first_block_arg_source_by_value),
       (void**)&builder->first_block_arg_source_by_value));
   for (iree_host_size_t i = 0; i < schedule->value_count; ++i) {
     builder->first_block_arg_source_by_value[i] = LOOM_LOW_SCHEDULE_NODE_NONE;
   }
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      builder->arena, source_count, sizeof(*builder->block_arg_sources),
-      (void**)&builder->block_arg_sources));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(builder->transient_arena, source_count,
+                                sizeof(*builder->block_arg_sources),
+                                (void**)&builder->block_arg_sources));
 
   for (iree_host_size_t i = 0; i < schedule->node_count; ++i) {
     const loom_low_schedule_node_t* node = &schedule->nodes[i];
@@ -889,12 +892,13 @@ static iree_status_t loom_amdgpu_wait_plan_ensure_dependency_visit_state(
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(builder->arena, schedule->value_count,
+      iree_arena_allocate_array(builder->transient_arena, schedule->value_count,
                                 sizeof(*builder->dependency_visit_epochs),
                                 (void**)&builder->dependency_visit_epochs));
   memset(builder->dependency_visit_epochs, 0,
          schedule->value_count * sizeof(*builder->dependency_visit_epochs));
-  return iree_arena_allocate_array(builder->arena, schedule->value_count,
+  return iree_arena_allocate_array(builder->transient_arena,
+                                   schedule->value_count,
                                    sizeof(*builder->dependency_visit_worklist),
                                    (void**)&builder->dependency_visit_worklist);
 }
@@ -1653,14 +1657,11 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
       loom_amdgpu_processor_properties_have_scheduling(
           builder->processor_properties,
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR);
-  bool supports_xcnt = false;
-  for (uint32_t i = 0; i < descriptor_set->descriptor_count; ++i) {
-    if (loom_amdgpu_wait_plan_descriptor_has_xcnt_source_lease(
-            descriptor_set, &descriptor_set->descriptors[i])) {
-      supports_xcnt = true;
-      break;
-    }
-  }
+  IREE_ASSERT_LT(LOOM_AMDGPU_WAIT_COUNTER_MASK_X,
+                 builder->wait_packet_target.selection_count);
+  const bool supports_xcnt =
+      builder->wait_packet_target.selections[LOOM_AMDGPU_WAIT_COUNTER_MASK_X]
+          .covered_counter_mask == LOOM_AMDGPU_WAIT_COUNTER_MASK_X;
   for (iree_host_size_t i = 0; i < schedule->node_count; ++i) {
     loom_amdgpu_wait_node_state_t* node_state = &builder->node_states[i];
     loom_amdgpu_wait_frontier_node_t* frontier_node =
@@ -1811,7 +1812,7 @@ static iree_status_t loom_amdgpu_wait_plan_build_dependency_links(
 
   if (value_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->arena, value_count, sizeof(*builder->producer_nodes),
+        builder->transient_arena, value_count, sizeof(*builder->producer_nodes),
         (void**)&builder->producer_nodes));
     for (iree_host_size_t i = 0; i < value_count; ++i) {
       builder->producer_nodes[i] = LOOM_LOW_SCHEDULE_NODE_NONE;
@@ -3376,12 +3377,14 @@ static iree_status_t loom_amdgpu_wait_plan_build_common_tables(
 iree_status_t loom_amdgpu_wait_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
-    iree_arena_allocator_t* arena, loom_amdgpu_wait_plan_t* out_plan) {
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* transient_arena,
+    loom_amdgpu_wait_plan_t* out_plan) {
   *out_plan = (loom_amdgpu_wait_plan_t){0};
   loom_amdgpu_wait_plan_builder_t builder = {
       .schedule = schedule,
       .allocation = allocation,
       .arena = arena,
+      .transient_arena = transient_arena,
       .processor_properties =
           loom_amdgpu_target_processor_properties_from_resolved_target(
               &schedule->target),
@@ -3410,7 +3413,8 @@ iree_status_t loom_amdgpu_wait_plan_build(
     status = loom_amdgpu_wait_frontier_initialize(
         schedule, allocation, builder.frontier_nodes,
         builder.physical_registers.vgpr_count,
-        builder.physical_registers.agpr_count, arena, &builder.frontier);
+        builder.physical_registers.agpr_count, transient_arena,
+        &builder.frontier);
   }
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_plan_build_actions(&builder);

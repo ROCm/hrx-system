@@ -1338,8 +1338,8 @@ def _emit_physical_target_rows(
     return lines
 
 
-def _matrix_coexecution_rule_symbol(profile: str) -> str:
-    return f"kAmdgpuMatrixCoexecutionRules{_c_ident(profile)}"
+def _matrix_coexecution_release_table_symbol(profile: str) -> str:
+    return f"kAmdgpuMatrixCoexecutionReleases{_c_ident(profile)}"
 
 
 def _emit_matrix_coexecution_source_layouts() -> str:
@@ -1363,18 +1363,27 @@ def _emit_matrix_coexecution_rows() -> list[str]:
     for profile, rules in AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE.items():
         if not rules:
             continue
-        lines.append(f"static const loom_amdgpu_matrix_coexecution_rule_t {_matrix_coexecution_rule_symbol(profile)}[] = {{")
-        for rule in rules:
-            lines.extend(
-                [
-                    "  {",
-                    f"    .source = {_matrix_coexecution_source_expr(rule.source)},",
-                    f"    .latency_cycles = {rule.latency_cycles},",
-                    f"    .matrix_issue_distance = {rule.matrix_issue_distance},",
-                    f"    .vector_issue_distance = {rule.vector_issue_distance},",
-                    "  },",
-                ]
-            )
+        lines.append(
+            "static const loom_amdgpu_matrix_coexecution_release_t "
+            f"{_matrix_coexecution_release_table_symbol(profile)}"
+            "[LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_COUNT]"
+            "[LOOM_AMDGPU_MATRIX_COEXECUTION_LATENCY_COUNT] = {"
+        )
+        for source_info in AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS:
+            source_rules = tuple(rule for rule in rules if rule.source == source_info.source)
+            if not source_rules:
+                continue
+            lines.append(f"  [{_matrix_coexecution_source_expr(source_info.source)}] = {{")
+            for rule in source_rules:
+                lines.extend(
+                    [
+                        f"    [{rule.latency_cycles}] = {{",
+                        f"      .matrix_issue_distance = {rule.matrix_issue_distance},",
+                        f"      .vector_issue_distance = {rule.vector_issue_distance},",
+                        "    },",
+                    ]
+                )
+            lines.append("  },")
         lines.extend(["};", ""])
 
     lines.append("const loom_amdgpu_matrix_coexecution_profile_info_t loom_amdgpu_target_info_matrix_coexecution_profile_infos[] = {")
@@ -1387,8 +1396,7 @@ def _emit_matrix_coexecution_rows() -> list[str]:
         lines.extend(
             [
                 f"  [{profile_expr}] = {{",
-                f"    .rules = {_matrix_coexecution_rule_symbol(profile)},",
-                f"    .rule_count = {len(rules)},",
+                f"    .releases = {_matrix_coexecution_release_table_symbol(profile)},",
                 f"    .maximum_issue_distance = {maximum_issue_distance},",
                 "  },",
             ]

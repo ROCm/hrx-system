@@ -232,23 +232,23 @@ typedef enum loom_amdgpu_matrix_coexecution_source_kind_e {
   LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_COUNT = 2,
 } loom_amdgpu_matrix_coexecution_source_kind_t;
 
-typedef struct loom_amdgpu_matrix_coexecution_rule_t {
-  // Matrix instruction family opening the release window.
-  loom_amdgpu_matrix_coexecution_source_kind_t source;
-  // Descriptor schedule latency selecting the rule.
-  uint8_t latency_cycles;
+enum {
+  // Number of entries required to index every uint8_t schedule latency.
+  LOOM_AMDGPU_MATRIX_COEXECUTION_LATENCY_COUNT = UINT8_MAX + 1,
+};
+
+typedef struct loom_amdgpu_matrix_coexecution_release_t {
   // Required vector issues before a dependent matrix packet.
   uint8_t matrix_issue_distance;
   // Required vector issues before a dependent ordinary vector packet.
   uint8_t vector_issue_distance;
-} loom_amdgpu_matrix_coexecution_rule_t;
+} loom_amdgpu_matrix_coexecution_release_t;
 
 typedef struct loom_amdgpu_matrix_coexecution_profile_info_t {
-  // Generated release rules for this processor profile.
-  const loom_amdgpu_matrix_coexecution_rule_t* rules;
-  // Number of entries in |rules|.
-  uint8_t rule_count;
-  // Largest vector issue distance in |rules|.
+  // Generated releases indexed directly by source kind and schedule latency.
+  const loom_amdgpu_matrix_coexecution_release_t (
+      *releases)[LOOM_AMDGPU_MATRIX_COEXECUTION_LATENCY_COUNT];
+  // Largest release distance, measured in vector issue slots, in |releases|.
   uint8_t maximum_issue_distance;
 } loom_amdgpu_matrix_coexecution_profile_info_t;
 

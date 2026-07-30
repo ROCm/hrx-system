@@ -296,9 +296,9 @@ typedef struct loom_amdgpu_wait_state_builder_t {
   const loom_amdgpu_vopd_pair_t* vopd_pairs;
   // Descriptor set selected by the scheduled target.
   const loom_low_descriptor_set_t* descriptor_set;
-  // Arena that owns all output and scratch arrays.
+  // Arena that owns output tables retained by the completed plan.
   iree_arena_allocator_t* arena;
-  // Arena that owns analysis facts discarded after plan construction.
+  // Arena that owns builder state discarded after plan construction.
   iree_arena_allocator_t* transient_arena;
   // Processor properties selected by the low target, or NULL if unavailable.
   const loom_amdgpu_processor_properties_t* processor_properties;
@@ -506,17 +506,15 @@ static iree_status_t loom_amdgpu_wait_state_allocate(
       allocation->physical_extents
           .ends_by_reg_class[LOOM_AMDGPU_REG_CLASS_ID_SGPR];
   if (vgpr_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(builder->arena, vgpr_count,
-                                                   sizeof(*builder->vgprs),
-                                                   (void**)&builder->vgprs));
-    memset(builder->vgprs, 0, vgpr_count * sizeof(*builder->vgprs));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        builder->transient_arena, vgpr_count, sizeof(*builder->vgprs),
+        (void**)&builder->vgprs));
     builder->vgpr_count = vgpr_count;
   }
   if (sgpr_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(builder->arena, sgpr_count,
-                                                   sizeof(*builder->sgprs),
-                                                   (void**)&builder->sgprs));
-    memset(builder->sgprs, 0, sgpr_count * sizeof(*builder->sgprs));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        builder->transient_arena, sgpr_count, sizeof(*builder->sgprs),
+        (void**)&builder->sgprs));
     builder->sgpr_count = sgpr_count;
   }
   const iree_host_size_t states_per_packet =

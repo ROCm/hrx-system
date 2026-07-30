@@ -102,6 +102,19 @@ constexpr FixtureSpec kMemoryControl = {
     /*.generated_matrix=*/{},
 };
 
+// A straight-line matrix workload that isolates the common single-block
+// coexecution path without CFG frontier propagation.
+constexpr FixtureSpec kMatrixSingleBlockCanary = {
+    /*.name=*/"matrix_single_block_canary",
+    /*.input_stage=*/FixtureInputStage::kGeneratedLow,
+    /*.generated_matrix=*/
+    {
+        /*.phase_count=*/1,
+        /*.valu_packets_per_phase=*/4,
+        /*.dependent_valu_packets_per_phase=*/4,
+    },
+};
+
 constexpr FixtureSpec kMatrixDependencyCanary = {
     /*.name=*/"matrix_dependency_canary",
     /*.input_stage=*/FixtureInputStage::kGeneratedLow,
@@ -434,6 +447,7 @@ class PacketPlanFixture {
                                      &plan_block_pool_);
     iree_arena_initialize(&frame_block_pool_, &frame_arena_);
     iree_arena_initialize(&plan_block_pool_, &plan_arena_);
+    iree_arena_initialize(&plan_block_pool_, &transient_arena_);
 
     AbortOnError(loom_target_environment_initialize(
         &loom_amdgpu_target_provider_set, &target_environment_));
@@ -558,6 +572,7 @@ class PacketPlanFixture {
   }
 
   ~PacketPlanFixture() {
+    iree_arena_deinitialize(&transient_arena_);
     iree_arena_deinitialize(&plan_arena_);
     iree_arena_deinitialize(&frame_arena_);
     if (module_ != nullptr) {
@@ -575,6 +590,7 @@ class PacketPlanFixture {
 
   const loom_low_emission_frame_t& frame() const { return frame_; }
   iree_arena_allocator_t* plan_arena() { return &plan_arena_; }
+  iree_arena_allocator_t* transient_arena() { return &transient_arena_; }
   iree_host_size_t frame_arena_used_bytes() const {
     return frame_arena_.used_allocation_size;
   }
@@ -586,6 +602,8 @@ class PacketPlanFixture {
   iree_arena_block_pool_t plan_block_pool_ = {};
   iree_arena_allocator_t frame_arena_ = {};
   iree_arena_allocator_t plan_arena_ = {};
+  // Scratch storage discarded after each direct wait-plan build.
+  iree_arena_allocator_t transient_arena_ = {};
   loom_target_environment_t target_environment_ = {};
   loom_context_t context_ = {};
   loom_target_low_descriptor_registry_t target_registry_ = {};
@@ -599,10 +617,11 @@ static PlanMetrics BuildReferencePlan(PacketPlanFixture& fixture,
   iree_arena_reset(fixture.plan_arena());
   PlanMetrics metrics = {};
   if (component == PlanComponent::kWait) {
+    iree_arena_reset(fixture.transient_arena());
     loom_amdgpu_wait_plan_t plan = {};
-    AbortOnError(loom_amdgpu_wait_plan_build(&fixture.frame().schedule,
-                                             &fixture.frame().allocation,
-                                             fixture.plan_arena(), &plan));
+    AbortOnError(loom_amdgpu_wait_plan_build(
+        &fixture.frame().schedule, &fixture.frame().allocation,
+        fixture.plan_arena(), fixture.transient_arena(), &plan));
     metrics.wait_action_count = plan.action_count;
     metrics.hazard_record_count = plan.hazard_plan.record_count;
     metrics.progress_record_count = plan.progress.record_count;
@@ -676,10 +695,11 @@ static void BenchmarkPlan(benchmark::State& state, const FixtureSpec& spec,
   for (auto _ : state) {
     iree_arena_reset(fixture.plan_arena());
     if (component == PlanComponent::kWait) {
+      iree_arena_reset(fixture.transient_arena());
       loom_amdgpu_wait_plan_t plan = {};
-      AbortOnError(loom_amdgpu_wait_plan_build(&fixture.frame().schedule,
-                                               &fixture.frame().allocation,
-                                               fixture.plan_arena(), &plan));
+      AbortOnError(loom_amdgpu_wait_plan_build(
+          &fixture.frame().schedule, &fixture.frame().allocation,
+          fixture.plan_arena(), fixture.transient_arena(), &plan));
       benchmark::DoNotOptimize(plan);
     } else {
       loom_amdgpu_packet_plan_t plan = {};
@@ -704,6 +724,20 @@ static void BM_PacketPlan_MemoryControl(benchmark::State& state) {
 }
 BENCHMARK(BM_PacketPlan_MemoryControl)
     ->Iterations(2000)
+    ->Unit(benchmark::kNanosecond);
+
+static void BM_WaitPlan_MatrixSingleBlockCanary(benchmark::State& state) {
+  BenchmarkPlan(state, kMatrixSingleBlockCanary, PlanComponent::kWait);
+}
+BENCHMARK(BM_WaitPlan_MatrixSingleBlockCanary)
+    ->Iterations(1000)
+    ->Unit(benchmark::kNanosecond);
+
+static void BM_PacketPlan_MatrixSingleBlockCanary(benchmark::State& state) {
+  BenchmarkPlan(state, kMatrixSingleBlockCanary, PlanComponent::kComplete);
+}
+BENCHMARK(BM_PacketPlan_MatrixSingleBlockCanary)
+    ->Iterations(1000)
     ->Unit(benchmark::kNanosecond);
 
 static void BM_WaitPlan_MatrixDependencyCanary(benchmark::State& state) {
