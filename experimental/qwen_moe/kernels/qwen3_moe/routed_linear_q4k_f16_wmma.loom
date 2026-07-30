@@ -749,7 +749,7 @@ check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_differential_cas
 }
 
 check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case {
-  %token_count = check.param.choice values([17, 32, 63, 128, 129, 512, 1024, 2048]) name("token_count") : index
+  %token_count = check.param.choice values([1, 17, 32, 63, 128, 129, 512, 1024, 2048]) name("token_count") : index
   %route_count = check.literal value(8) : index
   %route_stride = check.literal value(8) : index
   %expert_count = check.literal value(128) : index
@@ -775,7 +775,7 @@ check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case {
 }
 
 check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_benchmark_case {
-  %token_count = check.param.choice values([17, 32, 63, 128, 129, 512, 1024, 2048]) name("token_count") : index
+  %token_count = check.param.choice values([1, 17, 32, 63, 128, 129, 512, 1024, 2048]) name("token_count") : index
   %route_count = check.literal value(8) : index
   %route_stride = check.literal value(8) : index
   %expert_count = check.literal value(128) : index
@@ -796,6 +796,8 @@ check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_benchmark_
 
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_differential_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_differential
 
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_decode {token_count = 1}
+
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_prefill_17 {token_count = 17}
 
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_prefill_32 {token_count = 32}
@@ -811,6 +813,8 @@ check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case> @q
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_prefill_1024 {token_count = 1024}
 
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_prefill_2048 {token_count = 2048}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_decode {token_count = 1}
 
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma_fused_prefill_17 {token_count = 17}
 
