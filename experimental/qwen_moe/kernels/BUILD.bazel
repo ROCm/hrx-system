@@ -16,6 +16,7 @@ package(
 exports_files([
     "ggml/linear_q6k_q8_1_x4.loom",
     "ggml/quantize_q8_1_x4.loom",
+    "qwen3_moe/attention_prepare_quantized.loom",
     "qwen3_moe/dense_linear_quantized_f16_wmma.loom",
     "qwen3_moe/flash_attention_decode_f32_f16_wmma.loom",
     "qwen3_moe/flash_attention_decode_q128_f32_f16_wmma.loom",
@@ -27,6 +28,72 @@ exports_files([
     "qwen3_moe/routed_gate_up_swiglu_q4k.loom",
     "qwen3_moe/routed_linear_q4k_f16_wmma.loom",
 ])
+
+loom_link_module(
+    name = "attention_prepare_quantized_linked",
+    srcs = ["qwen3_moe/attention_prepare_quantized.loom"],
+    libraries = ["ggml/quantize_q8_1_x4.loom"],
+)
+
+iree_executable_test(
+    name = "attention_prepare_quantized_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :attention_prepare_quantized_linked)",
+        "--config=qwen3_moe.model.hidden_size=2048",
+        "--config=qwen3_moe.model.rms_epsilon=0.000001",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = [":attention_prepare_quantized_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "attention_prepare_quantized_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :attention_prepare_quantized_linked)",
+        "--config=qwen3_moe.model.hidden_size=256",
+        "--config=qwen3_moe.model.rms_epsilon=0.000001",
+        "--case=@qwen3_moe_attention_rmsnorm_quantize_q8_1_x4_differential_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":attention_prepare_quantized_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "attention_prepare_quantized_multistripe_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :attention_prepare_quantized_linked)",
+        "--config=qwen3_moe.model.hidden_size=2048",
+        "--config=qwen3_moe.model.rms_epsilon=0.000001",
+        "--case=@qwen3_moe_attention_rmsnorm_quantize_q8_1_x4_multistripe_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":attention_prepare_quantized_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
 
 iree_executable_test(
     name = "quantize_q8_1_x4_plan_test",
@@ -819,6 +886,9 @@ iree_executable_test(
 test_suite(
     name = "tests",
     tests = [
+        ":attention_prepare_quantized_hal_test",
+        ":attention_prepare_quantized_multistripe_hal_test",
+        ":attention_prepare_quantized_plan_test",
         ":dense_linear_q4k_f16_wmma_o_hal_test",
         ":dense_linear_q4k_f16_wmma_o_plan_test",
         ":dense_linear_q4k_q8_1_x4_accumulation_hal_test",
