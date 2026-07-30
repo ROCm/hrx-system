@@ -13,6 +13,9 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Stable runtime path for the device-owned attention metadata producer.
+#define QWEN_LOOM_SOURCE_ATTENTION_METADATA "qwen3_moe/attention_metadata"
+
 // Stable runtime path for the attention preparation module.
 #define QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED \
   "qwen3_moe/attention_prepare_quantized"

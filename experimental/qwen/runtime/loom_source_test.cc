@@ -24,6 +24,11 @@ struct ExpectedSource {
 TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
   const ExpectedSource expected_sources[] = {
       {
+          QWEN_LOOM_SOURCE_ATTENTION_METADATA,
+          "qwen_attention_metadata.loom",
+          "qwen_attention_metadata_bringup_workaround",
+      },
+      {
           QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED,
           "qwen3_moe_attention_prepare_quantized.loom",
           "qwen3_moe_rmsnorm_f32",

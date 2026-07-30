@@ -4,13 +4,64 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_test")
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:loom_link.bzl", "loom_link_module")
 
 package(
     default_visibility = ["//experimental/qwen:__subpackages__"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+loom_link_module(
+    name = "attention_metadata_bringup_workaround_linked",
+    srcs = ["attention_metadata_bringup_workaround.loom"],
+)
+
+iree_executable_test(
+    name = "attention_metadata_bringup_workaround_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :attention_metadata_bringup_workaround_linked)",
+        "--benchmark=@qwen_attention_metadata_prefill_512",
+        "--dry-run",
+        "--output-format=jsonl",
+        "--sample-compilation=per_sample",
+    ],
+    data = [":attention_metadata_bringup_workaround_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "attention_metadata_bringup_workaround_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :attention_metadata_bringup_workaround_linked)",
+        "--case=@qwen_attention_metadata_causal_and_nonzero_base_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":attention_metadata_bringup_workaround_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+loom_link_module(
+    name = "attention_metadata_runtime_module",
+    srcs = ["attention_metadata_bringup_workaround.loom"],
+    mode = "selective",
+    output = "qwen_attention_metadata.loom",
+    roots = ["@qwen_attention_metadata_bringup_workaround"],
+    strip_check = True,
 )
 
 loom_link_module(
@@ -156,6 +207,7 @@ loom_link_module(
 iree_c_embed_data(
     name = "runtime_modules",
     srcs = [
+        ":attention_metadata_runtime_module",
         ":attention_postprocess_f32_f16_runtime_module",
         ":attention_prepare_quantized_runtime_module",
         ":attention_qkv_quantized_runtime_module",

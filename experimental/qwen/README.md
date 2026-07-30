@@ -71,6 +71,13 @@ an exact divisor, but the compile boundary currently loses the exact workload
 value already used during launch evaluation. This one-function fork is deleted
 when workload specialization reaches target lowering.
 
+`kernels/attention_metadata_bringup_workaround.loom` is a temporary
+one-function device-state producer while the Qwen kernel corpus has no
+canonical attention-metadata kernel. It derives positions, separate K/V cache
+indices, and dense causal-mask bits from one compact context-base control word.
+It is not a kernel framework or a generator and must not accumulate alternate
+indexing policies. Delete it when the canonical producer lands.
+
 Later milestones repeat the proven layer shape across the model, add embedding
 and vocabulary projection, and introduce reusable prefill and decode programs.
 The layer runner remains a first-class optimization surface so model work can
