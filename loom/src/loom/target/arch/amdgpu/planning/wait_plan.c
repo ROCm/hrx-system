@@ -1657,14 +1657,11 @@ static iree_status_t loom_amdgpu_wait_plan_finish_node_classification(
       loom_amdgpu_processor_properties_have_scheduling(
           builder->processor_properties,
           LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR);
-  bool supports_xcnt = false;
-  for (uint32_t i = 0; i < descriptor_set->descriptor_count; ++i) {
-    if (loom_amdgpu_wait_plan_descriptor_has_xcnt_source_lease(
-            descriptor_set, &descriptor_set->descriptors[i])) {
-      supports_xcnt = true;
-      break;
-    }
-  }
+  IREE_ASSERT_LT(LOOM_AMDGPU_WAIT_COUNTER_MASK_X,
+                 builder->wait_packet_target.selection_count);
+  const bool supports_xcnt =
+      builder->wait_packet_target.selections[LOOM_AMDGPU_WAIT_COUNTER_MASK_X]
+          .covered_counter_mask == LOOM_AMDGPU_WAIT_COUNTER_MASK_X;
   for (iree_host_size_t i = 0; i < schedule->node_count; ++i) {
     loom_amdgpu_wait_node_state_t* node_state = &builder->node_states[i];
     loom_amdgpu_wait_frontier_node_t* frontier_node =
