@@ -1572,6 +1572,8 @@ static const loom_low_lower_policy_t kAmdgpuLowLowerPolicy = {
     .name = IREE_SVL("amdgpu-register-lower"),
     .error_catalog = &loom_amdgpu_error_catalog,
     .map_type = {.fn = loom_amdgpu_map_type, .user_data = NULL},
+    .source_type_supported = {.fn = loom_amdgpu_source_type_supported,
+                              .user_data = NULL},
     .map_value = {.fn = loom_amdgpu_map_value, .user_data = NULL},
     .map_contract_value = {.fn = loom_amdgpu_map_contract_value,
                            .user_data = NULL},

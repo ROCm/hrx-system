@@ -324,6 +324,11 @@ iree_status_t loom_amdgpu_map_type(void* user_data,
                                    loom_type_t source_type,
                                    loom_type_t* out_low_type);
 
+// Reports target-owned source types with an AMDGPU low register mapping.
+bool loom_amdgpu_source_type_supported(void* user_data,
+                                       const loom_module_t* module,
+                                       loom_type_t source_type);
+
 // Maps a source value to the AMDGPU low register type selected for its
 // placement-sensitive use.
 iree_status_t loom_amdgpu_map_value(void* user_data,

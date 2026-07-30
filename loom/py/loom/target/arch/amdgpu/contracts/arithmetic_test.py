@@ -246,7 +246,7 @@ def test_vector_packed_float_conversion_rules_publish_contract_only_shape_rows()
 
     expected_rule_counts = {
         vector.vector_extf: 8,
-        vector.vector_fptrunc: 2,
+        vector.vector_fptrunc: 8,
     }
     for source_op, expected_rule_count in expected_rule_counts.items():
         rules = _rules_for_source_op(compiled, source_op)

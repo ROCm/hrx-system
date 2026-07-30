@@ -1,0 +1,51 @@
+// RUN: pass-report source-to-low,low-dce
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @report_f32_to_fp8_saturating_native(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
+  %converted = vector.fptrunc %input : vector<4xf32> to vector<4xf8E4M3>
+  func.return %converted : vector<4xf8E4M3>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=24 rows=1
+COMPILE-REPORT: source_low[0] function=report_f32_to_fp8_saturating_native source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.f32_pair_saturating_native emitted_ops=24
+
+// ====
+
+amdgpu.target<gfx1250> @target
+func.def target(@target) @report_f16_to_bf8_direct_native(%input: vector<4xf16>) -> (vector<4xf8E5M2>) {
+  %converted = vector.fptrunc %input : vector<4xf16> to vector<4xf8E5M2>
+  func.return %converted : vector<4xf8E5M2>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=4 rows=1
+COMPILE-REPORT: source_low[0] function=report_f16_to_bf8_direct_native source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.f16_pair_native emitted_ops=4
+
+// ====
+
+amdgpu.target<gfx1201> @target
+func.def target(@target) @report_f16_to_bf8_via_f32_native(%input: vector<4xf16>) -> (vector<4xf8E5M2>) {
+  %converted = vector.fptrunc %input : vector<4xf16> to vector<4xf8E5M2>
+  func.return %converted : vector<4xf8E5M2>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=12 rows=1
+COMPILE-REPORT: source_low[0] function=report_f16_to_bf8_via_f32_native source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.f16_via_f32_pair_native emitted_ops=12
+
+// ====
+
+amdgpu.target<gfx950> @target
+func.def target(@target) @report_bf16_to_bf8_via_f32_native(%input: vector<4xbf16>) -> (vector<4xf8E5M2>) {
+  %converted = vector.fptrunc %input : vector<4xbf16> to vector<4xf8E5M2>
+  func.return %converted : vector<4xf8E5M2>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=10 rows=1
+COMPILE-REPORT: source_low[0] function=report_bf16_to_bf8_via_f32_native source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.bf16_via_f32_pair_native emitted_ops=10

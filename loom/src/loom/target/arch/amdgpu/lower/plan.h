@@ -56,6 +56,22 @@ typedef struct loom_amdgpu_constant_plan_t {
   bool i1_value;
 } loom_amdgpu_constant_plan_t;
 
+typedef enum loom_amdgpu_fp8_encode_kind_e {
+  LOOM_AMDGPU_FP8_ENCODE_KIND_NONE = 0,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F32_PAIR = 1,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F32_PAIR_SATURATE_E4M3 = 2,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F16_PAIR = 3,
+} loom_amdgpu_fp8_encode_kind_t;
+
+typedef struct loom_amdgpu_fp8_encode_plan_t {
+  // Source pair representation consumed by the selected encode packets.
+  loom_amdgpu_fp8_encode_kind_t kind;
+  // Descriptor writing the low encoded byte pair of a result register.
+  loom_amdgpu_descriptor_ref_t low_descriptor_ref;
+  // Descriptor continuing a result register with its high encoded byte pair.
+  loom_amdgpu_descriptor_ref_t high_descriptor_ref;
+} loom_amdgpu_fp8_encode_plan_t;
+
 typedef enum loom_amdgpu_vector_16bit_float_conversion_kind_e {
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_NONE = 0,
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_EXTF = 1,
@@ -102,6 +118,8 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   uint32_t storage_register_count;
   // Number of 32-bit result registers occupied by the result vector.
   uint32_t result_register_count;
+  // Native packed FP8 encode strategy for an FP8-result truncation.
+  loom_amdgpu_fp8_encode_plan_t fp8_encode;
 } loom_amdgpu_vector_16bit_float_conversion_plan_t;
 
 typedef enum loom_amdgpu_index_cast_kind_e {
@@ -237,6 +255,7 @@ typedef enum loom_amdgpu_scalar_conversion_kind_e {
   LOOM_AMDGPU_SCALAR_CONVERSION_KIND_ZERO_EXTEND,
   LOOM_AMDGPU_SCALAR_CONVERSION_KIND_UITOFP_NARROW_TO_F32,
   LOOM_AMDGPU_SCALAR_CONVERSION_KIND_FP8_TO_BF16,
+  LOOM_AMDGPU_SCALAR_CONVERSION_KIND_FP8_ENCODE,
   LOOM_AMDGPU_SCALAR_CONVERSION_KIND_FPTOI_F32_TO_I32,
   LOOM_AMDGPU_SCALAR_CONVERSION_KIND_FPTOI_F32_TO_NARROW,
 } loom_amdgpu_scalar_conversion_kind_t;
@@ -254,6 +273,8 @@ typedef struct loom_amdgpu_scalar_conversion_plan_t {
   uint32_t result_bit_count;
   // Descriptor selected for conversion packets used by the strategy.
   loom_amdgpu_descriptor_ref_t convert_descriptor_ref;
+  // Native packed FP8 encode strategy for an FP8-result truncation.
+  loom_amdgpu_fp8_encode_plan_t fp8_encode;
 } loom_amdgpu_scalar_conversion_plan_t;
 
 typedef enum loom_amdgpu_vector_conversion_kind_e {
