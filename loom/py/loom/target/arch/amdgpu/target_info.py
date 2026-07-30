@@ -267,13 +267,19 @@ AMDGPU_WAVEFRONT_SIZE_KNOWN_FLAGS = (
 
 AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING = 1 << 0
 AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION = 1 << 1
+AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS = 1 << 2
 AMDGPU_DESCRIPTOR_SET_INFO_KNOWN_FLAGS = (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING
     | AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION
+    | AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS
 )
 AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD = (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING
     | AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION
+)
+AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA4_VOPD = (
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD
+    | AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS
 )
 
 AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_ARCHITECTED_FLAT_SCRATCH = 1 << 0
@@ -1153,7 +1159,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         generator_target="rdna4_gfx1250_a0",
         key="amdgpu.rdna4.gfx1250_a0.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
-        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA4_VOPD,
         storage_generator_target="rdna4_gfx125x",
         buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE57,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
@@ -1164,7 +1170,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         generator_target="rdna4_gfx125x",
         key="amdgpu.rdna4.gfx125x.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
-        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA4_VOPD,
         buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE57,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
@@ -1174,7 +1180,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         generator_target="rdna4_gfx1251",
         key="amdgpu.rdna4.gfx1251.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
-        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA4_VOPD,
         storage_generator_target="rdna4_gfx125x",
         buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE57,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
@@ -1205,7 +1211,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         generator_target="rdna4",
         key="amdgpu.rdna4.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
-        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA4_VOPD,
         buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE48_UNIFIED,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
@@ -1258,7 +1264,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         generator_target="gfx12_generic",
         key="amdgpu.gfx12.generic.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
-        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA4_VOPD,
         storage_generator_target="rdna4",
         member_generator_targets=("rdna4",),
         buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE48_UNIFIED,
@@ -1270,7 +1276,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         generator_target="gfx12_5_generic",
         key="amdgpu.gfx12_5.generic.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
-        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA4_VOPD,
         storage_generator_target="rdna4_gfx125x",
         member_generator_targets=("rdna4_gfx1251", "rdna4_gfx125x"),
         buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE57,

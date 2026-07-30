@@ -192,7 +192,7 @@ typedef struct loom_amdgpu_vopd_plan_builder_t {
 #define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                      \
     row_index_value, op_value, same_op_reason_value, op_name_value,           \
     same_op_reason_name_value, assembly_mnemonic_value,                       \
-    rdna4_assembly_mnemonic_value, form_value, accumulator_index_value,       \
+    numeric_minmax_mnemonic_value, form_value, accumulator_index_value,       \
     src0_index_value, vsrc1_index_value, lane_mask_value, pairing_mask_value, \
     source_register_mask_value, flags_value)                                  \
   [row_index_value] = {                                                       \
@@ -203,8 +203,8 @@ typedef struct loom_amdgpu_vopd_plan_builder_t {
               .op_name = IREE_SVL(op_name_value),                             \
               .same_op_reason_name = IREE_SVL(same_op_reason_name_value),     \
               .assembly_mnemonic = IREE_SVL(assembly_mnemonic_value),         \
-              .rdna4_assembly_mnemonic =                                      \
-                  IREE_SVL(rdna4_assembly_mnemonic_value),                    \
+              .numeric_minmax_mnemonic =                                      \
+                  IREE_SVL(numeric_minmax_mnemonic_value),                    \
               .form = form_value,                                             \
               .operands =                                                     \
                   {                                                           \
@@ -351,7 +351,7 @@ static const loom_amdgpu_vopd_pair_affinity_row_t kVopdPairAffinities[] = {
 #define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                      \
     row_index_value, op_value, same_op_reason_value, op_name_value,           \
     same_op_reason_name_value, assembly_mnemonic_value,                       \
-    rdna4_assembly_mnemonic_value, form_value, accumulator_index_value,       \
+    numeric_minmax_mnemonic_value, form_value, accumulator_index_value,       \
     src0_index_value, vsrc1_index_value, lane_mask_value, pairing_mask_value, \
     source_register_mask_value, flags_value)                                  \
   [op_value] = (uint8_t)((row_index_value) + 1),
@@ -369,7 +369,7 @@ static const uint8_t
 #define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                      \
     row_index_value, op_value, same_op_reason_value, op_name_value,           \
     same_op_reason_name_value, assembly_mnemonic_value,                       \
-    rdna4_assembly_mnemonic_value, form_value, accumulator_index_value,       \
+    numeric_minmax_mnemonic_value, form_value, accumulator_index_value,       \
     src0_index_value, vsrc1_index_value, lane_mask_value, pairing_mask_value, \
     source_register_mask_value, flags_value)
 #define LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(same_op_reason_value, \

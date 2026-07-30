@@ -3018,13 +3018,16 @@ static iree_status_t loom_amdgpu_append_vopd_vgpr(
 static iree_string_view_t loom_amdgpu_vopd_component_assembly_mnemonic(
     const loom_native_assembly_packet_context_t* context,
     const loom_amdgpu_vopd_component_info_t* info) {
-  const uint32_t descriptor_set_ordinal =
+  const uint16_t descriptor_set_ordinal =
       context->schedule->target.descriptor_set->descriptor_set_ordinal;
-  if ((descriptor_set_ordinal == LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4 ||
-       descriptor_set_ordinal ==
-           LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X) &&
-      info->rdna4_assembly_mnemonic.size != 0) {
-    return info->rdna4_assembly_mnemonic;
+  const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
+      loom_amdgpu_target_info_descriptor_set_at(descriptor_set_ordinal);
+  IREE_ASSERT(descriptor_set_info != NULL);
+  if (loom_amdgpu_descriptor_set_info_has_flags(
+          descriptor_set_info,
+          LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS) &&
+      info->numeric_minmax_mnemonic.size != 0) {
+    return info->numeric_minmax_mnemonic;
   }
   return info->assembly_mnemonic;
 }
