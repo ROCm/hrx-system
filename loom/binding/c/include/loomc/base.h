@@ -268,6 +268,9 @@ typedef enum loomc_structure_type_e {
 
   /// `loomc_launch_config_t`.
   LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG = 34,
+
+  /// `loomc_amdgpu_iree_hal_profile_options_t`.
+  LOOMC_STRUCTURE_TYPE_AMDGPU_IREE_HAL_PROFILE_OPTIONS = 35,
 } loomc_structure_type_t;
 
 /// One loose string option entry.

@@ -207,6 +207,7 @@ TargetProfilePtr CreateProfileFromHal(
       /*.next=*/nullptr,
       /*.identifier=*/loomc_make_cstring_view("fake-vulkan"),
       /*.device=*/hal_device,
+      /*.physical_device_affinity=*/0,
   };
   loomc_target_profile_t* profile = nullptr;
   loomc_status_t status = loomc_target_profile_create_spirv_iree_hal(
@@ -300,6 +301,7 @@ TEST(LoomcSpirvIreeHalTargetTest, ProviderRoutesThroughGenericHalRouter) {
       /*.next=*/nullptr,
       /*.identifier=*/loomc_make_cstring_view("router"),
       /*.device=*/hal_device,
+      /*.physical_device_affinity=*/0,
       /*.providers=*/providers,
       /*.provider_count=*/IREE_ARRAYSIZE(providers),
   };
@@ -329,6 +331,7 @@ TEST(LoomcSpirvIreeHalTargetTest, ProviderMissLetsRouterReportUnsupported) {
       /*.next=*/nullptr,
       /*.identifier=*/loomc_make_cstring_view("miss"),
       /*.device=*/hal_device,
+      /*.physical_device_affinity=*/0,
       /*.providers=*/providers,
       /*.provider_count=*/IREE_ARRAYSIZE(providers),
   };

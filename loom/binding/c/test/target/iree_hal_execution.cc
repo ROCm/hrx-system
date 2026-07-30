@@ -232,6 +232,8 @@ loomc_status_t CreateHalTargetProfile(
       /*.next=*/nullptr,
       /*.identifier=*/target.target_profile_identifier,
       /*.device=*/device,
+      /*.physical_device_affinity=*/
+      target.executable_target_selection.physical_device_affinity,
       /*.providers=*/target.profile_providers,
       /*.provider_count=*/target.profile_provider_count,
   };
@@ -327,10 +329,9 @@ iree_status_t AllocateStorageBuffer(iree_hal_device_t* device,
                                     iree_device_size_t buffer_size,
                                     iree_hal_buffer_t** out_buffer) {
   iree_hal_buffer_params_t params = {0};
-  params.type =
-      IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL | IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
-  params.usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
-                 IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING;
+  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  params.usage =
+      IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
   return iree_hal_allocator_allocate_buffer(iree_hal_device_allocator(device),
                                             params, buffer_size, out_buffer);
 }

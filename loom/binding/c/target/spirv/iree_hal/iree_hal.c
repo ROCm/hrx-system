@@ -255,6 +255,7 @@ static loomc_status_t loomc_spirv_iree_hal_query_facts(
       .family = IREE_SV("spirv"),
       .target_key = IREE_SV("vulkan1.3+bda"),
       .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
+      .physical_device_affinity = options->physical_device_affinity,
   };
   const iree_hal_executable_target_selection_result_t target_result =
       iree_hal_device_spec_select_executable_target(device_spec,
@@ -541,6 +542,7 @@ static loomc_status_t loomc_spirv_iree_hal_provider_create_profile(
       /*.next=*/options->next,
       /*.identifier=*/options->identifier,
       /*.device=*/options->device,
+      /*.physical_device_affinity=*/options->physical_device_affinity,
   };
   return loomc_target_profile_create_spirv_iree_hal(
       target_environment, &spirv_options, allocator, out_profile, out_result);

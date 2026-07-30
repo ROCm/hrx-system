@@ -288,6 +288,7 @@ static loomc_status_t create_target_profile(
       .structure_size = sizeof(profile_options),
       .identifier = loomc_make_cstring_view("iree-hal-device"),
       .device = state->device,
+      .physical_device_affinity = 0,
       .providers = providers,
       .provider_count = 1,
   };
