@@ -36,8 +36,8 @@ iree_status_t loom_amdgpu_packet_plan_build(
                                                   &out_plan->address_state);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_amdgpu_wait_plan_build(schedule, allocation, arena,
-                                         &out_plan->wait_plan);
+    status = loom_amdgpu_wait_plan_build(
+        schedule, allocation, arena, &transient_arena, &out_plan->wait_plan);
   }
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_packet_plan_build(&out_plan->wait_plan, arena,

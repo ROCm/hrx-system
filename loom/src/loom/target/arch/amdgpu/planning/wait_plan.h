@@ -145,12 +145,14 @@ iree_string_view_t loom_amdgpu_wait_plan_residual_action_name(
 // actions requested by allocation, such as outstanding memory reads whose
 // destination registers have not yet been written and memory packets whose
 // scalar or vector sources have not yet been consumed by the memory pipe. The
-// caller must keep |schedule| and |allocation| immutable and |arena| alive for
-// as long as |out_plan| is used.
+// Builder state is allocated from |transient_arena| and may be discarded after
+// this function returns. The caller must keep |schedule| and |allocation|
+// immutable and |arena| alive for as long as |out_plan| is used.
 iree_status_t loom_amdgpu_wait_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
-    iree_arena_allocator_t* arena, loom_amdgpu_wait_plan_t* out_plan);
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* transient_arena,
+    loom_amdgpu_wait_plan_t* out_plan);
 
 // Appends the common packet hazard JSON representation of |plan| to |builder|.
 iree_status_t loom_amdgpu_wait_plan_format_json(
