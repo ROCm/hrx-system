@@ -241,15 +241,9 @@ static iree_status_t loom_low_verify_emit_packet_contract_mismatch(
       loom_param_string(packet->descriptor_key),
       loom_param_string(target->descriptor_set_key),
   };
-  loom_diagnostic_related_op_t related[] = {{
-      .label = IREE_SV("target contract selected here"),
-      .op = target->target_op,
-      .field_ref = loom_diagnostic_field_ref_none(),
-  }};
   return loom_low_verify_emit(function_state->state, packet->op,
                               LOOM_ERR_STRUCTURE_037, params,
-                              IREE_ARRAYSIZE(params), related,
-                              target->target_op ? IREE_ARRAYSIZE(related) : 0);
+                              IREE_ARRAYSIZE(params), NULL, 0);
 }
 
 static iree_status_t loom_low_verify_emit_missing_immediate(

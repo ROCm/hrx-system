@@ -31,10 +31,6 @@ extern "C" {
 typedef struct loom_low_resolved_target_t {
   // Immutable facts projected from the target record.
   const loom_target_facts_t* target_facts;
-  // Symbol defining the low function target record.
-  const loom_symbol_t* target_symbol;
-  // Defining op for |target_symbol|.
-  const loom_op_t* target_op;
   // Materialized target payloads selected by this low function's durable target
   // record. Export-plan facts may additionally be function-local.
   loom_target_bundle_storage_t bundle_storage;

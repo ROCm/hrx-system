@@ -161,9 +161,8 @@ static iree_status_t loom_low_emit_unresolved_symbol(
 
 static iree_status_t loom_low_emit_missing_descriptor_set(
     iree_diagnostic_emitter_t emitter, const loom_module_t* module,
-    const loom_op_t* low_func_op, const loom_op_t* target_context_op,
-    uint16_t target_attr_index, iree_string_view_t descriptor_set_key,
-    iree_string_view_t target_name) {
+    const loom_op_t* low_func_op, uint16_t target_attr_index,
+    iree_string_view_t descriptor_set_key, iree_string_view_t target_name) {
   loom_diagnostic_param_t params[] = {
       loom_param_string(loom_low_function_name(module, low_func_op)),
       loom_param_with_field_ref(
@@ -172,14 +171,8 @@ static iree_status_t loom_low_emit_missing_descriptor_set(
                                     target_attr_index)),
       loom_param_string(descriptor_set_key),
   };
-  loom_diagnostic_related_op_t related[] = {{
-      .label = IREE_SV("descriptor set selected here"),
-      .op = target_context_op,
-      .field_ref = loom_diagnostic_field_ref_none(),
-  }};
   return loom_low_emit(emitter, low_func_op, LOOM_ERR_TARGET_044, params,
-                       IREE_ARRAYSIZE(params), related,
-                       target_context_op ? IREE_ARRAYSIZE(related) : 0);
+                       IREE_ARRAYSIZE(params), NULL, 0);
 }
 
 static bool loom_low_get_function_target_ref(const loom_op_t* low_func_op,
@@ -228,12 +221,6 @@ static iree_status_t loom_low_resolve_func_target(
         IREE_STATUS_INVALID_ARGUMENT,
         "low function symbol must resolve to func symbol facts");
   }
-  if (iree_status_is_ok(status) &&
-      !loom_symbol_ref_is_valid(func_facts->target_symbol)) {
-    status = loom_low_emit_symbol_kind_mismatch(
-        emitter, module, low_func_op, func_facts->target_symbol,
-        out_target->target_symbol, target_attr_index, IREE_SV("target record"));
-  }
   bool contract_valid = false;
   if (iree_status_is_ok(status)) {
     status = loom_target_function_contract_resolve(
@@ -266,7 +253,7 @@ static iree_status_t loom_low_resolve_func_target(
                                           out_target->descriptor_set_key);
   if (!descriptor_set) {
     return loom_low_emit_missing_descriptor_set(
-        emitter, module, low_func_op, out_target->target_op, target_attr_index,
+        emitter, module, low_func_op, target_attr_index,
         out_target->descriptor_set_key, out_target->target_name);
   }
   out_target->descriptor_set = descriptor_set;
@@ -295,8 +282,6 @@ iree_status_t loom_low_resolve_function_target(
                                            target_ref, target_attr_index);
   }
 
-  out_target->target_symbol = target_symbol;
-  out_target->target_op = target_symbol->defining_op;
   out_target->target_name = loom_low_symbol_name(module, target_ref);
 
   if (loom_symbol_implements(target_symbol, LOOM_SYMBOL_INTERFACE_TARGET)) {

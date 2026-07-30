@@ -596,127 +596,76 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   schedule.resource_use_count = 4;
   schedule.hazard_gap_count = 2;
   schedule.model_summary_count = 1;
-  const loom_low_emission_frame_t frame = {
-      /*.module=*/{},
-      /*.function_op=*/{}, /*.target=*/
-      {
-          /*.target_facts=*/{},
-          /*.target_symbol=*/{},
-          /*.target_op=*/{},
-          /*.bundle_storage=*/{},
-          /*.target_name=*/{},
-          /*.descriptor_set_key=*/{},
-          /*.feature_bits=*/{},
-          /*.descriptor_set=*/&descriptor_set,
-      },
-      /*.schedule=*/schedule,
-      /*.allocation=*/
-      {
-          /*.module=*/module,
-          /*.function_op=*/{}, /*.target=*/
-          {
-              /*.target_facts=*/{},
-              /*.target_symbol=*/{},
-              /*.target_op=*/{},
-              /*.bundle_storage=*/{},
-              /*.target_name=*/{},
-              /*.descriptor_set_key=*/{},
-              /*.feature_bits=*/{},
-              /*.descriptor_set=*/&descriptor_set,
-          },
-          /*.liveness=*/
-          {
-              /*.module=*/{},
-              /*.region=*/{},
-              /*.flags=*/{},
-              /*.is_cfg=*/{},
-              /*.blocks=*/{},
-              /*.block_count=*/{},
-              /*.intervals=*/liveness_intervals,
-              /*.interval_count=*/IREE_ARRAYSIZE(liveness_intervals),
-              /*.value_ids=*/liveness_value_ids,
-              /*.value_count=*/IREE_ARRAYSIZE(liveness_value_ids),
-              /*.value_interval_indices=*/liveness_value_interval_indices,
-              /*.pressure_summaries=*/pressure_summaries,
-              /*.pressure_summary_count=*/
-              IREE_ARRAYSIZE(pressure_summaries),
-          },
-          /*.placement=*/{},
-          /*.fixed_values=*/{},
-          /*.fixed_value_count=*/{},
-          /*.allocation_mode=*/{},
-          /*.error_count=*/1,
-          /*.assignments=*/assignments,
-          /*.assignment_count=*/IREE_ARRAYSIZE(assignments),
-          /*.physical_extents=*/{},
-          /*.assignment_indices_by_value_ordinal=*/
-          assignment_indices_by_value_ordinal,
-          /*.unit_start_points=*/{},
-          /*.unit_end_points=*/{},
-          /*.unit_point_count=*/{},
-          /*.spill_plans=*/spill_plans,
-          /*.spill_plan_count=*/IREE_ARRAYSIZE(spill_plans),
-          /*.remarks=*/{},
-          /*.remark_count=*/{},
-          /*.failure=*/
-          {
-              /*.failure_code=*/IREE_SVL("unspillable-register-exhausted"),
-              /*.value_id=*/5,
-              /*.value_class=*/pressure_summaries[1].value_class,
-              /*.descriptor_reg_class_id=*/0,
-              /*.start_point=*/3,
-              /*.end_point=*/8,
-              /*.required_unit_count=*/2,
-              /*.budget_units=*/1,
-              /*.peak_live_units=*/11,
-              /*.location_kind=*/LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-              /*.location_base=*/0,
-              /*.location_count=*/2,
-              /*.blocking_kind=*/
-              LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_ACTIVE_ASSIGNMENT,
-              /*.conflict_assignment_index=*/0,
-              /*.conflict_value_id=*/4,
-              /*.conflict_start_point=*/0,
-              /*.conflict_end_point=*/8,
-              /*.conflict_location_kind=*/
-              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-              /*.conflict_location_base=*/0,
-              /*.conflict_location_count=*/1,
-          },
-          /*.copy_decisions=*/copy_decisions,
-          /*.copy_decision_count=*/IREE_ARRAYSIZE(copy_decisions),
-          /*.edge_copies=*/edge_copies,
-          /*.edge_copy_count=*/IREE_ARRAYSIZE(edge_copies),
-          /*.edge_copy_groups=*/edge_copy_groups,
-          /*.edge_copy_group_count=*/IREE_ARRAYSIZE(edge_copy_groups),
-          /*.packet_move_groups=*/packet_move_groups,
-          /*.packet_move_group_count=*/IREE_ARRAYSIZE(packet_move_groups),
-          /*.moves=*/moves,
-          /*.scratch_move_indices=*/{},
-          /*.packet_move_count=*/1,
-          /*.storage_leases=*/{},
-          /*.storage_lease_instances=*/{},
-          /*.storage_lease_instance_count=*/{},
-          /*.storage_lease_unit_index=*/{},
-          /*.storage_release_actions=*/{},
-          /*.storage_release_action_count=*/{},
-          /*.spill_count=*/IREE_ARRAYSIZE(spill_plans),
-          /*.coalesced_copy_count=*/3,
-          /*.materialized_copy_count=*/1,
-      },
-      /*.materialized_spill_storage_count=*/4,
-      /*.materialized_spill_storage_bytes=*/40,
-      /*.materialized_spill_store_count=*/5,
-      /*.materialized_spill_store_bytes=*/50,
-      /*.materialized_reload_count=*/6,
-      /*.materialized_reload_bytes=*/60,
-      /*.materialized_spills=*/
-      {
-          /*.head=*/&materialized_spill_vec,
-          /*.tail=*/&materialized_spill_vec,
-          /*.record_count=*/IREE_ARRAYSIZE(materialized_spills),
-      },
-  };
+  loom_low_resolved_target_t target = {};
+  target.descriptor_set = &descriptor_set;
+
+  loom_low_emission_frame_t frame = {};
+  frame.target = target;
+  frame.schedule = schedule;
+  frame.allocation.module = module;
+  frame.allocation.target = target;
+  frame.allocation.liveness.intervals = liveness_intervals;
+  frame.allocation.liveness.interval_count = IREE_ARRAYSIZE(liveness_intervals);
+  frame.allocation.liveness.value_ids = liveness_value_ids;
+  frame.allocation.liveness.value_count = IREE_ARRAYSIZE(liveness_value_ids);
+  frame.allocation.liveness.value_interval_indices =
+      liveness_value_interval_indices;
+  frame.allocation.liveness.pressure_summaries = pressure_summaries;
+  frame.allocation.liveness.pressure_summary_count =
+      IREE_ARRAYSIZE(pressure_summaries);
+  frame.allocation.error_count = 1;
+  frame.allocation.assignments = assignments;
+  frame.allocation.assignment_count = IREE_ARRAYSIZE(assignments);
+  frame.allocation.assignment_indices_by_value_ordinal =
+      assignment_indices_by_value_ordinal;
+  frame.allocation.spill_plans = spill_plans;
+  frame.allocation.spill_plan_count = IREE_ARRAYSIZE(spill_plans);
+  frame.allocation.failure.failure_code =
+      IREE_SVL("unspillable-register-exhausted");
+  frame.allocation.failure.value_id = 5;
+  frame.allocation.failure.value_class = pressure_summaries[1].value_class;
+  frame.allocation.failure.descriptor_reg_class_id = 0;
+  frame.allocation.failure.start_point = 3;
+  frame.allocation.failure.end_point = 8;
+  frame.allocation.failure.required_unit_count = 2;
+  frame.allocation.failure.budget_units = 1;
+  frame.allocation.failure.peak_live_units = 11;
+  frame.allocation.failure.location_kind =
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
+  frame.allocation.failure.location_base = 0;
+  frame.allocation.failure.location_count = 2;
+  frame.allocation.failure.blocking_kind =
+      LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_ACTIVE_ASSIGNMENT;
+  frame.allocation.failure.conflict_assignment_index = 0;
+  frame.allocation.failure.conflict_value_id = 4;
+  frame.allocation.failure.conflict_start_point = 0;
+  frame.allocation.failure.conflict_end_point = 8;
+  frame.allocation.failure.conflict_location_kind =
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
+  frame.allocation.failure.conflict_location_base = 0;
+  frame.allocation.failure.conflict_location_count = 1;
+  frame.allocation.copy_decisions = copy_decisions;
+  frame.allocation.copy_decision_count = IREE_ARRAYSIZE(copy_decisions);
+  frame.allocation.edge_copies = edge_copies;
+  frame.allocation.edge_copy_count = IREE_ARRAYSIZE(edge_copies);
+  frame.allocation.edge_copy_groups = edge_copy_groups;
+  frame.allocation.edge_copy_group_count = IREE_ARRAYSIZE(edge_copy_groups);
+  frame.allocation.packet_move_groups = packet_move_groups;
+  frame.allocation.packet_move_group_count = IREE_ARRAYSIZE(packet_move_groups);
+  frame.allocation.moves = moves;
+  frame.allocation.packet_move_count = 1;
+  frame.allocation.spill_count = IREE_ARRAYSIZE(spill_plans);
+  frame.allocation.coalesced_copy_count = 3;
+  frame.allocation.materialized_copy_count = 1;
+  frame.materialized_spill_storage_count = 4;
+  frame.materialized_spill_storage_bytes = 40;
+  frame.materialized_spill_store_count = 5;
+  frame.materialized_spill_store_bytes = 50;
+  frame.materialized_reload_count = 6;
+  frame.materialized_reload_bytes = 60;
+  frame.materialized_spills.head = &materialized_spill_vec;
+  frame.materialized_spills.tail = &materialized_spill_vec;
+  frame.materialized_spills.record_count = IREE_ARRAYSIZE(materialized_spills);
 
   IREE_ASSERT_OK(
       loom_target_compile_report_record_low_emission_frame(&report, &frame));

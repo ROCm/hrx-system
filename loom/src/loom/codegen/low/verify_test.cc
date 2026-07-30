@@ -176,7 +176,6 @@ low.func.def target(@target) @ordinal_key_mismatch(%lhs: reg<test.i32>, %rhs: re
   ASSERT_EQ(emission.field_refs.size(), 5u);
   EXPECT_EQ(emission.field_refs[1].kind, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE);
   EXPECT_EQ(emission.field_refs[1].index, loom_low_op_opcode_ATTR_INDEX);
-  EXPECT_EQ(emission.related_count, 1u);
 }
 
 }  // namespace
