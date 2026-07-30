@@ -7,6 +7,7 @@ llvmir.target<object> @target {
 
 func.def target(@target) @add(%lhs: i32, %rhs: i32) -> (i32) {
   %sum = scalar.addi %lhs, %rhs : i32
+  scf.schedule.fence
   func.return %sum : i32
 }
 

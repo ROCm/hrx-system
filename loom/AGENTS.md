@@ -59,6 +59,24 @@ translates it, and when it is consumed. A general provenance or rewrite
 tracking facility must be justified as reusable compiler infrastructure and
 must remain separate from program semantics.
 
+## Assembly Formatting Is A Source Contract
+
+Target assembly regions are a durable, readable source form rather than a
+disposable view of canonical low IR. Parsing and printing an `asm<...>` region
+must preserve its target mnemonics, canonical structural operations, compiler
+hints, comments, and descriptor-selected register spellings without replacing
+the region with generic low syntax. Downstream authoring, review, diagnostic,
+and comparison workflows rely on that stable representation.
+
+A change that makes valid operations unprintable inside target assembly, drops
+them while formatting, or weakens a round-trip test by rewriting the input into
+generic low syntax is a release-blocking format regression. New generic
+metadata and compiler hints interleaved with target packets extend the
+trait-based canonical fallback in the low assembly parser and printer; they do
+not receive target-opcode special cases. Target emission may intentionally
+erase a zero-cost hint only after the readable low assembly form has been
+preserved and tested.
+
 ## Reviewable Pipeline Changes
 
 A pull request boundary is an architectural cut, not a file-count or

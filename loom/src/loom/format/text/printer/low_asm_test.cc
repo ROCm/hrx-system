@@ -147,6 +147,20 @@ TEST_F(LowAsmPrinterTest, PrintsDescriptorBackedPacketRegion) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmPrinterTest, PrintsCanonicalHintAmongTargetPackets) {
+  const char* source =
+      "test.low_asm_region asm<test.low.core> {\n"
+      "  %c0 = test.const.i32 7\n"
+      "  low.schedule.fence\n"
+      "  %sum = test.add.i32 %c0, %c0\n"
+      "  return %sum\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module, IREE_SV("test.low.core")), source);
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmPrinterTest, PrintsExplicitAmbiguousResultType) {
   const char* source =
       "test.low_asm_region asm<test.low.core> {\n"

@@ -1783,6 +1783,9 @@ static iree_status_t loom_amdgpu_encode_wait_states_before_packet(
 
 static iree_status_t loom_amdgpu_encode_packet(
     loom_amdgpu_encode_state_t* state, const loom_low_packet_view_t* packet) {
+  if (loom_low_packet_is_compiler_hint(packet)) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_encode_address_state_before_packet(state, packet));
   IREE_RETURN_IF_ERROR(

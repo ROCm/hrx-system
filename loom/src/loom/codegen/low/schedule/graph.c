@@ -1237,7 +1237,7 @@ iree_status_t loom_low_schedule_fill_nodes(
       if (loom_low_live_in_isa(op) || loom_low_resource_isa(op)) {
         node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;
       }
-      if (loom_low_schedule_fence_isa(op)) {
+      if (iree_any_bit_set(node->traits, LOOM_TRAIT_HINT)) {
         node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY;
       }
       if (loom_low_return_isa(op)) {
