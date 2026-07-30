@@ -101,7 +101,7 @@ TEST(QwenLoomSourceTest, RejectsUnknownPath) {
   EXPECT_THAT(status, StatusIs(iree::StatusCode::kNotFound));
 }
 
-TEST(QwenLoomSourceTest, EmbedsRewrittenFlashAttentionSource) {
+TEST(QwenLoomSourceTest, EmbedsWorkaroundFlashAttentionSource) {
   qwen_loom_source_module_t source_module;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
       IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_PREFILL_F32_F16),

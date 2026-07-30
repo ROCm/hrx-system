@@ -35,3 +35,10 @@ Compiler or kernel failures do not silently select another implementation.
 Create a matched bug bead and local reproducer packet, select any bounded
 workaround explicitly, and record which milestone claim the workaround cannot
 authorize.
+
+The Python patch named `flash_attention_bringup_workaround.py` is temporary,
+non-sanctioned bring-up machinery. It is not a Loom source generator, a kernel
+authoring API, or reusable infrastructure. It may patch only exact upstream
+source fragments for preserved defects, must fail on any source drift, and is
+deleted in full when those upstream fixes land. Never generalize it into
+templating, parameterization, module generation, or a second authoring path.

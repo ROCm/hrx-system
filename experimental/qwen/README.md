@@ -31,6 +31,22 @@ The first integration milestone is one complete layer-0 prefill-512 execution:
 5. exercise that same runtime path from a CLI smoke and a filterable
    `Qwen/Layer0/Prefill/512` benchmark row.
 
+## Temporary FlashAttention bring-up workaround
+
+`kernels/flash_attention_bringup_workaround.py` is an explicitly
+non-sanctioned unblocker, not a Loom kernel generator or an alternate authoring
+path. It patches exact text in the selectively linked FlashAttention module for
+two preserved upstream defects: insufficient relational facts for bounded
+subtraction and a tail allocation that violates `buffer.alloca`'s fixed-frame
+contract. The patch rejects any source drift instead of trying to understand or
+regenerate Loom.
+
+Nothing else should depend on this tool or copy its mechanism. Delete the tool,
+its test, and the linked-module interception as soon as the unmodified
+upstream module compiles. Until then, performance results must identify the
+workaround's 23,808-byte LDS frame rather than treating that resource shape as
+the intended zero-tail kernel.
+
 Later milestones repeat the proven layer shape across the model, add embedding
 and vocabulary projection, and introduce reusable prefill and decode programs.
 The layer runner remains a first-class optimization surface so model work can

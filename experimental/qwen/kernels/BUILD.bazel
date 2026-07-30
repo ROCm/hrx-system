@@ -65,27 +65,27 @@ loom_link_module(
 )
 
 iree_py_binary(
-    name = "flash_attention_source_rewrite",
-    srcs = ["flash_attention_source_rewrite.py"],
-    main = "flash_attention_source_rewrite.py",
+    name = "flash_attention_bringup_workaround",
+    srcs = ["flash_attention_bringup_workaround.py"],
+    main = "flash_attention_bringup_workaround.py",
 )
 
 iree_py_test(
-    name = "flash_attention_source_rewrite_test",
+    name = "flash_attention_bringup_workaround_test",
     srcs = [
-        "flash_attention_source_rewrite.py",
-        "flash_attention_source_rewrite_test.py",
+        "flash_attention_bringup_workaround.py",
+        "flash_attention_bringup_workaround_test.py",
     ],
-    main = "flash_attention_source_rewrite_test.py",
+    main = "flash_attention_bringup_workaround_test.py",
 )
 
 genrule(
     name = "flash_attention_prefill_f32_f16_runtime_module",
     srcs = [":flash_attention_prefill_f32_f16_runtime_module_unpatched"],
     outs = ["qwen3_moe_flash_attention_prefill_f32_f16.loom"],
-    cmd = "$(location :flash_attention_source_rewrite) --input $(location :flash_attention_prefill_f32_f16_runtime_module_unpatched) --output $@",
-    message = "Rewriting bounded FlashAttention expressions",
-    tools = [":flash_attention_source_rewrite"],
+    cmd = "$(location :flash_attention_bringup_workaround) --input $(location :flash_attention_prefill_f32_f16_runtime_module_unpatched) --output $@",
+    message = "Applying temporary FlashAttention bring-up workaround",
+    tools = [":flash_attention_bringup_workaround"],
 )
 
 loom_link_module(

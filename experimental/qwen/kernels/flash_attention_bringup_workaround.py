@@ -4,7 +4,13 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Applies exact algebraic rewrites to the embedded FlashAttention source."""
+"""Temporary, non-sanctioned patches for blocked FlashAttention bring-up.
+
+This is not a Loom source generator or an authoring pattern. It applies exact
+textual workarounds for known upstream defects so the owned Qwen experiment can
+keep moving. The build must fail on source drift, and this entire tool must be
+deleted when the upstream source and compiler accept the unmodified module.
+"""
 
 import argparse
 from pathlib import Path
@@ -71,8 +77,8 @@ def _require_exactly_once(source: str, text: str, description: str) -> None:
         )
 
 
-def rewrite_flash_attention_source(source: str) -> str:
-    """Rewrites bounded expressions while rejecting unexpected source drift."""
+def apply_flash_attention_bringup_workaround(source: str) -> str:
+    """Applies the temporary patches while rejecting unexpected source drift."""
     _require_exactly_once(source, _EXPECTED_EXPORT, "FlashAttention export")
     subtraction_count = source.count("index.sub")
     if subtraction_count != 3:
@@ -81,7 +87,7 @@ def rewrite_flash_attention_source(source: str) -> str:
             f"found {subtraction_count}"
         )
 
-    rewrites = (
+    patches = (
         (
             _TAIL_SUBTRACTION,
             _TAIL_REMAINDER,
@@ -108,18 +114,18 @@ def rewrite_flash_attention_source(source: str) -> str:
             "FlashAttention tail-stage allocation",
         ),
     )
-    rewritten_source = source
-    for expected_text, replacement_text, description in rewrites:
-        _require_exactly_once(rewritten_source, expected_text, description)
-        rewritten_source = rewritten_source.replace(expected_text, replacement_text, 1)
+    patched_source = source
+    for expected_text, replacement_text, description in patches:
+        _require_exactly_once(patched_source, expected_text, description)
+        patched_source = patched_source.replace(expected_text, replacement_text, 1)
 
-    rewritten_subtraction_count = rewritten_source.count("index.sub")
-    if rewritten_subtraction_count != 1:
+    patched_subtraction_count = patched_source.count("index.sub")
+    if patched_subtraction_count != 1:
         raise ValueError(
             "expected exactly one bounded FlashAttention index.sub operation "
-            f"after rewriting, found {rewritten_subtraction_count}"
+            f"after patching, found {patched_subtraction_count}"
         )
-    return rewritten_source
+    return patched_source
 
 
 def main() -> None:
@@ -130,10 +136,12 @@ def main() -> None:
 
     source = args.input.read_text(encoding="utf-8")
     try:
-        rewritten_source = rewrite_flash_attention_source(source)
+        patched_source = apply_flash_attention_bringup_workaround(source)
     except ValueError as error:
-        raise SystemExit(f"FlashAttention source rewrite failed: {error}") from error
-    args.output.write_text(rewritten_source, encoding="utf-8")
+        raise SystemExit(
+            f"FlashAttention bring-up workaround failed: {error}"
+        ) from error
+    args.output.write_text(patched_source, encoding="utf-8")
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@
 
 import unittest
 
-from experimental.qwen.kernels import flash_attention_source_rewrite
+from experimental.qwen.kernels import flash_attention_bringup_workaround
 
 _EXPORT = (
     'kernel.def export("qwen3_moe_flash_attention_f32_f16_wmma") '
@@ -44,10 +44,10 @@ _COMPLETE_SOURCE = "\n".join(
 )
 
 
-class FlashAttentionSourceRewriteTest(unittest.TestCase):
-    def test_rewrites_every_address_width_invalid_subtraction(self):
-        rewritten_source = (
-            flash_attention_source_rewrite.rewrite_flash_attention_source(
+class FlashAttentionBringupWorkaroundTest(unittest.TestCase):
+    def test_applies_every_required_patch(self):
+        patched_source = (
+            flash_attention_bringup_workaround.apply_flash_attention_bringup_workaround(
                 _COMPLETE_SOURCE
             )
         )
@@ -55,46 +55,46 @@ class FlashAttentionSourceRewriteTest(unittest.TestCase):
         self.assertIn(
             "%tail_key_value_token_count = index.rem "
             "%bounded_key_value_token_count, %sixtyfour : index",
-            rewritten_source,
+            patched_source,
         )
         self.assertIn(
             "%full_tile_key_value_token_count = index.assume "
             "%bounded_key_value_token_count "
             "[range(%bounded_key_value_token_count, 64, 32768)] : index",
-            rewritten_source,
+            patched_source,
         )
         self.assertIn(
             "%last_full_key_tile_start = index.sub "
             "%full_tile_key_value_token_count, %fifteen : index",
-            rewritten_source,
+            patched_source,
         )
         self.assertIn(
             "  %first_tail_key_count = index.min "
             "%tail_key_value_token_count, %thirtytwo : index",
-            rewritten_source,
+            patched_source,
         )
         self.assertIn(
             "  %second_tail_key_count = index.rem "
             "%tail_key_value_token_count, %thirtytwo : index",
-            rewritten_source,
+            patched_source,
         )
         self.assertIn(
             "%tail_key_count = scf.select %is_first_tail_tile, "
             "%first_tail_key_count, %second_tail_key_count : index",
-            rewritten_source,
+            patched_source,
         )
         self.assertIn(
             "%tail_key_value_stage = buffer.alloca "
             "%tail_key_value_stage_capacity "
             "{base_alignment = 16, memory_space = workgroup} : buffer",
-            rewritten_source,
+            patched_source,
         )
-        self.assertEqual(rewritten_source.count("index.sub"), 1)
-        self.assertIn(_EXPORT, rewritten_source)
+        self.assertEqual(patched_source.count("index.sub"), 1)
+        self.assertIn(_EXPORT, patched_source)
 
     def test_rejects_missing_export(self):
         with self.assertRaisesRegex(ValueError, "FlashAttention export, found 0"):
-            flash_attention_source_rewrite.rewrite_flash_attention_source(
+            flash_attention_bringup_workaround.apply_flash_attention_bringup_workaround(
                 _COMPLETE_SOURCE.replace(_EXPORT, "")
             )
 
@@ -103,11 +103,11 @@ class FlashAttentionSourceRewriteTest(unittest.TestCase):
             ValueError,
             "three FlashAttention index.sub operations, found 4",
         ):
-            flash_attention_source_rewrite.rewrite_flash_attention_source(
+            flash_attention_bringup_workaround.apply_flash_attention_bringup_workaround(
                 _COMPLETE_SOURCE + "  %unexpected = index.sub %a, %b : index\n"
             )
 
-    def test_rejects_source_drift_in_each_rewrite(self):
+    def test_rejects_source_drift_in_each_patch(self):
         expected_failures = (
             (_TAIL_SUBTRACTION, "tail subtraction"),
             (_FULL_TILE_BOUND_SUBTRACTION, "full-tile bound subtraction"),
@@ -130,7 +130,7 @@ class FlashAttentionSourceRewriteTest(unittest.TestCase):
                 if "index.sub" in original_text:
                     drifted_source += "  %replacement = index.sub %a, %b : index\n"
                 with self.assertRaisesRegex(ValueError, f"{description}, found 0"):
-                    flash_attention_source_rewrite.rewrite_flash_attention_source(
+                    flash_attention_bringup_workaround.apply_flash_attention_bringup_workaround(
                         drifted_source
                     )
 
