@@ -200,8 +200,8 @@ def _emit_tables(rows: Sequence[_AmdgpuTargetRecordRow]) -> str:
         "//",
         "// Define one or more of the documented macros before including this file:",
         "//   LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(symbol_suffix, bundle_name,",
-        "//       snapshot_name, descriptor_set_key, wavefront_size,",
-        "//       max_workgroup_storage_bytes)",
+        "//       snapshot_name, descriptor_set_key, descriptor_set_flags,",
+        "//       wavefront_size, max_workgroup_storage_bytes)",
         "//   LOOM_AMDGPU_TARGET_RECORD_INFO(record_suffix, target_kind, target,",
         "//       descriptor_set_ordinal, bundle_suffix)",
         "//   LOOM_AMDGPU_TARGET_RECORD_DEFAULT(descriptor_set_ordinal, record_suffix)",
@@ -218,6 +218,7 @@ def _emit_tables(rows: Sequence[_AmdgpuTargetRecordRow]) -> str:
             f"{_c_string_arg(bundle_name)}, "
             f"{_c_string_arg(bundle_name + '-low')}, "
             f"{_c_string_arg(descriptor_set.key)}, "
+            f"{_u64_expr(descriptor_set.flags)}, "
             f"{default_row.processor.wavefront.default_size}, "
             f"{_u64_expr(default_row.processor.limits.max_workgroup_storage_bytes)})"
         )

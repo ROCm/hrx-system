@@ -38,9 +38,9 @@
       },                                                                     \
   }
 
-#define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(symbol_suffix, bundle_name, \
-                                          snapshot_name, key, wavefront_size, \
-                                          workgroup_storage_byte_limit) \
+#define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(                                  \
+    symbol_suffix, bundle_name, snapshot_name, key, descriptor_set_flags,   \
+    wavefront_size, workgroup_storage_byte_limit)                           \
   LOOM_AMDGPU_LOW_SNAPSHOT(kAmdgpu##symbol_suffix##Snapshot, snapshot_name, \
                            wavefront_size, workgroup_storage_byte_limit);
 #include "loom/target/arch/amdgpu/records/target_records_tables.inl"
@@ -63,16 +63,16 @@ static const loom_target_export_plan_t kAmdgpuHalExportPlan = {
       .contract_set_key = IREE_SVL(key), \
   }
 
-#define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(symbol_suffix, bundle_name, \
-                                          snapshot_name, key, wavefront_size, \
-                                          workgroup_storage_byte_limit) \
+#define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(                                  \
+    symbol_suffix, bundle_name, snapshot_name, key, descriptor_set_flags,   \
+    wavefront_size, workgroup_storage_byte_limit)                           \
   LOOM_AMDGPU_LOW_CONFIG(kAmdgpu##symbol_suffix##Config, key);
 #include "loom/target/arch/amdgpu/records/target_records_tables.inl"
 #undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
 
-#define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(symbol_suffix, bundle_name, \
-                                          snapshot_name, key, wavefront_size, \
-                                          workgroup_storage_byte_limit) \
+#define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(                                  \
+    symbol_suffix, bundle_name, snapshot_name, key, descriptor_set_flags,   \
+    wavefront_size, workgroup_storage_byte_limit)                           \
   static const loom_target_bundle_t kAmdgpuLowTargetBundle##symbol_suffix##Core = { \
     .name = IREE_SVL(bundle_name), \
     .snapshot = &kAmdgpu##symbol_suffix##Snapshot, \
