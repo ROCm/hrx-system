@@ -355,6 +355,12 @@ typedef enum loom_low_resource_kind_e {
 // Bitset of resource flags.
 typedef uint16_t loom_low_resource_flags_t;
 
+// Instructions issuing on this resource advance a target vector-issue stream.
+#define LOOM_LOW_RESOURCE_FLAG_VECTOR_ISSUE ((uint16_t)1u << 0)
+// Instructions issuing on this resource establish matrix/vector coexecution
+// operand-retention state.
+#define LOOM_LOW_RESOURCE_FLAG_MATRIX_COEXECUTION_SOURCE ((uint16_t)1u << 1)
+
 typedef enum loom_low_hazard_kind_e {
   // Unknown or uninitialized hazard kind.
   LOOM_LOW_HAZARD_KIND_UNKNOWN = 0,
@@ -456,6 +462,9 @@ typedef uint32_t loom_low_instruction_class_flags_t;
 #define LOOM_LOW_INSTRUCTION_CLASS_FLAG_CACHE ((uint32_t)1u << 24)
 // Descriptor contributes register-move or repair work.
 #define LOOM_LOW_INSTRUCTION_CLASS_FLAG_REGISTER_MOVE ((uint32_t)1u << 25)
+// Descriptor moves device memory directly to workgroup memory through a DMA
+// path that also advances a target vector issue stream.
+#define LOOM_LOW_INSTRUCTION_CLASS_FLAG_LDSDMA ((uint32_t)1u << 26)
 
 typedef struct loom_low_reg_class_t {
   // String-table offset for the stable register-class name.

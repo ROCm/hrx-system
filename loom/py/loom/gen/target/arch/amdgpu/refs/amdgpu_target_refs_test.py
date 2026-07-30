@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
 from loom.gen.target.arch.amdgpu.refs import amdgpu_target_refs
@@ -26,6 +27,7 @@ from loom.target.low_descriptors import (
     Immediate,
     ImmediateFlag,
     ImmediateKind,
+    InstructionClass,
     IssueUse,
     LatencyKind,
     ModelQuality,
@@ -33,6 +35,7 @@ from loom.target.low_descriptors import (
     OperandFlag,
     OperandRole,
     Resource,
+    ResourceFlag,
     ResourceKind,
     ScheduleClass,
 )
@@ -64,6 +67,7 @@ def _descriptor(
     schedule_class: str = _SCHEDULE_NONE,
     encoding_format_id: int = 0,
     immediates: tuple[Immediate, ...] = (),
+    instruction_classes: tuple[InstructionClass, ...] = (),
     operands: tuple[Operand, ...] = (),
 ) -> Descriptor:
     return Descriptor(
@@ -75,6 +79,7 @@ def _descriptor(
         asm_forms=asm_forms,
         encoding_format_id=encoding_format_id,
         immediates=immediates,
+        instruction_classes=instruction_classes,
     )
 
 
@@ -102,11 +107,16 @@ def _descriptor_set(*descriptors: Descriptor) -> DescriptorSet:
                 _RESOURCE_VALU,
                 capacity_per_cycle=1,
                 kind=ResourceKind.VECTOR_ALU,
+                flags=(ResourceFlag.VECTOR_ISSUE,),
             ),
             Resource(
                 _RESOURCE_MATRIX,
                 capacity_per_cycle=1,
                 kind=ResourceKind.MATRIX,
+                flags=(
+                    ResourceFlag.VECTOR_ISSUE,
+                    ResourceFlag.MATRIX_COEXECUTION_SOURCE,
+                ),
             ),
         ),
         schedule_classes=(
@@ -257,6 +267,7 @@ def test_descriptor_trait_names_include_resource_and_encoding_facts() -> None:
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU",
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_DPP",
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_SDWA",
+        "LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ISSUE",
     )
 
 
@@ -269,7 +280,11 @@ def test_descriptor_trait_names_include_memory_and_ref_facts() -> None:
         ),
         _descriptor("amdgpu.v_exp_f32", schedule_class=_SCHEDULE_VALU),
         _descriptor("amdgpu.v_readfirstlane_b32", schedule_class=_SCHEDULE_SALU),
-        _descriptor("amdgpu.v_wmma", schedule_class=_SCHEDULE_MATRIX),
+        _descriptor(
+            "amdgpu.v_wmma",
+            schedule_class=_SCHEDULE_MATRIX,
+            instruction_classes=(InstructionClass.WMMA,),
+        ),
     )
     trait_context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
 
@@ -280,12 +295,57 @@ def test_descriptor_trait_names_include_memory_and_ref_facts() -> None:
     assert amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[1]) == (
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU",
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_TRANSCENDENTAL",
+        "LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ISSUE",
     )
     assert amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[2]) == (
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU",
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_READFIRSTLANE",
     )
-    assert amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[3]) == ("LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX",)
+    assert amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[3]) == (
+        "LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX",
+        "LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ISSUE",
+        "LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX_COEXECUTION_SOURCE",
+    )
+
+
+def test_vector_issue_traits_follow_issue_resource_contracts() -> None:
+    descriptor_set = _descriptor_set(
+        _descriptor(
+            "amdgpu.v_wmma",
+            schedule_class=_SCHEDULE_MATRIX,
+            instruction_classes=(InstructionClass.WMMA,),
+        ),
+        _descriptor("amdgpu.v_add", schedule_class=_SCHEDULE_VALU),
+        _descriptor("amdgpu.s_nop", schedule_class=_SCHEDULE_SALU),
+    )
+    trait_context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
+
+    assert amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[0]) == (
+        "LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX",
+        "LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ISSUE",
+        "LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX_COEXECUTION_SOURCE",
+    )
+    assert amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[1]) == (
+        "LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ALU",
+        "LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ISSUE",
+    )
+    assert "LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ISSUE" not in (amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[2]))
+
+
+def test_ldsdma_instruction_class_advances_vector_issue() -> None:
+    descriptor_set = _descriptor_set(
+        _descriptor(
+            "amdgpu.cluster_load_async_to_lds_b32",
+            schedule_class=_SCHEDULE_SALU,
+            instruction_classes=(InstructionClass.LDSDMA,),
+        )
+    )
+    trait_context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
+
+    assert amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[0]) == (
+        "LOOM_AMDGPU_DESCRIPTOR_TRAIT_SCALAR_ALU",
+        "LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ISSUE",
+    )
 
 
 def test_descriptor_trait_names_include_xcnt_implicit_drain_families() -> None:
@@ -378,6 +438,37 @@ def test_descriptor_traits_reject_missing_issue_resource() -> None:
     trait_context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
 
     with _raises_value_error("schedule class 'valu' references missing resource 'missing'"):
+        amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[0])
+
+
+def test_descriptor_traits_reject_duplicate_matrix_source_issue_use() -> None:
+    descriptor_set = _descriptor_set(_descriptor("amdgpu.test", schedule_class=_SCHEDULE_MATRIX))
+    descriptor_set = replace(
+        descriptor_set,
+        schedule_classes=tuple(
+            replace(
+                schedule_class,
+                issue_uses=(
+                    IssueUse(_RESOURCE_MATRIX, cycles=1, units=1),
+                    IssueUse(_RESOURCE_MATRIX, cycles=1, units=1),
+                ),
+            )
+            if schedule_class.name == _SCHEDULE_MATRIX
+            else schedule_class
+            for schedule_class in descriptor_set.schedule_classes
+        ),
+    )
+    trait_context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
+
+    with _raises_value_error("descriptor 'amdgpu.test' must use at most one matrix coexecution source resource"):
+        amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[0])
+
+
+def test_descriptor_traits_reject_unclassified_matrix_source() -> None:
+    descriptor_set = _descriptor_set(_descriptor("amdgpu.test", schedule_class=_SCHEDULE_MATRIX))
+    trait_context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
+
+    with _raises_value_error("descriptor 'amdgpu.test' matrix coexecution source must belong to exactly one WMMA or SWMMAC instruction class"):
         amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[0])
 
 

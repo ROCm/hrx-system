@@ -185,6 +185,11 @@ class ResourceKind(CEnum):
     ADDRESS = "LOOM_LOW_RESOURCE_KIND_ADDRESS"
 
 
+class ResourceFlag(CEnum):
+    VECTOR_ISSUE = "LOOM_LOW_RESOURCE_FLAG_VECTOR_ISSUE"
+    MATRIX_COEXECUTION_SOURCE = "LOOM_LOW_RESOURCE_FLAG_MATRIX_COEXECUTION_SOURCE"
+
+
 class HazardKind(CEnum):
     MIN_DISTANCE = "LOOM_LOW_HAZARD_KIND_MIN_DISTANCE"
     WAIT_COUNTER = "LOOM_LOW_HAZARD_KIND_WAIT_COUNTER"
@@ -236,6 +241,7 @@ class InstructionClass(CEnum):
     CONVERSION = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_CONVERSION"
     CACHE = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_CACHE"
     REGISTER_MOVE = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_REGISTER_MOVE"
+    LDSDMA = "LOOM_LOW_INSTRUCTION_CLASS_FLAG_LDSDMA"
 
 
 class DescriptorAsmSurface(Enum):
@@ -495,7 +501,7 @@ class Resource:
     name: str
     capacity_per_cycle: int
     kind: ResourceKind
-    flags: tuple[CEnum, ...] = ()
+    flags: tuple[ResourceFlag, ...] = ()
     contention_group_id: int = 0
 
 

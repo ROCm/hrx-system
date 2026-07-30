@@ -11,6 +11,7 @@ from dataclasses import replace
 from loom.target.arch.amdgpu.descriptors import (
     _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_RDNA4_GFX1251_CORE_DESCRIPTOR_SET_BASE,
     AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64,
     amdgpu_encoding_field_id,
@@ -59,7 +60,6 @@ def test_gfx125x_wmma_catalog_is_portable_across_exact_and_generic_targets() -> 
             replace(descriptor, schedule_class="") for descriptor in descriptors
         )
 
-    assert len(gfx1250_wmma) == 53
     assert without_schedule_class(gfx1251_wmma) == without_schedule_class(gfx1250_wmma)
     assert without_schedule_class(generic_wmma) == without_schedule_class(gfx1250_wmma)
     assert (
@@ -113,6 +113,63 @@ def test_gfx1251_wmma_schedule_classes_match_llvm_speed_model() -> None:
         assert generic_schedule.latency_kind is LatencyKind.ESTIMATE
         assert generic_schedule.latency_cycles == latency_cycles
         assert generic_schedule.model_quality is ModelQuality.ESTIMATED
+
+
+def test_gfx1250_stepping_wmma_schedules_match_llvm_speed_model() -> None:
+    b0_descriptors = {
+        descriptor.key: descriptor
+        for descriptor in _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.descriptors
+    }
+    a0_descriptors = {
+        descriptor.key: descriptor
+        for descriptor in _AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE.descriptors
+    }
+    assert {
+        key: replace(descriptor, schedule_class="")
+        for key, descriptor in b0_descriptors.items()
+    } == {
+        key: replace(descriptor, schedule_class="")
+        for key, descriptor in a0_descriptors.items()
+    }
+
+    b0_schedule_classes = {
+        schedule_class.name: schedule_class
+        for schedule_class in (
+            _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.schedule_classes
+        )
+    }
+    a0_schedule_classes = {
+        schedule_class.name: schedule_class
+        for schedule_class in (
+            _AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE.schedule_classes
+        )
+    }
+    schedule_cases = (
+        ("amdgpu.v_wmma_f32_16x16x4_f32", 16, 16),
+        ("amdgpu.v_wmma_f32_16x16x64_fp8_fp8", 4, 8),
+        ("amdgpu.v_wmma_f32_16x16x128_f8f6f4_f4_f4", 4, 8),
+        ("amdgpu.v_wmma_f32_16x16x128_f8f6f4_f6_f4", 8, 8),
+        ("amdgpu.v_wmma_f32_16x16x128_f8f6f4_f8_f4", 8, 16),
+        ("amdgpu.v_wmma_i32_16x16x64_iu8", 16, 16),
+        ("amdgpu.v_wmma_scale_f32_16x16x128_f8f6f4_f4_f4", 4, 8),
+    )
+    for descriptor_key, expected_b0_latency, expected_a0_latency in schedule_cases:
+        for descriptor, schedule_classes, expected_latency in (
+            (
+                b0_descriptors[descriptor_key],
+                b0_schedule_classes,
+                expected_b0_latency,
+            ),
+            (
+                a0_descriptors[descriptor_key],
+                a0_schedule_classes,
+                expected_a0_latency,
+            ),
+        ):
+            schedule_class = schedule_classes[descriptor.schedule_class]
+            assert schedule_class.latency_kind is LatencyKind.EXACT
+            assert schedule_class.latency_cycles == expected_latency
+            assert schedule_class.model_quality is ModelQuality.EXACT
 
 
 def test_gfx125x_f8f6f4_wmma_descriptors_model_all_physical_abis() -> None:

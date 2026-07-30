@@ -100,6 +100,7 @@ _AMDGPU_SUPPLEMENTAL_ENCODING_FORMAT_NAMES_BY_TARGET = {
     "gfx12_generic": ("ENC_VOP3PX2",),
     "gfx12_5_generic": ("ENC_VOP3PX2", "ENC_VOP1_VGPR"),
     "rdna4": ("ENC_VOP3PX2",),
+    "rdna4_gfx1250_a0": ("ENC_VOP3PX2", "ENC_VOP1_VGPR"),
     "rdna4_gfx1251": ("ENC_VOP3PX2", "ENC_VOP1_VGPR"),
     "rdna4_gfx125x": ("ENC_VOP3PX2", "ENC_VOP1_VGPR"),
 }

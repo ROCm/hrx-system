@@ -675,6 +675,8 @@ typedef struct loom_low_schedule_table_t {
   iree_host_size_t candidate_decision_count;
   // Number of descriptor issue-use rows referenced by scheduled nodes.
   iree_host_size_t resource_use_count;
+  // Issue uses that establish matrix/vector coexecution retention state.
+  iree_host_size_t matrix_coexecution_source_use_count;
   // Descriptor effects in scheduled order.
   const loom_low_schedule_effect_use_t* effect_uses;
   // Number of effect-use records.

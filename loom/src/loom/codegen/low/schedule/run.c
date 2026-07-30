@@ -1392,6 +1392,8 @@ iree_status_t loom_low_schedule_function(
         .candidate_decisions = state.candidate_decisions,
         .candidate_decision_count = state.candidate_decision_count,
         .resource_use_count = state.resource_use_count,
+        .matrix_coexecution_source_use_count =
+            state.matrix_coexecution_source_use_count,
         .effect_uses = state.effect_uses,
         .effect_use_count = state.effect_use_count,
         .hazard_uses = state.hazard_uses,

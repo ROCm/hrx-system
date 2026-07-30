@@ -134,6 +134,15 @@ AMDGPU_MATRIX_FEATURES_BY_PROFILE = {
     ),
 }
 
+AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE = "none"
+AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16 = "xdl_latency_4_8_16"
+AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32 = "xdl_latency_16_32"
+AMDGPU_MATRIX_COEXECUTION_PROFILES = (
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE,
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16,
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32,
+)
+
 # Features present on every exact member but intentionally absent from the
 # corresponding ROCm generic processor contract.
 AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS = {
@@ -449,6 +458,7 @@ class AmdgpuProcessorTargetIdInfo:
 
 @dataclass(frozen=True, slots=True)
 class AmdgpuTargetSemantics:
+    descriptor_set_key: str | None = None
     instruction_constraints: int = 0
     lds_bank_service_models: tuple[str, ...] | None = None
     kernel_metadata_extensions: tuple[tuple[str, str], ...] = ()
@@ -487,8 +497,106 @@ class AmdgpuProcessorInstructionInfo:
 @dataclass(frozen=True, slots=True)
 class AmdgpuProcessorFeatureInfo:
     matrix: str = AMDGPU_MATRIX_FEATURE_PROFILE_NONE
+    matrix_coexecution: str = AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE
     scheduling: int = 0
     lds_bank_service_models: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuMatrixCoexecutionSourceInfo:
+    source: str
+    result_operand_index: int
+    source_operand_start: int
+    source_operand_count: int
+
+
+AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA = "wmma"
+AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC = "swmmac"
+AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS = (
+    AmdgpuMatrixCoexecutionSourceInfo(
+        source=AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
+        result_operand_index=0,
+        source_operand_start=1,
+        source_operand_count=2,
+    ),
+    AmdgpuMatrixCoexecutionSourceInfo(
+        source=AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC,
+        result_operand_index=0,
+        source_operand_start=2,
+        source_operand_count=3,
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuMatrixCoexecutionRuleInfo:
+    source: str
+    latency_cycles: int
+    matrix_issue_distance: int
+    vector_issue_distance: int
+
+
+AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE = {
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE: (),
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16: (
+        AmdgpuMatrixCoexecutionRuleInfo(
+            source=AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
+            latency_cycles=4,
+            matrix_issue_distance=2,
+            vector_issue_distance=1,
+        ),
+        AmdgpuMatrixCoexecutionRuleInfo(
+            source=AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
+            latency_cycles=8,
+            matrix_issue_distance=5,
+            vector_issue_distance=4,
+        ),
+        AmdgpuMatrixCoexecutionRuleInfo(
+            source=AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
+            latency_cycles=16,
+            matrix_issue_distance=9,
+            vector_issue_distance=8,
+        ),
+        AmdgpuMatrixCoexecutionRuleInfo(
+            source=AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC,
+            latency_cycles=8,
+            matrix_issue_distance=3,
+            vector_issue_distance=2,
+        ),
+        AmdgpuMatrixCoexecutionRuleInfo(
+            source=AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC,
+            latency_cycles=16,
+            matrix_issue_distance=5,
+            vector_issue_distance=4,
+        ),
+    ),
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32: (
+        AmdgpuMatrixCoexecutionRuleInfo(
+            source=AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
+            latency_cycles=16,
+            matrix_issue_distance=9,
+            vector_issue_distance=8,
+        ),
+        AmdgpuMatrixCoexecutionRuleInfo(
+            source=AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
+            latency_cycles=32,
+            matrix_issue_distance=17,
+            vector_issue_distance=16,
+        ),
+        AmdgpuMatrixCoexecutionRuleInfo(
+            source=AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC,
+            latency_cycles=16,
+            matrix_issue_distance=9,
+            vector_issue_distance=8,
+        ),
+        AmdgpuMatrixCoexecutionRuleInfo(
+            source=AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC,
+            latency_cycles=32,
+            matrix_issue_distance=17,
+            vector_issue_distance=16,
+        ),
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -827,6 +935,7 @@ def processor_info(
         AMDGPU_PROCESSOR_INSTRUCTION_INFO_NONE
     ),
     matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_NONE,
+    matrix_coexecution_profile: str = AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE,
     scheduling_bits: int = 0,
     lds_bank_service_models: tuple[str, ...] = (),
     max_workgroup_storage_bytes: int = 0,
@@ -855,6 +964,7 @@ def processor_info(
         instructions=instructions,
         features=AmdgpuProcessorFeatureInfo(
             matrix=matrix_feature_profile,
+            matrix_coexecution=matrix_coexecution_profile,
             scheduling=scheduling_bits,
             lds_bank_service_models=lds_bank_service_models,
         ),
@@ -1001,6 +1111,7 @@ def gfx125x_processor_info(
     ),
     matrix_feature_profile: str = AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
     lds_bank_service_models: tuple[str, ...] = (),
+    matrix_coexecution_profile: str = AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE,
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor=processor,
@@ -1015,6 +1126,7 @@ def gfx125x_processor_info(
         instructions=instructions,
         matrix_feature_profile=matrix_feature_profile,
         lds_bank_service_models=lds_bank_service_models,
+        matrix_coexecution_profile=matrix_coexecution_profile,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
         max_workgroup_storage_bytes=AMDGPU_GFX125X_MAX_WORKGROUP_STORAGE_BYTES,
         occupancy=AMDGPU_OCCUPANCY_GFX125X,
@@ -1033,6 +1145,17 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         ),
     ),
     AmdgpuDescriptorSetInfo(
+        generator_target="rdna4_gfx1250_a0",
+        key="amdgpu.rdna4.gfx1250_a0.core",
+        isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        storage_generator_target="rdna4_gfx125x",
+        buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE57,
+        vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
+            cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
+        ),
+    ),
+    AmdgpuDescriptorSetInfo(
         generator_target="rdna4_gfx125x",
         key="amdgpu.rdna4.gfx125x.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
@@ -1047,6 +1170,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         key="amdgpu.rdna4.gfx1251.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        storage_generator_target="rdna4_gfx125x",
         buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE57,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
             cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX12_NV_SCOPE_TH,
@@ -1142,6 +1266,7 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         key="amdgpu.gfx12_5.generic.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA4,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_VOPD,
+        storage_generator_target="rdna4_gfx125x",
         member_generator_targets=("rdna4_gfx1251", "rdna4_gfx125x"),
         buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE57,
         vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
@@ -1268,12 +1393,16 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         lds_bank_service_models=(
             AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES
         ),
+        matrix_coexecution_profile=(
+            AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16
+        ),
     ),
     gfx125x_processor_info(
         "gfx1251",
         0x05A,
         descriptor_set_key="amdgpu.rdna4.gfx1251.core",
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
+        matrix_coexecution_profile=AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32,
     ),
     processor_info(
         "gfx1310",
@@ -1333,6 +1462,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         elf_generic_version=generic_code_object_current_version("gfx12-5-generic"),
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC,
+        matrix_coexecution_profile=AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32,
     ),
 )
 
@@ -1495,7 +1625,9 @@ AMDGPU_TARGET_INFOS: tuple[AmdgpuTargetInfo, ...] = (
         processor="gfx1250",
         enum_value=24,
         doc="RDNA 4 gfx1250 A0 target-overlay row.",
+        default_for_descriptor_set=True,
         semantics=AmdgpuTargetSemantics(
+            descriptor_set_key="amdgpu.rdna4.gfx1250_a0.core",
             instruction_constraints=(
                 AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT
                 | AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION
@@ -1555,6 +1687,15 @@ def amdgpu_processor_info_by_name(processor: str) -> AmdgpuProcessorInfo | None:
         if info.processor == processor:
             return info
     return None
+
+
+def amdgpu_target_descriptor_set_key(
+    target: AmdgpuTargetInfo,
+    processor: AmdgpuProcessorInfo,
+) -> str:
+    """Returns the descriptor contract selected by one compiler target."""
+
+    return target.semantics.descriptor_set_key or processor.descriptor_set.key
 
 
 def _amdgpu_target_local_instruction_constraints(
@@ -1730,10 +1871,14 @@ def validate_amdgpu_target_id_processor_rows(
 def validate_amdgpu_target_rows(
     processors: Sequence[AmdgpuProcessorInfo],
     targets: Sequence[AmdgpuTargetInfo] = AMDGPU_TARGET_INFOS,
+    descriptor_sets: Sequence[AmdgpuDescriptorSetInfo] = AMDGPU_DESCRIPTOR_SET_INFOS,
 ) -> None:
     """Validates Loom semantics attached to canonical target rows."""
 
     processors_by_name = {processor.processor: processor for processor in processors}
+    descriptor_sets_by_key = {
+        descriptor_set.key: descriptor_set for descriptor_set in descriptor_sets
+    }
     targets_by_name = {target.target: target for target in targets}
     if len(targets_by_name) != len(targets):
         raise ValueError("AMDGPU target rows repeat a target identity")
@@ -1788,6 +1933,46 @@ def validate_amdgpu_target_rows(
                 f"AMDGPU target {target.target} resolves to processor "
                 f"{canonical_processor}, not {target.processor}"
             )
+
+        descriptor_set_key = amdgpu_target_descriptor_set_key(target, processor)
+        descriptor_set = descriptor_sets_by_key.get(descriptor_set_key)
+        if descriptor_set is None:
+            raise ValueError(
+                f"AMDGPU target {target.target} selects unknown descriptor set "
+                f"{descriptor_set_key}"
+            )
+        processor_descriptor_set = descriptor_sets_by_key.get(
+            processor.descriptor_set.key
+        )
+        if processor_descriptor_set is None:
+            raise ValueError(
+                f"AMDGPU processor {processor.processor} selects unknown "
+                f"descriptor set {processor.descriptor_set.key}"
+            )
+        if target.semantics.descriptor_set_key is not None:
+            if (
+                descriptor_set.storage_generator_target
+                != processor_descriptor_set.generator_target
+            ):
+                raise ValueError(
+                    f"AMDGPU target {target.target} descriptor override "
+                    f"{descriptor_set_key} does not view its processor descriptor "
+                    f"contract {processor_descriptor_set.key}"
+                )
+            if (
+                descriptor_set.isa_infos != processor_descriptor_set.isa_infos
+                or descriptor_set.flags != processor_descriptor_set.flags
+                or descriptor_set.buffer_resource
+                != processor_descriptor_set.buffer_resource
+                or descriptor_set.vector_memory
+                != processor_descriptor_set.vector_memory
+            ):
+                raise ValueError(
+                    f"AMDGPU target {target.target} descriptor override "
+                    f"{descriptor_set_key} changes its processor instruction or "
+                    "ABI contract instead of only target-local scheduling "
+                    "semantics"
+                )
 
         effective_models = (
             target.semantics.lds_bank_service_models
@@ -2330,7 +2515,8 @@ def amdgpu_default_target_info_for_descriptor_set(
         if (
             info.default_for_descriptor_set
             and processor_info is not None
-            and processor_info.descriptor_set.key == descriptor_set_key
+            and amdgpu_target_descriptor_set_key(info, processor_info)
+            == descriptor_set_key
         ):
             return info
     return None

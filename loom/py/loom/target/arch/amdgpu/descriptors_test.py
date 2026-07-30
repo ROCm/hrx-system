@@ -586,6 +586,7 @@ def test_instruction_classes_project_target_packet_families() -> None:
         InstructionClass.GLOBAL_MEMORY,
         InstructionClass.GLOBAL_LOAD,
         InstructionClass.LOCAL_MEMORY,
+        InstructionClass.LDSDMA,
     )
     assert descriptor_set.descriptors[3].instruction_classes == (
         InstructionClass.SWMMAC,
@@ -1643,6 +1644,7 @@ def test_s_delay_alu_descriptor_is_exposed_on_rdna_families() -> None:
         "rdna3",
         "rdna3_5",
         "rdna4",
+        "rdna4_gfx1250_a0",
         "rdna4_gfx1251",
         "rdna4_gfx125x",
     }
@@ -1736,6 +1738,7 @@ def test_tensor_memory_descriptors_are_gfx125x_scoped() -> None:
 
     gfx125x_targets = {
         "gfx12_5_generic",
+        "rdna4_gfx1250_a0",
         "rdna4_gfx1251",
         "rdna4_gfx125x",
     }
@@ -1824,6 +1827,7 @@ def test_cluster_memory_descriptors_are_gfx125x_scoped() -> None:
 
     gfx125x_targets = {
         "gfx12_5_generic",
+        "rdna4_gfx1250_a0",
         "rdna4_gfx1251",
         "rdna4_gfx125x",
     }

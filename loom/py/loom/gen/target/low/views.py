@@ -18,7 +18,7 @@ from loom.gen.target.low.compiled import (
     CompiledOperandForm,
     DescriptorSetView,
 )
-from loom.target.low_descriptors import Descriptor, DescriptorSet
+from loom.target.low_descriptors import Descriptor, DescriptorSet, InstructionClass
 
 
 def _descriptor_refs_for_ordinals(
@@ -93,25 +93,67 @@ def _validate_view_descriptors_match_storage(
     compiled: CompiledDescriptorSet,
     view_spec: DescriptorSet,
     descriptor_ordinals: Sequence[int],
-) -> None:
+) -> tuple[Descriptor, ...]:
+    projected_descriptors: list[Descriptor] = []
     for view_descriptor, storage_descriptor_ordinal in zip(view_spec.descriptors, descriptor_ordinals, strict=True):
         storage_descriptor = compiled.descriptors[storage_descriptor_ordinal]
         validation.validate_descriptor_operands(view_descriptor)
         validation.validate_descriptor_constraints(view_descriptor)
         projected_view_descriptor = compiler.derive_descriptor_projections(view_descriptor)
+        projected_descriptors.append(projected_view_descriptor)
         if (
             replace(
                 projected_view_descriptor,
                 asm_forms=storage_descriptor.asm_forms,
                 asm_surface=storage_descriptor.asm_surface,
                 asm_surface_reason=storage_descriptor.asm_surface_reason,
+                schedule_class=storage_descriptor.schedule_class,
             )
             == storage_descriptor
         ):
             continue
         raise ValueError(
-            f"descriptor set view '{view_spec.key}' descriptor '{view_descriptor.key}' differs from storage descriptor '{storage_descriptor.key}' outside of asm forms or asm surface policy"
+            f"descriptor set view '{view_spec.key}' descriptor '{view_descriptor.key}' differs from storage descriptor '{storage_descriptor.key}' outside of asm forms, asm surface policy, or schedule class"
         )
+    return tuple(projected_descriptors)
+
+
+def _view_instruction_classes(
+    compiled: CompiledDescriptorSet,
+    view_spec: DescriptorSet,
+    descriptors: Sequence[Descriptor],
+    descriptor_ordinals: Sequence[int],
+) -> tuple[tuple[InstructionClass, ...], ...]:
+    storage_schedule_classes = {schedule_class.name: schedule_class for schedule_class in compiled.schedule_classes}
+    view_schedule_classes = {schedule_class.name: schedule_class for schedule_class in view_spec.schedule_classes}
+    resources = {resource.name: resource for resource in compiled.resources}
+    result: list[tuple[InstructionClass, ...]] = []
+    for descriptor, storage_descriptor_ordinal in zip(descriptors, descriptor_ordinals, strict=True):
+        storage_descriptor = compiled.descriptors[storage_descriptor_ordinal]
+        view_schedule_class = view_schedule_classes.get(descriptor.schedule_class)
+        if view_schedule_class is None:
+            raise ValueError(f"descriptor set view '{view_spec.key}' descriptor '{descriptor.key}' references unknown schedule class '{descriptor.schedule_class}'")
+        storage_schedule_class = storage_schedule_classes.get(descriptor.schedule_class)
+        if storage_schedule_class is None:
+            raise ValueError(f"descriptor set view '{view_spec.key}' schedule class '{descriptor.schedule_class}' is absent from storage set '{compiled.spec.key}'")
+        if descriptor.schedule_class != storage_descriptor.schedule_class and view_schedule_class != storage_schedule_class:
+            raise ValueError(f"descriptor set view '{view_spec.key}' schedule class '{descriptor.schedule_class}' differs from storage set '{compiled.spec.key}'")
+        result.append(
+            compiler.derive_instruction_classes(
+                descriptor,
+                storage_schedule_class,
+                resources,
+            )
+        )
+    return tuple(result)
+
+
+def _view_descriptors_match_storage(
+    compiled: CompiledDescriptorSet,
+    descriptors: Sequence[Descriptor],
+    descriptor_ordinals: Sequence[int],
+) -> bool:
+    return all(descriptor == compiled.descriptors[storage_descriptor_ordinal] for descriptor, storage_descriptor_ordinal in zip(descriptors, descriptor_ordinals, strict=True))
 
 
 def _view_asm_forms_match_storage(
@@ -179,9 +221,15 @@ def descriptor_set_view_for_spec(
         view_spec.descriptors,
         surface_name="descriptor set view",
     )
-    _validate_view_descriptors_match_storage(
+    descriptors = _validate_view_descriptors_match_storage(
         compiled,
         view_spec,
+        descriptor_ordinal_tuple,
+    )
+    instruction_classes = _view_instruction_classes(
+        compiled,
+        view_spec,
+        descriptors,
         descriptor_ordinal_tuple,
     )
     _validate_view_operand_forms_closed(
@@ -191,12 +239,19 @@ def descriptor_set_view_for_spec(
     )
     if (
         descriptor_ordinal_tuple == tuple(range(len(descriptor_ordinal_tuple)))
+        and _view_descriptors_match_storage(
+            compiled,
+            descriptors,
+            descriptor_ordinal_tuple,
+        )
         and _view_asm_forms_match_storage(compiled, view_spec, descriptor_ordinal_tuple)
         and not _asm_forms_have_duplicate_mnemonics(compiled.asm_forms)
     ):
         descriptor_count = len(descriptor_ordinal_tuple)
         return DescriptorSetView(
             spec=view_spec,
+            descriptors=descriptors,
+            instruction_classes=instruction_classes,
             descriptor_ordinals=descriptor_ordinal_tuple,
             descriptor_refs=_descriptor_refs_for_ordinals(
                 compiled.descriptors,
@@ -235,6 +290,8 @@ def descriptor_set_view_for_spec(
 
     return DescriptorSetView(
         spec=view_spec,
+        descriptors=descriptors,
+        instruction_classes=instruction_classes,
         descriptor_ordinals=descriptor_ordinal_tuple,
         descriptor_refs=_descriptor_refs_for_ordinals(
             compiled.descriptors,

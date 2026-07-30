@@ -106,6 +106,8 @@ class CompiledDescriptorSet:
 @dataclass(frozen=True, slots=True)
 class DescriptorSetView:
     spec: DescriptorSet
+    descriptors: tuple[Descriptor, ...]
+    instruction_classes: tuple[tuple[InstructionClass, ...], ...]
     descriptor_ordinals: tuple[int, ...]
     descriptor_refs: list[tuple[str, int]]
     descriptor_rows: list[dict[str, int]]

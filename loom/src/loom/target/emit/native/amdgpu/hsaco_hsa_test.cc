@@ -977,7 +977,7 @@ iree_status_t EmitB128CopyKernelForAmdgpu(const AmdgpuHsaTarget& target,
       "= hal.buffer} : reg<amdgpu.sgpr x2>\n"
       "  %target = low.resource<hal_binding> {index = 1, source_type "
       "= hal.buffer} : reg<amdgpu.sgpr x2>\n";
-  switch (processor->properties.descriptor_set.ordinal) {
+  switch (target_profile.identity.target->descriptor_set_ordinal) {
     case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3:
     case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA4:
       source +=

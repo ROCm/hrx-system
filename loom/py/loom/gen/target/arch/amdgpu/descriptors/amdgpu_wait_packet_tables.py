@@ -60,7 +60,9 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR,
     AmdgpuDescriptorSetInfo,
     amdgpu_descriptor_set_ordinal,
+    amdgpu_target_descriptor_set_key,
     sorted_descriptor_set_infos,
+    sorted_target_infos,
 )
 from loom.target.low_descriptors import (  # noqa: E402
     Descriptor,
@@ -406,8 +408,10 @@ def _descriptor_set_wait_packet_selection_rows(
 
 def _descriptor_set_processor_scheduling_bits(descriptor_set_key: str) -> int:
     scheduling_bits = 0
-    for processor_info in AMDGPU_PROCESSOR_INFOS:
-        if processor_info.descriptor_set.key == descriptor_set_key:
+    processors_by_name = {processor_info.processor: processor_info for processor_info in AMDGPU_PROCESSOR_INFOS}
+    for target_info in sorted_target_infos():
+        processor_info = processors_by_name[target_info.processor]
+        if amdgpu_target_descriptor_set_key(target_info, processor_info) == descriptor_set_key:
             scheduling_bits |= processor_info.features.scheduling
     return scheduling_bits
 

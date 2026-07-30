@@ -22,6 +22,9 @@ _AMDGPU_MATRIX_CONTRACT_TABLE_GENERATOR = "//loom/py/loom/gen/target/arch/amdgpu
 loom_cc_library(
     name = "types",
     hdrs = ["types.h"],
+    visibility = [
+        "//loom/src/loom/target/arch/amdgpu/planning:__pkg__",
+    ],
     deps = [
         "//loom/src/loom/analysis:contract_roles",
         "//loom/src/loom/analysis:matrix_fragment_layout",

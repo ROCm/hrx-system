@@ -27,6 +27,7 @@ from loom.target.low_descriptors import (
     DescriptorSet,
     Hazard,
     HazardReferenceKind,
+    InstructionClass,
     Operand,
     descriptor_stable_id,
 )
@@ -225,6 +226,7 @@ def _intern_descriptor_set_view_metadata(compiled: CompiledDescriptorSet, view_s
 def _descriptor_row_lines(
     compiled: CompiledDescriptorSet,
     descriptors: Sequence[Descriptor],
+    instruction_classes: Sequence[tuple[InstructionClass, ...]],
     descriptor_rows: Sequence[dict[str, int]],
     canonical_asm_form_ordinals: Sequence[int | None],
 ) -> list[list[str]]:
@@ -256,7 +258,7 @@ def _descriptor_row_lines(
             f".operand_form_count = {descriptor_rows[i]['operand_form_count']},",
             f".schedule_class_id = {compiled.schedule_class_ids[descriptor.schedule_class]},",
             f".flags = {c_spelling.flag_expr(descriptor.flags)},",
-            f".instruction_class_flags = {c_spelling.flag_expr(compiled.instruction_classes[i])},",
+            f".instruction_class_flags = {c_spelling.flag_expr(instruction_classes[i])},",
             f".canonical_asm_form_ordinal = {c_spelling.canonical_asm_form_ordinal_expr(canonical_asm_form_ordinals[i])},",
         ]
         for i, descriptor in enumerate(descriptors)
@@ -697,6 +699,7 @@ def emit_source_for_views(
         _descriptor_row_lines(
             compiled,
             compiled.descriptors,
+            compiled.instruction_classes,
             compiled.descriptor_rows,
             compiled.canonical_asm_form_ordinals,
         ),
@@ -704,7 +707,6 @@ def emit_source_for_views(
     for view in views:
         if view.uses_storage_descriptor_tables:
             continue
-        view_descriptors = [compiled.descriptors[descriptor_ordinal] for descriptor_ordinal in view.descriptor_ordinals]
         _emit_array(
             lines,
             "loom_low_descriptor_t",
@@ -712,7 +714,8 @@ def emit_source_for_views(
             "Descriptors",
             _descriptor_row_lines(
                 compiled,
-                view_descriptors,
+                view.descriptors,
+                view.instruction_classes,
                 view.descriptor_rows,
                 view.canonical_asm_form_ordinals,
             ),
@@ -897,6 +900,8 @@ def emit_source(compiled: CompiledDescriptorSet) -> str:
         views=[
             DescriptorSetView(
                 spec=compiled.spec,
+                descriptors=tuple(compiled.descriptors),
+                instruction_classes=tuple(compiled.instruction_classes),
                 descriptor_ordinals=tuple(range(len(compiled.descriptors))),
                 descriptor_refs=compiled.descriptor_refs,
                 descriptor_rows=compiled.descriptor_rows,

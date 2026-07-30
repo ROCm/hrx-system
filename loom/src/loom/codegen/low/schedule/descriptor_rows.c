@@ -206,6 +206,15 @@ void loom_low_schedule_compact_resource_summaries(
     if (state->resource_summaries[read_index].use_count == 0) {
       continue;
     }
+    const loom_low_schedule_resource_summary_t* summary =
+        &state->resource_summaries[read_index];
+    if (iree_any_bit_set(summary->resource_flags,
+                         LOOM_LOW_RESOURCE_FLAG_MATRIX_COEXECUTION_SOURCE)) {
+      IREE_ASSERT_LE(
+          summary->use_count,
+          IREE_HOST_SIZE_MAX - state->matrix_coexecution_source_use_count);
+      state->matrix_coexecution_source_use_count += summary->use_count;
+    }
     state->resource_summaries[write_index++] =
         state->resource_summaries[read_index];
   }

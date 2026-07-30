@@ -677,6 +677,14 @@ iree_status_t loom_amdgpu_encoding_pack_v_mov_b32_u32(
       out_packet);
 }
 
+iree_status_t loom_amdgpu_encoding_pack_v_nop(
+    const loom_amdgpu_encoding_table_t* table,
+    loom_amdgpu_encoding_packet_t* out_packet) {
+  return loom_amdgpu_encoding_pack(
+      table, LOOM_AMDGPU_ENCODING_FORMAT_VOP1, table->v_nop_opcode,
+      /*field_values=*/NULL, /*field_value_count=*/0, out_packet);
+}
+
 iree_status_t loom_amdgpu_encoding_pack_vop2_u32_vgpr(
     const loom_amdgpu_encoding_table_t* table, uint16_t opcode, uint16_t vdst,
     uint32_t imm32, uint16_t vsrc1, loom_amdgpu_encoding_packet_t* out_packet) {

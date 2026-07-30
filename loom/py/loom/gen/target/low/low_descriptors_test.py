@@ -13,7 +13,7 @@ from typing import cast
 
 import pytest
 
-from loom.gen.target.low import compiler
+from loom.gen.target.low import compiler, views
 from loom.gen.target.low.low_descriptors import (
     DescriptorAllowlist,
     generate_descriptor_set,
@@ -961,6 +961,81 @@ def test_shared_source_emits_one_storage_table_with_multiple_views() -> None:
     assert ".descriptor_count = 1," in source
     assert ".descriptor_count = 2," in source
     assert ("const loom_low_descriptor_set_t* loom_test_low_extension_core_descriptor_set(void)") in source
+
+
+def test_descriptor_set_view_selects_shared_schedule_class() -> None:
+    scalar_schedule = TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes[1]
+    vector_schedule = TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes[2]
+    assert TEST_LOW_ADD_I32_DESCRIPTOR.schedule_class == scalar_schedule.name
+
+    vector_multiply = replace(
+        TEST_LOW_MUL_I32_DESCRIPTOR,
+        schedule_class=vector_schedule.name,
+    )
+    storage_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR, vector_multiply),
+    )
+    view = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        key="test.low.schedule_view.core",
+        function_name="loom_test_low_schedule_view_core_descriptor_set",
+        c_table_prefix="TestLowScheduleViewCore",
+        c_enum_prefix="TEST_LOW_SCHEDULE_VIEW_CORE",
+        descriptors=(
+            replace(
+                TEST_LOW_ADD_I32_DESCRIPTOR,
+                schedule_class=vector_schedule.name,
+            ),
+        ),
+    )
+
+    compiled_view = views.descriptor_set_view_for_spec(
+        compiler.compile_descriptor_set(storage_set),
+        view,
+    )
+
+    assert not compiled_view.uses_storage_descriptor_tables
+    assert compiled_view.descriptors[0].schedule_class == vector_schedule.name
+    assert compiled_view.instruction_classes == ((InstructionClass.VECTOR_ALU,),)
+
+
+def test_descriptor_set_view_rejects_local_schedule_definition() -> None:
+    vector_schedule = TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes[2]
+    vector_multiply = replace(
+        TEST_LOW_MUL_I32_DESCRIPTOR,
+        schedule_class=vector_schedule.name,
+    )
+    storage_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR, vector_multiply),
+    )
+    view_schedule_classes = tuple(
+        replace(schedule_class, latency_cycles=3) if schedule_class.name == vector_schedule.name else schedule_class for schedule_class in TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes
+    )
+    view = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        key="test.low.schedule_view.core",
+        function_name="loom_test_low_schedule_view_core_descriptor_set",
+        c_table_prefix="TestLowScheduleViewCore",
+        c_enum_prefix="TEST_LOW_SCHEDULE_VIEW_CORE",
+        schedule_classes=view_schedule_classes,
+        descriptors=(
+            replace(
+                TEST_LOW_ADD_I32_DESCRIPTOR,
+                schedule_class=vector_schedule.name,
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set view 'test.low.schedule_view.core' schedule class 'test.vector.alu' differs from storage set 'test.low.core'"),
+    ):
+        views.descriptor_set_view_for_spec(
+            compiler.compile_descriptor_set(storage_set),
+            view,
+        )
 
 
 def test_shared_source_emits_prefix_view_local_asm_forms() -> None:

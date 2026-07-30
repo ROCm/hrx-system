@@ -111,6 +111,7 @@ from loom.target.low_descriptors import (
     RegClassFlag,
     RegisterPart,
     Resource,
+    ResourceFlag,
     ResourceKind,
     ScheduleClass,
     ScheduleClassFlag,
@@ -816,7 +817,12 @@ def _matrix_hazards(resource: str) -> tuple[Hazard, ...]:
 def _common_scalar_vector_memory_resources() -> tuple[Resource, ...]:
     return (
         Resource(_RESOURCE_SALU, capacity_per_cycle=1, kind=ResourceKind.SCALAR_ALU),
-        Resource(_RESOURCE_VALU, capacity_per_cycle=1, kind=ResourceKind.VECTOR_ALU),
+        Resource(
+            _RESOURCE_VALU,
+            capacity_per_cycle=1,
+            kind=ResourceKind.VECTOR_ALU,
+            flags=(ResourceFlag.VECTOR_ISSUE,),
+        ),
         Resource(_RESOURCE_SMEM, capacity_per_cycle=1, kind=ResourceKind.LOAD),
         Resource(_RESOURCE_VMEM_LOAD, capacity_per_cycle=1, kind=ResourceKind.LOAD),
         Resource(_RESOURCE_VMEM_STORE, capacity_per_cycle=1, kind=ResourceKind.STORE),
@@ -3099,6 +3105,7 @@ __all__ = (
     "RegClassFlag",
     "RegisterPart",
     "Resource",
+    "ResourceFlag",
     "ResourceKind",
     "ScheduleClass",
     "ScheduleClassFlag",

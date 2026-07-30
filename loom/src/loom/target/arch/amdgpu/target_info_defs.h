@@ -209,6 +209,49 @@ typedef enum loom_amdgpu_matrix_feature_profile_e {
   LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_COUNT = 10,
 } loom_amdgpu_matrix_feature_profile_t;
 
+// Exact processor scheduling models for matrix/VALU coexecution. These are
+// independent of matrix instruction inventories: processors may expose the
+// same descriptors while assigning them different release distances.
+typedef enum loom_amdgpu_matrix_coexecution_profile_e {
+  // No qualified matrix coexecution model is available.
+  LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE = 0,
+  // 4/8/16-cycle XDL WMMA/SWMMAC vector-issue release model.
+  LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16 = 1,
+  // Conservative 16/32-cycle XDL WMMA/SWMMAC vector-issue release model.
+  LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32 = 2,
+  // Number of matrix coexecution profiles.
+  LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_COUNT = 3,
+} loom_amdgpu_matrix_coexecution_profile_t;
+
+typedef enum loom_amdgpu_matrix_coexecution_source_kind_e {
+  // Dense wave matrix multiply-accumulate source.
+  LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA = 0,
+  // Sparse wave matrix multiply-accumulate source.
+  LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC = 1,
+  // Number of matrix coexecution source kinds.
+  LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_COUNT = 2,
+} loom_amdgpu_matrix_coexecution_source_kind_t;
+
+typedef struct loom_amdgpu_matrix_coexecution_rule_t {
+  // Matrix instruction family opening the release window.
+  loom_amdgpu_matrix_coexecution_source_kind_t source;
+  // Descriptor schedule latency selecting the rule.
+  uint8_t latency_cycles;
+  // Required vector issues before a dependent matrix packet.
+  uint8_t matrix_issue_distance;
+  // Required vector issues before a dependent ordinary vector packet.
+  uint8_t vector_issue_distance;
+} loom_amdgpu_matrix_coexecution_rule_t;
+
+typedef struct loom_amdgpu_matrix_coexecution_profile_info_t {
+  // Generated release rules for this processor profile.
+  const loom_amdgpu_matrix_coexecution_rule_t* rules;
+  // Number of entries in |rules|.
+  uint8_t rule_count;
+  // Largest vector issue distance in |rules|.
+  uint8_t maximum_issue_distance;
+} loom_amdgpu_matrix_coexecution_profile_info_t;
+
 typedef enum loom_amdgpu_processor_info_flag_bits_e {
   // Processor has enough target-owned facts for native HSACO emission.
   LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION = 1u << 0,
@@ -513,6 +556,8 @@ typedef struct loom_amdgpu_processor_instruction_info_t {
 typedef struct loom_amdgpu_processor_feature_info_t {
   // Matrix instruction feature profile implemented for this processor.
   loom_amdgpu_matrix_feature_profile_t matrix;
+  // Matrix/VALU coexecution scheduling model implemented for this processor.
+  loom_amdgpu_matrix_coexecution_profile_t matrix_coexecution;
   // Target-local scheduling and hazard facts for this processor.
   loom_amdgpu_processor_scheduling_bits_t scheduling;
   // LDS bank-service models selected by the processor's base target.
@@ -568,6 +613,10 @@ typedef struct loom_amdgpu_target_info_t {
   uint32_t target_kind;
   // Dense ordinal of the backend processor selected by this target.
   uint16_t processor_ordinal;
+  // Target-low descriptor-set key selected by this target.
+  iree_string_view_t descriptor_set_key;
+  // Dense generated descriptor-set ordinal selected by this target.
+  uint16_t descriptor_set_ordinal;
   // Complete instruction constraints active for this target.
   loom_amdgpu_instruction_constraint_bits_t instruction_constraints;
   // Complete LDS bank-service model set selected for this target.
@@ -704,6 +753,11 @@ iree_host_size_t loom_amdgpu_target_info_descriptor_set_count(void);
 // NULL when the ordinal is NONE or outside the generated table.
 const loom_amdgpu_descriptor_set_info_t*
 loom_amdgpu_target_info_descriptor_set_at(uint16_t descriptor_set_ordinal);
+
+// Returns generated matrix coexecution facts for |profile|.
+const loom_amdgpu_matrix_coexecution_profile_info_t*
+loom_amdgpu_target_info_matrix_coexecution_profile(
+    loom_amdgpu_matrix_coexecution_profile_t profile);
 
 // Looks up known AMDGPU processor facts by processor name.
 //

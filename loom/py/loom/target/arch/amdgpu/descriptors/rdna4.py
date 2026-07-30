@@ -17,15 +17,13 @@ from .control import *
 
 _RESOURCE_GFX125X_XDL = "amdgpu.gfx125x.xdl"
 
-_SCHEDULE_GFX125X_MATRIX_VALU = f"{_SCHEDULE_MATRIX}.gfx125x.valu"
-_SCHEDULE_GFX125X_MATRIX_XDL = f"{_SCHEDULE_MATRIX}.gfx125x.xdl"
-_SCHEDULE_GFX125X_MATRIX_XDL_INTEGER = f"{_SCHEDULE_MATRIX}.gfx125x.xdl.integer"
-_SCHEDULE_GFX1251_MATRIX_XDL = f"{_SCHEDULE_MATRIX}.gfx1251.xdl"
-_SCHEDULE_GFX1251_MATRIX_XDL_SLOW = f"{_SCHEDULE_MATRIX}.gfx1251.xdl.slow"
-_SCHEDULE_GFX125X_GENERIC_MATRIX_XDL = f"{_SCHEDULE_MATRIX}.gfx125x.generic.xdl"
-_SCHEDULE_GFX125X_GENERIC_MATRIX_XDL_SLOW = (
-    f"{_SCHEDULE_MATRIX}.gfx125x.generic.xdl.slow"
-)
+_SCHEDULE_MATRIX_VALU_EXACT_16 = f"{_SCHEDULE_MATRIX}.valu.exact.16"
+_SCHEDULE_MATRIX_XDL_EXACT_4 = f"{_SCHEDULE_MATRIX}.xdl.exact.4"
+_SCHEDULE_MATRIX_XDL_EXACT_8 = f"{_SCHEDULE_MATRIX}.xdl.exact.8"
+_SCHEDULE_MATRIX_XDL_EXACT_16 = f"{_SCHEDULE_MATRIX}.xdl.exact.16"
+_SCHEDULE_MATRIX_XDL_EXACT_32 = f"{_SCHEDULE_MATRIX}.xdl.exact.32"
+_SCHEDULE_MATRIX_XDL_ESTIMATED_16 = f"{_SCHEDULE_MATRIX}.xdl.estimated.16"
+_SCHEDULE_MATRIX_XDL_ESTIMATED_32 = f"{_SCHEDULE_MATRIX}.xdl.estimated.32"
 
 _GFX1250_MATRIX_FORMAT_ENUM_DOMAIN_NAMES = {
     physical_format.token: (f"amdgpu.gfx1250.matrix_format.{physical_format.token}")
@@ -131,8 +129,18 @@ _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     register_parts=_AMDGPU_REGISTER_PARTS,
     resources=(
         *_common_scalar_vector_memory_resources(),
-        Resource(_RESOURCE_WMMA, capacity_per_cycle=1, kind=ResourceKind.MATRIX),
-        Resource(_RESOURCE_SWMMAC, capacity_per_cycle=1, kind=ResourceKind.MATRIX),
+        Resource(
+            _RESOURCE_WMMA,
+            capacity_per_cycle=1,
+            kind=ResourceKind.MATRIX,
+            flags=(ResourceFlag.VECTOR_ISSUE,),
+        ),
+        Resource(
+            _RESOURCE_SWMMAC,
+            capacity_per_cycle=1,
+            kind=ResourceKind.MATRIX,
+            flags=(ResourceFlag.VECTOR_ISSUE,),
+        ),
         Resource(_RESOURCE_CONTROL, capacity_per_cycle=1, kind=ResourceKind.CONTROL),
     ),
     schedule_classes=(
@@ -393,11 +401,11 @@ _GFX1250_MATRIX_REUSE_IMMEDIATE_FIELDS = ("matrix_a_reuse", "matrix_b_reuse")
 
 _GFX1250_WMMA_ROW_GROUPS = (
     (
-        _SCHEDULE_GFX125X_MATRIX_VALU,
+        _SCHEDULE_MATRIX_VALU_EXACT_16,
         (("f32.16x16x4.f32", 0x5D, 2, 2, 8, 8, True),),
     ),
     (
-        _SCHEDULE_GFX125X_MATRIX_XDL,
+        _SCHEDULE_MATRIX_XDL_EXACT_4,
         (
             ("f32.16x16x64.fp8.fp8", 0x6A, 8, 8, 8, 8, True),
             ("f32.16x16x64.fp8.bf8", 0x6B, 8, 8, 8, 8, True),
@@ -410,7 +418,7 @@ _GFX1250_WMMA_ROW_GROUPS = (
         ),
     ),
     (
-        _SCHEDULE_GFX125X_MATRIX_XDL,
+        _SCHEDULE_MATRIX_XDL_EXACT_8,
         (
             ("f32.16x16x32.f16", 0x60, 8, 8, 8, 8, True),
             ("f16.16x16x32.f16", 0x61, 8, 8, 4, 4, True),
@@ -429,7 +437,7 @@ _GFX1250_WMMA_ROW_GROUPS = (
         ),
     ),
     (
-        _SCHEDULE_GFX125X_MATRIX_XDL_INTEGER,
+        _SCHEDULE_MATRIX_XDL_EXACT_16,
         (("i32.16x16x64.iu8", 0x72, 8, 8, 8, 8, True),),
     ),
 )
@@ -563,7 +571,11 @@ def _gfx1250_wmma_f8f6f4_descriptor(
                 *_gfx1250_matrix_format_native_values(),
             ),
         ),
-        schedule_class=_SCHEDULE_GFX125X_MATRIX_XDL,
+        schedule_class=(
+            _SCHEDULE_MATRIX_XDL_EXACT_4
+            if lhs_physical_format == "f4" and rhs_physical_format == "f4"
+            else _SCHEDULE_MATRIX_XDL_EXACT_8
+        ),
         encoding_format_id=AMDGPU_ENCODING_FORMAT_VOP3P,
         encoding_id=0x33,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -585,7 +597,7 @@ def _gfx1250_wmma_f8f6f4_descriptors() -> tuple[Descriptor, ...]:
 
 _GFX1250_WMMA_SCALE_ROW_GROUPS = (
     (
-        _SCHEDULE_GFX125X_MATRIX_XDL,
+        _SCHEDULE_MATRIX_XDL_EXACT_8,
         tuple(
             (
                 f"{scale_kind}.f32.16x16x128.f8f6f4."
@@ -609,7 +621,7 @@ _GFX1250_WMMA_SCALE_ROW_GROUPS = (
         ),
     ),
     (
-        _SCHEDULE_GFX125X_MATRIX_XDL,
+        _SCHEDULE_MATRIX_XDL_EXACT_8,
         (
             (
                 "scale.f32.32x16x128.f4",
@@ -656,6 +668,11 @@ def _gfx1250_wmma_scale_descriptor(
 ) -> Descriptor:
     suffix = name.replace(".", "_")
     has_matrix_format_selectors = matrix_physical_formats is not None
+    effective_schedule_class = (
+        _SCHEDULE_MATRIX_XDL_EXACT_4
+        if matrix_physical_formats == ("f4", "f4")
+        else schedule_class
+    )
     immediate_fields = (
         ("matrix_a_fmt", "matrix_b_fmt") if has_matrix_format_selectors else ()
     ) + (
@@ -710,7 +727,7 @@ def _gfx1250_wmma_scale_descriptor(
                 *_gfx1250_wmma_scale_native_values(has_matrix_format_selectors),
             ),
         ),
-        schedule_class=schedule_class,
+        schedule_class=effective_schedule_class,
         encoding_format_id=AMDGPU_ENCODING_FORMAT_VOP3PX2,
         encoding_id=encoding_id,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -727,7 +744,7 @@ def _gfx1250_wmma_scale_descriptors() -> tuple[Descriptor, ...]:
 
 _GFX1250_SWMMAC_ROW_GROUPS = (
     (
-        _SCHEDULE_GFX125X_MATRIX_XDL,
+        _SCHEDULE_MATRIX_XDL_EXACT_8,
         (
             ("f32.16x16x64.f16", 0x65, 8, 16, 8, 8, "index_key_16bit", 1),
             ("f32.16x16x64.bf16", 0x66, 8, 16, 8, 8, "index_key_16bit", 1),
@@ -745,7 +762,7 @@ _GFX1250_SWMMAC_ROW_GROUPS = (
         ),
     ),
     (
-        _SCHEDULE_GFX125X_MATRIX_XDL_INTEGER,
+        _SCHEDULE_MATRIX_XDL_EXACT_16,
         (
             (
                 "i32.16x16x128.iu8",
@@ -852,9 +869,9 @@ def _with_gfx125x_inherited_matrix_schedules(
         semantic_tag = descriptor.semantic_tag or ""
         input_type = semantic_tag.rpartition(".")[2]
         if input_type in ("iu8", "iu4"):
-            schedule_class = _SCHEDULE_GFX125X_MATRIX_XDL_INTEGER
+            schedule_class = _SCHEDULE_MATRIX_XDL_EXACT_16
         elif input_type in ("f16", "bf16", "fp8", "bf8"):
-            schedule_class = _SCHEDULE_GFX125X_MATRIX_XDL
+            schedule_class = _SCHEDULE_MATRIX_XDL_EXACT_8
         else:
             raise ValueError(
                 f"gfx125x matrix descriptor '{descriptor.key}' with semantic "
@@ -864,11 +881,36 @@ def _with_gfx125x_inherited_matrix_schedules(
     return tuple(result)
 
 
-def _with_gfx1251_matrix_schedules(
+def _with_gfx1250_a0_matrix_schedules(
+    descriptors: tuple[Descriptor, ...],
+) -> tuple[Descriptor, ...]:
+    result: list[Descriptor] = []
+    for descriptor in descriptors:
+        schedule_class = descriptor.schedule_class
+        if schedule_class == _SCHEDULE_MATRIX_XDL_EXACT_4:
+            schedule_class = _SCHEDULE_MATRIX_XDL_EXACT_8
+
+        semantic_components = (descriptor.semantic_tag or "").split(".")
+        if (
+            len(semantic_components) >= 2
+            and "f8f6f4" in semantic_components
+            and "f8" in semantic_components[-2:]
+        ):
+            schedule_class = _SCHEDULE_MATRIX_XDL_EXACT_16
+
+        result.append(
+            descriptor
+            if schedule_class == descriptor.schedule_class
+            else replace(descriptor, schedule_class=schedule_class)
+        )
+    return tuple(result)
+
+
+def _with_xdl_latency_tiers(
     descriptors: tuple[Descriptor, ...],
     *,
-    schedule_class: str = _SCHEDULE_GFX1251_MATRIX_XDL,
-    slow_schedule_class: str = _SCHEDULE_GFX1251_MATRIX_XDL_SLOW,
+    regular_schedule_class: str = _SCHEDULE_MATRIX_XDL_EXACT_16,
+    slow_schedule_class: str = _SCHEDULE_MATRIX_XDL_EXACT_32,
 ) -> tuple[Descriptor, ...]:
     result: list[Descriptor] = []
     for descriptor in descriptors:
@@ -877,19 +919,20 @@ def _with_gfx1251_matrix_schedules(
             result.append(descriptor)
             continue
 
-        if descriptor.schedule_class == _SCHEDULE_GFX125X_MATRIX_VALU:
+        if descriptor.schedule_class == _SCHEDULE_MATRIX_VALU_EXACT_16:
             result.append(descriptor)
             continue
         if descriptor.schedule_class not in (
-            _SCHEDULE_GFX125X_MATRIX_XDL,
-            _SCHEDULE_GFX125X_MATRIX_XDL_INTEGER,
+            _SCHEDULE_MATRIX_XDL_EXACT_4,
+            _SCHEDULE_MATRIX_XDL_EXACT_8,
+            _SCHEDULE_MATRIX_XDL_EXACT_16,
         ):
             raise ValueError(
-                f"gfx1251 matrix descriptor '{descriptor.key}' has unexpected "
+                f"two-tier XDL matrix descriptor '{descriptor.key}' has unexpected "
                 f"schedule class '{descriptor.schedule_class}'"
             )
 
-        is_slow = descriptor.schedule_class == _SCHEDULE_GFX125X_MATRIX_XDL_INTEGER
+        is_slow = descriptor.schedule_class == _SCHEDULE_MATRIX_XDL_EXACT_16
         if semantic_tag.startswith("matrix.wmma."):
             is_slow = is_slow or (
                 ".16x16x128.fp8." in semantic_tag
@@ -901,56 +944,17 @@ def _with_gfx1251_matrix_schedules(
         result.append(
             replace(
                 descriptor,
-                schedule_class=slow_schedule_class if is_slow else schedule_class,
+                schedule_class=(
+                    slow_schedule_class if is_slow else regular_schedule_class
+                ),
             )
         )
     return tuple(result)
 
 
-_GFX125X_EXACT_MATRIX_SCHEDULE_CLASS_NAMES = frozenset(
-    (
-        _SCHEDULE_GFX125X_MATRIX_XDL,
-        _SCHEDULE_GFX125X_MATRIX_XDL_INTEGER,
-    )
-)
-
-
-def _with_matrix_schedule_classes(
-    schedule_classes: tuple[ScheduleClass, ...],
-    replacements: tuple[ScheduleClass, ...],
-) -> tuple[ScheduleClass, ...]:
-    return (
-        *(
-            schedule_class
-            for schedule_class in schedule_classes
-            if schedule_class.name not in _GFX125X_EXACT_MATRIX_SCHEDULE_CLASS_NAMES
-        ),
-        *replacements,
-    )
-
-
-_GFX1251_MATRIX_SCHEDULE_CLASSES = (
+_XDL_ESTIMATED_MATRIX_SCHEDULE_CLASSES = (
     ScheduleClass(
-        _SCHEDULE_GFX1251_MATRIX_XDL,
-        latency_kind=LatencyKind.EXACT,
-        latency_cycles=16,
-        issue_uses=(IssueUse(_RESOURCE_GFX125X_XDL, cycles=16, units=1),),
-        hazards=_matrix_hazards(_RESOURCE_GFX125X_XDL),
-        model_quality=ModelQuality.EXACT,
-    ),
-    ScheduleClass(
-        _SCHEDULE_GFX1251_MATRIX_XDL_SLOW,
-        latency_kind=LatencyKind.EXACT,
-        latency_cycles=32,
-        issue_uses=(IssueUse(_RESOURCE_GFX125X_XDL, cycles=32, units=1),),
-        hazards=_matrix_hazards(_RESOURCE_GFX125X_XDL),
-        model_quality=ModelQuality.EXACT,
-    ),
-)
-
-_GFX125X_GENERIC_MATRIX_SCHEDULE_CLASSES = (
-    ScheduleClass(
-        _SCHEDULE_GFX125X_GENERIC_MATRIX_XDL,
+        _SCHEDULE_MATRIX_XDL_ESTIMATED_16,
         latency_kind=LatencyKind.ESTIMATE,
         latency_cycles=16,
         issue_uses=(IssueUse(_RESOURCE_GFX125X_XDL, cycles=16, units=1),),
@@ -958,7 +962,7 @@ _GFX125X_GENERIC_MATRIX_SCHEDULE_CLASSES = (
         model_quality=ModelQuality.ESTIMATED,
     ),
     ScheduleClass(
-        _SCHEDULE_GFX125X_GENERIC_MATRIX_XDL_SLOW,
+        _SCHEDULE_MATRIX_XDL_ESTIMATED_32,
         latency_kind=LatencyKind.ESTIMATE,
         latency_cycles=32,
         issue_uses=(IssueUse(_RESOURCE_GFX125X_XDL, cycles=32, units=1),),
@@ -1000,13 +1004,21 @@ _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
             _RESOURCE_GFX125X_XDL,
             capacity_per_cycle=1,
             kind=ResourceKind.MATRIX,
+            flags=(
+                ResourceFlag.VECTOR_ISSUE,
+                ResourceFlag.MATRIX_COEXECUTION_SOURCE,
+            ),
         ),
-        Resource(_RESOURCE_TENSOR, capacity_per_cycle=1, kind=ResourceKind.LOAD),
+        Resource(
+            _RESOURCE_TENSOR,
+            capacity_per_cycle=1,
+            kind=ResourceKind.LOAD,
+        ),
     ),
     schedule_classes=(
         *_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
         ScheduleClass(
-            _SCHEDULE_GFX125X_MATRIX_VALU,
+            _SCHEDULE_MATRIX_VALU_EXACT_16,
             latency_kind=LatencyKind.EXACT,
             latency_cycles=16,
             issue_uses=(IssueUse(_RESOURCE_VALU, cycles=1, units=1),),
@@ -1014,7 +1026,15 @@ _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
             model_quality=ModelQuality.EXACT,
         ),
         ScheduleClass(
-            _SCHEDULE_GFX125X_MATRIX_XDL,
+            _SCHEDULE_MATRIX_XDL_EXACT_4,
+            latency_kind=LatencyKind.EXACT,
+            latency_cycles=4,
+            issue_uses=(IssueUse(_RESOURCE_GFX125X_XDL, cycles=4, units=1),),
+            hazards=_matrix_hazards(_RESOURCE_GFX125X_XDL),
+            model_quality=ModelQuality.EXACT,
+        ),
+        ScheduleClass(
+            _SCHEDULE_MATRIX_XDL_EXACT_8,
             latency_kind=LatencyKind.EXACT,
             latency_cycles=8,
             issue_uses=(IssueUse(_RESOURCE_GFX125X_XDL, cycles=8, units=1),),
@@ -1022,13 +1042,22 @@ _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
             model_quality=ModelQuality.EXACT,
         ),
         ScheduleClass(
-            _SCHEDULE_GFX125X_MATRIX_XDL_INTEGER,
+            _SCHEDULE_MATRIX_XDL_EXACT_16,
             latency_kind=LatencyKind.EXACT,
             latency_cycles=16,
             issue_uses=(IssueUse(_RESOURCE_GFX125X_XDL, cycles=16, units=1),),
             hazards=_matrix_hazards(_RESOURCE_GFX125X_XDL),
             model_quality=ModelQuality.EXACT,
         ),
+        ScheduleClass(
+            _SCHEDULE_MATRIX_XDL_EXACT_32,
+            latency_kind=LatencyKind.EXACT,
+            latency_cycles=32,
+            issue_uses=(IssueUse(_RESOURCE_GFX125X_XDL, cycles=32, units=1),),
+            hazards=_matrix_hazards(_RESOURCE_GFX125X_XDL),
+            model_quality=ModelQuality.EXACT,
+        ),
+        *_XDL_ESTIMATED_MATRIX_SCHEDULE_CLASSES,
         ScheduleClass(
             _SCHEDULE_TENSOR_LOAD_LDS,
             latency_kind=LatencyKind.VARIABLE,
@@ -1084,17 +1113,27 @@ _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     ),
 )
 
+_AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
+    key="amdgpu.rdna4.gfx1250_a0.core",
+    reg_classes=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.reg_classes,
+    register_parts=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.register_parts,
+    enum_domains=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.enum_domains,
+    resources=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.resources,
+    schedule_classes=(_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.schedule_classes),
+    descriptors=_with_gfx1250_a0_matrix_schedules(
+        _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.descriptors
+    ),
+    categories=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.categories,
+)
+
 _AMDGPU_RDNA4_GFX1251_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     key="amdgpu.rdna4.gfx1251.core",
     reg_classes=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.reg_classes,
     register_parts=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.register_parts,
     enum_domains=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.enum_domains,
     resources=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.resources,
-    schedule_classes=_with_matrix_schedule_classes(
-        _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
-        _GFX1251_MATRIX_SCHEDULE_CLASSES,
-    ),
-    descriptors=_with_gfx1251_matrix_schedules(
+    schedule_classes=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
+    descriptors=_with_xdl_latency_tiers(
         _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.descriptors
     ),
     categories=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.categories,
@@ -1115,11 +1154,8 @@ _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE = (
 )
 _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE = replace(
     _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
-    schedule_classes=_with_matrix_schedule_classes(
-        _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
-        _GFX125X_GENERIC_MATRIX_SCHEDULE_CLASSES,
-    ),
-    descriptors=_with_gfx1251_matrix_schedules(
+    schedule_classes=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.schedule_classes,
+    descriptors=_with_xdl_latency_tiers(
         tuple(
             descriptor
             for descriptor in (
@@ -1127,8 +1163,8 @@ _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE = replace(
             )
             if not (descriptor.semantic_tag or "").startswith("matrix.swmmac.")
         ),
-        schedule_class=_SCHEDULE_GFX125X_GENERIC_MATRIX_XDL,
-        slow_schedule_class=_SCHEDULE_GFX125X_GENERIC_MATRIX_XDL_SLOW,
+        regular_schedule_class=_SCHEDULE_MATRIX_XDL_ESTIMATED_16,
+        slow_schedule_class=_SCHEDULE_MATRIX_XDL_ESTIMATED_32,
     ),
 )
 
@@ -1137,12 +1173,14 @@ __all__ = (
     "_AMDGPU_GFX12_GENERIC_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE",
+    "_AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA4_GFX1251_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE",
-    "_SCHEDULE_GFX125X_GENERIC_MATRIX_XDL",
-    "_SCHEDULE_GFX125X_GENERIC_MATRIX_XDL_SLOW",
+    "_SCHEDULE_MATRIX_XDL_ESTIMATED_16",
+    "_SCHEDULE_MATRIX_XDL_ESTIMATED_32",
     "_gfx125x_reg_classes",
     "_s_getreg_b32_cluster_workgroup_flat_id_overlay",
+    "_with_gfx1250_a0_matrix_schedules",
     "_with_gfx125x_inherited_matrix_schedules",
-    "_with_gfx1251_matrix_schedules",
+    "_with_xdl_latency_tiers",
 )

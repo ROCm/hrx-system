@@ -64,7 +64,12 @@ _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
     register_parts=_AMDGPU_REGISTER_PARTS,
     resources=(
         *_common_scalar_vector_memory_resources(),
-        Resource(_RESOURCE_WMMA, capacity_per_cycle=1, kind=ResourceKind.MATRIX),
+        Resource(
+            _RESOURCE_WMMA,
+            capacity_per_cycle=1,
+            kind=ResourceKind.MATRIX,
+            flags=(ResourceFlag.VECTOR_ISSUE,),
+        ),
         Resource(_RESOURCE_CONTROL, capacity_per_cycle=1, kind=ResourceKind.CONTROL),
     ),
     schedule_classes=(

@@ -11,12 +11,61 @@ import pytest
 from loom.gen.target.arch.amdgpu.encoding.amdgpu_encoding_tables import (
     _bit_range,
     _descriptor_encoding_field_names,
+    _DescriptorEncodingContract,
+    _EncodingContract,
     _field,
     _identifier_seed_without_fields,
+    _project_encoding_contract,
     _replace_encoding_fields,
 )
 from loom.target.arch.amdgpu.isa_xml import AmdgpuIsaEncoding
 from loom.target.low_descriptors import Descriptor
+
+
+def _encoding_contract(*descriptor_keys: str) -> _EncodingContract:
+    return _EncodingContract(
+        descriptors=tuple(
+            _DescriptorEncodingContract(
+                descriptor_key=descriptor_key,
+                format_id=1,
+                bit_count=32,
+                word_count=1,
+                identifier_seed=0,
+                fields=(),
+            )
+            for descriptor_key in descriptor_keys
+        ),
+        source_literal=255,
+        scalar_source_literal=255,
+        scalar_inline_u32=(128, 65),
+        inline_f32_sources=(),
+        vector_source_vgprs=(256, 256),
+        s_mov_b32_opcode=0,
+        v_mov_b32_opcode=1,
+    )
+
+
+def test_encoding_contract_projection_preserves_view_order() -> None:
+    contract = _encoding_contract("test.first", "test.second", "test.third")
+
+    projected = _project_encoding_contract(
+        contract,
+        ("test.third", "test.first"),
+    )
+
+    assert tuple(descriptor.descriptor_key for descriptor in projected.descriptors) == ("test.third", "test.first")
+    assert projected.source_literal == contract.source_literal
+    assert projected.vector_source_vgprs == contract.vector_source_vgprs
+
+
+def test_encoding_contract_projection_rejects_missing_descriptor() -> None:
+    contract = _encoding_contract("test.present")
+
+    with pytest.raises(
+        ValueError,
+        match=r"storage contract is missing view descriptor 'test\.missing'",
+    ):
+        _project_encoding_contract(contract, ("test.missing",))
 
 
 def test_descriptor_encoding_contract_includes_opcode_field() -> None:

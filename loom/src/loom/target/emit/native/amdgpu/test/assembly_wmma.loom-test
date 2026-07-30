@@ -221,6 +221,22 @@ low.func.def target(@gfx1250_target) @gfx1250_wmma_supplemental(%a8: reg<amdgpu.
 
 // ====
 
+// gfx1251 shares the gfx125x encoding storage while selecting its own matrix
+// schedule view. Exercise supplemental fields from VOP3, VOP3P, and VOP3PX2
+// through the native encoder rather than only formatting their assembly.
+// RUN: emit amdgpu-native @gfx1251_native_supplemental waits=none
+amdgpu.target<gfx1251> @gfx1251_target
+low.func.def target(@gfx1251_target) @gfx1251_native_supplemental(%a16: reg<amdgpu.vgpr x16>, %b12: reg<amdgpu.vgpr x12>, %packed8: reg<amdgpu.vgpr x2>, %scale0: reg<amdgpu.vgpr>, %scale1: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.gfx1251.core> {
+  %converted = v_cvt_scale_pk8_bf16_fp8 %packed8, %scale0 {scale_sel = 3}
+  %wmma = v_wmma_f32_16x16x128_f8f6f4_f8_f6 %a16, %b12, %acc {matrix_a_fmt = 1, matrix_b_fmt = 2}
+  %scaled = v_wmma_scale_f32_16x16x128_f8f6f4_f8_f6 %a16, %b12, %wmma, %scale0, %scale1 {matrix_a_fmt = 1, matrix_b_fmt = 2, matrix_a_scale = 1, matrix_b_scale = 1, matrix_a_scale_fmt = 0, matrix_b_scale_fmt = 0, matrix_a_reuse = 1, matrix_b_reuse = 1}
+  return
+}
+
+// ----
+
+// ====
+
 // RUN: emit amdgpu-assembly @gfx1250_retained_gfx12_swmmac waits=none
 amdgpu.target<gfx1250> @gfx1250_target
 low.func.def target(@gfx1250_target) @gfx1250_retained_gfx12_swmmac(%acc8: reg<amdgpu.vgpr x8>, %acc4: reg<amdgpu.vgpr x4>, %a4: reg<amdgpu.vgpr x4>, %a2: reg<amdgpu.vgpr x2>, %a1: reg<amdgpu.vgpr>, %b8: reg<amdgpu.vgpr x8>, %b4: reg<amdgpu.vgpr x4>, %b2: reg<amdgpu.vgpr x2>, %index: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {

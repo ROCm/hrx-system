@@ -126,20 +126,13 @@ if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE AND LOOM_TARGET_ARCH_A
 loom_target_table_cc_library(
   NAME
     gfx12_5_generic_encoding_tables
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::encoding::encoding_tables
-  ARGS
-    "--target=gfx12_5_generic"
-    "--descriptor-set-key=amdgpu.gfx12_5.generic.core"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-    "--public-header=loom/target/arch/amdgpu/encoding/gfx12_5_generic_encoding_tables.h"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-    "loom_amdgpu_isa_xml"
+  HEADER
+    "gfx12_5_generic_encoding_tables.h"
   DEPS
     ::encoding_defs
+    ::rdna4_gfx125x_encoding_tables
     iree::base
-  EXCLUDE_FROM_ALL
+  HEADER_ONLY
 )
 endif()
 
@@ -147,20 +140,13 @@ if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE AND LOOM_TARGET_ARCH_AMD
 loom_target_table_cc_library(
   NAME
     rdna4_gfx1251_encoding_tables
-  GENERATOR
-    loom::py::loom::gen::target::arch::amdgpu::encoding::encoding_tables
-  ARGS
-    "--target=rdna4_gfx1251"
-    "--descriptor-set-key=amdgpu.rdna4.gfx1251.core"
-    "--isa-xml=rdna4:${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-    "--public-header=loom/target/arch/amdgpu/encoding/rdna4_gfx1251_encoding_tables.h"
-  INPUTS
-    "${_LOOM_AMDGPU_ISA_XML_SOURCE_DIR}/amdgpu_isa_rdna4.xml"
-    "loom_amdgpu_isa_xml"
+  HEADER
+    "rdna4_gfx1251_encoding_tables.h"
   DEPS
     ::encoding_defs
+    ::rdna4_gfx125x_encoding_tables
     iree::base
-  EXCLUDE_FROM_ALL
+  HEADER_ONLY
 )
 endif()
 
@@ -237,12 +223,20 @@ loom_target_table_cc_library(
 )
 endif()
 
-if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX125X_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU)
 loom_target_table_cc_library(
   NAME
     rdna4_gfx125x_encoding_tables
   GENERATOR
     loom::py::loom::gen::target::arch::amdgpu::encoding::encoding_tables
+  GENERATED_HDR_FLAGS
+    "--view-header=gfx12_5_generic"
+    "--view-header=rdna4_gfx1250_a0"
+    "--view-header=rdna4_gfx1251"
+  GENERATED_HDRS
+    "gfx12_5_generic_encoding_tables.h"
+    "rdna4_gfx1250_a0_encoding_tables.h"
+    "rdna4_gfx1251_encoding_tables.h"
   ARGS
     "--target=rdna4_gfx125x"
     "--descriptor-set-key=amdgpu.rdna4.gfx125x.core"
@@ -255,6 +249,20 @@ loom_target_table_cc_library(
     ::encoding_defs
     iree::base
   EXCLUDE_FROM_ALL
+)
+endif()
+
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE AND LOOM_TARGET_ARCH_AMDGPU)
+loom_target_table_cc_library(
+  NAME
+    rdna4_gfx1250_a0_encoding_tables
+  HEADER
+    "rdna4_gfx1250_a0_encoding_tables.h"
+  DEPS
+    ::encoding_defs
+    ::rdna4_gfx125x_encoding_tables
+    iree::base
+  HEADER_ONLY
 )
 endif()
 
@@ -327,6 +335,9 @@ endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
   list(APPEND _encoding_platform_defines "LOOM_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE")
 endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE)
+  list(APPEND _encoding_platform_defines "LOOM_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE")
+endif()
 set(_encoding_platform_deps "")
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE)
   list(APPEND _encoding_platform_deps ::cdna3_encoding_tables)
@@ -360,6 +371,9 @@ if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_GENERIC_CORE)
 endif()
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX12_5_GENERIC_CORE)
   list(APPEND _encoding_platform_deps ::gfx12_5_generic_encoding_tables)
+endif()
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE)
+  list(APPEND _encoding_platform_deps ::rdna4_gfx1250_a0_encoding_tables)
 endif()
 loom_cc_library(
   NAME

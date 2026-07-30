@@ -46,10 +46,12 @@ def generate_descriptor_set_shared_source(
     vocabulary during generation.
     """
 
+    required_schedule_class_names = tuple(sorted({descriptor.schedule_class for view_spec in view_specs for descriptor in view_spec.descriptors if descriptor.schedule_class is not None}))
     compiled = compiler.compile_descriptor_set(
         storage_spec,
         allowlist=None,
         allow_ambiguous_asm_mnemonics=True,
+        required_schedule_class_names=required_schedule_class_names,
     )
     descriptor_set_views = tuple(views.descriptor_set_view_for_spec(compiled, view_spec) for view_spec in view_specs)
     return c_emit.emit_source_for_views(compiled, views=descriptor_set_views)
@@ -61,10 +63,12 @@ def generate_descriptor_set_shared_header(
 ) -> str:
     """Generates a public view header for a shared descriptor storage source."""
 
+    required_schedule_class_names = tuple(sorted({descriptor.schedule_class for descriptor in view_spec.descriptors if descriptor.schedule_class is not None}))
     compiled = compiler.compile_descriptor_set(
         storage_spec,
         allowlist=None,
         allow_ambiguous_asm_mnemonics=True,
+        required_schedule_class_names=required_schedule_class_names,
     )
     views.descriptor_set_view_for_spec(compiled, view_spec)
     return c_emit.emit_header_for_spec(compiled, view_spec)

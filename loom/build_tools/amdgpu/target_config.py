@@ -150,8 +150,13 @@ class TargetConfig:
             exact_targets, code_object_targets
         )
         self._validate_generic_descriptor_membership()
-        self._validate_targets()
+        descriptor_backed_keys.update(self._validate_targets())
         self._validate_descriptor_set_defaults(descriptor_backed_keys)
+
+    def _target_descriptor_set_key(self, target) -> str:
+        return self._target_info.amdgpu_target_descriptor_set_key(
+            target, self._processor_infos[target.processor]
+        )
 
     def _validate_processor_infos(
         self, exact_targets: set[str], code_object_targets: set[str]
@@ -260,8 +265,9 @@ class TargetConfig:
                     f"{member_generator_targets}"
                 )
 
-    def _validate_targets(self) -> None:
+    def _validate_targets(self) -> set[str]:
         seen_targets: set[str] = set()
+        descriptor_set_keys: set[str] = set()
         for target in self._targets:
             if target.target in seen_targets:
                 raise ValueError(f"duplicate target row for {target.target}")
@@ -283,7 +289,7 @@ class TargetConfig:
                     f"Loom AMDGPU target {target.target} has no processor row "
                     f"{target.processor}"
                 )
-            descriptor_set_key = processor_descriptor_set_key(processor_info)
+            descriptor_set_key = self._target_descriptor_set_key(target)
             if not descriptor_set_key:
                 raise ValueError(
                     f"Loom AMDGPU target {target.target} has no descriptor-set key"
@@ -293,12 +299,14 @@ class TargetConfig:
                     f"Loom AMDGPU target {target.target} references "
                     f"unknown descriptor set {descriptor_set_key}"
                 )
+            descriptor_set_keys.add(descriptor_set_key)
+        return descriptor_set_keys
 
     def _validate_descriptor_set_defaults(
         self, descriptor_backed_keys: set[str]
     ) -> None:
         default_target_descriptor_set_keys = {
-            processor_descriptor_set_key(self._processor_infos[target.processor])
+            self._target_descriptor_set_key(target)
             for target in self._targets
             if target.default_for_descriptor_set
         }
@@ -355,13 +363,26 @@ class TargetConfig:
             key = processor_descriptor_set_key(processor_info)
             if key and key not in keys:
                 keys.append(key)
+        for target in self._targets:
+            key = self._target_descriptor_set_key(target)
+            if key not in keys:
+                keys.append(key)
         return keys
 
     def exact_processors_for_descriptor_set(self, key: str) -> list[str]:
-        processors: list[str] = []
-        for processor_info in self._supported_exact_processor_infos:
-            if processor_descriptor_set_key(processor_info) == key:
-                processors.append(processor_info.processor)
+        processors = [
+            processor_info.processor
+            for processor_info in self._supported_exact_processor_infos
+            if processor_descriptor_set_key(processor_info) == key
+        ]
+        for target in self._targets:
+            if (
+                is_generic_processor(self._processor_infos[target.processor])
+                or self._target_descriptor_set_key(target) != key
+                or target.processor in processors
+            ):
+                continue
+            processors.append(target.processor)
         return processors
 
     def generic_processors_for_descriptor_set(self, key: str) -> list[str]:

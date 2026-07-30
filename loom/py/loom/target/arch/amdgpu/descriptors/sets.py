@@ -2238,7 +2238,13 @@ def _gfx1250_core_overlay_descriptors(
 def _gfx1251_core_overlay_descriptors(
     spec: AmdgpuIsaFactSource,
 ) -> tuple[Descriptor, ...]:
-    return _with_gfx1251_matrix_schedules(_gfx1250_core_overlay_descriptors(spec))
+    return _with_xdl_latency_tiers(_gfx1250_core_overlay_descriptors(spec))
+
+
+def _gfx1250_a0_core_overlay_descriptors(
+    spec: AmdgpuIsaFactSource,
+) -> tuple[Descriptor, ...]:
+    return _with_gfx1250_a0_matrix_schedules(_gfx1250_core_overlay_descriptors(spec))
 
 
 def _gfx12_5_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
@@ -2258,10 +2264,10 @@ def _gfx12_5_generic_core_overlay_descriptors(
         spec, _gfx12_5_generic_core_overlays()
     )
     return _with_execution_mask_state_reads(
-        _with_gfx1251_matrix_schedules(
+        _with_xdl_latency_tiers(
             _with_gfx125x_inherited_matrix_schedules(descriptors),
-            schedule_class=_SCHEDULE_GFX125X_GENERIC_MATRIX_XDL,
-            slow_schedule_class=_SCHEDULE_GFX125X_GENERIC_MATRIX_XDL_SLOW,
+            regular_schedule_class=_SCHEDULE_MATRIX_XDL_ESTIMATED_16,
+            slow_schedule_class=_SCHEDULE_MATRIX_XDL_ESTIMATED_32,
         )
     )
 
@@ -2277,6 +2283,7 @@ def _amdgpu_core_descriptor_set_bases() -> tuple[DescriptorSet, ...]:
         _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,
+        _AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_RDNA4_GFX1251_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,
     )
@@ -2310,6 +2317,7 @@ __all__ = (
     "_AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE",
+    "_AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA4_GFX1251_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE",
     "_amdgpu_core_descriptor_set_bases",
@@ -2326,6 +2334,7 @@ __all__ = (
     "_gfx12_5_generic_core_overlays",
     "_gfx1250_core_overlay_descriptors",
     "_gfx1250_core_overlays",
+    "_gfx1250_a0_core_overlay_descriptors",
     "_gfx1251_core_overlay_descriptors",
     "_gfx12_core_overlay_descriptors",
     "_gfx12_core_overlays",

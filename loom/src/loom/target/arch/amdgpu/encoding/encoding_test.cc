@@ -320,6 +320,17 @@ TEST(AmdgpuEncodingTest, PacksGfx125XPackedFp8Vop1Words) {
   }
 }
 
+TEST(AmdgpuEncodingTest, PacksGfx125XVNop) {
+  LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
+      table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X,
+      "amdgpu.rdna4.gfx125x.core");
+  loom_amdgpu_encoding_packet_t packet = {};
+  IREE_ASSERT_OK(loom_amdgpu_encoding_pack_v_nop(table, &packet));
+  EXPECT_EQ(packet.word_count, 1u);
+  EXPECT_EQ(packet.bit_count, 32u);
+  EXPECT_EQ(packet.words[0], UINT32_C(0x7e000000));
+}
+
 TEST(AmdgpuEncodingTest, RejectsGfx125XPackedFp8HighSource) {
   LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
       table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X,

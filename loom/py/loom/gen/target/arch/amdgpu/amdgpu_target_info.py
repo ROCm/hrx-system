@@ -94,6 +94,14 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY,
     AMDGPU_KERNEL_ENTRY_PROFILE_NONE,
     AMDGPU_LDS_BANK_SERVICE_MODEL_SET_ORDINAL_NONE,
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE,
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16,
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32,
+    AMDGPU_MATRIX_COEXECUTION_PROFILES,
+    AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE,
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS,
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC,
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908,
@@ -135,6 +143,7 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     amdgpu_generic_code_object_compatibility_info,
     amdgpu_lds_bank_service_model_sets,
     amdgpu_processor_ordinal,
+    amdgpu_target_descriptor_set_key,
     amdgpu_target_instruction_constraints,
     kernel_descriptor_profile_supports_wavefront_size,
     sorted_descriptor_set_infos,
@@ -208,6 +217,17 @@ _MATRIX_FEATURE_PROFILE_EXPRS = {
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12",
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250",
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC: "LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC",
+}
+
+_MATRIX_COEXECUTION_PROFILE_EXPRS = {
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE: "LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE",
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16: "LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16",
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32: "LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32",
+}
+
+_MATRIX_COEXECUTION_SOURCE_EXPRS = {
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA: "LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA",
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC: "LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC",
 }
 
 _BUFFER_RESOURCE_CACHE_SWIZZLE_EXPRS = {
@@ -394,6 +414,22 @@ def _kernel_entry_profile_expr(profile: str) -> str:
 
 def _matrix_feature_profile_expr(profile: str) -> str:
     return _enum_expr(profile, _MATRIX_FEATURE_PROFILE_EXPRS, "matrix feature profile")
+
+
+def _matrix_coexecution_profile_expr(profile: str) -> str:
+    return _enum_expr(
+        profile,
+        _MATRIX_COEXECUTION_PROFILE_EXPRS,
+        "matrix coexecution profile",
+    )
+
+
+def _matrix_coexecution_source_expr(source: str) -> str:
+    return _enum_expr(
+        source,
+        _MATRIX_COEXECUTION_SOURCE_EXPRS,
+        "matrix coexecution source",
+    )
 
 
 def _buffer_resource_cache_swizzle_expr(kind: str) -> str:
@@ -958,6 +994,52 @@ def _validate_descriptor_set_rows(rows: Sequence[_AmdgpuDescriptorSetRow]) -> No
                 raise ValueError(f"AMDGPU {name} opcode for {row.info.key} must fit u16")
 
 
+def _validate_matrix_coexecution_sources() -> None:
+    if tuple(_MATRIX_COEXECUTION_SOURCE_EXPRS) != tuple(info.source for info in AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS):
+        raise ValueError("AMDGPU matrix coexecution source expressions must cover sources in enum order")
+    for source_info in AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS:
+        _matrix_coexecution_source_expr(source_info.source)
+        if source_info.result_operand_index < 0 or source_info.result_operand_index > 0xFF:
+            raise ValueError(f"AMDGPU matrix coexecution result operand for {source_info.source} must fit u8")
+        if source_info.source_operand_start < 0 or source_info.source_operand_start > 0xFF:
+            raise ValueError(f"AMDGPU matrix coexecution source operand start for {source_info.source} must fit u8")
+        if source_info.source_operand_count <= 0 or source_info.source_operand_count > 0xFF:
+            raise ValueError(f"AMDGPU matrix coexecution source operand count for {source_info.source} must fit nonzero u8")
+        source_operand_end = source_info.source_operand_start + source_info.source_operand_count
+        if source_operand_end > 0x100:
+            raise ValueError(f"AMDGPU matrix coexecution source operand range for {source_info.source} must fit u8 indexes")
+        if source_info.source_operand_start <= source_info.result_operand_index < source_operand_end:
+            raise ValueError(f"AMDGPU matrix coexecution result operand for {source_info.source} overlaps its sources")
+
+
+def _validate_matrix_coexecution_profiles() -> None:
+    _validate_matrix_coexecution_sources()
+    if tuple(AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE) != (AMDGPU_MATRIX_COEXECUTION_PROFILES):
+        raise ValueError("AMDGPU matrix coexecution rule tables must cover profiles in enum order")
+    for profile, rules in AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE.items():
+        if profile == AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE:
+            if rules:
+                raise ValueError("AMDGPU none matrix coexecution profile cannot contain rules")
+            continue
+        if not rules:
+            raise ValueError(f"AMDGPU matrix coexecution profile {profile} must contain rules")
+        if len(rules) > 0xFF:
+            raise ValueError(f"AMDGPU matrix coexecution profile {profile} must fit u8 rule count")
+        keys: set[tuple[str, int]] = set()
+        for rule in rules:
+            _matrix_coexecution_source_expr(rule.source)
+            if rule.latency_cycles <= 0 or rule.latency_cycles > 0xFF:
+                raise ValueError(f"AMDGPU matrix coexecution latency for {profile} must fit nonzero u8")
+            if rule.vector_issue_distance <= 0 or rule.vector_issue_distance > 0xFF or rule.matrix_issue_distance <= 0 or rule.matrix_issue_distance > 0xFF:
+                raise ValueError(f"AMDGPU matrix coexecution distances for {profile} must fit nonzero u8")
+            if rule.matrix_issue_distance < rule.vector_issue_distance:
+                raise ValueError(f"AMDGPU matrix coexecution matrix distance for {profile} cannot be shorter than its vector distance")
+            key = (rule.source, rule.latency_cycles)
+            if key in keys:
+                raise ValueError(f"AMDGPU matrix coexecution profile {profile} has duplicate rule {key}")
+            keys.add(key)
+
+
 def _validate_processors(
     processors: Sequence[AmdgpuProcessorInfo],
     descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
@@ -998,6 +1080,7 @@ def _validate_processors(
             raise ValueError(f"AMDGPU default wavefront size for {info.processor} must be 32 or 64")
         supported_wavefront_sizes = _supported_wavefront_sizes(info)
         _matrix_feature_profile_expr(info.features.matrix)
+        _matrix_coexecution_profile_expr(info.features.matrix_coexecution)
         if kernel_descriptor.flags < 0 or kernel_descriptor.flags > 0xFFFFFFFFFFFFFFFF:
             raise ValueError(f"AMDGPU kernel descriptor ABI flags for {info.processor} must fit u64")
         _kernel_descriptor_abi_flags_expr(kernel_descriptor.flags)
@@ -1085,6 +1168,9 @@ def _emit_tables_header() -> str:
         "    loom_amdgpu_target_info_descriptor_set_infos[];",
         "extern const iree_host_size_t",
         "    loom_amdgpu_target_info_descriptor_set_info_count;",
+        "",
+        "extern const loom_amdgpu_matrix_coexecution_profile_info_t",
+        "    loom_amdgpu_target_info_matrix_coexecution_profile_infos[];",
         "",
         "extern const loom_amdgpu_processor_info_t",
         "    loom_amdgpu_target_info_processor_infos[];",
@@ -1192,6 +1278,7 @@ def _emit_target_rows(
     lines.append("const loom_amdgpu_target_info_t loom_amdgpu_target_info_target_infos[] = {")
     for info in targets:
         processor = processors_by_name[info.processor]
+        descriptor_set_key = amdgpu_target_descriptor_set_key(info, processor)
         model_keys = info.semantics.lds_bank_service_models if info.semantics.lds_bank_service_models is not None else processor.features.lds_bank_service_models
         metadata_extensions = info.semantics.kernel_metadata_extensions
         metadata_array_name = _target_kernel_metadata_extension_array_name(info)
@@ -1203,6 +1290,8 @@ def _emit_target_rows(
                 f"    .name = IREE_SVL({_c_string_arg(info.target)}),",
                 f"    .target_kind = {_u32_expr(info.enum_value)},",
                 f"    .processor_ordinal = {_u16_expr(amdgpu_processor_ordinal(info.processor))},",
+                f"    .descriptor_set_key = IREE_SVL({_c_string_arg(descriptor_set_key)}),",
+                f"    .descriptor_set_ordinal = {_u16_expr(amdgpu_descriptor_set_ordinal(descriptor_set_key))},",
                 f"    .instruction_constraints = {_instruction_constraint_bits_expr(amdgpu_target_instruction_constraints(info, processor))},",
                 f"    .lds_bank_service_model_set_ordinal = {_lds_bank_service_model_set_ordinal_expr(model_keys, model_set_ordinals)},",
                 "    .kernel_metadata_extensions = {",
@@ -1232,6 +1321,65 @@ def _emit_physical_target_rows(
                 f"    .processor_ordinal = {_u16_expr(amdgpu_processor_ordinal(info.processor))},",
                 f"    .asic_revision = {_u32_expr(info.asic_revision)},",
                 f"    .target_kind = {_u32_expr(target.enum_value)},",
+                "  },",
+            ]
+        )
+    lines.extend(["};", ""])
+    return lines
+
+
+def _matrix_coexecution_rule_symbol(profile: str) -> str:
+    return f"kAmdgpuMatrixCoexecutionRules{_c_ident(profile)}"
+
+
+def _emit_matrix_coexecution_source_layouts() -> str:
+    _validate_matrix_coexecution_sources()
+    lines: list[str] = []
+    for source_info in AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS:
+        lines.extend(
+            [
+                f"  [{_matrix_coexecution_source_expr(source_info.source)}] = {{",
+                f"    .result_operand_index = {source_info.result_operand_index},",
+                f"    .source_operand_start = {source_info.source_operand_start},",
+                f"    .source_operand_count = {source_info.source_operand_count},",
+                "  },",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _emit_matrix_coexecution_rows() -> list[str]:
+    lines: list[str] = []
+    for profile, rules in AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE.items():
+        if not rules:
+            continue
+        lines.append(f"static const loom_amdgpu_matrix_coexecution_rule_t {_matrix_coexecution_rule_symbol(profile)}[] = {{")
+        for rule in rules:
+            lines.extend(
+                [
+                    "  {",
+                    f"    .source = {_matrix_coexecution_source_expr(rule.source)},",
+                    f"    .latency_cycles = {rule.latency_cycles},",
+                    f"    .matrix_issue_distance = {rule.matrix_issue_distance},",
+                    f"    .vector_issue_distance = {rule.vector_issue_distance},",
+                    "  },",
+                ]
+            )
+        lines.extend(["};", ""])
+
+    lines.append("const loom_amdgpu_matrix_coexecution_profile_info_t loom_amdgpu_target_info_matrix_coexecution_profile_infos[] = {")
+    for profile, rules in AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE.items():
+        profile_expr = _matrix_coexecution_profile_expr(profile)
+        if not rules:
+            lines.append(f"  [{profile_expr}] = {{0}},")
+            continue
+        maximum_issue_distance = max(max(rule.matrix_issue_distance, rule.vector_issue_distance) for rule in rules)
+        lines.extend(
+            [
+                f"  [{profile_expr}] = {{",
+                f"    .rules = {_matrix_coexecution_rule_symbol(profile)},",
+                f"    .rule_count = {len(rules)},",
+                f"    .maximum_issue_distance = {maximum_issue_distance},",
                 "  },",
             ]
         )
@@ -1298,6 +1446,7 @@ def _emit_processor_rows(
                 "      },",
                 "      .features = {",
                 f"        .matrix = {_matrix_feature_profile_expr(info.features.matrix)},",
+                f"        .matrix_coexecution = {_matrix_coexecution_profile_expr(info.features.matrix_coexecution)},",
                 f"        .scheduling = {_processor_scheduling_bits_expr(info.features.scheduling)},",
                 f"        .lds_bank_service_model_set_ordinal = {_lds_bank_service_model_set_ordinal_expr(info.features.lds_bank_service_models, model_set_ordinals)},",
                 "      },",
@@ -1334,6 +1483,7 @@ def _emit_tables_source(
         "// clang-format off",
     ]
     lines.extend(_emit_descriptor_set_rows(descriptor_set_rows))
+    lines.extend(_emit_matrix_coexecution_rows())
     lines.extend(_emit_processor_rows(processors, model_set_ordinals))
     lines.extend(_emit_target_rows(targets, processors, model_set_ordinals))
     lines.extend(_emit_physical_target_rows(targets))
@@ -1375,6 +1525,7 @@ def write_target_info_to_paths(
     descriptor_set_rows = _materialize_descriptor_set_rows(descriptor_sets, isa_specs)
     _validate_descriptor_sets(descriptor_sets)
     _validate_descriptor_set_rows(descriptor_set_rows)
+    _validate_matrix_coexecution_profiles()
     _validate_processors(processors, descriptor_sets)
     validate_amdgpu_lds_bank_service_model_infos(amdgpu_descriptor_ref_keys())
     validate_amdgpu_code_object_processor_rows(processors)
@@ -1428,6 +1579,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Generated LDS bank-service model-set fragment path.",
     )
     parser.add_argument(
+        "--matrix-coexecution-source-layouts",
+        type=Path,
+        help="Generated matrix coexecution source-layout fragment path.",
+    )
+    parser.add_argument(
         "--isa-xml",
         action="append",
         default=[],
@@ -1458,6 +1614,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.lds_bank_service_model_rows is not None:
         args.lds_bank_service_model_rows.parent.mkdir(parents=True, exist_ok=True)
         args.lds_bank_service_model_rows.write_text(_emit_lds_bank_service_model_rows(), encoding="utf-8")
+        wrote_output = True
+    if args.matrix_coexecution_source_layouts is not None:
+        args.matrix_coexecution_source_layouts.parent.mkdir(parents=True, exist_ok=True)
+        args.matrix_coexecution_source_layouts.write_text(_emit_matrix_coexecution_source_layouts(), encoding="utf-8")
         wrote_output = True
     if not wrote_output:
         parser.error("at least one output path is required")
