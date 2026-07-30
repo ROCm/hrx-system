@@ -62,3 +62,42 @@ func.def target(@target) @report_bf16_to_bf8_via_f32_native(%input: vector<4xbf1
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=10 rows=1
 COMPILE-REPORT: source_low[0] function=report_bf16_to_bf8_via_f32_native source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.bf16_via_f32_pair_native emitted_ops=10
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @report_f32_to_fp8_software(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
+  %converted = vector.fptrunc %input : vector<4xf32> to vector<4xf8E4M3>
+  func.return %converted : vector<4xf8E4M3>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=67 rows=1
+COMPILE-REPORT: source_low[0] function=report_f32_to_fp8_software source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.f32_software emitted_ops=67
+
+// ====
+
+amdgpu.target<gfx1151> @target
+func.def target(@target) @report_f16_to_bf8_software(%input: vector<4xf16>) -> (vector<4xf8E5M2>) {
+  %converted = vector.fptrunc %input : vector<4xf16> to vector<4xf8E5M2>
+  func.return %converted : vector<4xf8E5M2>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=43 rows=1
+COMPILE-REPORT: source_low[0] function=report_f16_to_bf8_software source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.f16_e5m2_software emitted_ops=43
+
+// ====
+
+amdgpu.target<gfx942> @target
+func.def target(@target) @report_f32_to_fp8_fnuz_bridge(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
+  %converted = vector.fptrunc %input : vector<4xf32> to vector<4xf8E4M3>
+  func.return %converted : vector<4xf8E4M3>
+}
+
+// ----
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=37 rows=1
+COMPILE-REPORT: source_low[0] function=report_f32_to_fp8_fnuz_bridge source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.f32_fnuz_bridge emitted_ops=37

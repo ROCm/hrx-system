@@ -56,20 +56,44 @@ typedef struct loom_amdgpu_constant_plan_t {
   bool i1_value;
 } loom_amdgpu_constant_plan_t;
 
+typedef enum loom_amdgpu_i8_pack_permute_kind_e {
+  LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_NONE = 0,
+  LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_LITERAL_SELECTOR = 1,
+  LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_REGISTER_SELECTOR = 2,
+} loom_amdgpu_i8_pack_permute_kind_t;
+
+typedef struct loom_amdgpu_i8_pack_permute_plan_t {
+  // Representation selected for V_PERM_B32 byte selector operands.
+  loom_amdgpu_i8_pack_permute_kind_t kind;
+  // Descriptor selected for each byte permutation packet.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
+} loom_amdgpu_i8_pack_permute_plan_t;
+
 typedef enum loom_amdgpu_fp8_encode_kind_e {
   LOOM_AMDGPU_FP8_ENCODE_KIND_NONE = 0,
   LOOM_AMDGPU_FP8_ENCODE_KIND_F32_PAIR = 1,
   LOOM_AMDGPU_FP8_ENCODE_KIND_F32_PAIR_SATURATE_E4M3 = 2,
   LOOM_AMDGPU_FP8_ENCODE_KIND_F16_PAIR = 3,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F32_SOFTWARE_E4M3 = 4,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F32_SOFTWARE_E5M2 = 5,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F32_FNUZ_BRIDGE_E4M3 = 6,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F32_FNUZ_BRIDGE_E5M2 = 7,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F16_SOFTWARE_E5M2 = 8,
 } loom_amdgpu_fp8_encode_kind_t;
 
 typedef struct loom_amdgpu_fp8_encode_plan_t {
-  // Source pair representation consumed by the selected encode packets.
+  // Exact encoding strategy selected from the target descriptor set.
   loom_amdgpu_fp8_encode_kind_t kind;
   // Descriptor writing the low encoded byte pair of a result register.
   loom_amdgpu_descriptor_ref_t low_descriptor_ref;
   // Descriptor continuing a result register with its high encoded byte pair.
   loom_amdgpu_descriptor_ref_t high_descriptor_ref;
+  // Optional fused descriptor adding the rounding LSB and literal bias.
+  loom_amdgpu_descriptor_ref_t round_add_descriptor_ref;
+  // Optional descriptor inserting encoded sign bits into a result word.
+  loom_amdgpu_descriptor_ref_t sign_insert_descriptor_ref;
+  // Byte permutation plan selected for encoded bytes or packed sign bits.
+  loom_amdgpu_i8_pack_permute_plan_t packed_i8_permute;
 } loom_amdgpu_fp8_encode_plan_t;
 
 typedef enum loom_amdgpu_vector_16bit_float_conversion_kind_e {
@@ -288,19 +312,6 @@ typedef enum loom_amdgpu_vector_conversion_kind_e {
   LOOM_AMDGPU_VECTOR_CONVERSION_KIND_PACKED_U8_TO_F32,
   LOOM_AMDGPU_VECTOR_CONVERSION_KIND_COUNT_,
 } loom_amdgpu_vector_conversion_kind_t;
-
-typedef enum loom_amdgpu_i8_pack_permute_kind_e {
-  LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_NONE = 0,
-  LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_LITERAL_SELECTOR = 1,
-  LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_REGISTER_SELECTOR = 2,
-} loom_amdgpu_i8_pack_permute_kind_t;
-
-typedef struct loom_amdgpu_i8_pack_permute_plan_t {
-  // Representation selected for V_PERM_B32 byte selector operands.
-  loom_amdgpu_i8_pack_permute_kind_t kind;
-  // Descriptor selected for each byte permutation packet.
-  loom_amdgpu_descriptor_ref_t descriptor_ref;
-} loom_amdgpu_i8_pack_permute_plan_t;
 
 typedef struct loom_amdgpu_vector_conversion_plan_t {
   // Source vector value being converted.

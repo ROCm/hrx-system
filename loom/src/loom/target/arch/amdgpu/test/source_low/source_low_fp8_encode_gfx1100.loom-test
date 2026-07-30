@@ -1,0 +1,110 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @vector_fptrunc_f32x4_to_fp8(%input: vector<4xf32>) -> (vector<4xf8E4M3>) {
+  %converted = vector.fptrunc %input : vector<4xf32> to vector<4xf8E4M3>
+  func.return %converted : vector<4xf8E4M3>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_f32x4_to_fp8(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = v_mov_b32 1138753536
+  %6 = v_mov_b32 2139095040
+  %7 = v_mov_b32 1015021568
+  %8 = v_mov_b32 127
+  %9 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %10 = v_and_b32_lit %9, 2147483647
+  %11 = v_min_u32 %5, %10
+  %12 = v_bfe_u32_offset_width_inline %11 {offset = 20, width = 1}
+  %13 = v_add3_u32_src2_lit %11, %12, 524287
+  %14 = v_lshrrev_b32_src0_inline %13, 20
+  %15 = v_add_u32_lit %14, 4294966336
+  %16 = v_add_f32_lit %11, 1182793728
+  %17 = v_add_u32_lit %16, 3112173568
+  %18 = v_cmp_lt_u32 %11, %7
+  %19 = v_cndmask_b32 %15, %17, %18
+  %20 = v_cmp_gt_u32 %10, %6
+  %21 = v_cndmask_b32 %19, %8, %20
+  %22 = v_lshrrev_b32_src0_inline %9, 24
+  %23 = v_bfi_b32_src0_lit %22, %21, 128
+  %24 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %25 = v_and_b32_lit %24, 2147483647
+  %26 = v_min_u32 %5, %25
+  %27 = v_bfe_u32_offset_width_inline %26 {offset = 20, width = 1}
+  %28 = v_add3_u32_src2_lit %26, %27, 524287
+  %29 = v_lshrrev_b32_src0_inline %28, 20
+  %30 = v_add_u32_lit %29, 4294966336
+  %31 = v_add_f32_lit %26, 1182793728
+  %32 = v_add_u32_lit %31, 3112173568
+  %33 = v_cmp_lt_u32 %26, %7
+  %34 = v_cndmask_b32 %30, %32, %33
+  %35 = v_cmp_gt_u32 %25, %6
+  %36 = v_cndmask_b32 %34, %8, %35
+  %37 = v_lshrrev_b32_src0_inline %24, 24
+  %38 = v_bfi_b32_src0_lit %37, %36, 128
+  %39 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %40 = v_and_b32_lit %39, 2147483647
+  %41 = v_min_u32 %5, %40
+  %42 = v_bfe_u32_offset_width_inline %41 {offset = 20, width = 1}
+  %43 = v_add3_u32_src2_lit %41, %42, 524287
+  %44 = v_lshrrev_b32_src0_inline %43, 20
+  %45 = v_add_u32_lit %44, 4294966336
+  %46 = v_add_f32_lit %41, 1182793728
+  %47 = v_add_u32_lit %46, 3112173568
+  %48 = v_cmp_lt_u32 %41, %7
+  %49 = v_cndmask_b32 %45, %47, %48
+  %50 = v_cmp_gt_u32 %40, %6
+  %51 = v_cndmask_b32 %49, %8, %50
+  %52 = v_lshrrev_b32_src0_inline %39, 24
+  %53 = v_bfi_b32_src0_lit %52, %51, 128
+  %54 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %55 = v_and_b32_lit %54, 2147483647
+  %56 = v_min_u32 %5, %55
+  %57 = v_bfe_u32_offset_width_inline %56 {offset = 20, width = 1}
+  %58 = v_add3_u32_src2_lit %56, %57, 524287
+  %59 = v_lshrrev_b32_src0_inline %58, 20
+  %60 = v_add_u32_lit %59, 4294966336
+  %61 = v_add_f32_lit %56, 1182793728
+  %62 = v_add_u32_lit %61, 3112173568
+  %63 = v_cmp_lt_u32 %56, %7
+  %64 = v_cndmask_b32 %60, %62, %63
+  %65 = v_cmp_gt_u32 %55, %6
+  %66 = v_cndmask_b32 %64, %8, %65
+  %67 = v_lshrrev_b32_src0_inline %54, 24
+  %68 = v_bfi_b32_src0_lit %67, %66, 128
+  %69 = v_perm_b32_src2_lit %23, %38, 4
+  %70 = v_perm_b32_src2_lit %53, %68, 4
+  %converted = v_perm_b32_src2_lit %69, %70, 16778500
+  return %converted
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+func.def target(@target) @scalar_fptrunc_f32_to_bf8(%input: f32) -> (f8E5M2) {
+  %converted = scalar.fptrunc %input : f32 to f8E5M2
+  func.return %converted : f8E5M2
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @scalar_fptrunc_f32_to_bf8(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+  %5 = v_mov_b32 1198522368
+  %6 = v_mov_b32 2139095040
+  %7 = v_mov_b32 947912704
+  %8 = v_mov_b32 127
+  %9 = v_and_b32_lit %input, 2147483647
+  %10 = v_min_u32 %5, %9
+  %11 = v_bfe_u32_offset_width_inline %10 {offset = 21, width = 1}
+  %12 = v_add3_u32_src2_lit %10, %11, 1048575
+  %13 = v_lshrrev_b32_src0_inline %12, 21
+  %14 = v_add_u32_lit %13, 4294966848
+  %15 = v_add_f32_lit %10, 1124073472
+  %16 = v_add_u32_lit %15, 3170893824
+  %17 = v_cmp_lt_u32 %10, %7
+  %18 = v_cndmask_b32 %14, %16, %17
+  %19 = v_cmp_gt_u32 %9, %6
+  %20 = v_cndmask_b32 %18, %8, %19
+  %21 = v_lshrrev_b32_src0_inline %input, 24
+  %converted = v_bfi_b32_src0_lit %21, %20, 128
+  return %converted
+}

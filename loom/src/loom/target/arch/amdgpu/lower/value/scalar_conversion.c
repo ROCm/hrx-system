@@ -714,7 +714,8 @@ static iree_status_t loom_amdgpu_emit_scalar_fp8_encode(
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
   loom_amdgpu_fp8_encode_emission_state_t emission_state = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_initialize_fp8_encode_emission(
-      context, source_op, &plan->fp8_encode, lane_type, &emission_state));
+      context, source_op, &plan->fp8_encode, /*encoded_lane_count=*/1,
+      lane_type, &emission_state));
 
   loom_value_id_t encoded_source = low_source;
   loom_value_id_t high_source = low_source;
@@ -722,7 +723,9 @@ static iree_status_t loom_amdgpu_emit_scalar_fp8_encode(
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_duplicate_f16_lane(
         context, source_op, low_source, lane_type, &encoded_source));
     high_source = LOOM_VALUE_ID_INVALID;
-  } else if (source_type == LOOM_SCALAR_TYPE_F16) {
+  } else if (source_type == LOOM_SCALAR_TYPE_F16 &&
+             plan->fp8_encode.kind !=
+                 LOOM_AMDGPU_FP8_ENCODE_KIND_F16_SOFTWARE_E5M2) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_unary(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_F32_F16,
         low_source, lane_type, &encoded_source));
@@ -732,6 +735,28 @@ static iree_status_t loom_amdgpu_emit_scalar_fp8_encode(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT, 16,
         low_source, lane_type, &encoded_source));
     high_source = encoded_source;
+  }
+
+  if (loom_amdgpu_fp8_encode_plan_is_software(&plan->fp8_encode)) {
+    loom_value_id_t low_result = LOOM_VALUE_ID_INVALID;
+    if (plan->fp8_encode.kind ==
+        LOOM_AMDGPU_FP8_ENCODE_KIND_F16_SOFTWARE_E5M2) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_software_f16_e5m2_lane(
+          context, source_op, &plan->fp8_encode, &emission_state,
+          encoded_source, &low_result));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_software_f32_lane(
+          context, source_op, &plan->fp8_encode, &emission_state,
+          encoded_source, &low_result));
+    }
+    return loom_low_lower_bind_value(context, plan->result, low_result);
+  }
+  if (loom_amdgpu_fp8_encode_plan_is_fnuz_bridge(&plan->fp8_encode)) {
+    loom_value_id_t packed = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_fnuz_f32_lanes(
+        context, source_op, &plan->fp8_encode, &emission_state, &encoded_source,
+        /*source_lane_count=*/1, &packed));
+    return loom_low_lower_bind_value(context, plan->result, packed);
   }
 
   loom_value_id_t low_result = LOOM_VALUE_ID_INVALID;
