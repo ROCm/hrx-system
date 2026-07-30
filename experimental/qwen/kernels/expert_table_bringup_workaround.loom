@@ -1,0 +1,82 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Temporary, non-sanctioned one-function fork for Qwen bring-up. The owned
+// model fixes route_count to eight, but compilation cannot consume the exact
+// workload value and AMDGPU lowering requires an exact divisor. This function
+// makes the Qwen route count structural in the assignment mapping. Delete this
+// fork when workload specialization reaches target lowering.
+amdgpu.target<gfx11-generic> @qwen3_moe_expert_table_gfx11_wave32 {subgroup_size = 32}
+
+kernel.def target(@qwen3_moe_expert_table_gfx11_wave32) export("qwen3_moe_build_expert_table") @qwen3_moe_build_expert_table(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index) {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%expert_count, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %route_ids: buffer, %expert_table: buffer) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %bounded_route_stride = index.assume %route_stride [range(%route_stride, 1, 512)] : index
+  %bounded_expert_count = index.assume %expert_count [range(%expert_count, 1, 512)] : index
+  %expert0 = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : index
+  %eight = index.constant 8 : index
+  %workgroup_size = index.constant 256 : index
+  %zero_i32 = scalar.constant 0 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %zero_offset = index.constant 0 : offset
+  %four_bytes = index.constant 4 : offset
+  %assignment_count = index.mul %bounded_token_count, %eight : index
+  %expert, %table_expert_count = index.assume %expert0, %bounded_expert_count [lt(%expert0, %bounded_expert_count)] : index, index
+  %assignment_table_byte_base = index.scale %table_expert_count, %four_bytes : index, offset -> offset
+  %route_view = buffer.view %route_ids[%zero_offset] : buffer -> view<[%bounded_token_count]x[%bounded_route_stride]xi32, #dense>
+  %count_view = buffer.view %expert_table[%zero_offset] : buffer -> view<[%table_expert_count]xi32, #dense>
+  %assignment_view = buffer.view %expert_table[%assignment_table_byte_base] : buffer -> view<[%table_expert_count]x[%bounded_token_count]xi32, #dense>
+  %expert_route_count = scf.for %block_base = [%zero to %assignment_count step %workgroup_size](%matched_base = %zero_i32 : i32) -> (i32) {
+    %assignment = index.add %block_base, %lane : index
+    %in_range = index.cmp ult, %assignment, %assignment_count : index
+    %route_expert_i32 = scf.if %in_range -> (i32) {
+      %token0 = index.div %assignment, %eight : index
+      %route0 = index.rem %assignment, %eight : index
+      %token, %route_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
+      // The route stride is the physical row width and must contain every
+      // logical top-k route.
+      %route, %route_row_stride = index.assume %route0, %bounded_route_stride [lt(%route0, %bounded_route_stride)] : index, index
+      %loaded = view.load %route_view[%token, %route] : view<[%bounded_token_count]x[%bounded_route_stride]xi32, #dense> -> i32
+      scf.yield %loaded : i32
+    } else {
+      %minus_one_i32 = scalar.constant -1 : i32
+      scf.yield %minus_one_i32 : i32
+    }
+    %route_expert0 = index.cast %route_expert_i32 : i32 to index
+    %route_expert = index.assume %route_expert0 [range(%route_expert0, -1, 511)] : index
+    %matches = index.cmp eq, %route_expert, %expert : index
+    %match_i32 = scf.if %matches -> (i32) {
+      scf.yield %one_i32 : i32
+    } else {
+      scf.yield %zero_i32 : i32
+    }
+    %block_prefix = kernel.workgroup.scan<addi> %match_i32 {direction = forward, mode = exclusive} : i32
+    %block_match_count_reduced = kernel.workgroup.reduce<addi> %match_i32 : i32
+    %block_match_count = kernel.subgroup.broadcast.first %block_match_count_reduced : i32
+    scf.if %matches {
+      %match_ordinal_i32 = scalar.addi %matched_base, %block_prefix : i32
+      %match_ordinal0 = index.cast %match_ordinal_i32 : i32 to index
+      %match_ordinal = index.assume %match_ordinal0 [range(%match_ordinal0, 0, 2047)] : index
+      // Top-k route IDs are unique within a token, so one expert can own at
+      // most token_count assignments.
+      %bounded_match_ordinal, %table_token_count = index.assume %match_ordinal, %bounded_token_count [lt(%match_ordinal, %bounded_token_count)] : index, index
+      %assignment_i32 = index.cast %assignment : index to i32
+      view.store %assignment_i32, %assignment_view[%expert, %bounded_match_ordinal] : i32, view<[%table_expert_count]x[%bounded_token_count]xi32, #dense>
+    }
+    %next_matched_base = scalar.addi %matched_base, %block_match_count : i32
+    scf.yield %next_matched_base : i32
+  }
+  %is_lane_zero = index.cmp eq, %lane, %zero : index
+  scf.if %is_lane_zero {
+    view.store %expert_route_count, %count_view[%expert] : i32, view<[%table_expert_count]xi32, #dense>
+  }
+  kernel.return
+}

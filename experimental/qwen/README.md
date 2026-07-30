@@ -65,6 +65,12 @@ workload-evaluated decode-or-prefill launch choice. Prefill measurements remain
 representative of that geometry; decode measurements do not until the fork is
 deleted.
 
+`kernels/expert_table_bringup_workaround.loom` makes Qwen's fixed route count
+of eight structural in expert-assignment enumeration. AMDGPU lowering requires
+an exact divisor, but the compile boundary currently loses the exact workload
+value already used during launch evaluation. This one-function fork is deleted
+when workload specialization reaches target lowering.
+
 Later milestones repeat the proven layer shape across the model, add embedding
 and vocabulary projection, and introduce reusable prefill and decode programs.
 The layer runner remains a first-class optimization surface so model work can
