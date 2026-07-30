@@ -15,12 +15,12 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/util/fact_table.h"
 

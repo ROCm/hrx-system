@@ -21,9 +21,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::codegen::low::target_binding
-    loom::ir
-    loom::target::arch::amdgpu::ops
-    loom::target::arch::amdgpu::profile
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::target_info
   PUBLIC
 )
@@ -41,7 +39,6 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
-    loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::target_info
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"

@@ -11,7 +11,6 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 
 namespace loom {

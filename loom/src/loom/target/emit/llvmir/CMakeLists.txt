@@ -100,9 +100,9 @@ loom_cc_library(
     loom::ir
     loom::ir::facts
     loom::ops::atomic
-    loom::ops::llvmir
     loom::ops::low
     loom::target::arch::llvmir::descriptors::descriptors_ids
+    loom::target::arch::llvmir::facts
     loom::target::launch
     loom::target::low_descriptor_registry
     loom::target::registers
@@ -190,7 +190,8 @@ loom_cc_library(
     loom::analysis::symbol_facts
     loom::codegen::low::function
     loom::ir
-    loom::ops::llvmir
+    loom::ops::target
+    loom::target::arch::llvmir::facts
     loom::target::tool::llvm
     loom::tools::loom-check::execute
     loom::util::stream

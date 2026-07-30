@@ -7,52 +7,8 @@
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 
 #include "loom/codegen/low/target_binding.h"
-#include "loom/target/arch/amdgpu/ops/ops.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
-
-const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_op(
-    const loom_op_t* target_op) {
-  if (!loom_amdgpu_target_isa(target_op)) {
-    return NULL;
-  }
-  return loom_amdgpu_target_record_processor(target_op);
-}
-
-static const loom_op_t* loom_amdgpu_target_op_from_ref(
-    const loom_module_t* module, loom_symbol_ref_t target_ref) {
-  if (!loom_symbol_ref_is_valid(target_ref) || target_ref.module_id != 0 ||
-      target_ref.symbol_id >= module->symbols.count) {
-    return NULL;
-  }
-  return module->symbols.entries[target_ref.symbol_id].defining_op;
-}
-
-const loom_amdgpu_target_info_t* loom_amdgpu_target_from_op(
-    const loom_op_t* target_op) {
-  return loom_amdgpu_target_isa(target_op)
-             ? loom_amdgpu_target_record_target(target_op)
-             : NULL;
-}
-
-const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_ref(
-    const loom_module_t* module, loom_symbol_ref_t target_ref) {
-  return loom_amdgpu_target_processor_from_op(
-      loom_amdgpu_target_op_from_ref(module, target_ref));
-}
-
-bool loom_amdgpu_target_identity_from_ref(
-    const loom_module_t* module, loom_symbol_ref_t target_ref,
-    loom_amdgpu_target_identity_t* out_identity) {
-  IREE_ASSERT_ARGUMENT(out_identity);
-  *out_identity = (loom_amdgpu_target_identity_t){0};
-  const loom_op_t* target_op =
-      loom_amdgpu_target_op_from_ref(module, target_ref);
-  if (!loom_amdgpu_target_isa(target_op)) {
-    return false;
-  }
-  loom_amdgpu_target_record_resolve_identity(target_op, out_identity);
-  return true;
-}
+#include "loom/target/arch/amdgpu/facts.h"
+#include "loom/target/arch/amdgpu/target_info.h"
 
 const loom_amdgpu_processor_info_t*
 loom_amdgpu_target_processor_from_resolved_target(

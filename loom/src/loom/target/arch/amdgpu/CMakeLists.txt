@@ -131,13 +131,31 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
+    facts
+  HDRS
+    "facts.h"
+  SRCS
+    "facts.c"
+  DEPS
+    ::target_info
+    ::target_info_defs
+    iree::base
+    loom::target::facts
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
     profile
   HDRS
     "profile.h"
   SRCS
     "profile.c"
   DEPS
-    ::target_info_defs
+    ::facts
+    ::target_info
     iree::base
     loom::target::arch::amdgpu::records::target_records
     loom::target::profile
@@ -241,6 +259,7 @@ loom_cc_library(
   SRCS
     "legalization.c"
   DEPS
+    ::facts
     iree::base
     loom::analysis::symbolic_expr
     loom::codegen::low::descriptors
@@ -318,7 +337,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::ops::low
     loom::target::arch::amdgpu::encoding
-    loom::target::arch::amdgpu::ops
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::refs::target_refs
   PUBLIC
 )
@@ -378,6 +397,7 @@ loom_cc_test(
     loom::pass::registry
     loom::pass::testing::registry_verify
     loom::pass::tooling
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info

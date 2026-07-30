@@ -13,7 +13,8 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/llvmir/ops.h"
-#include "loom/ops/llvmir/target.h"
+#include "loom/ops/target/facts.h"
+#include "loom/target/arch/llvmir/facts.h"
 #include "loom/testing/module_ptr.h"
 
 namespace loom {

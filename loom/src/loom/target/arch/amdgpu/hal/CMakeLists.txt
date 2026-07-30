@@ -94,7 +94,7 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::pass::types
-    loom::target::arch::amdgpu::ops
+    loom::target::arch::amdgpu::facts
   PUBLIC
 )
 endif()

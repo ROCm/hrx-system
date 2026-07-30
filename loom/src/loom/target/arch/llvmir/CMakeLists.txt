@@ -12,6 +12,21 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_LLVMIR)
 loom_cc_library(
   NAME
+    facts
+  HDRS
+    "facts.h"
+  SRCS
+    "facts.c"
+  DEPS
+    iree::base
+    loom::target::facts
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_LLVMIR)
+loom_cc_library(
+  NAME
     math_policy
   HDRS
     "math_policy.h"
@@ -50,6 +65,7 @@ loom_cc_test(
   SRCS
     "provider_test.cc"
   DEPS
+    ::facts
     ::provider
     iree::base
     iree::base::internal::arena
@@ -59,6 +75,7 @@ loom_cc_test(
     loom::format::text::parser
     loom::ir
     loom::ops::llvmir
+    loom::ops::target
     loom::target::arch::llvmir::descriptors::low_registry
     loom::target::arch::llvmir::lower
     loom::target::provider

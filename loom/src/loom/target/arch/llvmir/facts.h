@@ -4,19 +4,17 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// LLVMIR target fact projection.
+// Immutable LLVMIR target facts.
 
-#ifndef LOOM_OPS_LLVMIR_TARGET_H_
-#define LOOM_OPS_LLVMIR_TARGET_H_
+#ifndef LOOM_TARGET_ARCH_LLVMIR_FACTS_H_
+#define LOOM_TARGET_ARCH_LLVMIR_FACTS_H_
 
-#include "iree/base/api.h"
-#include "loom/ops/target/facts.h"
+#include "loom/target/facts.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Immutable facts projected once from a verified llvmir.target witness.
 typedef struct loom_llvmir_target_facts_t {
   // Target-neutral facts shared by all target families.
   loom_target_facts_t base;
@@ -46,7 +44,7 @@ typedef struct loom_llvmir_target_facts_t {
   } authored;
 } loom_llvmir_target_facts_t;
 
-// Static fact type used by generated llvmir.target metadata.
+// Static fact type used by LLVMIR target projection and structured profiles.
 extern const loom_target_fact_type_t loom_llvmir_target_fact_type;
 
 // Returns |facts| as LLVMIR facts, or NULL for another target family.
@@ -61,4 +59,4 @@ static inline const loom_llvmir_target_facts_t* loom_llvmir_target_facts_cast(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_OPS_LLVMIR_TARGET_H_
+#endif  // LOOM_TARGET_ARCH_LLVMIR_FACTS_H_

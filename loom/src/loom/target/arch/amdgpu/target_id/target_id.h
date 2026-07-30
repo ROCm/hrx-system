@@ -4,43 +4,20 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// AMDGPU target-record identity and canonical target-id formatting.
+// AMDGPU target identity formatting and resolved low-target queries.
 
 #ifndef LOOM_TARGET_ARCH_AMDGPU_TARGET_ID_TARGET_ID_H_
 #define LOOM_TARGET_ARCH_AMDGPU_TARGET_ID_TARGET_ID_H_
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/ir/ir.h"
-#include "loom/target/arch/amdgpu/profile.h"
-#include "loom/target/arch/amdgpu/target_info.h"
+#include "loom/target/arch/amdgpu/facts.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct loom_low_resolved_target_t loom_low_resolved_target_t;
-
-// Returns the canonical AMDGPU target selected by |target_op|, or NULL.
-const loom_amdgpu_target_info_t* loom_amdgpu_target_from_op(
-    const loom_op_t* target_op);
-
-// Returns the AMDGPU processor selected by |target_op|, or NULL when the op is
-// not an AMDGPU target record or verification has not proven the processor.
-const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_op(
-    const loom_op_t* target_op);
-
-// Returns the AMDGPU processor selected by |target_ref|, or NULL.
-const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_ref(
-    const loom_module_t* module, loom_symbol_ref_t target_ref);
-
-// Resolves the complete AMDGPU identity selected by |target_ref|.
-//
-// Returns false when the reference does not name a verified AMDGPU target
-// record. The output is zeroed in that case.
-bool loom_amdgpu_target_identity_from_ref(
-    const loom_module_t* module, loom_symbol_ref_t target_ref,
-    loom_amdgpu_target_identity_t* out_identity);
 
 // Returns the AMDGPU processor selected by a resolved low target, or NULL.
 const loom_amdgpu_processor_info_t*

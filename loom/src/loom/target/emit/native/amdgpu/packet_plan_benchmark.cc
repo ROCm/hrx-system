@@ -33,7 +33,6 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
-#include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
 #include "loom/target/arch/amdgpu/planning/occupancy.h"
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"

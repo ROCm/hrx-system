@@ -9,9 +9,9 @@
 #include "iree/base/internal/math.h"
 #include "loom/analysis/control_uniformity.h"
 #include "loom/target/arch/amdgpu/analysis/lds_bank_service.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_memory_address.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 typedef enum loom_amdgpu_memory_bank_service_lane_source_e {

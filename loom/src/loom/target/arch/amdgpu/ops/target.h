@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// AMDGPU target op interpretation and typed fact projection.
+// AMDGPU target op interpretation.
 
 #ifndef LOOM_TARGET_ARCH_AMDGPU_OPS_TARGET_H_
 #define LOOM_TARGET_ARCH_AMDGPU_OPS_TARGET_H_
@@ -12,42 +12,12 @@
 #include "iree/base/api.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/op_defs.h"
-#include "loom/ops/target/facts.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Immutable facts projected once from a verified amdgpu.target witness.
-typedef struct loom_amdgpu_target_facts_t {
-  // Target-neutral facts shared by all target families.
-  loom_target_facts_t base;
-
-  // Canonical target and normalized AMDHSA feature identity.
-  loom_amdgpu_target_identity_t identity;
-
-  // Compiler-semantic properties resolved from |identity| and |base|.
-  loom_amdgpu_target_properties_t properties;
-
-  // True when subgroup_size was explicitly present in the authored target.
-  bool subgroup_size_authored;
-
-  // True when contract_set_key was explicitly present in the authored target.
-  bool contract_set_key_authored;
-} loom_amdgpu_target_facts_t;
-
-// Static fact type used by generated amdgpu.target metadata.
-extern const loom_target_fact_type_t loom_amdgpu_target_fact_type;
-
-// Returns |facts| as AMDGPU facts, or NULL for another target family.
-static inline const loom_amdgpu_target_facts_t* loom_amdgpu_target_facts_cast(
-    const loom_target_facts_t* facts) {
-  return facts != NULL && facts->fact_type == &loom_amdgpu_target_fact_type
-             ? (const loom_amdgpu_target_facts_t*)facts
-             : NULL;
-}
 
 // Returns the canonical AMDGPU target name selected by |target_op|, or empty.
 iree_string_view_t loom_amdgpu_target_record_target_name(

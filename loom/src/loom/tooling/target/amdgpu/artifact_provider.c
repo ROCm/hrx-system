@@ -7,6 +7,8 @@
 #include "loom/tooling/target/amdgpu/artifact_provider.h"
 
 #include "iree/hal/executable/amdgpu/target_id.h"
+#include "loom/ir/module.h"
+#include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
@@ -33,6 +35,23 @@ typedef struct loom_amdgpu_hal_device_target_storage_t {
   // Canonical provider-facing target key borrowing |target_key_storage|.
   iree_string_view_t target_key;
 } loom_amdgpu_hal_device_target_storage_t;
+
+static bool loom_amdgpu_hal_artifact_provider_resolve_authored_identity(
+    const loom_module_t* module, loom_symbol_ref_t target_ref,
+    loom_amdgpu_target_identity_t* out_identity) {
+  *out_identity = (loom_amdgpu_target_identity_t){0};
+  if (!loom_symbol_ref_is_valid(target_ref) || target_ref.module_id != 0 ||
+      target_ref.symbol_id >= module->symbols.count) {
+    return false;
+  }
+  const loom_op_t* target_op =
+      module->symbols.entries[target_ref.symbol_id].defining_op;
+  if (!loom_amdgpu_target_isa(target_op)) {
+    return false;
+  }
+  loom_amdgpu_target_record_resolve_identity(target_op, out_identity);
+  return true;
+}
 
 static void loom_amdgpu_hal_device_target_storage_deinitialize(
     loom_amdgpu_hal_device_target_storage_t* storage,
@@ -316,8 +335,8 @@ loom_amdgpu_hal_artifact_provider_select_function_device_target(
   const loom_symbol_ref_t target_ref = loom_func_like_target(function);
   loom_amdgpu_target_identity_t authored_requirement = {0};
   const loom_amdgpu_target_identity_t* authored_requirement_ptr =
-      loom_amdgpu_target_identity_from_ref(module, target_ref,
-                                           &authored_requirement)
+      loom_amdgpu_hal_artifact_provider_resolve_authored_identity(
+          module, target_ref, &authored_requirement)
           ? &authored_requirement
           : NULL;
   return loom_amdgpu_hal_artifact_provider_select_compatible_device_target(

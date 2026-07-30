@@ -7,10 +7,10 @@
 #include "loom/target/arch/amdgpu/lower/cluster_preamble.h"
 
 #include "loom/ops/kernel/launch_config.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 #define LOOM_AMDGPU_EXTENDED_DISPATCH_PACKET_CLUSTER_COUNT_X_OFFSET 12u

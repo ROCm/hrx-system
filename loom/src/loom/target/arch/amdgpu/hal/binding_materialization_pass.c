@@ -10,10 +10,9 @@
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/hal/binding_materialization.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
-#include "loom/target/arch/amdgpu/ops/ops.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
 
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_STATISTICS(V, statistics_type) \
   V(statistics_type, errors, "errors",                            \

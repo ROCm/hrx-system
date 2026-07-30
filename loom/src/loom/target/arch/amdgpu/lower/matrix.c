@@ -13,9 +13,9 @@
 #include "loom/ir/context.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/matrix/projection.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/util/numeric_format.h"
 
 typedef struct loom_amdgpu_matrix_target_facts_t {

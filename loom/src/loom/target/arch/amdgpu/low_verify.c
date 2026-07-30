@@ -11,10 +11,9 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/instruction_constraints.h"
 #include "loom/target/arch/amdgpu/low_aliases.h"
-#include "loom/target/arch/amdgpu/ops/ops.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 typedef struct loom_amdgpu_low_verify_state_t {

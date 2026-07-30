@@ -278,7 +278,6 @@ loom_cc_benchmark(
     loom::ops::low
     loom::ops::op_registry
     loom::target::arch::amdgpu::hal::kernel_abi
-    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::planning::descriptor_semantics
     loom::target::arch::amdgpu::planning::occupancy
     loom::target::arch::amdgpu::planning::packet_plan
@@ -317,8 +316,8 @@ loom_cc_library(
     loom::codegen::low::schedule
     loom::ir
     loom::ops::low
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::hal::kernel_abi
-    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
@@ -565,9 +564,9 @@ loom_cc_library(
     loom::ops::global
     loom::ops::low
     loom::ops::target
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::hal::kernel_abi
     loom::target::arch::amdgpu::matrix::contract
-    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::planning::descriptor_semantics
     loom::target::arch::amdgpu::planning::occupancy
     loom::target::arch::amdgpu::planning::storage_lease

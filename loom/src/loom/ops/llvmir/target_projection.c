@@ -4,10 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/ops/llvmir/target.h"
-
 #include "loom/ir/module.h"
 #include "loom/ops/llvmir/ops.h"
+#include "loom/ops/target/facts.h"
+#include "loom/target/arch/llvmir/facts.h"
 
 static iree_string_view_t loom_llvmir_target_project_string(
     const loom_module_t* module, const loom_op_t* target_op, uint8_t attr_index,
@@ -43,9 +43,4 @@ static void loom_llvmir_target_facts_project(const loom_module_t* module,
 
 const loom_target_fact_projector_t loom_llvmir_target_fact_projector = {
     .project = loom_llvmir_target_facts_project,
-};
-
-const loom_target_fact_type_t loom_llvmir_target_fact_type = {
-    .name = IREE_SVL("llvmir"),
-    .storage_size = sizeof(loom_llvmir_target_facts_t),
 };

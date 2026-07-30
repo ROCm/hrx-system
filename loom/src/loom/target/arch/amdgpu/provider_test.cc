@@ -25,6 +25,7 @@
 #include "loom/pass/registry.h"
 #include "loom/pass/testing/registry_verify.h"
 #include "loom/pass/tooling.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/profile.h"

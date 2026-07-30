@@ -14,7 +14,7 @@
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
+#include "loom/target/arch/amdgpu/facts.h"
 
 #ifdef __cplusplus
 extern "C" {

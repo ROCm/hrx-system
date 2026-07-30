@@ -9,10 +9,10 @@
 #include "loom/ir/context.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
 
 static iree_string_view_t loom_amdgpu_cache_policy_scope_param(
     const loom_vector_memory_cache_policy_t* policy) {

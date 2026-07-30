@@ -28,6 +28,20 @@ _LLVMIR_PROVIDER_VISIBILITY = [
 ]
 
 loom_cc_library(
+    name = "facts",
+    srcs = ["facts.c"],
+    hdrs = ["facts.h"],
+    visibility = [
+        "//loom/src/loom/ops/llvmir:__pkg__",
+        "//loom/src/loom/target/emit/llvmir:__pkg__",
+    ],
+    deps = [
+        "//loom/src/loom/target:facts",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "math_policy",
     srcs = ["math_policy.c"],
     hdrs = ["math_policy.h"],
@@ -56,11 +70,13 @@ loom_cc_test(
     name = "provider_test",
     srcs = ["provider_test.cc"],
     deps = [
+        ":facts",
         ":provider",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/llvmir",
+        "//loom/src/loom/ops/target",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/llvmir/descriptors:low_registry",
         "//loom/src/loom/target/arch/llvmir/lower",
