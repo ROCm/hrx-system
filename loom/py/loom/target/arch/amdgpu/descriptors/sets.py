@@ -2238,7 +2238,7 @@ def _gfx1250_core_overlay_descriptors(
 def _gfx1251_core_overlay_descriptors(
     spec: AmdgpuIsaFactSource,
 ) -> tuple[Descriptor, ...]:
-    return _with_gfx1251_matrix_schedules(_gfx1250_core_overlay_descriptors(spec))
+    return _with_xdl_latency_tiers(_gfx1250_core_overlay_descriptors(spec))
 
 
 def _gfx1250_a0_core_overlay_descriptors(
@@ -2264,10 +2264,10 @@ def _gfx12_5_generic_core_overlay_descriptors(
         spec, _gfx12_5_generic_core_overlays()
     )
     return _with_execution_mask_state_reads(
-        _with_gfx1251_matrix_schedules(
+        _with_xdl_latency_tiers(
             _with_gfx125x_inherited_matrix_schedules(descriptors),
-            schedule_class=_SCHEDULE_GFX125X_GENERIC_MATRIX_XDL,
-            slow_schedule_class=_SCHEDULE_GFX125X_GENERIC_MATRIX_XDL_SLOW,
+            regular_schedule_class=_SCHEDULE_MATRIX_XDL_ESTIMATED_16,
+            slow_schedule_class=_SCHEDULE_MATRIX_XDL_ESTIMATED_32,
         )
     )
 
