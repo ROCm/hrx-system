@@ -29,6 +29,7 @@ from loom.target.arch.amdgpu.encoding import (
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE,
     AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE,
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS,
     AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC,
     AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
     AMDGPU_PROCESSOR_INFOS,
@@ -324,18 +325,8 @@ def _operand_has_vgpr_alt(operand: Operand) -> bool:
     return any(reg_alt.reg_class == _REG_VGPR for reg_alt in operand.reg_alts)
 
 
-_MATRIX_COEXECUTION_OPERAND_LAYOUTS = {
-    AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA: (
-        (0, OperandRole.RESULT, amdgpu_encoding_field_id("VDST")),
-        (1, OperandRole.OPERAND, amdgpu_encoding_field_id("SRC0")),
-        (2, OperandRole.OPERAND, amdgpu_encoding_field_id("SRC1")),
-    ),
-    AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC: (
-        (0, OperandRole.RESULT, amdgpu_encoding_field_id("VDST")),
-        (2, OperandRole.OPERAND, amdgpu_encoding_field_id("SRC0")),
-        (3, OperandRole.OPERAND, amdgpu_encoding_field_id("SRC1")),
-        (4, OperandRole.OPERAND, amdgpu_encoding_field_id("SRC2")),
-    ),
+_MATRIX_COEXECUTION_SOURCE_INFOS_BY_SOURCE = {
+    info.source: info for info in AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS
 }
 
 
@@ -418,13 +409,34 @@ def _validate_matrix_coexecution_profile_coverage(
                 f"'{descriptor.key}' must belong to one matrix source family"
             )
         source_family = source_families[0]
-        operand_layout = _MATRIX_COEXECUTION_OPERAND_LAYOUTS[source_family]
-        if len(descriptor.operands) <= operand_layout[-1][0]:
+        source_info = _MATRIX_COEXECUTION_SOURCE_INFOS_BY_SOURCE[source_family]
+        source_operand_end = (
+            source_info.source_operand_start + source_info.source_operand_count
+        )
+        required_operand_count = max(
+            source_info.result_operand_index + 1, source_operand_end
+        )
+        if len(descriptor.operands) < required_operand_count:
             raise ValueError(
                 f"AMDGPU descriptor target '{generator_target}' descriptor "
                 f"'{descriptor.key}' does not provide the {source_family} "
                 "coexecution operand layout"
             )
+        operand_layout = (
+            (
+                source_info.result_operand_index,
+                OperandRole.RESULT,
+                amdgpu_encoding_field_id("VDST"),
+            ),
+            *(
+                (
+                    source_info.source_operand_start + source_index,
+                    OperandRole.OPERAND,
+                    amdgpu_encoding_field_id(f"SRC{source_index}"),
+                )
+                for source_index in range(source_info.source_operand_count)
+            ),
+        )
         for operand_index, expected_role, expected_encoding_field_id in operand_layout:
             operand = descriptor.operands[operand_index]
             if operand.role is not expected_role:

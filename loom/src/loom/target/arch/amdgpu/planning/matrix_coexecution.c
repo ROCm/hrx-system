@@ -15,7 +15,6 @@
 #include "loom/util/cfg_graph.h"
 
 enum {
-  LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_OPERAND_CAPACITY = 3,
   LOOM_AMDGPU_MATRIX_COEXECUTION_NODE_CHUNK_CAPACITY = 64,
   LOOM_AMDGPU_MATRIX_COEXECUTION_CONSUMER_CHUNK_CAPACITY = 128,
 };
@@ -50,18 +49,7 @@ typedef struct loom_amdgpu_matrix_coexecution_family_layout_t {
 
 static const loom_amdgpu_matrix_coexecution_family_layout_t
     kSourceLayouts[LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_COUNT] = {
-        [LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA] =
-            {
-                .result_operand_index = 0,
-                .source_operand_start = 1,
-                .source_operand_count = 2,
-            },
-        [LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC] =
-            {
-                .result_operand_index = 0,
-                .source_operand_start = 2,
-                .source_operand_count = 3,
-            },
+#include "loom/target/arch/amdgpu/planning/matrix_coexecution_source_layouts.inl"
 };
 
 // One retained source packet in final scheduled order.
@@ -379,9 +367,6 @@ loom_amdgpu_matrix_coexecution_append_source(
   IREE_ASSERT(rule != NULL);
   const loom_amdgpu_matrix_coexecution_family_layout_t* layout =
       &kSourceLayouts[source_kind];
-  IREE_ASSERT_NE(layout->source_operand_count, 0);
-  IREE_ASSERT_LE(layout->source_operand_count,
-                 LOOM_AMDGPU_MATRIX_COEXECUTION_SOURCE_OPERAND_CAPACITY);
   loom_amdgpu_matrix_coexecution_source_t* source =
       &coexecution->sources[coexecution->source_count++];
   *source = (loom_amdgpu_matrix_coexecution_source_t){

@@ -99,9 +99,9 @@ from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32,
     AMDGPU_MATRIX_COEXECUTION_PROFILES,
     AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE,
+    AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS,
     AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC,
     AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
-    AMDGPU_MATRIX_COEXECUTION_SOURCES,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX9_4_GENERIC,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX90A,
     AMDGPU_MATRIX_FEATURE_PROFILE_MFMA_GFX908,
@@ -994,9 +994,26 @@ def _validate_descriptor_set_rows(rows: Sequence[_AmdgpuDescriptorSetRow]) -> No
                 raise ValueError(f"AMDGPU {name} opcode for {row.info.key} must fit u16")
 
 
-def _validate_matrix_coexecution_profiles() -> None:
-    if tuple(_MATRIX_COEXECUTION_SOURCE_EXPRS) != AMDGPU_MATRIX_COEXECUTION_SOURCES:
+def _validate_matrix_coexecution_sources() -> None:
+    if tuple(_MATRIX_COEXECUTION_SOURCE_EXPRS) != tuple(info.source for info in AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS):
         raise ValueError("AMDGPU matrix coexecution source expressions must cover sources in enum order")
+    for source_info in AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS:
+        _matrix_coexecution_source_expr(source_info.source)
+        if source_info.result_operand_index < 0 or source_info.result_operand_index > 0xFF:
+            raise ValueError(f"AMDGPU matrix coexecution result operand for {source_info.source} must fit u8")
+        if source_info.source_operand_start < 0 or source_info.source_operand_start > 0xFF:
+            raise ValueError(f"AMDGPU matrix coexecution source operand start for {source_info.source} must fit u8")
+        if source_info.source_operand_count <= 0 or source_info.source_operand_count > 0xFF:
+            raise ValueError(f"AMDGPU matrix coexecution source operand count for {source_info.source} must fit nonzero u8")
+        source_operand_end = source_info.source_operand_start + source_info.source_operand_count
+        if source_operand_end > 0x100:
+            raise ValueError(f"AMDGPU matrix coexecution source operand range for {source_info.source} must fit u8 indexes")
+        if source_info.source_operand_start <= source_info.result_operand_index < source_operand_end:
+            raise ValueError(f"AMDGPU matrix coexecution result operand for {source_info.source} overlaps its sources")
+
+
+def _validate_matrix_coexecution_profiles() -> None:
+    _validate_matrix_coexecution_sources()
     if tuple(AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE) != (AMDGPU_MATRIX_COEXECUTION_PROFILES):
         raise ValueError("AMDGPU matrix coexecution rule tables must cover profiles in enum order")
     for profile, rules in AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE.items():
@@ -1315,6 +1332,22 @@ def _matrix_coexecution_rule_symbol(profile: str) -> str:
     return f"kAmdgpuMatrixCoexecutionRules{_c_ident(profile)}"
 
 
+def _emit_matrix_coexecution_source_layouts() -> str:
+    _validate_matrix_coexecution_sources()
+    lines: list[str] = []
+    for source_info in AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS:
+        lines.extend(
+            [
+                f"  [{_matrix_coexecution_source_expr(source_info.source)}] = {{",
+                f"    .result_operand_index = {source_info.result_operand_index},",
+                f"    .source_operand_start = {source_info.source_operand_start},",
+                f"    .source_operand_count = {source_info.source_operand_count},",
+                "  },",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
 def _emit_matrix_coexecution_rows() -> list[str]:
     lines: list[str] = []
     for profile, rules in AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE.items():
@@ -1546,6 +1579,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Generated LDS bank-service model-set fragment path.",
     )
     parser.add_argument(
+        "--matrix-coexecution-source-layouts",
+        type=Path,
+        help="Generated matrix coexecution source-layout fragment path.",
+    )
+    parser.add_argument(
         "--isa-xml",
         action="append",
         default=[],
@@ -1576,6 +1614,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.lds_bank_service_model_rows is not None:
         args.lds_bank_service_model_rows.parent.mkdir(parents=True, exist_ok=True)
         args.lds_bank_service_model_rows.write_text(_emit_lds_bank_service_model_rows(), encoding="utf-8")
+        wrote_output = True
+    if args.matrix_coexecution_source_layouts is not None:
+        args.matrix_coexecution_source_layouts.parent.mkdir(parents=True, exist_ok=True)
+        args.matrix_coexecution_source_layouts.write_text(_emit_matrix_coexecution_source_layouts(), encoding="utf-8")
         wrote_output = True
     if not wrote_output:
         parser.error("at least one output path is required")

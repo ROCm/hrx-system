@@ -142,12 +142,6 @@ AMDGPU_MATRIX_COEXECUTION_PROFILES = (
     AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16,
     AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32,
 )
-AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA = "wmma"
-AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC = "swmmac"
-AMDGPU_MATRIX_COEXECUTION_SOURCES = (
-    AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
-    AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC,
-)
 
 # Features present on every exact member but intentionally absent from the
 # corresponding ROCm generic processor contract.
@@ -506,6 +500,32 @@ class AmdgpuProcessorFeatureInfo:
     matrix_coexecution: str = AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE
     scheduling: int = 0
     lds_bank_service_models: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AmdgpuMatrixCoexecutionSourceInfo:
+    source: str
+    result_operand_index: int
+    source_operand_start: int
+    source_operand_count: int
+
+
+AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA = "wmma"
+AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC = "swmmac"
+AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS = (
+    AmdgpuMatrixCoexecutionSourceInfo(
+        source=AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
+        result_operand_index=0,
+        source_operand_start=1,
+        source_operand_count=2,
+    ),
+    AmdgpuMatrixCoexecutionSourceInfo(
+        source=AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC,
+        result_operand_index=0,
+        source_operand_start=2,
+        source_operand_count=3,
+    ),
+)
 
 
 @dataclass(frozen=True, slots=True)
