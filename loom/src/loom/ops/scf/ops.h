@@ -41,7 +41,8 @@ typedef enum loom_scf_for_unroll_policy_e {
 typedef enum loom_scf_for_unroll_schedule_e {
   LOOM_SCF_FOR_UNROLL_SCHEDULE_LINEAR = 0,
   LOOM_SCF_FOR_UNROLL_SCHEDULE_INTERLEAVED = 1,
-  LOOM_SCF_FOR_UNROLL_SCHEDULE_COUNT_ = 2,
+  LOOM_SCF_FOR_UNROLL_SCHEDULE_RECURRENCE = 2,
+  LOOM_SCF_FOR_UNROLL_SCHEDULE_COUNT_ = 3,
 } loom_scf_for_unroll_schedule_t;
 
 // LOOM_OP_SCF_FOR: Bounded counted loop with optional loop-carried state.

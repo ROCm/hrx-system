@@ -109,6 +109,11 @@ ScfForUnrollSchedule = EnumDef(
             1,
             doc="Materialize corresponding body positions across unrolled iterations when dependencies allow.",
         ),
+        EnumCase(
+            "recurrence",
+            2,
+            doc="Overlap independent producers while preserving loop-carried recurrence order.",
+        ),
     ],
     doc="Local scf.for unroll body ordering.",
 )
@@ -389,6 +394,7 @@ scf_for = Op(
         "%result = scf.for %iv = [%c0 to %n step %c1](%acc = %init : f32) -> (f32) {\n  %next = scalar.addf %acc, %acc : f32\n  scf.yield %next : f32\n}",
         "scf.for %iv = [%c0 to %n step %c1] unroll(%factor) {\n  scf.yield\n}",
         "scf.for %iv = [%c0 to %n step %c1] unroll(%factor) schedule(interleaved) {\n  scf.yield\n}",
+        "%result = scf.for %iv = [%c0 to %n step %c1](%acc = %init : f32) -> (f32) unroll(%factor) schedule(recurrence) {\n  %next = scalar.addf %acc, %acc : f32\n  scf.yield %next : f32\n}",
     ],
 )
 
