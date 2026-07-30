@@ -448,7 +448,7 @@ iree_executable_test(
 )
 
 iree_executable_test(
-    name = "routed_gate_up_swiglu_q4k_gfx1151_hal_test",
+    name = "routed_gate_up_swiglu_q4k_f16_wmma_hal_test",
     src = "//loom/src/loom/tools/iree-test-loom",
     args = [
         "$(location :routed_gate_up_swiglu_q4k_f16_wmma_linked)",
@@ -772,8 +772,8 @@ test_suite(
         ":routed_down_q4k_f16_wmma_hal_test",
         ":routed_down_q6k_f16_wmma_hal_test",
         ":routed_down_quantized_f16_wmma_plan_test",
+        ":routed_gate_up_swiglu_q4k_f16_wmma_hal_test",
         ":routed_gate_up_swiglu_q4k_f16_wmma_plan_test",
-        ":routed_gate_up_swiglu_q4k_gfx1151_hal_test",
         ":routed_gate_up_swiglu_q4k_hal_test",
         ":routed_gate_up_swiglu_q4k_plan_test",
     ],
