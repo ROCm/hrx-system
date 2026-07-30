@@ -5,7 +5,11 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
-load("//build_tools/sanitizer:suppressions.bzl", "rocm_suppressions")
+load(
+    "//build_tools/sanitizer:suppressions.bzl",
+    "hsa_suppressions",
+    "rocm_suppressions",
+)
 load(
     "//libhrx/build_tools/bazel:cc.bzl",
     "hrx_cc_library",
@@ -191,6 +195,25 @@ hrx_cc_test(
         ":launch_params",
         "//build_tools:dl",
         "//libhrx/src/binding/common",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_memory_pool_api_test",
+    srcs = ["hip_memory_pool_api_test.cc"],
+    # The test loads the built runtime through its public ABI and exercises
+    # device-backed allocation and graph teardown.
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    sanitizer_suppressions = hsa_suppressions,
+    target_compatible_with = _LINUX_COMPATIBILITY,
+    deps = [
+        ":launch_params",
+        "//build_tools:dl",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
