@@ -43,7 +43,8 @@ enum {
   LOOM_OP_LOW_SCF_YIELD = LOOM_OP_KIND(LOOM_DIALECT_LOW, 20),
   LOOM_OP_LOW_SCF_IF = LOOM_OP_KIND(LOOM_DIALECT_LOW, 21),
   LOOM_OP_LOW_SCF_FOR = LOOM_OP_KIND(LOOM_DIALECT_LOW, 22),
-  LOOM_OP_LOW_COUNT_ = 23,
+  LOOM_OP_LOW_SCHEDULE_FENCE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 23),
+  LOOM_OP_LOW_COUNT_ = 24,
 };
 
 // Function visibility. Absent (0) means private (module-internal).
@@ -750,6 +751,14 @@ iree_status_t loom_low_scf_for_build(
 iree_status_t loom_low_scf_for_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_SCHEDULE_FENCE: Compiler hint separating independently reorderable low source ranges. The fence has no runtime effect and emits no target instruction.
+// low.schedule.fence
+LOOM_DEFINE_ISA(loom_low_schedule_fence_isa, LOOM_OP_LOW_SCHEDULE_FENCE)
+iree_status_t loom_low_schedule_fence_build(
+    loom_builder_t* builder,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 
 // Returns the vtable array for the low dialect.
 const loom_op_vtable_t* const* loom_low_dialect_vtables(

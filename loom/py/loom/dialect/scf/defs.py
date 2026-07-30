@@ -50,6 +50,7 @@ from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64_ARRAY,
     DISTRIBUTION_TRANSFER,
+    HINT,
     I1,
     INDEX,
     PURE,
@@ -588,6 +589,20 @@ scf_switch = Op(
 )
 
 # ============================================================================
+# scf.schedule.fence — compile-time scheduling boundary
+# ============================================================================
+
+scf_schedule_fence = Op(
+    "scf.schedule.fence",
+    group=scf_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Compiler hint separating independently reorderable source ranges. The fence has no runtime effect and emits no target instruction."),
+    traits=[HINT],
+    format=[],
+    examples=["scf.schedule.fence"],
+)
+
+# ============================================================================
 # All ops
 # ============================================================================
 
@@ -600,4 +615,5 @@ ALL_SCF_OPS: tuple[Op, ...] = (
     scf_lookup,
     scf_condition,
     scf_while,
+    scf_schedule_fence,
 )

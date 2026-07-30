@@ -56,6 +56,7 @@ from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
     ATTR_TYPE_TYPE,
+    HINT,
     ISOLATED_FROM_ABOVE,
     PURE,
     REGISTER,
@@ -1385,6 +1386,20 @@ low_invoke = Op(
     ],
 )
 
+# ============================================================================
+# low.schedule.fence — compile-time scheduling boundary
+# ============================================================================
+
+low_schedule_fence = Op(
+    "low.schedule.fence",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Compiler hint separating independently reorderable low source ranges. The fence has no runtime effect and emits no target instruction."),
+    traits=[HINT],
+    format=[],
+    examples=["low.schedule.fence"],
+)
+
 ALL_LOW_OPS: tuple[Op, ...] = (
     low_func_def,
     low_kernel_def,
@@ -1409,4 +1424,5 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_scf_yield,
     low_scf_if,
     low_scf_for,
+    low_schedule_fence,
 )

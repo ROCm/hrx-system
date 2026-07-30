@@ -375,6 +375,7 @@ static bool loom_low_lower_op_is_structural(const loom_module_t* module,
     case LOOM_OP_KERNEL_RETURN:
     case LOOM_OP_SCF_FOR:
     case LOOM_OP_SCF_IF:
+    case LOOM_OP_SCF_SCHEDULE_FENCE:
     case LOOM_OP_SCF_YIELD:
       return true;
     default:
@@ -2652,6 +2653,11 @@ static iree_status_t loom_low_lower_structural_op(
       loom_op_t* low_return_op = NULL;
       return loom_low_return_build(&context->builder, NULL, 0,
                                    source_op->location, &low_return_op);
+    }
+    case LOOM_OP_SCF_SCHEDULE_FENCE: {
+      loom_op_t* low_fence_op = NULL;
+      return loom_low_schedule_fence_build(&context->builder,
+                                           source_op->location, &low_fence_op);
     }
     case LOOM_OP_CFG_BR: {
       loom_block_t* low_dest = NULL;
