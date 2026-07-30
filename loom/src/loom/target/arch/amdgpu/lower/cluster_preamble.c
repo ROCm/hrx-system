@@ -10,8 +10,8 @@
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
+#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 
 #define LOOM_AMDGPU_EXTENDED_DISPATCH_PACKET_CLUSTER_COUNT_X_OFFSET 12u
 #define LOOM_AMDGPU_EXTENDED_DISPATCH_PACKET_CLUSTER_COUNT_YZ_OFFSET 16u
@@ -80,20 +80,20 @@ bool loom_amdgpu_cluster_preamble_required_nontrivial_size(
 }
 
 bool loom_amdgpu_cluster_preamble_target_uses_architected_workgroup_ids(
-    const loom_module_t* module, loom_symbol_ref_t target_ref) {
-  const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_processor_from_ref(module, target_ref);
+    const loom_amdgpu_target_facts_t* target_facts) {
+  IREE_ASSERT(target_facts != NULL,
+              "AMDGPU cluster preamble requires AMDGPU target facts");
   return loom_amdgpu_processor_properties_have_flags(
-      processor != NULL ? &processor->properties : NULL,
+      target_facts->properties.processor,
       LOOM_AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS);
 }
 
 bool loom_amdgpu_cluster_preamble_target_supports_cluster_launch_state(
-    const loom_module_t* module, loom_symbol_ref_t target_ref) {
-  const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_processor_from_ref(module, target_ref);
+    const loom_amdgpu_target_facts_t* target_facts) {
+  IREE_ASSERT(target_facts != NULL,
+              "AMDGPU cluster preamble requires AMDGPU target facts");
   return loom_amdgpu_processor_properties_have_flags(
-      processor != NULL ? &processor->properties : NULL,
+      target_facts->properties.processor,
       LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE);
 }
 
@@ -120,14 +120,15 @@ static iree_status_t loom_amdgpu_cluster_preamble_state(
     }
     // Architected workgroup identity uses TTMP9/TTMP7 even for ordinary
     // dispatches with a trivial 1x1x1 source cluster.
+    const loom_amdgpu_target_facts_t* target_facts =
+        loom_amdgpu_target_facts_cast(
+            loom_low_lower_context_target_facts(context));
     state->uses_architected_workgroup_ids =
         loom_amdgpu_cluster_preamble_target_uses_architected_workgroup_ids(
-            loom_low_lower_context_module(context),
-            loom_low_lower_context_target_ref(context));
+            target_facts);
     const bool supports_cluster_launch_state =
         loom_amdgpu_cluster_preamble_target_supports_cluster_launch_state(
-            loom_low_lower_context_module(context),
-            loom_low_lower_context_target_ref(context));
+            target_facts);
     state->uses_clustered_dispatch =
         has_nontrivial_cluster && supports_cluster_launch_state;
     state->cluster_workgroup_info = LOOM_VALUE_ID_INVALID;
@@ -345,8 +346,8 @@ static iree_status_t loom_amdgpu_cluster_preamble_materialize_workgroup_id(
           &state->cluster_workgroup_ids[dimension]);
     case LOOM_KERNEL_DIMENSION_Y:
     case LOOM_KERNEL_DIMENSION_Z: {
-      // gfx1250 uses the GFX12 BFE literal layout: the four-bit width is in
-      // bits 16..22 and the offset is in bits 0..4.
+      // The selected GFX12 BFE literal layout places the four-bit width in bits
+      // 16..22 and the offset in bits 0..4.
       const uint32_t offset =
           (uint32_t)dimension * LOOM_AMDGPU_CLUSTER_WORKGROUP_COORDINATE_BITS;
       const uint32_t control =

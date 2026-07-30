@@ -16,6 +16,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_amdgpu_target_facts_t loom_amdgpu_target_facts_t;
+
 typedef struct loom_amdgpu_cluster_preamble_demands_t {
   // First source op requiring each global workgroup coordinate.
   const loom_op_t* workgroup_id_ops[LOOM_KERNEL_DIMENSION_COUNT_];
@@ -36,11 +38,11 @@ bool loom_amdgpu_cluster_preamble_required_nontrivial_size(
 // Returns whether the selected processor carries workgroup coordinates in
 // architected TTMP launch state.
 bool loom_amdgpu_cluster_preamble_target_uses_architected_workgroup_ids(
-    const loom_module_t* module, loom_symbol_ref_t target_ref);
+    const loom_amdgpu_target_facts_t* target_facts);
 
 // Returns whether the selected processor defines clustered launch state.
 bool loom_amdgpu_cluster_preamble_target_supports_cluster_launch_state(
-    const loom_module_t* module, loom_symbol_ref_t target_ref);
+    const loom_amdgpu_target_facts_t* target_facts);
 
 // Returns the static cluster extent along |dimension|.
 uint32_t loom_amdgpu_cluster_preamble_size_dimension(
