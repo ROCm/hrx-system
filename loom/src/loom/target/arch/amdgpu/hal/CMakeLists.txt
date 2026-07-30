@@ -68,6 +68,7 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::rewrite::rewriter
+    loom::target::arch::amdgpu::buffer_resource
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_info
     loom::target::types

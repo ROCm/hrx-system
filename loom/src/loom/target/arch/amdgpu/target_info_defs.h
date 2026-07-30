@@ -358,6 +358,21 @@ typedef enum loom_amdgpu_kernel_descriptor_abi_flag_bits_e {
 // Bitset of loom_amdgpu_kernel_descriptor_abi_flag_bits_t values.
 typedef uint64_t loom_amdgpu_kernel_descriptor_abi_flags_t;
 
+typedef enum loom_amdgpu_buffer_resource_record_encoding_e {
+  // No buffer-resource descriptor record encoding is selected.
+  LOOM_AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_NONE = 0,
+  // 48-bit base, 32-bit num_records, and legacy format fields.
+  LOOM_AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_BASE48_NUM_RECORDS32_LEGACY_FORMAT =
+      1,
+  // 48-bit base, 32-bit num_records, and unified format fields.
+  LOOM_AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_BASE48_NUM_RECORDS32_UNIFIED_FORMAT =
+      2,
+  // 57-bit base, 45-bit num_records, 16-bit stride, and 4-bit control.
+  LOOM_AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_BASE57_NUM_RECORDS45 = 3,
+  // Number of buffer-resource descriptor record encodings.
+  LOOM_AMDGPU_BUFFER_RESOURCE_RECORD_ENCODING_COUNT = 4,
+} loom_amdgpu_buffer_resource_record_encoding_t;
+
 typedef enum loom_amdgpu_buffer_resource_cache_swizzle_e {
   // Buffer resource descriptors do not support cache swizzle.
   LOOM_AMDGPU_BUFFER_RESOURCE_CACHE_SWIZZLE_NONE = 0,
@@ -392,6 +407,8 @@ typedef struct loom_amdgpu_descriptor_set_sopp_opcodes_t {
 } loom_amdgpu_descriptor_set_sopp_opcodes_t;
 
 typedef struct loom_amdgpu_descriptor_set_buffer_resource_info_t {
+  // Physical buffer-resource descriptor record encoding.
+  loom_amdgpu_buffer_resource_record_encoding_t record_encoding;
   // Buffer resource descriptor cache-swizzle encoding shape.
   loom_amdgpu_buffer_resource_cache_swizzle_t cache_swizzle;
 } loom_amdgpu_descriptor_set_buffer_resource_info_t;

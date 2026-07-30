@@ -345,6 +345,11 @@ loom_symbol_ref_t loom_target_low_legality_target_ref(
   return context->options->target_ref;
 }
 
+const loom_op_t* loom_target_low_legality_target_op(
+    const loom_target_low_legality_context_t* context) {
+  return context->options->target_op;
+}
+
 const loom_low_descriptor_set_t* loom_target_low_legality_descriptor_set(
     const loom_target_low_legality_context_t* context) {
   return context->descriptor_set;

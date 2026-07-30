@@ -34,7 +34,6 @@ loom_cc_library(
     "target_env.c"
   DEPS
     iree::base
-    loom::target::arch::amdgpu::hal::binding_descriptor
     loom::target::emit::llvmir::target_presets
     loom::target::types
   PUBLIC

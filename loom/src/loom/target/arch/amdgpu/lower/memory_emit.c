@@ -1986,13 +1986,20 @@ static iree_status_t loom_amdgpu_lower_memory_packet_store(
     }
     if (access->address_form == LOOM_AMDGPU_MEMORY_ADDRESS_FORM_DS_2ADDR) {
       loom_type_t lane_type = loom_type_none();
-      IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
+      const uint32_t lane_register_count = access->payload_register_count / 2u;
+      if (lane_register_count == 1u) {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &lane_type));
+      } else {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_range_type(
+            context, lane_register_count, &lane_type));
+      }
       loom_value_id_t low_value0 = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
           context, source_op, low_value, 0, lane_type, &low_value0));
       loom_value_id_t low_value1 = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
-          context, source_op, low_value, 1, lane_type, &low_value1));
+          context, source_op, low_value, lane_register_count, lane_type,
+          &low_value1));
       loom_value_id_t operands[] = {
           low_vaddr,
           low_value0,

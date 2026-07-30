@@ -437,6 +437,7 @@ class CliTest(unittest.TestCase):
 
         self.assertIn(".iree/bazel-try/run-<pid>/BUILD.bazel", description)
         self.assertIn("bazel build", description)
+        self.assertIn("--check_visibility=false", description)
         self.assertIn("//.iree/bazel-try/run-<pid>:snippet", description)
         self.assertIn("# compile only", description)
 

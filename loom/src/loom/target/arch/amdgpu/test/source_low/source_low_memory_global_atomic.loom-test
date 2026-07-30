@@ -27,7 +27,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %23 = s_and_b32 %21, %22
   %24 = concat(%20, %23) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %25 = s_mov_b32 256
-  %26 = s_mov_b32 822243328
+  %26 = s_mov_b32 822173696
   %27 = concat(%24, %25, %26) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %14 = v_mov_b32 1
   buffer_atomic_add_u32 %14, %27, %11, %12
@@ -122,7 +122,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %22 = s_and_b32 %20, %21
   %23 = concat(%19, %22) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %24 = s_mov_b32 256
-  %25 = s_mov_b32 822243328
+  %25 = s_mov_b32 822173696
   %26 = concat(%23, %24, %25) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   buffer_atomic_add_f32 %one, %26, %11, %12
   %17 = v_mov_b32 1065353216
@@ -161,7 +161,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %31 = s_and_b32 %29, %30
   %32 = concat(%28, %31) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %33 = s_mov_b32 256
-  %34 = s_mov_b32 822243328
+  %34 = s_mov_b32 822173696
   %35 = concat(%32, %33, %34) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   buffer_atomic_min_f32 %limit, %35, %12, %13
   buffer_atomic_max_f32 %limit, %35, %12, %13
@@ -199,7 +199,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %25 = s_and_b32 %23, %24
   %26 = concat(%22, %25) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %27 = s_mov_b32 256
-  %28 = s_mov_b32 822243328
+  %28 = s_mov_b32 822173696
   %29 = concat(%26, %27, %28) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %15 = v_mov_b32_copy %value
   %old_min = buffer_atomic_min_f32_rtn %15, %29, %12, %13
@@ -240,7 +240,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %43 = s_and_b32 %41, %42
   %44 = concat(%40, %43) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %45 = s_mov_b32 256
-  %46 = s_mov_b32 822243328
+  %46 = s_mov_b32 822173696
   %47 = concat(%44, %45, %46) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %16 = v_mov_b32 255
   buffer_atomic_and_b32 %16, %47, %13, %14
@@ -283,7 +283,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %23 = s_and_b32 %21, %22
   %24 = concat(%20, %23) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %25 = s_mov_b32 256
-  %26 = s_mov_b32 822243328
+  %26 = s_mov_b32 822173696
   %27 = concat(%24, %25, %26) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %14 = v_mov_b32 1
   buffer_atomic_sub_u32 %14, %27, %11, %12
@@ -319,7 +319,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %19 = s_and_b32 %17, %18
   %20 = concat(%16, %19) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %21 = s_mov_b32 256
-  %22 = s_mov_b32 822243328
+  %22 = s_mov_b32 822173696
   %23 = concat(%20, %21, %22) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %14 = v_mov_b32 7
   %old = buffer_atomic_swap_b32_rtn %14, %23, %11, %12
@@ -380,7 +380,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %24 = s_and_b32 %22, %23
   %25 = concat(%21, %24) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %26 = s_mov_b32 256
-  %27 = s_mov_b32 822243328
+  %27 = s_mov_b32 822173696
   %28 = concat(%25, %26, %27) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %16 = v_mov_b32 7
   %17 = v_mov_b32 9
@@ -453,7 +453,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   %53 = s_and_b32 %51, %52
   %54 = concat(%50, %53) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %55 = s_mov_b32 256
-  %56 = s_mov_b32 822243328
+  %56 = s_mov_b32 822173696
   %57 = concat(%54, %55, %56) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %17 = v_mov_b32 1
   buffer_atomic_min_i32 %17, %57, %14, %15

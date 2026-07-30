@@ -21,6 +21,7 @@
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
+#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/util/fact_table.h"
 
 static bool loom_amdgpu_memory_access_static_byte_offset_is_usable(
@@ -209,11 +210,16 @@ static bool loom_amdgpu_memory_access_is_packed_16bit_float_tail(
          access->packet_byte_count % 4u == 2u;
 }
 
-static bool loom_amdgpu_memory_access_has_32bit_lanes(
+static bool loom_amdgpu_memory_access_is_ds_pair(
     const loom_amdgpu_memory_access_t* access) {
-  return access->packet_byte_count ==
-         access->source.element_byte_count *
-             iree_max(access->payload_register_count, 1u);
+  if (access->source.vector_lane_count != 2u ||
+      (access->source.element_byte_count != 4u &&
+       access->source.element_byte_count != 8u)) {
+    return false;
+  }
+  const uint32_t lane_register_count = access->source.element_byte_count / 4u;
+  return access->payload_register_count == lane_register_count * 2u &&
+         access->packet_byte_count == access->source.element_byte_count * 2u;
 }
 
 static bool loom_amdgpu_memory_access_has_contiguous_vector_lanes(
@@ -355,6 +361,8 @@ typedef struct loom_amdgpu_memory_packet_selection_context_t {
   loom_func_like_t source_function;
   // Target configuration bundle being specialized.
   const loom_target_bundle_t* bundle;
+  // Target instruction restrictions active for packet selection.
+  loom_amdgpu_instruction_constraint_bits_t instruction_constraints;
   // Cached dynamic-term materialization facts for the source access.
   const loom_amdgpu_memory_dynamic_term_materialization_plan_t*
       materialization_plan;
@@ -2233,6 +2241,11 @@ loom_amdgpu_memory_address_attempt_apply(
     loom_amdgpu_memory_access_diagnostic_t* diagnostic) {
   switch (attempt->kind) {
     case LOOM_AMDGPU_MEMORY_ADDRESS_ATTEMPT_DS_ADDTID:
+      if (iree_any_bit_set(
+              selection_context->instruction_constraints,
+              LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION)) {
+        return LOOM_AMDGPU_MEMORY_ADDRESS_ATTEMPT_NOT_APPLICABLE;
+      }
       return loom_amdgpu_try_select_ds_addtid_memory_descriptor(
                  selection_context->descriptor_set, selection_context->module,
                  selection_context->source_function, selection_context->bundle,
@@ -2243,8 +2256,7 @@ loom_amdgpu_memory_address_attempt_apply(
       if (loom_amdgpu_memory_access_has_contiguous_vector_lanes(access)) {
         return LOOM_AMDGPU_MEMORY_ADDRESS_ATTEMPT_NOT_APPLICABLE;
       }
-      if (access->payload_register_count != 2 ||
-          !loom_amdgpu_memory_access_has_32bit_lanes(access)) {
+      if (!loom_amdgpu_memory_access_is_ds_pair(access)) {
         diagnostic->rejection_bits |=
             LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_VECTOR_AXIS_STRIDE;
         return LOOM_AMDGPU_MEMORY_ADDRESS_ATTEMPT_REJECTED;
@@ -2655,11 +2667,49 @@ static bool loom_amdgpu_memory_access_plan_push_chunk_packet(
       &packet_access, out_plan, out_diagnostic);
 }
 
+static bool loom_amdgpu_memory_access_plan_push_strided_lane_packet(
+    const loom_amdgpu_memory_packet_selection_context_t* selection_context,
+    loom_low_source_memory_operation_kind_t kind,
+    const loom_low_source_memory_access_plan_t* source, uint32_t lane_index,
+    loom_amdgpu_memory_access_plan_t* out_plan,
+    loom_amdgpu_memory_access_diagnostic_t* out_diagnostic) {
+  const uint32_t lane_register_count = source->element_byte_count / 4u;
+  const uint32_t source_byte_offset =
+      lane_index * (uint32_t)source->vector_lane_byte_stride;
+  loom_low_source_memory_access_plan_t packet_source = {0};
+  if (!loom_amdgpu_memory_access_make_byte_chunk_source(
+          source, source_byte_offset, source->element_byte_count,
+          &packet_source, out_diagnostic)) {
+    return false;
+  }
+  loom_amdgpu_memory_access_t packet_access = {0};
+  loom_amdgpu_memory_access_make_packet(&packet_source, lane_register_count,
+                                        source->element_byte_count,
+                                        &packet_access);
+  return loom_amdgpu_memory_access_plan_push_packet(
+      selection_context, kind, /*allow_global_smem=*/false,
+      lane_index * lane_register_count, &packet_access, out_plan,
+      out_diagnostic);
+}
+
+static bool loom_amdgpu_memory_access_requires_ds_pair_split(
+    const loom_amdgpu_memory_packet_selection_context_t* selection_context,
+    const loom_amdgpu_memory_access_t* access) {
+  return iree_any_bit_set(
+             selection_context->instruction_constraints,
+             LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT) &&
+         loom_amdgpu_memory_access_is_ds_pair(access) &&
+         access->source.vector_lane_byte_stride > 0 &&
+         access->source.vector_lane_byte_stride <= UINT32_MAX &&
+         !loom_amdgpu_memory_access_has_contiguous_vector_lanes(access);
+}
+
 bool loom_amdgpu_memory_access_plan_select(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_view_region_table_t* view_regions,
     loom_func_like_t source_function, const loom_target_bundle_t* bundle,
+    loom_amdgpu_instruction_constraint_bits_t instruction_constraints,
     const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     const loom_op_t* source_op,
     loom_low_source_memory_access_plan_t* out_source,
@@ -2692,6 +2742,7 @@ bool loom_amdgpu_memory_access_plan_select(
       .view_regions = view_regions,
       .source_function = source_function,
       .bundle = bundle,
+      .instruction_constraints = instruction_constraints,
       .materialization_plan = &materialization_plan,
   };
 
@@ -2726,6 +2777,17 @@ bool loom_amdgpu_memory_access_plan_select(
                                                               vector_type)) {
     access.payload_format =
         LOOM_AMDGPU_MEMORY_PAYLOAD_FORMAT_SIGNED_16BIT_INTEGER;
+  }
+  if (loom_amdgpu_memory_access_requires_ds_pair_split(&selection_context,
+                                                       &access)) {
+    for (uint32_t lane_index = 0; lane_index < 2u; ++lane_index) {
+      if (!loom_amdgpu_memory_access_plan_push_strided_lane_packet(
+              &selection_context, kind, &access.source, lane_index, out_plan,
+              out_diagnostic)) {
+        return false;
+      }
+    }
+    return true;
   }
   const uint32_t whole_register_byte_count = access.payload_register_count * 4u;
   const bool whole_register_payload =
@@ -2827,12 +2889,16 @@ static iree_status_t loom_amdgpu_memory_access_plan_select_from_context(
   const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_lower_context(
       context, &alloca_layout));
+  const loom_amdgpu_target_info_t* target =
+      loom_amdgpu_target_from_op(loom_low_lower_context_target_op(context));
+  IREE_ASSERT(target != NULL);
   if (!loom_amdgpu_memory_access_plan_select(
           module, loom_low_lower_context_fact_table(context),
           loom_low_lower_context_descriptor_set(context), view_regions,
           loom_low_lower_context_source_function(context),
-          loom_low_lower_context_bundle(context), alloca_layout, source_op,
-          &source, out_plan, &source_diagnostic, &diagnostic)) {
+          loom_low_lower_context_bundle(context),
+          target->instruction_constraints, alloca_layout, source_op, &source,
+          out_plan, &source_diagnostic, &diagnostic)) {
     return iree_ok_status();
   }
   *out_selected = true;

@@ -20,7 +20,7 @@ low.func.def target(@target) abi(hal_kernel) @prefetch_static() asm<amdgpu.rdna4
   %9 = s_and_b32 %7, %8
   %10 = concat(%6, %9) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %11 = s_mov_b32 272
-  %12 = s_mov_b32 822243328
+  %12 = s_mov_b32 822173696
   %13 = concat(%10, %11, %12) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   s_buffer_prefetch_data %13, %4 {offset = 32, count = 1}
   return
@@ -53,7 +53,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1025, 1, 
   %13 = s_and_b32 %11, %12
   %14 = concat(%10, %13) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %15 = s_mov_b32 4100
-  %16 = s_mov_b32 822243328
+  %16 = s_mov_b32 822173696
   %17 = concat(%14, %15, %16) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   s_buffer_prefetch_data %17, %8 {count = 1}
   return
@@ -92,7 +92,7 @@ low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) 
   %19 = s_and_b32 %17, %18
   %20 = concat(%16, %19) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %21 = s_mov_b32 256
-  %22 = s_mov_b32 822243328
+  %22 = s_mov_b32 822173696
   %23 = concat(%20, %21, %22) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   s_buffer_prefetch_data %23, %14 {offset = 180, count = 1}
   return

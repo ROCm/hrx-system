@@ -217,6 +217,7 @@ static iree_status_t loom_low_source_selection_try_symbol(
   out_selection->function_name = func_facts->name;
   out_selection->target_source = target_source;
   out_selection->target_ref = target_ref;
+  out_selection->target_op = target_facts->target.op;
   out_selection->target_symbol_name =
       loom_low_source_selection_symbol_ref_name(module, target_ref);
   out_selection->policy = policy;

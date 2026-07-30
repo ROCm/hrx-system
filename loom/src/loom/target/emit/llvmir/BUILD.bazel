@@ -162,6 +162,7 @@ loom_cc_library(
     deps = [
         ":core",
         ":target_env",
+        "//loom/src/loom/target/arch/amdgpu:buffer_resource",
         "//loom/src/loom/target/emit/llvmir/amdgpu:intrinsics",
         "//loom/src/loom/target/emit/llvmir/amdgpu:target_env",
         "//loom/src/loom/target/emit/llvmir/x86:intrinsics",

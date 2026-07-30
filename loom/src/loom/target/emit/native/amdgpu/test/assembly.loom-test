@@ -1723,8 +1723,8 @@ low.func.def target(@gfx11_target) @gfx11_scheduled_liveness_resource(%kernarg: 
   %masked_hi = s_and_b32 %ptr_hi, %mask
   %base = concat(%ptr_lo, %masked_hi) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %range = s_mov_b32 256
-  %flags = s_mov_b32 822243328
-  %resource = concat(%base, %range, %flags) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %control = s_mov_b32 822173696
+  %resource = concat(%base, %range, %control) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %value = v_mov_b32 1
   buffer_store_dword %value, %resource, %vaddr, %soffset
   return
@@ -1733,7 +1733,7 @@ low.func.def target(@gfx11_target) @gfx11_scheduled_liveness_resource(%kernarg: 
 // ----
   s_load_dwordx2 s[0:1], s[0:1], s2 offset:0
   s_mov_b32 s6, 256
-  s_mov_b32 s7, 822243328
+  s_mov_b32 s7, 822173696
   s_mov_b32 s3, 65535
   v_mov_b32 v1, 1
   s_waitcnt vmcnt(63) lgkmcnt(0)
@@ -1840,8 +1840,8 @@ low.func.def target(@gfx11_target) @gfx11_s_load_tied_after_prior_kernarg_read()
   %masked_high = low.op<amdgpu.s_and_b32>(%pointer_high, %mask) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
   %pointer = low.concat(%pointer_low, %masked_high) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %range = low.const<amdgpu.s_mov_b32> {imm32 = 16} : reg<amdgpu.sgpr>
-  %flags = low.const<amdgpu.s_mov_b32> {imm32 = 822243328} : reg<amdgpu.sgpr>
-  %descriptor = low.concat(%pointer, %range, %flags) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %control = low.const<amdgpu.s_mov_b32> {imm32 = 822173696} : reg<amdgpu.sgpr>
+  %descriptor = low.concat(%pointer, %range, %control) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   low.return
 }
 
@@ -1850,7 +1850,7 @@ low.func.def target(@gfx11_target) @gfx11_s_load_tied_after_prior_kernarg_read()
   s_load_dwordx2 s[0:1], s[0:1] offset:16
   s_mov_b32 s0, 65535
   s_mov_b32 s2, 16
-  s_mov_b32 s3, 822243328
+  s_mov_b32 s3, 822173696
   s_and_b32 s5, s5, s0
   s_endpgm
 

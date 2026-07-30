@@ -21,6 +21,10 @@ extern "C" {
 
 typedef struct loom_low_resolved_target_t loom_low_resolved_target_t;
 
+// Returns the canonical AMDGPU target selected by |target_op|, or NULL.
+const loom_amdgpu_target_info_t* loom_amdgpu_target_from_op(
+    const loom_op_t* target_op);
+
 // Returns the AMDGPU processor selected by |target_op|, or NULL when the op is
 // not an AMDGPU target record or verification has not proven the processor.
 const loom_amdgpu_processor_info_t* loom_amdgpu_target_processor_from_op(

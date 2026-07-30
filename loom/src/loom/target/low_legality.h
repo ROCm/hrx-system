@@ -140,6 +140,8 @@ typedef struct loom_target_low_legality_options_t {
   const loom_target_profile_t* target_profile;
   // Module-local target record symbol selected for this lowering attempt.
   loom_symbol_ref_t target_ref;
+  // Borrowed durable target record referenced by |target_ref|.
+  const loom_op_t* target_op;
   // Low descriptor registry linked into the current compiler binary.
   const loom_low_descriptor_registry_t* descriptor_registry;
   // Catalog resolving compact diagnostic refs emitted by target contract
@@ -215,6 +217,10 @@ const loom_target_bundle_t* loom_target_low_legality_bundle(
 // Returns the module-local target record symbol selected for this legality
 // check.
 loom_symbol_ref_t loom_target_low_legality_target_ref(
+    const loom_target_low_legality_context_t* context);
+
+// Returns the durable target record selected for this legality check.
+const loom_op_t* loom_target_low_legality_target_op(
     const loom_target_low_legality_context_t* context);
 
 // Returns the selected low descriptor set.
