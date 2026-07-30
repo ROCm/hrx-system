@@ -19,6 +19,12 @@ from loom.reporting.compile_report import (
     match_compile_report_entries,
     report_identity_json,
 )
+from loom.reporting.compile_report_bank_service import (
+    append_bank_service_diff_text,
+    append_bank_service_show_text,
+    build_bank_service_diff,
+    build_bank_service_show,
+)
 
 SHOW_KIND = "loom.compile_report.show"
 DIFF_KIND = "loom.compile_report.diff"
@@ -274,6 +280,9 @@ def build_compile_report_show(
             for entry in document.entries
         ],
     }
+    bank_service = build_bank_service_show(document)
+    if bank_service is not None:
+        view["bank_service"] = bank_service
     if document.envelope_context:
         view["envelope_context"] = dict(document.envelope_context)
     return view
@@ -310,7 +319,7 @@ def build_compile_report_diff(
                 "compiler_analysis": compiler_analysis,
             }
         )
-    return {
+    view: dict[str, object] = {
         "kind": DIFF_KIND,
         "schema_version": COMPILE_REPORT_SCHEMA_VERSION,
         "missing_evidence": "omitted_metrics_are_unavailable",
@@ -321,6 +330,10 @@ def build_compile_report_diff(
         "unchanged_entry_count": unchanged_entry_count,
         "entries": entries,
     }
+    bank_service = build_bank_service_diff(baseline, candidate)
+    if bank_service is not None:
+        view["bank_service"] = bank_service
+    return view
 
 
 def format_compile_report_show_text(view: dict[str, object]) -> str:
@@ -372,6 +385,9 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
             _expect_dict(entry["compiler_analysis"]),
             EvidenceClass.COMPILER_ANALYSIS,
         )
+    bank_service = view.get("bank_service")
+    if isinstance(bank_service, dict):
+        append_bank_service_show_text(lines, bank_service)
     return "\n".join(lines) + "\n"
 
 
@@ -406,6 +422,9 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
             _expect_dict(entry["compiler_analysis"]),
             EvidenceClass.COMPILER_ANALYSIS,
         )
+    bank_service = view.get("bank_service")
+    if isinstance(bank_service, dict):
+        append_bank_service_diff_text(lines, bank_service)
     return "\n".join(lines) + "\n"
 
 

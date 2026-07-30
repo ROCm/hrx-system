@@ -55,12 +55,14 @@ def test_builds_compact_suggestion_view_with_cited_evidence() -> None:
         {
             "id": "test.reduce_pressure",
             "entry": "kernel",
+            "confidence": "high",
             "action": "Reduce pressure and recompile.",
             "evidence": {"entries.rows[0].pressure": 128},
         }
     ]
     text = format_compile_report_suggestions_text(view)
     assert "[test.reduce_pressure] kernel" in text
+    assert "confidence: high" in text
     assert "entries.rows[0].pressure: 128" in text
 
 

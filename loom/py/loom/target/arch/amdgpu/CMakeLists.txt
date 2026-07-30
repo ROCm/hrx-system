@@ -70,6 +70,7 @@ iree_py_library(
     "compile_report_suggestions.py"
   DEPS
     loom::py::loom::target::arch::amdgpu::target_identity
+    loom::py::loom::target::arch::amdgpu::target_info
     loom::py::loom::reporting::reporting
 )
 
