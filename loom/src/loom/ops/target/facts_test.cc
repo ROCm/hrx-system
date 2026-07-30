@@ -169,7 +169,6 @@ target.generic<reference> @base
   selected_storage.export_plan.export_symbol = IREE_SV("materialized_kernel");
   selected_storage.export_plan.abi_kind = LOOM_TARGET_ABI_HAL_KERNEL;
   selected_storage.export_plan.linkage = LOOM_TARGET_LINKAGE_DSO_LOCAL;
-  selected_storage.export_plan.hal_kernel.buffer_resource_flags = 7;
   selected_storage.config.contract_set_key = IREE_SV("test.materialized");
   selected_storage.config.contract_feature_bits = UINT64_C(0x1234);
 
@@ -198,7 +197,7 @@ target.generic<reference> @base
   const loom_target_like_descriptor_t* descriptor = loom_target_like_descriptor(
       loom_target_like_cast(module.get(), target_op));
   ASSERT_NE(descriptor, nullptr);
-  EXPECT_EQ(descriptor->projection_count, 31u);
+  EXPECT_EQ(descriptor->projection_count, 30u);
 
   const loom_target_symbol_facts_t* facts =
       LookupTarget(module.get(), IREE_SV("materialized"));
@@ -233,7 +232,6 @@ target.generic<reference> @base
                                      IREE_SV("materialized_kernel")));
   EXPECT_EQ(facts->storage.export_plan.abi_kind, LOOM_TARGET_ABI_HAL_KERNEL);
   EXPECT_EQ(facts->storage.export_plan.linkage, LOOM_TARGET_LINKAGE_DSO_LOCAL);
-  EXPECT_EQ(facts->storage.export_plan.hal_kernel.buffer_resource_flags, 7u);
   EXPECT_TRUE(iree_string_view_equal(facts->storage.config.contract_set_key,
                                      IREE_SV("test.materialized")));
   EXPECT_EQ(facts->storage.config.contract_feature_bits, UINT64_C(0x1234));

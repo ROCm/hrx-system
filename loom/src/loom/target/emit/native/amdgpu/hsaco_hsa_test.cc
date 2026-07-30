@@ -782,8 +782,7 @@ class LowKernelEmitter {
         &target_registry_.registry, &bundle_storage.bundle, &descriptor_set));
     loom_amdgpu_hal_binding_materialization_result_t materialization = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_materialize(
-        module_, low_function, &bundle_storage.bundle, descriptor_set,
-        &materialization, arena));
+        module_, low_function, descriptor_set, &materialization, arena));
 
     loom_amdgpu_hal_kernel_abi_verify_result_t abi_verify_result = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(

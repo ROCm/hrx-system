@@ -99,8 +99,8 @@ iree_status_t loom_amdgpu_materialize_hal_kernel_abi_run(
 
   loom_amdgpu_hal_binding_materialization_result_t materialization = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_materialize(
-      module, function.op, &target.bundle_storage.bundle, target.descriptor_set,
-      &materialization, pass->arena));
+      module, function.op, target.descriptor_set, &materialization,
+      pass->arena));
   ++statistics->functions;
   statistics->bindings += materialization.materialized_binding_count;
   statistics->direct_args += materialization.materialized_direct_arg_count;
@@ -135,8 +135,8 @@ iree_status_t loom_amdgpu_materialize_hal_buffer_descriptors_run(
 
   iree_host_size_t materialized_count = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_materialize_buffer_descriptors(
-      module, function.op, &target.bundle_storage.bundle, target.descriptor_set,
-      &materialized_count, pass->arena));
+      module, function.op, target.descriptor_set, &materialized_count,
+      pass->arena));
   if (materialized_count == 0) {
     return iree_ok_status();
   }

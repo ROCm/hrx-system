@@ -39,14 +39,6 @@ extern "C" {
 // Dense generated reference to an immutable LDS bank-service model set.
 typedef uint16_t loom_amdgpu_lds_bank_service_model_set_ordinal_t;
 
-// Default raw buffer-resource descriptor control word for global HAL bindings.
-//
-// This is the final descriptor word consumed by MUBUF/MTBUF packets. It matches
-// the word emitted by LLVM/IREE for amdgcn-amd-amdhsa raw buffers with 32-bit
-// element format, resource-level OOB behavior, and the standard memory
-// properties used for HAL binding resources.
-#define LOOM_AMDGPU_HAL_BUFFER_RESOURCE_FLAGS UINT32_C(0x31027000)
-
 typedef enum loom_amdgpu_elf_feature_flag_bits_e {
   // Mask selecting the AMDHSA code-object v4+ XNACK feature state.
   LOOM_AMDGPU_ELF_FEATURE_XNACK_MASK_V4 = UINT32_C(0x300),

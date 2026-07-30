@@ -71,7 +71,7 @@ static const loom_llvmir_target_profile_t kTestKernelProfile = {
         /*.flat_workgroup_size_min=*/1,
         /*.flat_workgroup_size_max=*/1024,
         /*.subgroup_size=*/{},
-        /*.binding_resource_flags=*/{},
+        /*.binding_resource_control=*/{},
         /*.flat_workgroup_size_attr_name=*/
         IREE_SVL("loom-test-flat-work-group-size"),
         /*.uniform_workgroup_size_attr_name=*/

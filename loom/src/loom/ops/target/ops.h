@@ -63,9 +63,8 @@ LOOM_DEFINE_ATTR_I64(loom_target_generic_memory_space_descriptor, 26)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_target_generic_abi, 27, loom_target_abi_kind_t)
 LOOM_DEFINE_ATTR_STRING(loom_target_generic_export_symbol, 28)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_target_generic_linkage, 29, loom_target_linkage_t)
-LOOM_DEFINE_ATTR_I64(loom_target_generic_hal_buffer_resource_flags, 30)
-LOOM_DEFINE_ATTR_STRING(loom_target_generic_contract_set_key, 31)
-LOOM_DEFINE_ATTR_I64(loom_target_generic_contract_feature_bits, 32)
+LOOM_DEFINE_ATTR_STRING(loom_target_generic_contract_set_key, 30)
+LOOM_DEFINE_ATTR_I64(loom_target_generic_contract_feature_bits, 31)
 enum loom_target_generic_build_flag_bits_e {
   LOOM_TARGET_GENERIC_BUILD_FLAG_HAS_CODEGEN_FORMAT = 1u << 0,
   LOOM_TARGET_GENERIC_BUILD_FLAG_HAS_ARTIFACT_FORMAT = 1u << 1,
@@ -95,9 +94,8 @@ enum loom_target_generic_build_flag_bits_e {
   LOOM_TARGET_GENERIC_BUILD_FLAG_HAS_ABI = 1u << 25,
   LOOM_TARGET_GENERIC_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 26,
   LOOM_TARGET_GENERIC_BUILD_FLAG_HAS_LINKAGE = 1u << 27,
-  LOOM_TARGET_GENERIC_BUILD_FLAG_HAS_HAL_BUFFER_RESOURCE_FLAGS = 1u << 28,
-  LOOM_TARGET_GENERIC_BUILD_FLAG_HAS_CONTRACT_SET_KEY = 1u << 29,
-  LOOM_TARGET_GENERIC_BUILD_FLAG_HAS_CONTRACT_FEATURE_BITS = 1u << 30,
+  LOOM_TARGET_GENERIC_BUILD_FLAG_HAS_CONTRACT_SET_KEY = 1u << 28,
+  LOOM_TARGET_GENERIC_BUILD_FLAG_HAS_CONTRACT_FEATURE_BITS = 1u << 29,
 };
 typedef uint32_t loom_target_generic_build_flags_t;
 iree_status_t loom_target_generic_build(
@@ -133,7 +131,6 @@ iree_status_t loom_target_generic_build(
     loom_optional uint8_t abi,
     loom_optional loom_string_id_t export_symbol,
     loom_optional uint8_t linkage,
-    loom_optional int64_t hal_buffer_resource_flags,
     loom_optional loom_string_id_t contract_set_key,
     loom_optional int64_t contract_feature_bits,
     loom_location_id_t location,

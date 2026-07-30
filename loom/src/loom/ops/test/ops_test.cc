@@ -1109,7 +1109,6 @@ TEST_F(BuilderTest, TargetLikeInterfaceReadsTargetRecordFields) {
       /*memory_space_constant=*/0, /*memory_space_private=*/0,
       /*memory_space_host=*/0, /*memory_space_descriptor=*/0, /*abi=*/0,
       /*export_symbol=*/LOOM_STRING_ID_INVALID, /*linkage=*/0,
-      /*hal_buffer_resource_flags=*/0,
       /*contract_set_key=*/LOOM_STRING_ID_INVALID, /*contract_feature_bits=*/0,
       LOOM_LOCATION_UNKNOWN, &op));
 

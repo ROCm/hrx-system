@@ -135,8 +135,7 @@ low.func.def target(@test_target) @kernel() {
 TEST_F(TargetFunctionContractTest, HalContractOverlaysTargetRecord) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @test_target {
-  abi = hal_kernel,
-  hal_buffer_resource_flags = 7
+  abi = hal_kernel
 }
 
 low.kernel.def target(@test_target) export("dispatch") linkage(dso_local) @kernel() {
@@ -156,7 +155,6 @@ low.kernel.def target(@test_target) export("dispatch") linkage(dso_local) @kerne
                                      IREE_SV("dispatch")));
   EXPECT_EQ(storage.export_plan.hal_kernel.flat_workgroup_size_min, 0u);
   EXPECT_EQ(storage.export_plan.hal_kernel.flat_workgroup_size_max, 0u);
-  EXPECT_EQ(storage.export_plan.hal_kernel.buffer_resource_flags, 7u);
 }
 
 TEST_F(TargetFunctionContractTest,

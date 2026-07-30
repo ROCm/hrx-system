@@ -70,13 +70,12 @@ LOOM_DEFINE_ATTR_I64(loom_llvmir_target_memory_space_descriptor, 26)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_llvmir_target_abi, 27, loom_target_abi_kind_t)
 LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_export_symbol, 28)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_llvmir_target_linkage, 29, loom_target_linkage_t)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_hal_buffer_resource_flags, 30)
-LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_contract_set_key, 31)
-LOOM_DEFINE_ATTR_I64(loom_llvmir_target_contract_feature_bits, 32)
-LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_triple, 33)
-LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_data_layout, 34)
-LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_cpu, 35)
-LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_features, 36)
+LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_contract_set_key, 30)
+LOOM_DEFINE_ATTR_I64(loom_llvmir_target_contract_feature_bits, 31)
+LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_triple, 32)
+LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_data_layout, 33)
+LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_cpu, 34)
+LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_features, 35)
 // Build flag values use macros because C enums cannot portably represent
 // values wider than int.
 #define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_CODEGEN_FORMAT (UINT64_C(1) << 0)
@@ -122,14 +121,12 @@ LOOM_DEFINE_ATTR_STRING(loom_llvmir_target_features, 36)
 #define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_ABI (UINT64_C(1) << 25)
 #define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_EXPORT_SYMBOL (UINT64_C(1) << 26)
 #define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_LINKAGE (UINT64_C(1) << 27)
-#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_HAL_BUFFER_RESOURCE_FLAGS \
-  (UINT64_C(1) << 28)
-#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_CONTRACT_SET_KEY (UINT64_C(1) << 29)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_CONTRACT_SET_KEY (UINT64_C(1) << 28)
 #define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_CONTRACT_FEATURE_BITS \
-  (UINT64_C(1) << 30)
-#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_DATA_LAYOUT (UINT64_C(1) << 31)
-#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_CPU (UINT64_C(1) << 32)
-#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_FEATURES (UINT64_C(1) << 33)
+  (UINT64_C(1) << 29)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_DATA_LAYOUT (UINT64_C(1) << 30)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_CPU (UINT64_C(1) << 31)
+#define LOOM_LLVMIR_TARGET_BUILD_FLAG_HAS_FEATURES (UINT64_C(1) << 32)
 typedef uint64_t loom_llvmir_target_build_flags_t;
 iree_status_t loom_llvmir_target_build(
     loom_builder_t* builder,
@@ -164,7 +161,6 @@ iree_status_t loom_llvmir_target_build(
     loom_optional uint8_t abi,
     loom_optional loom_string_id_t export_symbol,
     loom_optional uint8_t linkage,
-    loom_optional int64_t hal_buffer_resource_flags,
     loom_optional loom_string_id_t contract_set_key,
     loom_optional int64_t contract_feature_bits,
     loom_string_id_t triple,

@@ -248,8 +248,6 @@ typedef struct loom_target_hal_kernel_abi_t {
   uint32_t flat_workgroup_size_min;
   // Optimization upper flat workgroup size advertised to the backend.
   uint32_t flat_workgroup_size_max;
-  // ABI-required raw buffer resource flags for global binding resources.
-  uint32_t buffer_resource_flags;
 } loom_target_hal_kernel_abi_t;
 
 typedef struct loom_target_export_plan_t {
