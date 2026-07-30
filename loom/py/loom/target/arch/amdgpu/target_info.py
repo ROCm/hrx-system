@@ -135,12 +135,12 @@ AMDGPU_MATRIX_FEATURES_BY_PROFILE = {
 }
 
 AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE = "none"
-AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_GFX1250 = "xdl_gfx1250"
-AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_GFX1251 = "xdl_gfx1251"
+AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16 = "xdl_latency_4_8_16"
+AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32 = "xdl_latency_16_32"
 AMDGPU_MATRIX_COEXECUTION_PROFILES = (
     AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE,
-    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_GFX1250,
-    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_GFX1251,
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16,
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32,
 )
 AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA = "wmma"
 AMDGPU_MATRIX_COEXECUTION_SOURCE_SWMMAC = "swmmac"
@@ -518,7 +518,7 @@ class AmdgpuMatrixCoexecutionRuleInfo:
 
 AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE = {
     AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE: (),
-    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_GFX1250: (
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16: (
         AmdgpuMatrixCoexecutionRuleInfo(
             source=AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
             latency_cycles=4,
@@ -550,7 +550,7 @@ AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE = {
             vector_issue_distance=4,
         ),
     ),
-    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_GFX1251: (
+    AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32: (
         AmdgpuMatrixCoexecutionRuleInfo(
             source=AMDGPU_MATRIX_COEXECUTION_SOURCE_WMMA,
             latency_cycles=16,
@@ -1373,14 +1373,16 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         lds_bank_service_models=(
             AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES
         ),
-        matrix_coexecution_profile=AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_GFX1250,
+        matrix_coexecution_profile=(
+            AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16
+        ),
     ),
     gfx125x_processor_info(
         "gfx1251",
         0x05A,
         descriptor_set_key="amdgpu.rdna4.gfx1251.core",
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
-        matrix_coexecution_profile=AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_GFX1251,
+        matrix_coexecution_profile=AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32,
     ),
     processor_info(
         "gfx1310",
@@ -1440,7 +1442,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_SRAMECC_ANY_V4,
         elf_generic_version=generic_code_object_current_version("gfx12-5-generic"),
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12_5_GENERIC,
-        matrix_coexecution_profile=AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_GFX1251,
+        matrix_coexecution_profile=AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32,
     ),
 )
 

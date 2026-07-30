@@ -216,9 +216,9 @@ typedef enum loom_amdgpu_matrix_coexecution_profile_e {
   // No qualified matrix coexecution model is available.
   LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE = 0,
   // 4/8/16-cycle XDL WMMA/SWMMAC vector-issue release model.
-  LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_GFX1250 = 1,
+  LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_4_8_16 = 1,
   // Conservative 16/32-cycle XDL WMMA/SWMMAC vector-issue release model.
-  LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_GFX1251 = 2,
+  LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_XDL_LATENCY_16_32 = 2,
   // Number of matrix coexecution profiles.
   LOOM_AMDGPU_MATRIX_COEXECUTION_PROFILE_COUNT = 3,
 } loom_amdgpu_matrix_coexecution_profile_t;
