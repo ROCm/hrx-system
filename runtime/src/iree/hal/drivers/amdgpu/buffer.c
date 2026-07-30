@@ -236,6 +236,29 @@ void* iree_hal_amdgpu_buffer_device_pointer(iree_hal_buffer_t* base_buffer) {
   return ((iree_hal_amdgpu_buffer_t*)base_buffer)->host_ptr;
 }
 
+bool iree_hal_amdgpu_buffer_uses_release_callback(
+    iree_hal_buffer_t* base_buffer,
+    iree_hal_buffer_release_callback_t release_callback) {
+  if (!iree_hal_resource_is((const iree_hal_resource_t*)base_buffer,
+                            &iree_hal_amdgpu_buffer_vtable)) {
+    return false;
+  }
+  const iree_hal_amdgpu_buffer_t* buffer =
+      (const iree_hal_amdgpu_buffer_t*)base_buffer;
+  return buffer->release_callback.fn == release_callback.fn &&
+         buffer->release_callback.user_data == release_callback.user_data;
+}
+
+void iree_hal_amdgpu_buffer_disarm_storage(
+    iree_hal_buffer_t* base_buffer,
+    iree_hal_buffer_release_callback_t release_callback) {
+  IREE_ASSERT(iree_hal_amdgpu_buffer_uses_release_callback(base_buffer,
+                                                           release_callback));
+  iree_hal_amdgpu_buffer_t* buffer = iree_hal_amdgpu_buffer_cast(base_buffer);
+  buffer->host_ptr = NULL;
+  buffer->release_callback = iree_hal_buffer_release_callback_null();
+}
+
 static void iree_hal_amdgpu_buffer_initialize(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,

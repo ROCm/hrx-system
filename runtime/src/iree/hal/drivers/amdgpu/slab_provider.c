@@ -517,9 +517,13 @@ iree_status_t iree_hal_amdgpu_slab_provider_create(
   }
   if (iree_status_is_ok(status)) {
     if (iree_hal_amdgpu_slab_provider_uses_asan_vmm(provider)) {
-      status = iree_hal_amdgpu_vmem_query_alloc_granule(
-          libhsa, options.memory_pool, &provider->allocation_granule);
-      provider->allocation_alignment = provider->allocation_granule;
+      iree_hal_amdgpu_vmem_granularity_t granularity;
+      status = iree_hal_amdgpu_vmem_query_alloc_granularity(
+          libhsa, options.memory_pool, &granularity);
+      if (iree_status_is_ok(status)) {
+        provider->allocation_granule = granularity.recommended;
+        provider->allocation_alignment = granularity.recommended;
+      }
     } else {
       provider->allocation_granule = properties.allocation_granule;
       provider->allocation_alignment = properties.allocation_alignment;
