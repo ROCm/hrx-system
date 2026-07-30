@@ -11,6 +11,7 @@
 
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/target/arch/amdgpu/lower/plan.h"
+#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/low_legality.h"
 
 #ifdef __cplusplus
@@ -126,10 +127,9 @@ loom_amdgpu_matrix_fragment_contract_candidate_at(
     const loom_amdgpu_matrix_fragment_contract_candidates_t* candidates,
     iree_host_size_t index);
 
-// Returns matrix feature bits for the processor selected by |target_ref|.
-loom_amdgpu_matrix_feature_bits_t
-loom_amdgpu_matrix_fragment_feature_bits_from_target_ref(
-    const loom_module_t* module, loom_symbol_ref_t target_ref);
+// Returns matrix feature bits for the selected AMDGPU target facts.
+loom_amdgpu_matrix_feature_bits_t loom_amdgpu_matrix_fragment_feature_bits(
+    const loom_amdgpu_target_facts_t* target_facts);
 
 #ifdef __cplusplus
 }  // extern "C"

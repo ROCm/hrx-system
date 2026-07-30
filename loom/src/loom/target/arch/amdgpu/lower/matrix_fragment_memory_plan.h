@@ -17,14 +17,15 @@ extern "C" {
 #endif
 
 // Selects the AMDGPU matrix-fragment memory plan for a source op without
-// requiring a low-lowering context.
+// requiring a low-lowering context. |target_facts| supplies the processor
+// matrix capabilities without resolving target IR.
 iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
     const loom_target_bundle_t* bundle,
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_symbol_ref_t target_ref, loom_func_like_t source_function,
-    const loom_op_t* source_op,
+    const loom_amdgpu_target_facts_t* target_facts,
+    loom_func_like_t source_function, const loom_op_t* source_op,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_amdgpu_fragment_memory_plan_t* out_plan, bool* out_selected);
 
