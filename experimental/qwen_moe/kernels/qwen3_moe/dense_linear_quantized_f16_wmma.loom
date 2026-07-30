@@ -15,6 +15,8 @@
 // persistent repacking or expanded-weight allocation is required.
 amdgpu.target<gfx11-generic> @qwen3_moe_dense_gfx11_wave64 {subgroup_size = 64}
 
+amdgpu.target<gfx11-generic> @qwen3_moe_dense_gfx11_wave32 {subgroup_size = 32}
+
 config.decl @qwen3_moe.dense_quantized.input_size : %value: index where [range(%value, 256, 32768), mul(%value, 256)]
 
 config.decl @qwen3_moe.dense_quantized.output_size : %value: index where [range(%value, 1, 262144)]
@@ -28,6 +30,9 @@ config.decl @qwen3_moe.dense_quantized.output_accumulation : %value: index where
 func.decl @qwen3_moe_build_expert_table(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %route_ids: buffer, %expert_table: buffer)
 
 func.decl @qwen3_moe_routed_linear_q4k_f16_wmma(%token_count: index, %input: buffer, %expert_table: buffer, %weight: buffer, %output: buffer)
+
+// Shared raw-layout Q4_K row contraction primitive.
+func.decl @qwen3_moe_q4k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32)
 
 // Shared raw Q6_K decoder linked from the GGML physical-layout module.
 func.decl @ggml_q6k_f16_vector4(%weight: buffer, %weight_row_byte_base: offset, %q6_block: index, %q6_group: index, %packet: index) -> (vector<4xf16>)
@@ -134,6 +139,81 @@ func.def inline @qwen3_moe_dense_q4k_wmma_vector4(%weight: buffer, %row_byte_bas
   %half3 = scalar.fptrunc %value3 : f32 to f16
   %result = vector.from_elements %half0, %half1, %half2, %half3 : vector<4xf16>
   func.return %result : vector<4xf16>
+}
+
+// Low-fixed-cost Q4_K schedule for decode and small prefill. Each wave owns
+// one output channel and contracts a Q8_1 activation row directly against the
+// original GGUF weight row. This complements the grouped WMMA schedule below:
+// it gives up cross-token weight reuse in exchange for doing no padded matrix
+// work when fewer than 32 tokens are available.
+kernel.def target(@qwen3_moe_dense_gfx11_wave32) @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count: index) {
+  %output_size = config.get @qwen3_moe.dense_quantized.output_size : index
+  %one = index.constant 1 : index
+  %seven = index.constant 7 : index
+  %eight = index.constant 8 : index
+  %twofiftysix = index.constant 256 : index
+  %padded_output_size = index.add %output_size, %seven : index
+  %output_tiles = index.div %padded_output_size, %eight : index
+  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%twofiftysix, %one, %one) : index
+} launch(%token_count: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+  %input_size = config.get @qwen3_moe.dense_quantized.input_size : index
+  %output_size = config.get @qwen3_moe.dense_quantized.output_size : index
+  %output_accumulation = config.get @qwen3_moe.dense_quantized.output_accumulation : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
+  %channel_tile = kernel.workgroup.id<x> : index
+  %token0 = kernel.workgroup.id<y> : index
+  %subgroup0 = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %one = index.constant 1 : index
+  %eight = index.constant 8 : index
+  %onetwentyeight = index.constant 128 : index
+  %onehundredfortyfour = index.constant 144 : index
+  %twofiftysix = index.constant 256 : index
+  %zero_i32 = scalar.constant 0 : i32
+  %zero_f32 = scalar.constant 0.0 : f32
+  %zero_offset = index.constant 0 : offset
+  %token, %launch_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
+  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
+  %channel_base = index.mul %channel_tile, %eight : index
+  %channel = index.add %channel_base, %subgroup : index
+  %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
+  %lane_i32 = index.cast %lane : index to i32
+  %is_lane_zero = scalar.cmpi eq, %lane_i32, %zero_i32 : i32
+  %q4_block_count = index.div %bounded_input_size, %twofiftysix : index
+  %weight_row_byte_count = index.mul %q4_block_count, %onehundredfortyfour : index
+  %weight_row_byte_index = index.mul %channel, %weight_row_byte_count : index
+  %weight_row_byte_base = index.cast %weight_row_byte_index : index to offset
+  %q8_group_count = index.div %bounded_input_size, %onetwentyeight : index
+  %q8_row_byte_count = index.mul %q8_group_count, %onehundredfortyfour : index
+  %q8_row_byte_index = index.mul %token, %q8_row_byte_count : index
+  %q8_row_byte_base = index.cast %q8_row_byte_index : index to offset
+  %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
+  %lane_sum = scf.if %valid_channel -> (f32) {
+    %sum = func.call @qwen3_moe_q4k_q8_1_x4_row_lane(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
+    scf.yield %sum : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %dot = kernel.subgroup.reduce<addf> %lane_sum : f32
+  %writes_output = scalar.andi %valid_channel, %is_lane_zero : i1
+  %accumulates_output = index.cmp eq, %output_accumulation, %one : index
+  scf.if %writes_output {
+    %output_element_count = index.mul %launch_token_count, %bounded_output_size : index
+    %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<[%output_element_count]xf32, #dense>
+    %token_output_base = index.mul %token, %bounded_output_size : index
+    %output_index = index.add %token_output_base, %channel : index
+    %result = scf.if %accumulates_output -> (f32) {
+      %residual = view.load %output_view[%output_index] : view<[%output_element_count]xf32, #dense> -> f32
+      %sum = scalar.addf %residual, %dot : f32
+      scf.yield %sum : f32
+    } else {
+      scf.yield %dot : f32
+    }
+    view.store %result, %output_view[%output_index] : f32, view<[%output_element_count]xf32, #dense>
+  }
+  kernel.return
 }
 
 // Shared matrix schedule. Format-specific entry points pass a literal storage
@@ -444,19 +524,59 @@ check.case public @qwen3_moe_dense_linear_q6k_f16_wmma_differential_case {
 // of the benchmark parameter sweep.
 check.case public @qwen3_moe_dense_linear_q4k_f16_wmma_o_differential_case {
   %token_count = check.literal value(1) : index
+  %input_size = check.literal value(4096) : index
   %route_count = check.literal value(1) : index
   %route_stride = check.literal value(1) : index
   %expert_count = check.literal value(1) : index
   %input = check.generate.fill value(0.00390625) : tensor<1x4096xf32>
+  %q8_input = check.generate.fill value(0) : tensor<1x4608xi8>
   %route_ids = check.generate.fill value(0) : tensor<1x1xi32>
   %expert_table = check.generate.fill value(-1) : tensor<2xi32>
   %weight = check.generate.fill value(34) : tensor<1x2048x16x144xi8>
   %expected = check.generate.fill value(0.0) : tensor<1x2048xf32>
   %actual = check.generate.fill value(0.0) : tensor<1x2048xf32>
+  %direct = check.generate.fill value(0.0) : tensor<1x2048xf32>
   func.call @qwen3_moe_build_expert_table(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table) : (index, index, index, index, tensor<1x1xi32>, tensor<2xi32>)
+  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %q8_input) : (index, index, tensor<1x4096xf32>, tensor<1x4608xi8>)
   func.call @qwen3_moe_routed_linear_q4k_f16_wmma(%token_count, %input, %expert_table, %weight, %expected) : (index, tensor<1x4096xf32>, tensor<2xi32>, tensor<1x2048x16x144xi8>, tensor<1x2048xf32>)
   func.call @qwen3_moe_dense_linear_q4k_f16_wmma(%token_count, %input, %weight, %actual) : (index, tensor<1x4096xf32>, tensor<1x2048x16x144xi8>, tensor<1x2048xf32>)
+  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %weight, %direct) : (index, tensor<1x4608xi8>, tensor<1x2048x16x144xi8>, tensor<1x2048xf32>)
   check.expect.close actual(%actual) expected(%expected) atol(0.01) rtol(0.01) nan(same) : tensor<1x2048xf32>
+  check.expect.close actual(%direct) expected(%expected) atol(0.25) rtol(0.01) nan(same) : tensor<1x2048xf32>
+  check.return
+}
+
+// Crosses the direct schedule's eight-wave output tile while comparing its
+// Q8_1 dot path against the independently structured FP16 WMMA provider.
+check.case public @qwen3_moe_dense_linear_q4k_q8_1_x4_differential_case {
+  %token_count = check.literal value(2) : index
+  %input_size = check.literal value(512) : index
+  %input = check.generate.fill value(0.00390625) : tensor<2x512xf32>
+  %q8_input = check.generate.fill value(0) : tensor<2x576xi8>
+  %weight = check.generate.fill value(34) : tensor<65x2x144xi8>
+  %expected = check.generate.fill value(0.0) : tensor<2x65xf32>
+  %actual = check.generate.fill value(0.0) : tensor<2x65xf32>
+  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %q8_input) : (index, index, tensor<2x512xf32>, tensor<2x576xi8>)
+  func.call @qwen3_moe_dense_linear_q4k_f16_wmma(%token_count, %input, %weight, %expected) : (index, tensor<2x512xf32>, tensor<65x2x144xi8>, tensor<2x65xf32>)
+  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %weight, %actual) : (index, tensor<2x576xi8>, tensor<65x2x144xi8>, tensor<2x65xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.25) rtol(0.01) nan(same) : tensor<2x65xf32>
+  check.return
+}
+
+// A zero projection leaves the nonzero caller-provided residual unchanged.
+// Overwrite publication would instead produce zero, making the accumulation
+// contract observable without coupling this case to another projection kernel.
+check.case public @qwen3_moe_dense_linear_q4k_q8_1_x4_accumulation_case {
+  %token_count = check.literal value(2) : index
+  %input_size = check.literal value(512) : index
+  %input = check.generate.fill value(0.0) : tensor<2x512xf32>
+  %q8_input = check.generate.fill value(1) : tensor<2x576xi8>
+  %weight = check.generate.fill value(34) : tensor<65x2x144xi8>
+  %actual = check.generate.fill value(1.25) : tensor<2x65xf32>
+  %expected = check.generate.fill value(1.25) : tensor<2x65xf32>
+  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %q8_input) : (index, index, tensor<2x512xf32>, tensor<2x576xi8>)
+  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %weight, %actual) : (index, tensor<2x576xi8>, tensor<65x2x144xi8>, tensor<2x65xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x65xf32>
   check.return
 }
 
@@ -471,6 +591,20 @@ check.case public @qwen3_moe_dense_linear_q4k_f16_wmma_q_projection_benchmark_ca
   check.return
 }
 
+check.case public @qwen3_moe_dense_linear_q4k_q8_1_x4_q_projection_benchmark_case {
+  %token_count = check.param.choice values([1, 17, 32, 63, 128, 129, 512, 1024, 2048]) name("token_count") : index
+  %input_size = check.literal value(2048) : index
+  %input = check.generate.fill value(0.0) : tensor<[%token_count]x2048xf32>
+  %q8_input = check.generate.fill value(1) : tensor<[%token_count]x2304xi8>
+  %weight = check.generate.fill value(0) : tensor<4096x8x144xi8>
+  %output = check.generate.fill value(1.0) : tensor<[%token_count]x4096xf32>
+  %expected = check.generate.fill value(0.0) : tensor<[%token_count]x4096xf32>
+  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %q8_input) : (index, index, tensor<[%token_count]x2048xf32>, tensor<[%token_count]x2304xi8>)
+  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %weight, %output) : (index, tensor<[%token_count]x2304xi8>, tensor<4096x8x144xi8>, tensor<[%token_count]x4096xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x4096xf32>
+  check.return
+}
+
 check.case public @qwen3_moe_dense_linear_q4k_f16_wmma_k_projection_benchmark_case {
   %token_count = check.param.choice values([1, 17, 32, 63, 128, 129, 512, 1024, 2048]) name("token_count") : index
   %input = check.generate.fill value(0.0) : tensor<[%token_count]x2048xf32>
@@ -478,6 +612,20 @@ check.case public @qwen3_moe_dense_linear_q4k_f16_wmma_k_projection_benchmark_ca
   %output = check.generate.fill value(1.0) : tensor<[%token_count]x512xf32>
   %expected = check.generate.fill value(0.0) : tensor<[%token_count]x512xf32>
   func.call @qwen3_moe_dense_linear_q4k_f16_wmma(%token_count, %input, %weight, %output) : (index, tensor<[%token_count]x2048xf32>, tensor<512x8x144xi8>, tensor<[%token_count]x512xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x512xf32>
+  check.return
+}
+
+check.case public @qwen3_moe_dense_linear_q4k_q8_1_x4_k_projection_benchmark_case {
+  %token_count = check.param.choice values([1, 17, 32, 63, 128, 129, 512, 1024, 2048]) name("token_count") : index
+  %input_size = check.literal value(2048) : index
+  %input = check.generate.fill value(0.0) : tensor<[%token_count]x2048xf32>
+  %q8_input = check.generate.fill value(1) : tensor<[%token_count]x2304xi8>
+  %weight = check.generate.fill value(0) : tensor<512x8x144xi8>
+  %output = check.generate.fill value(1.0) : tensor<[%token_count]x512xf32>
+  %expected = check.generate.fill value(0.0) : tensor<[%token_count]x512xf32>
+  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %q8_input) : (index, index, tensor<[%token_count]x2048xf32>, tensor<[%token_count]x2304xi8>)
+  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %weight, %output) : (index, tensor<[%token_count]x2304xi8>, tensor<512x8x144xi8>, tensor<[%token_count]x512xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x512xf32>
   check.return
 }
@@ -504,11 +652,27 @@ check.case public @qwen3_moe_dense_linear_q4k_f16_wmma_o_projection_benchmark_ca
   check.return
 }
 
+check.case public @qwen3_moe_dense_linear_q4k_q8_1_x4_o_projection_benchmark_case {
+  %token_count = check.param.choice values([1, 17, 32, 63, 128, 129, 512, 1024, 2048]) name("token_count") : index
+  %input_size = check.literal value(4096) : index
+  %input = check.generate.fill value(0.0) : tensor<[%token_count]x4096xf32>
+  %q8_input = check.generate.fill value(1) : tensor<[%token_count]x4608xi8>
+  %weight = check.generate.fill value(0) : tensor<2048x16x144xi8>
+  %output = check.generate.fill value(1.0) : tensor<[%token_count]x2048xf32>
+  %expected = check.generate.fill value(1.0) : tensor<[%token_count]x2048xf32>
+  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %q8_input) : (index, index, tensor<[%token_count]x4096xf32>, tensor<[%token_count]x4608xi8>)
+  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %weight, %output) : (index, tensor<[%token_count]x4608xi8>, tensor<2048x16x144xi8>, tensor<[%token_count]x2048xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x2048xf32>
+  check.return
+}
+
 check.benchmark<@qwen3_moe_dense_linear_q4k_f16_wmma_differential_case> @qwen3_moe_dense_linear_q4k_f16_wmma_differential
 
 check.benchmark<@qwen3_moe_dense_linear_q6k_f16_wmma_differential_case> @qwen3_moe_dense_linear_q6k_f16_wmma_differential
 
 check.benchmark<@qwen3_moe_dense_linear_q4k_f16_wmma_o_differential_case> @qwen3_moe_dense_linear_q4k_f16_wmma_o_differential
+
+check.benchmark<@qwen3_moe_dense_linear_q4k_q8_1_x4_differential_case> @qwen3_moe_dense_linear_q4k_q8_1_x4_differential
 
 check.benchmark<@qwen3_moe_dense_linear_q4k_f16_wmma_q_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_f16_wmma_q_decode {token_count = 1}
 
@@ -518,6 +682,14 @@ check.benchmark<@qwen3_moe_dense_linear_q4k_f16_wmma_q_projection_benchmark_case
 
 check.benchmark<@qwen3_moe_dense_linear_q4k_f16_wmma_q_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_f16_wmma_q_prefill_512 {token_count = 512}
 
+check.benchmark<@qwen3_moe_dense_linear_q4k_q8_1_x4_q_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_q8_1_x4_q_decode {token_count = 1}
+
+check.benchmark<@qwen3_moe_dense_linear_q4k_q8_1_x4_q_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_q8_1_x4_q_prefill_32 {token_count = 32}
+
+check.benchmark<@qwen3_moe_dense_linear_q4k_q8_1_x4_q_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_q8_1_x4_q_prefill_128 {token_count = 128}
+
+check.benchmark<@qwen3_moe_dense_linear_q4k_q8_1_x4_q_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_q8_1_x4_q_prefill_512 {token_count = 512}
+
 check.benchmark<@qwen3_moe_dense_linear_q4k_f16_wmma_k_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_f16_wmma_k_decode {token_count = 1}
 
 check.benchmark<@qwen3_moe_dense_linear_q4k_f16_wmma_k_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_f16_wmma_k_prefill_32 {token_count = 32}
@@ -525,6 +697,14 @@ check.benchmark<@qwen3_moe_dense_linear_q4k_f16_wmma_k_projection_benchmark_case
 check.benchmark<@qwen3_moe_dense_linear_q4k_f16_wmma_k_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_f16_wmma_k_prefill_128 {token_count = 128}
 
 check.benchmark<@qwen3_moe_dense_linear_q4k_f16_wmma_k_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_f16_wmma_k_prefill_512 {token_count = 512}
+
+check.benchmark<@qwen3_moe_dense_linear_q4k_q8_1_x4_k_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_q8_1_x4_k_decode {token_count = 1}
+
+check.benchmark<@qwen3_moe_dense_linear_q4k_q8_1_x4_k_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_q8_1_x4_k_prefill_32 {token_count = 32}
+
+check.benchmark<@qwen3_moe_dense_linear_q4k_q8_1_x4_k_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_q8_1_x4_k_prefill_128 {token_count = 128}
+
+check.benchmark<@qwen3_moe_dense_linear_q4k_q8_1_x4_k_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_q8_1_x4_k_prefill_512 {token_count = 512}
 
 check.benchmark<@qwen3_moe_dense_linear_q6k_f16_wmma_v_projection_benchmark_case> @qwen3_moe_dense_linear_q6k_f16_wmma_v_decode {token_count = 1}
 
@@ -541,3 +721,11 @@ check.benchmark<@qwen3_moe_dense_linear_q4k_f16_wmma_o_projection_benchmark_case
 check.benchmark<@qwen3_moe_dense_linear_q4k_f16_wmma_o_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_f16_wmma_o_prefill_128 {token_count = 128}
 
 check.benchmark<@qwen3_moe_dense_linear_q4k_f16_wmma_o_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_f16_wmma_o_prefill_512 {token_count = 512}
+
+check.benchmark<@qwen3_moe_dense_linear_q4k_q8_1_x4_o_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_q8_1_x4_o_decode {token_count = 1}
+
+check.benchmark<@qwen3_moe_dense_linear_q4k_q8_1_x4_o_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_q8_1_x4_o_prefill_32 {token_count = 32}
+
+check.benchmark<@qwen3_moe_dense_linear_q4k_q8_1_x4_o_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_q8_1_x4_o_prefill_128 {token_count = 128}
+
+check.benchmark<@qwen3_moe_dense_linear_q4k_q8_1_x4_o_projection_benchmark_case> @qwen3_moe_dense_linear_q4k_q8_1_x4_o_prefill_512 {token_count = 512}
