@@ -304,6 +304,33 @@ func.def inline @qwen3_moe_q4k_q8_1_x4_row_lane(%input_size: index, %weight: buf
   func.return %sum : f32
 }
 
+// Decodes the packed queue descriptor shared by expert-grouped projections.
+// The producer stores a 7-bit expert ordinal, a 6-bit 32-row partition
+// ordinal, and a 5-bit row count minus one.
+func.def inline @qwen3_moe_unpack_expert_partition_descriptor(%descriptor: i32) -> (index, index, index) {
+  %one_i32 = scalar.constant 1 : i32
+  %five_i32 = scalar.constant 5 : i32
+  %seven_i32 = scalar.constant 7 : i32
+  %thirteen_i32 = scalar.constant 13 : i32
+  %thirtyone_i32 = scalar.constant 31 : i32
+  %sixtythree_i32 = scalar.constant 63 : i32
+  %onetwentyseven_i32 = scalar.constant 127 : i32
+  %expert_i32 = scalar.andi %descriptor, %onetwentyseven_i32 : i32
+  %partition_shifted_i32 = scalar.shrui %descriptor, %seven_i32 : i32
+  %partition_i32 = scalar.andi %partition_shifted_i32, %sixtythree_i32 : i32
+  %route_tile_base_i32 = scalar.shli %partition_i32, %five_i32 : i32
+  %row_count_shifted_i32 = scalar.shrui %descriptor, %thirteen_i32 : i32
+  %row_count_minus_one_i32 = scalar.andi %row_count_shifted_i32, %thirtyone_i32 : i32
+  %partition_row_count_i32 = scalar.addi %row_count_minus_one_i32, %one_i32 : i32
+  %expert0 = index.cast %expert_i32 : i32 to index
+  %expert = index.assume %expert0 [range(%expert0, 0, 127)] : index
+  %route_tile_base0 = index.cast %route_tile_base_i32 : i32 to index
+  %route_tile_base = index.assume %route_tile_base0 [range(%route_tile_base0, 0, 2016)] : index
+  %partition_row_count0 = index.cast %partition_row_count_i32 : i32 to index
+  %partition_row_count = index.assume %partition_row_count0 [range(%partition_row_count0, 1, 32)] : index
+  func.return %expert, %route_tile_base, %partition_row_count : index, index, index
+}
+
 // Builds the transient expert table consumed by the grouped projection. The
 // table packs [expert_count] route counts followed by
 // [expert_count][token_count] compact assignment ordinals. Top-k routing
