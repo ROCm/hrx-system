@@ -21,8 +21,6 @@
 #define LOOM_AMDGPU_FP8_NAN_ENCODING UINT32_C(0x7F)
 #define LOOM_AMDGPU_FP8_LOW_PAIR_SIGN_MASK UINT32_C(0x00008080)
 #define LOOM_AMDGPU_FP8_HIGH_PAIR_SIGN_MASK UINT32_C(0x80800000)
-#define LOOM_AMDGPU_FP8_LOW_PAIR_SIGN_SELECTOR UINT32_C(0x00000307)
-#define LOOM_AMDGPU_FP8_HIGH_PAIR_SIGN_SELECTOR UINT32_C(0x03070000)
 
 static bool loom_amdgpu_fp8_encode_has_refs(
     const loom_low_descriptor_set_t* descriptor_set,
@@ -43,6 +41,15 @@ static bool loom_amdgpu_fp8_encode_plan_is_f32_software(
     const loom_amdgpu_fp8_encode_plan_t* plan) {
   return plan->kind == LOOM_AMDGPU_FP8_ENCODE_KIND_F32_SOFTWARE_E4M3 ||
          plan->kind == LOOM_AMDGPU_FP8_ENCODE_KIND_F32_SOFTWARE_E5M2;
+}
+
+static uint32_t loom_amdgpu_fp8_encode_sign_permute_selector(
+    const loom_amdgpu_fp8_encode_plan_t* plan, bool high_pair) {
+  const uint32_t sign_byte_index =
+      plan->kind == LOOM_AMDGPU_FP8_ENCODE_KIND_F16_SOFTWARE_E5M2 ? 1u : 3u;
+  const uint32_t low_pair_selector =
+      (sign_byte_index << 8) | (4u + sign_byte_index);
+  return high_pair ? low_pair_selector << 16 : low_pair_selector;
 }
 
 bool loom_amdgpu_fp8_encode_plan_is_fnuz_bridge(
@@ -409,13 +416,15 @@ iree_status_t loom_amdgpu_initialize_fp8_encode_emission(
         LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_REGISTER_SELECTOR) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
           context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
-          LOOM_AMDGPU_FP8_LOW_PAIR_SIGN_SELECTOR, selector_type,
-          &out_state->low_sign_permute_selector));
+          loom_amdgpu_fp8_encode_sign_permute_selector(plan,
+                                                       /*high_pair=*/false),
+          selector_type, &out_state->low_sign_permute_selector));
       if (encoded_lane_count > 2u) {
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
             context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
-            LOOM_AMDGPU_FP8_HIGH_PAIR_SIGN_SELECTOR, selector_type,
-            &out_state->high_sign_permute_selector));
+            loom_amdgpu_fp8_encode_sign_permute_selector(plan,
+                                                         /*high_pair=*/true),
+            selector_type, &out_state->high_sign_permute_selector));
       }
     }
     if (plan->sign_insert_descriptor_ref ==
@@ -580,7 +589,7 @@ static iree_status_t loom_amdgpu_emit_fp8_encode_sign(
       state->lane_type, out_encoded);
 }
 
-iree_status_t loom_amdgpu_emit_fp8_encode_software_f32_lane(
+static iree_status_t loom_amdgpu_emit_fp8_encode_software_f32_magnitude_lane(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_encode_plan_t* plan,
     const loom_amdgpu_fp8_encode_emission_state_t* state,
@@ -639,12 +648,25 @@ iree_status_t loom_amdgpu_emit_fp8_encode_software_f32_lane(
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_select(
       context, source_op, finite_encoding, state->nan_encoding, is_nan,
       state->lane_type, &magnitude_encoding));
+  *out_encoded = magnitude_encoding;
+  return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_emit_fp8_encode_software_f32_lane(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_encode_plan_t* plan,
+    const loom_amdgpu_fp8_encode_emission_state_t* state,
+    loom_value_id_t source, loom_value_id_t* out_encoded) {
+  loom_value_id_t magnitude_encoding = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_software_f32_magnitude_lane(
+      context, source_op, plan, state, source, &magnitude_encoding));
   return loom_amdgpu_emit_fp8_encode_sign(context, source_op, plan, state,
                                           source, /*sign_shift=*/24,
                                           magnitude_encoding, out_encoded);
 }
 
-iree_status_t loom_amdgpu_emit_fp8_encode_software_f16_e5m2_lane(
+static iree_status_t
+loom_amdgpu_emit_fp8_encode_software_f16_e5m2_magnitude_lane(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_encode_plan_t* plan,
     const loom_amdgpu_fp8_encode_emission_state_t* state,
@@ -676,6 +698,19 @@ iree_status_t loom_amdgpu_emit_fp8_encode_software_f16_e5m2_lane(
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_select(
       context, source_op, finite_encoding, state->nan_encoding, is_nan,
       state->lane_type, &magnitude_encoding));
+  *out_encoded = magnitude_encoding;
+  return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_emit_fp8_encode_software_f16_e5m2_lane(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_encode_plan_t* plan,
+    const loom_amdgpu_fp8_encode_emission_state_t* state,
+    loom_value_id_t source, loom_value_id_t* out_encoded) {
+  loom_value_id_t magnitude_encoding = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_emit_fp8_encode_software_f16_e5m2_magnitude_lane(
+          context, source_op, plan, state, source, &magnitude_encoding));
   return loom_amdgpu_emit_fp8_encode_sign(context, source_op, plan, state,
                                           source, /*sign_shift=*/8,
                                           magnitude_encoding, out_encoded);
@@ -762,7 +797,7 @@ static iree_status_t loom_amdgpu_prepare_fp8_encode_f32_pair(
                                             high_source, out_high_source);
 }
 
-static iree_status_t loom_amdgpu_emit_fp8_encode_fnuz_sign_permute(
+static iree_status_t loom_amdgpu_emit_fp8_encode_packed_sign_permute(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_encode_plan_t* plan,
     const loom_amdgpu_fp8_encode_emission_state_t* state, bool high_pair,
@@ -771,8 +806,8 @@ static iree_status_t loom_amdgpu_emit_fp8_encode_fnuz_sign_permute(
   loom_low_lower_resolved_descriptor_t descriptor = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
       context, plan->packed_i8_permute.descriptor_ref, &descriptor));
-  const uint32_t selector = high_pair ? LOOM_AMDGPU_FP8_HIGH_PAIR_SIGN_SELECTOR
-                                      : LOOM_AMDGPU_FP8_LOW_PAIR_SIGN_SELECTOR;
+  const uint32_t selector =
+      loom_amdgpu_fp8_encode_sign_permute_selector(plan, high_pair);
   switch (plan->packed_i8_permute.kind) {
     case LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_LITERAL_SELECTOR:
       return loom_amdgpu_emit_resolved_vgpr_binary_immediate(
@@ -786,21 +821,17 @@ static iree_status_t loom_amdgpu_emit_fp8_encode_fnuz_sign_permute(
           state->lane_type, out_sign_bytes);
     case LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_NONE:
     default:
-      IREE_ASSERT_UNREACHABLE("invalid FNUZ bridge sign permutation");
+      IREE_ASSERT_UNREACHABLE("invalid packed FP8 sign permutation");
       IREE_BUILTIN_UNREACHABLE();
   }
 }
 
-static iree_status_t loom_amdgpu_emit_fp8_encode_fnuz_sign_repair(
+static iree_status_t loom_amdgpu_emit_fp8_encode_packed_sign_insert(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_fp8_encode_plan_t* plan,
     const loom_amdgpu_fp8_encode_emission_state_t* state, bool high_pair,
-    loom_value_id_t low_source, loom_value_id_t high_source,
-    loom_value_id_t packed, loom_value_id_t* out_packed) {
-  loom_value_id_t sign_bytes = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_fnuz_sign_permute(
-      context, source_op, plan, state, high_pair, low_source, high_source,
-      &sign_bytes));
+    loom_value_id_t sign_bytes, loom_value_id_t packed,
+    loom_value_id_t* out_packed) {
   const uint32_t sign_mask = high_pair ? LOOM_AMDGPU_FP8_HIGH_PAIR_SIGN_MASK
                                        : LOOM_AMDGPU_FP8_LOW_PAIR_SIGN_MASK;
   if (plan->sign_insert_descriptor_ref ==
@@ -830,6 +861,83 @@ static iree_status_t loom_amdgpu_emit_fp8_encode_fnuz_sign_repair(
   return loom_amdgpu_emit_vgpr_binary(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_OR_B32, packed,
       sign_bits, state->lane_type, out_packed);
+}
+
+static iree_status_t loom_amdgpu_emit_fp8_encode_packed_sign_repair(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_encode_plan_t* plan,
+    const loom_amdgpu_fp8_encode_emission_state_t* state, bool high_pair,
+    loom_value_id_t low_source, loom_value_id_t high_source,
+    loom_value_id_t packed, loom_value_id_t* out_packed) {
+  loom_value_id_t sign_bytes = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_packed_sign_permute(
+      context, source_op, plan, state, high_pair, low_source, high_source,
+      &sign_bytes));
+  return loom_amdgpu_emit_fp8_encode_packed_sign_insert(
+      context, source_op, plan, state, high_pair, sign_bytes, packed,
+      out_packed);
+}
+
+iree_status_t loom_amdgpu_emit_fp8_encode_software_packed_lanes(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_encode_plan_t* plan,
+    const loom_amdgpu_fp8_encode_emission_state_t* state,
+    const loom_value_id_t* source_lanes, uint32_t source_lane_count,
+    loom_value_id_t* out_packed) {
+  IREE_ASSERT(loom_amdgpu_fp8_encode_plan_is_software(plan));
+  IREE_ASSERT_EQ(plan->packed_i8_permute.kind,
+                 LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_LITERAL_SELECTOR);
+  IREE_ASSERT_GE(source_lane_count, 3u);
+  IREE_ASSERT_LE(source_lane_count, 4u);
+
+  loom_value_id_t physical_sources[4] = {
+      source_lanes[0],
+      source_lanes[1],
+      source_lanes[2],
+      source_lanes[source_lane_count - 1u],
+  };
+  loom_value_id_t low_sign_bytes = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_packed_sign_permute(
+      context, source_op, plan, state, /*high_pair=*/false, physical_sources[0],
+      physical_sources[1], &low_sign_bytes));
+  loom_value_id_t high_sign_bytes = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_packed_sign_permute(
+      context, source_op, plan, state, /*high_pair=*/true, physical_sources[2],
+      physical_sources[3], &high_sign_bytes));
+
+  loom_value_id_t magnitude_lanes[4] = {
+      LOOM_VALUE_ID_INVALID,
+      LOOM_VALUE_ID_INVALID,
+      LOOM_VALUE_ID_INVALID,
+      LOOM_VALUE_ID_INVALID,
+  };
+  for (uint32_t lane = 0; lane < source_lane_count; ++lane) {
+    if (plan->kind == LOOM_AMDGPU_FP8_ENCODE_KIND_F16_SOFTWARE_E5M2) {
+      IREE_RETURN_IF_ERROR(
+          loom_amdgpu_emit_fp8_encode_software_f16_e5m2_magnitude_lane(
+              context, source_op, plan, state, physical_sources[lane],
+              &magnitude_lanes[lane]));
+    } else {
+      IREE_RETURN_IF_ERROR(
+          loom_amdgpu_emit_fp8_encode_software_f32_magnitude_lane(
+              context, source_op, plan, state, physical_sources[lane],
+              &magnitude_lanes[lane]));
+    }
+  }
+  for (uint32_t lane = source_lane_count; lane < 4u; ++lane) {
+    magnitude_lanes[lane] = magnitude_lanes[source_lane_count - 1u];
+  }
+
+  loom_value_id_t packed_register = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_pack_i8_lanes_with_permute(
+      context, source_op, &plan->packed_i8_permute, magnitude_lanes,
+      IREE_ARRAYSIZE(magnitude_lanes), state->lane_type, &packed_register));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_packed_sign_insert(
+      context, source_op, plan, state, /*high_pair=*/false, low_sign_bytes,
+      packed_register, &packed_register));
+  return loom_amdgpu_emit_fp8_encode_packed_sign_insert(
+      context, source_op, plan, state, /*high_pair=*/true, high_sign_bytes,
+      packed_register, out_packed);
 }
 
 static iree_status_t loom_amdgpu_emit_fp8_encode_raw_pair(
@@ -933,14 +1041,14 @@ iree_status_t loom_amdgpu_emit_fp8_encode_fnuz_f32_lanes(
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_raw_pair(
       context, source_op, state, plan->high_descriptor_ref, packed,
       prepared_sources[2], prepared_sources[3], &packed));
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_fnuz_sign_repair(
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_packed_sign_repair(
       context, source_op, plan, state, /*high_pair=*/false, physical_sources[0],
       physical_sources[1], packed, &packed));
   if (source_lane_count <= 2u) {
     *out_packed = packed;
     return iree_ok_status();
   }
-  return loom_amdgpu_emit_fp8_encode_fnuz_sign_repair(
+  return loom_amdgpu_emit_fp8_encode_packed_sign_repair(
       context, source_op, plan, state, /*high_pair=*/true, physical_sources[2],
       physical_sources[3], packed, out_packed);
 }

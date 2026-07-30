@@ -13,68 +13,64 @@ low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_f32x4_to_fp8(%input
   %7 = v_mov_b32 1015021568
   %8 = v_mov_b32 127
   %9 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %10 = v_and_b32_lit %9, 2147483647
-  %11 = v_min_u32 %5, %10
-  %12 = v_bfe_u32_offset_width_inline %11 {offset = 20, width = 1}
-  %13 = v_add3_u32_src2_lit %11, %12, 524287
-  %14 = v_lshrrev_b32_src0_inline %13, 20
-  %15 = v_add_u32_lit %14, 4294966336
-  %16 = v_add_f32_lit %11, 1182793728
-  %17 = v_add_u32_lit %16, 3112173568
-  %18 = v_cmp_lt_u32 %11, %7
-  %19 = v_cndmask_b32 %15, %17, %18
-  %20 = v_cmp_gt_u32 %10, %6
-  %21 = v_cndmask_b32 %19, %8, %20
-  %22 = v_lshrrev_b32_src0_inline %9, 24
-  %23 = v_bfi_b32_src0_lit %22, %21, 128
-  %24 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %25 = v_and_b32_lit %24, 2147483647
-  %26 = v_min_u32 %5, %25
-  %27 = v_bfe_u32_offset_width_inline %26 {offset = 20, width = 1}
-  %28 = v_add3_u32_src2_lit %26, %27, 524287
-  %29 = v_lshrrev_b32_src0_inline %28, 20
-  %30 = v_add_u32_lit %29, 4294966336
-  %31 = v_add_f32_lit %26, 1182793728
-  %32 = v_add_u32_lit %31, 3112173568
-  %33 = v_cmp_lt_u32 %26, %7
-  %34 = v_cndmask_b32 %30, %32, %33
-  %35 = v_cmp_gt_u32 %25, %6
-  %36 = v_cndmask_b32 %34, %8, %35
-  %37 = v_lshrrev_b32_src0_inline %24, 24
-  %38 = v_bfi_b32_src0_lit %37, %36, 128
-  %39 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %40 = v_and_b32_lit %39, 2147483647
-  %41 = v_min_u32 %5, %40
-  %42 = v_bfe_u32_offset_width_inline %41 {offset = 20, width = 1}
-  %43 = v_add3_u32_src2_lit %41, %42, 524287
-  %44 = v_lshrrev_b32_src0_inline %43, 20
-  %45 = v_add_u32_lit %44, 4294966336
-  %46 = v_add_f32_lit %41, 1182793728
-  %47 = v_add_u32_lit %46, 3112173568
-  %48 = v_cmp_lt_u32 %41, %7
-  %49 = v_cndmask_b32 %45, %47, %48
-  %50 = v_cmp_gt_u32 %40, %6
-  %51 = v_cndmask_b32 %49, %8, %50
-  %52 = v_lshrrev_b32_src0_inline %39, 24
-  %53 = v_bfi_b32_src0_lit %52, %51, 128
-  %54 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %55 = v_and_b32_lit %54, 2147483647
-  %56 = v_min_u32 %5, %55
-  %57 = v_bfe_u32_offset_width_inline %56 {offset = 20, width = 1}
-  %58 = v_add3_u32_src2_lit %56, %57, 524287
-  %59 = v_lshrrev_b32_src0_inline %58, 20
-  %60 = v_add_u32_lit %59, 4294966336
-  %61 = v_add_f32_lit %56, 1182793728
-  %62 = v_add_u32_lit %61, 3112173568
-  %63 = v_cmp_lt_u32 %56, %7
-  %64 = v_cndmask_b32 %60, %62, %63
-  %65 = v_cmp_gt_u32 %55, %6
-  %66 = v_cndmask_b32 %64, %8, %65
-  %67 = v_lshrrev_b32_src0_inline %54, 24
-  %68 = v_bfi_b32_src0_lit %67, %66, 128
-  %69 = v_perm_b32_src2_lit %23, %38, 4
-  %70 = v_perm_b32_src2_lit %53, %68, 4
-  %converted = v_perm_b32_src2_lit %69, %70, 16778500
+  %10 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %11 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %12 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %13 = v_perm_b32_src2_lit %9, %10, 775
+  %14 = v_perm_b32_src2_lit %11, %12, 50790400
+  %15 = v_and_b32_lit %9, 2147483647
+  %16 = v_min_u32 %5, %15
+  %17 = v_bfe_u32_offset_width_inline %16 {offset = 20, width = 1}
+  %18 = v_add3_u32_src2_lit %16, %17, 524287
+  %19 = v_lshrrev_b32_src0_inline %18, 20
+  %20 = v_add_u32_lit %19, 4294966336
+  %21 = v_add_f32_lit %16, 1182793728
+  %22 = v_add_u32_lit %21, 3112173568
+  %23 = v_cmp_lt_u32 %16, %7
+  %24 = v_cndmask_b32 %20, %22, %23
+  %25 = v_cmp_gt_u32 %15, %6
+  %26 = v_cndmask_b32 %24, %8, %25
+  %27 = v_and_b32_lit %10, 2147483647
+  %28 = v_min_u32 %5, %27
+  %29 = v_bfe_u32_offset_width_inline %28 {offset = 20, width = 1}
+  %30 = v_add3_u32_src2_lit %28, %29, 524287
+  %31 = v_lshrrev_b32_src0_inline %30, 20
+  %32 = v_add_u32_lit %31, 4294966336
+  %33 = v_add_f32_lit %28, 1182793728
+  %34 = v_add_u32_lit %33, 3112173568
+  %35 = v_cmp_lt_u32 %28, %7
+  %36 = v_cndmask_b32 %32, %34, %35
+  %37 = v_cmp_gt_u32 %27, %6
+  %38 = v_cndmask_b32 %36, %8, %37
+  %39 = v_and_b32_lit %11, 2147483647
+  %40 = v_min_u32 %5, %39
+  %41 = v_bfe_u32_offset_width_inline %40 {offset = 20, width = 1}
+  %42 = v_add3_u32_src2_lit %40, %41, 524287
+  %43 = v_lshrrev_b32_src0_inline %42, 20
+  %44 = v_add_u32_lit %43, 4294966336
+  %45 = v_add_f32_lit %40, 1182793728
+  %46 = v_add_u32_lit %45, 3112173568
+  %47 = v_cmp_lt_u32 %40, %7
+  %48 = v_cndmask_b32 %44, %46, %47
+  %49 = v_cmp_gt_u32 %39, %6
+  %50 = v_cndmask_b32 %48, %8, %49
+  %51 = v_and_b32_lit %12, 2147483647
+  %52 = v_min_u32 %5, %51
+  %53 = v_bfe_u32_offset_width_inline %52 {offset = 20, width = 1}
+  %54 = v_add3_u32_src2_lit %52, %53, 524287
+  %55 = v_lshrrev_b32_src0_inline %54, 20
+  %56 = v_add_u32_lit %55, 4294966336
+  %57 = v_add_f32_lit %52, 1182793728
+  %58 = v_add_u32_lit %57, 3112173568
+  %59 = v_cmp_lt_u32 %52, %7
+  %60 = v_cndmask_b32 %56, %58, %59
+  %61 = v_cmp_gt_u32 %51, %6
+  %62 = v_cndmask_b32 %60, %8, %61
+  %63 = v_perm_b32_src2_lit %26, %38, 4
+  %64 = v_perm_b32_src2_lit %50, %62, 4
+  %65 = v_perm_b32_src2_lit %63, %64, 16778500
+  %66 = v_bfi_b32_src0_lit %13, %65, 32896
+  %converted = v_bfi_b32_src0_lit %14, %66, 2155872256
   return %converted
 }
 

@@ -35,9 +35,9 @@ typedef struct loom_amdgpu_fp8_encode_emission_state_t {
   loom_value_id_t nan_encoding;
   // Positive F32 magnitude yielding the canonical FNUZ bridge NaN encoding.
   loom_value_id_t fnuz_nan_bridge_magnitude;
-  // V_PERM selector gathering low-pair F32 sign bytes into packed FP8 lanes.
+  // V_PERM selector gathering low-pair source sign bytes into FP8 lanes.
   loom_value_id_t low_sign_permute_selector;
-  // V_PERM selector gathering high-pair F32 sign bytes into packed FP8 lanes.
+  // V_PERM selector gathering high-pair source sign bytes into FP8 lanes.
   loom_value_id_t high_sign_permute_selector;
   // Bit mask selecting the low packed FP8 pair's sign bits.
   loom_value_id_t low_sign_mask;
@@ -94,6 +94,16 @@ iree_status_t loom_amdgpu_emit_fp8_encode_software_f16_e5m2_lane(
     const loom_amdgpu_fp8_encode_plan_t* plan,
     const loom_amdgpu_fp8_encode_emission_state_t* state,
     loom_value_id_t source, loom_value_id_t* out_encoded);
+
+// Encodes and packs three or four software FP8 lanes with literal-selector
+// byte permutations gathering their signs. The last logical lane fills an
+// unused fourth byte.
+iree_status_t loom_amdgpu_emit_fp8_encode_software_packed_lanes(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_encode_plan_t* plan,
+    const loom_amdgpu_fp8_encode_emission_state_t* state,
+    const loom_value_id_t* source_lanes, uint32_t source_lane_count,
+    loom_value_id_t* out_packed);
 
 // Encodes one to four F32 lanes through native FNUZ pair conversions. The last
 // logical lane fills unused physical bytes in the complete result register.
