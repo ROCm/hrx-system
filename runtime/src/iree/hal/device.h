@@ -308,8 +308,24 @@ typedef iree_status_t(IREE_API_PTR* iree_hal_host_call_fn_t)(
 typedef struct iree_hal_host_call_t {
   // Callback function pointer in the host program.
   iree_hal_host_call_fn_t fn;
+
   // User data passed to the callback function. Unowned.
+  // When |resource| is provided it may retain |user_data| transitively.
   void* user_data;
+
+  // Optional resource retaining callback state.
+  //
+  // The caller must keep its reference live until
+  // iree_hal_device_queue_host_call returns. Implementations retain the
+  // resource when the call may execute after the queue operation returns and
+  // release it after |fn| returns or the queued call is cancelled before
+  // invocation.
+  //
+  // Returning IREE_STATUS_DEFERRED transfers signal semaphore completion to
+  // |fn| but does not extend this retain. A deferred continuation that still
+  // needs the resource must retain it before returning and release it after
+  // completion.
+  iree_hal_resource_t* resource;
 } iree_hal_host_call_t;
 
 // Backend-native ingredients required to create queue-allocation pools for a
@@ -342,8 +358,22 @@ typedef struct iree_hal_queue_pool_backend_t {
 // Returns a host call bound to the given function pointer and user data.
 static inline iree_hal_host_call_t iree_hal_make_host_call(
     iree_hal_host_call_fn_t fn, void* user_data) {
-  iree_hal_host_call_t call = {fn, user_data};
-  return call;
+  return (iree_hal_host_call_t){
+      .fn = fn,
+      .user_data = user_data,
+      .resource = NULL,
+  };
+}
+
+// Returns a host call whose callback state is retained by |resource|.
+static inline iree_hal_host_call_t iree_hal_make_host_call_with_resource(
+    iree_hal_host_call_fn_t fn, void* user_data,
+    iree_hal_resource_t* resource) {
+  return (iree_hal_host_call_t){
+      .fn = fn,
+      .user_data = user_data,
+      .resource = resource,
+  };
 }
 
 // Bitfield specifying flags controlling an execution operation.

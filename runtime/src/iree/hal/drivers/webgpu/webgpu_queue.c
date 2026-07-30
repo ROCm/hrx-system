@@ -1780,7 +1780,7 @@ static iree_status_t iree_hal_webgpu_queue_execute_host_call(
         .queue_affinity = queue_affinity,
         .signal_semaphore_list = iree_hal_semaphore_list_empty(),
     };
-    iree_status_ignore(call.fn(call.user_data, args, &context));
+    iree_status_free(call.fn(call.user_data, args, &context));
     return signal_status;
   }
 
@@ -1794,7 +1794,7 @@ static iree_status_t iree_hal_webgpu_queue_execute_host_call(
     return iree_hal_semaphore_list_signal(signal_semaphore_list, frontier);
   } else if (iree_status_code(call_status) == IREE_STATUS_DEFERRED) {
     // The callback has cloned the signal list and will signal later.
-    iree_status_ignore(call_status);
+    iree_status_free(call_status);
     return iree_ok_status();
   } else {
     // Fail all signal semaphores with the error.
@@ -1837,7 +1837,7 @@ static void iree_hal_webgpu_host_call_completion_fn(
     const iree_async_frontier_t* frontier =
         iree_hal_webgpu_queue_build_frontier(state->queue, state->epoch,
                                              &frontier_storage);
-    iree_status_ignore(iree_hal_webgpu_queue_execute_host_call(
+    iree_status_free(iree_hal_webgpu_queue_execute_host_call(
         state->device, state->queue_affinity, state->signal_semaphore_list,
         frontier, state->call, state->args, state->flags));
   } else {
@@ -1851,6 +1851,7 @@ static void iree_hal_webgpu_host_call_completion_fn(
   // Release both semaphore lists and free the slab.
   iree_hal_semaphore_list_release(state->signal_semaphore_list);
   iree_hal_semaphore_list_release(state->wait_semaphore_list);
+  iree_hal_resource_release(state->call.resource);
   iree_allocator_free(state->allocator, state);
 }
 
@@ -1912,6 +1913,7 @@ iree_status_t iree_hal_webgpu_queue_host_call(
 
   // Copy call parameters.
   state->call = call;
+  iree_hal_resource_retain(state->call.resource);
   memcpy(state->args, args, sizeof(state->args));
   state->flags = flags;
   state->device = device;
@@ -1956,6 +1958,7 @@ iree_status_t iree_hal_webgpu_queue_host_call(
                                  iree_status_clone(status));
     iree_hal_semaphore_list_release(state->signal_semaphore_list);
     iree_hal_semaphore_list_release(state->wait_semaphore_list);
+    iree_hal_resource_release(state->call.resource);
     iree_allocator_free(queue->host_allocator, state);
   }
   return status;

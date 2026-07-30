@@ -42,6 +42,7 @@ static void iree_hal_amdgpu_host_call_state_destroy(
   iree_hal_amdgpu_host_call_state_t* state =
       (iree_hal_amdgpu_host_call_state_t*)resource;
   IREE_TRACE_ZONE_BEGIN(z0);
+  iree_hal_resource_release(state->call.resource);
   if (!iree_hal_semaphore_list_is_empty(state->signal_semaphore_list)) {
     iree_hal_semaphore_list_free(state->signal_semaphore_list,
                                  state->host_allocator);
@@ -98,6 +99,7 @@ static iree_status_t iree_hal_amdgpu_host_call_state_create(
   state->device = queue->logical_device;
   state->queue_affinity = queue->queue_affinity;
   state->call = call;
+  iree_hal_resource_retain(state->call.resource);
   memcpy(state->args, args, sizeof(state->args));
   state->flags = flags;
 
