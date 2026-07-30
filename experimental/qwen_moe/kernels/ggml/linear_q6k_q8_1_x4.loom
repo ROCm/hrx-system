@@ -192,19 +192,19 @@ kernel.def @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %ou
 }
 
 // Uniform packed bytes exercise both low/high Q6 fields and signed per-group
-// scales. The output width crosses the eight-wave tile boundary, while K=768
-// covers the exact routed-down contraction depth.
+// scales. The output width crosses the eight-wave tile boundary, while K=2048
+// covers the exact mixed-format dense V contraction depth.
 check.case public @ggml_linear_q6k_q8_1_x4_nonzero_tail_case {
   %token_count = check.literal value(2) : index
-  %input_size = check.literal value(768) : index
+  %input_size = check.literal value(2048) : index
   %output_size = check.literal value(9) : index
-  %input = check.generate.fill value(0.00390625) : tensor<2x768xf32>
-  %q8_input = check.generate.fill value(0) : tensor<2x864xi8>
-  %weight = check.generate.fill value(-86) : tensor<9x3x210xi8>
+  %input = check.generate.fill value(0.00390625) : tensor<2x2048xf32>
+  %q8_input = check.generate.fill value(0) : tensor<2x2304xi8>
+  %weight = check.generate.fill value(-86) : tensor<9x8x210xi8>
   %output = check.generate.fill value(0.0) : tensor<2x9xf32>
-  %expected = check.generate.fill value(134.31431579589844) : tensor<2x9xf32>
-  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %q8_input) : (index, index, tensor<2x768xf32>, tensor<2x864xi8>)
-  func.call @ggml_linear_q6k_q8_1_x4(%token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, tensor<2x864xi8>, tensor<9x3x210xi8>, tensor<2x9xf32>)
+  %expected = check.generate.fill value(358.1715087890625) : tensor<2x9xf32>
+  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %q8_input) : (index, index, tensor<2x2048xf32>, tensor<2x2304xi8>)
+  func.call @ggml_linear_q6k_q8_1_x4(%token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, tensor<2x2304xi8>, tensor<9x8x210xi8>, tensor<2x9xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.25) rtol(9.9999999999999995e-07) nan(same) : tensor<2x9xf32>
   check.return
 }
@@ -222,6 +222,25 @@ check.case public @ggml_linear_q6k_q8_1_x4_benchmark_case {
   check.return
 }
 
+// Exercises the complete activation-pack and dense Q6_K projection boundary at
+// the K=2048, M=512 shape used by mixed-format attention V weights. The token
+// buckets cover decode, awkward prefill tails, llama.cpp's 512-token
+// microbatch, and larger schedules available to callers without host routing.
+check.case public @ggml_linear_q6k_q8_1_x4_dense_v_benchmark_case {
+  %token_count = check.param.choice values([1, 17, 32, 63, 128, 129, 512, 1024, 2048]) name("token_count") : index
+  %input_size = check.literal value(2048) : index
+  %output_size = check.literal value(512) : index
+  %input = check.generate.fill value(0.0) : tensor<[%token_count]x2048xf32>
+  %q8_input = check.generate.fill value(1) : tensor<[%token_count]x2304xi8>
+  %weight = check.generate.fill value(0) : tensor<512x8x210xi8>
+  %output = check.generate.fill value(1.0) : tensor<[%token_count]x512xf32>
+  %expected = check.generate.fill value(0.0) : tensor<[%token_count]x512xf32>
+  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %q8_input) : (index, index, tensor<[%token_count]x2048xf32>, tensor<[%token_count]x2304xi8>)
+  func.call @ggml_linear_q6k_q8_1_x4(%token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, tensor<[%token_count]x2304xi8>, tensor<512x8x210xi8>, tensor<[%token_count]x512xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x512xf32>
+  check.return
+}
+
 check.benchmark<@ggml_linear_q6k_q8_1_x4_nonzero_tail_case> @ggml_linear_q6k_q8_1_x4_small
 
 check.benchmark<@ggml_linear_q6k_q8_1_x4_benchmark_case> @ggml_linear_q6k_q8_1_x4_decode {token_count = 1}
@@ -231,3 +250,15 @@ check.benchmark<@ggml_linear_q6k_q8_1_x4_benchmark_case> @ggml_linear_q6k_q8_1_x
 check.benchmark<@ggml_linear_q6k_q8_1_x4_benchmark_case> @ggml_linear_q6k_q8_1_x4_prefill_128 {token_count = 128}
 
 check.benchmark<@ggml_linear_q6k_q8_1_x4_benchmark_case> @ggml_linear_q6k_q8_1_x4_prefill_512 {token_count = 512}
+
+check.benchmark<@ggml_linear_q6k_q8_1_x4_dense_v_benchmark_case> @ggml_linear_q6k_q8_1_x4_dense_v_decode {token_count = 1}
+
+check.benchmark<@ggml_linear_q6k_q8_1_x4_dense_v_benchmark_case> @ggml_linear_q6k_q8_1_x4_dense_v_prefill_32 {token_count = 32}
+
+check.benchmark<@ggml_linear_q6k_q8_1_x4_dense_v_benchmark_case> @ggml_linear_q6k_q8_1_x4_dense_v_prefill_128 {token_count = 128}
+
+check.benchmark<@ggml_linear_q6k_q8_1_x4_dense_v_benchmark_case> @ggml_linear_q6k_q8_1_x4_dense_v_prefill_512 {token_count = 512}
+
+check.benchmark<@ggml_linear_q6k_q8_1_x4_dense_v_benchmark_case> @ggml_linear_q6k_q8_1_x4_dense_v_prefill_1024 {token_count = 1024}
+
+check.benchmark<@ggml_linear_q6k_q8_1_x4_dense_v_benchmark_case> @ggml_linear_q6k_q8_1_x4_dense_v_prefill_2048 {token_count = 2048}
