@@ -55,8 +55,8 @@ iree_status_t loom_amdgpu_get_bf16_pack_descriptors(
 bool loom_amdgpu_bf16_descriptor_set_can_emit_f32_to_bf16_lane(
     const loom_low_descriptor_set_t* descriptor_set);
 
-// Returns true when |descriptor_set| can pack two already-rounded BF16 lanes.
-bool loom_amdgpu_bf16_descriptor_set_can_emit_packed_lane_pair(
+// Returns true when |descriptor_set| can pack two low-aligned 16-bit lanes.
+bool loom_amdgpu_descriptor_set_can_emit_packed_u16_lane_pair(
     const loom_low_descriptor_set_t* descriptor_set);
 
 // Returns true when |descriptor_set| can emit a packed BF16 pair from two f32
@@ -94,10 +94,10 @@ iree_status_t loom_amdgpu_emit_f32_pair_to_packed_bf16_with_descriptors(
     loom_value_id_t low_source_lane, loom_value_id_t high_source_lane,
     loom_type_t lane_type, loom_value_id_t* out_packed);
 
-// Emits one packed VGPR containing two already-rounded BF16 bit payloads. The
-// low source becomes the low 16 bits of the result. |pack_u16_descriptor| may
-// be NULL, in which case the helper falls back to shift/or packing.
-iree_status_t loom_amdgpu_emit_packed_bf16_lane_pair(
+// Emits one packed VGPR containing two low-aligned 16-bit payloads. The low
+// source becomes the low 16 bits of the result. |pack_u16_descriptor| may be
+// NULL, in which case the helper falls back to shift/or packing.
+iree_status_t loom_amdgpu_emit_packed_u16_lane_pair(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_resolved_descriptor_t* pack_u16_descriptor,
     loom_value_id_t low_lane, loom_value_id_t high_lane, loom_type_t lane_type,
@@ -129,6 +129,13 @@ iree_status_t loom_amdgpu_pack_f32_lane_to_f16_register(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_lane, uint32_t register_lane, loom_type_t lane_type,
     loom_value_id_t* inout_packed);
+
+// Converts one F32 lane to F16 and duplicates it into both packed lanes.
+iree_status_t loom_amdgpu_splat_f32_lane_to_packed_f16(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* pack_u16_descriptor,
+    loom_value_id_t source_lane, loom_type_t lane_type,
+    loom_value_id_t* out_packed);
 
 #ifdef __cplusplus
 }  // extern "C"

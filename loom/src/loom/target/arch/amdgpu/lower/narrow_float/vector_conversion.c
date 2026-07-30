@@ -154,6 +154,7 @@ static bool loom_amdgpu_vector_decode_scale_element_type(
     case LOOM_VALUE_FACT_NUMERIC_FORMAT_F32:
       *out_element_type = LOOM_SCALAR_TYPE_F32;
       return true;
+    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN:
     case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0:
       *out_element_type = LOOM_SCALAR_TYPE_I32;
       return true;
@@ -162,10 +163,16 @@ static bool loom_amdgpu_vector_decode_scale_element_type(
   }
 }
 
-static bool loom_amdgpu_vector_decode_scale_source(
+bool loom_amdgpu_vector_decode_scale_source(
     const loom_module_t* module, const loom_op_t* source_op,
-    loom_scalar_type_t scale_element_type, loom_value_id_t* out_scale_source) {
+    loom_value_fact_numeric_format_flags_t scale_format,
+    loom_value_id_t* out_scale_source) {
   *out_scale_source = LOOM_VALUE_ID_INVALID;
+  loom_scalar_type_t scale_element_type = 0;
+  if (!loom_amdgpu_vector_decode_scale_element_type(scale_format,
+                                                    &scale_element_type)) {
+    return false;
+  }
   loom_vector_encoding_auxiliary_view_t auxiliary_view = {0};
   iree_string_view_t unknown_key = iree_string_view_empty();
   if (!loom_vector_encoding_auxiliary_view_resolve(
@@ -200,6 +207,17 @@ static loom_value_id_t loom_amdgpu_vector_decode_materialized_scale_source(
     return scalar_source;
   }
   return scale_source;
+}
+
+iree_status_t loom_amdgpu_lookup_vector_scale_source(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
+    loom_value_id_t* out_low_scale) {
+  IREE_ASSERT_NE(plan->scale_source, LOOM_VALUE_ID_INVALID);
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_lookup_value(context, plan->scale_source, out_low_scale));
+  return loom_amdgpu_materialize_full_low_vgpr_b32(
+      context, source_op, *out_low_scale, out_low_scale);
 }
 
 bool loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
@@ -274,7 +292,8 @@ bool loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
   switch (summary.storage_schema.encoded_operand.scale_format) {
     case LOOM_VALUE_FACT_NUMERIC_FORMAT_F32:
       return loom_amdgpu_vector_decode_scale_source(
-                 module, source_op, LOOM_SCALAR_TYPE_F32, &scale_source) &&
+                 module, source_op, LOOM_VALUE_FACT_NUMERIC_FORMAT_F32,
+                 &scale_source) &&
              loom_amdgpu_fp8_encoded_operand_schema_matches(
                  summary.storage_schema.encoded_operand, source_element_type,
                  source_lane_count,
@@ -286,7 +305,8 @@ bool loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
               loom_value_fact_table_lookup(
                   fact_table, loom_op_const_results(source_op)[0]));
       return loom_amdgpu_vector_decode_scale_source(
-                 module, source_op, LOOM_SCALAR_TYPE_I32, &scale_source) &&
+                 module, source_op, LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0,
+                 &scale_source) &&
              loom_amdgpu_fp8_encoded_operand_schema_matches(
                  summary.storage_schema.encoded_operand, source_element_type,
                  source_lane_count,
@@ -407,11 +427,8 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
       scale_format = summary.storage_schema.encoded_operand.scale_format;
       scale_group_element_count =
           summary.storage_schema.encoded_operand.scale_group_element_count;
-      loom_scalar_type_t scale_element_type = 0;
-      if (loom_amdgpu_vector_decode_scale_element_type(scale_format,
-                                                       &scale_element_type) &&
-          loom_amdgpu_vector_decode_scale_source(
-              module, source_op, scale_element_type, &scale_source)) {
+      if (loom_amdgpu_vector_decode_scale_source(module, source_op,
+                                                 scale_format, &scale_source)) {
         scale_source = loom_amdgpu_vector_decode_materialized_scale_source(
             module, fact_table, scale_source);
       } else {

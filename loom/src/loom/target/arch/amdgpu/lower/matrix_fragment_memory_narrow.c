@@ -591,7 +591,7 @@ loom_amdgpu_emit_fragment_memory_fp8_to_packed_bf16_register(
                        LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PACK_U16)
           ? &decode_plan->pack_u16_descriptor
           : NULL;
-  return loom_amdgpu_emit_packed_bf16_lane_pair(
+  return loom_amdgpu_emit_packed_u16_lane_pair(
       context, source_op, pack_u16_descriptor, low_elements[0], low_elements[1],
       vgpr_type, out_low_packet);
 }

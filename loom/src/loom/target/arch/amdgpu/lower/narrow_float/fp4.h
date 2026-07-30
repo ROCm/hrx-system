@@ -16,8 +16,9 @@
 extern "C" {
 #endif
 
-// Returns true when vector.decode has the exact packed E2M1-to-F16 schema and
-// the active descriptor set can emit the portable packet recipe.
+// Returns true when vector.decode has an exact packed E2M1-to-F16 schema,
+// optionally with one E4M3FN scale per 16 lanes, and the active descriptor set
+// can emit the portable packet recipe.
 bool loom_amdgpu_vector_decode_can_lower_as_fp4_conversion(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_low_descriptor_set_t* descriptor_set,
