@@ -41,6 +41,10 @@ def _compile_report() -> dict[str, object]:
         "target_config": "gfx11_wave64",
         "workload": workload,
         "instruction_count": 100,
+        "body_instruction_count": 97,
+        "entry_instruction_count": 3,
+        "coissued_instruction_count": 4,
+        "coissued_component_count": 8,
         "code_byte_count": 512,
         "code_storage_byte_count": 512,
         "local_memory_bytes": 4096,
@@ -53,9 +57,15 @@ def _compile_report() -> dict[str, object]:
         "schedule_dependency_count": 120,
         "schedule_hazard_gap_count": 2,
         "static_instruction_mix": {
+            "unknown_count": 0,
             "scalar_alu_count": 10,
             "vector_alu_count": 40,
             "matrix_count": 8,
+            "mfma_count": 0,
+            "smfmac_count": 0,
+            "wmma_count": 8,
+            "swmmac_count": 0,
+            "dot_count": 0,
             "global_load_count": 4,
             "global_store_count": 2,
             "buffer_load_count": 6,
@@ -99,6 +109,7 @@ def _compile_report() -> dict[str, object]:
                 "dispatch": {
                     "vector_alu_count": 40960,
                     "matrix_count": 8192,
+                    "wmma_count": 8192,
                 }
             },
             "memory": {
@@ -111,8 +122,20 @@ def _compile_report() -> dict[str, object]:
         },
         "wait_plan": {
             "action_count": 12,
+            "explicit_action_count": 2,
+            "planned_action_count": 10,
             "full_drain_count": 3,
             "partial_wait_count": 9,
+            "drained_count": 20,
+            "max_drained_count": 4,
+            "max_outstanding_before": 7,
+            "max_full_drain_outstanding_before": 6,
+        },
+        "target_insertions": {
+            "static_packet_count": 4,
+            "exact_dynamic_packet_count": 4,
+            "unknown_dynamic_packet_count": 0,
+            "dynamic_packet_count": 384,
         },
     }
     return {
@@ -252,6 +275,10 @@ def test_rejects_incomparable_reports(mutate, message: str) -> None:
 def test_show_separates_facts_analysis_and_unavailable_evidence() -> None:
     report = _compile_report()
     del report["entries"]["rows"][0]["wait_plan"]["partial_wait_count"]
+    report["entries"]["rows"][0]["target_insertions"][
+        "unknown_dynamic_packet_count"
+    ] = 1
+    report["entries"]["rows"][0]["target_insertions"]["dynamic_packet_count"] = None
     document = parse_compile_report(report, source="report.json")
 
     view = build_compile_report_show(document)
@@ -262,14 +289,27 @@ def test_show_separates_facts_analysis_and_unavailable_evidence() -> None:
     assert view["missing_evidence"] == "omitted_metrics_are_unavailable"
     assert artifact_facts["code_byte_count"] == 512
     assert artifact_facts["private_memory_bytes"] == 0
+    assert artifact_facts["body_instruction_count"] == 97
+    assert artifact_facts["entry_instruction_count"] == 3
+    assert artifact_facts["coissued_instruction_count"] == 4
+    assert artifact_facts["coissued_component_count"] == 8
+    assert artifact_facts["wmma_count"] == 8
+    assert artifact_facts["unclassified_instruction_count"] == 0
     assert compiler_analysis["occupancy_percent"] == 31
     assert compiler_analysis["residency_next_better_tier"] == 6
     assert compiler_analysis["dispatch_total_bytes"] == 4096
+    assert compiler_analysis["dispatch_wmma_count"] == 8192
+    assert compiler_analysis["planned_wait_action_count"] == 10
+    assert compiler_analysis["target_insertion_static_packet_count"] == 4
+    assert compiler_analysis["target_insertion_unknown_dynamic_packet_count"] == 1
+    assert "target_insertion_dynamic_packet_count" not in compiler_analysis
     assert "partial_wait_count" not in compiler_analysis
     text = format_compile_report_show_text(view)
     assert "Artifact facts" in text
     assert "Compiler analysis" in text
     assert "code bytes: 512 B" in text
+    assert "WMMA instructions: 8" in text
+    assert "target-planned wait actions: 10" in text
     assert "partial waits: unavailable" in text
 
 
@@ -278,22 +318,55 @@ def test_diff_preserves_missing_evidence_and_numeric_deltas() -> None:
     candidate_report = _compile_report()
     candidate_entry = candidate_report["entries"]["rows"][0]
     candidate_entry["code_byte_count"] = 480
+    candidate_entry["body_instruction_count"] = 89
+    candidate_entry["static_instruction_mix"]["wmma_count"] = 6
+    candidate_entry["economics"]["operations"]["dispatch"]["wmma_count"] = 6144
+    candidate_entry["wait_plan"]["planned_action_count"] = 8
+    candidate_entry["target_insertions"]["dynamic_packet_count"] = 256
     del candidate_entry["wait_plan"]["partial_wait_count"]
     candidate = parse_compile_report(candidate_report, source="candidate.json")
 
     view = build_compile_report_diff(baseline, candidate)
     entry = view["entries"][0]
     code_bytes = entry["artifact_facts"]["changed"]["code_byte_count"]
+    body_instructions = entry["artifact_facts"]["changed"]["body_instruction_count"]
+    wmma = entry["artifact_facts"]["changed"]["wmma_count"]
     partial_waits = entry["compiler_analysis"]["incomplete"]["partial_wait_count"]
+    dynamic_wmma = entry["compiler_analysis"]["changed"]["dispatch_wmma_count"]
+    planned_waits = entry["compiler_analysis"]["changed"]["planned_wait_action_count"]
+    target_insertions = entry["compiler_analysis"]["changed"][
+        "target_insertion_dynamic_packet_count"
+    ]
 
     assert code_bytes["delta"] == -32
     assert code_bytes["change_percent"] == -6.25
+    assert body_instructions["delta"] == -8
+    assert wmma["delta"] == -2
+    assert dynamic_wmma["delta"] == -2048
+    assert planned_waits["delta"] == -2
+    assert target_insertions["delta"] == -128
     assert partial_waits["candidate"] is None
     assert view["changed_entry_count"] == 1
     assert view["unchanged_entry_count"] == 0
     text = format_compile_report_diff_text(view)
     assert "512 B -> 480 B, delta -32 B (-6.25%)" in text
     assert "partial waits: 9 -> unavailable" in text
+
+
+def test_diff_treats_explicit_null_as_unavailable_evidence() -> None:
+    baseline = parse_compile_report(_compile_report(), source="baseline.json")
+    candidate_report = _compile_report()
+    candidate_report["entries"]["rows"][0]["target_insertions"][
+        "dynamic_packet_count"
+    ] = None
+    candidate = parse_compile_report(candidate_report, source="candidate.json")
+
+    view = build_compile_report_diff(baseline, candidate)
+    target_insertions = view["entries"][0]["compiler_analysis"]["incomplete"][
+        "target_insertion_dynamic_packet_count"
+    ]
+
+    assert target_insertions == {"baseline": 384, "candidate": None}
 
 
 def test_diff_omits_unchanged_entries() -> None:
