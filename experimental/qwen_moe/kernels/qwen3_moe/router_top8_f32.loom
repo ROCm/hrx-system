@@ -16,14 +16,14 @@
 // Selection therefore operates directly on logits and only the selected
 // values reach the exponential. This preserves the model contract while
 // avoiding exponentials for experts that cannot contribute to the result.
-amdgpu.target<gfx11-generic> @qwen3_moe_router_gfx11_wave32 {subgroup_size = 32}
+amdgpu.target<gfx11-generic> @qwen3_moe_router_gfx11_wave64 {subgroup_size = 64}
 
-kernel.def target(@qwen3_moe_router_gfx11_wave32) @qwen3_moe_router_top8_f32(%token_count: index, %route_id_stride: index) {
+kernel.def target(@qwen3_moe_router_gfx11_wave64) @qwen3_moe_router_top8_f32(%token_count: index, %route_id_stride: index) {
   %one = index.constant 1 : index
   %three = index.constant 3 : index
   %four = index.constant 4 : index
-  %wave_size = index.constant 32 : index
-  %wide_workgroup_size = index.constant 128 : index
+  %wave_size = index.constant 64 : index
+  %wide_workgroup_size = index.constant 256 : index
   %uses_decode_geometry = index.cmp eq, %token_count, %one : index
   %subgroup_count = scf.select %uses_decode_geometry, %one, %four : index
   %workgroup_size = scf.select %uses_decode_geometry, %wave_size, %wide_workgroup_size : index
@@ -43,12 +43,9 @@ kernel.def target(@qwen3_moe_router_gfx11_wave32) @qwen3_moe_router_top8_f32(%to
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %four = index.constant 4 : index
-  %five = index.constant 5 : index
-  %wave_size = index.constant 32 : index
+  %wave_size = index.constant 64 : index
   %negative_large = scalar.constant -3.4028234663852885e+38 : f32
   %largest_i32 = scalar.constant 2147483647 : i32
-  %one_i32 = scalar.constant 1 : i32
-  %wave_size_i32 = scalar.constant 32 : i32
   %zero_offset = index.constant 0 : offset
   %uses_decode_geometry = index.cmp eq, %bounded_token_count, %one : index
   %subgroup_count = scf.select %uses_decode_geometry, %one, %four : index
@@ -84,28 +81,16 @@ kernel.def target(@qwen3_moe_router_gfx11_wave32) @qwen3_moe_router_top8_f32(%to
       }
       scf.yield %next_value, %next_id : f32, i32
     }
-    %winner_value, %winner_id = scf.for %stage = [%zero to %five step %one](%best_value = %local_value : f32, %best_id = %local_id : i32) -> (f32, i32) unroll {
-      %stage_i32 = index.cast %stage : index to i32
-      %shuffle_offset = scalar.shli %one_i32, %stage_i32 : i32
-      %peer_value, %peer_value_valid = kernel.subgroup.shuffle<xor> %best_value, %shuffle_offset, %wave_size_i32 : f32, i32, i32
-      %peer_id, %peer_id_valid = kernel.subgroup.shuffle<xor> %best_id, %shuffle_offset, %wave_size_i32 : i32, i32, i32
-      %peer_is_greater = scalar.cmpf ogt, %peer_value, %best_value : f32
-      %peer_is_equal = scalar.cmpf oeq, %peer_value, %best_value : f32
-      %peer_has_lower_id = scalar.cmpi ult, %peer_id, %best_id : i32
-      %peer_wins_tie = scalar.andi %peer_is_equal, %peer_has_lower_id : i1
-      %peer_is_better = scalar.ori %peer_is_greater, %peer_wins_tie : i1
-      %next_value, %next_id = scf.if %peer_is_better -> (f32, i32) {
-        scf.yield %peer_value, %peer_id : f32, i32
-      } else {
-        scf.yield %best_value, %best_id : f32, i32
-      }
-      scf.yield %next_value, %next_id : f32, i32
-    }
-    %winner_id_bounded = scalar.assume %winner_id [range(%winner_id, 0, 511)] : i32
-    %winner_expert0 = index.cast %winner_id_bounded : i32 to index
-    %winner_expert = index.assume %winner_expert0 [range(%winner_expert0, 0, 511)] : index
-    %winner_lane = index.div %winner_expert, %experts_per_lane : index
-    %winner_slot = index.rem %winner_expert, %experts_per_lane : index
+    %winner_value = kernel.subgroup.reduce<maxnumf> %local_value : f32
+    %matches_winner = scalar.cmpf oeq, %local_value, %winner_value : f32
+    %winner_lane_mask = kernel.subgroup.vote.ballot %matches_winner : i1 -> i64
+    %nonzero_winner_lane_mask = scalar.assume %winner_lane_mask [ne(%winner_lane_mask, 0)] : i64
+    %winner_lane_i64 = scalar.cttzi %nonzero_winner_lane_mask : i64
+    %winner_lane0 = index.cast %winner_lane_i64 : i64 to index
+    %winner_lane = index.assume %winner_lane0 [range(%winner_lane0, 0, 63)] : index
+    %local_expert0 = index.cast %local_id : i32 to index
+    %local_expert = index.assume %local_expert0 [range(%local_expert0, 0, 511)] : index
+    %winner_slot = index.rem %local_expert, %experts_per_lane : index
     %owns_winner = index.cmp eq, %lane, %winner_lane : index
     %next_remaining_logits = scf.if %owns_winner -> (vector<[%experts_per_lane]xf32>) {
       %removed = vector.insert %negative_large into %remaining_logits[%winner_slot] : f32, vector<[%experts_per_lane]xf32>
@@ -113,12 +98,15 @@ kernel.def target(@qwen3_moe_router_gfx11_wave32) @qwen3_moe_router_top8_f32(%to
     } else {
       scf.yield %remaining_logits : vector<[%experts_per_lane]xf32>
     }
+    %publishes_route_id = scalar.andi %valid_token, %owns_winner : i1
+    scf.if %publishes_route_id {
+      %route_id_token_base = index.mul %token, %bounded_route_id_stride : index
+      %route_id_index = index.add %route_id_token_base, %route : index
+      view.store %local_id, %route_ids_view[%route_id_index] : i32, view<[%route_id_storage_count]xi32, #dense>
+    }
     %lane_publishes_route = index.cmp eq, %lane, %route : index
     %publishes_route = scalar.andi %valid_token, %lane_publishes_route : i1
     %next_lane_selected_logit = scf.if %publishes_route -> (f32) {
-      %route_id_token_base = index.mul %token, %bounded_route_id_stride : index
-      %route_id_index = index.add %route_id_token_base, %route : index
-      view.store %winner_id, %route_ids_view[%route_id_index] : i32, view<[%route_id_storage_count]xi32, #dense>
       scf.yield %winner_value : f32
     } else {
       scf.yield %lane_selected_logit : f32
