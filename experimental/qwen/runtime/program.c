@@ -28,26 +28,27 @@ typedef enum qwen_program_binding_slot_e {
   QWEN_PROGRAM_BINDING_KEY_CACHE = 2,
   // Selected layer's value cache.
   QWEN_PROGRAM_BINDING_VALUE_CACHE = 3,
-  // Request hidden state and uploaded attention metadata.
+  // Request hidden state, compact control, and derived attention metadata.
   QWEN_PROGRAM_BINDING_REQUEST_STATE = 4,
   // Host-visible completed hidden-state staging.
   QWEN_PROGRAM_BINDING_OUTPUT_STAGING = 5,
 } qwen_program_binding_slot_t;
 
 typedef enum qwen_layer_executable_ordinal_e {
-  QWEN_LAYER_EXECUTABLE_ATTENTION_PREPARE = 0,
-  QWEN_LAYER_EXECUTABLE_ATTENTION_QKV = 1,
-  QWEN_LAYER_EXECUTABLE_ATTENTION_POSTPROCESS = 2,
-  QWEN_LAYER_EXECUTABLE_FLASH_ATTENTION = 3,
-  QWEN_LAYER_EXECUTABLE_ATTENTION_OUTPUT = 4,
-  QWEN_LAYER_EXECUTABLE_FEED_FORWARD_NORM = 5,
-  QWEN_LAYER_EXECUTABLE_ROUTER_PROJECTION = 6,
-  QWEN_LAYER_EXECUTABLE_ROUTER_TOP8 = 7,
-  QWEN_LAYER_EXECUTABLE_EXPERT_TABLE = 8,
-  QWEN_LAYER_EXECUTABLE_PARTITION_TABLE = 9,
-  QWEN_LAYER_EXECUTABLE_GATE_UP = 10,
-  QWEN_LAYER_EXECUTABLE_ROUTED_DOWN = 11,
-  QWEN_LAYER_EXECUTABLE_WEIGHTED_REDUCE = 12,
+  QWEN_LAYER_EXECUTABLE_ATTENTION_METADATA = 0,
+  QWEN_LAYER_EXECUTABLE_ATTENTION_PREPARE = 1,
+  QWEN_LAYER_EXECUTABLE_ATTENTION_QKV = 2,
+  QWEN_LAYER_EXECUTABLE_ATTENTION_POSTPROCESS = 3,
+  QWEN_LAYER_EXECUTABLE_FLASH_ATTENTION = 4,
+  QWEN_LAYER_EXECUTABLE_ATTENTION_OUTPUT = 5,
+  QWEN_LAYER_EXECUTABLE_FEED_FORWARD_NORM = 6,
+  QWEN_LAYER_EXECUTABLE_ROUTER_PROJECTION = 7,
+  QWEN_LAYER_EXECUTABLE_ROUTER_TOP8 = 8,
+  QWEN_LAYER_EXECUTABLE_EXPERT_TABLE = 9,
+  QWEN_LAYER_EXECUTABLE_PARTITION_TABLE = 10,
+  QWEN_LAYER_EXECUTABLE_GATE_UP = 11,
+  QWEN_LAYER_EXECUTABLE_ROUTED_DOWN = 12,
+  QWEN_LAYER_EXECUTABLE_WEIGHTED_REDUCE = 13,
 } qwen_layer_executable_ordinal_t;
 
 struct qwen_program_t {
@@ -340,6 +341,10 @@ static iree_status_t qwen_program_prepare_layer_executables(
   const int64_t expert_count = QWEN_MODEL_EXPERT_COUNT;
   const int64_t cache_row_count = (int64_t)program->context_capacity;
   const int64_t token_workload[] = {token_count};
+  const int64_t attention_metadata_workload[] = {
+      token_count,
+      cache_row_count,
+  };
   const int64_t attention_postprocess_workload[] = {
       token_count,
       cache_row_count,
@@ -377,12 +382,20 @@ static iree_status_t qwen_program_prepare_layer_executables(
               : IREE_SV("qwen3_moe_routed_down_q4k_f16_wmma_grouped");
 
   iree_status_t status = qwen_program_prepare_kernel(
-      program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
-      IREE_SV("qwen3_moe_attention_rmsnorm_quantize_q8_1_x4"),
-      IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
-      qwen_attention_prepare_config_bindings, IREE_ARRAYSIZE(token_workload),
-      token_workload,
-      &program->executables[QWEN_LAYER_EXECUTABLE_ATTENTION_PREPARE]);
+      program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_METADATA),
+      IREE_SV("qwen_attention_metadata_bringup_workaround"),
+      /*config_binding_count=*/0, /*config_bindings=*/NULL,
+      IREE_ARRAYSIZE(attention_metadata_workload), attention_metadata_workload,
+      &program->executables[QWEN_LAYER_EXECUTABLE_ATTENTION_METADATA]);
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_prepare_kernel(
+        program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
+        IREE_SV("qwen3_moe_attention_rmsnorm_quantize_q8_1_x4"),
+        IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
+        qwen_attention_prepare_config_bindings, IREE_ARRAYSIZE(token_workload),
+        token_workload,
+        &program->executables[QWEN_LAYER_EXECUTABLE_ATTENTION_PREPARE]);
+  }
   if (iree_status_is_ok(status)) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_QKV_QUANTIZED),
@@ -562,6 +575,29 @@ static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
   const uint32_t expert_count = QWEN_MODEL_EXPERT_COUNT;
 
   iree_status_t status = iree_hal_command_buffer_begin(program->command_buffer);
+
+  const uint32_t attention_metadata_constants[] = {
+      token_count,
+      context_capacity,
+  };
+  const iree_hal_buffer_ref_t attention_metadata_bindings[] = {
+      qwen_program_request_ref(request.control),
+      qwen_program_request_ref(request.positions),
+      qwen_program_request_ref(request.key_cache_indices),
+      qwen_program_request_ref(request.value_cache_indices),
+      qwen_program_request_ref(request.attention_mask),
+  };
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_record_dispatch(
+        program, QWEN_LAYER_EXECUTABLE_ATTENTION_METADATA,
+        IREE_ARRAYSIZE(attention_metadata_constants),
+        attention_metadata_constants,
+        IREE_ARRAYSIZE(attention_metadata_bindings),
+        attention_metadata_bindings);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_record_dispatch_barrier(program);
+  }
 
   const uint32_t attention_prepare_constants[] = {token_count};
   const iree_hal_buffer_ref_t attention_prepare_bindings[] = {
@@ -1162,7 +1198,7 @@ iree_status_t qwen_program_issue(
           {
               .buffer = qwen_request_storage_buffer(request),
               .offset = 0,
-              .length = request_layout->reset_upload_byte_length,
+              .length = request_layout->dispatch_state_byte_length,
           },
       [QWEN_PROGRAM_BINDING_OUTPUT_STAGING] =
           {

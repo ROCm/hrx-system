@@ -19,8 +19,13 @@ TEST(QwenRequestStorageTest, PacksPrefill512WithoutOverlap) {
 
   EXPECT_EQ(layout.hidden_state.offset, 0u);
   EXPECT_EQ(layout.hidden_state.length, 4u * 1024u * 1024u);
-  EXPECT_GE(layout.positions.offset,
+  EXPECT_GE(layout.control.offset,
             layout.hidden_state.offset + layout.hidden_state.length);
+  EXPECT_EQ(layout.control.length, sizeof(qwen_request_control_t));
+  EXPECT_EQ(layout.reset_upload_byte_length,
+            layout.control.offset + layout.control.length);
+  EXPECT_GE(layout.positions.offset,
+            layout.control.offset + layout.control.length);
   EXPECT_GE(layout.key_cache_indices.offset,
             layout.positions.offset + layout.positions.length);
   EXPECT_GE(layout.value_cache_indices.offset,
@@ -28,9 +33,10 @@ TEST(QwenRequestStorageTest, PacksPrefill512WithoutOverlap) {
   EXPECT_GE(
       layout.attention_mask.offset,
       layout.value_cache_indices.offset + layout.value_cache_indices.length);
-  EXPECT_EQ(layout.reset_upload_byte_length,
+  EXPECT_EQ(layout.attention_mask.length, 512u * 512u * 2u);
+  EXPECT_EQ(layout.dispatch_state_byte_length,
             layout.attention_mask.offset + layout.attention_mask.length);
-  EXPECT_GE(layout.key_cache.offset, layout.reset_upload_byte_length);
+  EXPECT_GE(layout.key_cache.offset, layout.dispatch_state_byte_length);
   EXPECT_GE(layout.value_cache.offset,
             layout.key_cache.offset + layout.key_cache.length);
   EXPECT_EQ(layout.persistent_byte_length,
@@ -54,6 +60,7 @@ TEST(QwenRequestStorageTest, AlignsDecodeMaskForVectorLoads) {
       /*token_count=*/1, /*context_capacity=*/512, &layout));
 
   EXPECT_EQ(layout.attention_mask.offset % 16, 0u);
+  EXPECT_EQ(layout.attention_mask.length, 1u * 512u * 2u);
 }
 
 }  // namespace

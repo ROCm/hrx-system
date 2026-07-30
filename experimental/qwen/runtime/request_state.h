@@ -21,17 +21,27 @@ typedef struct qwen_request_span_t {
   iree_device_size_t length;
 } qwen_request_span_t;
 
+// Compact device control record uploaded before each physical issue.
+typedef struct qwen_request_control_t {
+  // Zero-based logical position and direct no-ring cache row for token zero.
+  int32_t context_base;
+} qwen_request_control_t;
+static_assert(sizeof(qwen_request_control_t) == sizeof(int32_t),
+              "Qwen request control must be exactly one I32 word");
+
 // Deterministic request-local persistent storage layout.
 typedef struct qwen_request_storage_layout_t {
   // Dense F32 residual stream read and updated by a layer program.
   qwen_request_span_t hidden_state;
-  // I32 logical position for each physical token.
+  // Compact control record uploaded by request reset.
+  qwen_request_span_t control;
+  // Device-derived I32 logical position for each physical token.
   qwen_request_span_t positions;
-  // I64 K cache row selected for each physical token.
+  // Device-derived I64 K cache row selected for each physical token.
   qwen_request_span_t key_cache_indices;
-  // I64 V cache row selected for each physical token.
+  // Device-derived I64 V cache row selected for each physical token.
   qwen_request_span_t value_cache_indices;
-  // F16 causal attention mask for the physical token square.
+  // Device-derived F16 causal mask over token by context-capacity rows.
   qwen_request_span_t attention_mask;
   // All layer-local F16 key caches.
   qwen_request_span_t key_cache;
@@ -39,6 +49,8 @@ typedef struct qwen_request_storage_layout_t {
   qwen_request_span_t value_cache;
   // Byte length uploaded by qwen_request_reset_hidden_state.
   iree_device_size_t reset_upload_byte_length;
+  // Complete request-state binding length visible to recorded dispatches.
+  iree_device_size_t dispatch_state_byte_length;
   // Byte length of one layer-local K or V cache.
   iree_device_size_t layer_cache_byte_length;
   // Complete request-local device allocation size.

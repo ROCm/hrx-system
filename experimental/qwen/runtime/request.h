@@ -57,11 +57,12 @@ IREE_API_EXPORT void qwen_request_retain(qwen_request_t* request);
 // Releases |request| after its last externally observed operation completes.
 IREE_API_EXPORT void qwen_request_release(qwen_request_t* request);
 
-// Asynchronously resets a layer request from dense F32 hidden states.
+// Asynchronously resets a base-zero layer request from dense F32 hidden states.
 //
 // |hidden_state_data| must contain exactly token_count * 2048 little-endian
-// IEEE F32 elements. The operation captures the host data before returning and
-// publishes caller signals after the device upload completes.
+// IEEE F32 elements. The reset establishes context_base = 0, captures the host
+// data before returning, and publishes caller signals after the device upload
+// completes.
 IREE_API_EXPORT iree_status_t qwen_request_reset_hidden_state(
     qwen_request_t* request, iree_const_byte_span_t hidden_state_data,
     iree_hal_semaphore_list_t wait_semaphore_list,

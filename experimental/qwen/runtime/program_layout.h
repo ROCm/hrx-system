@@ -13,8 +13,8 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Number of dispatches in one complete Qwen transformer layer.
-#define QWEN_LAYER_DISPATCH_COUNT 13
+// Number of dispatches in one complete Qwen transformer layer issue.
+#define QWEN_LAYER_DISPATCH_COUNT 14
 
 // Byte span within per-issue transient program storage.
 typedef struct qwen_program_span_t {

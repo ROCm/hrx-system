@@ -4,13 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <math.h>
 #include <string.h>
 
 #include "experimental/qwen/runtime/model_shape.h"
 #include "experimental/qwen/runtime/request_state.h"
 #include "iree/base/internal/atomics.h"
-#include "iree/base/internal/math.h"
 
 typedef struct qwen_request_semaphore_list_storage_t {
   // Materialized semaphore pointer array.
@@ -262,31 +260,12 @@ iree_status_t qwen_request_reset_hidden_state(
          (iree_host_size_t)request->storage_layout.reset_upload_byte_length);
   memcpy(upload_data + request->storage_layout.hidden_state.offset,
          hidden_state_data.data, hidden_state_data.data_length);
-
-  int32_t* positions =
-      (int32_t*)(upload_data + request->storage_layout.positions.offset);
-  int64_t* key_cache_indices =
-      (int64_t*)(upload_data +
-                 request->storage_layout.key_cache_indices.offset);
-  int64_t* value_cache_indices =
-      (int64_t*)(upload_data +
-                 request->storage_layout.value_cache_indices.offset);
-  for (iree_host_size_t i = 0; i < request->token_count; ++i) {
-    positions[i] = (int32_t)i;
-    key_cache_indices[i] = (int64_t)i;
-    value_cache_indices[i] = (int64_t)i;
-  }
-
-  uint16_t* attention_mask =
-      (uint16_t*)(upload_data + request->storage_layout.attention_mask.offset);
-  const uint16_t zero_f16 = iree_math_f32_to_f16(0.0f);
-  const uint16_t negative_infinity_f16 = iree_math_f32_to_f16(-INFINITY);
-  for (iree_host_size_t query = 0; query < request->token_count; ++query) {
-    for (iree_host_size_t key = 0; key < request->token_count; ++key) {
-      attention_mask[query * request->token_count + key] =
-          key <= query ? zero_f16 : negative_infinity_f16;
-    }
-  }
+  qwen_request_control_t* control =
+      (qwen_request_control_t*)(upload_data +
+                                request->storage_layout.control.offset);
+  *control = (qwen_request_control_t){
+      .context_base = 0,
+  };
 
   qwen_request_semaphore_list_storage_t wait_storage;
   qwen_request_semaphore_list_storage_t signal_storage;

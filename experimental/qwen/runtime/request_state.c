@@ -57,6 +57,11 @@ iree_status_t qwen_request_storage_layout_calculate(
       hidden_state_byte_length, QWEN_REQUEST_STORAGE_ALIGNMENT, &cursor,
       &out_layout->hidden_state));
 
+  IREE_RETURN_IF_ERROR(qwen_request_storage_append(
+      sizeof(qwen_request_control_t), _Alignof(qwen_request_control_t), &cursor,
+      &out_layout->control));
+  out_layout->reset_upload_byte_length = cursor;
+
   iree_device_size_t positions_byte_length = 0;
   if (!iree_device_size_checked_mul((iree_device_size_t)token_count,
                                     sizeof(int32_t), &positions_byte_length)) {
@@ -83,7 +88,7 @@ iree_status_t qwen_request_storage_layout_calculate(
   iree_device_size_t mask_element_count = 0;
   iree_device_size_t mask_byte_length = 0;
   if (!iree_device_size_checked_mul((iree_device_size_t)token_count,
-                                    (iree_device_size_t)token_count,
+                                    (iree_device_size_t)context_capacity,
                                     &mask_element_count) ||
       !iree_device_size_checked_mul(mask_element_count,
                                     /*F16 byte length=*/2, &mask_byte_length)) {
@@ -93,7 +98,7 @@ iree_status_t qwen_request_storage_layout_calculate(
   IREE_RETURN_IF_ERROR(qwen_request_storage_append(
       mask_byte_length, /*FlashAttention vector alignment=*/16, &cursor,
       &out_layout->attention_mask));
-  out_layout->reset_upload_byte_length = cursor;
+  out_layout->dispatch_state_byte_length = cursor;
 
   iree_device_size_t all_layer_cache_byte_length = 0;
   if (!iree_device_size_checked_mul(out_layout->layer_cache_byte_length,
