@@ -10,12 +10,20 @@ from __future__ import annotations
 
 from loom.reporting.compile_report import (
     CompileReportDocument,
+    CompileReportError,
     compile_report_entry_identity,
 )
 from loom.reporting.compile_report_suggestions import (
     CompileReportSuggestion,
+    CompileReportSuggestionConfidence,
     CompileReportSuggestionEvidence,
+    CompileReportSuggestionOptions,
     CompileReportSuggestionResult,
+)
+from loom.target.arch.amdgpu.lds_bank_service import (
+    AMDGPU_LDS_BANK_SERVICE_EVIDENCE_PUBLIC_VENDOR_DOCUMENTATION,
+    AMDGPU_LDS_BANK_SERVICE_EVIDENCE_SILICON_CALIBRATED_VENDOR_MODEL,
+    AMDGPU_LDS_BANK_SERVICE_EVIDENCE_VENDOR_SOFTWARE_MODEL_UNVALIDATED,
 )
 from loom.target.arch.amdgpu.target_identity import (
     AmdgpuArtifactTargetKeyError,
@@ -29,7 +37,13 @@ class AmdgpuCompileReportSuggestionProvider:
     target_family = "AMDGPU"
     provider_name = "amdgpu"
 
-    def suggest(self, document: CompileReportDocument) -> CompileReportSuggestionResult:
+    def suggest(
+        self,
+        document: CompileReportDocument,
+        options: CompileReportSuggestionOptions | None = None,
+    ) -> CompileReportSuggestionResult:
+        if options is None:
+            options = CompileReportSuggestionOptions()
         target_key = document.report.get("target_key")
         if target_key is None:
             return CompileReportSuggestionResult(
@@ -76,6 +90,7 @@ class AmdgpuCompileReportSuggestionProvider:
             )
             if wave_suggestion is not None:
                 suggestions.append(wave_suggestion)
+        suggestions.extend(_suggest_lds_bank_service(document, options))
         return CompileReportSuggestionResult(
             provider_name=self.provider_name,
             unavailable_reason=None,
@@ -243,6 +258,223 @@ def _suggest_nondefault_wave_size(
             ),
         ),
     )
+
+
+def _suggest_lds_bank_service(
+    document: CompileReportDocument,
+    options: CompileReportSuggestionOptions,
+) -> tuple[CompileReportSuggestion, ...]:
+    source_low = document.report.get("source_low")
+    if source_low is None:
+        return ()
+    source_low_object = _report_object(source_low, "source_low")
+    memory = source_low_object.get("memory")
+    if memory is None:
+        return ()
+    memory_object = _report_object(memory, "source_low.memory")
+    group_values = memory_object.get("bank_service_groups")
+    if group_values is None:
+        return ()
+    if not isinstance(group_values, list):
+        raise CompileReportError(
+            "source_low.memory.bank_service_groups: expected array"
+        )
+    group_count = _report_integer(
+        memory_object.get("bank_service_group_count"),
+        "source_low.memory.bank_service_group_count",
+    )
+    if group_count != len(group_values):
+        raise CompileReportError(
+            "source_low.memory.bank_service_group_count: "
+            f"expected {len(group_values)}, got {group_count}"
+        )
+
+    suggestions = []
+    for group_position, group_value in enumerate(group_values):
+        path_prefix = f"source_low.memory.bank_service_groups[{group_position}]"
+        group = _report_object(group_value, path_prefix)
+        report_index = _report_integer(group.get("index"), f"{path_prefix}.index")
+        if report_index != group_position:
+            raise CompileReportError(
+                f"{path_prefix}.index: expected {group_position}, got {report_index}"
+            )
+        model = _report_object(group.get("model"), f"{path_prefix}.model")
+        summary = _report_object(group.get("summary"), f"{path_prefix}.summary")
+        structural = _report_object(
+            summary.get("structural"),
+            f"{path_prefix}.summary.structural",
+        )
+
+        exact_packet_count = _report_integer(
+            summary.get("exact_packet_count"),
+            f"{path_prefix}.summary.exact_packet_count",
+        )
+        unknown_packet_count = _report_integer(
+            summary.get("unknown_packet_count"),
+            f"{path_prefix}.summary.unknown_packet_count",
+        )
+        conflicted_packet_count = _report_integer(
+            structural.get("conflicted_packet_count"),
+            f"{path_prefix}.summary.structural.conflicted_packet_count",
+        )
+        extra_round_count = _report_integer(
+            structural.get("extra_round_count"),
+            f"{path_prefix}.summary.structural.extra_round_count",
+        )
+        maximum_request_multiplicity = _report_integer(
+            structural.get("maximum_request_multiplicity"),
+            (f"{path_prefix}.summary.structural.maximum_request_multiplicity"),
+        )
+        if (
+            exact_packet_count == 0
+            or unknown_packet_count != 0
+            or conflicted_packet_count == 0
+            or extra_round_count == 0
+        ):
+            continue
+
+        model_evidence = _report_string(
+            model.get("evidence"),
+            f"{path_prefix}.model.evidence",
+        )
+        if model_evidence in (
+            AMDGPU_LDS_BANK_SERVICE_EVIDENCE_PUBLIC_VENDOR_DOCUMENTATION,
+            AMDGPU_LDS_BANK_SERVICE_EVIDENCE_SILICON_CALIBRATED_VENDOR_MODEL,
+        ):
+            confidence = CompileReportSuggestionConfidence.HIGH
+        elif (
+            model_evidence
+            == AMDGPU_LDS_BANK_SERVICE_EVIDENCE_VENDOR_SOFTWARE_MODEL_UNVALIDATED
+        ):
+            if not options.include_experimental:
+                continue
+            confidence = CompileReportSuggestionConfidence.EXPERIMENTAL
+        else:
+            raise CompileReportError(
+                f"{path_prefix}.model.evidence: unsupported evidence class "
+                f"{model_evidence!r}"
+            )
+
+        function_name = _optional_report_string(
+            group.get("function"),
+            f"{path_prefix}.function",
+        )
+        source_op = _optional_report_string(
+            group.get("source_op"),
+            f"{path_prefix}.source_op",
+        )
+        source_root = _optional_report_string(
+            group.get("source_root"),
+            f"{path_prefix}.source_root",
+        )
+        source_root_argument_index_value = group.get("source_root_argument_index")
+        if source_root_argument_index_value is not None:
+            source_root_argument_index = _report_integer(
+                source_root_argument_index_value,
+                f"{path_prefix}.source_root_argument_index",
+            )
+            if source_root is None:
+                source_root = f"arg{source_root_argument_index}"
+        packet = _optional_report_string(
+            group.get("packet"),
+            f"{path_prefix}.packet",
+        )
+        entry_name = _entry_name_for_function(document, function_name)
+        location = "/".join(
+            value for value in (source_op, source_root, packet) if value is not None
+        )
+        suggestions.append(
+            CompileReportSuggestion(
+                suggestion_id="amdgpu.lds_bank_service",
+                entry_name=entry_name,
+                confidence=confidence,
+                action=(
+                    f"Search layout variants for {location or 'this LDS access'} "
+                    "using pitch or padding, lane mapping, fragment layout, or "
+                    "packet width to reduce exact structural extra rounds. "
+                    "Recompile each candidate, reject spill or occupancy "
+                    "regressions, and select only from hardware timing."
+                ),
+                evidence=(
+                    CompileReportSuggestionEvidence(
+                        path=f"{path_prefix}.summary.exact_packet_count",
+                        value=exact_packet_count,
+                    ),
+                    CompileReportSuggestionEvidence(
+                        path=(
+                            f"{path_prefix}.summary.structural.conflicted_packet_count"
+                        ),
+                        value=conflicted_packet_count,
+                    ),
+                    CompileReportSuggestionEvidence(
+                        path=(f"{path_prefix}.summary.structural.extra_round_count"),
+                        value=extra_round_count,
+                    ),
+                    CompileReportSuggestionEvidence(
+                        path=(
+                            f"{path_prefix}.summary.structural."
+                            "maximum_request_multiplicity"
+                        ),
+                        value=maximum_request_multiplicity,
+                    ),
+                    CompileReportSuggestionEvidence(
+                        path=f"{path_prefix}.model.evidence",
+                        value=model_evidence,
+                    ),
+                    CompileReportSuggestionEvidence(
+                        path=f"{path_prefix}.model.revision",
+                        value=_report_string(
+                            model.get("revision"),
+                            f"{path_prefix}.model.revision",
+                        ),
+                    ),
+                ),
+            )
+        )
+    return tuple(suggestions)
+
+
+def _entry_name_for_function(
+    document: CompileReportDocument,
+    function_name: str | None,
+) -> str:
+    if function_name is not None:
+        for entry in document.entries:
+            if function_name in (
+                entry.get("function"),
+                entry.get("source_function"),
+                entry.get("target_export"),
+                entry.get("target_export_symbol"),
+            ):
+                return compile_report_entry_identity(entry).display_name()
+        return function_name
+    if len(document.entries) == 1:
+        return compile_report_entry_identity(document.entries[0]).display_name()
+    return "<report>"
+
+
+def _report_object(value: object, path: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise CompileReportError(f"{path}: expected object")
+    return value
+
+
+def _report_integer(value: object, path: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise CompileReportError(f"{path}: expected integer")
+    return value
+
+
+def _report_string(value: object, path: str) -> str:
+    if not isinstance(value, str):
+        raise CompileReportError(f"{path}: expected string")
+    return value
+
+
+def _optional_report_string(value: object, path: str) -> str | None:
+    if value is None:
+        return None
+    return _report_string(value, path)
 
 
 def _object_at(root: dict[str, object], *components: str) -> dict[str, object] | None:

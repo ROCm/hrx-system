@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from loom.reporting.compile_report import CompileReportDocument
 from loom.reporting.compile_report_suggestions import (
+    CompileReportSuggestionOptions,
     CompileReportSuggestionProvider,
     CompileReportSuggestionResult,
 )
@@ -24,8 +25,11 @@ _PROVIDERS: tuple[CompileReportSuggestionProvider, ...] = (
 
 def suggest_compile_report(
     document: CompileReportDocument,
+    options: CompileReportSuggestionOptions | None = None,
 ) -> CompileReportSuggestionResult:
     """Dispatches a validated report to its exact target-family provider."""
+    if options is None:
+        options = CompileReportSuggestionOptions()
     if document.status_code != 0:
         return CompileReportSuggestionResult(
             provider_name=None,
@@ -39,7 +43,7 @@ def suggest_compile_report(
         )
     for provider in _PROVIDERS:
         if provider.target_family == target_family:
-            return provider.suggest(document)
+            return provider.suggest(document, options)
     return CompileReportSuggestionResult(
         provider_name=None,
         unavailable_reason="unsupported_target_family",

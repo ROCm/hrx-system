@@ -559,6 +559,40 @@ typedef struct loom_target_compile_report_workload_t {
   uint64_t dispatch_workitem_count;
 } loom_target_compile_report_workload_t;
 
+// Structural target bank-service evidence accumulated across source packets.
+typedef struct loom_target_compile_report_bank_service_summary_t {
+  // Number of source packets for which a target service model was selected.
+  uint64_t modeled_packet_count;
+  // Number of modeled source packets with exact service evidence.
+  uint64_t exact_packet_count;
+  // Number of modeled source packets without exact service evidence.
+  uint64_t unknown_packet_count;
+  // Number of exact source packets requiring no extra service rounds.
+  uint64_t conflict_free_packet_count;
+  // Number of exact source packets requiring extra service rounds.
+  uint64_t conflicted_packet_count;
+  // Required service rounds summed once per exact source packet.
+  uint64_t required_round_count;
+  // Uncontended service rounds summed once per exact source packet.
+  uint64_t uncontended_round_count;
+  // Extra service rounds summed once per exact source packet.
+  uint64_t extra_round_count;
+  // Number of source packets with exact dynamic service contributions.
+  uint64_t exact_dynamic_packet_count;
+  // Number of source packets without exact dynamic service contributions.
+  uint64_t unknown_dynamic_packet_count;
+  // Dynamic executions represented by exact service contributions.
+  uint64_t dynamic_packet_count;
+  // Required service rounds across exact dynamic packet executions.
+  uint64_t dynamic_required_round_count;
+  // Uncontended service rounds across exact dynamic packet executions.
+  uint64_t dynamic_uncontended_round_count;
+  // Extra service rounds across exact dynamic packet executions.
+  uint64_t dynamic_extra_round_count;
+  // Maximum requests assigned to one bank in one exact packet phase.
+  uint16_t maximum_request_multiplicity;
+} loom_target_compile_report_bank_service_summary_t;
+
 // One emitted artifact entry summary in a compile report.
 typedef struct loom_target_compile_report_entry_t {
   // Target artifact function symbol emitted for this entry.
@@ -633,6 +667,8 @@ typedef struct loom_target_compile_report_entry_t {
   uint64_t private_memory_bytes;
   // Estimated target local/shared memory bytes.
   uint64_t local_memory_bytes;
+  // Structural target bank-service evidence for this entry.
+  loom_target_compile_report_bank_service_summary_t bank_service_summary;
   // Residual target move counts indexed by
   // loom_target_compile_report_move_cause_t.
   loom_target_compile_report_move_cause_counts_t
@@ -1362,6 +1398,50 @@ typedef struct loom_target_compile_report_source_low_memory_row_t {
   uint64_t execution_count_plus_one;
 } loom_target_compile_report_source_low_memory_row_t;
 
+// Bank-service evidence grouped by one stable source and target packet shape.
+typedef struct loom_target_compile_report_source_low_bank_service_summary_t {
+  // Source function symbol containing the modeled memory packets.
+  iree_string_view_t function_name;
+  // Source operation mnemonic that emitted the modeled memory packets.
+  iree_string_view_t source_op_name;
+  // Numeric source operation kind that emitted the modeled memory packets.
+  uint32_t source_op_kind;
+  // Named source memory root selected by value facts, if available.
+  iree_string_view_t source_root_name;
+  // Source function entry argument index for the memory root, or UINT16_MAX.
+  uint16_t source_root_argument_index;
+  // Target-independent memory-space key selected by the target.
+  iree_string_view_t memory_space;
+  // Source memory operation kind selected by the target.
+  iree_string_view_t operation_kind;
+  // Stable target packet key selected for the modeled packets.
+  iree_string_view_t packet_key;
+  // Stable target-owned strategy key selected for the modeled packets.
+  iree_string_view_t strategy_key;
+  // Stable target packet-service model key.
+  iree_string_view_t model_key;
+  // Immutable source revision defining the selected model.
+  iree_string_view_t model_revision;
+  // Provenance strength of the selected model.
+  iree_string_view_t model_evidence;
+  // Treatment of requests to identical bank-word addresses.
+  iree_string_view_t request_policy;
+  // Stable reason shared by unknown rows, or empty when none or mixed.
+  iree_string_view_t unknown_reason;
+  // Whether unknown rows carried more than one stable reason.
+  bool has_mixed_unknown_reasons;
+  // Number of lanes represented by the model phases.
+  uint8_t wave_size;
+  // Number of independently serviced banks.
+  uint8_t bank_count;
+  // Byte width of one bank word.
+  uint8_t bank_word_byte_count;
+  // Number of consecutive bank words requested by each active lane.
+  uint8_t packet_word_count;
+  // Accumulated structural service evidence for the packet group.
+  loom_target_compile_report_bank_service_summary_t summary;
+} loom_target_compile_report_source_low_bank_service_summary_t;
+
 // Summary of emitted source-memory packet shape.
 typedef struct loom_target_compile_report_source_low_memory_summary_t {
   // Number of emitted source-memory packets.
@@ -1841,9 +1921,13 @@ typedef struct loom_target_compile_report_t {
       source_low_memory_argument_packet_summaries;
   // Owned source-memory summaries grouped by selected target strategy.
   loom_target_compile_report_row_list_t source_low_memory_strategy_summaries;
+  // Owned bank-service summaries grouped by source root and target packet.
+  loom_target_compile_report_row_list_t source_low_bank_service_summaries;
   // Derived summary of emitted source-memory packet shape.
   loom_target_compile_report_source_low_memory_summary_t
       source_low_memory_summary;
+  // Derived structural bank-service evidence across emitted source packets.
+  loom_target_compile_report_bank_service_summary_t bank_service_summary;
   // Owned target math-legalization decision rows.
   loom_target_compile_report_row_list_t math_legalization_rows;
   // Owned target-legalization decision rows.

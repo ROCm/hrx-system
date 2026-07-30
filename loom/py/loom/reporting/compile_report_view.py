@@ -19,6 +19,12 @@ from loom.reporting.compile_report import (
     match_compile_report_entries,
     report_identity_json,
 )
+from loom.reporting.compile_report_bank_service import (
+    append_bank_service_diff_text,
+    append_bank_service_show_text,
+    build_bank_service_diff,
+    build_bank_service_show,
+)
 
 SHOW_KIND = "loom.compile_report.show"
 DIFF_KIND = "loom.compile_report.diff"
@@ -54,6 +60,26 @@ def _analysis(key: str, label: str, path: str, unit: str | None = None) -> Metri
 
 _METRIC_SPECS = (
     _artifact("instruction_count", "instructions", "instruction_count"),
+    _artifact(
+        "body_instruction_count",
+        "body instructions",
+        "body_instruction_count",
+    ),
+    _artifact(
+        "entry_instruction_count",
+        "entry-envelope instructions",
+        "entry_instruction_count",
+    ),
+    _artifact(
+        "coissued_instruction_count",
+        "native coissued instructions",
+        "coissued_instruction_count",
+    ),
+    _artifact(
+        "coissued_component_count",
+        "coissued semantic components",
+        "coissued_component_count",
+    ),
     _artifact("code_byte_count", "code bytes", "code_byte_count", "bytes"),
     _artifact(
         "code_storage_byte_count",
@@ -74,6 +100,11 @@ _METRIC_SPECS = (
         "static_instruction_mix.scalar_alu_count",
     ),
     _artifact(
+        "unclassified_instruction_count",
+        "unclassified instructions",
+        "static_instruction_mix.unknown_count",
+    ),
+    _artifact(
         "vector_alu_count",
         "vector ALU instructions",
         "static_instruction_mix.vector_alu_count",
@@ -83,6 +114,19 @@ _METRIC_SPECS = (
         "matrix instructions",
         "static_instruction_mix.matrix_count",
     ),
+    _artifact("mfma_count", "MFMA instructions", "static_instruction_mix.mfma_count"),
+    _artifact(
+        "smfmac_count",
+        "SMFMAC instructions",
+        "static_instruction_mix.smfmac_count",
+    ),
+    _artifact("wmma_count", "WMMA instructions", "static_instruction_mix.wmma_count"),
+    _artifact(
+        "swmmac_count",
+        "SWMMAC instructions",
+        "static_instruction_mix.swmmac_count",
+    ),
+    _artifact("dot_count", "dot instructions", "static_instruction_mix.dot_count"),
     _artifact(
         "global_load_count",
         "global loads",
@@ -211,6 +255,31 @@ _METRIC_SPECS = (
         "estimated dispatch matrix operations",
         "economics.operations.dispatch.matrix_count",
     ),
+    _analysis(
+        "dispatch_mfma_count",
+        "estimated dispatch MFMA",
+        "economics.operations.dispatch.mfma_count",
+    ),
+    _analysis(
+        "dispatch_smfmac_count",
+        "estimated dispatch SMFMAC",
+        "economics.operations.dispatch.smfmac_count",
+    ),
+    _analysis(
+        "dispatch_wmma_count",
+        "estimated dispatch WMMA",
+        "economics.operations.dispatch.wmma_count",
+    ),
+    _analysis(
+        "dispatch_swmmac_count",
+        "estimated dispatch SWMMAC",
+        "economics.operations.dispatch.swmmac_count",
+    ),
+    _analysis(
+        "dispatch_dot_count",
+        "estimated dispatch dot operations",
+        "economics.operations.dispatch.dot_count",
+    ),
     _analysis("schedule_node_count", "schedule nodes", "schedule_node_count"),
     _analysis(
         "schedule_dependency_count",
@@ -245,8 +314,58 @@ _METRIC_SPECS = (
         "bytes",
     ),
     _analysis("wait_action_count", "wait actions", "wait_plan.action_count"),
+    _analysis(
+        "explicit_wait_action_count",
+        "explicit wait actions",
+        "wait_plan.explicit_action_count",
+    ),
+    _analysis(
+        "planned_wait_action_count",
+        "target-planned wait actions",
+        "wait_plan.planned_action_count",
+    ),
     _analysis("full_drain_count", "full drains", "wait_plan.full_drain_count"),
     _analysis("partial_wait_count", "partial waits", "wait_plan.partial_wait_count"),
+    _analysis(
+        "wait_drained_packet_count",
+        "packets drained by waits",
+        "wait_plan.drained_count",
+    ),
+    _analysis(
+        "wait_maximum_drained_packet_count",
+        "maximum packets drained by one wait",
+        "wait_plan.max_drained_count",
+    ),
+    _analysis(
+        "wait_maximum_outstanding_packet_count",
+        "maximum packets outstanding before a wait",
+        "wait_plan.max_outstanding_before",
+    ),
+    _analysis(
+        "wait_maximum_full_drain_outstanding_packet_count",
+        "maximum packets outstanding before a full drain",
+        "wait_plan.max_full_drain_outstanding_before",
+    ),
+    _analysis(
+        "target_insertion_static_packet_count",
+        "target-inserted static packets",
+        "target_insertions.static_packet_count",
+    ),
+    _analysis(
+        "target_insertion_exact_dynamic_packet_count",
+        "target insertions with exact dynamic counts",
+        "target_insertions.exact_dynamic_packet_count",
+    ),
+    _analysis(
+        "target_insertion_unknown_dynamic_packet_count",
+        "target insertions with unknown dynamic counts",
+        "target_insertions.unknown_dynamic_packet_count",
+    ),
+    _analysis(
+        "target_insertion_dynamic_packet_count",
+        "target-inserted dynamic packets",
+        "target_insertions.dynamic_packet_count",
+    ),
 )
 
 
@@ -274,6 +393,9 @@ def build_compile_report_show(
             for entry in document.entries
         ],
     }
+    bank_service = build_bank_service_show(document)
+    if bank_service is not None:
+        view["bank_service"] = bank_service
     if document.envelope_context:
         view["envelope_context"] = dict(document.envelope_context)
     return view
@@ -310,7 +432,7 @@ def build_compile_report_diff(
                 "compiler_analysis": compiler_analysis,
             }
         )
-    return {
+    view: dict[str, object] = {
         "kind": DIFF_KIND,
         "schema_version": COMPILE_REPORT_SCHEMA_VERSION,
         "missing_evidence": "omitted_metrics_are_unavailable",
@@ -321,6 +443,10 @@ def build_compile_report_diff(
         "unchanged_entry_count": unchanged_entry_count,
         "entries": entries,
     }
+    bank_service = build_bank_service_diff(baseline, candidate)
+    if bank_service is not None:
+        view["bank_service"] = bank_service
+    return view
 
 
 def format_compile_report_show_text(view: dict[str, object]) -> str:
@@ -372,6 +498,9 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
             _expect_dict(entry["compiler_analysis"]),
             EvidenceClass.COMPILER_ANALYSIS,
         )
+    bank_service = view.get("bank_service")
+    if isinstance(bank_service, dict):
+        append_bank_service_show_text(lines, bank_service)
     return "\n".join(lines) + "\n"
 
 
@@ -406,6 +535,9 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
             _expect_dict(entry["compiler_analysis"]),
             EvidenceClass.COMPILER_ANALYSIS,
         )
+    bank_service = view.get("bank_service")
+    if isinstance(bank_service, dict):
+        append_bank_service_diff_text(lines, bank_service)
     return "\n".join(lines) + "\n"
 
 
@@ -432,7 +564,7 @@ def _show_metrics(
         if spec.evidence is not evidence:
             continue
         value = _lookup(entry, spec.path)
-        if value is not _MISSING:
+        if value is not _MISSING and value is not None:
             metrics[spec.key] = value
     return metrics
 
@@ -451,6 +583,10 @@ def _diff_metrics(
             continue
         baseline_value = _lookup(baseline, spec.path)
         candidate_value = _lookup(candidate, spec.path)
+        if baseline_value is None:
+            baseline_value = _MISSING
+        if candidate_value is None:
+            candidate_value = _MISSING
         if baseline_value is _MISSING and candidate_value is _MISSING:
             unavailable_count += 1
             continue

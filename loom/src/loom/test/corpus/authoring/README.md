@@ -133,7 +133,11 @@ replaying the full report. Omitted metrics are unavailable, not zero. `diff`
 requires exact schema, target, config, workload, and entry identity; it has no
 force mode for unlike compilations. `suggest` uses only explicitly registered
 target providers and reports unavailable target interpretation instead of
-guessing from bundle names.
+guessing from bundle names. Findings carry an evidence tier. The default output
+contains only target models backed by public documentation or silicon
+calibration; `--include-experimental` additionally admits exact compiler proofs
+against hardware-unvalidated models. That opt-in is useful for pre-silicon
+search, but hardware timing still decides whether a candidate is adopted.
 
 Version-zero reports are ephemeral diagnostics co-versioned with the compiler.
 Regenerate them after changing compiler versions. Use the full report and
@@ -425,12 +429,34 @@ visible before object disassembly enters the debugging loop.
 
 The AMDGPU compile report explains selected workgroup-memory packets and the
 source address facts retained at packet selection. When Loom has a named
-instruction- and target-specific service model, detailed rows also report an
-exact structural LDS bank-service profile or an explicit reason the source
+instruction- and target-specific service model, summary reports retain compact
+global and per-source-operation bank-service groups. Detailed rows additionally
+report each exact structural LDS bank-service profile or the reason the source
 address and active-lane facts were insufficient. These are bank service rounds,
 not cycle predictions. Runtime measurements and profiler counters remain
 necessary when occupancy, cache behavior, scheduling, or data-dependent control
 flow dominates.
+
+The bounded report tools preserve the same evidence without replaying lowering:
+
+```bash
+loom-compile-report show /tmp/kernel.compile-report.json
+loom-compile-report \
+  diff /tmp/baseline.compile-report.json \
+       /tmp/candidate.compile-report.json
+loom-compile-report \
+  suggest /tmp/candidate.compile-report.json --include-experimental
+```
+
+`show` calls out conflicted and incomplete semantic groups. `diff` matches groups
+by function, source operation, memory root, operation, packet, and strategy, so
+an improvement in one access cannot hide a regression in another through global
+netting. It also reports loss of exact proof coverage and changes to the model
+revision or evidence class. `suggest` proposes bounded layout experiments only
+when a group has complete exact proof, conflicts, and structural extra rounds.
+The experiment searches padding or pitch, lane mapping, fragment layout, and
+packet width, then rejects spill or occupancy regressions before hardware
+timing.
 
 Compile with detailed reports when investigating shared-memory layout,
 padding, swizzling, vectorization, or imported kernel staging choices:
@@ -461,7 +487,10 @@ class independently from the address proof. `proof: "exact"` carries the
 per-phase service rounds, uncontended baseline, extra rounds, and maximum
 same-bank request multiplicity. `proof: "unknown"` carries a stable
 `unknown_reason` instead of guessing through unsupported address shapes or
-divergent active-lane control.
+divergent active-lane control. Exact proof establishes the result within the
+named model; the model's evidence class separately states whether its behavior
+has been documented, calibrated on silicon, or only recovered from vendor
+software.
 
 The current gfx1250 model covers full-wave `ds_read_b128` and
 `ds_write_b128` packets whose lane addresses are an aligned affine function of

@@ -13,6 +13,11 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Accumulates structural bank-service counters from |source| into |target|.
+void loom_target_compile_report_accumulate_bank_service_summaries(
+    loom_target_compile_report_bank_service_summary_t* target,
+    const loom_target_compile_report_bank_service_summary_t* source);
+
 // Accumulates source-memory summary counters from |source| into |target|.
 void loom_target_compile_report_accumulate_source_low_memory_summaries(
     loom_target_compile_report_source_low_memory_summary_t* target,

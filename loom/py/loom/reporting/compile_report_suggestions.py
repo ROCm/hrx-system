@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol
 
 from loom.reporting.compile_report import (
@@ -17,6 +18,20 @@ from loom.reporting.compile_report import (
 )
 
 SUGGEST_KIND = "loom.compile_report.suggest"
+
+
+class CompileReportSuggestionConfidence(StrEnum):
+    """Evidence tier for one proposed experiment."""
+
+    HIGH = "high"
+    EXPERIMENTAL = "experimental"
+
+
+@dataclass(frozen=True, slots=True)
+class CompileReportSuggestionOptions:
+    """Controls whether lower-confidence experiments may be surfaced."""
+
+    include_experimental: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +50,9 @@ class CompileReportSuggestion:
     entry_name: str
     action: str
     evidence: tuple[CompileReportSuggestionEvidence, ...]
+    confidence: CompileReportSuggestionConfidence = (
+        CompileReportSuggestionConfidence.HIGH
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +70,11 @@ class CompileReportSuggestionProvider(Protocol):
     target_family: str
     provider_name: str
 
-    def suggest(self, document: CompileReportDocument) -> CompileReportSuggestionResult:
+    def suggest(
+        self,
+        document: CompileReportDocument,
+        options: CompileReportSuggestionOptions,
+    ) -> CompileReportSuggestionResult:
         """Returns ordered suggestions for a validated compile report."""
         ...
 
@@ -83,6 +105,7 @@ def build_compile_report_suggestions(
             {
                 "id": suggestion.suggestion_id,
                 "entry": suggestion.entry_name,
+                "confidence": suggestion.confidence.value,
                 "action": suggestion.action,
                 "evidence": {
                     evidence.path: evidence.value for evidence in suggestion.evidence
@@ -124,6 +147,7 @@ def format_compile_report_suggestions_text(view: dict[str, object]) -> str:
             (
                 "",
                 f"[{finding['id']}] {finding['entry']}",
+                f"  confidence: {finding['confidence']}",
                 f"  action: {finding['action']}",
                 "  evidence:",
             )

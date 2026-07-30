@@ -6,7 +6,12 @@
 
 from __future__ import annotations
 
-from loom.reporting.compile_report import parse_compile_report
+import pytest
+
+from loom.reporting.compile_report import CompileReportError, parse_compile_report
+from loom.reporting.compile_report_suggestions import (
+    CompileReportSuggestionOptions,
+)
 from loom.target.arch.amdgpu.compile_report_suggestions import (
     AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER,
 )
@@ -50,6 +55,89 @@ def _compile_report(
     if target_key is not None:
         report["target_key"] = target_key
     return report
+
+
+def _add_bank_service_group(
+    report: dict[str, object],
+    *,
+    model_evidence: str,
+    exact_packet_count: int = 1,
+    unknown_packet_count: int = 0,
+    conflicted_packet_count: int = 1,
+    extra_round_count: int = 8,
+) -> None:
+    report["source_low"] = {
+        "memory": {
+            "bank_service": {
+                "modeled_packet_count": exact_packet_count + unknown_packet_count,
+                "exact_packet_count": exact_packet_count,
+                "unknown_packet_count": unknown_packet_count,
+                "structural": {
+                    "conflict_free_packet_count": 0,
+                    "conflicted_packet_count": conflicted_packet_count,
+                    "required_round_count": 16,
+                    "uncontended_round_count": 8,
+                    "extra_round_count": extra_round_count,
+                    "maximum_request_multiplicity": 2,
+                },
+                "dynamic": {
+                    "exact_packet_count": exact_packet_count,
+                    "unknown_packet_count": unknown_packet_count,
+                    "packet_count": exact_packet_count,
+                    "required_round_count": 16,
+                    "uncontended_round_count": 8,
+                    "extra_round_count": extra_round_count,
+                },
+            },
+            "bank_service_group_count": 1,
+            "bank_service_groups": [
+                {
+                    "index": 0,
+                    "function": "routed_linear",
+                    "source_op": "vector.fragment.load",
+                    "source_op_kind": 80,
+                    "source_root": "scratch",
+                    "memory_space": "workgroup",
+                    "operation": "load",
+                    "packet": "amdgpu.ds_read_b128",
+                    "strategy": None,
+                    "model": {
+                        "key": ("amdgpu.lds.wave32.b128.quad-phases.read.count-each"),
+                        "revision": "ROCm/rocm-libraries@model",
+                        "evidence": model_evidence,
+                        "request_policy": "count-each",
+                        "wave_size": 32,
+                        "bank_count": 32,
+                        "bank_word_bytes": 4,
+                        "packet_bank_words": 4,
+                    },
+                    "summary": {
+                        "modeled_packet_count": (
+                            exact_packet_count + unknown_packet_count
+                        ),
+                        "exact_packet_count": exact_packet_count,
+                        "unknown_packet_count": unknown_packet_count,
+                        "structural": {
+                            "conflict_free_packet_count": 0,
+                            "conflicted_packet_count": conflicted_packet_count,
+                            "required_round_count": 16,
+                            "uncontended_round_count": 8,
+                            "extra_round_count": extra_round_count,
+                            "maximum_request_multiplicity": 2,
+                        },
+                        "dynamic": {
+                            "exact_packet_count": exact_packet_count,
+                            "unknown_packet_count": unknown_packet_count,
+                            "packet_count": exact_packet_count,
+                            "required_round_count": 16,
+                            "uncontended_round_count": 8,
+                            "extra_round_count": extra_round_count,
+                        },
+                    },
+                }
+            ],
+        }
+    }
 
 
 def test_suggests_ordered_experiments_from_exact_target_evidence() -> None:
@@ -132,3 +220,75 @@ def test_private_memory_is_reported_once_without_spill_evidence() -> None:
         "amdgpu.residency_cliff",
         "amdgpu.nondefault_wave_size",
     ]
+
+
+def test_unvalidated_bank_model_is_explicitly_opt_in() -> None:
+    report = _compile_report(target_key="gfx1250-a0", subgroup_size=32)
+    _add_bank_service_group(
+        report,
+        model_evidence="vendor-software-model-unvalidated",
+    )
+    document = parse_compile_report(report)
+
+    default_result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+    experimental_result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(
+        document,
+        CompileReportSuggestionOptions(include_experimental=True),
+    )
+
+    assert "amdgpu.lds_bank_service" not in {
+        suggestion.suggestion_id for suggestion in default_result.suggestions
+    }
+    bank_suggestion = experimental_result.suggestions[-1]
+    assert bank_suggestion.suggestion_id == "amdgpu.lds_bank_service"
+    assert bank_suggestion.confidence == "experimental"
+    assert "spill or occupancy regressions" in bank_suggestion.action
+    assert "hardware timing" in bank_suggestion.action
+    assert bank_suggestion.evidence[2].path.endswith(
+        "summary.structural.extra_round_count"
+    )
+    assert bank_suggestion.evidence[2].value == 8
+
+
+def test_calibrated_exact_bank_conflict_is_high_confidence() -> None:
+    report = _compile_report(target_key="gfx1250-a0", subgroup_size=32)
+    _add_bank_service_group(
+        report,
+        model_evidence="silicon-calibrated-vendor-model",
+    )
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    bank_suggestion = result.suggestions[-1]
+    assert bank_suggestion.suggestion_id == "amdgpu.lds_bank_service"
+    assert bank_suggestion.confidence == "high"
+
+
+def test_bank_suggestion_requires_complete_exact_conflict_evidence() -> None:
+    report = _compile_report(target_key="gfx1250-a0", subgroup_size=32)
+    _add_bank_service_group(
+        report,
+        model_evidence="silicon-calibrated-vendor-model",
+        exact_packet_count=1,
+        unknown_packet_count=1,
+    )
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    assert "amdgpu.lds_bank_service" not in {
+        suggestion.suggestion_id for suggestion in result.suggestions
+    }
+
+
+def test_bank_suggestion_rejects_unknown_model_evidence_class() -> None:
+    report = _compile_report(target_key="gfx1250-a0", subgroup_size=32)
+    _add_bank_service_group(
+        report,
+        model_evidence="unversioned-model",
+    )
+    document = parse_compile_report(report)
+
+    with pytest.raises(CompileReportError, match="unsupported evidence class"):
+        AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)

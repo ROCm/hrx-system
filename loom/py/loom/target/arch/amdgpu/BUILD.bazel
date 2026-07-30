@@ -62,6 +62,7 @@ iree_py_library(
     srcs = ["compile_report_suggestions.py"],
     deps = [
         ":target_identity",
+        ":target_info",
         "//loom/py/loom/reporting",
     ],
 )

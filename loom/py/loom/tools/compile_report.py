@@ -20,6 +20,7 @@ from loom.reporting.compile_report import (
     load_compile_report,
 )
 from loom.reporting.compile_report_suggestions import (
+    CompileReportSuggestionOptions,
     build_compile_report_suggestions,
     format_compile_report_suggestions_text,
 )
@@ -56,7 +57,12 @@ def run(args: argparse.Namespace, *, stdout: TextIO) -> int:
         text = format_compile_report_diff_text(view)
     elif args.command == "suggest":
         document = load_compile_report(args.report)
-        result = suggest_compile_report(document)
+        result = suggest_compile_report(
+            document,
+            CompileReportSuggestionOptions(
+                include_experimental=args.include_experimental,
+            ),
+        )
         view = build_compile_report_suggestions(document, result)
         text = format_compile_report_suggestions_text(view)
     else:
@@ -99,6 +105,14 @@ def _create_argument_parser() -> argparse.ArgumentParser:
         help="Suggests target-owned optimization experiments.",
     )
     suggest_parser.add_argument("report", type=Path, help="Compile report JSON path.")
+    suggest_parser.add_argument(
+        "--include-experimental",
+        action="store_true",
+        help=(
+            "Include experiments grounded in structurally exact but "
+            "hardware-unvalidated target models."
+        ),
+    )
     _add_output_format_argument(suggest_parser)
     return parser
 

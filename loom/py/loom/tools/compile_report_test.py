@@ -21,6 +21,7 @@ def _write_report(
     target_family: str = "AMDGPU",
     target_key: str = "gfx11-generic",
     target_record: str = "gfx11-generic",
+    experimental_bank_conflict: bool = False,
 ) -> None:
     workload = {
         "workgroup_size": {"x": 64, "y": 1, "z": 1, "flat": 64},
@@ -63,6 +64,60 @@ def _write_report(
             ],
         },
     }
+    if experimental_bank_conflict:
+        bank_service = {
+            "modeled_packet_count": 1,
+            "exact_packet_count": 1,
+            "unknown_packet_count": 0,
+            "structural": {
+                "conflict_free_packet_count": 0,
+                "conflicted_packet_count": 1,
+                "required_round_count": 16,
+                "uncontended_round_count": 8,
+                "extra_round_count": 8,
+                "maximum_request_multiplicity": 2,
+            },
+            "dynamic": {
+                "exact_packet_count": 1,
+                "unknown_packet_count": 0,
+                "packet_count": 1,
+                "required_round_count": 16,
+                "uncontended_round_count": 8,
+                "extra_round_count": 8,
+            },
+        }
+        report["source_low"] = {
+            "memory": {
+                "bank_service": bank_service,
+                "bank_service_group_count": 1,
+                "bank_service_groups": [
+                    {
+                        "index": 0,
+                        "function": "kernel",
+                        "source_op": "vector.fragment.load",
+                        "source_op_kind": 80,
+                        "source_root": "scratch",
+                        "memory_space": "workgroup",
+                        "operation": "load",
+                        "packet": "amdgpu.ds_read_b128",
+                        "strategy": None,
+                        "model": {
+                            "key": (
+                                "amdgpu.lds.wave32.b128.quad-phases.read.count-each"
+                            ),
+                            "revision": "ROCm/rocm-libraries@model",
+                            "evidence": "vendor-software-model-unvalidated",
+                            "request_policy": "count-each",
+                            "wave_size": 32,
+                            "bank_count": 32,
+                            "bank_word_bytes": 4,
+                            "packet_bank_words": 4,
+                        },
+                        "summary": bank_service,
+                    }
+                ],
+            }
+        }
     path.write_text(json.dumps(report), encoding="utf-8")
 
 
@@ -167,6 +222,44 @@ def test_suggest_json_uses_registered_target_provider(
     assert view["provider"] == "amdgpu"
     assert view["status"] == "available"
     assert view["findings"] == []
+
+
+def test_suggest_experimental_bank_model_requires_explicit_opt_in(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report_path = tmp_path / "report.json"
+    _write_report(
+        report_path,
+        target_key="gfx1250-a0",
+        target_record="gfx1250-a0",
+        experimental_bank_conflict=True,
+    )
+
+    assert main(["suggest", str(report_path), "--format=json"]) == 0
+    default_view = json.loads(capsys.readouterr().out)
+    assert "amdgpu.lds_bank_service" not in {
+        finding["id"] for finding in default_view["findings"]
+    }
+
+    assert (
+        main(
+            [
+                "suggest",
+                str(report_path),
+                "--include-experimental",
+                "--format=json",
+            ]
+        )
+        == 0
+    )
+    experimental_view = json.loads(capsys.readouterr().out)
+    finding = next(
+        finding
+        for finding in experimental_view["findings"]
+        if finding["id"] == "amdgpu.lds_bank_service"
+    )
+    assert finding["confidence"] == "experimental"
 
 
 @pytest.mark.parametrize(

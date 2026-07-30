@@ -140,6 +140,33 @@ loom_target_compile_report_append_source_low_memory_bank_service_text(
   return iree_string_builder_append_cstring(builder, "}");
 }
 
+iree_status_t
+loom_target_compile_report_append_bank_service_summary_text_fields(
+    const loom_target_compile_report_bank_service_summary_t* summary,
+    iree_string_builder_t* builder) {
+  return iree_string_builder_append_format(
+      builder,
+      " modeled_packets=%" PRIu64 " exact_packets=%" PRIu64
+      " unknown_packets=%" PRIu64 " conflict_free_packets=%" PRIu64
+      " conflicted_packets=%" PRIu64 " structural_required_rounds=%" PRIu64
+      " structural_uncontended_rounds=%" PRIu64
+      " structural_extra_rounds=%" PRIu64
+      " maximum_request_multiplicity=%" PRIu16 " dynamic_exact_packets=%" PRIu64
+      " dynamic_unknown_packets=%" PRIu64 " dynamic_packets=%" PRIu64
+      " dynamic_required_rounds=%" PRIu64 " dynamic_uncontended_rounds=%" PRIu64
+      " dynamic_extra_rounds=%" PRIu64,
+      summary->modeled_packet_count, summary->exact_packet_count,
+      summary->unknown_packet_count, summary->conflict_free_packet_count,
+      summary->conflicted_packet_count, summary->required_round_count,
+      summary->uncontended_round_count, summary->extra_round_count,
+      summary->maximum_request_multiplicity,
+      summary->exact_dynamic_packet_count,
+      summary->unknown_dynamic_packet_count, summary->dynamic_packet_count,
+      summary->dynamic_required_round_count,
+      summary->dynamic_uncontended_round_count,
+      summary->dynamic_extra_round_count);
+}
+
 static iree_status_t loom_target_compile_report_append_memory_interval_text(
     const loom_target_compile_report_memory_interval_t* interval,
     iree_string_builder_t* builder) {
@@ -851,6 +878,75 @@ loom_target_compile_report_format_source_low_memory_strategy_summaries(
   return iree_ok_status();
 }
 
+static iree_status_t
+loom_target_compile_report_format_source_low_bank_service_summaries(
+    const loom_target_compile_report_t* report,
+    iree_string_builder_t* builder) {
+  iree_host_size_t row_index = 0;
+  for (const loom_target_compile_report_vec_t* vec =
+           report->source_low_bank_service_summaries.head;
+       vec != NULL; vec = vec->next) {
+    const loom_target_compile_report_source_low_bank_service_summary_t* rows =
+        (const loom_target_compile_report_source_low_bank_service_summary_t*)
+            loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i, ++row_index) {
+      const loom_target_compile_report_source_low_bank_service_summary_t* row =
+          &rows[i];
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "COMPILE-REPORT: source_low_bank_service[%" PRIhsz
+          "] function=%.*s source_op=%.*s source_op_kind=%" PRIu32,
+          row_index, (int)row->function_name.size, row->function_name.data,
+          (int)row->source_op_name.size, row->source_op_name.data,
+          row->source_op_kind));
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_text_append_string_field(
+          builder, IREE_SV("source_root"), row->source_root_name));
+      if (row->source_root_argument_index != UINT16_MAX) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " source_root_argument=%" PRIu16,
+            row->source_root_argument_index));
+      }
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_text_append_string_field(
+          builder, IREE_SV("memory_space"), row->memory_space));
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_text_append_string_field(
+          builder, IREE_SV("operation"), row->operation_kind));
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_text_append_string_field(
+          builder, IREE_SV("packet"), row->packet_key));
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_text_append_string_field(
+          builder, IREE_SV("strategy"), row->strategy_key));
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_text_append_string_field(
+          builder, IREE_SV("model"), row->model_key));
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_text_append_string_field(
+          builder, IREE_SV("model_revision"), row->model_revision));
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_text_append_string_field(
+          builder, IREE_SV("model_evidence"), row->model_evidence));
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_text_append_string_field(
+          builder, IREE_SV("request_policy"), row->request_policy));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          " wave_size=%" PRIu8 " banks=%" PRIu8 " bank_word_bytes=%" PRIu8
+          " packet_bank_words=%" PRIu8,
+          row->wave_size, row->bank_count, row->bank_word_byte_count,
+          row->packet_word_count));
+      if (row->summary.unknown_packet_count != 0) {
+        const iree_string_view_t unknown_reason =
+            row->has_mixed_unknown_reasons
+                ? IREE_SV("mixed")
+                : loom_target_compile_report_text_non_empty(
+                      row->unknown_reason);
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder, " unknown_reason=%.*s", (int)unknown_reason.size,
+            unknown_reason.data));
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_target_compile_report_append_bank_service_summary_text_fields(
+              &row->summary, builder));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_target_compile_report_format_math_rows(
     const loom_target_compile_report_t* report,
     iree_string_builder_t* builder) {
@@ -1010,6 +1106,9 @@ iree_status_t loom_target_compile_report_format_text_lowering_details(
           report, builder));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_format_source_low_memory_strategy_summaries(
+          report, builder));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_format_source_low_bank_service_summaries(
           report, builder));
   return loom_target_compile_report_format_legalization_rows(report, builder);
 }

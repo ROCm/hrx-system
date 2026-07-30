@@ -52,6 +52,11 @@ iree_status_t loom_target_compile_report_format_operation_economics_json(
     const loom_target_compile_report_static_instruction_mix_t* mix,
     uint64_t scale, loom_output_stream_t* stream);
 
+// Writes one structural bank-service summary object.
+iree_status_t loom_target_compile_report_format_bank_service_summary_json(
+    const loom_target_compile_report_bank_service_summary_t* summary,
+    loom_output_stream_t* stream);
+
 // Returns true when the report has economics evidence to serialize.
 bool loom_target_compile_report_has_report_economics(
     const loom_target_compile_report_t* report);

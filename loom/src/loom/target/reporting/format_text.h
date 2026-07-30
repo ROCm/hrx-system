@@ -30,6 +30,12 @@ iree_status_t loom_target_compile_report_format_text_source_low_memory_summary(
     const loom_target_compile_report_workload_t* workload,
     iree_string_builder_t* builder);
 
+// Appends the fields of one structural bank-service summary.
+iree_status_t
+loom_target_compile_report_append_bank_service_summary_text_fields(
+    const loom_target_compile_report_bank_service_summary_t* summary,
+    iree_string_builder_t* builder);
+
 // Appends detailed source-low, math, and target legalization evidence.
 iree_status_t loom_target_compile_report_format_text_lowering_details(
     const loom_target_compile_report_t* report, iree_string_builder_t* builder);

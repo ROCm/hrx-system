@@ -127,13 +127,29 @@ python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
   diff /tmp/baseline.json /tmp/candidate.json --format=json
 python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
   suggest /tmp/candidate.json --format=json
+python dev.py bazel run //loom/py/loom/tools:loom-compile-report -- \
+  suggest /tmp/candidate.json --include-experimental --format=json
 ```
 
 `show` separates emitted artifact facts from compiler analysis and omits
 unavailable metrics from its compact JSON. `diff` rejects reports unless their
 schema, target, specialization, workload, and entry identities match exactly.
 `suggest` delegates interpretation to the selected target family and cites the
-evidence behind each proposed experiment.
+evidence behind each proposed experiment. Default findings require a documented
+or silicon-calibrated target model. `--include-experimental` also exposes
+structurally exact findings from hardware-unvalidated models and labels them
+`experimental`, allowing pre-silicon search without presenting model
+predictions as measured hardware behavior.
+
+Final-native facts expose the scheduled body separately from the target-owned
+entry envelope, native coissued instructions separately from their semantic
+components, and each matrix family separately from the broad matrix total.
+Dispatch-scaled operation counts appear only when the report carries an exact
+workload scale. Wait analysis distinguishes waits already present in the low
+stream from waits inserted by target planning, while target-insertion coverage
+states whether dynamic packet counts are exact or unknown. These are structural
+search signals rather than cycle estimates; absent values stay unavailable
+instead of being inferred by the report tool.
 
 Compile reports are version-zero, same-compiler-horizon diagnostics. Regenerate
 them with the current checkout instead of treating them as durable records or
