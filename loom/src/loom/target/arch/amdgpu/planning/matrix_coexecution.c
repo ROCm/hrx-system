@@ -173,7 +173,7 @@ struct loom_amdgpu_matrix_coexecution_t {
   uint32_t* active_vgpr_indices;
   // Number of entries in |active_vgpr_indices|.
   iree_host_size_t active_vgpr_count;
-  // Scratch lookup from physical VGPR to a node in one outgoing frontier.
+  // Multi-block scratch lookup from physical VGPR to one outgoing frontier.
   loom_amdgpu_matrix_coexecution_frontier_node_t** frontier_lookup;
   // Number of physical VGPR units in the release lattice.
   uint32_t vgpr_count;
@@ -833,13 +833,14 @@ iree_status_t loom_amdgpu_matrix_coexecution_allocate(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, vgpr_count, sizeof(*coexecution->active_vgpr_indices),
       (void**)&coexecution->active_vgpr_indices));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, vgpr_count, sizeof(*coexecution->frontier_lookup),
-      (void**)&coexecution->frontier_lookup));
-  memset(coexecution->frontier_lookup, 0,
-         (iree_host_size_t)vgpr_count * sizeof(*coexecution->frontier_lookup));
   if (schedule->block_count > 1) {
     IREE_ASSERT(schedule->cfg_graph.blocks != NULL);
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, vgpr_count, sizeof(*coexecution->frontier_lookup),
+        (void**)&coexecution->frontier_lookup));
+    memset(
+        coexecution->frontier_lookup, 0,
+        (iree_host_size_t)vgpr_count * sizeof(*coexecution->frontier_lookup));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         arena, schedule->block_count, sizeof(*coexecution->blocks),
         (void**)&coexecution->blocks));

@@ -102,6 +102,19 @@ constexpr FixtureSpec kMemoryControl = {
     /*.generated_matrix=*/{},
 };
 
+// A straight-line matrix workload that isolates the common single-block
+// coexecution path without CFG frontier propagation.
+constexpr FixtureSpec kMatrixSingleBlockCanary = {
+    /*.name=*/"matrix_single_block_canary",
+    /*.input_stage=*/FixtureInputStage::kGeneratedLow,
+    /*.generated_matrix=*/
+    {
+        /*.phase_count=*/1,
+        /*.valu_packets_per_phase=*/4,
+        /*.dependent_valu_packets_per_phase=*/4,
+    },
+};
+
 constexpr FixtureSpec kMatrixDependencyCanary = {
     /*.name=*/"matrix_dependency_canary",
     /*.input_stage=*/FixtureInputStage::kGeneratedLow,
@@ -704,6 +717,20 @@ static void BM_PacketPlan_MemoryControl(benchmark::State& state) {
 }
 BENCHMARK(BM_PacketPlan_MemoryControl)
     ->Iterations(2000)
+    ->Unit(benchmark::kNanosecond);
+
+static void BM_WaitPlan_MatrixSingleBlockCanary(benchmark::State& state) {
+  BenchmarkPlan(state, kMatrixSingleBlockCanary, PlanComponent::kWait);
+}
+BENCHMARK(BM_WaitPlan_MatrixSingleBlockCanary)
+    ->Iterations(1000)
+    ->Unit(benchmark::kNanosecond);
+
+static void BM_PacketPlan_MatrixSingleBlockCanary(benchmark::State& state) {
+  BenchmarkPlan(state, kMatrixSingleBlockCanary, PlanComponent::kComplete);
+}
+BENCHMARK(BM_PacketPlan_MatrixSingleBlockCanary)
+    ->Iterations(1000)
     ->Unit(benchmark::kNanosecond);
 
 static void BM_WaitPlan_MatrixDependencyCanary(benchmark::State& state) {
