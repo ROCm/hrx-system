@@ -230,6 +230,42 @@ TEST(AmdgpuEncodingTest, PacksSDelayAluSoppImmediate) {
   EXPECT_EQ(packet.words[0], UINT32_C(0xbf870214));
 }
 
+TEST(AmdgpuEncodingTest, PacksRdnaVop3UnusedSourcesAsInlineZero) {
+  const uint16_t descriptor_set_ordinals[] = {
+      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX11_GENERIC,
+      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX12_GENERIC,
+      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX12_5_GENERIC,
+      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3,
+      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3_5,
+      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4,
+      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX1250_A0,
+      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX1251,
+      LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X,
+  };
+  const loom_amdgpu_encoding_field_value_t field_values[] = {
+      {LOOM_AMDGPU_ENCODING_FIELD_VDST, {}, 0},
+      {LOOM_AMDGPU_ENCODING_FIELD_SRC0, {}, 0x101},
+      {LOOM_AMDGPU_ENCODING_FIELD_SRC1, {}, 0x102},
+  };
+  bool tested_table = false;
+  for (uint16_t descriptor_set_ordinal : descriptor_set_ordinals) {
+    const loom_amdgpu_encoding_table_t* table =
+        loom_amdgpu_encoding_table_for_descriptor_set_ordinal(
+            descriptor_set_ordinal);
+    if (table == nullptr) continue;
+    tested_table = true;
+    loom_amdgpu_encoding_packet_t packet = {};
+    IREE_ASSERT_OK(loom_amdgpu_encoding_pack(
+        table, LOOM_AMDGPU_ENCODING_FORMAT_VOP3, /*opcode=*/0x32C, field_values,
+        IREE_ARRAYSIZE(field_values), &packet));
+    EXPECT_EQ(packet.word_count, 2u);
+    EXPECT_EQ(packet.bit_count, 64u);
+    EXPECT_EQ(packet.words[0], UINT32_C(0xd72c0000));
+    EXPECT_EQ(packet.words[1], UINT32_C(0x02020501));
+  }
+  if (!tested_table) GTEST_SKIP() << "No RDNA encoding table selected";
+}
+
 TEST(AmdgpuEncodingTest, Vop2U32VgprUsesInlineSourceForSmallU32) {
   LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
       table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3, "amdgpu.rdna3.core");
@@ -317,6 +353,82 @@ TEST(AmdgpuEncodingTest, PacksGfx125XPackedFp8Vop1Words) {
     EXPECT_EQ(packet.word_count, 1u);
     EXPECT_EQ(packet.bit_count, 32u);
     EXPECT_EQ(packet.words[0], test_case.expected_word);
+  }
+}
+
+TEST(AmdgpuEncodingTest, PacksGfx125XScalarFp8Vop1Words) {
+  LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
+      table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X,
+      "amdgpu.rdna4.gfx125x.core");
+  struct {
+    uint16_t opcode;
+    uint32_t expected_word;
+  } cases[] = {
+      {0x77, UINT32_C(0x7e02ef02)},
+      {0x78, UINT32_C(0x7e02f102)},
+  };
+  for (const auto& test_case : cases) {
+    const loom_amdgpu_encoding_field_value_t field_values[] = {
+        {
+            /*.field_id=*/LOOM_AMDGPU_ENCODING_FIELD_VDST,
+            /*.reserved=*/{},
+            /*.value=*/1,
+        },
+        {
+            /*.field_id=*/LOOM_AMDGPU_ENCODING_FIELD_SRC0,
+            /*.reserved=*/{},
+            /*.value=*/258,
+        },
+    };
+    loom_amdgpu_encoding_packet_t packet = {};
+    IREE_ASSERT_OK(loom_amdgpu_encoding_pack(
+        table, LOOM_AMDGPU_ENCODING_FORMAT_VOP1, test_case.opcode, field_values,
+        IREE_ARRAYSIZE(field_values), &packet));
+    EXPECT_EQ(packet.word_count, 1u);
+    EXPECT_EQ(packet.bit_count, 32u);
+    EXPECT_EQ(packet.words[0], test_case.expected_word);
+  }
+}
+
+TEST(AmdgpuEncodingTest, PacksGfx125XScalarFp8Vop3Words) {
+  LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
+      table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X,
+      "amdgpu.rdna4.gfx125x.core");
+  struct {
+    uint16_t opcode;
+    uint16_t op_sel;
+    uint32_t expected_word_0;
+  } cases[] = {
+      {0x1F7, 2, UINT32_C(0xd5f71001)}, {0x1F7, 1, UINT32_C(0xd5f70801)},
+      {0x1F7, 3, UINT32_C(0xd5f71801)}, {0x1F8, 2, UINT32_C(0xd5f81001)},
+      {0x1F8, 1, UINT32_C(0xd5f80801)}, {0x1F8, 3, UINT32_C(0xd5f81801)},
+  };
+  for (const auto& test_case : cases) {
+    const loom_amdgpu_encoding_field_value_t field_values[] = {
+        {
+            /*.field_id=*/LOOM_AMDGPU_ENCODING_FIELD_VDST,
+            /*.reserved=*/{},
+            /*.value=*/1,
+        },
+        {
+            /*.field_id=*/LOOM_AMDGPU_ENCODING_FIELD_SRC0,
+            /*.reserved=*/{},
+            /*.value=*/258,
+        },
+        {
+            /*.field_id=*/LOOM_AMDGPU_ENCODING_FIELD_OPSEL,
+            /*.reserved=*/{},
+            /*.value=*/test_case.op_sel,
+        },
+    };
+    loom_amdgpu_encoding_packet_t packet = {};
+    IREE_ASSERT_OK(loom_amdgpu_encoding_pack(
+        table, LOOM_AMDGPU_ENCODING_FORMAT_VOP3, test_case.opcode, field_values,
+        IREE_ARRAYSIZE(field_values), &packet));
+    EXPECT_EQ(packet.word_count, 2u);
+    EXPECT_EQ(packet.bit_count, 64u);
+    EXPECT_EQ(packet.words[0], test_case.expected_word_0);
+    EXPECT_EQ(packet.words[1], UINT32_C(0x02010102));
   }
 }
 

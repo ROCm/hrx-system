@@ -7,6 +7,7 @@
 #include "loom/target/arch/amdgpu/math_policy.h"
 
 #include "loom/target/arch/amdgpu/lower/kinds.h"
+#include "loom/target/arch/amdgpu/target_info_defs.h"
 
 typedef uint32_t loom_amdgpu_math_policy_flags_t;
 enum loom_amdgpu_math_policy_flag_bits_e {
@@ -246,54 +247,33 @@ static const loom_target_math_policy_t kAmdgpuMathPolicy = {
     .query = loom_amdgpu_math_policy_query,
 };
 
-static const loom_amdgpu_math_policy_payload_t kAmdgpuGfx125xMathPayload = {
-    .flags = LOOM_AMDGPU_MATH_POLICY_FLAG_NATIVE_PACKED_BF16_BINARY,
+static const loom_amdgpu_math_policy_payload_t
+    kAmdgpuNativePackedBf16MathPayload = {
+        .flags = LOOM_AMDGPU_MATH_POLICY_FLAG_NATIVE_PACKED_BF16_BINARY,
 };
 
-static const loom_target_math_policy_t kAmdgpuGfx125xMathPolicy = {
-    .name = IREE_SVL("amdgpu-gfx125x-math"),
+static const loom_target_math_policy_t kAmdgpuNativePackedBf16MathPolicy = {
+    .name = IREE_SVL("amdgpu-native-packed-bf16-math"),
     .query = loom_amdgpu_math_policy_query,
-    .user_data = &kAmdgpuGfx125xMathPayload,
+    .user_data = &kAmdgpuNativePackedBf16MathPayload,
 };
-
-#define LOOM_AMDGPU_MATH_POLICY_Cdna3 (&kAmdgpuMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Cdna4 (&kAmdgpuMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Gfx94Generic (&kAmdgpuMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Gfx11Generic (&kAmdgpuMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Gfx12Generic (&kAmdgpuMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Gfx125Generic (&kAmdgpuGfx125xMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Rdna3 (&kAmdgpuMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Rdna35 (&kAmdgpuMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Rdna4 (&kAmdgpuMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx1250A0 (&kAmdgpuGfx125xMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx1251 (&kAmdgpuGfx125xMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx125x (&kAmdgpuGfx125xMathPolicy)
 
 static const loom_target_math_policy_registry_entry_t
     kAmdgpuMathPolicyEntries[] = {
-#define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(symbol_suffix, bundle_name,         \
-                                          snapshot_name, key, wavefront_size, \
-                                          workgroup_storage_byte_limit)       \
-  {                                                                           \
-      .contract_set_key = IREE_SVL(key),                                      \
-      .policy = LOOM_AMDGPU_MATH_POLICY_##symbol_suffix,                      \
+#define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(                                      \
+    symbol_suffix, bundle_name, snapshot_name, key, descriptor_set_flags,       \
+    wavefront_size, workgroup_storage_byte_limit)                               \
+  {                                                                             \
+      .contract_set_key = IREE_SVL(key),                                        \
+      .policy =                                                                 \
+          ((descriptor_set_flags &                                              \
+            LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC) \
+               ? &kAmdgpuNativePackedBf16MathPolicy                             \
+               : &kAmdgpuMathPolicy),                                           \
   },
 #include "loom/target/arch/amdgpu/records/target_records_tables.inl"
 #undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET
 };
-
-#undef LOOM_AMDGPU_MATH_POLICY_Cdna3
-#undef LOOM_AMDGPU_MATH_POLICY_Cdna4
-#undef LOOM_AMDGPU_MATH_POLICY_Gfx94Generic
-#undef LOOM_AMDGPU_MATH_POLICY_Gfx11Generic
-#undef LOOM_AMDGPU_MATH_POLICY_Gfx12Generic
-#undef LOOM_AMDGPU_MATH_POLICY_Gfx125Generic
-#undef LOOM_AMDGPU_MATH_POLICY_Rdna3
-#undef LOOM_AMDGPU_MATH_POLICY_Rdna35
-#undef LOOM_AMDGPU_MATH_POLICY_Rdna4
-#undef LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx1250A0
-#undef LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx1251
-#undef LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx125x
 
 void loom_amdgpu_math_policy_registry_initialize(
     loom_target_math_policy_registry_t* out_registry) {

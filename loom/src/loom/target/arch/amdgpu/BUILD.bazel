@@ -231,6 +231,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/records:target_records_tables.inl",
     ],
     deps = [
+        ":target_info_defs",
         "//loom/src/loom/target:math_policy",
         "//loom/src/loom/target/arch/amdgpu/lower:kinds",
         "//runtime/src/iree/base",

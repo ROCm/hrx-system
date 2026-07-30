@@ -27,6 +27,7 @@ from loom.target.arch.amdgpu.encoding import (
     amdgpu_supplemental_encoding_format_names,
 )
 from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC,
     AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE,
     AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE,
     AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS,
@@ -328,6 +329,50 @@ def _operand_has_vgpr_alt(operand: Operand) -> bool:
 _MATRIX_COEXECUTION_SOURCE_INFOS_BY_SOURCE = {
     info.source: info for info in AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS
 }
+
+
+_NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS = frozenset(
+    (
+        "amdgpu.v_pk_add_bf16",
+        "amdgpu.v_pk_mul_bf16",
+        "amdgpu.v_pk_fma_bf16",
+    )
+)
+
+
+def _validate_descriptor_set_info_capabilities(
+    generator_target: str, descriptor_set: DescriptorSet
+) -> None:
+    info = amdgpu_descriptor_set_info_by_generator_target(generator_target)
+    descriptor_keys = frozenset(
+        descriptor.key for descriptor in descriptor_set.descriptors
+    )
+    present_keys = descriptor_keys & _NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS
+    declares_native_packed_bf16_arithmetic = bool(
+        info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC
+    )
+    if present_keys and present_keys != _NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS:
+        missing_keys = sorted(
+            _NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS - present_keys
+        )
+        raise ValueError(
+            f"AMDGPU descriptor target '{generator_target}' has an incomplete "
+            "native packed BF16 arithmetic family; missing: "
+            f"{', '.join(missing_keys)}"
+        )
+    has_native_packed_bf16_arithmetic = (
+        present_keys == _NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS
+    )
+    if declares_native_packed_bf16_arithmetic != has_native_packed_bf16_arithmetic:
+        declared_state = (
+            "declares" if declares_native_packed_bf16_arithmetic else "omits"
+        )
+        actual_state = "provides" if has_native_packed_bf16_arithmetic else "omits"
+        raise ValueError(
+            f"AMDGPU descriptor target '{generator_target}' {declared_state} "
+            "native packed BF16 arithmetic capability but its descriptor set "
+            f"{actual_state} the instruction family"
+        )
 
 
 def _validate_matrix_coexecution_profile_coverage(
@@ -1340,21 +1385,21 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
     ),
     "rdna4_gfx125x": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,
-        overlay_rows=_gfx1250_core_overlays,
-        overlay_descriptors=_gfx1250_core_overlay_descriptors,
+        overlay_rows=_gfx125x_core_overlays,
+        overlay_descriptors=_gfx125x_core_overlay_descriptors,
         extra_descriptors=_GFX125X_EXTRA_DESCRIPTORS,
         flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     ),
     "rdna4_gfx1250_a0": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE,
-        overlay_rows=_gfx1250_core_overlays,
+        overlay_rows=_gfx125x_core_overlays,
         overlay_descriptors=_gfx1250_a0_core_overlay_descriptors,
         extra_descriptors=_GFX125X_EXTRA_DESCRIPTORS,
         flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     ),
     "rdna4_gfx1251": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA4_GFX1251_CORE_DESCRIPTOR_SET_BASE,
-        overlay_rows=_gfx1250_core_overlays,
+        overlay_rows=_gfx125x_core_overlays,
         overlay_descriptors=_gfx1251_core_overlay_descriptors,
         extra_descriptors=_GFX125X_EXTRA_DESCRIPTORS,
         flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
@@ -1388,6 +1433,7 @@ def _build_amdgpu_core_descriptor_set_from_spec(
     _validate_dpp_control_fields(descriptor_set)
     _validate_matrix_high_half_select_fields(descriptor_set)
     _validate_native_asm_values(descriptor_set)
+    _validate_descriptor_set_info_capabilities(target, descriptor_set)
     _validate_matrix_coexecution_profile_coverage(target, descriptor_set)
     return descriptor_set
 

@@ -35,8 +35,9 @@ from loom.target.arch.amdgpu.encoding import (  # noqa: E402
     AMDGPU_ENCODING_FORMAT_IDS,
     AMDGPU_ENCODING_FORMAT_XML_NAMES_BY_ID,
     AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE,
-    AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_COUNT,
-    AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_OFFSET,
+    AMDGPU_GFX125X_VOP3_SCALE_SEL_BIT_COUNT,
+    AMDGPU_GFX125X_VOP3_SCALE_SEL_BIT_OFFSET,
+    AMDGPU_VOP3_ENCODING_FORMAT_NAMES,
     amdgpu_encoding_field_name,
     amdgpu_supplemental_encoding_format_names,
 )
@@ -52,6 +53,7 @@ from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
 )
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
     AmdgpuDescriptorSetInfo,
+    AmdgpuDescriptorSetIsaInfo,
     amdgpu_descriptor_set_info_by_generator_target,
     amdgpu_descriptor_set_ordinal,
     amdgpu_descriptor_set_storage_info_by_generator_target,
@@ -99,13 +101,13 @@ def _rdna4_vop3p_supplemental_fields() -> tuple[AmdgpuIsaEncodingField, ...]:
     )
 
 
-def _gfx1250_vop3_supplemental_fields() -> tuple[AmdgpuIsaEncodingField, ...]:
+def _gfx125x_vop3_supplemental_fields() -> tuple[AmdgpuIsaEncodingField, ...]:
     return (
         _field(
             "SCALE_SEL",
             _bit_range(
-                AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_OFFSET,
-                AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_COUNT,
+                AMDGPU_GFX125X_VOP3_SCALE_SEL_BIT_OFFSET,
+                AMDGPU_GFX125X_VOP3_SCALE_SEL_BIT_COUNT,
             ),
         ),
     )
@@ -167,7 +169,7 @@ def _supplemental_fields_by_encoding(
     if target in ("rdna4", "rdna4_gfx125x"):
         fields_by_encoding["ENC_VOP3P"] = _rdna4_vop3p_supplemental_fields()
     if target == "rdna4_gfx125x":
-        fields_by_encoding["ENC_VOP3"] = _gfx1250_vop3_supplemental_fields()
+        fields_by_encoding["ENC_VOP3"] = _gfx125x_vop3_supplemental_fields()
     return fields_by_encoding
 
 
@@ -369,6 +371,56 @@ def _compile_field_ranges(
     return tuple(compiled_ranges), source_bit_offset
 
 
+def _encoding_with_field_default(
+    encoding: AmdgpuIsaEncoding,
+    field: AmdgpuIsaEncodingField,
+    value: int,
+) -> AmdgpuIsaEncoding:
+    field_ranges, value_bit_count = _compile_field_ranges(field.ranges)
+    if value < 0 or (value_bit_count < 64 and value >> value_bit_count):
+        raise ValueError(f"AMDGPU encoding '{encoding.name}' field '{field.name}' default value {value} does not fit {value_bit_count} bits")
+    identifier_values = []
+    for identifier_value in encoding.identifier_values:
+        for bit_range, source_bit_offset in field_ranges:
+            if bit_range.padding_bit_count:
+                padding_mask = (1 << bit_range.padding_bit_count) - 1
+                padding_value = (value >> source_bit_offset) & padding_mask
+                if padding_value != bit_range.padding_value:
+                    raise ValueError(f"AMDGPU encoding '{encoding.name}' field '{field.name}' default value {value} violates its required source padding")
+            value_bit_offset = source_bit_offset + bit_range.padding_bit_count
+            range_mask = (1 << bit_range.bit_count) - 1
+            range_value = (value >> value_bit_offset) & range_mask
+            target_mask = range_mask << bit_range.bit_offset
+            identifier_value = (identifier_value & ~target_mask) | range_value << bit_range.bit_offset
+        identifier_values.append(identifier_value)
+    return replace(encoding, identifier_values=tuple(identifier_values))
+
+
+def _with_vop3_unused_source_defaults(
+    encodings: tuple[AmdgpuIsaEncoding, ...],
+    unused_source_value: int | None,
+) -> tuple[AmdgpuIsaEncoding, ...]:
+    if unused_source_value is None:
+        return encodings
+    output = []
+    for encoding in encodings:
+        if encoding.name not in AMDGPU_VOP3_ENCODING_FORMAT_NAMES:
+            output.append(encoding)
+            continue
+        fields_by_name = _encoding_fields_by_name(encoding)
+        if not all(name in fields_by_name for name in ("SRC0", "SRC1", "SRC2")):
+            output.append(encoding)
+            continue
+        for field_name in ("SRC0", "SRC1", "SRC2"):
+            encoding = _encoding_with_field_default(
+                encoding,
+                fields_by_name[field_name],
+                unused_source_value,
+            )
+        output.append(encoding)
+    return tuple(output)
+
+
 def _encoding_fields_by_name(
     encoding: AmdgpuIsaEncoding,
 ) -> dict[str, AmdgpuIsaEncodingField]:
@@ -556,8 +608,10 @@ def _compile_encoding_contract(
     target: str,
     spec: AmdgpuIsaFactSource,
     descriptor_set: DescriptorSet,
+    vop3_unused_source_value: int | None,
 ) -> _EncodingContract:
     encodings = _with_supplemental_encodings(target, spec.encodings)
+    encodings = _with_vop3_unused_source_defaults(encodings, vop3_unused_source_value)
     compiled_formats, compiled_fields, compiled_ranges = _compile_formats(
         encodings,
         _partitioned_fields_by_encoding(
@@ -677,6 +731,7 @@ def _validate_view_encoding_contract(
                 storage_target,
                 member_spec,
                 view_descriptor_set,
+                _vop3_unused_source_value(member_spec, isa_info),
             )
         )
         if member_contract != view_storage_contract:
@@ -744,6 +799,16 @@ def _derive_predefined_linear_range(
     return base_value, count
 
 
+def _vop3_unused_source_value(
+    spec: AmdgpuIsaFactSource,
+    isa_info: AmdgpuDescriptorSetIsaInfo,
+) -> int | None:
+    value_name = isa_info.vop3_unused_source_value
+    if value_name is None:
+        return None
+    return spec.operand_predefined_value("OPR_SRC", value_name)
+
+
 def _f32_bit_pattern(value: float) -> int:
     return int(struct.unpack("<I", struct.pack("<f", value))[0])
 
@@ -801,8 +866,10 @@ def _emit_source(
     inline_f32_sources: tuple[_InlineF32Source, ...],
     vector_source_vgpr0: int,
     vector_source_vgpr_count: int,
+    vop3_unused_source_value: int | None,
 ) -> str:
     encodings = _with_supplemental_encodings(target, encodings)
+    encodings = _with_vop3_unused_source_defaults(encodings, vop3_unused_source_value)
     compiled_formats, compiled_fields, compiled_ranges = _compile_formats(
         encodings,
         _partitioned_fields_by_encoding(encodings, instructions, operand_types),
@@ -1025,10 +1092,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.target,
         isa_specs,
     )
+    vop3_unused_source_value = _vop3_unused_source_value(spec, storage_isa_info)
     storage_contract = _compile_encoding_contract(
         args.target,
         spec,
         storage_descriptor_set,
+        vop3_unused_source_value,
     )
     for view_info in view_infos:
         view_descriptor_set = build_amdgpu_core_descriptor_set_from_specs(
@@ -1112,6 +1181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             inline_f32_sources=inline_f32_sources,
             vector_source_vgpr0=vector_source_vgpr0,
             vector_source_vgpr_count=vector_source_vgpr_count,
+            vop3_unused_source_value=vop3_unused_source_value,
         ),
         encoding="utf-8",
     )

@@ -192,6 +192,7 @@ loom_cc_library(
   SRCS
     "math_policy.c"
   DEPS
+    ::target_info_defs
     iree::base
     loom::target::arch::amdgpu::lower::kinds
     loom::target::math_policy

@@ -182,6 +182,7 @@ _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS: dict[
     **_contract_overlay_builders_from_overlays(_integer_bit_count_overlays()),
     **_contract_overlay_builders_from_overlays(_integer_bitwise_shift_overlays()),
     **_contract_overlay_builders_from_overlays(_v_cvt_f32_packed8_overlays("ocp")),
+    **_contract_overlay_builders_from_overlays(_v_cvt_f16_packed8_byte_overlays("ocp")),
     **_contract_overlay_builders_from_overlays(_s_cmp_i32_overlays()),
     **_contract_overlay_builders_from_overlays(_s_cmp_u64_overlays()),
     **_contract_overlay_builders_from_overlays(_v_cmp_overlays()),

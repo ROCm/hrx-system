@@ -111,10 +111,10 @@ from loom.target.arch.amdgpu.descriptors import (
     _gfx12_core_overlays,
     _gfx12_generic_core_overlays,
     _gfx117x_core_overlays,
+    _gfx125x_core_overlays,
     _gfx125x_reg_classes,
     _gfx940_core_overlays,
     _gfx950_core_overlays,
-    _gfx1250_core_overlays,
     _predefined,
     _record_amdgpu_atomic_candidate,
     _validate_address_immediate_units,
@@ -264,14 +264,14 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
         if gfx117x_overlays.get(overlay.descriptor_key) == overlay
     )
     assert _gfx12_generic_core_overlays() == _gfx12_core_overlays()
-    gfx1250_overlays = _gfx1250_core_overlays()
+    gfx125x_overlays = _gfx125x_core_overlays()
     assert all(
         not (overlay.semantic_tag or "").startswith("matrix.wmma.")
-        for overlay in gfx1250_overlays
+        for overlay in gfx125x_overlays
     )
     assert _gfx12_5_generic_core_overlays() == tuple(
         overlay
-        for overlay in gfx1250_overlays
+        for overlay in gfx125x_overlays
         if not (overlay.semantic_tag or "").startswith("matrix.swmmac.")
     )
 
@@ -944,7 +944,7 @@ def test_scalar_compare_descriptors_use_scc_branch_schedule_class() -> None:
         _gfx11_core_overlays(),
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {
             descriptor.descriptor_key: descriptor for descriptor in descriptor_set
@@ -960,7 +960,7 @@ def test_packed_dot_descriptors_use_packed_dot_schedule_class() -> None:
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     )
     dot_descriptor_count = 0
     for overlays in overlay_sets:
@@ -1020,7 +1020,7 @@ def test_div_fmas_low_asm_preserves_vcc_scale_mask_operand() -> None:
         _gfx11_core_overlays(),
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
         descriptor = descriptors["amdgpu.v_div_fmas_f32"]
@@ -1048,7 +1048,7 @@ def test_div_scale_low_asm_writes_architectural_vcc_scale_mask() -> None:
         _gfx11_core_overlays(),
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
         descriptor = descriptors["amdgpu.v_div_scale_f32"]
@@ -1083,7 +1083,7 @@ def test_scalar_scc_compare_results_are_rematerializable() -> None:
         _gfx11_core_overlays(),
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
         compare_keys = tuple(
@@ -1121,7 +1121,7 @@ def test_v_mov_b32_literal_results_are_rematerializable() -> None:
         _gfx11_core_overlays(),
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
         descriptor = descriptors["amdgpu.v_mov_b32"]
@@ -1144,7 +1144,7 @@ def test_pure_vop2_f32_results_are_rematerializable() -> None:
         _gfx11_core_overlays(),
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
         matching_keys = []
@@ -1239,7 +1239,7 @@ def test_pure_integer_valu_results_are_rematerializable() -> None:
         _gfx11_core_overlays(),
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
         for descriptor_key in descriptor_keys:
@@ -1295,7 +1295,7 @@ def test_full_width_conversion_results_are_rematerializable() -> None:
         _gfx11_core_overlays(),
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
         for descriptor_key in descriptor_keys:
@@ -1377,7 +1377,7 @@ def test_scc_free_scalar_integer_results_are_rematerializable() -> None:
         _gfx11_core_overlays(),
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
         for descriptor_key in descriptor_keys:
@@ -1399,7 +1399,7 @@ def test_rdna_f16_to_f32_convert_uses_wide_encoding() -> None:
     for overlays in (
         _gfx11_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
         descriptor = descriptors["amdgpu.v_cvt_f32_f16"]
@@ -1420,7 +1420,7 @@ def test_f32_to_f16_convert_results_use_d16_low_window() -> None:
         _gfx11_core_overlays(),
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
         descriptor = descriptors["amdgpu.v_cvt_f16_f32"]
@@ -1527,7 +1527,7 @@ def test_rdna_matrix_descriptors_pin_canonical_high_half_selectors() -> None:
     for overlays, field_name in (
         (_gfx11_core_overlays(), "OP_SEL_HI"),
         (_gfx12_core_overlays(), "OPSEL_HI"),
-        (_gfx1250_core_overlays(), "OPSEL_HI"),
+        (_gfx125x_core_overlays(), "OPSEL_HI"),
     ):
         matrix_descriptors = tuple(
             descriptor
@@ -1651,8 +1651,8 @@ def test_s_delay_alu_descriptor_is_exposed_on_rdna_families() -> None:
     assert "amdgpu.s_delay_alu" in amdgpu_descriptor_ref_keys()
 
 
-def test_gfx1250_cluster_flat_rank_descriptor_matches_compiler_abi() -> None:
-    overlays = {overlay.descriptor_key: overlay for overlay in _gfx1250_core_overlays()}
+def test_gfx125x_cluster_flat_rank_descriptor_matches_compiler_abi() -> None:
+    overlays = {overlay.descriptor_key: overlay for overlay in _gfx125x_core_overlays()}
     descriptor = overlays["amdgpu.s_getreg_b32.cluster_workgroup_flat_id"]
 
     assert descriptor.instruction_name == "S_GETREG_B32"
@@ -2242,7 +2242,7 @@ def test_feedback_control_descriptors_cover_execution_families() -> None:
     for overlays in (
         _gfx11_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
         for descriptor_key in (
@@ -2272,7 +2272,7 @@ def test_symbol_relative_salu_descriptors_have_lossless_low_asm_forms() -> None:
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
 
@@ -2334,7 +2334,7 @@ def test_feedback_atomic64_descriptors_cover_execution_families() -> None:
         (_gfx950_core_overlays(), "x2"),
         (_gfx11_core_overlays(), "u64"),
         (_gfx12_core_overlays(), "u64"),
-        (_gfx1250_core_overlays(), "u64"),
+        (_gfx125x_core_overlays(), "u64"),
     ):
         descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
 
@@ -2456,7 +2456,7 @@ def test_flat_load_descriptors_cover_execution_families() -> None:
             ("offset", "nv", "scope", "th"),
         ),
         (
-            _gfx1250_core_overlays(),
+            _gfx125x_core_overlays(),
             "flat_load_u8",
             False,
             False,
@@ -2537,7 +2537,7 @@ def test_flat_load_descriptors_cover_execution_families() -> None:
 
 
 def test_gfx12_global_atomic_return_uses_temporal_hint_return_bit() -> None:
-    for overlays in (_gfx12_core_overlays(), _gfx1250_core_overlays()):
+    for overlays in (_gfx12_core_overlays(), _gfx125x_core_overlays()):
         for descriptor_prefix, descriptor_suffix in (
             ("amdgpu.global_atomic", "_saddr"),
             ("amdgpu.flat_atomic", ""),
@@ -2562,7 +2562,7 @@ def test_gfx12_global_atomic_return_uses_temporal_hint_return_bit() -> None:
 
 
 def test_gfx12_global_cache_controls_expose_scope_immediate() -> None:
-    for overlays in (_gfx12_core_overlays(), _gfx1250_core_overlays()):
+    for overlays in (_gfx12_core_overlays(), _gfx125x_core_overlays()):
         for descriptor_key in (
             "amdgpu.global_inv",
             "amdgpu.global_wb",
@@ -2713,7 +2713,7 @@ def test_sop2_bfe_literal_forms_fix_control_to_literal_source() -> None:
         _gfx11_core_overlays(),
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {
             descriptor.descriptor_key: descriptor for descriptor in descriptor_set
@@ -2751,7 +2751,7 @@ def test_fmamk_f32_descriptor_pins_literal_multiply_slot() -> None:
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     )
     for descriptor_set in descriptor_sets:
         descriptors = {
@@ -2808,7 +2808,7 @@ def test_scalar_f16_fma_descriptor_families_are_arch_specific() -> None:
         _gfx11_core_overlays(),
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {
             descriptor.descriptor_key: descriptor for descriptor in descriptor_set
@@ -2898,7 +2898,7 @@ def test_scalar_f64_fma_descriptors_pin_register_pair_widths() -> None:
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {
             descriptor.descriptor_key: descriptor for descriptor in descriptor_set
@@ -2949,7 +2949,7 @@ def test_scalar_domain_fma_descriptors_are_arch_specific() -> None:
     for descriptor_set in (
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {
             descriptor.descriptor_key: descriptor for descriptor in descriptor_set
@@ -2961,7 +2961,7 @@ def test_scalar_domain_fma_descriptors_pin_sgpr_contracts() -> None:
     for descriptor_set in (
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         descriptors = {
             descriptor.descriptor_key: descriptor for descriptor in descriptor_set
@@ -3060,7 +3060,7 @@ def test_packed_fma_mad_descriptors_pin_lane_container_widths() -> None:
         (_gfx950_core_overlays(), "OP_SEL_HI"),
         (_gfx11_core_overlays(), "OP_SEL_HI"),
         (_gfx12_core_overlays(), "OPSEL_HI"),
-        (_gfx1250_core_overlays(), "OPSEL_HI"),
+        (_gfx125x_core_overlays(), "OPSEL_HI"),
     )
     expected_32_bit_keys = (
         "amdgpu.v_pk_fma_f16",
@@ -3100,7 +3100,7 @@ def test_packed_fma_mad_descriptors_pin_lane_container_widths() -> None:
     rdna_descriptor_sets = (
         _gfx11_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     )
     for descriptor_set in rdna_descriptor_sets:
         descriptors = {
@@ -3109,7 +3109,7 @@ def test_packed_fma_mad_descriptors_pin_lane_container_widths() -> None:
         assert "amdgpu.v_pk_fma_f32" not in descriptors
 
 
-def test_gfx1250_packed_bf16_descriptors_are_arch_scoped() -> None:
+def test_gfx125x_packed_bf16_descriptors_are_arch_scoped() -> None:
     unsupported_descriptor_sets = (
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
@@ -3125,7 +3125,7 @@ def test_gfx1250_packed_bf16_descriptors_are_arch_scoped() -> None:
         assert "amdgpu.v_pk_fma_bf16" not in descriptors
 
     descriptors = {
-        descriptor.descriptor_key: descriptor for descriptor in _gfx1250_core_overlays()
+        descriptor.descriptor_key: descriptor for descriptor in _gfx125x_core_overlays()
     }
     for descriptor_key in ("amdgpu.v_pk_add_bf16", "amdgpu.v_pk_mul_bf16"):
         binary_descriptor = descriptors[descriptor_key]
@@ -3157,9 +3157,9 @@ def test_gfx1250_packed_bf16_descriptors_are_arch_scoped() -> None:
     assert fma_descriptor.fixed_encoding_fields == (("OPSEL_HI", 0x7),)
 
 
-def test_gfx1250_packed_fp8_to_f16_sources_use_low_half_window() -> None:
+def test_gfx125x_packed_fp8_to_f16_sources_use_low_half_window() -> None:
     descriptors = {
-        descriptor.descriptor_key: descriptor for descriptor in _gfx1250_core_overlays()
+        descriptor.descriptor_key: descriptor for descriptor in _gfx125x_core_overlays()
     }
     for descriptor_key in (
         "amdgpu.v_cvt_pk_f16_fp8.ocp",
@@ -3199,7 +3199,7 @@ def test_packed_binary_descriptors_pin_lane_container_widths() -> None:
         (_gfx950_core_overlays(), "OP_SEL_HI"),
         (_gfx11_core_overlays(), "OP_SEL_HI"),
         (_gfx12_core_overlays(), "OPSEL_HI"),
-        (_gfx1250_core_overlays(), "OPSEL_HI"),
+        (_gfx125x_core_overlays(), "OPSEL_HI"),
     ):
         descriptors = {
             descriptor.descriptor_key: descriptor for descriptor in descriptor_set
@@ -3274,7 +3274,7 @@ def test_packed_fma_mad_rdna_literal_forms_cover_source_positions() -> None:
     for descriptor_set, op_sel_hi_field in (
         (_gfx11_core_overlays(), "OP_SEL_HI"),
         (_gfx12_core_overlays(), "OPSEL_HI"),
-        (_gfx1250_core_overlays(), "OPSEL_HI"),
+        (_gfx125x_core_overlays(), "OPSEL_HI"),
     ):
         descriptors = {
             descriptor.descriptor_key: descriptor for descriptor in descriptor_set
@@ -3339,7 +3339,7 @@ def test_packed_fmac_f16_descriptor_pins_destructive_accumulator() -> None:
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     )
     for descriptor_set in descriptor_sets:
         descriptors = {
@@ -3372,7 +3372,7 @@ def test_packed_dot2_descriptors_pin_destructive_accumulator() -> None:
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     )
     for descriptor_set in descriptor_sets:
         descriptors = {
@@ -3520,8 +3520,8 @@ def test_fma_mix_f32_half_lane_descriptors_pin_modifier_fields() -> None:
     rdna4_descriptors = {
         descriptor.descriptor_key: descriptor for descriptor in _gfx12_core_overlays()
     }
-    gfx1250_descriptors = {
-        descriptor.descriptor_key: descriptor for descriptor in _gfx1250_core_overlays()
+    gfx125x_descriptors = {
+        descriptor.descriptor_key: descriptor for descriptor in _gfx125x_core_overlays()
     }
     cdna3_descriptors = {
         descriptor.descriptor_key: descriptor for descriptor in _gfx940_core_overlays()
@@ -3533,7 +3533,7 @@ def test_fma_mix_f32_half_lane_descriptors_pin_modifier_fields() -> None:
     for descriptors, op_sel_field, op_sel_hi_field in (
         (rdna3_descriptors, "OP_SEL", "OP_SEL_HI"),
         (rdna4_descriptors, "OPSEL", "OPSEL_HI"),
-        (gfx1250_descriptors, "OPSEL", "OPSEL_HI"),
+        (gfx125x_descriptors, "OPSEL", "OPSEL_HI"),
     ):
         _assert_mix_descriptor_family(
             descriptors,
@@ -3579,7 +3579,7 @@ def test_fma_mix_f32_source2_literal_forms_cover_full_f32_addends() -> None:
     descriptor_sets = (
         (_gfx11_core_overlays(), "OP_SEL", "OP_SEL_HI"),
         (_gfx12_core_overlays(), "OPSEL", "OPSEL_HI"),
-        (_gfx1250_core_overlays(), "OPSEL", "OPSEL_HI"),
+        (_gfx125x_core_overlays(), "OPSEL", "OPSEL_HI"),
     )
     for descriptor_set, op_sel_field, op_sel_hi_field in descriptor_sets:
         descriptors = {
@@ -3628,7 +3628,7 @@ def test_fma_mix_half_result_source2_literal_forms_cover_zero_addends() -> None:
     descriptor_sets = (
         (_gfx11_core_overlays(), "OP_SEL", "OP_SEL_HI"),
         (_gfx12_core_overlays(), "OPSEL", "OPSEL_HI"),
-        (_gfx1250_core_overlays(), "OPSEL", "OPSEL_HI"),
+        (_gfx125x_core_overlays(), "OPSEL", "OPSEL_HI"),
     )
     for descriptor_set, op_sel_field, op_sel_hi_field in descriptor_sets:
         descriptors = {
@@ -3718,8 +3718,8 @@ def test_mad_mix_descriptors_cover_cdna_half_lane_forms() -> None:
     rdna4_descriptors = {
         descriptor.descriptor_key: descriptor for descriptor in _gfx12_core_overlays()
     }
-    gfx1250_descriptors = {
-        descriptor.descriptor_key: descriptor for descriptor in _gfx1250_core_overlays()
+    gfx125x_descriptors = {
+        descriptor.descriptor_key: descriptor for descriptor in _gfx125x_core_overlays()
     }
 
     for descriptors in (cdna3_descriptors, cdna4_descriptors):
@@ -3750,7 +3750,7 @@ def test_mad_mix_descriptors_cover_cdna_half_lane_forms() -> None:
             tied_half_result=True,
         )
 
-    for descriptors in (rdna3_descriptors, rdna4_descriptors, gfx1250_descriptors):
+    for descriptors in (rdna3_descriptors, rdna4_descriptors, gfx125x_descriptors):
         for descriptor_key_prefix in (
             "amdgpu.v_mad_mix_f32",
             "amdgpu.v_mad_mixlo_f16",
@@ -4307,7 +4307,7 @@ def test_dwordx3_memory_descriptors_cover_cdna_and_rdna_families() -> None:
         (
             {
                 descriptor.descriptor_key: descriptor
-                for descriptor in _gfx1250_core_overlays()
+                for descriptor in _gfx125x_core_overlays()
             },
             "amdgpu.buffer_load_b96",
             "amdgpu.buffer_store_b96",
@@ -4671,7 +4671,7 @@ def test_cdna_buffer_load_lds_descriptors_cover_fixed_lds_rows() -> None:
         },
         {
             descriptor.descriptor_key: descriptor
-            for descriptor in _gfx1250_core_overlays()
+            for descriptor in _gfx125x_core_overlays()
         },
     ):
         assert "amdgpu.buffer_load_lds_dword" not in descriptors
@@ -4697,7 +4697,7 @@ def test_smem_dword_width_descriptors_cover_active_xml_families() -> None:
         },
         {
             descriptor.descriptor_key: descriptor
-            for descriptor in _gfx1250_core_overlays()
+            for descriptor in _gfx125x_core_overlays()
         },
     ):
         for width_bits, units, descriptor_key, mnemonic in (
@@ -4753,7 +4753,7 @@ def test_smem_dword_width_descriptors_cover_active_xml_families() -> None:
         },
         {
             descriptor.descriptor_key: descriptor
-            for descriptor in _gfx1250_core_overlays()
+            for descriptor in _gfx125x_core_overlays()
         },
     ):
         for width_bits, units, descriptor_key, mnemonic in (
@@ -4779,7 +4779,7 @@ def test_smem_dword_width_descriptors_cover_active_xml_families() -> None:
         },
         {
             descriptor.descriptor_key: descriptor
-            for descriptor in _gfx1250_core_overlays()
+            for descriptor in _gfx125x_core_overlays()
         },
     ):
         for descriptor_key, mnemonic in (
@@ -4819,7 +4819,7 @@ def test_rdna4_smem_narrow_load_descriptors_have_extension_semantics() -> None:
         },
         {
             descriptor.descriptor_key: descriptor
-            for descriptor in _gfx1250_core_overlays()
+            for descriptor in _gfx125x_core_overlays()
         },
     ):
         for suffix, width_bits, semantic_tag, implicit_data_format in rows:
@@ -4939,7 +4939,7 @@ def test_vmem_narrow_load_descriptors_cover_active_xml_families() -> None:
             "IOFFSET",
         ),
         (
-            _gfx1250_core_overlays(),
+            _gfx125x_core_overlays(),
             rdna_mnemonic_suffixes,
             rdna_mnemonic_suffixes,
             False,
@@ -5175,7 +5175,7 @@ def test_cdna_smem_dwordx4_store_and_scratch_descriptors_cover_xml() -> None:
     for rdna_overlays in (
         _gfx11_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         rdna_descriptors = {
             descriptor.descriptor_key: descriptor for descriptor in rdna_overlays

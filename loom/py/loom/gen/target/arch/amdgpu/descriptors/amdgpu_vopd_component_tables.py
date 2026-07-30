@@ -99,7 +99,7 @@ class _VopdComponentDefinition:
     source_register_mask: str
     same_op_reason: str = "LOOM_AMDGPU_VOPD_PAIR_REASON_UNKNOWN"
     same_op_reason_name: str = ""
-    rdna4_assembly_mnemonic: str = ""
+    numeric_minmax_mnemonic: str = ""
     operand_layout: tuple[int, int, int] = (0, 0, 0)
     xml_instruction_name: str | None = None
     xml_instruction_names_by_isa_key: tuple[tuple[str, str], ...] = ()
@@ -315,7 +315,7 @@ def _component(
     descriptor_key: str | None = None,
     descriptor_set_group: str = _DESCRIPTOR_SET_GROUP_RDNA_VOPD,
     assembly_mnemonic: str | None = None,
-    rdna4_assembly_mnemonic: str = "",
+    numeric_minmax_mnemonic: str = "",
     form: str = _FORM_BINARY_VGPR,
     lane_mask: str = _LANE_XY,
     pairing_mask: str = _PAIR_ANY,
@@ -344,7 +344,7 @@ def _component(
         op_value=op_value,
         op_name=name,
         assembly_mnemonic=assembly_mnemonic or f"v_dual_{name}",
-        rdna4_assembly_mnemonic=rdna4_assembly_mnemonic,
+        numeric_minmax_mnemonic=numeric_minmax_mnemonic,
         form=form,
         lane_mask=lane_mask,
         pairing_mask=pairing_mask,
@@ -370,7 +370,7 @@ def _component_definitions() -> tuple[_VopdComponentDefinition, ...]:
         _component(
             "max_f32",
             10,
-            rdna4_assembly_mnemonic="v_dual_max_num_f32",
+            numeric_minmax_mnemonic="v_dual_max_num_f32",
             xml_instruction_names_by_isa_key=(
                 ("rdna3", "V_DUAL_MAX_F32"),
                 ("rdna4", "V_DUAL_MAX_NUM_F32"),
@@ -379,7 +379,7 @@ def _component_definitions() -> tuple[_VopdComponentDefinition, ...]:
         _component(
             "min_f32",
             11,
-            rdna4_assembly_mnemonic="v_dual_min_num_f32",
+            numeric_minmax_mnemonic="v_dual_min_num_f32",
             xml_instruction_names_by_isa_key=(
                 ("rdna3", "V_DUAL_MIN_F32"),
                 ("rdna4", "V_DUAL_MIN_NUM_F32"),
@@ -1123,7 +1123,7 @@ def _component_rule_initializer(index: int, rule: _VopdComponentRule) -> str:
             f"    {_c_string_arg(component.op_name)},",
             f"    {_c_string_arg(component.same_op_reason_name)},",
             f"    {_c_string_arg(component.assembly_mnemonic)},",
-            f"    {_c_string_arg(component.rdna4_assembly_mnemonic)},",
+            f"    {_c_string_arg(component.numeric_minmax_mnemonic)},",
             f"    {component.form},",
             f"    {accumulator_index}, {src0_index}, {vsrc1_index},",
             f"    {component.lane_mask}, {component.pairing_mask},",

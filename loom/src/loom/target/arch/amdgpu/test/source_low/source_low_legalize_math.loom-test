@@ -945,6 +945,60 @@ low.func.def target(@target) abi(hal_kernel) @vector_bf16_fma_wide_native_pk_gfx
 
 // ====
 
+amdgpu.target<gfx1250-a0> @target
+func.def target(@target) @vector_bf16_arithmetic_native_pack_gfx1250_a0(%a: vector<2xbf16>, %b: vector<2xbf16>, %c: vector<2xbf16>) -> (vector<2xbf16>, vector<2xbf16>, vector<2xbf16>) {
+  %sum = vector.addf %a, %b : vector<2xbf16>
+  %product = vector.mulf %a, %b : vector<2xbf16>
+  %fma = vector.fmaf %a, %b, %c : vector<2xbf16>
+  func.return %sum, %product, %fma : vector<2xbf16>, vector<2xbf16>, vector<2xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_arithmetic_native_pack_gfx1250_a0(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx1250_a0.core> {
+  %sum = v_pk_add_bf16 %a, %b
+  %product = v_pk_mul_bf16 %a, %b
+  %fma = v_pk_fma_bf16 %a, %b, %c
+  return %sum, %product, %fma
+}
+
+// ====
+
+amdgpu.target<gfx1251> @target
+func.def target(@target) @vector_bf16_arithmetic_native_pack_gfx1251(%a: vector<2xbf16>, %b: vector<2xbf16>, %c: vector<2xbf16>) -> (vector<2xbf16>, vector<2xbf16>, vector<2xbf16>) {
+  %sum = vector.addf %a, %b : vector<2xbf16>
+  %product = vector.mulf %a, %b : vector<2xbf16>
+  %fma = vector.fmaf %a, %b, %c : vector<2xbf16>
+  func.return %sum, %product, %fma : vector<2xbf16>, vector<2xbf16>, vector<2xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_arithmetic_native_pack_gfx1251(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx1251.core> {
+  %sum = v_pk_add_bf16 %a, %b
+  %product = v_pk_mul_bf16 %a, %b
+  %fma = v_pk_fma_bf16 %a, %b, %c
+  return %sum, %product, %fma
+}
+
+// ====
+
+amdgpu.target<gfx12-5-generic> @target
+func.def target(@target) @vector_bf16_arithmetic_native_pack_gfx12_5_generic(%a: vector<2xbf16>, %b: vector<2xbf16>, %c: vector<2xbf16>) -> (vector<2xbf16>, vector<2xbf16>, vector<2xbf16>) {
+  %sum = vector.addf %a, %b : vector<2xbf16>
+  %product = vector.mulf %a, %b : vector<2xbf16>
+  %fma = vector.fmaf %a, %b, %c : vector<2xbf16>
+  func.return %sum, %product, %fma : vector<2xbf16>, vector<2xbf16>, vector<2xbf16>
+}
+
+// ----
+low.func.def target(@target) abi(hal_kernel) @vector_bf16_arithmetic_native_pack_gfx12_5_generic(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx12_5.generic.core> {
+  %sum = v_pk_add_bf16 %a, %b
+  %product = v_pk_mul_bf16 %a, %b
+  %fma = v_pk_fma_bf16 %a, %b, %c
+  return %sum, %product, %fma
+}
+
+// ====
+
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @scalar_log_afn(%input: f32) -> (f32) {
   %result = scalar.logf<afn> %input : f32

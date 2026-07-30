@@ -1622,12 +1622,12 @@ const loom_target_low_legality_provider_t* loom_amdgpu_low_legality_provider(
 void loom_amdgpu_low_lower_policy_registry_initialize(
     loom_low_lower_policy_registry_t* out_registry) {
   static const loom_low_lower_policy_registry_entry_t kEntries[] = {
-#define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(symbol_suffix, bundle_name,         \
-                                          snapshot_name, key, wavefront_size, \
-                                          workgroup_storage_byte_limit)       \
-  {                                                                           \
-      .contract_set_key = IREE_SVL(key),                                      \
-      .policy = &kAmdgpuLowLowerPolicy,                                       \
+#define LOOM_AMDGPU_TARGET_DESCRIPTOR_SET(                                \
+    symbol_suffix, bundle_name, snapshot_name, key, descriptor_set_flags, \
+    wavefront_size, workgroup_storage_byte_limit)                         \
+  {                                                                       \
+      .contract_set_key = IREE_SVL(key),                                  \
+      .policy = &kAmdgpuLowLowerPolicy,                                   \
   },
 #include "loom/target/arch/amdgpu/records/target_records_tables.inl"
 #undef LOOM_AMDGPU_TARGET_DESCRIPTOR_SET

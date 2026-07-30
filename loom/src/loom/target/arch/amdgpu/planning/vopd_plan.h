@@ -199,8 +199,8 @@ typedef struct loom_amdgpu_vopd_component_info_t {
   iree_string_view_t same_op_reason_name;
   // Native assembly mnemonic for this component inside a VOPD packet.
   iree_string_view_t assembly_mnemonic;
-  // RDNA4 native assembly mnemonic override, or empty to use assembly_mnemonic.
-  iree_string_view_t rdna4_assembly_mnemonic;
+  // Numeric-minimum/maximum mnemonic, or empty to use assembly_mnemonic.
+  iree_string_view_t numeric_minmax_mnemonic;
   // Operand/register form shared by planning, assembly, and encoding.
   loom_amdgpu_vopd_component_form_t form;
   // Operand indexes interpreted by forms with row-defined source layout.

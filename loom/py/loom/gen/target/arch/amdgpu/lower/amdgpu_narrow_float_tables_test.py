@@ -324,6 +324,31 @@ def test_fp8_native_descriptor_refs_reject_missing_descriptor_ref() -> None:
         )
 
 
+def test_fp8_native_descriptor_refs_reject_partial_byte_select_family() -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"AMDGPU FP8 native conversion descriptor table byte-select family "
+            r"has 1 entries instead of 4"
+        ),
+    ):
+        amdgpu_narrow_float_tables._emit_fp8_native_descriptor_ref_rows(
+            rows=(
+                _Fp8NativeDescriptorRefRow(
+                    "LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3",
+                    ScalarTypeKind.F16,
+                    None,
+                    "amdgpu.v_cvt_pk_f16_fp8.ocp",
+                    ("amdgpu.v_cvt_f16_fp8.ocp.byte0",),
+                ),
+            ),
+            descriptor_ref_key_set={
+                "amdgpu.v_cvt_pk_f16_fp8.ocp",
+                "amdgpu.v_cvt_f16_fp8.ocp.byte0",
+            },
+        )
+
+
 def test_fp8_native_descriptor_refs_reject_duplicate_type_pair() -> None:
     with pytest.raises(
         ValueError,

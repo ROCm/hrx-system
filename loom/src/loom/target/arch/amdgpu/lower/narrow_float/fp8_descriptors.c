@@ -8,6 +8,7 @@
 #include <stddef.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/target/arch/amdgpu/lower/descriptor_ref.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -90,8 +91,11 @@ static const loom_amdgpu_fp8_native_descriptor_ref_row_t
     kLoomAmdgpuFp8NativeDescriptorRefRows[] = {
 #define LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(                        \
     row_index, source_format_index, source_format, result_type, lane_ref, \
-    pair_ref)                                                             \
-  [row_index] = {source_format, result_type, {lane_ref, pair_ref}}
+    pair_ref, byte0_ref, byte1_ref, byte2_ref, byte3_ref)                 \
+  [row_index] = {                                                         \
+      source_format,                                                      \
+      result_type,                                                        \
+      {lane_ref, pair_ref, {byte0_ref, byte1_ref, byte2_ref, byte3_ref}}}
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8_native_descriptor_ref_rows.inl"
 #undef LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW
 };
@@ -102,7 +106,7 @@ static const uint8_t kLoomAmdgpuFp8NativeDescriptorRefRowIndex[IREE_ARRAYSIZE(
     kLoomAmdgpuFp8SourceFormats)][LOOM_SCALAR_TYPE_COUNT_] = {
 #define LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW(                        \
     row_index, source_format_index, source_format, result_type, lane_ref, \
-    pair_ref)                                                             \
+    pair_ref, byte0_ref, byte1_ref, byte2_ref, byte3_ref)                 \
   [source_format_index][result_type] = (row_index) + 1
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8_native_descriptor_ref_rows.inl"
 #undef LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_REF_ROW
@@ -189,6 +193,13 @@ iree_status_t loom_amdgpu_get_fp8_native_descriptors(
       if (descriptor_is_present) {
         descriptors->flags |= LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_PAIR;
       }
+    }
+    if (descriptor_refs.byte_select[0] != LOOM_AMDGPU_DESCRIPTOR_REF_NONE &&
+        loom_amdgpu_descriptor_set_has_ref(
+            loom_low_lower_context_descriptor_set(context),
+            descriptor_refs.byte_select[0])) {
+      descriptors->flags |=
+          LOOM_AMDGPU_FP8_NATIVE_DESCRIPTOR_FLAG_HAS_BYTE_SELECT_FAMILY;
     }
     cache->initialized_row_bits |= row_bit;
   }
