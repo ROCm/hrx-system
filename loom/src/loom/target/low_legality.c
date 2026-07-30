@@ -717,6 +717,7 @@ static iree_status_t loom_target_low_legality_try_contract_query_op(
       .bundle = context->options->bundle,
       .target_profile = context->options->target_profile,
       .target_ref = context->options->target_ref,
+      .target_facts = context->options->target_facts,
       .descriptor_set = context->descriptor_set,
       .fact_table = context->fact_table,
       .value_domain = context->value_domain,

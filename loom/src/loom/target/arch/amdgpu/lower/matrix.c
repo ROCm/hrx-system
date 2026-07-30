@@ -15,7 +15,7 @@
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/matrix/projection.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
+#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/util/numeric_format.h"
 
 typedef struct loom_amdgpu_matrix_target_facts_t {
@@ -32,15 +32,15 @@ static void loom_amdgpu_matrix_target_facts_from_environment(
     loom_amdgpu_matrix_target_facts_t* out_facts) {
   *out_facts = (loom_amdgpu_matrix_target_facts_t){0};
 
-  const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_processor_from_ref(environment->module,
-                                            environment->target_ref);
-  IREE_ASSERT(processor != NULL,
-              "AMDGPU matrix lowering requires an AMDGPU processor target "
-              "record");
+  const loom_amdgpu_target_facts_t* target_facts =
+      loom_amdgpu_target_facts_cast(environment->target_facts);
+  IREE_ASSERT(target_facts != NULL,
+              "AMDGPU matrix lowering requires AMDGPU target facts");
+  const loom_amdgpu_processor_properties_t* processor =
+      target_facts->properties.processor;
   loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
-  (void)loom_amdgpu_matrix_feature_bits_from_profile(
-      processor->properties.features.matrix, &feature_bits);
+  (void)loom_amdgpu_matrix_feature_bits_from_profile(processor->features.matrix,
+                                                     &feature_bits);
   if (environment->bundle == NULL || environment->bundle->snapshot == NULL ||
       environment->bundle->snapshot->subgroup_size == 0) {
     IREE_ASSERT_UNREACHABLE("selected AMDGPU matrix target subgroup size");

@@ -1570,6 +1570,7 @@ static iree_status_t loom_low_target_legalize_function(
       .bundle = selection->target_bundle,
       .target_profile = selection->target_profile,
       .target_ref = selection->target_ref,
+      .target_facts = selection->target_facts,
       .descriptor_set = state.descriptor_set,
       .mode = pass_state->mode,
       .policy = pass_state->policy,

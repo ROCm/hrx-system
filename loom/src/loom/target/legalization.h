@@ -113,6 +113,8 @@ typedef struct loom_target_legalization_context_t {
   const loom_target_profile_t* target_profile;
   // Module-local target record symbol selected for this function.
   loom_symbol_ref_t target_ref;
+  // Borrowed typed target facts projected from |target_ref|.
+  const loom_target_facts_t* target_facts;
   // Low descriptor set selected by the target bundle.
   const loom_low_descriptor_set_t* descriptor_set;
   // Source value facts visible to legalizers.

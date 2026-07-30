@@ -246,6 +246,7 @@ iree_status_t loom_target_legalization_query_contract(
       .bundle = context->bundle,
       .target_profile = context->target_profile,
       .target_ref = context->target_ref,
+      .target_facts = context->target_facts,
       .descriptor_set = context->descriptor_set,
       .fact_table = context->fact_table,
       .view_regions = context->view_regions,

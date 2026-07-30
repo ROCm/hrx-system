@@ -1058,6 +1058,7 @@ static iree_status_t loom_low_lower_query_environment_from_context(
       .bundle = context->options->bundle,
       .target_profile = context->options->target_profile,
       .target_ref = context->options->target_ref,
+      .target_facts = context->options->target_facts,
       .descriptor_set = descriptor_set,
       .fact_table = context->lowering.fact_table,
       .value_domain = &context->lowering.value_domain,
