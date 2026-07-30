@@ -26,6 +26,7 @@ exports_files([
     "shared_memory_transpose.loom",
     "shared_memory_vector_tile.loom",
     "shared_memory_wave_tile.loom",
+    "template_math_legalization.loom",
     "target_provider_selection.loom",
     "wave64_reductions.loom",
 ])
@@ -53,6 +54,7 @@ iree_execution_test_suite(
         "shared_memory_vector_tile.loom",
         "shared_memory_wave_tile.loom",
         "target_provider_selection.loom",
+        "template_math_legalization.loom",
         "wave64_reductions.loom",
     ],
     manifests = ["hip_authoring.test.json"],

@@ -720,6 +720,45 @@
       ]
     },
     {
+      "name": "compiles math materialized from a target template",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/template_math_legalization.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx11-generic",
+          "--output={tmp}/template_math_legalization.vmfb",
+          "--emit-target-artifact={tmp}/template_math_legalization.hsaco",
+          "--artifact-manifest=summary",
+          "--compile-report=summary"
+        ]
+      },
+      "stderr": {
+        "contains": {
+          "unordered": [
+            "\"target_key\":\"gfx11-generic\"",
+            "\"artifact_format\":\"elf\"",
+            "\"status\":{\"code\":0,\"name\":\"OK\"}",
+            "\"function\":\"template_math_legalization\""
+          ]
+        }
+      },
+      "files": [
+        {
+          "path": "{tmp}/template_math_legalization.vmfb",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/template_math_legalization.hsaco",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/template_math_legalization.hsaco.manifest.json",
+          "non_empty": true
+        }
+      ]
+    },
+    {
       "name": "plans gfx1250 cluster b128 multicast recipe",
       "run": {
         "tool": "iree-benchmark-loom",
