@@ -1984,12 +1984,14 @@ def _gfx1250_spec_with_supplemental_encoding_facts(
 def _gfx1250_supplemental_vop1_source(
     field_name: str,
     data_format_name: str,
+    *,
+    operand_type: str = "OPR_VGPR",
 ) -> AmdgpuIsaOperand:
     return AmdgpuIsaOperand(
         order=2,
         field_name=field_name,
         data_format_name=data_format_name,
-        operand_type="OPR_VGPR",
+        operand_type=operand_type,
         size_bits=32,
         is_input=True,
         is_output=False,
@@ -2000,13 +2002,15 @@ def _gfx1250_supplemental_vop1_source(
 
 def _gfx1250_supplemental_vop1_result(
     data_format_name: str,
+    *,
+    size_bits: int = 32,
 ) -> AmdgpuIsaOperand:
     return AmdgpuIsaOperand(
         order=1,
         field_name="VDST",
         data_format_name=data_format_name,
         operand_type="OPR_VGPR",
-        size_bits=32,
+        size_bits=size_bits,
         is_input=False,
         is_output=True,
         is_implicit=False,
@@ -2125,20 +2129,66 @@ _GFX1250_SUPPLEMENTAL_INSTRUCTIONS = (
     ),
     _gfx1250_supplemental_instruction(
         name="V_CVT_F16_FP8",
-        encoding_name="ENC_VOP3",
-        opcode=0x1F7,
+        encoding_name="ENC_VOP1",
+        opcode=0x77,
         operands=(
-            _gfx1250_supplemental_vop3_result("FMT_NUM_F16", size_bits=16),
-            _gfx1250_supplemental_vop3_source(2, "SRC0", "FMT_NUM_UINT", size_bits=32),
+            _gfx1250_supplemental_vop1_result("FMT_NUM_F16", size_bits=16),
+            _gfx1250_supplemental_vop1_source(
+                "SRC0",
+                "FMT_NUM_UINT",
+                operand_type="OPR_SRC",
+            ),
+        ),
+        additional_encodings=(
+            AmdgpuIsaInstructionEncoding(
+                encoding_name="ENC_VOP3",
+                condition_name="default",
+                opcode=0x1F7,
+                operands=(
+                    _gfx1250_supplemental_vop3_result(
+                        "FMT_NUM_F16",
+                        size_bits=16,
+                    ),
+                    _gfx1250_supplemental_vop3_source(
+                        2,
+                        "SRC0",
+                        "FMT_NUM_UINT",
+                        size_bits=32,
+                    ),
+                ),
+            ),
         ),
     ),
     _gfx1250_supplemental_instruction(
         name="V_CVT_F16_BF8",
-        encoding_name="ENC_VOP3",
-        opcode=0x1F8,
+        encoding_name="ENC_VOP1",
+        opcode=0x78,
         operands=(
-            _gfx1250_supplemental_vop3_result("FMT_NUM_F16", size_bits=16),
-            _gfx1250_supplemental_vop3_source(2, "SRC0", "FMT_NUM_UINT", size_bits=32),
+            _gfx1250_supplemental_vop1_result("FMT_NUM_F16", size_bits=16),
+            _gfx1250_supplemental_vop1_source(
+                "SRC0",
+                "FMT_NUM_UINT",
+                operand_type="OPR_SRC",
+            ),
+        ),
+        additional_encodings=(
+            AmdgpuIsaInstructionEncoding(
+                encoding_name="ENC_VOP3",
+                condition_name="default",
+                opcode=0x1F8,
+                operands=(
+                    _gfx1250_supplemental_vop3_result(
+                        "FMT_NUM_F16",
+                        size_bits=16,
+                    ),
+                    _gfx1250_supplemental_vop3_source(
+                        2,
+                        "SRC0",
+                        "FMT_NUM_UINT",
+                        size_bits=32,
+                    ),
+                ),
+            ),
         ),
     ),
     _gfx1250_supplemental_instruction(

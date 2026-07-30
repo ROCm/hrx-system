@@ -4822,13 +4822,14 @@ _PACKED8_BYTE_SELECTOR_OPSEL_VALUES = (0, 2, 1, 3)
 def _v_cvt_f16_packed8_byte_overlay(
     source_type: str, source_semantics: str, byte_selector: int
 ) -> AmdgpuDescriptorOverlay:
+    uses_byte_selector = byte_selector != 0
     return AmdgpuDescriptorOverlay(
         descriptor_key=(
             f"amdgpu.v_cvt_f16_{source_type}.{source_semantics}.byte{byte_selector}"
         ),
         instruction_name=f"V_CVT_F16_{source_type.upper()}",
         mnemonic=f"v_cvt_f16_{source_type}_byte{byte_selector}",
-        encoding_name="ENC_VOP3",
+        encoding_name="ENC_VOP3" if uses_byte_selector else "ENC_VOP1",
         semantic_tag=(
             f"convert.float.{source_type}.{source_semantics}.byte{byte_selector}.f16"
         ),
@@ -4847,7 +4848,9 @@ def _v_cvt_f16_packed8_byte_overlay(
             AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
         ),
         fixed_encoding_fields=(
-            ("OPSEL", _PACKED8_BYTE_SELECTOR_OPSEL_VALUES[byte_selector]),
+            (("OPSEL", _PACKED8_BYTE_SELECTOR_OPSEL_VALUES[byte_selector]),)
+            if uses_byte_selector
+            else ()
         ),
         asm_forms=_asm(
             native_assembly_mnemonic=f"v_cvt_f16_{source_type}",
