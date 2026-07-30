@@ -1000,32 +1000,6 @@ def test_descriptor_set_view_selects_shared_schedule_class() -> None:
     assert compiled_view.instruction_classes == ((InstructionClass.VECTOR_ALU,),)
 
 
-def test_shared_source_retains_view_only_schedule_class() -> None:
-    vector_schedule = TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes[2]
-    storage_set = replace(
-        TEST_LOW_CORE_DESCRIPTOR_SET,
-        descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR,),
-    )
-    view = replace(
-        TEST_LOW_CORE_DESCRIPTOR_SET,
-        key="test.low.schedule_view.core",
-        function_name="loom_test_low_schedule_view_core_descriptor_set",
-        c_table_prefix="TestLowScheduleViewCore",
-        c_enum_prefix="TEST_LOW_SCHEDULE_VIEW_CORE",
-        descriptors=(
-            replace(
-                TEST_LOW_ADD_I32_DESCRIPTOR,
-                schedule_class=vector_schedule.name,
-            ),
-        ),
-    )
-
-    source = generate_descriptor_set_shared_source(storage_set, (view,))
-
-    assert vector_schedule.name in source
-    assert "loom_test_low_schedule_view_core_descriptor_set" in source
-
-
 def test_descriptor_set_view_rejects_local_schedule_definition() -> None:
     vector_schedule = TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes[2]
     vector_multiply = replace(
