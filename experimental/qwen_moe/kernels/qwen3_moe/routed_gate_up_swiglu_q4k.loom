@@ -380,6 +380,96 @@ kernel.def @qwen3_moe_build_expert_table(%token_count: index, %route_count: inde
   kernel.return
 }
 
+// Compacts expert assignment counts into exact 32-row projection partitions.
+//
+// One lane owns each expert. A workgroup scan assigns deterministic descriptor
+// offsets, then each lane publishes an 18-bit descriptor containing the expert,
+// 32-row partition ordinal, and tail row count. The consumer can launch a
+// distribution-independent grid without serializing a concentrated expert
+// inside one workgroup.
+kernel.def @qwen3_moe_build_expert_partition_table(%token_count: index, %route_count: index, %expert_count: index) {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 128 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%token_count: index, %route_count: index, %expert_count: index, %expert_table: buffer, %partition_table: buffer) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
+  %bounded_expert_count = index.assume %expert_count [range(%expert_count, 1, 128)] : index
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %thirtyone = index.constant 31 : index
+  %thirtytwo = index.constant 32 : index
+  %zero_i32 = scalar.constant 0 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %seven_i32 = scalar.constant 7 : i32
+  %thirteen_i32 = scalar.constant 13 : i32
+  %zero_offset = index.constant 0 : offset
+  %four_bytes = index.constant 4 : offset
+  %assignment_count = index.mul %bounded_token_count, %bounded_route_count : index
+  %rounded_assignment_count = index.add %assignment_count, %thirtyone : index
+  %assignment_partition_count = index.div %rounded_assignment_count, %thirtytwo : index
+  %maximum_partition_count = index.add %assignment_partition_count, %bounded_expert_count : index
+  %count_view = buffer.view %expert_table[%zero_offset] : buffer -> view<[%bounded_expert_count]xi32, #dense>
+  %partition_count_view = buffer.view %partition_table[%zero_offset] : buffer -> view<1xi32, #dense>
+  %partition_descriptor_view = buffer.view %partition_table[%four_bytes] : buffer -> view<[%maximum_partition_count]xi32, #dense>
+  %has_expert = index.cmp ult, %lane, %bounded_expert_count : index
+  %expert_assignment_count_i32 = scf.if %has_expert -> (i32) {
+    %expert, %table_expert_count = index.assume %lane, %bounded_expert_count [lt(%lane, %bounded_expert_count)] : index, index
+    %loaded = view.load %count_view[%expert] : view<[%bounded_expert_count]xi32, #dense> -> i32
+    scf.yield %loaded : i32
+  } else {
+    scf.yield %zero_i32 : i32
+  }
+  %expert_assignment_count0 = index.cast %expert_assignment_count_i32 : i32 to index
+  %expert_assignment_count = index.assume %expert_assignment_count0 [range(%expert_assignment_count0, 0, 2048)] : index
+  %rounded_expert_assignment_count = index.add %expert_assignment_count, %thirtyone : index
+  %expert_partition_count = index.div %rounded_expert_assignment_count, %thirtytwo : index
+  %expert_partition_count_i32 = index.cast %expert_partition_count : index to i32
+  %expert_partition_base_i32 = kernel.workgroup.scan<addi> %expert_partition_count_i32 {direction = forward, mode = exclusive} : i32
+  %partition_count_i32 = kernel.workgroup.reduce<addi> %expert_partition_count_i32 : i32
+  %partition_count = index.cast %partition_count_i32 : i32 to index
+  %bounded_partition_count, %table_partition_capacity = index.assume %partition_count, %maximum_partition_count [lt(%partition_count, %maximum_partition_count)] : index, index
+  %expert_partition_base0 = index.cast %expert_partition_base_i32 : i32 to index
+  %expert_partition_base = index.assume %expert_partition_base0 [range(%expert_partition_base0, 0, 639)] : index
+  scf.if %has_expert {
+    %expert, %table_expert_count = index.assume %lane, %bounded_expert_count [lt(%lane, %bounded_expert_count)] : index, index
+    %expert_i32 = index.cast %expert : index to i32
+    scf.for %partition = [%zero to %expert_partition_count step %one] {
+      %descriptor_ordinal0 = index.add %expert_partition_base, %partition : index
+      %descriptor_ordinal, %descriptor_count = index.assume %descriptor_ordinal0, %bounded_partition_count [lt(%descriptor_ordinal0, %bounded_partition_count)] : index, index
+      %table_descriptor_ordinal, %table_descriptor_capacity = index.assume %descriptor_ordinal, %maximum_partition_count [lt(%descriptor_ordinal, %maximum_partition_count)] : index, index
+      %partition_remainder = index.rem %expert_assignment_count, %thirtytwo : index
+      %has_partial_tail = index.cmp ne, %partition_remainder, %zero : index
+      %partition_row_count = scf.if %has_partial_tail -> (index) {
+        %next_partition = index.add %partition, %one : index
+        %is_tail_partition = index.cmp eq, %next_partition, %expert_partition_count : index
+        %tail_row_count = scf.if %is_tail_partition -> (index) {
+          scf.yield %partition_remainder : index
+        } else {
+          scf.yield %thirtytwo : index
+        }
+        scf.yield %tail_row_count : index
+      } else {
+        scf.yield %thirtytwo : index
+      }
+      %partition_i32 = index.cast %partition : index to i32
+      %partition_row_count_i32 = index.cast %partition_row_count : index to i32
+      %packed_partition = scalar.shli %partition_i32, %seven_i32 : i32
+      %partition_row_count_minus_one = scalar.subi %partition_row_count_i32, %one_i32 : i32
+      %packed_row_count = scalar.shli %partition_row_count_minus_one, %thirteen_i32 : i32
+      %packed_expert_partition = scalar.ori %expert_i32, %packed_partition : i32
+      %packed_descriptor = scalar.ori %packed_expert_partition, %packed_row_count : i32
+      view.store %packed_descriptor, %partition_descriptor_view[%table_descriptor_ordinal] : i32, view<[%maximum_partition_count]xi32, #dense>
+    }
+  }
+  %is_lane_zero = index.cmp eq, %lane, %zero : index
+  scf.if %is_lane_zero {
+    view.store %partition_count_i32, %partition_count_view[%zero] : i32, view<1xi32, #dense>
+  }
+  kernel.return
+}
+
 // Small-token schedule for routed Q4_K gate/up projections. One wave computes
 // one [token, route, output channel]. Every lane owns 16 K elements, and all
 // lanes advance through K in 512-element stripes. Gate and up share each Q8_1
