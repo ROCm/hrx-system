@@ -246,14 +246,15 @@ static const loom_target_math_policy_t kAmdgpuMathPolicy = {
     .query = loom_amdgpu_math_policy_query,
 };
 
-static const loom_amdgpu_math_policy_payload_t kAmdgpuGfx125xMathPayload = {
-    .flags = LOOM_AMDGPU_MATH_POLICY_FLAG_NATIVE_PACKED_BF16_BINARY,
+static const loom_amdgpu_math_policy_payload_t
+    kAmdgpuNativePackedBf16MathPayload = {
+        .flags = LOOM_AMDGPU_MATH_POLICY_FLAG_NATIVE_PACKED_BF16_BINARY,
 };
 
-static const loom_target_math_policy_t kAmdgpuGfx125xMathPolicy = {
-    .name = IREE_SVL("amdgpu-gfx125x-math"),
+static const loom_target_math_policy_t kAmdgpuNativePackedBf16MathPolicy = {
+    .name = IREE_SVL("amdgpu-native-packed-bf16-math"),
     .query = loom_amdgpu_math_policy_query,
-    .user_data = &kAmdgpuGfx125xMathPayload,
+    .user_data = &kAmdgpuNativePackedBf16MathPayload,
 };
 
 #define LOOM_AMDGPU_MATH_POLICY_Cdna3 (&kAmdgpuMathPolicy)
@@ -261,13 +262,17 @@ static const loom_target_math_policy_t kAmdgpuGfx125xMathPolicy = {
 #define LOOM_AMDGPU_MATH_POLICY_Gfx94Generic (&kAmdgpuMathPolicy)
 #define LOOM_AMDGPU_MATH_POLICY_Gfx11Generic (&kAmdgpuMathPolicy)
 #define LOOM_AMDGPU_MATH_POLICY_Gfx12Generic (&kAmdgpuMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Gfx125Generic (&kAmdgpuGfx125xMathPolicy)
+#define LOOM_AMDGPU_MATH_POLICY_Gfx125Generic \
+  (&kAmdgpuNativePackedBf16MathPolicy)
 #define LOOM_AMDGPU_MATH_POLICY_Rdna3 (&kAmdgpuMathPolicy)
 #define LOOM_AMDGPU_MATH_POLICY_Rdna35 (&kAmdgpuMathPolicy)
 #define LOOM_AMDGPU_MATH_POLICY_Rdna4 (&kAmdgpuMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx1250A0 (&kAmdgpuGfx125xMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx1251 (&kAmdgpuGfx125xMathPolicy)
-#define LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx125x (&kAmdgpuGfx125xMathPolicy)
+#define LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx1250A0 \
+  (&kAmdgpuNativePackedBf16MathPolicy)
+#define LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx1251 \
+  (&kAmdgpuNativePackedBf16MathPolicy)
+#define LOOM_AMDGPU_MATH_POLICY_Rdna4Gfx125x \
+  (&kAmdgpuNativePackedBf16MathPolicy)
 
 static const loom_target_math_policy_registry_entry_t
     kAmdgpuMathPolicyEntries[] = {
