@@ -1993,6 +1993,10 @@ static iree_status_t iree_hal_streaming_enqueue_buffer_copy(
 }
 
 typedef struct iree_hal_streaming_host_d2h_staging_t {
+  // Resource retained while the staging completion is pending in a HAL queue.
+  iree_hal_resource_t resource;
+  // Allocator used to release this staging operation.
+  iree_allocator_t host_allocator;
   // User host destination pointer populated after the stream D2H completes.
   void* dst;
   // Byte distance between consecutive destination rows.
@@ -2004,6 +2008,20 @@ typedef struct iree_hal_streaming_host_d2h_staging_t {
   // Number of rows copied from staging into the destination.
   iree_host_size_t height;
 } iree_hal_streaming_host_d2h_staging_t;
+
+static void iree_hal_streaming_host_d2h_staging_destroy(
+    iree_hal_resource_t* base_resource) {
+  iree_hal_streaming_host_d2h_staging_t* copy =
+      (iree_hal_streaming_host_d2h_staging_t*)base_resource;
+  iree_hal_streaming_temporary_host_buffer_free(copy->staging->context,
+                                                copy->staging);
+  iree_allocator_free(copy->host_allocator, copy);
+}
+
+static const iree_hal_resource_vtable_t
+    iree_hal_streaming_host_d2h_staging_vtable = {
+        .destroy = iree_hal_streaming_host_d2h_staging_destroy,
+};
 
 static void iree_hal_streaming_host_d2h_staging_scatter_rows(
     void* dst, iree_device_size_t dst_pitch, const void* src,
@@ -2025,9 +2043,6 @@ static iree_status_t iree_hal_streaming_host_d2h_staging_call(
   iree_hal_streaming_host_d2h_staging_scatter_rows(copy->dst, copy->dst_pitch,
                                                    copy->staging->host_ptr,
                                                    copy->width, copy->height);
-  iree_hal_streaming_temporary_host_buffer_free(copy->staging->context,
-                                                copy->staging);
-  iree_allocator_free(iree_allocator_system(), copy);
   return iree_ok_status();
 }
 
@@ -2050,11 +2065,14 @@ static iree_status_t iree_hal_streaming_enqueue_host_d2h_staging_copy(
     }
     iree_hal_streaming_temporary_host_buffer_free(staging->context, staging);
     if (iree_status_is_ok(sync_status)) {
-      iree_status_ignore(status);
+      iree_status_free(status);
       return iree_ok_status();
     }
     return iree_status_join(status, sync_status);
   }
+  iree_hal_resource_initialize(&iree_hal_streaming_host_d2h_staging_vtable,
+                               &copy->resource);
+  copy->host_allocator = iree_allocator_system();
   copy->dst = dst;
   copy->dst_pitch = dst_pitch;
   copy->staging = staging;
@@ -2062,8 +2080,8 @@ static iree_status_t iree_hal_streaming_enqueue_host_d2h_staging_copy(
   copy->height = height;
 
   uint64_t args[4] = {0, 0, 0, 0};
-  iree_hal_host_call_t call =
-      iree_hal_make_host_call(iree_hal_streaming_host_d2h_staging_call, copy);
+  iree_hal_host_call_t call = iree_hal_make_host_call_with_resource(
+      iree_hal_streaming_host_d2h_staging_call, copy, &copy->resource);
   status = iree_hal_streaming_queue_host_call(stream, call, args,
                                               IREE_HAL_HOST_CALL_FLAG_NONE);
   if (!iree_status_is_ok(status)) {
@@ -2072,16 +2090,17 @@ static iree_status_t iree_hal_streaming_enqueue_host_d2h_staging_copy(
       iree_hal_streaming_host_d2h_staging_scatter_rows(
           dst, dst_pitch, staging->host_ptr, width, height);
     }
-    iree_hal_streaming_temporary_host_buffer_free(staging->context, staging);
-    iree_allocator_free(iree_allocator_system(), copy);
+    iree_hal_resource_release(&copy->resource);
     if (iree_status_is_ok(sync_status)) {
-      iree_status_ignore(status);
+      iree_status_free(status);
       return iree_ok_status();
     }
     return iree_status_join(status, sync_status);
   }
+  iree_hal_resource_release(&copy->resource);
   return iree_ok_status();
 }
+
 static iree_status_t iree_hal_streaming_enqueue_host_update(
     iree_hal_streaming_stream_t* stream, const void* src,
     iree_hal_streaming_buffer_ref_t dst_ref, iree_device_size_t size) {
