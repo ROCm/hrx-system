@@ -978,7 +978,7 @@ static iree_status_t loom_kernel_barrier_control_target_bundle(
   const loom_target_symbol_facts_t* target_facts =
       loom_target_symbol_facts_cast(base_facts);
   if (target_facts) {
-    *out_target_bundle = &target_facts->storage.bundle;
+    *out_target_bundle = &target_facts->projection->storage.bundle;
   }
   return iree_ok_status();
 }

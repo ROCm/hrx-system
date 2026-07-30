@@ -83,14 +83,14 @@ static bool loom_low_source_selection_snapshots_differ(
 static void loom_low_source_selection_set_candidate_target(
     const loom_module_t* module, const loom_target_symbol_facts_t* target_facts,
     loom_low_source_selection_t* selection) {
+  const loom_target_bundle_storage_t* storage =
+      &target_facts->projection->storage;
   selection->candidate_target_symbol_name =
       loom_low_source_selection_symbol_ref_name(module, target_facts->symbol);
-  selection->candidate_target_bundle_name = target_facts->storage.bundle.name;
-  selection->candidate_target_snapshot_name =
-      target_facts->storage.snapshot.name;
-  selection->candidate_target_config_name = target_facts->storage.config.name;
-  selection->candidate_target_subgroup_size =
-      target_facts->storage.snapshot.subgroup_size;
+  selection->candidate_target_bundle_name = storage->bundle.name;
+  selection->candidate_target_snapshot_name = storage->snapshot.name;
+  selection->candidate_target_config_name = storage->config.name;
+  selection->candidate_target_subgroup_size = storage->snapshot.subgroup_size;
 }
 
 static iree_status_t loom_low_source_selection_find_candidate_targets(
@@ -119,11 +119,12 @@ static iree_status_t loom_low_source_selection_find_candidate_targets(
       continue;
     }
     if (!loom_target_function_contract_bundles_compatible(
-            &target_facts->storage.bundle, selection->target_bundle)) {
+            &target_facts->projection->storage.bundle,
+            selection->target_bundle)) {
       continue;
     }
     if (!loom_low_source_selection_snapshots_differ(
-            target_facts->storage.bundle.snapshot,
+            target_facts->projection->storage.bundle.snapshot,
             selection->target_bundle->snapshot)) {
       continue;
     }
@@ -193,9 +194,9 @@ static iree_status_t loom_low_source_selection_try_symbol(
   }
   bool contract_valid = false;
   IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve_from_bundle(
-      module, func_facts, target_facts->name, &target_facts->storage.bundle,
-      options->diagnostic_emitter, &contract_valid,
-      &out_selection->target_bundle_storage));
+      module, func_facts, target_facts->name,
+      &target_facts->projection->storage.bundle, options->diagnostic_emitter,
+      &contract_valid, &out_selection->target_bundle_storage));
   if (!contract_valid) {
     return iree_ok_status();
   }

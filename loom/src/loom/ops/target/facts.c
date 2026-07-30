@@ -99,11 +99,6 @@ static iree_status_t loom_target_symbol_fact_compute(
   };
   facts->name = module->strings.entries[symbol->name_id];
 
-  facts->selector = selector;
-  facts->row_bundle = row_bundle;
-  facts->storage = projection->storage;
-  loom_target_bundle_storage_rebind(&facts->storage);
-
   *out_facts = &facts->base;
   return iree_ok_status();
 }

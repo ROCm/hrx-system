@@ -267,8 +267,8 @@ TEST_F(SpirvProviderTest, MaterializesByDurableProjectionIdentity) {
       Target(&effective_fact_table_, module.get(), first_ref);
   const loom_target_symbol_facts_t* distinct_target =
       Target(&effective_fact_table_, module.get(), distinct_ref);
-  EXPECT_EQ(first_target->storage.snapshot.subgroup_size, 32u);
-  EXPECT_EQ(distinct_target->storage.snapshot.subgroup_size, 64u);
+  EXPECT_EQ(first_target->projection->storage.snapshot.subgroup_size, 32u);
+  EXPECT_EQ(distinct_target->projection->storage.snapshot.subgroup_size, 64u);
 }
 
 }  // namespace

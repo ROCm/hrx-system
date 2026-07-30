@@ -394,18 +394,19 @@ func.def public target(@right_requirement) @right() {
   const loom_target_symbol_facts_t* right_facts =
       loom_target_symbol_facts_cast(right_base_facts);
   ASSERT_NE(right_facts, nullptr);
-  EXPECT_EQ(left_facts->storage.export_plan.abi_kind,
+  EXPECT_EQ(left_facts->projection->storage.export_plan.abi_kind,
             LOOM_TARGET_ABI_HAL_KERNEL);
-  EXPECT_EQ(right_facts->storage.export_plan.abi_kind,
+  EXPECT_EQ(right_facts->projection->storage.export_plan.abi_kind,
             LOOM_TARGET_ABI_OBJECT_FUNCTION);
   EXPECT_TRUE(iree_string_view_equal(
-      left_facts->storage.export_plan.export_symbol, IREE_SV("left_kernel")));
-  EXPECT_TRUE(
-      iree_string_view_equal(right_facts->storage.export_plan.export_symbol,
-                             IREE_SV("right_function")));
-  EXPECT_EQ(left_facts->storage.export_plan.linkage,
+      left_facts->projection->storage.export_plan.export_symbol,
+      IREE_SV("left_kernel")));
+  EXPECT_TRUE(iree_string_view_equal(
+      right_facts->projection->storage.export_plan.export_symbol,
+      IREE_SV("right_function")));
+  EXPECT_EQ(left_facts->projection->storage.export_plan.linkage,
             LOOM_TARGET_LINKAGE_DSO_LOCAL);
-  EXPECT_EQ(right_facts->storage.export_plan.linkage,
+  EXPECT_EQ(right_facts->projection->storage.export_plan.linkage,
             LOOM_TARGET_LINKAGE_DEFAULT);
 }
 

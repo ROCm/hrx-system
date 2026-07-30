@@ -165,7 +165,8 @@ target.generic<reference> @base
 )");
   const loom_target_symbol_facts_t* base_facts =
       LookupTarget(module.get(), IREE_SV("base"));
-  loom_target_bundle_storage_t selected_storage = base_facts->storage;
+  loom_target_bundle_storage_t selected_storage =
+      base_facts->projection->storage;
   loom_target_bundle_storage_rebind(&selected_storage);
   selected_storage.bundle.name = IREE_SV("incidental-profile-name");
   selected_storage.snapshot.codegen_format = LOOM_TARGET_CODEGEN_FORMAT_SPIRV;
@@ -239,40 +240,40 @@ target.generic<reference> @base
 
   const loom_target_symbol_facts_t* facts =
       LookupTarget(module.get(), IREE_SV("materialized"));
-  EXPECT_EQ(facts->storage.snapshot.codegen_format,
-            LOOM_TARGET_CODEGEN_FORMAT_SPIRV);
-  EXPECT_EQ(facts->storage.snapshot.artifact_format,
+  const loom_target_bundle_storage_t& storage = facts->projection->storage;
+  EXPECT_EQ(storage.snapshot.codegen_format, LOOM_TARGET_CODEGEN_FORMAT_SPIRV);
+  EXPECT_EQ(storage.snapshot.artifact_format,
             LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY);
-  EXPECT_EQ(facts->storage.snapshot.default_pointer_bitwidth, 32u);
-  EXPECT_EQ(facts->storage.snapshot.index_bitwidth, 32u);
-  EXPECT_EQ(facts->storage.snapshot.offset_bitwidth, 32u);
-  EXPECT_EQ(facts->storage.snapshot.max_workgroup_size.x, 256u);
-  EXPECT_EQ(facts->storage.snapshot.max_workgroup_size.y, 8u);
-  EXPECT_EQ(facts->storage.snapshot.max_workgroup_size.z, 4u);
-  EXPECT_EQ(facts->storage.snapshot.max_flat_workgroup_size, 512u);
-  EXPECT_EQ(facts->storage.snapshot.max_workgroup_storage_bytes, 131072u);
-  EXPECT_EQ(facts->storage.snapshot.subgroup_size, 32u);
-  EXPECT_EQ(facts->storage.snapshot.max_grid_size.x, 4096u);
-  EXPECT_EQ(facts->storage.snapshot.max_grid_size.y, 2048u);
-  EXPECT_EQ(facts->storage.snapshot.max_grid_size.z, 1024u);
-  EXPECT_EQ(facts->storage.snapshot.max_flat_grid_size, UINT64_C(8589934592));
-  EXPECT_EQ(facts->storage.snapshot.max_workgroup_count.x, 65535u);
-  EXPECT_EQ(facts->storage.snapshot.max_workgroup_count.y, 32768u);
-  EXPECT_EQ(facts->storage.snapshot.max_workgroup_count.z, 16384u);
-  EXPECT_EQ(facts->storage.snapshot.memory_spaces.generic, 1u);
-  EXPECT_EQ(facts->storage.snapshot.memory_spaces.global, 2u);
-  EXPECT_EQ(facts->storage.snapshot.memory_spaces.workgroup, 3u);
-  EXPECT_EQ(facts->storage.snapshot.memory_spaces.constant, 4u);
-  EXPECT_EQ(facts->storage.snapshot.memory_spaces.private_memory, 5u);
-  EXPECT_EQ(facts->storage.snapshot.memory_spaces.host, 6u);
-  EXPECT_EQ(facts->storage.snapshot.memory_spaces.descriptor, 7u);
-  EXPECT_TRUE(iree_string_view_equal(facts->storage.export_plan.export_symbol,
+  EXPECT_EQ(storage.snapshot.default_pointer_bitwidth, 32u);
+  EXPECT_EQ(storage.snapshot.index_bitwidth, 32u);
+  EXPECT_EQ(storage.snapshot.offset_bitwidth, 32u);
+  EXPECT_EQ(storage.snapshot.max_workgroup_size.x, 256u);
+  EXPECT_EQ(storage.snapshot.max_workgroup_size.y, 8u);
+  EXPECT_EQ(storage.snapshot.max_workgroup_size.z, 4u);
+  EXPECT_EQ(storage.snapshot.max_flat_workgroup_size, 512u);
+  EXPECT_EQ(storage.snapshot.max_workgroup_storage_bytes, 131072u);
+  EXPECT_EQ(storage.snapshot.subgroup_size, 32u);
+  EXPECT_EQ(storage.snapshot.max_grid_size.x, 4096u);
+  EXPECT_EQ(storage.snapshot.max_grid_size.y, 2048u);
+  EXPECT_EQ(storage.snapshot.max_grid_size.z, 1024u);
+  EXPECT_EQ(storage.snapshot.max_flat_grid_size, UINT64_C(8589934592));
+  EXPECT_EQ(storage.snapshot.max_workgroup_count.x, 65535u);
+  EXPECT_EQ(storage.snapshot.max_workgroup_count.y, 32768u);
+  EXPECT_EQ(storage.snapshot.max_workgroup_count.z, 16384u);
+  EXPECT_EQ(storage.snapshot.memory_spaces.generic, 1u);
+  EXPECT_EQ(storage.snapshot.memory_spaces.global, 2u);
+  EXPECT_EQ(storage.snapshot.memory_spaces.workgroup, 3u);
+  EXPECT_EQ(storage.snapshot.memory_spaces.constant, 4u);
+  EXPECT_EQ(storage.snapshot.memory_spaces.private_memory, 5u);
+  EXPECT_EQ(storage.snapshot.memory_spaces.host, 6u);
+  EXPECT_EQ(storage.snapshot.memory_spaces.descriptor, 7u);
+  EXPECT_TRUE(iree_string_view_equal(storage.export_plan.export_symbol,
                                      IREE_SV("materialized_kernel")));
-  EXPECT_EQ(facts->storage.export_plan.abi_kind, LOOM_TARGET_ABI_HAL_KERNEL);
-  EXPECT_EQ(facts->storage.export_plan.linkage, LOOM_TARGET_LINKAGE_DSO_LOCAL);
-  EXPECT_TRUE(iree_string_view_equal(facts->storage.config.contract_set_key,
+  EXPECT_EQ(storage.export_plan.abi_kind, LOOM_TARGET_ABI_HAL_KERNEL);
+  EXPECT_EQ(storage.export_plan.linkage, LOOM_TARGET_LINKAGE_DSO_LOCAL);
+  EXPECT_TRUE(iree_string_view_equal(storage.config.contract_set_key,
                                      IREE_SV("test.materialized")));
-  EXPECT_EQ(facts->storage.config.contract_feature_bits, UINT64_C(0x1234));
+  EXPECT_EQ(storage.config.contract_feature_bits, UINT64_C(0x1234));
 }
 
 TEST_F(TargetFactsTest,
@@ -288,7 +289,8 @@ target.generic<reference> @authored {
 )");
   const loom_target_symbol_facts_t* profile_facts =
       LookupTarget(module.get(), IREE_SV("profile"));
-  loom_target_bundle_storage_t profile_storage = profile_facts->storage;
+  loom_target_bundle_storage_t profile_storage =
+      profile_facts->projection->storage;
   loom_target_bundle_storage_rebind(&profile_storage);
   profile_storage.snapshot.max_workgroup_size.x = 256;
   profile_storage.export_plan.abi_kind = LOOM_TARGET_ABI_OBJECT_FUNCTION;
@@ -330,14 +332,13 @@ target.generic<reference> @authored {
 
   const loom_target_symbol_facts_t* refined_facts =
       LookupTarget(module.get(), IREE_SV("refined"));
-  EXPECT_EQ(refined_facts->storage.snapshot.max_workgroup_size.x, 256u);
-  EXPECT_EQ(refined_facts->storage.export_plan.abi_kind,
-            LOOM_TARGET_ABI_HAL_KERNEL);
-  EXPECT_TRUE(
-      iree_string_view_equal(refined_facts->storage.export_plan.export_symbol,
-                             IREE_SV("authored_kernel")));
-  EXPECT_EQ(refined_facts->storage.export_plan.linkage,
-            LOOM_TARGET_LINKAGE_DSO_LOCAL);
+  const loom_target_bundle_storage_t& refined_storage =
+      refined_facts->projection->storage;
+  EXPECT_EQ(refined_storage.snapshot.max_workgroup_size.x, 256u);
+  EXPECT_EQ(refined_storage.export_plan.abi_kind, LOOM_TARGET_ABI_HAL_KERNEL);
+  EXPECT_TRUE(iree_string_view_equal(refined_storage.export_plan.export_symbol,
+                                     IREE_SV("authored_kernel")));
+  EXPECT_EQ(refined_storage.export_plan.linkage, LOOM_TARGET_LINKAGE_DSO_LOCAL);
 }
 
 TEST_F(TargetFactsTest, InvalidSelectorProducesNoFacts) {

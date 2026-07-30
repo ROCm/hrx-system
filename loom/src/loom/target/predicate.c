@@ -226,8 +226,9 @@ static iree_status_t loom_target_pass_predicate_resolve_contract(
   facts->contract_resolved = true;
   return loom_target_function_contract_resolve_from_bundle(
       context->target_module, facts->func, facts->target->name,
-      &facts->target->storage.bundle, (iree_diagnostic_emitter_t){0},
-      &facts->contract_valid, &facts->contract_storage);
+      &facts->target->projection->storage.bundle,
+      (iree_diagnostic_emitter_t){0}, &facts->contract_valid,
+      &facts->contract_storage);
 }
 
 static iree_status_t loom_target_pass_predicate_match_attr(
@@ -235,7 +236,8 @@ static iree_status_t loom_target_pass_predicate_match_attr(
     loom_target_pass_predicate_target_facts_t* facts, iree_string_view_t name,
     iree_string_view_t expected, bool* out_match) {
   *out_match = false;
-  const loom_target_bundle_storage_t* storage = &facts->target->storage;
+  const loom_target_bundle_storage_t* storage =
+      &facts->target->projection->storage;
   if (iree_string_view_equal(name, IREE_SV("target"))) {
     *out_match = loom_target_pass_predicate_symbol_matches(
         loom_target_pass_predicate_symbol_name(context->target_module,

@@ -89,15 +89,6 @@ typedef struct loom_target_symbol_facts_t {
 
   // Borrowed target symbol name from the module string table.
   iree_string_view_t name;
-
-  // Typed selector value from the target-like op.
-  uint8_t selector;
-
-  // Borrowed generated target row bundle used as the base before overrides.
-  const loom_target_bundle_t* row_bundle;
-
-  // Materialized target bundle after typed attr projections are applied.
-  loom_target_bundle_storage_t storage;
 } loom_target_symbol_facts_t;
 
 // Symbol fact domain used by generated target-like record descriptors.

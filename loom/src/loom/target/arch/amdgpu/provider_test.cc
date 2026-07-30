@@ -372,10 +372,10 @@ TEST_F(AmdgpuProviderTest, MaterializesEveryProfileTargetKind) {
 
     loom_amdgpu_target_properties_t record_properties = {};
     loom_amdgpu_target_record_resolve_properties(
-        target_op, &target->storage.bundle, &record_properties);
+        target_op, &target->projection->storage.bundle, &record_properties);
     EXPECT_EQ(record_properties.target, target_profile.properties.target);
     EXPECT_EQ(record_properties.processor, target_profile.properties.processor);
-    EXPECT_EQ(record_properties.common, &target->storage.bundle);
+    EXPECT_EQ(record_properties.common, &target->projection->storage.bundle);
     EXPECT_EQ(record_properties.instruction_constraints,
               target_profile.properties.instruction_constraints);
     EXPECT_TRUE(loom_target_snapshot_satisfies_requirement(
@@ -436,7 +436,7 @@ TEST_F(AmdgpuProviderTest,
             Target(module.get(), refs[i]);
         loom_amdgpu_target_properties_t properties = {};
         loom_amdgpu_target_record_resolve_properties(
-            target_op, &target->storage.bundle, &properties);
+            target_op, &target->projection->storage.bundle, &properties);
         EXPECT_EQ(properties.target, targets[i]);
         EXPECT_EQ(properties.instruction_constraints,
                   targets[i]->instruction_constraints);

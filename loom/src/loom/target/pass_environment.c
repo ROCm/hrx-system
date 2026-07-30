@@ -133,8 +133,9 @@ iree_status_t loom_target_pass_capability_resolve_function_bundle(
 
   bool contract_valid = false;
   IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve_from_bundle(
-      module, func_facts, target_facts->name, &target_facts->storage.bundle,
-      diagnostic_emitter, &contract_valid, out_bundle_storage));
+      module, func_facts, target_facts->name,
+      &target_facts->projection->storage.bundle, diagnostic_emitter,
+      &contract_valid, out_bundle_storage));
   if (!contract_valid) {
     return iree_ok_status();
   }

@@ -213,7 +213,8 @@ loom_low_descriptor_text_asm_lookup_target_descriptor_set_from_registry(
   if (iree_status_is_ok(status) && target_facts != NULL) {
     const loom_low_descriptor_set_t* descriptor_set =
         loom_low_descriptor_registry_lookup(
-            registry, target_facts->storage.config.contract_set_key);
+            registry,
+            target_facts->projection->storage.config.contract_set_key);
     if (descriptor_set != NULL) {
       *out_descriptor_set =
           loom_low_descriptor_text_asm_descriptor_set_handle(descriptor_set);

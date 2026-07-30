@@ -436,14 +436,15 @@ static iree_status_t loom_math_legalize_resolve_policy(
     return iree_ok_status();
   }
 
-  state->target.contract_set_key = target->storage.config.contract_set_key;
-  state->target.target_bundle_name = target->storage.bundle.name;
-  state->target.target_config_name = target->storage.bundle.config
-                                         ? target->storage.bundle.config->name
+  const loom_target_bundle_storage_t* storage = &target->projection->storage;
+  state->target.contract_set_key = storage->config.contract_set_key;
+  state->target.target_bundle_name = storage->bundle.name;
+  state->target.target_config_name = storage->bundle.config
+                                         ? storage->bundle.config->name
                                          : iree_string_view_empty();
   if (state->policy_registry != NULL) {
     state->target.policy = loom_target_math_policy_registry_lookup_for_bundle(
-        state->policy_registry, &target->storage.bundle);
+        state->policy_registry, &storage->bundle);
   }
   return iree_ok_status();
 }

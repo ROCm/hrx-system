@@ -344,7 +344,7 @@ iree_status_t loom_target_function_contract_resolve(
     return iree_ok_status();
   }
   return loom_target_function_contract_resolve_from_bundle(
-      module, func_facts, target->name, &target->storage.bundle,
+      module, func_facts, target->name, &target->projection->storage.bundle,
       diagnostic_emitter, out_valid, out_bundle_storage);
 }
 
