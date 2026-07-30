@@ -97,7 +97,12 @@ scalar_fptrunc = cast_op(
     phase=OpPhase.EXECUTABLE,
     from_constraint=FLOAT,
     to_constraint=FLOAT,
-    doc="Float precision truncation (narrow): e.g. f32 to f16.",
+    doc=(
+        "Float precision truncation using round-to-nearest, ties-to-even. "
+        "Special values follow the destination format: f8E4M3 saturates "
+        "finite overflow and infinities to its signed maximum finite value "
+        "while preserving NaNs; IEEE formats preserve infinities and NaNs."
+    ),
     canonicalize="loom_scalar_fptrunc_canonicalize",
     facts="loom_scalar_fptrunc_facts",
     examples=["%result = scalar.fptrunc %input : f32 to f16"],

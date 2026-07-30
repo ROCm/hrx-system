@@ -383,6 +383,10 @@ def _cdna_core_overlays(
         _v_cvt_f32_f16_overlay(),
         _v_cvt_f16_f32_overlay(),
         *_v_cvt_f32_packed8_overlays(packed8_source_semantics),
+        *_v_cvt_pk_packed8_from_f32_overlays(
+            packed8_source_semantics,
+            op_sel_field="OP_SEL",
+        ),
         *(
             _v_cvt_scalef32_pk_packed8_overlays()
             if include_v_cvt_scalef32_pk_packed8
@@ -1575,6 +1579,10 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_cvt_f32_f16_overlay(encoding_name="ENC_VOP3"),
         _v_cvt_f16_f32_overlay(),
         *_v_cvt_f32_packed8_overlays("ocp"),
+        *_v_cvt_pk_packed8_from_f32_overlays(
+            "ocp",
+            op_sel_field="OPSEL",
+        ),
         _v_cvt_pk_u16_u32_overlay(),
         _v_cvt_pk_u16_u32_dpp16_overlay(),
         _v_cvt_f32_i32_overlay(),
@@ -1912,6 +1920,10 @@ def _gfx125x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _s_getreg_b32_cluster_workgroup_flat_id_overlay(),
         *_v_cvt_f16_packed8_byte_overlays("ocp"),
         *_v_cvt_pk_f16_packed8_overlays("ocp"),
+        *_v_cvt_pk_packed8_from_f16_overlays(
+            "ocp",
+            op_sel_field="OPSEL",
+        ),
         *_v_cvt_scale_pk8_overlays(),
         _v_cvt_pk_bf16_f32_overlay(),
         _v_cvt_pk_bf16_f32_dpp16_overlay(),
@@ -2207,6 +2219,38 @@ _GFX125X_SUPPLEMENTAL_INSTRUCTIONS = (
         operands=(
             _gfx125x_supplemental_vop1_result("FMT_NUM_PK2_F16"),
             _gfx125x_supplemental_vop1_source("VSRC0", "FMT_NUM_UINT"),
+        ),
+    ),
+    _gfx125x_supplemental_instruction(
+        name="V_CVT_PK_FP8_F16",
+        encoding_name="ENC_VOP3",
+        opcode=0x372,
+        operands=(
+            _gfx125x_supplemental_vop3_result(
+                "FMT_NUM_PK2_FP8",
+                size_bits=16,
+            ),
+            _gfx125x_supplemental_vop3_source(
+                2,
+                "SRC0",
+                "FMT_NUM_PK2_F16",
+            ),
+        ),
+    ),
+    _gfx125x_supplemental_instruction(
+        name="V_CVT_PK_BF8_F16",
+        encoding_name="ENC_VOP3",
+        opcode=0x373,
+        operands=(
+            _gfx125x_supplemental_vop3_result(
+                "FMT_NUM_PK2_BF8",
+                size_bits=16,
+            ),
+            _gfx125x_supplemental_vop3_source(
+                2,
+                "SRC0",
+                "FMT_NUM_PK2_F16",
+            ),
         ),
     ),
     _gfx125x_supplemental_instruction(

@@ -3188,6 +3188,68 @@ def test_gfx125x_packed_fp8_to_f16_sources_use_low_half_window() -> None:
         assert source.descriptor_operand.addressable_unit_count == 128
 
 
+def test_packed8_encode_descriptors_own_numeric_and_partial_result_semantics() -> None:
+    for descriptor_set, target_semantics, op_sel_field in (
+        (_gfx940_core_overlays(), "fnuz", "OP_SEL"),
+        (_gfx950_core_overlays(), "ocp", "OP_SEL"),
+        (_gfx12_core_overlays(), "ocp", "OPSEL"),
+        (_gfx125x_core_overlays(), "ocp", "OPSEL"),
+    ):
+        descriptors = {
+            descriptor.descriptor_key: descriptor for descriptor in descriptor_set
+        }
+        for target_type in ("fp8", "bf8"):
+            key_prefix = f"amdgpu.v_cvt_pk_{target_type}_f32.{target_semantics}"
+            low_descriptor = descriptors[f"{key_prefix}.low"]
+            high_descriptor = descriptors[f"{key_prefix}.high"]
+
+            assert low_descriptor.operands[0].descriptor_operand.register_part == (
+                _REG_PART_VGPR_LOW16
+            )
+            assert low_descriptor.fixed_encoding_fields == ((op_sel_field, 0),)
+            assert low_descriptor.constraints == ()
+
+            assert high_descriptor.operands[0].descriptor_operand.register_part == (
+                _REG_PART_VGPR_HIGH16
+            )
+            accumulator = high_descriptor.operands[1].descriptor_operand
+            assert accumulator.register_part == _REG_PART_VGPR_LOW16
+            assert OperandFlag.IMPLICIT in accumulator.flags
+            assert OperandFlag.STORAGE_CONTINUATION in accumulator.flags
+            assert high_descriptor.fixed_encoding_fields == ((op_sel_field, 0b100),)
+            assert tuple(
+                constraint.kind for constraint in high_descriptor.constraints
+            ) == (ConstraintKind.TIED,)
+            assert (
+                high_descriptor.asm_forms[0].native_assembly_values[-1].literal
+                == "op_sel:[0,0,1]"
+            )
+
+    unsupported_f16_descriptor_sets = (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx12_core_overlays(),
+    )
+    for descriptor_set in unsupported_f16_descriptor_sets:
+        descriptor_keys = {descriptor.descriptor_key for descriptor in descriptor_set}
+        assert "amdgpu.v_cvt_pk_fp8_f16.ocp.low" not in descriptor_keys
+        assert "amdgpu.v_cvt_pk_bf8_f16.ocp.low" not in descriptor_keys
+
+    gfx125x_descriptors = {
+        descriptor.descriptor_key: descriptor for descriptor in _gfx125x_core_overlays()
+    }
+    for target_type in ("fp8", "bf8"):
+        key_prefix = f"amdgpu.v_cvt_pk_{target_type}_f16.ocp"
+        low_descriptor = gfx125x_descriptors[f"{key_prefix}.low"]
+        high_descriptor = gfx125x_descriptors[f"{key_prefix}.high"]
+        assert low_descriptor.fixed_encoding_fields == (("OPSEL", 0),)
+        assert high_descriptor.fixed_encoding_fields == (("OPSEL", 0b10),)
+        assert (
+            high_descriptor.asm_forms[0].native_assembly_values[-1].literal
+            == "op_sel:[0,1]"
+        )
+
+
 def test_packed_binary_descriptors_pin_lane_container_widths() -> None:
     packed_keys = (
         "amdgpu.v_pk_add_f16",

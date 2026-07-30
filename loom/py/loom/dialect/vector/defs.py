@@ -3406,7 +3406,14 @@ vector_fptrunc = _vector_cast(
     phase=OpPhase.EXECUTABLE,
     source_constraint=HasFloatElement,
     result_constraint=FLOAT_ELEMENT,
-    doc=("Lanewise floating-point precision truncation. Source and result shapes match exactly; only the floating-point element type narrows."),
+    doc=(
+        "Lanewise floating-point precision truncation using round-to-nearest, "
+        "ties-to-even. Source and result shapes match exactly; only the "
+        "floating-point element type narrows. Special values follow the "
+        "destination format: f8E4M3 saturates finite overflow and infinities "
+        "to its signed maximum finite value while preserving NaNs; IEEE "
+        "formats preserve infinities and NaNs."
+    ),
     constraints=[ElementWidthLessThan("result", "input")],
     facts="loom_vector_fptrunc_facts",
     canonicalize="loom_vector_fptrunc_canonicalize",

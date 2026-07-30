@@ -5051,6 +5051,138 @@ def _v_cvt_pk_f16_packed8_overlays(
     )
 
 
+def _v_cvt_pk_packed8_encode_overlay(
+    target_type: str,
+    source_type: str,
+    target_semantics: str,
+    result_part: str,
+    *,
+    op_sel_field: str,
+) -> AmdgpuDescriptorOverlay:
+    result_register_part = {
+        "low": _REG_PART_VGPR_LOW16,
+        "high": _REG_PART_VGPR_HIGH16,
+    }[result_part]
+    is_high_result = result_part == "high"
+    if source_type == "f32":
+        source_operands = (
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("low")),
+            AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("high")),
+        )
+        high_op_sel = 0b100
+        native_source_values = (
+            _native_operand("low"),
+            _native_operand("high"),
+        )
+        high_native_modifier = "op_sel:[0,0,1]"
+    elif source_type == "f16":
+        source_operands = (AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),)
+        high_op_sel = 0b10
+        native_source_values = (_native_operand("input"),)
+        high_native_modifier = "op_sel:[0,1]"
+    else:
+        raise ValueError(f"unsupported packed8 encode source type '{source_type}'")
+
+    accumulator_operands = (
+        (
+            AmdgpuOperandOverlay(
+                "VDST",
+                Operand(
+                    "acc",
+                    OperandRole.OPERAND,
+                    _VGPR_ALT,
+                    flags=(
+                        OperandFlag.IMPLICIT,
+                        OperandFlag.STORAGE_CONTINUATION,
+                    ),
+                    register_part=_REG_PART_VGPR_LOW16,
+                ),
+                role_exception_reason=(
+                    "the encoded destination register carries the untouched "
+                    "packed byte pair"
+                ),
+            ),
+        )
+        if is_high_result
+        else ()
+    )
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=(
+            f"amdgpu.v_cvt_pk_{target_type}_{source_type}."
+            f"{target_semantics}.{result_part}"
+        ),
+        instruction_name=f"V_CVT_PK_{target_type.upper()}_{source_type.upper()}",
+        mnemonic=f"v_cvt_pk_{target_type}_{source_type}_{result_part}",
+        encoding_name="ENC_VOP3",
+        semantic_tag=(
+            f"convert.float.{source_type}x2."
+            f"{target_type}.{target_semantics}x2.{result_part}"
+        ),
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay(
+                "VDST", _vgpr_result(register_part=result_register_part)
+            ),
+            *accumulator_operands,
+            *source_operands,
+        ),
+        constraints=(
+            (Constraint(ConstraintKind.TIED, 0, 1),) if is_high_result else ()
+        ),
+        fixed_encoding_fields=((op_sel_field, high_op_sel if is_high_result else 0),),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=(
+                *(("acc",) if is_high_result else ()),
+                *(("low", "high") if source_type == "f32" else ("input",)),
+            ),
+            native_assembly_mnemonic=(f"v_cvt_pk_{target_type}_{source_type}"),
+            native_assembly_values=(
+                _native_result("dst"),
+                *native_source_values,
+                *((_native_literal(high_native_modifier),) if is_high_result else ()),
+            ),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_cvt_pk_packed8_from_f32_overlays(
+    target_semantics: str,
+    *,
+    op_sel_field: str,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return tuple(
+        _v_cvt_pk_packed8_encode_overlay(
+            target_type,
+            "f32",
+            target_semantics,
+            result_part,
+            op_sel_field=op_sel_field,
+        )
+        for target_type in ("fp8", "bf8")
+        for result_part in ("low", "high")
+    )
+
+
+def _v_cvt_pk_packed8_from_f16_overlays(
+    target_semantics: str,
+    *,
+    op_sel_field: str,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return tuple(
+        _v_cvt_pk_packed8_encode_overlay(
+            target_type,
+            "f16",
+            target_semantics,
+            result_part,
+            op_sel_field=op_sel_field,
+        )
+        for target_type in ("fp8", "bf8")
+        for result_part in ("low", "high")
+    )
+
+
 def _v_cvt_f16_packed8_byte_overlays(
     source_semantics: str,
 ) -> tuple[AmdgpuDescriptorOverlay, ...]:
@@ -6175,6 +6307,8 @@ __all__ = (
     "_v_cvt_pk_bf16_f32_overlay",
     "_v_cvt_f16_packed8_byte_overlays",
     "_v_cvt_pk_f16_packed8_overlays",
+    "_v_cvt_pk_packed8_from_f16_overlays",
+    "_v_cvt_pk_packed8_from_f32_overlays",
     "_v_cvt_pk_u16_u32_dpp16_overlay",
     "_v_cvt_pk_u16_u32_overlay",
     "_v_cvt_scale_pk8_overlays",
