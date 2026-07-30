@@ -390,7 +390,7 @@
         "args": [
           "{srcdir}/wave64_reductions.loom",
           "--backend=amdgpu-hal",
-          "--target=gfx11-generic",
+          "--target=gfx1151",
           "--output={tmp}/wave64_reductions.vmfb",
           "--emit-target-artifact={tmp}/wave64_reductions.hsaco",
           "--artifact-manifest=summary",
@@ -400,7 +400,7 @@
       "stderr": {
         "contains": {
           "unordered": [
-            "\"target_key\":\"gfx11-generic\"",
+            "\"target_key\":\"gfx1151\"",
             "\"artifact_format\":\"elf\"",
             "\"status\":{\"code\":0,\"name\":\"OK\"}",
             "\"function\":\"wave64_workgroup_reduce_sub_wave\"",
@@ -423,7 +423,12 @@
         },
         {
           "path": "{tmp}/wave64_reductions.hsaco.manifest.json",
-          "non_empty": true
+          "contains": [
+            "\"family\":\"amdgpu\"",
+            "\"selector\":\"gfx1151\"",
+            "\"processor\":\"gfx1151\"",
+            "\"code_object_target\":\"amdgcn-amd-amdhsa--gfx1151\""
+          ]
         }
       ]
     },

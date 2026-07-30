@@ -419,7 +419,6 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         ParseWorkgroupStorageKernel(processor_name, byte_length, &module));
 
     loom_amdgpu_hal_kernel_library_options_t options = {
-        /*.target_selection=*/{},
         /*.runtime_globals=*/{},
         /*.data_symbols=*/{},
         /*.data_symbol_count=*/{},
@@ -612,7 +611,6 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
 
     loom_amdgpu_hal_kernel_library_t library = {};
     loom_amdgpu_hal_kernel_library_options_t options = {
-        /*.target_selection=*/{},
         /*.runtime_globals=*/{},
         /*.data_symbols=*/{},
         /*.data_symbol_count=*/{},
@@ -665,7 +663,6 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx1250HardwareEntryEnvelope) {
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
-      /*.target_selection=*/{},
       /*.runtime_globals=*/{},
       /*.data_symbols=*/{},
       /*.data_symbol_count=*/{},
@@ -735,7 +732,6 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsDynamicLocalSizeKernel) {
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
-      /*.target_selection=*/{},
       /*.runtime_globals=*/{},
       /*.data_symbols=*/{},
       /*.data_symbol_count=*/{},
@@ -878,7 +874,6 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedCanonicalTarget) {
     DiagnosticCapture capture;
     loom_amdgpu_hal_kernel_library_t library = {};
     loom_amdgpu_hal_kernel_library_options_t options = {
-        /*.target_selection=*/{},
         /*.runtime_globals=*/{},
         /*.data_symbols=*/{},
         /*.data_symbol_count=*/{},
@@ -1019,7 +1014,6 @@ TEST_F(AmdgpuHalKernelLibraryTest,
     DiagnosticCapture capture;
     loom_amdgpu_hal_kernel_library_t library = {};
     const loom_amdgpu_hal_kernel_library_options_t options = {
-        /*.target_selection=*/{},
         /*.runtime_globals=*/{},
         /*.data_symbols=*/{},
         /*.data_symbol_count=*/{},
@@ -1132,7 +1126,6 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
     DiagnosticCapture capture;
     loom_amdgpu_hal_kernel_library_t library = {};
     loom_amdgpu_hal_kernel_library_options_t options = {
-        /*.target_selection=*/{},
         /*.runtime_globals=*/{},
         /*.data_symbols=*/{},
         /*.data_symbol_count=*/{},
@@ -1194,7 +1187,6 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsTensorWaitCounter) {
       LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
-      /*.target_selection=*/{},
       /*.runtime_globals=*/{},
       /*.data_symbols=*/{},
       /*.data_symbol_count=*/{},
@@ -1227,7 +1219,6 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsArgumentMetadataFromLowKernelAbi) {
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
-      /*.target_selection=*/{},
       /*.runtime_globals=*/{},
       /*.data_symbols=*/{},
       /*.data_symbol_count=*/{},
@@ -1263,7 +1254,6 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsAllCompatibleKernels) {
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
-      /*.target_selection=*/{},
       /*.runtime_globals=*/{},
       /*.data_symbols=*/{},
       /*.data_symbol_count=*/{},
@@ -1309,7 +1299,6 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsRequestedRuntimeGlobals) {
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
-      /*.target_selection=*/{},
       /*.runtime_globals=*/LOOM_AMDGPU_RUNTIME_GLOBAL_ASAN_CONFIG |
           LOOM_AMDGPU_RUNTIME_GLOBAL_TSAN_CONFIG |
           LOOM_AMDGPU_RUNTIME_GLOBAL_FEEDBACK_CONFIG,
@@ -1419,7 +1408,6 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
-      /*.target_selection=*/{},
       /*.runtime_globals=*/LOOM_AMDGPU_RUNTIME_GLOBAL_FEEDBACK_CONFIG,
       /*.data_symbols=*/&site_symbol,
       /*.data_symbol_count=*/1,
@@ -1496,7 +1484,6 @@ TEST_F(AmdgpuHalKernelLibraryTest, RejectsRel32AddWithoutPcProvenance) {
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
-      /*.target_selection=*/{},
       /*.runtime_globals=*/LOOM_AMDGPU_RUNTIME_GLOBAL_FEEDBACK_CONFIG,
       /*.data_symbols=*/{},
       /*.data_symbol_count=*/{},
@@ -1549,7 +1536,6 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
-      /*.target_selection=*/{},
       /*.runtime_globals=*/LOOM_AMDGPU_RUNTIME_GLOBAL_FEEDBACK_CONFIG,
       /*.data_symbols=*/{},
       /*.data_symbol_count=*/{},
@@ -1617,7 +1603,6 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsSourceLoweredSanitizerSiteTableRodata) {
 
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
-      /*.target_selection=*/{},
       /*.runtime_globals=*/LOOM_AMDGPU_RUNTIME_GLOBAL_ASAN_CONFIG |
           LOOM_AMDGPU_RUNTIME_GLOBAL_FEEDBACK_CONFIG,
       /*.data_symbols=*/{},

@@ -189,11 +189,13 @@ target.generic<reference> @base
   loom_op_t* target_op = nullptr;
   IREE_ASSERT_OK(loom_target_record_projection_build(
       &builder, LOOM_OP_TARGET_GENERIC, LOOM_TARGET_GENERIC_KIND_REFERENCE,
-      symbol, &selected_storage.bundle, /*extension_attrs=*/nullptr,
+      symbol, &selected_storage.bundle, /*authored_target_op=*/nullptr,
+      /*extension_attrs=*/nullptr,
       /*extension_attr_count=*/0, LOOM_LOCATION_UNKNOWN, &target_op));
   ASSERT_NE(target_op, nullptr);
   EXPECT_TRUE(loom_target_record_projection_matches_bundle(
-      module.get(), target_op, &selected_storage.bundle));
+      module.get(), target_op, &selected_storage.bundle,
+      /*authored_target_op=*/nullptr));
   const loom_target_like_descriptor_t* descriptor = loom_target_like_descriptor(
       loom_target_like_cast(module.get(), target_op));
   ASSERT_NE(descriptor, nullptr);
@@ -235,6 +237,71 @@ target.generic<reference> @base
   EXPECT_TRUE(iree_string_view_equal(facts->storage.config.contract_set_key,
                                      IREE_SV("test.materialized")));
   EXPECT_EQ(facts->storage.config.contract_feature_bits, UINT64_C(0x1234));
+}
+
+TEST_F(TargetFactsTest,
+       MaterializedProjectionRefinesProfileWithAuthoredFunctionFacts) {
+  ModulePtr module = ParseModule(R"(
+target.generic<reference> @profile
+target.generic<reference> @authored {
+  max_workgroup_size_x = 64,
+  abi = hal_kernel,
+  export_symbol = "authored_kernel",
+  linkage = dso_local
+}
+)");
+  const loom_target_symbol_facts_t* profile_facts =
+      LookupTarget(module.get(), IREE_SV("profile"));
+  loom_target_bundle_storage_t profile_storage = profile_facts->storage;
+  loom_target_bundle_storage_rebind(&profile_storage);
+  profile_storage.snapshot.max_workgroup_size.x = 256;
+  profile_storage.export_plan.abi_kind = LOOM_TARGET_ABI_OBJECT_FUNCTION;
+  profile_storage.export_plan.export_symbol = IREE_SV("profile_function");
+  profile_storage.export_plan.linkage = LOOM_TARGET_LINKAGE_DEFAULT;
+
+  const loom_symbol_id_t authored_symbol_id =
+      FindSymbol(module.get(), IREE_SV("authored"));
+  const loom_op_t* authored_target_op =
+      module->symbols.entries[authored_symbol_id].defining_op;
+
+  loom_string_id_t refined_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module.get(), IREE_SV("refined"),
+                                           &refined_name_id));
+  loom_symbol_id_t refined_symbol_id = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module.get(), refined_name_id,
+                                        &refined_symbol_id));
+  const loom_symbol_ref_t refined_ref = {
+      /*.module_id=*/0,
+      /*.symbol_id=*/refined_symbol_id,
+  };
+
+  loom_builder_t builder = {};
+  loom_builder_initialize(module.get(), &module->arena,
+                          loom_module_block(module.get()), &builder);
+  loom_op_t* refined_target_op = nullptr;
+  IREE_ASSERT_OK(loom_target_record_projection_build(
+      &builder, LOOM_OP_TARGET_GENERIC, LOOM_TARGET_GENERIC_KIND_REFERENCE,
+      refined_ref, &profile_storage.bundle, authored_target_op,
+      /*extension_attrs=*/nullptr,
+      /*extension_attr_count=*/0, LOOM_LOCATION_UNKNOWN, &refined_target_op));
+  ASSERT_NE(refined_target_op, nullptr);
+  EXPECT_TRUE(loom_target_record_projection_matches_bundle(
+      module.get(), refined_target_op, &profile_storage.bundle,
+      authored_target_op));
+  EXPECT_FALSE(loom_target_record_projection_matches_bundle(
+      module.get(), refined_target_op, &profile_storage.bundle,
+      /*authored_target_op=*/nullptr));
+
+  const loom_target_symbol_facts_t* refined_facts =
+      LookupTarget(module.get(), IREE_SV("refined"));
+  EXPECT_EQ(refined_facts->storage.snapshot.max_workgroup_size.x, 256u);
+  EXPECT_EQ(refined_facts->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_HAL_KERNEL);
+  EXPECT_TRUE(
+      iree_string_view_equal(refined_facts->storage.export_plan.export_symbol,
+                             IREE_SV("authored_kernel")));
+  EXPECT_EQ(refined_facts->storage.export_plan.linkage,
+            LOOM_TARGET_LINKAGE_DSO_LOCAL);
 }
 
 TEST_F(TargetFactsTest, InvalidSelectorProducesNoFacts) {

@@ -444,7 +444,7 @@ static iree_status_t loom_target_compile_report_format_source_low_target_rows(
       const iree_string_view_t target_config_name =
           loom_target_compile_report_text_non_empty(row->target_config_name);
       const iree_string_view_t target_source =
-          loom_target_selection_source_name(row->target_source);
+          loom_target_binding_source_name(row->target_source);
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           builder,
           "COMPILE-REPORT: source_low_target[%" PRIhsz

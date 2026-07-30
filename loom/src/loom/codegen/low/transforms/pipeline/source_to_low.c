@@ -41,14 +41,14 @@ typedef struct loom_low_source_to_low_parse_context_t {
   loom_low_source_to_low_pass_state_t* state;
 } loom_low_source_to_low_parse_context_t;
 
-static iree_status_t loom_low_source_to_low_record_target_selection(
+static iree_status_t loom_low_source_to_low_record_target_specialization(
     loom_target_compile_report_t* compile_report,
     const loom_low_source_selection_t* selection) {
   if (!loom_target_compile_report_wants_details(
           compile_report, LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS)) {
     return iree_ok_status();
   }
-  if (selection->target_source != LOOM_TARGET_SELECTION_SOURCE_INVOCATION) {
+  if (selection->target_source != LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION) {
     return iree_ok_status();
   }
   const loom_target_bundle_t* bundle = selection->target_bundle;
@@ -317,16 +317,15 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
       .policy_registry = policy_registry,
       .diagnostic_emitter = pass->diagnostic_emitter,
       .lowering_kind = IREE_SV("source-to-low"),
-      .target_selection =
-          loom_target_pass_capability_target_selection(target_capability),
-      .target_ref = loom_target_pass_capability_target_ref(target_capability),
+      .specialization_context =
+          loom_target_pass_capability_specialization_context(target_capability),
       .collect_target_candidates = record_source_low_targets,
   };
   iree_status_t status = loom_low_select_source_symbols(
       module, &selection_options, &selection_arena, &selection_list);
   for (iree_host_size_t i = 0;
        i < selection_list.count && iree_status_is_ok(status); ++i) {
-    status = loom_low_source_to_low_record_target_selection(
+    status = loom_low_source_to_low_record_target_specialization(
         compile_report, &selection_list.values[i]);
   }
   if (iree_status_is_ok(status)) {

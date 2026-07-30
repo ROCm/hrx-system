@@ -338,7 +338,13 @@ TEST_F(SpirvVulkanHalArtifactProviderTest, EmitsRawBdaSpirvArtifact) {
   EXPECT_EQ(artifact.hal_target, target.hal_target);
   EXPECT_TRUE(
       iree_string_view_equal(artifact.target_key, IREE_SV("vulkan1.3+bda")));
-  EXPECT_EQ(artifact.target_bundle, loom_run_hal_device_target_bundle(&target));
+  ASSERT_NE(artifact.target_bundle, nullptr);
+  EXPECT_EQ(artifact.target_bundle->snapshot->codegen_format,
+            LOOM_TARGET_CODEGEN_FORMAT_SPIRV);
+  EXPECT_EQ(artifact.target_bundle->snapshot->artifact_format,
+            LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY);
+  EXPECT_EQ(artifact.target_bundle->export_plan->abi_kind,
+            LOOM_TARGET_ABI_HAL_KERNEL);
   EXPECT_EQ(artifact.target_artifact_format,
             LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY);
   EXPECT_EQ(artifact.target_artifact_data.data, artifact.executable_data.data);

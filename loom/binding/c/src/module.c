@@ -364,8 +364,8 @@ static loomc_status_t loomc_module_select_single_low_descriptor_set_key(
     loom_low_resolved_target_t target = {0};
     LOOMC_RETURN_IF_ERROR(
         loomc_status_from_iree(loom_low_resolve_function_target(
-            internal_module, op, registry, loom_target_selection_empty(),
-            (iree_diagnostic_emitter_t){0}, &target)));
+            internal_module, op, registry, (iree_diagnostic_emitter_t){0},
+            &target)));
     if (target.descriptor_set == NULL) {
       return loomc_make_status(
           LOOMC_STATUS_FAILED_PRECONDITION,

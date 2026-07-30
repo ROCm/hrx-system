@@ -58,8 +58,6 @@ using TargetEnvironmentPtr =
     HandlePtr<loomc_target_environment_t, loomc_target_environment_release>;
 using TargetProfilePtr =
     HandlePtr<loomc_target_profile_t, loomc_target_profile_release>;
-using TargetSelectionPtr =
-    HandlePtr<loomc_target_selection_t, loomc_target_selection_release>;
 
 static const loom_target_profile_type_t kFakeTargetProfileType = {
     /*.name=*/IREE_SVL("fake-link"),
@@ -99,19 +97,19 @@ static iree_string_view_t FakeTargetMaterializationSymbolStem(
              : iree_string_view_empty();
 }
 
-static bool FakeTargetRecordMatchesProfile(
+static bool FakeTargetRecordMatchesEffectiveTarget(
     const loom_module_t* module, const loom_op_t* target_op,
-    const loom_target_profile_t* profile) {
+    const loom_target_profile_t* profile, const loom_op_t* authored_target_op) {
   return loom_target_profile_has_type(profile, &kFakeTargetProfileType) &&
          loom_test_target_kind(target_op) == LOOM_TEST_TARGET_KIND_LOW_CORE &&
-         loom_target_record_projection_matches_bundle(module, target_op,
-                                                      profile->target_bundle);
+         loom_target_record_projection_matches_bundle(
+             module, target_op, profile->target_bundle, authored_target_op);
 }
 
-static iree_status_t BuildFakeTargetProfileRecord(
+static iree_status_t BuildFakeTargetEffectiveRecord(
     loom_builder_t* builder, const loom_target_profile_t* profile,
-    loom_symbol_ref_t symbol, loom_location_id_t location,
-    loom_op_t** out_target_op) {
+    const loom_op_t* authored_target_op, loom_symbol_ref_t symbol,
+    loom_location_id_t location, loom_op_t** out_target_op) {
   if (!loom_target_profile_has_type(profile, &kFakeTargetProfileType)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -119,7 +117,8 @@ static iree_status_t BuildFakeTargetProfileRecord(
   }
   return loom_target_record_projection_build(
       builder, LOOM_OP_TEST_TARGET, LOOM_TEST_TARGET_KIND_LOW_CORE, symbol,
-      profile->target_bundle, /*extension_attrs=*/nullptr,
+      profile->target_bundle, authored_target_op,
+      /*extension_attrs=*/nullptr,
       /*extension_attr_count=*/0, location, out_target_op);
 }
 
@@ -140,8 +139,10 @@ static const loom_target_provider_t kFakeTargetProvider = {
     /*.materialization=*/
     {
         /*.symbol_stem=*/FakeTargetMaterializationSymbolStem,
-        /*.record_matches_profile=*/FakeTargetRecordMatchesProfile,
-        /*.build_profile_record=*/BuildFakeTargetProfileRecord,
+        /*.record_matches_effective_target=*/
+        FakeTargetRecordMatchesEffectiveTarget,
+        /*.build_effective_target_record=*/
+        BuildFakeTargetEffectiveRecord,
     },
     /*.record_semantics=*/
     {
@@ -308,14 +309,6 @@ TargetProfilePtr CreateFakeTargetProfile(
       /*deinitialize=*/nullptr, loomc_allocator_system(), &profile);
   LOOMC_EXPECT_OK(status);
   return TargetProfilePtr(profile);
-}
-
-TargetSelectionPtr CreateTargetSelection(loomc_target_profile_t* profile) {
-  loomc_target_selection_t* selection = nullptr;
-  loomc_status_t status = loomc_target_selection_create_from_profile(
-      profile, loomc_allocator_system(), &selection);
-  LOOMC_EXPECT_OK(status);
-  return TargetSelectionPtr(selection);
 }
 
 SourcePtr CreateSource(loomc_source_format_t format, const char* identifier,
@@ -856,18 +849,23 @@ func.def public @entry() -> (index) {
   EXPECT_EQ(second_text.find("4096"), std::string::npos);
 }
 
-TEST(LinkTest, LinkModuleMaterializesInvocationTargetOnLinkedOutput) {
+TEST(LinkTest, LinkModulePreservesAuthoredTargetSet) {
   TargetEnvironmentPtr target_environment = CreateFakeTargetEnvironment();
-  TargetProfilePtr profile = CreateFakeTargetProfile(target_environment.get());
-  TargetSelectionPtr target_selection = CreateTargetSelection(profile.get());
   ContextPtr context = CreateContext(target_environment.get());
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr source = CreateTextSource("multi_root.loom", R"(
-func.def public @first() {
+test.target<low_core> @first_target
+test.target<quirky> @second_target
+
+func.def public target(@first_target) @first() {
   func.return
 }
 
-func.def public @second() {
+func.def public target(@second_target) @second() {
+  func.return
+}
+
+func.def public @targetless() {
   func.return
 }
 )");
@@ -878,16 +876,10 @@ func.def public @second() {
   FinishIndex(builder.get(), &link_index);
   LinkerPtr linker = CreateLinker(context.get());
   WorkspacePtr workspace = CreateWorkspace();
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/target_selection.get(),
-  };
   loomc_link_options_t options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
       /*.structure_size=*/0,
-      /*.next=*/&target_options,
+      /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
       /*.root_symbols=*/nullptr,
@@ -905,17 +897,25 @@ func.def public @second() {
   VerifyModule(internal_module);
   EXPECT_TRUE(ModuleHasSymbol(internal_module, "first"));
   EXPECT_TRUE(ModuleHasSymbol(internal_module, "second"));
-  EXPECT_TRUE(ModuleHasSymbol(internal_module, "selected_link_target"));
+  EXPECT_TRUE(ModuleHasSymbol(internal_module, "targetless"));
+  EXPECT_TRUE(ModuleHasSymbol(internal_module, "first_target"));
+  EXPECT_TRUE(ModuleHasSymbol(internal_module, "second_target"));
 
   std::string linked_text = SerializeModuleToText(module.get());
-  EXPECT_NE(linked_text.find("test.target<low_core> @selected_link_target"),
+  EXPECT_NE(linked_text.find("test.target<low_core> @first_target"),
             std::string::npos);
+  EXPECT_NE(linked_text.find("test.target<quirky> @second_target"),
+            std::string::npos);
+  EXPECT_NE(linked_text.find("func.def public target(@first_target) @first"),
+            std::string::npos);
+  EXPECT_NE(linked_text.find("func.def public target(@second_target) @second"),
+            std::string::npos);
+  EXPECT_NE(linked_text.find("func.def public @targetless"), std::string::npos);
 }
 
-TEST(LinkTest, LinkAndCompileSelectsTargetApplicableProviderThroughCOptions) {
+TEST(LinkTest, LinkThenCompileSpecializesEntryForTemplateSelection) {
   TargetEnvironmentPtr target_environment = CreateFakeTargetEnvironment();
   TargetProfilePtr profile = CreateFakeTargetProfile(target_environment.get());
-  TargetSelectionPtr target_selection = CreateTargetSelection(profile.get());
   ContextPtr context = CreateContext(target_environment.get());
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr root_source = CreateTextSource("root.loom", R"(
@@ -950,19 +950,13 @@ func.template<demo.capi_selected> priority(1) @fallback_provider(%value: i32) ->
   FinishIndex(builder.get(), &link_index);
   LinkerPtr linker = CreateLinker(context.get());
   WorkspacePtr workspace = CreateWorkspace();
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/target_selection.get(),
-  };
   loomc_string_view_t roots[] = {
       loomc_make_cstring_view("@entry"),
   };
   loomc_link_options_t link_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
       /*.structure_size=*/0,
-      /*.next=*/&target_options,
+      /*.next=*/nullptr,
       /*.link_index=*/nullptr,
       /*.module_name=*/loomc_string_view_empty(),
       /*.root_symbols=*/roots,
@@ -985,6 +979,17 @@ func.template<demo.capi_selected> priority(1) @fallback_provider(%value: i32) ->
   CompilerPtr compiler = CreateCompiler(context.get());
   PassProgramPtr pass_program = CreatePassProgramFromPipelineText(
       context.get(), "select-templates,inline-callables,symbol-dce");
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("entry"),
+      /*.target_profile=*/profile.get(),
+  };
+  loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
+  };
   loomc_compile_options_t compile_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
       /*.structure_size=*/sizeof(compile_options),

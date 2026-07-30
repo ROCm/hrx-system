@@ -11,6 +11,7 @@
 
 #include "iree/testing/gtest.h"
 #include "loomc/artifact.h"
+#include "loomc/artifact_manifest.h"
 #include "loomc/compile.h"
 #include "loomc/context.h"
 #include "loomc/emit.h"
@@ -38,8 +39,6 @@ using TargetEnvironmentPtr =
     HandlePtr<loomc_target_environment_t, loomc_target_environment_release>;
 using TargetProfilePtr =
     HandlePtr<loomc_target_profile_t, loomc_target_profile_release>;
-using TargetSelectionPtr =
-    HandlePtr<loomc_target_selection_t, loomc_target_selection_release>;
 using WorkspacePtr = HandlePtr<loomc_workspace_t, loomc_workspace_release>;
 
 std::string ToString(loomc_string_view_t value) {
@@ -151,18 +150,30 @@ ModulePtr DeserializeModule(loomc_context_t* context,
   return ModulePtr(module);
 }
 
-PassProgramPtr CreatePreparedLowPassProgram(
-    loomc_context_t* context, loomc_target_selection_t* target_selection) {
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
+std::string SerializeModuleToText(const loomc_module_t* module) {
+  loomc_module_serialize_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
       /*.next=*/nullptr,
-      /*.target_selection=*/target_selection,
+      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
+      /*.identifier=*/loomc_make_cstring_view("compiled.loom"),
   };
+  loomc_source_t* source = nullptr;
+  loomc_status_t status = loomc_module_serialize_to_source(
+      module, &options, loomc_allocator_system(), &source);
+  LOOMC_EXPECT_OK(status);
+  if (!loomc_status_is_ok(status)) {
+    return std::string();
+  }
+  SourcePtr source_ptr(source);
+  return ToString(loomc_source_contents(source_ptr.get()));
+}
+
+PassProgramPtr CreatePreparedLowPassProgram(loomc_context_t* context) {
   loomc_target_pipeline_options_t pipeline_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
       /*.structure_size=*/sizeof(pipeline_options),
-      /*.next=*/&target_options,
+      /*.next=*/nullptr,
       /*.identifier=*/loomc_make_cstring_view("amdgpu-prepared-low-test"),
       /*.kind=*/LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
       /*.control_flow_lowering=*/LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
@@ -211,16 +222,6 @@ TargetProfilePtr CreateTargetProfile(
       target_environment, &profile_options, loomc_allocator_system(), &profile);
   LOOMC_EXPECT_OK(status);
   return TargetProfilePtr(profile);
-}
-
-TargetSelectionPtr CreateTargetSelection(
-    loomc_target_environment_t* target_environment, const char* target) {
-  TargetProfilePtr profile = CreateTargetProfile(target_environment, target);
-  loomc_target_selection_t* selection = nullptr;
-  loomc_status_t status = loomc_target_selection_create_from_profile(
-      profile.get(), loomc_allocator_system(), &selection);
-  LOOMC_EXPECT_OK(status);
-  return TargetSelectionPtr(selection);
 }
 
 TEST(AmdgpuTargetTest, TargetProfilePreservesCanonicalTarget) {
@@ -391,18 +392,22 @@ TEST(AmdgpuTargetTest, HsaAdapterRejectsNonAmdhsaFeature) {
 
 ResultPtr EmitModule(loomc_target_environment_t* target_environment,
                      loomc_workspace_t* workspace, loomc_module_t* module,
-                     loomc_target_selection_t* selection,
-                     loomc_amdgpu_runtime_global_flags_t runtime_globals) {
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
+                     loomc_amdgpu_runtime_global_flags_t runtime_globals,
+                     loomc_artifact_manifest_mode_t artifact_manifest_mode =
+                         LOOMC_ARTIFACT_MANIFEST_MODE_NONE) {
+  loomc_artifact_manifest_options_t artifact_manifest_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,
+      /*.structure_size=*/sizeof(artifact_manifest_options),
       /*.next=*/nullptr,
-      /*.target_selection=*/selection,
+      /*.mode=*/artifact_manifest_mode,
+      /*.identifier=*/loomc_string_view_empty(),
   };
   loomc_amdgpu_emit_options_t amdgpu_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_EMIT_OPTIONS,
       /*.structure_size=*/sizeof(amdgpu_options),
-      /*.next=*/&target_options,
+      /*.next=*/artifact_manifest_mode != LOOMC_ARTIFACT_MANIFEST_MODE_NONE
+          ? &artifact_manifest_options
+          : nullptr,
       /*.runtime_globals=*/runtime_globals,
   };
   loomc_emit_options_t emit_options = {
@@ -422,20 +427,22 @@ ResultPtr EmitModule(loomc_target_environment_t* target_environment,
   return ResultPtr(result);
 }
 
-TEST(AmdgpuTargetTest, CompileConfiguredHalKernelEmitsModuleTextArtifact) {
+TEST(AmdgpuTargetTest,
+     CompileSpecializesGenericHalKernelAndEmitsExactArtifact) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   ContextPtr context = CreateAmdgpuContext(target_environment.get());
   WorkspacePtr workspace = CreateWorkspace();
   CompilerPtr compiler = CreateCompiler(context.get());
-  TargetSelectionPtr selection =
-      CreateTargetSelection(target_environment.get(), "gfx11-generic");
-  PassProgramPtr pass_program =
-      CreatePreparedLowPassProgram(context.get(), selection.get());
+  TargetProfilePtr profile =
+      CreateTargetProfile(target_environment.get(), "gfx1151");
+  PassProgramPtr pass_program = CreatePreparedLowPassProgram(context.get());
   SourcePtr source = CreateTextSource("configured_store.loom", R"(
+amdgpu.target<gfx11-generic> @gfx11_generic
+
 config.decl @test.workgroups_x : %value: index where [range(%value, 1, 16)]
 config.decl @test.workgroup_size_x : %value: index where [range(%value, 1, 256)]
 
-kernel.def @configured_store() {
+kernel.def target(@gfx11_generic) @configured_store() {
   %workgroups_x = config.get @test.workgroups_x : index
   %workgroup_size_x = config.get @test.workgroup_size_x : index
   %one = index.constant 1 : index
@@ -462,11 +469,16 @@ kernel.def @configured_store() {
           /*.value=*/loomc_make_cstring_view("64"),
       },
   };
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("configured_store"),
+      /*.target_profile=*/profile.get(),
+  };
+  loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
       /*.structure_size=*/sizeof(target_options),
       /*.next=*/nullptr,
-      /*.target_selection=*/selection.get(),
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
   };
   loomc_compile_options_t options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
@@ -497,22 +509,131 @@ kernel.def @configured_store() {
                    LOOMC_ARTIFACT_FORMAT_LOOM_TEXT);
   ASSERT_NE(text_artifact, nullptr);
   EXPECT_EQ(ToString(text_artifact->identifier), "configured_store.loom");
-  EXPECT_NE(text_artifact->contents.data_length, 0u);
+  const std::string module_text = ToString(text_artifact->contents);
+  EXPECT_NE(module_text.find("amdgpu.target<gfx1151> @gfx1151"),
+            std::string::npos)
+      << module_text;
+  EXPECT_NE(module_text.find("low.kernel.def target(@gfx1151)"),
+            std::string::npos)
+      << module_text;
+  EXPECT_NE(module_text.find("@configured_store("), std::string::npos)
+      << module_text;
+
+  ResultPtr emit_result =
+      EmitModule(target_environment.get(), workspace.get(), module.get(),
+                 /*runtime_globals=*/0, LOOMC_ARTIFACT_MANIFEST_MODE_SUMMARY);
+  ExpectSucceededResult(emit_result.get());
+
+  const loomc_artifact_t* hsaco_artifact =
+      FindArtifact(emit_result.get(), LOOMC_ARTIFACT_KIND_EXECUTABLE,
+                   LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO);
+  ASSERT_NE(hsaco_artifact, nullptr);
+  const std::string hsaco = ToString(hsaco_artifact->contents);
+  EXPECT_NE(hsaco.find("amdgcn-amd-amdhsa--gfx1151"), std::string::npos);
+
+  const loomc_artifact_t* manifest_artifact =
+      FindArtifact(emit_result.get(), LOOMC_ARTIFACT_KIND_REPORT,
+                   LOOMC_ARTIFACT_FORMAT_ARTIFACT_MANIFEST_JSON);
+  ASSERT_NE(manifest_artifact, nullptr);
+  const std::string manifest = ToString(manifest_artifact->contents);
+  EXPECT_NE(manifest.find("\"family\":\"amdgpu\""), std::string::npos)
+      << manifest;
+  EXPECT_NE(manifest.find("\"selector\":\"gfx1151\""), std::string::npos)
+      << manifest;
+  EXPECT_NE(manifest.find("\"processor\":\"gfx1151\""), std::string::npos)
+      << manifest;
+  EXPECT_NE(
+      manifest.find("\"code_object_target\":\"amdgcn-amd-amdhsa--gfx1151\""),
+      std::string::npos)
+      << manifest;
 }
 
-TEST(AmdgpuTargetTest, EmitRuntimeGlobalsFromTargetOptions) {
+TEST(AmdgpuTargetTest,
+     CompileRejectsIncompatibleExactTargetWithoutBindingAnyFunction) {
+  TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
+  ContextPtr context = CreateAmdgpuContext(target_environment.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  TargetProfilePtr profile =
+      CreateTargetProfile(target_environment.get(), "gfx1151");
+  PassProgramPtr pass_program = CreatePreparedLowPassProgram(context.get());
+  SourcePtr source = CreateTextSource("incompatible_targets.loom", R"(
+amdgpu.target<gfx1170> @gfx1170
+
+func.def public target(@gfx1170) @incompatible() {
+  func.return
+}
+
+func.def public @otherwise_compatible() {
+  func.return
+}
+)");
+  ModulePtr module =
+      DeserializeModule(context.get(), workspace.get(), source.get());
+  const loomc_target_specialization_t specializations[] = {
+      {
+          /*.function_symbol=*/loomc_make_cstring_view("incompatible"),
+          /*.target_profile=*/profile.get(),
+      },
+      {
+          /*.function_symbol=*/loomc_make_cstring_view("otherwise_compatible"),
+          /*.target_profile=*/profile.get(),
+      },
+  };
+  loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/specializations,
+      /*.specialization_count=*/IREE_ARRAYSIZE(specializations),
+  };
+  loomc_compile_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/&target_options,
+  };
+
+  loomc_result_t* result = nullptr;
+  loomc_status_t status = loomc_compile_module(
+      compiler.get(), workspace.get(), pass_program.get(), module.get(),
+      &options, loomc_allocator_system(), &result);
+  LOOMC_EXPECT_OK(status);
+  ResultPtr result_ptr(result);
+  ASSERT_NE(result_ptr.get(), nullptr);
+  EXPECT_FALSE(loomc_result_succeeded(result_ptr.get()));
+  ASSERT_EQ(loomc_result_diagnostic_count(result_ptr.get()), 1u);
+  const loomc_diagnostic_t* diagnostic =
+      loomc_result_diagnostic_at(result_ptr.get(), 0);
+  ASSERT_NE(diagnostic, nullptr);
+  EXPECT_EQ(ToString(diagnostic->code), "TARGET/052");
+  const std::string diagnostic_message = ToString(diagnostic->message);
+  EXPECT_NE(diagnostic_message.find("gfx1170"), std::string::npos)
+      << diagnostic_message;
+  EXPECT_NE(diagnostic_message.find("gfx1151"), std::string::npos)
+      << diagnostic_message;
+  EXPECT_EQ(diagnostic_message.find("amdgpu-rdna3-5"), std::string::npos)
+      << diagnostic_message;
+
+  const std::string module_text = SerializeModuleToText(module.get());
+  EXPECT_NE(module_text.find("func.def public target(@gfx1170) @incompatible"),
+            std::string::npos)
+      << module_text;
+  EXPECT_NE(module_text.find("func.def public @otherwise_compatible"),
+            std::string::npos)
+      << module_text;
+}
+
+TEST(AmdgpuTargetTest, EmitRuntimeGlobalsFromAmdgpuOptions) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   ContextPtr context = CreateAmdgpuContext(target_environment.get());
   WorkspacePtr workspace = CreateWorkspace();
   ModulePtr module =
       CreatePreparedArithmeticModule(context.get(), workspace.get());
-  TargetSelectionPtr selection =
-      CreateTargetSelection(target_environment.get(), "gfx11-generic");
 
-  ResultPtr result = EmitModule(target_environment.get(), workspace.get(),
-                                module.get(), selection.get(),
-                                LOOMC_AMDGPU_RUNTIME_GLOBAL_FEEDBACK_CONFIG |
-                                    LOOMC_AMDGPU_RUNTIME_GLOBAL_ASAN_CONFIG);
+  ResultPtr result =
+      EmitModule(target_environment.get(), workspace.get(), module.get(),
+                 LOOMC_AMDGPU_RUNTIME_GLOBAL_FEEDBACK_CONFIG |
+                     LOOMC_AMDGPU_RUNTIME_GLOBAL_ASAN_CONFIG);
   ExpectSucceededResult(result.get());
 
   ASSERT_EQ(loomc_result_artifact_count(result.get()), 1u);

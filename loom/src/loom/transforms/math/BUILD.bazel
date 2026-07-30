@@ -38,7 +38,7 @@ loom_cc_library(
         "//loom/src/loom/rewrite:greedy",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:math_policy",
-        "//loom/src/loom/target:selection",
+        "//loom/src/loom/target:pass_environment",
         "//loom/src/loom/target/reporting:report",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

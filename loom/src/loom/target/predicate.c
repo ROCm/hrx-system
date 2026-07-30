@@ -16,7 +16,7 @@
 #include "loom/ops/pass/ops.h"
 #include "loom/ops/target/facts.h"
 #include "loom/target/function_contract.h"
-#include "loom/target/selection.h"
+#include "loom/target/pass_environment.h"
 
 static bool loom_target_pass_predicate_is_supported_attr(
     iree_string_view_t name) {
@@ -192,10 +192,7 @@ static iree_status_t loom_target_pass_predicate_resolve_facts(
   if (!out_facts->func) {
     return iree_ok_status();
   }
-  const loom_target_pass_capability_t* target_capability =
-      loom_target_pass_capability_from_environment(context->environment);
-  out_facts->target_ref = loom_target_effective_target_ref(
-      out_facts->func->target_symbol, target_capability);
+  out_facts->target_ref = out_facts->func->target_symbol;
   if (!loom_symbol_ref_is_valid(out_facts->target_ref)) {
     return iree_ok_status();
   }

@@ -816,9 +816,15 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
       provider->context->artifact_provider->default_pipeline_options;
   pipeline_options.target_pipeline_options.sanitizer = provider->sanitizer;
   pipeline_options.target_environment = provider->target_environment;
-  pipeline_options.target_selection = (loom_target_selection_t){
-      .profile = provider->compile_device_target.target_profile,
+  const loom_target_specialization_request_t specialization_request = {
+      .function_name = entry_symbol,
+      .target_profile = provider->compile_device_target.target_profile,
   };
+  pipeline_options.target_specializations =
+      (loom_target_specialization_request_list_t){
+          .values = &specialization_request,
+          .count = 1,
+      };
   pipeline_options.low_descriptor_registry =
       loom_run_session_low_descriptor_registry(provider->session);
   pipeline_options.diagnostic_sink = diagnostic_sink;

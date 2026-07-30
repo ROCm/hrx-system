@@ -29,6 +29,7 @@ loom_cc_library(
     deps = [
         ":vulkan_profile",
         "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target:function_contract",
         "//loom/src/loom/target:low_descriptor_registry",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/spirv:low_verify",

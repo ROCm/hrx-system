@@ -107,12 +107,13 @@ loom-compile \
   --compile-report-output=/tmp/loom-q6q8.compile-report.json
 ```
 
-`--target=gfx11-generic` is invocation target selection. The source kernel
-stays targetless, template providers are resolved against the effective target,
-and target-sensitive passes see that same selected target. A successful
-summary manifest for this kernel reports one `ffn_gate_up_swiglu_q6q8`
-function, four parameters/bindings, zero constant bytes, workgroup size
-`[512,1,1]`, and subgroup size `32`.
+`--target=gfx11-generic` specializes the kernel function for this compile
+invocation; it does not establish a module-global target. Template providers
+and target-sensitive passes resolve the durable target written onto that
+function, while other functions in a multi-target module remain unchanged. A
+successful summary manifest for this kernel reports one
+`ffn_gate_up_swiglu_q6q8` function, four parameters/bindings, zero constant
+bytes, workgroup size `[512,1,1]`, and subgroup size `32`.
 
 The artifact manifest describes the emitted artifact contract. The compile
 report describes compiler evidence for the invocation: status, selected backend

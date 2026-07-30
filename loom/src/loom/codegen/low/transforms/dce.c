@@ -69,13 +69,11 @@ static iree_status_t loom_low_dce_deadness_query(void* user_data,
 static iree_status_t loom_low_dce_function(
     loom_pass_t* pass, loom_module_t* module, loom_func_like_t function,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    loom_target_selection_t target_selection,
     iree_diagnostic_emitter_t emitter) {
   loom_op_t* low_func_op = function.op;
   loom_low_resolved_target_t target = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_resolve_function_target(module, low_func_op, descriptor_registry,
-                                       target_selection, emitter, &target));
+  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
+      module, low_func_op, descriptor_registry, emitter, &target));
   if (!target.descriptor_set) {
     return iree_ok_status();
   }
@@ -101,11 +99,6 @@ iree_status_t loom_low_dce_run(loom_pass_t* pass, loom_module_t* module,
       loom_low_pass_capability_from_pass(pass);
   const loom_low_descriptor_registry_t* descriptor_registry =
       loom_low_pass_capability_descriptor_registry(low_capability);
-  const loom_target_pass_capability_t* target_capability =
-      loom_target_pass_capability_from_pass(pass);
-  const loom_target_selection_t target_selection =
-      loom_target_pass_capability_target_selection(target_capability);
-
   return loom_low_dce_function(pass, module, function, descriptor_registry,
-                               target_selection, pass->diagnostic_emitter);
+                               pass->diagnostic_emitter);
 }

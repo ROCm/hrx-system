@@ -142,8 +142,8 @@ void loom_amdgpu_target_record_resolve_properties(
 
 iree_status_t loom_amdgpu_target_record_build_for_profile(
     loom_builder_t* builder, const loom_amdgpu_target_profile_t* profile,
-    loom_symbol_ref_t symbol, loom_location_id_t location,
-    loom_op_t** out_target_op) {
+    const loom_op_t* authored_target_op, loom_symbol_ref_t symbol,
+    loom_location_id_t location, loom_op_t** out_target_op) {
   if (builder == NULL || profile == NULL || profile->identity.target == NULL ||
       profile->base.target_bundle == NULL || out_target_op == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -184,7 +184,7 @@ iree_status_t loom_amdgpu_target_record_build_for_profile(
   }
   return loom_target_record_projection_build(
       builder, LOOM_OP_AMDGPU_TARGET, (uint8_t)target_record->target_kind,
-      symbol, profile->base.target_bundle, extension_attrs,
+      symbol, profile->base.target_bundle, authored_target_op, extension_attrs,
       extension_attr_count, location, out_target_op);
 }
 

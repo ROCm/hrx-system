@@ -212,8 +212,8 @@ typedef enum loomc_structure_type_e {
   /// `loomc_spirv_emit_options_t`.
   LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS = 14,
 
-  /// `loomc_target_selection_options_t`.
-  LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS = 16,
+  /// `loomc_target_specialization_options_t`.
+  LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS = 16,
 
   /// `loomc_spirv_profile_options_t`.
   LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS = 17,

@@ -93,9 +93,6 @@ typedef struct loom_low_verify_options_t {
   // target-owned static data; IR verification only uses it to resolve selected
   // descriptor sets and packet semantics.
   const loom_low_descriptor_registry_t* descriptor_registry;
-  // Optional runtime/device target overlay applied when compatible with a low
-  // function's target record.
-  loom_target_selection_t target_selection;
   // Structured diagnostic emitter for user IR failures.
   iree_diagnostic_emitter_t emitter;
   // Optional target-owned low verification providers.

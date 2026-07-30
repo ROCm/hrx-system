@@ -242,7 +242,6 @@ class AmdgpuSanitizerAccessTest : public ::testing::Test {
   void VerifyLowModuleOk() {
     loom_low_verify_options_t options = {
         /*.descriptor_registry=*/&low_registry_.registry,
-        /*.target_selection=*/{},
         /*.emitter=*/{EmitDiagnosticToStderr, NULL},
         /*.provider_list=*/{},
         /*.max_errors=*/20,

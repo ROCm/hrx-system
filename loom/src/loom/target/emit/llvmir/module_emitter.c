@@ -195,8 +195,6 @@ typedef struct loom_llvmir_emit_module_state_t {
   loom_module_t* module;
   // Low descriptor registry used to resolve target-bound packets.
   const loom_low_descriptor_registry_t* descriptor_registry;
-  // Runtime-selected target overlay, or empty for source-selected targets.
-  loom_target_selection_t target_selection;
   // Structured diagnostic emitter for user IR failures.
   iree_diagnostic_emitter_t diagnostic_emitter;
   // Case/module scratch arena.
@@ -3796,8 +3794,8 @@ static iree_status_t loom_llvmir_emit_low_function_into_module(
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target_with_facts(
       module_state->module, &module_state->symbol_facts, low_function_op,
-      module_state->descriptor_registry, module_state->target_selection,
-      module_state->diagnostic_emitter, &target));
+      module_state->descriptor_registry, module_state->diagnostic_emitter,
+      &target));
   if (target.descriptor_set == NULL) {
     ++module_state->error_count;
     return iree_ok_status();
@@ -3878,7 +3876,6 @@ void loom_llvmir_emit_low_module_options_initialize(
 iree_status_t loom_llvmir_emit_low_module(
     loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    loom_target_selection_t target_selection,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* scratch_arena,
     const loom_llvmir_emit_low_module_options_t* options,
@@ -3893,7 +3890,6 @@ iree_status_t loom_llvmir_emit_low_module(
   loom_llvmir_emit_module_state_t state = {
       .module = module,
       .descriptor_registry = descriptor_registry,
-      .target_selection = target_selection,
       .diagnostic_emitter = diagnostic_emitter,
       .scratch_arena = scratch_arena,
       .target_profile_registry =

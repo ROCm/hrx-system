@@ -66,9 +66,10 @@ static iree_string_view_t loom_spirv_provider_materialization_symbol_stem(
                                                  : bundle->name;
 }
 
-static bool loom_spirv_provider_record_matches_profile(
+static bool loom_spirv_provider_record_matches_effective_target(
     const loom_module_t* module, const loom_op_t* target_op,
-    const loom_target_profile_t* base_profile) {
+    const loom_target_profile_t* base_profile,
+    const loom_op_t* authored_target_op) {
   const loom_spirv_target_profile_t* profile =
       loom_spirv_target_profile_cast(base_profile);
   if (profile == NULL ||
@@ -76,13 +77,13 @@ static bool loom_spirv_provider_record_matches_profile(
     return false;
   }
   return loom_target_record_projection_matches_bundle(
-      module, target_op, profile->base.target_bundle);
+      module, target_op, profile->base.target_bundle, authored_target_op);
 }
 
-static iree_status_t loom_spirv_provider_build_profile_record(
+static iree_status_t loom_spirv_provider_build_effective_target_record(
     loom_builder_t* builder, const loom_target_profile_t* base_profile,
-    loom_symbol_ref_t symbol, loom_location_id_t location,
-    loom_op_t** out_target_op) {
+    const loom_op_t* authored_target_op, loom_symbol_ref_t symbol,
+    loom_location_id_t location, loom_op_t** out_target_op) {
   const loom_spirv_target_profile_t* profile =
       loom_spirv_target_profile_cast(base_profile);
   if (profile == NULL || !loom_spirv_provider_profile_bundle_is_valid(
@@ -93,7 +94,8 @@ static iree_status_t loom_spirv_provider_build_profile_record(
   }
   return loom_target_record_projection_build(
       builder, LOOM_OP_SPIRV_TARGET, LOOM_SPIRV_TARGET_KIND_VULKAN1_3, symbol,
-      profile->base.target_bundle, /*extension_attrs=*/NULL,
+      profile->base.target_bundle, authored_target_op,
+      /*extension_attrs=*/NULL,
       /*extension_attr_count=*/0, location, out_target_op);
 }
 
@@ -114,9 +116,10 @@ const loom_target_provider_t loom_spirv_target_provider = {
     .materialization =
         {
             .symbol_stem = loom_spirv_provider_materialization_symbol_stem,
-            .record_matches_profile =
-                loom_spirv_provider_record_matches_profile,
-            .build_profile_record = loom_spirv_provider_build_profile_record,
+            .record_matches_effective_target =
+                loom_spirv_provider_record_matches_effective_target,
+            .build_effective_target_record =
+                loom_spirv_provider_build_effective_target_record,
         },
     .record_semantics =
         {

@@ -69,6 +69,23 @@ static bool loom_amdgpu_provider_satisfies_requirement(
       &effective_target.facts->storage;
   const loom_target_bundle_storage_t* requirement_storage =
       &target_requirement.facts->storage;
+  const loom_amdgpu_processor_info_t* effective_processor =
+      loom_amdgpu_target_info_target_processor(effective_identity.target);
+  IREE_ASSERT(effective_processor != NULL);
+
+  // AMDGPU processors may support more than one wavefront size. The target
+  // bundle carries the default used when the author does not choose one, while
+  // an explicit authored subgroup is a function-local codegen choice.
+  loom_target_snapshot_t effective_snapshot = effective_storage->snapshot;
+  const uint32_t required_subgroup_size =
+      requirement_storage->snapshot.subgroup_size;
+  if (required_subgroup_size != 0) {
+    if (!loom_amdgpu_processor_properties_support_wavefront_size(
+            &effective_processor->properties, required_subgroup_size)) {
+      return false;
+    }
+    effective_snapshot.subgroup_size = required_subgroup_size;
+  }
 
   // Processor refinement deliberately changes a generic descriptor-set
   // contract into the exact processor contract. An explicitly overridden
@@ -86,7 +103,7 @@ static bool loom_amdgpu_provider_satisfies_requirement(
   // applicability preserves structural target constraints and requires all
   // authored target feature bits.
   return loom_target_snapshot_satisfies_requirement(
-             &effective_storage->snapshot, &requirement_storage->snapshot) &&
+             &effective_snapshot, &requirement_storage->snapshot) &&
          iree_all_bits_set(effective_storage->config.contract_feature_bits,
                            requirement_storage->config.contract_feature_bits);
 }
@@ -100,9 +117,10 @@ static iree_string_view_t loom_amdgpu_provider_materialization_symbol_stem(
              : iree_string_view_empty();
 }
 
-static bool loom_amdgpu_provider_record_matches_profile(
+static bool loom_amdgpu_provider_record_matches_effective_target(
     const loom_module_t* module, const loom_op_t* target_op,
-    const loom_target_profile_t* base_profile) {
+    const loom_target_profile_t* base_profile,
+    const loom_op_t* authored_target_op) {
   const loom_amdgpu_target_profile_t* profile =
       loom_amdgpu_target_profile_cast(base_profile);
   if (profile == NULL || profile->identity.target == NULL ||
@@ -115,13 +133,14 @@ static bool loom_amdgpu_provider_record_matches_profile(
   return loom_amdgpu_target_identity_equal(&record_identity,
                                            &profile->identity) &&
          loom_target_record_projection_matches_bundle(
-             module, target_op, profile->base.target_bundle);
+             module, target_op, profile->base.target_bundle,
+             authored_target_op);
 }
 
-static iree_status_t loom_amdgpu_provider_build_profile_record(
+static iree_status_t loom_amdgpu_provider_build_effective_target_record(
     loom_builder_t* builder, const loom_target_profile_t* base_profile,
-    loom_symbol_ref_t symbol, loom_location_id_t location,
-    loom_op_t** out_target_op) {
+    const loom_op_t* authored_target_op, loom_symbol_ref_t symbol,
+    loom_location_id_t location, loom_op_t** out_target_op) {
   const loom_amdgpu_target_profile_t* profile =
       loom_amdgpu_target_profile_cast(base_profile);
   if (profile == NULL || profile->identity.target == NULL) {
@@ -129,8 +148,8 @@ static iree_status_t loom_amdgpu_provider_build_profile_record(
         IREE_STATUS_FAILED_PRECONDITION,
         "AMDGPU target materialization requires a complete AMDGPU profile");
   }
-  return loom_amdgpu_target_record_build_for_profile(builder, profile, symbol,
-                                                     location, out_target_op);
+  return loom_amdgpu_target_record_build_for_profile(
+      builder, profile, authored_target_op, symbol, location, out_target_op);
 }
 
 static iree_status_t loom_amdgpu_provider_build_string_attr(
@@ -239,9 +258,10 @@ const loom_target_provider_t loom_amdgpu_target_provider = {
     .materialization =
         {
             .symbol_stem = loom_amdgpu_provider_materialization_symbol_stem,
-            .record_matches_profile =
-                loom_amdgpu_provider_record_matches_profile,
-            .build_profile_record = loom_amdgpu_provider_build_profile_record,
+            .record_matches_effective_target =
+                loom_amdgpu_provider_record_matches_effective_target,
+            .build_effective_target_record =
+                loom_amdgpu_provider_build_effective_target_record,
         },
     .record_semantics =
         {

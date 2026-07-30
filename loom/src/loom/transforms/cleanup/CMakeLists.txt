@@ -79,7 +79,7 @@ loom_cc_library(
     loom::ir
     loom::ops::op_defs
     loom::pass::types
-    loom::target::selection
+    loom::target::pass_environment
     loom::util::dominance
   PUBLIC
 )

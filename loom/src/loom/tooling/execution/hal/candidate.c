@@ -88,8 +88,11 @@ static iree_status_t loom_run_hal_candidate_emit_selected_target(
       &candidate->artifact);
   if (iree_status_is_ok(status) && candidate->compiled &&
       candidate->artifact.target_bundle == NULL) {
-    candidate->artifact.target_bundle =
-        loom_run_hal_device_target_bundle(&candidate->device_target);
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "HAL artifact provider '%.*s' emitted an artifact without its durable "
+        "target bundle",
+        (int)provider->name.size, provider->name.data);
   }
   return status;
 }

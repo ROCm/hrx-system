@@ -36,8 +36,8 @@ loom_cc_library(
     loom::pass::types
     loom::pass::value_facts
     loom::rewrite::rewriter
+    loom::target::pass_environment
     loom::target::provider
-    loom::target::selection
   PUBLIC
 )
 
@@ -59,7 +59,7 @@ loom_cc_library(
     loom::pass::types
     loom::rewrite::callable
     loom::rewrite::rewriter
-    loom::target::selection
+    loom::target::pass_environment
   PUBLIC
 )
 
@@ -125,7 +125,7 @@ loom_cc_library(
     loom::analysis::symbol_liveness
     loom::ir
     loom::pass::types
-    loom::target::selection
+    loom::target::pass_environment
   PUBLIC
 )
 

@@ -143,8 +143,8 @@ class AmdgpuI32ChainScenario final : public TargetCompileScenario {
             LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
     };
     IREE_RETURN_IF_ERROR(CompileModuleToPreparedLow(
-        workspace, module, loomc_make_cstring_view("amdgpu_i32_chain"),
-        config_options));
+        workspace, module, loomc_make_cstring_view("i32_memory_chain"),
+        loomc_make_cstring_view("amdgpu_i32_chain"), config_options));
     return EmitAmdgpuArtifact(workspace, module);
   }
 
@@ -169,16 +169,10 @@ class AmdgpuI32ChainScenario final : public TargetCompileScenario {
   };
 
   iree_status_t EmitAmdgpuArtifact(WorkspacePtr& workspace, ModulePtr& module) {
-    loomc_target_selection_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.target_selection=*/target_selection(),
-    };
     loomc_amdgpu_emit_options_t amdgpu_options = {
         /*.type=*/LOOMC_STRUCTURE_TYPE_AMDGPU_EMIT_OPTIONS,
         /*.structure_size=*/sizeof(amdgpu_options),
-        /*.next=*/&target_options,
+        /*.next=*/nullptr,
         /*.runtime_globals=*/LOOMC_AMDGPU_RUNTIME_GLOBAL_NONE,
     };
     loomc_emit_options_t emit_options = {

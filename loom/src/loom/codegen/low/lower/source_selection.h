@@ -8,10 +8,10 @@
 //
 // This is cold compilation setup: it resolves each source symbol's effective
 // target, checks that the low lowering policy supports the resulting target
-// contract, and returns the concrete inputs needed by the core lowerer.
-// Authored func target records win over invocation target selection; compatible
-// invocation selections refine the target bundle and provide target-owned
-// payloads without rewriting source attrs.
+// contract, and returns the concrete inputs needed by the core lowerer. Target
+// identity always comes from the function's durable target record. Specialized
+// functions may additionally carry provider-owned profile facts that are not
+// representable in IR.
 
 #ifndef LOOM_CODEGEN_LOW_LOWER_SOURCE_SELECTION_H_
 #define LOOM_CODEGEN_LOW_LOWER_SOURCE_SELECTION_H_
@@ -22,6 +22,7 @@
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/target/specialization.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -39,13 +40,8 @@ typedef struct loom_low_source_selection_options_t {
   // User-facing lowering kind used in diagnostics.
   iree_string_view_t lowering_kind;
 
-  // Optional runtime-selected target overlay. When compatible with a source
-  // function's module target record, this bundle refines the target contract
-  // used by legality and lowering while preserving the module target symbol.
-  loom_target_selection_t target_selection;
-
-  // Module-local target record materialized for |target_selection|, or null.
-  loom_symbol_ref_t target_ref;
+  // Optional per-function supplemental profiles for specialized functions.
+  const loom_target_specialization_context_t* specialization_context;
 
   // True to collect compatible different-topology target candidates.
   bool collect_target_candidates;
@@ -68,8 +64,8 @@ typedef struct loom_low_source_selection_t {
   // Borrowed source function symbol name.
   iree_string_view_t function_name;
 
-  // Whether |target_ref| came from source IR or invocation selection.
-  loom_target_selection_source_t target_source;
+  // Whether |target_ref| was authored or bound by specialization.
+  loom_target_binding_source_t target_source;
 
   // Module-local target record symbol referenced by |func|.
   loom_symbol_ref_t target_ref;
@@ -83,9 +79,9 @@ typedef struct loom_low_source_selection_t {
   // Effective target bundle selected by |func|.
   const loom_target_bundle_t* target_bundle;
 
-  // Invocation profile whose facts contributed to |target_bundle|, or NULL
-  // when the effective bundle came only from module target records. Its bundle
-  // projection may be less specific after compatible function refinement.
+  // Supplemental specialization profile for |func|, or NULL when the function
+  // was not specialized in this invocation. Target identity remains entirely
+  // defined by |target_ref| and |target_bundle|.
   const loom_target_profile_t* target_profile;
 
   // Number of compatible module target records with different topology.

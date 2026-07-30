@@ -25,6 +25,7 @@ loom_cc_library(
     loom::target::emit::spirv::module_builder
     loom::target::emit::spirv::module_emitter
     loom::target::entry_selection
+    loom::target::function_contract
     loom::target::low_descriptor_registry
     loom::target::reporting::artifact_manifest_collect
     loom::target::reporting::report

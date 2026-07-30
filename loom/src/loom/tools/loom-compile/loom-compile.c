@@ -17,7 +17,6 @@
 #include "loom/format/text/printer.h"
 #include "loom/ir/module.h"
 #include "loom/link/linker.h"
-#include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/sanitizer/options.h"
 #include "loom/target/entry_selection.h"
@@ -139,10 +138,9 @@ IREE_FLAG_NAMED(string, module_name, "module-name", "loom",
                 "Module name to store in VM bytecode archives.");
 IREE_FLAG(string, target, "",
           "Optional HAL backend target key, such as 'gfx11-generic' or "
-          "'gfx1151'. When present, the invocation selects target facts used "
-          "by source roots that omit target(...) attrs, provider/template "
-          "selection, lowering, and emission. Compatible authored targets are "
-          "refined with the same backend-owned target facts.");
+          "'gfx1151'. When present, every materialized HAL kernel entry is "
+          "specialized to that exact provider-owned profile before the pass "
+          "pipeline. Authored targets remain compatibility requirements.");
 IREE_FLAG_LIST(string, root,
                "Root symbol to materialize before compilation. Repeat for "
                "multiple roots. When omitted, the full input module is "
@@ -509,6 +507,50 @@ static iree_status_t loom_compile_run_pass_pipeline(
     const loom_run_candidate_compile_options_t* compile_options,
     const loom_pass_trace_options_t* trace_options,
     loom_pass_run_result_t* out_run_result) {
+  iree_arena_allocator_t specialization_arena;
+  iree_arena_initialize(loom_run_session_block_pool(session),
+                        &specialization_arena);
+  loom_target_specialization_request_list_t target_specializations = {0};
+  if (hal_target != NULL) {
+    iree_host_size_t specialization_count = 0;
+    loom_op_t* op = NULL;
+    loom_block_for_each_op(loom_module_block(run_module->module), op) {
+      if (loom_func_like_is_kernel_entry(
+              loom_func_like_cast(run_module->module, op))) {
+        ++specialization_count;
+      }
+    }
+    loom_target_specialization_request_t* specialization_requests = NULL;
+    iree_status_t status = iree_arena_allocate_array(
+        &specialization_arena, specialization_count,
+        sizeof(*specialization_requests), (void**)&specialization_requests);
+    if (!iree_status_is_ok(status)) {
+      iree_arena_deinitialize(&specialization_arena);
+      return status;
+    }
+    iree_host_size_t specialization_ordinal = 0;
+    loom_block_for_each_op(loom_module_block(run_module->module), op) {
+      const loom_func_like_t function =
+          loom_func_like_cast(run_module->module, op);
+      if (!loom_func_like_is_kernel_entry(function)) {
+        continue;
+      }
+      const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
+      const loom_symbol_t* function_symbol =
+          &run_module->module->symbols.entries[function_ref.symbol_id];
+      specialization_requests[specialization_ordinal++] =
+          (loom_target_specialization_request_t){
+              .function_name =
+                  run_module->module->strings.entries[function_symbol->name_id],
+              .target_profile = hal_target->target_profile,
+          };
+    }
+    target_specializations = (loom_target_specialization_request_list_t){
+        .values = specialization_requests,
+        .count = specialization_count,
+    };
+  }
+
   loom_compile_pipeline_options_t pipeline_options = {0};
   loom_compile_pipeline_options_initialize(&pipeline_options);
   pipeline_options.pipeline = iree_make_cstring_view(FLAG_pipeline);
@@ -516,11 +558,7 @@ static iree_status_t loom_compile_run_pass_pipeline(
       compile_options->target_pipeline_options;
   pipeline_options.target_environment =
       loom_run_execution_environment_target_environment(environment);
-  if (hal_target != NULL) {
-    pipeline_options.target_selection = (loom_target_selection_t){
-        .profile = hal_target->target_profile,
-    };
-  }
+  pipeline_options.target_specializations = target_specializations;
   pipeline_options.low_descriptor_registry =
       loom_run_session_low_descriptor_registry(session);
   loom_compile_diagnostic_sink_t diagnostic_sink = {
@@ -539,9 +577,11 @@ static iree_status_t loom_compile_run_pass_pipeline(
   pipeline_options.report = compile_options->report;
   pipeline_options.trace_options = trace_options;
 
-  return loom_compile_run_pipeline(run_module->module, &pipeline_options,
-                                   loom_run_session_block_pool(session),
-                                   out_run_result);
+  iree_status_t status = loom_compile_run_pipeline(
+      run_module->module, &pipeline_options,
+      loom_run_session_block_pool(session), out_run_result);
+  iree_arena_deinitialize(&specialization_arena);
+  return status;
 }
 
 static iree_status_t loom_compile_write_bytes(iree_string_view_t path,
@@ -891,7 +931,6 @@ static iree_status_t loom_compile_emit_target(
       .low_descriptor_registry =
           &loom_run_session_low_descriptor_registry(session)->registry,
       .module = run_module->module,
-      .target_selection = loom_target_selection_empty(),
       .option_chain = option_chain,
       .identifier = identifier,
       .compile_report = compile_options->report,
@@ -1050,7 +1089,7 @@ static iree_status_t loom_compile_select_explicit_hal_target(
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "HAL artifact provider '%.*s' does not support explicit offline "
-        "target selection",
+        "target specialization",
         (int)artifact_provider->name.size, artifact_provider->name.data);
   }
 
@@ -1060,7 +1099,7 @@ static iree_status_t loom_compile_select_explicit_hal_target(
   return iree_ok_status();
 }
 
-static iree_status_t loom_compile_require_hal_target_selection(
+static iree_status_t loom_compile_require_hal_kernel_targets(
     const loom_run_hal_artifact_provider_t* artifact_provider,
     const loom_run_hal_device_target_t* explicit_target,
     loom_module_t* module) {
@@ -1076,8 +1115,9 @@ static iree_status_t loom_compile_require_hal_target_selection(
   }
   loom_op_t* op = NULL;
   loom_block_for_each_op(loom_module_block(module), op) {
-    if (loom_kernel_def_isa(op) &&
-        !loom_symbol_ref_is_valid(loom_kernel_def_target(op))) {
+    const loom_func_like_t function = loom_func_like_cast(module, op);
+    if (loom_func_like_is_kernel_entry(function) &&
+        !loom_symbol_ref_is_valid(loom_func_like_target(function))) {
       ++unselected_root_count;
     }
   }
@@ -1122,7 +1162,7 @@ static void loom_compile_print_agents_markdown(FILE* stream) {
       "loom-compile kernel.loom --backend=vm --pipeline=@my_pipeline\n"
       "```\n"
       "\n"
-      "### Backend and target selection\n"
+      "### Backend and target specialization\n"
       "\n"
       "`--backend=vm` emits a VM bytecode archive. HAL/native backends such "
       "as\n"
@@ -1130,11 +1170,14 @@ static void loom_compile_print_agents_markdown(FILE* stream) {
       "target-native\n"
       "artifact with `--emit-target-artifact=path`. Use a generic target such\n"
       "as `--target=gfx11-generic` for portable code, or an exact target such\n"
-      "as `--target=gfx1151` when processor-specific behavior is required.\n"
-      "Target selection is required when roots omit explicit `target(...)`\n"
-      "attrs. Target-owned emitters such as `--backend=llvmir-text` and\n"
-      "`--backend=llvmir-bitcode` write the selected artifact directly to\n"
-      "`--output`. A single invocation compiles one target configuration.\n"
+      "as `--target=gfx1151` to specialize every materialized HAL kernel "
+      "entry\n"
+      "before compilation. Authored targets are retained as compatibility\n"
+      "requirements, so a generic `gfx11-generic` kernel can specialize to\n"
+      "`gfx1151` while an incompatible family fails. `--target` is required\n"
+      "only when a materialized HAL kernel entry has no authored target.\n"
+      "Target-owned emitters such as `--backend=llvmir-text` and\n"
+      "`--backend=llvmir-bitcode` write the artifact directly to `--output`.\n"
       "Use repeated `--root=@symbol` values to compile selected entries from "
       "a\n"
       "catalog-like module without first producing a linked bytecode file.\n"
@@ -1591,7 +1634,7 @@ int main(int argc, char** argv) {
         &explicit_hal_target);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_compile_require_hal_target_selection(
+    status = loom_compile_require_hal_kernel_targets(
         hal_artifact_provider,
         explicit_hal_target_selected ? &explicit_hal_target : NULL,
         run_module.module);

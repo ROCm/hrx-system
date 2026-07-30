@@ -9,7 +9,7 @@
 #include "loom/analysis/symbol_dependencies.h"
 #include "loom/analysis/symbol_liveness.h"
 #include "loom/ir/module.h"
-#include "loom/target/selection.h"
+#include "loom/target/pass_environment.h"
 #include "loom/transforms/symbol/symbol_pruning.h"
 
 //===----------------------------------------------------------------------===//
@@ -92,6 +92,5 @@ iree_status_t loom_symbol_dce_run(loom_pass_t* pass, loom_module_t* module) {
   };
   IREE_RETURN_IF_ERROR(loom_symbol_dce_compute_live_symbols(&state));
   IREE_RETURN_IF_ERROR(loom_symbol_dce_erase_unreachable_symbols(&state));
-  return loom_target_pass_compact_symbols_preserving_target_ref(
-      pass, module, pass->arena, NULL);
+  return loom_module_compact_symbols(module, pass->arena, NULL);
 }

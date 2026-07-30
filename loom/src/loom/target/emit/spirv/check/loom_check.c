@@ -307,8 +307,7 @@ static iree_status_t loom_spirv_loom_check_verify_low_module(
   loom_low_verify_scratch_t low_verify_scratch =
       loom_low_verify_scratch_for_module(request->module);
   IREE_RETURN_IF_ERROR(loom_target_entry_verify_low_module(
-      request->module, request->low_registry, &verifier_emitter,
-      loom_target_selection_empty(), 20,
+      request->module, request->low_registry, &verifier_emitter, 20,
       request->environment->low_verify_provider_list, &low_verify_scratch,
       &low_verify_result));
   if (low_verify_result.error_count != 0 &&
@@ -352,9 +351,8 @@ static iree_status_t loom_spirv_loom_check_emit_provider_execute(
 
   loom_spirv_module_binary_t module = {0};
   iree_status_t status = loom_spirv_emit_low_module(
-      request->module, &request->low_registry->registry,
-      loom_target_selection_empty(), diagnostic_emitter, request->case_arena,
-      /*options=*/NULL, &module, request->host_allocator);
+      request->module, &request->low_registry->registry, diagnostic_emitter,
+      request->case_arena, /*options=*/NULL, &module, request->host_allocator);
 
   loom_spirv_toolchain_t toolchain;
   loom_spirv_toolchain_initialize_from_environment(&toolchain);

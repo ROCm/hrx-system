@@ -113,12 +113,13 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "selection",
-    srcs = ["selection.c"],
-    hdrs = ["selection.h"],
+    name = "pass_environment",
+    srcs = ["pass_environment.c"],
+    hdrs = ["pass_environment.h"],
     deps = [
         ":function_contract",
         ":profile",
+        ":specialization",
         ":types",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/error:emitter",
@@ -133,6 +134,46 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "specialization",
+    srcs = ["specialization.c"],
+    hdrs = ["specialization.h"],
+    deps = [
+        ":profile",
+        ":provider",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/target",
+        "//loom/src/loom/rewrite:rewriter",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "specialization_test",
+    srcs = ["specialization_test.cc"],
+    deps = [
+        ":materialization",
+        ":provider",
+        ":specialization",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "launch_test",
     srcs = ["launch_test.cc"],
@@ -144,11 +185,10 @@ loom_cc_test(
 )
 
 loom_cc_test(
-    name = "selection_test",
-    srcs = ["selection_test.cc"],
+    name = "pass_environment_test",
+    srcs = ["pass_environment_test.cc"],
     deps = [
-        ":profile",
-        ":selection",
+        ":pass_environment",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -386,7 +426,7 @@ loom_cc_library(
     hdrs = ["predicate.h"],
     deps = [
         ":function_contract",
-        ":selection",
+        ":pass_environment",
         ":types",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/ir",
@@ -429,7 +469,7 @@ loom_cc_test(
         "//loom/src/loom/ops/test",
         "//loom/src/loom/pass:environment",
         "//loom/src/loom/pass:verify",
-        "//loom/src/loom/target:selection",
+        "//loom/src/loom/target:pass_environment",
         "//loom/src/loom/target/test:target_record_table",
         "//loom/src/loom/testing:module_ptr",
         "//runtime/src/iree/base/internal:arena",

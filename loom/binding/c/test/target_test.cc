@@ -48,8 +48,6 @@ using TargetEnvironmentPtr =
     HandlePtr<loomc_target_environment_t, loomc_target_environment_release>;
 using TargetProfilePtr =
     HandlePtr<loomc_target_profile_t, loomc_target_profile_release>;
-using TargetSelectionPtr =
-    HandlePtr<loomc_target_selection_t, loomc_target_selection_release>;
 using WorkspacePtr = HandlePtr<loomc_workspace_t, loomc_workspace_release>;
 
 void FakeArtifactRelease(void* storage, iree_allocator_t allocator) {
@@ -216,6 +214,14 @@ CompilerPtr CreateCompiler(loomc_context_t* context) {
   return CompilerPtr(compiler);
 }
 
+PassProgramPtr CreateEmptyPassProgram(loomc_context_t* context) {
+  loomc_pass_program_t* pass_program = nullptr;
+  loomc_status_t status = loomc_pass_program_create_empty(
+      context, nullptr, loomc_allocator_system(), &pass_program);
+  LOOMC_EXPECT_OK(status);
+  return PassProgramPtr(pass_program);
+}
+
 LinkerPtr CreateLinker(loomc_context_t* context) {
   loomc_linker_t* linker = nullptr;
   loomc_status_t status =
@@ -268,60 +274,24 @@ ContextPtr CreateSpirvContext(loomc_target_environment_t* target_environment) {
   return ContextPtr(context);
 }
 
-TargetProfilePtr CreatePartialSpirvProfile(
+TargetProfilePtr CreateSpirvProfile(
     loomc_target_environment_t* target_environment) {
+  loomc_spirv_profile_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.identifier=*/loomc_make_cstring_view("vulkan13"),
+      /*.preset=*/LOOMC_SPIRV_PROFILE_PRESET_VULKAN_1_3_BDA,
+  };
   loomc_target_profile_t* profile = nullptr;
   loomc_result_t* result = nullptr;
   loomc_status_t status = loomc_target_profile_create_spirv(
-      target_environment, /*options=*/nullptr, loomc_allocator_system(),
-      &profile, &result);
+      target_environment, &options, loomc_allocator_system(), &profile,
+      &result);
   LOOMC_EXPECT_OK(status);
   ResultPtr result_ptr(result);
   EXPECT_TRUE(loomc_result_succeeded(result_ptr.get()));
   return TargetProfilePtr(profile);
-}
-
-TargetSelectionPtr CreateSelectionFromProfile(loomc_target_profile_t* profile) {
-  loomc_target_selection_t* selection = nullptr;
-  loomc_status_t status = loomc_target_selection_create_from_profile(
-      profile, loomc_allocator_system(), &selection);
-  LOOMC_EXPECT_OK(status);
-  return TargetSelectionPtr(selection);
-}
-
-loomc_pass_program_options_t PassOptionsWithSelection(
-    loomc_target_selection_options_t* target_options) {
-  return loomc_pass_program_options_t{
-      /*.type=*/LOOMC_STRUCTURE_TYPE_PASS_PROGRAM_OPTIONS,
-      /*.structure_size=*/sizeof(loomc_pass_program_options_t),
-      /*.next=*/target_options,
-      /*.identifier=*/loomc_make_cstring_view("selected-pass-program"),
-  };
-}
-
-PassProgramPtr CreateEmptyPassProgramWithSelection(
-    loomc_context_t* context, loomc_target_selection_t* target_selection) {
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/target_selection,
-  };
-  loomc_pass_program_options_t pass_options =
-      PassOptionsWithSelection(&target_options);
-  loomc_pass_program_t* pass_program = nullptr;
-  loomc_status_t status = loomc_pass_program_create_empty(
-      context, &pass_options, loomc_allocator_system(), &pass_program);
-  LOOMC_EXPECT_OK(status);
-  return PassProgramPtr(pass_program);
-}
-
-TargetSelectionPtr CreateEmptySelection() {
-  loomc_target_selection_t* selection = nullptr;
-  loomc_status_t status =
-      loomc_target_selection_create_empty(loomc_allocator_system(), &selection);
-  LOOMC_EXPECT_OK(status);
-  return TargetSelectionPtr(selection);
 }
 
 SourcePtr CreateTextSource(const char* identifier, const char* contents) {
@@ -377,6 +347,22 @@ ModulePtr DeserializeModule(loomc_context_t* context,
   ResultPtr result_ptr(result);
   ExpectSucceededResult(result_ptr.get());
   return ModulePtr(module);
+}
+
+std::string SerializeModuleToText(const loomc_module_t* module) {
+  loomc_module_serialize_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
+      /*.identifier=*/loomc_make_cstring_view("module.loom"),
+  };
+  loomc_source_t* source = nullptr;
+  loomc_status_t status = loomc_module_serialize_to_source(
+      module, &options, loomc_allocator_system(), &source);
+  LOOMC_EXPECT_OK(status);
+  SourcePtr source_ptr(source);
+  return ToString(loomc_source_contents(source_ptr.get()));
 }
 
 ModulePtr CreateIdentityModule(loomc_context_t* context,
@@ -832,149 +818,20 @@ func.def public @entry(%x: i32) -> (i32) {
   return LinkIndexPtr(link_index);
 }
 
-TEST(TargetTest, RetainReleaseProfileAndSelection) {
+TEST(TargetTest, RetainReleaseProfile) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile =
-      CreatePartialSpirvProfile(target_environment.get());
+  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
   loomc_target_profile_retain(profile.get());
   loomc_target_profile_release(profile.get());
-
-  TargetSelectionPtr selection = CreateSelectionFromProfile(profile.get());
-  loomc_target_selection_retain(selection.get());
-  loomc_target_selection_release(selection.get());
-
-  TargetSelectionPtr empty_selection = CreateEmptySelection();
-  loomc_target_selection_retain(empty_selection.get());
-  loomc_target_selection_release(empty_selection.get());
 }
 
-TEST(TargetTest, AcceptsExplicitTargetlessSelectionWithoutTargetEnvironment) {
-  ContextPtr context = CreateContext();
-  TargetSelectionPtr selection = CreateEmptySelection();
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/selection.get(),
-  };
-  loomc_pass_program_options_t pass_options =
-      PassOptionsWithSelection(&target_options);
-
-  loomc_pass_program_t* pass_program = nullptr;
-  loomc_status_t status = loomc_pass_program_create_empty(
-      context.get(), &pass_options, loomc_allocator_system(), &pass_program);
-  LOOMC_EXPECT_OK(status);
-  PassProgramPtr pass_program_ptr(pass_program);
-  EXPECT_NE(pass_program_ptr.get(), nullptr);
-}
-
-TEST(TargetTest, RejectsProfileSelectionWithoutTargetEnvironment) {
-  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile =
-      CreatePartialSpirvProfile(target_environment.get());
-  TargetSelectionPtr selection = CreateSelectionFromProfile(profile.get());
-  ContextPtr context = CreateContext();
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/selection.get(),
-  };
-  loomc_pass_program_options_t pass_options =
-      PassOptionsWithSelection(&target_options);
-
-  loomc_pass_program_t* pass_program = nullptr;
-  LOOMC_EXPECT_STATUS_IS(
-      LOOMC_STATUS_INVALID_ARGUMENT,
-      loomc_pass_program_create_empty(context.get(), &pass_options,
-                                      loomc_allocator_system(), &pass_program));
-  EXPECT_EQ(pass_program, nullptr);
-}
-
-TEST(TargetTest, AcceptsProfileSelectionWithCompatibleTargetEnvironment) {
-  TargetEnvironmentPtr profile_environment = CreateSpirvTargetEnvironment();
-  TargetEnvironmentPtr context_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile =
-      CreatePartialSpirvProfile(profile_environment.get());
-  TargetSelectionPtr selection = CreateSelectionFromProfile(profile.get());
-  ContextPtr context = CreateSpirvContext(context_environment.get());
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/selection.get(),
-  };
-  loomc_pass_program_options_t pass_options =
-      PassOptionsWithSelection(&target_options);
-
-  loomc_pass_program_t* pass_program = nullptr;
-  loomc_status_t status = loomc_pass_program_create_empty(
-      context.get(), &pass_options, loomc_allocator_system(), &pass_program);
-  LOOMC_EXPECT_OK(status);
-  PassProgramPtr pass_program_ptr(pass_program);
-  EXPECT_NE(pass_program_ptr.get(), nullptr);
-}
-
-TEST(TargetTest, RejectsDuplicateTargetSelectionOptions) {
-  ContextPtr context = CreateContext();
-  TargetSelectionPtr selection = CreateEmptySelection();
-  loomc_target_selection_options_t second_target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(second_target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/selection.get(),
-  };
-  loomc_target_selection_options_t first_target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(first_target_options),
-      /*.next=*/&second_target_options,
-      /*.target_selection=*/selection.get(),
-  };
-  loomc_pass_program_options_t pass_options =
-      PassOptionsWithSelection(&first_target_options);
-
-  loomc_pass_program_t* pass_program = nullptr;
-  LOOMC_EXPECT_STATUS_IS(
-      LOOMC_STATUS_INVALID_ARGUMENT,
-      loomc_pass_program_create_empty(context.get(), &pass_options,
-                                      loomc_allocator_system(), &pass_program));
-  EXPECT_EQ(pass_program, nullptr);
-}
-
-TEST(TargetTest, RejectsTargetSelectionOptionsWithoutSelection) {
-  ContextPtr context = CreateContext();
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/nullptr,
-  };
-  loomc_pass_program_options_t pass_options =
-      PassOptionsWithSelection(&target_options);
-
-  loomc_pass_program_t* pass_program = nullptr;
-  LOOMC_EXPECT_STATUS_IS(
-      LOOMC_STATUS_INVALID_ARGUMENT,
-      loomc_pass_program_create_empty(context.get(), &pass_options,
-                                      loomc_allocator_system(), &pass_program));
-  EXPECT_EQ(pass_program, nullptr);
-}
-
-TEST(TargetTest, AcceptsSanitizerAndTargetSelectionPipelineOptions) {
+TEST(TargetTest, AcceptsSanitizerPipelineOptions) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   ContextPtr context = CreateSpirvContext(target_environment.get());
-  TargetSelectionPtr selection = CreateEmptySelection();
-
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/selection.get(),
-  };
-  loomc_sanitizer_options_t sanitizer_first = {
+  loomc_sanitizer_options_t sanitizer_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
-      /*.structure_size=*/sizeof(sanitizer_first),
-      /*.next=*/&target_options,
+      /*.structure_size=*/sizeof(sanitizer_options),
+      /*.next=*/nullptr,
       /*.checks=*/LOOMC_SANITIZER_CHECKS_ASAN_LIKE |
           LOOMC_SANITIZER_CHECKS_UBSAN_LIKE | LOOMC_SANITIZER_CHECKS_TSAN_LIKE,
       /*.flags=*/0,
@@ -982,29 +839,15 @@ TEST(TargetTest, AcceptsSanitizerAndTargetSelectionPipelineOptions) {
   loomc_target_pipeline_options_t pipeline_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
       /*.structure_size=*/sizeof(pipeline_options),
-      /*.next=*/&sanitizer_first,
-      /*.identifier=*/loomc_make_cstring_view("sanitizer-first"),
+      /*.next=*/&sanitizer_options,
+      /*.identifier=*/loomc_make_cstring_view("sanitized"),
       /*.kind=*/LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
       /*.control_flow_lowering=*/LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
       /*.source_to_low_max_errors=*/0,
   };
-  PassProgramPtr sanitizer_first_program =
+  PassProgramPtr pass_program =
       CreateTargetPipelinePassProgram(context.get(), &pipeline_options);
-  EXPECT_NE(sanitizer_first_program.get(), nullptr);
-
-  loomc_sanitizer_options_t sanitizer_second = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
-      /*.structure_size=*/sizeof(sanitizer_second),
-      /*.next=*/nullptr,
-      /*.checks=*/LOOMC_SANITIZER_CHECK_ACCESS | LOOMC_SANITIZER_CHECK_RACE,
-      /*.flags=*/0,
-  };
-  target_options.next = &sanitizer_second;
-  pipeline_options.next = &target_options;
-  pipeline_options.identifier = loomc_make_cstring_view("target-first");
-  PassProgramPtr target_first_program =
-      CreateTargetPipelinePassProgram(context.get(), &pipeline_options);
-  EXPECT_NE(target_first_program.get(), nullptr);
+  EXPECT_NE(pass_program.get(), nullptr);
 }
 
 TEST(TargetTest, RejectsUnknownSanitizerCheckBits) {
@@ -1092,21 +935,23 @@ TEST(TargetTest, RejectsSanitizerOptionsOnPlainPassProgramOptions) {
   EXPECT_EQ(pass_program, nullptr);
 }
 
-TEST(TargetTest, ReusesSelectionAcrossCompileWorkspaces) {
+TEST(TargetTest, BorrowsSpecializationRowsAcrossCompileWorkspaces) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile =
-      CreatePartialSpirvProfile(target_environment.get());
-  TargetSelectionPtr selection = CreateSelectionFromProfile(profile.get());
+  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
   ContextPtr context = CreateSpirvContext(target_environment.get());
   CompilerPtr compiler = CreateCompiler(context.get());
-  PassProgramPtr pass_program =
-      CreateEmptyPassProgramWithSelection(context.get(), selection.get());
+  PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
 
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("entry"),
+      /*.target_profile=*/profile.get(),
+  };
+  loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
       /*.structure_size=*/sizeof(target_options),
       /*.next=*/nullptr,
-      /*.target_selection=*/selection.get(),
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
   };
   loomc_compile_options_t compile_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
@@ -1128,23 +973,58 @@ TEST(TargetTest, ReusesSelectionAcrossCompileWorkspaces) {
     LOOMC_EXPECT_OK(status);
     ResultPtr result_ptr(result);
     ExpectSucceededResult(result_ptr.get());
+    const std::string text = SerializeModuleToText(module.get());
+    EXPECT_NE(text.find("spirv.target<"), std::string::npos);
+    EXPECT_NE(text.find("func.def public target(@"), std::string::npos);
   }
 }
 
-TEST(TargetTest, ReusesSelectionAcrossLinkWorkspaces) {
+TEST(TargetTest, RejectsSpecializationOptionsOnPassProgramCreation) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile =
-      CreatePartialSpirvProfile(target_environment.get());
-  TargetSelectionPtr selection = CreateSelectionFromProfile(profile.get());
+  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
+  ContextPtr context = CreateSpirvContext(target_environment.get());
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("entry"),
+      /*.target_profile=*/profile.get(),
+  };
+  loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
+  };
+  loomc_pass_program_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_PASS_PROGRAM_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/&target_options,
+  };
+
+  loomc_pass_program_t* pass_program = nullptr;
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_UNIMPLEMENTED,
+      loomc_pass_program_create_empty(context.get(), &options,
+                                      loomc_allocator_system(), &pass_program));
+  EXPECT_EQ(pass_program, nullptr);
+}
+
+TEST(TargetTest, RejectsSpecializationOptionsDuringLink) {
+  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
+  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
   ContextPtr context = CreateSpirvContext(target_environment.get());
   LinkerPtr linker = CreateLinker(context.get());
   LinkIndexPtr link_index = CreateSingleSourceLinkIndex(context.get());
 
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("entry"),
+      /*.target_profile=*/profile.get(),
+  };
+  loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
       /*.structure_size=*/sizeof(target_options),
       /*.next=*/nullptr,
-      /*.target_selection=*/selection.get(),
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
   };
   loomc_link_options_t link_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
@@ -1157,18 +1037,46 @@ TEST(TargetTest, ReusesSelectionAcrossLinkWorkspaces) {
       /*.flags=*/LOOMC_LINK_FLAG_INCLUDE_EXPORTED_ROOTS,
   };
 
-  for (int i = 0; i < 2; ++i) {
-    WorkspacePtr workspace = CreateWorkspace();
-    loomc_module_t* module = nullptr;
-    loomc_result_t* result = nullptr;
-    loomc_status_t status = loomc_link_module(linker.get(), workspace.get(),
-                                              &link_options, &module, &result);
-    LOOMC_EXPECT_OK(status);
-    ModulePtr module_ptr(module);
-    ResultPtr result_ptr(result);
-    ExpectSucceededResult(result_ptr.get());
-    EXPECT_NE(module_ptr.get(), nullptr);
-  }
+  WorkspacePtr workspace = CreateWorkspace();
+  loomc_module_t* module = nullptr;
+  loomc_result_t* result = nullptr;
+  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_UNIMPLEMENTED,
+                         loomc_link_module(linker.get(), workspace.get(),
+                                           &link_options, &module, &result));
+  EXPECT_EQ(module, nullptr);
+  EXPECT_EQ(result, nullptr);
+}
+
+TEST(TargetTest, RejectsSpecializationOptionsDuringEmission) {
+  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
+  TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
+  ContextPtr context = CreateSpirvContext(target_environment.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  ModulePtr module =
+      CreateIdentityModule(context.get(), workspace.get(), "entry");
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/loomc_make_cstring_view("entry"),
+      /*.target_profile=*/profile.get(),
+  };
+  loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+      /*.structure_size=*/sizeof(target_options),
+      /*.next=*/nullptr,
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
+  };
+  loomc_emit_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/&target_options,
+  };
+
+  loomc_result_t* result = nullptr;
+  LOOMC_EXPECT_STATUS_IS(
+      LOOMC_STATUS_UNIMPLEMENTED,
+      loomc_emit_module(target_environment.get(), workspace.get(), module.get(),
+                        &options, loomc_allocator_system(), &result));
+  EXPECT_EQ(result, nullptr);
 }
 
 }  // namespace

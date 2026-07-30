@@ -11,9 +11,8 @@
 iree_status_t loom_low_function_model_initialize(
     loom_module_t* module, const loom_op_t* low_func_op,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    loom_target_selection_t target_selection, iree_diagnostic_emitter_t emitter,
-    loom_low_function_model_flags_t flags, iree_arena_allocator_t* arena,
-    loom_low_function_model_t* out_model) {
+    iree_diagnostic_emitter_t emitter, loom_low_function_model_flags_t flags,
+    iree_arena_allocator_t* arena, loom_low_function_model_t* out_model) {
   if (!loom_low_function_def_isa(low_func_op)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "expected low.func.def or low.kernel.def");
@@ -26,8 +25,7 @@ iree_status_t loom_low_function_model_initialize(
   IREE_ASSERT(out_model->body != NULL);
 
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-      module, low_func_op, descriptor_registry, target_selection, emitter,
-      &out_model->target));
+      module, low_func_op, descriptor_registry, emitter, &out_model->target));
   if (out_model->target.descriptor_set == NULL) {
     out_model->error_count = 1;
     return iree_ok_status();

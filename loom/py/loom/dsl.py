@@ -3434,6 +3434,10 @@ class TargetLikeInterface(NamedTuple):
     # present, the C generator emits the TargetLike descriptor and projection
     # table instead of requiring hand-authored descriptor metadata.
     bundle_table: str | None = None
+    # Common target attrs owned by the authored function contract during
+    # specialization. Target-family identity, capabilities, and limits remain
+    # profile-owned unless listed here.
+    specialization_authored_attrs: tuple[str, ...] = ()
 
 
 class LoopLikeInterface(NamedTuple):

@@ -9,8 +9,9 @@
 iree_status_t loom_function_contract_verify(const loom_module_t* module,
                                             const loom_op_t* op,
                                             iree_diagnostic_emitter_t emitter) {
-  // ABI/export contracts may be completed by invocation target context during
-  // compilation, so source verification cannot require an authored target attr.
+  // Targetless functions are valid generic program representations. A compile
+  // invocation may bind an exact target later, so source verification cannot
+  // require an authored target attribute.
   (void)module;
   (void)op;
   (void)emitter;

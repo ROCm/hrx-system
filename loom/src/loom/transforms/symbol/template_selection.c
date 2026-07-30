@@ -25,8 +25,8 @@
 #include "loom/pass/report.h"
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/pass_environment.h"
 #include "loom/target/provider.h"
-#include "loom/target/selection.h"
 #include "loom/transforms/symbol/symbol_pruning.h"
 
 //===----------------------------------------------------------------------===//
@@ -406,10 +406,7 @@ static loom_symbol_ref_t loom_template_selection_apply_target(
   if (!loom_func_like_isa(source_function)) {
     return loom_symbol_ref_null();
   }
-  const loom_target_pass_capability_t* target_capability =
-      loom_target_pass_capability_from_pass(state->pass);
-  return loom_target_effective_target_ref(
-      loom_func_like_target(source_function), target_capability);
+  return loom_func_like_target(source_function);
 }
 
 static iree_status_t loom_template_selection_lookup_target_record(
@@ -1467,6 +1464,5 @@ iree_status_t loom_template_selection_run(loom_pass_t* pass,
   if (!pass->changed) {
     return iree_ok_status();
   }
-  return loom_target_pass_compact_symbols_preserving_target_ref(
-      pass, module, pass->arena, NULL);
+  return loom_module_compact_symbols(module, pass->arena, NULL);
 }

@@ -155,12 +155,10 @@ TEST_F(SpirvProviderTest, MaterializedProfileSatisfiesStructuredRequirements) {
   loom_spirv_target_profile_t profile = {};
   loom_spirv_target_profile_initialize(
       &live_storage.bundle, /*cooperative_properties=*/nullptr, &profile);
-  const loom_target_selection_t selection = {
-      /*.profile=*/&profile.base,
-  };
   loom_symbol_ref_t effective_ref = loom_symbol_ref_null();
-  IREE_ASSERT_OK(loom_target_environment_materialize_selection(
-      &target_environment_, effective_module.get(), selection, &effective_ref));
+  IREE_ASSERT_OK(loom_target_environment_materialize_effective_target(
+      &target_environment_, effective_module.get(), &profile.base,
+      /*authored_target_op=*/nullptr, &effective_ref));
   const loom_target_record_view_t effective =
       Target(&effective_fact_table_, effective_module.get(), effective_ref);
   ASSERT_TRUE(loom_target_record_view_is_valid(effective));
@@ -217,9 +215,9 @@ TEST_F(SpirvProviderTest, MaterializesByDurableProjectionIdentity) {
   loom_spirv_target_profile_initialize(&first_storage.bundle, &first_inventory,
                                        &first_profile);
   loom_symbol_ref_t first_ref = loom_symbol_ref_null();
-  IREE_ASSERT_OK(loom_target_environment_materialize_selection(
-      &target_environment_, module.get(),
-      loom_target_selection_t{/*.profile=*/&first_profile.base}, &first_ref));
+  IREE_ASSERT_OK(loom_target_environment_materialize_effective_target(
+      &target_environment_, module.get(), &first_profile.base,
+      /*authored_target_op=*/nullptr, &first_ref));
   EXPECT_TRUE(iree_string_view_equal(
       module->strings
           .entries[module->symbols.entries[first_ref.symbol_id].name_id],
@@ -235,9 +233,9 @@ TEST_F(SpirvProviderTest, MaterializesByDurableProjectionIdentity) {
   loom_spirv_target_profile_initialize(&equal_storage.bundle,
                                        &different_inventory, &equal_profile);
   loom_symbol_ref_t equal_ref = loom_symbol_ref_null();
-  IREE_ASSERT_OK(loom_target_environment_materialize_selection(
-      &target_environment_, module.get(),
-      loom_target_selection_t{/*.profile=*/&equal_profile.base}, &equal_ref));
+  IREE_ASSERT_OK(loom_target_environment_materialize_effective_target(
+      &target_environment_, module.get(), &equal_profile.base,
+      /*authored_target_op=*/nullptr, &equal_ref));
   EXPECT_EQ(equal_ref.module_id, first_ref.module_id);
   EXPECT_EQ(equal_ref.symbol_id, first_ref.symbol_id);
 
@@ -249,10 +247,9 @@ TEST_F(SpirvProviderTest, MaterializesByDurableProjectionIdentity) {
   loom_spirv_target_profile_initialize(&distinct_storage.bundle,
                                        &first_inventory, &distinct_profile);
   loom_symbol_ref_t distinct_ref = loom_symbol_ref_null();
-  IREE_ASSERT_OK(loom_target_environment_materialize_selection(
-      &target_environment_, module.get(),
-      loom_target_selection_t{/*.profile=*/&distinct_profile.base},
-      &distinct_ref));
+  IREE_ASSERT_OK(loom_target_environment_materialize_effective_target(
+      &target_environment_, module.get(), &distinct_profile.base,
+      /*authored_target_op=*/nullptr, &distinct_ref));
   EXPECT_NE(distinct_ref.symbol_id, first_ref.symbol_id);
 
   loom_target_bundle_storage_t distinct_copy = distinct_storage;
@@ -262,10 +259,9 @@ TEST_F(SpirvProviderTest, MaterializesByDurableProjectionIdentity) {
                                        /*cooperative_properties=*/nullptr,
                                        &distinct_copy_profile);
   loom_symbol_ref_t distinct_copy_ref = loom_symbol_ref_null();
-  IREE_ASSERT_OK(loom_target_environment_materialize_selection(
-      &target_environment_, module.get(),
-      loom_target_selection_t{/*.profile=*/&distinct_copy_profile.base},
-      &distinct_copy_ref));
+  IREE_ASSERT_OK(loom_target_environment_materialize_effective_target(
+      &target_environment_, module.get(), &distinct_copy_profile.base,
+      /*authored_target_op=*/nullptr, &distinct_copy_ref));
   EXPECT_EQ(distinct_copy_ref.symbol_id, distinct_ref.symbol_id);
 
   const loom_target_record_view_t first_target =

@@ -38,8 +38,8 @@ loom_cc_library(
     loom::rewrite::greedy
     loom::rewrite::rewriter
     loom::target::math_policy
+    loom::target::pass_environment
     loom::target::reporting::report
-    loom::target::selection
   PUBLIC
 )
 

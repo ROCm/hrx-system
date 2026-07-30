@@ -357,10 +357,6 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_emit_artifact(
   *storage = (loom_amdgpu_hal_artifact_storage_t){0};
 
   const loom_amdgpu_hal_kernel_library_options_t library_options = {
-      .target_selection =
-          {
-              .profile = target->target_profile,
-          },
       .runtime_globals = loom_amdgpu_hal_artifact_provider_runtime_globals(
           target_pipeline_options),
       .diagnostic_sink = diagnostic_sink,
@@ -392,7 +388,7 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_emit_artifact(
     *out_artifact = (loom_run_hal_artifact_t){
         .hal_target = target->hal_target,
         .target_key = storage->kernel_library.target_key,
-        .target_bundle = loom_run_hal_device_target_bundle(target),
+        .target_bundle = &storage->kernel_library.target_bundle_storage.bundle,
         .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
         .target_artifact_data = hsaco_data,
         .target_listing_format = storage->kernel_library.target_listing_format,

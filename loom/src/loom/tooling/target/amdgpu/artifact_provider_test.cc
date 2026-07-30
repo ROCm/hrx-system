@@ -270,7 +270,13 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
               artifact.executable_data.data_length);
     EXPECT_NE(artifact.target_artifact_data.data, nullptr);
     EXPECT_GT(artifact.target_artifact_data.data_length, 0u);
-    EXPECT_EQ(artifact.target_bundle, nullptr);
+    ASSERT_NE(artifact.target_bundle, nullptr);
+    EXPECT_EQ(artifact.target_bundle->snapshot->codegen_format,
+              LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE);
+    EXPECT_EQ(artifact.target_bundle->snapshot->artifact_format,
+              LOOM_TARGET_ARTIFACT_FORMAT_ELF);
+    EXPECT_EQ(artifact.target_bundle->export_plan->abi_kind,
+              LOOM_TARGET_ABI_HAL_KERNEL);
 
     loom_amdgpu_hal_artifact_provider.deinitialize_artifact(
         &loom_amdgpu_hal_artifact_provider, &artifact, iree_allocator_system());

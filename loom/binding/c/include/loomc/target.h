@@ -28,11 +28,10 @@
 /// same environment-derived tables.
 ///
 /// A target profile is a reusable, immutable, target-family-typed set of facts
-/// for a concrete, partial, saved, or synthetic target. A target selection is
-/// the cheap invocation object that chooses one profile for a compile, link,
-/// pipeline, or emission operation. This split lets a JIT share one prepared
-/// profile across many worker threads while varying ordinary per-kernel compile
-/// options independently.
+/// for a concrete, partial, saved, or synthetic target. Compile invocations
+/// borrow profiles in per-function specialization rows. This lets a JIT share
+/// cached device profiles across worker threads while independently choosing
+/// the exact target of every function version in a multi-target module.
 ///
 /// @par Example
 /// Create a context linked with a target environment:
@@ -67,7 +66,7 @@
 /// @endcode
 ///
 /// @par Example
-/// Pass a target selection into an invocation option chain:
+/// Specialize one function during a compile invocation:
 ///
 /// @code{.c}
 /// #include "loomc/target/spirv/profile.h"
@@ -89,16 +88,15 @@
 /// }
 /// loomc_result_release(profile_result);
 ///
-/// loomc_target_selection_t* target_selection = NULL;
-/// status = loomc_target_selection_create_from_profile(
-///     profile, loomc_allocator_system(), &target_selection);
-/// loomc_target_profile_release(profile);
-/// if (!loomc_status_is_ok(status)) return status;
-///
-/// loomc_target_selection_options_t target_options = {
-///     .type = LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-///     .structure_size = sizeof(loomc_target_selection_options_t),
-///     .target_selection = target_selection,
+/// loomc_target_specialization_t specialization = {
+///     .function_symbol = loomc_make_cstring_view("dispatch"),
+///     .target_profile = profile,
+/// };
+/// loomc_target_specialization_options_t target_options = {
+///     .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+///     .structure_size = sizeof(loomc_target_specialization_options_t),
+///     .specializations = &specialization,
+///     .specialization_count = 1,
 /// };
 /// loomc_compile_options_t compile_options = {
 ///     .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
@@ -106,7 +104,7 @@
 ///     .next = &target_options,
 /// };
 /// // Pass compile_options to loomc_compile_module.
-/// loomc_target_selection_release(target_selection);
+/// loomc_target_profile_release(profile);
 /// @endcode
 
 #ifdef __cplusplus
@@ -135,18 +133,6 @@ typedef struct loomc_target_environment_t loomc_target_environment_t;
 /// Target profiles are immutable after creation and may be shared across
 /// threads. Retain/release operations are safe from multiple threads.
 typedef struct loomc_target_profile_t loomc_target_profile_t;
-
-/// Prepared immutable target selection.
-///
-/// A target selection is an invocation-ready view of a target profile. Compile,
-/// link, pipeline, and emission option chains borrow selections for the
-/// duration of the call. Selections retain their profile, so callers may
-/// release the profile after creating the selection.
-///
-/// @thread_safety
-/// Target selections are immutable after creation and may be shared across
-/// threads. Retain/release operations are safe from multiple threads.
-typedef struct loomc_target_selection_t loomc_target_selection_t;
 
 /// Three-valued target fact state.
 ///
@@ -185,24 +171,37 @@ typedef struct loomc_context_target_options_t {
   loomc_target_environment_t* target_environment;
 } loomc_context_target_options_t;
 
-/// Invocation option extension that selects a target profile.
+/// One function version to specialize to one structured target profile.
+typedef struct loomc_target_specialization_t {
+  /// Function symbol name. A leading `@` is accepted.
+  loomc_string_view_t function_symbol;
+
+  /// Complete target profile borrowed for the compile invocation.
+  loomc_target_profile_t* target_profile;
+} loomc_target_specialization_t;
+
+/// Compile option extension carrying per-function target specializations.
 ///
-/// Put this descriptor on the `next` chain of compile, link, target-pipeline,
-/// or emission options when an invocation should use a prepared target
-/// selection. The invocation borrows `target_selection` and does not retain it.
-typedef struct loomc_target_selection_options_t {
-  /// Structure type. Must be `LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS`.
+/// Put this descriptor on `loomc_compile_options_t::next`. Every row is
+/// validated before any function target is changed. The invocation borrows the
+/// row array, symbol strings, and profiles for the duration of the call.
+typedef struct loomc_target_specialization_options_t {
+  /// Structure type. Must be
+  /// `LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS`.
   loomc_structure_type_t type;
 
   /// Size of this structure in bytes.
   loomc_host_size_t structure_size;
 
-  /// Next invocation option extension.
+  /// Next compile option extension.
   const void* next;
 
-  /// Target selection borrowed for the invocation.
-  loomc_target_selection_t* target_selection;
-} loomc_target_selection_options_t;
+  /// Specialization rows borrowed for the invocation.
+  const loomc_target_specialization_t* specializations;
+
+  /// Number of rows in `specializations`.
+  loomc_host_size_t specialization_count;
+} loomc_target_specialization_options_t;
 
 /// Target lowering pipeline boundary.
 typedef enum loomc_target_pipeline_kind_e {
@@ -239,7 +238,7 @@ typedef struct loomc_target_pipeline_options_t {
   loomc_host_size_t structure_size;
 
   /// Extension chain for target pipeline options such as
-  /// `loomc_target_selection_options_t` and `loomc_sanitizer_options_t`.
+  /// `loomc_sanitizer_options_t`.
   const void* next;
 
   /// Stable identifier used for the synthetic pipeline module and diagnostics.
@@ -255,44 +254,6 @@ typedef struct loomc_target_pipeline_options_t {
   /// Maximum source-to-low diagnostics. Zero uses source-to-low's default.
   uint32_t source_to_low_max_errors;
 } loomc_target_pipeline_options_t;
-
-/// Creates an explicit empty target selection.
-///
-/// Empty selections behave the same as omitting target-selection options. They
-/// are provided so bindings and frameworks can construct uniform option chains
-/// without treating source-selected compilation as a special case.
-///
-/// @param allocator Host allocator used for selection-owned storage.
-/// @param out_target_selection Receives one retained target selection on
-/// success.
-/// @return OK when the selection was created.
-///
-/// @ownership
-/// The caller owns the returned reference and releases it with
-/// `loomc_target_selection_release`.
-LOOMC_API_EXPORT loomc_status_t loomc_target_selection_create_empty(
-    loomc_allocator_t allocator,
-    loomc_target_selection_t** out_target_selection);
-
-/// Creates a target selection from a prepared target profile.
-///
-/// @param profile Profile to select for invocations. The selection retains the
-/// profile on success.
-/// @param allocator Host allocator used for selection-owned storage.
-/// @param out_target_selection Receives one retained target selection on
-/// success.
-/// @return OK when the selection was created.
-///
-/// @ownership
-/// The caller owns the returned reference and releases it with
-/// `loomc_target_selection_release`.
-///
-/// @lifetime
-/// The caller may release `profile` after this function returns. The returned
-/// selection keeps the profile alive until the selection is released.
-LOOMC_API_EXPORT loomc_status_t loomc_target_selection_create_from_profile(
-    loomc_target_profile_t* profile, loomc_allocator_t allocator,
-    loomc_target_selection_t** out_target_selection);
 
 /// Creates a prepared target lowering pass program.
 ///
@@ -321,13 +282,6 @@ LOOMC_API_EXPORT loomc_status_t loomc_target_selection_create_from_profile(
 /// The returned pass program is immutable and may be shared across worker
 /// threads.
 ///
-/// @par Target Selection
-/// `loomc_target_selection_options_t` may be attached to
-/// `loomc_target_pipeline_options_t::next`. The selected profile must be
-/// compatible with the context's target environment. Omitting the extension or
-/// passing an explicit empty selection prepares the target pipeline without a
-/// concrete target overlay.
-///
 /// @par Sanitizer Assertions
 /// `loomc_sanitizer_options_t` may be attached to
 /// `loomc_target_pipeline_options_t::next`. Nonzero check bits insert
@@ -355,26 +309,6 @@ LOOMC_API_EXPORT void loomc_target_profile_retain(
 /// destroyed when the final reference is released.
 LOOMC_API_EXPORT void loomc_target_profile_release(
     loomc_target_profile_t* profile);
-
-/// Retains a target selection for another owner.
-///
-/// @param target_selection Target selection to retain.
-///
-/// @thread_safety
-/// Retain/release operations are safe from multiple threads.
-LOOMC_API_EXPORT void loomc_target_selection_retain(
-    loomc_target_selection_t* target_selection);
-
-/// Releases a target selection from one owner.
-///
-/// @param target_selection Target selection to release. Passing `NULL` is
-/// allowed.
-///
-/// @thread_safety
-/// Retain/release operations are safe from multiple threads. The selection is
-/// destroyed when the final reference is released.
-LOOMC_API_EXPORT void loomc_target_selection_release(
-    loomc_target_selection_t* target_selection);
 
 /// Retains a target environment for another owner.
 ///

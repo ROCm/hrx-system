@@ -34,10 +34,6 @@ using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
 using SourcePtr = HandlePtr<loomc_source_t, loomc_source_release>;
 using TargetEnvironmentPtr =
     HandlePtr<loomc_target_environment_t, loomc_target_environment_release>;
-using TargetProfilePtr =
-    HandlePtr<loomc_target_profile_t, loomc_target_profile_release>;
-using TargetSelectionPtr =
-    HandlePtr<loomc_target_selection_t, loomc_target_selection_release>;
 using WorkspacePtr = HandlePtr<loomc_workspace_t, loomc_workspace_release>;
 
 std::string ToString(loomc_string_view_t value) {
@@ -81,27 +77,6 @@ ContextPtr CreateSpirvContext(loomc_target_environment_t* target_environment) {
       &context_options, loomc_allocator_system(), &context);
   LOOMC_EXPECT_OK(status);
   return ContextPtr(context);
-}
-
-TargetProfilePtr CreatePartialSpirvProfile(
-    loomc_target_environment_t* target_environment) {
-  loomc_target_profile_t* profile = nullptr;
-  loomc_result_t* result = nullptr;
-  loomc_status_t status = loomc_target_profile_create_spirv(
-      target_environment, /*options=*/nullptr, loomc_allocator_system(),
-      &profile, &result);
-  LOOMC_EXPECT_OK(status);
-  ResultPtr result_ptr(result);
-  ExpectSucceededResult(result_ptr.get());
-  return TargetProfilePtr(profile);
-}
-
-TargetSelectionPtr CreateSelectionFromProfile(loomc_target_profile_t* profile) {
-  loomc_target_selection_t* selection = nullptr;
-  loomc_status_t status = loomc_target_selection_create_from_profile(
-      profile, loomc_allocator_system(), &selection);
-  LOOMC_EXPECT_OK(status);
-  return TargetSelectionPtr(selection);
 }
 
 SourcePtr CreateTextSource(const char* identifier, const char* contents) {
@@ -194,21 +169,12 @@ void ExpectSpirvArtifact(const loomc_result_t* result,
 
 TEST(TargetSpirvTest, CreatesTargetPipelinePassProgram) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile =
-      CreatePartialSpirvProfile(target_environment.get());
-  TargetSelectionPtr selection = CreateSelectionFromProfile(profile.get());
   ContextPtr context = CreateSpirvContext(target_environment.get());
 
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/selection.get(),
-  };
   loomc_target_pipeline_options_t options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
       /*.structure_size=*/sizeof(options),
-      /*.next=*/&target_options,
+      /*.next=*/nullptr,
       /*.identifier=*/loomc_make_cstring_view("spirv-prepared-low"),
       /*.kind=*/LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
       /*.control_flow_lowering=*/LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
@@ -228,9 +194,6 @@ TEST(TargetSpirvTest, CreatesTargetPipelinePassProgram) {
 
 TEST(TargetSpirvTest, EmitsSpirvBinaryArtifact) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  TargetProfilePtr profile =
-      CreatePartialSpirvProfile(target_environment.get());
-  TargetSelectionPtr selection = CreateSelectionFromProfile(profile.get());
   ContextPtr context = CreateSpirvContext(target_environment.get());
   loomc_workspace_t* module_workspace_handle = nullptr;
   LOOMC_ASSERT_OK(loomc_workspace_create(nullptr, loomc_allocator_system(),
@@ -248,16 +211,10 @@ TEST(TargetSpirvTest, EmitsSpirvBinaryArtifact) {
   ModulePtr round_trip_module = DeserializeModule(
       context.get(), module_workspace.get(), serialized.get());
 
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/selection.get(),
-  };
   loomc_spirv_emit_options_t spirv_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_EMIT_OPTIONS,
       /*.structure_size=*/sizeof(spirv_options),
-      /*.next=*/&target_options,
+      /*.next=*/nullptr,
   };
   const loomc_option_entry_t emit_entries[] = {
       {

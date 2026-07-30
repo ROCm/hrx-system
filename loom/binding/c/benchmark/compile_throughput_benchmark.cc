@@ -396,12 +396,6 @@ iree_status_t TargetCompileScenario::SetUpTarget(
   target_environment_ = std::move(target_environment);
   target_profile_ = std::move(target_profile);
 
-  loomc_target_selection_t* raw_selection = nullptr;
-  IREE_RETURN_IF_ERROR(
-      to_iree_status(loomc_target_selection_create_from_profile(
-          target_profile_.get(), loom_allocator(), &raw_selection)));
-  target_selection_.reset(raw_selection);
-
   loomc_context_target_options_t target_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
       /*.structure_size=*/sizeof(target_options),
@@ -423,16 +417,10 @@ iree_status_t TargetCompileScenario::SetUpTarget(
       context_.get(), /*options=*/nullptr, loom_allocator(), &raw_compiler)));
   compiler_.reset(raw_compiler);
 
-  loomc_target_selection_options_t selection_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
-      /*.structure_size=*/sizeof(selection_options),
-      /*.next=*/nullptr,
-      /*.target_selection=*/target_selection_.get(),
-  };
   loomc_target_pipeline_options_t pipeline_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
       /*.structure_size=*/sizeof(pipeline_options),
-      /*.next=*/&selection_options,
+      /*.next=*/nullptr,
       /*.identifier=*/pipeline_identifier,
       /*.kind=*/LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
       /*.control_flow_lowering=*/LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG,
@@ -455,13 +443,19 @@ iree_status_t TargetCompileScenario::SetUpTarget(
 }
 
 iree_status_t TargetCompileScenario::CompileModuleToPreparedLow(
-    WorkspacePtr& workspace, ModulePtr& module, loomc_string_view_t module_name,
+    WorkspacePtr& workspace, ModulePtr& module,
+    loomc_string_view_t function_symbol, loomc_string_view_t module_name,
     loomc_config_options_t config) {
-  loomc_target_selection_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SELECTION_OPTIONS,
+  const loomc_target_specialization_t specialization = {
+      /*.function_symbol=*/function_symbol,
+      /*.target_profile=*/target_profile_.get(),
+  };
+  loomc_target_specialization_options_t target_options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
       /*.structure_size=*/sizeof(target_options),
       /*.next=*/nullptr,
-      /*.target_selection=*/target_selection_.get(),
+      /*.specializations=*/&specialization,
+      /*.specialization_count=*/1,
   };
   loomc_compile_options_t compile_options = {
       /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,

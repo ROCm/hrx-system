@@ -269,7 +269,6 @@ static iree_status_t loomc_amdgpu_emit_module_artifact(
       request->option_chain, &runtime_globals));
   iree_diagnostic_emitter_t diagnostic_emitter = request->diagnostic_emitter;
   const loom_amdgpu_hal_kernel_library_options_t library_options = {
-      .target_selection = request->target_selection,
       .runtime_globals = runtime_globals,
       .diagnostic_sink =
           {

@@ -62,6 +62,24 @@ static void loom_target_record_projection_apply_attr(
   }
 }
 
+static void loom_target_record_projection_apply_authored_specialization(
+    const loom_module_t* module, const loom_op_t* authored_target_op,
+    const loom_target_like_descriptor_t* descriptor,
+    loom_target_bundle_storage_t* storage) {
+  if (authored_target_op == NULL) {
+    return;
+  }
+  for (uint8_t i = 0; i < descriptor->projection_count; ++i) {
+    const loom_target_projection_t* projection = &descriptor->projections[i];
+    if (projection->specialization !=
+        LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED) {
+      continue;
+    }
+    loom_target_record_projection_apply_attr(module, authored_target_op,
+                                             projection, storage);
+  }
+}
+
 bool loom_target_record_projection_resolve(
     const loom_module_t* module, loom_target_like_t target,
     iree_string_view_t record_name, loom_target_bundle_storage_t* out_storage) {
@@ -116,7 +134,8 @@ static bool loom_target_record_projection_values_equal(
 
 bool loom_target_record_projection_matches_bundle(
     const loom_module_t* module, const loom_op_t* target_op,
-    const loom_target_bundle_t* selected_bundle) {
+    const loom_target_bundle_t* selected_bundle,
+    const loom_op_t* authored_target_op) {
   if (!module || !target_op ||
       !loom_target_record_projection_bundle_is_valid(selected_bundle)) {
     return false;
@@ -134,9 +153,15 @@ bool loom_target_record_projection_matches_bundle(
   loom_target_bundle_storage_t selected_storage = {0};
   loom_target_record_projection_initialize_storage(
       selected_bundle, iree_string_view_empty(), &selected_storage);
-
   const loom_target_like_descriptor_t* descriptor =
       loom_target_like_descriptor(target);
+  if (authored_target_op != NULL &&
+      authored_target_op->kind != target_op->kind) {
+    return false;
+  }
+  loom_target_record_projection_apply_authored_specialization(
+      module, authored_target_op, descriptor, &selected_storage);
+
   for (uint8_t i = 0; i < descriptor->projection_count; ++i) {
     if (!loom_target_record_projection_values_equal(&descriptor->projections[i],
                                                     &existing_storage,
@@ -191,6 +216,7 @@ static iree_status_t loom_target_record_projection_encode_attr(
 iree_status_t loom_target_record_projection_build(
     loom_builder_t* builder, loom_op_kind_t op_kind, uint8_t selector,
     loom_symbol_ref_t symbol, const loom_target_bundle_t* selected_bundle,
+    const loom_op_t* authored_target_op,
     const loom_target_record_extension_attr_t* extension_attrs,
     iree_host_size_t extension_attr_count, loom_location_id_t location,
     loom_op_t** out_target_op) {
@@ -209,6 +235,13 @@ iree_status_t loom_target_record_projection_build(
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "target record projection extension attributes are missing");
+  }
+  if (authored_target_op != NULL && authored_target_op->kind != op_kind) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "authored target op kind 0x%04X does not match specialized op kind "
+        "0x%04X",
+        (unsigned)authored_target_op->kind, (unsigned)op_kind);
   }
 
   const loom_op_vtable_t* vtable =
@@ -248,6 +281,8 @@ iree_status_t loom_target_record_projection_build(
   loom_target_bundle_storage_t selected_storage = {0};
   loom_target_record_projection_initialize_storage(
       selected_bundle, iree_string_view_empty(), &selected_storage);
+  loom_target_record_projection_apply_authored_specialization(
+      builder->module, authored_target_op, descriptor, &selected_storage);
 
   loom_attribute_t attrs[UINT8_MAX + 1] = {0};
   attrs[target_like->symbol_attr_index] = loom_attr_symbol(symbol);

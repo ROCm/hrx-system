@@ -23,7 +23,7 @@ loom_target_compile_report_format_source_low_target_row_json(
           &object, IREE_SV("function"), row->function_name));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("target_source"),
-      loom_target_selection_source_name(row->target_source)));
+      loom_target_binding_source_name(row->target_source)));
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           &object, IREE_SV("target_symbol"), row->target_symbol_name));
@@ -40,7 +40,7 @@ loom_target_compile_report_format_source_low_target_row_json(
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
         &object, IREE_SV("target_subgroup_size"), row->target_subgroup_size));
   }
-  if (row->target_source == LOOM_TARGET_SELECTION_SOURCE_INVOCATION) {
+  if (row->target_source == LOOM_TARGET_BINDING_SOURCE_SPECIALIZATION) {
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
         &object, IREE_SV("candidate_target_count"),
         row->candidate_target_count));

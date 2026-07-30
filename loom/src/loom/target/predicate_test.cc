@@ -17,9 +17,7 @@
 #include "loom/ops/pass/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
-#include "loom/pass/environment.h"
 #include "loom/pass/verify.h"
-#include "loom/target/selection.h"
 #include "loom/testing/module_ptr.h"
 
 namespace loom {
@@ -81,18 +79,6 @@ class TargetPredicateTest : public ::testing::Test {
     return &module->symbols.entries[symbol_id];
   }
 
-  loom_symbol_ref_t FindSymbolRef(loom_module_t* module,
-                                  iree_string_view_t name) {
-    loom_string_id_t name_id = loom_module_lookup_string(module, name);
-    IREE_ASSERT(name_id != LOOM_STRING_ID_INVALID);
-    loom_symbol_id_t symbol_id = loom_module_find_symbol(module, name_id);
-    IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
-    return (loom_symbol_ref_t){
-        /*.module_id=*/0,
-        /*.symbol_id=*/symbol_id,
-    };
-  }
-
   loom_op_t* FindPipeline(loom_module_t* module, iree_string_view_t name) {
     loom_symbol_t* symbol = FindSymbol(module, name);
     IREE_ASSERT(symbol->defining_op != nullptr);
@@ -136,8 +122,7 @@ class TargetPredicateTest : public ::testing::Test {
   }
 
   bool Evaluate(loom_module_t* module, loom_op_t* where_op,
-                iree_string_view_t function_name,
-                const loom_pass_environment_t* environment = nullptr) {
+                iree_string_view_t function_name) {
     loom_symbol_t* symbol = FindSymbol(module, function_name);
     loom_func_like_t function = FindFunction(module, function_name);
     bool match = false;
@@ -146,7 +131,7 @@ class TargetPredicateTest : public ::testing::Test {
         /*.where_op=*/where_op,
         /*.anchor_kind=*/LOOM_PASS_FUNCTION,
         /*.predicate=*/IREE_SV("target"),
-        /*.environment=*/environment,
+        /*.environment=*/nullptr,
         /*.target_module=*/module,
         /*.symbol=*/symbol,
         /*.function=*/function,
@@ -200,49 +185,6 @@ func.def target(@other_target) abi(object_function) @rejected() {
       FirstWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
   EXPECT_TRUE(Evaluate(module.get(), where_op, IREE_SV("matched")));
   EXPECT_FALSE(Evaluate(module.get(), where_op, IREE_SV("rejected")));
-}
-
-TEST_F(TargetPredicateTest, MatchesInvocationSelectedTarget) {
-  ModulePtr module = ParseModule(R"(
-test.target<low_core> @test_target
-test.target<quirky> @other_target
-
-pass.pipeline<module> @pipeline pipeline {
-  for func {
-    where target(target = "@test_target", target_op = "test.target", bundle = "test_target", snapshot = "test_target", codegen = "low_native", artifact_format = "elf", config = "test_target", contract = "test.low.core") {
-    }
-  }
-}
-
-func.def @selected() {
-  func.return
-}
-
-func.def target(@other_target) @rejected() {
-  func.return
-}
-)");
-
-  const loom_symbol_ref_t selected_target_ref =
-      FindSymbolRef(module.get(), IREE_SV("test_target"));
-  const loom_target_pass_capability_t target_capability =
-      loom_target_pass_capability_make(/*target_environment=*/nullptr,
-                                       loom_target_selection_empty(),
-                                       selected_target_ref);
-  const loom_pass_environment_capability_t* capabilities[] = {
-      &target_capability.base,
-  };
-  const loom_pass_environment_t environment =
-      loom_pass_environment_make(capabilities, IREE_ARRAYSIZE(capabilities));
-  IREE_ASSERT_OK(loom_pass_environment_verify(&environment));
-
-  loom_op_t* where_op =
-      FirstWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
-  EXPECT_TRUE(
-      Evaluate(module.get(), where_op, IREE_SV("selected"), &environment));
-  EXPECT_FALSE(
-      Evaluate(module.get(), where_op, IREE_SV("rejected"), &environment));
-  EXPECT_FALSE(Evaluate(module.get(), where_op, IREE_SV("selected")));
 }
 
 }  // namespace

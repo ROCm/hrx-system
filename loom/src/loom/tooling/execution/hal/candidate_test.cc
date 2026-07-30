@@ -135,7 +135,7 @@ iree_status_t FakeHalEmitArtifact(
   *out_artifact = (loom_run_hal_artifact_t){
       /*.hal_target=*/nullptr,
       /*.target_key=*/IREE_SVL("fake-hal-target"),
-      /*.target_bundle=*/{},
+      /*.target_bundle=*/&kFakeTargetBundle,
       /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
       /*.target_artifact_data=*/
       iree_make_const_byte_span(kFakeHalTargetArtifactData,
@@ -334,7 +334,7 @@ TEST_F(HalCandidateTest, EmitsModuleTargetCandidate) {
   EXPECT_EQ(candidate.device_target.target_profile, nullptr);
   EXPECT_EQ(loom_run_hal_device_target_bundle(&candidate.device_target),
             nullptr);
-  EXPECT_EQ(candidate.artifact.target_bundle, nullptr);
+  EXPECT_EQ(candidate.artifact.target_bundle, &kFakeTargetBundle);
   EXPECT_TRUE(iree_string_view_equal(candidate.artifact.target_key,
                                      IREE_SV("fake-hal-target")));
   EXPECT_TRUE(iree_string_view_equal(candidate.compile_report.target_key,

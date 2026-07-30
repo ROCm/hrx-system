@@ -1684,9 +1684,9 @@ iree_status_t loom_low_target_legalize_run(loom_pass_t* pass,
         .policy_registry = policy_registry,
         .diagnostic_emitter = pass->diagnostic_emitter,
         .lowering_kind = IREE_SV("target-legalize"),
-        .target_selection =
-            loom_target_pass_capability_target_selection(target_capability),
-        .target_ref = loom_target_pass_capability_target_ref(target_capability),
+        .specialization_context =
+            loom_target_pass_capability_specialization_context(
+                target_capability),
     };
     status = loom_low_select_source_funcs(module, &selection_options,
                                           &run_arena, &selection_list);

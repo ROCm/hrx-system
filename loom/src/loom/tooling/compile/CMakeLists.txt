@@ -34,6 +34,7 @@ loom_cc_library(
     loom::target::predicate
     loom::target::provider
     loom::target::reporting::report
+    loom::target::specialization
     loom::target::types
     loom::verify
   PUBLIC

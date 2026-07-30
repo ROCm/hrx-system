@@ -19,7 +19,7 @@
 #include "loom/pass/environment.h"
 #include "loom/pass/types.h"
 #include "loom/target/math_policy.h"
-#include "loom/target/selection.h"
+#include "loom/target/pass_environment.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -86,7 +86,7 @@ loom_pass_environment_t loom_low_pass_environment_storage_initialize(
     const loom_target_math_policy_registry_t* math_policy_registry,
     loom_target_compile_report_t* compile_report,
     const loom_target_environment_t* target_environment,
-    loom_target_selection_t target_selection, loom_symbol_ref_t target_ref,
+    const loom_target_specialization_context_t* specialization_context,
     loom_low_pass_environment_storage_t* out_storage);
 
 // Looks up the low capability from |environment|. Returns NULL when absent.

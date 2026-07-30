@@ -33,8 +33,10 @@ from loom.dsl import (
     ATTR_TYPE_BYTES,
     ATTR_TYPE_ENUM,
     ATTR_TYPE_FLAGS,
+    ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
     ATTR_TYPE_PREDICATE_LIST,
+    ATTR_TYPE_STRING,
     ATTR_TYPE_SYMBOL,
     DECOMPOSABLE,
     ELEMENTWISE,
@@ -78,6 +80,7 @@ from loom.dsl import (
     SameType,
     Successor,
     SymbolDefinition,
+    TargetLikeInterface,
     TotalBitCountEqual,
     TypeConstraint,
     TypeDef,
@@ -269,6 +272,72 @@ def test_generate_tables_omits_zero_default_vtable_fields() -> None:
     assert ".format_elements = NULL," not in tables_c
     assert ".format_element_count = 0," not in tables_c
     assert ".contract_families = 0," not in tables_c
+
+
+def _target_projection_test_op(
+    specialization_authored_attrs: tuple[str, ...] = (),
+) -> Op:
+    kind = EnumDef("TargetKind", [EnumCase("generic", 0)])
+    abi = EnumDef("TargetAbi", [EnumCase("unknown", 0)])
+    linkage = EnumDef("TargetLinkage", [EnumCase("default", 0)])
+    return Op(
+        "test.target",
+        group=Dialect("test"),
+        attrs=[
+            AttrDef("symbol", ATTR_TYPE_SYMBOL),
+            AttrDef("kind", ATTR_TYPE_ENUM, enum_def=kind),
+            AttrDef("max_workgroup_size_x", ATTR_TYPE_I64, optional=True),
+            AttrDef("subgroup_size", ATTR_TYPE_I64, optional=True),
+            AttrDef("abi", ATTR_TYPE_ENUM, enum_def=abi, optional=True),
+            AttrDef("export_symbol", ATTR_TYPE_STRING, optional=True),
+            AttrDef("linkage", ATTR_TYPE_ENUM, enum_def=linkage, optional=True),
+        ],
+        interfaces=[
+            TargetLikeInterface(
+                symbol="symbol",
+                selector="kind",
+                bundle_table="loom_test_target_bundles",
+                specialization_authored_attrs=specialization_authored_attrs,
+            )
+        ],
+    )
+
+
+def test_generate_target_projection_distinguishes_profile_and_authored_fields() -> None:
+    tables_c = generate_tables_c(
+        "test",
+        0,
+        [_target_projection_test_op(("subgroup_size",))],
+    )
+
+    assert ("snapshot.max_workgroup_size.x), 2, LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32, LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE}") in tables_c
+    assert ("snapshot.subgroup_size), 3, LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
+    assert ("export_plan.abi_kind), 4, LOOM_TARGET_PROJECTION_VALUE_ENUM_U8, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
+    assert ("export_plan.export_symbol), 5, LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
+    assert ("export_plan.linkage), 6, LOOM_TARGET_PROJECTION_VALUE_ENUM_U8, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
+
+
+def test_generate_target_projection_rejects_invalid_authored_field_contract() -> None:
+    with _raises_value_error(r"duplicate specialization authored attrs"):
+        generate_tables_c(
+            "test",
+            0,
+            [_target_projection_test_op(("subgroup_size", "subgroup_size"))],
+        )
+
+    with _raises_value_error(r"unknown specialization authored attrs"):
+        generate_tables_c(
+            "test",
+            0,
+            [_target_projection_test_op(("missing",))],
+        )
+
+    with _raises_value_error(r"authored attrs are not declared by the op"):
+        generate_tables_c(
+            "test",
+            0,
+            [_target_projection_test_op(("contract_set_key",))],
+        )
 
 
 def test_generate_tables_omits_type_propagation_flag_for_scalar_only_constraints() -> None:

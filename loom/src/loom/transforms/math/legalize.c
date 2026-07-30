@@ -22,8 +22,8 @@
 #include "loom/pass/registry.h"
 #include "loom/rewrite/greedy.h"
 #include "loom/target/math_policy.h"
+#include "loom/target/pass_environment.h"
 #include "loom/target/reporting/report.h"
-#include "loom/target/selection.h"
 #include "loom/transforms/math/patterns.h"
 
 //===----------------------------------------------------------------------===//
@@ -391,10 +391,7 @@ static iree_status_t loom_math_legalize_lookup_target_facts(
   const loom_symbol_ref_t authored_target_ref =
       func_facts != NULL ? func_facts->target_symbol
                          : loom_func_like_target(state->function);
-  const loom_target_pass_capability_t* target_capability =
-      loom_target_pass_capability_from_pass(state->pass);
-  const loom_symbol_ref_t target_ref =
-      loom_target_effective_target_ref(authored_target_ref, target_capability);
+  const loom_symbol_ref_t target_ref = authored_target_ref;
   if (!loom_symbol_ref_is_valid(target_ref)) {
     return iree_ok_status();
   }
@@ -667,10 +664,7 @@ iree_status_t loom_math_legalize_run(loom_pass_t* pass, loom_module_t* module,
   if (!loom_func_like_body(function)) {
     return iree_ok_status();
   }
-  const loom_target_pass_capability_t* target_capability =
-      loom_target_pass_capability_from_pass(pass);
-  const loom_symbol_ref_t target_ref = loom_target_effective_target_ref(
-      loom_func_like_target(function), target_capability);
+  const loom_symbol_ref_t target_ref = loom_func_like_target(function);
   if (!loom_symbol_ref_is_valid(target_ref)) {
     return iree_ok_status();
   }

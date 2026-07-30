@@ -17,7 +17,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/rewrite/callable.h"
 #include "loom/rewrite/rewriter.h"
-#include "loom/target/selection.h"
+#include "loom/target/pass_environment.h"
 
 //===----------------------------------------------------------------------===//
 // Statistics
@@ -820,6 +820,5 @@ iree_status_t loom_inline_callables_run(loom_pass_t* pass,
   if (!pass->changed) {
     return iree_ok_status();
   }
-  return loom_target_pass_compact_symbols_preserving_target_ref(
-      pass, module, pass->arena, NULL);
+  return loom_module_compact_symbols(module, pass->arena, NULL);
 }

@@ -132,9 +132,9 @@ static iree_status_t loom_target_provider_set_validate_contracts(
         provider->materialization;
     const bool has_symbol_stem = materialization.symbol_stem != NULL;
     const bool has_record_match =
-        materialization.record_matches_profile != NULL;
+        materialization.record_matches_effective_target != NULL;
     const bool has_record_builder =
-        materialization.build_profile_record != NULL;
+        materialization.build_effective_target_record != NULL;
     const bool has_any_materialization =
         has_symbol_stem || has_record_match || has_record_builder;
     const bool has_complete_materialization =
@@ -575,7 +575,8 @@ static iree_status_t loom_target_environment_validate_materialized_target_ref(
 
 static bool loom_target_provider_find_equal_materialized_record(
     const loom_target_provider_t* provider, const loom_module_t* module,
-    const loom_target_profile_t* profile, loom_symbol_ref_t* out_target_ref) {
+    const loom_target_profile_t* profile, const loom_op_t* authored_target_op,
+    loom_symbol_ref_t* out_target_ref) {
   *out_target_ref = loom_symbol_ref_null();
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
     const loom_symbol_t* symbol = &module->symbols.entries[i];
@@ -584,8 +585,8 @@ static bool loom_target_provider_find_equal_materialized_record(
         defining_op->kind != provider->record_semantics.op_kind) {
       continue;
     }
-    if (!provider->materialization.record_matches_profile(module, defining_op,
-                                                          profile)) {
+    if (!provider->materialization.record_matches_effective_target(
+            module, defining_op, profile, authored_target_op)) {
       continue;
     }
     *out_target_ref = (loom_symbol_ref_t){
@@ -656,39 +657,38 @@ static iree_status_t loom_target_provider_add_materialized_symbol(
   return status;
 }
 
-iree_status_t loom_target_environment_materialize_selection(
+iree_status_t loom_target_environment_materialize_effective_target(
     const loom_target_environment_t* environment, loom_module_t* module,
-    loom_target_selection_t target_selection,
-    loom_symbol_ref_t* out_target_ref) {
+    const loom_target_profile_t* target_profile,
+    const loom_op_t* authored_target_op, loom_symbol_ref_t* out_target_ref) {
   IREE_ASSERT_ARGUMENT(environment);
   IREE_ASSERT_ARGUMENT(module);
+  IREE_ASSERT_ARGUMENT(target_profile);
   IREE_ASSERT_ARGUMENT(out_target_ref);
   *out_target_ref = loom_symbol_ref_null();
-  if (loom_target_selection_is_empty(target_selection)) {
-    return iree_ok_status();
-  }
   if (module->body == NULL || module->body->block_count == 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "target materialization requires a module with a body block");
   }
 
-  const loom_target_profile_t* target_profile =
-      loom_target_selection_profile(target_selection);
   if (target_profile->target_bundle == NULL) {
-    return iree_ok_status();
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "target materialization requires a complete target profile");
   }
   const loom_target_provider_set_t* provider_set = environment->provider_set;
   for (iree_host_size_t i = 0; i < provider_set->provider_count; ++i) {
     const loom_target_provider_t* provider = provider_set->providers[i];
     if (provider->profile_type != target_profile->type ||
-        provider->materialization.build_profile_record == NULL) {
+        provider->materialization.build_effective_target_record == NULL) {
       continue;
     }
 
     loom_symbol_ref_t target_ref = loom_symbol_ref_null();
     if (loom_target_provider_find_equal_materialized_record(
-            provider, module, target_profile, &target_ref)) {
+            provider, module, target_profile, authored_target_op,
+            &target_ref)) {
       *out_target_ref = target_ref;
       return iree_ok_status();
     }
@@ -713,9 +713,10 @@ iree_status_t loom_target_environment_materialize_selection(
       loom_builder_set_before(&builder, module_block->first_op);
     }
     loom_op_t* target_op = NULL;
-    IREE_RETURN_IF_ERROR(provider->materialization.build_profile_record(
-        &builder, target_profile, target_ref, LOOM_LOCATION_UNKNOWN,
-        &target_op));
+    IREE_RETURN_IF_ERROR(
+        provider->materialization.build_effective_target_record(
+            &builder, target_profile, authored_target_op, target_ref,
+            LOOM_LOCATION_UNKNOWN, &target_op));
     IREE_RETURN_IF_ERROR(
         loom_target_environment_validate_materialized_target_ref(module,
                                                                  target_ref));

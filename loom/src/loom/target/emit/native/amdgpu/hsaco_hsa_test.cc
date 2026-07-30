@@ -774,7 +774,7 @@ class LowKernelEmitter {
     loom_low_resolved_target_t target = {};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
         module_, low_function, &target_registry_.registry,
-        loom_target_selection_empty(), iree_diagnostic_emitter_t{}, &target));
+        iree_diagnostic_emitter_t{}, &target));
     bundle_storage = target.bundle_storage;
     loom_target_bundle_storage_rebind(&bundle_storage);
     const loom_low_descriptor_set_t* descriptor_set = nullptr;
@@ -800,7 +800,6 @@ class LowKernelEmitter {
 
     loom_low_verify_options_t verify_options = {
         /*.descriptor_registry=*/&target_registry_.registry,
-        /*.target_selection=*/{},
         /*.emitter=*/
         {
             /*.fn=*/PrintLowVerifyDiagnostic,
@@ -823,7 +822,6 @@ class LowKernelEmitter {
     loom_amdgpu_storage_lease_provider(&storage_lease_provider);
     loom_low_emission_frame_options_t frame_options = {
         /*.descriptor_registry=*/&target_registry_.registry,
-        /*.target_selection=*/{},
         /*.memory_access_table=*/{},
         /*.pressure_cliffs=*/{},
         /*.schedule_pair_affinities=*/{},

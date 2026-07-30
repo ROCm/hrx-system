@@ -158,7 +158,7 @@ low.kernel.def target(@test_target) export("dispatch") linkage(dso_local) @kerne
 }
 
 TEST_F(TargetFunctionContractTest,
-       BundleCompatibilityAllowsFeatureAndLimitRefinement) {
+       BundleCompatibilityIgnoresDeviceLimitsAndFunctionAbi) {
   const loom_target_snapshot_t module_snapshot = {
       /*.name=*/IREE_SVL("spirv-vulkan1.3"),
       /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_SPIRV,
@@ -210,30 +210,6 @@ TEST_F(TargetFunctionContractTest,
   selected_export.abi_kind = LOOM_TARGET_ABI_OBJECT_FUNCTION;
   EXPECT_TRUE(loom_target_function_contract_bundles_compatible(
       &module_bundle, &selected_bundle));
-
-  loom_target_bundle_storage_t storage = {
-      /*.snapshot=*/module_snapshot,
-      /*.export_plan=*/module_export,
-      /*.config=*/module_config,
-      /*.bundle=*/module_bundle,
-  };
-  loom_target_bundle_storage_rebind(&storage);
-  loom_target_function_contract_apply_compatible_selection(&selected_bundle,
-                                                           &storage);
-  EXPECT_TRUE(iree_string_view_equal(storage.bundle.name, module_bundle.name));
-  EXPECT_TRUE(
-      iree_string_view_equal(storage.snapshot.name, module_snapshot.name));
-  EXPECT_EQ(storage.snapshot.max_flat_workgroup_size,
-            selected_snapshot.max_flat_workgroup_size);
-  EXPECT_EQ(storage.snapshot.subgroup_size, module_snapshot.subgroup_size);
-  EXPECT_TRUE(iree_string_view_equal(storage.config.name, module_config.name));
-  EXPECT_TRUE(iree_string_view_equal(storage.config.contract_set_key,
-                                     module_config.contract_set_key));
-  EXPECT_EQ(storage.config.contract_feature_bits,
-            selected_config.contract_feature_bits);
-  EXPECT_EQ(storage.export_plan.abi_kind, LOOM_TARGET_ABI_HAL_KERNEL);
-  EXPECT_TRUE(
-      iree_string_view_equal(storage.export_plan.name, module_export.name));
 }
 
 TEST_F(TargetFunctionContractTest, BundleCompatibilityRejectsContractShape) {

@@ -74,23 +74,20 @@ LOOMC_API_PRIVATE loomc_status_t loomc_context_target_options_resolve(
     const loomc_context_options_t* options,
     loomc_target_environment_t** out_target_environment);
 
-// Resolves target-selection invocation option extensions.
-LOOMC_API_PRIVATE loomc_status_t loomc_target_selection_options_resolve(
-    const void* next, loomc_target_selection_t** out_target_selection);
+// Resolves the target-specialization compile option extension.
+LOOMC_API_PRIVATE loomc_status_t loomc_target_specialization_options_resolve(
+    const void* next,
+    const loomc_target_specialization_options_t** out_options);
 
-// Validates one target-selection option descriptor.
-LOOMC_API_PRIVATE loomc_status_t loomc_target_selection_options_validate(
-    const loomc_target_selection_options_t* options);
+// Validates one target-specialization option descriptor.
+LOOMC_API_PRIVATE loomc_status_t loomc_target_specialization_options_validate(
+    const loomc_target_specialization_options_t* options);
 
-// Validates that a target selection can be used with a target environment.
-LOOMC_API_PRIVATE loomc_status_t loomc_target_selection_validate_environment(
-    const loomc_target_selection_t* target_selection,
+// Validates every specialization profile against a target environment.
+LOOMC_API_PRIVATE loomc_status_t
+loomc_target_specialization_options_validate_environment(
+    const loomc_target_specialization_options_t* options,
     const loomc_target_environment_t* target_environment);
-
-// Returns the internal target selection represented by a public handle.
-LOOMC_API_PRIVATE loom_target_selection_t
-loomc_target_selection_loom_target_selection(
-    const loomc_target_selection_t* target_selection);
 
 // Creates a public target profile from a prepared target-family profile. Takes
 // ownership of |target_profile| on entry and calls |deinitialize| on failure or
@@ -105,11 +102,6 @@ LOOMC_API_PRIVATE loomc_status_t loomc_target_profile_create(
 // Returns the typed target-family profile owned by a public profile.
 LOOMC_API_PRIVATE const loom_target_profile_t*
 loomc_target_profile_loom_target_profile(const loomc_target_profile_t* profile);
-
-// Returns the internal target selection represented by a public profile.
-LOOMC_API_PRIVATE loom_target_selection_t
-loomc_target_profile_loom_target_selection(
-    const loomc_target_profile_t* profile);
 
 // Returns the target environment retained by a public profile.
 LOOMC_API_PRIVATE loomc_target_environment_t*
@@ -130,7 +122,7 @@ LOOMC_API_PRIVATE loomc_status_t loomc_target_pass_registry_initialize(
 LOOMC_API_PRIVATE loom_pass_environment_t
 loomc_target_pass_environment_make_loom_pass_environment(
     const loomc_target_pass_environment_t* environment,
-    loom_target_selection_t target_selection, loom_symbol_ref_t target_ref,
+    const loom_target_specialization_context_t* specialization_context,
     loom_low_pass_environment_storage_t* out_storage);
 
 // Initializes a target-aware text low-asm environment over prepared target

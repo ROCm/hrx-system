@@ -53,18 +53,6 @@ static inline const loom_target_bundle_t* loom_target_profile_bundle(
   return profile ? profile->target_bundle : NULL;
 }
 
-// Returns the target profile borrowed by |selection|, or NULL.
-static inline const loom_target_profile_t* loom_target_selection_profile(
-    loom_target_selection_t selection) {
-  return selection.profile;
-}
-
-// Returns the target-neutral bundle projected by |selection|, or NULL.
-static inline const loom_target_bundle_t* loom_target_selection_bundle(
-    loom_target_selection_t selection) {
-  return loom_target_profile_bundle(selection.profile);
-}
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif

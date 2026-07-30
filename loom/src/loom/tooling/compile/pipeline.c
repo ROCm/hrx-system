@@ -150,38 +150,19 @@ iree_status_t loom_compile_run_pipeline(
   *out_result = (loom_pass_run_result_t){0};
 
   iree_string_view_t pipeline = iree_string_view_trim(options->pipeline);
-  if (loom_compile_pipeline_is_disabled(pipeline)) {
-    return iree_ok_status();
-  }
-  if (options->target_environment == NULL) {
+  if (options->target_environment == NULL &&
+      (options->target_specializations.count != 0 ||
+       !loom_compile_pipeline_is_disabled(pipeline))) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "Loom compile pass pipelines require a target "
-                            "environment");
+                            "Loom target specialization and pass pipelines "
+                            "require a target environment");
   }
-  if (options->low_descriptor_registry == NULL) {
+  if (!loom_compile_pipeline_is_disabled(pipeline) &&
+      options->low_descriptor_registry == NULL) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "Loom compile pass pipelines require a target-low "
                             "descriptor registry");
   }
-
-  loom_pass_registry_storage_t pass_registry_storage = {0};
-  const loom_pass_registry_t* pass_registry = NULL;
-  IREE_RETURN_IF_ERROR(loom_compile_pipeline_registry_initialize(
-      options->target_environment, &pass_registry_storage, &pass_registry));
-
-  loom_low_lower_policy_registry_t low_lower_policy_registry = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_target_environment_initialize_low_lower_policy_registry(
-          options->target_environment, &low_lower_policy_registry));
-  loom_target_math_policy_registry_t math_policy_registry = {0};
-  IREE_RETURN_IF_ERROR(loom_target_environment_initialize_math_policy_registry(
-      options->target_environment, &math_policy_registry));
-  const loom_target_low_legality_provider_list_t low_legality_provider_list =
-      loom_target_environment_low_legality_provider_list(
-          options->target_environment);
-  const loom_target_legalizer_provider_list_t legalizer_provider_list =
-      loom_target_environment_legalizer_provider_list(
-          options->target_environment);
 
   const loom_target_entry_options_t entry_options = {
       .diagnostic_sink = options->diagnostic_sink,
@@ -191,12 +172,46 @@ iree_status_t loom_compile_run_pipeline(
   loom_target_entry_diagnostic_emitter_t pass_emitter = {0};
   loom_target_entry_diagnostic_emitter_initialize(
       module, &entry_options, LOOM_EMITTER_PASS, &pass_emitter);
-  loom_symbol_ref_t target_ref = loom_symbol_ref_null();
-  if (!loom_target_selection_is_empty(options->target_selection)) {
-    IREE_RETURN_IF_ERROR(loom_target_environment_materialize_selection(
-        options->target_environment, module, options->target_selection,
-        &target_ref));
+  iree_arena_allocator_t specialization_arena;
+  iree_arena_initialize(block_pool, &specialization_arena);
+  loom_target_specialization_result_t specialization_result = {0};
+  iree_status_t status = iree_ok_status();
+  if (options->target_specializations.count != 0) {
+    status = loom_target_specialize_functions(
+        options->target_environment, module, options->target_specializations,
+        loom_target_entry_emitter(&pass_emitter), &specialization_arena,
+        &specialization_result);
   }
+  if (iree_status_is_ok(status) && specialization_result.error_count != 0) {
+    out_result->error_count = specialization_result.error_count;
+  }
+  if (!iree_status_is_ok(status) || out_result->error_count != 0 ||
+      loom_compile_pipeline_is_disabled(pipeline)) {
+    iree_arena_deinitialize(&specialization_arena);
+    return status;
+  }
+
+  loom_pass_registry_storage_t pass_registry_storage = {0};
+  const loom_pass_registry_t* pass_registry = NULL;
+  status = loom_compile_pipeline_registry_initialize(
+      options->target_environment, &pass_registry_storage, &pass_registry);
+
+  loom_low_lower_policy_registry_t low_lower_policy_registry = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_target_environment_initialize_low_lower_policy_registry(
+        options->target_environment, &low_lower_policy_registry);
+  }
+  loom_target_math_policy_registry_t math_policy_registry = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_target_environment_initialize_math_policy_registry(
+        options->target_environment, &math_policy_registry);
+  }
+  const loom_target_low_legality_provider_list_t low_legality_provider_list =
+      loom_target_environment_low_legality_provider_list(
+          options->target_environment);
+  const loom_target_legalizer_provider_list_t legalizer_provider_list =
+      loom_target_environment_legalizer_provider_list(
+          options->target_environment);
 
   loom_low_pass_environment_storage_t low_pass_environment_storage = {0};
   loom_target_pass_predicate_provider_storage_t predicate_storage = {0};
@@ -222,7 +237,7 @@ iree_status_t loom_compile_run_pipeline(
           &options->low_descriptor_registry->registry,
           &low_lower_policy_registry, &low_legality_provider_list,
           &legalizer_provider_list, &math_policy_registry, options->report,
-          options->target_environment, options->target_selection, target_ref,
+          options->target_environment, &specialization_result.context,
           &low_pass_environment_storage),
       .predicate_provider =
           loom_target_pass_predicate_provider(&predicate_storage),
@@ -231,16 +246,17 @@ iree_status_t loom_compile_run_pipeline(
       .trace = trace_ptr,
   };
 
-  iree_status_t status = iree_ok_status();
-  if (loom_compile_pipeline_is_default(pipeline)) {
+  if (iree_status_is_ok(status) && loom_compile_pipeline_is_default(pipeline)) {
     status = loom_compile_run_default_pipeline(module, options, &run_options,
                                                out_result);
-  } else if (iree_string_view_starts_with_char(pipeline, '@')) {
+  } else if (iree_status_is_ok(status) &&
+             iree_string_view_starts_with_char(pipeline, '@')) {
     status = loom_pass_tool_run_pipeline_symbol(module, pipeline, &run_options,
                                                 out_result);
-  } else {
+  } else if (iree_status_is_ok(status)) {
     status = loom_pass_tool_run_flat_pipeline(module, pipeline, &run_options,
                                               out_result);
   }
+  iree_arena_deinitialize(&specialization_arena);
   return status;
 }

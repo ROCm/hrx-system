@@ -39,25 +39,30 @@ bool loom_target_record_projection_resolve(
     const loom_module_t* module, loom_target_like_t target,
     iree_string_view_t record_name, loom_target_bundle_storage_t* out_storage);
 
-// Returns whether the durable common projection of |target_op| equals
-// |selected_bundle|.
+// Returns whether the durable common projection of |target_op| equals the
+// specialization of |selected_bundle| by |authored_target_op|.
 //
 // Symbol and bundle names are diagnostic labels and do not participate.
 // Family-owned extension attributes remain the provider's responsibility.
+// |authored_target_op| may be NULL when materializing an unqualified profile.
 bool loom_target_record_projection_matches_bundle(
     const loom_module_t* module, const loom_op_t* target_op,
-    const loom_target_bundle_t* selected_bundle);
+    const loom_target_bundle_t* selected_bundle,
+    const loom_op_t* authored_target_op);
 
-// Builds a target-like record from a complete durable common projection and
-// family-owned extension attributes.
+// Builds a target-like record by specializing a complete profile projection
+// with preserved fields from |authored_target_op| and family-owned extension
+// attributes.
 //
 // Fields equal to the generated selector row remain implicit. Differing
 // projected fields become typed attributes. The operation kind must implement
 // TargetLike as a metadata-only operation with no operands, results, or
-// regions.
+// regions. |authored_target_op| may be NULL when materializing an unqualified
+// profile.
 iree_status_t loom_target_record_projection_build(
     loom_builder_t* builder, loom_op_kind_t op_kind, uint8_t selector,
     loom_symbol_ref_t symbol, const loom_target_bundle_t* selected_bundle,
+    const loom_op_t* authored_target_op,
     const loom_target_record_extension_attr_t* extension_attrs,
     iree_host_size_t extension_attr_count, loom_location_id_t location,
     loom_op_t** out_target_op);
