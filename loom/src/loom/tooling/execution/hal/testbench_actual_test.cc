@@ -339,6 +339,59 @@ check.case @dynamic_workgroups_case {
   loom_run_module_deinitialize(&run_module);
 }
 
+TEST_F(HalTestbenchActualTest, LaunchConfigBindsInputsBeforeConfigOnlyNames) {
+  static constexpr char kSource[] = R"(
+kernel.def @selected(%token_count: index, %config_only_count: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%token_count, %config_only_count, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%token_count: index) {
+  kernel.return
+}
+
+check.case @selected_case {
+  %token_count = check.literal value(1) : index
+  %routed_row_count = check.literal value(2) : index
+  %config_only_count = check.literal value(3) : index
+  func.call @selected(%routed_row_count) : (index)
+  check.return
+}
+)";
+  loom_run_module_t run_module = {};
+  loom_testbench_module_plan_t module_plan = {};
+  ParseAndPlan(IREE_SV(kSource), &run_module, &module_plan);
+  ASSERT_EQ(module_plan.case_count, 1u);
+  const loom_testbench_case_plan_t* case_plan = &module_plan.cases[0];
+  const loom_testbench_invocation_plan_t* actual_invocation = nullptr;
+  IREE_ASSERT_OK(loom_run_hal_testbench_select_actual_invocation(
+      case_plan, &actual_invocation));
+
+  loom_run_hal_testbench_context_t context = {};
+  context.artifact_provider = &kFakeHalArtifactProvider;
+  context.runtime_initialized = true;
+  context.host_allocator = iree_allocator_system();
+
+  loom_run_hal_testbench_actual_provider_options_t options = {};
+  options.context = &context;
+  options.session = &session_;
+  options.filename = IREE_SV("hal_testbench_actual_test.loom");
+  options.source = IREE_SV(kSource);
+  options.test_module = run_module.module;
+  options.actual_invocation = actual_invocation;
+  options.case_plan = case_plan;
+
+  loom_run_hal_testbench_actual_provider_t provider = {};
+  loom_run_hal_testbench_actual_provider_initialize(&options, &provider);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_run_hal_testbench_actual_provider_compile(&provider));
+  EXPECT_EQ(provider.invocation_options.workgroup_count[0], 2u);
+  EXPECT_EQ(provider.invocation_options.workgroup_count[1], 3u);
+  EXPECT_EQ(provider.invocation_options.workgroup_count[2], 1u);
+
+  loom_run_hal_testbench_actual_provider_deinitialize(&provider);
+  loom_run_module_deinitialize(&run_module);
+}
+
 TEST_F(HalTestbenchActualTest, CompileModuleContainsOnlySelectedEntry) {
   static constexpr char kSource[] = R"(
 kernel.def @selected(%element_count: index) {

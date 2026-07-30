@@ -422,6 +422,37 @@ static bool loom_run_hal_testbench_find_case_constant_value_for_name(
   return false;
 }
 
+static bool loom_run_hal_testbench_find_actual_input_value_for_name(
+    const loom_run_hal_testbench_actual_provider_t* provider,
+    loom_func_like_t func, iree_string_view_t name,
+    loom_value_id_t* out_value_id) {
+  if (iree_string_view_is_empty(name)) {
+    *out_value_id = LOOM_VALUE_ID_INVALID;
+    return false;
+  }
+  loom_region_t* body = loom_func_like_body(func);
+  if (body == NULL || body->block_count == 0) {
+    *out_value_id = LOOM_VALUE_ID_INVALID;
+    return false;
+  }
+  const loom_block_t* entry_block = loom_region_const_entry_block(body);
+  for (uint16_t argument_index = 0; argument_index < entry_block->arg_count;
+       ++argument_index) {
+    const loom_value_id_t argument_id =
+        loom_block_arg_id(entry_block, argument_index);
+    if (iree_string_view_equal(
+            loom_run_hal_testbench_value_name(provider->compile_module.module,
+                                              argument_id),
+            name)) {
+      *out_value_id =
+          provider->actual_invocation->input_value_ids[argument_index];
+      return true;
+    }
+  }
+  *out_value_id = LOOM_VALUE_ID_INVALID;
+  return false;
+}
+
 static bool loom_run_hal_testbench_value_facts_from_constant_attr(
     loom_attribute_t attr, loom_scalar_type_t scalar_type,
     loom_value_facts_t* out_facts) {
@@ -560,7 +591,11 @@ loom_run_hal_testbench_apply_case_constants_to_named_region_args(
     const iree_string_view_t argument_name = loom_run_hal_testbench_value_name(
         provider->compile_module.module, argument_id);
     loom_value_id_t case_value_id = LOOM_VALUE_ID_INVALID;
-    if (!loom_run_hal_testbench_find_case_constant_value_for_name(
+    const bool binds_actual_input =
+        loom_run_hal_testbench_find_actual_input_value_for_name(
+            provider, func, argument_name, &case_value_id);
+    if (!binds_actual_input &&
+        !loom_run_hal_testbench_find_case_constant_value_for_name(
             provider->test_module, provider->case_plan, argument_name,
             &case_value_id)) {
       continue;
