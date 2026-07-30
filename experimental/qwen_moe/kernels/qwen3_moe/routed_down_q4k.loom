@@ -15,7 +15,7 @@
 // final block; inactive lanes never address a synthetic fourth block.
 func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
-func.decl @qwen3_moe_q4k_q8_1_chunk(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group: index, %q4_half: index, %q8_values: vector<16xi8>, %q8_d: f32, %q8_s: f32) -> (f32)
+func.decl @qwen3_moe_q4k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32)
 
 kernel.def @qwen3_moe_routed_down_q4k_q8_1_x4(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index) {
   %eight = index.constant 8 : index
@@ -38,17 +38,10 @@ kernel.def @qwen3_moe_routed_down_q4k_q8_1_x4(%token_count: index, %input_size: 
   %lane = kernel.subgroup.lane.id : index
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %four = index.constant 4 : index
   %eight = index.constant 8 : index
-  %sixteen = index.constant 16 : index
   %onetwentyeight = index.constant 128 : index
   %onehundredfortyfour = index.constant 144 : index
   %twofiftysix = index.constant 256 : index
-  %fivehundredeleven = index.constant 511 : index
-  %fiveonetwo = index.constant 512 : index
-  %q8_group_bytes = index.constant 144 : offset
-  %q8_payload_byte_add = index.constant 16 : offset
   %one_byte = index.constant 1 : offset
   %zero_i32 = scalar.constant 0 : i32
   %zero_f32 = scalar.constant 0.0 : f32
@@ -67,24 +60,6 @@ kernel.def @qwen3_moe_routed_down_q4k_q8_1_x4(%token_count: index, %input_size: 
   %weight_row_byte_count = index.mul %q4_block_count, %onehundredfortyfour : index
   %q8_group_count = index.div %bounded_input_size, %onetwentyeight : index
   %q8_row_byte_count = index.mul %q8_group_count, %onehundredfortyfour : index
-  %padded_input_size = index.add %bounded_input_size, %fivehundredeleven : index
-  %iteration_count = index.div %padded_input_size, %fiveonetwo : index
-  %q4_group0 = index.div %lane, %two : index
-  %q4_group1 = index.rem %q4_group0, %eight : index
-  %q4_group = index.assume %q4_group1 [range(%q4_group1, 0, 7)] : index
-  %q4_half0 = index.rem %lane, %two : index
-  %q4_half = index.assume %q4_half0 [range(%q4_half0, 0, 1)] : index
-  %lane_q4_block = index.div %lane, %sixteen : index
-  %lane_q8_group = index.div %lane, %eight : index
-  %q8_inner_block0 = index.div %lane, %two : index
-  %q8_inner_block1 = index.rem %q8_inner_block0, %four : index
-  %q8_inner_block = index.assume %q8_inner_block1 [range(%q8_inner_block1, 0, 3)] : index
-  %q8_inner_word_base = index.mul %q8_inner_block, %eight : index
-  %q8_half_word_add = index.mul %q4_half, %four : index
-  %q8_word_index0 = index.add %q8_inner_word_base, %q8_half_word_add : index
-  %q8_word_index = index.assume %q8_word_index0 [range(%q8_word_index0, 0, 28)] : index
-  %q8_ds_index = index.mul %q8_inner_block, %two : index
-  %q8_s_index = index.add %q8_ds_index, %one : index
   %q8_noalias, %route_id_noalias, %route_weight_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %route_ids, %route_weights, %weight, %output : buffer, buffer, buffer, buffer, buffer
   %route_id_view = buffer.view %route_id_noalias[%zero_offset] : buffer -> view<[%route_id_element_count]xi32, #dense>
   %route_weight_view = buffer.view %route_weight_noalias[%zero_offset] : buffer -> view<[%route_weight_element_count]xf32, #dense>
@@ -120,34 +95,7 @@ kernel.def @qwen3_moe_routed_down_q4k_q8_1_x4(%token_count: index, %input_size: 
       %q8_row = index.add %q8_row_base0, %route : index
       %q8_row_byte_index = index.mul %q8_row, %q8_row_byte_count : index
       %q8_row_byte_base = index.scale %q8_row_byte_index, %one_byte : index, offset -> offset
-      %route_lane_sum = scf.for %iteration = [%zero to %iteration_count step %one](%iteration_acc = %zero_f32 : f32) -> (f32) unroll {
-        %iteration_q4_block = index.mul %iteration, %two : index
-        %q4_block0 = index.add %iteration_q4_block, %lane_q4_block : index
-        %valid_q4_block = index.cmp ult, %q4_block0, %q4_block_count : index
-        %contribution = scf.if %valid_q4_block -> (f32) {
-          %q4_block, %bounded_q4_block_count = index.assume %q4_block0, %q4_block_count [lt(%q4_block0, %q4_block_count)] : index, index
-          %iteration_q8_group = index.mul %iteration, %four : index
-          %q8_group0 = index.add %iteration_q8_group, %lane_q8_group : index
-          %q8_group, %bounded_q8_group_count = index.assume %q8_group0, %q8_group_count [lt(%q8_group0, %q8_group_count)] : index, index
-          %q8_group_byte_add = index.scale %q8_group, %q8_group_bytes : index, offset -> offset
-          %q8_group_byte_base = index.add %q8_row_byte_base, %q8_group_byte_add : offset
-          %q8_payload_byte_base = index.add %q8_group_byte_base, %q8_payload_byte_add : offset
-          %q8_ds_view = buffer.view %q8_noalias[%q8_group_byte_base] : buffer -> view<8xf16, #dense>
-          %q8_words_view = buffer.view %q8_noalias[%q8_payload_byte_base] : buffer -> view<32xi32, #dense>
-          %q8_d_f16 = view.load %q8_ds_view[%q8_ds_index] : view<8xf16, #dense> -> f16
-          %q8_s_f16 = view.load %q8_ds_view[%q8_s_index] : view<8xf16, #dense> -> f16
-          %q8_d = scalar.extf %q8_d_f16 : f16 to f32
-          %q8_s = scalar.extf %q8_s_f16 : f16 to f32
-          %q8_words = vector.load %q8_words_view[%q8_word_index] : view<32xi32, #dense> -> vector<4xi32>
-          %q8_values = vector.bitcast %q8_words : vector<4xi32> to vector<16xi8>
-          %dot = func.call @qwen3_moe_q4k_q8_1_chunk(%weight_noalias, %weight_row_byte_base, %q4_block, %q4_group, %q4_half, %q8_values, %q8_d, %q8_s) : (buffer, offset, index, index, index, vector<16xi8>, f32, f32) -> (f32)
-          scf.yield %dot : f32
-        } else {
-          scf.yield %zero_f32 : f32
-        }
-        %next = scalar.addf %iteration_acc, %contribution : f32
-        scf.yield %next : f32
-      }
+      %route_lane_sum = func.call @qwen3_moe_q4k_q8_1_x4_row_lane(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
       %route_weight = kernel.subgroup.broadcast %lane_route_weight from %route_i32 : f32, i32
       %weighted_lane = scalar.mulf<reassoc|nnan|ninf|nsz> %route_lane_sum, %route_weight : f32
       %next = scalar.addf<reassoc|nnan|ninf|nsz> %route_acc, %weighted_lane : f32
