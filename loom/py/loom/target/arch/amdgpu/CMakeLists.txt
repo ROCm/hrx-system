@@ -35,11 +35,41 @@ iree_py_library(
 
 iree_py_library(
   NAME
+    target_identity
+  SRCS
+    "target_identity.py"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::target_info
+    loom::py::loom::target::arch::amdgpu::target_map_data
+)
+
+iree_py_test(
+  NAME
+    target_identity_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
+  SRCS
+    "target_identity_test.py"
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.amdgpu.target_identity_test"
+  DEPS
+    loom::py::loom::target::arch::amdgpu::target_identity
+    loom::py::loom::target::arch::amdgpu::target_info
+    loom::py::loom::target::arch::amdgpu::target_map_data
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_library(
+  NAME
     compile_report_suggestions
   SRCS
     "compile_report_suggestions.py"
   DEPS
-    loom::py::loom::target::arch::amdgpu::target_info
+    loom::py::loom::target::arch::amdgpu::target_identity
     loom::py::loom::reporting::reporting
 )
 

@@ -12,7 +12,11 @@ from loom.target.arch.amdgpu.compile_report_suggestions import (
 )
 
 
-def _compile_report(*, target_key: str | None = "gfx1100") -> dict[str, object]:
+def _compile_report(
+    *,
+    target_key: str | None = "gfx1100",
+    subgroup_size: int = 64,
+) -> dict[str, object]:
     report = {
         "kind": "loom.compile_report",
         "schema_version": 0,
@@ -29,7 +33,7 @@ def _compile_report(*, target_key: str | None = "gfx1100") -> dict[str, object]:
                     "allocation_materialized_reload_bytes": 4096,
                     "private_memory_bytes": 128,
                     "target_resources": {
-                        "subgroup_size": 64,
+                        "subgroup_size": subgroup_size,
                         "residency": {
                             "current_tier": 5,
                             "next_better_tier": 6,
@@ -67,17 +71,51 @@ def test_suggests_ordered_experiments_from_exact_target_evidence() -> None:
     assert residency.evidence[0].path.endswith("residency.current_tier")
 
 
-def test_missing_or_unknown_target_key_is_unavailable() -> None:
+def test_resolves_overlay_target_to_its_processor_model() -> None:
+    document = parse_compile_report(
+        _compile_report(target_key="gfx1250-a0"), source="report.json"
+    )
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    assert result.unavailable_reason is None
+    wave_evidence = result.suggestions[-1].evidence
+    assert wave_evidence[-1].path == "target_info.wavefront.default_size"
+    assert wave_evidence[-1].value == 32
+
+
+def test_resolves_qualified_target_without_losing_feature_identity() -> None:
+    document = parse_compile_report(
+        _compile_report(
+            target_key="gfx942:sramecc+:xnack-",
+            subgroup_size=32,
+        ),
+        source="report.json",
+    )
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    assert result.unavailable_reason is None
+    wave_evidence = result.suggestions[-1].evidence
+    assert wave_evidence[-1].path == "target_info.wavefront.default_size"
+    assert wave_evidence[-1].value == 64
+
+
+def test_missing_unknown_and_invalid_target_keys_are_unavailable() -> None:
     missing = parse_compile_report(_compile_report(target_key=None))
     unknown = parse_compile_report(_compile_report(target_key="gfx9999"))
+    invalid = parse_compile_report(_compile_report(target_key="gfx942:xnack+:xnack-"))
 
     missing_result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(missing)
     unknown_result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(unknown)
+    invalid_result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(invalid)
 
     assert missing_result.unavailable_reason == "missing_target_key"
     assert missing_result.suggestions == ()
     assert unknown_result.unavailable_reason == "unknown_target_key"
     assert unknown_result.suggestions == ()
+    assert invalid_result.unavailable_reason == "invalid_target_key"
+    assert invalid_result.suggestions == ()
 
 
 def test_private_memory_is_reported_once_without_spill_evidence() -> None:

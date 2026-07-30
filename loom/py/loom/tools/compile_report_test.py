@@ -20,6 +20,7 @@ def _write_report(
     code_byte_count: int = 512,
     target_family: str = "AMDGPU",
     target_key: str = "gfx11-generic",
+    target_record: str = "gfx11-generic",
 ) -> None:
     workload = {
         "workgroup_size": {"x": 64, "y": 1, "z": 1, "flat": 64},
@@ -31,14 +32,14 @@ def _write_report(
         "schema_version": 0,
         "mode": "summary",
         "artifact_kind": "hal-executable",
-        "artifact_format": "hsaco",
+        "artifact_format": "elf",
         "backend": "amdgpu-hal",
         "status": {"code": 0, "name": "OK"},
         "target_family": target_family,
         "target_key": target_key,
-        "target_bundle": "gfx11",
-        "target_snapshot": "gfx11",
-        "target_config": "gfx11",
+        "target_bundle": target_record,
+        "target_snapshot": target_record,
+        "target_config": target_record,
         "workload": workload,
         "entries": {
             "count": 1,
@@ -47,11 +48,11 @@ def _write_report(
                     "index": 0,
                     "function": "kernel",
                     "source_function": "kernel",
-                    "target_bundle": "gfx11",
-                    "target_snapshot": "gfx11",
+                    "target_bundle": target_record,
+                    "target_snapshot": target_record,
                     "target_export": "kernel",
                     "target_export_symbol": None,
-                    "target_config": "gfx11",
+                    "target_config": target_record,
                     "workload": workload,
                     "instruction_count": 100,
                     "code_byte_count": code_byte_count,
@@ -97,6 +98,44 @@ def test_diff_text_reports_changed_metric(
     assert "code bytes: 512 B -> 480 B" in captured.out
 
 
+def test_diff_json_preserves_qualified_target_identity(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    target_key = "gfx942:sramecc+:xnack-"
+    _write_report(
+        baseline_path,
+        code_byte_count=512,
+        target_key=target_key,
+        target_record="gfx942",
+    )
+    _write_report(
+        candidate_path,
+        code_byte_count=480,
+        target_key=target_key,
+        target_record="gfx942",
+    )
+
+    assert (
+        main(
+            [
+                "diff",
+                str(baseline_path),
+                str(candidate_path),
+                "--format=json",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    view = json.loads(captured.out)
+    assert captured.err == ""
+    assert view["identity"]["target_key"] == target_key
+    assert view["changed_entry_count"] == 1
+
+
 def test_rejects_unversioned_report(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -113,7 +152,7 @@ def test_rejects_unversioned_report(
     assert "schema_version" in captured.err
 
 
-def test_suggest_json_uses_exact_target_provider(
+def test_suggest_json_uses_registered_target_provider(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     report_path = tmp_path / "report.json"
@@ -130,11 +169,41 @@ def test_suggest_json_uses_exact_target_provider(
     assert view["findings"] == []
 
 
+@pytest.mark.parametrize(
+    ("target_key", "target_record"),
+    [
+        ("gfx1250-a0", "gfx1250-a0"),
+        ("gfx942:sramecc+:xnack-", "gfx942"),
+    ],
+)
+def test_suggest_json_resolves_structured_amdgpu_target_keys(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    target_key: str,
+    target_record: str,
+) -> None:
+    report_path = tmp_path / "report.json"
+    _write_report(
+        report_path,
+        target_key=target_key,
+        target_record=target_record,
+    )
+
+    assert main(["suggest", str(report_path), "--format=json"]) == 0
+
+    captured = capsys.readouterr()
+    view = json.loads(captured.out)
+    assert captured.err == ""
+    assert view["provider"] == "amdgpu"
+    assert view["status"] == "available"
+    assert view["target"] == {"family": "AMDGPU", "key": target_key}
+
+
 def test_suggest_json_reports_unknown_target_without_guessing(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     report_path = tmp_path / "report.json"
-    _write_report(report_path, target_key="gfx9999")
+    _write_report(report_path, target_key="gfx9999", target_record="gfx9999")
 
     assert main(["suggest", str(report_path), "--format=json"]) == 0
 
@@ -146,11 +215,36 @@ def test_suggest_json_reports_unknown_target_without_guessing(
     assert view["findings"] == []
 
 
+def test_suggest_json_reports_invalid_target_identity(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    report_path = tmp_path / "report.json"
+    _write_report(
+        report_path,
+        target_key="gfx942:xnack+:xnack-",
+        target_record="gfx942",
+    )
+
+    assert main(["suggest", str(report_path), "--format=json"]) == 0
+
+    captured = capsys.readouterr()
+    view = json.loads(captured.out)
+    assert captured.err == ""
+    assert view["status"] == "unavailable"
+    assert view["reason"] == "invalid_target_key"
+    assert view["findings"] == []
+
+
 def test_suggest_json_reports_unsupported_family_without_provider(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     report_path = tmp_path / "report.json"
-    _write_report(report_path, target_family="TEST", target_key="test0")
+    _write_report(
+        report_path,
+        target_family="TEST",
+        target_key="test0",
+        target_record="test0",
+    )
 
     assert main(["suggest", str(report_path), "--format=json"]) == 0
 

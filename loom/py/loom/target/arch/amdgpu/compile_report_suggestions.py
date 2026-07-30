@@ -17,11 +17,14 @@ from loom.reporting.compile_report_suggestions import (
     CompileReportSuggestionEvidence,
     CompileReportSuggestionResult,
 )
-from loom.target.arch.amdgpu.target_info import amdgpu_processor_info_by_name
+from loom.target.arch.amdgpu.target_identity import (
+    AmdgpuArtifactTargetKeyError,
+    parse_amdgpu_artifact_target_key,
+)
 
 
 class AmdgpuCompileReportSuggestionProvider:
-    """Interprets AMDGPU evidence only after resolving the exact processor."""
+    """Interprets AMDGPU evidence after resolving its structured target."""
 
     target_family = "AMDGPU"
     provider_name = "amdgpu"
@@ -33,8 +36,14 @@ class AmdgpuCompileReportSuggestionProvider:
                 provider_name=self.provider_name,
                 unavailable_reason="missing_target_key",
             )
-        processor_info = amdgpu_processor_info_by_name(target_key)
-        if processor_info is None:
+        try:
+            target_identity = parse_amdgpu_artifact_target_key(target_key)
+        except AmdgpuArtifactTargetKeyError:
+            return CompileReportSuggestionResult(
+                provider_name=self.provider_name,
+                unavailable_reason="invalid_target_key",
+            )
+        if target_identity is None:
             return CompileReportSuggestionResult(
                 provider_name=self.provider_name,
                 unavailable_reason="unknown_target_key",
@@ -63,7 +72,7 @@ class AmdgpuCompileReportSuggestionProvider:
                 entry,
                 entry_name,
                 path_prefix,
-                processor_info.wavefront.default_size,
+                target_identity.processor.wavefront.default_size,
             )
             if wave_suggestion is not None:
                 suggestions.append(wave_suggestion)
