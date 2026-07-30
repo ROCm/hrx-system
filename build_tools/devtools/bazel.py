@@ -29,6 +29,7 @@ from build_tools.devtools.environment import (
 LOCAL_STATE_ROOT = REPO_ROOT / ".iree"
 BAZEL_TRY_ROOT = LOCAL_STATE_ROOT / "bazel-try"
 BAZEL_TRY_LABEL_ROOT = "//.iree/bazel-try"
+BAZEL_TRY_COMMON_ARGS = ("--check_visibility=false",)
 BAZEL_COMPILE_COMMANDS_ROOT = LOCAL_TMP_ROOT / "iree-bazel-compile-commands"
 DEFAULT_TRY_BINARY_NAME = "snippet"
 DEFAULT_COMPILE_COMMANDS_OUTPUT = REPO_ROOT / "compile_commands.json"
@@ -768,12 +769,18 @@ class BazelTryStep:
     command: BazelTryCommand
     env: dict[str, str] | None = None
 
+    def _bazel_args(self) -> list[str]:
+        return [*BAZEL_TRY_COMMON_ARGS, *self.command.bazel_args]
+
+    def _build_command(self, label: str) -> list[str]:
+        return [self.bazel, "build", *self._bazel_args(), label]
+
     def describe(self) -> str:
         scratch = BAZEL_TRY_ROOT / "run-<pid>"
         label = f"{BAZEL_TRY_LABEL_ROOT}/run-<pid>:snippet"
         lines = [
             f"# write {scratch}/BUILD.bazel",
-            quote_command([self.bazel, "build", *self.command.bazel_args, label]),
+            quote_command(self._build_command(label)),
         ]
         if self.command.compile_only:
             lines.append("# compile only")
@@ -807,7 +814,7 @@ class BazelTryStep:
                 f"{BAZEL_TRY_LABEL_ROOT}/{scratch_dir.name}:{DEFAULT_TRY_BINARY_NAME}"
             )
             build_result = run_quietly(
-                [self.bazel, "build", *self.command.bazel_args, label],
+                self._build_command(label),
                 cwd=REPO_ROOT,
                 env=self.env,
                 verbose=verbose,
@@ -817,7 +824,7 @@ class BazelTryStep:
             binary_path = resolve_bazel_output_path(
                 bazel=self.bazel,
                 target=label,
-                bazel_args=self.command.bazel_args,
+                bazel_args=self._bazel_args(),
                 cwd=REPO_ROOT,
                 env=self.env,
             )
