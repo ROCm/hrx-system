@@ -657,18 +657,27 @@ static void iree_hal_streaming_pending_free_destroy(
   iree_allocator_free(iree_allocator_system(), free_op);
 }
 
+static iree_status_t iree_hal_streaming_buffer_free_and_trim_pool(
+    iree_hal_streaming_buffer_t* buffer, bool trim_to_release_threshold) {
+  // Pool-backed buffers retain their pool. Preserve it across buffer
+  // destruction so that any now-unused backing storage can be released.
+  hrx_mem_pool_t allocation_pool = buffer->allocation_pool;
+  if (allocation_pool) hrx_mem_pool_retain(allocation_pool);
+  iree_hal_streaming_buffer_free(buffer);
+
+  iree_status_t status = iree_ok_status();
+  if (allocation_pool && trim_to_release_threshold) {
+    status = HRX_CALL(hrx_mem_pool_release_unused(allocation_pool));
+  }
+  hrx_mem_pool_release(allocation_pool);
+  return status;
+}
+
 static iree_status_t iree_hal_streaming_pending_free_release_buffer(
     iree_hal_streaming_deferred_device_free_t* free_op,
     bool trim_to_release_threshold) {
-  hrx_mem_pool_t allocation_pool = free_op->buffer->allocation_pool;
-  IREE_ASSERT(allocation_pool);
-  hrx_mem_pool_retain(allocation_pool);
-  iree_hal_streaming_buffer_free(free_op->buffer);
-  iree_status_t status =
-      trim_to_release_threshold
-          ? HRX_CALL(hrx_mem_pool_release_unused(allocation_pool))
-          : iree_ok_status();
-  hrx_mem_pool_release(allocation_pool);
+  iree_status_t status = iree_hal_streaming_buffer_free_and_trim_pool(
+      free_op->buffer, trim_to_release_threshold);
   iree_hal_streaming_pending_free_destroy(free_op);
   return status;
 }
@@ -1028,13 +1037,9 @@ iree_status_t iree_hal_streaming_memory_free_device(
   iree_hal_streaming_memory_account_device_free(wrapper);
 
   // Synchronous frees return an entirely idle pool's backing storage to the
-  // allocator. Retain the pool across wrapper destruction because the wrapper
-  // owns the last allocation reference in the common case.
-  hrx_mem_pool_t allocation_pool = wrapper->allocation_pool;
-  hrx_mem_pool_retain(allocation_pool);
-  iree_hal_streaming_buffer_free(wrapper);
-  status = HRX_CALL(hrx_mem_pool_release_unused(allocation_pool));
-  hrx_mem_pool_release(allocation_pool);
+  // allocator. Ordinary device allocations have no pool to trim.
+  status = iree_hal_streaming_buffer_free_and_trim_pool(
+      wrapper, /*trim_to_release_threshold=*/true);
   iree_hal_streaming_context_release(owner_context);
 
   IREE_TRACE_ZONE_END(z0);
@@ -1044,14 +1049,19 @@ iree_status_t iree_hal_streaming_memory_free_device(
 static void iree_hal_streaming_deferred_device_free(void* user_data) {
   iree_hal_streaming_deferred_device_free_t* free_op =
       (iree_hal_streaming_deferred_device_free_t*)user_data;
-  uint64_t allow_opportunistic = 0;
-  iree_status_t policy_status = HRX_CALL(hrx_mem_pool_get_attribute(
-      free_op->buffer->allocation_pool,
-      HRX_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC, &allow_opportunistic));
-  if (!iree_status_is_ok(policy_status)) {
-    iree_status_fprint(stderr, policy_status);
-    iree_status_free(policy_status);
-    allow_opportunistic = 0;
+  hrx_mem_pool_t allocation_pool = free_op->buffer->allocation_pool;
+  // Non-pool allocations have no backing storage available for reuse and can
+  // be released as soon as the stream reaches the free operation.
+  uint64_t allow_opportunistic = allocation_pool ? 0 : 1;
+  if (allocation_pool) {
+    iree_status_t policy_status = HRX_CALL(hrx_mem_pool_get_attribute(
+        allocation_pool, HRX_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC,
+        &allow_opportunistic));
+    if (!iree_status_is_ok(policy_status)) {
+      iree_status_fprint(stderr, policy_status);
+      iree_status_free(policy_status);
+      allow_opportunistic = 0;
+    }
   }
 
   bool is_reused = false;
@@ -1228,12 +1238,9 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
         wrapper->size, wrapper->hrx_buf, wrapper);
     if (!hrx_status_is_ok(insert_status)) {
       status = iree_status_join(status, HRX_CALL(insert_status));
-      hrx_mem_pool_t allocation_pool = wrapper->allocation_pool;
-      hrx_mem_pool_retain(allocation_pool);
-      iree_hal_streaming_buffer_free(wrapper);
       status = iree_status_join(
-          status, HRX_CALL(hrx_mem_pool_release_unused(allocation_pool)));
-      hrx_mem_pool_release(allocation_pool);
+          status, iree_hal_streaming_buffer_free_and_trim_pool(
+                      wrapper, /*trim_to_release_threshold=*/true));
     } else {
       iree_hal_streaming_buffer_activate_pool_allocation(wrapper);
       iree_hal_streaming_memory_account_device_allocation(

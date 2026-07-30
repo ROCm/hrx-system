@@ -750,8 +750,8 @@ iree_status_t iree_hal_amdgpu_allocator_create(
           &allocator->memory_pools.device_uncached[i]);
     }
     if (iree_status_is_ok(status) &&
-        logical_device->physical_devices[i]->isa.target_id.version.major >=
-            12) {
+        logical_device->system->gpu_agent_targets[i]
+                .primary_isa.identity.version.major >= 12) {
       if (!device_uncached_pool_available) {
         allocator->memory_pools.device_uncached[i] =
             allocator->memory_pools.device_coarse[i];
