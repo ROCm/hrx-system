@@ -666,11 +666,35 @@ static iree_status_t qwen_program_record_dispatch_barrier(
       /*buffer_barrier_count=*/0, /*buffer_barriers=*/NULL);
 }
 
-static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
+static iree_status_t qwen_program_record_attention_metadata(
+    qwen_program_t* program,
+    const qwen_request_storage_layout_t* request_layout) {
+  const uint32_t constants[] = {
+      (uint32_t)program->token_count,
+      (uint32_t)program->context_capacity,
+  };
+  const iree_hal_buffer_ref_t bindings[] = {
+      qwen_program_request_ref(request_layout->control),
+      qwen_program_request_ref(request_layout->positions),
+      qwen_program_request_ref(request_layout->key_cache_indices),
+      qwen_program_request_ref(request_layout->value_cache_indices),
+      qwen_program_request_ref(request_layout->attention_mask),
+  };
+  IREE_RETURN_IF_ERROR(qwen_program_record_dispatch(
+      program, QWEN_PROGRAM_EXECUTABLE_ATTENTION_METADATA,
+      IREE_ARRAYSIZE(constants), constants, IREE_ARRAYSIZE(bindings),
+      bindings));
+  return qwen_program_record_dispatch_barrier(program);
+}
+
+static iree_status_t qwen_program_record_layer_body(
+    qwen_program_t* program, iree_host_size_t layer_index,
+    iree_host_size_t cache_window_layer_index,
+    const qwen_request_storage_layout_t* request_layout) {
   const qwen_parameter_layout_t* parameter_layout =
       qwen_model_parameter_layout(program->model);
   const qwen_layer_parameters_t* parameters =
-      &parameter_layout->layers[program->layer_index];
+      &parameter_layout->layers[layer_index];
   const qwen_layer_program_layout_t* transient = &program->layer_layout;
   const bool uses_q6 =
       parameters->value_and_down_storage == QWEN_QUANTIZED_STORAGE_Q6_K;
@@ -685,44 +709,18 @@ static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
       uses_q6 ? QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6
               : QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4;
 
-  qwen_request_storage_layout_t request;
-  IREE_RETURN_IF_ERROR(qwen_request_storage_layout_calculate(
-      program->token_count, program->context_capacity, &request));
-
   const uint32_t token_count = (uint32_t)program->token_count;
   const uint32_t context_capacity = (uint32_t)program->context_capacity;
   const uint32_t route_count = QWEN_MODEL_ROUTE_COUNT;
   const uint32_t route_stride = QWEN_MODEL_ROUTE_COUNT;
   const uint32_t expert_count = QWEN_MODEL_EXPERT_COUNT;
-
-  iree_status_t status = iree_hal_command_buffer_begin(program->command_buffer);
-
-  const uint32_t attention_metadata_constants[] = {
-      token_count,
-      context_capacity,
-  };
-  const iree_hal_buffer_ref_t attention_metadata_bindings[] = {
-      qwen_program_request_ref(request.control),
-      qwen_program_request_ref(request.positions),
-      qwen_program_request_ref(request.key_cache_indices),
-      qwen_program_request_ref(request.value_cache_indices),
-      qwen_program_request_ref(request.attention_mask),
-  };
-  if (iree_status_is_ok(status)) {
-    status = qwen_program_record_dispatch(
-        program, QWEN_PROGRAM_EXECUTABLE_ATTENTION_METADATA,
-        IREE_ARRAYSIZE(attention_metadata_constants),
-        attention_metadata_constants,
-        IREE_ARRAYSIZE(attention_metadata_bindings),
-        attention_metadata_bindings);
-  }
-  if (iree_status_is_ok(status)) {
-    status = qwen_program_record_dispatch_barrier(program);
-  }
+  const iree_device_size_t layer_cache_offset =
+      cache_window_layer_index * request_layout->layer_cache_byte_length;
+  iree_status_t status = iree_ok_status();
 
   const uint32_t attention_prepare_constants[] = {token_count};
   const iree_hal_buffer_ref_t attention_prepare_bindings[] = {
-      qwen_program_request_ref(request.hidden_state),
+      qwen_program_request_ref(request_layout->hidden_state),
       qwen_program_model_ref(parameters->attention_norm),
       qwen_program_transient_ref(transient->attention_projection_input),
   };
@@ -805,9 +803,9 @@ static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
       context_capacity,
   };
   const iree_hal_buffer_ref_t attention_postprocess_bindings[] = {
-      qwen_program_request_ref(request.positions),
-      qwen_program_request_ref(request.key_cache_indices),
-      qwen_program_request_ref(request.value_cache_indices),
+      qwen_program_request_ref(request_layout->positions),
+      qwen_program_request_ref(request_layout->key_cache_indices),
+      qwen_program_request_ref(request_layout->value_cache_indices),
       qwen_program_transient_ref(transient->raw_query),
       qwen_program_transient_ref(transient->raw_key),
       qwen_program_transient_ref(transient->raw_value),
@@ -815,12 +813,12 @@ static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
       qwen_program_model_ref(parameters->key_norm),
       qwen_program_model_ref(parameter_layout->rope_inverse_frequencies),
       qwen_program_transient_ref(transient->rotated_query),
-      iree_hal_make_indirect_buffer_ref(QWEN_PROGRAM_BINDING_KEY_CACHE,
-                                        /*offset=*/0,
-                                        request.layer_cache_byte_length),
-      iree_hal_make_indirect_buffer_ref(QWEN_PROGRAM_BINDING_VALUE_CACHE,
-                                        /*offset=*/0,
-                                        request.layer_cache_byte_length),
+      iree_hal_make_indirect_buffer_ref(
+          QWEN_PROGRAM_BINDING_KEY_CACHE, layer_cache_offset,
+          request_layout->layer_cache_byte_length),
+      iree_hal_make_indirect_buffer_ref(
+          QWEN_PROGRAM_BINDING_VALUE_CACHE, layer_cache_offset,
+          request_layout->layer_cache_byte_length),
   };
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_dispatch(
@@ -840,13 +838,13 @@ static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
   };
   const iree_hal_buffer_ref_t flash_attention_bindings[] = {
       qwen_program_transient_ref(transient->rotated_query),
-      iree_hal_make_indirect_buffer_ref(QWEN_PROGRAM_BINDING_KEY_CACHE,
-                                        /*offset=*/0,
-                                        request.layer_cache_byte_length),
-      iree_hal_make_indirect_buffer_ref(QWEN_PROGRAM_BINDING_VALUE_CACHE,
-                                        /*offset=*/0,
-                                        request.layer_cache_byte_length),
-      qwen_program_request_ref(request.attention_mask),
+      iree_hal_make_indirect_buffer_ref(
+          QWEN_PROGRAM_BINDING_KEY_CACHE, layer_cache_offset,
+          request_layout->layer_cache_byte_length),
+      iree_hal_make_indirect_buffer_ref(
+          QWEN_PROGRAM_BINDING_VALUE_CACHE, layer_cache_offset,
+          request_layout->layer_cache_byte_length),
+      qwen_program_request_ref(request_layout->attention_mask),
       qwen_program_transient_ref(transient->attention_output),
   };
   if (iree_status_is_ok(status)) {
@@ -863,7 +861,7 @@ static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
   const iree_hal_buffer_ref_t attention_output_bindings[] = {
       qwen_program_transient_ref(transient->attention_output),
       qwen_program_model_ref(parameters->attention_output),
-      qwen_program_request_ref(request.hidden_state),
+      qwen_program_request_ref(request_layout->hidden_state),
   };
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_dispatch(
@@ -877,7 +875,7 @@ static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
 
   const uint32_t feed_forward_norm_constants[] = {token_count};
   const iree_hal_buffer_ref_t feed_forward_norm_bindings[] = {
-      qwen_program_request_ref(request.hidden_state),
+      qwen_program_request_ref(request_layout->hidden_state),
       qwen_program_model_ref(parameters->feed_forward_norm),
       qwen_program_transient_ref(transient->feed_forward_norm),
   };
@@ -1007,7 +1005,7 @@ static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
   const iree_hal_buffer_ref_t weighted_reduce_bindings[] = {
       qwen_program_transient_ref(transient->route_weights),
       qwen_program_transient_ref(transient->routed_down),
-      qwen_program_request_ref(request.hidden_state),
+      qwen_program_request_ref(request_layout->hidden_state),
   };
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_dispatch(
@@ -1015,25 +1013,46 @@ static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
         IREE_ARRAYSIZE(weighted_reduce_constants), weighted_reduce_constants,
         IREE_ARRAYSIZE(weighted_reduce_bindings), weighted_reduce_bindings);
   }
+  return status;
+}
 
+static iree_status_t qwen_program_record_hidden_state_copy(
+    qwen_program_t* program,
+    const qwen_request_storage_layout_t* request_layout) {
   const iree_hal_memory_barrier_t output_memory_barrier = {
       .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
       .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
   };
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_execution_barrier(
+      program->command_buffer, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_TRANSFER, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
+      /*memory_barrier_count=*/1, &output_memory_barrier,
+      /*buffer_barrier_count=*/0, /*buffer_barriers=*/NULL));
+  return iree_hal_command_buffer_copy_buffer(
+      program->command_buffer,
+      qwen_program_request_ref(request_layout->hidden_state),
+      iree_hal_make_indirect_buffer_ref(QWEN_PROGRAM_BINDING_OUTPUT_STAGING,
+                                        /*offset=*/0,
+                                        request_layout->hidden_state.length),
+      IREE_HAL_COPY_FLAG_NONE);
+}
+
+static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
+  qwen_request_storage_layout_t request_layout;
+  IREE_RETURN_IF_ERROR(qwen_request_storage_layout_calculate(
+      program->token_count, program->context_capacity, &request_layout));
+
+  iree_status_t status = iree_hal_command_buffer_begin(program->command_buffer);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_execution_barrier(
-        program->command_buffer, IREE_HAL_EXECUTION_STAGE_DISPATCH,
-        IREE_HAL_EXECUTION_STAGE_TRANSFER, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
-        /*memory_barrier_count=*/1, &output_memory_barrier,
-        /*buffer_barrier_count=*/0, /*buffer_barriers=*/NULL);
+    status = qwen_program_record_attention_metadata(program, &request_layout);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_copy_buffer(
-        program->command_buffer, qwen_program_request_ref(request.hidden_state),
-        iree_hal_make_indirect_buffer_ref(QWEN_PROGRAM_BINDING_OUTPUT_STAGING,
-                                          /*offset=*/0,
-                                          request.hidden_state.length),
-        IREE_HAL_COPY_FLAG_NONE);
+    status = qwen_program_record_layer_body(program, program->layer_index,
+                                            /*cache_window_layer_index=*/0,
+                                            &request_layout);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_record_hidden_state_copy(program, &request_layout);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_end(program->command_buffer);
