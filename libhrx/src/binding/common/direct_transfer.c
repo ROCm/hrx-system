@@ -26,6 +26,8 @@ iree_status_t iree_hal_streaming_direct_transfer_h2d(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "direct H2D transfer exceeds host address range");
   }
+  IREE_RETURN_IF_ERROR(
+      iree_hal_buffer_validate_range(target_buffer, target_offset, length));
 
   const uint8_t* source_bytes = (const uint8_t*)source;
   iree_device_size_t transferred = 0;
@@ -55,6 +57,8 @@ iree_status_t iree_hal_streaming_direct_transfer_d2h(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "direct D2H transfer exceeds host address range");
   }
+  IREE_RETURN_IF_ERROR(
+      iree_hal_buffer_validate_range(source_buffer, source_offset, length));
 
   uint8_t* target_bytes = (uint8_t*)target;
   iree_device_size_t transferred = 0;

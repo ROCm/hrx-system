@@ -7,6 +7,7 @@
 #include "iree/hal/drivers/amdgpu/virtual_memory.h"
 
 #include <stdint.h>
+#include <stdio.h>
 
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/drivers/amdgpu/access_policy.h"
@@ -226,8 +227,13 @@ static void iree_hal_amdgpu_virtual_memory_release_reservation(
   iree_hal_amdgpu_virtual_memory_reservation_t* reservation =
       (iree_hal_amdgpu_virtual_memory_reservation_t*)user_data;
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_amdgpu_hsa_cleanup_assert_success(iree_hsa_amd_vmem_address_free_raw(
-      reservation->state->libhsa, reservation->base_ptr, reservation->size));
+  iree_status_t status =
+      iree_hsa_amd_vmem_address_free(IREE_LIBHSA(reservation->state->libhsa),
+                                     reservation->base_ptr, reservation->size);
+  if (!iree_status_is_ok(status)) {
+    iree_status_fprint(stderr, status);
+    iree_status_free(status);
+  }
   iree_allocator_free(reservation->state->host_allocator, reservation);
   IREE_TRACE_ZONE_END(z0);
 }
@@ -330,9 +336,9 @@ iree_status_t iree_hal_amdgpu_virtual_memory_reserve(
     *out_virtual_buffer = reservation->virtual_buffer;
   } else {
     if (reservation->base_ptr) {
-      iree_hal_amdgpu_hsa_cleanup_assert_success(
-          iree_hsa_amd_vmem_address_free_raw(state->libhsa,
-                                             reservation->base_ptr, size));
+      status = iree_status_join(
+          status, iree_hsa_amd_vmem_address_free(IREE_LIBHSA(state->libhsa),
+                                                 reservation->base_ptr, size));
     }
     iree_allocator_free(state->host_allocator, reservation);
   }
@@ -400,7 +406,8 @@ iree_status_t iree_hal_amdgpu_physical_memory_allocate(
   }
 
   // VMM physical handles must remain resident while their mappings are live.
-  // The selected pool carries the cache policy, including uncached placement.
+  // Placement rejects memory requirements that the HSA VMM handle API cannot
+  // represent before selecting the pool.
   hsa_amd_memory_type_t hsa_memory_type = MEMORY_TYPE_NONE;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_vmem_translate_memory_type(
       IREE_HAL_AMDGPU_VMEM_MEMORY_TYPE_PINNED_HOST, &hsa_memory_type));
@@ -447,15 +454,16 @@ iree_status_t iree_hal_amdgpu_physical_memory_free(
         "AMDGPU physical-memory allocation still has %" PRIu64 " mapped bytes",
         (uint64_t)physical_memory->mapped_size);
   } else {
+    status = iree_hsa_amd_vmem_handle_release(
+        IREE_LIBHSA(state->libhsa), physical_memory->allocation_handle);
+  }
+  if (iree_status_is_ok(status)) {
     IREE_ASSERT(state->physical_memory_count > 0);
     --state->physical_memory_count;
   }
   iree_slim_mutex_unlock(&state->mutex);
 
   if (iree_status_is_ok(status)) {
-    iree_hal_amdgpu_hsa_cleanup_assert_success(
-        iree_hsa_amd_vmem_handle_release_raw(
-            state->libhsa, physical_memory->allocation_handle));
     iree_allocator_free(physical_memory->host_allocator, physical_memory);
   }
   return status;
