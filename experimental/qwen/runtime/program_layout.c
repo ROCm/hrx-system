@@ -67,12 +67,11 @@ iree_status_t qwen_layer_program_layout_calculate(
   iree_device_size_t cursor = 0;
   iree_device_size_t byte_length = 0;
 
-  // One 144-byte Q8_1 x4 physical group covers 128 hidden channels.
-  IREE_RETURN_IF_ERROR(qwen_program_layout_tensor_byte_length(
-      token_count, (QWEN_MODEL_HIDDEN_SIZE / 128) * /*Q8_1 x4 group bytes=*/144,
-      /*already bytes=*/1, &byte_length));
-  IREE_RETURN_IF_ERROR(qwen_program_layout_append(
-      byte_length, &cursor, &out_layout->quantized_attention_input));
+  // Large prefill projections consume materialized F32 RMSNorm output. This is
+  // also sufficient for the smaller Q8_1 x4 representation used by decode.
+  IREE_RETURN_IF_ERROR(
+      qwen_program_layout_append(hidden_state_byte_length, &cursor,
+                                 &out_layout->attention_projection_input));
 
   IREE_RETURN_IF_ERROR(qwen_program_layout_tensor_byte_length(
       token_count, QWEN_MODEL_QUERY_HEAD_COUNT * QWEN_MODEL_HEAD_SIZE,

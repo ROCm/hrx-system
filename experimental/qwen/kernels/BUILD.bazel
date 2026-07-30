@@ -147,7 +147,10 @@ loom_link_module(
     ],
     mode = "selective",
     output = "qwen3_moe_dense_linear_quantized_f16.loom",
-    roots = ["@qwen3_moe_dense_linear_q4k_f16_wmma"],
+    roots = [
+        "@qwen3_moe_dense_linear_q4k_f16_wmma",
+        "@qwen3_moe_dense_linear_q6k_f16_wmma",
+    ],
     strip_check = True,
 )
 

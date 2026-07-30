@@ -20,7 +20,8 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512Layer) {
   IREE_ASSERT_OK(qwen_layer_program_layout_calculate(
       /*token_count=*/512, &layout));
 
-  EXPECT_EQ(layout.quantized_attention_input.length, 512u * 16u * 144u);
+  EXPECT_EQ(layout.attention_projection_input.length,
+            512u * 2048u * sizeof(float));
   EXPECT_EQ(layout.raw_query.length, 512u * 4096u * sizeof(float));
   EXPECT_EQ(layout.raw_key.length, 512u * 512u * sizeof(float));
   EXPECT_EQ(layout.raw_value.length, layout.raw_key.length);
@@ -30,7 +31,7 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512Layer) {
   EXPECT_EQ(layout.swiglu.length, 512u * 8u * 768u * sizeof(float));
   EXPECT_EQ(layout.routed_down.length, 512u * 8u * 2048u * 2u);
 
-  ExpectOrdered(layout.quantized_attention_input, layout.raw_query);
+  ExpectOrdered(layout.attention_projection_input, layout.raw_query);
   ExpectOrdered(layout.raw_query, layout.raw_key);
   ExpectOrdered(layout.raw_key, layout.raw_value);
   ExpectOrdered(layout.raw_value, layout.rotated_query);

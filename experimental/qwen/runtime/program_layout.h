@@ -28,8 +28,8 @@ typedef struct qwen_program_span_t {
 // Evidence-backed reuse can later merge spans only across explicit dependency
 // barriers that prove the preceding value dead.
 typedef struct qwen_layer_program_layout_t {
-  // Fused attention RMSNorm output in GGML Q8_1 x4 storage.
-  qwen_program_span_t quantized_attention_input;
+  // Attention RMSNorm output sized for either F32 or GGML Q8_1 x4 storage.
+  qwen_program_span_t attention_projection_input;
   // Raw F32 query projection.
   qwen_program_span_t raw_query;
   // Raw F32 key projection.

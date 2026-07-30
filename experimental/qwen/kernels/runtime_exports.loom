@@ -13,6 +13,8 @@ func.decl target(@qwen3_moe_attention_gfx11_wave64) export("qwen3_moe_flash_atte
 
 func.decl target(@qwen3_moe_dense_gfx11_wave64) export("qwen3_moe_dense_linear_q4k_f16_wmma") @qwen3_moe_dense_linear_q4k_f16_wmma(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
 
+func.decl target(@qwen3_moe_dense_gfx11_wave64) export("qwen3_moe_dense_linear_q6k_f16_wmma") @qwen3_moe_dense_linear_q6k_f16_wmma(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
+
 func.decl target(@qwen3_moe_router_projection_gfx11_wave32) export("qwen3_moe_router_projection_f32_four_row_wave32") @qwen3_moe_router_projection_f32_four_row_wave32(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
 
 func.decl target(@qwen3_moe_router_gfx11_wave64) export("qwen3_moe_router_top8_f32") @qwen3_moe_router_top8_f32(%token_count: index, %route_id_stride: index, %logits: buffer, %route_ids: buffer, %route_weights: buffer)
