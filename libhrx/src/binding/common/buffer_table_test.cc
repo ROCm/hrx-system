@@ -71,6 +71,14 @@ static iree_status_t iree_hal_streaming_buffer_table_insert(
                               buffer->size, (hrx_buffer_t)buffer, nullptr));
 }
 
+static iree_status_t iree_hal_streaming_buffer_table_insert_reserved(
+    iree_hal_streaming_buffer_table_t* table,
+    iree_hal_streaming_buffer_t* buffer) {
+  return BufferTableStatus(hrx_buffer_table_insert_reserved(
+      table, buffer->device_ptr, buffer->host_ptr, buffer->size,
+      (hrx_buffer_t)buffer, nullptr));
+}
+
 static iree_status_t iree_hal_streaming_buffer_table_remove(
     iree_hal_streaming_buffer_table_t* table, uint64_t any_ptr) {
   return BufferTableStatus(hrx_buffer_table_remove(table, any_ptr));
@@ -641,6 +649,47 @@ TEST(BufferTableTest, InsertRemoveInsert) {
   iree_hal_streaming_buffer_table_free(table);
   FreeDummyBuffer(buffer1, allocator);
   FreeDummyBuffer(buffer2, allocator);
+}
+
+TEST(BufferTableTest, ReservedInsertSurvivesCapacityPressure) {
+  iree_allocator_t allocator = iree_allocator_system();
+  iree_hal_streaming_buffer_table_t* table = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
+
+  auto* removed_buffer = CreateDummyBuffer(0x100000000ULL, 4096, allocator);
+  IREE_ASSERT_OK(iree_hal_streaming_buffer_table_insert(table, removed_buffer));
+  const size_t reserved_capacity = table->capacity;
+  IREE_ASSERT_OK(BufferTableStatus(hrx_buffer_table_reserve_insert(table)));
+  IREE_ASSERT_OK(iree_hal_streaming_buffer_table_remove(
+      table, removed_buffer->device_ptr));
+
+  std::vector<iree_hal_streaming_buffer_t*> competing_buffers;
+  competing_buffers.reserve(reserved_capacity - 1);
+  for (size_t i = 0; i < reserved_capacity - 1; ++i) {
+    auto* buffer =
+        CreateDummyBuffer(0x200000000ULL + i * 0x10000, 4096, allocator);
+    competing_buffers.push_back(buffer);
+    IREE_ASSERT_OK(iree_hal_streaming_buffer_table_insert(table, buffer));
+  }
+  EXPECT_EQ(table->capacity, reserved_capacity);
+  EXPECT_EQ(table->reserved_insert_count, 1u);
+
+  IREE_EXPECT_OK(
+      iree_hal_streaming_buffer_table_insert_reserved(table, removed_buffer));
+  EXPECT_EQ(table->capacity, reserved_capacity);
+  EXPECT_EQ(table->count, reserved_capacity);
+  EXPECT_EQ(table->reserved_insert_count, 0u);
+
+  iree_hal_streaming_buffer_t* found = nullptr;
+  IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup(
+      table, removed_buffer->device_ptr, &found));
+  EXPECT_EQ(found, removed_buffer);
+
+  iree_hal_streaming_buffer_table_free(table);
+  FreeDummyBuffer(removed_buffer, allocator);
+  for (auto* buffer : competing_buffers) {
+    FreeDummyBuffer(buffer, allocator);
+  }
 }
 
 TEST(BufferTableTest, MixedOperations) {
