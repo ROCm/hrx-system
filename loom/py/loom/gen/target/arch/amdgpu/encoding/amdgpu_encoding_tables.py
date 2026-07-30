@@ -35,8 +35,8 @@ from loom.target.arch.amdgpu.encoding import (  # noqa: E402
     AMDGPU_ENCODING_FORMAT_IDS,
     AMDGPU_ENCODING_FORMAT_XML_NAMES_BY_ID,
     AMDGPU_GFX125X_VGPR_MSB_WINDOW_SIZE,
-    AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_COUNT,
-    AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_OFFSET,
+    AMDGPU_GFX125X_VOP3_SCALE_SEL_BIT_COUNT,
+    AMDGPU_GFX125X_VOP3_SCALE_SEL_BIT_OFFSET,
     AMDGPU_VOP3_ENCODING_FORMAT_NAMES,
     amdgpu_encoding_field_name,
     amdgpu_supplemental_encoding_format_names,
@@ -101,13 +101,13 @@ def _rdna4_vop3p_supplemental_fields() -> tuple[AmdgpuIsaEncodingField, ...]:
     )
 
 
-def _gfx1250_vop3_supplemental_fields() -> tuple[AmdgpuIsaEncodingField, ...]:
+def _gfx125x_vop3_supplemental_fields() -> tuple[AmdgpuIsaEncodingField, ...]:
     return (
         _field(
             "SCALE_SEL",
             _bit_range(
-                AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_OFFSET,
-                AMDGPU_GFX1250_VOP3_SCALE_SEL_BIT_COUNT,
+                AMDGPU_GFX125X_VOP3_SCALE_SEL_BIT_OFFSET,
+                AMDGPU_GFX125X_VOP3_SCALE_SEL_BIT_COUNT,
             ),
         ),
     )
@@ -169,7 +169,7 @@ def _supplemental_fields_by_encoding(
     if target in ("rdna4", "rdna4_gfx125x"):
         fields_by_encoding["ENC_VOP3P"] = _rdna4_vop3p_supplemental_fields()
     if target == "rdna4_gfx125x":
-        fields_by_encoding["ENC_VOP3"] = _gfx1250_vop3_supplemental_fields()
+        fields_by_encoding["ENC_VOP3"] = _gfx125x_vop3_supplemental_fields()
     return fields_by_encoding
 
 

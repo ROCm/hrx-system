@@ -30,9 +30,9 @@ from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     _gfx11_core_overlays,
     _gfx12_core_overlays,
     _gfx117x_core_overlays,
+    _gfx125x_core_overlays,
     _gfx940_core_overlays,
     _gfx950_core_overlays,
-    _gfx1250_core_overlays,
 )
 from loom.target.arch.amdgpu.low_aliases import (  # noqa: E402
     AmdgpuBlockedLowAlias,
@@ -65,7 +65,7 @@ def _amdgpu_core_overlay_sets():
         _gfx11_core_overlays(),
         _gfx117x_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     )
 
 

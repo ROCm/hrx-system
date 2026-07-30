@@ -418,7 +418,7 @@ def amdgpu_atomic_descriptor_candidates() -> tuple[
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         for overlay in overlays:
             candidate = _amdgpu_atomic_candidate_from_overlay(overlay)
@@ -454,7 +454,7 @@ def amdgpu_async_gather_descriptor_candidates() -> tuple[
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
         _gfx12_core_overlays(),
-        _gfx1250_core_overlays(),
+        _gfx125x_core_overlays(),
     ):
         for overlay in overlays:
             candidate = _amdgpu_async_gather_candidate_from_overlay(overlay)
