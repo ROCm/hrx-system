@@ -206,11 +206,8 @@ void loom_low_schedule_compact_resource_summaries(
     if (state->resource_summaries[read_index].use_count == 0) {
       continue;
     }
-    // Retain the flag union while this mandatory compaction already touches
-    // each used resource instead of adding work to every issue use.
     const loom_low_schedule_resource_summary_t* summary =
         &state->resource_summaries[read_index];
-    state->used_resource_flags |= summary->resource_flags;
     if (iree_any_bit_set(summary->resource_flags,
                          LOOM_LOW_RESOURCE_FLAG_MATRIX_COEXECUTION_SOURCE)) {
       IREE_ASSERT_LE(
