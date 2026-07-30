@@ -15,6 +15,9 @@ package(
 
 exports_files([
     "ggml/quantize_q8_1_x4.loom",
+    "qwen3_moe/flash_attention_decode_f32_f16_wmma.loom",
+    "qwen3_moe/flash_attention_decode_q128_f32_f16_wmma.loom",
+    "qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom",
     "qwen3_moe/flash_attention_f32_f16_wmma.loom",
     "qwen3_moe/routed_gate_up_swiglu_q4k.loom",
     "qwen3_moe/routed_linear_q4k_f16_wmma.loom",
@@ -144,6 +147,183 @@ iree_executable_test(
 )
 
 iree_executable_test(
+    name = "flash_attention_decode_f32_f16_wmma_gqa_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location qwen3_moe/flash_attention_decode_f32_f16_wmma.loom)",
+        "--case=@qwen3_moe_flash_attention_decode_f32_f16_wmma_gqa_case",
+        "--config=qwen3_moe.attention.decode.output_partition_count=2",
+        "--config=qwen3_moe.attention.key_value_head_count=4",
+        "--config=qwen3_moe.attention.query_head_count=32",
+        "--device=amdgpu://0",
+    ],
+    data = ["qwen3_moe/flash_attention_decode_f32_f16_wmma.loom"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "flash_attention_decode_f32_f16_wmma_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location qwen3_moe/flash_attention_decode_f32_f16_wmma.loom)",
+        "--config=qwen3_moe.attention.decode.output_partition_count=1",
+        "--config=qwen3_moe.attention.key_value_head_count=4",
+        "--config=qwen3_moe.attention.query_head_count=32",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = ["qwen3_moe/flash_attention_decode_f32_f16_wmma.loom"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "flash_attention_decode_f32_f16_wmma_tail_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location qwen3_moe/flash_attention_decode_f32_f16_wmma.loom)",
+        "--case=@qwen3_moe_flash_attention_decode_f32_f16_wmma_tail_case",
+        "--config=qwen3_moe.attention.decode.output_partition_count=1",
+        "--config=qwen3_moe.attention.key_value_head_count=1",
+        "--config=qwen3_moe.attention.query_head_count=1",
+        "--device=amdgpu://0",
+    ],
+    data = ["qwen3_moe/flash_attention_decode_f32_f16_wmma.loom"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "flash_attention_decode_q128_f32_f16_wmma_gqa_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location qwen3_moe/flash_attention_decode_q128_f32_f16_wmma.loom)",
+        "--case=@qwen3_moe_flash_attention_decode_q128_fused_gqa_case",
+        "--config=qwen3_moe.attention.key_value_head_count=4",
+        "--config=qwen3_moe.attention.query_head_count=32",
+        "--device=amdgpu://0",
+    ],
+    data = ["qwen3_moe/flash_attention_decode_q128_f32_f16_wmma.loom"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "flash_attention_decode_q128_f32_f16_wmma_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location qwen3_moe/flash_attention_decode_q128_f32_f16_wmma.loom)",
+        "--config=qwen3_moe.attention.key_value_head_count=4",
+        "--config=qwen3_moe.attention.query_head_count=32",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = ["qwen3_moe/flash_attention_decode_q128_f32_f16_wmma.loom"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "flash_attention_decode_q128_f32_f16_wmma_selected_row_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location qwen3_moe/flash_attention_decode_q128_f32_f16_wmma.loom)",
+        "--case=@qwen3_moe_flash_attention_decode_q128_fused_selected_row_case",
+        "--config=qwen3_moe.attention.key_value_head_count=1",
+        "--config=qwen3_moe.attention.query_head_count=1",
+        "--device=amdgpu://0",
+    ],
+    data = ["qwen3_moe/flash_attention_decode_q128_f32_f16_wmma.loom"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "flash_attention_decode_split_f32_f16_wmma_long_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom)",
+        "--case=@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_long_case",
+        "--config=qwen3_moe.attention.key_value_head_count=4",
+        "--config=qwen3_moe.attention.query_head_count=32",
+        "--device=amdgpu://0",
+    ],
+    data = ["qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "flash_attention_decode_split_f32_f16_wmma_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom)",
+        "--config=qwen3_moe.attention.key_value_head_count=4",
+        "--config=qwen3_moe.attention.query_head_count=32",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = ["qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "flash_attention_decode_split_f32_f16_wmma_tail_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom)",
+        "--case=@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_tail_case",
+        "--config=qwen3_moe.attention.key_value_head_count=1",
+        "--config=qwen3_moe.attention.query_head_count=1",
+        "--device=amdgpu://0",
+    ],
+    data = ["qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
     name = "flash_attention_f32_f16_wmma_key_value_tail_hal_test",
     src = "//loom/src/loom/tools/iree-test-loom",
     args = [
@@ -226,6 +406,15 @@ iree_executable_test(
 test_suite(
     name = "tests",
     tests = [
+        ":flash_attention_decode_f32_f16_wmma_gqa_hal_test",
+        ":flash_attention_decode_f32_f16_wmma_plan_test",
+        ":flash_attention_decode_f32_f16_wmma_tail_hal_test",
+        ":flash_attention_decode_q128_f32_f16_wmma_gqa_hal_test",
+        ":flash_attention_decode_q128_f32_f16_wmma_plan_test",
+        ":flash_attention_decode_q128_f32_f16_wmma_selected_row_hal_test",
+        ":flash_attention_decode_split_f32_f16_wmma_long_hal_test",
+        ":flash_attention_decode_split_f32_f16_wmma_plan_test",
+        ":flash_attention_decode_split_f32_f16_wmma_tail_hal_test",
         ":flash_attention_f32_f16_wmma_key_value_tail_hal_test",
         ":flash_attention_f32_f16_wmma_plan_test",
         ":flash_attention_f32_f16_wmma_query_tail_hal_test",
