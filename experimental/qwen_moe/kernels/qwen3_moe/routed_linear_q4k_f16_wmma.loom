@@ -409,16 +409,24 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
 // fragments meet in a wave-private LDS slice and publish the activated product
 // directly, avoiding both full-size projection intermediates.
 kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma(%token_count: index) {
+  %route_count = config.get @qwen3_moe.routed_gate_up.route_count : index
   %expert_count = config.get @qwen3_moe.routed_gate_up.expert_count : index
   %output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
   %one = index.constant 1 : index
+  %thirtytwo = index.constant 32 : index
   %sixtythree = index.constant 63 : index
   %sixtyfour = index.constant 64 : index
   %twofiftysix = index.constant 256 : index
   %padded_output_size = index.add %output_size, %sixtythree : index
   %output_tiles = index.div %padded_output_size, %sixtyfour : index
-  %padded_token_count = index.add %token_count, %sixtythree : index
-  %route_tiles = index.div %padded_token_count, %sixtyfour : index
+  // Size the route grid for the average number of 32-row expert partitions.
+  // Skewed experts consume additional partitions through the strided loop in
+  // the kernel body instead of making every expert pay for the worst case.
+  %assignment_count = index.mul %token_count, %route_count : index
+  %route_tile_capacity = index.mul %expert_count, %thirtytwo : index
+  %route_tile_padding = index.sub %route_tile_capacity, %one : index
+  %padded_assignment_count = index.add %assignment_count, %route_tile_padding : index
+  %route_tiles = index.div %padded_assignment_count, %route_tile_capacity : index
   kernel.launch.config workgroups(%output_tiles, %route_tiles, %expert_count) workgroup_size(%twofiftysix, %one, %one) : index
 } launch(%token_count: index, %input: buffer, %expert_table: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
   %input_size = config.get @qwen3_moe.routed_gate_up.input_size : index
@@ -444,7 +452,6 @@ kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_
   %sixteen = index.constant 16 : index
   %thirtytwo = index.constant 32 : index
   %forty = index.constant 40 : index
-  %sixtythree = index.constant 63 : index
   %sixtyfour = index.constant 64 : index
   %twofiftysix = index.constant 256 : index
   %zero_offset = index.constant 0 : offset
@@ -488,8 +495,10 @@ kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_
   %result_physical_view = buffer.view %result_stage[%wave_result_stage_offset] : buffer -> view<16x16xf16, #dense>
   %channel_tile_base = index.mul %channel_tile, %sixtyfour : index
   %initial_route_tile_base = index.mul %route_tile, %thirtytwo : index
-  %padded_token_count = index.add %bounded_token_count, %sixtythree : index
-  %route_partition_count = index.div %padded_token_count, %sixtyfour : index
+  %route_tile_capacity = index.mul %bounded_expert_count, %thirtytwo : index
+  %route_tile_padding = index.sub %route_tile_capacity, %one : index
+  %padded_assignment_count = index.add %assignment_count, %route_tile_padding : index
+  %route_partition_count = index.div %padded_assignment_count, %route_tile_capacity : index
   %route_partition_step = index.mul %route_partition_count, %thirtytwo : index
   %bounded_expert, %table_expert_count = index.assume %expert, %bounded_expert_count [lt(%expert, %bounded_expert_count)] : index, index
   %is_workitem_zero = index.cmp eq, %workitem, %zero : index
