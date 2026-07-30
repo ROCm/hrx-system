@@ -1181,11 +1181,17 @@ static void iree_hal_tlsf_pool_trim_unused_slabs_locked(
   uint32_t slab_index = 0;
   while (slab_index < pool->slab_count) {
     iree_hal_tlsf_pool_slab_t* slab = pool->slabs[slab_index];
-    iree_hal_memory_tlsf_stats_t stats;
-    iree_hal_memory_tlsf_query_stats(&slab->tlsf, &stats);
+    const iree_async_frontier_t* death_frontier = NULL;
+    iree_hal_memory_tlsf_block_flags_t block_flags =
+        IREE_HAL_MEMORY_TLSF_BLOCK_FLAG_NONE;
+    const bool is_reclaimable =
+        iree_hal_memory_tlsf_query_full_free_block(&slab->tlsf, &death_frontier,
+                                                   &block_flags) &&
+        iree_hal_tlsf_pool_frontier_is_satisfied(
+            pool, /*requester_frontier=*/NULL, death_frontier, block_flags);
     const iree_device_size_t committed = (iree_device_size_t)iree_atomic_load(
         &pool->bytes_committed, iree_memory_order_relaxed);
-    if (stats.allocation_count == 0 && committed >= min_bytes_to_keep &&
+    if (is_reclaimable && committed >= min_bytes_to_keep &&
         slab->slab.length <= committed - min_bytes_to_keep) {
       iree_hal_tlsf_pool_release_slab_locked(pool, (uint16_t)slab_index);
       continue;
