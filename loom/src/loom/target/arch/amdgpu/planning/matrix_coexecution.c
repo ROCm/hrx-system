@@ -324,25 +324,6 @@ static void loom_amdgpu_matrix_coexecution_publish_source(
   }
 }
 
-static const loom_amdgpu_matrix_coexecution_rule_t*
-loom_amdgpu_matrix_coexecution_select_rule(
-    const loom_amdgpu_matrix_coexecution_t* coexecution,
-    const loom_low_packet_view_t* packet,
-    loom_amdgpu_matrix_coexecution_source_kind_t source_kind) {
-  const loom_low_schedule_class_t* schedule_class =
-      &coexecution->descriptor_set
-           ->schedule_classes[packet->descriptor->schedule_class_id];
-  for (iree_host_size_t i = 0; i < coexecution->profile->rule_count; ++i) {
-    const loom_amdgpu_matrix_coexecution_rule_t* rule =
-        &coexecution->profile->rules[i];
-    if (rule->source == source_kind &&
-        rule->latency_cycles == schedule_class->latency_cycles) {
-      return rule;
-    }
-  }
-  return NULL;
-}
-
 static const loom_amdgpu_matrix_coexecution_source_t*
 loom_amdgpu_matrix_coexecution_append_source(
     loom_amdgpu_matrix_coexecution_t* coexecution,
@@ -361,10 +342,14 @@ loom_amdgpu_matrix_coexecution_append_source(
     IREE_ASSERT_UNREACHABLE(
         "matrix coexecution source trait requires WMMA or SWMMAC");
   }
-  const loom_amdgpu_matrix_coexecution_rule_t* rule =
-      loom_amdgpu_matrix_coexecution_select_rule(coexecution, packet,
-                                                 source_kind);
-  IREE_ASSERT(rule != NULL);
+  const loom_low_schedule_class_t* schedule_class =
+      &coexecution->descriptor_set
+           ->schedule_classes[packet->descriptor->schedule_class_id];
+  IREE_ASSERT_LE(schedule_class->latency_cycles, UINT8_MAX);
+  const uint8_t latency_cycles = (uint8_t)schedule_class->latency_cycles;
+  const loom_amdgpu_matrix_coexecution_release_t* release =
+      &coexecution->profile->releases[source_kind][latency_cycles];
+  IREE_ASSERT_NE(release->matrix_issue_distance, 0);
   const loom_amdgpu_matrix_coexecution_family_layout_t* layout =
       &kSourceLayouts[source_kind];
   loom_amdgpu_matrix_coexecution_source_t* source =
@@ -375,8 +360,8 @@ loom_amdgpu_matrix_coexecution_append_source(
       .result_operand_index = layout->result_operand_index,
       .source_operand_start = layout->source_operand_start,
       .source_operand_count = layout->source_operand_count,
-      .matrix_issue_distance = rule->matrix_issue_distance,
-      .vector_issue_distance = rule->vector_issue_distance,
+      .matrix_issue_distance = release->matrix_issue_distance,
+      .vector_issue_distance = release->vector_issue_distance,
   };
   return source;
 }
@@ -799,7 +784,7 @@ iree_status_t loom_amdgpu_matrix_coexecution_allocate(
   *out_coexecution = NULL;
   const loom_amdgpu_matrix_coexecution_profile_info_t* profile_model =
       loom_amdgpu_target_info_matrix_coexecution_profile(profile);
-  if (profile_model->rule_count == 0) return iree_ok_status();
+  if (profile_model->releases == NULL) return iree_ok_status();
   const iree_host_size_t source_capacity =
       schedule->matrix_coexecution_source_use_count;
   if (source_capacity == 0) return iree_ok_status();
