@@ -85,9 +85,9 @@ iree_status_t loom_amdgpu_low_legality_verify_direct_subgroup_width(
     uint32_t source_wavefront_size, uint32_t required_width,
     iree_string_view_t constraint_key) {
   if (!loom_amdgpu_target_supports_direct_subgroup_width(
-          loom_target_low_legality_module(context),
-          loom_target_low_legality_target_ref(context), source_wavefront_size,
-          required_width)) {
+          loom_amdgpu_target_facts_cast(
+              loom_target_low_legality_target_facts(context)),
+          source_wavefront_size, required_width)) {
     return loom_amdgpu_low_legality_reject(context, op, constraint_key);
   }
   return iree_ok_status();

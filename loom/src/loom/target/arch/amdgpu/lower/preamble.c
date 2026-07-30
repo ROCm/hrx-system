@@ -279,15 +279,12 @@ uint32_t loom_amdgpu_target_wavefront_size(const loom_target_bundle_t* bundle) {
 }
 
 uint32_t loom_amdgpu_target_native_subgroup_width(
-    const loom_module_t* module, loom_symbol_ref_t target_ref,
+    const loom_amdgpu_target_facts_t* target_facts,
     uint32_t source_wavefront_size) {
-  const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_processor_from_ref(module, target_ref);
-  IREE_ASSERT(processor != NULL,
-              "AMDGPU subgroup communication requires an AMDGPU processor "
-              "target record");
+  IREE_ASSERT(target_facts != NULL,
+              "AMDGPU subgroup communication requires AMDGPU target facts");
   const uint32_t default_wavefront_size =
-      processor->properties.wavefront.default_size;
+      target_facts->properties.processor->wavefront.default_size;
   IREE_ASSERT(loom_amdgpu_wavefront_size_is_valid(default_wavefront_size),
               "AMDGPU subgroup communication selected a processor with an "
               "invalid default wavefront size");
@@ -297,10 +294,10 @@ uint32_t loom_amdgpu_target_native_subgroup_width(
 }
 
 bool loom_amdgpu_target_supports_direct_subgroup_width(
-    const loom_module_t* module, loom_symbol_ref_t target_ref,
+    const loom_amdgpu_target_facts_t* target_facts,
     uint32_t source_wavefront_size, uint32_t required_width) {
   const uint32_t native_subgroup_width =
-      loom_amdgpu_target_native_subgroup_width(module, target_ref,
+      loom_amdgpu_target_native_subgroup_width(target_facts,
                                                source_wavefront_size);
   return required_width != 0 && required_width <= native_subgroup_width;
 }
@@ -318,10 +315,11 @@ bool loom_amdgpu_select_direct_subgroup_width(loom_low_lower_context_t* context,
   if (!loom_amdgpu_wavefront_size_is_valid(source_wavefront_size)) {
     return false;
   }
+  const loom_amdgpu_target_facts_t* target_facts =
+      loom_amdgpu_target_facts_cast(
+          loom_low_lower_context_target_facts(context));
   return loom_amdgpu_target_supports_direct_subgroup_width(
-      loom_low_lower_context_module(context),
-      loom_low_lower_context_target_ref(context), source_wavefront_size,
-      required_width);
+      target_facts, source_wavefront_size, required_width);
 }
 
 bool loom_amdgpu_select_full_wave_direct_subgroup_width(

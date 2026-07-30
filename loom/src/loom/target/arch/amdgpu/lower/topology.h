@@ -14,8 +14,7 @@
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
-#include "loom/target/arch/amdgpu/refs/target_refs.h"
-#include "loom/target/arch/amdgpu/target_info_defs.h"
+#include "loom/target/arch/amdgpu/ops/target.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -75,20 +74,20 @@ bool loom_amdgpu_source_alloca_layout_lookup_root(
 uint32_t loom_amdgpu_target_wavefront_size(const loom_target_bundle_t* bundle);
 
 // Returns the native execution partition width available to subgroup
-// communication for |source_wavefront_size| on |target_ref|.
+// communication for |source_wavefront_size| on |target_facts|.
 //
 // Source target records may request a kernel wavefront size that is wider than
 // the processor's default/native execution partition. Workgroup collectives can
 // stitch native partitions together through LDS, but direct subgroup operations
 // must not claim semantic communication wider than this value.
 uint32_t loom_amdgpu_target_native_subgroup_width(
-    const loom_module_t* module, loom_symbol_ref_t target_ref,
+    const loom_amdgpu_target_facts_t* target_facts,
     uint32_t source_wavefront_size);
 
 // Returns whether a direct subgroup operation with |required_width| lanes can
 // be represented by native subgroup communication for the selected target.
 bool loom_amdgpu_target_supports_direct_subgroup_width(
-    const loom_module_t* module, loom_symbol_ref_t target_ref,
+    const loom_amdgpu_target_facts_t* target_facts,
     uint32_t source_wavefront_size, uint32_t required_width);
 
 // Selects the active target wavefront size when it is valid for native
