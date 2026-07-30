@@ -22,6 +22,7 @@ extern "C" {
 #endif
 
 typedef struct loom_target_profile_t loom_target_profile_t;
+typedef struct loom_target_facts_t loom_target_facts_t;
 typedef struct loom_target_fact_type_t loom_target_fact_type_t;
 
 typedef uint8_t loom_target_codegen_format_t;

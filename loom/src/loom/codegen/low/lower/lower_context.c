@@ -259,9 +259,9 @@ loom_symbol_ref_t loom_low_lower_context_target_ref(
   return context->options->target_ref;
 }
 
-const loom_op_t* loom_low_lower_context_target_op(
+const loom_target_facts_t* loom_low_lower_context_target_facts(
     const loom_low_lower_context_t* context) {
-  return context->options->target_op;
+  return context->options->target_facts;
 }
 
 const loom_low_descriptor_set_t* loom_low_lower_context_descriptor_set(

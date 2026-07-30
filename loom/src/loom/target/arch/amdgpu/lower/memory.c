@@ -20,8 +20,8 @@
 #include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
+#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/util/fact_table.h"
 
 static bool loom_amdgpu_memory_access_static_byte_offset_is_usable(
@@ -2963,16 +2963,17 @@ static iree_status_t loom_amdgpu_memory_access_plan_select_from_context(
   const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_lower_context(
       context, &alloca_layout));
-  const loom_amdgpu_target_info_t* target =
-      loom_amdgpu_target_from_op(loom_low_lower_context_target_op(context));
-  IREE_ASSERT(target != NULL);
+  const loom_amdgpu_target_facts_t* target_facts =
+      loom_amdgpu_target_facts_cast(
+          loom_low_lower_context_target_facts(context));
+  IREE_ASSERT(target_facts != NULL);
   if (!loom_amdgpu_memory_access_plan_select(
           module, loom_low_lower_context_fact_table(context),
           loom_low_lower_context_descriptor_set(context), view_regions,
           loom_low_lower_context_source_function(context),
           loom_low_lower_context_bundle(context),
-          target->instruction_constraints, alloca_layout, source_op, &source,
-          out_plan, &source_diagnostic, &diagnostic)) {
+          target_facts->properties.instruction_constraints, alloca_layout,
+          source_op, &source, out_plan, &source_diagnostic, &diagnostic)) {
     return iree_ok_status();
   }
   *out_selected = true;

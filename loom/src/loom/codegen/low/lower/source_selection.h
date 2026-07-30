@@ -70,8 +70,8 @@ typedef struct loom_low_source_selection_t {
   // Module-local target record symbol referenced by |func|.
   loom_symbol_ref_t target_ref;
 
-  // Borrowed durable target record referenced by |target_ref|.
-  const loom_op_t* target_op;
+  // Borrowed typed target facts projected from |target_ref|.
+  const loom_target_facts_t* target_facts;
 
   // Borrowed module symbol name for |target_ref|.
   iree_string_view_t target_symbol_name;

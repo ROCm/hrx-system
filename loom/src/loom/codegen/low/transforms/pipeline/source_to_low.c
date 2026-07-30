@@ -344,7 +344,7 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     }
     const loom_low_lower_options_t lower_options = {
         .target_ref = selection->target_ref,
-        .target_op = selection->target_op,
+        .target_facts = selection->target_facts,
         .bundle = selection->target_bundle,
         .target_profile = selection->target_profile,
         .descriptor_registry = descriptor_registry,
@@ -395,7 +395,7 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     if (!iree_status_is_ok(status)) break;
     const loom_low_lower_options_t lower_options = {
         .target_ref = selection->target_ref,
-        .target_op = selection->target_op,
+        .target_facts = selection->target_facts,
         .bundle = selection->target_bundle,
         .target_profile = selection->target_profile,
         .descriptor_registry = descriptor_registry,

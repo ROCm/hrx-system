@@ -22,6 +22,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/pass/ops.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/target/facts.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/pass/registry.h"
@@ -307,6 +308,12 @@ TEST_F(LowLowerPassTest,
       FindSymbolRef(module.get(), IREE_SV("test_target"));
   EXPECT_EQ(selections.values[0].target_ref.module_id, target_ref.module_id);
   EXPECT_EQ(selections.values[0].target_ref.symbol_id, target_ref.symbol_id);
+  ASSERT_NE(selections.values[0].target_facts, nullptr);
+  EXPECT_EQ(selections.values[0].target_facts->selector,
+            LOOM_TEST_TARGET_KIND_QUIRKY);
+  EXPECT_TRUE(iree_string_view_equal(
+      selections.values[0].target_facts->storage.config.contract_set_key,
+      IREE_SV("test.low.core")));
   EXPECT_TRUE(iree_string_view_equal(selections.values[0].target_bundle->name,
                                      IREE_SV("test_target")));
   EXPECT_TRUE(

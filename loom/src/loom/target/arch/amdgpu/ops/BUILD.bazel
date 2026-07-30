@@ -17,6 +17,8 @@ package(
 
 _AMDGPU_HAL_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/hal:__pkg__"]
 
+_AMDGPU_LOWER_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/lower:__pkg__"]
+
 _AMDGPU_NATIVE_VISIBILITY = ["//loom/src/loom/target/emit/native/amdgpu:__pkg__"]
 
 _AMDGPU_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu:__pkg__"]
@@ -50,6 +52,7 @@ loom_generated_cc_library(
     generator = "//loom/py/loom/gen/ops:c_tables_amdgpu_generator",
     visibility = (
         _AMDGPU_HAL_VISIBILITY +
+        _AMDGPU_LOWER_VISIBILITY +
         _AMDGPU_NATIVE_VISIBILITY +
         _AMDGPU_ROOT_VISIBILITY +
         _AMDGPU_TARGET_ID_VISIBILITY +

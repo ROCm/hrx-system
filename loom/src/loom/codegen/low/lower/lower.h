@@ -755,8 +755,8 @@ typedef enum loom_low_control_flow_lowering_e {
 typedef struct loom_low_lower_options_t {
   // Module-local target record symbol used by the emitted low function.
   loom_symbol_ref_t target_ref;
-  // Borrowed durable target record referenced by |target_ref|.
-  const loom_op_t* target_op;
+  // Borrowed typed target facts projected from |target_ref|.
+  const loom_target_facts_t* target_facts;
   // Target bundle selected for this lowering attempt.
   const loom_target_bundle_t* bundle;
   // Invocation profile whose facts contributed to |bundle|, or NULL when the
@@ -992,8 +992,8 @@ const loom_target_bundle_t* loom_low_lower_context_bundle(
 loom_symbol_ref_t loom_low_lower_context_target_ref(
     const loom_low_lower_context_t* context);
 
-// Returns the durable target record selected for this lowering attempt.
-const loom_op_t* loom_low_lower_context_target_op(
+// Returns the typed target facts selected for this lowering attempt.
+const loom_target_facts_t* loom_low_lower_context_target_facts(
     const loom_low_lower_context_t* context);
 
 // Returns the selected target bundle key used in generated diagnostics.
