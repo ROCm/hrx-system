@@ -3,6 +3,8 @@
 
 #include "vmm_slab_provider.h"
 
+#include <stdio.h>
+
 #include "iree/hal/buffer.h"
 
 typedef struct hrx_vmm_slab_provider_t {
@@ -37,6 +39,9 @@ typedef struct hrx_vmm_slab_t {
 
   // Mapped byte length, rounded up to the VMM page granularity.
   iree_device_size_t allocation_size;
+
+  // True after the physical allocation has been mapped into the reservation.
+  bool is_mapped;
 } hrx_vmm_slab_t;
 
 static const iree_hal_slab_provider_vtable_t hrx_vmm_slab_provider_vtable;
@@ -51,12 +56,6 @@ static const hrx_vmm_slab_provider_t* hrx_vmm_slab_provider_const_cast(
   return (const hrx_vmm_slab_provider_t*)base_provider;
 }
 
-static void hrx_vmm_slab_provider_abort_on_error(iree_status_t status) {
-  if (!iree_status_is_ok(status)) {
-    iree_status_abort(status);
-  }
-}
-
 static void hrx_vmm_slab_provider_destroy(
     iree_hal_slab_provider_t* base_provider) {
   hrx_vmm_slab_provider_t* provider = hrx_vmm_slab_provider_cast(base_provider);
@@ -64,24 +63,44 @@ static void hrx_vmm_slab_provider_destroy(
   iree_allocator_free(provider->host_allocator, provider);
 }
 
-static void hrx_vmm_slab_provider_release_slab_state(
+static iree_status_t hrx_vmm_slab_provider_release_slab_state(
     hrx_vmm_slab_provider_t* provider, hrx_vmm_slab_t* slab) {
-  if (!slab) return;
-  if (slab->physical_memory) {
-    hrx_vmm_slab_provider_abort_on_error(
-        iree_hal_allocator_virtual_memory_unmap(
-            provider->allocator, slab->virtual_buffer, /*virtual_offset=*/0,
-            slab->allocation_size));
-    hrx_vmm_slab_provider_abort_on_error(
-        iree_hal_allocator_physical_memory_free(provider->allocator,
-                                                slab->physical_memory));
+  if (!slab) return iree_ok_status();
+
+  iree_status_t status = iree_ok_status();
+  if (slab->is_mapped) {
+    iree_status_t unmap_status = iree_hal_allocator_virtual_memory_unmap(
+        provider->allocator, slab->virtual_buffer, /*virtual_offset=*/0,
+        slab->allocation_size);
+    if (iree_status_is_ok(unmap_status)) {
+      slab->is_mapped = false;
+    } else {
+      status = iree_status_join(status, unmap_status);
+    }
   }
-  if (slab->virtual_buffer) {
-    hrx_vmm_slab_provider_abort_on_error(
-        iree_hal_allocator_virtual_memory_release(provider->allocator,
-                                                  slab->virtual_buffer));
+
+  // Mapped resources must stay alive when unmapping fails. Once unmapped, the
+  // physical allocation and virtual reservation have independent lifetimes.
+  if (!slab->is_mapped && slab->physical_memory) {
+    iree_status_t free_status = iree_hal_allocator_physical_memory_free(
+        provider->allocator, slab->physical_memory);
+    if (iree_status_is_ok(free_status)) {
+      slab->physical_memory = NULL;
+    } else {
+      status = iree_status_join(status, free_status);
+    }
+  }
+  if (!slab->is_mapped && slab->virtual_buffer) {
+    iree_status_t release_status = iree_hal_allocator_virtual_memory_release(
+        provider->allocator, slab->virtual_buffer);
+    if (iree_status_is_ok(release_status)) {
+      slab->virtual_buffer = NULL;
+    } else {
+      status = iree_status_join(status, release_status);
+    }
   }
   iree_allocator_free(provider->host_allocator, slab);
+  return status;
 }
 
 static iree_status_t hrx_vmm_slab_provider_acquire_slab(
@@ -122,6 +141,7 @@ static iree_status_t hrx_vmm_slab_provider_acquire_slab(
     status = iree_hal_allocator_virtual_memory_map(
         provider->allocator, slab->virtual_buffer, /*virtual_offset=*/0,
         slab->physical_memory, /*physical_offset=*/0, allocation_size);
+    slab->is_mapped = iree_status_is_ok(status);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_allocator_virtual_memory_protect(
@@ -145,21 +165,8 @@ static iree_status_t hrx_vmm_slab_provider_acquire_slab(
   }
 
   if (!iree_status_is_ok(status)) {
-    if (slab->physical_memory && slab->virtual_buffer) {
-      iree_status_ignore(iree_hal_allocator_virtual_memory_unmap(
-          provider->allocator, slab->virtual_buffer, /*virtual_offset=*/0,
-          allocation_size));
-    }
-    if (slab->physical_memory) {
-      iree_status_ignore(iree_hal_allocator_physical_memory_free(
-          provider->allocator, slab->physical_memory));
-    }
-    if (slab->virtual_buffer) {
-      iree_status_ignore(iree_hal_allocator_virtual_memory_release(
-          provider->allocator, slab->virtual_buffer));
-    }
-    iree_allocator_free(provider->host_allocator, slab);
-    return status;
+    return iree_status_join(
+        status, hrx_vmm_slab_provider_release_slab_state(provider, slab));
   }
 
   out_slab->base_ptr =
@@ -175,10 +182,15 @@ static void hrx_vmm_slab_provider_release_slab(
     iree_hal_slab_provider_t* base_provider, const iree_hal_slab_t* slab) {
   if (!slab || !slab->provider_handle) return;
   hrx_vmm_slab_provider_t* provider = hrx_vmm_slab_provider_cast(base_provider);
-  hrx_vmm_slab_provider_release_slab_state(
+  iree_status_t status = hrx_vmm_slab_provider_release_slab_state(
       provider, (hrx_vmm_slab_t*)(uintptr_t)slab->provider_handle);
-  iree_atomic_fetch_add(&provider->total_released, 1,
-                        iree_memory_order_relaxed);
+  if (iree_status_is_ok(status)) {
+    iree_atomic_fetch_add(&provider->total_released, 1,
+                          iree_memory_order_relaxed);
+  } else {
+    iree_status_fprint(stderr, status);
+    iree_status_free(status);
+  }
 }
 
 static iree_status_t hrx_vmm_slab_provider_wrap_buffer(

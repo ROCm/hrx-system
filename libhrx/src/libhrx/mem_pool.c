@@ -109,13 +109,12 @@ static void hrx_mem_pool_refresh_stats_locked(hrx_mem_pool_t pool) {
 // Callers must hold |pool->mutex| and release returned references after
 // unlocking.
 static void hrx_mem_pool_take_idle_hal_pools_locked(
-    hrx_mem_pool_t pool, bool require_zero_release_threshold,
-    iree_hal_pool_t** out_hal_pool, iree_hal_pool_t** out_oversized_hal_pool) {
+    hrx_mem_pool_t pool, iree_hal_pool_t** out_hal_pool,
+    iree_hal_pool_t** out_oversized_hal_pool) {
   *out_hal_pool = NULL;
   *out_oversized_hal_pool = NULL;
   if ((!pool->hal_pool && !pool->oversized_hal_pool) ||
-      pool->inflight_allocation_count != 0 ||
-      (require_zero_release_threshold && pool->release_threshold != 0)) {
+      pool->inflight_allocation_count != 0) {
     return;
   }
 
@@ -409,9 +408,8 @@ hrx_status_t hrx_mem_pool_trim(hrx_mem_pool_t pool, size_t min_bytes_to_keep) {
   if (iree_status_is_ok(status)) {
     hrx_mem_pool_refresh_stats_locked(pool);
     if (min_bytes_to_keep == 0) {
-      hrx_mem_pool_take_idle_hal_pools_locked(
-          pool, /*require_zero_release_threshold=*/false, &idle_hal_pool,
-          &idle_oversized_hal_pool);
+      hrx_mem_pool_take_idle_hal_pools_locked(pool, &idle_hal_pool,
+                                              &idle_oversized_hal_pool);
     }
   }
   iree_slim_mutex_unlock(&pool->mutex);
@@ -420,18 +418,29 @@ hrx_status_t hrx_mem_pool_trim(hrx_mem_pool_t pool, size_t min_bytes_to_keep) {
   return hrx_status_from_iree(status);
 }
 
-void hrx_mem_pool_release_unused(hrx_mem_pool_t pool) {
-  if (!pool) return;
+hrx_status_t hrx_mem_pool_release_unused(hrx_mem_pool_t pool) {
+  if (!pool) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "pool is NULL");
+  }
 
   iree_slim_mutex_lock(&pool->mutex);
   iree_hal_pool_t* idle_hal_pool = NULL;
   iree_hal_pool_t* idle_oversized_hal_pool = NULL;
-  hrx_mem_pool_take_idle_hal_pools_locked(
-      pool, /*require_zero_release_threshold=*/true, &idle_hal_pool,
-      &idle_oversized_hal_pool);
+  iree_status_t status =
+      pool->hal_pool
+          ? iree_hal_tlsf_pool_trim_to(pool->hal_pool, pool->release_threshold)
+          : iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    hrx_mem_pool_refresh_stats_locked(pool);
+    if (pool->release_threshold == 0) {
+      hrx_mem_pool_take_idle_hal_pools_locked(pool, &idle_hal_pool,
+                                              &idle_oversized_hal_pool);
+    }
+  }
   iree_slim_mutex_unlock(&pool->mutex);
   iree_hal_pool_release(idle_hal_pool);
   iree_hal_pool_release(idle_oversized_hal_pool);
+  return hrx_status_from_iree(status);
 }
 
 void hrx_mem_pool_record_logical_allocation(hrx_mem_pool_t pool, size_t size) {

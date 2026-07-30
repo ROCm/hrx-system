@@ -644,9 +644,8 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
   stream->completed_value = iree_max(stream->completed_value, completed_value);
   iree_slim_mutex_unlock(&stream->mutex);
 
-  // A completed stream can no longer expose its pending frees to a later
-  // stream-ordered allocation, so return any cached backing to the pool.
-  iree_hal_streaming_memory_release_completed_async_frees(stream);
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_memory_release_completed_async_frees(stream));
 
   if (timing_enabled) {
     ++g_hrx_launch_timing.sync_count;

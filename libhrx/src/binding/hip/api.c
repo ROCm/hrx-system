@@ -22360,9 +22360,11 @@ HIPAPI hipError_t hipMemPoolTrimTo(hipMemPool_t pool, size_t minBytesToKeep) {
   hrx_mem_pool_t hrx_pool = NULL;
   result = iree_hip_mem_pool_retain_backend(pool_handle, &hrx_pool);
   if (result == hipSuccess) {
-    iree_hal_streaming_memory_release_completed_async_frees_from_pool(hrx_pool);
     iree_status_t status =
-        HRX_CALL(hrx_mem_pool_trim(hrx_pool, minBytesToKeep));
+        iree_hal_streaming_memory_release_completed_async_frees_from_pool(
+            hrx_pool);
+    status = iree_status_join(
+        status, HRX_CALL(hrx_mem_pool_trim(hrx_pool, minBytesToKeep)));
     result = iree_status_to_hip_result(status);
   }
   hrx_mem_pool_release(hrx_pool);

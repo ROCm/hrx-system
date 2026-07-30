@@ -1796,14 +1796,14 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t ptr,
     iree_hal_streaming_stream_t* stream);
 
-// Releases completed stream-ordered frees cached for reuse on |stream|.
+// Releases completed stream-ordered frees retained for conservative reuse.
 // Synchronization: stream (requires |stream| to be idle).
-void iree_hal_streaming_memory_release_completed_async_frees(
+iree_status_t iree_hal_streaming_memory_release_completed_async_frees(
     iree_hal_streaming_stream_t* stream);
 
-// Releases completed stream-ordered frees cached for reuse by |pool|.
+// Releases completed stream-ordered frees retained by |pool|.
 // Synchronization: none (each free has reached its queued host callback).
-void iree_hal_streaming_memory_release_completed_async_frees_from_pool(
+iree_status_t iree_hal_streaming_memory_release_completed_async_frees_from_pool(
     hrx_mem_pool_t pool);
 
 // Synchronization: none (allocates host memory).

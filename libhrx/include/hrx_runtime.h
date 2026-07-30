@@ -1025,9 +1025,9 @@ HRX_API hrx_status_t hrx_mem_pool_set_attribute(hrx_mem_pool_t pool,
 HRX_API hrx_status_t hrx_mem_pool_trim(hrx_mem_pool_t pool,
                                        size_t min_bytes_to_keep);
 
-// Releases a fully idle pool's backing storage when its release threshold is
-// zero. This is intended for stream-ordered free completion paths.
-HRX_API void hrx_mem_pool_release_unused(hrx_mem_pool_t pool);
+// Trims unused backing storage toward the pool's configured release threshold.
+// This is intended for stream-ordered free completion paths.
+HRX_API hrx_status_t hrx_mem_pool_release_unused(hrx_mem_pool_t pool);
 
 // Records a logical allocation backed by |pool|. Logical usage is distinct
 // from physical TLSF reservations, which can remain retained for later
