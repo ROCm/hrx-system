@@ -16,6 +16,7 @@ package(
 exports_files([
     "ggml/linear_q6k_q8_1_x4.loom",
     "ggml/quantize_q8_1_x4.loom",
+    "qwen3_moe/attention_postprocess_f32_f16.loom",
     "qwen3_moe/attention_prepare_quantized.loom",
     "qwen3_moe/attention_qkv_quantized.loom",
     "qwen3_moe/dense_linear_quantized_f16_wmma.loom",
@@ -30,6 +31,80 @@ exports_files([
     "qwen3_moe/routed_gate_up_swiglu_q4k.loom",
     "qwen3_moe/routed_linear_q4k_f16_wmma.loom",
 ])
+
+loom_link_module(
+    name = "attention_postprocess_f32_f16_linked",
+    srcs = ["qwen3_moe/attention_postprocess_f32_f16.loom"],
+    libraries = ["qwen3_moe/model_config.loom"],
+)
+
+iree_executable_test(
+    name = "attention_postprocess_f32_f16_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :attention_postprocess_f32_f16_linked)",
+        "--benchmark=@qwen3_moe_attention_postprocess_decode",
+        "--config=qwen3_moe.attention.head_size=128",
+        "--config=qwen3_moe.attention.key_value_size=512",
+        "--config=qwen3_moe.attention.query_size=4096",
+        "--config=qwen3_moe.model.rms_epsilon=0.000001",
+        "--dry-run",
+        "--output-format=jsonl",
+        "--sample-compilation=per_sample",
+    ],
+    data = [":attention_postprocess_f32_f16_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "attention_postprocess_f32_f16_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :attention_postprocess_f32_f16_linked)",
+        "--config=qwen3_moe.attention.head_size=4",
+        "--config=qwen3_moe.attention.key_value_size=4",
+        "--config=qwen3_moe.attention.query_size=4",
+        "--config=qwen3_moe.model.rms_epsilon=0.000001",
+        "--case=@qwen3_moe_attention_postprocess_identity_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":attention_postprocess_f32_f16_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "attention_postprocess_f32_f16_neox_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :attention_postprocess_f32_f16_linked)",
+        "--config=qwen3_moe.attention.head_size=4",
+        "--config=qwen3_moe.attention.key_value_size=4",
+        "--config=qwen3_moe.attention.query_size=4",
+        "--config=qwen3_moe.model.rms_epsilon=0.000001",
+        "--case=@qwen3_moe_attention_postprocess_neox_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":attention_postprocess_f32_f16_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
 
 loom_link_module(
     name = "attention_prepare_quantized_linked",
@@ -979,6 +1054,9 @@ iree_executable_test(
 test_suite(
     name = "tests",
     tests = [
+        ":attention_postprocess_f32_f16_hal_test",
+        ":attention_postprocess_f32_f16_neox_hal_test",
+        ":attention_postprocess_f32_f16_plan_test",
         ":attention_prepare_quantized_hal_test",
         ":attention_prepare_quantized_multistripe_hal_test",
         ":attention_prepare_quantized_plan_test",

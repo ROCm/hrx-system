@@ -6,3 +6,9 @@
 config.decl @qwen3_moe.model.hidden_size : %value: index where [range(%value, 128, 32768), mul(%value, 128)]
 
 config.decl @qwen3_moe.model.rms_epsilon : f32
+
+config.decl @qwen3_moe.attention.head_size : %value: index where [range(%value, 4, 1024), mul(%value, 4)]
+
+config.decl @qwen3_moe.attention.query_size : %value: index where [range(%value, 1, 262144)]
+
+config.decl @qwen3_moe.attention.key_value_size : %value: index where [range(%value, 1, 262144)]
