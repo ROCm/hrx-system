@@ -238,7 +238,7 @@ iree_status_t qwen_model_load(const qwen_model_options_t* options,
   if (iree_status_is_ok(status)) {
     const iree_hal_buffer_params_t buffer_params = {
         .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
-                 IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE_READ,
+                 IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
         .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
         .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
         .queue_affinity = model->queue_affinity,
