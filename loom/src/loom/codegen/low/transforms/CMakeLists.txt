@@ -32,6 +32,7 @@ loom_cc_library(
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::types
+    loom::target::function_version
   PUBLIC
 )
 

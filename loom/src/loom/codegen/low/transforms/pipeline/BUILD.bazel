@@ -80,6 +80,7 @@ loom_cc_test(
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/codegen/low/lower:source_selection",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
+        "//loom/src/loom/codegen/low/transforms:allocation",
         "//loom/src/loom/codegen/low/transforms:dce",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/format/text:parser",

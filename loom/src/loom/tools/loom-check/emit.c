@@ -1119,8 +1119,9 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
   loom_low_function_model_t model = {0};
   loom_low_schedule_table_t table = {0};
   iree_status_t status = loom_low_function_model_initialize(
-      module, low_function, descriptor_registry, emitter, /*flags=*/0,
-      analysis_arena, &model);
+      module, low_function,
+      /*effective_target_facts=*/NULL, descriptor_registry, emitter,
+      /*flags=*/0, analysis_arena, &model);
   if (iree_status_is_ok(status)) {
     status =
         loom_low_schedule_function(&model, &options, analysis_arena, &table);
@@ -1220,7 +1221,8 @@ static iree_status_t loom_check_emit_build_low_allocation_table(
   };
   loom_low_function_model_t model = {0};
   iree_status_t status = loom_low_function_model_initialize(
-      module, low_function, descriptor_registry, emitter,
+      module, low_function,
+      /*effective_target_facts=*/NULL, descriptor_registry, emitter,
       LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, analysis_arena, &model);
   if (iree_status_is_ok(status)) {
     status =

@@ -33,6 +33,7 @@ loom_cc_library(
         "//loom/src/loom/pass:pipeline",
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:types",
+        "//loom/src/loom/target:function_version",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

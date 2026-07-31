@@ -15,6 +15,7 @@
 #include "loom/codegen/low/lower/lower_rules.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
+#include "loom/codegen/low/transforms/allocation.h"
 #include "loom/codegen/low/transforms/dce.h"
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/parser.h"
@@ -61,11 +62,13 @@ static iree_status_t CollectDiagnosticEmission(
 
 static loom_pass_descriptor_t MakeFunctionPassDescriptor(
     iree_string_view_t key, loom_pass_info_fn_t info,
-    loom_function_pass_fn_t function_run) {
+    loom_function_pass_fn_t function_run,
+    loom_pass_create_fn_t create = nullptr) {
   loom_pass_descriptor_t descriptor = {};
   descriptor.key = key;
   descriptor.info = info;
   descriptor.function_run = function_run;
+  descriptor.create = create;
   return descriptor;
 }
 
@@ -186,6 +189,10 @@ class LowLowerPassTest : public ::testing::Test {
         },
         MakeFunctionPassDescriptor(IREE_SV("low-dce"), loom_low_dce_pass_info,
                                    loom_low_dce_run),
+        MakeFunctionPassDescriptor(IREE_SV("low-materialize-allocation"),
+                                   loom_low_materialize_allocation_pass_info,
+                                   loom_low_materialize_allocation_run,
+                                   loom_low_materialize_allocation_create),
         {
             /*.key=*/IREE_SVL("select-templates"),
             /*.info=*/loom_template_selection_pass_info,
@@ -361,7 +368,7 @@ TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionEffectiveTargetFacts) {
 }
 
 TEST_F(LowLowerPassTest,
-       InvocationBoundTargetlessFunctionRunsLowPassWithoutWitness) {
+       InvocationBoundTargetlessFunctionRunsLowPassesWithoutWitness) {
   ModulePtr module = Parse(IREE_SV(
       "test.target<low_core> @available_target\n"
       "test.target<quirky> @other_target\n"
@@ -449,6 +456,8 @@ TEST_F(LowLowerPassTest,
     low_packet_count += loom_low_op_isa(op) ? 1 : 0;
   }
   EXPECT_EQ(low_packet_count, 1u);
+  IREE_ASSERT_OK(RunFlatPipeline(
+      module.get(), IREE_SV("low-materialize-allocation"), &function_versions));
   iree_arena_deinitialize(&arena);
 }
 
