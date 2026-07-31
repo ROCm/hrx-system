@@ -85,10 +85,10 @@ typedef iree_status_t (*loom_run_hal_select_device_target_fn_t)(
     const struct loom_run_hal_runtime_t* runtime, iree_allocator_t allocator,
     loom_run_hal_device_target_t* out_target);
 
-typedef iree_status_t (*loom_run_hal_select_function_device_target_fn_t)(
+typedef iree_status_t (*loom_run_hal_select_compatible_device_target_fn_t)(
     const loom_run_hal_artifact_provider_t* provider,
-    const struct loom_run_hal_runtime_t* runtime, const loom_module_t* module,
-    loom_func_like_t function, iree_allocator_t allocator,
+    const struct loom_run_hal_runtime_t* runtime,
+    const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
     loom_run_hal_device_target_t* out_target);
 
 typedef iree_status_t (*loom_run_hal_select_target_key_fn_t)(
@@ -127,11 +127,11 @@ struct loom_run_hal_artifact_provider_t {
   loom_target_pipeline_options_t default_pipeline_options;
   // Selects a concrete target supported by the active HAL device.
   loom_run_hal_select_device_target_fn_t select_device_target;
-  // Selects the most specific concrete device target satisfying one authored
-  // function's target requirement. An exact device target refines a compatible
-  // generic authored target; a generic device target is used only when no
-  // compatible exact target is advertised.
-  loom_run_hal_select_function_device_target_fn_t select_function_device_target;
+  // Selects the most specific concrete device target satisfying an immutable
+  // target requirement. NULL represents target-independent code. Facts are
+  // borrowed only for the duration of the call and must not be retained.
+  loom_run_hal_select_compatible_device_target_fn_t
+      select_compatible_device_target;
   // Selects a concrete offline target by provider-owned key. This is used by
   // compilation tools that do not have an active HAL runtime device.
   loom_run_hal_select_target_key_fn_t select_target_key;
@@ -142,6 +142,15 @@ struct loom_run_hal_artifact_provider_t {
   // Releases storage owned by an artifact returned from |emit_artifact|.
   loom_run_hal_deinitialize_artifact_fn_t deinitialize_artifact;
 };
+
+// Asks |provider| to select a target from |runtime| satisfying
+// |target_requirement|. NULL represents target-independent code. The caller
+// retains the immutable requirement for the duration of the call.
+iree_status_t loom_run_hal_artifact_provider_select_compatible_device_target(
+    const loom_run_hal_artifact_provider_t* provider,
+    const struct loom_run_hal_runtime_t* runtime,
+    const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
+    loom_run_hal_device_target_t* out_target);
 
 // A registry of HAL artifact providers linked into a runner binary.
 typedef struct loom_run_hal_artifact_provider_registry_t {

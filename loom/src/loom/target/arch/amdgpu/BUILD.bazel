@@ -187,7 +187,8 @@ loom_cc_library(
         _AMDGPU_LOWER_VISIBILITY +
         _AMDGPU_NATIVE_VISIBILITY +
         _AMDGPU_OPS_VISIBILITY +
-        _AMDGPU_TARGET_ID_VISIBILITY
+        _AMDGPU_TARGET_ID_VISIBILITY +
+        _AMDGPU_TOOLING_VISIBILITY
     ),
     deps = [
         ":target_info",

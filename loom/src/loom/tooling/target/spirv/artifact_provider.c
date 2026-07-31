@@ -7,6 +7,7 @@
 #include "loom/tooling/target/spirv/artifact_provider.h"
 
 #include "loom/target/arch/spirv/descriptors/low_registry.h"
+#include "loom/target/arch/spirv/facts.h"
 #include "loom/target/arch/spirv/low_verify.h"
 #include "loom/target/emit/spirv/module_builder.h"
 #include "loom/target/emit/spirv/module_emitter.h"
@@ -114,13 +115,20 @@ static iree_status_t loom_spirv_hal_artifact_provider_select_device_target(
 }
 
 static iree_status_t
-loom_spirv_hal_artifact_provider_select_function_device_target(
+loom_spirv_hal_artifact_provider_select_compatible_device_target_from_facts(
     const loom_run_hal_artifact_provider_t* provider,
-    const loom_run_hal_runtime_t* runtime, const loom_module_t* module,
-    loom_func_like_t function, iree_allocator_t allocator,
+    const loom_run_hal_runtime_t* runtime,
+    const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
     loom_run_hal_device_target_t* out_target) {
-  (void)module;
-  (void)function;
+  if (target_requirement != NULL &&
+      loom_spirv_target_facts_cast(target_requirement) == NULL) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "SPIR-V HAL artifact provider cannot satisfy target family "
+        "'%.*s'",
+        (int)target_requirement->fact_type->name.size,
+        target_requirement->fact_type->name.data);
+  }
   return loom_spirv_hal_artifact_provider_select_device_target(
       provider, runtime, allocator, out_target);
 }
@@ -341,23 +349,22 @@ static void loom_spirv_hal_artifact_provider_deinitialize_artifact(
   *artifact = (loom_run_hal_artifact_t){0};
 }
 
-const loom_run_hal_artifact_provider_t loom_spirv_vulkan_hal_artifact_provider =
-    {
-        .name = IREE_SVL("spirv-vulkan-hal"),
-        .hal_driver_name = IREE_SVL("vulkan"),
-        .target_family_name = IREE_SVL("SPIR-V/Vulkan"),
-        .default_pipeline_options =
-            {
-                .control_flow_lowering =
-                    LOOM_TARGET_CONTROL_FLOW_LOWERING_STRUCTURED_LOW,
-            },
-        .select_device_target =
-            loom_spirv_hal_artifact_provider_select_device_target,
-        .select_function_device_target =
-            loom_spirv_hal_artifact_provider_select_function_device_target,
-        .deinitialize_device_target =
-            loom_spirv_hal_artifact_provider_deinitialize_device_target,
-        .emit_artifact = loom_spirv_hal_artifact_provider_emit_artifact,
-        .deinitialize_artifact =
-            loom_spirv_hal_artifact_provider_deinitialize_artifact,
+const loom_run_hal_artifact_provider_t loom_spirv_vulkan_hal_artifact_provider = {
+    .name = IREE_SVL("spirv-vulkan-hal"),
+    .hal_driver_name = IREE_SVL("vulkan"),
+    .target_family_name = IREE_SVL("SPIR-V/Vulkan"),
+    .default_pipeline_options =
+        {
+            .control_flow_lowering =
+                LOOM_TARGET_CONTROL_FLOW_LOWERING_STRUCTURED_LOW,
+        },
+    .select_device_target =
+        loom_spirv_hal_artifact_provider_select_device_target,
+    .select_compatible_device_target =
+        loom_spirv_hal_artifact_provider_select_compatible_device_target_from_facts,
+    .deinitialize_device_target =
+        loom_spirv_hal_artifact_provider_deinitialize_device_target,
+    .emit_artifact = loom_spirv_hal_artifact_provider_emit_artifact,
+    .deinitialize_artifact =
+        loom_spirv_hal_artifact_provider_deinitialize_artifact,
 };

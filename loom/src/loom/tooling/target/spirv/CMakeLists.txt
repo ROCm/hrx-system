@@ -21,6 +21,7 @@ loom_cc_library(
     ::vulkan_profile
     iree::base
     loom::target::arch::spirv::descriptors::low_registry
+    loom::target::arch::spirv::facts
     loom::target::arch::spirv::low_verify
     loom::target::emit::spirv::module_builder
     loom::target::emit::spirv::module_emitter

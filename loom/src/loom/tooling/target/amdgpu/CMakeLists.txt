@@ -22,10 +22,8 @@ loom_cc_library(
     iree::hal
     iree::hal::executable::amdgpu::target_id
     loom::ir
-    loom::ops::op_defs
-    loom::target::arch::amdgpu::ops
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::profile
-    loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::runtime_requirements
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
@@ -79,10 +77,10 @@ loom_cc_test(
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::profile
-    loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::emit::native::amdgpu::runtime_globals
+    loom::target::entry_selection
     loom::target::reporting::report
     loom::testing::module_ptr
     loom::tooling::execution::hal::runtime

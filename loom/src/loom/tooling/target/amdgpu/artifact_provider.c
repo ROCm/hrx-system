@@ -8,10 +8,8 @@
 
 #include "iree/hal/executable/amdgpu/target_id.h"
 #include "loom/ir/module.h"
-#include "loom/target/arch/amdgpu/ops/ops.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/profile.h"
-#include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/runtime_requirements.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
@@ -35,23 +33,6 @@ typedef struct loom_amdgpu_hal_device_target_storage_t {
   // Canonical provider-facing target key borrowing |target_key_storage|.
   iree_string_view_t target_key;
 } loom_amdgpu_hal_device_target_storage_t;
-
-static bool loom_amdgpu_hal_artifact_provider_resolve_authored_identity(
-    const loom_module_t* module, loom_symbol_ref_t target_ref,
-    loom_amdgpu_target_identity_t* out_identity) {
-  *out_identity = (loom_amdgpu_target_identity_t){0};
-  if (!loom_symbol_ref_is_valid(target_ref) || target_ref.module_id != 0 ||
-      target_ref.symbol_id >= module->symbols.count) {
-    return false;
-  }
-  const loom_op_t* target_op =
-      module->symbols.entries[target_ref.symbol_id].defining_op;
-  if (!loom_amdgpu_target_isa(target_op)) {
-    return false;
-  }
-  loom_amdgpu_target_record_resolve_identity(target_op, out_identity);
-  return true;
-}
 
 static void loom_amdgpu_hal_device_target_storage_deinitialize(
     loom_amdgpu_hal_device_target_storage_t* storage,
@@ -320,27 +301,31 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_select_device_target(
 }
 
 static iree_status_t
-loom_amdgpu_hal_artifact_provider_select_function_device_target(
+loom_amdgpu_hal_artifact_provider_select_compatible_device_target_from_facts(
     const loom_run_hal_artifact_provider_t* provider,
-    const loom_run_hal_runtime_t* runtime, const loom_module_t* module,
-    loom_func_like_t function, iree_allocator_t allocator,
+    const loom_run_hal_runtime_t* runtime,
+    const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
     loom_run_hal_device_target_t* out_target) {
   IREE_ASSERT_ARGUMENT(provider);
   IREE_ASSERT_ARGUMENT(runtime);
-  IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(out_target);
 
   *out_target = (loom_run_hal_device_target_t){0};
 
-  const loom_symbol_ref_t target_ref = loom_func_like_target(function);
-  loom_amdgpu_target_identity_t authored_requirement = {0};
-  const loom_amdgpu_target_identity_t* authored_requirement_ptr =
-      loom_amdgpu_hal_artifact_provider_resolve_authored_identity(
-          module, target_ref, &authored_requirement)
-          ? &authored_requirement
-          : NULL;
+  const loom_amdgpu_target_facts_t* amdgpu_requirement =
+      loom_amdgpu_target_facts_cast(target_requirement);
+  if (target_requirement != NULL && amdgpu_requirement == NULL) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "AMDGPU HAL artifact provider cannot satisfy target family "
+        "'%.*s'",
+        (int)target_requirement->fact_type->name.size,
+        target_requirement->fact_type->name.data);
+  }
+  const loom_amdgpu_target_identity_t* authored_requirement =
+      amdgpu_requirement != NULL ? &amdgpu_requirement->identity : NULL;
   return loom_amdgpu_hal_artifact_provider_select_compatible_device_target(
-      provider, runtime, authored_requirement_ptr, allocator, out_target);
+      provider, runtime, authored_requirement, allocator, out_target);
 }
 
 static iree_status_t loom_amdgpu_hal_artifact_provider_select_target_key(
@@ -498,8 +483,8 @@ const loom_run_hal_artifact_provider_t loom_amdgpu_hal_artifact_provider = {
     .target_family_name = IREE_SVL("AMDGPU"),
     .select_device_target =
         loom_amdgpu_hal_artifact_provider_select_device_target,
-    .select_function_device_target =
-        loom_amdgpu_hal_artifact_provider_select_function_device_target,
+    .select_compatible_device_target =
+        loom_amdgpu_hal_artifact_provider_select_compatible_device_target_from_facts,
     .select_target_key = loom_amdgpu_hal_artifact_provider_select_target_key,
     .deinitialize_device_target =
         loom_amdgpu_hal_artifact_provider_deinitialize_device_target,
