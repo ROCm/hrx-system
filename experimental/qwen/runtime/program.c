@@ -63,6 +63,13 @@ typedef enum qwen_program_attention_output_schedule_e {
   QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_F32_WMMA = 1,
 } qwen_program_attention_output_schedule_t;
 
+typedef enum qwen_program_attention_prepare_schedule_e {
+  // Each attention stage prepares its projection input from hidden state.
+  QWEN_PROGRAM_ATTENTION_PREPARE_SCHEDULE_PER_LAYER = 0,
+  // Each preceding feed-forward stage publishes the next projection input.
+  QWEN_PROGRAM_ATTENTION_PREPARE_SCHEDULE_INTERLAYER = 1,
+} qwen_program_attention_prepare_schedule_t;
+
 typedef enum qwen_program_feed_forward_schedule_e {
   // Materialized F32 RMSNorm plus grouped F16 routed projections.
   QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16 = 0,
@@ -165,6 +172,8 @@ struct qwen_program_t {
   qwen_program_attention_postprocess_schedule_t attention_postprocess_schedule;
   // Attention output contraction family selected for this token shape.
   qwen_program_attention_output_schedule_t attention_output_schedule;
+  // Ownership of the normalized input consumed by each attention stage.
+  qwen_program_attention_prepare_schedule_t attention_prepare_schedule;
   // Routed feed-forward family selected for this program role.
   qwen_program_feed_forward_schedule_t feed_forward_schedule;
   // Prepared executable for each unique recorded kernel specialization.
@@ -608,6 +617,13 @@ qwen_program_select_attention_output_schedule(iree_host_size_t token_count) {
   // larger shape on the measured WMMA schedule until its crossover is captured.
   return token_count == 1 ? QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8
                           : QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_F32_WMMA;
+}
+
+static qwen_program_attention_prepare_schedule_t
+qwen_program_select_attention_prepare_schedule(qwen_program_kind_t kind) {
+  return kind == QWEN_PROGRAM_KIND_DECODE
+             ? QWEN_PROGRAM_ATTENTION_PREPARE_SCHEDULE_INTERLAYER
+             : QWEN_PROGRAM_ATTENTION_PREPARE_SCHEDULE_PER_LAYER;
 }
 
 static qwen_program_feed_forward_schedule_t
@@ -1337,8 +1353,8 @@ static iree_status_t qwen_program_record_attention(
           ? QWEN_PROGRAM_EXECUTABLE_RMSNORM_F32
           : QWEN_PROGRAM_EXECUTABLE_ATTENTION_PREPARE_Q8;
   const bool input_was_published_by_previous_layer =
-      program->feed_forward_schedule ==
-          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8 &&
+      program->attention_prepare_schedule ==
+          QWEN_PROGRAM_ATTENTION_PREPARE_SCHEDULE_INTERLAYER &&
       layer_index > 0;
   const bool records_attention_prepare = !input_was_published_by_previous_layer;
 
@@ -2247,6 +2263,8 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
       qwen_program_select_attention_postprocess_schedule(options->kind);
   program->attention_output_schedule =
       qwen_program_select_attention_output_schedule(options->token_count);
+  program->attention_prepare_schedule =
+      qwen_program_select_attention_prepare_schedule(options->kind);
   program->feed_forward_schedule =
       qwen_program_select_feed_forward_schedule(options->kind);
 
