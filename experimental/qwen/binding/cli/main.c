@@ -58,6 +58,20 @@ static iree_hal_semaphore_list_t qwen_cli_timepoint_list(
   return list;
 }
 
+// Transient, non-sanctioned containment for an AMDGPU async file-action
+// teardown defect. A host preparation failure must not release the tooling
+// runtime while the model gather remains active. Keep this wait tool-only and
+// delete it when asynchronous device teardown is safe.
+static iree_status_t qwen_wait_for_model_ready_bringup_workaround(
+    iree_status_t status, qwen_model_t* model,
+    const qwen_cli_timepoint_t* model_ready) {
+  if (!model) return status;
+  return iree_status_join(
+      status, iree_hal_semaphore_wait(
+                  model_ready->semaphore, model_ready->value,
+                  iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+}
+
 static iree_status_t qwen_layer_cli_run(void) {
   iree_allocator_t host_allocator = iree_allocator_system();
   iree_status_t status = iree_ok_status();
@@ -210,6 +224,8 @@ static iree_status_t qwen_layer_cli_run(void) {
             comparison.maximum_relative_error);
   }
 
+  status =
+      qwen_wait_for_model_ready_bringup_workaround(status, model, &model_ready);
   iree_allocator_free(host_allocator, output_buffer);
   qwen_request_release(request);
   qwen_program_release(program);

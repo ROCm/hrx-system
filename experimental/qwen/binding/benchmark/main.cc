@@ -50,6 +50,8 @@ typedef struct QwenLayerBenchmarkEnvironment {
   iree_hal_semaphore_t* timeline;
   // Last allocated value on |timeline|.
   uint64_t timeline_value;
+  // Externally published completion of the asynchronous model gather.
+  QwenBenchmarkTimepoint model_ready;
   // Resident fixed Qwen model.
   qwen_model_t* model;
   // Reusable complete layer-0 program.
@@ -88,6 +90,20 @@ static QwenBenchmarkTimepoint QwenBenchmarkCurrentTimepoint(
       /*.value=*/environment->timeline_value,
   };
   return timepoint;
+}
+
+// Transient, non-sanctioned containment for an AMDGPU async file-action
+// teardown defect. A host preparation failure must not release the tooling
+// runtime while the model gather remains active. Keep this wait tool-only and
+// delete it when asynchronous device teardown is safe.
+static void qwen_wait_for_model_ready_bringup_workaround(
+    QwenLayerBenchmarkEnvironment* environment) {
+  if (!environment->model) return;
+  environment->terminal_status = iree_status_join(
+      environment->terminal_status,
+      iree_hal_semaphore_wait(
+          environment->model_ready.semaphore, environment->model_ready.value,
+          iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 }
 
 static void QwenBenchmarkRecordFailure(
@@ -171,7 +187,7 @@ static iree_status_t QwenBenchmarkEnvironmentInitialize(
         IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &environment->timeline);
   }
 
-  QwenBenchmarkTimepoint model_ready = QwenBenchmarkNextTimepoint(environment);
+  environment->model_ready = QwenBenchmarkNextTimepoint(environment);
   if (iree_status_is_ok(status)) {
     qwen_model_options_t model_options;
     qwen_model_options_initialize(&model_options);
@@ -181,10 +197,10 @@ static iree_status_t QwenBenchmarkEnvironmentInitialize(
         /*.provider=*/environment->runtime_context.parameter_provider,
         /*.scope=*/iree_string_view_empty(),
     };
-    status = qwen_model_load(&model_options, &parameter_source,
-                             iree_hal_semaphore_list_empty(),
-                             QwenBenchmarkTimepointList(&model_ready),
-                             environment->host_allocator, &environment->model);
+    status = qwen_model_load(
+        &model_options, &parameter_source, iree_hal_semaphore_list_empty(),
+        QwenBenchmarkTimepointList(&environment->model_ready),
+        environment->host_allocator, &environment->model);
   }
 
   // Host-side program preparation overlaps the asynchronous model gather.
@@ -209,11 +225,11 @@ static iree_status_t QwenBenchmarkEnvironmentInitialize(
     qwen_request_options_initialize(&request_options);
     request_options.token_count = QWEN_LAYER_TOKEN_COUNT;
     request_options.context_capacity = QWEN_LAYER_TOKEN_COUNT;
-    status =
-        qwen_request_create(environment->model, &request_options,
-                            QwenBenchmarkTimepointList(&model_ready),
-                            QwenBenchmarkTimepointList(&request_ready),
-                            environment->host_allocator, &environment->request);
+    status = qwen_request_create(
+        environment->model, &request_options,
+        QwenBenchmarkTimepointList(&environment->model_ready),
+        QwenBenchmarkTimepointList(&request_ready), environment->host_allocator,
+        &environment->request);
   }
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(environment->host_allocator,
@@ -237,6 +253,7 @@ static iree_status_t QwenBenchmarkEnvironmentInitialize(
 
 static void QwenBenchmarkEnvironmentDeinitialize(
     QwenLayerBenchmarkEnvironment* environment) {
+  qwen_wait_for_model_ready_bringup_workaround(environment);
   qwen_request_release(environment->request);
   qwen_program_release(environment->program);
   qwen_model_release(environment->model);
