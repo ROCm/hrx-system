@@ -322,11 +322,7 @@ iree_executable_test(
 loom_link_module(
     name = "attention_qkv_quantized_linked",
     srcs = ["qwen3_moe/attention_qkv_quantized.loom"],
-    libraries = [
-        "qwen3_moe/model_config.loom",
-        "qwen3_moe/attention_prepare_quantized.loom",
-        ":dense_linear_quantized_f16_wmma_linked",
-    ],
+    libraries = [":dense_linear_quantized_f16_wmma_linked"],
 )
 
 iree_executable_test(
