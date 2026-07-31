@@ -63,21 +63,11 @@ func.def inline @ggml_q8_1_x4_word(%q8_input: buffer, %row_byte_base: offset, %q
   func.return %values, %d : vector<4xi8>, f32
 }
 
-// A 32-lane workgroup owns one physical group. Each eight-lane cohort loads
-// four values, computes one Q8_1 block, and writes disjoint metadata and packed
-// words. The LDS reductions make the independent eight-lane cohorts explicit.
-kernel.def @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) {
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
-  %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), mul(%input_size, 128)] : index
-  %unit = index.constant 1 : index
-  %elements_per_group = index.constant 128 : index
-  %workgroup_size = index.constant 32 : index
-  %element_count = index.mul %bounded_token_count, %bounded_input_size : index
-  %workgroup_count = index.div %element_count, %elements_per_group : index
-  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
-} launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer) {
-  %group = kernel.workgroup.id<x> : index
-  %group_count = kernel.workgroup.count<x> : index
+// Packs one explicit physical group. Callers provide the complete physical
+// group domain and an ordinal within it, and guarantee that one complete
+// 32-lane wave executes after all 128 source values are visible.
+func.template<ggml.quantize_q8_1_x4.group_body> device @ggml_quantize_q8_1_x4_group_body(%group_count0: index, %group0: index, %input: buffer, %output: buffer) {
+  %group_count, %group = index.assume %group_count0, %group0 [range(%group_count0, 1, 524288), lt(%group0, %group_count0)] : index, index
   %lane = kernel.workitem.id<x> : index
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -161,6 +151,25 @@ kernel.def @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) {
     %s_index = index.add %ds_index, %one : index
     view.store %s_f16, %group_ds[%s_index] : f16, view<8xf16, #dense>
   }
+  func.return
+}
+
+// A 32-lane workgroup owns one physical group. Each eight-lane cohort loads
+// four values, computes one Q8_1 block, and writes disjoint metadata and packed
+// words. The LDS reductions make the independent eight-lane cohorts explicit.
+kernel.def @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), mul(%input_size, 128)] : index
+  %unit = index.constant 1 : index
+  %elements_per_group = index.constant 128 : index
+  %workgroup_size = index.constant 32 : index
+  %element_count = index.mul %bounded_token_count, %bounded_input_size : index
+  %workgroup_count = index.div %element_count, %elements_per_group : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer) {
+  %group = kernel.workgroup.id<x> : index
+  %group_count = kernel.workgroup.count<x> : index
+  func.apply<ggml.quantize_q8_1_x4.group_body>(%group_count, %group, %input, %output) : (index, index, buffer, buffer)
   kernel.return
 }
 
