@@ -26,6 +26,7 @@
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/pass_environment.h"
+#include "loom/transforms/symbol/symbol_equivalence.h"
 #include "loom/transforms/symbol/symbol_pruning.h"
 
 //===----------------------------------------------------------------------===//
@@ -258,6 +259,17 @@ typedef struct loom_template_selection_entry_t {
   loom_template_selection_blocker_t blocker;
 } loom_template_selection_entry_t;
 
+typedef struct loom_template_provider_equivalence_t {
+  // First compared local provider symbol.
+  loom_symbol_ref_t lhs;
+
+  // Second compared local provider symbol.
+  loom_symbol_ref_t rhs;
+
+  // Structural equivalence result for the pair.
+  bool equivalent;
+} loom_template_provider_equivalence_t;
+
 typedef struct loom_template_selection_state_t {
   // Active pass invocation.
   loom_pass_t* pass;
@@ -300,6 +312,18 @@ typedef struct loom_template_selection_state_t {
 
   // Capacity of entries.
   iree_host_size_t entry_capacity;
+
+  // Structural provider comparisons cached for this immutable analysis phase.
+  struct {
+    // Compared provider pairs.
+    loom_template_provider_equivalence_t* entries;
+
+    // Number of cached comparisons.
+    iree_host_size_t count;
+
+    // Allocated entries.
+    iree_host_size_t capacity;
+  } equivalence_cache;
 } loom_template_selection_state_t;
 
 static iree_string_view_t loom_template_selection_contract_name(
@@ -391,6 +415,47 @@ static bool loom_template_provider_is_materializable(
   return provider->origin == LOOM_FUNC_PROVIDER_ORIGIN_LOCAL &&
          provider->kind == LOOM_FUNC_PROVIDER_KIND_TEMPLATE &&
          provider->has_body && loom_symbol_ref_is_valid(provider->symbol);
+}
+
+static iree_status_t loom_template_providers_are_equivalent(
+    loom_template_selection_state_t* state,
+    const loom_func_provider_summary_t* lhs,
+    const loom_func_provider_summary_t* rhs, bool* out_equivalent) {
+  *out_equivalent = false;
+  if (!loom_template_provider_is_materializable(lhs) ||
+      !loom_template_provider_is_materializable(rhs)) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < state->equivalence_cache.count; ++i) {
+    const loom_template_provider_equivalence_t* entry =
+        &state->equivalence_cache.entries[i];
+    const bool forward = entry->lhs.symbol_id == lhs->symbol.symbol_id &&
+                         entry->rhs.symbol_id == rhs->symbol.symbol_id;
+    const bool reverse = entry->lhs.symbol_id == rhs->symbol.symbol_id &&
+                         entry->rhs.symbol_id == lhs->symbol.symbol_id;
+    if (!forward && !reverse) continue;
+    *out_equivalent = entry->equivalent;
+    return iree_ok_status();
+  }
+
+  bool equivalent = false;
+  IREE_RETURN_IF_ERROR(loom_symbol_definitions_equivalent(
+      state->module, lhs->symbol, rhs->symbol, state->pass->arena,
+      &equivalent));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_grow_array(state->pass->arena, state->equivalence_cache.count,
+                            state->equivalence_cache.count + 1,
+                            sizeof(*state->equivalence_cache.entries),
+                            &state->equivalence_cache.capacity,
+                            (void**)&state->equivalence_cache.entries));
+  state->equivalence_cache.entries[state->equivalence_cache.count++] =
+      (loom_template_provider_equivalence_t){
+          .lhs = lhs->symbol,
+          .rhs = rhs->symbol,
+          .equivalent = equivalent,
+      };
+  *out_equivalent = equivalent;
+  return iree_ok_status();
 }
 
 typedef struct loom_template_selection_apply_target_t {
@@ -1209,6 +1274,7 @@ static iree_status_t loom_template_selection_analyze_apply(
 
   bool has_exact = false;
   bool has_maybe = false;
+  bool has_distinct_best_exact = false;
   int64_t best_exact_priority = INT64_MIN;
   int64_t highest_provider_priority = INT64_MIN;
   int64_t highest_maybe_priority = INT64_MIN;
@@ -1249,9 +1315,16 @@ static iree_status_t loom_template_selection_analyze_apply(
       has_exact = true;
       best_exact_priority = provider->priority;
       best_exact_count = 1;
+      has_distinct_best_exact = false;
       best_exact_provider = provider;
     } else if (provider->priority == best_exact_priority) {
       ++best_exact_count;
+      if (!has_distinct_best_exact) {
+        bool equivalent = false;
+        IREE_RETURN_IF_ERROR(loom_template_providers_are_equivalent(
+            state, best_exact_provider, provider, &equivalent));
+        has_distinct_best_exact = !equivalent;
+      }
     }
   }
 
@@ -1290,7 +1363,7 @@ static iree_status_t loom_template_selection_analyze_apply(
         highest_provider_priority);
   }
 
-  if (best_exact_count > 1) {
+  if (has_distinct_best_exact) {
     loom_template_selection_record_blocker(
         state, entry, LOOM_TEMPLATE_SELECTION_BLOCKER_AMBIGUOUS);
     IREE_RETURN_IF_ERROR(loom_template_selection_mark_exact_priority(

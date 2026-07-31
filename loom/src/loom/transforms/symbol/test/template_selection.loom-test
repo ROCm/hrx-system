@@ -96,15 +96,80 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // ====
 
+// Independently archived libraries may carry renamed copies of one private
+// provider closure. They remain one implementation choice when both the
+// provider and its private dependencies are structurally equivalent.
+// RUN: pass select-templates
+
+func.def @identity_a(%m: index, %value: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
+  func.return %value : tensor<[%m]xf32>
+}
+
+func.def @identity_b(%m: index, %value: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
+  func.return %value : tensor<[%m]xf32>
+}
+
+func.template<demo.archived_duplicate> @provider_a(%m: index, %value: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) where [mul(%m, 16)] {
+  %result = func.call @identity_a(%m, %value) : (index, tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
+  func.return %result : tensor<[%m]xf32>
+}
+
+func.template<demo.archived_duplicate> @provider_b(%m: index, %value: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) where [mul(%m, 16)] {
+  %result = func.call @identity_b(%m, %value) : (index, tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
+  func.return %result : tensor<[%m]xf32>
+}
+
+func.def public @entry_a(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) where [mul(%n, 16)] {
+  %result = func.apply<demo.archived_duplicate>(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
+  func.return %result : tensor<[%n]xf32>
+}
+
+func.def public @entry_b(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) where [mul(%n, 16)] {
+  %result = func.apply<demo.archived_duplicate>(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
+  func.return %result : tensor<[%n]xf32>
+}
+
+// ----
+func.def @identity_a(%m: index, %value: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) {
+  func.return %value : tensor<[%m]xf32>
+}
+
+func.template<demo.archived_duplicate> @provider_a(%m: index, %value: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) where [mul(%m, 16)] {
+  %result = func.call @identity_a(%m, %value) : (index, tensor<[%m]xf32>) -> (tensor<[%m]xf32>)
+  func.return %result : tensor<[%m]xf32>
+}
+
+func.def public @entry_a(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) where [mul(%n, 16)] {
+  %result = func.call inline @provider_a(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
+  func.return %result : tensor<[%n]xf32>
+}
+
+func.def public @entry_b(%n: index, %arg: tensor<[%n]xf32>) -> (tensor<[%n]xf32>) where [mul(%n, 16)] {
+  %result = func.call inline @provider_a(%n, %arg) : (index, tensor<[%n]xf32>) -> (tensor<[%n]xf32>)
+  func.return %result : tensor<[%n]xf32>
+}
+
+// ====
+
 // RUN: pass select-templates{mode=final}
 
-func.template<demo.tie> priority(10) @lhs(%value: i32) -> (i32) {
+func.def @lhs_impl(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
-func.template<demo.tie> priority(10) @rhs(%value: i32) -> (i32) {
+func.def @rhs_impl(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
+}
+
+func.template<demo.tie> priority(10) @lhs(%value: i32) -> (i32) {
+  %result = func.call @lhs_impl(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.template<demo.tie> priority(10) @rhs(%value: i32) -> (i32) {
+  %result = func.call @rhs_impl(%value) : (i32) -> (i32)
+  func.return %result : i32
 }
 
 func.def public @entry(%arg: i32) -> (i32) {
