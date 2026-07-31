@@ -24,7 +24,8 @@ See [KERNEL_INTEGRATION.md](KERNEL_INTEGRATION.md) for the exact authored-source
 map, prefill/decode routing, JIT and export boundary, and the compiler facts
 exposed by each transient bring-up workaround.
 
-The first integration milestone is one complete layer-0 prefill-512 execution:
+The first completed integration milestone was one complete layer-0 prefill-512
+execution:
 
 1. validate and gather the real GGUF parameter set;
 2. specialize and load the required Loom exports for the live HAL device;
@@ -82,7 +83,27 @@ indices, and dense causal-mask bits from one compact context-base control word.
 It is not a kernel framework or a generator and must not accumulate alternate
 indexing policies. Delete it when the canonical producer lands.
 
-Later milestones repeat the proven layer shape across the model, add embedding
-and vocabulary projection, and introduce reusable prefill and decode programs.
-The layer runner remains a first-class optimization surface so model work can
-be isolated to a stable benchmark row without forking execution logic.
+The three direct feed-forward forks
+`kernels/routed_gate_up_q8_bringup_workaround.loom`,
+`kernels/routed_down_q4_q8_bringup_workaround.loom`, and
+`kernels/routed_down_q6_q8_bringup_workaround.loom` retain the canonical
+decode ABIs and kernel bodies while making this model's exact one-token,
+eight-route dimensions structural. They exist only because those workload facts
+do not reach source-to-low compilation and the direct down route loop therefore
+cannot be unrolled. Delete all three when workload specialization crosses that
+compiler boundary; they are not model-generated kernel variants.
+
+`kernels/linear_q6k_q8_1_x4_bringup_workaround.loom` is the vocabulary
+projection's one-row specialization. It retains the raw Q6_K by Q8_1 x4
+contraction while exposing the guarded output-channel bound needed by address
+planning. Its fixed vocabulary and hidden dimensions are model facts, not a
+general vocabulary-kernel authoring mechanism.
+
+The working full-model programs now record all 48 layers, embedding, final
+normalization, vocabulary projection, and greedy selection into reusable
+command buffers. Prefill retains the grouped F16 WMMA feed-forward route;
+decode uses fused normalization and Q8_1 packing, direct raw-Q4_K gate/up, and
+direct Q4_K or Q6_K down contraction with route weighting, reduction, and
+residual publication fused. The layer runner remains a first-class
+optimization surface so model work can be isolated to a stable benchmark row
+without forking execution logic.
