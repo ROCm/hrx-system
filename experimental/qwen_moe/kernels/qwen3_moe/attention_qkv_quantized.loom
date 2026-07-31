@@ -31,20 +31,9 @@ func.decl @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count: index, %q8_input: bu
 
 func.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer)
 
-kernel.def target(@qwen3_moe_attention_qkv_gfx11_wave32) @qwen3_moe_attention_qkv_quantized(%token_count: index) {
-  %query_size = config.get @qwen3_moe.attention.query_size : index
-  %key_value_size = config.get @qwen3_moe.attention.key_value_size : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %seven = index.constant 7 : index
-  %eight = index.constant 8 : index
-  %twofiftysix = index.constant 256 : index
-  %key_value_output_size = index.mul %key_value_size, %two : index
-  %output_size = index.add %query_size, %key_value_output_size : index
-  %padded_output_size = index.add %output_size, %seven : index
-  %output_tiles = index.div %padded_output_size, %eight : index
-  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%twofiftysix, %one, %one) : index
-} launch(%token_count: index, %q8_input: buffer, %query_weight: buffer, %key_weight: buffer, %value_weight: buffer, %query_output: buffer, %key_output: buffer, %value_output: buffer) {
+// Device body shared by the ordinary projection and completion-fused
+// postprocess exports. Each caller owns its boundary after the raw row stores.
+func.template<qwen3_moe.attention.qkv_quantized.body> device @qwen3_moe_attention_qkv_quantized_body(%token_count: index, %q8_input: buffer, %query_weight: buffer, %key_weight: buffer, %value_weight: buffer, %query_output: buffer, %key_output: buffer, %value_output: buffer) {
   %hidden_size0 = config.get @qwen3_moe.model.hidden_size : index
   %query_size0 = config.get @qwen3_moe.attention.query_size : index
   %key_value_size0 = config.get @qwen3_moe.attention.key_value_size : index
@@ -137,6 +126,24 @@ kernel.def target(@qwen3_moe_attention_qkv_gfx11_wave32) @qwen3_moe_attention_qk
       }
     }
   }
+  func.return
+}
+
+kernel.def target(@qwen3_moe_attention_qkv_gfx11_wave32) @qwen3_moe_attention_qkv_quantized(%token_count: index) {
+  %query_size = config.get @qwen3_moe.attention.query_size : index
+  %key_value_size = config.get @qwen3_moe.attention.key_value_size : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %seven = index.constant 7 : index
+  %eight = index.constant 8 : index
+  %twofiftysix = index.constant 256 : index
+  %key_value_output_size = index.mul %key_value_size, %two : index
+  %output_size = index.add %query_size, %key_value_output_size : index
+  %padded_output_size = index.add %output_size, %seven : index
+  %output_tiles = index.div %padded_output_size, %eight : index
+  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%twofiftysix, %one, %one) : index
+} launch(%token_count: index, %q8_input: buffer, %query_weight: buffer, %key_weight: buffer, %value_weight: buffer, %query_output: buffer, %key_output: buffer, %value_output: buffer) {
+  func.apply<qwen3_moe.attention.qkv_quantized.body>(%token_count, %q8_input, %query_weight, %key_weight, %value_weight, %query_output, %key_output, %value_output) : (index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
