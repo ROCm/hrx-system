@@ -2149,7 +2149,7 @@ def _v_lshl_add_u32_shift_immediate_src2_literal_overlay() -> AmdgpuDescriptorOv
                 _native_unsigned_hex_immediate("imm32", 32),
             ),
         ),
-        immediate_fields=("SRC1",),
+        immediate_fields=("SRC1", "LITERAL"),
         immediates=(
             _source_inline_u32_immediate("shift"),
             _LITERAL_U32_IMMEDIATE,
@@ -5917,7 +5917,7 @@ def _v_cndmask_b32_literal_inline_overlay(
             immediates=("imm32", inline_operand),
             named_immediates=True,
         ),
-        immediate_fields=(inline_field,),
+        immediate_fields=("LITERAL", inline_field),
         immediates=(
             _LITERAL_U32_IMMEDIATE,
             replace(

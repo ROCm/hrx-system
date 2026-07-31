@@ -82,6 +82,24 @@ _IGNORE_GLOBAL_WRITE_MEMORY = AmdgpuImplicitOperandOverlay(
     ignore_reason="modeled-by-global-write-effect",
 )
 
+
+def test_descriptor_overlay_rejects_partial_immediate_field_map() -> None:
+    with pytest.raises(
+        AmdgpuDescriptorOverlayError,
+        match="maps 1 immediate encoding fields for 2 immediates",
+    ):
+        AmdgpuDescriptorOverlay(
+            descriptor_key="amdgpu.test.partial_immediate_fields",
+            instruction_name="V_ADD_NC_U32",
+            encoding_name="VOP2_INST_LITERAL",
+            semantic_tag="test.partial_immediate_fields",
+            schedule_class="amdgpu.valu",
+            operands=(),
+            immediate_fields=("SRC0",),
+            immediates=(_U32_IMMEDIATE, _U32_IMMEDIATE),
+        )
+
+
 _BUFFER_ATOMIC_XML = SAMPLE_XML.replace(
     "    </Instructions>",
     """
@@ -724,6 +742,7 @@ def test_materialize_rejects_repeated_overlay_xml_field() -> None:
             AmdgpuOperandOverlay("VSRC1", _operand("rhs", _VGPR_ALT)),
         ),
         immediate_fields=("LITERAL",),
+        immediates=(_U32_IMMEDIATE,),
     )
 
     with pytest.raises(

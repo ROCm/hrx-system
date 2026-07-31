@@ -2615,6 +2615,24 @@ def test_vop3_shift_immediate_is_constrained_to_inline_source_selector() -> None
     assert immediate.unsigned_max == 64
 
 
+def test_vop3_mixed_inline_literal_immediates_name_both_encoding_fields() -> None:
+    for overlays in (
+        _gfx11_core_overlays(),
+        _gfx117x_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx125x_core_overlays(),
+    ):
+        descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
+        shift_add = descriptors["amdgpu.v_lshl_add_u32.shift_imm.src2_lit"]
+        assert shift_add.immediate_fields == ("SRC1", "LITERAL")
+
+        src0_literal = descriptors["amdgpu.v_cndmask_b32.src0_lit_src1_inline"]
+        assert src0_literal.immediate_fields == ("LITERAL", "SRC1")
+
+        src1_literal = descriptors["amdgpu.v_cndmask_b32.src1_lit_src0_inline"]
+        assert src1_literal.immediate_fields == ("LITERAL", "SRC0")
+
+
 def test_vop2_f32_inline_immediate_uses_enum_domain() -> None:
     descriptor = next(
         overlay
