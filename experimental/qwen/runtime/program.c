@@ -31,7 +31,7 @@ typedef enum qwen_program_binding_slot_e {
   QWEN_PROGRAM_BINDING_VALUE_CACHE = 3,
   // Request hidden state, compact control, and derived attention metadata.
   QWEN_PROGRAM_BINDING_REQUEST_STATE = 4,
-  // Host-visible completed hidden-state staging.
+  // Host-visible completed result staging.
   QWEN_PROGRAM_BINDING_OUTPUT_STAGING = 5,
 } qwen_program_binding_slot_t;
 
@@ -69,7 +69,7 @@ typedef enum qwen_program_executable_ordinal_e {
   QWEN_PROGRAM_EXECUTABLE_TERMINAL_EXPERT_TABLE = 23,
   QWEN_PROGRAM_EXECUTABLE_TERMINAL_PARTITION_TABLE = 24,
   QWEN_PROGRAM_EXECUTABLE_TERMINAL_GATE_UP = 25,
-  QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTED_DOWN_Q6 = 26,
+  QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTED_DOWN = 26,
   QWEN_PROGRAM_EXECUTABLE_TERMINAL_WEIGHTED_REDUCE = 27,
   QWEN_PROGRAM_EXECUTABLE_FINAL_QUANTIZE_Q8 = 28,
   QWEN_PROGRAM_EXECUTABLE_VOCABULARY_PROJECTION_Q6 = 29,
@@ -650,6 +650,14 @@ static iree_status_t qwen_program_prepare_layer_executables(
 
 static iree_status_t qwen_program_prepare_prefill_executables(
     qwen_program_t* program) {
+  const qwen_quantized_storage_t terminal_storage =
+      qwen_model_parameter_layout(program->model)
+          ->layers[QWEN_MODEL_LAYER_COUNT - 1]
+          .value_and_down_storage;
+  const iree_string_view_t terminal_routed_down_function =
+      terminal_storage == QWEN_QUANTIZED_STORAGE_Q6_K
+          ? IREE_SV("qwen3_moe_routed_down_q6k_f16_wmma_grouped")
+          : IREE_SV("qwen3_moe_routed_down_q4k_f16_wmma_grouped");
   const int64_t terminal_token_count = 1;
   const int64_t route_stride = QWEN_MODEL_ROUTE_COUNT;
   const int64_t route_count = QWEN_MODEL_ROUTE_COUNT;
@@ -753,11 +761,11 @@ static iree_status_t qwen_program_prepare_prefill_executables(
   if (iree_status_is_ok(status)) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
-        IREE_SV("qwen3_moe_routed_down_q6k_f16_wmma_grouped"),
+        terminal_routed_down_function,
         IREE_ARRAYSIZE(qwen_routed_down_config_bindings),
         qwen_routed_down_config_bindings,
         IREE_ARRAYSIZE(terminal_token_workload), terminal_token_workload,
-        &program->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTED_DOWN_Q6]);
+        &program->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTED_DOWN]);
   }
   if (iree_status_is_ok(status)) {
     status = qwen_program_prepare_kernel(
@@ -1275,9 +1283,6 @@ static iree_status_t qwen_program_record_terminal_feed_forward(
     qwen_program_t* program,
     const qwen_request_storage_layout_t* request_layout) {
   const iree_host_size_t layer_index = QWEN_MODEL_LAYER_COUNT - 1;
-  IREE_ASSERT(qwen_model_parameter_layout(program->model)
-                  ->layers[layer_index]
-                  .value_and_down_storage == QWEN_QUANTIZED_STORAGE_Q6_K);
   const qwen_program_feed_forward_executables_t executables = {
       .rmsnorm = QWEN_PROGRAM_EXECUTABLE_TERMINAL_RMSNORM_F32,
       .router_projection = QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTER_PROJECTION,
@@ -1285,7 +1290,7 @@ static iree_status_t qwen_program_record_terminal_feed_forward(
       .expert_table = QWEN_PROGRAM_EXECUTABLE_TERMINAL_EXPERT_TABLE,
       .partition_table = QWEN_PROGRAM_EXECUTABLE_TERMINAL_PARTITION_TABLE,
       .gate_up = QWEN_PROGRAM_EXECUTABLE_TERMINAL_GATE_UP,
-      .routed_down = QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTED_DOWN_Q6,
+      .routed_down = QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTED_DOWN,
       .weighted_reduce = QWEN_PROGRAM_EXECUTABLE_TERMINAL_WEIGHTED_REDUCE,
   };
   return qwen_program_record_feed_forward(
