@@ -132,9 +132,11 @@ loom_cc_test(
     loom::analysis::symbol_facts
     loom::format::text::parser
     loom::ir
+    loom::ops::func_symbol_facts
     loom::ops::low
     loom::ops::target
     loom::ops::test
+    loom::target::function_contract
     loom::target::test::low_registry
     loom::testing::module_ptr
 )

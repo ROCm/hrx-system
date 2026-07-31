@@ -27,7 +27,8 @@ iree_status_t loom_low_function_model_initialize(
   loom_symbol_fact_table_t symbol_facts = {0};
   loom_symbol_fact_table_initialize(&symbol_facts, arena);
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-      module, &symbol_facts, low_func_op, descriptor_registry, emitter,
+      module, &symbol_facts, low_func_op,
+      /*effective_target_facts=*/NULL, descriptor_registry, emitter,
       &out_model->target));
   if (out_model->target.descriptor_set == NULL) {
     out_model->error_count = 1;

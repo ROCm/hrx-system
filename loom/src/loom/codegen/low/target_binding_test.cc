@@ -12,9 +12,12 @@
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/target/facts.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/target/function_contract.h"
 #include "loom/target/test/low_registry.h"
 #include "loom/testing/module_ptr.h"
 
@@ -82,6 +85,42 @@ class LowTargetBindingTest : public ::testing::Test {
     return op;
   }
 
+  const loom_func_symbol_facts_t* LookupFunctionFacts(
+      const loom_module_t* module, iree_string_view_t name) {
+    const loom_symbol_facts_base_t* base_facts = nullptr;
+    IREE_CHECK_OK(loom_symbol_fact_table_lookup(
+        &symbol_facts_, module, FindSymbol(module, name), &base_facts));
+    const loom_func_symbol_facts_t* facts =
+        loom_func_symbol_facts_cast(base_facts);
+    IREE_ASSERT(facts != nullptr);
+    return facts;
+  }
+
+  const loom_target_symbol_facts_t* LookupTargetFacts(
+      const loom_module_t* module, iree_string_view_t name) {
+    const loom_symbol_facts_base_t* base_facts = nullptr;
+    IREE_CHECK_OK(loom_symbol_fact_table_lookup(
+        &symbol_facts_, module, FindSymbol(module, name), &base_facts));
+    const loom_target_symbol_facts_t* facts =
+        loom_target_symbol_facts_cast(base_facts);
+    IREE_ASSERT(facts != nullptr);
+    return facts;
+  }
+
+  const loom_target_facts_t* RefineFunctionFacts(
+      const loom_module_t* module, const loom_func_symbol_facts_t* function,
+      const loom_target_symbol_facts_t* target) {
+    bool valid = false;
+    const loom_target_facts_t* effective_facts = nullptr;
+    IREE_CHECK_OK(loom_target_function_contract_refine_facts(
+        module, function, target->name, target->projection,
+        iree_diagnostic_emitter_t{}, &analysis_arena_, &valid,
+        &effective_facts));
+    IREE_ASSERT(valid);
+    IREE_ASSERT(effective_facts != nullptr);
+    return effective_facts;
+  }
+
   // Block pool shared by parser, module allocation, and analysis storage.
   iree_arena_block_pool_t block_pool_;
 
@@ -114,7 +153,8 @@ low.func.def target<test.low.core>(@target) @kernel() {
   loom_low_resolved_target_t target = {};
   IREE_ASSERT_OK(loom_low_resolve_function_target(
       module.get(), &symbol_facts_,
-      LookupFunctionOp(module.get(), IREE_SV("kernel")), &registry_.registry,
+      LookupFunctionOp(module.get(), IREE_SV("kernel")),
+      /*effective_target_facts=*/nullptr, &registry_.registry,
       iree_diagnostic_emitter_t{}, &target));
 
   ASSERT_NE(target.target_facts, nullptr);
@@ -134,6 +174,92 @@ low.func.def target<test.low.core>(@target) @kernel() {
   const loom_low_resolved_target_t copied_target = target;
   EXPECT_EQ(copied_target.target_facts, target.target_facts);
   EXPECT_EQ(loom_low_resolved_target_bundle(&copied_target), bundle);
+}
+
+TEST_F(LowTargetBindingTest, EffectiveFactsOverrideAuthoredTarget) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @generic {
+  contract_feature_bits = 1,
+  default_pointer_bitwidth = 32,
+  index_bitwidth = 32,
+  offset_bitwidth = 32
+}
+test.target<low_core> @exact {
+  contract_feature_bits = 7,
+  default_pointer_bitwidth = 64,
+  index_bitwidth = 64,
+  offset_bitwidth = 64
+}
+low.func.def target<test.low.core>(@generic) @kernel() {
+  low.return
+}
+)");
+
+  const loom_func_symbol_facts_t* function_facts =
+      LookupFunctionFacts(module.get(), IREE_SV("kernel"));
+  const loom_target_facts_t* exact_facts =
+      RefineFunctionFacts(module.get(), function_facts,
+                          LookupTargetFacts(module.get(), IREE_SV("exact")));
+  const loom_op_t* function_op =
+      LookupFunctionOp(module.get(), IREE_SV("kernel"));
+
+  loom_low_resolved_target_t exact_target = {};
+  IREE_ASSERT_OK(loom_low_resolve_function_target(
+      module.get(), &symbol_facts_, function_op, exact_facts,
+      &registry_.registry, iree_diagnostic_emitter_t{}, &exact_target));
+  EXPECT_EQ(exact_target.target_facts, exact_facts);
+  EXPECT_TRUE(
+      iree_string_view_equal(exact_target.target_name, IREE_SV("exact")));
+  EXPECT_EQ(exact_target.feature_bits, 7u);
+  EXPECT_EQ(loom_low_resolved_target_bundle(&exact_target),
+            &exact_facts->storage.bundle);
+  EXPECT_EQ(loom_low_resolved_target_bundle(&exact_target)
+                ->snapshot->default_pointer_bitwidth,
+            64u);
+  ASSERT_NE(exact_target.descriptor_set, nullptr);
+
+  loom_low_resolved_target_t authored_target = {};
+  IREE_ASSERT_OK(loom_low_resolve_function_target(
+      module.get(), &symbol_facts_, function_op,
+      /*effective_target_facts=*/nullptr, &registry_.registry,
+      iree_diagnostic_emitter_t{}, &authored_target));
+  EXPECT_NE(authored_target.target_facts, exact_facts);
+  EXPECT_TRUE(
+      iree_string_view_equal(authored_target.target_name, IREE_SV("generic")));
+  EXPECT_EQ(authored_target.feature_bits, 1u);
+  EXPECT_EQ(loom_low_resolved_target_bundle(&authored_target)
+                ->snapshot->default_pointer_bitwidth,
+            32u);
+}
+
+TEST_F(LowTargetBindingTest, EffectiveFactsBindTargetlessFunction) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @exact {
+  contract_feature_bits = 7,
+  default_pointer_bitwidth = 64,
+  index_bitwidth = 64,
+  offset_bitwidth = 64
+}
+low.func.def target<test.low.core> @kernel() {
+  low.return
+}
+)");
+
+  const loom_func_symbol_facts_t* function_facts =
+      LookupFunctionFacts(module.get(), IREE_SV("kernel"));
+  const loom_target_facts_t* exact_facts =
+      RefineFunctionFacts(module.get(), function_facts,
+                          LookupTargetFacts(module.get(), IREE_SV("exact")));
+
+  loom_low_resolved_target_t target = {};
+  IREE_ASSERT_OK(loom_low_resolve_function_target(
+      module.get(), &symbol_facts_,
+      LookupFunctionOp(module.get(), IREE_SV("kernel")), exact_facts,
+      &registry_.registry, iree_diagnostic_emitter_t{}, &target));
+  EXPECT_EQ(target.target_facts, exact_facts);
+  EXPECT_TRUE(iree_string_view_equal(target.target_name, IREE_SV("exact")));
+  EXPECT_EQ(target.feature_bits, 7u);
+  ASSERT_NE(target.descriptor_set, nullptr);
 }
 
 }  // namespace

@@ -197,6 +197,7 @@ static bool loom_low_get_function_target_ref(const loom_op_t* low_func_op,
 
 static iree_status_t loom_low_resolve_func_target(
     const loom_module_t* module, const loom_op_t* low_func_op,
+    const loom_target_facts_t* effective_target_facts,
     const loom_low_descriptor_registry_t* registry,
     iree_diagnostic_emitter_t emitter, loom_symbol_fact_table_t* fact_table,
     uint16_t target_attr_index, loom_low_resolved_target_t* out_target) {
@@ -225,8 +226,10 @@ static iree_status_t loom_low_resolve_func_target(
         IREE_STATUS_INVALID_ARGUMENT,
         "low function symbol must resolve to func symbol facts");
   }
-  bool contract_valid = false;
-  if (iree_status_is_ok(status)) {
+  bool contract_valid = effective_target_facts != NULL;
+  if (iree_status_is_ok(status) && effective_target_facts != NULL) {
+    out_target->target_facts = effective_target_facts;
+  } else if (iree_status_is_ok(status)) {
     status = loom_target_function_contract_resolve_facts(
         module, fact_table, func_facts, emitter, fact_table->arena,
         &contract_valid, &out_target->target_facts);
@@ -266,6 +269,7 @@ static iree_status_t loom_low_resolve_func_target(
 iree_status_t loom_low_resolve_function_target(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
     const loom_op_t* low_func_op,
+    const loom_target_facts_t* effective_target_facts,
     const loom_low_descriptor_registry_t* registry,
     iree_diagnostic_emitter_t emitter, loom_low_resolved_target_t* out_target) {
   *out_target = (loom_low_resolved_target_t){0};
@@ -278,6 +282,14 @@ iree_status_t loom_low_resolve_function_target(
                             "low.func.decl");
   }
 
+  if (effective_target_facts != NULL) {
+    out_target->target_name =
+        loom_target_facts_identity_name(effective_target_facts);
+    return loom_low_resolve_func_target(
+        module, low_func_op, effective_target_facts, registry, emitter,
+        fact_table, target_attr_index, out_target);
+  }
+
   const loom_symbol_t* target_symbol =
       loom_low_lookup_defined_symbol(module, target_ref);
   if (!target_symbol) {
@@ -288,9 +300,9 @@ iree_status_t loom_low_resolve_function_target(
   out_target->target_name = loom_low_symbol_name(module, target_ref);
 
   if (loom_symbol_implements(target_symbol, LOOM_SYMBOL_INTERFACE_TARGET)) {
-    return loom_low_resolve_func_target(module, low_func_op, registry, emitter,
-                                        fact_table, target_attr_index,
-                                        out_target);
+    return loom_low_resolve_func_target(
+        module, low_func_op, /*effective_target_facts=*/NULL, registry, emitter,
+        fact_table, target_attr_index, out_target);
   }
   return loom_low_emit_symbol_kind_mismatch(
       emitter, module, low_func_op, target_ref, target_symbol,

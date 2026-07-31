@@ -1048,7 +1048,8 @@ static iree_status_t loom_check_emit_write_low_schedule_json(
     loom_symbol_fact_table_initialize(&symbol_facts, analysis_arena);
     loom_low_resolved_target_t target = {0};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-        module, &symbol_facts, low_function, descriptor_registry, emitter,
+        module, &symbol_facts, low_function,
+        /*effective_target_facts=*/NULL, descriptor_registry, emitter,
         &target));
     if (!target.descriptor_set) {
       return iree_make_status(
@@ -1479,7 +1480,8 @@ static iree_status_t loom_check_emit_select_single_low_descriptor_set_key(
     }
     loom_low_resolved_target_t target = {0};
     status = loom_low_resolve_function_target(
-        module, &symbol_facts, op, descriptor_registry, emitter, &target);
+        module, &symbol_facts, op, /*effective_target_facts=*/NULL,
+        descriptor_registry, emitter, &target);
     if (!iree_status_is_ok(status)) {
       break;
     }
