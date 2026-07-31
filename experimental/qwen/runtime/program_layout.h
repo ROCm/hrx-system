@@ -24,12 +24,11 @@ typedef struct qwen_program_span_t {
 // Named transient spans used by one complete layer program.
 //
 // Most semantic values have distinct storage, keeping the correctness witness
-// independent of a general lifetime planner. The projection scratch is the one
-// explicit reuse: the QKV input is dead after its dispatch barrier, before the
-// attention-output quantizer writes the same storage.
+// independent of a general lifetime planner. The two explicitly phased spans
+// carry projection inputs whose consumers are separated by dispatch barriers.
 typedef struct qwen_layer_program_layout_t {
-  // Phased QKV-input and attention-output Q8_1 x4 projection scratch.
-  qwen_program_span_t attention_projection_scratch;
+  // Phased F32 or Q8_1 x4 input for attention and feed-forward projections.
+  qwen_program_span_t projection_input_scratch;
   // Raw F32 query projection.
   qwen_program_span_t raw_query;
   // Raw F32 key projection.
@@ -54,8 +53,8 @@ typedef struct qwen_layer_program_layout_t {
   qwen_program_span_t partition_table;
   // F32 routed SwiGLU values.
   qwen_program_span_t swiglu;
-  // F16 routed down-projection values.
-  qwen_program_span_t routed_down;
+  // Phased F16 routed-down output or Q8_1 x4 routed-down input.
+  qwen_program_span_t routed_projection_scratch;
   // Complete transient allocation size.
   iree_device_size_t transient_byte_length;
 } qwen_layer_program_layout_t;

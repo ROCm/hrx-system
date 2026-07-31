@@ -70,7 +70,7 @@ static iree_status_t qwen_program_layout_append(iree_device_size_t length,
 static iree_status_t qwen_program_layout_rebase_layer(
     iree_device_size_t base_offset, qwen_layer_program_layout_t* layout) {
   qwen_program_span_t* spans[] = {
-      &layout->attention_projection_scratch,
+      &layout->projection_input_scratch,
       &layout->raw_query,
       &layout->raw_key,
       &layout->raw_value,
@@ -83,7 +83,7 @@ static iree_status_t qwen_program_layout_rebase_layer(
       &layout->expert_table,
       &layout->partition_table,
       &layout->swiglu,
-      &layout->routed_down,
+      &layout->routed_projection_scratch,
   };
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(spans); ++i) {
     iree_device_size_t rebased_offset = 0;
@@ -117,11 +117,11 @@ iree_status_t qwen_layer_program_layout_calculate(
   IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
       quantized_attention_byte_length, QWEN_PROGRAM_Q8_1_X4_GROUP_BYTE_LENGTH,
       &quantized_attention_byte_length));
-  const iree_device_size_t attention_projection_scratch_byte_length =
+  const iree_device_size_t projection_input_scratch_byte_length =
       iree_max(hidden_state_byte_length, quantized_attention_byte_length);
-  IREE_RETURN_IF_ERROR(qwen_program_layout_append(
-      attention_projection_scratch_byte_length, &cursor,
-      &out_layout->attention_projection_scratch));
+  IREE_RETURN_IF_ERROR(
+      qwen_program_layout_append(projection_input_scratch_byte_length, &cursor,
+                                 &out_layout->projection_input_scratch));
 
   IREE_RETURN_IF_ERROR(qwen_program_layout_tensor_byte_length(
       token_count, QWEN_MODEL_QUERY_HEAD_COUNT * QWEN_MODEL_HEAD_SIZE,
@@ -193,8 +193,8 @@ iree_status_t qwen_layer_program_layout_calculate(
   IREE_RETURN_IF_ERROR(qwen_program_layout_tensor_byte_length(
       token_count, QWEN_MODEL_ROUTE_COUNT * QWEN_MODEL_HIDDEN_SIZE,
       /*F16 byte length=*/2, &byte_length));
-  IREE_RETURN_IF_ERROR(qwen_program_layout_append(byte_length, &cursor,
-                                                  &out_layout->routed_down));
+  IREE_RETURN_IF_ERROR(qwen_program_layout_append(
+      byte_length, &cursor, &out_layout->routed_projection_scratch));
 
   out_layout->transient_byte_length = cursor;
   return iree_ok_status();

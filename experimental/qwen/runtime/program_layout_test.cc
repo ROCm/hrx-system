@@ -25,8 +25,8 @@ static void ExpectRebased(qwen_program_span_t expected,
 static void ExpectRebasedLayer(const qwen_layer_program_layout_t& expected,
                                const qwen_layer_program_layout_t& actual,
                                iree_device_size_t base_offset) {
-  ExpectRebased(expected.attention_projection_scratch,
-                actual.attention_projection_scratch, base_offset);
+  ExpectRebased(expected.projection_input_scratch,
+                actual.projection_input_scratch, base_offset);
   ExpectRebased(expected.raw_query, actual.raw_query, base_offset);
   ExpectRebased(expected.raw_key, actual.raw_key, base_offset);
   ExpectRebased(expected.raw_value, actual.raw_value, base_offset);
@@ -41,7 +41,8 @@ static void ExpectRebasedLayer(const qwen_layer_program_layout_t& expected,
   ExpectRebased(expected.expert_table, actual.expert_table, base_offset);
   ExpectRebased(expected.partition_table, actual.partition_table, base_offset);
   ExpectRebased(expected.swiglu, actual.swiglu, base_offset);
-  ExpectRebased(expected.routed_down, actual.routed_down, base_offset);
+  ExpectRebased(expected.routed_projection_scratch,
+                actual.routed_projection_scratch, base_offset);
   EXPECT_EQ(actual.transient_byte_length, expected.transient_byte_length);
 }
 
@@ -50,7 +51,7 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512Layer) {
   IREE_ASSERT_OK(qwen_layer_program_layout_calculate(
       /*token_count=*/512, &layout));
 
-  EXPECT_EQ(layout.attention_projection_scratch.length,
+  EXPECT_EQ(layout.projection_input_scratch.length,
             512u * 2048u * sizeof(float));
   EXPECT_EQ(layout.raw_query.length, 512u * 4096u * sizeof(float));
   EXPECT_EQ(layout.raw_key.length, 512u * 512u * sizeof(float));
@@ -59,9 +60,9 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512Layer) {
   EXPECT_EQ(layout.expert_table.length, 128u * 513u * sizeof(int32_t));
   EXPECT_EQ(layout.partition_table.length, 257u * sizeof(int32_t));
   EXPECT_EQ(layout.swiglu.length, 512u * 8u * 768u * sizeof(float));
-  EXPECT_EQ(layout.routed_down.length, 512u * 8u * 2048u * 2u);
+  EXPECT_EQ(layout.routed_projection_scratch.length, 512u * 8u * 2048u * 2u);
 
-  ExpectOrdered(layout.attention_projection_scratch, layout.raw_query);
+  ExpectOrdered(layout.projection_input_scratch, layout.raw_query);
   ExpectOrdered(layout.raw_query, layout.raw_key);
   ExpectOrdered(layout.raw_key, layout.raw_value);
   ExpectOrdered(layout.raw_value, layout.rotated_query);
@@ -73,9 +74,10 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512Layer) {
   ExpectOrdered(layout.route_weights, layout.expert_table);
   ExpectOrdered(layout.expert_table, layout.partition_table);
   ExpectOrdered(layout.partition_table, layout.swiglu);
-  ExpectOrdered(layout.swiglu, layout.routed_down);
+  ExpectOrdered(layout.swiglu, layout.routed_projection_scratch);
   EXPECT_EQ(layout.transient_byte_length,
-            layout.routed_down.offset + layout.routed_down.length);
+            layout.routed_projection_scratch.offset +
+                layout.routed_projection_scratch.length);
 }
 
 TEST(QwenProgramLayoutTest, RejectsUnsupportedTokenCount) {
@@ -89,8 +91,8 @@ TEST(QwenProgramLayoutTest, ReservesEveryExpertTailPartitionForDecode) {
   IREE_ASSERT_OK(
       qwen_layer_program_layout_calculate(/*token_count=*/1, &layout));
 
-  EXPECT_EQ(layout.attention_projection_scratch.length, 8192u);
-  EXPECT_GE(layout.attention_projection_scratch.length, 4608u);
+  EXPECT_EQ(layout.projection_input_scratch.length, 8192u);
+  EXPECT_GE(layout.projection_input_scratch.length, 4608u);
   EXPECT_EQ(layout.partition_table.length, 130u * sizeof(int32_t));
 }
 
@@ -113,7 +115,7 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512FullProgram) {
       layout.layer.transient_byte_length;
   ExpectRebasedLayer(terminal_layer, layout.terminal_layer,
                      terminal_layer_base);
-  EXPECT_EQ(layout.terminal_layer.attention_projection_scratch.length, 8192u);
+  EXPECT_EQ(layout.terminal_layer.projection_input_scratch.length, 8192u);
   EXPECT_EQ(layout.terminal_layer.raw_query.length, 16384u);
   EXPECT_EQ(layout.terminal_layer.raw_key.length, 2048u);
   EXPECT_EQ(layout.terminal_layer.raw_value.length, 2048u);
@@ -126,12 +128,12 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512FullProgram) {
   EXPECT_EQ(layout.terminal_layer.expert_table.length, 1024u);
   EXPECT_EQ(layout.terminal_layer.partition_table.length, 520u);
   EXPECT_EQ(layout.terminal_layer.swiglu.length, 24576u);
-  EXPECT_EQ(layout.terminal_layer.routed_down.length, 32768u);
+  EXPECT_EQ(layout.terminal_layer.routed_projection_scratch.length, 32768u);
   EXPECT_EQ(layout.terminal_layer.transient_byte_length, 129792u);
 
-  ExpectOrdered(layout.layer.routed_down,
-                layout.terminal_layer.attention_projection_scratch);
-  ExpectOrdered(layout.terminal_layer.attention_projection_scratch,
+  ExpectOrdered(layout.layer.routed_projection_scratch,
+                layout.terminal_layer.projection_input_scratch);
+  ExpectOrdered(layout.terminal_layer.projection_input_scratch,
                 layout.terminal_layer.raw_query);
   ExpectOrdered(layout.terminal_layer.raw_query, layout.terminal_layer.raw_key);
   ExpectOrdered(layout.terminal_layer.raw_key, layout.terminal_layer.raw_value);
@@ -154,8 +156,8 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512FullProgram) {
   ExpectOrdered(layout.terminal_layer.partition_table,
                 layout.terminal_layer.swiglu);
   ExpectOrdered(layout.terminal_layer.swiglu,
-                layout.terminal_layer.routed_down);
-  ExpectOrdered(layout.terminal_layer.routed_down,
+                layout.terminal_layer.routed_projection_scratch);
+  ExpectOrdered(layout.terminal_layer.routed_projection_scratch,
                 layout.final_normalized_hidden_state);
   ExpectOrdered(layout.final_normalized_hidden_state,
                 layout.final_quantized_hidden_state);

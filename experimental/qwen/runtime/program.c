@@ -993,7 +993,7 @@ static iree_status_t qwen_program_record_attention(
   const iree_hal_buffer_ref_t attention_prepare_bindings[] = {
       qwen_program_request_ref(request_layout->hidden_state),
       qwen_program_model_ref(parameters->attention_norm),
-      qwen_program_transient_ref(transient->attention_projection_scratch),
+      qwen_program_transient_ref(transient->projection_input_scratch),
   };
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_dispatch(
@@ -1010,7 +1010,7 @@ static iree_status_t qwen_program_record_attention(
   if (iree_status_is_ok(status) &&
       program->qkv_schedule == QWEN_PROGRAM_QKV_SCHEDULE_QUANTIZED_ROWS) {
     const iree_hal_buffer_ref_t attention_qkv_bindings[] = {
-        qwen_program_transient_ref(transient->attention_projection_scratch),
+        qwen_program_transient_ref(transient->projection_input_scratch),
         qwen_program_model_ref(parameters->query),
         qwen_program_model_ref(parameters->key),
         qwen_program_model_ref(parameters->value),
@@ -1027,7 +1027,7 @@ static iree_status_t qwen_program_record_attention(
   if (iree_status_is_ok(status) &&
       program->qkv_schedule == QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA) {
     const iree_hal_buffer_ref_t query_bindings[] = {
-        qwen_program_transient_ref(transient->attention_projection_scratch),
+        qwen_program_transient_ref(transient->projection_input_scratch),
         qwen_program_model_ref(parameters->query),
         qwen_program_transient_ref(transient->raw_query),
     };
@@ -1040,7 +1040,7 @@ static iree_status_t qwen_program_record_attention(
   if (iree_status_is_ok(status) &&
       program->qkv_schedule == QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA) {
     const iree_hal_buffer_ref_t key_bindings[] = {
-        qwen_program_transient_ref(transient->attention_projection_scratch),
+        qwen_program_transient_ref(transient->projection_input_scratch),
         qwen_program_model_ref(parameters->key),
         qwen_program_transient_ref(transient->raw_key),
     };
@@ -1056,7 +1056,7 @@ static iree_status_t qwen_program_record_attention(
         uses_q6 ? QWEN_PROGRAM_EXECUTABLE_ATTENTION_VALUE_Q6_WMMA
                 : QWEN_PROGRAM_EXECUTABLE_ATTENTION_KEY_VALUE_Q4_WMMA;
     const iree_hal_buffer_ref_t value_bindings[] = {
-        qwen_program_transient_ref(transient->attention_projection_scratch),
+        qwen_program_transient_ref(transient->projection_input_scratch),
         qwen_program_model_ref(parameters->value),
         qwen_program_transient_ref(transient->raw_value),
     };
@@ -1137,7 +1137,7 @@ static iree_status_t qwen_program_record_attention(
     };
     const iree_hal_buffer_ref_t quantize_bindings[] = {
         qwen_program_transient_ref(transient->attention_output),
-        qwen_program_transient_ref(transient->attention_projection_scratch),
+        qwen_program_transient_ref(transient->projection_input_scratch),
     };
     status = qwen_program_record_dispatch(
         program, QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT_QUANTIZE_Q8,
@@ -1155,7 +1155,7 @@ static iree_status_t qwen_program_record_attention(
       program->attention_output_schedule ==
           QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8) {
     const iree_hal_buffer_ref_t attention_output_bindings[] = {
-        qwen_program_transient_ref(transient->attention_projection_scratch),
+        qwen_program_transient_ref(transient->projection_input_scratch),
         qwen_program_model_ref(parameters->attention_output),
         qwen_program_request_ref(request_layout->hidden_state),
     };
@@ -1311,7 +1311,7 @@ static iree_status_t qwen_program_record_feed_forward(
       qwen_program_transient_ref(transient->swiglu),
       qwen_program_transient_ref(transient->expert_table),
       qwen_program_model_ref(parameters->expert_down),
-      qwen_program_transient_ref(transient->routed_down),
+      qwen_program_transient_ref(transient->routed_projection_scratch),
   };
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_dispatch(
@@ -1326,7 +1326,7 @@ static iree_status_t qwen_program_record_feed_forward(
   const uint32_t weighted_reduce_constants[] = {token_count};
   const iree_hal_buffer_ref_t weighted_reduce_bindings[] = {
       qwen_program_transient_ref(transient->route_weights),
-      qwen_program_transient_ref(transient->routed_down),
+      qwen_program_transient_ref(transient->routed_projection_scratch),
       hidden_state,
   };
   if (iree_status_is_ok(status)) {
