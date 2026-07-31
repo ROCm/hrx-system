@@ -1,7 +1,7 @@
 // RUN: emit amdgpu-kernel-assembly
 
 amdgpu.target<gfx1250> @target
-low.kernel.def target(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @cluster_identity_abi() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @cluster_identity_abi() asm {
   %packed_local = live_in<amdgpu.cluster_workgroup_info> : reg<amdgpu.sgpr>
   %packed_cluster_yz = live_in<amdgpu.cluster_id_yz> : reg<amdgpu.sgpr>
   %cluster_x = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
@@ -123,7 +123,7 @@ cluster_identity_abi:
 // RUN: emit amdgpu-native @cluster_native_encoding waits=none strategy=source fixed=%lds:physical_register:0:1 fixed=%addr:physical_register:1:1 fixed=%saddr:physical_register:4:2
 
 amdgpu.target<gfx1250> @target
-low.func.def target(@target) @cluster_native_encoding(%lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @cluster_native_encoding(%lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
   %m0 = s_mov_b32_m0_imm 3
   cluster_load_async_to_lds_b8 %lds, %addr, %saddr, %m0
   cluster_load_async_to_lds_b32 %lds, %addr, %saddr, %m0 {offset = 1, scope = 1}
@@ -140,7 +140,7 @@ low.func.def target(@target) @cluster_native_encoding(%lds: reg<amdgpu.vgpr>, %a
 // RUN: emit amdgpu-kernel-assembly
 
 amdgpu.target<gfx1250> @target
-low.kernel.def target(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @cluster_local_x_only() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @cluster_local_x_only() asm {
   %packed = live_in<amdgpu.cluster_workgroup_info.x> : reg<amdgpu.sgpr>
   %local_x = s_and_b32_rhs_inline %packed, 15
   return
@@ -239,7 +239,7 @@ cluster_local_x_only:
 // RUN: emit amdgpu-kernel-assembly
 
 amdgpu.target<gfx1250> @target
-low.kernel.def target(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @cluster_local_y_only() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @cluster_local_y_only() asm {
   %packed = live_in<amdgpu.cluster_workgroup_info.xy> : reg<amdgpu.sgpr>
   %local_y = s_bfe_u32_lit %packed, 262148
   return
@@ -338,7 +338,7 @@ cluster_local_y_only:
 // RUN: emit amdgpu-kernel-assembly
 
 amdgpu.target<gfx1250> @target
-low.kernel.def target(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @cluster_local_z_only() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @cluster_local_z_only() asm {
   %packed = live_in<amdgpu.cluster_workgroup_info.xz> : reg<amdgpu.sgpr>
   %local_z = s_bfe_u32_lit %packed, 262152
   return
@@ -437,7 +437,7 @@ cluster_local_z_only:
 // RUN: emit amdgpu-kernel-assembly
 
 amdgpu.target<gfx1250> @target
-low.kernel.def target(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @empty_cluster() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @empty_cluster() asm {
   return
 }
 
@@ -533,7 +533,7 @@ empty_cluster:
 // RUN: emit amdgpu-kernel-assembly
 
 amdgpu.target<gfx1250> @target
-low.kernel.def target(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @flat_cluster_workgroup_id() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @flat_cluster_workgroup_id() asm {
   %flat_id = s_getreg_b32_cluster_workgroup_flat_id
   return
 }
@@ -631,7 +631,7 @@ flat_cluster_workgroup_id:
 // RUN: emit amdgpu-kernel-assembly
 
 amdgpu.target<gfx1250> @target
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 3, 2) @overlapping_cluster_y_z() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 3, 2) @overlapping_cluster_y_z() asm {
   %packed_y = live_in<amdgpu.cluster_id_y> : reg<amdgpu.sgpr>
   // ERROR@+1: AMDGPU/045 {source_name="amdgpu.cluster_id_z", conflicting_source_name="amdgpu.cluster_id_y", fixed_location="115"}
   %packed_z = live_in<amdgpu.cluster_id_z> : reg<amdgpu.sgpr>
@@ -646,7 +646,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 3, 2)
 // RUN: emit amdgpu-kernel-assembly
 
 amdgpu.target<gfx1250> @target
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @ordinary_workgroup_x() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(4, 1, 1) @ordinary_workgroup_x() asm {
   %workgroup_x = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
   %one = s_mov_b32 1
   %value = s_add_u32 %workgroup_x, %one
@@ -743,7 +743,7 @@ ordinary_workgroup_x:
 // RUN: emit amdgpu-kernel-assembly
 
 amdgpu.target<gfx1250> @target
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 3, 1) @ordinary_workgroup_y() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 3, 1) @ordinary_workgroup_y() asm {
   %packed_y = live_in<amdgpu.cluster_id_y> : reg<amdgpu.sgpr>
   %value = s_and_b32_lit %packed_y, 65535
   return
@@ -838,7 +838,7 @@ ordinary_workgroup_y:
 // RUN: emit amdgpu-kernel-assembly
 
 amdgpu.target<gfx1250-a0> @target
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 2) @ordinary_workgroup_z() asm<amdgpu.rdna4.gfx1250_a0.core> {
+low.kernel.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 2) @ordinary_workgroup_z() asm {
   %packed_z = live_in<amdgpu.cluster_id_z> : reg<amdgpu.sgpr>
   %value = s_lshr_b32_rhs_inline %packed_z, 16
   return

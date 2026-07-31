@@ -6,10 +6,10 @@ amdgpu.target<gfx1151> @target {subgroup_size = 64}
 // same gfx1151 residency as placing its first source at v48:v51, so the
 // interleaved blocker moves above the reservation and both sources remain
 // directly assembled without repair moves.
-low.func.def target(@target) @concat_reservation_preserves_residency(
+low.func.def target<amdgpu.rdna3_5.core>(@target) @concat_reservation_preserves_residency(
     %pressure: reg<amdgpu.vgpr x47>,
     %address: reg<amdgpu.vgpr>,
-    %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3_5.core> {
+    %output: reg<amdgpu.sgpr x2>) asm {
   %first = ds_read_b128 %address
   %blocker = ds_read_b128 %address {offset = 16}
   %second = ds_read_b128 %address {offset = 32}
@@ -98,9 +98,9 @@ low.func.def target(@target) @concat_reservation_preserves_residency(
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def target(@target) @d16_concat_reserves_past_addresses(
+low.func.def target<amdgpu.rdna3_5.core>(@target) @d16_concat_reserves_past_addresses(
     %base: reg<amdgpu.vgpr>, %stride: reg<amdgpu.vgpr>)
-    asm<amdgpu.rdna3_5.core> {
+    asm {
   %address0 = v_add_u32 %base, %stride
   %low0 = ds_load_u16_d16 %address0 {offset = 0}
   %full0 = ds_load_u16_d16_hi %low0, %address0 {offset = 2}
@@ -156,8 +156,8 @@ low.func.def target(@target) @d16_concat_reserves_past_addresses(
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def target(@target) @d16_tied_sources_assemble_aligned_concat(
-    %address: reg<amdgpu.vgpr>) asm<amdgpu.rdna3_5.core> {
+low.func.def target<amdgpu.rdna3_5.core>(@target) @d16_tied_sources_assemble_aligned_concat(
+    %address: reg<amdgpu.vgpr>) asm {
   %low0 = ds_load_u16_d16 %address {offset = 0}
   %full0 = ds_load_u16_d16_hi %low0, %address {offset = 2}
   %low1 = ds_load_u16_d16 %address {offset = 4}

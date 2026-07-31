@@ -372,7 +372,8 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
   void ParseGfx11Kernel(loom_module_t** out_module) {
     static const char kSource[] =
         "amdgpu.target<gfx1100> @gfx_target\n"
-        "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
+        "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
+        "workgroup_size(64, 1, 1) "
         "@loom_kernel() {\n"
         "  low.return\n"
         "}\n";
@@ -383,7 +384,8 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
   void ParseGfx11DynamicHalKernel(loom_module_t** out_module) {
     static const char kSource[] =
         "amdgpu.target<gfx1100> @gfx_target\n"
-        "low.kernel.def target(@gfx_target) @loom_kernel() {\n"
+        "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) @loom_kernel() "
+        "{\n"
         "  low.return\n"
         "}\n";
     ASSERT_NO_FATAL_FAILURE(
@@ -393,11 +395,19 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
   void ParseWorkgroupStorageKernel(iree_string_view_t processor_name,
                                    uint64_t byte_length,
                                    loom_module_t** out_module) {
+    const loom_amdgpu_target_info_t* target = nullptr;
+    IREE_ASSERT_OK(
+        loom_amdgpu_target_info_lookup_target(processor_name, &target));
+
     std::string source = "amdgpu.target<";
     source.append(processor_name.data, processor_name.size);
     source +=
         "> @gfx_target\n"
-        "low.kernel.def target(@gfx_target) workgroup_size(1, 1, 1) "
+        "low.kernel.def target<";
+    source.append(target->descriptor_set_key.data,
+                  target->descriptor_set_key.size);
+    source +=
+        ">(@gfx_target) workgroup_size(1, 1, 1) "
         "@loom_kernel() {\n"
         "  %storage = low.storage.reserve {byte_alignment = 16, "
         "byte_length = ";
@@ -435,7 +445,7 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
   void ParseGfx11KernelWithArguments(loom_module_t** out_module) {
     static const char kSource[] =
         "amdgpu.target<gfx1100> @gfx_target\n"
-        "low.kernel.def target(@gfx_target) "
+        "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
         "abi_layout({constant_count = 1, direct_arg_count = 1, "
         "direct_arg_names = {arg0 = \"extent\"}, direct_arg_offsets = [8], "
         "direct_arg_parameter_indices = [1], direct_arg_sizes = [4], "
@@ -493,11 +503,13 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
   void ParseGfx11MultiKernel(loom_module_t** out_module) {
     static const char kSource[] =
         "amdgpu.target<gfx1100> @gfx_target\n"
-        "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
+        "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
+        "workgroup_size(64, 1, 1) "
         "@first_kernel() {\n"
         "  low.return\n"
         "}\n"
-        "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
+        "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
+        "workgroup_size(64, 1, 1) "
         "@second_kernel() {\n"
         "  low.return\n"
         "}\n";
@@ -559,7 +571,8 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
   void ParseGfx942Kernel(loom_module_t** out_module) {
     static const char kSource[] =
         "amdgpu.target<gfx942> @gfx_target\n"
-        "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
+        "low.kernel.def target<amdgpu.cdna3.core>(@gfx_target) "
+        "workgroup_size(64, 1, 1) "
         "@loom_kernel() {\n"
         "  low.return\n"
         "}\n";
@@ -582,7 +595,11 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
     }
     source +=
         "\n"
-        "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
+        "low.kernel.def target<";
+    source.append(target->descriptor_set_key.data,
+                  target->descriptor_set_key.size);
+    source +=
+        ">(@gfx_target) workgroup_size(64, 1, 1) "
         "@loom_kernel() {\n"
         "  low.return\n"
         "}\n";
@@ -1375,7 +1392,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   };
   static const char kSource[] =
       "amdgpu.target<gfx1250> @gfx_target\n"
-      "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
+      "low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx_target) "
+      "workgroup_size(64, 1, 1) "
       "@loom_kernel() {\n"
       "  %pc = low.op<amdgpu.s_getpc_b64>() : () -> "
       "reg<amdgpu.sgpr x2>\n"
@@ -1465,7 +1483,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
 TEST_F(AmdgpuHalKernelLibraryTest, RejectsRel32AddWithoutPcProvenance) {
   static const char kSource[] =
       "amdgpu.target<gfx11-generic> @gfx_target\n"
-      "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
+      "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
+      "workgroup_size(64, 1, 1) "
       "@loom_kernel() {\n"
       "  %zero = low.op<amdgpu.s_mov_b32>() {imm32 = 0} : () -> "
       "reg<amdgpu.sgpr>\n"
@@ -1510,7 +1529,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
       "global.rodata @loom_sanitizer_sites = "
       "bytes(\"00020302010100000001010601010000\"), align 16\n"
       "amdgpu.target<gfx1100> @gfx_target\n"
-      "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
+      "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
+      "workgroup_size(64, 1, 1) "
       "@loom_kernel() {\n"
       "  %pc = low.op<amdgpu.s_getpc_b64>() : () -> "
       "reg<amdgpu.sgpr x2>\n"
