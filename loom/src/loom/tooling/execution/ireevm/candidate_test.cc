@@ -20,11 +20,18 @@
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/native_module.h"
 #include "iree/vm/shims.h"
+#include "loom/analysis/symbol_facts.h"
+#include "loom/ops/func_symbol_facts.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/op_registry.h"
+#include "loom/ops/target/facts.h"
 #include "loom/target/arch/ireevm/descriptors/descriptors.h"
 #include "loom/target/arch/ireevm/ops/registry.h"
 #include "loom/target/arch/ireevm/provider.h"
 #include "loom/target/emit/ireevm/function_bytecode.h"
+#include "loom/target/facts_builder.h"
+#include "loom/target/function_contract.h"
+#include "loom/target/function_version.h"
 #include "loom/target/provider.h"
 #include "loom/tooling/compile/pipeline.h"
 #include "loom/tooling/execution/ireevm/invocation.h"
@@ -689,6 +696,121 @@ TEST_F(IreeVmCandidateTest, EmitVmArchiveCandidate) {
 
   loom_ireevm_run_candidate_deinitialize(&candidate);
   loom_target_compile_report_deinitialize(&report);
+  loom_run_module_deinitialize(&run_module);
+}
+
+TEST_F(IreeVmCandidateTest, EmitsFromEffectiveFunctionTargetFacts) {
+  loom_run_module_t run_module = {};
+  IREE_ASSERT_OK(Parse(IREE_SV(kPreparedVmSource), &run_module));
+  loom_module_t* module = run_module.module;
+
+  iree_arena_allocator_t version_arena;
+  iree_arena_initialize(loom_run_session_block_pool(&session_), &version_arena);
+  loom_symbol_fact_table_t symbol_facts = {};
+  loom_symbol_fact_table_initialize(&symbol_facts, &version_arena);
+  const loom_string_id_t target_name_id =
+      loom_module_lookup_string(module, IREE_SV("vm_target"));
+  ASSERT_NE(target_name_id, LOOM_STRING_ID_INVALID);
+  const loom_symbol_id_t target_symbol_id =
+      loom_module_find_symbol(module, target_name_id);
+  ASSERT_NE(target_symbol_id, LOOM_SYMBOL_ID_INVALID);
+  const loom_symbol_facts_base_t* base_target_facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup(
+      &symbol_facts, module, target_symbol_id, &base_target_facts));
+  const loom_target_symbol_facts_t* authored_target_facts =
+      loom_target_symbol_facts_cast(base_target_facts);
+  ASSERT_NE(authored_target_facts, nullptr);
+
+  loom_target_facts_t* exact_target_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_facts_builder_clone(
+      authored_target_facts->projection, &version_arena, &exact_target_facts));
+  loom_target_bundle_storage_t exact_target_storage =
+      exact_target_facts->storage;
+  loom_target_bundle_storage_rebind(&exact_target_storage);
+  // Give the exact facts an observable identity without changing the VM
+  // representation.
+  exact_target_storage.bundle.name = IREE_SV("iree-vm-specialized");
+  loom_target_facts_builder_replace_bundle(&exact_target_storage.bundle,
+                                           exact_target_facts);
+
+  const iree_string_view_t function_names[] = {
+      IREE_SV("double"),
+      IREE_SV("branchy"),
+  };
+  loom_target_function_version_t
+      target_versions[IREE_ARRAYSIZE(function_names)] = {};
+  loom_function_version_t* version_values[IREE_ARRAYSIZE(function_names)] = {};
+  loom_func_like_t functions[IREE_ARRAYSIZE(function_names)] = {};
+  loom_symbol_ref_t authored_targets[IREE_ARRAYSIZE(function_names)] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(function_names); ++i) {
+    const loom_string_id_t function_name_id =
+        loom_module_lookup_string(module, function_names[i]);
+    ASSERT_NE(function_name_id, LOOM_STRING_ID_INVALID);
+    const loom_symbol_id_t function_symbol_id =
+        loom_module_find_symbol(module, function_name_id);
+    ASSERT_NE(function_symbol_id, LOOM_SYMBOL_ID_INVALID);
+    const loom_symbol_facts_base_t* base_function_facts = nullptr;
+    IREE_ASSERT_OK(loom_symbol_fact_table_lookup(
+        &symbol_facts, module, function_symbol_id, &base_function_facts));
+    const loom_func_symbol_facts_t* function_facts =
+        loom_func_symbol_facts_cast(base_function_facts);
+    ASSERT_NE(function_facts, nullptr);
+    bool contract_valid = false;
+    const loom_target_facts_t* effective_target_facts = nullptr;
+    IREE_ASSERT_OK(loom_target_function_contract_refine_facts(
+        module, function_facts,
+        loom_target_facts_identity_name(exact_target_facts), exact_target_facts,
+        iree_diagnostic_emitter_t{}, &version_arena, &contract_valid,
+        &effective_target_facts));
+    ASSERT_TRUE(contract_valid);
+    ASSERT_NE(effective_target_facts, nullptr);
+    ASSERT_TRUE(iree_string_view_equal(
+        loom_target_facts_bundle(effective_target_facts)->name,
+        IREE_SV("iree-vm-specialized")));
+
+    functions[i] = loom_func_like_cast(module, function_facts->func_op);
+    ASSERT_TRUE(loom_func_like_isa(functions[i]));
+    authored_targets[i] = loom_func_like_target(functions[i]);
+    target_versions[i].base.type = &loom_target_function_version_type;
+    target_versions[i].base.function = functions[i];
+    target_versions[i].authored_target_name = authored_target_facts->name;
+    target_versions[i].authored_target_facts =
+        authored_target_facts->projection;
+    target_versions[i].effective_target_facts = effective_target_facts;
+    version_values[i] = &target_versions[i].base;
+  }
+  const iree_host_size_t authored_symbol_count = module->symbols.count;
+  loom_function_version_list_t function_versions = {};
+  function_versions.values = version_values;
+  function_versions.count = IREE_ARRAYSIZE(version_values);
+
+  loom_run_candidate_compile_options_t options = {};
+  InitializeCandidateOptions(&run_module, &options);
+  options.function_versions = &function_versions;
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  options.report = &report;
+  loom_ireevm_run_candidate_t candidate = {};
+  IREE_ASSERT_OK(loom_ireevm_run_candidate_emit(
+      &run_module, &options, iree_allocator_system(), &candidate));
+
+  EXPECT_GT(candidate.archive.data_length, 0u);
+  EXPECT_TRUE(
+      iree_string_view_equal(candidate.compile_report.target_bundle_name,
+                             IREE_SV("iree-vm-specialized")));
+  EXPECT_TRUE(iree_string_view_equal(report.target_bundle_name,
+                                     IREE_SV("iree-vm-specialized")));
+  EXPECT_EQ(module->symbols.count, authored_symbol_count);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(functions); ++i) {
+    const loom_symbol_ref_t emitted_target =
+        loom_func_like_target(functions[i]);
+    EXPECT_EQ(emitted_target.module_id, authored_targets[i].module_id);
+    EXPECT_EQ(emitted_target.symbol_id, authored_targets[i].symbol_id);
+  }
+
+  loom_ireevm_run_candidate_deinitialize(&candidate);
+  loom_target_compile_report_deinitialize(&report);
+  iree_arena_deinitialize(&version_arena);
   loom_run_module_deinitialize(&run_module);
 }
 

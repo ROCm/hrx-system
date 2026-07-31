@@ -43,6 +43,7 @@ iree_status_t loom_ireevm_run_candidate_emit(
 
   const loom_ireevm_archive_emit_options_t archive_emit_options = {
       .module_name = options->module_name,
+      .function_versions = options->function_versions,
       .diagnostic_sink = options->diagnostic_sink,
       .source_resolver = options->source_resolver,
       .max_errors = options->max_errors,

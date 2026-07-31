@@ -140,6 +140,7 @@ static iree_status_t loom_ireevm_archive_emit_state_initialize(
       .report = options ? options->report : NULL,
       .target_options =
           {
+              .function_versions = options ? options->function_versions : NULL,
               .diagnostic_sink = options ? options->diagnostic_sink
                                          : (loom_diagnostic_sink_t){0},
               .source_resolver = options ? options->source_resolver
@@ -207,7 +208,7 @@ static iree_status_t loom_ireevm_archive_emit_build_plan(
   loom_symbol_fact_table_initialize(&fact_table, &state->table_arena);
   bool plan_valid = false;
   IREE_RETURN_IF_ERROR(loom_ireevm_module_plan_build(
-      state->module, &fact_table,
+      state->module, &fact_table, state->target_options.function_versions,
       loom_target_entry_emitter(&state->diagnostic_emitter),
       &state->table_arena, &plan_valid, out_plan));
   if (!plan_valid) {
@@ -242,7 +243,7 @@ static void loom_ireevm_archive_emit_record_first_function(
     return;
   }
   loom_target_compile_report_record_target_bundle(
-      state->report, &function->bundle_storage.bundle);
+      state->report, loom_target_facts_bundle(function->target_facts));
   state->report->lowered_symbol = function->symbol_name;
 }
 
@@ -429,6 +430,7 @@ static iree_status_t loom_ireevm_archive_emit_function(
   loom_low_emission_frame_t frame = {0};
   loom_low_planning_statistics_t planning_statistics = {0};
   const loom_low_emission_frame_options_t frame_options = {
+      .effective_target_facts = function->target_facts,
       .descriptor_registry = &state->low_registry.registry,
       .memory_access_table = loom_low_memory_access_table_empty(),
       .allocation_fixed_values = fixed_values,

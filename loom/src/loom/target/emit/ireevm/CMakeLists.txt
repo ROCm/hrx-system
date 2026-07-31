@@ -26,7 +26,9 @@ loom_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::low
     loom::target::arch::ireevm::descriptors
+    loom::target::facts
     loom::target::function_contract
+    loom::target::function_version
     loom::target::registers
     loom::target::types
   PUBLIC
