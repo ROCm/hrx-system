@@ -111,6 +111,11 @@ _ADDRESS_U32_DIAGNOSTIC = GuardDiagnostic(
     subject_name="u32",
     constraint_key="amdgpu.address.u32",
 )
+_ADDRESS_I32_DIAGNOSTIC = GuardDiagnostic(
+    subject_role="address-width",
+    subject_name="i32",
+    constraint_key="amdgpu.address.i32",
+)
 _BYTE_OFFSET_U32_DIAGNOSTIC = GuardDiagnostic(
     subject_role="byte-offset-width",
     subject_name="u32",
@@ -157,6 +162,8 @@ def _descriptor_available_guards(*descriptors: Descriptor) -> tuple[Guard, ...]:
 def _typed_binary_guards(
     type_pattern: TypePattern,
     *,
+    signed_bit_count: int | None = None,
+    signed_diagnostic: GuardDiagnostic | None = None,
     unsigned_bit_count: int | None = None,
     unsigned_diagnostic: GuardDiagnostic | None = None,
 ) -> tuple[Guard, ...]:
@@ -165,6 +172,14 @@ def _typed_binary_guards(
         Guard.value_type("rhs", type_pattern),
         Guard.value_type("result", type_pattern),
     ]
+    if signed_bit_count is not None:
+        guards.append(
+            Guard.value_signed_bit_count(
+                "result",
+                signed_bit_count,
+                diagnostic=signed_diagnostic,
+            )
+        )
     if unsigned_bit_count is not None:
         guards.append(
             Guard.value_unsigned_bit_count(
@@ -181,6 +196,8 @@ def _sgpr_binary_rule(
     type_pattern: TypePattern,
     descriptor: Descriptor,
     *,
+    signed_bit_count: int | None = None,
+    signed_diagnostic: GuardDiagnostic | None = None,
     unsigned_bit_count: int | None = None,
     unsigned_diagnostic: GuardDiagnostic | None = None,
 ) -> DescriptorRule:
@@ -190,6 +207,8 @@ def _sgpr_binary_rule(
         guards=(
             *_typed_binary_guards(
                 type_pattern,
+                signed_bit_count=signed_bit_count,
+                signed_diagnostic=signed_diagnostic,
                 unsigned_bit_count=unsigned_bit_count,
                 unsigned_diagnostic=unsigned_diagnostic,
             ),
@@ -222,6 +241,8 @@ def _vgpr_binary_rule(
     descriptor_rhs: str = "rhs",
     source_lhs: str = "lhs",
     source_rhs: str = "rhs",
+    signed_bit_count: int | None = None,
+    signed_diagnostic: GuardDiagnostic | None = None,
     unsigned_bit_count: int | None = None,
     unsigned_diagnostic: GuardDiagnostic | None = None,
 ) -> DescriptorRule:
@@ -231,6 +252,8 @@ def _vgpr_binary_rule(
         guards=(
             *_typed_binary_guards(
                 type_pattern,
+                signed_bit_count=signed_bit_count,
+                signed_diagnostic=signed_diagnostic,
                 unsigned_bit_count=unsigned_bit_count,
                 unsigned_diagnostic=unsigned_diagnostic,
             ),
@@ -719,6 +742,32 @@ def _address_rules(
             unsigned_diagnostic=_ADDRESS_U32_DIAGNOSTIC,
         )
         for type_pattern in (_INDEX, _OFFSET)
+    )
+
+
+def _signed_index_binary_rules(
+    source_op: Op,
+    sgpr_descriptor_key: str,
+    vgpr_descriptor_key: str,
+) -> tuple[DescriptorRule, ...]:
+    sgpr_descriptor = _descriptor(sgpr_descriptor_key)
+    vgpr_descriptor = _descriptor(vgpr_descriptor_key)
+    return (
+        _sgpr_binary_rule(
+            source_op,
+            _INDEX,
+            sgpr_descriptor,
+            signed_bit_count=32,
+            signed_diagnostic=_ADDRESS_I32_DIAGNOSTIC,
+        ),
+        _vgpr_binary_rule(
+            source_op,
+            _INDEX,
+            vgpr_descriptor,
+            ADDRESS_VGPR_MATERIALIZER,
+            signed_bit_count=32,
+            signed_diagnostic=_ADDRESS_I32_DIAGNOSTIC,
+        ),
     )
 
 
@@ -1658,6 +1707,13 @@ def _rules() -> tuple[DescriptorRule, ...]:
     )
     rules.extend(
         _address_rules(index.index_sub, "amdgpu.s_sub_u32", "amdgpu.v_sub_u32")
+    )
+    rules.extend(
+        _signed_index_binary_rules(
+            index.index_sub,
+            "amdgpu.s_sub_u32",
+            "amdgpu.v_sub_u32",
+        )
     )
     rules.extend(
         _address_rules(
