@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/storage_lease.h"
@@ -52,6 +53,24 @@ static void loom_low_allocation_checker_record(
   if (result->violation_count != UINT32_MAX) {
     ++result->violation_count;
   }
+}
+
+static bool loom_low_allocation_checker_assignment_start_shape_is_valid(
+    const loom_low_allocation_assignment_t* assignment,
+    const loom_liveness_interval_t* interval) {
+  const loom_low_allocation_assignment_flags_t unknown_flags =
+      assignment->flags &
+      (loom_low_allocation_assignment_flags_t)~LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS;
+  if (unknown_flags != 0) {
+    return false;
+  }
+  if (!iree_any_bit_set(
+          assignment->flags,
+          LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS)) {
+    return assignment->start_point == interval->start_point;
+  }
+  return assignment->unit_count != 0 &&
+         assignment->start_point <= interval->start_point;
 }
 
 iree_string_view_t loom_low_allocation_check_violation_kind_name(
@@ -319,7 +338,9 @@ static iree_status_t loom_low_allocation_checker_assignments(
     }
     seen[assignment_index] = 1;
     checker->assignment_ordinals[assignment_index] = ordinal;
-    if (interval == NULL || assignment->start_point != interval->start_point ||
+    if (interval == NULL ||
+        !loom_low_allocation_checker_assignment_start_shape_is_valid(
+            assignment, interval) ||
         assignment->end_point <
             loom_low_allocation_checker_storage_end_point(interval) ||
         assignment->unit_count != interval->unit_count ||
@@ -337,24 +358,39 @@ static iree_status_t loom_low_allocation_checker_assignments(
           LOOM_VALUE_ID_INVALID, assignment->start_point);
     }
     const uint64_t unit_end =
-        (uint64_t)assignment->unit_end_point_start + assignment->unit_count;
-    if (unit_end > allocation->unit_end_point_count) {
+        (uint64_t)assignment->unit_point_start + assignment->unit_count;
+    if (unit_end > allocation->unit_point_count) {
       loom_low_allocation_checker_record(
           checker, LOOM_LOW_ALLOCATION_CHECK_VIOLATION_ASSIGNMENT_SHAPE,
           assignment_index, ordinal, assignment->value_id,
           LOOM_VALUE_ID_INVALID, assignment->start_point);
     } else {
+      uint32_t minimum_start_point = UINT32_MAX;
       for (uint32_t unit = 0; unit < assignment->unit_count; ++unit) {
+        const uint32_t start_point =
+            loom_low_allocation_live_range_assignment_unit_start_point(
+                allocation->unit_start_points, allocation->unit_point_count,
+                assignment, unit);
+        minimum_start_point = iree_min(minimum_start_point, start_point);
         const uint32_t end_point =
-            allocation
-                ->unit_end_points[assignment->unit_end_point_start + unit];
-        if (end_point < assignment->start_point ||
+            allocation->unit_end_points[assignment->unit_point_start + unit];
+        if (start_point < assignment->start_point ||
+            start_point > interval->start_point || end_point < start_point ||
             end_point > assignment->end_point) {
           loom_low_allocation_checker_record(
               checker, LOOM_LOW_ALLOCATION_CHECK_VIOLATION_ASSIGNMENT_SHAPE,
               assignment_index, unit, assignment->value_id,
               LOOM_VALUE_ID_INVALID, end_point);
         }
+      }
+      if (iree_any_bit_set(
+              assignment->flags,
+              LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS) &&
+          assignment->start_point != minimum_start_point) {
+        loom_low_allocation_checker_record(
+            checker, LOOM_LOW_ALLOCATION_CHECK_VIOLATION_ASSIGNMENT_SHAPE,
+            assignment_index, ordinal, assignment->value_id,
+            LOOM_VALUE_ID_INVALID, assignment->start_point);
       }
     }
   }
@@ -543,10 +579,9 @@ static bool loom_low_allocation_checker_segments_overlap(
 static uint32_t loom_low_allocation_checker_unit_end_point(
     const loom_low_allocation_table_t* allocation,
     const loom_low_allocation_assignment_t* assignment, uint32_t unit_offset) {
-  const uint64_t index =
-      (uint64_t)assignment->unit_end_point_start + unit_offset;
+  const uint64_t index = (uint64_t)assignment->unit_point_start + unit_offset;
   if (unit_offset >= assignment->unit_count ||
-      index >= allocation->unit_end_point_count) {
+      index >= allocation->unit_point_count) {
     return assignment->end_point;
   }
   return allocation->unit_end_points[index];
@@ -560,7 +595,15 @@ static bool loom_low_allocation_checker_unit_lifetimes_overlap(
       loom_low_allocation_checker_unit_end_point(allocation, lhs, lhs_unit);
   const uint32_t rhs_end =
       loom_low_allocation_checker_unit_end_point(allocation, rhs, rhs_unit);
-  if (lhs->start_point >= rhs_end || rhs->start_point >= lhs_end) {
+  const uint32_t lhs_start =
+      loom_low_allocation_live_range_assignment_unit_start_point(
+          allocation->unit_start_points, allocation->unit_point_count, lhs,
+          lhs_unit);
+  const uint32_t rhs_start =
+      loom_low_allocation_live_range_assignment_unit_start_point(
+          allocation->unit_start_points, allocation->unit_point_count, rhs,
+          rhs_unit);
+  if (lhs_start >= rhs_end || rhs_start >= lhs_end) {
     return false;
   }
   return loom_low_allocation_checker_segments_overlap(

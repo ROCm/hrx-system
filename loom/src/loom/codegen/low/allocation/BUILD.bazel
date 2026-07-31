@@ -24,6 +24,7 @@ loom_cc_library(
         ":active_unit",
         ":assignment",
         ":live_range",
+        ":unit_liveness",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
         "//runtime/src/iree/base",
@@ -49,6 +50,7 @@ loom_cc_library(
     deps = [
         ":assignment",
         ":live_range",
+        ":unit_liveness",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
         "//runtime/src/iree/base",
@@ -552,6 +554,7 @@ loom_cc_library(
         ":live_range",
         ":move",
         ":storage",
+        ":unit_liveness",
         "//loom/src/loom/codegen/low:descriptors",
         "//runtime/src/iree/base",
     ],

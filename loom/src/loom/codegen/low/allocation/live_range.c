@@ -51,7 +51,7 @@ uint32_t loom_low_allocation_live_range_interval_alignment(
 }
 
 uint32_t loom_low_allocation_live_range_assignment_unit_end_point(
-    const uint32_t* unit_end_points, iree_host_size_t unit_end_point_count,
+    const uint32_t* unit_end_points, iree_host_size_t unit_point_count,
     const loom_low_allocation_assignment_t* assignment, uint32_t unit_offset) {
   IREE_ASSERT_ARGUMENT(assignment);
   if (unit_offset >= assignment->unit_count) {
@@ -59,14 +59,32 @@ uint32_t loom_low_allocation_live_range_assignment_unit_end_point(
   }
   IREE_ASSERT_ARGUMENT(unit_end_points);
   const uint64_t unit_index =
-      (uint64_t)assignment->unit_end_point_start + unit_offset;
-  IREE_ASSERT(unit_index < unit_end_point_count,
+      (uint64_t)assignment->unit_point_start + unit_offset;
+  IREE_ASSERT(unit_index < unit_point_count,
               "allocation unit end point must be in range");
   return unit_end_points[(iree_host_size_t)unit_index];
 }
 
+uint32_t loom_low_allocation_live_range_assignment_unit_start_point(
+    const uint32_t* unit_start_points, iree_host_size_t unit_start_point_count,
+    const loom_low_allocation_assignment_t* assignment, uint32_t unit_offset) {
+  IREE_ASSERT_ARGUMENT(assignment);
+  if (!iree_any_bit_set(
+          assignment->flags,
+          LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS) ||
+      unit_offset >= assignment->unit_count) {
+    return assignment->start_point;
+  }
+  IREE_ASSERT_ARGUMENT(unit_start_points);
+  const uint64_t unit_index =
+      (uint64_t)assignment->unit_point_start + unit_offset;
+  IREE_ASSERT(unit_index < unit_start_point_count,
+              "assignment unit start-point index out of range");
+  return unit_start_points[(iree_host_size_t)unit_index];
+}
+
 uint32_t loom_low_allocation_live_range_assignment_max_unit_end_point(
-    const uint32_t* unit_end_points, iree_host_size_t unit_end_point_count,
+    const uint32_t* unit_end_points, iree_host_size_t unit_point_count,
     const loom_low_allocation_assignment_t* assignment) {
   IREE_ASSERT_ARGUMENT(assignment);
   uint32_t end_point = assignment->end_point;
@@ -74,7 +92,7 @@ uint32_t loom_low_allocation_live_range_assignment_max_unit_end_point(
        ++unit_offset) {
     const uint32_t unit_end_point =
         loom_low_allocation_live_range_assignment_unit_end_point(
-            unit_end_points, unit_end_point_count, assignment, unit_offset);
+            unit_end_points, unit_point_count, assignment, unit_offset);
     if (end_point < unit_end_point) {
       end_point = unit_end_point;
     }
@@ -146,8 +164,8 @@ bool loom_low_allocation_live_range_values_overlap(
 
 bool loom_low_allocation_live_range_assignments_conflict(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_liveness_analysis_t* liveness, const uint32_t* unit_end_points,
-    iree_host_size_t unit_end_point_count,
+    const loom_liveness_analysis_t* liveness, const uint32_t* unit_start_points,
+    const uint32_t* unit_end_points, iree_host_size_t unit_point_count,
     const loom_low_allocation_assignment_t* lhs,
     const loom_low_allocation_assignment_t* rhs) {
   IREE_ASSERT_ARGUMENT(descriptor_set);
@@ -180,17 +198,47 @@ bool loom_low_allocation_live_range_assignments_conflict(
                                             rhs->liveness_segments)) {
     return false;
   }
+  const bool has_refined_unit_starts =
+      iree_any_bit_set(lhs->flags | rhs->flags,
+                       LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS);
+  if (!has_refined_unit_starts) {
+    for (uint64_t location = overlap_begin; location < overlap_end;
+         ++location) {
+      const uint32_t lhs_unit_offset =
+          (uint32_t)(location - lhs->location_base);
+      const uint32_t rhs_unit_offset =
+          (uint32_t)(location - rhs->location_base);
+      const uint32_t lhs_unit_end_point =
+          loom_low_allocation_live_range_assignment_unit_end_point(
+              unit_end_points, unit_point_count, lhs, lhs_unit_offset);
+      const uint32_t rhs_unit_end_point =
+          loom_low_allocation_live_range_assignment_unit_end_point(
+              unit_end_points, unit_point_count, rhs, rhs_unit_offset);
+      if (lhs->start_point >= rhs_unit_end_point ||
+          rhs->start_point >= lhs_unit_end_point) {
+        continue;
+      }
+      return true;
+    }
+    return false;
+  }
   for (uint64_t location = overlap_begin; location < overlap_end; ++location) {
     const uint32_t lhs_unit_offset = (uint32_t)(location - lhs->location_base);
     const uint32_t rhs_unit_offset = (uint32_t)(location - rhs->location_base);
     const uint32_t lhs_unit_end_point =
         loom_low_allocation_live_range_assignment_unit_end_point(
-            unit_end_points, unit_end_point_count, lhs, lhs_unit_offset);
+            unit_end_points, unit_point_count, lhs, lhs_unit_offset);
     const uint32_t rhs_unit_end_point =
         loom_low_allocation_live_range_assignment_unit_end_point(
-            unit_end_points, unit_end_point_count, rhs, rhs_unit_offset);
-    if (lhs->start_point >= rhs_unit_end_point ||
-        rhs->start_point >= lhs_unit_end_point) {
+            unit_end_points, unit_point_count, rhs, rhs_unit_offset);
+    const uint32_t lhs_unit_start_point =
+        loom_low_allocation_live_range_assignment_unit_start_point(
+            unit_start_points, unit_point_count, lhs, lhs_unit_offset);
+    const uint32_t rhs_unit_start_point =
+        loom_low_allocation_live_range_assignment_unit_start_point(
+            unit_start_points, unit_point_count, rhs, rhs_unit_offset);
+    if (lhs_unit_start_point >= rhs_unit_end_point ||
+        rhs_unit_start_point >= lhs_unit_end_point) {
       continue;
     }
     return true;

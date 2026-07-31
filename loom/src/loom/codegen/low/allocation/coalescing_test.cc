@@ -123,7 +123,7 @@ loom_liveness_interval_t Interval(loom_value_id_t value_id, uint32_t start,
 loom_low_allocation_assignment_t Assignment(
     loom_value_id_t value_id, uint32_t start, uint32_t end,
     loom_liveness_value_class_t value_class, uint32_t location_base,
-    uint32_t unit_end_point_start) {
+    uint32_t unit_point_start) {
   loom_low_allocation_assignment_t assignment = {};
   assignment.value_id = value_id;
   assignment.value_class = value_class;
@@ -134,7 +134,7 @@ loom_low_allocation_assignment_t Assignment(
   assignment.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
   assignment.location_base = location_base;
   assignment.location_count = 1;
-  assignment.unit_end_point_start = unit_end_point_start;
+  assignment.unit_point_start = unit_point_start;
   return assignment;
 }
 
@@ -177,13 +177,13 @@ TEST_F(LowAllocationCoalescingTest, AssignsTiedIntervalToSourceLocation) {
   liveness.value_count = IREE_ARRAYSIZE(value_ids);
   liveness.value_interval_indices = interval_indices;
 
-  uint32_t unit_end_point_starts[] = {0, 1};
+  uint32_t unit_point_starts[] = {0, 1};
   uint32_t unit_end_points[] = {8, 6};
   uint64_t edge_handoff_words[] = {0};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
+  unit_liveness.point_starts_by_value_ordinal = unit_point_starts;
   unit_liveness.end_points = unit_end_points;
-  unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
   unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
                                                            edge_handoff_words};
 
@@ -242,7 +242,7 @@ TEST_F(LowAllocationCoalescingTest, AssignsTiedIntervalToSourceLocation) {
 
   loom_low_allocation_assignment_t assignments[2] = {
       Assignment(source_value, /*start=*/0, /*end=*/8, value_class,
-                 /*location_base=*/3, /*unit_end_point_start=*/0),
+                 /*location_base=*/3, /*unit_point_start=*/0),
   };
   uint32_t assignment_indices_by_value_ordinal[] = {0, UINT32_MAX};
   loom_low_allocation_assignment_map_t assignment_map = {};

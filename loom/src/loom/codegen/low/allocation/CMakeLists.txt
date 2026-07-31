@@ -20,6 +20,7 @@ loom_cc_library(
     ::active_unit
     ::assignment
     ::live_range
+    ::unit_liveness
     iree::base
     iree::base::internal::arena
     loom::analysis::liveness
@@ -49,6 +50,7 @@ loom_cc_library(
   DEPS
     ::assignment
     ::live_range
+    ::unit_liveness
     iree::base
     iree::base::internal::arena
     loom::analysis::liveness
@@ -620,6 +622,7 @@ loom_cc_library(
     ::live_range
     ::move
     ::storage
+    ::unit_liveness
     iree::base
     loom::codegen::low::descriptors
   PUBLIC

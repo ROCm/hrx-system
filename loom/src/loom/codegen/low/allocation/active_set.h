@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation/active_unit.h"
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/descriptors.h"
 
 #ifdef __cplusplus
@@ -47,8 +48,8 @@ iree_status_t loom_low_allocation_active_set_initialize(
 // sparse segment ranges, when present, must belong to |liveness|.
 bool loom_low_allocation_active_assignment_conflicts(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_liveness_analysis_t* liveness, const uint32_t* unit_end_points,
-    iree_host_size_t unit_end_point_count,
+    const loom_liveness_analysis_t* liveness,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_allocation_assignment_t* existing,
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count);
@@ -57,7 +58,7 @@ bool loom_low_allocation_active_assignment_conflicts(
 bool loom_low_allocation_active_set_conflicts(
     loom_low_allocation_active_set_t* active_set,
     const loom_low_descriptor_set_t* descriptor_set,
-    const uint32_t* unit_end_points, iree_host_size_t unit_end_point_count,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_allocation_assignment_t* assignments,
     iree_host_size_t assignment_count,
     const loom_low_allocation_assignment_t* candidate,

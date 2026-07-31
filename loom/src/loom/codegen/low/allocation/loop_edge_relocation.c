@@ -323,8 +323,9 @@ static bool loom_low_allocation_loop_edge_relocation_candidate_conflicts(
     }
     if (loom_low_allocation_live_range_assignments_conflict(
             context->descriptor_set, context->liveness,
+            context->unit_liveness->start_points,
             context->unit_liveness->end_points,
-            context->unit_liveness->end_point_count, &candidate->assignment,
+            context->unit_liveness->point_count, &candidate->assignment,
             &context->assignments[i])) {
       return true;
     }
@@ -440,8 +441,9 @@ static bool loom_low_allocation_loop_edge_relocation_eviction_location_is_legal(
     }
     if (loom_low_allocation_live_range_assignments_conflict(
             context->descriptor_set, context->liveness,
+            context->unit_liveness->start_points,
             context->unit_liveness->end_points,
-            context->unit_liveness->end_point_count, &assignment,
+            context->unit_liveness->point_count, &assignment,
             &context->assignments[i])) {
       return false;
     }
@@ -560,9 +562,10 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_try_full_group(
       if (ignored_assignments[j] || conflict_assignments[j] ||
           !loom_low_allocation_live_range_assignments_conflict(
               context->descriptor_set, context->liveness,
+              context->unit_liveness->start_points,
               context->unit_liveness->end_points,
-              context->unit_liveness->end_point_count,
-              &candidates[i].assignment, &context->assignments[j])) {
+              context->unit_liveness->point_count, &candidates[i].assignment,
+              &context->assignments[j])) {
         continue;
       }
       conflict_assignments[j] = 1;
@@ -763,8 +766,8 @@ loom_low_allocation_loop_edge_relocation_candidate_depends_on_destination(
       state->context;
   return loom_low_allocation_live_range_assignments_conflict(
       context->descriptor_set, context->liveness,
-      context->unit_liveness->end_points,
-      context->unit_liveness->end_point_count, &candidate->assignment,
+      context->unit_liveness->start_points, context->unit_liveness->end_points,
+      context->unit_liveness->point_count, &candidate->assignment,
       &context->assignments[destination_assignment_index]);
 }
 

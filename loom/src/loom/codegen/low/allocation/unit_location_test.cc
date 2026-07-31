@@ -122,8 +122,14 @@ TEST(LowAllocationUnitLocationTest, DetectsLiveUnitAtPoint) {
   assignment.location_base = 4;
   assignment.location_count = 2;
   assignment.unit_count = 2;
-  assignment.unit_end_point_start = 0;
-  const uint32_t unit_end_points[] = {5, 9};
+  assignment.unit_point_start = 0;
+  assignment.flags = LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS;
+  uint32_t unit_start_points[] = {2, 6};
+  uint32_t unit_end_points[] = {5, 9};
+  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  unit_liveness.start_points = unit_start_points;
+  unit_liveness.end_points = unit_end_points;
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
 
   const loom_low_move_location_t first_unit =
       Location(/*reg_class_id=*/0, /*location=*/4);
@@ -133,17 +139,20 @@ TEST(LowAllocationUnitLocationTest, DetectsLiveUnitAtPoint) {
       Location(/*reg_class_id=*/0, /*location=*/6);
 
   EXPECT_TRUE(loom_low_allocation_unit_location_is_live_at_point(
-      &descriptor_set, &assignment, /*assignment_count=*/1, unit_end_points,
-      IREE_ARRAYSIZE(unit_end_points), &first_unit, /*point=*/4));
+      &descriptor_set, &assignment, /*assignment_count=*/1, &unit_liveness,
+      &first_unit, /*point=*/4));
   EXPECT_FALSE(loom_low_allocation_unit_location_is_live_at_point(
-      &descriptor_set, &assignment, /*assignment_count=*/1, unit_end_points,
-      IREE_ARRAYSIZE(unit_end_points), &first_unit, /*point=*/6));
+      &descriptor_set, &assignment, /*assignment_count=*/1, &unit_liveness,
+      &first_unit, /*point=*/6));
+  EXPECT_FALSE(loom_low_allocation_unit_location_is_live_at_point(
+      &descriptor_set, &assignment, /*assignment_count=*/1, &unit_liveness,
+      &second_unit, /*point=*/4));
   EXPECT_TRUE(loom_low_allocation_unit_location_is_live_at_point(
-      &descriptor_set, &assignment, /*assignment_count=*/1, unit_end_points,
-      IREE_ARRAYSIZE(unit_end_points), &second_unit, /*point=*/6));
+      &descriptor_set, &assignment, /*assignment_count=*/1, &unit_liveness,
+      &second_unit, /*point=*/6));
   EXPECT_FALSE(loom_low_allocation_unit_location_is_live_at_point(
-      &descriptor_set, &assignment, /*assignment_count=*/1, unit_end_points,
-      IREE_ARRAYSIZE(unit_end_points), &outside_unit, /*point=*/4));
+      &descriptor_set, &assignment, /*assignment_count=*/1, &unit_liveness,
+      &outside_unit, /*point=*/4));
 }
 
 }  // namespace

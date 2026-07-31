@@ -45,10 +45,10 @@ static bool loom_low_allocation_interval_assignment_value_ordinal_for_value(
 }
 
 static uint32_t
-loom_low_allocation_interval_assignment_unit_end_point_start_for_value_ordinal(
+loom_low_allocation_interval_assignment_unit_point_start_for_value_ordinal(
     const loom_low_allocation_interval_assignment_state_t* state,
     loom_value_ordinal_t value_ordinal) {
-  return loom_low_allocation_unit_liveness_end_point_start_for_value_ordinal(
+  return loom_low_allocation_unit_liveness_point_start_for_value_ordinal(
       state->context->unit_liveness, state->context->liveness, value_ordinal);
 }
 
@@ -64,13 +64,13 @@ loom_low_allocation_interval_assignment_max_unit_end_point_for_interval(
       .end_point =
           loom_low_allocation_live_range_interval_storage_end_point(interval),
       .unit_count = interval->unit_count,
-      .unit_end_point_start =
-          loom_low_allocation_interval_assignment_unit_end_point_start_for_value_ordinal(
+      .unit_point_start =
+          loom_low_allocation_interval_assignment_unit_point_start_for_value_ordinal(
               state, value_ordinal),
   };
   return loom_low_allocation_live_range_assignment_max_unit_end_point(
       state->context->unit_liveness->end_points,
-      state->context->unit_liveness->end_point_count, &candidate);
+      state->context->unit_liveness->point_count, &candidate);
 }
 
 static loom_low_allocation_search_context_t
@@ -147,8 +147,8 @@ loom_low_allocation_interval_assignment_failure_candidate(
       .location_kind = capacity->location_kind,
       .location_base = location_base,
       .location_count = interval->unit_count,
-      .unit_end_point_start =
-          loom_low_allocation_interval_assignment_unit_end_point_start_for_value_ordinal(
+      .unit_point_start =
+          loom_low_allocation_interval_assignment_unit_point_start_for_value_ordinal(
               state, value_ordinal),
   };
   candidate.end_point =
@@ -249,9 +249,8 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
           &state->result.assignments[assignment_index];
       if (!loom_low_allocation_active_assignment_conflicts(
               state->context->target->descriptor_set, state->context->liveness,
-              state->context->unit_liveness->end_points,
-              state->context->unit_liveness->end_point_count, assignment,
-              &candidate, /*ignored_value_ids=*/NULL,
+              state->context->unit_liveness, assignment, &candidate,
+              /*ignored_value_ids=*/NULL,
               /*ignored_value_count=*/0)) {
         continue;
       }
@@ -469,18 +468,27 @@ static iree_status_t loom_low_allocation_interval_assignment_append_assignment(
   }
   const uint32_t assignment_index = (uint32_t)state->result.assignment_count;
   loom_low_allocation_assignment_t stored_assignment = *assignment;
-  const loom_liveness_segment_range_t segment_range =
-      loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
-          state->context->unit_liveness, state->context->liveness,
-          value_ordinal);
-  stored_assignment.liveness_segments = segment_range;
-  stored_assignment.unit_end_point_start =
-      loom_low_allocation_interval_assignment_unit_end_point_start_for_value_ordinal(
+  const loom_liveness_interval_t* semantic_interval =
+      loom_liveness_interval_for_value_ordinal(state->context->liveness,
+                                               value_ordinal);
+  if (stored_assignment.start_point == semantic_interval->start_point) {
+    stored_assignment.liveness_segments =
+        loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+            state->context->unit_liveness, state->context->liveness,
+            value_ordinal);
+  } else {
+    // Storage reserved outside semantic SSA liveness is not represented by the
+    // value's sparse segments. Keep the range empty so conflicts use the
+    // conservative linear storage lifetime.
+    stored_assignment.liveness_segments = (loom_liveness_segment_range_t){0};
+  }
+  stored_assignment.unit_point_start =
+      loom_low_allocation_interval_assignment_unit_point_start_for_value_ordinal(
           state, value_ordinal);
   stored_assignment.end_point =
       loom_low_allocation_live_range_assignment_max_unit_end_point(
           state->context->unit_liveness->end_points,
-          state->context->unit_liveness->end_point_count, &stored_assignment);
+          state->context->unit_liveness->point_count, &stored_assignment);
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_storage_lease_state_record_release_actions(
           state->context->storage_leases,

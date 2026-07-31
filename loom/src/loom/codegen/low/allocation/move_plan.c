@@ -141,10 +141,8 @@ static iree_status_t loom_low_allocation_move_plan_resolve_temporary(
             temporary.location_kind, temporary.location, 1) ||
         loom_low_allocation_unit_location_is_live_at_point(
             context->descriptor_set, context->assignment_map.assignments,
-            context->assignment_map.assignment_count,
-            context->unit_liveness->end_points,
-            context->unit_liveness->end_point_count, &temporary,
-            program_point) ||
+            context->assignment_map.assignment_count, context->unit_liveness,
+            &temporary, program_point) ||
         loom_low_allocation_move_group_uses_location(
             context->descriptor_set, moves, move_count, &temporary)) {
       if (location == UINT32_MAX) {
