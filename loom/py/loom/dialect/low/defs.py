@@ -212,7 +212,6 @@ _FUNC_COMMON_ATTRS = [
     AttrDef(
         "descriptor_set",
         "string",
-        optional=True,
         doc="Canonical descriptor-set key governing the low representation.",
     ),
     AttrDef(
@@ -245,7 +244,6 @@ _KERNEL_COMMON_ATTRS = [
     AttrDef(
         "descriptor_set",
         "string",
-        optional=True,
         doc="Canonical descriptor-set key governing the low representation.",
     ),
     AttrDef("abi_layout", "dict", optional=True),
@@ -300,10 +298,7 @@ _LOW_EXACTNESS_FORMAT: list[FormatElement] = [
 
 _FUNC_TARGET_FORMAT: list[FormatElement] = [
     kw("target"),
-    OptionalGroup(
-        [KeyRef("descriptor_set")],
-        anchor="descriptor_set",
-    ),
+    KeyRef("descriptor_set"),
     GLUE,
     LPAREN,
     SymbolRef("target"),

@@ -1832,8 +1832,7 @@ static iree_status_t loom_low_lower_create_func_op(
   const loom_predicate_t* predicates =
       loom_func_like_predicates(context->source_function, &predicate_count);
 
-  loom_low_func_def_build_flags_t build_flags =
-      LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_DESCRIPTOR_SET;
+  loom_low_func_def_build_flags_t build_flags = 0;
   uint8_t visibility = loom_func_like_visibility(context->source_function);
   uint8_t cc = loom_func_like_cc(context->source_function);
   uint8_t purity = loom_func_like_purity(context->source_function);
@@ -1899,8 +1898,7 @@ static iree_status_t loom_low_lower_create_kernel_op(
   const loom_predicate_t* predicates =
       loom_func_like_predicates(context->source_function, &predicate_count);
 
-  loom_low_kernel_def_build_flags_t build_flags =
-      LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_DESCRIPTOR_SET;
+  loom_low_kernel_def_build_flags_t build_flags = 0;
   loom_string_id_t export_symbol =
       loom_func_like_export_symbol(context->source_function);
   if (export_symbol != LOOM_STRING_ID_INVALID) {
@@ -2129,8 +2127,7 @@ iree_status_t loom_low_lower_import_declaration(
     IREE_ASSERT_LT(code_symbol, module->strings.count);
     loom_low_func_decl_build_flags_t build_flags =
         LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_KIND |
-        LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL |
-        LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_DESCRIPTOR_SET;
+        LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL;
     const uint8_t visibility = loom_func_like_visibility(source_declaration);
     const uint8_t cc = loom_func_like_cc(source_declaration);
     const uint8_t purity = loom_func_like_purity(source_declaration);

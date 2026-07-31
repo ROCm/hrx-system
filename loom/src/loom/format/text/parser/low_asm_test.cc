@@ -351,6 +351,34 @@ TEST_F(LowAsmParserTest, FunctionRepresentationContractSelectsDescriptorSet) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmParserTest, RejectsMissingFunctionRepresentationContracts) {
+  const char* sources[] = {
+      "test.target<low_core> @test_target\n"
+      "\n"
+      "low.func.def target(@test_target) @empty() {\n"
+      "  low.return\n"
+      "}\n",
+      "test.target<low_core> @test_target\n"
+      "\n"
+      "low.kernel.def target(@test_target) @empty() {\n"
+      "  low.return\n"
+      "}\n",
+      "test.target<low_core> @test_target\n"
+      "\n"
+      "low.func.decl target(@test_target) @external()\n",
+  };
+  for (const char* source : sources) {
+    SCOPED_TRACE(source);
+    const auto& diagnostics = ParseExpectErrors(source);
+    const CapturedDiagnostic* diagnostic = FindDiagnostic(
+        capture_, loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 3));
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(GetStringParam(*diagnostic, 0), "(");
+    EXPECT_EQ(GetStringParam(*diagnostic, 1), "'<'");
+    (void)diagnostics;
+  }
+}
+
 TEST_F(LowAsmParserTest, RejectsRedundantFunctionAsmContract) {
   const auto& diagnostics = ParseExpectErrors(
       "test.target<low_core> @test_target\n"
