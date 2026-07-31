@@ -44,6 +44,10 @@ extern "C" {
 #define QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16 \
   "qwen3_moe/dense_linear_quantized_f16"
 
+// Stable runtime path for Q6_K vocabulary projection and Q8_1 quantization.
+#define QWEN_LOOM_SOURCE_VOCABULARY_PROJECTION_Q6 \
+  "qwen3_moe/vocabulary_projection_q6"
+
 // Stable runtime path for the F32 router projection module.
 #define QWEN_LOOM_SOURCE_ROUTER_PROJECTION_F32 "qwen3_moe/router_projection_f32"
 

@@ -69,6 +69,16 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
           "qwen3_moe_dense_linear_q6k_f16_wmma",
       },
       {
+          QWEN_LOOM_SOURCE_VOCABULARY_PROJECTION_Q6,
+          "qwen3_moe_vocabulary_projection_q6.loom",
+          "ggml_quantize_q8_1_x4_f32",
+      },
+      {
+          QWEN_LOOM_SOURCE_VOCABULARY_PROJECTION_Q6,
+          "qwen3_moe_vocabulary_projection_q6.loom",
+          "ggml_linear_q6k_q8_1_x4",
+      },
+      {
           QWEN_LOOM_SOURCE_ROUTER_PROJECTION_F32,
           "qwen3_moe_router_projection_f32.loom",
           "qwen3_moe_router_projection_f32_four_row_wave32",
