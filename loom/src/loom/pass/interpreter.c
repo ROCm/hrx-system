@@ -37,6 +37,8 @@ typedef struct loom_pass_interpreter_frame_t {
   loom_symbol_t* symbol;
   // Current function when kind is LOOM_PASS_FUNCTION.
   loom_func_like_t function;
+  // Concrete compiler version of |function|, or NULL.
+  loom_function_version_t* function_version;
 } loom_pass_interpreter_frame_t;
 
 typedef struct loom_pass_interpreter_state_t {
@@ -74,6 +76,8 @@ typedef struct loom_pass_interpreter_symbol_snapshot_entry_t {
   loom_symbol_t* symbol;
   // Function-like view of symbol->defining_op.
   loom_func_like_t function;
+  // Concrete compiler version of |function|, or NULL.
+  loom_function_version_t* function_version;
 } loom_pass_interpreter_symbol_snapshot_entry_t;
 
 static const char* loom_pass_interpreter_anchor_name(loom_pass_kind_t kind) {
@@ -356,6 +360,7 @@ static iree_status_t loom_pass_interpreter_invoke(
   if (pass_execution_allowed) {
     status = loom_pass_interpreter_make_pass(
         state, instruction, pass_diagnostic_emitter, &instance_arena, &pass);
+    pass.function_version = frame->function_version;
   }
   diagnostic_counter.pass = &pass;
 
@@ -471,28 +476,16 @@ static iree_status_t loom_pass_interpreter_build_function_snapshot(
     iree_host_size_t* out_count) {
   *out_entries = NULL;
   *out_count = 0;
-  iree_host_size_t count = 0;
-  for (iree_host_size_t i = 0; i < state->module->symbols.count; ++i) {
-    loom_symbol_t* symbol = &state->module->symbols.entries[i];
-    if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE)) {
-      continue;
-    }
-    loom_func_like_t function =
-        loom_func_like_cast(state->module, symbol->defining_op);
-    if (!loom_func_like_body(function)) {
-      continue;
-    }
-    ++count;
-  }
-  if (count == 0) {
+  const iree_host_size_t symbol_count = state->module->symbols.count;
+  if (symbol_count == 0) {
     return iree_ok_status();
   }
 
   loom_pass_interpreter_symbol_snapshot_entry_t* entries = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, count, sizeof(*entries),
-                                                 (void**)&entries));
-  iree_host_size_t entry_index = 0;
-  for (iree_host_size_t i = 0; i < state->module->symbols.count; ++i) {
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, symbol_count, sizeof(*entries), (void**)&entries));
+  memset(entries, 0, symbol_count * sizeof(*entries));
+  for (iree_host_size_t i = 0; i < symbol_count; ++i) {
     loom_symbol_t* symbol = &state->module->symbols.entries[i];
     if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE)) {
       continue;
@@ -502,13 +495,48 @@ static iree_status_t loom_pass_interpreter_build_function_snapshot(
     if (!loom_func_like_body(function)) {
       continue;
     }
-    entries[entry_index++] = (loom_pass_interpreter_symbol_snapshot_entry_t){
+    entries[i] = (loom_pass_interpreter_symbol_snapshot_entry_t){
         .symbol = symbol,
         .function = function,
     };
   }
+
+  const loom_function_version_list_t* versions =
+      state->options->function_versions;
+  if (versions != NULL) {
+    for (iree_host_size_t i = 0; i < versions->count; ++i) {
+      loom_function_version_t* version = versions->values[i];
+      if (version == NULL) {
+        continue;
+      }
+      const loom_symbol_ref_t function_ref =
+          loom_func_like_callee(version->function);
+      if (!loom_symbol_ref_is_valid(function_ref) ||
+          function_ref.module_id != 0 ||
+          function_ref.symbol_id >= symbol_count) {
+        continue;
+      }
+      loom_pass_interpreter_symbol_snapshot_entry_t* entry =
+          &entries[function_ref.symbol_id];
+      if (entry->function.op == version->function.op &&
+          entry->function.vtable == version->function.vtable) {
+        entry->function_version = version;
+      }
+    }
+  }
+
+  iree_host_size_t entry_index = 0;
+  for (iree_host_size_t i = 0; i < symbol_count; ++i) {
+    if (!loom_func_like_isa(entries[i].function)) {
+      continue;
+    }
+    if (entry_index != i) {
+      entries[entry_index] = entries[i];
+    }
+    ++entry_index;
+  }
   *out_entries = entries;
-  *out_count = count;
+  *out_count = entry_index;
   return iree_ok_status();
 }
 
@@ -540,6 +568,7 @@ static iree_status_t loom_pass_interpreter_execute_for(
         .kind = LOOM_PASS_FUNCTION,
         .symbol = entries[i].symbol,
         .function = entries[i].function,
+        .function_version = entries[i].function_version,
     };
     bool body_changed = false;
     status = loom_pass_interpreter_execute_range(
@@ -780,6 +809,7 @@ static iree_status_t loom_pass_interpreter_evaluate_provider_predicate(
           .target_module = state->module,
           .symbol = frame->symbol,
           .function = frame->function,
+          .function_version = frame->function_version,
       },
       out_match);
 }
@@ -1003,6 +1033,8 @@ iree_status_t loom_pass_interpreter_run_function(
       .kind = LOOM_PASS_FUNCTION,
       .symbol = symbol,
       .function = function,
+      .function_version =
+          loom_function_version_list_find(options->function_versions, function),
   };
   bool changed = false;
   iree_status_t status = loom_pass_interpreter_execute_range(

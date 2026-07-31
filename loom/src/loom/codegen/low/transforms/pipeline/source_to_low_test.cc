@@ -231,6 +231,7 @@ class LowLowerPassTest : public ::testing::Test {
     loom_pass_tool_run_options_t run_options = {
         /*.registry=*/&kPassRegistry,
         /*.environment=*/environment,
+        /*.function_versions=*/nullptr,
         /*.predicate_provider=*/{},
         /*.block_pool=*/&block_pool_,
     };

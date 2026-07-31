@@ -87,6 +87,7 @@ class AmdgpuSanitizerSiteTableTest : public ::testing::Test {
     loom_pass_tool_run_options_t run_options = {
         /*.registry=*/loom_pass_builtin_registry(),
         /*.environment=*/environment,
+        /*.function_versions=*/nullptr,
         /*.predicate_provider=*/{},
         /*.block_pool=*/&block_pool_,
     };

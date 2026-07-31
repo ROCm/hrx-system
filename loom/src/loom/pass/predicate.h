@@ -44,6 +44,8 @@ typedef struct loom_pass_predicate_evaluate_context_t {
   const loom_symbol_t* symbol;
   // Current function when anchor_kind is LOOM_PASS_FUNCTION.
   loom_func_like_t function;
+  // Concrete compiler function version for |function|, or NULL.
+  const loom_function_version_t* function_version;
 } loom_pass_predicate_evaluate_context_t;
 
 // Validates provider-owned pass.where predicate syntax.

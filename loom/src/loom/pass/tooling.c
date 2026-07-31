@@ -39,6 +39,7 @@ static iree_status_t loom_pass_tool_run_program(
       .predicate_provider = options->predicate_provider,
       .diagnostic_emitter = options->diagnostic_emitter,
       .environment = options->environment,
+      .function_versions = options->function_versions,
       .report = options->report,
       .trace = options->trace,
   };

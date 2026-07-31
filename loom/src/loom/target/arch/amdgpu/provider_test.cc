@@ -209,6 +209,7 @@ class AmdgpuProviderTest : public ::testing::Test {
     const loom_pass_tool_run_options_t options = {
         /*.registry=*/&kPassRegistry,
         /*.environment=*/environment,
+        /*.function_versions=*/nullptr,
         /*.predicate_provider=*/{},
         /*.block_pool=*/&block_pool_,
     };
