@@ -80,14 +80,12 @@ class TargetPassFactsTest : public ::testing::Test {
   loom_context_t context_;
 };
 
-TEST(TargetPassEnvironmentTest, EnvironmentCarriesInvocationState) {
+TEST(TargetPassEnvironmentTest, EnvironmentCarriesProvidersAndVersions) {
   const loom_target_environment_t* target_environment =
       reinterpret_cast<const loom_target_environment_t*>(uintptr_t{1});
-  const loom_target_specialization_context_t specialization_context = {};
   const loom_function_version_list_t function_versions = {};
   const loom_target_pass_capability_t target_capability =
-      loom_target_pass_capability_make(
-          target_environment, &specialization_context, &function_versions);
+      loom_target_pass_capability_make(target_environment, &function_versions);
   const loom_pass_environment_capability_t* capabilities[] = {
       &target_capability.base,
   };
@@ -100,25 +98,14 @@ TEST(TargetPassEnvironmentTest, EnvironmentCarriesInvocationState) {
   ASSERT_EQ(found_capability, &target_capability);
   EXPECT_EQ(loom_target_pass_capability_target_environment(found_capability),
             target_environment);
-  EXPECT_EQ(
-      loom_target_pass_capability_specialization_context(found_capability),
-      &specialization_context);
   EXPECT_EQ(loom_target_pass_capability_function_versions(found_capability),
             &function_versions);
-  EXPECT_EQ(loom_target_pass_capability_specialization_profile(
-                found_capability, /*module=*/nullptr, /*function=*/{}),
-            nullptr);
 }
 
 TEST(TargetPassEnvironmentTest, MissingCapabilityHasEmptyAccessors) {
   EXPECT_EQ(loom_target_pass_capability_from_environment(nullptr), nullptr);
   EXPECT_EQ(loom_target_pass_capability_target_environment(nullptr), nullptr);
-  EXPECT_EQ(loom_target_pass_capability_specialization_context(nullptr),
-            nullptr);
   EXPECT_EQ(loom_target_pass_capability_function_versions(nullptr), nullptr);
-  EXPECT_EQ(loom_target_pass_capability_specialization_profile(
-                /*capability=*/nullptr, /*module=*/nullptr, /*function=*/{}),
-            nullptr);
 }
 
 TEST_F(TargetPassFactsTest, RefinedVersionSuppliesEffectiveFactsDirectly) {

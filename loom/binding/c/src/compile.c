@@ -128,8 +128,8 @@ static loomc_status_t loomc_compile_run_pass_program(
       loomc_context_target_pass_environment(compiler->context);
   if (target_environment != NULL) {
     pass_environment = loomc_target_pass_environment_make_loom_pass_environment(
-        target_environment, &specialization_result->context,
-        &specialization_result->function_versions, &low_environment_storage);
+        target_environment, &specialization_result->function_versions,
+        &low_environment_storage);
     loom_target_pass_predicate_provider_storage_initialize(
         loomc_workspace_block_pool(workspace), &predicate_storage);
     predicate_provider =

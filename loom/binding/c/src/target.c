@@ -373,7 +373,6 @@ loomc_status_t loomc_target_pass_registry_initialize(
 loom_pass_environment_t
 loomc_target_pass_environment_make_loom_pass_environment(
     const loomc_target_pass_environment_t* environment,
-    const loom_target_specialization_context_t* specialization_context,
     const loom_function_version_list_t* function_versions,
     loom_low_pass_environment_storage_t* out_storage) {
   return loom_low_pass_environment_storage_initialize(
@@ -382,7 +381,7 @@ loomc_target_pass_environment_make_loom_pass_environment(
       &environment->low_legality_provider_list,
       &environment->legalizer_provider_list, &environment->math_policy_registry,
       /*compile_report=*/NULL, environment->target_environment,
-      specialization_context, function_versions, out_storage);
+      function_versions, out_storage);
 }
 
 void loomc_target_pass_environment_initialize_text_asm_environment(

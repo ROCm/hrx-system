@@ -208,8 +208,8 @@ static loomc_status_t loomc_pass_program_compile_state_initialize(
       loomc_target_environment_pass_environment(target_environment);
   out_state->compile_options.environment =
       loomc_target_pass_environment_make_loom_pass_environment(
-          target_pass_environment, /*specialization_context=*/NULL,
-          /*function_versions=*/NULL, &out_state->low_environment_storage);
+          target_pass_environment, /*function_versions=*/NULL,
+          &out_state->low_environment_storage);
   loom_target_pass_predicate_provider_storage_initialize(
       &pass_program->block_pool, &out_state->predicate_storage);
   out_state->compile_options.predicate_provider =

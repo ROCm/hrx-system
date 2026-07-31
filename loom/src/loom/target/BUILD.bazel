@@ -178,11 +178,8 @@ loom_cc_library(
     srcs = ["pass_environment.c"],
     hdrs = ["pass_environment.h"],
     deps = [
-        ":facts",
         ":function_contract",
         ":function_version",
-        ":profile",
-        ":specialization",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:func_symbol_facts",

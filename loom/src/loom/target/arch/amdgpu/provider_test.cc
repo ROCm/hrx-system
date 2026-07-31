@@ -205,7 +205,6 @@ class AmdgpuProviderTest : public ::testing::Test {
             /*legalizer_provider_list=*/nullptr,
             /*math_policy_registry=*/nullptr,
             /*compile_report=*/nullptr, &target_environment_,
-            /*specialization_context=*/nullptr,
             /*function_versions=*/nullptr, &environment_storage);
     const loom_pass_tool_run_options_t options = {
         /*.registry=*/&kPassRegistry,

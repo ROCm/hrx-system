@@ -207,11 +207,8 @@ loom_cc_library(
   SRCS
     "pass_environment.c"
   DEPS
-    ::facts
     ::function_contract
     ::function_version
-    ::profile
-    ::specialization
     iree::base
     loom::analysis::symbol_facts
     loom::ir
