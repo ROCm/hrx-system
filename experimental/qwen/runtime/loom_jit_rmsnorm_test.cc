@@ -298,12 +298,19 @@ static iree_status_t RunRmsnormFixture(const std::string& fixture_directory) {
   ExecutablePtr executable_ptr(executable);
   const iree_hal_dispatch_config_t dispatch_config =
       qwen_loom_executable_dispatch_config(executable_ptr.get());
+  iree_hal_executable_function_info_t function_info;
+  IREE_RETURN_IF_ERROR(iree_hal_executable_function_info(
+      qwen_loom_executable_hal_executable(executable_ptr.get()),
+      qwen_loom_executable_function(executable_ptr.get()), &function_info));
   if (dispatch_config.workgroup_count[0] != 512 ||
       dispatch_config.workgroup_count[1] != 1 ||
       dispatch_config.workgroup_count[2] != 1 ||
-      dispatch_config.workgroup_size[0] != 256 ||
-      dispatch_config.workgroup_size[1] != 1 ||
-      dispatch_config.workgroup_size[2] != 1) {
+      dispatch_config.workgroup_size[0] != 0 ||
+      dispatch_config.workgroup_size[1] != 0 ||
+      dispatch_config.workgroup_size[2] != 0 ||
+      function_info.workgroup_size[0] != 256 ||
+      function_info.workgroup_size[1] != 1 ||
+      function_info.workgroup_size[2] != 1) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "workload 512 resolved unexpected RMSNorm launch geometry");

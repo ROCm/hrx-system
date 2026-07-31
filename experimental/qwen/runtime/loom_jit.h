@@ -108,7 +108,10 @@ iree_hal_executable_t* qwen_loom_executable_hal_executable(
 iree_hal_executable_function_t qwen_loom_executable_function(
     const qwen_loom_executable_t* executable);
 
-// Returns the resolved static dispatch configuration.
+// Returns the resolved static workgroup count.
+//
+// The loaded executable function owns the matching static workgroup size, so
+// the returned dispatch configuration carries no redundant size override.
 iree_hal_dispatch_config_t qwen_loom_executable_dispatch_config(
     const qwen_loom_executable_t* executable);
 

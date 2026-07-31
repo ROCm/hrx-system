@@ -91,7 +91,7 @@ struct qwen_loom_executable_t {
   iree_hal_executable_t* hal_executable;
   // Resolved exported function.
   iree_hal_executable_function_t function;
-  // Static launch geometry evaluated from exact workload arguments.
+  // Static workgroup count evaluated from exact workload arguments.
   iree_hal_dispatch_config_t dispatch_config;
 };
 
@@ -462,6 +462,44 @@ static iree_status_t qwen_loom_jit_make_dispatch_config(
   out_dispatch_config->workgroup_size[0] = launch_config->workgroup_size.x;
   out_dispatch_config->workgroup_size[1] = launch_config->workgroup_size.y;
   out_dispatch_config->workgroup_size[2] = launch_config->workgroup_size.z;
+  return iree_ok_status();
+}
+
+static iree_status_t qwen_loom_jit_use_executable_workgroup_size(
+    iree_hal_executable_t* executable, iree_hal_executable_function_t function,
+    iree_string_view_t module_path, iree_string_view_t function_name,
+    iree_hal_dispatch_config_t* dispatch_config) {
+  iree_hal_executable_function_info_t function_info;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_executable_function_info(executable, function, &function_info));
+  if (iree_any_bit_set(
+          function_info.flags,
+          IREE_HAL_EXECUTABLE_FUNCTION_FLAG_WORKGROUP_SIZE_DYNAMIC)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "compiled function %.*s:%.*s retains a dynamic workgroup size",
+        (int)module_path.size, module_path.data, (int)function_name.size,
+        function_name.data);
+  }
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(function_info.workgroup_size);
+       ++i) {
+    if (function_info.workgroup_size[i] != dispatch_config->workgroup_size[i]) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "compiled function %.*s:%.*s workgroup size "
+          "%" PRIu32 "x%" PRIu32 "x%" PRIu32
+          " disagrees with evaluated launch size "
+          "%" PRIu32 "x%" PRIu32 "x%" PRIu32,
+          (int)module_path.size, module_path.data, (int)function_name.size,
+          function_name.data, function_info.workgroup_size[0],
+          function_info.workgroup_size[1], function_info.workgroup_size[2],
+          dispatch_config->workgroup_size[0],
+          dispatch_config->workgroup_size[1],
+          dispatch_config->workgroup_size[2]);
+    }
+  }
+  memset(dispatch_config->workgroup_size, 0,
+         sizeof(dispatch_config->workgroup_size));
   return iree_ok_status();
 }
 
@@ -911,6 +949,11 @@ static iree_status_t qwen_loom_jit_prepare_uncached(
   if (iree_status_is_ok(status)) {
     status = iree_hal_executable_lookup_function_by_name(
         hal_executable, options->function_name, &function);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_loom_jit_use_executable_workgroup_size(
+        hal_executable, function, options->source_module->module_path,
+        options->function_name, &dispatch_config);
   }
   if (iree_status_is_ok(status)) {
     status =
