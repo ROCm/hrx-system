@@ -70,6 +70,15 @@ workload-evaluated decode-or-prefill launch choice. Prefill measurements remain
 representative of that geometry; decode measurements do not until the fork is
 deleted.
 
+`kernels/router_projection_top8_fused_bringup_workaround.loom` is the fused
+decode router's one-function instance of the same route-stride defect. It
+retains the canonical projection, device-scope last-arrival sequence, and
+shared top-8 row helper, but passes the configured route count as that helper's
+physical stride because this model fixes compact `8 == 8` rows. It intentionally
+ignores the public stride argument and is valid only for this owned model.
+Delete it with the standalone top-8 fork when the generic helper represents
+and verifies `route_count <= route_id_stride`.
+
 `kernels/expert_table_bringup_workaround.loom` makes Qwen's fixed route count
 of eight structural in expert-assignment enumeration. AMDGPU lowering requires
 an exact divisor, but the compile boundary currently loses the exact workload

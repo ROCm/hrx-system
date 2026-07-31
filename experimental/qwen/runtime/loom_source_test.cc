@@ -99,6 +99,11 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
           "qwen3_moe_router_projection_f32_four_row_wave32",
       },
       {
+          QWEN_LOOM_SOURCE_ROUTER_PROJECTION_TOP8_FUSED_F32,
+          "qwen3_moe_router_projection_top8_fused_f32.loom",
+          "qwen3_moe_router_projection_top8_fused_decode_f32",
+      },
+      {
           QWEN_LOOM_SOURCE_ROUTER_TOP8_F32,
           "qwen3_moe_router_top8_f32.loom",
           "qwen3_moe_router_top8_f32",
@@ -351,6 +356,26 @@ TEST(QwenLoomSourceTest, EmbedsWorkaroundRouterTop8Source) {
   EXPECT_EQ(source_text.find("%workgroup_count = scf.select"),
             std::string::npos);
   EXPECT_EQ(source_text.find("%subgroup_count = scf.select"),
+            std::string::npos);
+}
+
+TEST(QwenLoomSourceTest, EmbedsWorkaroundFusedRouterSource) {
+  qwen_loom_source_module_t source_module;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_ROUTER_PROJECTION_TOP8_FUSED_F32),
+      &source_module));
+
+  std::string source_text(
+      reinterpret_cast<const char*>(source_module.source_contents.data),
+      source_module.source_contents.data_length);
+  EXPECT_NE(source_text.find("%route_count = config.get "
+                             "@qwen3_moe.router.route_count"),
+            std::string::npos);
+  EXPECT_NE(
+      source_text.find("%route_count, %logits_noalias, %route_ids_noalias"),
+      std::string::npos);
+  EXPECT_EQ(source_text.find("%bounded_route_id_stride, %logits_noalias, "
+                             "%route_ids_noalias"),
             std::string::npos);
 }
 

@@ -77,6 +77,12 @@ static const qwen_loom_source_mapping_t qwen_loom_source_mappings[] = {
         .embedded_name = IREE_SVL("qwen3_moe_router_projection_f32.loom"),
     },
     {
+        .module_path =
+            IREE_SVL(QWEN_LOOM_SOURCE_ROUTER_PROJECTION_TOP8_FUSED_F32),
+        .embedded_name =
+            IREE_SVL("qwen3_moe_router_projection_top8_fused_f32.loom"),
+    },
+    {
         .module_path = IREE_SVL(QWEN_LOOM_SOURCE_ROUTER_TOP8_F32),
         .embedded_name = IREE_SVL("qwen3_moe_router_top8_f32.loom"),
     },

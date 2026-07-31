@@ -59,6 +59,10 @@ extern "C" {
 // Stable runtime path for the F32 router projection module.
 #define QWEN_LOOM_SOURCE_ROUTER_PROJECTION_F32 "qwen3_moe/router_projection_f32"
 
+// Stable runtime path for fused decode projection and normalized top-8 routing.
+#define QWEN_LOOM_SOURCE_ROUTER_PROJECTION_TOP8_FUSED_F32 \
+  "qwen3_moe/router_projection_top8_fused_f32"
+
 // Stable runtime path for the normalized top-8 router module.
 #define QWEN_LOOM_SOURCE_ROUTER_TOP8_F32 "qwen3_moe/router_top8_f32"
 

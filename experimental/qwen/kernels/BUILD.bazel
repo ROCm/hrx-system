@@ -439,6 +439,18 @@ loom_link_module(
 )
 
 loom_link_module(
+    name = "router_projection_top8_fused_f32_runtime_module",
+    srcs = ["router_projection_top8_fused_bringup_workaround.loom"],
+    libraries = [
+        "//experimental/qwen_moe/kernels:router_top8_f32_linked",
+    ],
+    mode = "selective",
+    output = "qwen3_moe_router_projection_top8_fused_f32.loom",
+    roots = ["@qwen3_moe_router_projection_top8_fused_decode_f32"],
+    strip_check = True,
+)
+
+loom_link_module(
     name = "router_top8_f32_runtime_module",
     srcs = ["router_top8_f32_bringup_workaround.loom"],
     mode = "selective",
@@ -545,6 +557,7 @@ iree_c_embed_data(
         ":routed_gate_up_f16_runtime_module",
         ":routed_gate_up_q8_runtime_module",
         ":router_projection_f32_runtime_module",
+        ":router_projection_top8_fused_f32_runtime_module",
         ":router_top8_f32_runtime_module",
         ":token_embedding_bringup_workaround_runtime_module",
         ":vocabulary_projection_q6_runtime_module",
