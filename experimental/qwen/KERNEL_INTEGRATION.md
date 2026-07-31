@@ -93,34 +93,39 @@ decode-513 programs:
 | Token embedding | Fixed Q4_K row decoder | Same | No corpus provider yet; owned bring-up kernel |
 | Attention metadata | Positions, direct K/V cache rows, dense causal mask | Same with nonzero context base | No corpus provider yet; owned bring-up kernel |
 | Attention normalization | F32 RMSNorm | Fused RMSNorm and Q8_1 x4 packing | `qwen3_moe/attention_prepare_quantized.loom` |
-| Q/K/V projection | Separate Q4_K query/key and storage-selected Q4_K or Q6_K value WMMA dispatches | One fused Q8_1 x4 Q/K/V dispatch with storage-selected value decoding | `qwen3_moe/dense_linear_quantized_f16_wmma.loom` and `qwen3_moe/attention_qkv_quantized.loom` |
-| RoPE and cache publication | One combined postprocess dispatch | Same | `qwen3_moe/attention_postprocess_f32_f16.loom` |
+| Q/K/V projection | Separate Q4_K query/key and storage-selected Q4_K or Q6_K value WMMA dispatches | One Q8_1 x4 Q/K/V dispatch whose last-arriving head tiles also publish the postprocessed attention inputs | `qwen3_moe/dense_linear_quantized_f16_wmma.loom`, `qwen3_moe/attention_qkv_quantized.loom`, and `qwen3_moe/attention_qkv_postprocess_fused.loom` |
+| RoPE and cache publication | One combined postprocess dispatch | Published by the fused Q/K/V projection | `qwen3_moe/attention_postprocess_f32_f16.loom` and `qwen3_moe/attention_qkv_postprocess_fused.loom` |
 | FlashAttention | General grouped-query prefill kernel | Fused split-K decode kernel with last-arrival reduction | `qwen3_moe/flash_attention_f32_f16_wmma.loom` and `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` |
 | Attention output | Q4_K F16 WMMA projection with residual accumulation | Q8_1 x4 pack followed by direct Q4_K row contraction with residual accumulation; the last-arriving output workgroup also publishes the following feed-forward normalized F32 and Q8_1 x4 rows | `qwen3_moe/dense_linear_quantized_f16_wmma.loom`, `qwen3_moe/attention_prepare_quantized.loom`, and `ggml/quantize_q8_1_x4.loom` |
 | Feed-forward RMSNorm | F32 RMSNorm | Published by the fused attention-output projection | `qwen3_moe/dense_linear_quantized_f16_wmma.loom` and `qwen3_moe/attention_prepare_quantized.loom` |
 | Router projection | Four-row wave32 schedule | Fused four-row wave64 projection with last-arrival top-8 selection | `qwen3_moe/router_projection_f32.loom` and `qwen3_moe/router_projection_top8_fused.loom` |
 | Top-8 routing | Normalized compact `[token, 8]` rows | Published by the fused projection's last-arriving wave | `qwen3_moe/router_top8_f32.loom` and `qwen3_moe/router_projection_top8_fused.loom` |
-| Expert tables | Assignment table then 32-row partition table | None; compact route IDs directly select expert rows | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` |
+| Expert tables | One fused assignment/partition publication in layers 0-46; separate terminal-row tables | None; compact route IDs directly select expert rows | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` and `qwen3_moe/expert_table_partition_fused.loom` |
 | Gate/up, SwiGLU, and Q8 packing | Grouped Q4_K F16 WMMA producing F32 SwiGLU rows | Raw Q4_K by Q8_1 x4 direct contraction publishing both F32 SwiGLU rows and their packed physical groups | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` and `ggml/quantize_q8_1_x4.loom` |
-| Routed down and reduction | Grouped Q4_K or Q6_K F16 WMMA followed by weighted reduction | Storage-selected direct Q4_K or Q6_K contraction with route weighting, reduction, and residual update fused; the last-arriving workgroup also publishes the next layer's normalized Q8_1 x4 row | `qwen3_moe/routed_down_q4k.loom` and `qwen3_moe/routed_down_q6k.loom` |
+| Routed down and reduction | Grouped Q4_K or Q6_K F16 WMMA; layers 0-46 fuse weighted reduction, residual update, and next-layer attention normalization | Storage-selected direct Q4_K or Q6_K contraction with route weighting, reduction, and residual update fused; the last-arriving workgroup also publishes the next layer's normalized Q8_1 x4 row | `qwen3_moe/routed_down_q4k.loom`, `qwen3_moe/routed_down_q6k.loom`, and `qwen3_moe/routed_down_weighted_reduce_next_rmsnorm_f32.loom` |
 | Vocabulary endpoint | Fused RMSNorm/Q8_1 x4 pack, raw Q6_K contraction publishing one maximum pair per eight logits, then compact finite-logit finalization | The final routed-down dispatch publishes the normalized Q8_1 x4 row; the endpoint performs the same partial Q6_K contraction and compact finalization | `qwen3_moe/routed_down_q4k.loom`, `qwen3_moe/routed_down_q6k.loom`, `ggml/linear_q6k_q8_1_x4.loom`, and an owned partial-argmax bring-up kernel |
 
-Full-model prefill records 725 dispatches. Layers 0 through 46 execute every
+Full-model prefill records 631 dispatches. Layers 0 through 46 execute every
 stage over all 512 rows. Layer 47 executes attention over all rows so its cache
 is complete, then executes feed-forward and the vocabulary endpoint only for
-the final row needed to select the next token. Decode records 389 dispatches:
-two request-setup dispatches, six attention dispatches in layer 0, five
-attention dispatches in each remaining layer, three direct feed-forward
-dispatches per layer, and two endpoint dispatches. Each routed-down dispatch
-publishes the normalized Q8_1 x4 row consumed by the following layer or
-vocabulary projection. Its reusable dispatch-only command buffer contains 388
-explicit barriers and one terminal return; selected-token publication does not
-add a transfer operation.
+the final row needed to select the next token. The 47 nonterminal layers fuse
+routed-down reduction with next-layer attention normalization and fuse expert
+assignment with partition publication. The terminal one-row feed-forward path
+retains the ordinary boundaries because it has no next full layer.
+
+Decode records 341 dispatches: two request-setup dispatches, one initial
+attention normalization/Q8_1 x4 producer, seven fused attention/feed-forward
+dispatches per layer, and two endpoint dispatches. Each Q/K/V dispatch also
+publishes RoPE and K/V cache results. Each routed-down dispatch publishes the
+normalized Q8_1 x4 row consumed by the following layer or vocabulary
+projection. The reusable dispatch-only command buffer has 341
+barrier-delimited segments and one terminal return; selected-token publication
+does not add a transfer operation.
 
 The endpoint stores 18,992 F32 partial logits and their 18,992 I32 vocabulary
 IDs in two independently aligned spans containing 151,936 bytes. The previous
 607,744-byte full vocabulary row is not materialized. This reduces complete
-prefill transient storage to 65,854,656 bytes and Decode-513 transient storage
+prefill transient storage to 65,854,912 bytes and Decode-513 transient storage
 to 566,208 bytes.
 
 Decode owns partial-maximum, partial-sum, and partial-output regions sized to
@@ -142,8 +147,10 @@ The host chooses semantic kernel families and passes model facts; target launch
 geometry remains in Loom. `program.c` currently selects five
 shape-dependent families:
 
-- Q/K/V uses separate F32-input WMMA projections at 128 or more rows and the
-  fused Q8_1 x4 row kernel below 128 rows.
+- Q/K/V uses separate F32-input WMMA projections at 128 or more rows. The
+  full-model one-token route fuses Q8_1 x4 Q/K/V projection with Q/K
+  normalization, RoPE, and K/V cache publication; ordinary one-token layer
+  programs retain separate quantized projection and postprocess dispatches.
 - FlashAttention uses fused split-K execution for full-model decode and the
   general grouped-query kernel for prefill and layer programs.
 - Attention output uses the direct Q8_1 x4 Q4_K contraction for one-token
