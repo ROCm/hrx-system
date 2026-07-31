@@ -329,9 +329,14 @@ iree_status_t qwen_full_program_layout_calculate(
       byte_length, &cursor, &out_layout->final_quantized_hidden_state));
 
   IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
-      QWEN_MODEL_VOCABULARY_SIZE, sizeof(float), &byte_length));
+      QWEN_MODEL_VOCABULARY_PARTIAL_COUNT, sizeof(float), &byte_length));
   IREE_RETURN_IF_ERROR(qwen_program_layout_append(
-      byte_length, &cursor, &out_layout->vocabulary_logits));
+      byte_length, &cursor, &out_layout->vocabulary_argmax.partial_logits));
+
+  IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
+      QWEN_MODEL_VOCABULARY_PARTIAL_COUNT, sizeof(int32_t), &byte_length));
+  IREE_RETURN_IF_ERROR(qwen_program_layout_append(
+      byte_length, &cursor, &out_layout->vocabulary_argmax.partial_ids));
 
   out_layout->transient_byte_length = cursor;
   return iree_ok_status();

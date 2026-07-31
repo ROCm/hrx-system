@@ -167,13 +167,18 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512FullProgram) {
                 layout.terminal_layer.routed_projection_scratch);
   ExpectOrdered(layout.terminal_layer.routed_projection_scratch,
                 layout.final_quantized_hidden_state);
-  ExpectOrdered(layout.final_quantized_hidden_state, layout.vocabulary_logits);
+  ExpectOrdered(layout.final_quantized_hidden_state,
+                layout.vocabulary_argmax.partial_logits);
+  ExpectOrdered(layout.vocabulary_argmax.partial_logits,
+                layout.vocabulary_argmax.partial_ids);
 
   EXPECT_EQ(layout.final_quantized_hidden_state.offset, 65700352u);
   EXPECT_EQ(layout.final_quantized_hidden_state.length, 2304u);
-  EXPECT_EQ(layout.vocabulary_logits.offset, 65702656u);
-  EXPECT_EQ(layout.vocabulary_logits.length, 607744u);
-  EXPECT_EQ(layout.transient_byte_length, 66310400u);
+  EXPECT_EQ(layout.vocabulary_argmax.partial_logits.offset, 65702656u);
+  EXPECT_EQ(layout.vocabulary_argmax.partial_logits.length, 75968u);
+  EXPECT_EQ(layout.vocabulary_argmax.partial_ids.offset, 65778688u);
+  EXPECT_EQ(layout.vocabulary_argmax.partial_ids.length, 75968u);
+  EXPECT_EQ(layout.transient_byte_length, 65854656u);
 }
 
 TEST(QwenProgramLayoutTest, ReservesReusableCompletionForDecode513) {
@@ -209,7 +214,15 @@ TEST(QwenProgramLayoutTest, ReservesReusableCompletionForDecode513) {
                 layout.decode_completion.initialization);
   ExpectOrdered(layout.decode_completion.initialization,
                 layout.final_quantized_hidden_state);
-  EXPECT_EQ(layout.transient_byte_length, 1021952u);
+  ExpectOrdered(layout.final_quantized_hidden_state,
+                layout.vocabulary_argmax.partial_logits);
+  ExpectOrdered(layout.vocabulary_argmax.partial_logits,
+                layout.vocabulary_argmax.partial_ids);
+  EXPECT_EQ(layout.vocabulary_argmax.partial_logits.offset, 414208u);
+  EXPECT_EQ(layout.vocabulary_argmax.partial_logits.length, 75968u);
+  EXPECT_EQ(layout.vocabulary_argmax.partial_ids.offset, 490240u);
+  EXPECT_EQ(layout.vocabulary_argmax.partial_ids.length, 75968u);
+  EXPECT_EQ(layout.transient_byte_length, 566208u);
 }
 
 TEST(QwenProgramLayoutTest, RejectsUnsupportedFullProgramTokenCount) {

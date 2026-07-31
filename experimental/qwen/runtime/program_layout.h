@@ -33,6 +33,14 @@ typedef struct qwen_decode_completion_layout_t {
   qwen_program_span_t shared;
 } qwen_decode_completion_layout_t;
 
+// Compact vocabulary candidates finalized into one selected token.
+typedef struct qwen_vocabulary_argmax_layout_t {
+  // One F32 maximum logit for each endpoint projection workgroup.
+  qwen_program_span_t partial_logits;
+  // I32 vocabulary ID associated with each partial maximum.
+  qwen_program_span_t partial_ids;
+} qwen_vocabulary_argmax_layout_t;
+
 // Full-model transient layout features.
 typedef uint32_t qwen_full_program_layout_flags_t;
 enum qwen_full_program_layout_flag_bits_e {
@@ -104,8 +112,8 @@ typedef struct qwen_full_program_layout_t {
   qwen_decode_completion_layout_t decode_completion;
   // GGML Q8_1 x4 packing of the final normalized hidden-state row.
   qwen_program_span_t final_quantized_hidden_state;
-  // Output projection result containing one F32 vocabulary row.
-  qwen_program_span_t vocabulary_logits;
+  // Partial projection maxima consumed by compact token finalization.
+  qwen_vocabulary_argmax_layout_t vocabulary_argmax;
   // Complete transient allocation size.
   iree_device_size_t transient_byte_length;
 } qwen_full_program_layout_t;

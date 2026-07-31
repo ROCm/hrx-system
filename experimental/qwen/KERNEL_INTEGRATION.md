@@ -117,6 +117,12 @@ vocabulary projection. Its reusable dispatch-only command buffer contains 388
 explicit barriers and one terminal return; selected-token publication does not
 add a transfer operation.
 
+The endpoint stores 18,992 F32 partial logits and their 18,992 I32 vocabulary
+IDs in two independently aligned spans containing 151,936 bytes. The previous
+607,744-byte full vocabulary row is not materialized. This reduces complete
+prefill transient storage to 65,854,656 bytes and Decode-513 transient storage
+to 566,208 bytes.
+
 Decode owns partial-maximum, partial-sum, and partial-output regions sized to
 its exact context. Four split-attention counters, 48 gate/up physical-group
 counters, and one shared fused-stage counter occupy one contiguous 212-byte

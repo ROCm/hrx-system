@@ -1851,22 +1851,11 @@ static iree_status_t qwen_program_record_full_model_endpoint(
       QWEN_MODEL_HIDDEN_SIZE,
       QWEN_MODEL_VOCABULARY_SIZE,
   };
-  const iree_device_size_t vocabulary_partial_byte_length =
-      QWEN_MODEL_VOCABULARY_PARTIAL_COUNT * sizeof(float);
-  const qwen_program_span_t vocabulary_partial_logits = {
-      .offset = transient->vocabulary_logits.offset,
-      .length = vocabulary_partial_byte_length,
-  };
-  const qwen_program_span_t vocabulary_partial_ids = {
-      .offset =
-          transient->vocabulary_logits.offset + vocabulary_partial_byte_length,
-      .length = vocabulary_partial_byte_length,
-  };
   const iree_hal_buffer_ref_t vocabulary_projection_bindings[] = {
       qwen_program_transient_ref(transient->final_quantized_hidden_state),
       qwen_program_model_ref(parameters->output),
-      qwen_program_transient_ref(vocabulary_partial_logits),
-      qwen_program_transient_ref(vocabulary_partial_ids),
+      qwen_program_transient_ref(transient->vocabulary_argmax.partial_logits),
+      qwen_program_transient_ref(transient->vocabulary_argmax.partial_ids),
   };
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_dispatch(
@@ -1884,8 +1873,8 @@ static iree_status_t qwen_program_record_full_model_endpoint(
       QWEN_MODEL_VOCABULARY_PARTIAL_COUNT,
   };
   const iree_hal_buffer_ref_t argmax_bindings[] = {
-      qwen_program_transient_ref(vocabulary_partial_logits),
-      qwen_program_transient_ref(vocabulary_partial_ids),
+      qwen_program_transient_ref(transient->vocabulary_argmax.partial_logits),
+      qwen_program_transient_ref(transient->vocabulary_argmax.partial_ids),
       qwen_program_output_staging_ref(sizeof(int32_t)),
   };
   if (iree_status_is_ok(status)) {
