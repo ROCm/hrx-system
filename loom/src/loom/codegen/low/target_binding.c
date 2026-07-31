@@ -211,13 +211,8 @@ static iree_status_t loom_low_resolve_func_target(
   const loom_symbol_ref_t func_ref = loom_func_like_callee(low_func);
   const loom_string_id_t repr_contract_id =
       loom_func_like_repr_contract(low_func);
-  const bool has_repr_contract = repr_contract_id != LOOM_STRING_ID_INVALID;
-  uint16_t descriptor_set_attr_index = target_attr_index;
-  if (has_repr_contract) {
-    out_target->descriptor_set_key =
-        loom_low_string_or_empty(module, repr_contract_id);
-    descriptor_set_attr_index = low_func.vtable->repr_contract_attr_index;
-  }
+  out_target->descriptor_set_key =
+      loom_low_string_or_empty(module, repr_contract_id);
 
   const loom_symbol_facts_base_t* base_facts = NULL;
   iree_status_t status = loom_symbol_fact_table_lookup_ref(
@@ -244,10 +239,6 @@ static iree_status_t loom_low_resolve_func_target(
         &out_target->bundle_storage, &contract_valid);
   }
   if (iree_status_is_ok(status) && contract_valid) {
-    if (!has_repr_contract) {
-      out_target->descriptor_set_key =
-          out_target->bundle_storage.config.contract_set_key;
-    }
     out_target->feature_bits =
         out_target->bundle_storage.config.contract_feature_bits;
   }
@@ -263,9 +254,9 @@ static iree_status_t loom_low_resolve_func_target(
       loom_low_descriptor_registry_lookup(registry,
                                           out_target->descriptor_set_key);
   if (!descriptor_set) {
-    return loom_low_emit_missing_descriptor_set(emitter, module, low_func_op,
-                                                descriptor_set_attr_index,
-                                                out_target->descriptor_set_key);
+    return loom_low_emit_missing_descriptor_set(
+        emitter, module, low_func_op, low_func.vtable->repr_contract_attr_index,
+        out_target->descriptor_set_key);
   }
   out_target->descriptor_set = descriptor_set;
   return iree_ok_status();

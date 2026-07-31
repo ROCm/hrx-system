@@ -6,11 +6,11 @@
 
 // Low function target binding.
 //
-// This layer connects low function target records to dense low descriptor
-// tables. The descriptor table ABI itself remains IR-agnostic; this file owns
-// the codegen contract that says a low.func target record selects one
-// descriptor set key and feature bitset before low.op packet verification,
-// scheduling, allocation feedback, or emission run.
+// This layer connects Low function representation contracts and target facts
+// to dense Low descriptor tables. The descriptor table ABI itself remains
+// IR-agnostic: each Low function selects its representation contract, while its
+// referenced target projects the feature and limit facts used by verification,
+// scheduling, allocation feedback, and emission.
 
 #ifndef LOOM_CODEGEN_LOW_TARGET_BINDING_H_
 #define LOOM_CODEGEN_LOW_TARGET_BINDING_H_
@@ -36,9 +36,10 @@ typedef struct loom_low_resolved_target_t {
   loom_target_bundle_storage_t bundle_storage;
   // Borrowed target symbol name without the leading '@'.
   iree_string_view_t target_name;
-  // Borrowed descriptor-set key selected by the resolved target record.
+  // Borrowed descriptor-set key selected by the Low function representation
+  // contract.
   iree_string_view_t descriptor_set_key;
-  // Feature bitset selected by the resolved target record.
+  // Feature bitset projected from the resolved target facts.
   uint64_t feature_bits;
   // Descriptor set found in the caller-provided registry.
   const loom_low_descriptor_set_t* descriptor_set;
