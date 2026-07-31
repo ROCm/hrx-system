@@ -1602,31 +1602,28 @@ iree_status_t loom_check_prepare_source_low_module(
   compile_options.max_errors = 20;
   compile_options.report = options->report;
 
-  loom_pass_run_result_t run_result = {0};
-  IREE_RETURN_IF_ERROR(loom_compile_run_pipeline(module, &compile_options,
-                                                 block_pool, &run_result));
-  if (run_result.error_count != 0 ||
-      loom_check_diagnostic_collector_has_error(diagnostic_collector)) {
-    return iree_ok_status();
+  loom_compile_pipeline_result_t pipeline_result = {0};
+  iree_status_t status = loom_compile_run_pipeline(
+      module, &compile_options, block_pool, &pipeline_result);
+  if (iree_status_is_ok(status) && pipeline_result.pass.error_count == 0 &&
+      !loom_check_diagnostic_collector_has_error(diagnostic_collector)) {
+    status = loom_target_entry_verify_module(module, &entry_options, 20,
+                                             &verify_result);
+    if (iree_status_is_ok(status) && verify_result.error_count == 0) {
+      loom_target_entry_diagnostic_emitter_t verifier_emitter = {0};
+      loom_target_entry_diagnostic_emitter_initialize(
+          module, &entry_options, LOOM_EMITTER_VERIFIER, &verifier_emitter);
+      loom_low_verify_result_t low_verify_result = {0};
+      loom_low_verify_scratch_t low_verify_scratch =
+          loom_low_verify_scratch_for_module(module);
+      status = loom_target_entry_verify_low_module(
+          module, low_registry, &verifier_emitter, 20,
+          environment->low_verify_provider_list, &low_verify_scratch,
+          &low_verify_result);
+    }
   }
-
-  IREE_RETURN_IF_ERROR(loom_target_entry_verify_module(module, &entry_options,
-                                                       20, &verify_result));
-  if (verify_result.error_count != 0) {
-    return iree_ok_status();
-  }
-
-  loom_target_entry_diagnostic_emitter_t verifier_emitter = {0};
-  loom_target_entry_diagnostic_emitter_initialize(
-      module, &entry_options, LOOM_EMITTER_VERIFIER, &verifier_emitter);
-  loom_low_verify_result_t low_verify_result = {0};
-  loom_low_verify_scratch_t low_verify_scratch =
-      loom_low_verify_scratch_for_module(module);
-  IREE_RETURN_IF_ERROR(loom_target_entry_verify_low_module(
-      module, low_registry, &verifier_emitter, 20,
-      environment->low_verify_provider_list, &low_verify_scratch,
-      &low_verify_result));
-  return iree_ok_status();
+  loom_compile_pipeline_result_deinitialize(&pipeline_result);
+  return status;
 }
 
 static iree_status_t loom_check_emit_write_source_low_pipeline_text(

@@ -562,10 +562,13 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
     options.low_descriptor_registry = &low_registry_;
     options.diagnostic_sink = capture->sink();
     options.max_errors = 20;
-    loom_pass_run_result_t result = {};
-    IREE_ASSERT_OK(
-        loom_compile_run_pipeline(module, &options, &block_pool_, &result));
-    ASSERT_EQ(result.error_count, 0u) << DiagnosticSummary(*capture);
+    loom_compile_pipeline_result_t result = {};
+    iree_status_t status =
+        loom_compile_run_pipeline(module, &options, &block_pool_, &result);
+    const uint32_t error_count = result.pass.error_count;
+    loom_compile_pipeline_result_deinitialize(&result);
+    IREE_ASSERT_OK(status);
+    ASSERT_EQ(error_count, 0u) << DiagnosticSummary(*capture);
   }
 
   void ParseGfx942Kernel(loom_module_t** out_module) {

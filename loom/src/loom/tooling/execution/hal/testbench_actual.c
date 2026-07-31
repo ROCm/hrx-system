@@ -317,6 +317,7 @@ void loom_run_hal_testbench_actual_provider_deinitialize(
         provider->context->artifact_provider, &provider->compile_device_target,
         provider->context->host_allocator);
   }
+  loom_compile_pipeline_result_deinitialize(&provider->pipeline_result);
   if (provider->compile_module_initialized) {
     loom_run_module_deinitialize(&provider->compile_module);
   }
@@ -869,7 +870,8 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   const iree_host_size_t compile_error_count = provider->diagnostic_error_count;
   iree_status_t status = loom_compile_run_pipeline(
       provider->compile_module.module, &pipeline_options,
-      loom_run_session_block_pool(provider->session), &provider->pass_result);
+      loom_run_session_block_pool(provider->session),
+      &provider->pipeline_result);
   if (!iree_status_is_ok(status)) {
     if (provider->diagnostic_error_count != compile_error_count) {
       iree_status_free(status);
@@ -880,7 +882,7 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
     }
     return status;
   }
-  if (provider->pass_result.error_count != 0) {
+  if (provider->pipeline_result.pass.error_count != 0) {
     loom_run_hal_testbench_record_compile_rejection(
         provider, IREE_SV("compile"), IREE_SV("pass_diagnostics"),
         iree_string_view_empty());

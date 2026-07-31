@@ -490,10 +490,13 @@ class PacketPlanFixture {
           /*.user_data=*/nullptr,
       };
       pipeline_options.max_errors = 20;
-      loom_pass_run_result_t pipeline_result = {};
-      AbortOnError(loom_compile_run_pipeline(
-          module_, &pipeline_options, &module_block_pool_, &pipeline_result));
-      if (pipeline_result.error_count != 0) {
+      loom_compile_pipeline_result_t pipeline_result = {};
+      iree_status_t status = loom_compile_run_pipeline(
+          module_, &pipeline_options, &module_block_pool_, &pipeline_result);
+      const uint32_t error_count = pipeline_result.pass.error_count;
+      loom_compile_pipeline_result_deinitialize(&pipeline_result);
+      AbortOnError(status);
+      if (error_count != 0) {
         std::abort();
       }
     }

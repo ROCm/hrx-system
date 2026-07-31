@@ -106,7 +106,6 @@ loom_cc_library(
     loom::link::linker
     loom::ops::kernel
     loom::ops::special_values
-    loom::pass::types
     loom::sanitizer::options
     loom::target::provider
     loom::target::types

@@ -563,14 +563,17 @@ class IreeVmCandidateTest : public ::testing::Test {
         loom_run_session_low_descriptor_registry(&session_);
     options.source_resolver = loom_run_module_source_resolver(run_module);
 
-    loom_pass_run_result_t run_result = {};
-    IREE_RETURN_IF_ERROR(loom_compile_run_pipeline(
+    loom_compile_pipeline_result_t pipeline_result = {};
+    iree_status_t status = loom_compile_run_pipeline(
         run_module->module, &options, loom_run_session_block_pool(&session_),
-        &run_result));
-    if (run_result.error_count != 0) {
+        &pipeline_result);
+    const uint32_t error_count = pipeline_result.pass.error_count;
+    loom_compile_pipeline_result_deinitialize(&pipeline_result);
+    IREE_RETURN_IF_ERROR(status);
+    if (error_count != 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "source-to-low pipeline emitted %u errors",
-                              run_result.error_count);
+                              error_count);
     }
     return iree_ok_status();
   }

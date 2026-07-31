@@ -506,7 +506,7 @@ static iree_status_t loom_compile_run_pass_pipeline(
     const loom_run_hal_device_target_t* hal_target,
     const loom_run_candidate_compile_options_t* compile_options,
     const loom_pass_trace_options_t* trace_options,
-    loom_pass_run_result_t* out_run_result) {
+    loom_compile_pipeline_result_t* out_result) {
   iree_arena_allocator_t specialization_arena;
   iree_arena_initialize(loom_run_session_block_pool(session),
                         &specialization_arena);
@@ -579,7 +579,7 @@ static iree_status_t loom_compile_run_pass_pipeline(
 
   iree_status_t status = loom_compile_run_pipeline(
       run_module->module, &pipeline_options,
-      loom_run_session_block_pool(session), out_run_result);
+      loom_run_session_block_pool(session), out_result);
   iree_arena_deinitialize(&specialization_arena);
   return status;
 }
@@ -1644,6 +1644,7 @@ int main(int argc, char** argv) {
 
   loom_run_candidate_compile_options_t compile_options = {0};
   loom_run_candidate_compile_options_initialize(&compile_options);
+  loom_compile_pipeline_result_t pipeline_result = {0};
   compile_options.module_name = iree_make_cstring_view(FLAG_module_name);
   compile_options.artifact_manifest = artifact_manifest_options;
   if (hal_artifact_provider != NULL) {
@@ -1701,15 +1702,14 @@ int main(int argc, char** argv) {
     }
   }
   if (iree_status_is_ok(status)) {
-    loom_pass_run_result_t pass_run_result = {0};
     status = loom_compile_run_pass_pipeline(
         &environment, &session, &run_module,
         explicit_hal_target_selected ? &explicit_hal_target : NULL,
         &compile_options, loom_tooling_pass_trace_options(&pass_trace),
-        &pass_run_result);
+        &pipeline_result);
     status =
         iree_status_join(status, loom_tooling_pass_trace_close(&pass_trace));
-    if (iree_status_is_ok(status) && pass_run_result.error_count != 0) {
+    if (iree_status_is_ok(status) && pipeline_result.pass.error_count != 0) {
       if (compile_options.report != NULL) {
         loom_target_compile_report_record_status(
             compile_options.report, IREE_STATUS_FAILED_PRECONDITION);
@@ -1765,6 +1765,7 @@ int main(int argc, char** argv) {
     hal_artifact_provider->deinitialize_device_target(
         hal_artifact_provider, &explicit_hal_target, allocator);
   }
+  loom_compile_pipeline_result_deinitialize(&pipeline_result);
   loom_run_compile_report_capture_deinitialize(&compile_report_capture);
   loom_run_module_deinitialize(&run_module);
   iree_allocator_free(allocator, input_filename_storage);

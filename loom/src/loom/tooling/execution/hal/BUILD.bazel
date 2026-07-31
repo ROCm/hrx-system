@@ -95,7 +95,6 @@ loom_cc_library(
         "//loom/src/loom/link:linker",
         "//loom/src/loom/ops:special_values",
         "//loom/src/loom/ops/kernel",
-        "//loom/src/loom/pass:types",
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:types",
