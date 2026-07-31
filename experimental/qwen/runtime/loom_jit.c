@@ -367,7 +367,7 @@ static iree_status_t qwen_loom_jit_entry_initialize(
   return status;
 }
 
-static bool qwen_loom_jit_entry_matches(
+static bool qwen_loom_jit_entry_matches_code(
     const qwen_loom_jit_entry_t* entry,
     const qwen_loom_jit_prepare_options_t* options) {
   return iree_string_view_equal(entry->module_path,
@@ -379,16 +379,32 @@ static bool qwen_loom_jit_entry_matches(
          iree_string_view_equal(entry->function_name, options->function_name) &&
          qwen_loom_jit_config_bindings_equal(
              entry->config_binding_count, entry->config_bindings,
-             options->config_binding_count, options->config_bindings) &&
+             options->config_binding_count, options->config_bindings);
+}
+
+static bool qwen_loom_jit_entry_matches_exact(
+    const qwen_loom_jit_entry_t* entry,
+    const qwen_loom_jit_prepare_options_t* options) {
+  return qwen_loom_jit_entry_matches_code(entry, options) &&
          qwen_loom_jit_workload_arguments_equal(
              entry->workload_argument_count, entry->workload_arguments,
              options->workload_argument_count, options->workload_arguments);
 }
 
-static qwen_loom_jit_entry_t* qwen_loom_jit_lookup(
+static qwen_loom_jit_entry_t* qwen_loom_jit_lookup_exact(
     qwen_loom_jit_t* jit, const qwen_loom_jit_prepare_options_t* options) {
   for (iree_host_size_t i = 0; i < jit->entry_count; ++i) {
-    if (qwen_loom_jit_entry_matches(&jit->entries[i], options)) {
+    if (qwen_loom_jit_entry_matches_exact(&jit->entries[i], options)) {
+      return &jit->entries[i];
+    }
+  }
+  return NULL;
+}
+
+static qwen_loom_jit_entry_t* qwen_loom_jit_lookup_code(
+    qwen_loom_jit_t* jit, const qwen_loom_jit_prepare_options_t* options) {
+  for (iree_host_size_t i = 0; i < jit->entry_count; ++i) {
+    if (qwen_loom_jit_entry_matches_code(&jit->entries[i], options)) {
       return &jit->entries[i];
     }
   }
@@ -696,8 +712,9 @@ void qwen_loom_jit_release(qwen_loom_jit_t* jit) {
   }
 }
 
-static iree_status_t qwen_loom_jit_prepare_uncached(
+static iree_status_t qwen_loom_jit_prepare_miss(
     qwen_loom_jit_t* jit, const qwen_loom_jit_prepare_options_t* options,
+    qwen_loom_executable_t* code_executable,
     qwen_loom_executable_t** out_executable) {
   loomc_config_binding_t* config_bindings = NULL;
   loomc_workspace_t* workspace = NULL;
@@ -711,6 +728,7 @@ static iree_status_t qwen_loom_jit_prepare_uncached(
   loomc_result_t* compile_result = NULL;
   loomc_result_t* emit_result = NULL;
   iree_hal_executable_t* hal_executable = NULL;
+  iree_hal_executable_function_t function = {0};
   qwen_loom_executable_t* prepared_executable = NULL;
   iree_hal_dispatch_config_t dispatch_config;
   memset(&dispatch_config, 0, sizeof(dispatch_config));
@@ -843,7 +861,14 @@ static iree_status_t qwen_loom_jit_prepare_uncached(
     }
   }
 
-  if (iree_status_is_ok(status)) {
+  const bool reuse_code = code_executable != NULL;
+  if (iree_status_is_ok(status) && reuse_code) {
+    hal_executable = code_executable->hal_executable;
+    iree_hal_executable_retain(hal_executable);
+    function = code_executable->function;
+  }
+
+  if (iree_status_is_ok(status) && !reuse_code) {
     const loomc_target_specialization_t specialization = {
         .function_symbol = root_symbol,
         .target_profile = jit->target_profile,
@@ -868,13 +893,13 @@ static iree_status_t qwen_loom_jit_prepare_uncached(
         jit->compiler, workspace, jit->pass_program, module, &compile_options,
         loomc_allocator_from_iree(jit->host_allocator), &compile_result));
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !reuse_code) {
     status = qwen_loom_jit_require_result(
         IREE_SV("compile"), options->source_module->module_path,
         options->function_name, compile_result);
   }
 
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !reuse_code) {
     const loomc_amdgpu_emit_options_t amdgpu_options = {
         .type = LOOMC_STRUCTURE_TYPE_AMDGPU_EMIT_OPTIONS,
         .structure_size = sizeof(amdgpu_options),
@@ -894,14 +919,14 @@ static iree_status_t qwen_loom_jit_prepare_uncached(
         jit->target_environment, workspace, module, &emit_options,
         loomc_allocator_from_iree(jit->host_allocator), &emit_result));
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !reuse_code) {
     status = qwen_loom_jit_require_result(IREE_SV("emit"),
                                           options->source_module->module_path,
                                           options->function_name, emit_result);
   }
 
   const loomc_artifact_t* executable_artifact = NULL;
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !reuse_code) {
     executable_artifact = qwen_loom_jit_find_executable_artifact(emit_result);
     if (!executable_artifact) {
       status = iree_make_status(
@@ -911,7 +936,7 @@ static iree_status_t qwen_loom_jit_prepare_uncached(
   }
 
   const iree_hal_executable_target_t* executable_target = NULL;
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !reuse_code) {
     const iree_hal_executable_target_selection_t selection = {
         .family = IREE_SV("amdgpu"),
         .target_key = iree_string_view_empty(),
@@ -935,7 +960,7 @@ static iree_status_t qwen_loom_jit_prepare_uncached(
       executable_target = selection_result.target;
     }
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !reuse_code) {
     iree_hal_executable_load_params_t load_params;
     iree_hal_executable_load_params_initialize(&load_params);
     load_params.executable_data =
@@ -945,8 +970,7 @@ static iree_status_t qwen_loom_jit_prepare_uncached(
                                              &hal_executable);
   }
 
-  iree_hal_executable_function_t function = {0};
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && !reuse_code) {
     status = iree_hal_executable_lookup_function_by_name(
         hal_executable, options->function_name, &function);
   }
@@ -990,7 +1014,7 @@ iree_status_t qwen_loom_jit_prepare(
   IREE_RETURN_IF_ERROR(qwen_loom_jit_validate_prepare_options(options));
 
   iree_slim_mutex_lock(&jit->mutex);
-  qwen_loom_jit_entry_t* entry = qwen_loom_jit_lookup(jit, options);
+  qwen_loom_jit_entry_t* entry = qwen_loom_jit_lookup_exact(jit, options);
   if (entry) {
     qwen_loom_executable_retain(entry->executable);
     *out_executable = entry->executable;
@@ -998,9 +1022,10 @@ iree_status_t qwen_loom_jit_prepare(
     return iree_ok_status();
   }
 
+  qwen_loom_jit_entry_t* code_entry = qwen_loom_jit_lookup_code(jit, options);
   qwen_loom_executable_t* executable = NULL;
-  iree_status_t status =
-      qwen_loom_jit_prepare_uncached(jit, options, &executable);
+  iree_status_t status = qwen_loom_jit_prepare_miss(
+      jit, options, code_entry ? code_entry->executable : NULL, &executable);
   if (iree_status_is_ok(status)) {
     status = qwen_loom_jit_store(jit, options, executable);
   }

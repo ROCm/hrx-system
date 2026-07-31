@@ -85,8 +85,10 @@ void qwen_loom_jit_release(qwen_loom_jit_t* jit);
 // Prepares or reuses one exact exported executable.
 //
 // Source identity and bytes, function name, config bindings, and workload
-// arguments all participate in cache identity. Concurrent cache misses are
-// serialized by the JIT.
+// arguments all participate in exact prepared-entry identity. Entries with the
+// same source, root, and configuration share loaded code while retaining their
+// workload-derived dispatch geometry. Concurrent cache misses are serialized by
+// the JIT.
 iree_status_t qwen_loom_jit_prepare(
     qwen_loom_jit_t* jit, const qwen_loom_jit_prepare_options_t* options,
     qwen_loom_executable_t** out_executable);

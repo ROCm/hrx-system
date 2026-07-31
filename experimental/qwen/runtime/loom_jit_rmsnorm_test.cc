@@ -337,10 +337,12 @@ static iree_status_t RunRmsnormFixture(const std::string& fixture_directory) {
       qwen_loom_executable_dispatch_config(distinct_executable_ptr.get());
   if (distinct_executable == executable_ptr.get() ||
       qwen_loom_jit_entry_count(jit_ptr.get()) != 2 ||
-      distinct_dispatch_config.workgroup_count[0] != 511) {
+      distinct_dispatch_config.workgroup_count[0] != 511 ||
+      qwen_loom_executable_hal_executable(distinct_executable_ptr.get()) !=
+          qwen_loom_executable_hal_executable(executable_ptr.get())) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
-        "workload values do not participate in exact Qwen JIT identity");
+        "workload values did not retain exact geometry over shared code");
   }
 
   iree_hal_buffer_view_t* input_view = nullptr;
