@@ -245,6 +245,7 @@ loom_cc_library(
     hdrs = ["function_contract.h"],
     deps = [
         ":facts",
+        ":facts_builder",
         ":launch",
         ":types",
         "//loom/src/loom/analysis:symbol_facts",
@@ -254,6 +255,7 @@ loom_cc_library(
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops/target",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 

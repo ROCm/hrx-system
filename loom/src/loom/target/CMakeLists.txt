@@ -282,9 +282,11 @@ loom_cc_library(
     "function_contract.c"
   DEPS
     ::facts
+    ::facts_builder
     ::launch
     ::types
     iree::base
+    iree::base::internal::arena
     loom::analysis::symbol_facts
     loom::error::emitter
     loom::error::error_defs

@@ -11,6 +11,7 @@
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/ops/target/facts.h"
+#include "loom/target/facts_builder.h"
 #include "loom/target/launch.h"
 
 bool loom_target_function_contract_bundles_compatible(
@@ -403,5 +404,88 @@ iree_status_t loom_target_function_contract_resolve_from_bundle(
     out_bundle_storage->export_plan.linkage = func_facts->export_linkage;
   }
   *out_valid = true;
+  return iree_ok_status();
+}
+
+static void loom_target_function_contract_record_authorship(
+    const loom_func_symbol_facts_t* func_facts,
+    loom_target_facts_t* effective_facts) {
+  if (func_facts->has_abi) {
+    loom_target_fact_field_set_insert(&effective_facts->authored_fields,
+                                      LOOM_TARGET_FACT_FIELD_ABI);
+  }
+  if (!iree_string_view_is_empty(func_facts->export_symbol)) {
+    loom_target_fact_field_set_insert(&effective_facts->authored_fields,
+                                      LOOM_TARGET_FACT_FIELD_EXPORT_SYMBOL);
+  }
+  if (func_facts->has_export_linkage) {
+    loom_target_fact_field_set_insert(&effective_facts->authored_fields,
+                                      LOOM_TARGET_FACT_FIELD_LINKAGE);
+  }
+}
+
+iree_status_t loom_target_function_contract_refine_facts(
+    const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
+    iree_string_view_t target_name, const loom_target_facts_t* base_facts,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    bool* out_valid, const loom_target_facts_t** out_facts) {
+  *out_valid = false;
+  *out_facts = NULL;
+
+  loom_target_bundle_storage_t bundle_storage = {0};
+  IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve_from_bundle(
+      module, func_facts, target_name, &base_facts->storage.bundle,
+      diagnostic_emitter, out_valid, &bundle_storage));
+  if (!*out_valid) {
+    return iree_ok_status();
+  }
+
+  loom_target_facts_t* effective_facts = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_target_facts_builder_clone(base_facts, arena, &effective_facts));
+  loom_target_facts_builder_replace_bundle(&bundle_storage.bundle,
+                                           effective_facts);
+  loom_target_function_contract_record_authorship(func_facts, effective_facts);
+  *out_facts = effective_facts;
+  return iree_ok_status();
+}
+
+iree_status_t loom_target_function_contract_resolve_facts(
+    const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
+    const loom_func_symbol_facts_t* func_facts,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    bool* out_valid, const loom_target_facts_t** out_facts) {
+  *out_valid = false;
+  *out_facts = NULL;
+
+  const loom_target_symbol_facts_t* target = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_function_contract_lookup_target(
+      module, fact_table, func_facts, diagnostic_emitter, out_valid, &target));
+  if (!*out_valid) {
+    return iree_ok_status();
+  }
+  return loom_target_function_contract_refine_facts(
+      module, func_facts, target->name, target->projection, diagnostic_emitter,
+      arena, out_valid, out_facts);
+}
+
+iree_status_t loom_target_function_contract_refine_hal_workgroup_size(
+    const loom_func_symbol_facts_t* func_facts, iree_string_view_t target_name,
+    const loom_target_workgroup_size_t* required_workgroup_size,
+    const loom_target_facts_t* base_facts,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    bool* out_valid, const loom_target_facts_t** out_facts) {
+  *out_valid = false;
+  *out_facts = NULL;
+
+  loom_target_facts_t* effective_facts = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_target_facts_builder_clone(base_facts, arena, &effective_facts));
+  IREE_RETURN_IF_ERROR(loom_target_function_contract_apply_hal_workgroup_size(
+      func_facts, target_name, required_workgroup_size, diagnostic_emitter,
+      &effective_facts->storage, out_valid));
+  if (*out_valid) {
+    *out_facts = effective_facts;
+  }
   return iree_ok_status();
 }
