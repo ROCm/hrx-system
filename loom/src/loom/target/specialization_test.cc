@@ -11,7 +11,6 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/analysis/symbol_facts.h"
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
@@ -29,14 +28,26 @@ namespace {
 
 using ModulePtr = ::loom::testing::ModulePtr;
 
-static const loom_target_profile_type_t kTestProfileType = {
-    /*.name=*/IREE_SVL("specialization-test"),
-};
-
 typedef struct TestTargetProfile {
   loom_target_profile_t base;
   loom_test_target_kind_t kind;
 } TestTargetProfile;
+
+static iree_status_t ProjectTestProfileFacts(
+    const loom_target_profile_t* base_profile, iree_arena_allocator_t* arena,
+    loom_target_facts_t* out_facts) {
+  (void)arena;
+  const auto* profile =
+      reinterpret_cast<const TestTargetProfile*>(base_profile);
+  out_facts->selector = profile->kind;
+  return iree_ok_status();
+}
+
+static const loom_target_profile_type_t kTestProfileType = {
+    /*.name=*/IREE_SVL("specialization-test"),
+    /*.fact_type=*/&loom_test_target_fact_type,
+    /*.project_facts=*/ProjectTestProfileFacts,
+};
 
 static const TestTargetProfile* TestProfileCast(
     const loom_target_profile_t* profile) {
@@ -278,6 +289,7 @@ func.def public target(@unrequested_family) @unrequested() {
   const loom_target_specialization_result_t result =
       Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
   ASSERT_EQ(result.error_count, 0u);
+  ASSERT_EQ(result.function_versions.count, 2u);
 
   const loom_func_like_t generic = Function(module.get(), IREE_SV("generic"));
   const loom_func_like_t targetless =
@@ -299,6 +311,29 @@ func.def public target(@unrequested_family) @unrequested() {
             &exact_profile.base);
   EXPECT_EQ(loom_target_specialization_context_lookup(
                 &result.context, module.get(), unrequested),
+            nullptr);
+
+  const loom_target_function_version_t* generic_version =
+      loom_target_function_version_list_find(&result.function_versions,
+                                             generic);
+  ASSERT_NE(generic_version, nullptr);
+  ASSERT_NE(generic_version->authored_target_facts, nullptr);
+  EXPECT_EQ(generic_version->authored_target_facts->selector,
+            LOOM_TEST_TARGET_KIND_LOW_CORE);
+  ASSERT_NE(generic_version->effective_target_facts, nullptr);
+  EXPECT_EQ(generic_version->effective_target_facts->selector,
+            LOOM_TEST_TARGET_KIND_LOW_CORE);
+
+  const loom_target_function_version_t* targetless_version =
+      loom_target_function_version_list_find(&result.function_versions,
+                                             targetless);
+  ASSERT_NE(targetless_version, nullptr);
+  EXPECT_EQ(targetless_version->authored_target_facts, nullptr);
+  ASSERT_NE(targetless_version->effective_target_facts, nullptr);
+  EXPECT_EQ(targetless_version->effective_target_facts->selector,
+            LOOM_TEST_TARGET_KIND_LOW_CORE);
+  EXPECT_EQ(loom_target_function_version_list_find(&result.function_versions,
+                                                   unrequested),
             nullptr);
 }
 
@@ -323,31 +358,36 @@ func.def public target(@exact) @entry() {
   const loom_target_specialization_result_t result =
       Specialize(module.get(), &request, 1);
   ASSERT_EQ(result.error_count, 0u);
+  ASSERT_EQ(result.function_versions.count, 1u);
   const loom_symbol_ref_t effective_ref =
       loom_func_like_target(Function(module.get(), IREE_SV("entry")));
   EXPECT_EQ(effective_ref.module_id, authored_ref.module_id);
   EXPECT_EQ(effective_ref.symbol_id, authored_ref.symbol_id);
+  const loom_target_function_version_t* version =
+      loom_target_function_version_const_cast(
+          result.function_versions.values[0]);
+  ASSERT_NE(version, nullptr);
+  EXPECT_EQ(version->effective_target_facts->selector,
+            LOOM_TEST_TARGET_KIND_LOW_CORE);
 }
 
 TEST_F(TargetSpecializationTest,
-       MaterializesDistinctTargetsForDistinctAuthoredFunctionFacts) {
+       ProducesVersionFactsBesideDistinctBoundTargets) {
   ModulePtr module = Parse(R"(
 test.target<low_core> @left_requirement {
   abi = hal_kernel,
-  export_symbol = "left_kernel",
   linkage = dso_local
 }
 test.target<low_core> @right_requirement {
   abi = object_function,
-  export_symbol = "right_function",
   linkage = default
 }
 
-func.def public target(@left_requirement) @left() {
+func.def public target(@left_requirement) export("left_kernel") @left() {
   func.return
 }
 
-func.def public target(@right_requirement) @right() {
+func.def public target(@right_requirement) export("right_function") @right() {
   func.return
 }
 )");
@@ -367,8 +407,36 @@ func.def public target(@right_requirement) @right() {
   const loom_target_specialization_result_t result =
       Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
   ASSERT_EQ(result.error_count, 0u);
+  ASSERT_EQ(result.function_versions.count, 2u);
   const loom_func_like_t left = Function(module.get(), IREE_SV("left"));
   const loom_func_like_t right = Function(module.get(), IREE_SV("right"));
+  const loom_target_function_version_t* left_version =
+      loom_target_function_version_list_find(&result.function_versions, left);
+  const loom_target_function_version_t* right_version =
+      loom_target_function_version_list_find(&result.function_versions, right);
+  ASSERT_NE(left_version, nullptr);
+  ASSERT_NE(right_version, nullptr);
+  const loom_target_facts_t* left_version_facts =
+      left_version->effective_target_facts;
+  const loom_target_facts_t* right_version_facts =
+      right_version->effective_target_facts;
+  ASSERT_NE(left_version_facts, nullptr);
+  ASSERT_NE(right_version_facts, nullptr);
+  EXPECT_EQ(left_version_facts->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_HAL_KERNEL);
+  EXPECT_EQ(right_version_facts->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_OBJECT_FUNCTION);
+  EXPECT_TRUE(iree_string_view_equal(
+      left_version_facts->storage.export_plan.export_symbol,
+      IREE_SV("left_kernel")));
+  EXPECT_TRUE(iree_string_view_equal(
+      right_version_facts->storage.export_plan.export_symbol,
+      IREE_SV("right_function")));
+  EXPECT_EQ(left_version_facts->storage.export_plan.linkage,
+            LOOM_TARGET_LINKAGE_DSO_LOCAL);
+  EXPECT_EQ(right_version_facts->storage.export_plan.linkage,
+            LOOM_TARGET_LINKAGE_DEFAULT);
+
   const loom_symbol_ref_t left_ref = loom_func_like_target(left);
   const loom_symbol_ref_t right_ref = loom_func_like_target(right);
   EXPECT_NE(left_ref.symbol_id, right_ref.symbol_id);
@@ -379,35 +447,6 @@ func.def public target(@right_requirement) @right() {
             LOOM_TEST_TARGET_KIND_LOW_CORE);
   EXPECT_EQ(loom_test_target_kind(right_target_op),
             LOOM_TEST_TARGET_KIND_LOW_CORE);
-
-  loom_symbol_fact_table_t fact_table = {};
-  loom_symbol_fact_table_initialize(&fact_table, &arena_);
-  const loom_symbol_facts_base_t* left_base_facts = nullptr;
-  IREE_ASSERT_OK(loom_symbol_fact_table_lookup_ref(&fact_table, module.get(),
-                                                   left_ref, &left_base_facts));
-  const loom_target_symbol_facts_t* left_facts =
-      loom_target_symbol_facts_cast(left_base_facts);
-  ASSERT_NE(left_facts, nullptr);
-  const loom_symbol_facts_base_t* right_base_facts = nullptr;
-  IREE_ASSERT_OK(loom_symbol_fact_table_lookup_ref(
-      &fact_table, module.get(), right_ref, &right_base_facts));
-  const loom_target_symbol_facts_t* right_facts =
-      loom_target_symbol_facts_cast(right_base_facts);
-  ASSERT_NE(right_facts, nullptr);
-  EXPECT_EQ(left_facts->projection->storage.export_plan.abi_kind,
-            LOOM_TARGET_ABI_HAL_KERNEL);
-  EXPECT_EQ(right_facts->projection->storage.export_plan.abi_kind,
-            LOOM_TARGET_ABI_OBJECT_FUNCTION);
-  EXPECT_TRUE(iree_string_view_equal(
-      left_facts->projection->storage.export_plan.export_symbol,
-      IREE_SV("left_kernel")));
-  EXPECT_TRUE(iree_string_view_equal(
-      right_facts->projection->storage.export_plan.export_symbol,
-      IREE_SV("right_function")));
-  EXPECT_EQ(left_facts->projection->storage.export_plan.linkage,
-            LOOM_TARGET_LINKAGE_DSO_LOCAL);
-  EXPECT_EQ(right_facts->projection->storage.export_plan.linkage,
-            LOOM_TARGET_LINKAGE_DEFAULT);
 }
 
 TEST_F(TargetSpecializationTest,
@@ -444,6 +483,7 @@ func.def public @otherwise_compatible() {
   const loom_target_specialization_result_t result = Specialize(
       module.get(), requests, IREE_ARRAYSIZE(requests), &diagnostic_collector);
   ASSERT_EQ(result.error_count, 1u);
+  EXPECT_EQ(result.function_versions.count, 0u);
   EXPECT_EQ(diagnostic_collector.error, LOOM_ERR_TARGET_052);
   ASSERT_EQ(diagnostic_collector.strings.size(), 3u);
   EXPECT_EQ(diagnostic_collector.strings[0], "conflict");
@@ -456,6 +496,36 @@ func.def public @otherwise_compatible() {
   EXPECT_FALSE(loom_symbol_ref_is_valid(loom_func_like_target(
       Function(module.get(), IREE_SV("otherwise_compatible")))));
   EXPECT_EQ(result.context.profiles_by_function_name_id, nullptr);
+}
+
+TEST_F(TargetSpecializationTest, RejectsUnlinkedProfileFamily) {
+  ModulePtr module = Parse(R"(
+func.def public @entry() {
+  func.return
+}
+)");
+  static const loom_target_profile_type_t kUnlinkedProfileType = {
+      /*.name=*/IREE_SVL("unlinked"),
+      /*.fact_type=*/&loom_test_target_fact_type,
+      /*.project_facts=*/ProjectTestProfileFacts,
+  };
+  TestTargetProfile profile = MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  profile.base.type = &kUnlinkedProfileType;
+  const loom_target_specialization_request_t request = {
+      /*.function_name=*/IREE_SV("entry"),
+      /*.target_profile=*/&profile.base,
+  };
+  loom_target_specialization_result_t result = {};
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_target_specialize_functions(
+                            &environment_, module.get(),
+                            {
+                                /*.values=*/&request,
+                                /*.count=*/1,
+                            },
+                            /*diagnostic_emitter=*/{}, &arena_, &result));
+  EXPECT_EQ(result.function_versions.count, 0u);
 }
 
 TEST_F(TargetSpecializationTest, RejectsMissingAndDuplicateFunctions) {

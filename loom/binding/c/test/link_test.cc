@@ -59,8 +59,19 @@ using TargetEnvironmentPtr =
 using TargetProfilePtr =
     HandlePtr<loomc_target_profile_t, loomc_target_profile_release>;
 
+static iree_status_t ProjectFakeTargetProfileFacts(
+    const loom_target_profile_t* profile, iree_arena_allocator_t* arena,
+    loom_target_facts_t* out_facts) {
+  (void)profile;
+  (void)arena;
+  out_facts->selector = LOOM_TEST_TARGET_KIND_LOW_CORE;
+  return iree_ok_status();
+}
+
 static const loom_target_profile_type_t kFakeTargetProfileType = {
     /*.name=*/IREE_SVL("fake-link"),
+    /*.fact_type=*/&loom_test_target_fact_type,
+    /*.project_facts=*/ProjectFakeTargetProfileFacts,
 };
 
 static loom_target_profile_t kFakeTargetProfile = {

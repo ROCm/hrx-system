@@ -116,7 +116,6 @@ from loom.dsl import (
     Successor,
     SymbolDefinition,
     SymbolReference,
-    TargetFactSatisfaction,
     TargetLikeInterface,
     TiedResult,
     Writes,
@@ -2380,7 +2379,7 @@ test_target = Op(
             symbol="symbol",
             selector="kind",
             bundle_table="loom_test_target_bundles",
-            fact_satisfaction=TargetFactSatisfaction.STRUCTURAL,
+            fact_type="loom_test_target_fact_type",
         )
     ],
     symbol_def=SymbolDefinition(

@@ -214,6 +214,9 @@ loom_cc_library(
   SRCS
     "specialization.c"
   DEPS
+    ::facts_builder
+    ::function_contract
+    ::function_version
     ::profile
     ::provider
     iree::base
@@ -222,6 +225,7 @@ loom_cc_library(
     loom::error::emitter
     loom::error::error_defs
     loom::ir
+    loom::ops::func_symbol_facts
     loom::ops::op_defs
     loom::ops::target
     loom::rewrite::rewriter
@@ -240,7 +244,6 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
-    loom::analysis::symbol_facts
     loom::error::error_defs
     loom::format::text::parser
     loom::ir

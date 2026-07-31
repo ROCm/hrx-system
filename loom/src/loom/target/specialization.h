@@ -8,9 +8,9 @@
 //
 // Specialization is an invocation-local compiler action. Each request names
 // one function version and supplies the structured target profile that should
-// become its exact effective target. The binder writes that durable target
-// identity onto the function and retains only supplemental profile facts in
-// the returned context.
+// become its exact effective target. The result carries compiler-owned
+// function-version facts alongside the currently bound target identity and
+// supplemental profile context.
 
 #ifndef LOOM_TARGET_SPECIALIZATION_H_
 #define LOOM_TARGET_SPECIALIZATION_H_
@@ -19,6 +19,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/target/function_version.h"
 #include "loom/target/profile.h"
 
 #ifdef __cplusplus
@@ -60,6 +61,9 @@ typedef struct loom_target_specialization_context_t {
 
 // Result of binding a specialization request list.
 typedef struct loom_target_specialization_result_t {
+  // Concrete target-refined function versions participating in compilation.
+  loom_function_version_list_t function_versions;
+
   // Supplemental profile context for successfully bound functions.
   loom_target_specialization_context_t context;
 
@@ -71,13 +75,14 @@ typedef struct loom_target_specialization_result_t {
 // Resolves and binds every target specialization request.
 //
 // The input module must be verified and mutable for this compiler invocation.
-// All function names, profiles, and authored target requirements are resolved
-// before any function target attribute is changed. Source incompatibilities
-// emit structured diagnostics and return OK with a nonzero |error_count|;
-// malformed external requests and infrastructure failures return a status.
+// All function names, profiles, authored target requirements, and
+// function-local contracts are resolved before any function target attribute
+// is changed. Source incompatibilities emit structured diagnostics and return
+// OK with a nonzero |error_count|; malformed external requests and
+// infrastructure failures return a status.
 //
 // Target profiles and |arena| storage must outlive every pass that consumes the
-// returned context.
+// returned context or function versions.
 iree_status_t loom_target_specialize_functions(
     const loom_target_environment_t* environment, loom_module_t* module,
     loom_target_specialization_request_list_t requests,
