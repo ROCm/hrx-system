@@ -38,18 +38,13 @@ static iree_status_t loom_vector_memory_footprint_fact_scope(
     loom_pass_t* pass, const loom_module_t* module, loom_func_like_t function,
     loom_pass_value_fact_scope_t* out_scope) {
   *out_scope = loom_pass_value_fact_scope_function(function);
-  if (!pass->environment) {
-    return iree_ok_status();
-  }
-
   const loom_target_facts_t* target_facts = NULL;
   bool resolved = false;
   IREE_RETURN_IF_ERROR(loom_target_pass_resolve_function_facts(
       pass, module, function, &resolved, &target_facts));
   if (resolved) {
-    *out_scope = loom_pass_value_fact_scope_function_for_target(
-        function, loom_target_facts_bundle(target_facts),
-        /*target_profile=*/NULL);
+    *out_scope =
+        loom_pass_value_fact_scope_function_for_target(function, target_facts);
   }
   return iree_ok_status();
 }

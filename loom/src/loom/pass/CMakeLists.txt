@@ -372,7 +372,7 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::ops::test
     loom::pass::test::harness
-    loom::target::profile
+    loom::target::facts
 )
 
 loom_cc_test(

@@ -959,10 +959,10 @@ typedef struct loom_kernel_barrier_control_verifier_t {
   loom_control_uniformity_info_t control_uniformity;
 } loom_kernel_barrier_control_verifier_t;
 
-static iree_status_t loom_kernel_barrier_control_target_bundle(
+static iree_status_t loom_kernel_barrier_control_target_facts(
     loom_kernel_barrier_control_verifier_t* verifier,
-    const loom_target_bundle_t** out_target_bundle) {
-  *out_target_bundle = NULL;
+    const loom_target_facts_t** out_target_facts) {
+  *out_target_facts = NULL;
   const loom_symbol_ref_t target_ref =
       loom_func_like_target(verifier->function);
   if (!loom_symbol_ref_is_valid(target_ref) || target_ref.module_id != 0 ||
@@ -978,7 +978,7 @@ static iree_status_t loom_kernel_barrier_control_target_bundle(
   const loom_target_symbol_facts_t* target_facts =
       loom_target_symbol_facts_cast(base_facts);
   if (target_facts) {
-    *out_target_bundle = &target_facts->projection->storage.bundle;
+    *out_target_facts = target_facts->projection;
   }
   return iree_ok_status();
 }
@@ -987,12 +987,12 @@ static iree_status_t loom_kernel_barrier_control_verifier_initialize(
     loom_kernel_barrier_control_verifier_t* verifier) {
   if (verifier->fact_table.arena) return iree_ok_status();
 
-  const loom_target_bundle_t* target_bundle = NULL;
+  const loom_target_facts_t* target_facts = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_kernel_barrier_control_target_bundle(verifier, &target_bundle));
+      loom_kernel_barrier_control_target_facts(verifier, &target_facts));
   IREE_RETURN_IF_ERROR(loom_value_fact_table_initialize(
       &verifier->fact_table, verifier->arena, verifier->module->values.count));
-  verifier->fact_table.context.target_bundle = target_bundle;
+  verifier->fact_table.context.target_facts = target_facts;
   IREE_RETURN_IF_ERROR(loom_value_fact_table_compute(
       &verifier->fact_table, verifier->module, verifier->function));
   loom_control_uniformity_info_initialize(

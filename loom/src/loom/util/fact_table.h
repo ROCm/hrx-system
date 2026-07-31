@@ -54,8 +54,7 @@ typedef struct loom_value_fact_domain_t loom_value_fact_domain_t;
 typedef struct loom_value_fact_cfg_graph_entry_t
     loom_value_fact_cfg_graph_entry_t;
 typedef struct loom_cfg_graph_t loom_cfg_graph_t;
-typedef struct loom_target_bundle_t loom_target_bundle_t;
-typedef struct loom_target_profile_t loom_target_profile_t;
+typedef struct loom_target_facts_t loom_target_facts_t;
 
 typedef const loom_value_fact_domain_t* (
     *loom_value_fact_type_domain_resolver_fn_t)(
@@ -575,15 +574,10 @@ struct loom_fact_context_t {
   // function-like projection.
   loom_func_like_t function;
 
-  // Optional selected target bundle for target-sensitive fact inference.
-  // Generic analyses leave this NULL and receive source-level facts.
-  const loom_target_bundle_t* target_bundle;
-
-  // Invocation profile whose facts contributed to target_bundle. Its bundle
-  // projection may be less specific after compatible function refinement.
-  // Target-independent fact domains leave this NULL; target-family domains
-  // access it through their checked profile cast.
-  const loom_target_profile_t* target_profile;
+  // Optional immutable target facts for target-sensitive inference. Generic
+  // analyses leave this NULL and receive source-level facts. Target-family
+  // domains access family-owned data through their checked fact cast.
+  const loom_target_facts_t* target_facts;
 
   // Optional type-domain resolver installed by layers that own registered type
   // descriptors. The fact table itself intentionally does not depend on the

@@ -6,6 +6,8 @@
 
 // Fact implementations for the kernel dialect.
 
+#include "loom/target/facts.h"
+
 #include <stdint.h>
 
 #include "iree/base/internal/math.h"
@@ -287,7 +289,8 @@ static bool loom_kernel_launch_config_operand_facts(
 
 static const loom_target_bundle_t* loom_kernel_target_bundle(
     const loom_fact_context_t* context) {
-  const loom_target_bundle_t* bundle = context->target_bundle;
+  const loom_target_bundle_t* bundle =
+      loom_target_facts_bundle(context->target_facts);
   if (!bundle) {
     return NULL;
   }

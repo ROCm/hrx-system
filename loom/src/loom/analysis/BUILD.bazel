@@ -264,6 +264,7 @@ loom_cc_library(
         "//loom/src/loom/ops:func_symbol_facts",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/target:facts",
         "//loom/src/loom/target:function_contract",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base",

@@ -174,9 +174,8 @@ static iree_status_t loom_stage_loop_carried_fragments_fact_scope(
   IREE_RETURN_IF_ERROR(loom_target_pass_resolve_function_facts(
       pass, module, function, &resolved, &target_facts));
   if (resolved) {
-    *out_scope = loom_pass_value_fact_scope_function_for_target(
-        function, loom_target_facts_bundle(target_facts),
-        /*target_profile=*/NULL);
+    *out_scope =
+        loom_pass_value_fact_scope_function_for_target(function, target_facts);
   }
   return iree_ok_status();
 }
@@ -391,8 +390,9 @@ static bool loom_stage_loop_carried_fragments_exact_subgroup_count(
   }
 
   const loom_value_fact_table_t* fact_table = context->rewriter->fact_table;
-  const loom_target_bundle_t* bundle =
-      fact_table ? fact_table->context.target_bundle : NULL;
+  const loom_target_facts_t* target_facts =
+      fact_table ? fact_table->context.target_facts : NULL;
+  const loom_target_bundle_t* bundle = loom_target_facts_bundle(target_facts);
   if (!bundle || !bundle->snapshot || !bundle->export_plan ||
       bundle->export_plan->abi_kind != LOOM_TARGET_ABI_HAL_KERNEL ||
       bundle->snapshot->subgroup_size == 0) {

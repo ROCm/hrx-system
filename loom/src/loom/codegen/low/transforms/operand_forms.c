@@ -1272,8 +1272,8 @@ static iree_status_t loom_low_select_operand_forms_function(
   if (target.descriptor_set->operand_form_count != 0) {
     IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
         pass, module,
-        loom_pass_value_fact_scope_function_for_target(
-            function, loom_low_resolved_target_bundle(&target), NULL),
+        loom_pass_value_fact_scope_function_for_target(function,
+                                                       target.target_facts),
         &value_facts));
   }
 

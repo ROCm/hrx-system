@@ -56,7 +56,7 @@ loom_cc_test(
     loom::ir
     loom::ops::op_defs
     loom::ops::test
-    loom::target::profile
+    loom::target::facts
     loom::target::types
 )
 

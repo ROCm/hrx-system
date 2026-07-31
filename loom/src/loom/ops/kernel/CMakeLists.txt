@@ -51,6 +51,7 @@ loom_generated_cc_library(
     loom::ops::view
     loom::rewrite::rewriter
     loom::target::capability_facts
+    loom::target::facts
     loom::target::types
     loom::util::fact_table
     loom::util::walk

@@ -7,6 +7,7 @@
 #include "loom/target/capability_facts.h"
 
 #include "iree/testing/gtest.h"
+#include "loom/target/facts.h"
 #include "loom/target/types.h"
 #include "loom/util/fact_table.h"
 
@@ -32,10 +33,10 @@ TEST(TargetCapabilityFactsTest, QueriesGenericTargetSnapshotValues) {
   snapshot.max_workgroup_count.y = 1024;
   snapshot.max_workgroup_count.z = 1;
 
-  loom_target_bundle_t bundle = {};
-  bundle.snapshot = &snapshot;
+  loom_target_facts_t target_facts = {};
+  target_facts.storage.snapshot = snapshot;
   loom_fact_context_t context = {};
-  context.target_bundle = &bundle;
+  context.target_facts = &target_facts;
 
   uint64_t value = 0;
   EXPECT_TRUE(loom_target_fact_context_query_u64(
@@ -53,10 +54,10 @@ TEST(TargetCapabilityFactsTest, QueriesGenericTargetSnapshotValues) {
 TEST(TargetCapabilityFactsTest, OmitsUnknownAndTargetFamilyValues) {
   loom_target_snapshot_t snapshot = {};
   snapshot.index_bitwidth = 64;
-  loom_target_bundle_t bundle = {};
-  bundle.snapshot = &snapshot;
+  loom_target_facts_t target_facts = {};
+  target_facts.storage.snapshot = snapshot;
   loom_fact_context_t context = {};
-  context.target_bundle = &bundle;
+  context.target_facts = &target_facts;
 
   uint64_t value = 99;
   EXPECT_FALSE(loom_target_fact_context_query_u64(

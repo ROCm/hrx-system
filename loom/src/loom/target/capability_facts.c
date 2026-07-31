@@ -6,6 +6,7 @@
 
 #include "loom/target/capability_facts.h"
 
+#include "loom/target/facts.h"
 #include "loom/target/types.h"
 #include "loom/util/fact_table.h"
 
@@ -114,13 +115,13 @@ bool loom_target_fact_context_query_u64(const loom_fact_context_t* context,
                                         uint64_t* out_value) {
   IREE_ASSERT_ARGUMENT(out_value);
   *out_value = 0;
-  if (!context || !context->target_bundle ||
-      !context->target_bundle->snapshot) {
+  if (!context || !context->target_facts) {
     return false;
   }
+  const loom_target_snapshot_t* snapshot =
+      &context->target_facts->storage.snapshot;
   if (iree_string_view_equal(namespace_name, IREE_SV("target"))) {
-    return loom_target_snapshot_query_u64(context->target_bundle->snapshot, key,
-                                          out_value);
+    return loom_target_snapshot_query_u64(snapshot, key, out_value);
   }
   return false;
 }

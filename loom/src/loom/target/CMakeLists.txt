@@ -163,6 +163,7 @@ loom_cc_library(
   SRCS
     "capability_facts.c"
   DEPS
+    ::facts
     ::types
     iree::base
     loom::util::fact_table
@@ -176,6 +177,7 @@ loom_cc_test(
     "capability_facts_test.cc"
   DEPS
     ::capability_facts
+    ::facts
     ::types
     iree::testing::gtest
     iree::testing::gtest_main

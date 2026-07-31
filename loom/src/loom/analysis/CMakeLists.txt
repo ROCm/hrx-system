@@ -302,6 +302,7 @@ loom_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::kernel
     loom::pass::value_facts
+    loom::target::facts
     loom::target::function_contract
     loom::target::types
   PUBLIC

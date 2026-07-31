@@ -1272,8 +1272,7 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->scratch.value_ids.capacity = 0;
   table->context.table = table;
   table->context.function = (loom_func_like_t){0};
-  table->context.target_bundle = NULL;
-  table->context.target_profile = NULL;
+  table->context.target_facts = NULL;
 }
 
 static iree_host_size_t loom_value_fact_table_cfg_region_hash(
