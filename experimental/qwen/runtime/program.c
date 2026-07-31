@@ -77,6 +77,13 @@ typedef enum qwen_program_feed_forward_schedule_e {
   QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8 = 1,
 } qwen_program_feed_forward_schedule_t;
 
+typedef enum qwen_program_expert_table_schedule_e {
+  // Independent expert assignment and partition-table dispatches.
+  QWEN_PROGRAM_EXPERT_TABLE_SCHEDULE_SEPARATE = 0,
+  // One Prefill-512 dispatch publishes both table representations.
+  QWEN_PROGRAM_EXPERT_TABLE_SCHEDULE_FUSED_PREFILL_512 = 1,
+} qwen_program_expert_table_schedule_t;
+
 typedef enum qwen_program_executable_ordinal_e {
   QWEN_PROGRAM_EXECUTABLE_ATTENTION_METADATA = 0,
   QWEN_PROGRAM_EXECUTABLE_ATTENTION_PREPARE_Q8 = 1,
@@ -119,7 +126,8 @@ typedef enum qwen_program_executable_ordinal_e {
   QWEN_PROGRAM_EXECUTABLE_ATTENTION_QKV_POSTPROCESS_FUSED_Q4 = 38,
   QWEN_PROGRAM_EXECUTABLE_ATTENTION_QKV_POSTPROCESS_FUSED_Q6 = 39,
   QWEN_PROGRAM_EXECUTABLE_WEIGHTED_REDUCE_NEXT_RMSNORM = 40,
-  QWEN_PROGRAM_EXECUTABLE_COUNT = 41,
+  QWEN_PROGRAM_EXECUTABLE_EXPERT_TABLE_PARTITION_FUSED = 41,
+  QWEN_PROGRAM_EXECUTABLE_COUNT = 42,
 } qwen_program_executable_ordinal_t;
 
 // Complete output publication owned by a nonterminal grouped feed-forward.
@@ -185,6 +193,8 @@ struct qwen_program_t {
   qwen_program_attention_prepare_schedule_t attention_prepare_schedule;
   // Routed feed-forward family selected for this program role.
   qwen_program_feed_forward_schedule_t feed_forward_schedule;
+  // Expert and partition table publication selected for nonterminal layers.
+  qwen_program_expert_table_schedule_t expert_table_schedule;
   // Prepared executable for each unique recorded kernel specialization.
   qwen_loom_executable_t* executables[QWEN_PROGRAM_EXECUTABLE_COUNT];
   // Number of dispatches recorded in the command buffer.
@@ -664,15 +674,27 @@ qwen_program_select_feed_forward_schedule(qwen_program_kind_t kind) {
              : QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16;
 }
 
+static qwen_program_expert_table_schedule_t
+qwen_program_select_expert_table_schedule(qwen_program_kind_t kind,
+                                          iree_host_size_t token_count) {
+  return kind == QWEN_PROGRAM_KIND_PREFILL && token_count == 512
+             ? QWEN_PROGRAM_EXPERT_TABLE_SCHEDULE_FUSED_PREFILL_512
+             : QWEN_PROGRAM_EXPERT_TABLE_SCHEDULE_SEPARATE;
+}
+
 static bool qwen_program_kind_is_full_model(qwen_program_kind_t kind) {
   return kind == QWEN_PROGRAM_KIND_PREFILL || kind == QWEN_PROGRAM_KIND_DECODE;
 }
 
 static qwen_full_program_layout_flags_t qwen_program_full_layout_flags(
-    qwen_program_kind_t kind) {
-  return kind == QWEN_PROGRAM_KIND_DECODE
-             ? QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION |
-                   QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_STAGE_COMPLETION
+    qwen_program_kind_t kind, iree_host_size_t token_count) {
+  if (kind == QWEN_PROGRAM_KIND_DECODE) {
+    return QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION |
+           QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_STAGE_COMPLETION;
+  }
+  return qwen_program_select_expert_table_schedule(kind, token_count) ==
+                 QWEN_PROGRAM_EXPERT_TABLE_SCHEDULE_FUSED_PREFILL_512
+             ? QWEN_FULL_PROGRAM_LAYOUT_FLAG_PREFILL_FUSED_EXPERT_TABLE
              : QWEN_FULL_PROGRAM_LAYOUT_FLAG_NONE;
 }
 
@@ -1097,6 +1119,12 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   const int64_t interlayer_token_workload[] = {
       (int64_t)program->token_count,
   };
+  const int64_t expert_table_partition_workload[] = {
+      (int64_t)program->token_count,
+      route_count,
+      route_stride,
+      expert_count,
+  };
   const int64_t terminal_token_workload[] = {terminal_token_count};
   const int64_t terminal_router_top8_workload[] = {
       terminal_token_count,
@@ -1140,6 +1168,18 @@ static iree_status_t qwen_program_prepare_full_model_executables(
         IREE_ARRAYSIZE(interlayer_token_workload), interlayer_token_workload,
         &program->executables
              [QWEN_PROGRAM_EXECUTABLE_WEIGHTED_REDUCE_NEXT_RMSNORM]);
+  }
+  if (iree_status_is_ok(status) &&
+      program->expert_table_schedule ==
+          QWEN_PROGRAM_EXPERT_TABLE_SCHEDULE_FUSED_PREFILL_512) {
+    status = qwen_program_prepare_kernel(
+        program->model, IREE_SV(QWEN_LOOM_SOURCE_EXPERT_TABLE_PARTITION_FUSED),
+        IREE_SV("qwen3_moe_build_expert_table_partition_prefill_512"),
+        /*config_binding_count=*/0, /*config_bindings=*/NULL,
+        IREE_ARRAYSIZE(expert_table_partition_workload),
+        expert_table_partition_workload,
+        &program->executables
+             [QWEN_PROGRAM_EXECUTABLE_EXPERT_TABLE_PARTITION_FUSED]);
   }
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
@@ -1703,6 +1743,8 @@ static iree_status_t qwen_program_record_grouped_feed_forward(
     iree_hal_buffer_ref_t hidden_state,
     const qwen_layer_program_layout_t* transient,
     const qwen_program_grouped_feed_forward_executables_t* executables,
+    qwen_program_expert_table_schedule_t expert_table_schedule,
+    qwen_program_span_t expert_table_completion_counter,
     const qwen_program_next_attention_publication_t*
         next_attention_publication) {
   const qwen_layer_parameters_t* parameters =
@@ -1771,34 +1813,50 @@ static iree_status_t qwen_program_record_grouped_feed_forward(
       route_stride,
       expert_count,
   };
-  const iree_hal_buffer_ref_t expert_table_bindings[] = {
-      qwen_program_transient_ref(transient->route_ids),
-      qwen_program_transient_ref(transient->expert_table),
-  };
-  if (iree_status_is_ok(status)) {
-    status = qwen_program_record_dispatch(
-        program, executables->expert_table,
-        IREE_ARRAYSIZE(expert_table_constants), expert_table_constants,
-        IREE_ARRAYSIZE(expert_table_bindings), expert_table_bindings);
-  }
-  if (iree_status_is_ok(status)) {
-    status = qwen_program_record_dispatch_barrier(program);
-  }
+  if (expert_table_schedule ==
+      QWEN_PROGRAM_EXPERT_TABLE_SCHEDULE_FUSED_PREFILL_512) {
+    const iree_hal_buffer_ref_t expert_table_bindings[] = {
+        qwen_program_transient_ref(transient->route_ids),
+        qwen_program_transient_ref(transient->expert_table),
+        qwen_program_transient_ref(transient->partition_table),
+        qwen_program_transient_ref(expert_table_completion_counter),
+    };
+    if (iree_status_is_ok(status)) {
+      status = qwen_program_record_dispatch(
+          program, QWEN_PROGRAM_EXECUTABLE_EXPERT_TABLE_PARTITION_FUSED,
+          IREE_ARRAYSIZE(expert_table_constants), expert_table_constants,
+          IREE_ARRAYSIZE(expert_table_bindings), expert_table_bindings);
+    }
+  } else {
+    const iree_hal_buffer_ref_t expert_table_bindings[] = {
+        qwen_program_transient_ref(transient->route_ids),
+        qwen_program_transient_ref(transient->expert_table),
+    };
+    if (iree_status_is_ok(status)) {
+      status = qwen_program_record_dispatch(
+          program, executables->expert_table,
+          IREE_ARRAYSIZE(expert_table_constants), expert_table_constants,
+          IREE_ARRAYSIZE(expert_table_bindings), expert_table_bindings);
+    }
+    if (iree_status_is_ok(status)) {
+      status = qwen_program_record_dispatch_barrier(program);
+    }
 
-  const uint32_t partition_table_constants[] = {
-      token_count,
-      route_count,
-      expert_count,
-  };
-  const iree_hal_buffer_ref_t partition_table_bindings[] = {
-      qwen_program_transient_ref(transient->expert_table),
-      qwen_program_transient_ref(transient->partition_table),
-  };
-  if (iree_status_is_ok(status)) {
-    status = qwen_program_record_dispatch(
-        program, executables->partition_table,
-        IREE_ARRAYSIZE(partition_table_constants), partition_table_constants,
-        IREE_ARRAYSIZE(partition_table_bindings), partition_table_bindings);
+    const uint32_t partition_table_constants[] = {
+        token_count,
+        route_count,
+        expert_count,
+    };
+    const iree_hal_buffer_ref_t partition_table_bindings[] = {
+        qwen_program_transient_ref(transient->expert_table),
+        qwen_program_transient_ref(transient->partition_table),
+    };
+    if (iree_status_is_ok(status)) {
+      status = qwen_program_record_dispatch(
+          program, executables->partition_table,
+          IREE_ARRAYSIZE(partition_table_constants), partition_table_constants,
+          IREE_ARRAYSIZE(partition_table_bindings), partition_table_bindings);
+    }
   }
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_dispatch_barrier(program);
@@ -2014,7 +2072,9 @@ static iree_status_t qwen_program_record_layer_body(
   return qwen_program_record_grouped_feed_forward(
       program, layer_index, (uint32_t)program->token_count,
       qwen_program_request_ref(request_layout->hidden_state),
-      &program->layer_layout, &executables, next_attention_publication_ptr);
+      &program->layer_layout, &executables, program->expert_table_schedule,
+      program->full_layout.expert_table_completion,
+      next_attention_publication_ptr);
 }
 
 static qwen_request_span_t qwen_program_last_hidden_state_row(
@@ -2059,6 +2119,8 @@ static iree_status_t qwen_program_record_terminal_feed_forward(
   return qwen_program_record_grouped_feed_forward(
       program, layer_index, /*token_count=*/1, hidden_state,
       &program->full_layout.terminal_layer, &executables,
+      QWEN_PROGRAM_EXPERT_TABLE_SCHEDULE_SEPARATE,
+      /*expert_table_completion_counter=*/(qwen_program_span_t){0},
       /*next_attention_publication=*/NULL);
 }
 
@@ -2285,7 +2347,8 @@ static iree_status_t qwen_program_validate_options(
     qwen_full_program_layout_t layout;
     return qwen_full_program_layout_calculate(
         options->token_count, options->context_count,
-        qwen_program_full_layout_flags(options->kind), &layout);
+        qwen_program_full_layout_flags(options->kind, options->token_count),
+        &layout);
   }
   qwen_layer_program_layout_t layout;
   return qwen_layer_program_layout_calculate(options->token_count, &layout);
@@ -2345,12 +2408,15 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
       qwen_program_select_attention_prepare_schedule(options->kind);
   program->feed_forward_schedule =
       qwen_program_select_feed_forward_schedule(options->kind);
+  program->expert_table_schedule = qwen_program_select_expert_table_schedule(
+      options->kind, options->token_count);
 
   iree_status_t status = iree_ok_status();
   if (qwen_program_kind_is_full_model(options->kind)) {
     status = qwen_full_program_layout_calculate(
         options->token_count, options->context_count,
-        qwen_program_full_layout_flags(options->kind), &program->full_layout);
+        qwen_program_full_layout_flags(options->kind, options->token_count),
+        &program->full_layout);
     if (iree_status_is_ok(status)) {
       program->layer_layout = program->full_layout.layer;
       program->transient_byte_length =
