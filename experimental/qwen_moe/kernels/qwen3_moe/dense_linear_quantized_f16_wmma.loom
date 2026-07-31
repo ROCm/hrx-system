@@ -141,21 +141,10 @@ func.def inline @qwen3_moe_dense_q4k_wmma_vector4(%weight: buffer, %row_byte_bas
   func.return %result : vector<4xf16>
 }
 
-// Low-fixed-cost Q4_K schedule for decode and small prefill. Each wave owns
-// one output channel and contracts a Q8_1 activation row directly against the
-// original GGUF weight row. This complements the grouped WMMA schedule below:
-// it gives up cross-token weight reuse in exchange for doing no padded matrix
-// work when fewer than 32 tokens are available.
-kernel.def target(@qwen3_moe_dense_gfx11_wave32) @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count: index) {
-  %output_size = config.get @qwen3_moe.dense_quantized.output_size : index
-  %one = index.constant 1 : index
-  %seven = index.constant 7 : index
-  %eight = index.constant 8 : index
-  %twofiftysix = index.constant 256 : index
-  %padded_output_size = index.add %output_size, %seven : index
-  %output_tiles = index.div %padded_output_size, %eight : index
-  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%twofiftysix, %one, %one) : index
-} launch(%token_count: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+// Low-fixed-cost Q4_K body shared by the ordinary and completion-fused decode
+// exports. Each wave owns one output channel and contracts a Q8_1 activation
+// row directly against the original GGUF weight row.
+func.template<qwen3_moe.dense.q4k_q8_1_x4.body> device @qwen3_moe_dense_linear_q4k_q8_1_x4_body(%token_count: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
   %input_size = config.get @qwen3_moe.dense_quantized.input_size : index
   %output_size = config.get @qwen3_moe.dense_quantized.output_size : index
   %output_accumulation = config.get @qwen3_moe.dense_quantized.output_accumulation : index
@@ -213,6 +202,23 @@ kernel.def target(@qwen3_moe_dense_gfx11_wave32) @qwen3_moe_dense_linear_q4k_q8_
     }
     view.store %result, %output_view[%output_index] : f32, view<[%output_element_count]xf32, #dense>
   }
+  func.return
+}
+
+// Direct decode entry point. This complements the grouped WMMA schedule below:
+// it gives up cross-token weight reuse in exchange for doing no padded matrix
+// work when fewer than 32 tokens are available.
+kernel.def target(@qwen3_moe_dense_gfx11_wave32) @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count: index) {
+  %output_size = config.get @qwen3_moe.dense_quantized.output_size : index
+  %one = index.constant 1 : index
+  %seven = index.constant 7 : index
+  %eight = index.constant 8 : index
+  %twofiftysix = index.constant 256 : index
+  %padded_output_size = index.add %output_size, %seven : index
+  %output_tiles = index.div %padded_output_size, %eight : index
+  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%twofiftysix, %one, %one) : index
+} launch(%token_count: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+  func.apply<qwen3_moe.dense.q4k_q8_1_x4.body>(%token_count, %q8_input, %weight, %output) : (index, buffer, buffer, buffer)
   kernel.return
 }
 
