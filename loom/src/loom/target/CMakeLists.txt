@@ -531,7 +531,7 @@ loom_cc_library(
     "predicate.c"
   DEPS
     ::function_contract
-    ::pass_environment
+    ::function_version
     ::types
     iree::base
     iree::base::internal::arena
@@ -539,7 +539,6 @@ loom_cc_library(
     loom::ir
     loom::ops::func_symbol_facts
     loom::ops::pass
-    loom::ops::target
     loom::pass::predicate
   PUBLIC
 )
@@ -567,6 +566,8 @@ loom_cc_test(
   SRCS
     "predicate_test.cc"
   DEPS
+    ::facts_builder
+    ::function_version
     ::predicate
     iree::base::internal::arena
     iree::testing::gtest
@@ -578,9 +579,7 @@ loom_cc_test(
     loom::ops::pass
     loom::ops::target
     loom::ops::test
-    loom::pass::environment
     loom::pass::verify
-    loom::target::pass_environment
     loom::target::test::target_record_table
     loom::testing::module_ptr
 )
