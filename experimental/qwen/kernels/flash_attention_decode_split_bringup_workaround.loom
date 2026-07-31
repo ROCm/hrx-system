@@ -1,18 +1,28 @@
-// Temporary, non-sanctioned one-function fork for Qwen decode bring-up. This
+// Temporary, non-sanctioned one-function adapter for Qwen decode bring-up. This
 // is not a second kernel authoring path. Delete it when exact workload values
-// reach template selection and select the canonical cooperative reducer for
-// context 513. The function retains the canonical public ABI and makes only
-// the exact 9-block, 4-KV-head launch structural and carries context 513 to
-// both canonical template applications.
+// reach template selection and launch-topology analysis. The function retains
+// the canonical public ABI and temporarily binds the runtime's exact context
+// through config because positional workload specialization is lost before
+// compilation. It applies the canonical producer and cooperative reducer
+// without copying either algorithm.
+config.decl @qwen.decode.key_value_token_count : %value: index where [range(%value, 1, 2048)]
+
 kernel.def target(@qwen3_moe_decode_split_gfx11_wave64) @qwen3_moe_flash_attention_decode_split_f32_f16_wmma(%key_value_token_count: index) {
+  %configured_key_value_token_count0 = config.get @qwen.decode.key_value_token_count : index
+  %workload_key_value_token_count, %configured_key_value_token_count = index.assume %key_value_token_count, %configured_key_value_token_count0 [eq(%key_value_token_count, %configured_key_value_token_count0), range(%configured_key_value_token_count0, 1, 2048)] : index, index
   %one = index.constant 1 : index
+  %sixtythree = index.constant 63 : index
+  %sixtyfour = index.constant 64 : index
   %four = index.constant 4 : index
-  %nine = index.constant 9 : index
   %twofiftysix = index.constant 256 : index
-  kernel.launch.config workgroups(%nine, %four, %one) workgroup_size(%twofiftysix, %one, %one) : index
+  %padded_key_value_token_count = index.add %configured_key_value_token_count, %sixtythree : index
+  %key_value_block_count0 = index.div %padded_key_value_token_count, %sixtyfour : index
+  %key_value_block_count = index.assume %key_value_block_count0 [range(%key_value_block_count0, 1, 32)] : index
+  kernel.launch.config workgroups(%key_value_block_count, %four, %one) workgroup_size(%twofiftysix, %one, %one) : index
 } launch(%key_value_token_count: index, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer, %completion_counter: buffer, %output: buffer) {
-  %bounded_key_value_token_count = index.assume %key_value_token_count [range(%key_value_token_count, 513, 513)] : index
-  func.apply<qwen3_moe.attention.decode_split.produce_partials>(%bounded_key_value_token_count, %query, %key, %value, %mask, %partial_max, %partial_sum, %partial_output) : (index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
-  func.apply<qwen3_moe.attention.decode_split.reduce_fused>(%bounded_key_value_token_count, %partial_max, %partial_sum, %partial_output, %completion_counter, %output) : (index, buffer, buffer, buffer, buffer, buffer)
+  %configured_key_value_token_count0 = config.get @qwen.decode.key_value_token_count : index
+  %workload_key_value_token_count, %configured_key_value_token_count = index.assume %key_value_token_count, %configured_key_value_token_count0 [eq(%key_value_token_count, %configured_key_value_token_count0), range(%configured_key_value_token_count0, 1, 2048)] : index, index
+  func.apply<qwen3_moe.attention.decode_split.produce_partials>(%configured_key_value_token_count, %query, %key, %value, %mask, %partial_max, %partial_sum, %partial_output) : (index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  func.call inline @qwen3_moe_flash_attention_decode_split_reduce_fused_cooperative_f32(%configured_key_value_token_count, %partial_max, %partial_sum, %partial_output, %completion_counter, %output) : (index, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }

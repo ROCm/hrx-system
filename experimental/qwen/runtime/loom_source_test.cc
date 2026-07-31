@@ -434,7 +434,7 @@ TEST(QwenLoomSourceTest, EmbedsWorkaroundExpertTableSource) {
       std::string::npos);
 }
 
-TEST(QwenLoomSourceTest, EmbedsDecodeSplitFixedContextWorkaround) {
+TEST(QwenLoomSourceTest, EmbedsDecodeSplitExactConfigWorkaround) {
   qwen_loom_source_module_t source_module;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
       IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_DECODE_SPLIT_F32_F16),
@@ -443,13 +443,22 @@ TEST(QwenLoomSourceTest, EmbedsDecodeSplitFixedContextWorkaround) {
   std::string source_text(
       reinterpret_cast<const char*>(source_module.source_contents.data),
       source_module.source_contents.data_length);
+  EXPECT_NE(source_text.find("config.decl "
+                             "@qwen.decode.key_value_token_count"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("eq(%key_value_token_count, "
+                             "%configured_key_value_token_count0)"),
+            std::string::npos);
   EXPECT_NE(
-      source_text.find("[range(%key_value_token_count, 513, 513)] : index"),
+      source_text.find(
+          "func.apply<qwen3_moe.attention.decode_split.produce_partials>"),
       std::string::npos);
   EXPECT_NE(
-      source_text.find("kernel.launch.config workgroups(%nine, %four, %one)"),
+      source_text.find("func.call inline "
+                       "@qwen3_moe_flash_attention_decode_split_reduce_fused_"
+                       "cooperative_f32"),
       std::string::npos);
-  EXPECT_NE(source_text.find(
+  EXPECT_EQ(source_text.find(
                 "func.apply<qwen3_moe.attention.decode_split.reduce_fused>"),
             std::string::npos);
 }
