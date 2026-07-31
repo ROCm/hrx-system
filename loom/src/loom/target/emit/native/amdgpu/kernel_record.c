@@ -112,9 +112,9 @@ static iree_status_t loom_amdgpu_kernel_record_symbol_name(
 static iree_status_t loom_amdgpu_kernel_record_export_symbol(
     const loom_low_resolved_target_t* target, const loom_module_t* module,
     const loom_op_t* function_op, iree_string_view_t* out_symbol) {
-  if (!iree_string_view_is_empty(
-          target->bundle_storage.export_plan.export_symbol)) {
-    *out_symbol = target->bundle_storage.export_plan.export_symbol;
+  const loom_target_bundle_t* bundle = loom_low_resolved_target_bundle(target);
+  if (!iree_string_view_is_empty(bundle->export_plan->export_symbol)) {
+    *out_symbol = bundle->export_plan->export_symbol;
     return loom_amdgpu_kernel_record_validate_symbol(*out_symbol);
   }
   return loom_amdgpu_kernel_record_symbol_name(module, function_op, out_symbol);
@@ -122,9 +122,9 @@ static iree_status_t loom_amdgpu_kernel_record_export_symbol(
 
 static iree_status_t loom_amdgpu_kernel_record_validate_target(
     const loom_low_resolved_target_t* target) {
-  const loom_target_snapshot_t* snapshot = &target->bundle_storage.snapshot;
-  const loom_target_export_plan_t* export_plan =
-      &target->bundle_storage.export_plan;
+  const loom_target_bundle_t* bundle = loom_low_resolved_target_bundle(target);
+  const loom_target_snapshot_t* snapshot = bundle->snapshot;
+  const loom_target_export_plan_t* export_plan = bundle->export_plan;
   if (target->descriptor_set == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU kernel emission target bundle is required");
@@ -410,8 +410,10 @@ iree_status_t loom_amdgpu_kernel_record_build(
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build_storage_layout(
       &schedule->storage_layout, scratch_arena, &storage_layout));
 
+  const loom_target_bundle_t* bundle =
+      loom_low_resolved_target_bundle(&schedule->target);
   const loom_target_hal_kernel_abi_t* hal_kernel =
-      &schedule->target.bundle_storage.export_plan.hal_kernel;
+      &bundle->export_plan->hal_kernel;
   const loom_amdgpu_target_facts_t* target_facts =
       loom_amdgpu_target_facts_cast(schedule->target.target_facts);
   if (target_facts == NULL) {
@@ -422,8 +424,7 @@ iree_status_t loom_amdgpu_kernel_record_build(
   const loom_amdgpu_processor_info_t* processor =
       loom_amdgpu_target_info_target_processor(target_facts->identity.target);
   IREE_ASSERT(processor != NULL);
-  const uint32_t wavefront_size =
-      schedule->target.bundle_storage.snapshot.subgroup_size;
+  const uint32_t wavefront_size = bundle->snapshot->subgroup_size;
   IREE_ASSERT(loom_amdgpu_processor_properties_support_wavefront_size(
       &processor->properties, wavefront_size));
 
@@ -479,8 +480,7 @@ iree_status_t loom_amdgpu_kernel_record_build(
           schedule->function_op, &workgroup_cluster_size);
   uint32_t max_flat_workgroup_size = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_max_flat_workgroup_size(
-      &schedule->target.bundle_storage.snapshot, hal_kernel,
-      &max_flat_workgroup_size));
+      bundle->snapshot, hal_kernel, &max_flat_workgroup_size));
 
   *out_record = (loom_amdgpu_kernel_record_t){
       .symbol = symbol,

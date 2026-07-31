@@ -367,7 +367,11 @@ loom_cc_test(
     loom::ops::low
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::error_defs
+    loom::target::arch::amdgpu::facts
+    loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::refs::target_refs
+    loom::target::arch::amdgpu::target_info_defs
+    loom::target::facts_builder
     loom::testing::diagnostic_matchers
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -576,6 +580,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::entry_selection
+    loom::target::facts_builder
     loom::target::function_contract
     loom::target::profile
     loom::target::provider

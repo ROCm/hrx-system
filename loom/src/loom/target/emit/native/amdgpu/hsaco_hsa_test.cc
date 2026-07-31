@@ -770,18 +770,16 @@ class LowKernelEmitter {
                               "AMDGPU HSA low kernel has no low func");
     }
 
-    loom_target_bundle_storage_t bundle_storage = {};
     loom_symbol_fact_table_t symbol_facts = {};
     loom_symbol_fact_table_initialize(&symbol_facts, arena);
     loom_low_resolved_target_t target = {};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
         module_, &symbol_facts, low_function, &target_registry_.registry,
         iree_diagnostic_emitter_t{}, &target));
-    bundle_storage = target.bundle_storage;
-    loom_target_bundle_storage_rebind(&bundle_storage);
     const loom_low_descriptor_set_t* descriptor_set = nullptr;
     IREE_RETURN_IF_ERROR(loom_target_low_descriptor_set_select_for_bundle(
-        &target_registry_.registry, &bundle_storage.bundle, &descriptor_set));
+        &target_registry_.registry, loom_low_resolved_target_bundle(&target),
+        &descriptor_set));
     loom_amdgpu_hal_binding_materialization_result_t materialization = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_materialize(
         module_, low_function, descriptor_set, &materialization, arena));

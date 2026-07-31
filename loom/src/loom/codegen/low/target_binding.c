@@ -227,20 +227,21 @@ static iree_status_t loom_low_resolve_func_target(
   }
   bool contract_valid = false;
   if (iree_status_is_ok(status)) {
-    status = loom_target_function_contract_resolve(
-        module, fact_table, func_facts, emitter, &contract_valid,
-        &out_target->target_facts, &out_target->bundle_storage);
+    status = loom_target_function_contract_resolve_facts(
+        module, fact_table, func_facts, emitter, fact_table->arena,
+        &contract_valid, &out_target->target_facts);
   }
   loom_target_workgroup_size_t workgroup_size = {0};
   if (iree_status_is_ok(status) && contract_valid &&
       loom_low_kernel_def_static_workgroup_size(low_func_op, &workgroup_size)) {
-    status = loom_target_function_contract_apply_hal_workgroup_size(
-        func_facts, out_target->target_name, &workgroup_size, emitter,
-        &out_target->bundle_storage, &contract_valid);
+    status = loom_target_function_contract_refine_hal_workgroup_size(
+        func_facts, out_target->target_name, &workgroup_size,
+        out_target->target_facts, emitter, fact_table->arena, &contract_valid,
+        &out_target->target_facts);
   }
   if (iree_status_is_ok(status) && contract_valid) {
-    out_target->feature_bits =
-        out_target->bundle_storage.config.contract_feature_bits;
+    out_target->feature_bits = loom_low_resolved_target_bundle(out_target)
+                                   ->config->contract_feature_bits;
   }
 
   if (!iree_status_is_ok(status)) {

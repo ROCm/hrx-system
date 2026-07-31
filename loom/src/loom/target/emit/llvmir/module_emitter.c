@@ -1453,17 +1453,17 @@ static iree_status_t loom_llvmir_emit_descriptor_set_diagnostic(
 
 static iree_status_t loom_llvmir_emit_projection_diagnostic(
     loom_llvmir_emit_function_state_t* state) {
-  const loom_target_bundle_storage_t* bundle_storage =
-      &state->target->bundle_storage;
+  const loom_target_bundle_t* bundle =
+      loom_low_resolved_target_bundle(state->target);
   const loom_diagnostic_param_t params[] = {
       loom_param_string(state->target->target_name),
-      loom_param_string(bundle_storage->export_plan.name),
-      loom_param_string(bundle_storage->config.name),
+      loom_param_string(bundle->export_plan->name),
+      loom_param_string(bundle->config->name),
       loom_param_string(LOOM_LLVMIR_LOW_EMITTER_KEY),
-      loom_param_string(loom_target_codegen_format_name(
-          bundle_storage->snapshot.codegen_format)),
       loom_param_string(
-          loom_target_abi_kind_name(bundle_storage->export_plan.abi_kind)),
+          loom_target_codegen_format_name(bundle->snapshot->codegen_format)),
+      loom_param_string(
+          loom_target_abi_kind_name(bundle->export_plan->abi_kind)),
   };
   return loom_llvmir_emit_diagnostic(state, state->function_op,
                                      LOOM_ERR_TARGET_036, params,
@@ -3571,7 +3571,8 @@ static iree_status_t loom_llvmir_emit_function_signature(
   if (!valid_signature) return iree_ok_status();
 
   const iree_string_view_t export_symbol =
-      state->target->bundle_storage.export_plan.export_symbol;
+      loom_low_resolved_target_bundle(state->target)
+          ->export_plan->export_symbol;
   const iree_string_view_t function_name =
       iree_string_view_is_empty(export_symbol) ? state->function_name
                                                : export_symbol;
@@ -3664,10 +3665,10 @@ static uint32_t loom_llvmir_emit_workgroup_size_dimension_count(
 
 static iree_status_t loom_llvmir_emit_prepare_function_profile(
     loom_llvmir_emit_function_state_t* state) {
-  const loom_target_snapshot_t* snapshot =
-      &state->target->bundle_storage.snapshot;
-  const loom_target_export_plan_t* export_plan =
-      &state->target->bundle_storage.export_plan;
+  const loom_target_bundle_t* bundle =
+      loom_low_resolved_target_bundle(state->target);
+  const loom_target_snapshot_t* snapshot = bundle->snapshot;
+  const loom_target_export_plan_t* export_plan = bundle->export_plan;
   iree_string_view_t target_triple = iree_string_view_empty();
   iree_string_view_t data_layout = iree_string_view_empty();
   iree_string_view_t target_cpu = iree_string_view_empty();
@@ -3722,7 +3723,7 @@ static iree_status_t loom_llvmir_emit_prepare_function_profile(
       }
       const loom_llvmir_target_profile_t* provider_profile = NULL;
       const loom_llvmir_target_profile_projection_request_t request = {
-          .bundle = &state->target->bundle_storage.bundle,
+          .bundle = bundle,
           .target_triple = target_triple,
       };
       if (!loom_llvmir_target_profile_registry_project_bundle(
@@ -3752,8 +3753,7 @@ static iree_status_t loom_llvmir_emit_prepare_function_profile(
   }
 
   loom_llvmir_target_profile_storage_initialize_from_bundle(
-      &state->target->bundle_storage.bundle, &projected_profile,
-      &state->target_profile_storage);
+      bundle, &projected_profile, &state->target_profile_storage);
   state->target_profile = &state->target_profile_storage.profile;
   return iree_ok_status();
 }

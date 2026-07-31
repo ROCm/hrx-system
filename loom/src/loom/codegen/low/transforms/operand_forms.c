@@ -1271,7 +1271,7 @@ static iree_status_t loom_low_select_operand_forms_function(
     IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
         pass, module,
         loom_pass_value_fact_scope_function_for_target(
-            function, &target.bundle_storage.bundle, NULL),
+            function, loom_low_resolved_target_bundle(&target), NULL),
         &value_facts));
   }
 

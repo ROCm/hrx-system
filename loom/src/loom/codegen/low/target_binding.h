@@ -4,13 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Low function target binding.
+// Low function representation and target binding.
 //
-// This layer connects Low function representation contracts and target facts
-// to dense Low descriptor tables. The descriptor table ABI itself remains
-// IR-agnostic: each Low function selects its representation contract, while its
-// referenced target projects the feature and limit facts used by verification,
-// scheduling, allocation feedback, and emission.
+// This layer connects a Low function's intrinsic representation contract and
+// effective target facts to dense Low descriptor tables. The descriptor table
+// ABI itself remains IR-agnostic.
 
 #ifndef LOOM_CODEGEN_LOW_TARGET_BINDING_H_
 #define LOOM_CODEGEN_LOW_TARGET_BINDING_H_
@@ -29,21 +27,24 @@ extern "C" {
 
 // Resolved low target context for one low function.
 typedef struct loom_low_resolved_target_t {
-  // Immutable facts projected from the target record.
+  // Immutable effective facts selected for this Low function.
   const loom_target_facts_t* target_facts;
-  // Materialized target payloads selected by this low function's durable target
-  // record. Export-plan facts may additionally be function-local.
-  loom_target_bundle_storage_t bundle_storage;
-  // Borrowed target symbol name without the leading '@'.
+  // Borrowed effective target name without the leading '@'.
   iree_string_view_t target_name;
   // Borrowed descriptor-set key selected by the Low function representation
   // contract.
   iree_string_view_t descriptor_set_key;
-  // Feature bitset projected from the resolved target facts.
+  // Feature bitset projected from the effective target facts.
   uint64_t feature_bits;
   // Descriptor set found in the caller-provided registry.
   const loom_low_descriptor_set_t* descriptor_set;
 } loom_low_resolved_target_t;
+
+// Returns the common target bundle projected into |target->target_facts|.
+static inline const loom_target_bundle_t* loom_low_resolved_target_bundle(
+    const loom_low_resolved_target_t* target) {
+  return target ? loom_target_facts_bundle(target->target_facts) : NULL;
+}
 
 typedef struct loom_low_register_type_resolver_t {
   // Descriptor set defining the resolved descriptor register-class IDs.
@@ -114,7 +115,7 @@ typedef struct loom_low_resolved_descriptor_packet_t {
   const loom_low_descriptor_t* descriptor;
 } loom_low_resolved_descriptor_packet_t;
 
-// Resolves the target record payloads and descriptor set for |low_func_op|
+// Resolves the effective target facts and descriptor set for |low_func_op|
 // using caller-owned symbol facts.
 //
 // User IR failures are emitted through |emitter| and leave

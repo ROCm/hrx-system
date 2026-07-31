@@ -43,6 +43,7 @@
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 #include "loom/target/emit/native/amdgpu/spill_lowering.h"
 #include "loom/target/entry_selection.h"
+#include "loom/target/facts_builder.h"
 #include "loom/target/function_contract.h"
 #include "loom/target/profile.h"
 #include "loom/target/provider.h"
@@ -663,8 +664,8 @@ loom_amdgpu_hal_kernel_library_validate_final_workgroup_storage(
     void* user_data, const loom_low_emission_frame_t* frame,
     iree_arena_allocator_t* table_arena) {
   (void)table_arena;
-  const uint64_t limit =
-      frame->target.bundle_storage.snapshot.max_workgroup_storage_bytes;
+  const uint64_t limit = loom_low_resolved_target_bundle(&frame->target)
+                             ->snapshot->max_workgroup_storage_bytes;
   if (limit == 0) {
     return iree_ok_status();
   }
@@ -707,14 +708,22 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   IREE_RETURN_IF_ERROR(loom_target_low_descriptor_set_select_for_bundle(
       &low_registry->registry, &plan->entry->bundle_storage.bundle,
       &descriptor_set));
+  loom_target_facts_t* effective_target_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(
+      plan->entry->target_facts, table_arena, &effective_target_facts));
+  loom_target_facts_builder_replace_bundle(&plan->entry->bundle_storage.bundle,
+                                           effective_target_facts);
+  const loom_target_bundle_t* target_bundle =
+      loom_target_facts_bundle(effective_target_facts);
   loom_low_schedule_pair_affinity_list_t schedule_pair_affinities =
       loom_low_schedule_pair_affinity_list_empty();
   loom_low_resolved_target_t resolved_target = {
-      .target_facts = plan->entry->target_facts,
-      .bundle_storage = plan->entry->bundle_storage,
+      .target_facts = effective_target_facts,
+      .target_name = loom_target_facts_identity_name(effective_target_facts),
+      .descriptor_set_key = target_bundle->config->contract_set_key,
+      .feature_bits = target_bundle->config->contract_feature_bits,
       .descriptor_set = descriptor_set,
   };
-  loom_target_bundle_storage_rebind(&resolved_target.bundle_storage);
   const loom_target_residency_model_t* residency_model =
       loom_amdgpu_occupancy_residency_model(&resolved_target);
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_build_schedule_pair_affinities(

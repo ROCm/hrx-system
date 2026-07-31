@@ -180,7 +180,10 @@ loom_cc_test(
     deps = [
         ":low",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:facts_builder",
         "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/test:target_record_table",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

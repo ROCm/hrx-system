@@ -38,15 +38,17 @@ iree_string_view_t loom_low_diagnostic_target_key(
 iree_string_view_t loom_low_diagnostic_export_name(
     const loom_low_resolved_target_t* target) {
   if (!target) return IREE_SV("<empty>");
-  return loom_low_diagnostic_string_or_placeholder(
-      target->bundle_storage.export_plan.name, IREE_SV("<empty>"));
+  const loom_target_bundle_t* bundle = loom_low_resolved_target_bundle(target);
+  return loom_low_diagnostic_string_or_placeholder(bundle->export_plan->name,
+                                                   IREE_SV("<empty>"));
 }
 
 iree_string_view_t loom_low_diagnostic_config_key(
     const loom_low_resolved_target_t* target) {
   if (!target) return IREE_SV("<empty>");
-  return loom_low_diagnostic_string_or_placeholder(
-      target->bundle_storage.config.name, IREE_SV("<empty>"));
+  const loom_target_bundle_t* bundle = loom_low_resolved_target_bundle(target);
+  return loom_low_diagnostic_string_or_placeholder(bundle->config->name,
+                                                   IREE_SV("<empty>"));
 }
 
 iree_string_view_t loom_low_diagnostic_function_name(

@@ -119,6 +119,26 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    target_binding_test
+  SRCS
+    "target_binding_test.cc"
+  DEPS
+    ::target_binding
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::format::text::parser
+    loom::ir
+    loom::ops::low
+    loom::ops::target
+    loom::ops::test
+    loom::target::test::low_registry
+    loom::testing::module_ptr
+)
+
 loom_cc_library(
   NAME
     function
@@ -582,6 +602,9 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::error::error_defs
+    loom::ops::test
+    loom::target::facts_builder
+    loom::target::test::target_record_table
 )
 
 loom_cc_library(

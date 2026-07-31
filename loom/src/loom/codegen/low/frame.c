@@ -204,7 +204,6 @@ static iree_status_t loom_low_emission_frame_build_with_diagnostic_emitter(
   }
   if (iree_status_is_ok(status)) {
     out_frame->target = out_frame->schedule.target;
-    loom_target_bundle_storage_rebind(&out_frame->target.bundle_storage);
   }
   loom_low_function_model_deinitialize(&model);
   return status;

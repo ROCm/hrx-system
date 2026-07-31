@@ -1244,7 +1244,6 @@ iree_status_t loom_low_schedule_function(
       .target = model->target,
       .error_count = model->error_count,
   };
-  loom_target_bundle_storage_rebind(&out_table->target.bundle_storage);
   if (model->error_count != 0) return iree_ok_status();
   IREE_ASSERT(loom_local_value_domain_is_acquired(&model->value_domain));
 
@@ -1267,7 +1266,6 @@ iree_status_t loom_low_schedule_function(
       .value_domain = &model->value_domain,
       .cfg_graph = &model->cfg_graph,
   };
-  loom_target_bundle_storage_rebind(&state.target.bundle_storage);
   loom_low_schedule_dependency_graph_initialize(&state.dependencies);
   loom_low_storage_layout_builder_initialize(&state.storage_layout_builder);
   IREE_ASSERT(state.body != NULL);
@@ -1407,7 +1405,6 @@ iree_status_t loom_low_schedule_function(
     };
     loom_low_schedule_dependency_graph_move(&state.dependencies,
                                             &out_table->dependencies);
-    loom_target_bundle_storage_rebind(&out_table->target.bundle_storage);
   }
   return status;
 }

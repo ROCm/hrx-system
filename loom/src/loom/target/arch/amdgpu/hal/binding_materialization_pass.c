@@ -59,7 +59,7 @@ loom_amdgpu_materialize_hal_buffer_descriptors_pass_info(void) {
 static bool loom_amdgpu_materialize_hal_kernel_abi_matches(
     const loom_low_resolved_target_t* target) {
   return target->descriptor_set != NULL &&
-         target->bundle_storage.export_plan.abi_kind ==
+         loom_low_resolved_target_bundle(target)->export_plan->abi_kind ==
              LOOM_TARGET_ABI_HAL_KERNEL &&
          loom_amdgpu_target_facts_cast(target->target_facts) != NULL;
 }

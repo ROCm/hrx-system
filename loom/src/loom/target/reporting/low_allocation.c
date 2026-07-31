@@ -1382,8 +1382,9 @@ static iree_status_t loom_target_compile_report_record_allocation_failure_rows(
 static void loom_target_compile_report_record_low_allocation_identity(
     loom_target_compile_report_t* report,
     const loom_low_allocation_table_t* allocation) {
-  const iree_string_view_t export_symbol =
-      allocation->target.bundle_storage.export_plan.export_symbol;
+  const loom_target_bundle_t* bundle =
+      loom_low_resolved_target_bundle(&allocation->target);
+  const iree_string_view_t export_symbol = bundle->export_plan->export_symbol;
   report->function_name =
       !iree_string_view_is_empty(export_symbol)
           ? export_symbol
@@ -1391,14 +1392,11 @@ static void loom_target_compile_report_record_low_allocation_identity(
                                               allocation->function_op);
   report->lowered_symbol = loom_low_diagnostic_function_name(
       allocation->module, allocation->function_op);
-  report->target_bundle_name = allocation->target.bundle_storage.bundle.name;
-  report->target_snapshot_name =
-      allocation->target.bundle_storage.snapshot.name;
-  report->target_export_name =
-      allocation->target.bundle_storage.export_plan.name;
-  report->target_export_symbol =
-      allocation->target.bundle_storage.export_plan.export_symbol;
-  report->target_config_name = allocation->target.bundle_storage.config.name;
+  report->target_bundle_name = bundle->name;
+  report->target_snapshot_name = bundle->snapshot->name;
+  report->target_export_name = bundle->export_plan->name;
+  report->target_export_symbol = bundle->export_plan->export_symbol;
+  report->target_config_name = bundle->config->name;
 }
 
 iree_status_t loom_target_compile_report_record_low_allocation_contents(

@@ -138,7 +138,8 @@ static iree_string_view_t loom_spirv_emit_function_name(
 static iree_string_view_t loom_spirv_emit_export_name(
     const loom_spirv_emit_state_t* state) {
   const iree_string_view_t export_symbol =
-      state->target->bundle_storage.export_plan.export_symbol;
+      loom_low_resolved_target_bundle(state->target)
+          ->export_plan->export_symbol;
   if (!iree_string_view_is_empty(export_symbol)) {
     return export_symbol;
   }
@@ -1594,7 +1595,7 @@ static iree_status_t loom_spirv_emit_module_prepare_contract(
           state->flags,
           LOOM_SPIRV_EMIT_MODULE_STATE_FLAG_BUILDER_INITIALIZED)) {
     IREE_RETURN_IF_ERROR(loom_spirv_module_builder_initialize(
-        &target->bundle_storage.bundle, allocator, &state->builder));
+        loom_low_resolved_target_bundle(target), allocator, &state->builder));
     loom_spirv_type_context_initialize(&state->builder, state->scratch_arena,
                                        &state->type_context);
     state->contract = contract;

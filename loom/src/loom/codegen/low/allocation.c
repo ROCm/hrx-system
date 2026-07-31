@@ -101,7 +101,6 @@ iree_status_t loom_low_allocate_function(
       .error_count = model->error_count,
       .cfg_graph = model->cfg_graph,
   };
-  loom_target_bundle_storage_rebind(&out_table->target.bundle_storage);
   if (model->error_count != 0) return iree_ok_status();
   IREE_ASSERT(loom_local_value_domain_is_acquired(&model->value_domain));
   IREE_ASSERT(iree_any_bit_set(model->value_domain.flags,
@@ -115,7 +114,6 @@ iree_status_t loom_low_allocate_function(
       .function_op = model->function_op,
       .target = model->target,
   };
-  loom_target_bundle_storage_rebind(&state.target.bundle_storage);
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_validate_synthesis_mode(model->function_op));
   iree_status_t status = loom_low_allocation_target_constraints_initialize(
@@ -319,7 +317,6 @@ iree_status_t loom_low_allocate_function(
         .reserved_range_count = state.target_constraints.reserved_range_count,
         .cfg_graph = model->cfg_graph,
     };
-    loom_target_bundle_storage_rebind(&table.target.bundle_storage);
   }
   if (iree_status_is_ok(status) && table.error_count == 0) {
     status = loom_low_allocation_diagnostics_emit(

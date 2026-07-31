@@ -10,7 +10,10 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/test/ops.h"
+#include "loom/target/facts_builder.h"
 #include "loom/target/registers.h"
+#include "loom/target/test/target_records.h"
 
 namespace loom {
 namespace {
@@ -583,9 +586,22 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       },
   };
   const uint32_t scheduled_node_indices[] = {0, 1, 2, 3, 4, 5, 6, 7};
+  loom_target_facts_t target_facts = {};
+  const loom_target_bundle_t* target_bundle = loom_target_bundle_table_lookup(
+      &loom_test_target_bundles, LOOM_TEST_TARGET_KIND_LOW_CORE);
+  ASSERT_NE(target_bundle, nullptr);
+  loom_target_facts_builder_initialize(&loom_test_target_fact_type,
+                                       target_bundle, &target_facts);
+  const loom_low_resolved_target_t target = {
+      /*.target_facts=*/&target_facts,
+      /*.target_name=*/target_bundle->name,
+      /*.descriptor_set_key=*/target_bundle->config->contract_set_key,
+      /*.feature_bits=*/target_bundle->config->contract_feature_bits,
+      /*.descriptor_set=*/&descriptor_set,
+  };
   loom_low_schedule_table_t schedule = {};
   schedule.module = module;
-  schedule.target.descriptor_set = &descriptor_set;
+  schedule.target = target;
   schedule.blocks = schedule_blocks;
   schedule.block_count = IREE_ARRAYSIZE(schedule_blocks);
   schedule.nodes = schedule_nodes;
@@ -596,8 +612,6 @@ TEST(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   schedule.resource_use_count = 4;
   schedule.hazard_gap_count = 2;
   schedule.model_summary_count = 1;
-  loom_low_resolved_target_t target = {};
-  target.descriptor_set = &descriptor_set;
 
   loom_low_emission_frame_t frame = {};
   frame.target = target;
