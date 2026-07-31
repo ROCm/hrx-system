@@ -711,6 +711,58 @@ func.def @guarded_flattened_store_proves_dynamic_axis_bounds(%payload: buffer, %
 
 // ====
 
+// Equivalent nonlinear bounds may be materialized independently on each side
+// of a convergent operation. The active branch relation still proves that an
+// index guarded by the first quotient fits a view shaped by the second.
+func.def @guarded_recomputed_quotient_proves_dynamic_axis_bound(%payload: buffer, %base: offset, %active_count0: index, %block0: index, %value: i32) {
+  %sixtythree = index.constant 63 : index
+  %sixtyfour = index.constant 64 : index
+  %active_count = index.assume %active_count0 [range(%active_count0, 1, 2048)] : index
+  %block = index.assume %block0 [range(%block0, 0, 31)] : index
+  %padded_count = index.add %active_count, %sixtythree : index
+  %block_count0 = index.div %padded_count, %sixtyfour : index
+  %block_count = index.assume %block_count0 [range(%block_count0, 1, 32)] : index
+  %barrier = test.convergent %value : i32
+  test.use %barrier : i32
+  %is_active = index.cmp ult, %block, %block_count : index
+  scf.if %is_active {
+    %active_block, %active_block_count, %active_token_count = index.assume %block, %block_count, %active_count [lt(%block, %block_count)] : index, index, index
+    %inner_active_count = index.assume %active_token_count [range(%active_token_count, 1, 32768)] : index
+    %inner_padded_count = index.add %inner_active_count, %sixtythree : index
+    %inner_block_count0 = index.div %inner_padded_count, %sixtyfour : index
+    %inner_block_count = index.assume %inner_block_count0 [range(%inner_block_count0, 1, 512)] : index
+    %view = buffer.view %payload[%base] : buffer -> view<[%inner_block_count]xi32, #dense>
+    view.store %value, %view[%active_block] : i32, view<[%inner_block_count]xi32, #dense>
+  }
+  func.return
+}
+
+// ====
+
+func.def @guarded_distinct_quotient_rejects_unproven_dynamic_axis_bound(%payload: buffer, %base: offset, %active_count0: index, %block0: index, %value: i32) {
+  %sixtythree = index.constant 63 : index
+  %sixtyfour = index.constant 64 : index
+  %onetwentyeight = index.constant 128 : index
+  %active_count = index.assume %active_count0 [range(%active_count0, 1, 2048)] : index
+  %block = index.assume %block0 [range(%block0, 0, 31)] : index
+  %padded_count = index.add %active_count, %sixtythree : index
+  %block_count0 = index.div %padded_count, %sixtyfour : index
+  %block_count = index.assume %block_count0 [range(%block_count0, 1, 32)] : index
+  %is_active = index.cmp ult, %block, %block_count : index
+  scf.if %is_active {
+    %inner_active_count = index.assume %active_count [range(%active_count, 1, 32768)] : index
+    %inner_padded_count = index.add %inner_active_count, %sixtythree : index
+    %inner_block_count0 = index.div %inner_padded_count, %onetwentyeight : index
+    %inner_block_count = index.assume %inner_block_count0 [range(%inner_block_count0, 1, 256)] : index
+    %view = buffer.view %payload[%base] : buffer -> view<[%inner_block_count]xi32, #dense>
+    // ERROR@+1: SUBRANGE/024 {op_name="view.store", view_axis="0"}
+    view.store %value, %view[%block] : i32, view<[%inner_block_count]xi32, #dense>
+  }
+  func.return
+}
+
+// ====
+
 kernel.def @dynamic_unit_axis_proven_by_workgroup_id_launch_config(%rows: index) {
   %c1 = index.constant 1 : index
   %c128 = index.constant 128 : index
