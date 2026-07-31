@@ -302,6 +302,27 @@ iree_executable_test(
     ]),
 )
 
+iree_executable_test(
+    name = "quantize_q8_1_x4_bringup_workaround_attention_output_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :quantize_q8_1_x4_bringup_workaround_linked)",
+        "--case=@ggml_quantize_q8_1_x4_bringup_workaround_attention_output_zero_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":quantize_q8_1_x4_bringup_workaround_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
 loom_link_module(
     name = "linear_q6k_q8_1_x4_bringup_workaround_linked",
     srcs = [

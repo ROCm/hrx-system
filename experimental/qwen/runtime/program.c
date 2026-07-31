@@ -42,6 +42,13 @@ typedef enum qwen_program_qkv_schedule_e {
   QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA = 1,
 } qwen_program_qkv_schedule_t;
 
+typedef enum qwen_program_attention_output_schedule_e {
+  // Packed Q8_1 input plus the row-parallel direct Q4_K contraction.
+  QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8 = 0,
+  // Materialized F32 input plus the tiled Q4_K WMMA contraction.
+  QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_F32_WMMA = 1,
+} qwen_program_attention_output_schedule_t;
+
 typedef enum qwen_program_executable_ordinal_e {
   QWEN_PROGRAM_EXECUTABLE_ATTENTION_METADATA = 0,
   QWEN_PROGRAM_EXECUTABLE_ATTENTION_PREPARE_Q8 = 1,
@@ -49,32 +56,34 @@ typedef enum qwen_program_executable_ordinal_e {
   QWEN_PROGRAM_EXECUTABLE_ATTENTION_QKV_Q6 = 3,
   QWEN_PROGRAM_EXECUTABLE_ATTENTION_POSTPROCESS = 4,
   QWEN_PROGRAM_EXECUTABLE_FLASH_ATTENTION = 5,
-  QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT = 6,
-  QWEN_PROGRAM_EXECUTABLE_RMSNORM_F32 = 7,
-  QWEN_PROGRAM_EXECUTABLE_ROUTER_PROJECTION = 8,
-  QWEN_PROGRAM_EXECUTABLE_ROUTER_TOP8 = 9,
-  QWEN_PROGRAM_EXECUTABLE_EXPERT_TABLE = 10,
-  QWEN_PROGRAM_EXECUTABLE_PARTITION_TABLE = 11,
-  QWEN_PROGRAM_EXECUTABLE_GATE_UP = 12,
-  QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4 = 13,
-  QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6 = 14,
-  QWEN_PROGRAM_EXECUTABLE_WEIGHTED_REDUCE = 15,
-  QWEN_PROGRAM_EXECUTABLE_ATTENTION_QUERY_Q4_WMMA = 16,
-  QWEN_PROGRAM_EXECUTABLE_ATTENTION_KEY_VALUE_Q4_WMMA = 17,
-  QWEN_PROGRAM_EXECUTABLE_ATTENTION_VALUE_Q6_WMMA = 18,
-  QWEN_PROGRAM_EXECUTABLE_TOKEN_EMBEDDING = 19,
-  QWEN_PROGRAM_EXECUTABLE_TERMINAL_RMSNORM_F32 = 20,
-  QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTER_PROJECTION = 21,
-  QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTER_TOP8 = 22,
-  QWEN_PROGRAM_EXECUTABLE_TERMINAL_EXPERT_TABLE = 23,
-  QWEN_PROGRAM_EXECUTABLE_TERMINAL_PARTITION_TABLE = 24,
-  QWEN_PROGRAM_EXECUTABLE_TERMINAL_GATE_UP = 25,
-  QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTED_DOWN = 26,
-  QWEN_PROGRAM_EXECUTABLE_TERMINAL_WEIGHTED_REDUCE = 27,
-  QWEN_PROGRAM_EXECUTABLE_FINAL_QUANTIZE_Q8 = 28,
-  QWEN_PROGRAM_EXECUTABLE_VOCABULARY_PROJECTION_Q6 = 29,
-  QWEN_PROGRAM_EXECUTABLE_GREEDY_ARGMAX = 30,
-  QWEN_PROGRAM_EXECUTABLE_COUNT = 31,
+  QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT_F32_WMMA = 6,
+  QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT_QUANTIZE_Q8 = 7,
+  QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT_Q4_DIRECT = 8,
+  QWEN_PROGRAM_EXECUTABLE_RMSNORM_F32 = 9,
+  QWEN_PROGRAM_EXECUTABLE_ROUTER_PROJECTION = 10,
+  QWEN_PROGRAM_EXECUTABLE_ROUTER_TOP8 = 11,
+  QWEN_PROGRAM_EXECUTABLE_EXPERT_TABLE = 12,
+  QWEN_PROGRAM_EXECUTABLE_PARTITION_TABLE = 13,
+  QWEN_PROGRAM_EXECUTABLE_GATE_UP = 14,
+  QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4 = 15,
+  QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6 = 16,
+  QWEN_PROGRAM_EXECUTABLE_WEIGHTED_REDUCE = 17,
+  QWEN_PROGRAM_EXECUTABLE_ATTENTION_QUERY_Q4_WMMA = 18,
+  QWEN_PROGRAM_EXECUTABLE_ATTENTION_KEY_VALUE_Q4_WMMA = 19,
+  QWEN_PROGRAM_EXECUTABLE_ATTENTION_VALUE_Q6_WMMA = 20,
+  QWEN_PROGRAM_EXECUTABLE_TOKEN_EMBEDDING = 21,
+  QWEN_PROGRAM_EXECUTABLE_TERMINAL_RMSNORM_F32 = 22,
+  QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTER_PROJECTION = 23,
+  QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTER_TOP8 = 24,
+  QWEN_PROGRAM_EXECUTABLE_TERMINAL_EXPERT_TABLE = 25,
+  QWEN_PROGRAM_EXECUTABLE_TERMINAL_PARTITION_TABLE = 26,
+  QWEN_PROGRAM_EXECUTABLE_TERMINAL_GATE_UP = 27,
+  QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTED_DOWN = 28,
+  QWEN_PROGRAM_EXECUTABLE_TERMINAL_WEIGHTED_REDUCE = 29,
+  QWEN_PROGRAM_EXECUTABLE_FINAL_QUANTIZE_Q8 = 30,
+  QWEN_PROGRAM_EXECUTABLE_VOCABULARY_PROJECTION_Q6 = 31,
+  QWEN_PROGRAM_EXECUTABLE_GREEDY_ARGMAX = 32,
+  QWEN_PROGRAM_EXECUTABLE_COUNT = 33,
 } qwen_program_executable_ordinal_t;
 
 // Executable specializations consumed by one feed-forward recording.
@@ -122,6 +131,8 @@ struct qwen_program_t {
   iree_host_size_t context_capacity;
   // Q/K/V contraction family selected for this token shape.
   qwen_program_qkv_schedule_t qkv_schedule;
+  // Attention output contraction family selected for this token shape.
+  qwen_program_attention_output_schedule_t attention_output_schedule;
   // Prepared executable for each unique recorded kernel specialization.
   qwen_loom_executable_t* executables[QWEN_PROGRAM_EXECUTABLE_COUNT];
   // Number of dispatches recorded in the command buffer.
@@ -439,6 +450,14 @@ static qwen_program_qkv_schedule_t qwen_program_select_qkv_schedule(
              : QWEN_PROGRAM_QKV_SCHEDULE_QUANTIZED_ROWS;
 }
 
+static qwen_program_attention_output_schedule_t
+qwen_program_select_attention_output_schedule(iree_host_size_t token_count) {
+  // The direct-Q8 result is established only for one-token decode. Keep every
+  // larger shape on the measured WMMA schedule until its crossover is captured.
+  return token_count == 1 ? QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8
+                          : QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_F32_WMMA;
+}
+
 static bool qwen_program_kind_is_full_model(qwen_program_kind_t kind) {
   return kind == QWEN_PROGRAM_KIND_PREFILL || kind == QWEN_PROGRAM_KIND_DECODE;
 }
@@ -462,6 +481,10 @@ static iree_status_t qwen_program_prepare_layer_executables(
   const int64_t flash_attention_workload[] = {
       token_count,
       context_count,
+  };
+  const int64_t attention_output_quantize_workload[] = {
+      token_count,
+      QWEN_MODEL_QUERY_HEAD_COUNT * QWEN_MODEL_HEAD_SIZE,
   };
   const int64_t router_top8_workload[] = {
       token_count,
@@ -535,14 +558,42 @@ static iree_status_t qwen_program_prepare_layer_executables(
         IREE_ARRAYSIZE(flash_attention_workload), flash_attention_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_FLASH_ATTENTION]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->attention_output_schedule ==
+          QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_F32_WMMA) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
         IREE_SV("qwen3_moe_dense_linear_q4k_f16_wmma"),
         IREE_ARRAYSIZE(qwen_attention_output_config_bindings),
         qwen_attention_output_config_bindings, IREE_ARRAYSIZE(token_workload),
         token_workload,
-        &program->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT]);
+        &program
+             ->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT_F32_WMMA]);
+  }
+  if (iree_status_is_ok(status) &&
+      program->attention_output_schedule ==
+          QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8) {
+    status = qwen_program_prepare_kernel(
+        program->model,
+        IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4_BRINGUP_WORKAROUND),
+        IREE_SV("ggml_quantize_q8_1_x4_f32"),
+        /*config_binding_count=*/0, /*config_bindings=*/NULL,
+        IREE_ARRAYSIZE(attention_output_quantize_workload),
+        attention_output_quantize_workload,
+        &program->executables
+             [QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT_QUANTIZE_Q8]);
+  }
+  if (iree_status_is_ok(status) &&
+      program->attention_output_schedule ==
+          QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8) {
+    status = qwen_program_prepare_kernel(
+        program->model, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
+        IREE_SV("qwen3_moe_dense_linear_q4k_q8_1_x4"),
+        IREE_ARRAYSIZE(qwen_attention_output_config_bindings),
+        qwen_attention_output_config_bindings, IREE_ARRAYSIZE(token_workload),
+        token_workload,
+        &program
+             ->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT_Q4_DIRECT]);
   }
   if (iree_status_is_ok(status)) {
     status = qwen_program_prepare_kernel(
@@ -942,7 +993,7 @@ static iree_status_t qwen_program_record_attention(
   const iree_hal_buffer_ref_t attention_prepare_bindings[] = {
       qwen_program_request_ref(request_layout->hidden_state),
       qwen_program_model_ref(parameters->attention_norm),
-      qwen_program_transient_ref(transient->attention_projection_input),
+      qwen_program_transient_ref(transient->attention_projection_scratch),
   };
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_dispatch(
@@ -959,7 +1010,7 @@ static iree_status_t qwen_program_record_attention(
   if (iree_status_is_ok(status) &&
       program->qkv_schedule == QWEN_PROGRAM_QKV_SCHEDULE_QUANTIZED_ROWS) {
     const iree_hal_buffer_ref_t attention_qkv_bindings[] = {
-        qwen_program_transient_ref(transient->attention_projection_input),
+        qwen_program_transient_ref(transient->attention_projection_scratch),
         qwen_program_model_ref(parameters->query),
         qwen_program_model_ref(parameters->key),
         qwen_program_model_ref(parameters->value),
@@ -976,7 +1027,7 @@ static iree_status_t qwen_program_record_attention(
   if (iree_status_is_ok(status) &&
       program->qkv_schedule == QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA) {
     const iree_hal_buffer_ref_t query_bindings[] = {
-        qwen_program_transient_ref(transient->attention_projection_input),
+        qwen_program_transient_ref(transient->attention_projection_scratch),
         qwen_program_model_ref(parameters->query),
         qwen_program_transient_ref(transient->raw_query),
     };
@@ -989,7 +1040,7 @@ static iree_status_t qwen_program_record_attention(
   if (iree_status_is_ok(status) &&
       program->qkv_schedule == QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA) {
     const iree_hal_buffer_ref_t key_bindings[] = {
-        qwen_program_transient_ref(transient->attention_projection_input),
+        qwen_program_transient_ref(transient->attention_projection_scratch),
         qwen_program_model_ref(parameters->key),
         qwen_program_transient_ref(transient->raw_key),
     };
@@ -1005,7 +1056,7 @@ static iree_status_t qwen_program_record_attention(
         uses_q6 ? QWEN_PROGRAM_EXECUTABLE_ATTENTION_VALUE_Q6_WMMA
                 : QWEN_PROGRAM_EXECUTABLE_ATTENTION_KEY_VALUE_Q4_WMMA;
     const iree_hal_buffer_ref_t value_bindings[] = {
-        qwen_program_transient_ref(transient->attention_projection_input),
+        qwen_program_transient_ref(transient->attention_projection_scratch),
         qwen_program_model_ref(parameters->value),
         qwen_program_transient_ref(transient->raw_value),
     };
@@ -1077,15 +1128,52 @@ static iree_status_t qwen_program_record_attention(
     status = qwen_program_record_dispatch_barrier(program);
   }
 
-  const uint32_t attention_output_constants[] = {token_count};
-  const iree_hal_buffer_ref_t attention_output_bindings[] = {
-      qwen_program_transient_ref(transient->attention_output),
-      qwen_program_model_ref(parameters->attention_output),
-      qwen_program_request_ref(request_layout->hidden_state),
-  };
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->attention_output_schedule ==
+          QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8) {
+    const uint32_t quantize_constants[] = {
+        token_count,
+        QWEN_MODEL_QUERY_HEAD_COUNT * QWEN_MODEL_HEAD_SIZE,
+    };
+    const iree_hal_buffer_ref_t quantize_bindings[] = {
+        qwen_program_transient_ref(transient->attention_output),
+        qwen_program_transient_ref(transient->attention_projection_scratch),
+    };
     status = qwen_program_record_dispatch(
-        program, QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT,
+        program, QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT_QUANTIZE_Q8,
+        IREE_ARRAYSIZE(quantize_constants), quantize_constants,
+        IREE_ARRAYSIZE(quantize_bindings), quantize_bindings);
+  }
+  if (iree_status_is_ok(status) &&
+      program->attention_output_schedule ==
+          QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8) {
+    status = qwen_program_record_dispatch_barrier(program);
+  }
+
+  const uint32_t attention_output_constants[] = {token_count};
+  if (iree_status_is_ok(status) &&
+      program->attention_output_schedule ==
+          QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8) {
+    const iree_hal_buffer_ref_t attention_output_bindings[] = {
+        qwen_program_transient_ref(transient->attention_projection_scratch),
+        qwen_program_model_ref(parameters->attention_output),
+        qwen_program_request_ref(request_layout->hidden_state),
+    };
+    status = qwen_program_record_dispatch(
+        program, QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT_Q4_DIRECT,
+        IREE_ARRAYSIZE(attention_output_constants), attention_output_constants,
+        IREE_ARRAYSIZE(attention_output_bindings), attention_output_bindings);
+  }
+  if (iree_status_is_ok(status) &&
+      program->attention_output_schedule ==
+          QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_F32_WMMA) {
+    const iree_hal_buffer_ref_t attention_output_bindings[] = {
+        qwen_program_transient_ref(transient->attention_output),
+        qwen_program_model_ref(parameters->attention_output),
+        qwen_program_request_ref(request_layout->hidden_state),
+    };
+    status = qwen_program_record_dispatch(
+        program, QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT_F32_WMMA,
         IREE_ARRAYSIZE(attention_output_constants), attention_output_constants,
         IREE_ARRAYSIZE(attention_output_bindings), attention_output_bindings);
   }
@@ -1614,6 +1702,8 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
   program->context_capacity = options->context_capacity;
   program->qkv_schedule =
       qwen_program_select_qkv_schedule(options->token_count);
+  program->attention_output_schedule =
+      qwen_program_select_attention_output_schedule(options->token_count);
 
   iree_status_t status = iree_ok_status();
   if (qwen_program_kind_is_full_model(options->kind)) {

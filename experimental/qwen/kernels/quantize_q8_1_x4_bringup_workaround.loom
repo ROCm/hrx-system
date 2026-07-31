@@ -122,6 +122,17 @@ check.case public @ggml_quantize_q8_1_x4_bringup_workaround_zero_case {
   check.return
 }
 
+check.case public @ggml_quantize_q8_1_x4_bringup_workaround_attention_output_zero_case {
+  %token_count = check.literal value(1) : index
+  %input_size = check.literal value(4096) : index
+  %input = check.generate.fill value(0.0) : tensor<1x4096xf32>
+  %packed = check.generate.fill value(1) : tensor<1x4608xi8>
+  %expected = check.generate.fill value(0) : tensor<1x4608xi8>
+  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %packed) : (index, index, tensor<1x4096xf32>, tensor<1x4608xi8>)
+  check.expect.equal actual(%packed) expected(%expected) : tensor<1x4608xi8>
+  check.return
+}
+
 check.benchmark<@ggml_quantize_q8_1_x4_bringup_workaround_zero_case> @ggml_quantize_q8_1_x4_bringup_workaround_decode
 
 amdgpu.target<gfx11-generic> @qwen3_moe_vocabulary_projection_gfx11_wave32 {subgroup_size = 32}

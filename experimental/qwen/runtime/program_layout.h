@@ -23,13 +23,13 @@ typedef struct qwen_program_span_t {
 
 // Named transient spans used by one complete layer program.
 //
-// The first implementation assigns distinct storage to every semantic value.
-// This makes the correctness witness independent of a lifetime planner.
-// Evidence-backed reuse can later merge spans only across explicit dependency
-// barriers that prove the preceding value dead.
+// Most semantic values have distinct storage, keeping the correctness witness
+// independent of a general lifetime planner. The projection scratch is the one
+// explicit reuse: the QKV input is dead after its dispatch barrier, before the
+// attention-output quantizer writes the same storage.
 typedef struct qwen_layer_program_layout_t {
-  // Attention RMSNorm output sized for either F32 or GGML Q8_1 x4 storage.
-  qwen_program_span_t attention_projection_input;
+  // Phased QKV-input and attention-output Q8_1 x4 projection scratch.
+  qwen_program_span_t attention_projection_scratch;
   // Raw F32 query projection.
   qwen_program_span_t raw_query;
   // Raw F32 key projection.
