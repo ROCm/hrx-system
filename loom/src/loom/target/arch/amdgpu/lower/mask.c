@@ -586,8 +586,10 @@ iree_status_t loom_amdgpu_select_scf_select_plan(
   }
   uint32_t register_count = 0;
   bool allows_lane_immediates = false;
-  if (!loom_amdgpu_select_payload_storage(result_type, &register_count,
-                                          &allows_lane_immediates)) {
+  if (loom_type_is_buffer(result_type)) {
+    register_count = 2;
+  } else if (!loom_amdgpu_select_payload_storage(result_type, &register_count,
+                                                 &allows_lane_immediates)) {
     return iree_ok_status();
   }
   const loom_value_id_t condition = loom_scf_select_condition(source_op);

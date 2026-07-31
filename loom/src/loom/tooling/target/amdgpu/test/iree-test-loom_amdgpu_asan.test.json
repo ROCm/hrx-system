@@ -73,6 +73,9 @@
             {
               "regex": "\"case\":\"selected_rhs_case\"[^}]*\"passed\":true"
             },
+            {
+              "regex": "\"case\":\"selected_buffer_per_workgroup_case\"[^}]*\"passed\":true"
+            },
             "\"failed_sample_count\":0"
           ]
         }
