@@ -628,6 +628,7 @@ def emit_source_for_views(
             [
                 f".name_string_offset = {pool.ref(f'schedule_{schedule_class.name}')},",
                 f".latency_cycles = {schedule_class.latency_cycles},",
+                f".schedule_distance_cycles = {schedule_class.schedule_distance_cycles},",
                 f".latency_kind = {schedule_class.latency_kind.c_name},",
                 f".issue_use_start = {compiled.schedule_rows[i]['issue_use_start']},",
                 f".issue_use_count = {compiled.schedule_rows[i]['issue_use_count']},",

@@ -1114,7 +1114,7 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
             state->nodes[chosen_node].schedule_class;
         result_ready_issue_cycle = iree_math_saturating_add_u32(
             result_ready_issue_cycle,
-            schedule_class ? schedule_class->latency_cycles : 0);
+            loom_low_schedule_class_schedule_distance_cycles(schedule_class));
       }
       const uint32_t group_begin =
           loom_low_schedule_dependency_index_group_begin(
