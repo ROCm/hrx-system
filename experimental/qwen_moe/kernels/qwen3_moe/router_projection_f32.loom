@@ -119,9 +119,17 @@ kernel.def target(@qwen3_moe_router_projection_gfx11_wave64) @qwen3_moe_router_p
   kernel.return
 }
 
-// Device body shared by the ordinary four-row projection and completion-fused
-// prefill routing. Each caller owns synchronization after the logits stores.
-func.template<qwen3_moe.router_projection.four_row_body> device @qwen3_moe_router_projection_f32_four_row_body(%token_count: index, %input: buffer, %weight: buffer, %output: buffer) {
+// One wave32 owns four adjacent output rows and reuses each input packet across
+// their contractions. This schedule is selected once token parallelism can
+// populate the device independently.
+kernel.def target(@qwen3_moe_router_projection_gfx11_wave32) @qwen3_moe_router_projection_f32_four_row_wave32(%token_count: index) {
+  %expert_count = config.get @qwen3_moe.router.expert_count : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %wave_size = index.constant 32 : index
+  %expert_tiles = index.div %expert_count, %four : index
+  kernel.launch.config workgroups(%expert_tiles, %token_count, %one) workgroup_size(%wave_size, %one, %one) : index
+} launch(%token_count: index, %input: buffer, %weight: buffer, %output: buffer) {
   %hidden_size0 = config.get @qwen3_moe.model.hidden_size : index
   %expert_count0 = config.get @qwen3_moe.router.expert_count : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
@@ -171,21 +179,6 @@ func.template<qwen3_moe.router_projection.four_row_body> device @qwen3_moe_route
   scf.if %writes_output {
     vector.store %sums, %output_view[%token, %expert_base] : vector<4xf32>, view<[%launch_token_count]x[%expert_count]xf32, #dense>
   }
-  func.return
-}
-
-// One wave32 owns four adjacent output rows and reuses each input packet across
-// their contractions. This schedule is selected once token parallelism can
-// populate the device independently.
-kernel.def target(@qwen3_moe_router_projection_gfx11_wave32) @qwen3_moe_router_projection_f32_four_row_wave32(%token_count: index) {
-  %expert_count = config.get @qwen3_moe.router.expert_count : index
-  %one = index.constant 1 : index
-  %four = index.constant 4 : index
-  %wave_size = index.constant 32 : index
-  %expert_tiles = index.div %expert_count, %four : index
-  kernel.launch.config workgroups(%expert_tiles, %token_count, %one) workgroup_size(%wave_size, %one, %one) : index
-} launch(%token_count: index, %input: buffer, %weight: buffer, %output: buffer) {
-  func.apply<qwen3_moe.router_projection.four_row_body>(%token_count, %input, %weight, %output) : (index, buffer, buffer, buffer)
   kernel.return
 }
 
