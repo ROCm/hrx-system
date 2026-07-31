@@ -28,7 +28,6 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scf/ops.h"
-#include "loom/ops/target/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/registers.h"

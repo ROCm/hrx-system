@@ -51,7 +51,6 @@ loom_cc_library(
     loom::ops::low
     loom::ops::op_defs
     loom::ops::scf
-    loom::ops::target
     loom::ops::vector
     loom::sanitizer::options
     loom::target::contract

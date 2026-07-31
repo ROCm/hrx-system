@@ -474,7 +474,6 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/low",
-        "//loom/src/loom/ops/target",
         "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:types",

@@ -25,7 +25,6 @@
 #include "loom/ops/global/ops.h"
 #include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
-#include "loom/ops/target/ops.h"
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"

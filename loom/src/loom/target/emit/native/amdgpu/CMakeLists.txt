@@ -567,7 +567,6 @@ loom_cc_library(
     loom::ir
     loom::ops::global
     loom::ops::low
-    loom::ops::target
     loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::hal::kernel_abi
     loom::target::arch::amdgpu::matrix::contract
