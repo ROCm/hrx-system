@@ -95,20 +95,6 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "materialization",
-    srcs = ["materialization.c"],
-    hdrs = ["materialization.h"],
-    deps = [
-        ":facts",
-        ":projection",
-        ":types",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops:op_defs",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
     name = "residency",
     srcs = ["residency.c"],
     hdrs = ["residency.h"],
@@ -430,13 +416,11 @@ loom_cc_library(
         ":low_descriptor_registry",
         ":low_legality",
         ":low_packet_diagnostics",
-        ":materialization",
         ":math_policy",
         ":profile",
         "//loom/src/loom/codegen/low:verify",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/pass:environment",
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/target/reporting:artifact_manifest",

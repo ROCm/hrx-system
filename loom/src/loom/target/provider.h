@@ -58,51 +58,6 @@ typedef struct loom_builder_t loom_builder_t;
 typedef struct loom_target_environment_t loom_target_environment_t;
 typedef struct loom_target_provider_t loom_target_provider_t;
 
-// Returns the diagnostic symbol-name stem for a materialized profile record.
-//
-// The returned name is never used as semantic identity. Common materialization
-// reuses an equal record under any name and uniquifies this stem when another
-// symbol already occupies it.
-typedef iree_string_view_t (
-    *loom_target_provider_materialization_symbol_stem_fn_t)(
-    const loom_target_profile_t* profile);
-
-// Returns whether |target_op| has the same provider-owned durable projection
-// as |profile| refined by |authored_target_op|.
-//
-// Common materialization calls this only for records whose op kind matches the
-// provider's materialization contract. The profile type is the provider's
-// registered |profile_type|. |authored_target_op| is NULL for a targetless
-// function.
-typedef bool (*loom_target_provider_record_matches_effective_target_fn_t)(
-    const loom_module_t* module, const loom_op_t* target_op,
-    const loom_target_profile_t* profile, const loom_op_t* authored_target_op);
-
-// Builds one provider-owned durable target record for |profile| refined by
-// |authored_target_op|.
-typedef iree_status_t (
-    *loom_target_provider_build_effective_target_record_fn_t)(
-    loom_builder_t* builder, const loom_target_profile_t* profile,
-    const loom_op_t* authored_target_op, loom_symbol_ref_t symbol,
-    loom_location_id_t location, loom_op_t** out_target_op);
-
-// Provider-owned projection hooks used by common target materialization.
-typedef struct loom_target_provider_materialization_t {
-  // Target-like op kind built and reused by this materializer.
-  loom_op_kind_t op_kind;
-
-  // Produces an incidental symbol-name stem for a new target record.
-  loom_target_provider_materialization_symbol_stem_fn_t symbol_stem;
-
-  // Compares one existing record with a refined structured target profile.
-  loom_target_provider_record_matches_effective_target_fn_t
-      record_matches_effective_target;
-
-  // Builds a record carrying the complete durable refined projection.
-  loom_target_provider_build_effective_target_record_fn_t
-      build_effective_target_record;
-} loom_target_provider_materialization_t;
-
 // Target emission artifact storage release callback.
 typedef void (*loom_target_emit_artifact_release_fn_t)(
     void* storage, iree_allocator_t allocator);
@@ -298,8 +253,6 @@ struct loom_target_provider_t {
   const loom_pass_registry_t* pass_registry;
   // Optional pass-pipeline contribution callback.
   loom_target_provider_pipeline_contribution_fn_t contribute_pipeline;
-  // Optional structured target-record materialization hooks.
-  loom_target_provider_materialization_t materialization;
 };
 
 // Static target provider table linked into a binary or embedding.
@@ -463,19 +416,6 @@ iree_status_t loom_target_environment_contribute_pipeline(
     const loom_target_environment_t* environment,
     loom_target_pipeline_phase_t phase,
     loom_pass_environment_t pass_environment, loom_builder_t* builder);
-
-// Materializes the effective target formed by refining |target_profile| with
-// |authored_target_op| into |module| using the provider owning its profile
-// type.
-//
-// An existing provider-owned record with the same complete durable projection
-// is reused regardless of its symbol name. Otherwise a new record receives a
-// collision-free incidental symbol name. |authored_target_op| may be NULL for
-// a targetless function.
-iree_status_t loom_target_environment_materialize_effective_target(
-    const loom_target_environment_t* environment, loom_module_t* module,
-    const loom_target_profile_t* target_profile,
-    const loom_op_t* authored_target_op, loom_symbol_ref_t* out_target_ref);
 
 #ifdef __cplusplus
 }  // extern "C"

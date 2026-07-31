@@ -76,36 +76,6 @@ static iree_status_t ContributePreparation(
                                 loom_named_attr_slice_empty(), &run_op);
 }
 
-static iree_string_view_t MaterializationSymbolStem(
-    const loom_target_profile_t* profile) {
-  (void)profile;
-  return IREE_SV("target");
-}
-
-static bool MaterializationRecordNeverMatches(
-    const loom_module_t* module, const loom_op_t* target_op,
-    const loom_target_profile_t* profile, const loom_op_t* authored_target_op) {
-  (void)module;
-  (void)target_op;
-  (void)profile;
-  (void)authored_target_op;
-  return false;
-}
-
-static iree_status_t MaterializationBuildMustNotRun(
-    loom_builder_t* builder, const loom_target_profile_t* profile,
-    const loom_op_t* authored_target_op, loom_symbol_ref_t symbol,
-    loom_location_id_t location, loom_op_t** out_target_op) {
-  (void)builder;
-  (void)profile;
-  (void)authored_target_op;
-  (void)symbol;
-  (void)location;
-  (void)out_target_op;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "test materializer must not run");
-}
-
 struct PipelineBuildData {
   const loom_target_environment_t* environment;
 };
@@ -329,49 +299,6 @@ TEST_F(TargetProviderTest, ReportsOwnedProfileTypes) {
       &environment, &kUnownedProfileType));
 
   loom_target_environment_deinitialize(&environment);
-}
-
-TEST_F(TargetProviderTest, RejectsAmbiguousMaterializationOwnership) {
-  static const loom_target_profile_type_t kProfileType = {
-      /*.name=*/IREE_SVL("test"),
-  };
-  const loom_target_provider_materialization_t materialization = {
-      /*.op_kind=*/LOOM_OP_KIND(LOOM_DIALECT_TEST, 0),
-      /*.symbol_stem=*/MaterializationSymbolStem,
-      /*.record_matches_effective_target=*/
-      MaterializationRecordNeverMatches,
-      /*.build_effective_target_record=*/MaterializationBuildMustNotRun,
-  };
-  loom_target_provider_t first_provider = {};
-  first_provider.profile_type = &kProfileType;
-  first_provider.materialization = materialization;
-  loom_target_provider_t second_provider = {};
-  second_provider.profile_type = &kProfileType;
-  second_provider.materialization = materialization;
-  const loom_target_provider_t* const providers[] = {
-      &first_provider,
-      &second_provider,
-  };
-  const loom_target_provider_set_t provider_set =
-      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
-  loom_target_environment_t environment = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_target_environment_initialize(&provider_set, &environment));
-}
-
-TEST_F(TargetProviderTest, RejectsPartialMaterializationContract) {
-  loom_target_provider_t provider = {};
-  provider.materialization.symbol_stem = MaterializationSymbolStem;
-  const loom_target_provider_t* const providers[] = {
-      &provider,
-  };
-  const loom_target_provider_set_t provider_set =
-      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
-  loom_target_environment_t environment = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_target_environment_initialize(&provider_set, &environment));
 }
 
 }  // namespace
