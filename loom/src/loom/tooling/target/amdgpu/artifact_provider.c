@@ -423,6 +423,7 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_emit_artifact(
   *storage = (loom_amdgpu_hal_artifact_storage_t){0};
 
   const loom_amdgpu_hal_kernel_library_options_t library_options = {
+      .function_versions = options->function_versions,
       .runtime_globals = loom_amdgpu_hal_artifact_provider_runtime_globals(
           &options->target_pipeline_options),
       .diagnostic_sink = options->diagnostic_sink,

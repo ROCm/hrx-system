@@ -47,6 +47,7 @@ int kFakeHalRuntime = 0;
 bool g_fake_hal_emit_was_called = false;
 bool g_fake_hal_expect_module_target = false;
 loom_target_compile_report_t* g_fake_hal_emit_report = nullptr;
+const loom_function_version_list_t* g_fake_hal_emit_function_versions = nullptr;
 uint32_t g_fake_hal_emit_source_to_low_max_errors = 0;
 const uint8_t kFakeHalExecutableData[] = {0x7F, 'E', 'L', 'F'};
 const uint8_t kFakeHalTargetArtifactData[] = {'h', 's', 'a', 'c', 'o'};
@@ -111,6 +112,7 @@ iree_status_t FakeHalEmitArtifact(
   (void)allocator;
   g_fake_hal_emit_was_called = true;
   g_fake_hal_emit_report = options->report;
+  g_fake_hal_emit_function_versions = options->function_versions;
   g_fake_hal_emit_source_to_low_max_errors =
       options->target_pipeline_options.source_to_low_max_errors;
   *out_emitted = false;
@@ -171,6 +173,7 @@ class HalCandidateTest : public ::testing::Test {
     g_fake_hal_emit_was_called = false;
     g_fake_hal_expect_module_target = false;
     g_fake_hal_emit_report = nullptr;
+    g_fake_hal_emit_function_versions = nullptr;
     g_fake_hal_emit_source_to_low_max_errors = 0;
     loom_run_session_options_t options = {};
     loom_run_session_options_initialize(&options);
@@ -229,6 +232,8 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidate) {
 
   loom_run_candidate_compile_options_t options = {};
   InitializeCompileOptions(&run_module, &options);
+  const loom_function_version_list_t function_versions = {};
+  options.function_versions = &function_versions;
   options.target_pipeline_options.source_to_low_max_errors = 73;
   loom_target_compile_report_t report = {};
   options.report = &report;
@@ -243,6 +248,7 @@ TEST_F(HalCandidateTest, CompileHalExecutableCandidate) {
       iree_allocator_system(), &candidate));
   EXPECT_TRUE(g_fake_hal_emit_was_called);
   EXPECT_EQ(g_fake_hal_emit_report, &candidate.compile_report);
+  EXPECT_EQ(g_fake_hal_emit_function_versions, &function_versions);
   EXPECT_EQ(g_fake_hal_emit_source_to_low_max_errors, 73u);
   EXPECT_EQ(candidate.provider, &kFakeHalArtifactProvider);
   EXPECT_EQ(candidate.device_target.target_profile, &kFakeTargetProfile);

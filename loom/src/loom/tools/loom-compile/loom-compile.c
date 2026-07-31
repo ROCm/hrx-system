@@ -878,6 +878,7 @@ static iree_status_t loom_compile_emit_target(
   }
 
   loom_target_entry_options_t target_options = {
+      .function_versions = compile_options->function_versions,
       .diagnostic_sink = compile_options->diagnostic_sink,
       .source_resolver = compile_options->source_resolver,
       .max_errors = compile_options->max_errors,
@@ -931,6 +932,7 @@ static iree_status_t loom_compile_emit_target(
       .low_descriptor_registry =
           &loom_run_session_low_descriptor_registry(session)->registry,
       .module = run_module->module,
+      .function_versions = compile_options->function_versions,
       .option_chain = option_chain,
       .identifier = identifier,
       .compile_report = compile_options->report,
@@ -1716,6 +1718,7 @@ int main(int argc, char** argv) {
       }
       exit_code = 1;
     }
+    compile_options.function_versions = &pipeline_result.function_versions;
   }
   if (iree_status_is_ok(status) && exit_code == 0) {
     status =

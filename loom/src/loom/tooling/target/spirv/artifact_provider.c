@@ -265,6 +265,7 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_artifact(
   *out_artifact = (loom_run_hal_artifact_t){0};
 
   const loom_target_entry_options_t target_options = {
+      .function_versions = options->function_versions,
       .diagnostic_sink = options->diagnostic_sink,
       .source_resolver = options->source_resolver,
       .max_errors = options->max_errors,
