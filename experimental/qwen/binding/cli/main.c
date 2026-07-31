@@ -128,6 +128,9 @@ static iree_status_t qwen_layer_cli_run(void) {
     qwen_model_options_t model_options;
     qwen_model_options_initialize(&model_options);
     model_options.device_group = runtime_context.device_group;
+    if (runtime_context.jit_worker_count != 0) {
+      model_options.jit_worker_count = runtime_context.jit_worker_count;
+    }
     qwen_parameter_source_t parameter_source = {
         .index = runtime_context.parameter_index,
         .provider = runtime_context.parameter_provider,

@@ -35,6 +35,8 @@ typedef struct qwen_tooling_runtime_context_t {
   iree_hal_device_group_t* device_group;
   // Command-buffer mode derived from the standard profiling flags.
   iree_hal_command_buffer_mode_t command_buffer_mode;
+  // Requested JIT worker override, or zero to use the model default.
+  iree_host_size_t jit_worker_count;
   // Anonymous parameter index retained for model schema validation.
   iree_io_parameter_index_t* parameter_index;
   // Anonymous provider serving parameters from |parameter_index|.

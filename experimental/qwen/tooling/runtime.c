@@ -10,12 +10,16 @@
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
+#include "iree/base/tooling/flags.h"
 #include "iree/io/parameter_index.h"
 #include "iree/io/parameter_index_provider.h"
 #include "iree/io/parameter_provider.h"
 #include "iree/io/scope_map.h"
 #include "iree/tooling/device_util.h"
 #include "iree/tooling/parameter_util.h"
+
+IREE_FLAG(int32_t, qwen_jit_workers, 0,
+          "Number of Qwen Loom compiler workers; 0 uses the model default.");
 
 static iree_status_t qwen_tooling_command_buffer_mode_from_flags(
     iree_hal_command_buffer_mode_t* out_mode) {
@@ -128,10 +132,19 @@ iree_status_t qwen_tooling_runtime_context_initialize_from_flags(
   memset(out_context, 0, sizeof(*out_context));
   out_context->host_allocator = host_allocator;
 
-  iree_status_t status = iree_async_proactor_pool_create(
-      /*node_count=*/1, /*node_ids=*/NULL,
-      iree_async_proactor_pool_options_default(), host_allocator,
-      &out_context->proactor_pool);
+  iree_status_t status = iree_ok_status();
+  if (FLAG_qwen_jit_workers < 0) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--qwen_jit_workers must not be negative");
+  } else {
+    out_context->jit_worker_count = (iree_host_size_t)FLAG_qwen_jit_workers;
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_async_proactor_pool_create(
+        /*node_count=*/1, /*node_ids=*/NULL,
+        iree_async_proactor_pool_options_default(), host_allocator,
+        &out_context->proactor_pool);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_async_frontier_tracker_create(
         iree_async_frontier_tracker_options_default(), host_allocator,

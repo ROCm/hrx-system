@@ -278,6 +278,10 @@ static iree_status_t QwenBenchmarkEnvironmentInitialize(
     qwen_model_options_t model_options;
     qwen_model_options_initialize(&model_options);
     model_options.device_group = environment->runtime_context.device_group;
+    if (environment->runtime_context.jit_worker_count != 0) {
+      model_options.jit_worker_count =
+          environment->runtime_context.jit_worker_count;
+    }
     qwen_parameter_source_t parameter_source = {
         /*.index=*/environment->runtime_context.parameter_index,
         /*.provider=*/environment->runtime_context.parameter_provider,
