@@ -42,6 +42,13 @@ typedef enum qwen_program_qkv_schedule_e {
   QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA = 1,
 } qwen_program_qkv_schedule_t;
 
+typedef enum qwen_program_attention_schedule_e {
+  // General grouped-query attention used by prefill and layer programs.
+  QWEN_PROGRAM_ATTENTION_SCHEDULE_GENERAL = 0,
+  // One-token split-K attention with fused last-arrival reduction.
+  QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT = 1,
+} qwen_program_attention_schedule_t;
+
 typedef enum qwen_program_attention_output_schedule_e {
   // Packed Q8_1 input plus the row-parallel direct Q4_K contraction.
   QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8 = 0,
@@ -143,6 +150,8 @@ struct qwen_program_t {
   iree_host_size_t context_capacity;
   // Q/K/V contraction family selected for this token shape.
   qwen_program_qkv_schedule_t qkv_schedule;
+  // FlashAttention family selected for this program role.
+  qwen_program_attention_schedule_t attention_schedule;
   // Attention output contraction family selected for this token shape.
   qwen_program_attention_output_schedule_t attention_output_schedule;
   // Routed feed-forward family selected for this program role.
@@ -472,6 +481,13 @@ static qwen_program_qkv_schedule_t qwen_program_select_qkv_schedule(
              : QWEN_PROGRAM_QKV_SCHEDULE_QUANTIZED_ROWS;
 }
 
+static qwen_program_attention_schedule_t qwen_program_select_attention_schedule(
+    qwen_program_kind_t kind) {
+  return kind == QWEN_PROGRAM_KIND_DECODE
+             ? QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT
+             : QWEN_PROGRAM_ATTENTION_SCHEDULE_GENERAL;
+}
+
 static qwen_program_attention_output_schedule_t
 qwen_program_select_attention_output_schedule(iree_host_size_t token_count) {
   // The direct-Q8 result is established only for one-token decode. Keep every
@@ -491,6 +507,13 @@ qwen_program_select_feed_forward_schedule(qwen_program_kind_t kind) {
 
 static bool qwen_program_kind_is_full_model(qwen_program_kind_t kind) {
   return kind == QWEN_PROGRAM_KIND_PREFILL || kind == QWEN_PROGRAM_KIND_DECODE;
+}
+
+static qwen_full_program_layout_flags_t qwen_program_full_layout_flags(
+    qwen_program_kind_t kind) {
+  return kind == QWEN_PROGRAM_KIND_DECODE
+             ? QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION
+             : QWEN_FULL_PROGRAM_LAYOUT_FLAG_NONE;
 }
 
 static iree_hal_command_category_t qwen_program_command_categories(
@@ -519,6 +542,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
   };
   const int64_t flash_attention_workload[] = {
       token_count,
+      context_count,
+  };
+  const int64_t split_flash_attention_workload[] = {
       context_count,
   };
   const int64_t attention_output_quantize_workload[] = {
@@ -603,7 +629,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
         attention_postprocess_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_POSTPROCESS]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->attention_schedule == QWEN_PROGRAM_ATTENTION_SCHEDULE_GENERAL) {
     status = qwen_program_prepare_kernel(
         program->model,
         IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_PREFILL_F32_F16),
@@ -611,6 +638,19 @@ static iree_status_t qwen_program_prepare_layer_executables(
         IREE_ARRAYSIZE(qwen_flash_attention_config_bindings),
         qwen_flash_attention_config_bindings,
         IREE_ARRAYSIZE(flash_attention_workload), flash_attention_workload,
+        &program->executables[QWEN_PROGRAM_EXECUTABLE_FLASH_ATTENTION]);
+  }
+  if (iree_status_is_ok(status) &&
+      program->attention_schedule ==
+          QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT) {
+    status = qwen_program_prepare_kernel(
+        program->model,
+        IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_DECODE_SPLIT_F32_F16),
+        IREE_SV("qwen3_moe_flash_attention_decode_split_f32_f16_wmma"),
+        IREE_ARRAYSIZE(qwen_flash_attention_config_bindings),
+        qwen_flash_attention_config_bindings,
+        IREE_ARRAYSIZE(split_flash_attention_workload),
+        split_flash_attention_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_FLASH_ATTENTION]);
   }
   if (iree_status_is_ok(status) &&
@@ -1247,22 +1287,52 @@ static iree_status_t qwen_program_record_attention(
     status = qwen_program_record_dispatch_barrier(program);
   }
 
-  const uint32_t flash_attention_constants[] = {
-      token_count,
-      context_count,
-  };
-  const iree_hal_buffer_ref_t flash_attention_bindings[] = {
-      qwen_program_transient_ref(transient->rotated_query),
-      iree_hal_make_indirect_buffer_ref(
-          QWEN_PROGRAM_BINDING_KEY_CACHE, layer_cache_offset,
-          request_layout->layer_cache_byte_length),
-      iree_hal_make_indirect_buffer_ref(
-          QWEN_PROGRAM_BINDING_VALUE_CACHE, layer_cache_offset,
-          request_layout->layer_cache_byte_length),
-      qwen_program_request_ref(request_layout->attention_mask),
-      qwen_program_transient_ref(transient->attention_output),
-  };
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->attention_schedule == QWEN_PROGRAM_ATTENTION_SCHEDULE_GENERAL) {
+    const uint32_t flash_attention_constants[] = {
+        token_count,
+        context_count,
+    };
+    const iree_hal_buffer_ref_t flash_attention_bindings[] = {
+        qwen_program_transient_ref(transient->rotated_query),
+        iree_hal_make_indirect_buffer_ref(
+            QWEN_PROGRAM_BINDING_KEY_CACHE, layer_cache_offset,
+            request_layout->layer_cache_byte_length),
+        iree_hal_make_indirect_buffer_ref(
+            QWEN_PROGRAM_BINDING_VALUE_CACHE, layer_cache_offset,
+            request_layout->layer_cache_byte_length),
+        qwen_program_request_ref(request_layout->attention_mask),
+        qwen_program_transient_ref(transient->attention_output),
+    };
+    status = qwen_program_record_dispatch(
+        program, QWEN_PROGRAM_EXECUTABLE_FLASH_ATTENTION,
+        IREE_ARRAYSIZE(flash_attention_constants), flash_attention_constants,
+        IREE_ARRAYSIZE(flash_attention_bindings), flash_attention_bindings);
+  }
+  if (iree_status_is_ok(status) &&
+      program->attention_schedule ==
+          QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT) {
+    const uint32_t flash_attention_constants[] = {
+        context_count,
+    };
+    const iree_hal_buffer_ref_t flash_attention_bindings[] = {
+        qwen_program_transient_ref(transient->rotated_query),
+        iree_hal_make_indirect_buffer_ref(
+            QWEN_PROGRAM_BINDING_KEY_CACHE, layer_cache_offset,
+            request_layout->layer_cache_byte_length),
+        iree_hal_make_indirect_buffer_ref(
+            QWEN_PROGRAM_BINDING_VALUE_CACHE, layer_cache_offset,
+            request_layout->layer_cache_byte_length),
+        qwen_program_request_ref(request_layout->attention_mask),
+        qwen_program_transient_ref(
+            program->full_layout.attention_partial_maximums),
+        qwen_program_transient_ref(program->full_layout.attention_partial_sums),
+        qwen_program_transient_ref(
+            program->full_layout.attention_partial_outputs),
+        qwen_program_transient_ref(
+            program->full_layout.attention_completion_counters),
+        qwen_program_transient_ref(transient->attention_output),
+    };
     status = qwen_program_record_dispatch(
         program, QWEN_PROGRAM_EXECUTABLE_FLASH_ATTENTION,
         IREE_ARRAYSIZE(flash_attention_constants), flash_attention_constants,
@@ -1921,7 +1991,9 @@ static iree_status_t qwen_program_validate_options(
   }
   if (qwen_program_kind_is_full_model(options->kind)) {
     qwen_full_program_layout_t layout;
-    return qwen_full_program_layout_calculate(options->token_count, &layout);
+    return qwen_full_program_layout_calculate(
+        options->token_count, options->context_count,
+        qwen_program_full_layout_flags(options->kind), &layout);
   }
   qwen_layer_program_layout_t layout;
   return qwen_layer_program_layout_calculate(options->token_count, &layout);
@@ -1971,6 +2043,8 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
   program->context_capacity = options->context_capacity;
   program->qkv_schedule =
       qwen_program_select_qkv_schedule(options->token_count);
+  program->attention_schedule =
+      qwen_program_select_attention_schedule(options->kind);
   program->attention_output_schedule =
       qwen_program_select_attention_output_schedule(options->token_count);
   program->feed_forward_schedule =
@@ -1978,8 +2052,9 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
 
   iree_status_t status = iree_ok_status();
   if (qwen_program_kind_is_full_model(options->kind)) {
-    status = qwen_full_program_layout_calculate(options->token_count,
-                                                &program->full_layout);
+    status = qwen_full_program_layout_calculate(
+        options->token_count, options->context_count,
+        qwen_program_full_layout_flags(options->kind), &program->full_layout);
     if (iree_status_is_ok(status)) {
       program->layer_layout = program->full_layout.layer;
       program->transient_byte_length =
@@ -2166,7 +2241,13 @@ iree_status_t qwen_program_issue(
         qwen_program_kind_is_full_model(program->kind) ? "token-ID"
                                                        : "hidden-state");
   }
-  if (program->timeline_value > IREE_HAL_SEMAPHORE_MAX_VALUE - 3 ||
+  const bool initializes_attention_counters =
+      program->attention_schedule ==
+      QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT;
+  const uint64_t issue_timeline_step_count =
+      initializes_attention_counters ? 4 : 3;
+  if (program->timeline_value >
+          IREE_HAL_SEMAPHORE_MAX_VALUE - issue_timeline_step_count ||
       qwen_request_timeline_value(request) == IREE_HAL_SEMAPHORE_MAX_VALUE) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "Qwen issue timeline is exhausted");
@@ -2187,8 +2268,10 @@ iree_status_t qwen_program_issue(
       program, request, wait_semaphore_list, &alloca_waits));
 
   uint64_t scratch_ready_value = program->timeline_value + 1;
-  uint64_t execute_complete_value = program->timeline_value + 2;
-  const uint64_t program_complete_value = program->timeline_value + 3;
+  uint64_t execute_ready_value =
+      program->timeline_value + (initializes_attention_counters ? 2 : 1);
+  uint64_t execute_complete_value = execute_ready_value + 1;
+  const uint64_t program_complete_value = execute_complete_value + 1;
   const uint64_t request_complete_value =
       qwen_request_timeline_value(request) + 1;
 
@@ -2199,6 +2282,12 @@ iree_status_t qwen_program_issue(
       .payload_values = &scratch_ready_value,
   };
   iree_hal_semaphore_list_t scratch_ready_waits = scratch_ready_signals;
+  iree_hal_semaphore_list_t execute_ready_signals = {
+      .count = 1,
+      .semaphores = &program_timeline,
+      .payload_values = &execute_ready_value,
+  };
+  iree_hal_semaphore_list_t execute_ready_waits = execute_ready_signals;
   iree_hal_semaphore_list_t execute_complete_signals = {
       .count = 1,
       .semaphores = &program_timeline,
@@ -2215,7 +2304,10 @@ iree_status_t qwen_program_issue(
   const iree_hal_queue_affinity_t queue_affinity =
       qwen_model_queue_affinity(program->model);
   const iree_hal_buffer_params_t scratch_params = {
-      .usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE,
+      .usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+               (initializes_attention_counters
+                    ? IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET
+                    : IREE_HAL_BUFFER_USAGE_NONE),
       .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
       .queue_affinity = queue_affinity,
@@ -2228,6 +2320,24 @@ iree_status_t qwen_program_issue(
       IREE_HAL_ALLOCA_FLAG_NONE, &scratch_buffer);
   if (!iree_status_is_ok(status)) {
     return status;
+  }
+  if (initializes_attention_counters) {
+    const uint32_t zero_pattern = 0;
+    const qwen_program_span_t completion_counters =
+        program->full_layout.attention_completion_counters;
+    status = iree_hal_device_queue_fill(
+        device, queue_affinity, scratch_ready_waits, execute_ready_signals,
+        scratch_buffer, completion_counters.offset, completion_counters.length,
+        &zero_pattern, sizeof(zero_pattern), IREE_HAL_FILL_FLAG_NONE);
+    if (!iree_status_is_ok(status)) {
+      iree_status_t cleanup_status = iree_hal_device_queue_dealloca(
+          device, queue_affinity, scratch_ready_waits,
+          iree_hal_semaphore_list_empty(), scratch_buffer,
+          IREE_HAL_DEALLOCA_FLAG_NONE);
+      iree_hal_buffer_release(scratch_buffer);
+      qwen_program_fail_after_partial_submission(program, request, status);
+      return iree_status_join(status, cleanup_status);
+    }
   }
 
   const qwen_request_storage_layout_t* request_layout =
@@ -2282,11 +2392,11 @@ iree_status_t qwen_program_issue(
       .bindings = bindings,
   };
   status = iree_hal_device_queue_execute(
-      device, queue_affinity, scratch_ready_waits, execute_complete_signals,
+      device, queue_affinity, execute_ready_waits, execute_complete_signals,
       program->command_buffer, binding_table, IREE_HAL_EXECUTE_FLAG_NONE);
   if (!iree_status_is_ok(status)) {
     iree_status_t cleanup_status = iree_hal_device_queue_dealloca(
-        device, queue_affinity, scratch_ready_waits,
+        device, queue_affinity, execute_ready_waits,
         iree_hal_semaphore_list_empty(), scratch_buffer,
         IREE_HAL_DEALLOCA_FLAG_NONE);
     iree_hal_buffer_release(scratch_buffer);

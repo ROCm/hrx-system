@@ -53,6 +53,12 @@ static const qwen_loom_source_mapping_t qwen_loom_source_mappings[] = {
             IREE_SVL("qwen3_moe_flash_attention_prefill_f32_f16.loom"),
     },
     {
+        .module_path =
+            IREE_SVL(QWEN_LOOM_SOURCE_FLASH_ATTENTION_DECODE_SPLIT_F32_F16),
+        .embedded_name =
+            IREE_SVL("qwen3_moe_flash_attention_decode_split_f32_f16.loom"),
+    },
+    {
         .module_path = IREE_SVL(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
         .embedded_name = IREE_SVL("qwen3_moe_dense_linear_quantized_f16.loom"),
     },

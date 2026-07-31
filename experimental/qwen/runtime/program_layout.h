@@ -21,6 +21,15 @@ typedef struct qwen_program_span_t {
   iree_device_size_t length;
 } qwen_program_span_t;
 
+// Full-model transient layout features.
+typedef uint32_t qwen_full_program_layout_flags_t;
+enum qwen_full_program_layout_flag_bits_e {
+  QWEN_FULL_PROGRAM_LAYOUT_FLAG_NONE = 0u,
+
+  // Reserves partial and completion storage for fused split-K decode attention.
+  QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION = 1u << 0,
+};
+
 // Named transient spans used by one complete layer program.
 //
 // Most semantic values have distinct storage, keeping the correctness witness
@@ -70,6 +79,14 @@ typedef struct qwen_full_program_layout_t {
   qwen_layer_program_layout_t layer;
   // Complete one-token scratch for the terminal layer-47 workload.
   qwen_layer_program_layout_t terminal_layer;
+  // Per-KV-block F32 online-softmax maximums reused by every decode layer.
+  qwen_program_span_t attention_partial_maximums;
+  // Per-KV-block F32 online-softmax sums reused by every decode layer.
+  qwen_program_span_t attention_partial_sums;
+  // Per-KV-block F16 attention outputs reused by every decode layer.
+  qwen_program_span_t attention_partial_outputs;
+  // Per-KV-head I32 completion counters reset by every decode layer.
+  qwen_program_span_t attention_completion_counters;
   // Final RMSNorm output containing one F32 hidden-state row.
   qwen_program_span_t final_normalized_hidden_state;
   // GGML Q8_1 x4 packing of the final normalized hidden-state row.
@@ -86,7 +103,9 @@ iree_status_t qwen_layer_program_layout_calculate(
 
 // Calculates the exact complete full-model transient layout.
 iree_status_t qwen_full_program_layout_calculate(
-    iree_host_size_t token_count, qwen_full_program_layout_t* out_layout);
+    iree_host_size_t token_count, iree_host_size_t context_count,
+    qwen_full_program_layout_flags_t flags,
+    qwen_full_program_layout_t* out_layout);
 
 #ifdef __cplusplus
 }  // extern "C"

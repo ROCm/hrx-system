@@ -64,6 +64,11 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
           "qwen3_moe_flash_attention_f32_f16_wmma",
       },
       {
+          QWEN_LOOM_SOURCE_FLASH_ATTENTION_DECODE_SPLIT_F32_F16,
+          "qwen3_moe_flash_attention_decode_split_f32_f16.loom",
+          "qwen3_moe_flash_attention_decode_split_f32_f16_wmma",
+      },
+      {
           QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16,
           "qwen3_moe_dense_linear_quantized_f16.loom",
           "qwen3_moe_dense_linear_q4k_f16_wmma",
@@ -374,6 +379,26 @@ TEST(QwenLoomSourceTest, EmbedsWorkaroundExpertTableSource) {
   EXPECT_EQ(
       source_text.find("%route0 = index.rem %assignment, %bounded_route_count"),
       std::string::npos);
+}
+
+TEST(QwenLoomSourceTest, EmbedsDecodeSplitFixedContextWorkaround) {
+  qwen_loom_source_module_t source_module;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_DECODE_SPLIT_F32_F16),
+      &source_module));
+
+  std::string source_text(
+      reinterpret_cast<const char*>(source_module.source_contents.data),
+      source_module.source_contents.data_length);
+  EXPECT_NE(
+      source_text.find("[range(%key_value_token_count, 513, 513)] : index"),
+      std::string::npos);
+  EXPECT_NE(
+      source_text.find("kernel.launch.config workgroups(%nine, %four, %one)"),
+      std::string::npos);
+  EXPECT_NE(source_text.find(
+                "func.apply<qwen3_moe.attention.decode_split.reduce_fused>"),
+            std::string::npos);
 }
 
 }  // namespace

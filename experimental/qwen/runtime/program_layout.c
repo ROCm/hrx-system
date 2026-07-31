@@ -13,6 +13,8 @@
 #define QWEN_PROGRAM_STORAGE_ALIGNMENT 256
 #define QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT 128
 #define QWEN_PROGRAM_Q8_1_X4_GROUP_BYTE_LENGTH 144
+#define QWEN_PROGRAM_SPLIT_ATTENTION_KEY_VALUE_BLOCK_LENGTH 64
+#define QWEN_PROGRAM_SPLIT_ATTENTION_QUERY_ROW_CAPACITY 16
 
 static_assert(QWEN_MODEL_HIDDEN_SIZE %
                       QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT ==
@@ -201,9 +203,19 @@ iree_status_t qwen_layer_program_layout_calculate(
 }
 
 iree_status_t qwen_full_program_layout_calculate(
-    iree_host_size_t token_count, qwen_full_program_layout_t* out_layout) {
+    iree_host_size_t token_count, iree_host_size_t context_count,
+    qwen_full_program_layout_flags_t flags,
+    qwen_full_program_layout_t* out_layout) {
   IREE_ASSERT_ARGUMENT(out_layout);
   memset(out_layout, 0, sizeof(*out_layout));
+  if (iree_any_bit_set(flags,
+                       ~QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen full-program layout flags are unsupported");
+  }
+  iree_device_size_t byte_length = 0;
+  IREE_RETURN_IF_ERROR(
+      qwen_model_layer_cache_byte_length(context_count, &byte_length));
 
   IREE_RETURN_IF_ERROR(
       qwen_layer_program_layout_calculate(token_count, &out_layout->layer));
@@ -218,7 +230,39 @@ iree_status_t qwen_full_program_layout_calculate(
   IREE_RETURN_IF_ERROR(qwen_program_layout_rebase_layer(
       terminal_layer_storage.offset, &out_layout->terminal_layer));
 
-  iree_device_size_t byte_length = 0;
+  if (iree_any_bit_set(flags,
+                       QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION)) {
+    const iree_device_size_t key_value_block_count =
+        ((iree_device_size_t)context_count +
+         QWEN_PROGRAM_SPLIT_ATTENTION_KEY_VALUE_BLOCK_LENGTH - 1) /
+        QWEN_PROGRAM_SPLIT_ATTENTION_KEY_VALUE_BLOCK_LENGTH;
+    iree_device_size_t partial_row_count = 0;
+    IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
+        QWEN_MODEL_KEY_VALUE_HEAD_COUNT, key_value_block_count,
+        &partial_row_count));
+    IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
+        partial_row_count, QWEN_PROGRAM_SPLIT_ATTENTION_QUERY_ROW_CAPACITY,
+        &partial_row_count));
+    IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
+        partial_row_count, sizeof(float), &byte_length));
+    IREE_RETURN_IF_ERROR(qwen_program_layout_append(
+        byte_length, &cursor, &out_layout->attention_partial_maximums));
+    IREE_RETURN_IF_ERROR(qwen_program_layout_append(
+        byte_length, &cursor, &out_layout->attention_partial_sums));
+
+    IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
+        partial_row_count, QWEN_MODEL_HEAD_SIZE, &byte_length));
+    IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
+        byte_length, /*F16 byte length=*/2, &byte_length));
+    IREE_RETURN_IF_ERROR(qwen_program_layout_append(
+        byte_length, &cursor, &out_layout->attention_partial_outputs));
+
+    IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
+        QWEN_MODEL_KEY_VALUE_HEAD_COUNT, sizeof(int32_t), &byte_length));
+    IREE_RETURN_IF_ERROR(qwen_program_layout_append(
+        byte_length, &cursor, &out_layout->attention_completion_counters));
+  }
+
   IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
       QWEN_MODEL_HIDDEN_SIZE, sizeof(float), &byte_length));
   IREE_RETURN_IF_ERROR(qwen_program_layout_append(

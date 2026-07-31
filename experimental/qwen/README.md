@@ -83,6 +83,13 @@ indices, and dense causal-mask bits from one compact context-base control word.
 It is not a kernel framework or a generator and must not accumulate alternate
 indexing policies. Delete it when the canonical producer lands.
 
+`kernels/flash_attention_decode_split_bringup_workaround.loom` retains the
+canonical split-K decode ABI and both canonical template applications. It makes
+the exact context-513 range and `9 x 4 x 1` launch structural because those
+workload facts do not reach template selection or topology analysis. It
+contains no attention algorithm body and is deleted when the unmodified public
+kernel specializes correctly.
+
 The three direct feed-forward forks
 `kernels/routed_gate_up_q8_bringup_workaround.loom`,
 `kernels/routed_down_q4_q8_bringup_workaround.loom`, and
@@ -102,8 +109,8 @@ general vocabulary-kernel authoring mechanism.
 The working full-model programs now record all 48 layers, embedding, final
 normalization, vocabulary projection, and greedy selection into reusable
 command buffers. Prefill retains the grouped F16 WMMA feed-forward route;
-decode uses fused normalization and Q8_1 packing, direct raw-Q4_K gate/up, and
-direct Q4_K or Q6_K down contraction with route weighting, reduction, and
-residual publication fused. The layer runner remains a first-class
-optimization surface so model work can be isolated to a stable benchmark row
-without forking execution logic.
+decode uses fused split-K attention, fused normalization and Q8_1 packing,
+direct raw-Q4_K gate/up, and direct Q4_K or Q6_K down contraction with route
+weighting, reduction, and residual publication fused. The layer runner remains
+a first-class optimization surface so model work can be isolated to a stable
+benchmark row without forking execution logic.

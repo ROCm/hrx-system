@@ -239,6 +239,21 @@ genrule(
 )
 
 loom_link_module(
+    name = "flash_attention_decode_split_f32_f16_runtime_module",
+    srcs = [
+        "flash_attention_decode_split_bringup_workaround.loom",
+        "runtime_exports.loom",
+    ],
+    libraries = [
+        "//experimental/qwen_moe/kernels:qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom",
+    ],
+    mode = "selective",
+    output = "qwen3_moe_flash_attention_decode_split_f32_f16.loom",
+    roots = ["@qwen3_moe_flash_attention_decode_split_f32_f16_wmma"],
+    strip_check = True,
+)
+
+loom_link_module(
     name = "dense_linear_quantized_f16_runtime_module",
     srcs = ["runtime_exports.loom"],
     libraries = [
@@ -520,6 +535,7 @@ iree_c_embed_data(
         ":attention_prepare_quantized_runtime_module",
         ":attention_qkv_quantized_runtime_module",
         ":dense_linear_quantized_f16_runtime_module",
+        ":flash_attention_decode_split_f32_f16_runtime_module",
         ":flash_attention_prefill_f32_f16_runtime_module",
         ":greedy_argmax_bringup_workaround_runtime_module",
         ":quantize_q8_1_x4_bringup_workaround_runtime_module",

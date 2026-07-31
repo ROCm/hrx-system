@@ -82,10 +82,11 @@ IREE_API_EXPORT void qwen_program_release(qwen_program_t* program);
 // Issues |program| against compatible |request| state.
 //
 // The issue waits for model residency, request readiness, and every caller
-// semaphore. It queue-allocates transient storage, executes the recorded
-// command buffer, queue-deallocates the transient storage, and only then
-// publishes |signal_semaphore_list|. A second issue before the prior issue
-// completes fails with FAILED_PRECONDITION.
+// semaphore. It queue-allocates transient storage, initializes any
+// schedule-owned synchronization state, executes the recorded command buffer,
+// queue-deallocates the transient storage, and only then publishes
+// |signal_semaphore_list|. A second issue before the prior issue completes
+// fails with FAILED_PRECONDITION.
 IREE_API_EXPORT iree_status_t
 qwen_program_issue(qwen_program_t* program, qwen_request_t* request,
                    iree_hal_semaphore_list_t wait_semaphore_list,

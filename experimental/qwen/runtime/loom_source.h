@@ -40,6 +40,10 @@ extern "C" {
 #define QWEN_LOOM_SOURCE_FLASH_ATTENTION_PREFILL_F32_F16 \
   "qwen3_moe/flash_attention_prefill_f32_f16"
 
+// Stable runtime path for fused split-K decode FlashAttention.
+#define QWEN_LOOM_SOURCE_FLASH_ATTENTION_DECODE_SPLIT_F32_F16 \
+  "qwen3_moe/flash_attention_decode_split_f32_f16"
+
 // Stable runtime path for dense quantized F16-WMMA projections.
 #define QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16 \
   "qwen3_moe/dense_linear_quantized_f16"

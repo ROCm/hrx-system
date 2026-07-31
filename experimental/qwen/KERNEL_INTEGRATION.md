@@ -80,9 +80,10 @@ specializations.
 The runtime records embedding, attention metadata, 48 transformer layers,
 final RMSNorm, Q6_K vocabulary projection, and greedy selection into one
 reusable indirect command buffer. Explicit dispatch barriers carry
-producer/consumer visibility. Queue issue allocates transient storage, executes
-the command buffer, deallocates the transient allocation, and publishes
-completion through explicit semaphore edges.
+producer/consumer visibility. Queue issue allocates transient storage,
+initializes schedule-owned synchronization state, executes the command buffer,
+deallocates the transient allocation, and publishes completion through explicit
+semaphore edges.
 
 The token-count routes below are the ones in the working prefill-512 and
 decode-513 programs:
@@ -94,7 +95,7 @@ decode-513 programs:
 | Attention normalization | F32 RMSNorm | Fused RMSNorm and Q8_1 x4 packing | `qwen3_moe/attention_prepare_quantized.loom` |
 | Q/K/V projection | Separate Q4_K query/key and storage-selected Q4_K or Q6_K value WMMA dispatches | One fused Q8_1 x4 Q/K/V dispatch with storage-selected value decoding | `qwen3_moe/dense_linear_quantized_f16_wmma.loom` and `qwen3_moe/attention_qkv_quantized.loom` |
 | RoPE and cache publication | One combined postprocess dispatch | Same | `qwen3_moe/attention_postprocess_f32_f16.loom` |
-| FlashAttention | General grouped-query prefill kernel | Currently the same general kernel | `qwen3_moe/flash_attention_f32_f16_wmma.loom` |
+| FlashAttention | General grouped-query prefill kernel | Fused split-K decode kernel with last-arrival reduction | `qwen3_moe/flash_attention_f32_f16_wmma.loom` and `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` |
 | Attention output | Q4_K F16 WMMA projection with residual accumulation | Q8_1 x4 pack followed by direct Q4_K row contraction with residual accumulation | `qwen3_moe/dense_linear_quantized_f16_wmma.loom` and `ggml/quantize_q8_1_x4.loom` |
 | Feed-forward RMSNorm | F32 RMSNorm | Fused F32 RMSNorm and Q8_1 x4 packing | `qwen3_moe/attention_prepare_quantized.loom` |
 | Router projection | Four-row wave32 schedule | Same current schedule | `qwen3_moe/router_projection_f32.loom` |
@@ -114,31 +115,24 @@ dispatches per layer, and four endpoint dispatches. Its reusable dispatch-only
 command buffer contains 581 explicit barriers and one terminal return;
 selected-token publication does not add a transfer operation.
 
-One route gap is deliberately visible instead of being hidden behind a generic
-fallback. The canonical corpus already contains three decode-specific attention
-families:
-
-- `qwen3_moe/flash_attention_decode_q128_f32_f16_wmma.loom` for the exact
-  128-row schedule;
-- `qwen3_moe/flash_attention_decode_f32_f16_wmma.loom` for ordinary context
-  lengths; and
-- `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` for long-context
-  split-K execution.
-
-The owned runtime at this revision still issues the general prefill-capable
-FlashAttention kernel for decode. The direct Q8_1 x4 gate/up and fused direct
-down families are selected for full-model decode; grouped F16 WMMA remains the
-prefill and layer-program route. This is an integration choice, not a missing
-kernel source.
+Decode owns one partial-maximum, partial-sum, partial-output, and completion
+counter region sized to its exact context. All 48 sequential layer dispatches
+reuse those spans. A queue fill initializes the four completion counters after
+transient allocation and signals reusable command-buffer execution; every
+attention dispatch returns its counters to zero before the following layer.
+The direct Q8_1 x4 gate/up and fused direct down families are selected for
+full-model decode; grouped F16 WMMA remains the prefill and layer-program route.
 
 ## Specialization and ABI
 
 The host chooses semantic kernel families and passes model facts; target launch
-geometry remains in Loom. `program.c` currently selects three
+geometry remains in Loom. `program.c` currently selects four
 shape-dependent families:
 
 - Q/K/V uses separate F32-input WMMA projections at 128 or more rows and the
   fused Q8_1 x4 row kernel below 128 rows.
+- FlashAttention uses fused split-K execution for full-model decode and the
+  general grouped-query kernel for prefill and layer programs.
 - Attention output uses the direct Q8_1 x4 Q4_K contraction for one-token
   decode and the F16 WMMA contraction for larger shapes.
 - Feed-forward uses fused RMSNorm/Q8_1 preparation, direct raw-Q4_K gate/up,
@@ -178,6 +172,7 @@ not copied wholesale into a second kernel corpus.
 | `routed_down_q4_q8_bringup_workaround.loom` | `qwen3_moe/routed_down_q4k.loom` | Exact decode dimensions do not reach source-to-low, so the eight-iteration route loop cannot be unrolled. The fork makes the one-token Q4_K workload structural while retaining the direct fused ABI and body. |
 | `routed_down_q6_q8_bringup_workaround.loom` | `qwen3_moe/routed_down_q6k.loom` | The same source-to-low specialization gap blocks the storage-selected Q6_K direct route. The fork fixes only the model dimensions needed to expose its eight-iteration route loop. |
 | `linear_q6k_q8_1_x4_bringup_workaround.loom` | `ggml/linear_q6k_q8_1_x4.loom` | A guarded tail store loses its channel bound during address planning. The one-row fork uses a safe masked weight channel, repeats the guarded output relation, and narrows generic maxima to hidden width 2048 and vocabulary size 151936. |
+| `flash_attention_decode_split_bringup_workaround.loom` | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` | Exact context 513 does not reach reducer-template selection or launch topology analysis. The fork carries that exact range to the canonical template applications and makes only the `9 x 4 x 1` launch structural. |
 | `flash_attention_bringup_workaround.py` | `qwen3_moe/flash_attention_f32_f16_wmma.loom` | Bounded subtraction facts are lost in full-tile and tail paths, and a dynamic zero-or-capacity workgroup allocation violates the fixed-frame contract. The exact-text patch expresses tails as remainders, introduces the path-local lower bound, and reserves the full 8192-byte tail stage inside the resulting 23808-byte LDS frame. |
 | `token_embedding_bringup_workaround.loom` | No corpus provider yet | Fixed Q4_K GGUF row decoding into the 2048-wide F32 hidden layout. This is endpoint glue, not an assumption repair. |
 | `attention_metadata_bringup_workaround.loom` | No corpus provider yet | Direct no-ring K/V indices, positions, and dense causal-mask construction from one context-base word. This is request-policy glue, not an assumption repair. |
