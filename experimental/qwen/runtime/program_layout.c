@@ -25,7 +25,14 @@ static_assert((QWEN_MODEL_QUERY_HEAD_COUNT * QWEN_MODEL_HEAD_SIZE) %
                   0,
               "Qwen attention rows must contain complete GGML Q8_1 x4 groups");
 static_assert((QWEN_MODEL_KEY_VALUE_HEAD_COUNT * sizeof(int32_t)) % 16 == 0,
-              "Qwen split-attention counters must align the router counter");
+              "Qwen split-attention counters must align gate/up counters");
+static_assert((QWEN_MODEL_ROUTE_COUNT *
+               (QWEN_MODEL_EXPERT_INTERMEDIATE_SIZE /
+                QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT) *
+               sizeof(int32_t)) %
+                      16 ==
+                  0,
+              "Qwen gate/up counters must align the shared stage counter");
 
 static iree_status_t qwen_program_layout_checked_product(
     iree_device_size_t lhs, iree_device_size_t rhs,
@@ -212,7 +219,7 @@ iree_status_t qwen_full_program_layout_calculate(
   memset(out_layout, 0, sizeof(*out_layout));
   const qwen_full_program_layout_flags_t supported_flags =
       QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION |
-      QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SHARED_COMPLETION;
+      QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_STAGE_COMPLETION;
   if (iree_any_bit_set(flags, ~supported_flags)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen full-program layout flags are unsupported");
@@ -264,19 +271,34 @@ iree_status_t qwen_full_program_layout_calculate(
 
   const bool reserves_attention_completion = iree_any_bit_set(
       flags, QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION);
-  const bool reserves_shared_completion = iree_any_bit_set(
-      flags, QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SHARED_COMPLETION);
-  if (reserves_attention_completion || reserves_shared_completion) {
+  const bool reserves_fused_stage_completion = iree_any_bit_set(
+      flags, QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_STAGE_COMPLETION);
+  if (reserves_attention_completion || reserves_fused_stage_completion) {
     iree_device_size_t attention_byte_length = 0;
     if (reserves_attention_completion) {
       IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
           QWEN_MODEL_KEY_VALUE_HEAD_COUNT, sizeof(int32_t),
           &attention_byte_length));
     }
+    iree_device_size_t gate_up_byte_length = 0;
+    if (reserves_fused_stage_completion) {
+      iree_device_size_t gate_up_counter_count = 0;
+      IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
+          QWEN_MODEL_ROUTE_COUNT,
+          QWEN_MODEL_EXPERT_INTERMEDIATE_SIZE /
+              QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT,
+          &gate_up_counter_count));
+      IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
+          gate_up_counter_count, sizeof(int32_t), &gate_up_byte_length));
+    }
     const iree_device_size_t shared_byte_length =
-        reserves_shared_completion ? sizeof(int32_t) : 0;
+        reserves_fused_stage_completion ? sizeof(int32_t) : 0;
     iree_device_size_t initialization_byte_length = 0;
-    if (!iree_device_size_checked_add(attention_byte_length, shared_byte_length,
+    if (!iree_device_size_checked_add(attention_byte_length,
+                                      gate_up_byte_length,
+                                      &initialization_byte_length) ||
+        !iree_device_size_checked_add(initialization_byte_length,
+                                      shared_byte_length,
                                       &initialization_byte_length)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "Qwen completion storage length overflows");
@@ -288,9 +310,14 @@ iree_status_t qwen_full_program_layout_calculate(
         .offset = out_layout->decode_completion.initialization.offset,
         .length = attention_byte_length,
     };
-    out_layout->decode_completion.shared = (qwen_program_span_t){
+    out_layout->decode_completion.gate_up = (qwen_program_span_t){
         .offset = out_layout->decode_completion.initialization.offset +
                   attention_byte_length,
+        .length = gate_up_byte_length,
+    };
+    out_layout->decode_completion.shared = (qwen_program_span_t){
+        .offset =
+            out_layout->decode_completion.gate_up.offset + gate_up_byte_length,
         .length = shared_byte_length,
     };
   }

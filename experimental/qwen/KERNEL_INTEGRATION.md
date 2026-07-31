@@ -101,33 +101,34 @@ decode-513 programs:
 | Router projection | Four-row wave32 schedule | Fused four-row wave64 projection with last-arrival top-8 selection | `qwen3_moe/router_projection_f32.loom` and `qwen3_moe/router_projection_top8_fused.loom` |
 | Top-8 routing | Normalized compact `[token, 8]` rows | Published by the fused projection's last-arriving wave | `qwen3_moe/router_top8_f32.loom` and `qwen3_moe/router_projection_top8_fused.loom` |
 | Expert tables | Assignment table then 32-row partition table | None; compact route IDs directly select expert rows | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` |
-| Gate/up and SwiGLU | Grouped Q4_K F16 WMMA | Raw Q4_K by Q8_1 x4 direct contraction producing F32 SwiGLU rows | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` |
-| SwiGLU packing | None | Eight F32 route rows packed to Q8_1 x4 | `ggml/quantize_q8_1_x4.loom` |
+| Gate/up, SwiGLU, and Q8 packing | Grouped Q4_K F16 WMMA producing F32 SwiGLU rows | Raw Q4_K by Q8_1 x4 direct contraction publishing both F32 SwiGLU rows and their packed physical groups | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` and `ggml/quantize_q8_1_x4.loom` |
 | Routed down and reduction | Grouped Q4_K or Q6_K F16 WMMA followed by weighted reduction | Storage-selected direct Q4_K or Q6_K contraction with route weighting, reduction, and residual update fused; the last-arriving workgroup also publishes the next layer's normalized Q8_1 x4 row | `qwen3_moe/routed_down_q4k.loom` and `qwen3_moe/routed_down_q6k.loom` |
 | Vocabulary endpoint | Fused RMSNorm/Q8_1 x4 pack, raw Q6_K contraction, finite-logit argmax | The final routed-down dispatch publishes the normalized Q8_1 x4 row; the endpoint performs the raw Q6_K contraction and finite-logit argmax | `qwen3_moe/routed_down_q4k.loom`, `qwen3_moe/routed_down_q6k.loom`, `ggml/linear_q6k_q8_1_x4.loom`, and an owned argmax bring-up kernel |
 
 Full-model prefill records 725 dispatches. Layers 0 through 46 execute every
 stage over all 512 rows. Layer 47 executes attention over all rows so its cache
 is complete, then executes feed-forward and the vocabulary endpoint only for
-the final row needed to select the next token. Decode records 485 dispatches:
+the final row needed to select the next token. Decode records 437 dispatches:
 two request-setup dispatches, six attention dispatches in layer 0, five
-attention dispatches in each remaining layer, five direct feed-forward
+attention dispatches in each remaining layer, four direct feed-forward
 dispatches per layer, and two endpoint dispatches. Each routed-down dispatch
 publishes the normalized Q8_1 x4 row consumed by the following layer or
-vocabulary projection. Its reusable dispatch-only command buffer contains 484
+vocabulary projection. Its reusable dispatch-only command buffer contains 436
 explicit barriers and one terminal return; selected-token publication does not
 add a transfer operation.
 
 Decode owns partial-maximum, partial-sum, and partial-output regions sized to
-its exact context. Four split-attention counters and one shared fused-stage
-counter occupy one contiguous 20-byte initialization span. All 48 sequential
-layers reuse those spans. One queue fill initializes all five counters after
-transient allocation and signals reusable command-buffer execution; each
-attention dispatch returns its counters to zero, while the fused router and
-routed-down dispatches sequentially return the shared counter to zero before
-its next use. The direct Q8_1 x4 gate/up and fused direct down families are
-selected for full-model decode; grouped F16 WMMA remains the prefill and
-layer-program route.
+its exact context. Four split-attention counters, 48 gate/up physical-group
+counters, and one shared fused-stage counter occupy one contiguous 212-byte
+initialization span. Existing 256-byte span alignment absorbs the added
+counters without increasing the complete transient allocation. All 48
+sequential layers reuse those spans. One queue fill initializes all 53 counters
+after transient allocation and signals reusable command-buffer execution; each
+attention and gate/up dispatch returns its owned counters to zero, while the
+fused router and routed-down dispatches sequentially return the shared counter
+to zero before its next use. The direct Q8_1 x4 gate/up and fused direct down
+families are selected for full-model decode; grouped F16 WMMA remains the
+prefill and layer-program route.
 
 ## Specialization and ABI
 

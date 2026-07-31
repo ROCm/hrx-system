@@ -99,11 +99,10 @@ typedef enum qwen_program_executable_ordinal_e {
   QWEN_PROGRAM_EXECUTABLE_GREEDY_ARGMAX = 32,
   QWEN_PROGRAM_EXECUTABLE_FEED_FORWARD_PREPARE_Q8 = 33,
   QWEN_PROGRAM_EXECUTABLE_GATE_UP_Q8 = 34,
-  QWEN_PROGRAM_EXECUTABLE_SWIGLU_QUANTIZE_Q8 = 35,
-  QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4_NEXT_Q8 = 36,
-  QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6_NEXT_Q8 = 37,
-  QWEN_PROGRAM_EXECUTABLE_ROUTER_PROJECTION_TOP8_FUSED = 38,
-  QWEN_PROGRAM_EXECUTABLE_COUNT = 39,
+  QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4_NEXT_Q8 = 35,
+  QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6_NEXT_Q8 = 36,
+  QWEN_PROGRAM_EXECUTABLE_ROUTER_PROJECTION_TOP8_FUSED = 37,
+  QWEN_PROGRAM_EXECUTABLE_COUNT = 38,
 } qwen_program_executable_ordinal_t;
 
 // Executable specializations consumed by one grouped feed-forward recording.
@@ -530,7 +529,7 @@ static qwen_full_program_layout_flags_t qwen_program_full_layout_flags(
     qwen_program_kind_t kind) {
   return kind == QWEN_PROGRAM_KIND_DECODE
              ? QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION |
-                   QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SHARED_COMPLETION
+                   QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_STAGE_COMPLETION
              : QWEN_FULL_PROGRAM_LAYOUT_FLAG_NONE;
 }
 
@@ -589,10 +588,6 @@ static iree_status_t qwen_program_prepare_layer_executables(
       route_count,
       route_stride,
       expert_count,
-      QWEN_MODEL_EXPERT_INTERMEDIATE_SIZE,
-  };
-  const int64_t swiglu_quantize_workload[] = {
-      token_count * route_count,
       QWEN_MODEL_EXPERT_INTERMEDIATE_SIZE,
   };
   const int64_t direct_routed_down_workload[] = {
@@ -833,22 +828,11 @@ static iree_status_t qwen_program_prepare_layer_executables(
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_Q8),
-        IREE_SV("qwen3_moe_routed_gate_up_swiglu_q4k_q8"),
+        IREE_SV("qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8"),
         IREE_ARRAYSIZE(qwen_direct_gate_up_config_bindings),
         qwen_direct_gate_up_config_bindings,
         IREE_ARRAYSIZE(direct_gate_up_workload), direct_gate_up_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_GATE_UP_Q8]);
-  }
-  if (iree_status_is_ok(status) &&
-      program->feed_forward_schedule ==
-          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
-    status = qwen_program_prepare_kernel(
-        program->model,
-        IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4_BRINGUP_WORKAROUND),
-        IREE_SV("ggml_quantize_q8_1_x4_f32"),
-        /*config_binding_count=*/0, /*config_bindings=*/NULL,
-        IREE_ARRAYSIZE(swiglu_quantize_workload), swiglu_quantize_workload,
-        &program->executables[QWEN_PROGRAM_EXECUTABLE_SWIGLU_QUANTIZE_Q8]);
   }
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
@@ -1600,6 +1584,7 @@ static iree_status_t qwen_program_record_direct_feed_forward(
     iree_hal_buffer_ref_t hidden_state,
     const qwen_layer_program_layout_t* transient,
     qwen_parameter_span_t next_norm_weight,
+    qwen_program_span_t gate_up_completion_counters,
     qwen_program_span_t shared_completion_counter,
     qwen_program_span_t next_q8_output) {
   const qwen_layer_parameters_t* parameters =
@@ -1611,7 +1596,6 @@ static iree_status_t qwen_program_record_direct_feed_forward(
   const uint32_t route_count = QWEN_MODEL_ROUTE_COUNT;
   const uint32_t route_stride = QWEN_MODEL_ROUTE_COUNT;
   const uint32_t expert_count = QWEN_MODEL_EXPERT_COUNT;
-  const uint32_t routed_row_count = token_count * route_count;
   iree_status_t status = iree_ok_status();
 
   const uint32_t feed_forward_prepare_constants[] = {token_count};
@@ -1668,30 +1652,14 @@ static iree_status_t qwen_program_record_direct_feed_forward(
       qwen_program_model_ref(parameters->expert_gate),
       qwen_program_model_ref(parameters->expert_up),
       qwen_program_transient_ref(transient->swiglu),
+      qwen_program_transient_ref(gate_up_completion_counters),
+      qwen_program_transient_ref(transient->routed_projection_scratch),
   };
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_dispatch(
         program, QWEN_PROGRAM_EXECUTABLE_GATE_UP_Q8,
         IREE_ARRAYSIZE(gate_up_constants), gate_up_constants,
         IREE_ARRAYSIZE(gate_up_bindings), gate_up_bindings);
-  }
-  if (iree_status_is_ok(status)) {
-    status = qwen_program_record_dispatch_barrier(program);
-  }
-
-  const uint32_t swiglu_quantize_constants[] = {
-      routed_row_count,
-      QWEN_MODEL_EXPERT_INTERMEDIATE_SIZE,
-  };
-  const iree_hal_buffer_ref_t swiglu_quantize_bindings[] = {
-      qwen_program_transient_ref(transient->swiglu),
-      qwen_program_transient_ref(transient->routed_projection_scratch),
-  };
-  if (iree_status_is_ok(status)) {
-    status = qwen_program_record_dispatch(
-        program, QWEN_PROGRAM_EXECUTABLE_SWIGLU_QUANTIZE_Q8,
-        IREE_ARRAYSIZE(swiglu_quantize_constants), swiglu_quantize_constants,
-        IREE_ARRAYSIZE(swiglu_quantize_bindings), swiglu_quantize_bindings);
   }
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_dispatch_barrier(program);
@@ -1736,6 +1704,7 @@ static iree_status_t qwen_program_record_layer_body(
         qwen_model_parameter_layout(program->model)
             ->layers[layer_index + 1]
             .attention_norm,
+        program->full_layout.decode_completion.gate_up,
         program->full_layout.decode_completion.shared,
         program->layer_layout.projection_input_scratch);
   }
@@ -1785,6 +1754,7 @@ static iree_status_t qwen_program_record_terminal_feed_forward(
         program, layer_index, /*token_count=*/1, hidden_state,
         &program->full_layout.terminal_layer,
         qwen_model_parameter_layout(program->model)->output_norm,
+        program->full_layout.decode_completion.gate_up,
         program->full_layout.decode_completion.shared,
         program->full_layout.final_quantized_hidden_state);
   }
