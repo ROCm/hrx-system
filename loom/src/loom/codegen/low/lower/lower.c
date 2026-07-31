@@ -1413,9 +1413,10 @@ iree_status_t loom_low_lower_source_query_scope_create(
   scope->context.lowering.fact_table = options->fact_table;
   iree_arena_initialize(module->arena.block_pool, &scope->context.arena);
 
-  iree_status_t status = loom_target_low_descriptor_set_select_for_bundle(
-      options->descriptor_registry, loom_low_lower_options_bundle(options),
-      &scope->context.descriptor_set);
+  iree_status_t status =
+      loom_target_low_descriptor_set_select_for_source_lowering(
+          options->descriptor_registry, loom_low_lower_options_bundle(options),
+          &scope->context.descriptor_set);
   loom_region_t* source_body = loom_func_like_body(source_function);
   if (iree_status_is_ok(status) && source_body != NULL) {
     status = loom_low_lowering_frame_initialize_value_ordinals(&scope->context,
@@ -2106,9 +2107,10 @@ iree_status_t loom_low_lower_import_declaration(
   IREE_ASSERT_LT(low_func_ref.symbol_id, module->symbols.count);
 
   const loom_low_descriptor_set_t* descriptor_set = NULL;
-  IREE_RETURN_IF_ERROR(loom_target_low_descriptor_set_select_for_bundle(
-      options->descriptor_registry, loom_low_lower_options_bundle(options),
-      &descriptor_set));
+  IREE_RETURN_IF_ERROR(
+      loom_target_low_descriptor_set_select_for_source_lowering(
+          options->descriptor_registry, loom_low_lower_options_bundle(options),
+          &descriptor_set));
 
   loom_low_lower_context_t context = {
       .module = module,

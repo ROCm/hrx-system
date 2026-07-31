@@ -51,10 +51,12 @@ iree_status_t loom_target_low_descriptor_registry_append_to_tables(
     iree_host_size_t descriptor_set_provider_capacity,
     iree_host_size_t* descriptor_set_provider_count);
 
-// Selects the descriptor set named by |bundle->config->contract_set_key| from
-// |registry|. This is an exact key lookup; target triples and CPUs are
-// descriptive facts, not fallback descriptor-selection rules.
-iree_status_t loom_target_low_descriptor_set_select_for_bundle(
+// Selects the descriptor set into which source IR is lowered for |bundle|.
+//
+// This is an exact lookup of |bundle->config->contract_set_key|. It is not
+// valid for interpreting existing Low IR, whose intrinsic representation
+// contract selects its descriptor set through loom_low_resolve_function_target.
+iree_status_t loom_target_low_descriptor_set_select_for_source_lowering(
     const loom_low_descriptor_registry_t* registry,
     const loom_target_bundle_t* bundle,
     const loom_low_descriptor_set_t** out_descriptor_set);

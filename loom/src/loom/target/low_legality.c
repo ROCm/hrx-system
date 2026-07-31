@@ -502,7 +502,7 @@ static iree_status_t loom_target_low_legality_validate_options(
                             "flag bits 0x%08x",
                             (unsigned)options->diagnostic_flags);
   }
-  return loom_target_low_descriptor_set_select_for_bundle(
+  return loom_target_low_descriptor_set_select_for_source_lowering(
       options->descriptor_registry, bundle, out_descriptor_set);
 }
 

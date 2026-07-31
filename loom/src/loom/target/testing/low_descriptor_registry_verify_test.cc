@@ -114,7 +114,7 @@ TEST(LowDescriptorRegistryTest, BundleSelectionFailsWhenLinkedSetIsMissing) {
   const loom_low_descriptor_set_t* descriptor_set = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_NOT_FOUND,
-      loom_target_low_descriptor_set_select_for_bundle(
+      loom_target_low_descriptor_set_select_for_source_lowering(
           &registry.registry, &missing_bundle, &descriptor_set));
   EXPECT_EQ(descriptor_set, nullptr);
 }

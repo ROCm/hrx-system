@@ -777,10 +777,12 @@ class LowKernelEmitter {
         module_, &symbol_facts, low_function,
         /*effective_target_facts=*/nullptr, &target_registry_.registry,
         iree_diagnostic_emitter_t{}, &target));
-    const loom_low_descriptor_set_t* descriptor_set = nullptr;
-    IREE_RETURN_IF_ERROR(loom_target_low_descriptor_set_select_for_bundle(
-        &target_registry_.registry, loom_low_resolved_target_bundle(&target),
-        &descriptor_set));
+    const loom_low_descriptor_set_t* descriptor_set = target.descriptor_set;
+    if (descriptor_set == nullptr) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU HSA low kernel target has no descriptor set");
+    }
     loom_amdgpu_hal_binding_materialization_result_t materialization = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_materialize(
         module_, low_function, descriptor_set, &materialization, arena));
