@@ -120,13 +120,22 @@ iree_host_size_t qwen_request_active_token_count(const qwen_request_t* request);
 // Returns the context base published by the latest successful reset.
 iree_host_size_t qwen_request_context_base(const qwen_request_t* request);
 
-// Commits a successfully submitted program result to the request timeline.
+// Commits a successfully submitted layer result to the request timeline.
 //
 // |signal_value| must be exactly one greater than the current timeline value
 // and must be published by the terminal queue operation before this call.
-void qwen_request_commit_program_signal(qwen_request_t* request,
-                                        uint64_t signal_value,
-                                        qwen_request_result_kind_t result_kind);
+void qwen_request_commit_hidden_state_signal(qwen_request_t* request,
+                                             uint64_t signal_value);
+
+// Commits a full-model result that already published its continuation token.
+//
+// The device has written the token into request-local input storage and the
+// matching context base into request control before |signal_value| completes.
+// If |next_context_base| equals request context capacity, the result remains
+// readable but no further model issue can consume it.
+void qwen_request_commit_selected_token_signal(
+    qwen_request_t* request, uint64_t signal_value,
+    iree_host_size_t next_context_base);
 
 // Permanently fails the request timeline after a partial submission failure.
 void qwen_request_fail(qwen_request_t* request, iree_status_t status);

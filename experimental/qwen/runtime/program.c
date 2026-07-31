@@ -1148,6 +1148,7 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   };
   const int64_t vocabulary_argmax_workload[] = {
       QWEN_MODEL_VOCABULARY_PARTIAL_COUNT,
+      (int64_t)program->context_count,
   };
 
   iree_status_t status = qwen_program_prepare_kernel(
@@ -2180,10 +2181,13 @@ static iree_status_t qwen_program_record_full_model_endpoint(
 
   const uint32_t argmax_constants[] = {
       QWEN_MODEL_VOCABULARY_PARTIAL_COUNT,
+      (uint32_t)program->context_count,
   };
   const iree_hal_buffer_ref_t argmax_bindings[] = {
       qwen_program_transient_ref(transient->vocabulary_argmax.partial_logits),
       qwen_program_transient_ref(transient->vocabulary_argmax.partial_ids),
+      qwen_program_request_ref(request_layout->token_ids),
+      qwen_program_request_ref(request_layout->control),
       qwen_program_output_staging_ref(sizeof(int32_t)),
   };
   if (iree_status_is_ok(status)) {
@@ -2776,12 +2780,12 @@ iree_status_t qwen_program_issue(
   }
 
   program->timeline_value = program_complete_value;
-  const qwen_request_result_kind_t result_kind =
-      qwen_program_kind_is_full_model(program->kind)
-          ? QWEN_REQUEST_RESULT_KIND_SELECTED_TOKEN
-          : QWEN_REQUEST_RESULT_KIND_HIDDEN_STATE;
-  qwen_request_commit_program_signal(request, request_complete_value,
-                                     result_kind);
+  if (qwen_program_kind_is_full_model(program->kind)) {
+    qwen_request_commit_selected_token_signal(request, request_complete_value,
+                                              program->context_count);
+  } else {
+    qwen_request_commit_hidden_state_signal(request, request_complete_value);
+  }
   return iree_ok_status();
 }
 

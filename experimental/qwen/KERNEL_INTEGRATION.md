@@ -194,7 +194,10 @@ publishes RoPE and K/V cache results. Each routed-down dispatch publishes the
 normalized Q8_1 x4 row consumed by the following layer or vocabulary
 projection. The reusable dispatch-only command buffer has 341
 barrier-delimited segments and one terminal return; selected-token publication
-does not add a transfer operation.
+does not add a transfer operation. The final argmax dispatch stores the token
+into the existing device-local request input slot for continuation and mirrors
+it to host-visible observation storage for streaming and validation. The next
+decode never consumes that host-visible copy.
 
 The endpoint stores 18,992 F32 partial logits and their 18,992 I32 vocabulary
 IDs in two independently aligned spans containing 151,936 bytes. The previous

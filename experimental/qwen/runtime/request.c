@@ -495,15 +495,32 @@ iree_host_size_t qwen_request_context_base(const qwen_request_t* request) {
   return request ? request->context_base : 0;
 }
 
-void qwen_request_commit_program_signal(
-    qwen_request_t* request, uint64_t signal_value,
-    qwen_request_result_kind_t result_kind) {
+void qwen_request_commit_hidden_state_signal(qwen_request_t* request,
+                                             uint64_t signal_value) {
   IREE_ASSERT_ARGUMENT(request);
   IREE_ASSERT(signal_value == request->timeline_value + 1);
-  IREE_ASSERT(result_kind != QWEN_REQUEST_RESULT_KIND_INVALID);
   request->timeline_value = signal_value;
   request->result_ready_value = signal_value;
-  request->result_kind = result_kind;
+  request->result_kind = QWEN_REQUEST_RESULT_KIND_HIDDEN_STATE;
+}
+
+void qwen_request_commit_selected_token_signal(
+    qwen_request_t* request, uint64_t signal_value,
+    iree_host_size_t next_context_base) {
+  IREE_ASSERT_ARGUMENT(request);
+  IREE_ASSERT(signal_value == request->timeline_value + 1);
+  IREE_ASSERT(next_context_base <= request->context_capacity);
+  request->timeline_value = signal_value;
+  request->result_ready_value = signal_value;
+  request->result_kind = QWEN_REQUEST_RESULT_KIND_SELECTED_TOKEN;
+  request->context_base = next_context_base;
+  if (next_context_base < request->context_capacity) {
+    request->input_kind = QWEN_REQUEST_INPUT_KIND_TOKEN_IDS;
+    request->active_token_count = 1;
+  } else {
+    request->input_kind = QWEN_REQUEST_INPUT_KIND_INVALID;
+    request->active_token_count = 0;
+  }
 }
 
 void qwen_request_fail(qwen_request_t* request, iree_status_t status) {

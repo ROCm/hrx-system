@@ -54,25 +54,29 @@ kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax_b
 }
 
 // Temporary, non-sanctioned finalizer for the Qwen-owned partial vocabulary
-// projection. This consumes explicit (logit, token ID) pairs; it is not a
-// generic selection framework and disappears with the surrounding bring-up
-// kernels.
-kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax_partials_bringup_workaround") @qwen_greedy_argmax_partials_bringup_workaround(%partial_count: index) {
+// projection. This consumes explicit (logit, token ID) pairs and publishes the
+// winning token to both device-local continuation state and a host-observation
+// sideband. It is not a generic selection framework and disappears with the
+// surrounding bring-up kernels.
+kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax_partials_bringup_workaround") @qwen_greedy_argmax_partials_bringup_workaround(%partial_count: index, %next_context_base: index) {
   %one = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
   kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
-} launch(%partial_count: index, %partial_logits: buffer, %partial_ids: buffer, %token_id: buffer) {
+} launch(%partial_count: index, %next_context_base: index, %partial_logits: buffer, %partial_ids: buffer, %next_token_id: buffer, %next_control: buffer, %observed_token_id: buffer) {
   %bounded_partial_count = index.assume %partial_count [range(%partial_count, 256, 18992)] : index
+  %bounded_next_context_base = index.assume %next_context_base [range(%next_context_base, 1, 32768)] : index
   %zero = index.constant 0 : index
   %workgroup_size = index.constant 256 : index
   %largest_i32 = scalar.constant 2147483647 : i32
   %zero_offset = index.constant 0 : offset
   %workitem0 = kernel.workitem.id<x> : index
   %workitem = index.assume %workitem0 [range(%workitem0, 0, 255), lt(%workitem0, %bounded_partial_count)] : index
-  %partial_logits_noalias, %partial_ids_noalias, %token_id_noalias = buffer.assume.noalias %partial_logits, %partial_ids, %token_id : buffer, buffer, buffer
+  %partial_logits_noalias, %partial_ids_noalias, %next_token_id_noalias, %next_control_noalias, %observed_token_id_noalias = buffer.assume.noalias %partial_logits, %partial_ids, %next_token_id, %next_control, %observed_token_id : buffer, buffer, buffer, buffer, buffer
   %partial_logits_view = buffer.view %partial_logits_noalias[%zero_offset] : buffer -> view<[%bounded_partial_count]xf32, #dense>
   %partial_ids_view = buffer.view %partial_ids_noalias[%zero_offset] : buffer -> view<[%bounded_partial_count]xi32, #dense>
-  %token_id_view = buffer.view %token_id_noalias[%zero_offset] : buffer -> view<1xi32, #dense>
+  %next_token_id_view = buffer.view %next_token_id_noalias[%zero_offset] : buffer -> view<1xi32, #dense>
+  %next_control_view = buffer.view %next_control_noalias[%zero_offset] : buffer -> view<1xi32, #dense>
+  %observed_token_id_view = buffer.view %observed_token_id_noalias[%zero_offset] : buffer -> view<1xi32, #dense>
   %initial_logit = view.load %partial_logits_view[%workitem] : view<[%bounded_partial_count]xf32, #dense> -> f32
   %initial_id = view.load %partial_ids_view[%workitem] : view<[%bounded_partial_count]xi32, #dense> -> i32
   %scan_begin = index.add %workitem, %workgroup_size : index
@@ -92,9 +96,12 @@ kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax_p
   %owns_winning_logit = scalar.cmpf oeq, %local_logit, %winning_logit : f32
   %candidate_winning_id = scf.select %owns_winning_logit, %local_id, %largest_i32 : i32
   %winning_id = kernel.workgroup.reduce<minsi> %candidate_winning_id : i32
+  %next_context_base_i32 = index.cast %bounded_next_context_base : index to i32
   %publishes_token = index.cmp eq, %workitem, %zero : index
   scf.if %publishes_token {
-    view.store %winning_id, %token_id_view[%zero] : i32, view<1xi32, #dense>
+    view.store %winning_id, %next_token_id_view[%zero] : i32, view<1xi32, #dense>
+    view.store %next_context_base_i32, %next_control_view[%zero] : i32, view<1xi32, #dense>
+    view.store %winning_id, %observed_token_id_view[%zero] : i32, view<1xi32, #dense>
   }
   kernel.return
 }
@@ -125,12 +132,18 @@ check.case public @qwen_greedy_argmax_equal_logit_tie_case {
 // partial 256 and carries vocabulary token 744.
 check.case public @qwen_greedy_argmax_partials_nontrivial_winner_case {
   %partial_count = check.literal value(512) : index
+  %next_context_base = check.literal value(513) : index
   %partial_logits = check.generate.iota offset(0.0) step(1.0) period(257) : tensor<512xf32>
   %partial_ids = check.generate.iota offset(1000) step(-1) : tensor<512xi32>
-  %token_id = check.generate.fill value(-1) : tensor<1xi32>
-  %expected = check.generate.fill value(744) : tensor<1xi32>
-  func.call @qwen_greedy_argmax_partials_bringup_workaround(%partial_count, %partial_logits, %partial_ids, %token_id) : (index, tensor<512xf32>, tensor<512xi32>, tensor<1xi32>)
-  check.expect.equal actual(%token_id) expected(%expected) : tensor<1xi32>
+  %next_token_id = check.generate.fill value(-1) : tensor<1xi32>
+  %next_control = check.generate.fill value(-1) : tensor<1xi32>
+  %observed_token_id = check.generate.fill value(-1) : tensor<1xi32>
+  %expected_token_id = check.generate.fill value(744) : tensor<1xi32>
+  %expected_control = check.generate.fill value(513) : tensor<1xi32>
+  func.call @qwen_greedy_argmax_partials_bringup_workaround(%partial_count, %next_context_base, %partial_logits, %partial_ids, %next_token_id, %next_control, %observed_token_id) : (index, index, tensor<512xf32>, tensor<512xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  check.expect.equal actual(%next_token_id) expected(%expected_token_id) : tensor<1xi32>
+  check.expect.equal actual(%next_control) expected(%expected_control) : tensor<1xi32>
+  check.expect.equal actual(%observed_token_id) expected(%expected_token_id) : tensor<1xi32>
   check.return
 }
 
@@ -138,12 +151,18 @@ check.case public @qwen_greedy_argmax_partials_nontrivial_winner_case {
 // partial-array ordinal.
 check.case public @qwen_greedy_argmax_partials_equal_logit_tie_case {
   %partial_count = check.literal value(512) : index
+  %next_context_base = check.literal value(513) : index
   %partial_logits = check.generate.fill value(7.0) : tensor<512xf32>
   %partial_ids = check.generate.iota offset(511) step(-1) : tensor<512xi32>
-  %token_id = check.generate.fill value(-1) : tensor<1xi32>
-  %expected = check.generate.fill value(0) : tensor<1xi32>
-  func.call @qwen_greedy_argmax_partials_bringup_workaround(%partial_count, %partial_logits, %partial_ids, %token_id) : (index, tensor<512xf32>, tensor<512xi32>, tensor<1xi32>)
-  check.expect.equal actual(%token_id) expected(%expected) : tensor<1xi32>
+  %next_token_id = check.generate.fill value(-1) : tensor<1xi32>
+  %next_control = check.generate.fill value(-1) : tensor<1xi32>
+  %observed_token_id = check.generate.fill value(-1) : tensor<1xi32>
+  %expected_token_id = check.generate.fill value(0) : tensor<1xi32>
+  %expected_control = check.generate.fill value(513) : tensor<1xi32>
+  func.call @qwen_greedy_argmax_partials_bringup_workaround(%partial_count, %next_context_base, %partial_logits, %partial_ids, %next_token_id, %next_control, %observed_token_id) : (index, index, tensor<512xf32>, tensor<512xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  check.expect.equal actual(%next_token_id) expected(%expected_token_id) : tensor<1xi32>
+  check.expect.equal actual(%next_control) expected(%expected_control) : tensor<1xi32>
+  check.expect.equal actual(%observed_token_id) expected(%expected_token_id) : tensor<1xi32>
   check.return
 }
 

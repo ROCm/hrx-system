@@ -94,11 +94,12 @@ IREE_API_EXPORT iree_status_t qwen_request_reset_tokens(
 IREE_API_EXPORT iree_status_t qwen_request_read_hidden_state(
     qwen_request_t* request, iree_byte_span_t target_data);
 
-// Reads the token selected by a completed full-model program.
+// Reads the observation copy of a completed full-model selected token.
 //
 // The caller must first observe the signal from qwen_program_issue. This
 // invalidates the authoritative four-byte host-visible span when required by
-// the HAL memory type and copies its I32 token into |out_token_id|.
+// the HAL memory type and copies its I32 token into |out_token_id|. Model
+// continuation consumes the device-local copy and does not depend on this read.
 IREE_API_EXPORT iree_status_t qwen_request_read_selected_token(
     qwen_request_t* request, iree_tokenizer_token_id_t* out_token_id);
 

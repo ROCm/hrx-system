@@ -65,6 +65,11 @@ typedef struct QwenPrefillBenchmarkEnvironment {
   iree_status_t terminal_status;
 } QwenPrefillBenchmarkEnvironment;
 
+typedef enum QwenBenchmarkInputKind {
+  QWEN_BENCHMARK_INPUT_KIND_PREFILL = 0,
+  QWEN_BENCHMARK_INPUT_KIND_DECODE = 1,
+} QwenBenchmarkInputKind;
+
 static iree_hal_semaphore_list_t QwenBenchmarkTimepointList(
     QwenBenchmarkTimepoint* timepoint) {
   iree_hal_semaphore_list_t list = {
@@ -199,6 +204,14 @@ static iree_status_t QwenBenchmarkPublishDecodeToken(
   return QwenBenchmarkPublishTokens(
       environment, /*context_base=*/QWEN_PREFILL_TOKEN_COUNT,
       iree_tokenizer_make_token_id_list(&decode_input_token, 1));
+}
+
+static iree_status_t QwenBenchmarkPublishInput(
+    QwenPrefillBenchmarkEnvironment* environment,
+    QwenBenchmarkInputKind input_kind) {
+  return input_kind == QWEN_BENCHMARK_INPUT_KIND_PREFILL
+             ? QwenBenchmarkPublishPrefillTokens(environment)
+             : QwenBenchmarkPublishDecodeToken(environment);
 }
 
 static iree_status_t QwenBenchmarkIssueAndWait(
@@ -358,18 +371,26 @@ static void QwenBenchmarkEnvironmentDeinitialize(
 
 static void QwenBenchmarkMeasureProgram(
     QwenPrefillBenchmarkEnvironment* environment, qwen_program_t* program,
-    iree_tokenizer_token_id_t expected_token, const char* operation_name,
-    iree_host_size_t logical_token_count, benchmark::State& benchmark_state) {
+    QwenBenchmarkInputKind input_kind, iree_tokenizer_token_id_t expected_token,
+    const char* operation_name, iree_host_size_t logical_token_count,
+    benchmark::State& benchmark_state) {
   for (auto _ : benchmark_state) {
     (void)_;
+
+    // Each measured row starts from the same production input state. The
+    // reset is outside both profiling and the manual issue interval; generated
+    // sequences instead consume the device-published continuation directly.
+    iree_status_t status = QwenBenchmarkPublishInput(environment, input_kind);
 
     // Profiling excludes process setup and warmup and surrounds the measured
     // issue. The manual interval includes submission and user-visible
     // completion; dispatch-only timings come from the device profile.
     iree_hal_profiling_from_flags_t* profiling = nullptr;
-    iree_status_t status = iree_hal_begin_device_group_profiling_from_flags(
-        environment->runtime_context.device_group, environment->host_allocator,
-        &profiling);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_begin_device_group_profiling_from_flags(
+          environment->runtime_context.device_group,
+          environment->host_allocator, &profiling);
+    }
 
     iree_time_t elapsed_time = 0;
     if (iree_status_is_ok(status)) {
@@ -415,12 +436,8 @@ static void QwenBenchmarkMeasureProgram(
 static void QwenFullModelPrefill512(
     QwenPrefillBenchmarkEnvironment* environment,
     benchmark::State& benchmark_state) {
-  iree_status_t status = QwenBenchmarkPublishPrefillTokens(environment);
-  if (!iree_status_is_ok(status)) {
-    QwenBenchmarkRecordFailure(environment, status, &benchmark_state);
-    return;
-  }
   QwenBenchmarkMeasureProgram(environment, environment->prefill_program,
+                              QWEN_BENCHMARK_INPUT_KIND_PREFILL,
                               QWEN_PREFILL_EXPECTED_TOKEN, "full-model prefill",
                               QWEN_PREFILL_TOKEN_COUNT, benchmark_state);
 }
@@ -442,6 +459,7 @@ static void QwenFullModelDecode513(QwenPrefillBenchmarkEnvironment* environment,
     return;
   }
   QwenBenchmarkMeasureProgram(environment, environment->decode_program,
+                              QWEN_BENCHMARK_INPUT_KIND_DECODE,
                               FLAG_expected_decode_token, "full-model decode",
                               /*logical_token_count=*/1, benchmark_state);
 }

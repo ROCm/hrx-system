@@ -14,7 +14,7 @@ func.decl @ggml_q6k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weigh
 
 func.decl @qwen_greedy_argmax_bringup_workaround(%logits: buffer, %token_id: buffer)
 
-func.decl @qwen_greedy_argmax_partials_bringup_workaround(%partial_count: index, %partial_logits: buffer, %partial_ids: buffer, %token_id: buffer)
+func.decl @qwen_greedy_argmax_partials_bringup_workaround(%partial_count: index, %next_context_base: index, %partial_logits: buffer, %partial_ids: buffer, %next_token_id: buffer, %next_control: buffer, %observed_token_id: buffer)
 
 // Shared contraction for the ordinary full-logit export and the bounded
 // endpoint partial-argmax experiment below.
@@ -187,6 +187,7 @@ check.case public @ggml_linear_q6k_q8_1_x4_partial_argmax_vocabulary_differentia
   %input_size = check.literal value(2048) : index
   %output_size = check.literal value(151936) : index
   %partial_count = check.literal value(18992) : index
+  %next_context_base = check.literal value(513) : index
   %q8_input = check.generate.fill value(0) : tensor<1x2304xi8>
   %weight = check.generate.fill value(0) : tensor<151936x8x210xi8>
   %logits = check.generate.fill value(1.0) : tensor<151936xf32>
@@ -195,14 +196,19 @@ check.case public @ggml_linear_q6k_q8_1_x4_partial_argmax_vocabulary_differentia
   %expected_partial_logits = check.generate.fill value(0.0) : tensor<18992xf32>
   %expected_partial_ids = check.generate.iota offset(0) step(8) : tensor<18992xi32>
   %expected_token = check.generate.fill value(-1) : tensor<1xi32>
+  %expected_control = check.generate.fill value(513) : tensor<1xi32>
   %actual_token = check.generate.fill value(-1) : tensor<1xi32>
+  %next_control = check.generate.fill value(-1) : tensor<1xi32>
+  %observed_token = check.generate.fill value(-1) : tensor<1xi32>
   func.call @ggml_linear_q6k_q8_1_x4(%token_count, %input_size, %output_size, %q8_input, %weight, %logits) : (index, index, index, tensor<1x2304xi8>, tensor<151936x8x210xi8>, tensor<151936xf32>)
   func.call @qwen_greedy_argmax_bringup_workaround(%logits, %expected_token) : (tensor<151936xf32>, tensor<1xi32>)
   func.call @ggml_linear_q6k_q8_1_x4_partial_argmax(%token_count, %input_size, %output_size, %q8_input, %weight, %partial_logits, %partial_ids) : (index, index, index, tensor<1x2304xi8>, tensor<151936x8x210xi8>, tensor<18992xf32>, tensor<18992xi32>)
-  func.call @qwen_greedy_argmax_partials_bringup_workaround(%partial_count, %partial_logits, %partial_ids, %actual_token) : (index, tensor<18992xf32>, tensor<18992xi32>, tensor<1xi32>)
+  func.call @qwen_greedy_argmax_partials_bringup_workaround(%partial_count, %next_context_base, %partial_logits, %partial_ids, %actual_token, %next_control, %observed_token) : (index, index, tensor<18992xf32>, tensor<18992xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
   check.expect.close actual(%partial_logits) expected(%expected_partial_logits) atol(0.0) rtol(0.0) nan(same) : tensor<18992xf32>
   check.expect.equal actual(%partial_ids) expected(%expected_partial_ids) : tensor<18992xi32>
   check.expect.equal actual(%actual_token) expected(%expected_token) : tensor<1xi32>
+  check.expect.equal actual(%next_control) expected(%expected_control) : tensor<1xi32>
+  check.expect.equal actual(%observed_token) expected(%expected_token) : tensor<1xi32>
   check.return
 }
 
@@ -224,13 +230,16 @@ check.case public @ggml_linear_q6k_q8_1_x4_partial_argmax_benchmark_case {
   %input_size = check.literal value(2048) : index
   %output_size = check.literal value(151936) : index
   %partial_count = check.literal value(18992) : index
+  %next_context_base = check.literal value(513) : index
   %q8_input = check.generate.fill value(0) : tensor<1x2304xi8>
   %weight = check.generate.fill value(0) : tensor<151936x8x210xi8>
   %partial_logits = check.generate.fill value(1.0) : tensor<18992xf32>
   %partial_ids = check.generate.fill value(-1) : tensor<18992xi32>
   %token = check.generate.fill value(-1) : tensor<1xi32>
+  %next_control = check.generate.fill value(-1) : tensor<1xi32>
+  %observed_token = check.generate.fill value(-1) : tensor<1xi32>
   func.call @ggml_linear_q6k_q8_1_x4_partial_argmax(%token_count, %input_size, %output_size, %q8_input, %weight, %partial_logits, %partial_ids) : (index, index, index, tensor<1x2304xi8>, tensor<151936x8x210xi8>, tensor<18992xf32>, tensor<18992xi32>)
-  func.call @qwen_greedy_argmax_partials_bringup_workaround(%partial_count, %partial_logits, %partial_ids, %token) : (index, tensor<18992xf32>, tensor<18992xi32>, tensor<1xi32>)
+  func.call @qwen_greedy_argmax_partials_bringup_workaround(%partial_count, %next_context_base, %partial_logits, %partial_ids, %token, %next_control, %observed_token) : (index, index, tensor<18992xf32>, tensor<18992xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
   check.return
 }
 

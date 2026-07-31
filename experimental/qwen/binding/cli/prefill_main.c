@@ -31,8 +31,8 @@ IREE_FLAG(int32_t, expected_token, IREE_TOKENIZER_TOKEN_ID_INVALID,
           "Expected selected token (pinned oracle: 264); omit to skip "
           "validation.");
 IREE_FLAG(bool, decode_one, false,
-          "Append the prefill-selected token at position 512 and execute one "
-          "exact-count decode issue.");
+          "Consume the device-published prefill token at position 512 and "
+          "execute one exact-count decode issue.");
 IREE_FLAG(int32_t, expected_decode_token, IREE_TOKENIZER_TOKEN_ID_INVALID,
           "Expected token selected by --decode_one; omit to report without "
           "external validation.");
@@ -299,32 +299,15 @@ static iree_status_t qwen_prefill_cli_run(void) {
             (uint64_t)qwen_program_transient_byte_length(prefill_program));
   }
 
-  qwen_prefill_cli_timepoint_t decode_tokens_ready = {
+  qwen_prefill_cli_timepoint_t decode_complete = {
       .semaphore = timeline,
       .value = 5,
   };
   if (iree_status_is_ok(status) && FLAG_decode_one) {
-    status = qwen_request_reset_tokens(
-        request, /*context_base=*/QWEN_PREFILL_TOKEN_COUNT,
-        iree_tokenizer_make_token_id_list(&selected_token, 1),
-        qwen_prefill_cli_timepoint_list(&issue_complete),
-        qwen_prefill_cli_timepoint_list(&decode_tokens_ready));
-  }
-  if (iree_status_is_ok(status) && FLAG_decode_one) {
-    status = iree_hal_semaphore_wait(timeline, decode_tokens_ready.value,
-                                     iree_infinite_timeout(),
-                                     IREE_ASYNC_WAIT_FLAG_NONE);
-  }
-
-  qwen_prefill_cli_timepoint_t decode_complete = {
-      .semaphore = timeline,
-      .value = 6,
-  };
-  if (iree_status_is_ok(status) && FLAG_decode_one) {
-    status = qwen_program_issue(
-        decode_program, request,
-        qwen_prefill_cli_timepoint_list(&decode_tokens_ready),
-        qwen_prefill_cli_timepoint_list(&decode_complete));
+    status =
+        qwen_program_issue(decode_program, request,
+                           qwen_prefill_cli_timepoint_list(&issue_complete),
+                           qwen_prefill_cli_timepoint_list(&decode_complete));
   }
   if (iree_status_is_ok(status) && FLAG_decode_one) {
     status = iree_hal_semaphore_wait(timeline, decode_complete.value,

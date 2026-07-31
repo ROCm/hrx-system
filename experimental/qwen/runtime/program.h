@@ -87,6 +87,12 @@ IREE_API_EXPORT void qwen_program_release(qwen_program_t* program);
 // queue-deallocates the transient storage, and only then publishes
 // |signal_semaphore_list|. A second issue before the prior issue completes
 // fails with FAILED_PRECONDITION.
+//
+// A full-model issue publishes its selected token into request-local device
+// input state before signaling completion. A compatible decode program may
+// consume that token directly through a semaphore dependency; no host read or
+// token reset is required. The request also retains a host-observable copy for
+// qwen_request_read_selected_token.
 IREE_API_EXPORT iree_status_t
 qwen_program_issue(qwen_program_t* program, qwen_request_t* request,
                    iree_hal_semaphore_list_t wait_semaphore_list,

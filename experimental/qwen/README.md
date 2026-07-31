@@ -118,7 +118,10 @@ planning. Its fixed vocabulary and hidden dimensions are model facts, not a
 general vocabulary-kernel authoring mechanism. The endpoint export reduces each
 workgroup's eight finite logits to one deterministic maximum pair; the compact
 argmax bring-up kernel finalizes those 18,992 pairs with lowest-token tie
-breaking.
+breaking. The finalizer publishes the winner into the existing device-local
+request token slot and separately into mapped host-visible observation
+storage. Decode consumes the device token through the request timeline; it
+does not read and reupload the observation copy.
 
 The working full-model programs now record all 48 layers, embedding, final
 normalization, partial vocabulary projection, and compact greedy finalization
