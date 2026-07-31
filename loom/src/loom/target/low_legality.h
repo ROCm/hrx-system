@@ -132,15 +132,7 @@ static inline bool loom_target_low_legality_provider_list_is_empty(
 }
 
 typedef struct loom_target_low_legality_options_t {
-  // Target bundle selected for this source-to-low lowering attempt.
-  const loom_target_bundle_t* bundle;
-  // Invocation profile whose facts contributed to |bundle|, or NULL when the
-  // effective bundle came only from module target records. Its bundle
-  // projection may be less specific after compatible function refinement.
-  const loom_target_profile_t* target_profile;
-  // Module-local target record symbol selected for this lowering attempt.
-  loom_symbol_ref_t target_ref;
-  // Borrowed typed target facts projected from |target_ref|.
+  // Borrowed immutable target facts selected for this legality check.
   const loom_target_facts_t* target_facts;
   // Low descriptor registry linked into the current compiler binary.
   const loom_low_descriptor_registry_t* descriptor_registry;
@@ -180,8 +172,8 @@ typedef struct loom_target_low_legality_result_t {
   uint32_t error_count;
   // Number of remark diagnostics emitted.
   uint32_t remark_count;
-  // Descriptor set selected by options.bundle, or NULL when selection failed
-  // before verification started.
+  // Descriptor set selected by options.target_facts, or NULL when selection
+  // failed before verification started.
   const loom_low_descriptor_set_t* descriptor_set;
 } loom_target_low_legality_result_t;
 
@@ -212,11 +204,6 @@ iree_string_view_t loom_target_low_legality_function_name(
 
 // Returns the selected target bundle.
 const loom_target_bundle_t* loom_target_low_legality_bundle(
-    const loom_target_low_legality_context_t* context);
-
-// Returns the module-local target record symbol selected for this legality
-// check.
-loom_symbol_ref_t loom_target_low_legality_target_ref(
     const loom_target_low_legality_context_t* context);
 
 // Returns the typed target facts selected for this legality check.

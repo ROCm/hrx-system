@@ -46,10 +46,12 @@ static bool loom_amdgpu_subgroup_mask_type_covers_wavefront(
 
 static uint32_t loom_amdgpu_legalizer_wavefront_size(
     const loom_target_legalization_context_t* context) {
-  if (context->bundle == NULL || context->bundle->snapshot == NULL) {
+  const loom_target_bundle_t* bundle =
+      loom_target_legalization_context_bundle(context);
+  if (bundle == NULL || bundle->snapshot == NULL) {
     return 0;
   }
-  return context->bundle->snapshot->subgroup_size;
+  return bundle->snapshot->subgroup_size;
 }
 
 static loom_target_legalizer_action_t loom_amdgpu_defer_or_reject_final(
@@ -1260,7 +1262,7 @@ static iree_status_t loom_amdgpu_fragment_store_plan_can_join_group(
   bool selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_analyze_vector_fragment_memory_plan(
       context->module, context->fact_table, context->view_regions,
-      context->bundle, context->descriptor_set,
+      loom_target_legalization_context_bundle(context), context->descriptor_set,
       loom_amdgpu_target_facts_cast(context->target_facts), context->function,
       op, LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE, &candidate_plan, &selected));
   if (!selected ||
@@ -1426,7 +1428,7 @@ static iree_status_t loom_amdgpu_legalize_result_fragment_store_epilogue_loop(
   bool selected = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_analyze_vector_fragment_memory_plan(
       context->module, context->fact_table, context->view_regions,
-      context->bundle, context->descriptor_set,
+      loom_target_legalization_context_bundle(context), context->descriptor_set,
       loom_amdgpu_target_facts_cast(context->target_facts), context->function,
       op, LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE, &plan, &selected));
   if (!selected ||

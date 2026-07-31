@@ -343,6 +343,7 @@ loom_cc_library(
   SRCS
     "contract.c"
   DEPS
+    ::facts
     ::types
     iree::base
     iree::base::internal::arena
@@ -363,6 +364,7 @@ loom_cc_library(
     "legalization.c"
   DEPS
     ::contract
+    ::facts
     ::types
     iree::base
     iree::base::internal::arena
@@ -397,6 +399,7 @@ loom_cc_library(
     "low_legality.c"
   DEPS
     ::contract
+    ::facts
     ::low_descriptor_registry
     ::registers
     ::types

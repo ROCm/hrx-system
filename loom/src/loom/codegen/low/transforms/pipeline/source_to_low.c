@@ -346,8 +346,6 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     const loom_low_lower_options_t lower_options = {
         .target_ref = selection->target_ref,
         .target_facts = selection->target_facts,
-        .bundle = loom_low_source_selection_target_bundle(selection),
-        .target_profile = NULL,
         .descriptor_registry = descriptor_registry,
         .policy = selection->policy,
         .emitter = pass->diagnostic_emitter,
@@ -401,8 +399,6 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
     const loom_low_lower_options_t lower_options = {
         .target_ref = selection->target_ref,
         .target_facts = selection->target_facts,
-        .bundle = loom_low_source_selection_target_bundle(selection),
-        .target_profile = NULL,
         .descriptor_registry = descriptor_registry,
         .legality_provider_list =
             legality_provider_list

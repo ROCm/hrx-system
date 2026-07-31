@@ -38,6 +38,11 @@ enum {
   LOOM_LOW_LOWER_REPORT_ROW_VEC_DEFAULT_BYTE_LENGTH = 4096,
 };
 
+static const loom_target_bundle_t* loom_low_lower_options_bundle(
+    const loom_low_lower_options_t* options) {
+  return loom_target_facts_bundle(options->target_facts);
+}
+
 typedef struct loom_low_lower_descriptor_matrix_plan_t {
   // Shared source adapter used by this matrix descriptor plan.
   loom_target_contract_descriptor_matrix_source_t source;
@@ -125,7 +130,7 @@ static loom_target_abi_kind_t loom_low_lower_function_abi(
                                            abi_attr_index)) {
     return (loom_target_abi_kind_t)loom_func_like_abi(context->source_function);
   }
-  return context->options->bundle->export_plan->abi_kind;
+  return loom_low_lower_context_bundle(context)->export_plan->abi_kind;
 }
 
 static iree_status_t loom_low_lower_map_direct_argument(
@@ -239,10 +244,11 @@ static void loom_low_lower_assert_options(
     IREE_ASSERT_LT(options->target_ref.symbol_id, module->symbols.count);
   }
   IREE_ASSERT(options->target_facts != NULL);
-  IREE_ASSERT(options->bundle != NULL);
-  IREE_ASSERT(options->bundle->snapshot != NULL);
-  IREE_ASSERT(options->bundle->export_plan != NULL);
-  IREE_ASSERT(options->bundle->config != NULL);
+  const loom_target_bundle_t* bundle = loom_low_lower_options_bundle(options);
+  IREE_ASSERT(bundle != NULL);
+  IREE_ASSERT(bundle->snapshot != NULL);
+  IREE_ASSERT(bundle->export_plan != NULL);
+  IREE_ASSERT(bundle->config != NULL);
   IREE_ASSERT(options->fact_table != NULL);
   IREE_ASSERT(options->fact_table->context.target_facts ==
               options->target_facts);
@@ -1065,9 +1071,6 @@ static iree_status_t loom_low_lower_query_environment_from_context(
   *out_environment = (loom_target_contract_query_environment_t){
       .module = context->module,
       .function = context->source_function,
-      .bundle = context->options->bundle,
-      .target_profile = context->options->target_profile,
-      .target_ref = context->options->target_ref,
       .target_facts = context->options->target_facts,
       .descriptor_set = descriptor_set,
       .fact_table = context->lowering.fact_table,
@@ -1411,7 +1414,7 @@ iree_status_t loom_low_lower_source_query_scope_create(
   iree_arena_initialize(module->arena.block_pool, &scope->context.arena);
 
   iree_status_t status = loom_target_low_descriptor_set_select_for_bundle(
-      options->descriptor_registry, options->bundle,
+      options->descriptor_registry, loom_low_lower_options_bundle(options),
       &scope->context.descriptor_set);
   loom_region_t* source_body = loom_func_like_body(source_function);
   if (iree_status_is_ok(status) && source_body != NULL) {
@@ -2104,7 +2107,8 @@ iree_status_t loom_low_lower_import_declaration(
 
   const loom_low_descriptor_set_t* descriptor_set = NULL;
   IREE_RETURN_IF_ERROR(loom_target_low_descriptor_set_select_for_bundle(
-      options->descriptor_registry, options->bundle, &descriptor_set));
+      options->descriptor_registry, loom_low_lower_options_bundle(options),
+      &descriptor_set));
 
   loom_low_lower_context_t context = {
       .module = module,
@@ -3418,9 +3422,6 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
   loom_target_low_legality_result_t legality_result = {};
   if (iree_status_is_ok(status)) {
     loom_target_low_legality_options_t legality_options = {
-        .bundle = options->bundle,
-        .target_profile = options->target_profile,
-        .target_ref = options->target_ref,
         .target_facts = options->target_facts,
         .descriptor_registry = options->descriptor_registry,
         .error_catalog = options->policy->error_catalog,

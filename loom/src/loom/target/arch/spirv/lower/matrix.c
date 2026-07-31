@@ -181,12 +181,14 @@ static void loom_spirv_matrix_diagnostic_make_context_params(
     const loom_target_contract_query_environment_t* environment,
     const loom_op_t* source_op, iree_string_view_t matrix_constraint,
     loom_diagnostic_param_t* params) {
-  params[0] = loom_param_string(loom_spirv_matrix_diagnostic_nonempty(
-      environment->bundle->name, IREE_SV("<empty>")));
+  const loom_target_bundle_t* bundle =
+      loom_target_contract_query_environment_bundle(environment);
+  params[0] = loom_param_string(
+      loom_spirv_matrix_diagnostic_nonempty(bundle->name, IREE_SV("<empty>")));
   params[1] = loom_param_string(loom_spirv_matrix_diagnostic_nonempty(
-      environment->bundle->export_plan->name, IREE_SV("<empty>")));
+      bundle->export_plan->name, IREE_SV("<empty>")));
   params[2] = loom_param_string(loom_spirv_matrix_diagnostic_nonempty(
-      environment->bundle->config->name, IREE_SV("<empty>")));
+      bundle->config->name, IREE_SV("<empty>")));
   params[3] = loom_param_string(
       loom_spirv_matrix_diagnostic_function_name(environment));
   params[4] = loom_param_string(loom_op_name(environment->module, source_op));

@@ -49,7 +49,7 @@ static iree_string_view_t loom_low_lower_target_key(
 
 iree_string_view_t loom_low_lower_context_target_key(
     const loom_low_lower_context_t* context) {
-  return loom_low_lower_target_key(context->options->bundle);
+  return loom_low_lower_target_key(loom_low_lower_context_bundle(context));
 }
 
 static iree_string_view_t loom_low_lower_export_name(
@@ -59,7 +59,7 @@ static iree_string_view_t loom_low_lower_export_name(
 
 iree_string_view_t loom_low_lower_context_export_name(
     const loom_low_lower_context_t* context) {
-  return loom_low_lower_export_name(context->options->bundle);
+  return loom_low_lower_export_name(loom_low_lower_context_bundle(context));
 }
 
 static iree_string_view_t loom_low_lower_config_key(
@@ -69,7 +69,7 @@ static iree_string_view_t loom_low_lower_config_key(
 
 iree_string_view_t loom_low_lower_context_config_key(
     const loom_low_lower_context_t* context) {
-  return loom_low_lower_config_key(context->options->bundle);
+  return loom_low_lower_config_key(loom_low_lower_context_bundle(context));
 }
 
 bool loom_low_lower_context_should_stop(
@@ -147,12 +147,10 @@ iree_status_t loom_low_lower_emit_error_ref(
 static void loom_low_lower_make_target_context_params(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_diagnostic_param_t* params) {
-  params[0] =
-      loom_param_string(loom_low_lower_target_key(context->options->bundle));
-  params[1] =
-      loom_param_string(loom_low_lower_export_name(context->options->bundle));
-  params[2] =
-      loom_param_string(loom_low_lower_config_key(context->options->bundle));
+  const loom_target_bundle_t* bundle = loom_low_lower_context_bundle(context);
+  params[0] = loom_param_string(loom_low_lower_target_key(bundle));
+  params[1] = loom_param_string(loom_low_lower_export_name(bundle));
+  params[2] = loom_param_string(loom_low_lower_config_key(bundle));
   params[3] = loom_param_string(loom_low_lower_context_function_name(context));
   params[4] = loom_param_string(loom_op_name(context->module, source_op));
 }
@@ -251,12 +249,7 @@ bool loom_low_lower_context_wants_report_rows(
 
 const loom_target_bundle_t* loom_low_lower_context_bundle(
     const loom_low_lower_context_t* context) {
-  return context->options->bundle;
-}
-
-loom_symbol_ref_t loom_low_lower_context_target_ref(
-    const loom_low_lower_context_t* context) {
-  return context->options->target_ref;
+  return loom_target_facts_bundle(context->options->target_facts);
 }
 
 const loom_target_facts_t* loom_low_lower_context_target_facts(

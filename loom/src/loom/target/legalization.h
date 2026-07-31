@@ -105,15 +105,7 @@ typedef struct loom_target_legalization_context_t {
   loom_module_t* module;
   // Source function containing the current rewrite region.
   loom_func_like_t function;
-  // Target bundle selected for this function.
-  const loom_target_bundle_t* bundle;
-  // Invocation profile whose facts contributed to |bundle|, or NULL when the
-  // effective bundle came only from module target records. Its bundle
-  // projection may be less specific after compatible function refinement.
-  const loom_target_profile_t* target_profile;
-  // Module-local target record symbol selected for this function.
-  loom_symbol_ref_t target_ref;
-  // Borrowed typed target facts projected from |target_ref|.
+  // Borrowed immutable target facts selected for this function.
   const loom_target_facts_t* target_facts;
   // Low descriptor set selected by the target bundle.
   const loom_low_descriptor_set_t* descriptor_set;
@@ -135,6 +127,13 @@ typedef struct loom_target_legalization_context_t {
   // Read-only target contract query for already-legal checks.
   loom_target_contract_query_callback_t contract_query;
 } loom_target_legalization_context_t;
+
+// Returns the common target bundle selected for |context|.
+static inline const loom_target_bundle_t*
+loom_target_legalization_context_bundle(
+    const loom_target_legalization_context_t* context) {
+  return loom_target_facts_bundle(context->target_facts);
+}
 
 typedef iree_status_t (*loom_target_legalizer_fn_t)(
     const loom_target_legalizer_entry_t* entry,

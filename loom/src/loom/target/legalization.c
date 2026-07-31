@@ -243,9 +243,6 @@ iree_status_t loom_target_legalization_query_contract(
   const loom_target_contract_query_environment_t environment = {
       .module = context->module,
       .function = context->function,
-      .bundle = context->bundle,
-      .target_profile = context->target_profile,
-      .target_ref = context->target_ref,
       .target_facts = context->target_facts,
       .descriptor_set = context->descriptor_set,
       .fact_table = context->fact_table,

@@ -41,13 +41,14 @@ static void loom_amdgpu_matrix_target_facts_from_environment(
   loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
   (void)loom_amdgpu_matrix_feature_bits_from_profile(processor->features.matrix,
                                                      &feature_bits);
-  if (environment->bundle == NULL || environment->bundle->snapshot == NULL ||
-      environment->bundle->snapshot->subgroup_size == 0) {
+  const loom_target_bundle_t* bundle =
+      loom_target_contract_query_environment_bundle(environment);
+  if (bundle == NULL || bundle->snapshot == NULL ||
+      bundle->snapshot->subgroup_size == 0) {
     IREE_ASSERT_UNREACHABLE("selected AMDGPU matrix target subgroup size");
     IREE_BUILTIN_UNREACHABLE();
   }
-  const uint16_t wavefront_size =
-      (uint16_t)environment->bundle->snapshot->subgroup_size;
+  const uint16_t wavefront_size = (uint16_t)bundle->snapshot->subgroup_size;
 
   *out_facts = (loom_amdgpu_matrix_target_facts_t){
       .options =
@@ -222,12 +223,14 @@ static iree_string_view_t loom_amdgpu_matrix_diagnostic_function_name(
 static void loom_amdgpu_matrix_diagnostic_make_context_params(
     const loom_target_contract_query_environment_t* environment,
     const loom_op_t* source_op, loom_diagnostic_param_t* params) {
-  params[0] = loom_param_string(loom_amdgpu_matrix_diagnostic_nonempty(
-      environment->bundle->name, IREE_SV("<empty>")));
+  const loom_target_bundle_t* bundle =
+      loom_target_contract_query_environment_bundle(environment);
+  params[0] = loom_param_string(
+      loom_amdgpu_matrix_diagnostic_nonempty(bundle->name, IREE_SV("<empty>")));
   params[1] = loom_param_string(loom_amdgpu_matrix_diagnostic_nonempty(
-      environment->bundle->export_plan->name, IREE_SV("<empty>")));
+      bundle->export_plan->name, IREE_SV("<empty>")));
   params[2] = loom_param_string(loom_amdgpu_matrix_diagnostic_nonempty(
-      environment->bundle->config->name, IREE_SV("<empty>")));
+      bundle->config->name, IREE_SV("<empty>")));
   params[3] = loom_param_string(
       loom_amdgpu_matrix_diagnostic_function_name(environment));
   params[4] = loom_param_string(loom_op_name(environment->module, source_op));

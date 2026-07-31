@@ -314,6 +314,7 @@ loom_cc_library(
     srcs = ["contract.c"],
     hdrs = ["contract.h"],
     deps = [
+        ":facts",
         ":types",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/error:error_defs",
@@ -331,6 +332,7 @@ loom_cc_library(
     hdrs = ["legalization.h"],
     deps = [
         ":contract",
+        ":facts",
         ":types",
         "//loom/src/loom/ir",
         "//loom/src/loom/pass:types",
@@ -361,6 +363,7 @@ loom_cc_library(
     hdrs = ["low_legality.h"],
     deps = [
         ":contract",
+        ":facts",
         ":low_descriptor_registry",
         ":registers",
         ":types",

@@ -55,6 +55,7 @@ loom_cc_library(
     loom::ops::vector
     loom::sanitizer::options
     loom::target::contract
+    loom::target::facts
     loom::target::low_descriptor_registry
     loom::target::low_legality
     loom::target::registers

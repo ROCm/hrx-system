@@ -64,6 +64,12 @@ const loom_target_bundle_t kTargetBundle = {
     /*.config=*/&kTargetConfig,
 };
 
+loom_target_facts_t MakeTargetFacts() {
+  loom_target_facts_t facts = {};
+  facts.storage.bundle = kTargetBundle;
+  return facts;
+}
+
 loom_target_contract_fragment_t MakeContractFragment(
     loom_target_contract_op_entry_t* op_entries,
     loom_target_contract_dialect_table_t* dialects,
@@ -305,20 +311,9 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleSelectsLegalCase) {
           /*.user_data=*/nullptr,
       },
   };
-  const loom_target_contract_query_environment_t environment = {
-      /*.module=*/nullptr,
-      /*.function=*/{},
-      /*.bundle=*/&kTargetBundle,
-      /*.target_profile=*/nullptr,
-      /*.target_ref=*/{},
-      /*.target_facts=*/nullptr,
-      /*.descriptor_set=*/nullptr,
-      /*.fact_table=*/nullptr,
-      /*.value_domain=*/nullptr,
-      /*.view_regions=*/nullptr,
-      /*.arena=*/nullptr,
-      /*.target_state_allocator=*/{},
-  };
+  const loom_target_facts_t target_facts = MakeTargetFacts();
+  loom_target_contract_query_environment_t environment = {};
+  environment.target_facts = &target_facts;
   loom_op_t op = {};
   op.kind = kSourceOpKind;
   loom_target_contract_query_result_t result =
@@ -418,20 +413,10 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
           /*.values=*/rule_sets,
       },
   };
-  const loom_target_contract_query_environment_t environment = {
-      /*.module=*/nullptr,
-      /*.function=*/{},
-      /*.bundle=*/&kTargetBundle,
-      /*.target_profile=*/nullptr,
-      /*.target_ref=*/{},
-      /*.target_facts=*/nullptr,
-      /*.descriptor_set=*/nullptr,
-      /*.fact_table=*/nullptr,
-      /*.value_domain=*/nullptr,
-      /*.view_regions=*/nullptr,
-      /*.arena=*/&arena,
-      /*.target_state_allocator=*/{},
-  };
+  const loom_target_facts_t target_facts = MakeTargetFacts();
+  loom_target_contract_query_environment_t environment = {};
+  environment.target_facts = &target_facts;
+  environment.arena = &arena;
   loom_op_t op = {};
   op.kind = kSourceOpKind;
   loom_target_contract_query_result_t result =
@@ -580,20 +565,13 @@ TEST_F(LowContractQuerySourceMemoryTest,
           /*.values=*/rule_sets,
       },
   };
-  const loom_target_contract_query_environment_t environment = {
-      /*.module=*/module_,
-      /*.function=*/function_,
-      /*.bundle=*/&kTargetBundle,
-      /*.target_profile=*/nullptr,
-      /*.target_ref=*/{},
-      /*.target_facts=*/nullptr,
-      /*.descriptor_set=*/nullptr,
-      /*.fact_table=*/&facts,
-      /*.value_domain=*/nullptr,
-      /*.view_regions=*/nullptr,
-      /*.arena=*/&arena,
-      /*.target_state_allocator=*/{},
-  };
+  const loom_target_facts_t target_facts = MakeTargetFacts();
+  loom_target_contract_query_environment_t environment = {};
+  environment.module = module_;
+  environment.function = function_;
+  environment.target_facts = &target_facts;
+  environment.fact_table = &facts;
+  environment.arena = &arena;
   loom_target_contract_query_result_t result =
       loom_target_contract_query_result_empty();
   IREE_ASSERT_OK(loom_low_lower_query_target_contract(&environment, &options,

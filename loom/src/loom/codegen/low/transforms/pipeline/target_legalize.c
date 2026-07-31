@@ -1141,7 +1141,8 @@ static iree_status_t loom_low_target_legalize_make_final_rejection(
   loom_diagnostic_param_t* params = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       environment->arena, 7, sizeof(*params), (void**)&params));
-  const loom_target_bundle_t* bundle = environment->bundle;
+  const loom_target_bundle_t* bundle =
+      loom_target_contract_query_environment_bundle(environment);
   const loom_target_config_t* config = bundle ? bundle->config : NULL;
   const loom_target_export_plan_t* export_plan =
       bundle ? bundle->export_plan : NULL;
@@ -1461,8 +1462,6 @@ static iree_status_t loom_low_target_legalize_verify_final(
   };
   loom_target_low_legality_result_t result = {0};
   const loom_target_low_legality_options_t legality_options = {
-      .bundle = loom_low_source_selection_target_bundle(state->selection),
-      .target_ref = state->selection->target_ref,
       .target_facts = state->selection->target_facts,
       .descriptor_registry = state->lower_options.descriptor_registry,
       .error_catalog = state->selection->policy->error_catalog,
@@ -1474,7 +1473,6 @@ static iree_status_t loom_low_target_legalize_verify_final(
           loom_low_lower_source_query_scope_value_domain(state->query_scope),
       .structural_legality_flags =
           LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF,
-      .target_profile = NULL,
       .emitter = state->pass->diagnostic_emitter,
       .max_errors = pass_state->max_errors,
   };
@@ -1546,8 +1544,6 @@ static iree_status_t loom_low_target_legalize_function(
   state.lower_options = (loom_low_lower_options_t){
       .target_ref = selection->target_ref,
       .target_facts = selection->target_facts,
-      .bundle = loom_low_source_selection_target_bundle(selection),
-      .target_profile = NULL,
       .descriptor_registry = descriptor_registry,
       .legality_provider_list = legality_provider_list,
       .policy = selection->policy,
@@ -1569,9 +1565,6 @@ static iree_status_t loom_low_target_legalize_function(
       .pass = pass,
       .module = module,
       .function = selection->func,
-      .bundle = loom_low_source_selection_target_bundle(selection),
-      .target_profile = NULL,
-      .target_ref = selection->target_ref,
       .target_facts = selection->target_facts,
       .descriptor_set = state.descriptor_set,
       .mode = pass_state->mode,
