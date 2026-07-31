@@ -548,14 +548,14 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         }
         break;
       }
-      case LOOM_FORMAT_KIND_OP_REF: {
-        // Op kind reference in angle brackets, glued to the op name:
-        // func.template<tile.contract>. The field_index references a
-        // string attribute holding the target op name.
+      case LOOM_FORMAT_KIND_KEY_REF: {
+        // Bare symbolic key in angle brackets, glued to the preceding token:
+        // func.template<tile.contract>. The field_index references a string
+        // attribute holding the canonical key spelling.
         if (element->field_index >= op->attribute_count) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
-              "format OP_REF field_index %u out of range (op has %u "
+              "format KEY_REF field_index %u out of range (op has %u "
               "attributes)",
               element->field_index, op->attribute_count);
         }
@@ -563,17 +563,16 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         if (attr.kind == LOOM_ATTR_STRING &&
             attr.string_id != LOOM_STRING_ID_INVALID &&
             attr.string_id < ctx->module->strings.count) {
-          iree_string_view_t op_name =
-              ctx->module->strings.entries[attr.string_id];
-          iree_host_size_t op_ref_start = ctx->stream->offset;
+          iree_string_view_t key = ctx->module->strings.entries[attr.string_id];
+          iree_host_size_t key_ref_start = ctx->stream->offset;
           IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "<", true));
-          IREE_RETURN_IF_ERROR(loom_print_emit(ctx, op_name, true));
+          IREE_RETURN_IF_ERROR(loom_print_emit(ctx, key, true));
           IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ">", true));
           loom_print_did_write(ctx);
           loom_print_report_field(
               ctx,
               loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index),
-              op_ref_start, ctx->stream->offset);
+              key_ref_start, ctx->stream->offset);
         }
         break;
       }

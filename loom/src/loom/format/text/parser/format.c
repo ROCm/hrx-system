@@ -290,7 +290,7 @@ static iree_status_t loom_parse_format_optional_group(
                  first_inner->kind == LOOM_FORMAT_KIND_SYMBOL_REF) {
         present = peek.kind == LOOM_TOKEN_SYMBOL;
       } else if (first_inner &&
-                 (first_inner->kind == LOOM_FORMAT_KIND_OP_REF ||
+                 (first_inner->kind == LOOM_FORMAT_KIND_KEY_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_DESCRIPTOR_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_STABLE_KEY_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_TEMPLATE_PARAM ||
@@ -393,11 +393,11 @@ static iree_status_t loom_parse_format_flags(loom_parser_t* parser,
   return iree_ok_status();
 }
 
-// Parses an op or descriptor key reference: <op.name> or <descriptor-key>.
-static iree_status_t loom_parse_format_op_ref(
+// Parses a bare symbolic key reference: <key.name>.
+static iree_status_t loom_parse_format_key_ref(
     loom_parser_t* parser, const loom_format_element_t* element,
     loom_parsed_op_t* parsed) {
-  loom_token_t op_ref_start_token = loom_tokenizer_peek(&parser->tokenizer);
+  loom_token_t key_ref_start_token = loom_tokenizer_peek(&parser->tokenizer);
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LANGLE)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'<'"));
@@ -421,7 +421,7 @@ static iree_status_t loom_parse_format_op_ref(
       parsed, &parser->parser_arena, element->field_index, attr));
   return loom_parse_format_add_field_span(
       parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE, element->field_index,
-      op_ref_start_token);
+      key_ref_start_token);
 }
 
 // Parses a descriptor key reference whose row ordinal is resolved later after
@@ -1061,8 +1061,9 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
         break;
       }
 
-      case LOOM_FORMAT_KIND_OP_REF: {
-        IREE_RETURN_IF_ERROR(loom_parse_format_op_ref(parser, element, parsed));
+      case LOOM_FORMAT_KIND_KEY_REF: {
+        IREE_RETURN_IF_ERROR(
+            loom_parse_format_key_ref(parser, element, parsed));
         break;
       }
 

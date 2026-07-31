@@ -31,9 +31,9 @@ from loom.assembly import (
     FuncArgs,
     Glue,
     IndexList,
+    KeyRef,
     Keyword,
     OperandDict,
-    OpRef,
     OptionalGroup,
     PredicateList,
     Ref,
@@ -342,7 +342,7 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                 case (
                     Attr(field=name)
                     | SymbolRef(field=name)
-                    | OpRef(field=name)
+                    | KeyRef(field=name)
                     | TemplateParam(field=name)
                 ):
                     append_attr_param(name)

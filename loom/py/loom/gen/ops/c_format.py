@@ -22,9 +22,9 @@ from loom.assembly import (
     FuncArgs,
     Glue,
     IndexList,
+    KeyRef,
     Keyword,
     OperandDict,
-    OpRef,
     OptionalGroup,
     PredicateList,
     Ref,
@@ -313,9 +313,9 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                 case Flags(field=name):
                     elements.append(("LOOM_FORMAT_KIND_FLAGS", 0, "0"))
 
-                case OpRef(field=name):
+                case KeyRef(field=name):
                     kind, index = resolve_field(name)
-                    elements.append(("LOOM_FORMAT_KIND_OP_REF", index, "0"))
+                    elements.append(("LOOM_FORMAT_KIND_KEY_REF", index, "0"))
 
                 case DescriptorRef(key=key_name, ordinal=ordinal_name):
                     key_kind, key_index = resolve_field(key_name)

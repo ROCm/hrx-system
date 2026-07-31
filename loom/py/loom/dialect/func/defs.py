@@ -33,7 +33,7 @@ from loom.assembly import (
     AttrDict,
     FormatElement,
     FuncArgs,
-    OpRef,
+    KeyRef,
     OptionalGroup,
     PredicateList,
     Refs,
@@ -432,7 +432,7 @@ func_template = Op(
         )
     ],
     format=[
-        OpRef("implements"),
+        KeyRef("implements"),
         *_MODIFIER_FORMAT,
         *_TARGET_FORMAT,
         OptionalGroup(
@@ -483,7 +483,7 @@ func_ukernel = Op(
         )
     ],
     format=[
-        OpRef("implements"),
+        KeyRef("implements"),
         *_MODIFIER_FORMAT,
         *_TARGET_FORMAT,
         OptionalGroup(
@@ -583,7 +583,7 @@ func_apply = Op(
     canonicalize="loom_func_apply_canonicalize",
     effective_traits="loom_func_apply_effective_traits",
     format=[
-        OpRef("contract"),
+        KeyRef("contract"),
         GLUE,
         LPAREN,
         Refs("operands"),

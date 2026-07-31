@@ -176,10 +176,10 @@ enum loom_format_kind_e {
   // the vtable's instance_flags_case_names. Reads/writes op->instance_flags.
   LOOM_FORMAT_KIND_FLAGS = 17,
 
-  // Op kind reference in angle brackets: <tile.contract>.
-  // Glued to the preceding token (op name). The field_index references
-  // a string attribute storing the op name.
-  LOOM_FORMAT_KIND_OP_REF = 18,
+  // Bare symbolic key in angle brackets: <tile.contract>.
+  // Glued to the preceding token. The field_index references a string
+  // attribute storing the canonical key spelling.
+  LOOM_FORMAT_KIND_KEY_REF = 18,
 
   // Single result type without parentheses: type.
   // For ops with exactly one non-variadic result where parenthesized

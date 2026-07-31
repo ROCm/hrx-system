@@ -2789,9 +2789,9 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
         FuncArgs,
         Glue,
         IndexList,
+        KeyRef,
         Keyword,
         OperandDict,
-        OpRef,
         OptionalGroup,
         PredicateList,
         Ref,
@@ -2820,7 +2820,7 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
                 Attr(field=f)
                 | SymbolRef(field=f)
                 | Flags(field=f)
-                | OpRef(field=f)
+                | KeyRef(field=f)
                 | TemplateParam(field=f)
             ):
                 fields.add(f)

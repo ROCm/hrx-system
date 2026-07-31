@@ -18,7 +18,7 @@ from loom.assembly import (
     Attr,
     AttrDict,
     Flags,
-    OpRef,
+    KeyRef,
     OptionalGroup,
     Refs,
     ResultTypeList,
@@ -183,7 +183,7 @@ llvmir_intrinsic = Op(
     ],
     traits=[UNKNOWN_EFFECTS],
     format=[
-        OpRef("kind"),
+        KeyRef("kind"),
         LPAREN,
         Refs("operands"),
         RPAREN,

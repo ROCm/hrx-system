@@ -36,9 +36,9 @@ from loom.assembly import (
     FuncArgs,
     Glue,
     IndexList,
+    KeyRef,
     Keyword,
     OperandDict,
-    OpRef,
     OptionalGroup,
     PredicateList,
     Ref,
@@ -1433,7 +1433,7 @@ class Parser:
         if element is skip:
             return False
         match element:
-            case Attr(field=name) | SymbolRef(field=name) | OpRef(field=name):
+            case Attr(field=name) | SymbolRef(field=name) | KeyRef(field=name):
                 return name == attr_name
             case TemplateParam(field=name) | PredicateList(field=name):
                 return name == attr_name
@@ -2410,15 +2410,14 @@ class Parser:
                         tok.expect(TokenKind.RANGLE)
                         parsed.attributes[name] = "|".join(parts)
 
-                case OpRef(field=name):
-                    if tok.at(TokenKind.LANGLE):
-                        tok.next()
-                        if tok.at(TokenKind.OP_NAME) or tok.at(TokenKind.BARE_IDENT):
-                            op_name_tok = tok.next()
-                        else:
-                            op_name_tok = tok.expect(TokenKind.OP_NAME)
-                        tok.expect(TokenKind.RANGLE)
-                        parsed.attributes[name] = op_name_tok.text
+                case KeyRef(field=name):
+                    tok.expect(TokenKind.LANGLE)
+                    if tok.at(TokenKind.OP_NAME) or tok.at(TokenKind.BARE_IDENT):
+                        key_tok = tok.next()
+                    else:
+                        key_tok = tok.expect(TokenKind.OP_NAME)
+                    tok.expect(TokenKind.RANGLE)
+                    parsed.attributes[name] = key_tok.text
 
                 case DescriptorRef(key=key, ordinal=ordinal):
                     tok.expect(TokenKind.LANGLE)
@@ -2516,7 +2515,7 @@ class Parser:
             case SymbolRef():
                 return tok.at(TokenKind.SYMBOL)
             case (
-                OpRef()
+                KeyRef()
                 | DescriptorRef()
                 | StableKeyRef()
                 | TemplateParam()
