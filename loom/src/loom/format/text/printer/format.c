@@ -139,6 +139,7 @@ static iree_status_t loom_print_update_register_context_from_target(
   if (!loom_print_symbol_ref_targets_register_context(vtable, attr_index)) {
     return iree_ok_status();
   }
+  ctx->low_repr = (loom_text_low_repr_context_t){0};
   if (!ctx->low_asm_environment.vtable ||
       !ctx->low_asm_environment.vtable->lookup_target_descriptor_set) {
     return iree_ok_status();
@@ -147,9 +148,7 @@ static iree_status_t loom_print_update_register_context_from_target(
   IREE_RETURN_IF_ERROR(
       ctx->low_asm_environment.vtable->lookup_target_descriptor_set(
           ctx->low_asm_environment.state, ctx->module, attr, &descriptor_set));
-  if (descriptor_set != NULL) {
-    ctx->low_register_descriptor_set = descriptor_set;
-  }
+  ctx->low_repr.descriptor_set = descriptor_set;
   return iree_ok_status();
 }
 

@@ -137,9 +137,8 @@ static iree_status_t loom_parse_low_asm_descriptor_set_key(
 }
 
 static iree_status_t loom_parse_low_asm_descriptor_set(
-    loom_parser_t* parser,
-    const loom_text_low_asm_descriptor_set_t** out_descriptor_set) {
-  *out_descriptor_set = NULL;
+    loom_parser_t* parser, loom_text_low_repr_context_t* out_low_repr) {
+  *out_low_repr = (loom_text_low_repr_context_t){0};
 
   uint32_t errors_before = parser->error_count;
   loom_token_t key_token = loom_token_none();
@@ -148,6 +147,7 @@ static iree_status_t loom_parse_low_asm_descriptor_set(
   if (parser->error_count > errors_before) {
     return iree_ok_status();
   }
+  out_low_repr->contract_key = key_token.text;
 
   if (!loom_text_low_asm_environment_is_configured(
           &parser->low_asm_environment)) {
@@ -158,8 +158,8 @@ static iree_status_t loom_parse_low_asm_descriptor_set(
   IREE_RETURN_IF_ERROR(
       parser->low_asm_environment.vtable->lookup_descriptor_set(
           parser->low_asm_environment.state, key_token.text,
-          out_descriptor_set));
-  if (*out_descriptor_set == NULL) {
+          &out_low_repr->descriptor_set));
+  if (out_low_repr->descriptor_set == NULL) {
     return loom_parser_emit_low_asm_error(
         parser, key_token, IREE_SV("unknown low descriptor set"));
   }
@@ -932,24 +932,22 @@ static iree_status_t loom_parse_low_asm_region_body(
 
 static iree_status_t loom_parse_low_asm_braced_region(
     loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
-    const loom_text_low_asm_descriptor_set_t* descriptor_set,
-    loom_region_t** out_region) {
+    loom_text_low_repr_context_t low_repr, loom_region_t** out_region) {
   loom_parse_region_body_callback_t body = {
       .fn = loom_parse_low_asm_region_body,
-      .user_data = descriptor_set,
+      .user_data = low_repr.descriptor_set,
   };
-  const loom_text_low_asm_descriptor_set_t* previous_descriptor_set =
-      parser->low_register_descriptor_set;
+  const loom_text_low_repr_context_t previous_low_repr = parser->low_repr;
   const uint16_t previous_depth = parser->low_asm_region_depth;
   if (previous_depth == UINT16_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "low asm region nesting exceeds uint16_t range");
   }
-  parser->low_register_descriptor_set = descriptor_set;
+  parser->low_repr = low_repr;
   parser->low_asm_region_depth = (uint16_t)(previous_depth + 1);
   iree_status_t status = loom_parse_braced_region_with_body(
       parser, region_descriptor, body, out_region);
-  parser->low_register_descriptor_set = previous_descriptor_set;
+  parser->low_repr = previous_low_repr;
   parser->low_asm_region_depth = previous_depth;
   return status;
 }
@@ -959,26 +957,24 @@ iree_status_t loom_parse_low_asm_prefixed_region(
     loom_region_t** out_region) {
   uint32_t errors_before = parser->error_count;
 
-  const loom_text_low_asm_descriptor_set_t* descriptor_set = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_parse_low_asm_descriptor_set(parser, &descriptor_set));
+  loom_text_low_repr_context_t low_repr = {0};
+  IREE_RETURN_IF_ERROR(loom_parse_low_asm_descriptor_set(parser, &low_repr));
   if (parser->error_count > errors_before) {
     return iree_ok_status();
   }
 
-  return loom_parse_low_asm_braced_region(parser, region_descriptor,
-                                          descriptor_set, out_region);
+  return loom_parse_low_asm_braced_region(parser, region_descriptor, low_repr,
+                                          out_region);
 }
 
 iree_status_t loom_parse_low_asm_inherited_region(
     loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
     loom_region_t** out_region) {
-  if (parser->low_register_descriptor_set == NULL) {
+  if (parser->low_repr.descriptor_set == NULL) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "inherited low asm region requires an active descriptor set");
   }
   return loom_parse_low_asm_braced_region(parser, region_descriptor,
-                                          parser->low_register_descriptor_set,
-                                          out_region);
+                                          parser->low_repr, out_region);
 }

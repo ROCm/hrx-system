@@ -711,6 +711,7 @@ static iree_status_t loom_parse_format_update_register_context_from_target(
                                                              attr_index)) {
     return iree_ok_status();
   }
+  parser->low_repr = (loom_text_low_repr_context_t){0};
   if (!parser->low_asm_environment.vtable ||
       !parser->low_asm_environment.vtable->lookup_target_descriptor_set) {
     return iree_ok_status();
@@ -720,9 +721,7 @@ static iree_status_t loom_parse_format_update_register_context_from_target(
       parser->low_asm_environment.vtable->lookup_target_descriptor_set(
           parser->low_asm_environment.state, parser->module, attr,
           &descriptor_set));
-  if (descriptor_set != NULL) {
-    parser->low_register_descriptor_set = descriptor_set;
-  }
+  parser->low_repr.descriptor_set = descriptor_set;
   return iree_ok_status();
 }
 

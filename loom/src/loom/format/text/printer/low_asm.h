@@ -24,8 +24,9 @@ iree_status_t loom_print_low_asm_region(
     const loom_region_descriptor_t* region_descriptor,
     bool entry_args_declared_by_parent);
 
-// Attempts to print a region using optional low asm syntax. Sets
-// |out_printed| to false when the region has no lossless low asm spelling.
+// Attempts to print a region using optional low asm syntax. When canonical
+// fallback is allowed, sets |out_printed| to false if no lossless asm spelling
+// exists.
 iree_status_t loom_print_low_asm_optional_region(
     loom_print_context_t* ctx, const loom_region_t* region,
     const loom_region_descriptor_t* region_descriptor,

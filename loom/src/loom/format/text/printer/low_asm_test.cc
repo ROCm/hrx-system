@@ -218,6 +218,30 @@ TEST_F(LowAsmPrinterTest, PrintsCanonicalStructuralCall) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmPrinterTest, NestedRegionsInheritRepresentationContract) {
+  const char* source =
+      "test.target<low_core> @test_target\n"
+      "\n"
+      "low.func.def target(@test_target) @select("
+      "%condition: reg<test.i32>, %then_value: reg<test.i32>, "
+      "%else_value: reg<test.i32>) -> (reg<test.i32>) "
+      "asm<test.low.core> {\n"
+      "  %result = low.scf.if %condition -> (reg<test.i32>) {\n"
+      "    low.scf.yield %then_value : reg<test.i32>\n"
+      "  } else {\n"
+      "    low.scf.yield %else_value : reg<test.i32>\n"
+      "  }\n"
+      "  return %result\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(
+      PrintModule(module, IREE_SV("test.low.core"),
+                  LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM),
+      source);
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmPrinterTest, RejectsMissingPrintEnvironment) {
   loom_module_t* module = ParseOk(
       "test.low_asm_region asm<test.low.core> {\n"

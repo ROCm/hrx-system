@@ -541,39 +541,11 @@ TEST_F(ParserTest, FunctionTypeScratchAndModulePayloadAreReusedOnInternHits) {
                                       /*hints=*/nullptr,
                                       iree_allocator_system(), &module));
   loom_parser_scope_t root_scope = {};
-  loom_parser_t parser = {
-      /*.tokenizer=*/{},
-      /*.module=*/module,
-      /*.context=*/&context_,
-      /*.parser_arena=*/{},
-      /*.builder=*/{},
-      /*.scope=*/&root_scope,
-      /*.scope_free_list=*/{},
-      /*.result_scope=*/{},
-      /*.parsed_op_free_list=*/{},
-      /*.encoding_params_free_list=*/{},
-      /*.type_list_free_list=*/{},
-      /*.aliases=*/{},
-      /*.symbol_lookup=*/{},
-      /*.diagnostic_sink=*/{},
-      /*.low_asm_environment=*/{},
-      /*.low_register_descriptor_set=*/{},
-      /*.low_asm_region_depth=*/{},
-      /*.error_count=*/{},
-      /*.max_errors=*/{},
-      /*.filename=*/{},
-      /*.source=*/{},
-      /*.source_id=*/{},
-      /*.cached_location=*/{},
-      /*.pending_func_args=*/{},
-      /*.pending_block_args=*/{},
-      /*.pending_successor_refs=*/{},
-      /*.unresolved_placeholders=*/{}, /*.definition_scope=*/
-      {
-          /*.placeholder_start=*/{},
-          /*.pop_at=*/UINT16_MAX,
-      },
-  };
+  loom_parser_t parser = {};
+  parser.module = module;
+  parser.context = &context_;
+  parser.scope = &root_scope;
+  parser.definition_scope.pop_at = UINT16_MAX;
   iree_arena_initialize(&block_pool_, &parser.parser_arena);
 
   loom_tokenizer_initialize(
@@ -626,39 +598,11 @@ TEST_F(ParserTest, RegisterTypeRequiresTargetLowDescriptorContext) {
                                       /*hints=*/nullptr,
                                       iree_allocator_system(), &module));
   loom_parser_scope_t root_scope = {};
-  loom_parser_t parser = {
-      /*.tokenizer=*/{},
-      /*.module=*/module,
-      /*.context=*/&context_,
-      /*.parser_arena=*/{},
-      /*.builder=*/{},
-      /*.scope=*/&root_scope,
-      /*.scope_free_list=*/{},
-      /*.result_scope=*/{},
-      /*.parsed_op_free_list=*/{},
-      /*.encoding_params_free_list=*/{},
-      /*.type_list_free_list=*/{},
-      /*.aliases=*/{},
-      /*.symbol_lookup=*/{},
-      /*.diagnostic_sink=*/{},
-      /*.low_asm_environment=*/{},
-      /*.low_register_descriptor_set=*/{},
-      /*.low_asm_region_depth=*/{},
-      /*.error_count=*/{},
-      /*.max_errors=*/{},
-      /*.filename=*/{},
-      /*.source=*/{},
-      /*.source_id=*/{},
-      /*.cached_location=*/{},
-      /*.pending_func_args=*/{},
-      /*.pending_block_args=*/{},
-      /*.pending_successor_refs=*/{},
-      /*.unresolved_placeholders=*/{}, /*.definition_scope=*/
-      {
-          /*.placeholder_start=*/{},
-          /*.pop_at=*/UINT16_MAX,
-      },
-  };
+  loom_parser_t parser = {};
+  parser.module = module;
+  parser.context = &context_;
+  parser.scope = &root_scope;
+  parser.definition_scope.pop_at = UINT16_MAX;
   iree_arena_initialize(&block_pool_, &parser.parser_arena);
   loom_tokenizer_initialize(IREE_SV("reg<test.ptr x4>"), IREE_SV("test.loom"),
                             &parser.parser_arena, &parser.tokenizer);

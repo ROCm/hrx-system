@@ -32,6 +32,15 @@ typedef struct loom_text_low_asm_form_t loom_text_low_asm_form_t;
 typedef struct loom_text_low_asm_descriptor_handle_t
     loom_text_low_asm_descriptor_handle_t;
 
+// Active target-low representation contract for contextual types and regions.
+typedef struct loom_text_low_repr_context_t {
+  // Canonical representation-contract key, or empty when derived from a
+  // target.
+  iree_string_view_t contract_key;
+  // Descriptor-set handle resolved from |contract_key| or a target.
+  const loom_text_low_asm_descriptor_set_t* descriptor_set;
+} loom_text_low_repr_context_t;
+
 typedef struct loom_text_low_asm_packet_descriptor_t {
   // Opaque descriptor-set handle owned by the environment implementation.
   const loom_text_low_asm_descriptor_set_t* descriptor_set;

@@ -61,10 +61,10 @@ func.def target(@target) @spirv_i32_if_else(%lhs: i32, %rhs: i32, %a: i32, %b: i
 // ----
 low.func.def target(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23, 23], spirv_result_value_types = [23]}) @spirv_i32_if_else(%lhs: reg<spirv.id>, %rhs: reg<spirv.id>, %a: reg<spirv.id>, %b: reg<spirv.id>) -> (reg<spirv.id>) asm<spirv.logical.core> {
   %less = OpSLessThan %lhs, %rhs
-  %result = low.scf.if %less -> (reg<spirv.id>) asm<spirv.logical.core> {
+  %result = low.scf.if %less -> (reg<spirv.id>) {
     %sum = OpIAdd %a, %b
     low.scf.yield %sum : reg<spirv.id>
-  } else asm<spirv.logical.core> {
+  } else {
     %difference = OpISub %a, %b
     low.scf.yield %difference : reg<spirv.id>
   }
@@ -87,7 +87,7 @@ func.def target(@target) @spirv_index_counted_loop(%start: index, %limit: index,
 // ----
 low.func.def target(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23], spirv_result_value_types = [23]}) @spirv_index_counted_loop(%start: reg<spirv.id>, %limit: reg<spirv.id>, %seed: reg<spirv.id>) -> (reg<spirv.id>) asm<spirv.logical.core> {
   %step = OpConstant.i32 1
-  %sum = low.scf.for [%start to %limit step %step] iter_args(%seed: reg<spirv.id>) -> (reg<spirv.id>) do(%i: reg<spirv.id>, %acc: reg<spirv.id>) asm<spirv.logical.core> {
+  %sum = low.scf.for [%start to %limit step %step] iter_args(%seed: reg<spirv.id>) -> (reg<spirv.id>) do(%i: reg<spirv.id>, %acc: reg<spirv.id>) {
     %next = OpIAdd %acc, %i
     low.scf.yield %next : reg<spirv.id>
   }
@@ -366,7 +366,7 @@ low.kernel.def target(@hal_target) workgroup_size(1, 1, 1) workgroup_count(1, 1,
   %input_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %inside = OpULessThan.offset64 %byte_offset_aligned, %limit
-  low.scf.if %inside asm<spirv.logical.core> {
+  low.scf.if %inside {
     %input_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %byte_offset_aligned
     %loaded = OpLoad.storage_buffer.i32 %input_view
     %incremented = OpIAdd %loaded, %loaded

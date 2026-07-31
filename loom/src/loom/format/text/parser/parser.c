@@ -606,8 +606,7 @@ static iree_status_t loom_parse_op_into(loom_parser_t* parser,
   }
 
   uint16_t pending_func_arg_start = parser->pending_func_args.count;
-  const loom_text_low_asm_descriptor_set_t* previous_descriptor_set =
-      parser->low_register_descriptor_set;
+  const loom_text_low_repr_context_t previous_low_repr = parser->low_repr;
 
   bool is_symbol_definition =
       iree_any_bit_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE);
@@ -622,7 +621,7 @@ static iree_status_t loom_parse_op_into(loom_parser_t* parser,
   iree_status_t walk_status = loom_parser_walk_format(
       parser, vtable, op_name_token, parsed, pending_func_arg_start,
       &func_args_consumed_by_region);
-  parser->low_register_descriptor_set = previous_descriptor_set;
+  parser->low_repr = previous_low_repr;
   IREE_RETURN_IF_ERROR(walk_status);
 
   if (parser->error_count > errors_before) {
