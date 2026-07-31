@@ -632,6 +632,7 @@ loom_link_module(
     srcs = ["runtime_exports.loom"],
     libraries = [
         "//experimental/qwen_moe/kernels:routed_down_quantized_f16_wmma_linked",
+        "//experimental/qwen_moe/kernels:routed_down_weighted_reduce_next_rmsnorm_f32_linked",
     ],
     mode = "selective",
     output = "qwen3_moe_routed_down_f16.loom",
@@ -639,6 +640,7 @@ loom_link_module(
         "@qwen3_moe_routed_down_q4k_f16_wmma_grouped",
         "@qwen3_moe_routed_down_q6k_f16_wmma_grouped",
         "@qwen3_moe_routed_down_weighted_reduce_f16_f32",
+        "@qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32",
     ],
     strip_check = True,
 )
