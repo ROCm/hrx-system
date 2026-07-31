@@ -1,7 +1,7 @@
 // RUN: emit amdgpu-wait-counter-plan-json @concat_forwards_lds_wait
 
 amdgpu.target<gfx1100> @target {subgroup_size = 64}
-low.func.def target(@target) @concat_forwards_lds_wait(%addr: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @concat_forwards_lds_wait(%addr: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %lhs0 = ds_read_b128 %addr
   %lhs1 = ds_read_b128 %addr {offset = 16}
   %lhs = concat(%lhs0, %lhs1) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
@@ -18,7 +18,7 @@ low.func.def target(@target) @concat_forwards_lds_wait(%addr: reg<amdgpu.vgpr>, 
 // RUN: emit amdgpu-wait-counter-plan-json @slice_forwards_lds_wait
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @slice_forwards_lds_wait(%addr: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @slice_forwards_lds_wait(%addr: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %loaded = ds_read_b128 %addr
   %lane0 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %result = v_add_f32 %lane0, %rhs
@@ -34,7 +34,7 @@ low.func.def target(@target) @slice_forwards_lds_wait(%addr: reg<amdgpu.vgpr>, %
 // RUN: emit amdgpu-wait-counter-plan-json @copy_forwards_lds_wait
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @copy_forwards_lds_wait(%addr: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @copy_forwards_lds_wait(%addr: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %loaded = ds_read_b32 %addr
   %copied = copy %loaded : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
   %result = v_add_f32 %copied, %rhs
@@ -50,7 +50,7 @@ low.func.def target(@target) @copy_forwards_lds_wait(%addr: reg<amdgpu.vgpr>, %r
 // RUN: emit amdgpu-wait-counter-plan-json @scratch_store_load_memory_effect strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @scratch_store_load_memory_effect(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @scratch_store_load_memory_effect(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   scratch_store_b32_vaddr %addr, %value
   %loaded = scratch_load_b32_vaddr %addr
   return %loaded
@@ -66,7 +66,7 @@ low.func.def target(@target) @scratch_store_load_memory_effect(%addr: reg<amdgpu
 // RUN: emit amdgpu-wait-counter-plan-json @conservative_scratch_stores_do_not_subsume_memory_effects strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @conservative_scratch_stores_do_not_subsume_memory_effects(%addr0: reg<amdgpu.vgpr>, %addr1: reg<amdgpu.vgpr>, %value0: reg<amdgpu.vgpr>, %value1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @conservative_scratch_stores_do_not_subsume_memory_effects(%addr0: reg<amdgpu.vgpr>, %addr1: reg<amdgpu.vgpr>, %value0: reg<amdgpu.vgpr>, %value1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   scratch_store_b32_vaddr %addr0, %value0
   scratch_store_b32_vaddr %addr1, %value1
   %loaded = scratch_load_b32_vaddr %addr0
@@ -83,7 +83,7 @@ low.func.def target(@target) @conservative_scratch_stores_do_not_subsume_memory_
 // RUN: emit amdgpu-wait-counter-plan-json @scratch_offset_only_stores_do_not_subsume_memory_effects strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @scratch_offset_only_stores_do_not_subsume_memory_effects(%value0: reg<amdgpu.vgpr>, %value1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @scratch_offset_only_stores_do_not_subsume_memory_effects(%value0: reg<amdgpu.vgpr>, %value1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   scratch_store_b32_offset_only %value0 {offset = 0}
   scratch_store_b32_offset_only %value1 {offset = 4}
   %loaded = scratch_load_b32_offset_only {offset = 0}
@@ -100,7 +100,7 @@ low.func.def target(@target) @scratch_offset_only_stores_do_not_subsume_memory_e
 // RUN: emit amdgpu-assembly @conservative_scratch_stores_do_not_subsume_memory_effects_assembly strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @conservative_scratch_stores_do_not_subsume_memory_effects_assembly(%addr0: reg<amdgpu.vgpr>, %addr1: reg<amdgpu.vgpr>, %value0: reg<amdgpu.vgpr>, %value1: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @conservative_scratch_stores_do_not_subsume_memory_effects_assembly(%addr0: reg<amdgpu.vgpr>, %addr1: reg<amdgpu.vgpr>, %value0: reg<amdgpu.vgpr>, %value1: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   scratch_store_b32_vaddr %addr0, %value0
   scratch_store_b32_vaddr %addr1, %value1
   %loaded = scratch_load_b32_vaddr %addr0
@@ -122,7 +122,7 @@ low.func.def target(@target) @conservative_scratch_stores_do_not_subsume_memory_
 // RUN: emit amdgpu-assembly @scratch_store_load_memory_effect_assembly strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @scratch_store_load_memory_effect_assembly(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @scratch_store_load_memory_effect_assembly(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   scratch_store_b32_vaddr %addr, %value
   %loaded = scratch_load_b32_vaddr %addr
   global_store_b32_saddr %addr, %loaded, %output
@@ -142,7 +142,7 @@ low.func.def target(@target) @scratch_store_load_memory_effect_assembly(%addr: r
 // RUN: emit amdgpu-assembly @global_load_saddr_source_reuse_assembly strategy=source amdgpu.sgpr=4
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @global_load_saddr_source_reuse_assembly(%addr: reg<amdgpu.vgpr>, %load_base: reg<amdgpu.sgpr x2>, %keep: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @global_load_saddr_source_reuse_assembly(%addr: reg<amdgpu.vgpr>, %load_base: reg<amdgpu.sgpr x2>, %keep: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
   %loaded = global_load_b32_saddr %addr, %load_base
   %mask = v_cmp_lt_i32 %lhs, %rhs
   %saved_exec, %active = s_and_saveexec_b64 %mask
@@ -167,7 +167,7 @@ low.func.def target(@target) @global_load_saddr_source_reuse_assembly(%addr: reg
 // RUN: emit amdgpu-assembly @global_load_saddr_source_reuse_across_branch_assembly strategy=source amdgpu.sgpr=4
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @global_load_saddr_source_reuse_across_branch_assembly(%addr: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @global_load_saddr_source_reuse_across_branch_assembly(%addr: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
   %base_lo = slice %base[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %base_hi = slice %base[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %zero = s_mov_b32 0
@@ -212,7 +212,7 @@ low.func.def target(@target) @global_load_saddr_source_reuse_across_branch_assem
 // RUN: emit amdgpu-wait-counter-plan-json @branch_load_join_store_common_wait strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @branch_load_join_store_common_wait(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %base0: reg<amdgpu.sgpr x2>, %base1: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @branch_load_join_store_common_wait(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %base0: reg<amdgpu.sgpr x2>, %base1: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
   low.cond_br %cond, ^then, ^else : reg<amdgpu.scc>
 ^then:
   %loaded0 = global_load_b64_saddr %addr, %base0
@@ -234,7 +234,7 @@ low.func.def target(@target) @branch_load_join_store_common_wait(%addr: reg<amdg
 // RUN: emit amdgpu-wait-counter-plan-json @branch_arg_repair_consumes_load_before_store strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @branch_arg_repair_consumes_load_before_store(%addr: reg<amdgpu.vgpr>, %load_cond: reg<amdgpu.scc>, %mask: reg<amdgpu.sgpr x2>, %base: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @branch_arg_repair_consumes_load_before_store(%addr: reg<amdgpu.vgpr>, %load_cond: reg<amdgpu.scc>, %mask: reg<amdgpu.sgpr x2>, %base: reg<amdgpu.sgpr x2>) asm {
   low.cond_br %load_cond, ^load, ^zero : reg<amdgpu.scc>
 ^load:
   %loaded = global_load_b128_saddr %addr, %base
@@ -277,7 +277,7 @@ low.func.def target(@target) @branch_arg_repair_consumes_load_before_store(%addr
 // RUN: emit amdgpu-assembly @branch_load_join_store_common_wait_assembly strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @branch_load_join_store_common_wait_assembly(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %base0: reg<amdgpu.sgpr x2>, %base1: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @branch_load_join_store_common_wait_assembly(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %base0: reg<amdgpu.sgpr x2>, %base1: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
   low.cond_br %cond, ^then, ^else : reg<amdgpu.scc>
 ^then:
   %loaded0 = global_load_b64_saddr %addr, %base0
@@ -307,7 +307,7 @@ low.func.def target(@target) @branch_load_join_store_common_wait_assembly(%addr:
 // RUN: emit amdgpu-wait-counter-plan-json @loop_carried_branch_arg_waits_at_next_iteration_use strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @loop_carried_branch_arg_waits_at_next_iteration_use(%addr: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @loop_carried_branch_arg_waits_at_next_iteration_use(%addr: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
   %zero = s_mov_b32 0
   low.br ^loop(%seed: reg<amdgpu.vgpr x2>, %zero: reg<amdgpu.sgpr>)
 ^loop(%carried: reg<amdgpu.vgpr x2>, %i: reg<amdgpu.sgpr>):
@@ -334,7 +334,7 @@ low.func.def target(@target) @loop_carried_branch_arg_waits_at_next_iteration_us
 // RUN: emit amdgpu-assembly @loop_carried_branch_arg_waits_at_next_iteration_use_assembly strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @loop_carried_branch_arg_waits_at_next_iteration_use_assembly(%addr: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @loop_carried_branch_arg_waits_at_next_iteration_use_assembly(%addr: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr x2>, %base: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
   %zero = s_mov_b32 0
   low.br ^loop(%seed: reg<amdgpu.vgpr x2>, %zero: reg<amdgpu.sgpr>)
 ^loop(%carried: reg<amdgpu.vgpr x2>, %i: reg<amdgpu.sgpr>):
@@ -371,7 +371,7 @@ low.func.def target(@target) @loop_carried_branch_arg_waits_at_next_iteration_us
 // RUN: emit amdgpu-wait-counter-plan-json @branch_load_then_use_join_store strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @branch_load_then_use_join_store(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %base0: reg<amdgpu.sgpr x2>, %base1: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @branch_load_then_use_join_store(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %base0: reg<amdgpu.sgpr x2>, %base1: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
   low.cond_br %cond, ^then, ^else : reg<amdgpu.scc>
 ^then:
   %loaded0 = global_load_b64_saddr %addr, %base0
@@ -395,7 +395,7 @@ low.func.def target(@target) @branch_load_then_use_join_store(%addr: reg<amdgpu.
 // RUN: emit amdgpu-assembly @branch_load_then_use_join_store_assembly strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @branch_load_then_use_join_store_assembly(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %base0: reg<amdgpu.sgpr x2>, %base1: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @branch_load_then_use_join_store_assembly(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %base0: reg<amdgpu.sgpr x2>, %base1: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
   low.cond_br %cond, ^then, ^else : reg<amdgpu.scc>
 ^then:
   %loaded0 = global_load_b64_saddr %addr, %base0
@@ -429,7 +429,7 @@ low.func.def target(@target) @branch_load_then_use_join_store_assembly(%addr: re
 // RUN: emit amdgpu-wait-counter-plan-json @scratch_store_load_cross_block_memory_effect strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @scratch_store_load_cross_block_memory_effect(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @scratch_store_load_cross_block_memory_effect(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   scratch_store_b32_vaddr %addr, %value
   low.br ^load
 ^load:
@@ -446,7 +446,7 @@ low.func.def target(@target) @scratch_store_load_cross_block_memory_effect(%addr
 // RUN: emit amdgpu-assembly @scratch_store_load_cross_block_memory_effect_assembly strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @scratch_store_load_cross_block_memory_effect_assembly(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @scratch_store_load_cross_block_memory_effect_assembly(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   scratch_store_b32_vaddr %addr, %value
   low.br ^load
 ^load:
@@ -469,7 +469,7 @@ low.func.def target(@target) @scratch_store_load_cross_block_memory_effect_assem
 // RUN: emit amdgpu-assembly @cross_block_workgroup_store_barrier strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @cross_block_workgroup_store_barrier(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @cross_block_workgroup_store_barrier(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) asm {
   ds_write_b32 %addr, %value
   low.br ^barrier
 ^barrier:
@@ -491,7 +491,7 @@ low.func.def target(@target) @cross_block_workgroup_store_barrier(%addr: reg<amd
 // RUN: emit amdgpu-assembly @cross_block_global_store_program_exit strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @cross_block_global_store_program_exit(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @cross_block_global_store_program_exit(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   global_store_b32_saddr %addr, %value, %output
   low.br ^exit
 ^exit:
@@ -510,7 +510,7 @@ low.func.def target(@target) @cross_block_global_store_program_exit(%addr: reg<a
 // RUN: emit amdgpu-wait-counter-plan-json @global_load_store_cross_block_antidependency strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @global_load_store_cross_block_antidependency(%addr: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @global_load_store_cross_block_antidependency(%addr: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %unused = global_load_b32_saddr %addr, %input
   low.br ^store
 ^store:
@@ -528,7 +528,7 @@ low.func.def target(@target) @global_load_store_cross_block_antidependency(%addr
 // RUN: emit amdgpu-assembly @global_load_store_cross_block_antidependency strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @global_load_store_cross_block_antidependency(%addr: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @global_load_store_cross_block_antidependency(%addr: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %unused = global_load_b32_saddr %addr, %input
   low.br ^store
 ^store:
@@ -548,7 +548,7 @@ low.func.def target(@target) @global_load_store_cross_block_antidependency(%addr
 // RUN: emit amdgpu-wait-counter-plan-json @global_load_store_cross_block_antidependency_cdna3 strategy=source
 
 amdgpu.target<gfx942> @target {subgroup_size = 64}
-low.func.def target(@target) @global_load_store_cross_block_antidependency_cdna3(%addr: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) @global_load_store_cross_block_antidependency_cdna3(%addr: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %m0 = s_mov_b32_m0_imm 0
   %unused = global_load_dword_saddr %addr, %input, %m0
   low.br ^store
@@ -564,7 +564,7 @@ low.func.def target(@target) @global_load_store_cross_block_antidependency_cdna3
 // RUN: emit amdgpu-wait-counter-plan-json @global_load_store_cross_block_antidependency_rdna4 strategy=source
 
 amdgpu.target<gfx1200> @target {subgroup_size = 64}
-low.func.def target(@target) @global_load_store_cross_block_antidependency_rdna4(%addr: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) @global_load_store_cross_block_antidependency_rdna4(%addr: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %unused = global_load_b32_saddr %addr, %input
   low.br ^store
 ^store:
@@ -579,7 +579,7 @@ low.func.def target(@target) @global_load_store_cross_block_antidependency_rdna4
 // RUN: emit amdgpu-assembly @cross_block_generic_read_aliases_global_write strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @cross_block_generic_read_aliases_global_write(%flat_addr: reg<amdgpu.vgpr x2>, %store_addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @cross_block_generic_read_aliases_global_write(%flat_addr: reg<amdgpu.vgpr x2>, %store_addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %unused = flat_load_dwordx2 %flat_addr
   low.br ^store
 ^store:
@@ -601,7 +601,7 @@ low.func.def target(@target) @cross_block_generic_read_aliases_global_write(%fla
 // RUN: emit amdgpu-assembly @cross_block_global_write_aliases_generic_read strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @cross_block_global_write_aliases_generic_read(%store_addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %flat_addr: reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @cross_block_global_write_aliases_generic_read(%store_addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>, %flat_addr: reg<amdgpu.vgpr x2>) asm {
   global_store_b32_saddr %store_addr, %value, %output
   low.br ^load
 ^load:
@@ -622,7 +622,7 @@ low.func.def target(@target) @cross_block_global_write_aliases_generic_read(%sto
 // RUN: emit amdgpu-wait-counter-plan-json @cross_block_disjoint_memory_spaces strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @cross_block_disjoint_memory_spaces(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @cross_block_disjoint_memory_spaces(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %unused = ds_read_b32 %addr
   low.br ^store
 ^store:
@@ -639,7 +639,7 @@ low.func.def target(@target) @cross_block_disjoint_memory_spaces(%addr: reg<amdg
 // RUN: emit amdgpu-wait-counter-plan-json @scratch_store_load_backedge_memory_effect strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @scratch_store_load_backedge_memory_effect(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @scratch_store_load_backedge_memory_effect(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr>) asm {
   low.br ^load
 ^load:
   %loaded = scratch_load_b32_vaddr %addr
@@ -662,7 +662,7 @@ low.func.def target(@target) @scratch_store_load_backedge_memory_effect(%addr: r
 // RUN: emit amdgpu-assembly @scratch_store_load_backedge_memory_effect_assembly strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @scratch_store_load_backedge_memory_effect_assembly(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @scratch_store_load_backedge_memory_effect_assembly(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>, %output: reg<amdgpu.sgpr x2>) asm {
   low.br ^load
 ^load:
   %loaded = scratch_load_b32_vaddr %addr
@@ -694,7 +694,7 @@ low.func.def target(@target) @scratch_store_load_backedge_memory_effect_assembly
 // RUN: emit amdgpu-assembly @exec_state_packets_preserve_scratch_store_wait strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @exec_state_packets_preserve_scratch_store_wait(%saved_exec: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @exec_state_packets_preserve_scratch_store_wait(%saved_exec: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   scratch_store_b32_offset_only %value {offset = 0}
   s_mov_b64_exec %saved_exec
   %observed_exec = s_mov_b64_exec_read
@@ -723,7 +723,7 @@ low.func.def target(@target) @exec_state_packets_preserve_scratch_store_wait(%sa
 // RUN: emit amdgpu-assembly @cdna_scratch_packets_read_m0_state strategy=source
 
 amdgpu.target<gfx942> @target
-low.func.def target(@target) @cdna_scratch_packets_read_m0_state(%value: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) {
+low.func.def target<amdgpu.cdna3.core>(@target) @cdna_scratch_packets_read_m0_state(%value: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) {
   %m0 = low.const<amdgpu.s_mov_b32_m0.imm> {imm32 = 0} : reg<amdgpu.m0>
   low.op<amdgpu.scratch_store_b32_offset_only>(%value, %m0) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.m0>)
   %loaded = low.op<amdgpu.scratch_load_b32_offset_only>(%m0) {offset = 0} : (reg<amdgpu.m0>) -> reg<amdgpu.vgpr>
@@ -748,7 +748,7 @@ low.func.def target(@target) @cdna_scratch_packets_read_m0_state(%value: reg<amd
 // RUN: emit amdgpu-wait-counter-plan-json @smem_load_address_dependency strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @smem_load_address_dependency(%kernarg: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @smem_load_address_dependency(%kernarg: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %zero = s_mov_b32 0
   %base = s_load_dwordx2 %kernarg, %zero {offset = 16}
   %noise0 = s_load_dword %kernarg, %zero {offset = 0}
@@ -767,7 +767,7 @@ low.func.def target(@target) @smem_load_address_dependency(%kernarg: reg<amdgpu.
 // RUN: emit amdgpu-assembly @smem_load_address_dependency_assembly strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @smem_load_address_dependency_assembly(%kernarg: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @smem_load_address_dependency_assembly(%kernarg: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
   %zero = s_mov_b32 0
   %zero_v = v_mov_b32 0
   %base = s_load_dwordx2 %kernarg, %zero {offset = 16}
@@ -805,7 +805,7 @@ low.func.def target(@target) @smem_load_address_dependency_assembly(%kernarg: re
 // RUN: emit amdgpu-wait-counter-plan-json @explicit_join_lgkm_wait_satisfies_cross_block_lds_use strategy=source
 
 amdgpu.target<gfx1100> @target {subgroup_size = 64}
-low.func.def target(@target) @explicit_join_lgkm_wait_satisfies_cross_block_lds_use(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @explicit_join_lgkm_wait_satisfies_cross_block_lds_use(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   low.cond_br %cond, ^load, ^zero : reg<amdgpu.scc>
 ^load:
   %loaded = ds_read_b128 %addr
@@ -831,7 +831,7 @@ low.func.def target(@target) @explicit_join_lgkm_wait_satisfies_cross_block_lds_
 // RUN: emit amdgpu-assembly @explicit_join_lgkm_wait_satisfies_cross_block_lds_use_assembly strategy=source
 
 amdgpu.target<gfx1100> @target {subgroup_size = 64}
-low.func.def target(@target) @explicit_join_lgkm_wait_satisfies_cross_block_lds_use_assembly(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %rhs: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @explicit_join_lgkm_wait_satisfies_cross_block_lds_use_assembly(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %rhs: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   low.cond_br %cond, ^load, ^zero : reg<amdgpu.scc>
 ^load:
   %loaded = ds_read_b128 %addr
@@ -872,7 +872,7 @@ low.func.def target(@target) @explicit_join_lgkm_wait_satisfies_cross_block_lds_
 // RUN: emit amdgpu-wait-counter-plan-json @explicit_join_lgkm_wait_satisfies_cross_block_lds_use_cdna3 strategy=source
 
 amdgpu.target<gfx942> @target {subgroup_size = 64}
-low.func.def target(@target) @explicit_join_lgkm_wait_satisfies_cross_block_lds_use_cdna3(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) @explicit_join_lgkm_wait_satisfies_cross_block_lds_use_cdna3(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   low.cond_br %cond, ^load, ^zero : reg<amdgpu.scc>
 ^load:
   %loaded = ds_read_b128 %addr
@@ -895,7 +895,7 @@ low.func.def target(@target) @explicit_join_lgkm_wait_satisfies_cross_block_lds_
 // RUN: emit amdgpu-wait-counter-plan-json @explicit_join_dscnt_wait_satisfies_cross_block_lds_use_rdna4 strategy=source
 
 amdgpu.target<gfx1200> @target {subgroup_size = 64}
-low.func.def target(@target) @explicit_join_dscnt_wait_satisfies_cross_block_lds_use_rdna4(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) @explicit_join_dscnt_wait_satisfies_cross_block_lds_use_rdna4(%addr: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   low.cond_br %cond, ^load, ^zero : reg<amdgpu.scc>
 ^load:
   %loaded = ds_read_b128 %addr
@@ -918,7 +918,7 @@ low.func.def target(@target) @explicit_join_dscnt_wait_satisfies_cross_block_lds
 // RUN: emit amdgpu-wait-counter-plan-json @explicit_wait_idle_drains_rdna3_counters strategy=source
 
 amdgpu.target<gfx1100> @target
-low.func.def target(@target) @explicit_wait_idle_drains_rdna3_counters(%addr: reg<amdgpu.vgpr>, %global: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @explicit_wait_idle_drains_rdna3_counters(%addr: reg<amdgpu.vgpr>, %global: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %global_value = global_load_b32_saddr %addr, %global
   %local_value = ds_read_b32 %addr
   s_wait_idle
@@ -935,7 +935,7 @@ low.func.def target(@target) @explicit_wait_idle_drains_rdna3_counters(%addr: re
 // RUN: emit amdgpu-wait-counter-plan-json @explicit_wait_idle_drains_rdna4_counters strategy=source
 
 amdgpu.target<gfx1200> @target
-low.func.def target(@target) @explicit_wait_idle_drains_rdna4_counters(%addr: reg<amdgpu.vgpr>, %global: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) @explicit_wait_idle_drains_rdna4_counters(%addr: reg<amdgpu.vgpr>, %global: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %global_value = global_load_b32_saddr %addr, %global
   %local_value = ds_read_b32 %addr
   s_wait_idle
@@ -950,7 +950,7 @@ low.func.def target(@target) @explicit_wait_idle_drains_rdna4_counters(%addr: re
 // RUN: emit amdgpu-wait-counter-plan-json @smem_store_then_load_cdna3 strategy=source
 
 amdgpu.target<gfx942> @target
-low.func.def target(@target) @smem_store_then_load_cdna3(%value: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) @smem_store_then_load_cdna3(%value: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   s_store_dword %value, %base, %offset {offset = 0}
   %loaded = s_load_dword %base, %offset {offset = 0}
   return %loaded
@@ -965,7 +965,7 @@ low.func.def target(@target) @smem_store_then_load_cdna3(%value: reg<amdgpu.sgpr
 // RUN: emit amdgpu-wait-counter-plan-json @explicit_lgkm_wait_keeps_vmem_pending
 
 amdgpu.target<gfx1100> @target {subgroup_size = 64}
-low.func.def target(@target) @explicit_lgkm_wait_keeps_vmem_pending(%addr: reg<amdgpu.vgpr>, %global: reg<amdgpu.sgpr x2>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @explicit_lgkm_wait_keeps_vmem_pending(%addr: reg<amdgpu.vgpr>, %global: reg<amdgpu.sgpr x2>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %lhs0 = global_load_b128_saddr %addr, %global
   %lhs1 = global_load_b128_saddr %addr, %global {offset = 16}
   %lhs = concat(%lhs0, %lhs1) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
@@ -986,7 +986,7 @@ low.func.def target(@target) @explicit_lgkm_wait_keeps_vmem_pending(%addr: reg<a
 // RUN: emit amdgpu-assembly @explicit_lgkm_wait_keeps_vmem_pending_assembly
 
 amdgpu.target<gfx1100> @target {subgroup_size = 64}
-low.func.def target(@target) @explicit_lgkm_wait_keeps_vmem_pending_assembly(%addr: reg<amdgpu.vgpr>, %global: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>, %acc: reg<amdgpu.vgpr x4>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) @explicit_lgkm_wait_keeps_vmem_pending_assembly(%addr: reg<amdgpu.vgpr>, %global: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>, %acc: reg<amdgpu.vgpr x4>) asm {
   %lhs0 = global_load_b128_saddr %addr, %global
   %lhs1 = global_load_b128_saddr %addr, %global {offset = 16}
   %lhs = concat(%lhs0, %lhs1) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
