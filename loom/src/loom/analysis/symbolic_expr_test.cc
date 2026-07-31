@@ -640,6 +640,118 @@ TEST_F(SymbolicExprTest, DynamicMultiplyFallsBackToResultSymbol) {
   EXPECT_EQ(expression.terms[0].value_id, result);
 }
 
+TEST_F(SymbolicExprTest, ProvesFlattenedAddressFromDynamicAxisBounds) {
+  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t row_source = DefineIndexValue();
+  loom_value_id_t row_count_source = DefineIndexValue();
+  loom_value_id_t column = DefineIndexValue();
+  loom_value_id_t column_count = DefineIndexValue();
+  DefineFacts(row_source, loom_value_facts_make(0, 2047, 1));
+  DefineFacts(row_count_source, loom_value_facts_make(1, 2048, 1));
+  DefineFacts(column, loom_value_facts_make(0, 262143, 1));
+  DefineFacts(column_count, loom_value_facts_make(1, 262144, 1));
+
+  loom_value_id_t row_values[] = {row_source, row_count_source};
+  loom_predicate_t row_predicate = {
+      /*.kind=*/LOOM_PREDICATE_LT,
+      /*.arg_count=*/2,
+      /*.arg_tags=*/{LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},
+      /*.reserved=*/{},
+      /*.args=*/{row_source, row_count_source, 0},
+  };
+  loom_type_t row_result_types[] = {index_type, index_type};
+  loom_op_t* row_assume_op = nullptr;
+  IREE_ASSERT_OK(loom_index_assume_build(
+      &builder_, row_values, IREE_ARRAYSIZE(row_values), &row_predicate, 1,
+      row_result_types, IREE_ARRAYSIZE(row_result_types), LOOM_LOCATION_UNKNOWN,
+      &row_assume_op));
+  loom_value_slice_t row_results = loom_index_assume_results(row_assume_op);
+  loom_value_id_t row = row_results.values[0];
+  loom_value_id_t row_count = row_results.values[1];
+
+  loom_op_t* column_compare_op = nullptr;
+  IREE_ASSERT_OK(loom_index_cmp_build(
+      &builder_, LOOM_INDEX_CMP_PREDICATE_ULT, column, column_count, index_type,
+      loom_type_scalar(LOOM_SCALAR_TYPE_I1), LOOM_LOCATION_UNKNOWN,
+      &column_compare_op));
+  loom_condition_integer_relation_t relation_storage[4];
+  loom_condition_fact_set_t condition_facts;
+  loom_condition_fact_set_initialize(
+      relation_storage, IREE_ARRAYSIZE(relation_storage), &condition_facts);
+  ASSERT_TRUE(loom_condition_facts_query(
+      module_, &fact_table_, loom_index_cmp_result(column_compare_op), true,
+      &condition_facts));
+  expression_context_.condition_facts = &condition_facts;
+  loom_symbolic_expr_context_reset(&expression_context_);
+
+  loom_op_t* row_base_op = nullptr;
+  IREE_ASSERT_OK(loom_index_mul_build(&builder_, row, column_count, index_type,
+                                      LOOM_LOCATION_UNKNOWN, &row_base_op));
+  loom_op_t* origin_op = nullptr;
+  IREE_ASSERT_OK(loom_index_add_build(
+      &builder_, loom_index_mul_result(row_base_op), column, index_type,
+      LOOM_LOCATION_UNKNOWN, &origin_op));
+  loom_op_t* element_count_op = nullptr;
+  IREE_ASSERT_OK(loom_index_mul_build(&builder_, row_count, column_count,
+                                      index_type, LOOM_LOCATION_UNKNOWN,
+                                      &element_count_op));
+
+  loom_symbolic_expr_t origin = {};
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(
+      &expression_context_, loom_index_add_result(origin_op), &origin));
+  loom_symbolic_expr_t one = {};
+  loom_symbolic_expr_constant(1, &one);
+  loom_symbolic_expr_t exclusive_end = {};
+  IREE_ASSERT_OK(loom_symbolic_expr_add(&expression_context_, &origin, &one,
+                                        &exclusive_end));
+  loom_symbolic_expr_t element_count = {};
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(
+      &expression_context_, loom_index_mul_result(element_count_op),
+      &element_count));
+
+  loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(loom_symbolic_expr_prove_le(
+      &expression_context_, &exclusive_end, &element_count, &proof));
+  EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
+
+  loom_op_t* row_nonstrict_compare_op = nullptr;
+  IREE_ASSERT_OK(loom_index_cmp_build(
+      &builder_, LOOM_INDEX_CMP_PREDICATE_ULE, row_source, row_count_source,
+      index_type, loom_type_scalar(LOOM_SCALAR_TYPE_I1), LOOM_LOCATION_UNKNOWN,
+      &row_nonstrict_compare_op));
+  ASSERT_TRUE(loom_condition_facts_query(
+      module_, &fact_table_, loom_index_cmp_result(row_nonstrict_compare_op),
+      true, &condition_facts));
+  ASSERT_TRUE(loom_condition_facts_query_into(
+      module_, &fact_table_, loom_index_cmp_result(column_compare_op), true,
+      &condition_facts));
+  loom_symbolic_expr_context_reset(&expression_context_);
+
+  loom_op_t* nonstrict_row_base_op = nullptr;
+  IREE_ASSERT_OK(loom_index_mul_build(&builder_, row_source, column_count,
+                                      index_type, LOOM_LOCATION_UNKNOWN,
+                                      &nonstrict_row_base_op));
+  loom_op_t* nonstrict_origin_op = nullptr;
+  IREE_ASSERT_OK(loom_index_add_build(
+      &builder_, loom_index_mul_result(nonstrict_row_base_op), column,
+      index_type, LOOM_LOCATION_UNKNOWN, &nonstrict_origin_op));
+  loom_op_t* nonstrict_element_count_op = nullptr;
+  IREE_ASSERT_OK(loom_index_mul_build(&builder_, row_count_source, column_count,
+                                      index_type, LOOM_LOCATION_UNKNOWN,
+                                      &nonstrict_element_count_op));
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(
+      &expression_context_, loom_index_add_result(nonstrict_origin_op),
+      &origin));
+  IREE_ASSERT_OK(loom_symbolic_expr_add(&expression_context_, &origin, &one,
+                                        &exclusive_end));
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(
+      &expression_context_, loom_index_mul_result(nonstrict_element_count_op),
+      &element_count));
+  IREE_ASSERT_OK(loom_symbolic_expr_prove_le(
+      &expression_context_, &exclusive_end, &element_count, &proof));
+  EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_UNKNOWN);
+}
+
 TEST_F(SymbolicExprTest, BoundedDynamicMaddFallsBackToResultSymbol) {
   loom_value_id_t left = DefineIndexValue();
   loom_value_id_t right = DefineIndexValue();

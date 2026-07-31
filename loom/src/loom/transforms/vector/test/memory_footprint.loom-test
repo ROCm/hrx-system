@@ -692,6 +692,25 @@ func.def @guarded_i64_precast_index_proves_store_unit_axis(%payload: buffer, %ba
 
 // ====
 
+func.def @guarded_flattened_store_proves_dynamic_axis_bounds(%payload: buffer, %base: offset, %row0: index, %row_count0: index, %column0: index, %column_count0: index, %lane: i32, %value: f32) {
+  %row, %row_count = index.assume %row0, %row_count0 [range(%row0, 0, 2047), range(%row_count0, 1, 2048), lt(%row0, %row_count0)] : index, index
+  %column, %column_count = index.assume %column0, %column_count0 [range(%column0, 0, 262143), range(%column_count0, 1, 262144)] : index, index
+  %zero_i32 = scalar.constant 0 : i32
+  %valid_column = index.cmp ult, %column, %column_count : index
+  %is_lane_zero = scalar.cmpi eq, %lane, %zero_i32 : i32
+  %writes_output = scalar.andi %valid_column, %is_lane_zero : i1
+  scf.if %writes_output {
+    %element_count = index.mul %row_count, %column_count : index
+    %view = buffer.view %payload[%base] : buffer -> view<[%element_count]xf32, #dense>
+    %row_base = index.mul %row, %column_count : index
+    %origin = index.add %row_base, %column : index
+    view.store %value, %view[%origin] : f32, view<[%element_count]xf32, #dense>
+  }
+  func.return
+}
+
+// ====
+
 kernel.def @dynamic_unit_axis_proven_by_workgroup_id_launch_config(%rows: index) {
   %c1 = index.constant 1 : index
   %c128 = index.constant 128 : index
