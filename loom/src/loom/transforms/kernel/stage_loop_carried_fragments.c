@@ -28,6 +28,7 @@
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/facts.h"
 #include "loom/target/launch.h"
 #include "loom/target/pass_environment.h"
 #include "loom/target/reporting/report.h"
@@ -166,17 +167,16 @@ typedef struct loom_stage_loop_carried_fragments_context_t {
 
 static iree_status_t loom_stage_loop_carried_fragments_fact_scope(
     loom_pass_t* pass, const loom_module_t* module, loom_func_like_t function,
-    loom_target_bundle_storage_t* bundle_storage,
     loom_pass_value_fact_scope_t* out_scope) {
   *out_scope = loom_pass_value_fact_scope_function(function);
-  memset(bundle_storage, 0, sizeof(*bundle_storage));
+  const loom_target_facts_t* target_facts = NULL;
   bool resolved = false;
-  IREE_RETURN_IF_ERROR(loom_target_pass_capability_resolve_function_bundle(
-      pass->environment, module, function, pass->diagnostic_emitter,
-      pass->arena, &resolved, bundle_storage));
+  IREE_RETURN_IF_ERROR(loom_target_pass_resolve_function_facts(
+      pass, module, function, &resolved, &target_facts));
   if (resolved) {
     *out_scope = loom_pass_value_fact_scope_function_for_target(
-        function, &bundle_storage->bundle, NULL);
+        function, loom_target_facts_bundle(target_facts),
+        /*target_profile=*/NULL);
   }
   return iree_ok_status();
 }
@@ -1030,11 +1030,10 @@ iree_status_t loom_stage_loop_carried_fragments_run(loom_pass_t* pass,
   statistics->candidate_loops += (int64_t)candidates.count;
   if (candidates.count == 0) return iree_ok_status();
 
-  loom_target_bundle_storage_t bundle_storage = {0};
   loom_pass_value_fact_scope_t fact_scope =
       loom_pass_value_fact_scope_function(function);
   IREE_RETURN_IF_ERROR(loom_stage_loop_carried_fragments_fact_scope(
-      pass, module, function, &bundle_storage, &fact_scope));
+      pass, module, function, &fact_scope));
 
   loom_value_fact_table_t* facts = NULL;
   IREE_RETURN_IF_ERROR(

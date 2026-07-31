@@ -6,11 +6,79 @@
 
 #include "loom/target/pass_environment.h"
 
+#include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/format/text/parser.h"
+#include "loom/ir/context.h"
+#include "loom/ir/module.h"
+#include "loom/ops/func/ops.h"
+#include "loom/ops/test/ops.h"
+#include "loom/target/facts_builder.h"
+#include "loom/target/test/target_records.h"
+#include "loom/testing/module_ptr.h"
 
 namespace loom {
 namespace {
+
+using ModulePtr = ::loom::testing::ModulePtr;
+
+class TargetPassFactsTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    iree_arena_block_pool_initialize(4096, iree_allocator_system(),
+                                     &block_pool_);
+    loom_context_initialize(iree_allocator_system(), &context_);
+    RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
+    IREE_ASSERT_OK(loom_context_finalize(&context_));
+  }
+
+  void TearDown() override {
+    loom_context_deinitialize(&context_);
+    iree_arena_block_pool_deinitialize(&block_pool_);
+  }
+
+  using DialectVtablesFn =
+      const loom_op_vtable_t* const* (*)(iree_host_size_t*);
+
+  void RegisterDialect(loom_dialect_id_t dialect_id, DialectVtablesFn fn) {
+    iree_host_size_t vtable_count = 0;
+    const loom_op_vtable_t* const* vtables = fn(&vtable_count);
+    IREE_ASSERT_OK(loom_context_register_dialect(&context_, dialect_id, vtables,
+                                                 (uint16_t)vtable_count));
+  }
+
+  ModulePtr ParseModule() {
+    loom_module_t* module = nullptr;
+    loom_text_parse_options_t options = {};
+    IREE_CHECK_OK(loom_text_parse(
+        IREE_SV("test.target<low_core> @authored_target\n"
+                "func.def target(@authored_target) @authored() {\n"
+                "  func.return\n"
+                "}\n"
+                "func.def @targetless() {\n"
+                "  func.return\n"
+                "}\n"),
+        IREE_SV("target_pass_environment_test.loom"), &context_, &block_pool_,
+        &options, &module));
+    return ModulePtr(module);
+  }
+
+  loom_func_like_t FindFunction(loom_module_t* module,
+                                iree_string_view_t name) {
+    const loom_string_id_t name_id = loom_module_lookup_string(module, name);
+    IREE_ASSERT(name_id != LOOM_STRING_ID_INVALID);
+    const loom_symbol_id_t symbol_id = loom_module_find_symbol(module, name_id);
+    IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
+    loom_op_t* op = module->symbols.entries[symbol_id].defining_op;
+    IREE_ASSERT(op != nullptr);
+    return loom_func_like_cast(module, op);
+  }
+
+  iree_arena_block_pool_t block_pool_;
+  loom_context_t context_;
+};
 
 TEST(TargetPassEnvironmentTest, EnvironmentCarriesInvocationState) {
   const loom_target_environment_t* target_environment =
@@ -51,6 +119,74 @@ TEST(TargetPassEnvironmentTest, MissingCapabilityHasEmptyAccessors) {
   EXPECT_EQ(loom_target_pass_capability_specialization_profile(
                 /*capability=*/nullptr, /*module=*/nullptr, /*function=*/{}),
             nullptr);
+}
+
+TEST_F(TargetPassFactsTest, RefinedVersionSuppliesEffectiveFactsDirectly) {
+  ModulePtr module = ParseModule();
+  const loom_func_like_t function =
+      FindFunction(module.get(), IREE_SV("authored"));
+  loom_target_facts_t effective_facts = {};
+  loom_target_facts_builder_initialize(&loom_test_target_fact_type,
+                                       loom_test_target_bundles.values[2],
+                                       &effective_facts);
+  loom_target_function_version_t function_version = {};
+  function_version.base.type = &loom_target_function_version_type;
+  function_version.base.function = function;
+  function_version.effective_target_facts = &effective_facts;
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_pass_t pass = {};
+  pass.arena = &arena;
+  pass.function_version = &function_version.base;
+  bool resolved = false;
+  const loom_target_facts_t* resolved_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_pass_resolve_function_facts(
+      &pass, module.get(), function, &resolved, &resolved_facts));
+
+  EXPECT_TRUE(resolved);
+  EXPECT_EQ(resolved_facts, &effective_facts);
+  iree_arena_deinitialize(&arena);
+}
+
+TEST_F(TargetPassFactsTest, UnrefinedFunctionProjectsAuthoredFacts) {
+  ModulePtr module = ParseModule();
+  const loom_func_like_t function =
+      FindFunction(module.get(), IREE_SV("authored"));
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_pass_t pass = {};
+  pass.arena = &arena;
+  bool resolved = false;
+  const loom_target_facts_t* resolved_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_pass_resolve_function_facts(
+      &pass, module.get(), function, &resolved, &resolved_facts));
+
+  ASSERT_TRUE(resolved);
+  ASSERT_NE(resolved_facts, nullptr);
+  EXPECT_EQ(resolved_facts->fact_type, &loom_test_target_fact_type);
+  const loom_target_bundle_t* bundle = loom_target_facts_bundle(resolved_facts);
+  ASSERT_NE(bundle, nullptr);
+  EXPECT_EQ(bundle->snapshot->index_bitwidth, 64u);
+  iree_arena_deinitialize(&arena);
+}
+
+TEST_F(TargetPassFactsTest, TargetlessFunctionHasNoEffectiveFacts) {
+  ModulePtr module = ParseModule();
+  const loom_func_like_t function =
+      FindFunction(module.get(), IREE_SV("targetless"));
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_pass_t pass = {};
+  pass.arena = &arena;
+  bool resolved = false;
+  const loom_target_facts_t* resolved_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_pass_resolve_function_facts(
+      &pass, module.get(), function, &resolved, &resolved_facts));
+
+  EXPECT_FALSE(resolved);
+  EXPECT_EQ(resolved_facts, nullptr);
+  iree_arena_deinitialize(&arena);
 }
 
 }  // namespace

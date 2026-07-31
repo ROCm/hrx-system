@@ -94,6 +94,7 @@ loom_cc_library(
     loom::rewrite::materialize
     loom::rewrite::remap
     loom::rewrite::rewriter
+    loom::target::facts
     loom::target::launch
     loom::target::pass_environment
     loom::target::reporting::report

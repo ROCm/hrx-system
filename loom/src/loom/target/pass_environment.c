@@ -9,7 +9,6 @@
 #include "loom/analysis/symbol_facts.h"
 #include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
-#include "loom/ops/target/facts.h"
 #include "loom/target/function_contract.h"
 
 static bool loom_target_pass_capability_satisfies_requirement(
@@ -102,14 +101,23 @@ static bool loom_target_function_symbol_id(const loom_module_t* module,
   return true;
 }
 
-iree_status_t loom_target_pass_capability_resolve_function_bundle(
-    const loom_pass_environment_t* environment, const loom_module_t* module,
-    loom_func_like_t function, iree_diagnostic_emitter_t diagnostic_emitter,
-    iree_arena_allocator_t* arena, bool* out_resolved,
-    loom_target_bundle_storage_t* out_bundle_storage) {
-  (void)environment;
+iree_status_t loom_target_pass_resolve_function_facts(
+    const loom_pass_t* pass, const loom_module_t* module,
+    loom_func_like_t function, bool* out_resolved,
+    const loom_target_facts_t** out_facts) {
   *out_resolved = false;
-  *out_bundle_storage = (loom_target_bundle_storage_t){0};
+  *out_facts = NULL;
+
+  const loom_target_function_version_t* version =
+      loom_target_function_version_const_cast(pass->function_version);
+  if (version != NULL) {
+    IREE_ASSERT(version->base.function.op == function.op &&
+                version->base.function.vtable == function.vtable);
+    IREE_ASSERT(version->effective_target_facts != NULL);
+    *out_facts = version->effective_target_facts;
+    *out_resolved = true;
+    return iree_ok_status();
+  }
 
   loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   if (!loom_target_function_symbol_id(module, function, &symbol_id)) {
@@ -117,7 +125,7 @@ iree_status_t loom_target_pass_capability_resolve_function_bundle(
   }
 
   loom_symbol_fact_table_t fact_table = {0};
-  loom_symbol_fact_table_initialize(&fact_table, arena);
+  loom_symbol_fact_table_initialize(&fact_table, pass->arena);
   const loom_symbol_facts_base_t* base_facts = NULL;
   IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup(&fact_table, module,
                                                      symbol_id, &base_facts));
@@ -128,22 +136,10 @@ iree_status_t loom_target_pass_capability_resolve_function_bundle(
     return iree_ok_status();
   }
 
-  const loom_symbol_facts_base_t* target_base_facts = NULL;
-  IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
-      &fact_table, module, func_facts->target_symbol, &target_base_facts));
-  const loom_target_symbol_facts_t* target_facts =
-      loom_target_symbol_facts_cast(target_base_facts);
-  if (target_facts == NULL) {
-    IREE_ASSERT_UNREACHABLE(
-        "verified function target has no indexed target facts");
-    IREE_BUILTIN_UNREACHABLE();
-  }
-
   bool contract_valid = false;
-  IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve_from_bundle(
-      module, func_facts, target_facts->name,
-      &target_facts->projection->storage.bundle, diagnostic_emitter,
-      &contract_valid, out_bundle_storage));
+  IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve_facts(
+      module, &fact_table, func_facts, pass->diagnostic_emitter, pass->arena,
+      &contract_valid, out_facts));
   if (!contract_valid) {
     return iree_ok_status();
   }

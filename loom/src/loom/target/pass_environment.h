@@ -15,15 +15,13 @@
 #define LOOM_TARGET_PASS_ENVIRONMENT_H_
 
 #include "iree/base/api.h"
-#include "iree/base/internal/arena.h"
-#include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/module.h"
 #include "loom/pass/environment.h"
 #include "loom/pass/types.h"
+#include "loom/target/facts.h"
 #include "loom/target/function_version.h"
 #include "loom/target/specialization.h"
-#include "loom/target/types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -84,15 +82,16 @@ const loom_target_profile_t* loom_target_pass_capability_specialization_profile(
     const loom_target_pass_capability_t* capability,
     const loom_module_t* module, loom_func_like_t function);
 
-// Resolves the durable target bundle for |function|.
+// Resolves the immutable effective target facts for the active function pass.
 //
-// Returns OK with |out_resolved| false when the function has no target record.
-// Verified function and target records are trusted compiler-owned state.
-iree_status_t loom_target_pass_capability_resolve_function_bundle(
-    const loom_pass_environment_t* environment, const loom_module_t* module,
-    loom_func_like_t function, iree_diagnostic_emitter_t diagnostic_emitter,
-    iree_arena_allocator_t* arena, bool* out_resolved,
-    loom_target_bundle_storage_t* out_bundle_storage);
+// A concrete target-refined function version supplies its facts directly from
+// the pass frame. An unrefined function projects its authored target contract
+// into |pass->arena|. Returns OK with |out_resolved| false when |function| has
+// no target contract.
+iree_status_t loom_target_pass_resolve_function_facts(
+    const loom_pass_t* pass, const loom_module_t* module,
+    loom_func_like_t function, bool* out_resolved,
+    const loom_target_facts_t** out_facts);
 
 #ifdef __cplusplus
 }  // extern "C"

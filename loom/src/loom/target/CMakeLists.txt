@@ -207,19 +207,16 @@ loom_cc_library(
   SRCS
     "pass_environment.c"
   DEPS
+    ::facts
     ::function_contract
     ::function_version
     ::profile
     ::specialization
-    ::types
     iree::base
-    iree::base::internal::arena
     loom::analysis::symbol_facts
-    loom::error::emitter
     loom::ir
     loom::ops::func_symbol_facts
     loom::ops::op_defs
-    loom::ops::target
     loom::pass::environment
     loom::pass::types
   PUBLIC
@@ -290,9 +287,18 @@ loom_cc_test(
   SRCS
     "pass_environment_test.cc"
   DEPS
+    ::facts_builder
+    ::function_version
     ::pass_environment
+    iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func
+    loom::ops::test
+    loom::target::test::target_record_table
+    loom::testing::module_ptr
 )
 
 loom_cc_library(
