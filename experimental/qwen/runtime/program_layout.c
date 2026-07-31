@@ -227,7 +227,8 @@ iree_status_t qwen_full_program_layout_calculate(
   memset(out_layout, 0, sizeof(*out_layout));
   const qwen_full_program_layout_flags_t supported_flags =
       QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION |
-      QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_STAGE_COMPLETION;
+      QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_STAGE_COMPLETION |
+      QWEN_FULL_PROGRAM_LAYOUT_FLAG_PREFILL_FUSED_EXPERT_TABLE;
   if (iree_any_bit_set(flags, ~supported_flags)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen full-program layout flags are unsupported");
@@ -281,7 +282,12 @@ iree_status_t qwen_full_program_layout_calculate(
       flags, QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION);
   const bool reserves_fused_stage_completion = iree_any_bit_set(
       flags, QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_STAGE_COMPLETION);
-  if (reserves_attention_completion || reserves_fused_stage_completion) {
+  const bool reserves_expert_table_completion = iree_any_bit_set(
+      flags, QWEN_FULL_PROGRAM_LAYOUT_FLAG_PREFILL_FUSED_EXPERT_TABLE);
+  if (reserves_attention_completion || reserves_fused_stage_completion ||
+      reserves_expert_table_completion) {
+    const iree_device_size_t expert_table_byte_length =
+        reserves_expert_table_completion ? sizeof(int32_t) : 0;
     iree_device_size_t attention_byte_length = 0;
     if (reserves_attention_completion) {
       IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
@@ -299,8 +305,11 @@ iree_status_t qwen_full_program_layout_calculate(
     }
     const iree_device_size_t shared_byte_length =
         reserves_fused_stage_completion ? sizeof(int32_t) : 0;
-    iree_device_size_t initialization_byte_length = 0;
-    if (!iree_device_size_checked_add(attention_byte_length,
+    iree_device_size_t initialization_byte_length = expert_table_byte_length;
+    if (!iree_device_size_checked_add(initialization_byte_length,
+                                      attention_byte_length,
+                                      &initialization_byte_length) ||
+        !iree_device_size_checked_add(initialization_byte_length,
                                       grouped_stage_byte_length,
                                       &initialization_byte_length) ||
         !iree_device_size_checked_add(initialization_byte_length,
@@ -309,15 +318,20 @@ iree_status_t qwen_full_program_layout_calculate(
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "Qwen completion storage length overflows");
     }
-    IREE_RETURN_IF_ERROR(qwen_program_layout_append(
-        initialization_byte_length, &cursor,
-        &out_layout->decode_completion.initialization));
+    IREE_RETURN_IF_ERROR(
+        qwen_program_layout_append(initialization_byte_length, &cursor,
+                                   &out_layout->completion_initialization));
+    out_layout->expert_table_completion = (qwen_program_span_t){
+        .offset = out_layout->completion_initialization.offset,
+        .length = expert_table_byte_length,
+    };
     out_layout->decode_completion.attention = (qwen_program_span_t){
-        .offset = out_layout->decode_completion.initialization.offset,
+        .offset = out_layout->expert_table_completion.offset +
+                  expert_table_byte_length,
         .length = attention_byte_length,
     };
     out_layout->decode_completion.grouped_stage = (qwen_program_span_t){
-        .offset = out_layout->decode_completion.initialization.offset +
+        .offset = out_layout->decode_completion.attention.offset +
                   attention_byte_length,
         .length = grouped_stage_byte_length,
     };

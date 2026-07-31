@@ -2538,7 +2538,7 @@ iree_status_t qwen_program_issue(
                                                        : "hidden-state");
   }
   const qwen_program_span_t completion_counter_initialization =
-      program->full_layout.decode_completion.initialization;
+      program->full_layout.completion_initialization;
   const bool initializes_completion_counters =
       completion_counter_initialization.length != 0;
   const uint64_t issue_timeline_step_count =

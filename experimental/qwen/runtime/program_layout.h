@@ -21,10 +21,8 @@ typedef struct qwen_program_span_t {
   iree_device_size_t length;
 } qwen_program_span_t;
 
-// Decode-only completion-counter storage initialized before command execution.
+// Decode-only completion-counter roles.
 typedef struct qwen_decode_completion_layout_t {
-  // Contiguous byte range covered by the issue-time initialization fill.
-  qwen_program_span_t initialization;
   // Per-KV-head counters reset by every split-attention dispatch.
   qwen_program_span_t attention;
   // Counters reused by sequential QKV-head and gate/up-group publications.
@@ -51,6 +49,9 @@ enum qwen_full_program_layout_flag_bits_e {
 
   // Reserves completion storage for QKV, gate/up, and shared publications.
   QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_STAGE_COMPLETION = 1u << 1,
+
+  // Reserves one completion word for fused prefill table construction.
+  QWEN_FULL_PROGRAM_LAYOUT_FLAG_PREFILL_FUSED_EXPERT_TABLE = 1u << 2,
 };
 
 // Named transient spans used by one complete layer program.
@@ -108,6 +109,10 @@ typedef struct qwen_full_program_layout_t {
   qwen_program_span_t attention_partial_sums;
   // Per-KV-block F16 attention outputs reused by every decode layer.
   qwen_program_span_t attention_partial_outputs;
+  // Contiguous completion-counter storage initialized before command execution.
+  qwen_program_span_t completion_initialization;
+  // Prefill expert-table completion counter reset by every fused dispatch.
+  qwen_program_span_t expert_table_completion;
   // Decode-only completion counters reused sequentially by every layer.
   qwen_decode_completion_layout_t decode_completion;
   // GGML Q8_1 x4 packing of the final normalized hidden-state row.

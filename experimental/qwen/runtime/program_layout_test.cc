@@ -107,7 +107,7 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512FullProgram) {
   qwen_full_program_layout_t layout;
   IREE_ASSERT_OK(qwen_full_program_layout_calculate(
       /*token_count=*/512, /*context_count=*/512,
-      QWEN_FULL_PROGRAM_LAYOUT_FLAG_NONE, &layout));
+      QWEN_FULL_PROGRAM_LAYOUT_FLAG_PREFILL_FUSED_EXPERT_TABLE, &layout));
 
   ExpectRebasedLayer(prefill_layer, layout.layer, /*base_offset=*/0);
   EXPECT_EQ(layout.layer.transient_byte_length, 65570560u);
@@ -134,7 +134,10 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512FullProgram) {
   EXPECT_EQ(layout.attention_partial_maximums.length, 0u);
   EXPECT_EQ(layout.attention_partial_sums.length, 0u);
   EXPECT_EQ(layout.attention_partial_outputs.length, 0u);
-  EXPECT_EQ(layout.decode_completion.initialization.length, 0u);
+  EXPECT_EQ(layout.completion_initialization.length, sizeof(int32_t));
+  EXPECT_EQ(layout.expert_table_completion.offset,
+            layout.completion_initialization.offset);
+  EXPECT_EQ(layout.expert_table_completion.length, sizeof(int32_t));
   EXPECT_EQ(layout.decode_completion.attention.length, 0u);
   EXPECT_EQ(layout.decode_completion.grouped_stage.length, 0u);
   EXPECT_EQ(layout.decode_completion.shared.length, 0u);
@@ -166,19 +169,21 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512FullProgram) {
   ExpectOrdered(layout.terminal_layer.swiglu,
                 layout.terminal_layer.routed_projection_scratch);
   ExpectOrdered(layout.terminal_layer.routed_projection_scratch,
+                layout.completion_initialization);
+  ExpectOrdered(layout.completion_initialization,
                 layout.final_quantized_hidden_state);
   ExpectOrdered(layout.final_quantized_hidden_state,
                 layout.vocabulary_argmax.partial_logits);
   ExpectOrdered(layout.vocabulary_argmax.partial_logits,
                 layout.vocabulary_argmax.partial_ids);
 
-  EXPECT_EQ(layout.final_quantized_hidden_state.offset, 65700352u);
+  EXPECT_EQ(layout.final_quantized_hidden_state.offset, 65700608u);
   EXPECT_EQ(layout.final_quantized_hidden_state.length, 2304u);
-  EXPECT_EQ(layout.vocabulary_argmax.partial_logits.offset, 65702656u);
+  EXPECT_EQ(layout.vocabulary_argmax.partial_logits.offset, 65702912u);
   EXPECT_EQ(layout.vocabulary_argmax.partial_logits.length, 75968u);
-  EXPECT_EQ(layout.vocabulary_argmax.partial_ids.offset, 65778688u);
+  EXPECT_EQ(layout.vocabulary_argmax.partial_ids.offset, 65778944u);
   EXPECT_EQ(layout.vocabulary_argmax.partial_ids.length, 75968u);
-  EXPECT_EQ(layout.transient_byte_length, 65854656u);
+  EXPECT_EQ(layout.transient_byte_length, 65854912u);
 }
 
 TEST(QwenProgramLayoutTest, ReservesReusableCompletionForDecode513) {
@@ -192,12 +197,13 @@ TEST(QwenProgramLayoutTest, ReservesReusableCompletionForDecode513) {
   EXPECT_EQ(layout.attention_partial_maximums.length, 2304u);
   EXPECT_EQ(layout.attention_partial_sums.length, 2304u);
   EXPECT_EQ(layout.attention_partial_outputs.length, 147456u);
-  EXPECT_EQ(layout.decode_completion.initialization.length, 212u);
+  EXPECT_EQ(layout.completion_initialization.length, 212u);
+  EXPECT_EQ(layout.expert_table_completion.length, 0u);
   EXPECT_EQ(layout.decode_completion.attention.length, 16u);
   EXPECT_EQ(layout.decode_completion.grouped_stage.length, 192u);
   EXPECT_EQ(layout.decode_completion.shared.length, 4u);
   EXPECT_EQ(layout.decode_completion.attention.offset,
-            layout.decode_completion.initialization.offset);
+            layout.completion_initialization.offset);
   EXPECT_EQ(layout.decode_completion.grouped_stage.offset,
             layout.decode_completion.attention.offset +
                 layout.decode_completion.attention.length);
@@ -211,8 +217,8 @@ TEST(QwenProgramLayoutTest, ReservesReusableCompletionForDecode513) {
   ExpectOrdered(layout.attention_partial_sums,
                 layout.attention_partial_outputs);
   ExpectOrdered(layout.attention_partial_outputs,
-                layout.decode_completion.initialization);
-  ExpectOrdered(layout.decode_completion.initialization,
+                layout.completion_initialization);
+  ExpectOrdered(layout.completion_initialization,
                 layout.final_quantized_hidden_state);
   ExpectOrdered(layout.final_quantized_hidden_state,
                 layout.vocabulary_argmax.partial_logits);
