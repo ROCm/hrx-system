@@ -771,7 +771,8 @@ static iree_status_t qwen_program_prepare_prefill_executables(
   }
   if (iree_status_is_ok(status)) {
     status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_VOCABULARY_PROJECTION_Q6),
+        program->model,
+        IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4_BRINGUP_WORKAROUND),
         IREE_SV("ggml_quantize_q8_1_x4_f32"),
         /*config_binding_count=*/0, /*config_bindings=*/NULL,
         IREE_ARRAYSIZE(final_quantize_workload), final_quantize_workload,

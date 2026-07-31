@@ -69,8 +69,8 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
           "qwen3_moe_dense_linear_q6k_f16_wmma",
       },
       {
-          QWEN_LOOM_SOURCE_VOCABULARY_PROJECTION_Q6,
-          "qwen3_moe_vocabulary_projection_q6.loom",
+          QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4_BRINGUP_WORKAROUND,
+          "qwen_quantize_q8_1_x4_bringup_workaround.loom",
           "ggml_quantize_q8_1_x4_f32",
       },
       {
@@ -129,6 +129,44 @@ TEST(QwenLoomSourceTest, RejectsUnknownPath) {
   iree::Status status = qwen_loom_source_lookup(
       IREE_SV("qwen3_moe/not_a_module"), &source_module);
   EXPECT_THAT(status, StatusIs(iree::StatusCode::kNotFound));
+}
+
+TEST(QwenLoomSourceTest, EmbedsBoundedVocabularyWorkaroundSources) {
+  qwen_loom_source_module_t quantize_source;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4_BRINGUP_WORKAROUND),
+      &quantize_source));
+  std::string quantize_text(
+      reinterpret_cast<const char*>(quantize_source.source_contents.data),
+      quantize_source.source_contents.data_length);
+  EXPECT_NE(quantize_text.find(
+                "%input_packet_end = index.sub %element_count, %three : index"),
+            std::string::npos);
+  EXPECT_NE(
+      quantize_text.find("%input_index = index.assume %input_index0 "
+                         "[lt(%input_index0, %input_packet_end)] : index"),
+      std::string::npos);
+
+  qwen_loom_source_module_t projection_source;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_VOCABULARY_PROJECTION_Q6), &projection_source));
+  std::string projection_text(
+      reinterpret_cast<const char*>(projection_source.source_contents.data),
+      projection_source.source_contents.data_length);
+  EXPECT_NE(
+      projection_text.find(
+          "%bounded_input_size = index.assume %input_size "
+          "[range(%input_size, 256, 2048), mul(%input_size, 256)] : index"),
+      std::string::npos);
+  EXPECT_NE(projection_text.find(
+                "%safe_channel0 = scf.select %valid_channel, %channel, "
+                "%zero : index"),
+            std::string::npos);
+  EXPECT_NE(projection_text.find(
+                "%output_index, %output_element_bound = index.assume "
+                "%output_index0, %output_element_count "
+                "[lt(%output_index0, %output_element_count)] : index, index"),
+            std::string::npos);
 }
 
 TEST(QwenLoomSourceTest, EmbedsWorkaroundFlashAttentionSource) {

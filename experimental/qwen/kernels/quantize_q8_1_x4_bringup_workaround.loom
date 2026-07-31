@@ -1,0 +1,127 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Temporary, non-sanctioned one-function fork for Qwen bring-up. This is not a
+// second kernel authoring path. Delete it when launch/fact propagation proves
+// the canonical packer's four-element input footprint from its exact
+// workgroup geometry. The only semantic delta is an explicit equivalent bound
+// on the packet origin consumed by vector.load.
+kernel.def target(@qwen3_moe_vocabulary_projection_gfx11_wave32) export("ggml_quantize_q8_1_x4_f32") @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), mul(%input_size, 128)] : index
+  %unit = index.constant 1 : index
+  %elements_per_group = index.constant 128 : index
+  %workgroup_size = index.constant 32 : index
+  %element_count = index.mul %bounded_token_count, %bounded_input_size : index
+  %workgroup_count = index.div %element_count, %elements_per_group : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), mul(%input_size, 128)] : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %thirtytwo = index.constant 32 : index
+  %onetwentyeight = index.constant 128 : index
+  %group_bytes = index.constant 144 : index
+  %payload_byte_add = index.constant 16 : index
+  %scratch_d_byte_add = index.constant 128 : offset
+  %scratch_bytes = index.constant 144 : offset
+  %zero_f32 = scalar.constant 0.0 : f32
+  %one_f32 = scalar.constant 1.0 : f32
+  %one_twenty_seven = scalar.constant 127.0 : f32
+  %zero_offset = index.constant 0 : offset
+  %element_count = index.mul %bounded_token_count, %bounded_input_size : index
+  %block_in_group0 = index.div %lane, %eight : index
+  %block_in_group = index.assume %block_in_group0 [range(%block_in_group0, 0, 3)] : index
+  %word_in_block0 = index.rem %lane, %eight : index
+  %word_in_block = index.assume %word_in_block0 [range(%word_in_block0, 0, 7)] : index
+  %group_element_base = index.mul %group, %onetwentyeight : index
+  %block_element_add = index.mul %block_in_group, %thirtytwo : index
+  %block_word_add = index.mul %block_in_group, %eight : index
+  %word_element_add = index.mul %word_in_block, %four : index
+  %input_block_base = index.add %group_element_base, %block_element_add : index
+  %input_index0 = index.add %input_block_base, %word_element_add : index
+  %input_packet_end = index.sub %element_count, %three : index
+  %input_index = index.assume %input_index0 [lt(%input_index0, %input_packet_end)] : index
+  %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
+  %input_view = buffer.view %input_noalias[%zero_offset] : buffer -> view<[%element_count]xf32, #dense>
+  %input_values = vector.load %input_view[%input_index] : view<[%element_count]xf32, #dense> -> vector<4xf32>
+  %absolute_values = vector.absf %input_values : vector<4xf32>
+  %thread_max = vector.reduce<maxnumf> %absolute_values, %zero_f32 : vector<4xf32>, f32
+  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_values = buffer.view %scratch[%zero_offset] : buffer -> view<32xf32, #dense>
+  %scratch_d = buffer.view %scratch[%scratch_d_byte_add] : buffer -> view<4xf32, #dense>
+  view.store %thread_max, %scratch_values[%lane] : f32, view<32xf32, #dense>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  %is_cohort_leader = index.cmp eq, %word_in_block, %zero : index
+  scf.if %is_cohort_leader {
+    %cohort_base = index.mul %block_in_group, %eight : index
+    %cohort_maxima = vector.load %scratch_values[%cohort_base] : view<32xf32, #dense> -> vector<8xf32>
+    %amax = vector.reduce<maxnumf> %cohort_maxima, %zero_f32 : vector<8xf32>, f32
+    %d = scalar.divf %amax, %one_twenty_seven : f32
+    view.store %d, %scratch_d[%block_in_group] : f32, view<4xf32, #dense>
+  }
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  %d = view.load %scratch_d[%block_in_group] : view<4xf32, #dense> -> f32
+  %d_nonzero = scalar.cmpf one, %d, %zero_f32 : f32
+  %d_inverse = scf.if %d_nonzero -> (f32) {
+    %inverse = scalar.divf %one_f32, %d : f32
+    scf.yield %inverse : f32
+  } else {
+    scf.yield %zero_f32 : f32
+  }
+  %d_inverse_vector = vector.splat %d_inverse : vector<4xf32>
+  %scaled_values = vector.mulf %input_values, %d_inverse_vector : vector<4xf32>
+  %rounded_values = vector.roundf %scaled_values : vector<4xf32>
+  %quantized_values = vector.fptosi %rounded_values : vector<4xf32> to vector<4xi8>
+  %packed_word = vector.bitcast %quantized_values : vector<4xi8> to vector<1xi32>
+  %group_byte_index = index.mul %group, %group_bytes : index
+  %group_byte_offset = index.cast %group_byte_index : index to offset
+  %payload_byte_index = index.add %group_byte_index, %payload_byte_add : index
+  %payload_byte_offset = index.cast %payload_byte_index : index to offset
+  %group_ds = buffer.view %output_noalias[%group_byte_offset] : buffer -> view<8xf16, #dense>
+  %group_qs = buffer.view %output_noalias[%payload_byte_offset] : buffer -> view<32xi32, #dense>
+  %packed_word_index0 = index.add %block_word_add, %word_in_block : index
+  %packed_word_index = index.assume %packed_word_index0 [range(%packed_word_index0, 0, 31)] : index
+  vector.store %packed_word, %group_qs[%packed_word_index] : vector<1xi32>, view<32xi32, #dense>
+  %thread_sum = vector.reduce<addf> %rounded_values, %zero_f32 : vector<4xf32>, f32
+  view.store %thread_sum, %scratch_values[%lane] : f32, view<32xf32, #dense>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  scf.if %is_cohort_leader {
+    %cohort_base = index.mul %block_in_group, %eight : index
+    %cohort_sums = vector.load %scratch_values[%cohort_base] : view<32xf32, #dense> -> vector<8xf32>
+    %quantized_sum = vector.reduce<addf> %cohort_sums, %zero_f32 : vector<8xf32>, f32
+    %s = scalar.mulf %quantized_sum, %d : f32
+    %d_f16 = scalar.fptrunc %d : f32 to f16
+    %s_f16 = scalar.fptrunc %s : f32 to f16
+    %ds_index = index.mul %block_in_group, %two : index
+    view.store %d_f16, %group_ds[%ds_index] : f16, view<8xf16, #dense>
+    %s_index = index.add %ds_index, %one : index
+    view.store %s_f16, %group_ds[%s_index] : f16, view<8xf16, #dense>
+  }
+  kernel.return
+}
+
+check.case public @ggml_quantize_q8_1_x4_bringup_workaround_zero_case {
+  %token_count = check.literal value(1) : index
+  %input_size = check.literal value(2048) : index
+  %input = check.generate.fill value(0.0) : tensor<1x2048xf32>
+  %packed = check.generate.fill value(1) : tensor<1x2304xi8>
+  %expected = check.generate.fill value(0) : tensor<1x2304xi8>
+  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %packed) : (index, index, tensor<1x2048xf32>, tensor<1x2304xi8>)
+  check.expect.equal actual(%packed) expected(%expected) : tensor<1x2304xi8>
+  check.return
+}
+
+check.benchmark<@ggml_quantize_q8_1_x4_bringup_workaround_zero_case> @ggml_quantize_q8_1_x4_bringup_workaround_decode
+
+amdgpu.target<gfx11-generic> @qwen3_moe_vocabulary_projection_gfx11_wave32 {subgroup_size = 32}

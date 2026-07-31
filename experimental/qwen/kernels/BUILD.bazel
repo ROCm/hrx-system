@@ -253,17 +253,141 @@ loom_link_module(
 )
 
 loom_link_module(
+    name = "quantize_q8_1_x4_bringup_workaround_linked",
+    srcs = ["quantize_q8_1_x4_bringup_workaround.loom"],
+)
+
+loom_link_module(
+    name = "quantize_q8_1_x4_bringup_workaround_runtime_module",
+    srcs = ["quantize_q8_1_x4_bringup_workaround.loom"],
+    mode = "selective",
+    output = "qwen_quantize_q8_1_x4_bringup_workaround.loom",
+    roots = ["@ggml_quantize_q8_1_x4_f32"],
+    strip_check = True,
+)
+
+iree_executable_test(
+    name = "quantize_q8_1_x4_bringup_workaround_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :quantize_q8_1_x4_bringup_workaround_linked)",
+        "--benchmark=@ggml_quantize_q8_1_x4_bringup_workaround_decode",
+        "--dry-run",
+        "--output-format=jsonl",
+        "--sample-compilation=per_sample",
+    ],
+    data = [":quantize_q8_1_x4_bringup_workaround_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "quantize_q8_1_x4_bringup_workaround_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :quantize_q8_1_x4_bringup_workaround_linked)",
+        "--case=@ggml_quantize_q8_1_x4_bringup_workaround_zero_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":quantize_q8_1_x4_bringup_workaround_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+loom_link_module(
+    name = "linear_q6k_q8_1_x4_bringup_workaround_linked",
+    srcs = [
+        "linear_q6k_q8_1_x4_bringup_workaround.loom",
+        "runtime_exports.loom",
+    ],
+    libraries = [
+        "//experimental/qwen_moe/kernels:linear_q6k_q8_1_x4_linked",
+    ],
+    mode = "selective",
+    roots = [
+        "@ggml_linear_q6k_q8_1_x4",
+        "@ggml_linear_q6k_q8_1_x4_bringup_workaround_small",
+        "@ggml_linear_q6k_q8_1_x4_bringup_workaround_tail_case",
+        "@ggml_linear_q6k_q8_1_x4_bringup_workaround_vocabulary_plan",
+        "@ggml_linear_q6k_q8_1_x4_bringup_workaround_vocabulary_plan_case",
+    ],
+)
+
+iree_executable_test(
+    name = "linear_q6k_q8_1_x4_bringup_workaround_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :linear_q6k_q8_1_x4_bringup_workaround_linked)",
+        "--benchmark=@ggml_linear_q6k_q8_1_x4_bringup_workaround_vocabulary_plan",
+        "--dry-run",
+        "--output-format=jsonl",
+        "--sample-compilation=per_sample",
+    ],
+    data = [":linear_q6k_q8_1_x4_bringup_workaround_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "linear_q6k_q8_1_x4_bringup_workaround_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :linear_q6k_q8_1_x4_bringup_workaround_linked)",
+        "--case=@ggml_linear_q6k_q8_1_x4_bringup_workaround_tail_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":linear_q6k_q8_1_x4_bringup_workaround_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "linear_q6k_q8_1_x4_bringup_workaround_vocabulary_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :linear_q6k_q8_1_x4_bringup_workaround_linked)",
+        "--case=@ggml_linear_q6k_q8_1_x4_bringup_workaround_vocabulary_plan_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":linear_q6k_q8_1_x4_bringup_workaround_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+loom_link_module(
     name = "vocabulary_projection_q6_runtime_module",
-    srcs = ["runtime_exports.loom"],
+    srcs = [
+        "linear_q6k_q8_1_x4_bringup_workaround.loom",
+        "runtime_exports.loom",
+    ],
     libraries = [
         "//experimental/qwen_moe/kernels:linear_q6k_q8_1_x4_linked",
     ],
     mode = "selective",
     output = "qwen3_moe_vocabulary_projection_q6.loom",
-    roots = [
-        "@ggml_linear_q6k_q8_1_x4",
-        "@ggml_quantize_q8_1_x4_f32",
-    ],
+    roots = ["@ggml_linear_q6k_q8_1_x4"],
     strip_check = True,
 )
 
@@ -330,6 +454,7 @@ iree_c_embed_data(
         ":dense_linear_quantized_f16_runtime_module",
         ":flash_attention_prefill_f32_f16_runtime_module",
         ":greedy_argmax_bringup_workaround_runtime_module",
+        ":quantize_q8_1_x4_bringup_workaround_runtime_module",
         ":routed_down_f16_runtime_module",
         ":routed_gate_up_f16_runtime_module",
         ":router_projection_f32_runtime_module",
