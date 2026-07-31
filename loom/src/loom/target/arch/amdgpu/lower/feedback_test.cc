@@ -65,18 +65,10 @@ class AmdgpuFeedbackTest : public ::testing::Test {
     loom_context_initialize(iree_allocator_system(), &context_);
     IREE_ASSERT_OK(loom_op_registry_register_all_dialects(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
-    IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"),
-                                        &block_pool_, NULL,
-                                        iree_allocator_system(), &module_));
     loom_amdgpu_low_descriptor_registry_initialize(&low_registry_);
-    descriptor_set_ = loom_low_descriptor_registry_lookup(
-        &low_registry_.registry, IREE_SV("amdgpu.rdna3.core"));
-    if (descriptor_set_ == NULL) {
+    if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.rdna3.core"))) {
       GTEST_SKIP() << "RDNA3 descriptor set is not linked.";
     }
-    loom_builder_initialize(module_, &module_->arena,
-                            loom_module_block(module_), &builder_);
-    BuildFunctionBody();
   }
 
   void TearDown() override {
@@ -98,21 +90,38 @@ class AmdgpuFeedbackTest : public ::testing::Test {
     };
   }
 
-  void UseDescriptorSet(iree_string_view_t key) {
-    descriptor_set_ =
+  bool ResetModuleForDescriptorSet(iree_string_view_t key) {
+    const loom_low_descriptor_set_t* descriptor_set =
         loom_low_descriptor_registry_lookup(&low_registry_.registry, key);
-    if (descriptor_set_ == NULL) {
-      GTEST_SKIP() << "AMDGPU descriptor set is not linked: " << ToString(key);
+    if (descriptor_set == NULL) {
+      return false;
     }
+    if (module_ != NULL) {
+      loom_module_free(module_);
+    }
+    module_ = NULL;
+    body_block_ = NULL;
+    builder_ = {};
+    descriptor_set_ = descriptor_set;
+    IREE_CHECK_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                       NULL, iree_allocator_system(),
+                                       &module_));
+    loom_builder_initialize(module_, &module_->arena,
+                            loom_module_block(module_), &builder_);
+    BuildFunctionBody();
+    return true;
   }
 
   void BuildFunctionBody() {
     loom_symbol_ref_t target = AddSymbol(IREE_SV("gfx_target"));
-    loom_string_id_t contract_set_key = LOOM_STRING_ID_INVALID;
-    IREE_ASSERT_OK(loom_builder_intern_string(
-        &builder_, IREE_SV("amdgpu.rdna3.core"), &contract_set_key));
+    loom_string_id_t representation_contract = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(loom_builder_intern_string(
+        &builder_,
+        loom_low_descriptor_set_string(descriptor_set_,
+                                       descriptor_set_->key_string_offset),
+        &representation_contract));
     loom_op_t* target_op = NULL;
-    IREE_ASSERT_OK(loom_target_generic_build(
+    IREE_CHECK_OK(loom_target_generic_build(
         &builder_,
         LOOM_TARGET_GENERIC_BUILD_FLAG_HAS_CODEGEN_FORMAT |
             LOOM_TARGET_GENERIC_BUILD_FLAG_HAS_ARTIFACT_FORMAT |
@@ -134,14 +143,15 @@ class AmdgpuFeedbackTest : public ::testing::Test {
         /*memory_space_host=*/0, /*memory_space_descriptor=*/0,
         LOOM_TARGET_ABI_OBJECT_FUNCTION,
         /*export_symbol=*/LOOM_STRING_ID_INVALID,
-        /*linkage=*/0, contract_set_key,
+        /*linkage=*/0, representation_contract,
         /*contract_feature_bits=*/0, LOOM_LOCATION_UNKNOWN, &target_op));
     loom_symbol_ref_t callee = AddSymbol(IREE_SV("test_fn"));
     loom_op_t* function_op = NULL;
-    IREE_ASSERT_OK(loom_low_func_def_build(
-        &builder_, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+    IREE_CHECK_OK(loom_low_func_def_build(
+        &builder_, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_DESCRIPTOR_SET,
+        /*visibility=*/0, /*retain=*/0, /*cc=*/0,
         /*purity=*/0, /*allocation=*/0, /*schedule=*/0,
-        /*descriptor_set=*/LOOM_STRING_ID_INVALID, target, /*abi=*/0,
+        /*descriptor_set=*/representation_contract, target, /*abi=*/0,
         loom_make_named_attr_slice(NULL, 0),
         loom_make_named_attr_slice(NULL, 0),
         /*export_symbol=*/LOOM_STRING_ID_INVALID,
@@ -710,7 +720,7 @@ class AmdgpuFeedbackTest : public ::testing::Test {
   loom_target_low_descriptor_registry_t low_registry_ = {};
   const loom_low_descriptor_set_t* descriptor_set_ = nullptr;
   loom_block_t* body_block_ = nullptr;
-  loom_builder_t builder_;
+  loom_builder_t builder_ = {};
 };
 
 TEST_F(AmdgpuFeedbackTest, LoadsCommonFeedbackConfigValues) {
@@ -874,7 +884,9 @@ TEST_F(AmdgpuFeedbackTest, IncrementsDroppedPacketCount) {
 }
 
 TEST_F(AmdgpuFeedbackTest, IncrementsDroppedPacketCountWithCdnaM0) {
-  UseDescriptorSet(IREE_SV("amdgpu.cdna3.core"));
+  if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.cdna3.core"))) {
+    GTEST_SKIP() << "CDNA3 descriptor set is not linked.";
+  }
   loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t config_values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
@@ -900,7 +912,9 @@ TEST_F(AmdgpuFeedbackTest, IncrementsDroppedPacketCountWithCdnaM0) {
 }
 
 TEST_F(AmdgpuFeedbackTest, IncrementsDroppedPacketCountWithGfx12SystemScope) {
-  UseDescriptorSet(IREE_SV("amdgpu.rdna4.core"));
+  if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.rdna4.core"))) {
+    GTEST_SKIP() << "RDNA4 descriptor set is not linked.";
+  }
   loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t config_values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
@@ -954,7 +968,9 @@ TEST_F(AmdgpuFeedbackTest, LoadsReservationHead) {
 }
 
 TEST_F(AmdgpuFeedbackTest, LoadsReservationHeadWithCdnaM0) {
-  UseDescriptorSet(IREE_SV("amdgpu.cdna3.core"));
+  if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.cdna3.core"))) {
+    GTEST_SKIP() << "CDNA3 descriptor set is not linked.";
+  }
   loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t config_values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
@@ -984,7 +1000,9 @@ TEST_F(AmdgpuFeedbackTest, LoadsReservationHeadWithCdnaM0) {
 }
 
 TEST_F(AmdgpuFeedbackTest, LoadsReservationHeadWithGfx12SystemScope) {
-  UseDescriptorSet(IREE_SV("amdgpu.rdna4.core"));
+  if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.rdna4.core"))) {
+    GTEST_SKIP() << "RDNA4 descriptor set is not linked.";
+  }
   loom_symbol_ref_t config_symbol = AddSymbol(IREE_SV("iree_feedback_config"));
   loom_amdgpu_feedback_config_values_t config_values = {};
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_config_values(
@@ -1045,7 +1063,9 @@ TEST_F(AmdgpuFeedbackTest, LoadsReadTailWithRdnaAcquireOrdering) {
 }
 
 TEST_F(AmdgpuFeedbackTest, LoadsReadTailWithCdnaAcquireOrdering) {
-  UseDescriptorSet(IREE_SV("amdgpu.cdna3.core"));
+  if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.cdna3.core"))) {
+    GTEST_SKIP() << "CDNA3 descriptor set is not linked.";
+  }
   loom_amdgpu_feedback_config_values_t config_values = {};
   loom_amdgpu_feedback_channel_header_values_t channel_values = {};
   IREE_ASSERT_OK(BuildFeedbackChannelValues(&config_values, &channel_values));
@@ -1077,7 +1097,9 @@ TEST_F(AmdgpuFeedbackTest, LoadsReadTailWithCdnaAcquireOrdering) {
 }
 
 TEST_F(AmdgpuFeedbackTest, LoadsReadTailWithGfx12AcquireOrdering) {
-  UseDescriptorSet(IREE_SV("amdgpu.rdna4.core"));
+  if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.rdna4.core"))) {
+    GTEST_SKIP() << "RDNA4 descriptor set is not linked.";
+  }
   loom_amdgpu_feedback_config_values_t config_values = {};
   loom_amdgpu_feedback_channel_header_values_t channel_values = {};
   IREE_ASSERT_OK(BuildFeedbackChannelValues(&config_values, &channel_values));
@@ -1142,7 +1164,9 @@ TEST_F(AmdgpuFeedbackTest, CompareExchangesReservationHeadWithRdnaOrdering) {
 }
 
 TEST_F(AmdgpuFeedbackTest, CompareExchangesReservationHeadWithCdnaOrdering) {
-  UseDescriptorSet(IREE_SV("amdgpu.cdna3.core"));
+  if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.cdna3.core"))) {
+    GTEST_SKIP() << "CDNA3 descriptor set is not linked.";
+  }
   loom_amdgpu_feedback_config_values_t config_values = {};
   loom_amdgpu_feedback_channel_header_values_t channel_values = {};
   IREE_ASSERT_OK(BuildFeedbackChannelValues(&config_values, &channel_values));
@@ -1179,7 +1203,9 @@ TEST_F(AmdgpuFeedbackTest, CompareExchangesReservationHeadWithCdnaOrdering) {
 }
 
 TEST_F(AmdgpuFeedbackTest, CompareExchangesReservationHeadWithGfx12Ordering) {
-  UseDescriptorSet(IREE_SV("amdgpu.rdna4.core"));
+  if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.rdna4.core"))) {
+    GTEST_SKIP() << "RDNA4 descriptor set is not linked.";
+  }
   loom_amdgpu_feedback_config_values_t config_values = {};
   loom_amdgpu_feedback_channel_header_values_t channel_values = {};
   IREE_ASSERT_OK(BuildFeedbackChannelValues(&config_values, &channel_values));
@@ -1559,7 +1585,9 @@ TEST_F(AmdgpuFeedbackTest, PublishesPacketStateWithRdnaReleaseOrdering) {
 }
 
 TEST_F(AmdgpuFeedbackTest, PublishesPacketStateWithCdnaReleaseOrdering) {
-  UseDescriptorSet(IREE_SV("amdgpu.cdna3.core"));
+  if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.cdna3.core"))) {
+    GTEST_SKIP() << "CDNA3 descriptor set is not linked.";
+  }
   loom_amdgpu_feedback_packet_address_t packet_address = {};
   IREE_ASSERT_OK(BuildFeedbackPacketAddress(&packet_address));
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_publish_packet_state(
@@ -1581,7 +1609,9 @@ TEST_F(AmdgpuFeedbackTest, PublishesPacketStateWithCdnaReleaseOrdering) {
 }
 
 TEST_F(AmdgpuFeedbackTest, PublishesPacketStateWithGfx12SystemScope) {
-  UseDescriptorSet(IREE_SV("amdgpu.rdna4.core"));
+  if (!ResetModuleForDescriptorSet(IREE_SV("amdgpu.rdna4.core"))) {
+    GTEST_SKIP() << "RDNA4 descriptor set is not linked.";
+  }
   loom_amdgpu_feedback_packet_address_t packet_address = {};
   IREE_ASSERT_OK(BuildFeedbackPacketAddress(&packet_address));
   IREE_ASSERT_OK(loom_amdgpu_build_feedback_publish_packet_state(
