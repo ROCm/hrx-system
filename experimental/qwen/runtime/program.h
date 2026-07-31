@@ -50,7 +50,7 @@ typedef struct qwen_program_options_t {
   iree_host_size_t layer_index;
   // Exact active token rows consumed by each issue.
   iree_host_size_t token_count;
-  // Exact initialized K/V rows visible to attention.
+  // Exact visible K/V rows for layer/prefill, or decode class upper bound.
   iree_host_size_t context_count;
   // Request token-storage capacity compatible with this program.
   iree_host_size_t token_capacity;
@@ -88,10 +88,11 @@ IREE_API_EXPORT void qwen_program_release(qwen_program_t* program);
 // |signal_semaphore_list|. A second issue before the prior issue completes
 // fails with FAILED_PRECONDITION.
 //
-// A full-model issue publishes its selected token into request-local device
-// input state before signaling completion. A compatible decode program may
-// consume that token directly through a semaphore dependency; no host read or
-// token reset is required. The request also retains a host-observable copy for
+// A full-model issue publishes its selected token and next position into
+// request-local device state before signaling completion. A compatible decode
+// program may be reused at consecutive positions and consumes that state
+// directly through a semaphore dependency; no host read or token reset is
+// required. The request also retains a host-observable token copy for
 // qwen_request_read_selected_token.
 IREE_API_EXPORT iree_status_t
 qwen_program_issue(qwen_program_t* program, qwen_request_t* request,

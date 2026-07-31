@@ -434,7 +434,7 @@ TEST(QwenLoomSourceTest, EmbedsWorkaroundExpertTableSource) {
       std::string::npos);
 }
 
-TEST(QwenLoomSourceTest, EmbedsDecodeSplitExactConfigWorkaround) {
+TEST(QwenLoomSourceTest, EmbedsDecodeSplitReusableCapacityWorkaround) {
   qwen_loom_source_module_t source_module;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
       IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_DECODE_SPLIT_F32_F16),
@@ -444,10 +444,17 @@ TEST(QwenLoomSourceTest, EmbedsDecodeSplitExactConfigWorkaround) {
       reinterpret_cast<const char*>(source_module.source_contents.data),
       source_module.source_contents.data_length);
   EXPECT_NE(source_text.find("config.decl "
-                             "@qwen.decode.key_value_token_count"),
+                             "@qwen.decode.key_value_capacity"),
             std::string::npos);
-  EXPECT_NE(source_text.find("eq(%key_value_token_count, "
-                             "%configured_key_value_token_count0)"),
+  EXPECT_NE(source_text.find("eq(%key_value_capacity, "
+                             "%configured_key_value_capacity0)"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("range(%configured_key_value_capacity0, 64, "
+                             "2048), "
+                             "mul(%configured_key_value_capacity0, 64)"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("produce_partials>("
+                             "%configured_key_value_capacity, %query"),
             std::string::npos);
   EXPECT_NE(
       source_text.find(
@@ -460,6 +467,31 @@ TEST(QwenLoomSourceTest, EmbedsDecodeSplitExactConfigWorkaround) {
       std::string::npos);
   EXPECT_EQ(source_text.find(
                 "func.apply<qwen3_moe.attention.decode_split.reduce_fused>"),
+            std::string::npos);
+  EXPECT_EQ(source_text.find("@qwen.decode.key_value_token_count"),
+            std::string::npos);
+  EXPECT_EQ(source_text.find("%control_view"), std::string::npos);
+  EXPECT_EQ(source_text.find("%active_key_value_token_count"),
+            std::string::npos);
+}
+
+TEST(QwenLoomSourceTest, EmbedsDynamicGreedyContinuationPosition) {
+  qwen_loom_source_module_t source_module;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_GREEDY_ARGMAX_PARTIALS_BRINGUP_WORKAROUND),
+      &source_module));
+
+  std::string source_text(
+      reinterpret_cast<const char*>(source_module.source_contents.data),
+      source_module.source_contents.data_length);
+  EXPECT_NE(source_text.find("%current_context_base_raw = "
+                             "view.load %next_control_view"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("%next_context_base0 = index.add "
+                             "%current_context_base, "
+                             "%bounded_context_increment : index"),
+            std::string::npos);
+  EXPECT_EQ(source_text.find("%bounded_next_context_base = index.assume"),
             std::string::npos);
 }
 

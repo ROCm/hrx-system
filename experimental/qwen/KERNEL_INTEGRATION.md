@@ -136,7 +136,7 @@ cuts in order:
 | Layer order | Exported function | Canonical source | Executed adapter, if any |
 | ---: | --- | --- | --- |
 | 1 | `qwen3_moe_attention_qkv_postprocess_fused_decode` | `qwen3_moe/attention_qkv_postprocess_fused.loom`, using `qwen3_moe/attention_qkv_quantized.loom` and `qwen3_moe/attention_postprocess_f32_f16.loom` | None |
-| 2 | `qwen3_moe_flash_attention_decode_split_f32_f16_wmma` | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` | `flash_attention_decode_split_bringup_workaround.loom` carries the runtime's exact context through a temporary config binding |
+| 2 | `qwen3_moe_flash_attention_decode_split_f32_f16_wmma` | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` | `flash_attention_decode_split_bringup_workaround.loom` specializes a 64-row capacity class while request metadata masks its zero-initialized inactive suffix |
 | 3 | `ggml_quantize_q8_1_x4_f32` for the attention result | `ggml/quantize_q8_1_x4.loom` | `quantize_q8_1_x4_bringup_workaround.loom` |
 | 4 | `qwen3_moe_dense_linear_q4k_q8_1_x4_next_q8`, including output residual and feed-forward RMSNorm/Q8_1 x4 publication | `qwen3_moe/dense_linear_quantized_f16_wmma.loom` and `qwen3_moe/attention_prepare_quantized.loom` | None |
 | 5 | `qwen3_moe_router_projection_top8_fused_decode_f32` | `qwen3_moe/router_projection_top8_fused_f32.loom`, using `qwen3_moe/router_projection_f32.loom` and `qwen3_moe/router_top8_f32.loom` | `router_projection_top8_fused_bringup_workaround.loom` |
@@ -209,7 +209,11 @@ prefill transient storage to 65,854,912 bytes and Decode-513 transient storage
 to 566,208 bytes.
 
 Decode owns partial-maximum, partial-sum, and partial-output regions sized to
-its exact context. Four split-attention counters, 48 gate/up physical-group
+its reusable 64-row context class. Request metadata masks rows beyond the
+device-owned active position, and request creation zero-initializes unwritten
+K/V rows, so the static class-sized contraction and reduction have no
+position-specific specialization and an inert suffix. Four split-attention
+counters, 48 gate/up physical-group
 counters, and one shared fused-stage counter occupy one contiguous 212-byte
 initialization span. Existing 256-byte span alignment absorbs the added
 counters without increasing the complete transient allocation. All 48

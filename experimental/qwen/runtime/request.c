@@ -194,12 +194,20 @@ iree_status_t qwen_request_create(
     request->output_staging_is_mapped = true;
   }
 
-  qwen_request_semaphore_list_storage_t signal_storage;
-  memset(&signal_storage, 0, sizeof(signal_storage));
+  qwen_request_semaphore_list_storage_t alloca_signal_storage;
+  qwen_request_semaphore_list_storage_t ready_signal_storage;
+  memset(&alloca_signal_storage, 0, sizeof(alloca_signal_storage));
+  memset(&ready_signal_storage, 0, sizeof(ready_signal_storage));
   if (iree_status_is_ok(status)) {
     status = qwen_request_semaphore_list_prepend(
-        request->timeline_semaphore, /*payload_value=*/1, signal_semaphore_list,
-        host_allocator, &signal_storage);
+        request->timeline_semaphore, /*payload_value=*/1,
+        iree_hal_semaphore_list_empty(), host_allocator,
+        &alloca_signal_storage);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_request_semaphore_list_prepend(
+        request->timeline_semaphore, /*payload_value=*/2, signal_semaphore_list,
+        host_allocator, &ready_signal_storage);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_buffer_params_t storage_params = {
@@ -211,15 +219,29 @@ iree_status_t qwen_request_create(
         .min_alignment = 64,
     };
     status = iree_hal_device_queue_alloca(
-        device, queue_affinity, wait_semaphore_list, signal_storage.list,
+        device, queue_affinity, wait_semaphore_list, alloca_signal_storage.list,
         /*pool=*/NULL, storage_params, storage_layout.persistent_byte_length,
         IREE_HAL_ALLOCA_FLAG_INDETERMINATE_LIFETIME, &request->storage_buffer);
   }
-  qwen_request_semaphore_list_storage_deinitialize(&signal_storage,
+  if (iree_status_is_ok(status)) {
+    const uint32_t zero_pattern = 0;
+    const iree_device_size_t cache_offset = storage_layout.key_cache.offset;
+    const iree_device_size_t cache_length = storage_layout.value_cache.offset +
+                                            storage_layout.value_cache.length -
+                                            cache_offset;
+    status = iree_hal_device_queue_fill(
+        device, queue_affinity, alloca_signal_storage.list,
+        ready_signal_storage.list, request->storage_buffer, cache_offset,
+        cache_length, &zero_pattern, sizeof(zero_pattern),
+        IREE_HAL_FILL_FLAG_NONE);
+  }
+  qwen_request_semaphore_list_storage_deinitialize(&ready_signal_storage,
+                                                   host_allocator);
+  qwen_request_semaphore_list_storage_deinitialize(&alloca_signal_storage,
                                                    host_allocator);
 
   if (iree_status_is_ok(status)) {
-    request->timeline_value = 1;
+    request->timeline_value = 2;
     *out_request = request;
   } else {
     qwen_request_destroy(request);

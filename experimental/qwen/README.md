@@ -53,10 +53,14 @@ build_tools/bin/iree-bazel-run //experimental/qwen/binding/cli:qwen-cli -- \
   --max_tokens=16
 ```
 
-The bring-up generation lane currently prepares one exact reusable program per
-decode position and is bounded to context 2048 by the cooperative
-decode-attention adapter. Program reuse across a capacity bucket is a separate
-runtime optimization; it does not change token ownership.
+The bring-up generation lane prepares one decode program for the 64-row shape
+class containing the first continuation position. The active position lives
+only in device request control and advances at the greedy endpoint, so every
+position in that class reuses the same recorded command buffer. A later class
+is prepared lazily only when generation crosses a 64-row boundary. The
+cooperative decode-attention adapter currently bounds this scheme to 2048
+rows. `--max_tokens` bounds generation; it does not change startup JIT or
+command-buffer preparation work.
 
 ## Temporary bring-up workarounds
 
@@ -115,13 +119,16 @@ It is not a kernel framework or a generator and must not accumulate alternate
 indexing policies. Delete it when the canonical producer lands.
 
 `kernels/flash_attention_decode_split_bringup_workaround.loom` retains the
-canonical split-K decode ABI and algorithm bodies. The runtime temporarily
-binds each exact context count as `qwen.decode.key_value_token_count` because
-positional workload facts do not reach template selection, topology, and
-address analysis. The adapter uses that exact config for launch evaluation,
-applies the canonical producer, and directly calls the canonical cooperative
-reducer. It contains no attention algorithm body or generated variants and is
-deleted when the unmodified public kernel specializes correctly.
+canonical split-K decode algorithm bodies. The runtime temporarily binds only
+the upper bound of a 64-row shape class as
+`qwen.decode.key_value_capacity` because launch topology still requires a
+structural bound. Request metadata masks rows beyond the device-owned active
+context, and request creation zero-initializes unwritten K/V rows. The adapter
+can therefore apply the canonical producer and cooperative reducer to the
+whole class without position-specific specialization or unsafe suffix reads.
+It contains no attention algorithm body or generated variants and is deleted
+when the unmodified public kernel supports a dynamic active context within a
+bounded launch capacity.
 
 Pure-tail prompt attention currently uses a second, explicitly temporary
 runtime workaround: contexts below the 64-token key tile are recorded as one

@@ -45,8 +45,10 @@ IREE_API_EXPORT void qwen_request_options_initialize(
 // Asynchronously creates request-local persistent state.
 //
 // The request retains |model|. Device-local storage uses an
-// indeterminate-lifetime queue allocation. The caller signals are published
-// only after the allocation is ready for use.
+// indeterminate-lifetime queue allocation. K/V storage is initialized to zero
+// so a masked capacity-class suffix is safe to read before its rows are
+// populated. The caller signals are published only after allocation and cache
+// initialization are complete.
 IREE_API_EXPORT iree_status_t qwen_request_create(
     qwen_model_t* model, const qwen_request_options_t* options,
     iree_hal_semaphore_list_t wait_semaphore_list,

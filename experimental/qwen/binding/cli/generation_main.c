@@ -26,6 +26,10 @@
 // Temporary bound imposed by the cooperative decode-attention bring-up
 // adapter. The canonical long-context path supports a larger model context.
 #define QWEN_GENERATION_DECODE_CONTEXT_LIMIT 2048
+#define QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE 64
+#define QWEN_GENERATION_DECODE_CONTEXT_CLASS_COUNT \
+  (QWEN_GENERATION_DECODE_CONTEXT_LIMIT /          \
+   QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE)
 
 IREE_FLAG(string, tokenizer, "", "HuggingFace tokenizer.json path.");
 IREE_FLAG(string, prompt, "", "User message to generate a response for.");
@@ -219,14 +223,35 @@ static iree_status_t qwen_generation_cli_finalize_text(
   return qwen_generation_cli_write_text(text_buffer, text_length);
 }
 
-static void qwen_generation_cli_release_programs(
-    qwen_program_t** programs, iree_host_size_t program_count,
-    iree_allocator_t host_allocator) {
-  if (!programs) return;
-  for (iree_host_size_t i = 0; i < program_count; ++i) {
+static iree_host_size_t qwen_generation_cli_decode_context_class(
+    iree_host_size_t context_base) {
+  return (context_base / QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE + 1) *
+         QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE;
+}
+
+static iree_status_t qwen_generation_cli_prepare_decode_program(
+    qwen_model_t* model, iree_host_size_t context_class,
+    iree_host_size_t token_capacity, iree_host_size_t context_capacity,
+    iree_hal_command_buffer_mode_t command_buffer_mode,
+    iree_allocator_t host_allocator, qwen_program_t** out_program) {
+  qwen_program_options_t program_options;
+  qwen_program_options_initialize(&program_options);
+  program_options.kind = QWEN_PROGRAM_KIND_DECODE;
+  program_options.token_count = 1;
+  program_options.context_count = context_class;
+  program_options.token_capacity = token_capacity;
+  program_options.context_capacity = context_capacity;
+  program_options.command_buffer_mode = command_buffer_mode;
+  return qwen_program_prepare(model, &program_options, host_allocator,
+                              out_program);
+}
+
+static void qwen_generation_cli_release_decode_programs(
+    qwen_program_t** programs) {
+  for (iree_host_size_t i = 0; i < QWEN_GENERATION_DECODE_CONTEXT_CLASS_COUNT;
+       ++i) {
     qwen_program_release(programs[i]);
   }
-  iree_allocator_free(host_allocator, programs);
 }
 
 static iree_status_t qwen_generation_cli_run(void) {
@@ -235,12 +260,15 @@ static iree_status_t qwen_generation_cli_run(void) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "--max_tokens must be greater than zero");
   }
-  if (FLAG_context_length <= 0 ||
-      FLAG_context_length > QWEN_GENERATION_DECODE_CONTEXT_LIMIT) {
+  if (FLAG_context_length < QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE ||
+      FLAG_context_length > QWEN_GENERATION_DECODE_CONTEXT_LIMIT ||
+      FLAG_context_length % QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "--context_length must be in [1, %d] while the decode-attention "
-        "bring-up adapter is active",
+        "--context_length must be a multiple of %d in [%d, %d] while the "
+        "decode-attention bring-up adapter is active",
+        QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE,
+        QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE,
         QWEN_GENERATION_DECODE_CONTEXT_LIMIT);
   }
 
@@ -346,29 +374,17 @@ static iree_status_t qwen_generation_cli_run(void) {
                                   &prefill_program);
   }
 
-  const iree_host_size_t decode_program_count = max_tokens - 1;
-  qwen_program_t** decode_programs = NULL;
-  if (iree_status_is_ok(status) && decode_program_count != 0) {
-    status = iree_allocator_malloc_array(host_allocator, decode_program_count,
-                                         sizeof(*decode_programs),
-                                         (void**)&decode_programs);
-    if (iree_status_is_ok(status)) {
-      memset(decode_programs, 0,
-             decode_program_count * sizeof(*decode_programs));
-    }
-  }
-  for (iree_host_size_t i = 0;
-       i < decode_program_count && iree_status_is_ok(status); ++i) {
-    qwen_program_options_t program_options;
-    qwen_program_options_initialize(&program_options);
-    program_options.kind = QWEN_PROGRAM_KIND_DECODE;
-    program_options.token_count = 1;
-    program_options.context_count = prompt_token_count + i + 1;
-    program_options.token_capacity = prompt_token_count;
-    program_options.context_capacity = context_capacity;
-    program_options.command_buffer_mode = runtime_context.command_buffer_mode;
-    status = qwen_program_prepare(model, &program_options, host_allocator,
-                                  &decode_programs[i]);
+  qwen_program_t* decode_programs[QWEN_GENERATION_DECODE_CONTEXT_CLASS_COUNT] =
+      {0};
+  if (iree_status_is_ok(status) && max_tokens > 1) {
+    const iree_host_size_t context_class =
+        qwen_generation_cli_decode_context_class(prompt_token_count);
+    const iree_host_size_t class_ordinal =
+        context_class / QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE - 1;
+    status = qwen_generation_cli_prepare_decode_program(
+        model, context_class, prompt_token_count, context_capacity,
+        runtime_context.command_buffer_mode, host_allocator,
+        &decode_programs[class_ordinal]);
   }
 
   qwen_generation_cli_timepoint_t request_ready = {
@@ -446,8 +462,21 @@ static iree_status_t qwen_generation_cli_run(void) {
         .semaphore = timeline,
         .value = issue_complete.value + 1,
     };
+    const iree_host_size_t decode_context_base =
+        prompt_token_count + generated_token_count - 1;
+    const iree_host_size_t context_class =
+        qwen_generation_cli_decode_context_class(decode_context_base);
+    const iree_host_size_t class_ordinal =
+        context_class / QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE - 1;
+    if (!decode_programs[class_ordinal]) {
+      status = qwen_generation_cli_prepare_decode_program(
+          model, context_class, prompt_token_count, context_capacity,
+          runtime_context.command_buffer_mode, host_allocator,
+          &decode_programs[class_ordinal]);
+    }
+    if (!iree_status_is_ok(status)) break;
     status = qwen_program_issue(
-        decode_programs[i], request,
+        decode_programs[class_ordinal], request,
         qwen_generation_cli_timepoint_list(&issue_complete),
         qwen_generation_cli_timepoint_list(&next_issue_complete));
     issue_complete = next_issue_complete;
@@ -469,8 +498,7 @@ static iree_status_t qwen_generation_cli_run(void) {
   status = qwen_generation_cli_wait_for_model_ready_workaround(status, model,
                                                                &model_ready);
   qwen_request_release(request);
-  qwen_generation_cli_release_programs(decode_programs, decode_program_count,
-                                       host_allocator);
+  qwen_generation_cli_release_decode_programs(decode_programs);
   qwen_program_release(prefill_program);
   qwen_model_release(model);
   iree_hal_semaphore_release(timeline);

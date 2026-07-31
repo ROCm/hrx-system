@@ -20,6 +20,8 @@
 #define QWEN_PROGRAM_INITIAL_SEMAPHORE_CAPACITY 8
 #define QWEN_PROGRAM_QKV_WMMA_MIN_TOKEN_COUNT 128
 #define QWEN_PROGRAM_FLASH_ATTENTION_KEY_TILE_TOKEN_COUNT 64
+#define QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE 64
+#define QWEN_PROGRAM_DECODE_CONTEXT_LIMIT 2048
 
 typedef enum qwen_program_binding_slot_e {
   // Complete resident model parameter allocation.
@@ -179,7 +181,7 @@ struct qwen_program_t {
   iree_host_size_t cache_layer_count;
   // Exact active token rows consumed by each issue.
   iree_host_size_t token_count;
-  // Exact initialized K/V rows visible to attention.
+  // Exact visible K/V rows for fixed programs, or decode class upper bound.
   iree_host_size_t context_count;
   // Compatible request token-storage capacity.
   iree_host_size_t token_capacity;
@@ -630,20 +632,20 @@ static iree_status_t qwen_program_prepare_kernel(
                                out_executable);
 }
 
-// Prepares the temporary decode-attention adapter with the exact context count
-// represented as a Loom config binding. Workload arguments do not yet retain
-// that exact value through template selection and address analysis.
+// Prepares the temporary decode-attention adapter for one 64-row context class.
+// Active context is represented by the device-produced mask and therefore does
+// not participate in JIT identity.
 static iree_status_t qwen_program_prepare_decode_flash_attention(
     qwen_program_t* program) {
-  char context_count_value[32];
-  const int context_count_value_length =
-      iree_snprintf(context_count_value, sizeof(context_count_value),
+  char context_capacity_value[32];
+  const int context_capacity_value_length =
+      iree_snprintf(context_capacity_value, sizeof(context_capacity_value),
                     "%" PRIhsz, program->context_count);
-  if (context_count_value_length < 0 ||
-      (iree_host_size_t)context_count_value_length >=
-          sizeof(context_count_value)) {
+  if (context_capacity_value_length < 0 ||
+      (iree_host_size_t)context_capacity_value_length >=
+          sizeof(context_capacity_value)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "Qwen decode context count cannot be formatted");
+                            "Qwen decode context class cannot be formatted");
   }
 
   qwen_loom_config_binding_t
@@ -652,10 +654,10 @@ static iree_status_t qwen_program_prepare_decode_flash_attention(
          sizeof(qwen_flash_attention_config_bindings));
   config_bindings[IREE_ARRAYSIZE(qwen_flash_attention_config_bindings)] =
       (qwen_loom_config_binding_t){
-          .key = IREE_SVL("qwen.decode.key_value_token_count"),
+          .key = IREE_SVL("qwen.decode.key_value_capacity"),
           .value = iree_make_string_view(
-              context_count_value,
-              (iree_host_size_t)context_count_value_length),
+              context_capacity_value,
+              (iree_host_size_t)context_capacity_value_length),
       };
   const int64_t workload[] = {(int64_t)program->context_count};
   return qwen_program_prepare_kernel(
@@ -1198,7 +1200,7 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   };
   const int64_t vocabulary_argmax_workload[] = {
       QWEN_MODEL_VOCABULARY_PARTIAL_COUNT,
-      (int64_t)program->context_count,
+      (int64_t)program->token_count,
   };
 
   iree_status_t status = qwen_program_prepare_kernel(
@@ -2292,7 +2294,7 @@ static iree_status_t qwen_program_record_full_model_endpoint(
 
   const uint32_t argmax_constants[] = {
       QWEN_MODEL_VOCABULARY_PARTIAL_COUNT,
-      (uint32_t)program->context_count,
+      (uint32_t)program->token_count,
   };
   const iree_hal_buffer_ref_t argmax_bindings[] = {
       qwen_program_transient_ref(transient->vocabulary_argmax.partial_logits),
@@ -2448,6 +2450,17 @@ static iree_status_t qwen_program_validate_options(
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "Qwen decode programs require exactly one active token");
+  }
+  if (options->kind == QWEN_PROGRAM_KIND_DECODE &&
+      (options->context_count < QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE ||
+       options->context_count > QWEN_PROGRAM_DECODE_CONTEXT_LIMIT ||
+       options->context_count % QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE != 0)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Qwen decode context class must be a multiple of %d in [%d, %d]",
+        QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE,
+        QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE,
+        QWEN_PROGRAM_DECODE_CONTEXT_LIMIT);
   }
   const iree_hal_command_buffer_mode_t allowed_mode =
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
@@ -2702,13 +2715,24 @@ iree_status_t qwen_program_issue(
         "Qwen request model and storage capacities must match the prepared "
         "program");
   }
-  if (qwen_request_active_token_count(request) != program->token_count ||
-      qwen_request_context_base(request) !=
-          program->context_count - program->token_count) {
+  const iree_host_size_t request_context_base =
+      qwen_request_context_base(request);
+  const iree_host_size_t decode_class_base =
+      program->kind == QWEN_PROGRAM_KIND_DECODE
+          ? program->context_count - QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE
+          : 0;
+  const bool active_shape_matches =
+      program->kind == QWEN_PROGRAM_KIND_DECODE
+          ? qwen_request_active_token_count(request) == 1 &&
+                request_context_base >= decode_class_base &&
+                request_context_base < program->context_count
+          : qwen_request_active_token_count(request) == program->token_count &&
+                request_context_base ==
+                    program->context_count - program->token_count;
+  if (!active_shape_matches) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
-        "Qwen request active token count and visible context must match the "
-        "prepared program");
+        "Qwen request active shape must fit the prepared program");
   }
   const qwen_request_input_kind_t expected_input_kind =
       qwen_program_kind_is_full_model(program->kind)
@@ -2896,8 +2920,10 @@ iree_status_t qwen_program_issue(
 
   program->timeline_value = program_complete_value;
   if (qwen_program_kind_is_full_model(program->kind)) {
+    const iree_host_size_t next_context_base =
+        request_context_base + program->token_count;
     qwen_request_commit_selected_token_signal(request, request_complete_value,
-                                              program->context_count);
+                                              next_context_base);
   } else {
     qwen_request_commit_hidden_state_signal(request, request_complete_value);
   }
