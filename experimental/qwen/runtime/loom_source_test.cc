@@ -44,11 +44,6 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
           "qwen3_moe_rmsnorm_f32",
       },
       {
-          QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED,
-          "qwen3_moe_attention_prepare_quantized.loom",
-          "qwen3_moe_rmsnorm_f32_quantize_q8_1_x4",
-      },
-      {
           QWEN_LOOM_SOURCE_ATTENTION_QKV_QUANTIZED,
           "qwen3_moe_attention_qkv_quantized.loom",
           "qwen3_moe_attention_qkv_quantized",

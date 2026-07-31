@@ -172,7 +172,6 @@ loom_link_module(
     output = "qwen3_moe_attention_prepare_quantized.loom",
     roots = [
         "@qwen3_moe_attention_rmsnorm_quantize_q8_1_x4",
-        "@qwen3_moe_rmsnorm_f32_quantize_q8_1_x4",
         "@qwen3_moe_rmsnorm_f32",
     ],
     strip_check = True,

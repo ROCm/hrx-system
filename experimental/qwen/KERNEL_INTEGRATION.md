@@ -96,8 +96,8 @@ decode-513 programs:
 | Q/K/V projection | Separate Q4_K query/key and storage-selected Q4_K or Q6_K value WMMA dispatches | One fused Q8_1 x4 Q/K/V dispatch with storage-selected value decoding | `qwen3_moe/dense_linear_quantized_f16_wmma.loom` and `qwen3_moe/attention_qkv_quantized.loom` |
 | RoPE and cache publication | One combined postprocess dispatch | Same | `qwen3_moe/attention_postprocess_f32_f16.loom` |
 | FlashAttention | General grouped-query prefill kernel | Fused split-K decode kernel with last-arrival reduction | `qwen3_moe/flash_attention_f32_f16_wmma.loom` and `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` |
-| Attention output | Q4_K F16 WMMA projection with residual accumulation | Q8_1 x4 pack followed by direct Q4_K row contraction with residual accumulation | `qwen3_moe/dense_linear_quantized_f16_wmma.loom` and `ggml/quantize_q8_1_x4.loom` |
-| Feed-forward RMSNorm | F32 RMSNorm | Fused F32 RMSNorm and Q8_1 x4 packing | `qwen3_moe/attention_prepare_quantized.loom` |
+| Attention output | Q4_K F16 WMMA projection with residual accumulation | Q8_1 x4 pack followed by direct Q4_K row contraction with residual accumulation; the last-arriving output workgroup also publishes the following feed-forward normalized F32 and Q8_1 x4 rows | `qwen3_moe/dense_linear_quantized_f16_wmma.loom`, `qwen3_moe/attention_prepare_quantized.loom`, and `ggml/quantize_q8_1_x4.loom` |
+| Feed-forward RMSNorm | F32 RMSNorm | Published by the fused attention-output projection | `qwen3_moe/dense_linear_quantized_f16_wmma.loom` and `qwen3_moe/attention_prepare_quantized.loom` |
 | Router projection | Four-row wave32 schedule | Fused four-row wave64 projection with last-arrival top-8 selection | `qwen3_moe/router_projection_f32.loom` and `qwen3_moe/router_projection_top8_fused.loom` |
 | Top-8 routing | Normalized compact `[token, 8]` rows | Published by the fused projection's last-arriving wave | `qwen3_moe/router_top8_f32.loom` and `qwen3_moe/router_projection_top8_fused.loom` |
 | Expert tables | Assignment table then 32-row partition table | None; compact route IDs directly select expert rows | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` |
@@ -108,12 +108,12 @@ decode-513 programs:
 Full-model prefill records 725 dispatches. Layers 0 through 46 execute every
 stage over all 512 rows. Layer 47 executes attention over all rows so its cache
 is complete, then executes feed-forward and the vocabulary endpoint only for
-the final row needed to select the next token. Decode records 437 dispatches:
+the final row needed to select the next token. Decode records 389 dispatches:
 two request-setup dispatches, six attention dispatches in layer 0, five
-attention dispatches in each remaining layer, four direct feed-forward
+attention dispatches in each remaining layer, three direct feed-forward
 dispatches per layer, and two endpoint dispatches. Each routed-down dispatch
 publishes the normalized Q8_1 x4 row consumed by the following layer or
-vocabulary projection. Its reusable dispatch-only command buffer contains 436
+vocabulary projection. Its reusable dispatch-only command buffer contains 388
 explicit barriers and one terminal return; selected-token publication does not
 add a transfer operation.
 
@@ -124,11 +124,11 @@ initialization span. Existing 256-byte span alignment absorbs the added
 counters without increasing the complete transient allocation. All 48
 sequential layers reuse those spans. One queue fill initializes all 53 counters
 after transient allocation and signals reusable command-buffer execution; each
-attention and gate/up dispatch returns its owned counters to zero, while the
-fused router and routed-down dispatches sequentially return the shared counter
-to zero before its next use. The direct Q8_1 x4 gate/up and fused direct down
-families are selected for full-model decode; grouped F16 WMMA remains the
-prefill and layer-program route.
+split-attention and gate/up dispatch returns its owned counters to zero, while
+the fused attention-output, router, and routed-down dispatches sequentially
+return the shared counter to zero before its next use. The direct Q8_1 x4
+gate/up and fused direct down families are selected for full-model decode;
+grouped F16 WMMA remains the prefill and layer-program route.
 
 ## Specialization and ABI
 
@@ -141,12 +141,16 @@ shape-dependent families:
 - FlashAttention uses fused split-K execution for full-model decode and the
   general grouped-query kernel for prefill and layer programs.
 - Attention output uses the direct Q8_1 x4 Q4_K contraction for one-token
-  decode and the F16 WMMA contraction for larger shapes.
+  shapes and the F16 WMMA contraction for larger shapes. Full-model decode
+  extends that direct contraction with last-arrival publication of the
+  following feed-forward normalized F32 and Q8_1 x4 rows; one-token layer
+  programs retain the ordinary direct output ABI.
 - Router projection publishes normalized top-8 rows from the last arriving
   projection wave for full-model decode. Prefill and layer programs retain
   separate projection and top-8 dispatches.
-- Feed-forward uses fused RMSNorm/Q8_1 preparation, direct raw-Q4_K gate/up,
-  Q8_1 packing, and fused direct down/reduction for full-model decode. Prefill
+- Feed-forward consumes the normalized F32 and Q8_1 rows published by attention
+  output, then uses fused router selection, direct raw-Q4_K gate/up with Q8_1
+  publication, and fused direct down/reduction for full-model decode. Prefill
   and layer programs retain the grouped F16 WMMA route.
 
 Each `qwen_program_prepare_kernel` call supplies:
