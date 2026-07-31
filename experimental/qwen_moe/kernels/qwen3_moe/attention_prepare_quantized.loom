@@ -94,13 +94,10 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_rmsnorm_
   kernel.return
 }
 
-// Fuses the RMSNorm publication above with GGML Q8_1 x4 activation packing.
-// The output row has hidden_size / 128 physical groups of 144 bytes.
-kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4(%token_count: index) {
-  %one = index.constant 1 : index
-  %twofiftysix = index.constant 256 : index
-  kernel.launch.config workgroups(%token_count, %one, %one) workgroup_size(%twofiftysix, %one, %one) : index
-} launch(%token_count: index, %input: buffer, %weight: buffer, %output: buffer) {
+// Shared RMSNorm and GGML Q8_1 x4 producer. The attention export discards the
+// ordinary F32 row, while feed-forward publishes it for the router without
+// rereading and requantizing the normalized values.
+func.template<qwen3_moe.rmsnorm_quantize_q8_1_x4.body> device @qwen3_moe_rmsnorm_quantize_q8_1_x4_body(%publish_normalized: i1, %token_count: index, %input: buffer, %weight: buffer, %normalized_output: buffer, %q8_output: buffer) {
   %hidden_size0 = config.get @qwen3_moe.model.hidden_size : index
   %epsilon = config.get @qwen3_moe.model.rms_epsilon : f32
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
@@ -135,9 +132,10 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_attentio
   %physical_group_count = index.div %hidden_size, %onehundredtwentyeight : index
   %row_byte_count = index.mul %physical_group_count, %group_bytes : index
   %token_output_byte_base = index.mul %token, %row_byte_count : index
-  %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
+  %input_noalias, %weight_noalias, %q8_output_noalias = buffer.assume.noalias %input, %weight, %q8_output : buffer, buffer, buffer
   %input_view = buffer.view %input_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%hidden_size]xf32, #dense>
   %weight_view = buffer.view %weight_noalias[%zero_offset] : buffer -> view<[%hidden_size]xf32, #dense>
+  %normalized_output_view = buffer.view %normalized_output[%zero_offset] : buffer -> view<[%launch_token_count]x[%hidden_size]xf32, #dense>
   %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch_values = buffer.view %scratch[%zero_offset] : buffer -> view<256xf32, #dense>
   %scratch_d = buffer.view %scratch[%scratch_d_byte_add] : buffer -> view<32xf32, #dense>
@@ -186,6 +184,9 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_attentio
     %learned_weights = vector.load.mask %weight_view[%channel], %mask, %zero_f32x4 : view<[%hidden_size]xf32, #dense>, vector<4xi1>, vector<4xf32>
     %normalized0 = vector.mulf %input_values, %row_scale_vector : vector<4xf32>
     %normalized = vector.mulf %normalized0, %learned_weights : vector<4xf32>
+    scf.if %publish_normalized {
+      vector.store.mask %normalized, %normalized_output_view[%token, %channel], %mask : vector<4xf32>, view<[%launch_token_count]x[%hidden_size]xf32, #dense>, vector<4xi1>
+    }
     %absolute_values = vector.absf %normalized : vector<4xf32>
     %thread_max = vector.reduce<maxnumf> %absolute_values, %zero_f32 : vector<4xf32>, f32
     view.store %thread_max, %scratch_values[%workitem] : f32, view<256xf32, #dense>
@@ -229,8 +230,8 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_attentio
       %payload_byte_index = index.add %group_byte_index, %payload_byte_add : index
       %group_byte_offset = index.cast %group_byte_index : index to offset
       %payload_byte_offset = index.cast %payload_byte_index : index to offset
-      %group_ds = buffer.view %output_noalias[%group_byte_offset] : buffer -> view<8xf16, #dense>
-      %group_qs = buffer.view %output_noalias[%payload_byte_offset] : buffer -> view<32xi32, #dense>
+      %group_ds = buffer.view %q8_output_noalias[%group_byte_offset] : buffer -> view<8xf16, #dense>
+      %group_qs = buffer.view %q8_output_noalias[%payload_byte_offset] : buffer -> view<32xi32, #dense>
       %block_word_base = index.mul %block_in_group, %eight : index
       %packed_word_index0 = index.add %block_word_base, %word_in_block : index
       %packed_word_index = index.assume %packed_word_index0 [range(%packed_word_index0, 0, 31)] : index
@@ -250,7 +251,7 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_attentio
       %group_byte_add = index.mul %physical_group, %group_bytes : index
       %group_byte_index = index.add %token_output_byte_base, %group_byte_add : index
       %group_byte_offset = index.cast %group_byte_index : index to offset
-      %group_ds = buffer.view %output_noalias[%group_byte_offset] : buffer -> view<8xf16, #dense>
+      %group_ds = buffer.view %q8_output_noalias[%group_byte_offset] : buffer -> view<8xf16, #dense>
       %d_f16 = scalar.fptrunc %d : f32 to f16
       %s_f16 = scalar.fptrunc %s : f32 to f16
       %ds_index = index.mul %block_in_group, %two : index
@@ -260,6 +261,32 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_attentio
     }
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   }
+  func.return
+}
+
+// Fuses attention RMSNorm directly into the Q8_1 x4 row consumed by decode
+// projections. The output has hidden_size / 128 physical groups of 144 bytes.
+kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4(%token_count: index) {
+  %one = index.constant 1 : index
+  %twofiftysix = index.constant 256 : index
+  kernel.launch.config workgroups(%token_count, %one, %one) workgroup_size(%twofiftysix, %one, %one) : index
+} launch(%token_count: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %publish_normalized = scalar.constant false : i1
+  %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
+  func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>(%publish_normalized, %token_count, %input_noalias, %weight_noalias, %output_noalias, %output_noalias) : (i1, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+// Publishes both the ordinary F32 RMSNorm row required by routing and the Q8_1
+// x4 row consumed by direct decode contractions.
+kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_rmsnorm_f32_quantize_q8_1_x4(%token_count: index) {
+  %one = index.constant 1 : index
+  %twofiftysix = index.constant 256 : index
+  kernel.launch.config workgroups(%token_count, %one, %one) workgroup_size(%twofiftysix, %one, %one) : index
+} launch(%token_count: index, %input: buffer, %weight: buffer, %normalized_output: buffer, %q8_output: buffer) {
+  %publish_normalized = scalar.constant true : i1
+  %input_noalias, %weight_noalias, %normalized_output_noalias, %q8_output_noalias = buffer.assume.noalias %input, %weight, %normalized_output, %q8_output : buffer, buffer, buffer, buffer
+  func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>(%publish_normalized, %token_count, %input_noalias, %weight_noalias, %normalized_output_noalias, %q8_output_noalias) : (i1, index, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -275,10 +302,15 @@ check.case public @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4_differential_cas
   %normalized = check.generate.fill value(0.0) : tensor<256xf32>
   %expected = check.generate.fill value(0) : tensor<288xi8>
   %actual = check.generate.fill value(1) : tensor<288xi8>
+  %dual_normalized = check.generate.fill value(1.0) : tensor<256xf32>
+  %dual_q8 = check.generate.fill value(1) : tensor<288xi8>
   func.call @qwen3_moe_rmsnorm_f32(%token_count, %input, %weight, %normalized) : (index, tensor<256xf32>, tensor<256xf32>, tensor<256xf32>)
   func.call @ggml_quantize_q8_1_x4_f32(%token_count, %hidden_size, %normalized, %expected) : (index, index, tensor<256xf32>, tensor<288xi8>)
   func.call @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4(%token_count, %input, %weight, %actual) : (index, tensor<256xf32>, tensor<256xf32>, tensor<288xi8>)
+  func.call @qwen3_moe_rmsnorm_f32_quantize_q8_1_x4(%token_count, %input, %weight, %dual_normalized, %dual_q8) : (index, tensor<256xf32>, tensor<256xf32>, tensor<256xf32>, tensor<288xi8>)
   check.expect.equal actual(%actual) expected(%expected) : tensor<288xi8>
+  check.expect.close actual(%dual_normalized) expected(%normalized) atol(0.0) rtol(0.0) nan(same) : tensor<256xf32>
+  check.expect.equal actual(%dual_q8) expected(%expected) : tensor<288xi8>
   check.return
 }
 
@@ -292,10 +324,15 @@ check.case public @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4_multistripe_case
   %normalized = check.generate.fill value(0.0) : tensor<2048xf32>
   %expected = check.generate.fill value(0) : tensor<2304xi8>
   %actual = check.generate.fill value(1) : tensor<2304xi8>
+  %dual_normalized = check.generate.fill value(1.0) : tensor<2048xf32>
+  %dual_q8 = check.generate.fill value(1) : tensor<2304xi8>
   func.call @qwen3_moe_rmsnorm_f32(%token_count, %input, %weight, %normalized) : (index, tensor<2048xf32>, tensor<2048xf32>, tensor<2048xf32>)
   func.call @ggml_quantize_q8_1_x4_f32(%token_count, %hidden_size, %normalized, %expected) : (index, index, tensor<2048xf32>, tensor<2304xi8>)
   func.call @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4(%token_count, %input, %weight, %actual) : (index, tensor<2048xf32>, tensor<2048xf32>, tensor<2304xi8>)
+  func.call @qwen3_moe_rmsnorm_f32_quantize_q8_1_x4(%token_count, %input, %weight, %dual_normalized, %dual_q8) : (index, tensor<2048xf32>, tensor<2048xf32>, tensor<2048xf32>, tensor<2304xi8>)
   check.expect.equal actual(%actual) expected(%expected) : tensor<2304xi8>
+  check.expect.close actual(%dual_normalized) expected(%normalized) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
+  check.expect.equal actual(%dual_q8) expected(%expected) : tensor<2304xi8>
   check.return
 }
 
@@ -318,6 +355,20 @@ check.case public @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4_benchmark_case {
   %expected = check.generate.fill value(0) : tensor<[%token_count]x2304xi8>
   func.call @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4(%token_count, %input, %weight, %output) : (index, tensor<[%token_count]x2048xf32>, tensor<2048xf32>, tensor<[%token_count]x2304xi8>)
   check.expect.equal actual(%output) expected(%expected) : tensor<[%token_count]x2304xi8>
+  check.return
+}
+
+check.case public @qwen3_moe_rmsnorm_f32_quantize_q8_1_x4_benchmark_case {
+  %token_count = check.param.choice values([1, 8, 32, 128, 512]) name("token_count") : index
+  %input = check.generate.fill value(0.0) : tensor<[%token_count]x2048xf32>
+  %weight = check.generate.fill value(1.0) : tensor<2048xf32>
+  %normalized_output = check.generate.fill value(1.0) : tensor<[%token_count]x2048xf32>
+  %q8_output = check.generate.fill value(1) : tensor<[%token_count]x2304xi8>
+  %expected_normalized = check.generate.fill value(0.0) : tensor<[%token_count]x2048xf32>
+  %expected_q8 = check.generate.fill value(0) : tensor<[%token_count]x2304xi8>
+  func.call @qwen3_moe_rmsnorm_f32_quantize_q8_1_x4(%token_count, %input, %weight, %normalized_output, %q8_output) : (index, tensor<[%token_count]x2048xf32>, tensor<2048xf32>, tensor<[%token_count]x2048xf32>, tensor<[%token_count]x2304xi8>)
+  check.expect.close actual(%normalized_output) expected(%expected_normalized) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x2048xf32>
+  check.expect.equal actual(%q8_output) expected(%expected_q8) : tensor<[%token_count]x2304xi8>
   check.return
 }
 
@@ -346,6 +397,8 @@ check.benchmark<@qwen3_moe_attention_rmsnorm_f32_benchmark_case> @qwen3_moe_atte
 check.benchmark<@qwen3_moe_attention_rmsnorm_f32_benchmark_case> @qwen3_moe_attention_rmsnorm_f32_prefill_512 {token_count = 512}
 
 check.benchmark<@qwen3_moe_attention_rmsnorm_quantize_q8_1_x4_benchmark_case> @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4_decode {token_count = 1}
+
+check.benchmark<@qwen3_moe_rmsnorm_f32_quantize_q8_1_x4_benchmark_case> @qwen3_moe_rmsnorm_f32_quantize_q8_1_x4_decode {token_count = 1}
 
 check.benchmark<@qwen3_moe_attention_rmsnorm_quantize_q8_1_x4_benchmark_case> @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4_prefill_32 {token_count = 32}
 
