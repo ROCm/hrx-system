@@ -83,6 +83,23 @@ iree_status_t loom_control_uniformity_prove_execution(
     loom_value_fact_uniform_scope_t required_scope,
     loom_control_uniformity_failure_t* out_failure, bool* out_proven);
 
+// Proves that every operation in |lhs_ops| and |rhs_ops| executes on distinct
+// alternatives of a common CFG controller whose selector is uniform at
+// |required_scope|. Controllers inside a CFG cycle are rejected because
+// distinct alternatives may execute on different loop iterations. Different
+// regions, structured-only control, and incomplete CFG facts conservatively
+// produce a failed proof.
+//
+// The first query in a CFG region lazily retains its control-dependence edges
+// and cycle membership. Later queries compare those retained summaries without
+// walking IR or recomputing graph structure. Infrastructure failures are
+// returned as status; an ordinary failed proof writes false to |out_proven|.
+iree_status_t loom_control_uniformity_prove_mutually_exclusive_execution(
+    loom_control_uniformity_info_t* info, iree_host_size_t lhs_op_count,
+    const loom_op_t* const* lhs_ops, iree_host_size_t rhs_op_count,
+    const loom_op_t* const* rhs_ops,
+    loom_value_fact_uniform_scope_t required_scope, bool* out_proven);
+
 // Returns the stable diagnostic name for a control source.
 iree_string_view_t loom_control_uniformity_source_name(
     loom_control_uniformity_source_t source);
