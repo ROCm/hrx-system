@@ -497,18 +497,10 @@ kernel.def @qwen3_moe_build_expert_partition_table(%token_count: index, %route_c
   kernel.return
 }
 
-// Small-token schedule for routed Q4_K gate/up projections. One wave computes
-// one [token, route, output channel]. Every lane owns 16 K elements, and all
-// lanes advance through K in 512-element stripes. Gate and up share each Q8_1
-// load before independent raw-weight dot products and a fused SwiGLU epilogue.
-kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index) {
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
-  %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
-  %bounded_output_size = index.assume %output_size [range(%output_size, 1, 4096)] : index
-  %unit = index.constant 1 : index
-  %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%bounded_output_size, %bounded_route_count, %bounded_token_count) workgroup_size(%workgroup_size, %unit, %unit) : index
-} launch(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+// Small-token body for routed Q4_K gate/up projections. One wave computes one
+// [token, route, output channel]. Callers own launch geometry and may append a
+// producer epilogue after the F32 SwiGLU value is visible.
+func.template<qwen3_moe.routed_gate_up.q4k_q8.body> device @qwen3_moe_routed_gate_up_swiglu_q4k_q8_body(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
   %input_size = config.get @qwen3_moe.routed_gate_up.input_size : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
   %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
@@ -609,6 +601,22 @@ kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_c
     %output_index = index.add %output_route_base, %channel : index
     view.store %result, %output_view[%output_index] : f32, view<[%output_element_count]xf32, #dense>
   }
+  func.return
+}
+
+// Small-token schedule for routed Q4_K gate/up projections. One wave computes
+// one [token, route, output channel]. Every lane owns 16 K elements, and all
+// lanes advance through K in 512-element stripes. Gate and up share each Q8_1
+// load before independent raw-weight dot products and a fused SwiGLU epilogue.
+kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
+  %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 1, 4096)] : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%bounded_output_size, %bounded_route_count, %bounded_token_count) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+  func.apply<qwen3_moe.routed_gate_up.q4k_q8.body>(%token_count, %route_count, %route_stride, %expert_count, %output_size, %q8_input, %route_ids, %gate_weight, %up_weight, %output) : (index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
