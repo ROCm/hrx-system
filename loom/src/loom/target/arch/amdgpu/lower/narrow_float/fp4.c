@@ -70,6 +70,12 @@ enum {
   LOOM_AMDGPU_FP4_E8M0_F32_EXPONENT_SHIFT = 23u,
   // Number of independently selectable bytes in one payload register.
   LOOM_AMDGPU_FP4_PAYLOAD_BYTES_PER_REGISTER = 4u,
+  // Number of independently selectable E8M0 bytes in one scale register.
+  LOOM_AMDGPU_FP4_E8M0_SCALE_BYTES_PER_REGISTER = 4u,
+  // Number of E2M1 elements consumed by one native packed conversion.
+  LOOM_AMDGPU_FP4_PK8_ELEMENT_COUNT = 8u,
+  // Number of packed BF16 result registers written by one pk8 conversion.
+  LOOM_AMDGPU_FP4_PK8_BF16_RESULT_REGISTER_COUNT = 4u,
   // Maximum E8M0 scale groups in one accepted packed BF16 vector.
   LOOM_AMDGPU_FP4_MAX_E8M0_BF16_SCALE_GROUPS =
       LOOM_AMDGPU_MAX_PACKED_16BIT_FLOAT_LANES /
@@ -114,7 +120,7 @@ typedef struct loom_amdgpu_fp4_decode_recipe_cache_t {
 
 static int loom_amdgpu_fp4_decode_recipe_cache_state_key;
 
-struct loom_amdgpu_fp4_native_decode_recipe_t {
+struct loom_amdgpu_fp4_native_pair_decode_recipe_t {
   // Native scaled pair descriptors selected by source byte.
   loom_low_lower_resolved_descriptor_t
       pair_descriptors[LOOM_AMDGPU_FP4_PAYLOAD_BYTES_PER_REGISTER];
@@ -126,14 +132,30 @@ struct loom_amdgpu_fp4_native_decode_recipe_t {
   loom_low_lower_resolved_descriptor_t scale_shift_descriptor;
 };
 
-typedef struct loom_amdgpu_fp4_native_decode_recipe_cache_t {
-  // Whether the native recipe has been resolved for this function's target.
+typedef struct loom_amdgpu_fp4_native_pair_decode_recipe_cache_t {
+  // Whether the pair recipe has been resolved for this function's target.
   bool initialized;
-  // Function-local descriptor resolution shared by native FP4 decodes.
-  loom_amdgpu_fp4_native_decode_recipe_t recipe;
-} loom_amdgpu_fp4_native_decode_recipe_cache_t;
+  // Function-local descriptor resolution shared by native pair decodes.
+  loom_amdgpu_fp4_native_pair_decode_recipe_t recipe;
+} loom_amdgpu_fp4_native_pair_decode_recipe_cache_t;
 
-static int loom_amdgpu_fp4_native_decode_recipe_cache_state_key;
+static int loom_amdgpu_fp4_native_pair_decode_recipe_cache_state_key;
+
+struct loom_amdgpu_fp4_native_pk8_decode_recipe_t {
+  // Native eight-lane E2M1-to-BF16 conversion descriptor.
+  loom_low_lower_resolved_descriptor_t conversion_descriptor;
+  // Module string ID for the descriptor scale_sel attribute.
+  loom_string_id_t scale_selector_attr_name_id;
+};
+
+typedef struct loom_amdgpu_fp4_native_pk8_decode_recipe_cache_t {
+  // Whether the pk8 recipe has been resolved for this function's target.
+  bool initialized;
+  // Function-local descriptor resolution shared by native pk8 decodes.
+  loom_amdgpu_fp4_native_pk8_decode_recipe_t recipe;
+} loom_amdgpu_fp4_native_pk8_decode_recipe_cache_t;
+
+static int loom_amdgpu_fp4_native_pk8_decode_recipe_cache_state_key;
 
 typedef struct loom_amdgpu_fp4_bf16_decode_recipe_t {
   // Vector constant descriptor used by scale-conditioned table values.
@@ -253,7 +275,7 @@ static loom_amdgpu_descriptor_ref_t loom_amdgpu_fp4_immediate_descriptor_ref(
              : LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
 }
 
-static bool loom_amdgpu_fp4_native_e8m0_bf16_descriptors_available(
+static bool loom_amdgpu_fp4_native_e8m0_bf16_pair_descriptors_available(
     const loom_low_descriptor_set_t* descriptor_set) {
   // All source-byte variants are generated from the same instruction overlay,
   // so the base ref represents availability of the complete family.
@@ -274,9 +296,15 @@ static bool loom_amdgpu_fp4_native_e8m0_bf16_descriptors_available(
              LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
 }
 
-static iree_status_t loom_amdgpu_initialize_fp4_native_decode_recipe(
+static bool loom_amdgpu_fp4_native_e8m0_bf16_pk8_descriptor_available(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  return loom_amdgpu_descriptor_set_has_ref(
+      descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALE_PK8_BF16_FP4_OCP);
+}
+
+static iree_status_t loom_amdgpu_initialize_fp4_native_pair_decode_recipe(
     loom_low_lower_context_t* context,
-    loom_amdgpu_fp4_native_decode_recipe_t* recipe) {
+    loom_amdgpu_fp4_native_pair_decode_recipe_t* recipe) {
   memset(recipe, 0, sizeof(*recipe));
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
@@ -306,16 +334,44 @@ static iree_status_t loom_amdgpu_initialize_fp4_native_decode_recipe(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_get_fp4_native_decode_recipe(
+static iree_status_t loom_amdgpu_get_fp4_native_pair_decode_recipe(
     loom_low_lower_context_t* context,
-    const loom_amdgpu_fp4_native_decode_recipe_t** out_recipe) {
+    const loom_amdgpu_fp4_native_pair_decode_recipe_t** out_recipe) {
   *out_recipe = NULL;
-  loom_amdgpu_fp4_native_decode_recipe_cache_t* cache = NULL;
+  loom_amdgpu_fp4_native_pair_decode_recipe_cache_t* cache = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
-      context, &loom_amdgpu_fp4_native_decode_recipe_cache_state_key,
+      context, &loom_amdgpu_fp4_native_pair_decode_recipe_cache_state_key,
       sizeof(*cache), (void**)&cache));
   if (!cache->initialized) {
-    IREE_RETURN_IF_ERROR(loom_amdgpu_initialize_fp4_native_decode_recipe(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_initialize_fp4_native_pair_decode_recipe(
+        context, &cache->recipe));
+    cache->initialized = true;
+  }
+  *out_recipe = &cache->recipe;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_initialize_fp4_native_pk8_decode_recipe(
+    loom_low_lower_context_t* context,
+    loom_amdgpu_fp4_native_pk8_decode_recipe_t* recipe) {
+  memset(recipe, 0, sizeof(*recipe));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
+      context, LOOM_AMDGPU_DESCRIPTOR_REF_V_CVT_SCALE_PK8_BF16_FP4_OCP,
+      &recipe->conversion_descriptor));
+  return loom_amdgpu_intern(context, IREE_SV("scale_sel"),
+                            &recipe->scale_selector_attr_name_id);
+}
+
+static iree_status_t loom_amdgpu_get_fp4_native_pk8_decode_recipe(
+    loom_low_lower_context_t* context,
+    const loom_amdgpu_fp4_native_pk8_decode_recipe_t** out_recipe) {
+  *out_recipe = NULL;
+  loom_amdgpu_fp4_native_pk8_decode_recipe_cache_t* cache = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
+      context, &loom_amdgpu_fp4_native_pk8_decode_recipe_cache_state_key,
+      sizeof(*cache), (void**)&cache));
+  if (!cache->initialized) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_initialize_fp4_native_pk8_decode_recipe(
         context, &cache->recipe));
     cache->initialized = true;
   }
@@ -654,7 +710,13 @@ static loom_amdgpu_fp4_decode_kind_t loom_amdgpu_fp4_decode_kind(
     return LOOM_AMDGPU_FP4_DECODE_KIND_NONE;
   }
   if (match->scale_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0 &&
-      loom_amdgpu_fp4_native_e8m0_bf16_descriptors_available(descriptor_set)) {
+      loom_amdgpu_fp4_native_e8m0_bf16_pk8_descriptor_available(
+          descriptor_set)) {
+    return LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_E8M0_PK8;
+  }
+  if (match->scale_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0 &&
+      loom_amdgpu_fp4_native_e8m0_bf16_pair_descriptors_available(
+          descriptor_set)) {
     return LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_SCALEF32_PAIR;
   }
   if (!loom_amdgpu_fp4_decode_descriptors_available(descriptor_set)) {
@@ -697,15 +759,18 @@ iree_status_t loom_amdgpu_select_fp4_decode_plan(
   }
 
   const loom_amdgpu_fp4_decode_recipe_t* portable_recipe = NULL;
-  const loom_amdgpu_fp4_native_decode_recipe_t* native_recipe = NULL;
+  const loom_amdgpu_fp4_native_pair_decode_recipe_t* native_pair_recipe = NULL;
+  const loom_amdgpu_fp4_native_pk8_decode_recipe_t* native_pk8_recipe = NULL;
   if (decode_kind == LOOM_AMDGPU_FP4_DECODE_KIND_PORTABLE_LOOKUP) {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_get_fp4_decode_recipe(context, &portable_recipe));
+  } else if (decode_kind == LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_SCALEF32_PAIR) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp4_native_pair_decode_recipe(
+        context, &native_pair_recipe));
   } else {
-    IREE_ASSERT_EQ(decode_kind,
-                   LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_SCALEF32_PAIR);
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_get_fp4_native_decode_recipe(context, &native_recipe));
+    IREE_ASSERT_EQ(decode_kind, LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_E8M0_PK8);
+    IREE_RETURN_IF_ERROR(loom_amdgpu_get_fp4_native_pk8_decode_recipe(
+        context, &native_pk8_recipe));
   }
 
   const loom_value_id_t source = loom_vector_decode_payload(source_op);
@@ -735,7 +800,8 @@ iree_status_t loom_amdgpu_select_fp4_decode_plan(
           {
               .kind = decode_kind,
               .portable_recipe = portable_recipe,
-              .native_recipe = native_recipe,
+              .native_pair_recipe = native_pair_recipe,
+              .native_pk8_recipe = native_pk8_recipe,
           },
   };
   return iree_ok_status();
@@ -1274,7 +1340,7 @@ static iree_status_t loom_amdgpu_emit_fp4_pair_as_packed_bf16(
 
 static iree_status_t loom_amdgpu_emit_fp4_native_scale_low_byte(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fp4_native_decode_recipe_t* recipe,
+    const loom_amdgpu_fp4_native_pair_decode_recipe_t* recipe,
     loom_value_id_t source_register, uint32_t byte_index,
     loom_type_t vector_type, loom_value_id_t* out_low_byte) {
   *out_low_byte = source_register;
@@ -1288,14 +1354,14 @@ static iree_status_t loom_amdgpu_emit_fp4_native_scale_low_byte(
 
 static iree_status_t loom_amdgpu_emit_fp4_native_e8m0_f32_scale(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_fp4_native_decode_recipe_t* recipe,
+    const loom_amdgpu_fp4_native_pair_decode_recipe_t* recipe,
     loom_value_id_t low_scale_source, uint32_t scale_register_count,
     uint32_t scale_index, loom_type_t vector_type,
     loom_value_id_t* out_f32_scale) {
   const uint32_t source_register_index =
-      scale_index / LOOM_AMDGPU_FP4_PAYLOAD_BYTES_PER_REGISTER;
+      scale_index / LOOM_AMDGPU_FP4_E8M0_SCALE_BYTES_PER_REGISTER;
   const uint32_t source_byte_index =
-      scale_index % LOOM_AMDGPU_FP4_PAYLOAD_BYTES_PER_REGISTER;
+      scale_index % LOOM_AMDGPU_FP4_E8M0_SCALE_BYTES_PER_REGISTER;
   loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
       context, source_op, low_scale_source, scale_register_count,
@@ -1313,7 +1379,7 @@ static iree_status_t loom_amdgpu_emit_fp4_native_e8m0_f32_scale(
       LOOM_AMDGPU_FP4_E8M0_F32_EXPONENT_SHIFT, vector_type, out_f32_scale);
 }
 
-static iree_status_t loom_amdgpu_lower_vector_fp4_decode_native(
+static iree_status_t loom_amdgpu_lower_vector_fp4_decode_native_pair(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
   IREE_ASSERT_EQ(plan->fp4_decode.kind,
@@ -1322,8 +1388,8 @@ static iree_status_t loom_amdgpu_lower_vector_fp4_decode_native(
   IREE_ASSERT_EQ(plan->scale_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0);
   IREE_ASSERT_EQ(plan->scale_group_element_count,
                  LOOM_AMDGPU_FP4_E8M0_BF16_SCALE_GROUP_ELEMENT_COUNT);
-  const loom_amdgpu_fp4_native_decode_recipe_t* recipe =
-      plan->fp4_decode.native_recipe;
+  const loom_amdgpu_fp4_native_pair_decode_recipe_t* recipe =
+      plan->fp4_decode.native_pair_recipe;
   IREE_ASSERT(recipe != NULL);
 
   loom_value_id_t low_source = LOOM_VALUE_ID_INVALID;
@@ -1372,6 +1438,100 @@ static iree_status_t loom_amdgpu_lower_vector_fp4_decode_native(
   IREE_ASSERT_EQ(result_index, plan->result_register_count);
   return loom_amdgpu_bind_low_register_range(context, source_op, plan->result,
                                              results, result_index);
+}
+
+static iree_status_t loom_amdgpu_lower_vector_fp4_decode_native_pk8(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
+  IREE_ASSERT_EQ(plan->fp4_decode.kind,
+                 LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_E8M0_PK8);
+  IREE_ASSERT_EQ(plan->result_element_type, LOOM_SCALAR_TYPE_BF16);
+  IREE_ASSERT_EQ(plan->scale_format, LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0);
+  IREE_ASSERT_EQ(plan->scale_group_element_count,
+                 LOOM_AMDGPU_FP4_E8M0_BF16_SCALE_GROUP_ELEMENT_COUNT);
+  IREE_ASSERT_EQ(
+      plan->source_register_count * LOOM_AMDGPU_FP4_PK8_ELEMENT_COUNT,
+      plan->lane_count);
+  IREE_ASSERT_EQ(plan->source_register_count *
+                     LOOM_AMDGPU_FP4_PK8_BF16_RESULT_REGISTER_COUNT,
+                 plan->result_register_count);
+  const loom_amdgpu_fp4_native_pk8_decode_recipe_t* recipe =
+      plan->fp4_decode.native_pk8_recipe;
+  IREE_ASSERT(recipe != NULL);
+
+  loom_value_id_t low_source = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_lookup_value(context, plan->source, &low_source));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32_registers(
+      context, source_op, low_source, &low_source));
+  loom_value_id_t low_scale_source = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(context, plan->scale_source,
+                                                   &low_scale_source));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32_registers(
+      context, source_op, low_scale_source, &low_scale_source));
+
+  loom_type_t vector_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &vector_type));
+  loom_type_t result_packet_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_range_type(
+      context, LOOM_AMDGPU_FP4_PK8_BF16_RESULT_REGISTER_COUNT,
+      &result_packet_type));
+
+  loom_value_id_t result_packets[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
+  uint32_t active_scale_register_index = UINT32_MAX;
+  loom_value_id_t active_scale_register = LOOM_VALUE_ID_INVALID;
+  for (uint32_t source_index = 0; source_index < plan->source_register_count;
+       ++source_index) {
+    loom_value_id_t source_register = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
+        context, source_op, low_source, plan->source_register_count,
+        source_index, vector_type, &source_register));
+
+    const uint32_t scale_index =
+        (source_index * LOOM_AMDGPU_FP4_PK8_ELEMENT_COUNT) /
+        plan->scale_group_element_count;
+    const uint32_t scale_register_index =
+        scale_index / LOOM_AMDGPU_FP4_E8M0_SCALE_BYTES_PER_REGISTER;
+    const uint32_t scale_selector =
+        scale_index % LOOM_AMDGPU_FP4_E8M0_SCALE_BYTES_PER_REGISTER;
+    if (scale_register_index != active_scale_register_index) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
+          context, source_op, low_scale_source, plan->scale_register_count,
+          scale_register_index, vector_type, &active_scale_register));
+      active_scale_register_index = scale_register_index;
+    }
+
+    loom_named_attr_t scale_selector_attr = {
+        .name_id = recipe->scale_selector_attr_name_id,
+        .value = loom_attr_i64(scale_selector),
+    };
+    const loom_value_id_t operands[] = {source_register, active_scale_register};
+    loom_op_t* convert_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+        context, &recipe->conversion_descriptor, operands,
+        IREE_ARRAYSIZE(operands),
+        scale_selector == 0
+            ? loom_named_attr_slice_empty()
+            : loom_make_named_attr_slice(&scale_selector_attr, 1),
+        &result_packet_type, 1, /*tied_results=*/NULL,
+        /*tied_result_count=*/0, source_op->location, &convert_op));
+    result_packets[source_index] =
+        loom_value_slice_get(loom_low_op_results(convert_op), 0);
+  }
+
+  if (plan->source_register_count == 1) {
+    return loom_low_lower_bind_value(context, plan->result, result_packets[0]);
+  }
+  loom_type_t result_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_range_type(
+      context, plan->result_register_count, &result_type));
+  loom_op_t* concat_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_concat_build(loom_low_lower_context_builder(context),
+                            result_packets, plan->source_register_count,
+                            result_type, source_op->location, &concat_op));
+  return loom_low_lower_bind_value(context, plan->result,
+                                   loom_low_concat_result(concat_op));
 }
 
 static iree_status_t loom_amdgpu_lower_vector_fp4_decode_portable(
@@ -1475,8 +1635,11 @@ iree_status_t loom_amdgpu_lower_vector_fp4_decode(
       return loom_amdgpu_lower_vector_fp4_decode_portable(context, source_op,
                                                           plan);
     case LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_SCALEF32_PAIR:
-      return loom_amdgpu_lower_vector_fp4_decode_native(context, source_op,
-                                                        plan);
+      return loom_amdgpu_lower_vector_fp4_decode_native_pair(context, source_op,
+                                                             plan);
+    case LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_E8M0_PK8:
+      return loom_amdgpu_lower_vector_fp4_decode_native_pk8(context, source_op,
+                                                            plan);
     default:
       IREE_ASSERT_UNREACHABLE("unselected packed FP4 decode");
       IREE_BUILTIN_UNREACHABLE();
@@ -1491,6 +1654,11 @@ iree_string_view_t loom_amdgpu_fp4_decode_plan_key(
     return IREE_SV(
         "amdgpu.vector_16bit_float_conversion.strategy."
         "fp4_e2m1_e8m0_scale32_native_bf16_pair");
+  }
+  if (plan->fp4_decode.kind == LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_E8M0_PK8) {
+    return IREE_SV(
+        "amdgpu.vector_16bit_float_conversion.strategy."
+        "fp4_e2m1_e8m0_scale32_native_bf16_pk8");
   }
   IREE_ASSERT_EQ(plan->fp4_decode.kind,
                  LOOM_AMDGPU_FP4_DECODE_KIND_PORTABLE_LOOKUP);

@@ -115,13 +115,16 @@ typedef enum loom_amdgpu_vector_16bit_float_conversion_kind_e {
 } loom_amdgpu_vector_16bit_float_conversion_kind_t;
 
 typedef struct loom_amdgpu_fp4_decode_recipe_t loom_amdgpu_fp4_decode_recipe_t;
-typedef struct loom_amdgpu_fp4_native_decode_recipe_t
-    loom_amdgpu_fp4_native_decode_recipe_t;
+typedef struct loom_amdgpu_fp4_native_pair_decode_recipe_t
+    loom_amdgpu_fp4_native_pair_decode_recipe_t;
+typedef struct loom_amdgpu_fp4_native_pk8_decode_recipe_t
+    loom_amdgpu_fp4_native_pk8_decode_recipe_t;
 
 typedef enum loom_amdgpu_fp4_decode_kind_e {
   LOOM_AMDGPU_FP4_DECODE_KIND_NONE = 0,
   LOOM_AMDGPU_FP4_DECODE_KIND_PORTABLE_LOOKUP = 1,
   LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_SCALEF32_PAIR = 2,
+  LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_E8M0_PK8 = 3,
 } loom_amdgpu_fp4_decode_kind_t;
 
 typedef struct loom_amdgpu_fp4_decode_plan_t {
@@ -129,8 +132,10 @@ typedef struct loom_amdgpu_fp4_decode_plan_t {
   loom_amdgpu_fp4_decode_kind_t kind;
   // Function-local portable lookup recipe when kind is PORTABLE_LOOKUP.
   const loom_amdgpu_fp4_decode_recipe_t* portable_recipe;
-  // Function-local native pair recipe when kind is NATIVE_SCALEF32_PAIR.
-  const loom_amdgpu_fp4_native_decode_recipe_t* native_recipe;
+  // Function-local scaled-pair recipe when kind is NATIVE_SCALEF32_PAIR.
+  const loom_amdgpu_fp4_native_pair_decode_recipe_t* native_pair_recipe;
+  // Function-local eight-lane recipe when kind is NATIVE_E8M0_PK8.
+  const loom_amdgpu_fp4_native_pk8_decode_recipe_t* native_pk8_recipe;
 } loom_amdgpu_fp4_decode_plan_t;
 
 typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
