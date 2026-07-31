@@ -20,6 +20,7 @@
 #include "loom/error/diagnostic.h"
 #include "loom/ir/ir.h"
 #include "loom/target/facts.h"
+#include "loom/target/function_version.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/target/types.h"
 #include "loom/verify/verify.h"
@@ -33,6 +34,9 @@ typedef struct loom_target_entry_options_t {
   // with a target record. A leading '@' is accepted for command-line
   // ergonomics.
   iree_string_view_t entry_symbol;
+  // Optional concrete compiler function versions participating in this
+  // emission. The list and its version objects are borrowed for selection.
+  const loom_function_version_list_t* function_versions;
   // Diagnostic sink used for verification, lowering, scheduling, and
   // allocation diagnostics. A NULL callback still counts diagnostics.
   loom_diagnostic_sink_t diagnostic_sink;
@@ -50,10 +54,12 @@ typedef struct loom_target_entry_t {
   iree_string_view_t func_name;
   // Module-local symbol reference for |func|.
   loom_symbol_ref_t func_ref;
-  // Immutable facts projected from the target record.
+  // Concrete target-refined function version, or NULL when unrefined.
+  const loom_target_function_version_t* function_version;
+  // Immutable effective facts selected for this function.
   const loom_target_facts_t* target_facts;
-  // Materialized target bundle selected by |func|. The export plan is the
-  // func-owned effective export plan, not a shared target-record backreference.
+  // Entry-owned copy of the effective target bundle. The embedded bundle
+  // points at the copied snapshot, export plan, and config.
   loom_target_bundle_storage_t bundle_storage;
 } loom_target_entry_t;
 

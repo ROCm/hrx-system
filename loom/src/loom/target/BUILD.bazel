@@ -555,6 +555,7 @@ loom_cc_library(
     deps = [
         ":facts",
         ":function_contract",
+        ":function_version",
         ":low_descriptor_registry",
         ":types",
         "//loom/src/loom/analysis:symbol_facts",
@@ -568,6 +569,28 @@ loom_cc_library(
         "//loom/src/loom/verify",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "entry_selection_test",
+    srcs = ["entry_selection_test.cc"],
+    deps = [
+        ":entry_selection",
+        ":facts_builder",
+        ":function_contract",
+        ":function_version",
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:func_symbol_facts",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

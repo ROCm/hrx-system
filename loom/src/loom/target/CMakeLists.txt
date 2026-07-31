@@ -616,6 +616,7 @@ loom_cc_library(
   DEPS
     ::facts
     ::function_contract
+    ::function_version
     ::low_descriptor_registry
     ::types
     iree::base
@@ -630,6 +631,29 @@ loom_cc_library(
     loom::ops::target
     loom::verify
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    entry_selection_test
+  SRCS
+    "entry_selection_test.cc"
+  DEPS
+    ::entry_selection
+    ::facts_builder
+    ::function_contract
+    ::function_version
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func
+    loom::ops::func_symbol_facts
+    loom::ops::test
+    loom::target::test::target_record_table
+    loom::testing::module_ptr
 )
 
 loom_cc_library(
