@@ -251,7 +251,6 @@ loom_cc_test(
   SRCS
     "specialization_test.cc"
   DEPS
-    ::materialization
     ::provider
     ::specialization
     iree::base::internal::arena

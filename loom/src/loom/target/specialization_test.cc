@@ -73,7 +73,6 @@ static const loom_target_provider_t kTestProvider = {
     /*.emitter_list=*/{},
     /*.pass_registry=*/nullptr,
     /*.contribute_pipeline=*/nullptr,
-    /*.materialization=*/{},
 };
 
 static const loom_target_provider_t* const kTestProviders[] = {

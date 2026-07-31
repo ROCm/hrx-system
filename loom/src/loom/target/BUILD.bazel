@@ -217,7 +217,6 @@ loom_cc_test(
     name = "specialization_test",
     srcs = ["specialization_test.cc"],
     deps = [
-        ":materialization",
         ":provider",
         ":specialization",
         "//loom/src/loom/error:error_defs",

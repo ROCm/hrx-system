@@ -359,7 +359,6 @@ loom_cc_library(
     ::math_policy
     ::pass_registry
     ::profile
-    ::target_info
     iree::base
     loom::ir
     loom::pass::builder
@@ -367,7 +366,6 @@ loom_cc_library(
     loom::target::arch::amdgpu::diagnostics::packet_diagnostics
     loom::target::arch::amdgpu::lower
     loom::target::arch::amdgpu::ops
-    loom::target::materialization
     loom::target::provider
   PUBLIC
 )
@@ -399,8 +397,6 @@ loom_cc_test(
     loom::pass::testing::registry_verify
     loom::pass::tooling
     loom::target::arch::amdgpu::facts
-    loom::target::arch::amdgpu::ops
-    loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_info
     loom::target::provider
     loom::testing::module_ptr

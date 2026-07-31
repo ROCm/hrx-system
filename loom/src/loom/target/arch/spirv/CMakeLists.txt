@@ -327,11 +327,9 @@ loom_cc_library(
     ::math_policy
     ::profile
     iree::base
-    loom::ir
     loom::target::arch::spirv::descriptors::low_registry
     loom::target::arch::spirv::lower
     loom::target::arch::spirv::ops
-    loom::target::materialization
     loom::target::provider
   PUBLIC
 )
@@ -356,7 +354,6 @@ loom_cc_test(
     loom::ir
     loom::ops::op_registry
     loom::ops::target
-    loom::target::arch::spirv::ops
     loom::target::arch::spirv::records::target_records
     loom::target::provider
     loom::testing::module_ptr

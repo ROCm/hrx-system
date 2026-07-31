@@ -26,10 +26,7 @@
 #include "loom/pass/testing/registry_verify.h"
 #include "loom/pass/tooling.h"
 #include "loom/target/arch/amdgpu/facts.h"
-#include "loom/target/arch/amdgpu/ops/ops.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/profile.h"
-#include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/transforms/symbol/template_selection.h"
@@ -150,10 +147,14 @@ class AmdgpuProviderTest : public ::testing::Test {
     return target_facts;
   }
 
+  bool Satisfies(const loom_target_facts_t* effective,
+                 const loom_target_facts_t* requirement) {
+    return loom_target_facts_satisfy_requirement(effective, requirement);
+  }
+
   bool Satisfies(const loom_target_symbol_facts_t* effective,
                  const loom_target_symbol_facts_t* requirement) {
-    return loom_target_facts_satisfy_requirement(effective->projection,
-                                                 requirement->projection);
+    return Satisfies(effective->projection, requirement->projection);
   }
 
   const loom_op_t* TargetOpFromRef(const loom_module_t* module,
@@ -326,183 +327,6 @@ TEST_F(AmdgpuProviderTest, ProvidesLoweringPolicyForEveryDescriptorSet) {
   }
 }
 
-TEST_F(AmdgpuProviderTest, MaterializesEveryProfileTargetKind) {
-  ModulePtr module;
-  IREE_ASSERT_OK(AllocateModule(IREE_SV("materialize"), &module));
-
-  for (uint32_t target_kind = 1; target_kind < LOOM_AMDGPU_TARGET_KIND_COUNT_;
-       ++target_kind) {
-    const loom_amdgpu_target_record_info_t* target_record =
-        loom_amdgpu_target_record_info_for_kind(target_kind);
-    ASSERT_NE(target_record, nullptr) << "target kind " << target_kind;
-    EXPECT_EQ(target_record->target_kind, target_kind);
-
-    const loom_amdgpu_target_info_t* target_info = nullptr;
-    IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_target(
-        target_record->target_name, &target_info));
-    ASSERT_NE(target_info, nullptr);
-    const loom_amdgpu_processor_info_t* processor =
-        loom_amdgpu_target_info_target_processor(target_info);
-    ASSERT_NE(processor, nullptr);
-    const loom_amdgpu_target_identity_t identity =
-        MakeTargetIdentity(target_info);
-    loom_amdgpu_target_profile_t target_profile = {};
-    IREE_ASSERT_OK(
-        loom_amdgpu_target_profile_initialize(&identity, &target_profile));
-    loom_symbol_ref_t target_ref = loom_symbol_ref_null();
-    IREE_ASSERT_OK(loom_target_environment_materialize_effective_target(
-        &target_environment_, module.get(), &target_profile.base,
-        /*authored_target_op=*/nullptr, &target_ref));
-    const loom_op_t* target_op = TargetOpFromRef(module.get(), target_ref);
-    ASSERT_TRUE(loom_amdgpu_target_isa(target_op));
-    EXPECT_EQ(loom_amdgpu_target_kind(target_op), target_kind);
-    EXPECT_EQ(loom_amdgpu_target_record_target(target_op), target_info);
-    EXPECT_TRUE(iree_string_view_equal(
-        loom_amdgpu_target_record_target_name(target_op), target_info->name));
-    EXPECT_TRUE(iree_string_view_equal(
-        loom_amdgpu_target_record_processor_name(target_op), processor->name));
-
-    const loom_target_symbol_facts_t* target = Target(module.get(), target_ref);
-    loom_amdgpu_target_identity_t record_identity = {};
-    loom_amdgpu_target_record_resolve_identity(target_op, &record_identity);
-    EXPECT_EQ(record_identity.target, target_profile.identity.target);
-    EXPECT_EQ(record_identity.amdhsa_features.sramecc,
-              target_profile.identity.amdhsa_features.sramecc);
-    EXPECT_EQ(record_identity.amdhsa_features.xnack,
-              target_profile.identity.amdhsa_features.xnack);
-
-    loom_amdgpu_target_properties_t record_properties = {};
-    loom_amdgpu_target_record_resolve_properties(
-        target_op, &target->projection->storage.bundle, &record_properties);
-    EXPECT_EQ(record_properties.target, target_profile.properties.target);
-    EXPECT_EQ(record_properties.processor, target_profile.properties.processor);
-    EXPECT_EQ(record_properties.common, &target->projection->storage.bundle);
-    EXPECT_EQ(record_properties.instruction_constraints,
-              target_profile.properties.instruction_constraints);
-    EXPECT_TRUE(loom_target_snapshot_satisfies_requirement(
-        record_properties.common->snapshot,
-        target_profile.properties.common->snapshot));
-    EXPECT_TRUE(loom_target_snapshot_satisfies_requirement(
-        target_profile.properties.common->snapshot,
-        record_properties.common->snapshot));
-
-    loom_amdgpu_target_profile_t equal_profile = {};
-    IREE_ASSERT_OK(
-        loom_amdgpu_target_profile_initialize(&identity, &equal_profile));
-    loom_symbol_ref_t reused_ref = loom_symbol_ref_null();
-    IREE_ASSERT_OK(loom_target_environment_materialize_effective_target(
-        &target_environment_, module.get(), &equal_profile.base,
-        /*authored_target_op=*/nullptr, &reused_ref));
-    EXPECT_EQ(reused_ref.module_id, target_ref.module_id);
-    EXPECT_EQ(reused_ref.symbol_id, target_ref.symbol_id);
-  }
-}
-
-TEST_F(AmdgpuProviderTest,
-       MaterializesTargetsSharingAProcessorAsDistinctRecords) {
-  ModulePtr module;
-  IREE_ASSERT_OK(AllocateModule(IREE_SV("materialize_overlays"), &module));
-
-  iree_host_size_t shared_processor_pair_count = 0;
-  const iree_host_size_t target_count = loom_amdgpu_target_info_target_count();
-  for (iree_host_size_t lhs_ordinal = 0; lhs_ordinal < target_count;
-       ++lhs_ordinal) {
-    const loom_amdgpu_target_info_t* lhs =
-        loom_amdgpu_target_info_target_at(lhs_ordinal);
-    ASSERT_NE(lhs, nullptr);
-    for (iree_host_size_t rhs_ordinal = lhs_ordinal + 1;
-         rhs_ordinal < target_count; ++rhs_ordinal) {
-      const loom_amdgpu_target_info_t* rhs =
-          loom_amdgpu_target_info_target_at(rhs_ordinal);
-      ASSERT_NE(rhs, nullptr);
-      if (lhs->processor_ordinal != rhs->processor_ordinal) {
-        continue;
-      }
-
-      loom_symbol_ref_t refs[2] = {};
-      const loom_amdgpu_target_info_t* targets[] = {lhs, rhs};
-      for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(targets); ++i) {
-        const loom_amdgpu_target_identity_t identity =
-            MakeTargetIdentity(targets[i]);
-        loom_amdgpu_target_profile_t profile = {};
-        IREE_ASSERT_OK(
-            loom_amdgpu_target_profile_initialize(&identity, &profile));
-        IREE_ASSERT_OK(loom_target_environment_materialize_effective_target(
-            &target_environment_, module.get(), &profile.base,
-            /*authored_target_op=*/nullptr, &refs[i]));
-
-        const loom_op_t* target_op = TargetOpFromRef(module.get(), refs[i]);
-        EXPECT_EQ(loom_amdgpu_target_record_target(target_op), targets[i]);
-        const loom_target_symbol_facts_t* target =
-            Target(module.get(), refs[i]);
-        loom_amdgpu_target_properties_t properties = {};
-        loom_amdgpu_target_record_resolve_properties(
-            target_op, &target->projection->storage.bundle, &properties);
-        EXPECT_EQ(properties.target, targets[i]);
-        EXPECT_EQ(properties.instruction_constraints,
-                  targets[i]->instruction_constraints);
-      }
-      EXPECT_NE(refs[0].symbol_id, refs[1].symbol_id);
-      ++shared_processor_pair_count;
-    }
-  }
-  EXPECT_GT(shared_processor_pair_count, 0u);
-}
-
-TEST_F(AmdgpuProviderTest, ReusesAuthoredFeatureRecordAndSeparatesVariant) {
-  ModulePtr module =
-      Parse(IREE_SV("amdgpu.target<gfx942> @authored "
-                    "{sramecc = on, xnack = off}\n"));
-
-  const loom_amdgpu_target_info_t* target = nullptr;
-  IREE_ASSERT_OK(
-      loom_amdgpu_target_info_lookup_target(IREE_SV("gfx942"), &target));
-  ASSERT_NE(target, nullptr);
-
-  loom_amdgpu_target_identity_t authored_identity = MakeTargetIdentity(target);
-  authored_identity.amdhsa_features.sramecc = LOOM_AMDGPU_TARGET_FEATURE_ON;
-  authored_identity.amdhsa_features.xnack = LOOM_AMDGPU_TARGET_FEATURE_OFF;
-  loom_amdgpu_target_profile_t authored_profile = {};
-  IREE_ASSERT_OK(loom_amdgpu_target_profile_initialize(&authored_identity,
-                                                       &authored_profile));
-  loom_symbol_ref_t authored_ref = loom_symbol_ref_null();
-  IREE_ASSERT_OK(loom_target_environment_materialize_effective_target(
-      &target_environment_, module.get(), &authored_profile.base,
-      /*authored_target_op=*/nullptr, &authored_ref));
-  const loom_symbol_ref_t expected_authored_ref =
-      FindSymbolRef(module.get(), IREE_SV("authored"));
-  EXPECT_EQ(authored_ref.symbol_id, expected_authored_ref.symbol_id);
-
-  loom_amdgpu_target_identity_t variant_identity = MakeTargetIdentity(target);
-  variant_identity.amdhsa_features.sramecc = LOOM_AMDGPU_TARGET_FEATURE_OFF;
-  variant_identity.amdhsa_features.xnack = LOOM_AMDGPU_TARGET_FEATURE_ON;
-  loom_amdgpu_target_profile_t variant_profile = {};
-  IREE_ASSERT_OK(loom_amdgpu_target_profile_initialize(&variant_identity,
-                                                       &variant_profile));
-  loom_symbol_ref_t variant_ref = loom_symbol_ref_null();
-  IREE_ASSERT_OK(loom_target_environment_materialize_effective_target(
-      &target_environment_, module.get(), &variant_profile.base,
-      /*authored_target_op=*/nullptr, &variant_ref));
-  EXPECT_NE(variant_ref.symbol_id, authored_ref.symbol_id);
-
-  loom_amdgpu_target_identity_t record_identity = {};
-  loom_amdgpu_target_record_resolve_identity(
-      TargetOpFromRef(module.get(), variant_ref), &record_identity);
-  EXPECT_EQ(record_identity.amdhsa_features.sramecc,
-            LOOM_AMDGPU_TARGET_FEATURE_OFF);
-  EXPECT_EQ(record_identity.amdhsa_features.xnack,
-            LOOM_AMDGPU_TARGET_FEATURE_ON);
-
-  loom_amdgpu_target_profile_t equal_variant_profile = {};
-  IREE_ASSERT_OK(loom_amdgpu_target_profile_initialize(&variant_identity,
-                                                       &equal_variant_profile));
-  loom_symbol_ref_t equal_variant_ref = loom_symbol_ref_null();
-  IREE_ASSERT_OK(loom_target_environment_materialize_effective_target(
-      &target_environment_, module.get(), &equal_variant_profile.base,
-      /*authored_target_op=*/nullptr, &equal_variant_ref));
-  EXPECT_EQ(equal_variant_ref.symbol_id, variant_ref.symbol_id);
-}
-
 TEST_F(AmdgpuProviderTest, SatisfiesCanonicalProcessorRequirements) {
   ModulePtr module =
       Parse(IREE_SV("amdgpu.target<gfx1151> @gfx1151_a\n"
@@ -624,17 +448,16 @@ TEST_F(AmdgpuProviderTest, PreservesTargetOverlayRequirements) {
   EXPECT_FALSE(Satisfies(gfx12_5_generic, gfx1250_a0));
 }
 
-TEST_F(AmdgpuProviderTest, ExhaustsSupportedRecordSatisfactionRelation) {
-  struct MaterializedRecord {
-    // Generated canonical target row represented by the record.
+TEST_F(AmdgpuProviderTest, ExhaustsSupportedProfileSatisfactionRelation) {
+  struct ProjectedProfile {
+    // Generated canonical target represented by the profile.
     const loom_amdgpu_target_info_t* target_info;
 
-    // Indexed materialized target record for the target.
-    const loom_target_symbol_facts_t* target;
+    // Compiler-owned facts projected from the profile.
+    const loom_target_facts_t* facts;
   };
 
-  ModulePtr module = Parse(IREE_SV(""));
-  std::vector<MaterializedRecord> records;
+  std::vector<ProjectedProfile> profiles;
   const iree_host_size_t target_count = loom_amdgpu_target_info_target_count();
   for (iree_host_size_t i = 0; i < target_count; ++i) {
     const loom_amdgpu_target_info_t* target_info =
@@ -644,25 +467,23 @@ TEST_F(AmdgpuProviderTest, ExhaustsSupportedRecordSatisfactionRelation) {
     const loom_amdgpu_target_identity_t identity =
         MakeTargetIdentity(target_info);
     IREE_ASSERT_OK(loom_amdgpu_target_profile_initialize(&identity, &profile));
-    loom_symbol_ref_t target_ref = loom_symbol_ref_null();
-    IREE_ASSERT_OK(loom_target_environment_materialize_effective_target(
-        &target_environment_, module.get(), &profile.base,
-        /*authored_target_op=*/nullptr, &target_ref));
-    const loom_target_symbol_facts_t* target = Target(module.get(), target_ref);
-    ASSERT_TRUE(target != nullptr && target->projection != nullptr);
-    records.push_back({
+    loom_target_facts_t* facts = nullptr;
+    IREE_ASSERT_OK(loom_target_profile_project_facts(&profile.base,
+                                                     &analysis_arena_, &facts));
+    ASSERT_NE(facts, nullptr);
+    profiles.push_back({
         /*.target_info=*/target_info,
-        /*.target=*/target,
+        /*.facts=*/facts,
     });
   }
 
-  ASSERT_FALSE(records.empty());
-  for (const MaterializedRecord& effective : records) {
-    for (const MaterializedRecord& requirement : records) {
+  ASSERT_FALSE(profiles.empty());
+  for (const ProjectedProfile& effective : profiles) {
+    for (const ProjectedProfile& requirement : profiles) {
       const bool expected =
           loom_amdgpu_target_satisfies_code_object_requirement(
               effective.target_info, requirement.target_info);
-      EXPECT_EQ(Satisfies(effective.target, requirement.target), expected)
+      EXPECT_EQ(Satisfies(effective.facts, requirement.facts), expected)
           << "effective "
           << std::string(effective.target_info->name.data,
                          effective.target_info->name.size)

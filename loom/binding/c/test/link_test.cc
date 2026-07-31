@@ -26,7 +26,6 @@
 #include "loom/ops/op_registry.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
-#include "loom/target/materialization.h"
 #include "loom/target/profile.h"
 #include "loom/target/provider.h"
 #include "loom/target/test/target_records.h"
@@ -82,38 +81,6 @@ static iree_status_t RegisterFakeTargetContext(loom_context_t* context) {
   return loom_test_dialect_register(context);
 }
 
-static iree_string_view_t FakeTargetMaterializationSymbolStem(
-    const loom_target_profile_t* profile) {
-  return loom_target_profile_has_type(profile, &kFakeTargetProfileType)
-             ? IREE_SV("selected_link_target")
-             : iree_string_view_empty();
-}
-
-static bool FakeTargetRecordMatchesEffectiveTarget(
-    const loom_module_t* module, const loom_op_t* target_op,
-    const loom_target_profile_t* profile, const loom_op_t* authored_target_op) {
-  return loom_target_profile_has_type(profile, &kFakeTargetProfileType) &&
-         loom_test_target_kind(target_op) == LOOM_TEST_TARGET_KIND_LOW_CORE &&
-         loom_target_record_projection_matches_bundle(
-             module, target_op, profile->target_bundle, authored_target_op);
-}
-
-static iree_status_t BuildFakeTargetEffectiveRecord(
-    loom_builder_t* builder, const loom_target_profile_t* profile,
-    const loom_op_t* authored_target_op, loom_symbol_ref_t symbol,
-    loom_location_id_t location, loom_op_t** out_target_op) {
-  if (!loom_target_profile_has_type(profile, &kFakeTargetProfileType)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "fake target materialization requires a fake target profile");
-  }
-  return loom_target_record_projection_build(
-      builder, LOOM_OP_TEST_TARGET, LOOM_TEST_TARGET_KIND_LOW_CORE, symbol,
-      profile->target_bundle, authored_target_op,
-      /*extension_attrs=*/nullptr,
-      /*extension_attr_count=*/0, location, out_target_op);
-}
-
 static const loom_target_provider_t kFakeTargetProvider = {
     /*.profile_type=*/&kFakeTargetProfileType,
     /*.register_context=*/RegisterFakeTargetContext,
@@ -128,15 +95,6 @@ static const loom_target_provider_t kFakeTargetProvider = {
     /*.emitter_list=*/{},
     /*.pass_registry=*/nullptr,
     /*.contribute_pipeline=*/nullptr,
-    /*.materialization=*/
-    {
-        /*.op_kind=*/LOOM_OP_TEST_TARGET,
-        /*.symbol_stem=*/FakeTargetMaterializationSymbolStem,
-        /*.record_matches_effective_target=*/
-        FakeTargetRecordMatchesEffectiveTarget,
-        /*.build_effective_target_record=*/
-        BuildFakeTargetEffectiveRecord,
-    },
 };
 
 static const loom_target_provider_t* const kFakeTargetProviders[] = {
