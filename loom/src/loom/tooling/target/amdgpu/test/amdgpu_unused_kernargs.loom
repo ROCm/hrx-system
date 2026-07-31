@@ -90,9 +90,9 @@ kernel.def @selected_buffer_per_workgroup() {
   %zero = index.constant 0 : index
   %two = index.constant 2 : index
   %zero_offset = index.constant 0 : offset
+  %use_lhs = index.cmp eq, %workgroup, %zero : index
   %use_rhs = index.cmp eq, %workgroup, %two : index
   %middle_or_rhs = scf.select %use_rhs, %rhs, %middle : buffer
-  %use_lhs = index.cmp eq, %workgroup, %zero : index
   %selected = scf.select %use_lhs, %lhs, %middle_or_rhs : buffer
   %selected_view = buffer.view %selected[%zero_offset] : buffer -> view<1xi32, #dense>
   %output_view = buffer.view %output[%zero_offset] : buffer -> view<3xi32, #dense>

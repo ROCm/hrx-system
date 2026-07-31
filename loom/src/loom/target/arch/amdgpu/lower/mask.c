@@ -418,6 +418,13 @@ static iree_status_t loom_amdgpu_resolve_i1_mask_select_descriptors(
       context, LOOM_AMDGPU_DESCRIPTOR_REF_S_CSELECT_B32, &plan->scc_descriptor,
       &scc_present));
   all_present = all_present && scc_present;
+  if (plan->condition_kind == LOOM_AMDGPU_SELECT_CONDITION_KIND_SGPR_BOOL) {
+    bool compare_present = false;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
+        context, LOOM_AMDGPU_DESCRIPTOR_REF_S_CMP_LG_I32_SRC1_INLINE,
+        &plan->sgpr_bool_compare_descriptor, &compare_present));
+    all_present = all_present && compare_present;
+  }
   bool exec_read_present = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
       context, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_EXEC_READ,
@@ -425,6 +432,7 @@ static iree_status_t loom_amdgpu_resolve_i1_mask_select_descriptors(
   all_present = all_present && exec_read_present;
   if (!all_present ||
       plan->condition_kind == LOOM_AMDGPU_SELECT_CONDITION_KIND_SCC ||
+      plan->condition_kind == LOOM_AMDGPU_SELECT_CONDITION_KIND_SGPR_BOOL ||
       plan->true_value == plan->false_value) {
     *out_present = all_present;
     return iree_ok_status();
@@ -543,17 +551,23 @@ static iree_status_t loom_amdgpu_select_scf_select_i1_mask_plan(
                                                 &condition_low_type));
   const bool condition_is_scc = loom_amdgpu_low_type_is_register_class_count(
       context, condition_low_type, LOOM_AMDGPU_REG_CLASS_ID_SCC, 1);
+  const bool condition_is_sgpr_bool =
+      loom_amdgpu_low_type_is_register_class_count(
+          context, condition_low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1);
   const bool condition_is_mask = loom_amdgpu_low_type_is_register_class_count(
       context, condition_low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2);
-  if (!condition_is_scc && !condition_is_mask) {
+  if (!condition_is_scc && !condition_is_sgpr_bool && !condition_is_mask) {
     return iree_ok_status();
   }
 
   loom_amdgpu_vector_select_plan_t plan = {
       .payload_kind = LOOM_AMDGPU_SELECT_PAYLOAD_KIND_I1_MASK,
-      .condition_kind = condition_is_scc
-                            ? LOOM_AMDGPU_SELECT_CONDITION_KIND_SCC
-                            : LOOM_AMDGPU_SELECT_CONDITION_KIND_SCALAR_MASK,
+      .condition_kind =
+          condition_is_scc
+              ? LOOM_AMDGPU_SELECT_CONDITION_KIND_SCC
+              : (condition_is_sgpr_bool
+                     ? LOOM_AMDGPU_SELECT_CONDITION_KIND_SGPR_BOOL
+                     : LOOM_AMDGPU_SELECT_CONDITION_KIND_SCALAR_MASK),
       .condition = condition,
       .true_value = true_value,
       .false_value = false_value,
@@ -612,9 +626,12 @@ iree_status_t loom_amdgpu_select_scf_select_plan(
 
   const bool condition_is_scc = loom_amdgpu_low_type_is_register_class_count(
       context, condition_low_type, LOOM_AMDGPU_REG_CLASS_ID_SCC, 1);
+  const bool condition_is_sgpr_bool =
+      loom_amdgpu_low_type_is_register_class_count(
+          context, condition_low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1);
   const bool result_is_sgpr = loom_amdgpu_low_type_is_register_class_count(
       context, result_low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, register_count);
-  if (condition_is_scc && result_is_sgpr) {
+  if ((condition_is_scc || condition_is_sgpr_bool) && result_is_sgpr) {
     loom_low_lower_resolved_descriptor_t scc_descriptor = {0};
     bool scc_descriptor_present = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
@@ -623,10 +640,23 @@ iree_status_t loom_amdgpu_select_scf_select_plan(
     if (!scc_descriptor_present) {
       return iree_ok_status();
     }
+    loom_low_lower_resolved_descriptor_t sgpr_bool_compare_descriptor = {0};
+    if (condition_is_sgpr_bool) {
+      bool compare_present = false;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
+          context, LOOM_AMDGPU_DESCRIPTOR_REF_S_CMP_LG_I32_SRC1_INLINE,
+          &sgpr_bool_compare_descriptor, &compare_present));
+      if (!compare_present) {
+        return iree_ok_status();
+      }
+    }
     *out_plan = (loom_amdgpu_vector_select_plan_t){
         .payload_kind = LOOM_AMDGPU_SELECT_PAYLOAD_KIND_DATA,
-        .condition_kind = LOOM_AMDGPU_SELECT_CONDITION_KIND_SCC,
+        .condition_kind = condition_is_scc
+                              ? LOOM_AMDGPU_SELECT_CONDITION_KIND_SCC
+                              : LOOM_AMDGPU_SELECT_CONDITION_KIND_SGPR_BOOL,
         .scc_descriptor = scc_descriptor,
+        .sgpr_bool_compare_descriptor = sgpr_bool_compare_descriptor,
         .condition = condition,
         .true_value = true_value,
         .false_value = false_value,
@@ -1751,6 +1781,27 @@ static iree_status_t loom_amdgpu_emit_i1_mask_exec_read(
   return iree_ok_status();
 }
 
+static iree_status_t loom_amdgpu_emit_sgpr_bool_scc(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_vector_select_plan_t* plan, loom_value_id_t low_condition,
+    loom_value_id_t* out_low_condition) {
+  *out_low_condition = LOOM_VALUE_ID_INVALID;
+  loom_type_t scc_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_amdgpu_make_scc_type(context, &scc_type));
+  loom_named_attr_t attrs[1] = {0};
+  iree_host_size_t attr_count = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_i64_attr(
+      context, IREE_SV("rhs"), 0, attrs, IREE_ARRAYSIZE(attrs), &attr_count));
+  loom_op_t* compare_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+      context, &plan->sgpr_bool_compare_descriptor, &low_condition, 1,
+      loom_make_named_attr_slice(attrs, attr_count), &scc_type, 1,
+      /*tied_results=*/NULL, /*tied_result_count=*/0, source_op->location,
+      &compare_op));
+  *out_low_condition = loom_value_slice_get(loom_low_op_results(compare_op), 0);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_emit_i1_zero_mask(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_type_t lane_type, loom_type_t mask_type, loom_value_id_t* out_mask) {
@@ -1820,11 +1871,16 @@ static iree_status_t loom_amdgpu_lower_i1_mask_select(
         &low_value));
     return loom_low_lower_bind_value(context, plan->result, low_value);
   }
+  if (plan->condition_kind == LOOM_AMDGPU_SELECT_CONDITION_KIND_SGPR_BOOL) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr_bool_scc(
+        context, source_op, plan, low_condition, &low_condition));
+  }
 
   loom_value_id_t low_true_value = LOOM_VALUE_ID_INVALID;
   loom_value_id_t low_false_value = LOOM_VALUE_ID_INVALID;
 
-  if (plan->condition_kind == LOOM_AMDGPU_SELECT_CONDITION_KIND_SCC) {
+  if (plan->condition_kind == LOOM_AMDGPU_SELECT_CONDITION_KIND_SCC ||
+      plan->condition_kind == LOOM_AMDGPU_SELECT_CONDITION_KIND_SGPR_BOOL) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_or_emit_i1_mask_value(
         context, source_op, plan->true_value, lane_type, mask_type, plan,
         &low_true_value));
@@ -1976,6 +2032,10 @@ iree_status_t loom_amdgpu_lower_select(
   loom_value_id_t low_condition = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_lookup_value(context, plan->condition, &low_condition));
+  if (plan->condition_kind == LOOM_AMDGPU_SELECT_CONDITION_KIND_SGPR_BOOL) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr_bool_scc(
+        context, source_op, plan, low_condition, &low_condition));
+  }
   loom_value_id_t low_true_value = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_lookup_value(context, plan->true_value, &low_true_value));
@@ -1983,7 +2043,8 @@ iree_status_t loom_amdgpu_lower_select(
   IREE_RETURN_IF_ERROR(loom_low_lower_lookup_value(context, plan->false_value,
                                                    &low_false_value));
 
-  if (plan->condition_kind == LOOM_AMDGPU_SELECT_CONDITION_KIND_SCC) {
+  if (plan->condition_kind == LOOM_AMDGPU_SELECT_CONDITION_KIND_SCC ||
+      plan->condition_kind == LOOM_AMDGPU_SELECT_CONDITION_KIND_SGPR_BOOL) {
     loom_type_t lane_type = loom_type_none();
     IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_type(context, &lane_type));
     loom_value_id_t lane_results[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
