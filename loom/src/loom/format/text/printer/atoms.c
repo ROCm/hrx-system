@@ -601,8 +601,10 @@ static iree_status_t loom_text_print_type_impl(
         return loom_output_stream_write_cstring(stream, ">");
       }
       const loom_text_low_asm_descriptor_set_t* descriptor_set =
-          ctx->low_register_descriptor_set;
-      if (!descriptor_set && ctx->low_asm_environment.vtable &&
+          ctx->low_repr.descriptor_set;
+      if (!descriptor_set &&
+          iree_string_view_is_empty(ctx->low_repr.contract_key) &&
+          ctx->low_asm_environment.vtable &&
           ctx->low_asm_environment.vtable->lookup_register_descriptor_set) {
         IREE_RETURN_IF_ERROR(
             ctx->low_asm_environment.vtable->lookup_register_descriptor_set(
@@ -708,9 +710,10 @@ iree_status_t loom_text_print_type_with_options(
   if (!iree_string_view_is_empty(ctx.low_asm_descriptor_set_key) &&
       ctx.low_asm_environment.vtable &&
       ctx.low_asm_environment.vtable->lookup_descriptor_set) {
+    ctx.low_repr.contract_key = ctx.low_asm_descriptor_set_key;
     IREE_RETURN_IF_ERROR(ctx.low_asm_environment.vtable->lookup_descriptor_set(
         ctx.low_asm_environment.state, ctx.low_asm_descriptor_set_key,
-        &ctx.low_register_descriptor_set));
+        &ctx.low_repr.descriptor_set));
   }
   return loom_text_print_type_impl(type, module, stream, &ctx);
 }

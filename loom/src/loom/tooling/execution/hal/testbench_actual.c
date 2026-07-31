@@ -9,14 +9,18 @@
 #include <string.h>
 
 #include "iree/tooling/device_util.h"
+#include "loom/analysis/symbol_facts.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/link/linker.h"
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/special_values.h"
+#include "loom/ops/target/facts.h"
 #include "loom/tooling/compile/pipeline.h"
 #include "loom/tooling/config/config.h"
 #include "loom/tooling/execution/compile_report_capture.h"
@@ -317,6 +321,7 @@ void loom_run_hal_testbench_actual_provider_deinitialize(
         provider->context->artifact_provider, &provider->compile_device_target,
         provider->context->host_allocator);
   }
+  loom_compile_pipeline_result_deinitialize(&provider->pipeline_result);
   if (provider->compile_module_initialized) {
     loom_run_module_deinitialize(&provider->compile_module);
   }
@@ -763,6 +768,40 @@ loom_run_hal_testbench_resolve_static_workgroup_count_from_facts(
   return iree_ok_status();
 }
 
+static iree_status_t loom_run_hal_testbench_resolve_target_requirement(
+    loom_module_t* module, loom_func_like_t func,
+    const loom_target_facts_t** out_target_requirement) {
+  *out_target_requirement = NULL;
+
+  loom_symbol_fact_table_t symbol_facts = {0};
+  loom_symbol_fact_table_initialize(&symbol_facts, &module->arena);
+  const loom_symbol_facts_base_t* base_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
+      &symbol_facts, module, loom_func_like_callee(func), &base_facts));
+  const loom_func_symbol_facts_t* function_facts =
+      loom_func_symbol_facts_cast(base_facts);
+  if (function_facts == NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "HAL testbench target selection requires a function symbol");
+  }
+  if (!loom_symbol_ref_is_valid(function_facts->target_symbol)) {
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
+      &symbol_facts, module, function_facts->target_symbol, &base_facts));
+  const loom_target_symbol_facts_t* target_facts =
+      loom_target_symbol_facts_cast(base_facts);
+  if (target_facts == NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "HAL testbench function target does not resolve to target facts");
+  }
+  *out_target_requirement = target_facts->projection;
+  return iree_ok_status();
+}
+
 iree_status_t loom_run_hal_testbench_actual_provider_compile(
     loom_run_hal_testbench_actual_provider_t* provider) {
   if (provider->prepared_candidate_initialized || provider->compile_rejected) {
@@ -826,17 +865,14 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   if (!provider->compile_device_target_initialized) {
     const loom_run_hal_artifact_provider_t* artifact_provider =
         provider->context->artifact_provider;
-    if (artifact_provider->select_function_device_target == NULL) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "HAL artifact provider '%.*s' is missing required function device "
-          "target selection hook",
-          (int)artifact_provider->name.size, artifact_provider->name.data);
-    }
-    IREE_RETURN_IF_ERROR(artifact_provider->select_function_device_target(
-        artifact_provider, &provider->context->runtime,
-        provider->compile_module.module, entry_func,
-        provider->context->host_allocator, &provider->compile_device_target));
+    const loom_target_facts_t* target_requirement = NULL;
+    IREE_RETURN_IF_ERROR(loom_run_hal_testbench_resolve_target_requirement(
+        provider->compile_module.module, entry_func, &target_requirement));
+    IREE_RETURN_IF_ERROR(
+        loom_run_hal_artifact_provider_select_compatible_device_target(
+            artifact_provider, &provider->context->runtime, target_requirement,
+            provider->context->host_allocator,
+            &provider->compile_device_target));
     provider->compile_device_target_initialized = true;
   }
 
@@ -869,7 +905,8 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   const iree_host_size_t compile_error_count = provider->diagnostic_error_count;
   iree_status_t status = loom_compile_run_pipeline(
       provider->compile_module.module, &pipeline_options,
-      loom_run_session_block_pool(provider->session), &provider->pass_result);
+      loom_run_session_block_pool(provider->session),
+      &provider->pipeline_result);
   if (!iree_status_is_ok(status)) {
     if (provider->diagnostic_error_count != compile_error_count) {
       iree_status_free(status);
@@ -880,7 +917,7 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
     }
     return status;
   }
-  if (provider->pass_result.error_count != 0) {
+  if (provider->pipeline_result.pass.error_count != 0) {
     loom_run_hal_testbench_record_compile_rejection(
         provider, IREE_SV("compile"), IREE_SV("pass_diagnostics"),
         iree_string_view_empty());
@@ -890,6 +927,8 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   loom_run_candidate_compile_options_t compile_options = {0};
   loom_run_candidate_compile_options_initialize(&compile_options);
   compile_options.module_name = IREE_SV("loom");
+  compile_options.function_versions =
+      &provider->pipeline_result.function_versions;
   compile_options.target_pipeline_options =
       pipeline_options.target_pipeline_options;
   compile_options.diagnostic_sink = diagnostic_sink;

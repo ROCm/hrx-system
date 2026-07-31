@@ -19,7 +19,7 @@ func.def target(@target) @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: 
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_i32_uniform_sgpr(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %shift: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_i32_uniform_sgpr(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %shift: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %product = mul.i32 %lhs, %rhs
   %and = and.i32 %product, %lhs
   %or = or.i32 %and, %rhs
@@ -42,7 +42,7 @@ func.def target(@target) @scalar_i32_compare_scc(%lhs: i32, %rhs: i32) -> (i1) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_i32_compare_scc(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i1>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_i32_compare_scc(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i1>) asm {
   %cmp = cmp.slt.i32 %lhs, %rhs
   return %cmp
 }
@@ -64,7 +64,7 @@ func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_i1_bitwise_scc(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i1>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_i1_bitwise_scc(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i1>) asm {
   %zero = const.i32 0
   %lhs_nonzero = cmp.ne.i32 %lhs, %zero
   %rhs_nonzero = cmp.ne.i32 %rhs, %zero

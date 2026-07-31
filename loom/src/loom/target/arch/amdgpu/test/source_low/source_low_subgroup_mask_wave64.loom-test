@@ -17,7 +17,7 @@ kernel.def target(@target) @subgroup_active_mask_i64_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_active_mask_i64_wave64() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_active_mask_i64_wave64() asm {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %mask = s_mov_b64_exec_read
@@ -54,7 +54,7 @@ kernel.def target(@target) @subgroup_vote_ballot_i64_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_vote_ballot_i64_wave64() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_vote_ballot_i64_wave64() asm {
   %lane_i32 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %mask = v_cmp_lt_i32_src1_inline %lane_i32 {rhs = 32}

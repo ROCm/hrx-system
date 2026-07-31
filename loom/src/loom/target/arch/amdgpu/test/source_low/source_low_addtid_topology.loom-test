@@ -19,7 +19,7 @@ kernel.def target(@target) @wave64_workgroup_memory_workitem_x_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wave64_workgroup_memory_workitem_x_b32() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wave64_workgroup_memory_workitem_x_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %10 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %one = v_mov_b32 1
@@ -53,7 +53,7 @@ kernel.def target(@target) @wave64_workgroup_memory_workitem_x_b32_static_offset
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wave64_workgroup_memory_workitem_x_b32_static_offset() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wave64_workgroup_memory_workitem_x_b32_static_offset() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %12 = storage {byte_alignment = 16, byte_length = 272} : low.storage<workgroup>
   %one = v_mov_b32 1
@@ -85,7 +85,7 @@ kernel.def target(@target) @cross_wave64_workgroup_memory_workitem_x_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @cross_wave64_workgroup_memory_workitem_x_b32() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @cross_wave64_workgroup_memory_workitem_x_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %10 = storage {byte_alignment = 16, byte_length = 512} : low.storage<workgroup>
   %one = v_mov_b32 1
@@ -118,7 +118,7 @@ kernel.def target(@target) @multidim_workgroup_memory_workitem_xy_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 8, 1) workgroup_count(1, 1, 1) @multidim_workgroup_memory_workitem_xy_b32() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 8, 1) workgroup_count(1, 1, 1) @multidim_workgroup_memory_workitem_xy_b32() asm {
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
   %column = v_and_b32_lit %packed_tid, 1023
   %20 = v_lshrrev_b32_src0_inline %packed_tid, 10

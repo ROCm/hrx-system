@@ -22,7 +22,7 @@ kernel.def target(@target) @lds_f16x4_b64_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16x4_b64_roundtrip() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16x4_b64_roundtrip() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -58,7 +58,7 @@ kernel.def target(@target) @lds_f16x8_b128_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16x8_b128_roundtrip() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16x8_b128_roundtrip() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -107,7 +107,7 @@ kernel.def target(@target) @lds_f16x8_b128_extract_scalar_stores() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_f16x8_b128_extract_scalar_stores() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_f16x8_b128_extract_scalar_stores() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %21 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
@@ -157,7 +157,7 @@ kernel.def target(@target) @lds_bf16x4_b64_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_bf16x4_b64_roundtrip() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_bf16x4_b64_roundtrip() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -193,7 +193,7 @@ kernel.def target(@target) @lds_bf16x8_b128_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_bf16x8_b128_roundtrip() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_bf16x8_b128_roundtrip() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -229,7 +229,7 @@ kernel.def target(@target) @lds_f16_scalar_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16_scalar_roundtrip() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_f16_scalar_roundtrip() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
@@ -264,7 +264,7 @@ kernel.def target(@target) @lds_i8x2_b16_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_i8x2_b16_roundtrip() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_i8x2_b16_roundtrip() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 2} : reg<amdgpu.sgpr x2>
   %13 = storage {byte_alignment = 2, byte_length = 2} : low.storage<workgroup>
@@ -297,7 +297,7 @@ kernel.def target(@target) @lds_i16_scalar_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_i16_scalar_roundtrip() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_i16_scalar_roundtrip() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 2} : reg<amdgpu.sgpr x2>
   %13 = storage {byte_alignment = 2, byte_length = 2} : low.storage<workgroup>
@@ -333,7 +333,7 @@ kernel.def target(@target) @lds_bf16_scalar_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_bf16_scalar_roundtrip() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_bf16_scalar_roundtrip() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
@@ -372,7 +372,7 @@ kernel.def target(@target) @lds_f16_strided_scalar_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(16, 16, 1) workgroup_count(1, 1, 1) @lds_f16_strided_scalar_roundtrip() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(16, 16, 1) workgroup_count(1, 1, 1) @lds_f16_strided_scalar_roundtrip() asm {
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>

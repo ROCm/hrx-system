@@ -9,6 +9,7 @@
 #include "loom/analysis/vector_memory_footprint.h"
 #include "loom/ops/op_defs.h"
 #include "loom/pass/value_facts.h"
+#include "loom/target/facts.h"
 #include "loom/target/pass_environment.h"
 
 #define LOOM_VECTOR_MEMORY_FOOTPRINT_STATISTICS(V, statistics_type) \
@@ -37,20 +38,13 @@ static iree_status_t loom_vector_memory_footprint_fact_scope(
     loom_pass_t* pass, const loom_module_t* module, loom_func_like_t function,
     loom_pass_value_fact_scope_t* out_scope) {
   *out_scope = loom_pass_value_fact_scope_function(function);
-  if (!pass->environment) {
-    return iree_ok_status();
-  }
-
-  loom_target_bundle_storage_t* bundle_storage = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate(pass->arena, sizeof(*bundle_storage),
-                                           (void**)&bundle_storage));
+  const loom_target_facts_t* target_facts = NULL;
   bool resolved = false;
-  IREE_RETURN_IF_ERROR(loom_target_pass_capability_resolve_function_bundle(
-      pass->environment, module, function, pass->diagnostic_emitter,
-      pass->arena, &resolved, bundle_storage));
+  IREE_RETURN_IF_ERROR(loom_target_pass_resolve_function_facts(
+      pass, module, function, &resolved, &target_facts));
   if (resolved) {
-    *out_scope = loom_pass_value_fact_scope_function_for_target(
-        function, &bundle_storage->bundle, NULL);
+    *out_scope =
+        loom_pass_value_fact_scope_function_for_target(function, target_facts);
   }
   return iree_ok_status();
 }

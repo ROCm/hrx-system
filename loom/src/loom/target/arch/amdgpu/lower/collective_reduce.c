@@ -909,7 +909,9 @@ iree_status_t loom_amdgpu_select_kernel_workgroup_reduce_plan(
   }
   const uint32_t partition_wavefront_size =
       loom_amdgpu_target_native_subgroup_width(
-          module, loom_low_lower_context_target_ref(context), wavefront_size);
+          loom_amdgpu_target_facts_cast(
+              loom_low_lower_context_target_facts(context)),
+          wavefront_size);
 
   loom_amdgpu_workgroup_collective_shape_t shape = {0};
   loom_amdgpu_workgroup_collective_shape_failure_t shape_failure =
@@ -2187,8 +2189,9 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_reduce(
       shape.flags, LOOM_AMDGPU_SUBGROUP_REDUCE_SHAPE_CLUSTERED);
   const bool direct_width_supported =
       loom_amdgpu_target_supports_direct_subgroup_width(
-          module, loom_target_low_legality_target_ref(context), wavefront_size,
-          active_lane_count);
+          loom_amdgpu_target_facts_cast(
+              loom_target_low_legality_target_facts(context)),
+          wavefront_size, active_lane_count);
   bool scalar_broadcast_supported = false;
   if (!direct_width_supported) {
     scalar_broadcast_supported =
@@ -2313,7 +2316,9 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_workgroup_reduce(
   }
   const uint32_t partition_wavefront_size =
       loom_amdgpu_target_native_subgroup_width(
-          module, loom_target_low_legality_target_ref(context), wavefront_size);
+          loom_amdgpu_target_facts_cast(
+              loom_target_low_legality_target_facts(context)),
+          wavefront_size);
 
   loom_amdgpu_workgroup_collective_shape_t shape = {0};
   loom_amdgpu_workgroup_collective_shape_failure_t shape_failure =

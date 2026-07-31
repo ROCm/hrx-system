@@ -83,7 +83,7 @@ __all__ = [
     "GLUE",
     # Angle-bracket elements.
     "Flags",
-    "OpRef",
+    "KeyRef",
     "DescriptorRef",
     "StableKeyRef",
     "TemplateParam",
@@ -672,22 +672,23 @@ class Flags:
 
 
 @dataclass(frozen=True, slots=True)
-class OpRef:
-    """Symbolic operation or implementation key in angle brackets.
+class KeyRef:
+    """Bare symbolic key in angle brackets.
 
     Prints/parses: <key.name> (glued to the op name) where the value
-    is a dotted symbolic key like "tile.contract", "tile.reduce", or
-    "qwen.q4.matmul".
+    is a dotted symbolic key like "tile.contract", "llvm.memcpy", or
+    "amdgpu.rdna3_5.core".
 
-    Used by func.template<T> and func.ukernel<T> to declare which
-    implementation contract key they provide, and by func.apply<T> to
-    demand a provider for that same contract key.
+    This is the untyped textual form for a required key that only needs its
+    canonical spelling in IR. DescriptorRef and StableKeyRef add derived
+    numeric identities for domains that require them.
 
     The field names a string attribute storing the key.
 
     Examples:
         func.template<tile.contract> device @name(...)
-        func.ukernel<tile.reduce> device @name(...)
+        llvmir.intrinsic<llvm.memcpy> (...)
+        low.func.def target<amdgpu.rdna3_5.core>(@gfx1151) @name(...)
         func.apply<qwen.q4.matmul>(%weights, %input) : (...) -> (...)
     """
 
@@ -855,7 +856,7 @@ type FormatElement = (
     | Scope
     | Glue
     | Flags
-    | OpRef
+    | KeyRef
     | DescriptorRef
     | StableKeyRef
     | TemplateParam

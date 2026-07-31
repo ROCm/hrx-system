@@ -630,6 +630,25 @@ TEST(LowDescriptorsTest, VerifiesAndLooksUpDescriptors) {
   EXPECT_EQ(descriptor_ordinal, LOOM_LOW_DESCRIPTOR_ORDINAL_NONE);
 }
 
+TEST(LowDescriptorsTest, RepresentationSupportsOwnAndDeclaredTargetContracts) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  const uint64_t supported_target_contract_stable_ids[] = {
+      loom_low_descriptor_stable_id_from_key(IREE_SV("test.exact")),
+  };
+  tables.set.supported_target_contract_stable_ids =
+      supported_target_contract_stable_ids;
+  tables.set.supported_target_contract_count =
+      IREE_ARRAYSIZE(supported_target_contract_stable_ids);
+
+  EXPECT_TRUE(loom_low_descriptor_set_supports_target_contract(
+      &tables.set, IREE_SV("test.core")));
+  EXPECT_TRUE(loom_low_descriptor_set_supports_target_contract(
+      &tables.set, IREE_SV("test.exact")));
+  EXPECT_FALSE(loom_low_descriptor_set_supports_target_contract(
+      &tables.set, IREE_SV("test.other")));
+}
+
 TEST(LowDescriptorsTest, ProviderBackedRegistryVerifiesAndLooksUpDescriptors) {
   TestTables tables;
   InitializeTestTables(&tables);

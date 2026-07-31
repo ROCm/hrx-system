@@ -51,10 +51,10 @@ loom_cc_library(
     loom::ops::low
     loom::ops::op_defs
     loom::ops::scf
-    loom::ops::target
     loom::ops::vector
     loom::sanitizer::options
     loom::target::contract
+    loom::target::facts
     loom::target::low_descriptor_registry
     loom::target::low_legality
     loom::target::registers
@@ -83,8 +83,7 @@ loom_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::target
     loom::target::function_contract
-    loom::target::profile
-    loom::target::specialization
+    loom::target::function_version
     loom::target::types
   PUBLIC
 )

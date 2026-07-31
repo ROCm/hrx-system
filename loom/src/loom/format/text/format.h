@@ -446,8 +446,8 @@
 //                           Used for bare Keyword("(") after SymbolRef.
 //   Flags(field)          Per-op-instance flags: <nuw|nsw>.
 //                           Glued to the op name. Stored in instance_flags.
-//   OpRef(field)          Op kind reference: <tile.contract>.
-//                           Glued to the op name. For template/ukernel.
+//   KeyRef(field)         Bare symbolic key: <tile.contract>.
+//                           Glued to the preceding token.
 //   TemplateParam(field)  Required compile-time op parameter: <add>.
 //                           Glued to the op name. Parsed as an attribute.
 //   TemplateParamFlags(p, f)

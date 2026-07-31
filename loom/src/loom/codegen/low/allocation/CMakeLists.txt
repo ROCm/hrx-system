@@ -607,7 +607,10 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::error::error_defs
+    loom::ops::test
+    loom::target::facts_builder
     loom::target::test::descriptors
+    loom::target::test::target_record_table
 )
 
 loom_cc_library(

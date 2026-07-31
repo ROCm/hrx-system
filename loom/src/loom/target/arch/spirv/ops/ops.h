@@ -13,6 +13,7 @@
 #define LOOM_OPS_SPIRV_OPS_H_
 
 #include "loom/ops/op_defs.h"
+#include "loom/target/arch/spirv/facts.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -23,12 +24,6 @@ enum {
   LOOM_OP_SPIRV_TARGET = LOOM_OP_KIND(LOOM_DIALECT_SPIRV, 0),
   LOOM_OP_SPIRV_COUNT_ = 1,
 };
-
-// SPIR-V target row selected by spirv.target.
-typedef enum loom_spirv_target_kind_e {
-  LOOM_SPIRV_TARGET_KIND_VULKAN1_3 = 1,
-  LOOM_SPIRV_TARGET_KIND_COUNT_ = 2,
-} loom_spirv_target_kind_t;
 
 // LOOM_OP_SPIRV_TARGET: SPIR-V target-family record. The selector chooses an authored SPIR-V row; optional attrs structurally override common target fields.
 // spirv.target<vulkan1_3> @spv

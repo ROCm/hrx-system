@@ -967,6 +967,11 @@ typedef struct loom_func_like_vtable_t {
   // Index of the optional target record attr. LOOM_ATTR_INDEX_NONE if absent.
   uint8_t target_attr_index;
 
+  // Index of the optional string key naming the intrinsic contract under which
+  // the function signature and body are represented. LOOM_ATTR_INDEX_NONE
+  // means the op does not expose an intrinsic representation contract.
+  uint8_t repr_contract_attr_index;
+
   // Index of the optional target ABI enum attr. LOOM_ATTR_INDEX_NONE if absent.
   uint8_t abi_attr_index;
 

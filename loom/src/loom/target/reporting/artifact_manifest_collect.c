@@ -341,7 +341,7 @@ static iree_status_t loom_target_artifact_manifest_collect_hal_interface(
     iree_arena_allocator_t* arena,
     loom_target_artifact_manifest_interface_t* out_interface) {
   const loom_target_export_plan_t* export_plan =
-      &entry->bundle_storage.export_plan;
+      loom_target_entry_bundle(entry)->export_plan;
   if (export_plan->abi_kind != LOOM_TARGET_ABI_HAL_KERNEL) {
     return iree_ok_status();
   }
@@ -376,8 +376,8 @@ static iree_status_t loom_target_artifact_manifest_collect_hal_interface(
 static void loom_target_artifact_manifest_collect_execution(
     const loom_target_entry_t* entry,
     loom_target_artifact_manifest_execution_t* out_execution) {
-  const loom_target_export_plan_t* export_plan =
-      &entry->bundle_storage.export_plan;
+  const loom_target_bundle_t* bundle = loom_target_entry_bundle(entry);
+  const loom_target_export_plan_t* export_plan = bundle->export_plan;
   const loom_target_workgroup_size_t required_workgroup_size =
       export_plan->hal_kernel.required_workgroup_size;
   if (export_plan->abi_kind == LOOM_TARGET_ABI_HAL_KERNEL &&
@@ -401,10 +401,10 @@ static void loom_target_artifact_manifest_collect_execution(
                                                      low_cluster_size);
     }
   }
-  if (entry->bundle_storage.snapshot.subgroup_size != 0) {
+  if (bundle->snapshot->subgroup_size != 0) {
     out_execution->flags |=
         LOOM_TARGET_ARTIFACT_MANIFEST_EXECUTION_FLAG_SUBGROUP_SIZE;
-    out_execution->subgroup_size = entry->bundle_storage.snapshot.subgroup_size;
+    out_execution->subgroup_size = bundle->snapshot->subgroup_size;
   }
 }
 
@@ -421,7 +421,7 @@ static iree_host_size_t loom_target_artifact_manifest_find_target(
 
 static iree_string_view_t loom_target_artifact_manifest_entry_target_name(
     const loom_target_entry_t* entry) {
-  return entry->bundle_storage.bundle.name;
+  return loom_target_entry_bundle(entry)->name;
 }
 
 static bool loom_target_artifact_manifest_snapshot_has_workgroup_size_limit(
@@ -559,7 +559,7 @@ static iree_status_t loom_target_artifact_manifest_collect_targets(
     if (loom_target_artifact_manifest_collect_mode_includes_details(
             options->mode)) {
       loom_target_artifact_manifest_collect_target_details(
-          &entries.values[i].bundle_storage.snapshot, target);
+          loom_target_entry_bundle(&entries.values[i])->snapshot, target);
     }
     if (options->target_projection != NULL &&
         options->target_projection->project != NULL) {
@@ -598,7 +598,7 @@ static iree_status_t loom_target_artifact_manifest_collect_functions(
   for (uint16_t i = 0; i < entries.count; ++i) {
     const loom_target_entry_t* entry = &entries.values[i];
     const loom_target_export_plan_t* export_plan =
-        &entry->bundle_storage.export_plan;
+        loom_target_entry_bundle(entry)->export_plan;
     functions[i].name = !iree_string_view_is_empty(export_plan->export_symbol)
                             ? export_plan->export_symbol
                             : entry->func_name;
@@ -871,7 +871,8 @@ iree_status_t loom_target_artifact_manifest_collect_from_entries(
   loom_target_artifact_format_t artifact_format = options->artifact_format;
   if (artifact_format == LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN &&
       entries.count > 0) {
-    artifact_format = entries.values[0].bundle_storage.snapshot.artifact_format;
+    artifact_format =
+        loom_target_entry_bundle(&entries.values[0])->snapshot->artifact_format;
   }
   out_manifest->artifact.format =
       loom_target_artifact_manifest_public_format_name(artifact_format);

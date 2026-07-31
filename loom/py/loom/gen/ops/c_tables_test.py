@@ -59,6 +59,7 @@ from loom.dsl import (
     ElementWidthGreaterThan,
     EnumCase,
     EnumDef,
+    FuncLikeInterface,
     HasParent,
     IterArgsMatchResults,
     LiteralMatchesElementType,
@@ -80,6 +81,7 @@ from loom.dsl import (
     SameType,
     Successor,
     SymbolDefinition,
+    TargetFactSatisfaction,
     TargetLikeInterface,
     TotalBitCountEqual,
     TypeConstraint,
@@ -275,7 +277,10 @@ def test_generate_tables_omits_zero_default_vtable_fields() -> None:
 
 
 def _target_projection_test_op(
-    specialization_authored_attrs: tuple[str, ...] = (),
+    *,
+    fact_type: str | None = None,
+    fact_projector: str | None = None,
+    fact_satisfaction: TargetFactSatisfaction = TargetFactSatisfaction.IDENTITY,
 ) -> Op:
     kind = EnumDef("TargetKind", [EnumCase("generic", 0)])
     abi = EnumDef("TargetAbi", [EnumCase("unknown", 0)])
@@ -297,46 +302,82 @@ def _target_projection_test_op(
                 symbol="symbol",
                 selector="kind",
                 bundle_table="loom_test_target_bundles",
-                specialization_authored_attrs=specialization_authored_attrs,
+                fact_type=fact_type,
+                fact_projector=fact_projector,
+                fact_satisfaction=fact_satisfaction,
             )
         ],
     )
 
 
-def test_generate_target_projection_distinguishes_profile_and_authored_fields() -> None:
+def test_generate_target_projection_emits_typed_fields() -> None:
     tables_c = generate_tables_c(
         "test",
         0,
-        [_target_projection_test_op(("subgroup_size",))],
+        [_target_projection_test_op()],
     )
 
-    assert ("snapshot.max_workgroup_size.x), 2, LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32, LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE}") in tables_c
-    assert ("snapshot.subgroup_size), 3, LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
-    assert ("export_plan.abi_kind), 4, LOOM_TARGET_PROJECTION_VALUE_ENUM_U8, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
-    assert ("export_plan.export_symbol), 5, LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
-    assert ("export_plan.linkage), 6, LOOM_TARGET_PROJECTION_VALUE_ENUM_U8, LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED}") in tables_c
+    assert ("snapshot.max_workgroup_size.x), 2, LOOM_TARGET_FACT_FIELD_MAX_WORKGROUP_SIZE_X, LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32}") in tables_c
+    assert ("snapshot.subgroup_size), 3, LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE, LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32}") in tables_c
+    assert ("export_plan.abi_kind), 4, LOOM_TARGET_FACT_FIELD_ABI, LOOM_TARGET_PROJECTION_VALUE_ENUM_U8}") in tables_c
+    assert ("export_plan.export_symbol), 5, LOOM_TARGET_FACT_FIELD_EXPORT_SYMBOL, LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW}") in tables_c
+    assert ("export_plan.linkage), 6, LOOM_TARGET_FACT_FIELD_LINKAGE, LOOM_TARGET_PROJECTION_VALUE_ENUM_U8}") in tables_c
 
 
-def test_generate_target_projection_rejects_invalid_authored_field_contract() -> None:
-    with _raises_value_error(r"duplicate specialization authored attrs"):
+def test_generate_target_projection_emits_typed_fact_contract() -> None:
+    tables_c = generate_tables_c(
+        "test",
+        0,
+        [_target_projection_test_op(fact_satisfaction=TargetFactSatisfaction.STRUCTURAL)],
+    )
+
+    assert '#include "loom/ops/target/facts.h"' in tables_c
+    assert "static const loom_target_fact_type_t loom_test_target_fact_type = {" in tables_c
+    assert '.name = IREE_SVL("test"),' in tables_c
+    assert ".storage_size = sizeof(loom_target_facts_t)," in tables_c
+    assert ".satisfies_requirement = loom_target_facts_structural_satisfy_requirement," in tables_c
+    assert ".fact_type = &loom_test_target_fact_type," in tables_c
+
+
+def test_generate_target_projection_accepts_family_owned_fact_type() -> None:
+    tables_c = generate_tables_c(
+        "test",
+        0,
+        [
+            _target_projection_test_op(
+                fact_type="loom_test_custom_fact_type",
+                fact_projector="loom_test_custom_fact_projector",
+            )
+        ],
+    )
+
+    assert "extern const loom_target_fact_type_t loom_test_custom_fact_type;" in tables_c
+    assert "extern const loom_target_fact_projector_t loom_test_custom_fact_projector;" in tables_c
+    assert "static const loom_target_fact_type_t" not in tables_c
+    assert ".fact_type = &loom_test_custom_fact_type," in tables_c
+    assert ".fact_projector = &loom_test_custom_fact_projector," in tables_c
+
+
+def test_generate_target_projection_rejects_projector_without_family_facts() -> None:
+    with _raises_value_error(r"family fact projector requires an external fact type"):
         generate_tables_c(
             "test",
             0,
-            [_target_projection_test_op(("subgroup_size", "subgroup_size"))],
+            [_target_projection_test_op(fact_projector="loom_test_fact_projector")],
         )
 
-    with _raises_value_error(r"unknown specialization authored attrs"):
-        generate_tables_c(
-            "test",
-            0,
-            [_target_projection_test_op(("missing",))],
-        )
 
-    with _raises_value_error(r"authored attrs are not declared by the op"):
+def test_generate_target_projection_rejects_split_fact_ownership() -> None:
+    with _raises_value_error(r"external fact type owns its satisfaction"):
         generate_tables_c(
             "test",
             0,
-            [_target_projection_test_op(("contract_set_key",))],
+            [
+                _target_projection_test_op(
+                    fact_type="loom_test_custom_fact_type",
+                    fact_satisfaction=TargetFactSatisfaction.STRUCTURAL,
+                )
+            ],
         )
 
 
@@ -1158,6 +1199,51 @@ def test_generate_tables_emits_call_like_interface() -> None:
     assert ".operand_offset = 0," in tables_c
     assert ".result_offset = 0," in tables_c
     assert ".kind = LOOM_CALL_LIKE_KIND_SEMANTIC," in tables_c
+
+
+def test_generate_tables_emits_func_like_representation_contract() -> None:
+    op = Op(
+        "test.func",
+        group=Dialect("test"),
+        attrs=[
+            AttrDef("callee", ATTR_TYPE_SYMBOL),
+            AttrDef("representation", ATTR_TYPE_STRING, optional=True),
+        ],
+        interfaces=[
+            FuncLikeInterface(
+                callee="callee",
+                repr_contract="representation",
+            )
+        ],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert ".callee_attr_index = 0," in tables_c
+    assert ".repr_contract_attr_index = 1," in tables_c
+
+
+def test_generate_tables_rejects_non_string_representation_contract() -> None:
+    op = Op(
+        "test.func",
+        group=Dialect("test"),
+        attrs=[
+            AttrDef("callee", ATTR_TYPE_SYMBOL),
+            AttrDef("representation", ATTR_TYPE_I64, optional=True),
+        ],
+        interfaces=[
+            FuncLikeInterface(
+                callee="callee",
+                repr_contract="representation",
+            )
+        ],
+    )
+
+    with _raises_value_error(
+        r"FuncLikeInterface on 'test\.func': attr 'representation' referenced "
+        r"by 'repr_contract' must have type 'string', got 'i64'"
+    ):
+        generate_tables_c("test", 0, [op])
 
 
 def _make_counted_loop_op(

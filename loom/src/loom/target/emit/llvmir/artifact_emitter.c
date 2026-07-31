@@ -151,6 +151,7 @@ static iree_status_t loom_llvmir_artifact_emit(
   loom_llvmir_emit_low_module_options_t emit_options = {0};
   IREE_RETURN_IF_ERROR(loom_llvmir_artifact_emitter_options_resolve(
       request->option_chain, &emit_options));
+  emit_options.function_versions = request->function_versions;
   iree_status_t status = loom_llvmir_emit_low_module(
       request->module, request->low_descriptor_registry,
       request->diagnostic_emitter, request->scratch_arena, &emit_options,

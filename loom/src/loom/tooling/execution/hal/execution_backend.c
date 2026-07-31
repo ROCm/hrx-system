@@ -41,9 +41,9 @@ static bool loom_run_hal_execution_backend_accept_entry(
 
 static iree_status_t loom_run_hal_execution_backend_select_entry(
     const loom_run_one_shot_request_t* request, iree_arena_allocator_t* arena,
-    bool* out_selected, loom_func_like_t* out_function) {
+    bool* out_selected, loom_target_entry_t* out_entry) {
   *out_selected = false;
-  *out_function = (loom_func_like_t){0};
+  *out_entry = (loom_target_entry_t){0};
 
   const loom_target_entry_options_t options = {
       .entry_symbol = request->options->hal_function_name,
@@ -58,14 +58,9 @@ static iree_status_t loom_run_hal_execution_backend_select_entry(
   const loom_target_entry_predicate_t predicate = {
       .fn = loom_run_hal_execution_backend_accept_entry,
   };
-  loom_target_entry_t entry = {0};
-  IREE_RETURN_IF_ERROR(loom_target_entry_select_entry(
+  return loom_target_entry_select_entry(
       request->run_module->module, &options, predicate, &diagnostic_emitter,
-      IREE_SV("HAL execution"), arena, out_selected, &entry));
-  if (*out_selected) {
-    *out_function = entry.func;
-  }
-  return iree_ok_status();
+      IREE_SV("HAL execution"), arena, out_selected, out_entry);
 }
 
 static iree_status_t loom_run_hal_write_artifact(
@@ -165,9 +160,9 @@ iree_status_t loom_run_hal_execution_backend_run_one_shot(
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
   bool entry_selected = false;
-  loom_func_like_t entry_function = {0};
+  loom_target_entry_t entry = {0};
   iree_status_t status = loom_run_hal_execution_backend_select_entry(
-      request, &arena, &entry_selected, &entry_function);
+      request, &arena, &entry_selected, &entry);
   if (iree_status_is_ok(status) && !entry_selected) {
     request->result->exit_code = 1;
   }
@@ -184,7 +179,7 @@ iree_status_t loom_run_hal_execution_backend_run_one_shot(
   }
   if (iree_status_is_ok(status) && entry_selected) {
     status = loom_run_hal_candidate_compile(
-        artifact_provider, &runtime, request->run_module, entry_function,
+        artifact_provider, &runtime, request->run_module, entry.target_facts,
         request->compile_options, request->host_allocator, &candidate);
   }
   if (iree_status_is_ok(status) && !candidate.compiled) {

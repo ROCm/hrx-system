@@ -143,13 +143,15 @@ static iree_status_t FakeHalSelectDeviceTarget(
   return iree_ok_status();
 }
 
-static iree_status_t FakeHalSelectFunctionDeviceTarget(
+static iree_status_t FakeHalSelectCompatibleDeviceTarget(
     const loom_run_hal_artifact_provider_t* provider,
-    const loom_run_hal_runtime_t* runtime, const loom_module_t* module,
-    loom_func_like_t function, iree_allocator_t allocator,
+    const loom_run_hal_runtime_t* runtime,
+    const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
     loom_run_hal_device_target_t* out_target) {
-  (void)module;
-  (void)function;
+  if (target_requirement != nullptr) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "fake HAL provider requires targetless input");
+  }
   return FakeHalSelectDeviceTarget(provider, runtime, allocator, out_target);
 }
 
@@ -159,7 +161,7 @@ static const loom_run_hal_artifact_provider_t kFakeHalArtifactProvider = {
     /*.target_family_name=*/IREE_SVL("fake-target"),
     /*.default_pipeline_options=*/{},
     /*.select_device_target=*/FakeHalSelectDeviceTarget,
-    /*.select_function_device_target=*/FakeHalSelectFunctionDeviceTarget,
+    /*.select_compatible_device_target=*/FakeHalSelectCompatibleDeviceTarget,
 };
 
 static bool ModuleHasSymbol(const loom_module_t* module,

@@ -287,7 +287,7 @@ typedef struct loom_low_target_legalize_function_state_t {
   const loom_low_source_selection_t* selection;
   // Source-to-low query options shared by eager and final legality checks.
   loom_low_lower_options_t lower_options;
-  // Low descriptor set selected by selection->target_bundle.
+  // Low descriptor set selected by the function's effective target facts.
   const loom_low_descriptor_set_t* descriptor_set;
   // Active source-to-low contract query scope, rebuilt after IR mutation.
   loom_low_lower_source_query_scope_t* query_scope;
@@ -538,7 +538,8 @@ static bool loom_low_target_legalize_lookup_assume_operand_facts(
 static void loom_low_target_legalize_context_params(
     loom_low_target_legalize_function_state_t* state, const loom_op_t* op,
     loom_diagnostic_param_t* params) {
-  const loom_target_bundle_t* bundle = state->selection->target_bundle;
+  const loom_target_bundle_t* bundle =
+      loom_low_source_selection_target_bundle(state->selection);
   const loom_target_config_t* config = bundle ? bundle->config : NULL;
   const loom_target_export_plan_t* export_plan =
       bundle ? bundle->export_plan : NULL;
@@ -893,7 +894,8 @@ static iree_status_t loom_low_target_legalize_record_report_row(
     return iree_ok_status();
   }
 
-  const loom_target_bundle_t* bundle = state->selection->target_bundle;
+  const loom_target_bundle_t* bundle =
+      loom_low_source_selection_target_bundle(state->selection);
   const loom_target_config_t* config = bundle ? bundle->config : NULL;
   const iree_string_view_t legalizer_name = legalizer_entry
                                                 ? legalizer_entry->provider_name
@@ -1139,7 +1141,8 @@ static iree_status_t loom_low_target_legalize_make_final_rejection(
   loom_diagnostic_param_t* params = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       environment->arena, 7, sizeof(*params), (void**)&params));
-  const loom_target_bundle_t* bundle = environment->bundle;
+  const loom_target_bundle_t* bundle =
+      loom_target_contract_query_environment_bundle(environment);
   const loom_target_config_t* config = bundle ? bundle->config : NULL;
   const loom_target_export_plan_t* export_plan =
       bundle ? bundle->export_plan : NULL;
@@ -1459,9 +1462,7 @@ static iree_status_t loom_low_target_legalize_verify_final(
   };
   loom_target_low_legality_result_t result = {0};
   const loom_target_low_legality_options_t legality_options = {
-      .bundle = state->selection->target_bundle,
-      .target_ref = state->selection->target_ref,
-      .target_op = state->selection->target_op,
+      .target_facts = state->selection->target_facts,
       .descriptor_registry = state->lower_options.descriptor_registry,
       .error_catalog = state->selection->policy->error_catalog,
       .provider_list = state->legality_provider_list,
@@ -1472,7 +1473,6 @@ static iree_status_t loom_low_target_legalize_verify_final(
           loom_low_lower_source_query_scope_value_domain(state->query_scope),
       .structural_legality_flags =
           LOOM_TARGET_LOW_STRUCTURAL_LEGALITY_ALLOW_SOURCE_SCF,
-      .target_profile = state->selection->target_profile,
       .emitter = state->pass->diagnostic_emitter,
       .max_errors = pass_state->max_errors,
   };
@@ -1496,8 +1496,8 @@ static iree_status_t loom_low_target_legalize_acquire_final_facts(
   loom_value_fact_table_t* fact_table = NULL;
   IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
       pass, module,
-      loom_pass_value_fact_scope_function_for_target(
-          selection->func, selection->target_bundle, selection->target_profile),
+      loom_pass_value_fact_scope_function_for_target(selection->func,
+                                                     selection->target_facts),
       &fact_table));
   *out_fact_table = fact_table;
   return iree_ok_status();
@@ -1527,8 +1527,11 @@ static iree_status_t loom_low_target_legalize_function(
       .legality_provider_list = legality_provider_list,
       .compile_report = loom_low_pass_capability_compile_report(low_capability),
   };
-  IREE_RETURN_IF_ERROR(loom_target_low_descriptor_set_select_for_bundle(
-      descriptor_registry, selection->target_bundle, &state.descriptor_set));
+  IREE_RETURN_IF_ERROR(
+      loom_target_low_descriptor_set_select_for_source_lowering(
+          descriptor_registry,
+          loom_low_source_selection_target_bundle(selection),
+          &state.descriptor_set));
   IREE_RETURN_IF_ERROR(
       loom_low_target_legalize_capture_report_source_ops(&state));
 
@@ -1536,16 +1539,13 @@ static iree_status_t loom_low_target_legalize_function(
   if (pass->value_facts != NULL) {
     IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
         pass, module,
-        loom_pass_value_fact_scope_function_for_target(
-            selection->func, selection->target_bundle,
-            selection->target_profile),
+        loom_pass_value_fact_scope_function_for_target(selection->func,
+                                                       selection->target_facts),
         &seed_facts));
   }
   state.lower_options = (loom_low_lower_options_t){
       .target_ref = selection->target_ref,
-      .target_op = selection->target_op,
-      .bundle = selection->target_bundle,
-      .target_profile = selection->target_profile,
+      .target_facts = selection->target_facts,
       .descriptor_registry = descriptor_registry,
       .legality_provider_list = legality_provider_list,
       .policy = selection->policy,
@@ -1567,9 +1567,7 @@ static iree_status_t loom_low_target_legalize_function(
       .pass = pass,
       .module = module,
       .function = selection->func,
-      .bundle = selection->target_bundle,
-      .target_profile = selection->target_profile,
-      .target_ref = selection->target_ref,
+      .target_facts = selection->target_facts,
       .descriptor_set = state.descriptor_set,
       .mode = pass_state->mode,
       .policy = pass_state->policy,
@@ -1686,9 +1684,8 @@ iree_status_t loom_low_target_legalize_run(loom_pass_t* pass,
         .policy_registry = policy_registry,
         .diagnostic_emitter = pass->diagnostic_emitter,
         .lowering_kind = IREE_SV("target-legalize"),
-        .specialization_context =
-            loom_target_pass_capability_specialization_context(
-                target_capability),
+        .function_versions =
+            loom_target_pass_capability_function_versions(target_capability),
     };
     status = loom_low_select_source_funcs(module, &selection_options,
                                           &run_arena, &selection_list);

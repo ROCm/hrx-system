@@ -18,6 +18,9 @@
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/pass/verify.h"
+#include "loom/target/facts_builder.h"
+#include "loom/target/function_version.h"
+#include "loom/target/test/target_records.h"
 #include "loom/testing/module_ptr.h"
 
 namespace loom {
@@ -122,7 +125,8 @@ class TargetPredicateTest : public ::testing::Test {
   }
 
   bool Evaluate(loom_module_t* module, loom_op_t* where_op,
-                iree_string_view_t function_name) {
+                iree_string_view_t function_name,
+                const loom_function_version_t* function_version = nullptr) {
     loom_symbol_t* symbol = FindSymbol(module, function_name);
     loom_func_like_t function = FindFunction(module, function_name);
     bool match = false;
@@ -135,6 +139,7 @@ class TargetPredicateTest : public ::testing::Test {
         /*.target_module=*/module,
         /*.symbol=*/symbol,
         /*.function=*/function,
+        /*.function_version=*/function_version,
     };
     IREE_CHECK_OK(predicate_provider_.evaluate(predicate_provider_.user_data,
                                                &context, &match));
@@ -151,13 +156,27 @@ TEST_F(TargetPredicateTest, VerifiesTargetPredicateAttrs) {
   ModulePtr module = ParseModule(R"(
 pass.pipeline<module> @pipeline pipeline {
   for func {
-    where target(target = "test_target", target_op = "test.target", codegen = "low_native", abi = "object_function") {
+    where target(bundle = "test_target", family = "test", codegen = "low_native", abi = "object_function") {
     }
   }
 }
 )");
 
   IREE_ASSERT_OK(VerifyPipeline(module.get(), IREE_SV("pipeline")));
+}
+
+TEST_F(TargetPredicateTest, RejectsTargetSymbolIdentityPredicateAttr) {
+  ModulePtr module = ParseModule(R"(
+pass.pipeline<module> @pipeline pipeline {
+  for func {
+    where target(target = "test_target") {
+    }
+  }
+}
+)");
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        VerifyPipeline(module.get(), IREE_SV("pipeline")));
 }
 
 TEST_F(TargetPredicateTest, MatchesResolvedTargetContract) {
@@ -167,7 +186,7 @@ test.target<quirky> @other_target
 
 pass.pipeline<module> @pipeline pipeline {
   for func {
-    where target(target = "@test_target", target_op = "test.target", bundle = "test_target", snapshot = "test_target", codegen = "low_native", artifact_format = "elf", abi = "object_function", config = "test_target", contract = "test.low.core") {
+    where target(family = "test", bundle = "test_target", snapshot = "test_target", codegen = "low_native", artifact_format = "elf", abi = "object_function", config = "test_target", contract = "test.low.core") {
     }
   }
 }
@@ -184,6 +203,60 @@ func.def target(@other_target) abi(object_function) @rejected() {
   loom_op_t* where_op =
       FirstWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
   EXPECT_TRUE(Evaluate(module.get(), where_op, IREE_SV("matched")));
+  EXPECT_FALSE(Evaluate(module.get(), where_op, IREE_SV("rejected")));
+}
+
+TEST_F(TargetPredicateTest, MatchesEffectiveFunctionVersionFacts) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @authored_target
+
+pass.pipeline<module> @pipeline pipeline {
+  for func {
+    where target(family = "test", bundle = "test-quirky", snapshot = "test-quirky", codegen = "low_native", artifact_format = "elf", abi = "object_function", config = "test.low.core", contract = "test.low.core") {
+    }
+  }
+}
+
+func.def target(@authored_target) abi(object_function) @entry() {
+  func.return
+}
+)");
+
+  loom_func_like_t function = FindFunction(module.get(), IREE_SV("entry"));
+  loom_target_facts_t effective_facts = {};
+  loom_target_facts_builder_initialize(&loom_test_target_fact_type,
+                                       loom_test_target_bundles.values[2],
+                                       &effective_facts);
+  loom_target_function_version_t function_version = {};
+  function_version.base.type = &loom_target_function_version_type;
+  function_version.base.function = function;
+  function_version.effective_target_facts = &effective_facts;
+  loom_op_t* where_op =
+      FirstWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
+
+  EXPECT_FALSE(Evaluate(module.get(), where_op, IREE_SV("entry")));
+  EXPECT_TRUE(Evaluate(module.get(), where_op, IREE_SV("entry"),
+                       &function_version.base));
+}
+
+TEST_F(TargetPredicateTest, RejectsDifferentTargetFamily) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @test_target
+
+pass.pipeline<module> @pipeline pipeline {
+  for func {
+    where target(family = "amdgpu") {
+    }
+  }
+}
+
+func.def target(@test_target) @rejected() {
+  func.return
+}
+)");
+
+  loom_op_t* where_op =
+      FirstWhere(FindPipeline(module.get(), IREE_SV("pipeline")));
   EXPECT_FALSE(Evaluate(module.get(), where_op, IREE_SV("rejected")));
 }
 

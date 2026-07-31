@@ -30,6 +30,15 @@ void loom_compile_pipeline_options_initialize(
   };
 }
 
+void loom_compile_pipeline_result_deinitialize(
+    loom_compile_pipeline_result_t* result) {
+  if (result == NULL) {
+    return;
+  }
+  iree_arena_deinitialize(&result->version_arena);
+  *result = (loom_compile_pipeline_result_t){0};
+}
+
 bool loom_compile_pipeline_is_disabled(iree_string_view_t pipeline) {
   pipeline = iree_string_view_trim(pipeline);
   return iree_string_view_equal(pipeline, IREE_SV("none"));
@@ -142,12 +151,14 @@ static iree_status_t loom_compile_run_default_pipeline(
 
 iree_status_t loom_compile_run_pipeline(
     loom_module_t* module, const loom_compile_pipeline_options_t* options,
-    iree_arena_block_pool_t* block_pool, loom_pass_run_result_t* out_result) {
+    iree_arena_block_pool_t* block_pool,
+    loom_compile_pipeline_result_t* out_result) {
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(options);
   IREE_ASSERT_ARGUMENT(block_pool);
   IREE_ASSERT_ARGUMENT(out_result);
-  *out_result = (loom_pass_run_result_t){0};
+  *out_result = (loom_compile_pipeline_result_t){0};
+  iree_arena_initialize(block_pool, &out_result->version_arena);
 
   iree_string_view_t pipeline = iree_string_view_trim(options->pipeline);
   if (options->target_environment == NULL &&
@@ -172,22 +183,20 @@ iree_status_t loom_compile_run_pipeline(
   loom_target_entry_diagnostic_emitter_t pass_emitter = {0};
   loom_target_entry_diagnostic_emitter_initialize(
       module, &entry_options, LOOM_EMITTER_PASS, &pass_emitter);
-  iree_arena_allocator_t specialization_arena;
-  iree_arena_initialize(block_pool, &specialization_arena);
   loom_target_specialization_result_t specialization_result = {0};
   iree_status_t status = iree_ok_status();
   if (options->target_specializations.count != 0) {
     status = loom_target_specialize_functions(
         options->target_environment, module, options->target_specializations,
-        loom_target_entry_emitter(&pass_emitter), &specialization_arena,
+        loom_target_entry_emitter(&pass_emitter), &out_result->version_arena,
         &specialization_result);
   }
   if (iree_status_is_ok(status) && specialization_result.error_count != 0) {
-    out_result->error_count = specialization_result.error_count;
+    out_result->pass.error_count = specialization_result.error_count;
   }
-  if (!iree_status_is_ok(status) || out_result->error_count != 0 ||
+  out_result->function_versions = specialization_result.function_versions;
+  if (!iree_status_is_ok(status) || out_result->pass.error_count != 0 ||
       loom_compile_pipeline_is_disabled(pipeline)) {
-    iree_arena_deinitialize(&specialization_arena);
     return status;
   }
 
@@ -237,8 +246,9 @@ iree_status_t loom_compile_run_pipeline(
           &options->low_descriptor_registry->registry,
           &low_lower_policy_registry, &low_legality_provider_list,
           &legalizer_provider_list, &math_policy_registry, options->report,
-          options->target_environment, &specialization_result.context,
+          options->target_environment, &out_result->function_versions,
           &low_pass_environment_storage),
+      .function_versions = &out_result->function_versions,
       .predicate_provider =
           loom_target_pass_predicate_provider(&predicate_storage),
       .block_pool = block_pool,
@@ -248,15 +258,14 @@ iree_status_t loom_compile_run_pipeline(
 
   if (iree_status_is_ok(status) && loom_compile_pipeline_is_default(pipeline)) {
     status = loom_compile_run_default_pipeline(module, options, &run_options,
-                                               out_result);
+                                               &out_result->pass);
   } else if (iree_status_is_ok(status) &&
              iree_string_view_starts_with_char(pipeline, '@')) {
     status = loom_pass_tool_run_pipeline_symbol(module, pipeline, &run_options,
-                                                out_result);
+                                                &out_result->pass);
   } else if (iree_status_is_ok(status)) {
     status = loom_pass_tool_run_flat_pipeline(module, pipeline, &run_options,
-                                              out_result);
+                                              &out_result->pass);
   }
-  iree_arena_deinitialize(&specialization_arena);
   return status;
 }

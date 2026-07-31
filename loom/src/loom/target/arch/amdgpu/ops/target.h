@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// AMDGPU target-record helpers.
+// AMDGPU target op interpretation.
 
 #ifndef LOOM_TARGET_ARCH_AMDGPU_OPS_TARGET_H_
 #define LOOM_TARGET_ARCH_AMDGPU_OPS_TARGET_H_
@@ -49,13 +49,6 @@ void loom_amdgpu_target_record_resolve_identity(
 void loom_amdgpu_target_record_resolve_properties(
     const loom_op_t* target_op, const loom_target_bundle_t* common,
     loom_amdgpu_target_properties_t* out_properties);
-
-// Builds a target record carrying every durable fact from |profile| and the
-// function-local fields preserved from |authored_target_op|.
-iree_status_t loom_amdgpu_target_record_build_for_profile(
-    loom_builder_t* builder, const loom_amdgpu_target_profile_t* profile,
-    const loom_op_t* authored_target_op, loom_symbol_ref_t symbol,
-    loom_location_id_t location, loom_op_t** out_target_op);
 
 iree_status_t loom_amdgpu_target_record_verify(
     const loom_module_t* module, const loom_op_t* op,

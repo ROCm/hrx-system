@@ -9,7 +9,7 @@ func.def target(@target) @f32_independent_dotf_shared_zero_seed(%lhs0: vector<2x
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_independent_dotf_shared_zero_seed(%lhs0: reg<amdgpu.vgpr x2>, %rhs0: reg<amdgpu.vgpr x2>, %lhs1: reg<amdgpu.vgpr x2>, %rhs1: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_independent_dotf_shared_zero_seed(%lhs0: reg<amdgpu.vgpr x2>, %rhs0: reg<amdgpu.vgpr x2>, %lhs1: reg<amdgpu.vgpr x2>, %rhs1: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %16 = v_mov_b32 0
   %17 = slice %lhs0[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %18 = slice %rhs0[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>

@@ -4,13 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Low function target binding.
+// Low function representation and target binding.
 //
-// This layer connects low function target records to dense low descriptor
-// tables. The descriptor table ABI itself remains IR-agnostic; this file owns
-// the codegen contract that says a low.func target record selects one
-// descriptor set key and feature bitset before low.op packet verification,
-// scheduling, allocation feedback, or emission run.
+// This layer resolves a Low function's intrinsic representation contract to
+// dense Low descriptor tables, then verifies that the representation can
+// encode the effective target selected by authored or invocation-refined
+// target facts. The descriptor table ABI itself remains IR-agnostic.
 
 #ifndef LOOM_CODEGEN_LOW_TARGET_BINDING_H_
 #define LOOM_CODEGEN_LOW_TARGET_BINDING_H_
@@ -20,6 +19,7 @@
 #include "loom/codegen/low/descriptors.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/target/facts.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -28,22 +28,24 @@ extern "C" {
 
 // Resolved low target context for one low function.
 typedef struct loom_low_resolved_target_t {
-  // Symbol defining the low function target record.
-  const loom_symbol_t* target_symbol;
-  // Defining op for |target_symbol|.
-  const loom_op_t* target_op;
-  // Materialized target payloads selected by this low function's durable target
-  // record. Export-plan facts may additionally be function-local.
-  loom_target_bundle_storage_t bundle_storage;
-  // Borrowed target symbol name without the leading '@'.
+  // Immutable effective facts selected for this Low function.
+  const loom_target_facts_t* target_facts;
+  // Borrowed effective target name without the leading '@'.
   iree_string_view_t target_name;
-  // Borrowed descriptor-set key selected by the resolved target record.
+  // Borrowed descriptor-set key selected by the Low function representation
+  // contract.
   iree_string_view_t descriptor_set_key;
-  // Feature bitset selected by the resolved target record.
+  // Feature bitset projected from the effective target facts.
   uint64_t feature_bits;
   // Descriptor set found in the caller-provided registry.
   const loom_low_descriptor_set_t* descriptor_set;
 } loom_low_resolved_target_t;
+
+// Returns the common target bundle projected into |target->target_facts|.
+static inline const loom_target_bundle_t* loom_low_resolved_target_bundle(
+    const loom_low_resolved_target_t* target) {
+  return target ? loom_target_facts_bundle(target->target_facts) : NULL;
+}
 
 typedef struct loom_low_register_type_resolver_t {
   // Descriptor set defining the resolved descriptor register-class IDs.
@@ -114,22 +116,20 @@ typedef struct loom_low_resolved_descriptor_packet_t {
   const loom_low_descriptor_t* descriptor;
 } loom_low_resolved_descriptor_packet_t;
 
-// Resolves the target record payloads and descriptor set for |low_func_op|.
+// Resolves the effective target facts and descriptor set for |low_func_op|
+// using caller-owned symbol facts.
+//
 // User IR failures are emitted through |emitter| and leave
 // out_target->descriptor_set NULL. Infrastructure failures are returned as
 // status. |low_func_op| must be a target-low function definition or
-// declaration.
+// declaration. |effective_target_facts| supplies invocation-refined facts that
+// already include the function contract when non-NULL; otherwise facts are
+// resolved from the authored target witness. The arena backing |symbol_facts|
+// and |effective_target_facts| must outlive |out_target|.
 iree_status_t loom_low_resolve_function_target(
-    const loom_module_t* module, const loom_op_t* low_func_op,
-    const loom_low_descriptor_registry_t* registry,
-    iree_diagnostic_emitter_t emitter, loom_low_resolved_target_t* out_target);
-
-// Resolves the target record payloads and descriptor set for |low_func_op|
-// using caller-owned symbol facts. This is the batched form for module-scope
-// analyses that resolve many low functions against one fact table.
-iree_status_t loom_low_resolve_function_target_with_facts(
     const loom_module_t* module, loom_symbol_fact_table_t* symbol_facts,
     const loom_op_t* low_func_op,
+    const loom_target_facts_t* effective_target_facts,
     const loom_low_descriptor_registry_t* registry,
     iree_diagnostic_emitter_t emitter, loom_low_resolved_target_t* out_target);
 

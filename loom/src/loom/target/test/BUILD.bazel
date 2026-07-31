@@ -54,7 +54,7 @@ loom_cc_library(
     srcs = ["target_records.c"],
     hdrs = ["target_records.h"],
     deps = [
-        "//loom/src/loom/target:types",
+        "//loom/src/loom/target:facts",
         "//runtime/src/iree/base",
     ],
 )

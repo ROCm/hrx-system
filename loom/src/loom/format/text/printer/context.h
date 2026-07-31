@@ -25,8 +25,8 @@ typedef struct loom_print_context_t {
   loom_text_print_flags_t flags;
   // Optional descriptor-backed environment for low asm region syntax.
   loom_text_low_asm_environment_t low_asm_environment;
-  // Descriptor-set context used for printing target-low register types.
-  const loom_text_low_asm_descriptor_set_t* low_register_descriptor_set;
+  // Representation context used for printing target-low types and regions.
+  loom_text_low_repr_context_t low_repr;
   // Descriptor-set key selected for low asm region syntax.
   iree_string_view_t low_asm_descriptor_set_key;
   // Nesting depth of active descriptor-backed low asm region bodies.

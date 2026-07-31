@@ -14,7 +14,7 @@ func.def target(@target) @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> 
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_f32_arith(%lhs: reg<llvmir.f32>, %rhs: reg<llvmir.f32>, %bias: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_f32_arith(%lhs: reg<llvmir.f32>, %rhs: reg<llvmir.f32>, %bias: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %sum = add.f32 %lhs, %rhs
   %difference = sub.f32 %sum, %bias
   %product = mul.f32 %difference, %rhs

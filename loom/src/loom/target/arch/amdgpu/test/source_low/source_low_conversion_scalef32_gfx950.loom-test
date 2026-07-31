@@ -69,7 +69,7 @@ func.def target(@target) @gfx950_vector_decode_f8e4m3fnuz_then_scalef32_to_bf16(
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4m3fn_to_f16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4m3fn_to_f16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %70 = v_mov_b32 0
   %71 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -85,7 +85,7 @@ low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4
   return %decoded
 }
 
-low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e5m2_to_f16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e5m2_to_f16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %85 = v_mov_b32 0
   %86 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -101,7 +101,7 @@ low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e5
   return %decoded
 }
 
-low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4m3fn_to_bf16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4m3fn_to_bf16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %100 = v_mov_b32 0
   %101 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -117,7 +117,7 @@ low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4
   return %decoded
 }
 
-low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e5m2_to_bf16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e5m2_to_bf16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %115 = v_mov_b32 0
   %116 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -133,7 +133,7 @@ low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e5
   return %decoded
 }
 
-low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4m3fn_to_f32(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4m3fn_to_f32(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %130 = v_mov_b32 0
   %131 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -149,7 +149,7 @@ low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e4
   return %decoded
 }
 
-low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e5m2_to_f32(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e5m2_to_f32(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %145 = v_mov_b32 0
   %146 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -165,7 +165,7 @@ low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_scalef32_f8e5
   return %decoded
 }
 
-low.func.def target(@target) abi(hal_kernel) @gfx950_vector_decode_f8e4m3fnuz_then_scalef32_to_bf16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @gfx950_vector_decode_f8e4m3fnuz_then_scalef32_to_bf16(%base: reg<amdgpu.sgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %160 = v_mov_b32 0
   %161 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>

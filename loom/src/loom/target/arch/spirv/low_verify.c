@@ -1362,8 +1362,9 @@ static iree_status_t loom_spirv_low_begin_function(
       .function_name = loom_low_diagnostic_function_name(
           loom_low_verify_context_module(context),
           loom_low_verify_context_function_op(context)),
-      .raw_bda_hal_kernel = target->bundle_storage.export_plan.abi_kind ==
-                            LOOM_TARGET_ABI_HAL_KERNEL,
+      .raw_bda_hal_kernel =
+          loom_low_resolved_target_bundle(target)->export_plan->abi_kind ==
+          LOOM_TARGET_ABI_HAL_KERNEL,
   };
   *out_provider_state = state;
 

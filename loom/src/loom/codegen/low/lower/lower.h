@@ -755,14 +755,8 @@ typedef enum loom_low_control_flow_lowering_e {
 typedef struct loom_low_lower_options_t {
   // Module-local target record symbol used by the emitted low function.
   loom_symbol_ref_t target_ref;
-  // Borrowed durable target record referenced by |target_ref|.
-  const loom_op_t* target_op;
-  // Target bundle selected for this lowering attempt.
-  const loom_target_bundle_t* bundle;
-  // Invocation profile whose facts contributed to |bundle|, or NULL when the
-  // effective bundle came only from module target records. Its bundle
-  // projection may be less specific after compatible function refinement.
-  const loom_target_profile_t* target_profile;
+  // Borrowed immutable target facts selected for this lowering attempt.
+  const loom_target_facts_t* target_facts;
   // Low descriptor registry linked into the current compiler binary.
   const loom_low_descriptor_registry_t* descriptor_registry;
   // Optional target-specific legality providers forwarded to source legality.
@@ -771,8 +765,9 @@ typedef struct loom_low_lower_options_t {
   loom_target_low_legality_diagnostic_flags_t legality_diagnostic_flags;
   // Target lowering policy for descriptor and type choices.
   const loom_low_lower_policy_t* policy;
-  // Borrowed source value facts for |source_function| and |bundle|. Lowering
-  // is a pure consumer of facts; callers own acquisition and invalidation.
+  // Borrowed source value facts for |source_function| and |target_facts|.
+  // Lowering is a pure consumer of facts; callers own acquisition and
+  // invalidation.
   loom_value_fact_table_t* fact_table;
   // Structured diagnostic emitter for user legality and lowering failures.
   iree_diagnostic_emitter_t emitter;
@@ -811,7 +806,7 @@ typedef struct loom_low_lower_result_t {
   // Number of remark diagnostics emitted by legality providers and lowering
   // callbacks.
   uint32_t remark_count;
-  // Descriptor set selected by |options.bundle|.
+  // Descriptor set selected by |options.target_facts|.
   const loom_low_descriptor_set_t* descriptor_set;
   // Emitted low function op, or NULL when user diagnostics prevented emission.
   loom_op_t* low_func_op;
@@ -987,13 +982,8 @@ bool loom_low_lower_context_wants_report_rows(
 const loom_target_bundle_t* loom_low_lower_context_bundle(
     const loom_low_lower_context_t* context);
 
-// Returns the module-local target record symbol used by the emitted low
-// function.
-loom_symbol_ref_t loom_low_lower_context_target_ref(
-    const loom_low_lower_context_t* context);
-
-// Returns the durable target record selected for this lowering attempt.
-const loom_op_t* loom_low_lower_context_target_op(
+// Returns the typed target facts selected for this lowering attempt.
+const loom_target_facts_t* loom_low_lower_context_target_facts(
     const loom_low_lower_context_t* context);
 
 // Returns the selected target bundle key used in generated diagnostics.

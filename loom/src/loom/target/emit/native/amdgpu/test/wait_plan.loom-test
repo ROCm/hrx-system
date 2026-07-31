@@ -1,6 +1,6 @@
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_smem_result_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_smem_result_wait(%kernarg: reg<amdgpu.sgpr x2>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_smem_result_wait(%kernarg: reg<amdgpu.sgpr x2>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %loaded = s_load_dword %kernarg, %soffset
   %sum = s_add_u32 %loaded, %lhs
   return %sum
@@ -13,7 +13,7 @@ low.func.def target(@gfx11_target) @gfx11_smem_result_wait(%kernarg: reg<amdgpu.
 
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_multi_counter_consumer_wait strategy=source fixed=%loaded:physical_register:0:1 fixed=%trans:physical_register:1:1 fixed=%result:physical_register:2:1
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_multi_counter_consumer_wait(%resource: reg<amdgpu.sgpr x4>, %address: reg<amdgpu.vgpr>, %offset: reg<amdgpu.sgpr>, %input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_multi_counter_consumer_wait(%resource: reg<amdgpu.sgpr x4>, %address: reg<amdgpu.vgpr>, %offset: reg<amdgpu.sgpr>, %input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %loaded = buffer_load_dword %resource, %address, %offset
   %trans = v_exp_f32 %input
   %result = v_add_f32 %trans, %loaded
@@ -27,7 +27,7 @@ low.func.def target(@gfx11_target) @gfx11_multi_counter_consumer_wait(%resource:
 
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_explicit_smem_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_explicit_smem_wait(%kernarg: reg<amdgpu.sgpr x2>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_explicit_smem_wait(%kernarg: reg<amdgpu.sgpr x2>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %loaded = s_load_dword %kernarg, %soffset
   s_waitcnt {lgkmcnt = 0}
   %sum = s_add_u32 %loaded, %lhs
@@ -43,7 +43,7 @@ low.func.def target(@gfx11_target) @gfx11_explicit_smem_wait(%kernarg: reg<amdgp
 
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_lds_barrier_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_lds_barrier_wait(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_lds_barrier_wait(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>) asm {
   ds_write_b32 %addr, %value
   s_barrier
   return
@@ -56,7 +56,7 @@ low.func.def target(@gfx11_target) @gfx11_lds_barrier_wait(%addr: reg<amdgpu.vgp
 
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_same_block_partial_vmem_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_same_block_partial_vmem_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr0: reg<amdgpu.vgpr>, %vaddr1: reg<amdgpu.vgpr>, %vaddr2: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_same_block_partial_vmem_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr0: reg<amdgpu.vgpr>, %vaddr1: reg<amdgpu.vgpr>, %vaddr2: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
   %oldest = buffer_load_dword %resource, %vaddr0, %soffset
   %middle = buffer_load_dword %resource, %vaddr1, %soffset {offset = 4}
   %youngest = buffer_load_dword %resource, %vaddr2, %soffset {offset = 8}
@@ -74,7 +74,7 @@ low.func.def target(@gfx11_target) @gfx11_same_block_partial_vmem_wait(%resource
 
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_cross_block_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_cross_block_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_cross_block_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm {
   %loaded = buffer_load_dword %resource, %vaddr, %soffset
   %cond = s_cmp_lt_i32 %lhs, %rhs
   low.cond_br %cond, ^store, ^exit : reg<amdgpu.scc>
@@ -92,7 +92,7 @@ low.func.def target(@gfx11_target) @gfx11_cross_block_wait(%resource: reg<amdgpu
 
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_cross_block_program_exit_wait strategy=source
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_cross_block_program_exit_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_cross_block_program_exit_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>) asm {
   buffer_store_dword %value, %resource, %vaddr, %soffset
   low.br ^exit
 ^exit:
@@ -106,7 +106,7 @@ low.func.def target(@gfx11_target) @gfx11_cross_block_program_exit_wait(%resourc
 
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_block_entry_wait_preserves_later_load strategy=source
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_block_entry_wait_preserves_later_load(%resource: reg<amdgpu.sgpr x4>, %vaddr0: reg<amdgpu.vgpr>, %vaddr1: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_block_entry_wait_preserves_later_load(%resource: reg<amdgpu.sgpr x4>, %vaddr0: reg<amdgpu.vgpr>, %vaddr1: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) asm {
   %older = buffer_load_dword %resource, %vaddr0, %soffset
   %cond = s_cmp_lt_i32 %lhs, %rhs
   low.cond_br %cond, ^body, ^exit : reg<amdgpu.scc>
@@ -129,7 +129,7 @@ low.func.def target(@gfx11_target) @gfx11_block_entry_wait_preserves_later_load(
 
 // RUN: emit amdgpu-wait-counter-plan-json @gfx11_edge_cycle_scratch_wait strategy=source fixed=%vaddr:physical_register:3:1 fixed=%loaded:physical_register:0:1 fixed=%lhs:physical_register:1:1 fixed=%rhs:physical_register:2:1 fixed=%a:physical_register:1:1 fixed=%b:physical_register:2:1
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target(@gfx11_target) @gfx11_edge_cycle_scratch_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_edge_cycle_scratch_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
   %loaded = buffer_load_dword %resource, %vaddr, %soffset
   low.br ^join(%rhs: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.vgpr>)
 ^join(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>):

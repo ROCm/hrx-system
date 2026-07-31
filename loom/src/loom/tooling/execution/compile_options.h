@@ -10,6 +10,7 @@
 #define LOOM_TOOLING_EXECUTION_COMPILE_OPTIONS_H_
 
 #include "iree/base/api.h"
+#include "loom/ir/function_version.h"
 #include "loom/target/pipeline_options.h"
 #include "loom/target/reporting/artifact_manifest.h"
 #include "loom/target/reporting/report.h"
@@ -45,6 +46,9 @@ typedef struct loom_run_candidate_artifact_manifest_options_t {
 typedef struct loom_run_candidate_compile_options_t {
   // VM module name stored in VM bytecode archives. Empty uses "loom".
   iree_string_view_t module_name;
+  // Optional compiler-owned function versions participating in artifact
+  // emission. The list and its version objects are borrowed for the call.
+  const loom_function_version_list_t* function_versions;
   // Target pipeline options used to prepare the module for artifact emission.
   // Artifact providers use this to publish runtime support required by
   // compiler-generated target-low code.

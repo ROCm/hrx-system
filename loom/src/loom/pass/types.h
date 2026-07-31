@@ -19,6 +19,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/error/emitter.h"
+#include "loom/ir/function_version.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -207,6 +208,8 @@ struct loom_pass_t {
   uint32_t remark_diagnostic_count;
   // Caller-owned execution environment capabilities.
   const loom_pass_environment_t* environment;
+  // Concrete compiler function version active for a function pass, or NULL.
+  loom_function_version_t* function_version;
   // Interpreter-owned scoped value-fact workspace for this module execution.
   loom_pass_value_fact_owner_t* value_facts;
 };

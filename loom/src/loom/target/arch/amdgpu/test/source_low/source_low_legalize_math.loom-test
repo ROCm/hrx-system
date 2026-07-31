@@ -7,7 +7,7 @@ func.def target(@target) @scalar_roundf_round_away(%input: f32) -> (f32) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_roundf_round_away(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_roundf_round_away(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %13 = v_mov_b32 1258291200
   %14 = v_and_b32_lit %input, 2147483647
   %15 = v_cmp_lt_f32 %14, %13
@@ -27,7 +27,7 @@ func.def target(@target) @vector_roundf_round_away(%input: vector<2xf32>) -> (ve
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_roundf_round_away(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_roundf_round_away(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %13 = v_mov_b32 1258291200
   %16 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %17 = v_and_b32_lit %16, 2147483647
@@ -63,7 +63,7 @@ func.def target(@target) @scalar_rounding_native(%input: f32, %sign: f32) -> (f3
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_rounding_native(%input: reg<amdgpu.vgpr>, %sign: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_rounding_native(%input: reg<amdgpu.vgpr>, %sign: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %ceiled = v_ceil_f32 %input
   %floored = v_floor_f32 %sign
   %even = v_rndne_f32 %input
@@ -91,7 +91,7 @@ func.def target(@target) @vector_rounding_native(%input: vector<2xf32>, %sign: v
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_rounding_native(%input: reg<amdgpu.vgpr x2>, %sign: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_rounding_native(%input: reg<amdgpu.vgpr x2>, %sign: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %14 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %15 = v_ceil_f32 %14
   %16 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
@@ -124,7 +124,7 @@ func.def target(@target) @vector_logistic_exp2(%input: vector<4xf32>) -> (vector
   func.return %result : vector<4xf32>
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_logistic_exp2(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_logistic_exp2(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %11 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %12 = v_mul_f32_lit %11, 3216550459
   %13 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -157,7 +157,7 @@ func.def target(@target) @scalar_logistic_exp2(%input: f32) -> (f32) {
   func.return %result : f32
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_logistic_exp2(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_logistic_exp2(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %11 = v_mul_f32_lit %input, 3216550459
   %12 = v_exp_f32 %11
   %13 = v_add_f32_src0_inline %12, 1065353216
@@ -173,7 +173,7 @@ func.def target(@target) @scalar_exp_afn(%input: f32) -> (f32) {
   func.return %result : f32
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_exp_afn(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_exp_afn(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %8 = v_mul_f32_lit %input, 1069066811
   %result = v_exp_f32 %8
   return %result
@@ -187,7 +187,7 @@ func.def target(@target) @vector_silu_logistic(%input: vector<4xf32>) -> (vector
   func.return %result : vector<4xf32>
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_silu_logistic(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_silu_logistic(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %13 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %14 = v_mul_f32_lit %13, 3216550459
   %15 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -224,7 +224,7 @@ func.def target(@target) @vector_softplus_exp2(%input: vector<4xf32>) -> (vector
   func.return %result : vector<4xf32>
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_softplus_exp2(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_softplus_exp2(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %13 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %14 = v_mul_f32_lit %13, 1069066811
   %15 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -261,7 +261,7 @@ func.def target(@target) @scalar_gelu_logistic(%input: f32) -> (f32) {
   func.return %result : f32
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_gelu_logistic(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_gelu_logistic(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %15 = v_mul_f32_lit %input, 1071242019
   %16 = v_mul_f32_lit %15, 3216550459
   %17 = v_exp_f32 %16
@@ -279,7 +279,7 @@ func.def target(@target) @scalar_gelu_tanh(%input: f32) -> (f32) {
   func.return %result : f32
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_gelu_tanh(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_gelu_tanh(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %29 = v_mul_f32 %input, %input
   %30 = v_mul_f32 %29, %input
   %31 = v_mul_f32_lit %30, 1027024659
@@ -306,7 +306,7 @@ func.def target(@target) @scalar_tanh_afn(%input: f32) -> (f32) {
   func.return %result : f32
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_tanh_afn(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_tanh_afn(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %17 = v_mul_f32_src0_inline %input, 1073741824
   %18 = v_mul_f32_lit %17, 3216550459
   %19 = v_exp_f32 %18
@@ -325,7 +325,7 @@ func.def target(@target) @scalar_pow_afn(%base: f32, %exponent: f32) -> (f32) {
   func.return %result : f32
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_pow_afn(%base: reg<amdgpu.vgpr>, %exponent: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_pow_afn(%base: reg<amdgpu.vgpr>, %exponent: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %10 = v_log_f32 %base
   %11 = v_mul_f32 %10, %exponent
   %result = v_exp_f32 %11
@@ -340,7 +340,7 @@ func.def target(@target) @vector_tanh_afn(%input: vector<4xf32>) -> (vector<4xf3
   func.return %result : vector<4xf32>
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_tanh_afn(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_tanh_afn(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %17 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %18 = v_mul_f32_src0_inline %17, 1073741824
   %19 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -385,7 +385,7 @@ func.def target(@target) @vector_pow_afn(%base: vector<4xf32>, %exponent: vector
   func.return %result : vector<4xf32>
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_pow_afn(%base: reg<amdgpu.vgpr x4>, %exponent: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_pow_afn(%base: reg<amdgpu.vgpr x4>, %exponent: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %10 = slice %base[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %11 = v_log_f32 %10
   %12 = slice %base[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -445,7 +445,7 @@ func.def target(@target) @scalar_erf_rational(%input: f32) -> (f32) {
   func.return %result : f32
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_erf_rational(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_erf_rational(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %36 = v_mov_b32 3229614080
   %37 = v_mov_b32 1082130432
   %38 = v_cmp_lt_f32 %input, %36
@@ -485,7 +485,7 @@ func.def target(@target) @vector_gelu_erf(%input: vector<4xf32>) -> (vector<4xf3
   func.return %result : vector<4xf32>
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_gelu_erf(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_gelu_erf(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %43 = v_mov_b32 1065353216
   %48 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %49 = v_mul_f32_lit %48, 1060439283
@@ -613,7 +613,7 @@ func.def target(@target) @vector_bf16_add_widen_round(%lhs: vector<3xbf16>, %rhs
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_bf16_add_widen_round(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_bf16_add_widen_round(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %11 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %12 = v_lshlrev_b32_src0_inline %11, 16
   %14 = v_and_b32_lit %11, 4294901760
@@ -653,7 +653,7 @@ func.def target(@target) @vector_bf16_add_native_pack_gfx1250(%lhs: vector<2xbf1
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_bf16_add_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @vector_bf16_add_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_pk_add_bf16 %lhs, %rhs
   return %result
 }
@@ -667,7 +667,7 @@ func.def target(@target) @vector_bf16_add_wide_native_pack_gfx1250(%lhs: vector<
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_bf16_add_wide_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @vector_bf16_add_wide_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %7 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %8 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %9 = v_pk_add_bf16 %7, %8
@@ -687,7 +687,7 @@ func.def target(@target) @vector_bf16_mul_widen_round(%lhs: vector<3xbf16>, %rhs
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_bf16_mul_widen_round(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_bf16_mul_widen_round(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %11 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %12 = v_lshlrev_b32_src0_inline %11, 16
   %14 = v_and_b32_lit %11, 4294901760
@@ -727,7 +727,7 @@ func.def target(@target) @scalar_bf16_add_widen_round(%lhs: bf16, %rhs: bf16) ->
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_bf16_add_widen_round(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_bf16_add_widen_round(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %11 = v_lshlrev_b32_src0_16_low16 %lhs
   %12 = v_lshlrev_b32_src0_16_low16 %rhs
   %13 = v_add_f32 %11, %12
@@ -761,7 +761,7 @@ func.def target(@target) @scalar_erf_rational_constant_edges() -> (f32, f32, f32
   func.return %negative, %center, %positive : f32, f32, f32
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_erf_rational_constant_edges() -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_erf_rational_constant_edges() -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %negative = v_mov_b32 3212836864
   %center = v_mov_b32 0
   %positive = v_mov_b32 1065353216
@@ -777,7 +777,7 @@ func.def target(@target) @scalar_erf_rational_source_low(%input: f32) -> (f32) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_erf_rational_source_low(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_erf_rational_source_low(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %38 = v_max_f32_lit %input, 3229614080
   %39 = v_min_f32_lit %38, 1082130432
   %40 = v_mul_f32 %39, %39
@@ -810,7 +810,7 @@ func.def target(@target) @scalar_pow_rope_source_low(%freq_base: f32, %exponent:
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_pow_rope_source_low(%freq_base: reg<amdgpu.vgpr>, %exponent: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_pow_rope_source_low(%freq_base: reg<amdgpu.vgpr>, %exponent: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %10 = v_log_f32 %freq_base
   %11 = v_mul_f32 %10, %exponent
   %theta_pow = v_exp_f32 %11
@@ -826,7 +826,7 @@ func.def target(@target) @scalar_gelu_tanh_source_low(%input: f32) -> (f32) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_gelu_tanh_source_low(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_gelu_tanh_source_low(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %29 = v_mul_f32 %input, %input
   %30 = v_mul_f32 %29, %input
   %31 = v_mul_f32_lit %30, 1027024659
@@ -854,7 +854,7 @@ func.def target(@target) @vector_bf16_mul_widen_round_source_low(%lhs: vector<2x
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_bf16_mul_widen_round_source_low(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_bf16_mul_widen_round_source_low(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %11 = v_lshlrev_b32_src0_inline %lhs, 16
   %12 = v_and_b32_lit %lhs, 4294901760
   %14 = v_lshlrev_b32_src0_inline %rhs, 16
@@ -882,7 +882,7 @@ func.def target(@target) @vector_bf16_mul_native_pack_gfx1250(%lhs: vector<2xbf1
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_bf16_mul_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @vector_bf16_mul_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_pk_mul_bf16 %lhs, %rhs
   return %result
 }
@@ -896,7 +896,7 @@ func.def target(@target) @vector_bf16_mul_wide_native_pack_gfx1250(%lhs: vector<
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_bf16_mul_wide_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @vector_bf16_mul_wide_native_pack_gfx1250(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %7 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %8 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %9 = v_pk_mul_bf16 %7, %8
@@ -916,7 +916,7 @@ func.def target(@target) @vector_bf16_fma_native_pk_gfx1250(%a: vector<2xbf16>, 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_bf16_fma_native_pk_gfx1250(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @vector_bf16_fma_native_pk_gfx1250(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_pk_fma_bf16 %a, %b, %c
   return %result
 }
@@ -930,7 +930,7 @@ func.def target(@target) @vector_bf16_fma_wide_native_pk_gfx1250(%a: vector<4xbf
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_bf16_fma_wide_native_pk_gfx1250(%a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @vector_bf16_fma_wide_native_pk_gfx1250(%a: reg<amdgpu.vgpr x2>, %b: reg<amdgpu.vgpr x2>, %c: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %9 = slice %a[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %10 = slice %b[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %11 = slice %c[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
@@ -954,7 +954,7 @@ func.def target(@target) @vector_bf16_arithmetic_native_pack_gfx1250_a0(%a: vect
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_bf16_arithmetic_native_pack_gfx1250_a0(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx1250_a0.core> {
+low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) abi(hal_kernel) @vector_bf16_arithmetic_native_pack_gfx1250_a0(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %sum = v_pk_add_bf16 %a, %b
   %product = v_pk_mul_bf16 %a, %b
   %fma = v_pk_fma_bf16 %a, %b, %c
@@ -972,7 +972,7 @@ func.def target(@target) @vector_bf16_arithmetic_native_pack_gfx1251(%a: vector<
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_bf16_arithmetic_native_pack_gfx1251(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx1251.core> {
+low.func.def target<amdgpu.rdna4.gfx1251.core>(@target) abi(hal_kernel) @vector_bf16_arithmetic_native_pack_gfx1251(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %sum = v_pk_add_bf16 %a, %b
   %product = v_pk_mul_bf16 %a, %b
   %fma = v_pk_fma_bf16 %a, %b, %c
@@ -990,7 +990,7 @@ func.def target(@target) @vector_bf16_arithmetic_native_pack_gfx12_5_generic(%a:
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_bf16_arithmetic_native_pack_gfx12_5_generic(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx12_5.generic.core> {
+low.func.def target<amdgpu.gfx12_5.generic.core>(@target) abi(hal_kernel) @vector_bf16_arithmetic_native_pack_gfx12_5_generic(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %sum = v_pk_add_bf16 %a, %b
   %product = v_pk_mul_bf16 %a, %b
   %fma = v_pk_fma_bf16 %a, %b, %c
@@ -1005,7 +1005,7 @@ func.def target(@target) @scalar_log_afn(%input: f32) -> (f32) {
   func.return %result : f32
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_log_afn(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_log_afn(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %8 = v_log_f32 %input
   %result = v_mul_f32_lit %8, 1060205080
   return %result
@@ -1021,7 +1021,7 @@ func.def target(@target) @vector_sin_project_turns(%input: vector<4xf32>) -> (ve
   func.return %result : vector<4xf32>
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_sin_project_turns(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_sin_project_turns(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %8 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %9 = v_sin_f32 %8
   %10 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -1042,7 +1042,7 @@ func.def target(@target) @vector_cos_general_turns(%radians: vector<4xf32>) -> (
   func.return %result : vector<4xf32>
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_cos_general_turns(%radians: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_cos_general_turns(%radians: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %8 = slice %radians[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %9 = v_mul_f32_src0_inline %8, 1042479491
   %10 = slice %radians[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -1076,7 +1076,7 @@ func.def target(@target) @scalar_box_muller_native_math(%u1: f32, %u2: f32) -> (
   func.return %z0, %z1 : f32, f32
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_box_muller_native_math(%u1: reg<amdgpu.vgpr>, %u2: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_box_muller_native_math(%u1: reg<amdgpu.vgpr>, %u2: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %23 = v_log_f32 %u1
   %radius_base = v_mul_f32_lit %23, 1060205080
   %radius_squared = v_mul_f32_src0_inline %radius_base, 3221225472
@@ -1098,7 +1098,7 @@ func.def target(@target) @cdna3_native_turn_math(%input: f32) -> (f32, f32, f32)
   func.return %log, %sin, %cos : f32, f32, f32
 }
 // ----
-low.func.def target(@target) abi(hal_kernel) @cdna3_native_turn_math(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @cdna3_native_turn_math(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %log = v_log_f32 %input
   %sin = v_sin_f32 %input
   %cos = v_cos_f32 %input

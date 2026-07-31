@@ -37,7 +37,6 @@
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/numeric_format.h"
 
@@ -1695,8 +1694,8 @@ static bool loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
     const loom_amdgpu_matrix_fragment_contract_candidates_t*
         contract_candidates,
     const loom_amdgpu_source_alloca_layout_t* alloca_layout,
-    loom_symbol_ref_t target_ref, loom_func_like_t source_function,
-    const loom_op_t* source_op,
+    const loom_amdgpu_target_facts_t* target_facts,
+    loom_func_like_t source_function, const loom_op_t* source_op,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_amdgpu_fragment_memory_plan_t* out_plan) {
   *out_plan = (loom_amdgpu_fragment_memory_plan_t){0};
@@ -1711,8 +1710,7 @@ static bool loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
       .feature_bits =
           contract_candidates != NULL
               ? contract_candidates->feature_bits
-              : loom_amdgpu_matrix_fragment_feature_bits_from_target_ref(
-                    module, target_ref),
+              : loom_amdgpu_matrix_fragment_feature_bits(target_facts),
       .source_function = source_function,
   };
   loom_amdgpu_fragment_memory_source_t source = {0};
@@ -1740,14 +1738,14 @@ iree_status_t loom_amdgpu_analyze_vector_fragment_memory_plan(
     const loom_view_region_table_t* view_regions,
     const loom_target_bundle_t* bundle,
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_symbol_ref_t target_ref, loom_func_like_t source_function,
-    const loom_op_t* source_op,
+    const loom_amdgpu_target_facts_t* target_facts,
+    loom_func_like_t source_function, const loom_op_t* source_op,
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_amdgpu_fragment_memory_plan_t* out_plan, bool* out_selected) {
   *out_selected = loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
       module, fact_table, view_regions, bundle, descriptor_set,
       /*contract_candidates=*/NULL, loom_amdgpu_source_alloca_layout_empty(),
-      target_ref, source_function, source_op, operation_kind, out_plan);
+      target_facts, source_function, source_op, operation_kind, out_plan);
   return iree_ok_status();
 }
 
@@ -1770,7 +1768,9 @@ static iree_status_t loom_amdgpu_fragment_memory_select(
       module, loom_low_lower_context_fact_table(context), view_regions,
       loom_low_lower_context_bundle(context),
       loom_low_lower_context_descriptor_set(context), contract_candidates,
-      alloca_layout, loom_low_lower_context_target_ref(context),
+      alloca_layout,
+      loom_amdgpu_target_facts_cast(
+          loom_low_lower_context_target_facts(context)),
       loom_low_lower_context_source_function(context), source_op,
       operation_kind, out_plan);
   return iree_ok_status();
@@ -1826,8 +1826,9 @@ iree_status_t loom_amdgpu_low_legality_verify_vector_fragment_memory(
       .bundle = bundle,
       .descriptor_set = loom_target_low_legality_descriptor_set(context),
       .alloca_layout = alloca_layout,
-      .feature_bits = loom_amdgpu_matrix_fragment_feature_bits_from_target_ref(
-          module, loom_target_low_legality_target_ref(context)),
+      .feature_bits = loom_amdgpu_matrix_fragment_feature_bits(
+          loom_amdgpu_target_facts_cast(
+              loom_target_low_legality_target_facts(context))),
       .source_function = loom_target_low_legality_function(context),
   };
   loom_amdgpu_fragment_memory_source_t source = {0};

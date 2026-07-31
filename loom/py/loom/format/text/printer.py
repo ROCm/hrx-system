@@ -46,9 +46,9 @@ from loom.assembly import (
     FuncArgs,
     Glue,
     IndexList,
+    KeyRef,
     Keyword,
     OperandDict,
-    OpRef,
     OptionalGroup,
     PredicateList,
     Ref,
@@ -1546,7 +1546,7 @@ class Printer:
                     if value:
                         stream.emit(f"<{value}>", glue=True)
 
-                case OpRef(field=name):
+                case KeyRef(field=name):
                     covered_attrs.add(name)
                     value = fields.attr(name)
                     if value:

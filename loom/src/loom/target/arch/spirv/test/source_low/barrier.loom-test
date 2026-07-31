@@ -8,7 +8,7 @@ func.def target(@target) @spirv_workgroup_barrier() {
 }
 
 // ----
-low.func.def target(@target) abi(shader_entry_point) @spirv_workgroup_barrier() asm<spirv.logical.core> {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_workgroup_barrier() asm {
   OpControlBarrier.workgroup.workgroup.acq_rel
   return
 }
@@ -23,7 +23,7 @@ func.def target(@target) @spirv_subgroup_barrier() {
 }
 
 // ----
-low.func.def target(@target) abi(shader_entry_point) @spirv_subgroup_barrier() asm<spirv.logical.core> {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_subgroup_barrier() asm {
   OpControlBarrier.subgroup.workgroup.acq_rel
   return
 }

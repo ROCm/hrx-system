@@ -11,10 +11,9 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/instruction_constraints.h"
 #include "loom/target/arch/amdgpu/low_aliases.h"
-#include "loom/target/arch/amdgpu/ops/ops.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 typedef struct loom_amdgpu_low_verify_state_t {
@@ -35,7 +34,9 @@ static iree_status_t loom_amdgpu_low_verify_begin_function(
   *out_provider_state = NULL;
   const loom_low_resolved_target_t* target =
       loom_low_verify_context_target(context);
-  if (!loom_amdgpu_target_isa(target->target_op)) {
+  const loom_amdgpu_target_facts_t* target_facts =
+      loom_amdgpu_target_facts_cast(target->target_facts);
+  if (target_facts == NULL) {
     return iree_ok_status();
   }
 
@@ -47,10 +48,9 @@ static iree_status_t loom_amdgpu_low_verify_begin_function(
       .function_name = loom_low_diagnostic_function_name(
           loom_low_verify_context_module(context),
           loom_low_verify_context_function_op(context)),
-      .target_name = loom_amdgpu_target_record_target_name(target->target_op),
+      .properties = target_facts->properties,
+      .target_name = target_facts->identity.target->name,
   };
-  loom_amdgpu_target_record_resolve_properties(
-      target->target_op, &target->bundle_storage.bundle, &state->properties);
   *out_provider_state = state;
   return iree_ok_status();
 }

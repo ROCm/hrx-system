@@ -15,6 +15,7 @@
 #include "loom/pass/environment.h"
 #include "loom/pass/interpreter.h"
 #include "loom/target/predicate.h"
+#include "loom/target/specialization.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
 #include "loomc/iree.h"
@@ -114,7 +115,7 @@ static iree_status_t loomc_compile_capture_diagnostic_emission(
 static loomc_status_t loomc_compile_run_pass_program(
     loomc_compiler_t* compiler, loomc_workspace_t* workspace,
     const loomc_pass_program_t* pass_program, loom_module_t* internal_module,
-    const loom_target_specialization_context_t* specialization_context,
+    const loom_function_version_list_t* function_versions,
     loomc_result_t* result) {
   loomc_compile_diagnostic_capture_t capture = {
       .result = result,
@@ -127,7 +128,7 @@ static loomc_status_t loomc_compile_run_pass_program(
       loomc_context_target_pass_environment(compiler->context);
   if (target_environment != NULL) {
     pass_environment = loomc_target_pass_environment_make_loom_pass_environment(
-        target_environment, specialization_context, &low_environment_storage);
+        target_environment, function_versions, &low_environment_storage);
     loom_target_pass_predicate_provider_storage_initialize(
         loomc_workspace_block_pool(workspace), &predicate_storage);
     predicate_provider =
@@ -142,6 +143,7 @@ static loomc_status_t loomc_compile_run_pass_program(
               .user_data = &capture,
           },
       .environment = pass_environment,
+      .function_versions = function_versions,
   };
   loom_pass_run_result_t run_result = {0};
   LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(loom_pass_interpreter_run_module(
@@ -157,8 +159,8 @@ static loomc_status_t loomc_compile_specialize_functions(
     const loomc_target_environment_t* target_environment,
     const loomc_target_specialization_options_t* options, loom_module_t* module,
     loomc_result_t* result, iree_arena_allocator_t* arena,
-    loom_target_specialization_context_t* out_context) {
-  *out_context = (loom_target_specialization_context_t){0};
+    loom_function_version_list_t* out_function_versions) {
+  *out_function_versions = (loom_function_version_list_t){0};
   if (options == NULL || options->specialization_count == 0) {
     return loomc_ok_status();
   }
@@ -194,7 +196,7 @@ static loomc_status_t loomc_compile_specialize_functions(
           .user_data = &capture,
       },
       arena, &specialization_result)));
-  *out_context = specialization_result.context;
+  *out_function_versions = specialization_result.function_versions;
   if (specialization_result.error_count != 0) {
     return loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
   }
@@ -470,10 +472,9 @@ loomc_status_t loomc_compile_module(loomc_compiler_t* compiler,
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(
       loomc_result_create(LOOMC_RESULT_STATE_SUCCEEDED, allocator, &result));
-  iree_arena_allocator_t specialization_arena;
-  iree_arena_initialize(loomc_workspace_block_pool(workspace),
-                        &specialization_arena);
-  loom_target_specialization_context_t specialization_context = {0};
+  iree_arena_allocator_t* function_version_arena =
+      loomc_module_prepare_function_versions(module);
+  loom_function_version_list_t function_versions = {0};
 
   loomc_status_t status =
       loomc_result_verify_loom_module(internal_module, /*source=*/NULL, result);
@@ -494,21 +495,27 @@ loomc_status_t loomc_compile_module(loomc_compiler_t* compiler,
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_compile_specialize_functions(
         context_target_environment, target_specialization, internal_module,
-        result, &specialization_arena, &specialization_context);
+        result, function_version_arena, &function_versions);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_compile_run_pass_program(compiler, workspace, pass_program,
-                                            internal_module,
-                                            &specialization_context, result);
+                                            internal_module, &function_versions,
+                                            result);
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_compile_emit_requested_artifacts(result, options, module);
+  }
+  const bool compilation_succeeded =
+      loomc_status_is_ok(status) && loomc_result_succeeded(result);
+  if (compilation_succeeded) {
+    loomc_module_publish_function_versions(module, function_versions);
+  } else {
+    loomc_module_prepare_function_versions(module);
   }
   if (loomc_status_is_ok(status)) {
     *out_result = result;
     result = NULL;
   }
-  iree_arena_deinitialize(&specialization_arena);
   loomc_result_release(result);
   return status;
 }

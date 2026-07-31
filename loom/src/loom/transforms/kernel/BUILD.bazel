@@ -82,6 +82,7 @@ loom_cc_library(
         "//loom/src/loom/rewrite:materialize",
         "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:facts",
         "//loom/src/loom/target:launch",
         "//loom/src/loom/target:pass_environment",
         "//loom/src/loom/target/reporting:report",

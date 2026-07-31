@@ -32,6 +32,15 @@ typedef struct loom_text_low_asm_form_t loom_text_low_asm_form_t;
 typedef struct loom_text_low_asm_descriptor_handle_t
     loom_text_low_asm_descriptor_handle_t;
 
+// Active target-low representation contract for contextual types and regions.
+typedef struct loom_text_low_repr_context_t {
+  // Canonical representation-contract key, or empty when derived from a
+  // target.
+  iree_string_view_t contract_key;
+  // Descriptor-set handle resolved from |contract_key| or a target.
+  const loom_text_low_asm_descriptor_set_t* descriptor_set;
+} loom_text_low_repr_context_t;
+
 typedef struct loom_text_low_asm_packet_descriptor_t {
   // Opaque descriptor-set handle owned by the environment implementation.
   const loom_text_low_asm_descriptor_set_t* descriptor_set;
@@ -190,13 +199,6 @@ typedef iree_status_t (*loom_text_low_asm_lookup_descriptor_set_fn_t)(
     const loom_text_low_asm_environment_state_t* state, iree_string_view_t key,
     const loom_text_low_asm_descriptor_set_t** out_descriptor_set);
 
-// Resolves a target symbol reference to the descriptor set selected by that
-// target. Returns OK with NULL when the target cannot select a descriptor set.
-typedef iree_status_t (*loom_text_low_asm_lookup_target_descriptor_set_fn_t)(
-    const loom_text_low_asm_environment_state_t* state,
-    const loom_module_t* module, loom_attribute_t target_attr,
-    const loom_text_low_asm_descriptor_set_t** out_descriptor_set);
-
 // Resolves a mnemonic within a descriptor set to a packet descriptor. Returns
 // OK with |out_packet->descriptor| NULL when no packet matches.
 typedef iree_status_t (*loom_text_low_asm_lookup_packet_fn_t)(
@@ -299,9 +301,6 @@ typedef iree_status_t (*loom_text_low_asm_describe_register_type_fn_t)(
 typedef struct loom_text_low_asm_vtable_t {
   // Resolves an `asm<...>` descriptor-set key to an environment-owned handle.
   loom_text_low_asm_lookup_descriptor_set_fn_t lookup_descriptor_set;
-  // Resolves a target symbol reference to its descriptor-set handle.
-  loom_text_low_asm_lookup_target_descriptor_set_fn_t
-      lookup_target_descriptor_set;
   // Resolves a mnemonic within a descriptor-set handle to a packet descriptor.
   loom_text_low_asm_lookup_packet_fn_t lookup_packet;
   // Optional target-owned explanation for unknown mnemonics.

@@ -151,7 +151,7 @@ TEST_F(FuncPrinterTest, Definition) {
             "}\n");
 }
 
-TEST_F(FuncPrinterTest, TemplateOpRef) {
+TEST_F(FuncPrinterTest, TemplateKeyRef) {
   loom_symbol_ref_t callee = MakeSymbol("vnni_q8");
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_string_id_t implements_id = Intern("tile.contract");

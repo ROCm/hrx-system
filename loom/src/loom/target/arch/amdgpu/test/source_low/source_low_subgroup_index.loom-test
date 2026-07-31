@@ -15,7 +15,7 @@ kernel.def target(@target) @subgroup_id_x_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_id_x_wave32() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_id_x_wave32() asm {
   %7 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %subgroup_id = v_lshrrev_b32_src0_inline %7, 5
@@ -43,7 +43,7 @@ kernel.def target(@target) @subgroup_id_single_wave_gfx11() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @subgroup_id_single_wave_gfx11() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @subgroup_id_single_wave_gfx11() asm {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %one = v_mov_b32 1
   %9 = v_mov_b32 0
@@ -71,7 +71,7 @@ kernel.def target(@target) @subgroup_lane_id_xyz_wave32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 2) workgroup_count(1, 1, 1) @subgroup_lane_id_xyz_wave32() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 4, 2) workgroup_count(1, 1, 1) @subgroup_lane_id_xyz_wave32() asm {
   %packed_tid = live_in<amdgpu.workitem_id.packed.xyz> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %11 = v_and_b32_lit %packed_tid, 1023
@@ -109,7 +109,7 @@ kernel.def target(@target) @subgroup_lane_id_xyz_wave32_gfx12() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 2) workgroup_count(1, 1, 1) @subgroup_lane_id_xyz_wave32_gfx12() asm<amdgpu.rdna4.core> {
+low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(8, 4, 2) workgroup_count(1, 1, 1) @subgroup_lane_id_xyz_wave32_gfx12() asm {
   %packed_tid = live_in<amdgpu.workitem_id.packed.xyz> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %11 = v_and_b32_lit %packed_tid, 1023
@@ -145,7 +145,7 @@ kernel.def target(@target) @subgroup_id_x_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @subgroup_id_x_wave64() asm<amdgpu.cdna4.core> {
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @subgroup_id_x_wave64() asm {
   %7 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %subgroup_id = v_lshrrev_b32_src0_inline %7, 6
@@ -173,7 +173,7 @@ kernel.def target(@target) @subgroup_lane_id_x_wave64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_lane_id_x_wave64() asm<amdgpu.cdna4.core> {
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_lane_id_x_wave64() asm {
   %lane_id = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %one = v_mov_b32 1

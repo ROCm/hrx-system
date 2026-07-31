@@ -60,7 +60,7 @@ loom_cc_test(
     loom::ops::vector
     loom::pass::types
     loom::pass::value_facts
-    loom::target::profile
+    loom::target::facts
     loom::target::types
 )
 
@@ -79,6 +79,7 @@ loom_cc_library(
     loom::ir
     loom::ops::op_defs
     loom::pass::types
+    loom::target::function_version
     loom::target::pass_environment
     loom::util::dominance
   PUBLIC

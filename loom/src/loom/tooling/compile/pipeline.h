@@ -75,10 +75,30 @@ typedef struct loom_compile_pipeline_options_t {
   const loom_pass_trace_options_t* trace_options;
 } loom_compile_pipeline_options_t;
 
+// Compiler products retained after running a compile pipeline.
+//
+// Function versions are stable compiler identities whose current IR functions
+// may change as lowering replaces operations. Their facts remain available to
+// artifact selection and emission until this result is deinitialized.
+typedef struct loom_compile_pipeline_result_t {
+  // Arena owning function versions and their immutable target facts.
+  iree_arena_allocator_t version_arena;
+
+  // Concrete function versions produced for this invocation.
+  loom_function_version_list_t function_versions;
+
+  // Pass diagnostics observed while executing the selected pipeline.
+  loom_pass_run_result_t pass;
+} loom_compile_pipeline_result_t;
+
 // Initializes compile pipeline options with the artifact-front-door default:
 // prepared target-low, stderr diagnostics, and a small error cap.
 void loom_compile_pipeline_options_initialize(
     loom_compile_pipeline_options_t* out_options);
+
+// Releases compiler products owned by |result|.
+void loom_compile_pipeline_result_deinitialize(
+    loom_compile_pipeline_result_t* result);
 
 // Returns true when |pipeline| disables pass execution.
 bool loom_compile_pipeline_is_disabled(iree_string_view_t pipeline);
@@ -92,9 +112,14 @@ bool loom_compile_pipeline_is_default(iree_string_view_t pipeline);
 // counted in |out_result| and left to the caller's product policy: a compiler
 // front door may exit nonzero, while a tuner can preserve the diagnostics as
 // failed-candidate evidence and continue.
+//
+// |out_result| is initialized on every call and must be deinitialized after
+// the final consumer of its function versions, including when this function
+// returns a non-OK status. |block_pool| must outlive |out_result|.
 iree_status_t loom_compile_run_pipeline(
     loom_module_t* module, const loom_compile_pipeline_options_t* options,
-    iree_arena_block_pool_t* block_pool, loom_pass_run_result_t* out_result);
+    iree_arena_block_pool_t* block_pool,
+    loom_compile_pipeline_result_t* out_result);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -233,6 +233,7 @@ __all__ = [
     "MemoryAccessInterface",
     "MemoryAccessOperationKind",
     "RegionBranchInterface",
+    "TargetFactSatisfaction",
     "TargetLikeInterface",
     # Op declaration.
     "Op",
@@ -2788,9 +2789,9 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
         FuncArgs,
         Glue,
         IndexList,
+        KeyRef,
         Keyword,
         OperandDict,
-        OpRef,
         OptionalGroup,
         PredicateList,
         Ref,
@@ -2819,7 +2820,7 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
                 Attr(field=f)
                 | SymbolRef(field=f)
                 | Flags(field=f)
-                | OpRef(field=f)
+                | KeyRef(field=f)
                 | TemplateParam(field=f)
             ):
                 fields.add(f)
@@ -3374,6 +3375,10 @@ class FuncLikeInterface(NamedTuple):
     import_symbol: str | None = None
     # Optional symbol ref attr naming the resolved target record.
     target: str | None = None
+    # Optional string attr naming the intrinsic contract under which the
+    # function signature and body are represented. None means the op does not
+    # expose an intrinsic representation contract.
+    repr_contract: str | None = None
     # Optional ABI enum attr for concrete target-bound functions.
     abi: str | None = None
     # Optional ABI payload dictionary attr.
@@ -3412,14 +3417,22 @@ class FuncLikeInterface(NamedTuple):
     args_as_operands: bool = False
 
 
+@unique
+class TargetFactSatisfaction(Enum):
+    """Satisfaction relation for generated common target facts."""
+
+    IDENTITY = "identity"
+    STRUCTURAL = "structural"
+
+
 class TargetLikeInterface(NamedTuple):
     """Interface for ops that define target environment records.
 
     The symbol field names the defining symbol attr. The selector field names
     the typed attr selecting the generated target row, such as a processor or
-    generic target kind. The extensions field names an optional dict
-    attr carrying target-specific extension data. Descriptor names a C-side
-    projection descriptor owned by the target family.
+    generic target kind. The extensions field names an optional dict attr
+    carrying target-specific extension data. Generated descriptor metadata
+    binds the target op to its fact type and optional family fact projector.
     """
 
     # Symbol attr that names the target record.
@@ -3434,10 +3447,15 @@ class TargetLikeInterface(NamedTuple):
     # present, the C generator emits the TargetLike descriptor and projection
     # table instead of requiring hand-authored descriptor metadata.
     bundle_table: str | None = None
-    # Common target attrs owned by the authored function contract during
-    # specialization. Target-family identity, capabilities, and limits remain
-    # profile-owned unless listed here.
-    specialization_authored_attrs: tuple[str, ...] = ()
+    # Optional C symbol for a family-owned target fact type. When absent, the C
+    # generator emits a common fact type private to this op.
+    fact_type: str | None = None
+    # Optional C symbol for the target-op adapter that projects family-owned
+    # attributes into the typed fact extension.
+    fact_projector: str | None = None
+    # Satisfaction relation used by a generated common fact type. Family-owned
+    # fact types carry their relation in the named descriptor instead.
+    fact_satisfaction: TargetFactSatisfaction = TargetFactSatisfaction.IDENTITY
 
 
 class LoopLikeInterface(NamedTuple):

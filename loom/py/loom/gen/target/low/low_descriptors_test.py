@@ -57,6 +57,7 @@ from loom.target.low_descriptors import (
     StorageLeaseFlag,
     StorageLeaseKind,
     StorageLeaseReleaseScope,
+    descriptor_stable_id,
 )
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_I32_DESCRIPTOR,
@@ -144,6 +145,56 @@ def test_descriptor_set_rejects_unknown_descriptor_category() -> None:
             categories=(DescriptorCategory("control"),),
             descriptors=(descriptor,),
         )
+
+
+def test_descriptor_set_requires_canonical_supported_target_contracts() -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"DescriptorSet 'test.low.core': supported target contract keys "
+            r"must be sorted and unique"
+        ),
+    ):
+        replace(
+            TEST_LOW_CORE_DESCRIPTOR_SET,
+            supported_target_contract_keys=(
+                "test.low.exact_b",
+                "test.low.exact_a",
+            ),
+        )
+
+
+def test_descriptor_set_rejects_explicit_self_target_contract() -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"DescriptorSet 'test.low.core': support for its own target "
+            r"contract is implicit"
+        ),
+    ):
+        replace(
+            TEST_LOW_CORE_DESCRIPTOR_SET,
+            supported_target_contract_keys=("test.low.core",),
+        )
+
+
+def test_descriptor_set_emits_supported_target_contract_identities() -> None:
+    target_contract_keys = (
+        "test.low.exact_a",
+        "test.low.exact_b",
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        supported_target_contract_keys=target_contract_keys,
+    )
+
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert ("static const uint64_t kTestLowCoreSupportedTargetContractStableIds[]") in generated.source
+    for key in target_contract_keys:
+        assert f"UINT64_C(0x{descriptor_stable_id(key):x})" in generated.source
+    assert (".supported_target_contract_stable_ids = kTestLowCoreSupportedTargetContractStableIds") in generated.source
+    assert (".supported_target_contract_count = IREE_ARRAYSIZE(kTestLowCoreSupportedTargetContractStableIds)") in generated.source
 
 
 def test_descriptor_set_requires_canonical_asm_for_authorable_surface() -> None:

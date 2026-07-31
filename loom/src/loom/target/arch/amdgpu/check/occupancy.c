@@ -174,10 +174,13 @@ static iree_status_t loom_amdgpu_occupancy_check_resolve_residency_model(
   if (!low_function) {
     return iree_ok_status();
   }
+  loom_symbol_fact_table_t symbol_facts = {0};
+  loom_symbol_fact_table_initialize(&symbol_facts, request->case_arena);
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-      request->module, low_function, &request->low_registry->registry, emitter,
-      &target));
+      request->module, &symbol_facts, low_function,
+      /*effective_target_facts=*/NULL, &request->low_registry->registry,
+      emitter, &target));
   if (target.descriptor_set == NULL) {
     return iree_ok_status();
   }

@@ -13,9 +13,9 @@
 #include "loom/ir/context.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/matrix/projection.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/util/numeric_format.h"
 
 typedef struct loom_amdgpu_matrix_target_facts_t {
@@ -32,22 +32,23 @@ static void loom_amdgpu_matrix_target_facts_from_environment(
     loom_amdgpu_matrix_target_facts_t* out_facts) {
   *out_facts = (loom_amdgpu_matrix_target_facts_t){0};
 
-  const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_processor_from_ref(environment->module,
-                                            environment->target_ref);
-  IREE_ASSERT(processor != NULL,
-              "AMDGPU matrix lowering requires an AMDGPU processor target "
-              "record");
+  const loom_amdgpu_target_facts_t* target_facts =
+      loom_amdgpu_target_facts_cast(environment->target_facts);
+  IREE_ASSERT(target_facts != NULL,
+              "AMDGPU matrix lowering requires AMDGPU target facts");
+  const loom_amdgpu_processor_properties_t* processor =
+      target_facts->properties.processor;
   loom_amdgpu_matrix_feature_bits_t feature_bits = 0;
-  (void)loom_amdgpu_matrix_feature_bits_from_profile(
-      processor->properties.features.matrix, &feature_bits);
-  if (environment->bundle == NULL || environment->bundle->snapshot == NULL ||
-      environment->bundle->snapshot->subgroup_size == 0) {
+  (void)loom_amdgpu_matrix_feature_bits_from_profile(processor->features.matrix,
+                                                     &feature_bits);
+  const loom_target_bundle_t* bundle =
+      loom_target_contract_query_environment_bundle(environment);
+  if (bundle == NULL || bundle->snapshot == NULL ||
+      bundle->snapshot->subgroup_size == 0) {
     IREE_ASSERT_UNREACHABLE("selected AMDGPU matrix target subgroup size");
     IREE_BUILTIN_UNREACHABLE();
   }
-  const uint16_t wavefront_size =
-      (uint16_t)environment->bundle->snapshot->subgroup_size;
+  const uint16_t wavefront_size = (uint16_t)bundle->snapshot->subgroup_size;
 
   *out_facts = (loom_amdgpu_matrix_target_facts_t){
       .options =
@@ -222,12 +223,14 @@ static iree_string_view_t loom_amdgpu_matrix_diagnostic_function_name(
 static void loom_amdgpu_matrix_diagnostic_make_context_params(
     const loom_target_contract_query_environment_t* environment,
     const loom_op_t* source_op, loom_diagnostic_param_t* params) {
-  params[0] = loom_param_string(loom_amdgpu_matrix_diagnostic_nonempty(
-      environment->bundle->name, IREE_SV("<empty>")));
+  const loom_target_bundle_t* bundle =
+      loom_target_contract_query_environment_bundle(environment);
+  params[0] = loom_param_string(
+      loom_amdgpu_matrix_diagnostic_nonempty(bundle->name, IREE_SV("<empty>")));
   params[1] = loom_param_string(loom_amdgpu_matrix_diagnostic_nonempty(
-      environment->bundle->export_plan->name, IREE_SV("<empty>")));
+      bundle->export_plan->name, IREE_SV("<empty>")));
   params[2] = loom_param_string(loom_amdgpu_matrix_diagnostic_nonempty(
-      environment->bundle->config->name, IREE_SV("<empty>")));
+      bundle->config->name, IREE_SV("<empty>")));
   params[3] = loom_param_string(
       loom_amdgpu_matrix_diagnostic_function_name(environment));
   params[4] = loom_param_string(loom_op_name(environment->module, source_op));

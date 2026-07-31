@@ -8,7 +8,7 @@ func.def target(@target) @bf16_dot2_256(%lhs: vector<16xbf16>, %rhs: vector<16xb
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @bf16_dot2_256(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %acc: reg<x86.ymm>) -> (reg<x86.ymm>) asm<x86.avx512_packed_dot.core> {
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @bf16_dot2_256(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %acc: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
   %9 = copy %acc : reg<x86.ymm> -> reg<x86.ymm>
   %dot = avx512_bf16.vdpbf16ps.ymm %9, %lhs, %rhs
   return %dot
@@ -23,7 +23,7 @@ func.def target(@target) @dot4i_u8s8_256(%lhs: vector<32xi8>, %rhs: vector<32xi8
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot4i_u8s8_256(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %acc: reg<x86.ymm>) -> (reg<x86.ymm>) asm<x86.avx512_packed_dot.core> {
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @dot4i_u8s8_256(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %acc: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
   %9 = copy %acc : reg<x86.ymm> -> reg<x86.ymm>
   %dot = avx512_vnni.vpdpbusd.ymm %9, %lhs, %rhs
   return %dot
@@ -38,7 +38,7 @@ func.def target(@target) @dot4i_s8s8_256(%lhs: vector<32xi8>, %rhs: vector<32xi8
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot4i_s8s8_256(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %acc: reg<x86.ymm>) -> (reg<x86.ymm>) asm<x86.avx512_packed_dot.core> {
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @dot4i_s8s8_256(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %acc: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
   %9 = copy %acc : reg<x86.ymm> -> reg<x86.ymm>
   %dot = avx_vnni_int8.vpdpbssd.ymm %9, %lhs, %rhs
   return %dot

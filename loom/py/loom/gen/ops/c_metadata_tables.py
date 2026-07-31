@@ -214,7 +214,7 @@ def generate_tables_c(
         lines.append("")
         lines.append("#include <stddef.h>")
         lines.append("")
-        lines.append('#include "loom/target/types.h"')
+        lines.append('#include "loom/ops/target/facts.h"')
     lines.append('#include "loom/error/error_defs.h"')
     lines.append("")
     if not private_header:
@@ -249,6 +249,14 @@ def generate_tables_c(
     target_like_bundle_table_symbols = c_interfaces.target_like_bundle_table_symbols(ops)
     if target_like_bundle_table_symbols:
         lines.extend(f"extern const loom_target_bundle_table_t {symbol};" for symbol in target_like_bundle_table_symbols)
+        lines.append("")
+    target_like_fact_type_symbols = c_interfaces.target_like_fact_type_symbols(ops)
+    if target_like_fact_type_symbols:
+        lines.extend(f"extern const loom_target_fact_type_t {symbol};" for symbol in target_like_fact_type_symbols)
+        lines.append("")
+    target_like_fact_projector_symbols = c_interfaces.target_like_fact_projector_symbols(ops)
+    if target_like_fact_projector_symbols:
+        lines.extend(f"extern const loom_target_fact_projector_t {symbol};" for symbol in target_like_fact_projector_symbols)
         lines.append("")
 
     emitted_enum_case_name_arrays: set[str] = set()

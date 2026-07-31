@@ -132,8 +132,10 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
     loom_symbol_ref_t callee = AddSymbol(IREE_SV("test_fn"));
     loom_op_t* function_op = NULL;
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &builder_, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
-        /*purity=*/0, /*allocation=*/0, /*schedule=*/0, target, /*abi=*/0,
+        &builder_, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
+        /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+        /*purity=*/0, /*allocation=*/0, /*schedule=*/0,
+        /*descriptor_set=*/contract_set_key, target, /*abi=*/0,
         loom_make_named_attr_slice(NULL, 0),
         loom_make_named_attr_slice(NULL, 0),
         /*export_symbol=*/LOOM_STRING_ID_INVALID,
@@ -362,12 +364,10 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
   }
 
   void VerifyLowModuleOk() {
-    loom_low_verify_options_t options = {
-        /*.descriptor_registry=*/&low_registry_.registry,
-        /*.emitter=*/{EmitDiagnosticToStderr, NULL},
-        /*.provider_list=*/{},
-        /*.max_errors=*/20,
-    };
+    loom_low_verify_options_t options = {};
+    options.descriptor_registry = &low_registry_.registry;
+    options.emitter = {EmitDiagnosticToStderr, NULL};
+    options.max_errors = 20;
     loom_low_verify_scratch_t scratch =
         loom_low_verify_scratch_for_module(module_);
     loom_low_verify_result_t result = {};

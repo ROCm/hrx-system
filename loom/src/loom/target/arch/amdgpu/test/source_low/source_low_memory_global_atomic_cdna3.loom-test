@@ -16,7 +16,7 @@ kernel.def target(@target) @global_atomic_add_f32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_add_f32() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_add_f32() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %one = v_mov_b32 1065353216
   %11 = v_mov_b32 0
@@ -45,7 +45,7 @@ kernel.def target(@target) @global_atomic_add_i64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_add_i64() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_add_i64() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %13 = v_mov_b32 0
   %14 = s_mov_b32_m0_imm 0
@@ -74,7 +74,7 @@ kernel.def target(@target) @global_atomic_dynamic_add_i64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_dynamic_add_i64(%value: reg<amdgpu.sgpr x2>) asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_dynamic_add_i64(%value: reg<amdgpu.sgpr x2>) asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %11 = v_mov_b32 0
   %12 = s_mov_b32_m0_imm 0
@@ -104,7 +104,7 @@ kernel.def target(@target) @global_atomic_exchange_i64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_exchange_i64() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_exchange_i64() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %13 = v_mov_b32 0
   %14 = s_mov_b32_m0_imm 0
@@ -132,7 +132,7 @@ kernel.def target(@target) @global_atomic_cmpxchg_i64() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_cmpxchg_i64() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_cmpxchg_i64() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %17 = v_mov_b32 0
   %18 = s_mov_b32_m0_imm 0
@@ -170,7 +170,7 @@ kernel.def target(@target) @intermediate_block_atomic_output_f32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(2, 4, 1) @intermediate_block_atomic_output_f32() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(2, 4, 1) @intermediate_block_atomic_output_f32() asm {
   %intermediate_block = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %row = live_in<amdgpu.workgroup_id.y> : reg<amdgpu.sgpr>
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>

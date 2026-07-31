@@ -278,7 +278,6 @@ loom_cc_benchmark(
     loom::ops::low
     loom::ops::op_registry
     loom::target::arch::amdgpu::hal::kernel_abi
-    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::planning::descriptor_semantics
     loom::target::arch::amdgpu::planning::occupancy
     loom::target::arch::amdgpu::planning::packet_plan
@@ -317,8 +316,8 @@ loom_cc_library(
     loom::codegen::low::schedule
     loom::ir
     loom::ops::low
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::hal::kernel_abi
-    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
@@ -368,7 +367,11 @@ loom_cc_test(
     loom::ops::low
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::error_defs
+    loom::target::arch::amdgpu::facts
+    loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::refs::target_refs
+    loom::target::arch::amdgpu::target_info_defs
+    loom::target::facts_builder
     loom::testing::diagnostic_matchers
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -557,17 +560,16 @@ loom_cc_library(
     loom::codegen::low::diagnostics
     loom::codegen::low::frame
     loom::codegen::low::storage_layout
+    loom::codegen::low::target_binding
     loom::codegen::low::verify
     loom::error::diagnostic
     loom::error::error_defs
     loom::ir
-    loom::ops::func_symbol_facts
     loom::ops::global
     loom::ops::low
-    loom::ops::target
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::hal::kernel_abi
     loom::target::arch::amdgpu::matrix::contract
-    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::planning::descriptor_semantics
     loom::target::arch::amdgpu::planning::occupancy
     loom::target::arch::amdgpu::planning::storage_lease
@@ -577,8 +579,6 @@ loom_cc_library(
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::entry_selection
-    loom::target::function_contract
-    loom::target::profile
     loom::target::provider
     loom::target::reporting::artifact_manifest_collect
     loom::target::reporting::low
@@ -602,21 +602,29 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::symbol_facts
     loom::codegen::low::text_asm
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
+    loom::ops::func_symbol_facts
     loom::ops::op_registry
     loom::ops::sanitizer
+    loom::ops::target
     loom::sanitizer::site_table
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::matrix::contract
     loom::target::arch::amdgpu::planning::wait_counters
+    loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::emit::native::elf
+    loom::target::facts_builder
+    loom::target::function_contract
+    loom::target::function_version
+    loom::target::profile
     loom::testing::diagnostic_matchers
     loom::tooling::compile::pipeline
   LABELS

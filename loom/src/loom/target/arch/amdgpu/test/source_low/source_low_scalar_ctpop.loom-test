@@ -8,7 +8,7 @@ func.def target(@target) @scalar_ctpopi_i64_sgpr(%input: i64) -> (i64) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_ctpopi_i64_sgpr(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_ctpopi_i64_sgpr(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
   %5 = s_bcnt1_i32_b64 %input
   %6 = s_mov_b32 0
   %result = concat(%5, %6) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
@@ -26,7 +26,7 @@ func.def target(@target) @scalar_ctpopi_i64_vgpr(%inputs: vector<2xi64>) -> (i64
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_ctpopi_i64_vgpr(%inputs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_ctpopi_i64_vgpr(%inputs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm {
   %6 = slice %inputs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %7 = slice %inputs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %10 = v_bcnt_u32_b32_src1_zero %6
@@ -46,7 +46,7 @@ func.def target(@target) @scalar_ctpopi_i32_sgpr(%input: i32) -> (i32) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_ctpopi_i32_sgpr(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_ctpopi_i32_sgpr(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %result = s_bcnt1_i32_b32 %input
   return %result
 }
@@ -62,7 +62,7 @@ func.def target(@target) @scalar_ctpopi_i32_vgpr(%inputs: vector<2xi32>) -> (i32
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_ctpopi_i32_vgpr(%inputs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_ctpopi_i32_vgpr(%inputs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %input = slice %inputs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %result = v_bcnt_u32_b32_src1_zero %input
   return %result
@@ -79,7 +79,7 @@ func.def target(@target) @scalar_ctpopi_i64_to_index(%input: i64) -> (index) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_ctpopi_i64_to_index(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_ctpopi_i64_to_index(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
   %6 = s_bcnt1_i32_b64 %input
   return %6
 }

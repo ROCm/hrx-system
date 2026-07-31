@@ -290,7 +290,7 @@ static iree_status_t loom_parse_format_optional_group(
                  first_inner->kind == LOOM_FORMAT_KIND_SYMBOL_REF) {
         present = peek.kind == LOOM_TOKEN_SYMBOL;
       } else if (first_inner &&
-                 (first_inner->kind == LOOM_FORMAT_KIND_OP_REF ||
+                 (first_inner->kind == LOOM_FORMAT_KIND_KEY_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_DESCRIPTOR_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_STABLE_KEY_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_TEMPLATE_PARAM ||
@@ -393,11 +393,12 @@ static iree_status_t loom_parse_format_flags(loom_parser_t* parser,
   return iree_ok_status();
 }
 
-// Parses an op or descriptor key reference: <op.name> or <descriptor-key>.
-static iree_status_t loom_parse_format_op_ref(
+// Parses a bare symbolic key reference: <key.name>.
+static iree_status_t loom_parse_format_key_ref(
     loom_parser_t* parser, const loom_format_element_t* element,
-    loom_parsed_op_t* parsed) {
-  loom_token_t op_ref_start_token = loom_tokenizer_peek(&parser->tokenizer);
+    loom_parsed_op_t* parsed, iree_string_view_t* out_key) {
+  *out_key = iree_string_view_empty();
+  loom_token_t key_ref_start_token = loom_tokenizer_peek(&parser->tokenizer);
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LANGLE)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'<'"));
@@ -419,9 +420,10 @@ static iree_status_t loom_parse_format_op_ref(
   loom_attribute_t attr = loom_attr_string(name_id);
   IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
       parsed, &parser->parser_arena, element->field_index, attr));
+  *out_key = name_token.text;
   return loom_parse_format_add_field_span(
       parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE, element->field_index,
-      op_ref_start_token);
+      key_ref_start_token);
 }
 
 // Parses a descriptor key reference whose row ordinal is resolved later after
@@ -691,39 +693,23 @@ static iree_status_t loom_parse_format_project_func_args(
   return iree_ok_status();
 }
 
-static bool loom_parse_format_symbol_ref_targets_register_context(
-    const loom_op_vtable_t* vtable, uint16_t attr_index) {
-  if (!vtable->func_like || !vtable->attr_descriptors ||
-      attr_index >= vtable->attribute_count) {
-    return false;
-  }
-  const loom_attr_descriptor_t* descriptor =
-      &vtable->attr_descriptors[attr_index];
-  return descriptor->symbol_ref &&
-         iree_any_bit_set(descriptor->symbol_ref->interfaces,
-                          LOOM_SYMBOL_INTERFACE_TARGET);
-}
-
-static iree_status_t loom_parse_format_update_register_context_from_target(
+static iree_status_t loom_parse_format_update_low_repr_context(
     loom_parser_t* parser, const loom_op_vtable_t* vtable, uint16_t attr_index,
-    loom_attribute_t attr) {
-  if (!loom_parse_format_symbol_ref_targets_register_context(vtable,
-                                                             attr_index)) {
+    iree_string_view_t key) {
+  if (!vtable->func_like ||
+      vtable->func_like->repr_contract_attr_index == LOOM_ATTR_INDEX_NONE ||
+      vtable->func_like->repr_contract_attr_index != attr_index) {
     return iree_ok_status();
   }
+  parser->low_repr = (loom_text_low_repr_context_t){
+      .contract_key = key,
+  };
   if (!parser->low_asm_environment.vtable ||
-      !parser->low_asm_environment.vtable->lookup_target_descriptor_set) {
+      !parser->low_asm_environment.vtable->lookup_descriptor_set) {
     return iree_ok_status();
   }
-  const loom_text_low_asm_descriptor_set_t* descriptor_set = NULL;
-  IREE_RETURN_IF_ERROR(
-      parser->low_asm_environment.vtable->lookup_target_descriptor_set(
-          parser->low_asm_environment.state, parser->module, attr,
-          &descriptor_set));
-  if (descriptor_set != NULL) {
-    parser->low_register_descriptor_set = descriptor_set;
-  }
-  return iree_ok_status();
+  return parser->low_asm_environment.vtable->lookup_descriptor_set(
+      parser->low_asm_environment.state, key, &parser->low_repr.descriptor_set);
 }
 
 iree_status_t loom_parser_walk_format(loom_parser_t* parser,
@@ -898,9 +884,6 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
         IREE_RETURN_IF_ERROR(loom_parsed_op_add_field_span(
             parsed, &parser->parser_arena, LOOM_LOCATION_FIELD_ATTRIBUTE,
             element->field_index, token, token.line, token.end_column));
-        IREE_RETURN_IF_ERROR(
-            loom_parse_format_update_register_context_from_target(
-                parser, vtable, element->field_index, attr));
         break;
       }
 
@@ -1061,8 +1044,12 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
         break;
       }
 
-      case LOOM_FORMAT_KIND_OP_REF: {
-        IREE_RETURN_IF_ERROR(loom_parse_format_op_ref(parser, element, parsed));
+      case LOOM_FORMAT_KIND_KEY_REF: {
+        iree_string_view_t key = iree_string_view_empty();
+        IREE_RETURN_IF_ERROR(
+            loom_parse_format_key_ref(parser, element, parsed, &key));
+        IREE_RETURN_IF_ERROR(loom_parse_format_update_low_repr_context(
+            parser, vtable, element->field_index, key));
         break;
       }
 

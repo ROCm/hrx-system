@@ -141,8 +141,12 @@ typedef struct loomc_emit_options_t {
 ///
 /// The module must already be in the target-low form expected by the selected
 /// emitter. This function does not run compile passes or link additional
-/// modules, and target specialization options are not accepted. Every emitted
-/// function carries its durable target in the prepared IR. The operation may
+/// modules, and target specialization options are not accepted. When the
+/// module was prepared by `loomc_compile_module`, emission consumes the
+/// concrete function-version facts retained by that successful invocation.
+/// Other functions resolve their authored target witnesses from IR. A
+/// targetless or generic Low function that requires more precise target facts
+/// must be compiled with specialization before emission. The operation may
 /// mutate invocation-local scratch state inside `module`; callers that need to
 /// emit the same module concurrently should pass distinct module handles.
 ///

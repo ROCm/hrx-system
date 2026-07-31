@@ -16,7 +16,7 @@ func.def target(@target) @cfg_branch_condition_sink(%lhs: i32, %rhs: i32, %a: i3
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @cfg_branch_condition_sink(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %a: reg<amdgpu.sgpr>, %b: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @cfg_branch_condition_sink(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %a: reg<amdgpu.sgpr>, %b: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %sum = s_add_u32 %a, %b
   %cond = s_cmp_lt_i32 %lhs, %rhs
   low.cond_br %cond, ^then, ^else : reg<amdgpu.scc>
@@ -52,7 +52,7 @@ func.def target(@target) @cfg_branch_condition_sink_cross_block(%lhs: i32, %rhs:
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @cfg_branch_condition_sink_cross_block(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %a: reg<amdgpu.sgpr>, %b: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @cfg_branch_condition_sink_cross_block(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %a: reg<amdgpu.sgpr>, %b: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %sum = s_add_u32 %a, %b
   %outer = s_cmp_lt_i32 %lhs, %rhs
   low.cond_br %outer, ^then, ^else : reg<amdgpu.scc>
@@ -94,7 +94,7 @@ func.def target(@target) @uniform_i1_reused_after_join(%count: i32, %lhs: i32, %
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @uniform_i1_reused_after_join(%count: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform_i1_reused_after_join(%count: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %zero = s_mov_b32 0
   %18 = s_cmp_lg_i32 %count, %zero
   %20 = s_mov_b32 1
@@ -154,7 +154,7 @@ func.def target(@target) @index_i1_reused_after_salu_scc_clobber(%row_i32: i32, 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @index_i1_reused_after_salu_scc_clobber(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr>, %scale: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_i1_reused_after_salu_scc_clobber(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr>, %scale: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %one = s_mov_b32 1
   %row1 = s_add_u32 %row, %one
   %32 = s_cmp_lt_u32 %row1, %rows
@@ -206,7 +206,7 @@ func.def target(@target) @uniform_branch_condition_combined_with_lane_mask(%valu
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @uniform_branch_condition_combined_with_lane_mask(%values: reg<amdgpu.vgpr x2>, %x: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.sgpr>, %false_value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform_branch_condition_combined_with_lane_mask(%values: reg<amdgpu.vgpr x2>, %x: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.sgpr>, %false_value: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
   %zero = s_mov_b32 0
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %25 = v_mov_b32_copy %limit
@@ -243,7 +243,7 @@ low.func.def target(@target) abi(hal_kernel) @uniform_branch_condition_combined_
 
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target(@target) @uniform_branch_condition_combined_with_lane_mask_assembly(%values: reg<amdgpu.vgpr x2>, %x: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.sgpr>, %false_value: reg<amdgpu.sgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @uniform_branch_condition_combined_with_lane_mask_assembly(%values: reg<amdgpu.vgpr x2>, %x: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.sgpr>, %false_value: reg<amdgpu.sgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %zero = s_mov_b32 0
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %limit_vgpr = v_mov_b32_copy %limit
@@ -329,7 +329,7 @@ func.def target(@target) @cfg_if_scalar_compare(%lhs: i32, %rhs: i32, %a: i32, %
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @cfg_if_scalar_compare(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %a: reg<amdgpu.sgpr>, %b: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @cfg_if_scalar_compare(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>, %a: reg<amdgpu.sgpr>, %b: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %cond = s_cmp_lt_i32 %lhs, %rhs
   low.cond_br %cond, ^then, ^else : reg<amdgpu.scc>
 ^then:
@@ -381,7 +381,7 @@ kernel.def target(@target) @cfg_exact_false_divergent_condition() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @cfg_exact_divergent_condition() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @cfg_exact_divergent_condition() asm {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %value = v_mov_b32 1
   %18 = v_mov_b32 0
@@ -389,7 +389,7 @@ low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) 
   return
 }
 
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @cfg_exact_false_divergent_condition() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @cfg_exact_false_divergent_condition() asm {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %value = v_mov_b32 2
   %21 = v_mov_b32 0
@@ -423,7 +423,7 @@ func.def target(@target) @divergent_if_else(%values: vector<2xi32>, %limit: i32,
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_if_else(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_if_else(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %then = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %17 = v_mov_b32_copy %limit
@@ -486,7 +486,7 @@ func.def target(@target) @divergent_nested_if_else_stores(%values: vector<2xi32>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_nested_if_else_stores(%values: reg<amdgpu.vgpr x2>, %lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_nested_if_else_stores(%values: reg<amdgpu.vgpr x2>, %lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>) asm {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 12} : reg<amdgpu.sgpr x2>
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %23 = v_mov_b32_copy %lower
@@ -551,7 +551,7 @@ func.def target(@target) @divergent_if_else_exact_constant_pair(%indices: vector
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_if_else_exact_constant_pair(%indices: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_if_else_exact_constant_pair(%indices: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %lane = slice %indices[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %then_index = v_mov_b32 151643
   %else_index = v_mov_b32 151652
@@ -605,7 +605,7 @@ func.def target(@target) @divergent_if_else_tail_argmax_pair(%indices: vector<2x
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_if_else_tail_argmax_pair(%indices: reg<amdgpu.vgpr x2>, %scores: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_if_else_tail_argmax_pair(%indices: reg<amdgpu.vgpr x2>, %scores: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %lane = slice %indices[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %score = slice %scores[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %sentinel = v_mov_b32 4294967295
@@ -659,7 +659,7 @@ func.def target(@target) @divergent_if_else_vector_result(%values: vector<2xi32>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_if_else_vector_result(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %state: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_if_else_vector_result(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %state: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %18 = v_mov_b32_copy %limit
   %cond = v_cmp_lt_i32 %lane, %18
@@ -719,7 +719,7 @@ func.def target(@target) @divergent_if_else_two_vector_results(%values: vector<2
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_if_else_two_vector_results(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %state: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_if_else_two_vector_results(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %state: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %24 = v_mov_b32_copy %limit
   %cond = v_cmp_lt_i32 %lane, %24
@@ -792,7 +792,7 @@ func.def target(@target) @divergent_nested_if_else_vector_result(%values: vector
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_nested_if_else_vector_result(%values: reg<amdgpu.vgpr x2>, %lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>, %state: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_nested_if_else_vector_result(%values: reg<amdgpu.vgpr x2>, %lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>, %state: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %26 = v_mov_b32_copy %lower
   %after_lower = v_cmp_ge_i32 %lane, %26
@@ -896,7 +896,7 @@ func.def target(@target) @uniform_prefix_guarded_divergent_nested_if_result(%val
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @uniform_prefix_guarded_divergent_nested_if_result(%values: reg<amdgpu.vgpr x2>, %reference_count: reg<amdgpu.sgpr>, %lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>, %state: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform_prefix_guarded_divergent_nested_if_result(%values: reg<amdgpu.vgpr x2>, %reference_count: reg<amdgpu.sgpr>, %lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>, %state: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %empty = s_mov_b32 0
   %has_reference = s_cmp_lg_i32 %reference_count, %empty
@@ -980,7 +980,7 @@ func.def target(@target) @divergent_nested_shared_fallback_vector_result(%values
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_nested_shared_fallback_vector_result(%values: reg<amdgpu.vgpr x2>, %lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>, %state: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_nested_shared_fallback_vector_result(%values: reg<amdgpu.vgpr x2>, %lower: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>, %state: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %21 = v_mov_b32_copy %lower
   %after_lower = v_cmp_ge_i32 %lane, %21
@@ -1054,7 +1054,7 @@ func.def target(@target) @divergent_then_only(%values: vector<2xi32>, %limit: i3
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_then_only(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_then_only(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>) asm {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %15 = v_mov_b32_copy %limit
@@ -1101,7 +1101,7 @@ func.def target(@target) @divergent_region_with_uniform_loop(%values: vector<2xi
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_region_with_uniform_loop(%values: reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_region_with_uniform_loop(%values: reg<amdgpu.vgpr x2>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %limit = s_mov_b32 8
   %start = s_mov_b32 0
@@ -1152,7 +1152,7 @@ func.def target(@target) @divergent_passthrough_else_loop_state(%values: vector<
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_passthrough_else_loop_state(%values: reg<amdgpu.vgpr x2>, %state: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_passthrough_else_loop_state(%values: reg<amdgpu.vgpr x2>, %state: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %start = s_mov_b32 0
   %stop = s_mov_b32 2
@@ -1215,7 +1215,7 @@ kernel.def target(@target) @workgroup_loop_bound_f32_accumulator() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(128, 1, 1) @workgroup_loop_bound_f32_accumulator() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(128, 1, 1) @workgroup_loop_bound_f32_accumulator() asm {
   %row = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -1316,7 +1316,7 @@ func.def target(@target) @uniform_q4_scale_min_loop_decode(%input: buffer) -> (f
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @uniform_q4_scale_min_loop_decode() -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform_q4_scale_min_loop_decode() -> (reg<amdgpu.vgpr>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %zero = s_mov_b32 0
   %one = s_mov_b32 1
@@ -1410,7 +1410,7 @@ func.def target(@target) @divergent_if_q6_nibble_i8_result(%values: vector<2xi32
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_if_q6_nibble_i8_result(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_if_q6_nibble_i8_result(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
   %code = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %selector = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %high_shifted = v_lshrrev_b32_lit %code, 4
@@ -1444,7 +1444,7 @@ func.def target(@target) @divergent_cfg_i1_true_false_constants_feeds_vgpr_selec
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_cfg_i1_true_false_constants_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_cfg_i1_true_false_constants_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %true = s_mov_b64_exec_read
   %24 = v_mov_b32_copy %limit
@@ -1497,7 +1497,7 @@ func.def target(@target) @divergent_cfg_i1_false_true_constants_feeds_vgpr_selec
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_cfg_i1_false_true_constants_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_cfg_i1_false_true_constants_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %21 = s_mov_b32 0
   %false = concat(%21, %21) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
@@ -1551,7 +1551,7 @@ func.def target(@target) @divergent_cfg_i1_true_fallback_feeds_vgpr_select(%valu
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_cfg_i1_true_fallback_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %fallback_condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_cfg_i1_true_fallback_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %fallback_condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %true = s_mov_b64_exec_read
   %22 = v_mov_b32_copy %limit
@@ -1606,7 +1606,7 @@ func.def target(@target) @divergent_cfg_i1_false_fallback_feeds_vgpr_select(%val
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_cfg_i1_false_fallback_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %fallback_condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_cfg_i1_false_fallback_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %fallback_condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %21 = s_mov_b32 0
   %false = concat(%21, %21) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
@@ -1661,7 +1661,7 @@ func.def target(@target) @divergent_cfg_i1_fallback_false_feeds_vgpr_select(%val
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_cfg_i1_fallback_false_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %fallback_condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_cfg_i1_fallback_false_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %fallback_condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %24 = v_mov_b32_copy %limit
   %lane_condition = v_cmp_lt_i32 %lane, %24
@@ -1713,7 +1713,7 @@ func.def target(@target) @divergent_cfg_i1_fallback_true_feeds_vgpr_select(%valu
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_cfg_i1_fallback_true_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %fallback_condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_cfg_i1_fallback_true_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %fallback_condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %22 = v_mov_b32_copy %limit
   %lane_condition = v_cmp_lt_i32 %lane, %22
@@ -1767,7 +1767,7 @@ func.def target(@target) @divergent_if_i1_true_false_constants_feeds_vgpr_select
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_if_i1_true_false_constants_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_if_i1_true_false_constants_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %17 = v_mov_b32_copy %limit
   %lane_condition = v_cmp_lt_i32 %lane, %17
@@ -1794,7 +1794,7 @@ func.def target(@target) @divergent_if_i1_false_true_constants_feeds_vgpr_select
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_if_i1_false_true_constants_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_if_i1_false_true_constants_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %22 = v_mov_b32_copy %limit
   %lane_condition = v_cmp_lt_i32 %lane, %22
@@ -1821,7 +1821,7 @@ func.def target(@target) @divergent_if_i1_yield_only_feeds_vgpr_select(%values: 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_if_i1_yield_only_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %fallback_condition: reg<amdgpu.scc>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_if_i1_yield_only_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %fallback_condition: reg<amdgpu.scc>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %18 = v_mov_b32_copy %limit
   %lane_condition = v_cmp_lt_i32 %lane, %18
@@ -1856,7 +1856,7 @@ func.def target(@target) @divergent_if_i1_computed_feeds_vgpr_select(%values: ve
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_if_i1_computed_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_if_i1_computed_feeds_vgpr_select(%values: reg<amdgpu.vgpr x2>, %limit: reg<amdgpu.sgpr>, %upper: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %24 = v_mov_b32_copy %limit
   %lane_condition = v_cmp_lt_i32 %lane, %24
@@ -1901,7 +1901,7 @@ func.def target(@target) @divergent_passthrough_else_i1_condition(%values: vecto
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_passthrough_else_i1_condition(%values: reg<amdgpu.vgpr x2>, %fallback_condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_passthrough_else_i1_condition(%values: reg<amdgpu.vgpr x2>, %fallback_condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %lane_condition = v_cmp_lt_i32_src1_inline %lane {rhs = 8}
   %23, %24 = s_and_saveexec_b64 %lane_condition
@@ -1963,7 +1963,7 @@ func.def target(@target) @divergent_passthrough_else_i1_select_condition(%values
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_passthrough_else_i1_select_condition(%values: reg<amdgpu.vgpr x2>, %fallback_condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_passthrough_else_i1_select_condition(%values: reg<amdgpu.vgpr x2>, %fallback_condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %lane_condition = v_cmp_lt_i32_src1_inline %lane {rhs = 8}
   %27, %28 = s_and_saveexec_b64 %lane_condition
@@ -2030,7 +2030,7 @@ func.def target(@target) @divergent_passthrough_else_i1_nested_branch_condition(
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_passthrough_else_i1_nested_branch_condition(%values: reg<amdgpu.vgpr x2>, %fallback_condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @divergent_passthrough_else_i1_nested_branch_condition(%values: reg<amdgpu.vgpr x2>, %fallback_condition: reg<amdgpu.sgpr x2>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %lane_condition = v_cmp_lt_i32_src1_inline %lane {rhs = 8}
   %26, %27 = s_and_saveexec_b64 %lane_condition
@@ -2092,7 +2092,7 @@ kernel.def target(@target) @branch_local_buffer_vector_load() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @branch_local_buffer_vector_load() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @branch_local_buffer_vector_load() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %positive_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %negative_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -2174,7 +2174,7 @@ func.def target(@target) @divergent_loop_if_result_then_store(%values: vector<2x
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @divergent_loop_if_result_then_store(%values: reg<amdgpu.vgpr x2>, %state: reg<amdgpu.vgpr x2>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @divergent_loop_if_result_then_store(%values: reg<amdgpu.vgpr x2>, %state: reg<amdgpu.vgpr x2>) asm {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %cond = v_cmp_lt_i32_src1_inline %lane {rhs = 4}
@@ -2265,7 +2265,7 @@ kernel.def target(@target) @loop_index_madd_guarded_copy(%n: i32) {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @loop_index_madd_guarded_copy(%n_idx: reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) @loop_index_madd_guarded_copy(%n_idx: reg<amdgpu.sgpr>) asm {
   %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
@@ -2364,7 +2364,7 @@ kernel.def target(@wave64_target) @predicated_tile_sweep_kq_src1_reduction_shape
 }
 
 // ----
-low.kernel.def target(@wave64_target) workgroup_size(32, 1, 1) workgroup_count(32, 1, 1) @predicated_tile_sweep_kq_src1_reduction_shape() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@wave64_target) workgroup_size(32, 1, 1) workgroup_count(32, 1, 1) @predicated_tile_sweep_kq_src1_reduction_shape() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %src0_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 524288} : reg<amdgpu.sgpr x2>
   %src1_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 6308736} : reg<amdgpu.sgpr x2>

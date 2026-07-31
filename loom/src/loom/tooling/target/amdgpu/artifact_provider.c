@@ -7,9 +7,9 @@
 #include "loom/tooling/target/amdgpu/artifact_provider.h"
 
 #include "iree/hal/executable/amdgpu/target_id.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
+#include "loom/ir/module.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/profile.h"
-#include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/runtime_requirements.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
@@ -301,27 +301,31 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_select_device_target(
 }
 
 static iree_status_t
-loom_amdgpu_hal_artifact_provider_select_function_device_target(
+loom_amdgpu_hal_artifact_provider_select_compatible_device_target_from_facts(
     const loom_run_hal_artifact_provider_t* provider,
-    const loom_run_hal_runtime_t* runtime, const loom_module_t* module,
-    loom_func_like_t function, iree_allocator_t allocator,
+    const loom_run_hal_runtime_t* runtime,
+    const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
     loom_run_hal_device_target_t* out_target) {
   IREE_ASSERT_ARGUMENT(provider);
   IREE_ASSERT_ARGUMENT(runtime);
-  IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(out_target);
 
   *out_target = (loom_run_hal_device_target_t){0};
 
-  const loom_symbol_ref_t target_ref = loom_func_like_target(function);
-  loom_amdgpu_target_identity_t authored_requirement = {0};
-  const loom_amdgpu_target_identity_t* authored_requirement_ptr =
-      loom_amdgpu_target_identity_from_ref(module, target_ref,
-                                           &authored_requirement)
-          ? &authored_requirement
-          : NULL;
+  const loom_amdgpu_target_facts_t* amdgpu_requirement =
+      loom_amdgpu_target_facts_cast(target_requirement);
+  if (target_requirement != NULL && amdgpu_requirement == NULL) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "AMDGPU HAL artifact provider cannot satisfy target family "
+        "'%.*s'",
+        (int)target_requirement->fact_type->name.size,
+        target_requirement->fact_type->name.data);
+  }
+  const loom_amdgpu_target_identity_t* authored_requirement =
+      amdgpu_requirement != NULL ? &amdgpu_requirement->identity : NULL;
   return loom_amdgpu_hal_artifact_provider_select_compatible_device_target(
-      provider, runtime, authored_requirement_ptr, allocator, out_target);
+      provider, runtime, authored_requirement, allocator, out_target);
 }
 
 static iree_status_t loom_amdgpu_hal_artifact_provider_select_target_key(
@@ -387,13 +391,9 @@ loom_amdgpu_hal_artifact_provider_runtime_globals(
 static iree_status_t loom_amdgpu_hal_artifact_provider_emit_artifact(
     const loom_run_hal_artifact_provider_t* provider, loom_module_t* module,
     const loom_run_hal_device_target_t* target,
-    loom_diagnostic_sink_t diagnostic_sink,
-    loom_source_resolver_t source_resolver, uint32_t max_errors,
-    const loom_target_pipeline_options_t* target_pipeline_options,
-    loom_run_candidate_artifact_flags_t artifact_flags,
-    const loom_run_candidate_artifact_manifest_options_t* artifact_manifest,
-    loom_target_compile_report_t* report, iree_allocator_t allocator,
-    bool* out_emitted, loom_run_hal_artifact_t* out_artifact) {
+    const loom_run_candidate_compile_options_t* options,
+    iree_allocator_t allocator, bool* out_emitted,
+    loom_run_hal_artifact_t* out_artifact) {
   IREE_ASSERT_ARGUMENT(provider);
   IREE_ASSERT_ARGUMENT(target);
   IREE_ASSERT_ARGUMENT(out_emitted);
@@ -408,24 +408,21 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_emit_artifact(
   *storage = (loom_amdgpu_hal_artifact_storage_t){0};
 
   const loom_amdgpu_hal_kernel_library_options_t library_options = {
+      .function_versions = options->function_versions,
       .runtime_globals = loom_amdgpu_hal_artifact_provider_runtime_globals(
-          target_pipeline_options),
-      .diagnostic_sink = diagnostic_sink,
-      .source_resolver = source_resolver,
-      .max_errors = max_errors,
-      .report = report,
-      .capture_target_listing = iree_all_bits_set(
-          artifact_flags, LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_TARGET_LISTING),
-      .artifact_name = artifact_manifest ? artifact_manifest->artifact_name
-                                         : iree_string_view_empty(),
-      .artifact_manifest_identifier = artifact_manifest
-                                          ? artifact_manifest->identifier
-                                          : iree_string_view_empty(),
+          &options->target_pipeline_options),
+      .diagnostic_sink = options->diagnostic_sink,
+      .source_resolver = options->source_resolver,
+      .max_errors = options->max_errors,
+      .report = options->report,
+      .capture_target_listing =
+          iree_all_bits_set(options->artifact_flags,
+                            LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_TARGET_LISTING),
+      .artifact_name = options->artifact_manifest.artifact_name,
+      .artifact_manifest_identifier = options->artifact_manifest.identifier,
       .artifact_manifest =
           {
-              .mode = artifact_manifest
-                          ? artifact_manifest->mode
-                          : LOOM_TARGET_ARTIFACT_MANIFEST_MODE_NONE,
+              .mode = options->artifact_manifest.mode,
           },
   };
   bool library_emitted = false;
@@ -486,8 +483,8 @@ const loom_run_hal_artifact_provider_t loom_amdgpu_hal_artifact_provider = {
     .target_family_name = IREE_SVL("AMDGPU"),
     .select_device_target =
         loom_amdgpu_hal_artifact_provider_select_device_target,
-    .select_function_device_target =
-        loom_amdgpu_hal_artifact_provider_select_function_device_target,
+    .select_compatible_device_target =
+        loom_amdgpu_hal_artifact_provider_select_compatible_device_target_from_facts,
     .select_target_key = loom_amdgpu_hal_artifact_provider_select_target_key,
     .deinitialize_device_target =
         loom_amdgpu_hal_artifact_provider_deinitialize_device_target,

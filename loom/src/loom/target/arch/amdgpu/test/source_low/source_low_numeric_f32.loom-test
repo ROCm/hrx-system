@@ -23,7 +23,7 @@ kernel.def target(@target) @f32_arith() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_arith() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_arith() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -62,7 +62,7 @@ kernel.def target(@target) @f32_fma() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_fma() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_fma() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -98,7 +98,7 @@ kernel.def target(@target) @f32_arcp_div() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_arcp_div() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_arcp_div() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -137,7 +137,7 @@ func.def target(@target) @f32_scalar_arcp_constant_divisor(%value: f32) -> (f32)
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_scalar_arcp_constant_divisor(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_scalar_arcp_constant_divisor(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_mul_f32_lit %value, 1006699012
   return %result
 }
@@ -152,7 +152,7 @@ func.def target(@target) @f32_scalar_arcp_literal_dividend(%value: f32) -> (f32)
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_scalar_arcp_literal_dividend(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_scalar_arcp_literal_dividend(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %6 = v_rcp_f32 %value
   %result = v_mul_f32_lit %6, 1123942400
   return %result
@@ -168,7 +168,7 @@ func.def target(@target) @f32_vector_arcp_constant_divisor(%values: vector<4xf32
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_vector_arcp_constant_divisor(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_vector_arcp_constant_divisor(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %8 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %9 = v_mul_f32_lit %8, 1006699012
   %10 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -191,7 +191,7 @@ func.def target(@target) @f32_vector_arcp_literal_dividend(%values: vector<4xf32
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_vector_arcp_literal_dividend(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_vector_arcp_literal_dividend(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %6 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %7 = v_rcp_f32 %6
   %8 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -230,7 +230,7 @@ func.def target(@target) @f32_guarded_arcp_reciprocal_scale(%amax: f32) -> (f32)
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_guarded_arcp_reciprocal_scale(%amax: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_guarded_arcp_reciprocal_scale(%amax: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %d = v_mul_f32_lit %amax, 1006699012
   %zero_for_cmp = v_sub_f32 %d, %d
   %nonzero = v_cmp_lg_f32 %d, %zero_for_cmp
@@ -261,7 +261,7 @@ kernel.def target(@target) @f32_exact_vector_div() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_exact_vector_div() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_exact_vector_div() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -302,7 +302,7 @@ func.def target(@target) @f32_exact_scalar_div(%lhs_buffer: buffer, %rhs_buffer:
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_exact_scalar_div() -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_exact_scalar_div() -> (reg<amdgpu.vgpr>) asm {
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %16 = s_mov_b32 0
@@ -361,7 +361,7 @@ kernel.def target(@target) @f32_scalarized() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_scalarized() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_scalarized() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -403,7 +403,7 @@ func.def target(@target) @f32_uniform_vector_bitops(%input: buffer) -> (vector<4
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_uniform_vector_bitops() -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uniform_vector_bitops() -> (reg<amdgpu.vgpr x4>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %12 = s_mov_b32 0
   %loaded = s_load_dwordx4 %input_view, %12
@@ -455,7 +455,7 @@ func.def target(@target) @f32_uniform_vector_binary(%lhs_buffer: buffer, %rhs_bu
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_uniform_vector_binary() -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uniform_vector_binary() -> (reg<amdgpu.vgpr x4>) asm {
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %23 = s_mov_b32 0
@@ -526,7 +526,7 @@ func.def target(@target) @f32_uniform_scalar_binary(%lhs_buffer: buffer, %rhs_bu
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_uniform_scalar_binary() -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uniform_scalar_binary() -> (reg<amdgpu.vgpr>) asm {
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %16 = s_mov_b32 0
@@ -549,7 +549,7 @@ func.def target(@target) @f32_inline_zero_arithmetic(%scalar: f32, %vector: vect
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_inline_zero_arithmetic(%scalar: reg<amdgpu.vgpr>, %vector: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_inline_zero_arithmetic(%scalar: reg<amdgpu.vgpr>, %vector: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
   %scalar_result = v_mul_f32_src0_inline %scalar, 0
   %14 = slice %vector[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %15 = v_mul_f32_src0_inline %14, 0
@@ -569,7 +569,7 @@ func.def target(@target) @f32_inline_rounded_literal(%input: f32) -> (f32) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_inline_rounded_literal(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_inline_rounded_literal(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_mul_f32_src0_inline %input, 1042479491
   return %result
 }
@@ -594,7 +594,7 @@ func.def target(@target) @f32_uniform_scalar_fma(%a_buffer: buffer, %b_buffer: b
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_uniform_scalar_fma() -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uniform_scalar_fma() -> (reg<amdgpu.vgpr>) asm {
   %a_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %b_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %c_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
@@ -627,7 +627,7 @@ func.def target(@target) @f32_uniform_vector_fma(%a_buffer: buffer, %b_buffer: b
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_uniform_vector_fma() -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uniform_vector_fma() -> (reg<amdgpu.vgpr x4>) asm {
   %a_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %b_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %c_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
@@ -676,7 +676,7 @@ kernel.def target(@target) @f32_direct_arg_scale() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f32_direct_arg_scale(%scale: reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f32_direct_arg_scale(%scale: reg<amdgpu.sgpr>) asm {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %10 = v_mov_b32_copy %scale
   %11 = v_mov_b32 0

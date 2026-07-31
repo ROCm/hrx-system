@@ -28,53 +28,12 @@ loom_liveness_value_class_t ValueClass(uint16_t register_class_id) {
 
 const loom_low_descriptor_set_t* IndependentDescriptorSet() {
   static const loom_low_reg_class_t kRegClasses[3] = {};
-  static const loom_low_descriptor_set_t kDescriptorSet = {
-      /*.abi_version=*/{},
-      /*.generator_version=*/{},
-      /*.stable_id=*/{},
-      /*.target_stable_id=*/{},
-      /*.descriptor_set_ordinal=*/{},
-      /*.key_string_offset=*/{},
-      /*.target_key_string_offset=*/{},
-      /*.feature_key_string_offset=*/{},
-      /*.string_table=*/{},
-      /*.descriptors=*/{},
-      /*.descriptor_count=*/{},
-      /*.descriptor_refs=*/{},
-      /*.descriptor_ref_count=*/{},
-      /*.asm_forms=*/{},
-      /*.asm_form_count=*/{},
-      /*.asm_operand_indices=*/{},
-      /*.asm_operand_index_count=*/{},
-      /*.asm_immediates=*/{},
-      /*.asm_immediate_count=*/{},
-      /*.native_asm_values=*/{},
-      /*.native_asm_value_count=*/{},
-      /*.operands=*/{},
-      /*.operand_count=*/{},
-      /*.immediates=*/{},
-      /*.immediate_count=*/{},
-      /*.immediate_encoding_slices=*/{},
-      /*.immediate_encoding_slice_count=*/{},
-      /*.enum_domains=*/{},
-      /*.enum_domain_count=*/{},
-      /*.enum_values=*/{},
-      /*.enum_value_count=*/{},
-      /*.effects=*/{},
-      /*.effect_count=*/{},
-      /*.constraints=*/{},
-      /*.constraint_count=*/{},
-      /*.storage_leases=*/{},
-      /*.storage_lease_count=*/{},
-      /*.operand_forms=*/{},
-      /*.operand_form_count=*/{},
-      /*.operand_form_matches=*/{},
-      /*.operand_form_match_count=*/{},
-      /*.operand_form_operand_indices=*/{},
-      /*.operand_form_operand_index_count=*/{},
-      /*.reg_classes=*/kRegClasses,
-      /*.reg_class_count=*/IREE_ARRAYSIZE(kRegClasses),
-  };
+  static const loom_low_descriptor_set_t kDescriptorSet = [] {
+    loom_low_descriptor_set_t descriptor_set = {};
+    descriptor_set.reg_classes = kRegClasses;
+    descriptor_set.reg_class_count = IREE_ARRAYSIZE(kRegClasses);
+    return descriptor_set;
+  }();
   return &kDescriptorSet;
 }
 

@@ -9,10 +9,10 @@
 #include "iree/base/internal/math.h"
 #include "loom/analysis/control_uniformity.h"
 #include "loom/target/arch/amdgpu/analysis/lds_bank_service.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_memory_address.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 
 typedef enum loom_amdgpu_memory_bank_service_lane_source_e {
   LOOM_AMDGPU_MEMORY_BANK_SERVICE_LANE_SOURCE_WORKITEM_X = 0,
@@ -29,20 +29,15 @@ static int loom_amdgpu_memory_bank_service_state_key;
 static const loom_amdgpu_lds_bank_service_model_t*
 loom_amdgpu_memory_bank_service_model(loom_low_lower_context_t* context,
                                       const loom_low_descriptor_t* descriptor) {
-  const loom_module_t* module = loom_low_lower_context_module(context);
-  loom_amdgpu_target_identity_t identity = {0};
-  if (!loom_amdgpu_target_identity_from_ref(
-          module, loom_low_lower_context_target_ref(context), &identity)) {
-    return NULL;
-  }
-  loom_amdgpu_target_properties_t properties = {0};
-  loom_amdgpu_target_properties_resolve(
-      &identity, loom_low_lower_context_bundle(context), &properties);
-
+  const loom_amdgpu_target_facts_t* target_facts =
+      loom_amdgpu_target_facts_cast(
+          loom_low_lower_context_target_facts(context));
+  IREE_ASSERT(target_facts != NULL,
+              "AMDGPU bank-service analysis requires AMDGPU target facts");
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
   return loom_amdgpu_lds_bank_service_model_lookup(
-      properties.lds_bank_service_model_set_ordinal,
+      target_facts->properties.lds_bank_service_model_set_ordinal,
       loom_amdgpu_descriptor_ref_for_descriptor(descriptor_set, descriptor));
 }
 

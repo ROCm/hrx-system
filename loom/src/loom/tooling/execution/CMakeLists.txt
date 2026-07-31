@@ -31,6 +31,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::error::diagnostic
+    loom::ir
     loom::target::pipeline_options
     loom::target::reporting::artifact_manifest
     loom::target::reporting::report

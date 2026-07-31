@@ -1897,10 +1897,8 @@ iree_status_t loom_canonicalizer_run_function(
     if (iree_status_is_ok(status)) {
       loom_type_registry_configure_fact_context(&seed_facts.context);
       if (options && options->seed_facts) {
-        seed_facts.context.target_bundle =
-            options->seed_facts->context.target_bundle;
-        seed_facts.context.target_profile =
-            options->seed_facts->context.target_profile;
+        seed_facts.context.target_facts =
+            options->seed_facts->context.target_facts;
       }
     }
     if (iree_status_is_ok(status) && options && options->seed_facts) {

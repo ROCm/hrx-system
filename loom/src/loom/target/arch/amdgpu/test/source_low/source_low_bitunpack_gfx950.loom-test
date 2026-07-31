@@ -7,7 +7,7 @@ func.def target(@target) @i32_to_u8x4_bitunpack(%packed: vector<1xi32>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32_to_u8x4_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @i32_to_u8x4_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm {
   %5 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 0, src0_sext = 0}
   %6 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 1, src0_sext = 0}
   %7 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 2, src0_sext = 0}
@@ -25,7 +25,7 @@ func.def target(@target) @i32_to_s8x4_bitunpack(%packed: vector<1xi32>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32_to_s8x4_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @i32_to_s8x4_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm {
   %5 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 0, src0_sext = 1}
   %6 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 1, src0_sext = 1}
   %7 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 2, src0_sext = 1}
@@ -43,7 +43,7 @@ func.def target(@target) @i32_to_u16x2_bitunpack(%packed: vector<1xi32>) -> (vec
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32_to_u16x2_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @i32_to_u16x2_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
   %5 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 4, src0_sext = 0}
   %6 = v_mov_b32_sdwa %packed {dst_sel = 6, dst_unused = 0, src0_sel = 5, src0_sext = 0}
   %unpacked = concat(%5, %6) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>

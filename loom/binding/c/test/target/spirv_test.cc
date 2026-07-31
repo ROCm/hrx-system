@@ -143,7 +143,7 @@ ModulePtr CreateBarrierSpirvLowModule(loomc_context_t* context,
   SourcePtr source = CreateTextSource("barrier_spirv_low.loom", R"(
 spirv.target<vulkan1_3> @target
 
-low.func.def target(@target) abi(shader_entry_point) @spirv_barriers() asm<spirv.logical.core> {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_barriers() asm {
   OpControlBarrier.subgroup.workgroup.acq_rel
   OpControlBarrier.workgroup.workgroup.acq_rel
   return
@@ -203,7 +203,7 @@ TEST(TargetSpirvTest, EmitsSpirvBinaryArtifact) {
       CreateBarrierSpirvLowModule(context.get(), module_workspace.get());
   SourcePtr serialized = SerializeModuleText(module.get());
   std::string serialized_text = SourceContentsToString(serialized.get());
-  EXPECT_NE(serialized_text.find("asm<spirv.logical.core>"), std::string::npos)
+  EXPECT_NE(serialized_text.find("asm {"), std::string::npos)
       << serialized_text;
   EXPECT_NE(serialized_text.find("OpControlBarrier.subgroup.workgroup.acq_rel"),
             std::string::npos)
@@ -288,7 +288,7 @@ TEST(TargetSpirvTest, SerializesGenericTargetLowTextWhenRequested) {
             std::string::npos);
 }
 
-TEST(TargetSpirvTest, RejectsUnknownLowAsmDescriptorSet) {
+TEST(TargetSpirvTest, IntrinsicReprContractOverridesGlobalLowAsmDefault) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   ContextPtr context = CreateSpirvContext(target_environment.get());
   loomc_workspace_t* workspace_handle = nullptr;
@@ -300,20 +300,45 @@ TEST(TargetSpirvTest, RejectsUnknownLowAsmDescriptorSet) {
 
   loomc_string_view_t unknown_descriptor_set_key =
       loomc_make_cstring_view("spirv.definitely_not_real");
-  loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("roundtrip.loom"),
-      /*.text_presentation=*/LOOMC_MODULE_TEXT_PRESENTATION_LOW_ASM,
-      /*.low_asm_descriptor_set_key=*/unknown_descriptor_set_key,
-  };
-  loomc_source_t* source = nullptr;
-  loomc_status_t status = loomc_module_serialize_to_source(
-      module.get(), &options, loomc_allocator_system(), &source);
-  LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_NOT_FOUND, status);
-  EXPECT_EQ(source, nullptr);
+  SourcePtr serialized =
+      SerializeModuleText(module.get(), LOOMC_MODULE_TEXT_PRESENTATION_LOW_ASM,
+                          unknown_descriptor_set_key);
+  const std::string serialized_text = SourceContentsToString(serialized.get());
+  EXPECT_NE(serialized_text.find("asm {"), std::string::npos)
+      << serialized_text;
+  EXPECT_NE(serialized_text.find("OpControlBarrier.subgroup.workgroup.acq_rel"),
+            std::string::npos)
+      << serialized_text;
+}
+
+TEST(TargetSpirvTest, SerializesTargetlessLowFromRepresentationContract) {
+  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
+  ContextPtr context = CreateSpirvContext(target_environment.get());
+  loomc_workspace_t* workspace_handle = nullptr;
+  LOOMC_ASSERT_OK(loomc_workspace_create(nullptr, loomc_allocator_system(),
+                                         &workspace_handle));
+  WorkspacePtr workspace(workspace_handle);
+  SourcePtr source = CreateTextSource("targetless_low.loom", R"(
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @targetless() asm {
+  OpControlBarrier.subgroup.workgroup.acq_rel
+  return
+}
+)");
+  ModulePtr module =
+      DeserializeModule(context.get(), workspace.get(), source.get());
+
+  SourcePtr serialized =
+      SerializeModuleText(module.get(), LOOMC_MODULE_TEXT_PRESENTATION_LOW_ASM);
+  const std::string serialized_text = SourceContentsToString(serialized.get());
+  EXPECT_NE(
+      serialized_text.find(
+          "low.func.def target<spirv.logical.core> abi(shader_entry_point) "
+          "@targetless() asm {"),
+      std::string::npos)
+      << serialized_text;
+  EXPECT_NE(serialized_text.find("OpControlBarrier.subgroup.workgroup.acq_rel"),
+            std::string::npos)
+      << serialized_text;
 }
 
 TEST(TargetSpirvTest, EmitsSpirvWithDefaultOptions) {

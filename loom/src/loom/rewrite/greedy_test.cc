@@ -15,11 +15,32 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
-#include "loom/target/profile.h"
+#include "loom/target/facts.h"
 #include "loom/target/types.h"
 
 namespace loom {
 namespace {
+
+static const loom_target_fact_type_t kTestTargetFactType = {
+    /*.name=*/IREE_SVL("test"),
+    /*.storage_size=*/sizeof(loom_target_facts_t),
+};
+
+static void InitializeTestTargetFacts(loom_target_facts_t* out_facts) {
+  *out_facts = {
+      /*.fact_type=*/&kTestTargetFactType,
+      /*.selector=*/0,
+      /*.authored_fields=*/0,
+      /*.storage=*/
+      {
+          /*.snapshot=*/{/*.name=*/IREE_SVL("test")},
+          /*.export_plan=*/{/*.name=*/IREE_SVL("test")},
+          /*.config=*/{/*.name=*/IREE_SVL("test")},
+          /*.bundle=*/{/*.name=*/IREE_SVL("test")},
+      },
+  };
+  loom_target_bundle_storage_rebind(&out_facts->storage);
+}
 
 class GreedyRewriteTest : public ::testing::Test {
  protected:
@@ -187,28 +208,21 @@ TEST_F(GreedyRewriteTest, UnmatchedPatternsLeaveIrUntouched) {
   EXPECT_EQ(loom_attr_as_i64(loom_op_attrs(const_op)[0]), 42);
 }
 
-TEST_F(GreedyRewriteTest, SeedFactsPreserveTargetBundleScope) {
+TEST_F(GreedyRewriteTest, SeedFactsPreserveTargetFactsScope) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   loom_op_t* const_op = NULL;
   IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(42), i32,
                                           LOOM_LOCATION_UNKNOWN, &const_op));
   ASSERT_NE(const_op, nullptr);
 
-  loom_target_bundle_t target_bundle = {};
-  const loom_target_profile_type_t target_profile_type = {
-      /*.name=*/IREE_SVL("test"),
-  };
-  const loom_target_profile_t target_profile = {
-      /*.type=*/&target_profile_type,
-      /*.target_bundle=*/&target_bundle,
-  };
+  loom_target_facts_t target_facts;
+  InitializeTestTargetFacts(&target_facts);
   iree_arena_allocator_t seed_arena;
   iree_arena_initialize(&block_pool_, &seed_arena);
   loom_value_fact_table_t seed_facts;
   IREE_ASSERT_OK(loom_value_fact_table_initialize(
       &seed_facts, &seed_arena, loom_value_table_capacity(&module_->values)));
-  seed_facts.context.target_bundle = &target_bundle;
-  seed_facts.context.target_profile = &target_profile;
+  seed_facts.context.target_facts = &target_facts;
 
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
@@ -228,8 +242,7 @@ TEST_F(GreedyRewriteTest, SeedFactsPreserveTargetBundleScope) {
   const loom_value_fact_table_t* latest_facts =
       loom_greedy_rewrite_driver_fact_table(&driver);
   ASSERT_NE(latest_facts, nullptr);
-  EXPECT_EQ(latest_facts->context.target_bundle, &target_bundle);
-  EXPECT_EQ(latest_facts->context.target_profile, &target_profile);
+  EXPECT_EQ(latest_facts->context.target_facts, &target_facts);
 
   loom_greedy_rewrite_driver_deinitialize(&driver);
   loom_pass_value_fact_owner_deinitialize(&fact_owner);

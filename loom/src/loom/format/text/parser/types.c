@@ -947,8 +947,7 @@ static iree_status_t loom_parse_register_type(loom_parser_t* parser,
   }
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RANGLE, NULL);
 
-  if (!parser->low_register_descriptor_set ||
-      !parser->low_asm_environment.vtable ||
+  if (!parser->low_repr.descriptor_set || !parser->low_asm_environment.vtable ||
       !parser->low_asm_environment.vtable->resolve_register_type) {
     return loom_parser_emit_unexpected_token(
         parser, class_token,
@@ -958,9 +957,8 @@ static iree_status_t loom_parse_register_type(loom_parser_t* parser,
   bool found = false;
   IREE_RETURN_IF_ERROR(
       parser->low_asm_environment.vtable->resolve_register_type(
-          parser->low_asm_environment.state,
-          parser->low_register_descriptor_set, class_token.text, unit_count,
-          &type, &found));
+          parser->low_asm_environment.state, parser->low_repr.descriptor_set,
+          class_token.text, unit_count, &type, &found));
   if (!found) {
     return loom_parser_emit_unexpected_token(
         parser, class_token,

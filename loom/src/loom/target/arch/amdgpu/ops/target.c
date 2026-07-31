@@ -14,7 +14,6 @@
 #include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
-#include "loom/target/materialization.h"
 
 static iree_string_view_t loom_amdgpu_target_record_symbol_name(
     const loom_module_t* module, const loom_op_t* target_op) {
@@ -138,54 +137,6 @@ void loom_amdgpu_target_record_resolve_properties(
   loom_amdgpu_target_identity_t identity = {0};
   loom_amdgpu_target_record_resolve_identity(target_op, &identity);
   loom_amdgpu_target_properties_resolve(&identity, common, out_properties);
-}
-
-iree_status_t loom_amdgpu_target_record_build_for_profile(
-    loom_builder_t* builder, const loom_amdgpu_target_profile_t* profile,
-    const loom_op_t* authored_target_op, loom_symbol_ref_t symbol,
-    loom_location_id_t location, loom_op_t** out_target_op) {
-  if (builder == NULL || profile == NULL || profile->identity.target == NULL ||
-      profile->base.target_bundle == NULL || out_target_op == NULL) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "AMDGPU target record builder requires a complete "
-                            "profile, builder, and output pointer");
-  }
-  *out_target_op = NULL;
-  const loom_amdgpu_target_info_t* target = profile->identity.target;
-
-  const loom_amdgpu_target_record_info_t* target_record =
-      loom_amdgpu_target_record_info_for_target(target->name);
-  if (target_record == NULL) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "AMDGPU target '%.*s' has no target record",
-                            (int)target->name.size, target->name.data);
-  }
-
-  loom_amdgpu_target_identity_t default_identity = {0};
-  loom_amdgpu_target_identity_initialize(target, &default_identity);
-
-  loom_target_record_extension_attr_t extension_attrs[2] = {0};
-  iree_host_size_t extension_attr_count = 0;
-  if (profile->identity.amdhsa_features.sramecc !=
-      default_identity.amdhsa_features.sramecc) {
-    extension_attrs[extension_attr_count++] =
-        (loom_target_record_extension_attr_t){
-            .attr_index = loom_amdgpu_target_sramecc_ATTR_INDEX,
-            .value = loom_attr_enum(profile->identity.amdhsa_features.sramecc),
-        };
-  }
-  if (profile->identity.amdhsa_features.xnack !=
-      default_identity.amdhsa_features.xnack) {
-    extension_attrs[extension_attr_count++] =
-        (loom_target_record_extension_attr_t){
-            .attr_index = loom_amdgpu_target_xnack_ATTR_INDEX,
-            .value = loom_attr_enum(profile->identity.amdhsa_features.xnack),
-        };
-  }
-  return loom_target_record_projection_build(
-      builder, LOOM_OP_AMDGPU_TARGET, (uint8_t)target_record->target_kind,
-      symbol, profile->base.target_bundle, authored_target_op, extension_attrs,
-      extension_attr_count, location, out_target_op);
 }
 
 static bool loom_amdgpu_target_record_feature_state_is_compatible(

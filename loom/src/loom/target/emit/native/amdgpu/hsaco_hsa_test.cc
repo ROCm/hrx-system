@@ -36,7 +36,7 @@
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/hal/binding_materialization.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
-#include "loom/target/arch/amdgpu/ops/ops.h"
+#include "loom/target/arch/amdgpu/ops/registry.h"
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 #include "loom/target/arch/amdgpu/planning/storage_lease.h"
 #include "loom/target/arch/amdgpu/profile.h"
@@ -118,7 +118,7 @@ void RegisterDialect(loom_context_t* context, uint8_t dialect_id,
 
 void InitializeLowKernelContext(loom_context_t* context) {
   loom_context_initialize(iree_allocator_system(), context);
-  RegisterDialect(context, LOOM_DIALECT_AMDGPU, loom_amdgpu_dialect_vtables);
+  IREE_ASSERT_OK(loom_amdgpu_ops_register_dialect(context));
   RegisterDialect(context, LOOM_DIALECT_LOW, loom_low_dialect_vtables);
   IREE_ASSERT_OK(loom_context_finalize(context));
 }
@@ -770,16 +770,19 @@ class LowKernelEmitter {
                               "AMDGPU HSA low kernel has no low func");
     }
 
-    loom_target_bundle_storage_t bundle_storage = {};
+    loom_symbol_fact_table_t symbol_facts = {};
+    loom_symbol_fact_table_initialize(&symbol_facts, arena);
     loom_low_resolved_target_t target = {};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-        module_, low_function, &target_registry_.registry,
+        module_, &symbol_facts, low_function,
+        /*effective_target_facts=*/nullptr, &target_registry_.registry,
         iree_diagnostic_emitter_t{}, &target));
-    bundle_storage = target.bundle_storage;
-    loom_target_bundle_storage_rebind(&bundle_storage);
-    const loom_low_descriptor_set_t* descriptor_set = nullptr;
-    IREE_RETURN_IF_ERROR(loom_target_low_descriptor_set_select_for_bundle(
-        &target_registry_.registry, &bundle_storage.bundle, &descriptor_set));
+    const loom_low_descriptor_set_t* descriptor_set = target.descriptor_set;
+    if (descriptor_set == nullptr) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "AMDGPU HSA low kernel target has no descriptor set");
+    }
     loom_amdgpu_hal_binding_materialization_result_t materialization = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_materialize(
         module_, low_function, descriptor_set, &materialization, arena));
@@ -798,16 +801,13 @@ class LowKernelEmitter {
           "AMDGPU HSA low kernel failed HAL ABI verification");
     }
 
-    loom_low_verify_options_t verify_options = {
-        /*.descriptor_registry=*/&target_registry_.registry,
-        /*.emitter=*/
-        {
-            /*.fn=*/PrintLowVerifyDiagnostic,
-            /*.user_data=*/nullptr,
-        },
-        /*.provider_list=*/{},
-        /*.max_errors=*/20,
+    loom_low_verify_options_t verify_options = {};
+    verify_options.descriptor_registry = &target_registry_.registry;
+    verify_options.emitter = {
+        /*.fn=*/PrintLowVerifyDiagnostic,
+        /*.user_data=*/nullptr,
     };
+    verify_options.max_errors = 20;
     loom_low_verify_result_t verify_result = {};
     loom_low_verify_scratch_t verify_scratch =
         loom_low_verify_scratch_for_module(module_);
@@ -820,22 +820,12 @@ class LowKernelEmitter {
 
     loom_low_storage_lease_provider_t storage_lease_provider = {};
     loom_amdgpu_storage_lease_provider(&storage_lease_provider);
-    loom_low_emission_frame_options_t frame_options = {
-        /*.descriptor_registry=*/&target_registry_.registry,
-        /*.memory_access_table=*/{},
-        /*.pressure_cliffs=*/{},
-        /*.schedule_pair_affinities=*/{},
-        /*.schedule_structural_state_reads=*/{},
-        /*.schedule_strategy=*/{},
-        /*.schedule_diagnostic_flags=*/{},
-        /*.allocation_budgets=*/{},
-        /*.allocation_budget_count=*/{},
-        /*.allocation_fixed_values=*/abi_verify_result.fixed_values,
-        /*.allocation_fixed_value_count=*/abi_verify_result.fixed_value_count,
-        /*.allocation_reserved_ranges=*/{},
-        /*.allocation_reserved_range_count=*/{},
-        /*.storage_lease_provider=*/&storage_lease_provider,
-    };
+    loom_low_emission_frame_options_t frame_options = {};
+    frame_options.descriptor_registry = &target_registry_.registry;
+    frame_options.allocation_fixed_values = abi_verify_result.fixed_values;
+    frame_options.allocation_fixed_value_count =
+        abi_verify_result.fixed_value_count;
+    frame_options.storage_lease_provider = &storage_lease_provider;
     loom_low_emission_frame_t frame = {};
     IREE_RETURN_IF_ERROR(loom_low_emission_frame_build(
         module_, low_function, &frame_options, arena, &frame));
@@ -922,6 +912,13 @@ iree_status_t PrepareTargetProfileForLowHsaco(
                                                out_target_profile);
 }
 
+void AppendLowKernelTargetClause(iree_string_view_t representation_contract,
+                                 std::string* source) {
+  source->append("target<");
+  source->append(representation_contract.data, representation_contract.size);
+  source->append(">(@gfx_target)");
+}
+
 iree_status_t EmitWorkitemStoreKernelForAmdgpu(const AmdgpuHsaTarget& target,
                                                std::string* out_hsaco) {
   IREE_ASSERT_ARGUMENT(out_hsaco);
@@ -932,9 +929,11 @@ iree_status_t EmitWorkitemStoreKernelForAmdgpu(const AmdgpuHsaTarget& target,
 
   TestArena arena;
   LowKernelEmitter emitter;
-  return emitter.EmitKernel(
-      &target_profile,
-      "low.kernel.def target(@gfx_target) @loom_kernel() {\n"
+  std::string source = "low.kernel.def ";
+  AppendLowKernelTargetClause(
+      target_profile.identity.target->descriptor_set_key, &source);
+  source.append(
+      " @loom_kernel() {\n"
       "  %tid = low.live_in<" LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_X_SOURCE
       "> : reg<amdgpu.vgpr>\n"
       "  %four = low.const<amdgpu.v_mov_b32> {imm32 = 4} : "
@@ -952,8 +951,8 @@ iree_status_t EmitWorkitemStoreKernelForAmdgpu(const AmdgpuHsaTarget& target,
       "%zero) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x4>, "
       "reg<amdgpu.vgpr>, reg<amdgpu.sgpr>)\n"
       "  low.return\n"
-      "}\n",
-      out_hsaco, arena.arena());
+      "}\n");
+  return emitter.EmitKernel(&target_profile, source, out_hsaco, arena.arena());
 }
 
 iree_status_t EmitB128CopyKernelForAmdgpu(const AmdgpuHsaTarget& target,
@@ -967,8 +966,11 @@ iree_status_t EmitB128CopyKernelForAmdgpu(const AmdgpuHsaTarget& target,
       loom_amdgpu_target_info_target_processor(target_profile.identity.target);
   IREE_ASSERT(processor != nullptr);
 
-  std::string source =
-      "low.kernel.def target(@gfx_target) @loom_kernel() {\n"
+  std::string source = "low.kernel.def ";
+  AppendLowKernelTargetClause(
+      target_profile.identity.target->descriptor_set_key, &source);
+  source.append(
+      " @loom_kernel() {\n"
       "  %tid = low.live_in<" LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_X_SOURCE
       "> : reg<amdgpu.vgpr>\n"
       "  %byte_offset = low.op<amdgpu.v_lshlrev_b32.src0_inline>(%tid) "
@@ -976,7 +978,7 @@ iree_status_t EmitB128CopyKernelForAmdgpu(const AmdgpuHsaTarget& target,
       "  %source = low.resource<hal_binding> {index = 0, source_type "
       "= hal.buffer} : reg<amdgpu.sgpr x2>\n"
       "  %target = low.resource<hal_binding> {index = 1, source_type "
-      "= hal.buffer} : reg<amdgpu.sgpr x2>\n";
+      "= hal.buffer} : reg<amdgpu.sgpr x2>\n");
   switch (target_profile.identity.target->descriptor_set_ordinal) {
     case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3:
     case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA4:

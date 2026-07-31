@@ -8,12 +8,13 @@
 
 loom_spirv_module_contract_t loom_spirv_module_contract_from_target(
     const loom_low_resolved_target_t* target) {
+  const loom_target_bundle_t* bundle = loom_low_resolved_target_bundle(target);
   return (loom_spirv_module_contract_t){
       .target_name = target->target_name,
-      .snapshot_name = target->bundle_storage.snapshot.name,
-      .codegen_format = target->bundle_storage.snapshot.codegen_format,
-      .artifact_format = target->bundle_storage.snapshot.artifact_format,
-      .abi_kind = target->bundle_storage.export_plan.abi_kind,
+      .snapshot_name = bundle->snapshot->name,
+      .codegen_format = bundle->snapshot->codegen_format,
+      .artifact_format = bundle->snapshot->artifact_format,
+      .abi_kind = bundle->export_plan->abi_kind,
       .descriptor_set_stable_id = target->descriptor_set->stable_id,
       .contract_set_key = target->descriptor_set_key,
       .contract_feature_bits = target->feature_bits,

@@ -553,7 +553,7 @@ static iree_status_t loom_check_execute_pass_with_output(
             environment ? &environment->legalizer_provider_list : NULL,
             math_policy_registry_ref, compile_report_ref,
             environment ? environment->target_environment : NULL,
-            /*specialization_context=*/NULL, &low_pass_environment_storage),
+            /*function_versions=*/NULL, &low_pass_environment_storage),
         .predicate_provider =
             loom_target_pass_predicate_provider(&predicate_storage),
         .block_pool = block_pool,

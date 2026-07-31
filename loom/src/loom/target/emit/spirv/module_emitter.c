@@ -25,6 +25,7 @@
 #include "loom/target/emit/spirv/module_storage.h"
 #include "loom/target/emit/spirv/module_types.h"
 #include "loom/target/emit/spirv/module_values.h"
+#include "loom/target/function_version.h"
 #include "loom/target/types.h"
 
 enum {
@@ -48,6 +49,8 @@ typedef struct loom_spirv_emit_module_state_t {
   iree_arena_allocator_t* scratch_arena;
   // Cached symbol facts shared by target resolution for every function.
   loom_symbol_fact_table_t symbol_facts;
+  // Compiler function versions observed against this module symbol snapshot.
+  loom_target_function_version_snapshot_t function_versions;
   // Sectioned SPIR-V module builder shared by every emitted function.
   loom_spirv_module_builder_t builder;
   // SPIR-V type and constant emission cache shared by the module.
@@ -138,7 +141,8 @@ static iree_string_view_t loom_spirv_emit_function_name(
 static iree_string_view_t loom_spirv_emit_export_name(
     const loom_spirv_emit_state_t* state) {
   const iree_string_view_t export_symbol =
-      state->target->bundle_storage.export_plan.export_symbol;
+      loom_low_resolved_target_bundle(state->target)
+          ->export_plan->export_symbol;
   if (!iree_string_view_is_empty(export_symbol)) {
     return export_symbol;
   }
@@ -1594,7 +1598,7 @@ static iree_status_t loom_spirv_emit_module_prepare_contract(
           state->flags,
           LOOM_SPIRV_EMIT_MODULE_STATE_FLAG_BUILDER_INITIALIZED)) {
     IREE_RETURN_IF_ERROR(loom_spirv_module_builder_initialize(
-        &target->bundle_storage.bundle, allocator, &state->builder));
+        loom_low_resolved_target_bundle(target), allocator, &state->builder));
     loom_spirv_type_context_initialize(&state->builder, state->scratch_arena,
                                        &state->type_context);
     state->contract = contract;
@@ -1679,9 +1683,15 @@ static iree_status_t loom_spirv_emit_low_function_into_module(
                             "definition");
   }
 
+  const loom_symbol_ref_t function_ref =
+      loom_low_function_callee(low_function_op);
+  const loom_target_function_version_t* function_version =
+      loom_target_function_version_snapshot_at(&module_state->function_versions,
+                                               function_ref.symbol_id);
   loom_low_resolved_target_t target = {0};
-  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target_with_facts(
+  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       module_state->module, &module_state->symbol_facts, low_function_op,
+      function_version ? function_version->effective_target_facts : NULL,
       module_state->descriptor_registry, module_state->diagnostic_emitter,
       &target));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_validate_target(&target));
@@ -1753,6 +1763,7 @@ static iree_status_t loom_spirv_emit_low_module_initialize(
     const loom_low_descriptor_registry_t* descriptor_registry,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* scratch_arena,
+    const loom_spirv_emit_low_module_options_t* options,
     loom_spirv_module_binary_t* out_module,
     loom_spirv_emit_module_state_t* out_state) {
   IREE_ASSERT_ARGUMENT(out_module);
@@ -1761,7 +1772,9 @@ static iree_status_t loom_spirv_emit_low_module_initialize(
   loom_spirv_emit_module_state_initialize(module, descriptor_registry,
                                           diagnostic_emitter, scratch_arena,
                                           out_state);
-  return iree_ok_status();
+  return loom_target_function_version_snapshot_build(
+      module, options ? options->function_versions : NULL, scratch_arena,
+      &out_state->function_versions);
 }
 
 void loom_spirv_emit_low_module_options_initialize(
@@ -1815,7 +1828,7 @@ iree_status_t loom_spirv_emit_low_module(
   iree_status_t status = iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_spirv_emit_low_module_options_validate(options));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_low_module_initialize(
-      module, descriptor_registry, diagnostic_emitter, scratch_arena,
+      module, descriptor_registry, diagnostic_emitter, scratch_arena, options,
       out_module, &state));
   loom_symbol_t* symbol = NULL;
   loom_module_for_each_symbol(module, symbol) {

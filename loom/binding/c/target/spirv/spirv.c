@@ -19,11 +19,14 @@ static iree_status_t loomc_spirv_emit_module_artifact(
     loom_target_emit_artifact_t* out_artifact) {
   *out_artifact = (loom_target_emit_artifact_t){0};
 
+  loom_spirv_emit_low_module_options_t options = {0};
+  loom_spirv_emit_low_module_options_initialize(&options);
+  options.function_versions = request->function_versions;
   loom_spirv_module_binary_t binary = {0};
   iree_status_t status = loom_spirv_emit_low_module(
       request->module, request->low_descriptor_registry,
-      request->diagnostic_emitter, request->scratch_arena, /*options=*/NULL,
-      &binary, request->allocator);
+      request->diagnostic_emitter, request->scratch_arena, &options, &binary,
+      request->allocator);
   if (iree_status_is_ok(status)) {
     out_artifact->target_artifact_format =
         LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY;

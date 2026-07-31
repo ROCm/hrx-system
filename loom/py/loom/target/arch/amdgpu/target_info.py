@@ -1737,6 +1737,96 @@ def amdgpu_target_descriptor_set_key(
     return target.semantics.descriptor_set_key or processor.descriptor_set.key
 
 
+def _amdgpu_generic_descriptor_set_members(
+    descriptor_set: AmdgpuDescriptorSetInfo,
+    processors: Sequence[AmdgpuProcessorInfo],
+) -> tuple[AmdgpuProcessorInfo, tuple[AmdgpuProcessorInfo, ...]]:
+    generic_processors = tuple(
+        processor
+        for processor in processors
+        if (
+            processor.descriptor_set.key == descriptor_set.key
+            and processor.elf.generic_version != 0
+        )
+    )
+    if len(generic_processors) != 1:
+        raise ValueError(
+            f"AMDGPU generic descriptor set {descriptor_set.key} must have "
+            "one processor"
+        )
+    generic_processor = generic_processors[0]
+    processors_by_name = {processor.processor: processor for processor in processors}
+    exact_member_names = tuple(
+        compatibility.exact_processor
+        for compatibility in AMDGPU_EXACT_TARGET_INFOS
+        if (
+            compatibility.code_object_processor == generic_processor.processor
+            and compatibility.generic_introduction_version
+            <= generic_processor.elf.generic_version
+        )
+    )
+    missing_member_names = tuple(
+        member_name
+        for member_name in exact_member_names
+        if member_name not in processors_by_name
+    )
+    if missing_member_names:
+        raise ValueError(
+            f"AMDGPU generic processor {generic_processor.processor} has no "
+            "processor rows for members " + ", ".join(missing_member_names)
+        )
+    exact_members = tuple(
+        processors_by_name[member_name] for member_name in exact_member_names
+    )
+    if not exact_members:
+        raise ValueError(
+            f"AMDGPU generic processor {generic_processor.processor} has "
+            "no exact members"
+        )
+    return generic_processor, exact_members
+
+
+def amdgpu_descriptor_set_supported_target_contract_keys(
+    descriptor_set: AmdgpuDescriptorSetInfo,
+    *,
+    processors: Sequence[AmdgpuProcessorInfo] = AMDGPU_PROCESSOR_INFOS,
+    targets: Sequence[AmdgpuTargetInfo] = AMDGPU_TARGET_INFOS,
+) -> tuple[str, ...]:
+    """Returns native target contracts represented by a portable descriptor set."""
+
+    if not descriptor_set.member_generator_targets:
+        return ()
+    _, exact_members = _amdgpu_generic_descriptor_set_members(
+        descriptor_set, processors
+    )
+
+    processors_by_name = {processor.processor: processor for processor in processors}
+    exact_member_names = {member.processor for member in exact_members}
+    target_contract_keys: set[str] = set()
+    covered_member_names: set[str] = set()
+    for target in targets:
+        if target.processor not in exact_member_names:
+            continue
+        processor = processors_by_name[target.processor]
+        target_contract_keys.add(amdgpu_target_descriptor_set_key(target, processor))
+        covered_member_names.add(target.processor)
+
+    missing_target_member_names = tuple(
+        sorted(exact_member_names - covered_member_names)
+    )
+    if missing_target_member_names:
+        raise ValueError(
+            f"AMDGPU generic descriptor set {descriptor_set.key} has no target "
+            "rows for members " + ", ".join(missing_target_member_names)
+        )
+    if descriptor_set.key in target_contract_keys:
+        raise ValueError(
+            f"AMDGPU generic descriptor set {descriptor_set.key} aliases an "
+            "exact target descriptor contract"
+        )
+    return tuple(sorted(target_contract_keys))
+
+
 def _amdgpu_target_local_instruction_constraints(
     target: AmdgpuTargetInfo,
     processor: AmdgpuProcessorInfo,
@@ -2303,38 +2393,19 @@ def validate_amdgpu_generic_contracts(
     descriptor_sets: Sequence[AmdgpuDescriptorSetInfo],
     targets: Sequence[AmdgpuTargetInfo] = AMDGPU_TARGET_INFOS,
 ) -> None:
-    processors_by_name = {info.processor: info for info in processors}
     descriptor_sets_by_key = {info.key: info for info in descriptor_sets}
     targets_by_name = {info.target: info for info in targets}
     for descriptor_set in descriptor_sets:
         if not descriptor_set.member_generator_targets:
             continue
-        generic_processors = tuple(
-            info
-            for info in processors
-            if info.descriptor_set.key == descriptor_set.key
-            and info.processor.endswith("-generic")
+        generic_processor, exact_members = _amdgpu_generic_descriptor_set_members(
+            descriptor_set, processors
         )
-        if len(generic_processors) != 1:
-            raise ValueError(
-                f"AMDGPU generic descriptor set {descriptor_set.key} must have "
-                "one processor"
-            )
-        generic_processor = generic_processors[0]
-        exact_members = tuple(
-            processors_by_name[compatibility.exact_processor]
-            for compatibility in AMDGPU_EXACT_TARGET_INFOS
-            if (
-                compatibility.code_object_processor == generic_processor.processor
-                and compatibility.generic_introduction_version
-                <= generic_processor.elf.generic_version
-            )
+        amdgpu_descriptor_set_supported_target_contract_keys(
+            descriptor_set,
+            processors=processors,
+            targets=targets,
         )
-        if not exact_members:
-            raise ValueError(
-                f"AMDGPU generic processor {generic_processor.processor} has "
-                "no exact members"
-            )
 
         exact_member_generator_targets = tuple(
             sorted(

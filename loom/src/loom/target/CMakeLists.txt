@@ -21,9 +21,11 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    profile
+    facts
   HDRS
-    "profile.h"
+    "facts.h"
+  SRCS
+    "facts.c"
   DEPS
     ::types
     iree::base
@@ -32,16 +34,73 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    materialization
+    facts_builder
   HDRS
-    "materialization.h"
+    "facts_builder.h"
   SRCS
-    "materialization.c"
+    "facts_builder.c"
   DEPS
-    ::types
+    ::facts
     iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    function_version
+  HDRS
+    "function_version.h"
+  SRCS
+    "function_version.c"
+  DEPS
+    ::facts
+    iree::base
+    iree::base::internal::arena
     loom::ir
     loom::ops::op_defs
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    function_version_test
+  SRCS
+    "function_version_test.cc"
+  DEPS
+    ::function_version
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::test
+    loom::testing::module_ptr
+)
+
+loom_cc_library(
+  NAME
+    projection
+  HDRS
+    "projection.h"
+  DEPS
+    ::facts
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    profile
+  HDRS
+    "profile.h"
+  SRCS
+    "profile.c"
+  DEPS
+    ::facts
+    ::facts_builder
+    ::types
+    iree::base
+    iree::base::internal::arena
   PUBLIC
 )
 
@@ -104,6 +163,7 @@ loom_cc_library(
   SRCS
     "capability_facts.c"
   DEPS
+    ::facts
     ::types
     iree::base
     loom::util::fact_table
@@ -117,6 +177,7 @@ loom_cc_test(
     "capability_facts_test.cc"
   DEPS
     ::capability_facts
+    ::facts
     ::types
     iree::testing::gtest
     iree::testing::gtest_main
@@ -132,17 +193,12 @@ loom_cc_library(
     "pass_environment.c"
   DEPS
     ::function_contract
-    ::profile
-    ::specialization
-    ::types
+    ::function_version
     iree::base
-    iree::base::internal::arena
     loom::analysis::symbol_facts
-    loom::error::emitter
     loom::ir
     loom::ops::func_symbol_facts
     loom::ops::op_defs
-    loom::ops::target
     loom::pass::environment
     loom::pass::types
   PUBLIC
@@ -156,6 +212,9 @@ loom_cc_library(
   SRCS
     "specialization.c"
   DEPS
+    ::facts_builder
+    ::function_contract
+    ::function_version
     ::profile
     ::provider
     iree::base
@@ -164,6 +223,7 @@ loom_cc_library(
     loom::error::emitter
     loom::error::error_defs
     loom::ir
+    loom::ops::func_symbol_facts
     loom::ops::op_defs
     loom::ops::target
     loom::rewrite::rewriter
@@ -176,17 +236,16 @@ loom_cc_test(
   SRCS
     "specialization_test.cc"
   DEPS
-    ::materialization
     ::provider
     ::specialization
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
-    loom::analysis::symbol_facts
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
     loom::ops::func
+    loom::ops::target
     loom::ops::test
     loom::target::test::target_record_table
     loom::testing::module_ptr
@@ -209,9 +268,18 @@ loom_cc_test(
   SRCS
     "pass_environment_test.cc"
   DEPS
+    ::facts_builder
+    ::function_version
     ::pass_environment
+    iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func
+    loom::ops::test
+    loom::target::test::target_record_table
+    loom::testing::module_ptr
 )
 
 loom_cc_library(
@@ -222,9 +290,12 @@ loom_cc_library(
   SRCS
     "function_contract.c"
   DEPS
+    ::facts
+    ::facts_builder
     ::launch
     ::types
     iree::base
+    iree::base::internal::arena
     loom::analysis::symbol_facts
     loom::error::emitter
     loom::error::error_defs
@@ -272,6 +343,7 @@ loom_cc_library(
   SRCS
     "contract.c"
   DEPS
+    ::facts
     ::types
     iree::base
     iree::base::internal::arena
@@ -292,6 +364,7 @@ loom_cc_library(
     "legalization.c"
   DEPS
     ::contract
+    ::facts
     ::types
     iree::base
     iree::base::internal::arena
@@ -326,6 +399,7 @@ loom_cc_library(
     "low_legality.c"
   DEPS
     ::contract
+    ::facts
     ::low_descriptor_registry
     ::registers
     ::types
@@ -391,7 +465,6 @@ loom_cc_library(
     ::low_descriptor_registry
     ::low_legality
     ::low_packet_diagnostics
-    ::materialization
     ::math_policy
     ::profile
     iree::base
@@ -399,8 +472,6 @@ loom_cc_library(
     loom::codegen::low::lower
     loom::codegen::low::verify
     loom::ir
-    loom::ops::op_defs
-    loom::ops::target
     loom::pass::environment
     loom::pass::registry
     loom::target::reporting::artifact_manifest
@@ -467,7 +538,7 @@ loom_cc_library(
     "predicate.c"
   DEPS
     ::function_contract
-    ::pass_environment
+    ::function_version
     ::types
     iree::base
     iree::base::internal::arena
@@ -475,7 +546,6 @@ loom_cc_library(
     loom::ir
     loom::ops::func_symbol_facts
     loom::ops::pass
-    loom::ops::target
     loom::pass::predicate
   PUBLIC
 )
@@ -503,6 +573,8 @@ loom_cc_test(
   SRCS
     "predicate_test.cc"
   DEPS
+    ::facts_builder
+    ::function_version
     ::predicate
     iree::base::internal::arena
     iree::testing::gtest
@@ -514,9 +586,7 @@ loom_cc_test(
     loom::ops::pass
     loom::ops::target
     loom::ops::test
-    loom::pass::environment
     loom::pass::verify
-    loom::target::pass_environment
     loom::target::test::target_record_table
     loom::testing::module_ptr
 )
@@ -529,7 +599,9 @@ loom_cc_library(
   SRCS
     "entry_selection.c"
   DEPS
+    ::facts
     ::function_contract
+    ::function_version
     ::low_descriptor_registry
     ::types
     iree::base
@@ -544,6 +616,29 @@ loom_cc_library(
     loom::ops::target
     loom::verify
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    entry_selection_test
+  SRCS
+    "entry_selection_test.cc"
+  DEPS
+    ::entry_selection
+    ::facts_builder
+    ::function_contract
+    ::function_version
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func
+    loom::ops::func_symbol_facts
+    loom::ops::test
+    loom::target::test::target_record_table
+    loom::testing::module_ptr
 )
 
 loom_cc_library(

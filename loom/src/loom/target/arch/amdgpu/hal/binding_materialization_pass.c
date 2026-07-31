@@ -10,9 +10,10 @@
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/hal/binding_materialization.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
-#include "loom/target/arch/amdgpu/ops/ops.h"
+#include "loom/target/function_version.h"
 
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_STATISTICS(V, statistics_type) \
   V(statistics_type, errors, "errors",                            \
@@ -59,9 +60,9 @@ loom_amdgpu_materialize_hal_buffer_descriptors_pass_info(void) {
 static bool loom_amdgpu_materialize_hal_kernel_abi_matches(
     const loom_low_resolved_target_t* target) {
   return target->descriptor_set != NULL &&
-         target->bundle_storage.export_plan.abi_kind ==
+         loom_low_resolved_target_bundle(target)->export_plan->abi_kind ==
              LOOM_TARGET_ABI_HAL_KERNEL &&
-         loom_amdgpu_target_isa(target->target_op);
+         loom_amdgpu_target_facts_cast(target->target_facts) != NULL;
 }
 
 iree_status_t loom_amdgpu_materialize_hal_kernel_abi_run(
@@ -74,10 +75,13 @@ iree_status_t loom_amdgpu_materialize_hal_kernel_abi_run(
       loom_low_pass_capability_from_pass(pass);
   const loom_low_descriptor_registry_t* descriptor_registry =
       loom_low_pass_capability_descriptor_registry(low_capability);
+  loom_symbol_fact_table_t symbol_facts = {0};
+  loom_symbol_fact_table_initialize(&symbol_facts, pass->arena);
   loom_low_resolved_target_t target = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_resolve_function_target(module, function.op, descriptor_registry,
-                                       pass->diagnostic_emitter, &target));
+  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
+      module, &symbol_facts, function.op,
+      loom_target_function_version_effective_facts(pass->function_version),
+      descriptor_registry, pass->diagnostic_emitter, &target));
   if (!loom_amdgpu_materialize_hal_kernel_abi_matches(&target)) {
     return iree_ok_status();
   }
@@ -117,10 +121,13 @@ iree_status_t loom_amdgpu_materialize_hal_buffer_descriptors_run(
       loom_low_pass_capability_from_pass(pass);
   const loom_low_descriptor_registry_t* descriptor_registry =
       loom_low_pass_capability_descriptor_registry(low_capability);
+  loom_symbol_fact_table_t symbol_facts = {0};
+  loom_symbol_fact_table_initialize(&symbol_facts, pass->arena);
   loom_low_resolved_target_t target = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_resolve_function_target(module, function.op, descriptor_registry,
-                                       pass->diagnostic_emitter, &target));
+  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
+      module, &symbol_facts, function.op,
+      loom_target_function_version_effective_facts(pass->function_version),
+      descriptor_registry, pass->diagnostic_emitter, &target));
   if (!loom_amdgpu_materialize_hal_kernel_abi_matches(&target)) {
     return iree_ok_status();
   }

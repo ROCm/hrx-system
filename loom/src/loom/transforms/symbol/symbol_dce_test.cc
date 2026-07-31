@@ -187,9 +187,9 @@ func.def @dead_wrapper(%lhs: i32, %rhs: i32) -> (i32) {
   func.return %sum : i32
 }
 
-low.func.decl target(@test_target) @live_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)
+low.func.decl target<test.low.core>(@test_target) @live_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)
 
-low.func.decl target(@test_target) @dead_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)
+low.func.decl target<test.low.core>(@test_target) @dead_add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>)
 )";
 
   ModulePtr module(Parse(iree_make_cstring_view(source)));

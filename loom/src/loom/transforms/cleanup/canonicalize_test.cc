@@ -16,7 +16,7 @@
 #include "loom/ops/test/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/pass/value_facts.h"
-#include "loom/target/profile.h"
+#include "loom/target/facts.h"
 #include "loom/target/types.h"
 
 namespace loom {
@@ -609,7 +609,7 @@ TEST_F(CanonicalizeTest, DriverAcceptsSeedFacts) {
   iree_arena_deinitialize(&seed_arena);
 }
 
-TEST_F(CanonicalizeTest, DriverPreservesSeedTargetContextAcrossSideRegions) {
+TEST_F(CanonicalizeTest, DriverPreservesSeedTargetFactsAcrossSideRegions) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
 
   loom_builder_t module_builder;
@@ -635,21 +635,30 @@ TEST_F(CanonicalizeTest, DriverPreservesSeedTargetContextAcrossSideRegions) {
       /*.export_plan=*/&export_plan,
       /*.config=*/&config,
   };
-  const loom_target_profile_type_t target_profile_type = {
+  const loom_target_fact_type_t target_fact_type = {
       /*.name=*/IREE_SVL("test"),
+      /*.storage_size=*/sizeof(loom_target_facts_t),
   };
-  const loom_target_profile_t target_profile = {
-      /*.type=*/&target_profile_type,
-      /*.target_bundle=*/&bundle,
+  loom_target_facts_t target_facts = {
+      /*.fact_type=*/&target_fact_type,
+      /*.selector=*/0,
+      /*.authored_fields=*/0,
+      /*.storage=*/
+      {
+          /*.snapshot=*/snapshot,
+          /*.export_plan=*/export_plan,
+          /*.config=*/config,
+          /*.bundle=*/bundle,
+      },
   };
+  loom_target_bundle_storage_rebind(&target_facts.storage);
 
   iree_arena_allocator_t seed_arena;
   iree_arena_initialize(&block_pool_, &seed_arena);
   loom_value_fact_table_t seed_facts;
   IREE_ASSERT_OK(loom_value_fact_table_initialize(
       &seed_facts, &seed_arena, loom_value_table_capacity(&module_->values)));
-  seed_facts.context.target_bundle = &bundle;
-  seed_facts.context.target_profile = &target_profile;
+  seed_facts.context.target_facts = &target_facts;
 
   iree_arena_allocator_t pass_arena;
   iree_arena_initialize(&block_pool_, &pass_arena);
@@ -669,8 +678,7 @@ TEST_F(CanonicalizeTest, DriverPreservesSeedTargetContextAcrossSideRegions) {
   const loom_value_fact_table_t* final_facts =
       loom_canonicalizer_fact_table(&canonicalizer);
   ASSERT_NE(final_facts, nullptr);
-  EXPECT_EQ(final_facts->context.target_bundle, &bundle);
-  EXPECT_EQ(final_facts->context.target_profile, &target_profile);
+  EXPECT_EQ(final_facts->context.target_facts, &target_facts);
 
   loom_canonicalizer_deinitialize(&canonicalizer);
   loom_pass_value_fact_owner_deinitialize(&value_facts);

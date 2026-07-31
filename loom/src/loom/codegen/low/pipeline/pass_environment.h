@@ -86,7 +86,7 @@ loom_pass_environment_t loom_low_pass_environment_storage_initialize(
     const loom_target_math_policy_registry_t* math_policy_registry,
     loom_target_compile_report_t* compile_report,
     const loom_target_environment_t* target_environment,
-    const loom_target_specialization_context_t* specialization_context,
+    const loom_function_version_list_t* function_versions,
     loom_low_pass_environment_storage_t* out_storage);
 
 // Looks up the low capability from |environment|. Returns NULL when absent.

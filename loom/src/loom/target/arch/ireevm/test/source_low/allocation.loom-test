@@ -2,7 +2,7 @@
 
 ireevm.target<core> @vm_target
 
-low.func.def target(@vm_target) @vm_i32_values_allocate_one_scalar_slot(%lhs: reg<ireevm.i32>, %rhs: reg<ireevm.i32>) -> (reg<ireevm.i32>) asm<ireevm.core> {
+low.func.def target<ireevm.core>(@vm_target) @vm_i32_values_allocate_one_scalar_slot(%lhs: reg<ireevm.i32>, %rhs: reg<ireevm.i32>) -> (reg<ireevm.i32>) asm {
   %sum = ireevm.add.i32 %lhs, %rhs
   return %sum
 }
@@ -16,7 +16,7 @@ low.func.def target(@vm_target) @vm_i32_values_allocate_one_scalar_slot(%lhs: re
 
 ireevm.target<core> @vm_target
 
-low.func.def target(@vm_target) @vm_i64_block_arguments_allocate_two_slots(%start: reg<ireevm.i64 x2>, %limit: reg<ireevm.i64 x2>, %step: reg<ireevm.i64 x2>) -> (reg<ireevm.i64 x2>) asm<ireevm.core> {
+low.func.def target<ireevm.core>(@vm_target) @vm_i64_block_arguments_allocate_two_slots(%start: reg<ireevm.i64 x2>, %limit: reg<ireevm.i64 x2>, %step: reg<ireevm.i64 x2>) -> (reg<ireevm.i64 x2>) asm {
   low.br ^loop(%start: reg<ireevm.i64 x2>)
 ^loop(%current: reg<ireevm.i64 x2>):
   %keep_going = ireevm.cmp.lt.s.i64 %current, %limit
@@ -38,7 +38,7 @@ low.func.def target(@vm_target) @vm_i64_block_arguments_allocate_two_slots(%star
 ireevm.target<core> @vm_target
 
 // WARNING@+1: BACKEND/008 {function_name="vm_scalar_alias_classes_share_storage", value_name="narrow", value_class="ireevm.i32", spill_cause="register-budget-conflict"}
-low.func.def target(@vm_target) @vm_scalar_alias_classes_share_storage(%wide: reg<ireevm.i64 x2>, %narrow: reg<ireevm.i32>) -> (reg<ireevm.i64 x2>, reg<ireevm.i32>) asm<ireevm.core> {
+low.func.def target<ireevm.core>(@vm_target) @vm_scalar_alias_classes_share_storage(%wide: reg<ireevm.i64 x2>, %narrow: reg<ireevm.i32>) -> (reg<ireevm.i64 x2>, reg<ireevm.i32>) asm {
   return %wide, %narrow
 }
 
@@ -49,7 +49,7 @@ low.func.def target(@vm_target) @vm_scalar_alias_classes_share_storage(%wide: re
 ireevm.target<core> @vm_target
 
 // WARNING@+1: BACKEND/008 {function_name="vm_i64_values_consume_two_scalar_slots", value_name="rhs", value_class="ireevm.i64", spill_cause="register-budget-conflict"}
-low.func.def target(@vm_target) @vm_i64_values_consume_two_scalar_slots(%lhs: reg<ireevm.i64 x2>, %rhs: reg<ireevm.i64 x2>) -> (reg<ireevm.i64 x2>, reg<ireevm.i64 x2>) asm<ireevm.core> {
+low.func.def target<ireevm.core>(@vm_target) @vm_i64_values_consume_two_scalar_slots(%lhs: reg<ireevm.i64 x2>, %rhs: reg<ireevm.i64 x2>) -> (reg<ireevm.i64 x2>, reg<ireevm.i64 x2>) asm {
   return %lhs, %rhs
 }
 
@@ -60,6 +60,6 @@ low.func.def target(@vm_target) @vm_i64_values_consume_two_scalar_slots(%lhs: re
 ireevm.target<core> @vm_target
 
 // ERROR@+1: BACKEND/019 {function_name="vm_forced_spill_reports_missing_storage_support", value_class="ireevm.i32", spill_slot_space="private", storage_space="private"}
-low.func.def target(@vm_target) @vm_forced_spill_reports_missing_storage_support(%wide: reg<ireevm.i64 x2>, %narrow: reg<ireevm.i32>) -> (reg<ireevm.i64 x2>, reg<ireevm.i32>) asm<ireevm.core> {
+low.func.def target<ireevm.core>(@vm_target) @vm_forced_spill_reports_missing_storage_support(%wide: reg<ireevm.i64 x2>, %narrow: reg<ireevm.i32>) -> (reg<ireevm.i64 x2>, reg<ireevm.i32>) asm {
   return %wide, %narrow
 }

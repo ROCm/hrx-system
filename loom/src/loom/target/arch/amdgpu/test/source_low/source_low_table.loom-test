@@ -25,7 +25,7 @@ kernel.def target(@target) @f32_table_lookup_i8_codes() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @f32_table_lookup_i8_codes() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(2, 1, 1) workgroup_count(1, 1, 1) @f32_table_lookup_i8_codes() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %codes_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
@@ -79,7 +79,7 @@ func.def target(@target) @f32_table_lookup_i32_codes(%codes: vector<2xi32>) -> (
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_table_lookup_i32_codes(%codes: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_table_lookup_i32_codes(%codes: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %g0 = v_mov_b32 1073741824
   %16 = slice %codes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %17 = v_cmp_eq_i32_src1_inline %16 {rhs = 1}
@@ -104,7 +104,7 @@ func.def target(@target) @f32_table_lookup_dynamic_grid(%grid: vector<3xf32>, %c
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_table_lookup_dynamic_grid(%grid: reg<amdgpu.vgpr x3>, %codes: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_table_lookup_dynamic_grid(%grid: reg<amdgpu.vgpr x3>, %codes: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %7 = slice %grid[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
   %8 = slice %grid[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
   %9 = slice %grid[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
@@ -136,7 +136,7 @@ func.def target(@target) @i8_table_lookup_fact_known_codes(%grid: vector<4xi8>) 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8_table_lookup_fact_known_codes(%grid: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8_table_lookup_fact_known_codes(%grid: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %codes = v_mov_b32 16973826
   %decoded = v_perm_b32 %grid, %grid, %codes
   return %decoded
@@ -161,7 +161,7 @@ func.def target(@target) @i8_table_lookup_constant_table() -> (vector<4xi8>) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8_table_lookup_constant_table() -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8_table_lookup_constant_table() -> (reg<amdgpu.vgpr>) asm {
   %grid = v_mov_b32 117637116
   %codes = v_mov_b32 66051
   %decoded = v_perm_b32 %grid, %grid, %codes
@@ -178,7 +178,7 @@ func.def target(@target) @i8_table_lookup_u4_dynamic_table(%grid: vector<16xi8>,
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8_table_lookup_u4_dynamic_table(%grid: reg<amdgpu.vgpr x4>, %packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8_table_lookup_u4_dynamic_table(%grid: reg<amdgpu.vgpr x4>, %packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %8 = v_and_b32_src0_inline %packed, 15
   %9 = v_bfe_u32_offset_width_inline %packed {offset = 4, width = 4}
   %10 = v_lshl_add_u32_shift_imm %9, %8, 8
@@ -227,7 +227,7 @@ func.def target(@target) @i8_table_lookup_u4_constant_table(%packed: vector<2xi8
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8_table_lookup_u4_constant_table(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8_table_lookup_u4_constant_table(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %23 = v_mov_b32 4244832000
   %24 = v_mov_b32 4177984260
   %25 = v_mov_b32 4111136520

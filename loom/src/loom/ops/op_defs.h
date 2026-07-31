@@ -176,10 +176,10 @@ enum loom_format_kind_e {
   // the vtable's instance_flags_case_names. Reads/writes op->instance_flags.
   LOOM_FORMAT_KIND_FLAGS = 17,
 
-  // Op kind reference in angle brackets: <tile.contract>.
-  // Glued to the preceding token (op name). The field_index references
-  // a string attribute storing the op name.
-  LOOM_FORMAT_KIND_OP_REF = 18,
+  // Bare symbolic key in angle brackets: <tile.contract>.
+  // Glued to the preceding token. The field_index references a string
+  // attribute storing the canonical key spelling.
+  LOOM_FORMAT_KIND_KEY_REF = 18,
 
   // Single result type without parentheses: type.
   // For ops with exactly one non-variadic result where parenthesized
@@ -1329,6 +1329,10 @@ loom_string_id_t loom_func_like_import_symbol(loom_func_like_t func);
 // Returns the target record symbol ref for a func-like op, or null if
 // |func| has no target contract.
 loom_symbol_ref_t loom_func_like_target(loom_func_like_t func);
+
+// Returns the authored representation-contract key for a func-like op, or
+// LOOM_STRING_ID_INVALID when none is present.
+loom_string_id_t loom_func_like_repr_contract(loom_func_like_t func);
 
 // Returns the target ABI enum value, or 0 if |func| has no explicit ABI.
 uint8_t loom_func_like_abi(loom_func_like_t func);

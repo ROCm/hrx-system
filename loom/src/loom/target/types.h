@@ -22,6 +22,8 @@ extern "C" {
 #endif
 
 typedef struct loom_target_profile_t loom_target_profile_t;
+typedef struct loom_target_facts_t loom_target_facts_t;
+typedef struct loom_target_fact_type_t loom_target_fact_type_t;
 
 typedef uint8_t loom_target_codegen_format_t;
 typedef enum loom_target_codegen_format_e {
@@ -323,49 +325,6 @@ static inline const loom_target_bundle_t* loom_target_bundle_table_lookup(
     const loom_target_bundle_table_t* table, uint32_t selector) {
   return selector < table->count ? table->values[selector] : NULL;
 }
-
-enum loom_target_projection_value_bits_e {
-  // Enum attr projected into a uint8_t target enum field.
-  LOOM_TARGET_PROJECTION_VALUE_ENUM_U8 = 1,
-  // I64 attr projected into a uint32_t field after verification.
-  LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32 = 2,
-  // I64 attr projected into a uint64_t field after verification.
-  LOOM_TARGET_PROJECTION_VALUE_I64_TO_U64 = 3,
-  // String attr projected into an iree_string_view_t field.
-  LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW = 4,
-};
-typedef uint8_t loom_target_projection_value_kind_t;
-
-typedef uint8_t loom_target_projection_specialization_t;
-enum {
-  // Structured target profiles own this field during specialization.
-  LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE = 0,
-  // An explicit authored value survives profile specialization.
-  LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED = 1,
-};
-
-typedef struct loom_target_projection_t {
-  // Byte offset into loom_target_bundle_storage_t for the destination field.
-  uint16_t storage_offset;
-  // Attribute index on the target-like op.
-  uint8_t attr_index;
-  // Projection operation used to copy the present attr payload.
-  loom_target_projection_value_kind_t value_kind;
-  // Source that owns this field when specializing an authored target.
-  loom_target_projection_specialization_t specialization;
-} loom_target_projection_t;
-
-static_assert(sizeof(loom_target_projection_t) == 6,
-              "loom_target_projection_t must be exactly 6 bytes");
-
-typedef struct loom_target_like_descriptor_t {
-  // Direct selector-indexed bundle table for a target-like op family.
-  const loom_target_bundle_table_t* bundle_table;
-  // Optional projection rows for typed attrs that override the selected bundle.
-  const loom_target_projection_t* projections;
-  // Number of entries in |projections|.
-  uint8_t projection_count;
-} loom_target_like_descriptor_t;
 
 typedef struct loom_target_bundle_storage_t {
   // Materialized target snapshot owned by this storage object.

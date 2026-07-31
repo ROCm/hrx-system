@@ -104,7 +104,6 @@ loom_cc_library(
   DEPS
     ::descriptors
     iree::base
-    iree::base::internal::arena
     loom::analysis::symbol_facts
     loom::error::emitter
     loom::error::error_defs
@@ -112,11 +111,36 @@ loom_cc_library(
     loom::ops::func_symbol_facts
     loom::ops::low
     loom::ops::target
+    loom::target::facts
     loom::target::function_contract
     loom::target::profile
     loom::target::registers
     loom::target::types
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    target_binding_test
+  SRCS
+    "target_binding_test.cc"
+  DEPS
+    ::target_binding
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::error::error_defs
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func_symbol_facts
+    loom::ops::low
+    loom::ops::target
+    loom::ops::test
+    loom::target::function_contract
+    loom::target::test::alt_descriptors
+    loom::target::test::descriptors
+    loom::testing::module_ptr
 )
 
 loom_cc_library(
@@ -582,6 +606,9 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::error::error_defs
+    loom::ops::test
+    loom::target::facts_builder
+    loom::target::test::target_record_table
 )
 
 loom_cc_library(
@@ -645,6 +672,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::low
+    loom::target::facts
     loom::target::residency
   PUBLIC
 )
@@ -772,6 +800,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::low
+    loom::target::function_version
     loom::target::registers
     loom::util::walk
   PUBLIC
@@ -788,13 +817,17 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::symbol_facts
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
     loom::ops::func
+    loom::ops::func_symbol_facts
     loom::ops::low
     loom::ops::target
     loom::ops::test
+    loom::target::function_contract
+    loom::target::function_version
     loom::target::test::low_registry
     loom::testing::diagnostic_matchers
     loom::testing::module_ptr

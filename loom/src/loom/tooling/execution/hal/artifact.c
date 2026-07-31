@@ -6,6 +6,23 @@
 
 #include "loom/tooling/execution/hal/artifact.h"
 
+iree_status_t loom_run_hal_artifact_provider_select_compatible_device_target(
+    const loom_run_hal_artifact_provider_t* provider,
+    const struct loom_run_hal_runtime_t* runtime,
+    const loom_target_facts_t* target_requirement, iree_allocator_t allocator,
+    loom_run_hal_device_target_t* out_target) {
+  if (provider->select_compatible_device_target == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "HAL artifact provider '%.*s' is missing required compatible device "
+        "target selection hook",
+        (int)provider->name.size, provider->name.data);
+  }
+
+  return provider->select_compatible_device_target(
+      provider, runtime, target_requirement, allocator, out_target);
+}
+
 void loom_run_hal_artifact_provider_registry_initialize_from_entries(
     const loom_run_hal_artifact_provider_t* const* providers,
     iree_host_size_t provider_count,

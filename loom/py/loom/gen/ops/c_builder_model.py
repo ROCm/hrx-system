@@ -24,9 +24,9 @@ from loom.assembly import (
     FuncArgs,
     Glue,
     IndexList,
+    KeyRef,
     Keyword,
     OperandDict,
-    OpRef,
     OptionalGroup,
     PredicateList,
     Ref,
@@ -570,7 +570,7 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                                 continue
                             append_attr_param(attr_def.name)
 
-                case OpRef(field=name):
+                case KeyRef(field=name):
                     append_attr_param(name)
 
                 case DescriptorRef(key=name, ordinal=ordinal):

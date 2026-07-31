@@ -8,7 +8,7 @@ func.def target(@target) @f32_dotf(%lhs: vector<4xf32>, %rhs: vector<4xf32>, %ac
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_dotf(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_dotf(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %9 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %10 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %11 = v_fma_f32 %9, %10, %acc
@@ -34,7 +34,7 @@ func.def target(@target) @f32_dotf_zero_seed(%lhs: vector<4xf32>, %rhs: vector<4
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_dotf_zero_seed(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_dotf_zero_seed(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
   %9 = v_mov_b32 0
   %10 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %11 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -61,7 +61,7 @@ func.def target(@target) @f32_contract_product_reduce(%lhs: vector<8xf32>, %rhs:
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_contract_product_reduce(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_contract_product_reduce(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %11 = slice %lhs[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %12 = slice %rhs[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %13 = v_fma_f32 %11, %12, %acc
@@ -102,7 +102,7 @@ func.def target(@target) @f32_exact_product_reduce(%lhs: vector<4xf32>, %rhs: ve
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_exact_product_reduce(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_exact_product_reduce(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %10 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %11 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %12 = v_mul_f32 %10, %11
@@ -131,7 +131,7 @@ func.def target(@target) @f16_dot2f(%lhs: vector<8xf16>, %rhs: vector<8xf16>, %a
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f16_dot2f(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f16_dot2f(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %9 = copy %acc : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %10 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %11 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -162,7 +162,7 @@ func.def target(@target) @bf16_dot2f(%lhs: vector<8xbf16>, %rhs: vector<8xbf16>,
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16_dot2f(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16_dot2f(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %9 = copy %acc : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %10 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %11 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -201,7 +201,7 @@ func.def target(@target) @f32_uniform_smem_vector_operands(%lhs: vector<4xf32>, 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_uniform_smem_vector_operands(%lhs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_uniform_smem_vector_operands(%lhs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
   %weights_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
   %19 = s_mov_b32 0
   %rhs = s_load_dwordx4 %weights_view, %19

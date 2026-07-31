@@ -22,7 +22,6 @@
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
-#include "loom/target/arch/amdgpu/target_id/target_id.h"
 
 #define LOOM_AMDGPU_PACKED_WORKITEM_ID_DIMENSION_BITS 10u
 #define LOOM_AMDGPU_PACKED_WORKITEM_ID_DIMENSION_MASK 0x3FFu
@@ -174,8 +173,8 @@ typedef struct loom_amdgpu_preamble_query_facts_t {
   loom_func_like_t function;
   // Selected target bundle for target and launch facts.
   const loom_target_bundle_t* bundle;
-  // Module-local target record selected for this lowering contract.
-  loom_symbol_ref_t target_ref;
+  // Typed AMDGPU target facts selected for this lowering contract.
+  const loom_amdgpu_target_facts_t* target_facts;
   // Optional value-fact table used for specialization-aware proofs.
   const loom_value_fact_table_t* fact_table;
 } loom_amdgpu_preamble_query_facts_t;
@@ -279,15 +278,12 @@ uint32_t loom_amdgpu_target_wavefront_size(const loom_target_bundle_t* bundle) {
 }
 
 uint32_t loom_amdgpu_target_native_subgroup_width(
-    const loom_module_t* module, loom_symbol_ref_t target_ref,
+    const loom_amdgpu_target_facts_t* target_facts,
     uint32_t source_wavefront_size) {
-  const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_processor_from_ref(module, target_ref);
-  IREE_ASSERT(processor != NULL,
-              "AMDGPU subgroup communication requires an AMDGPU processor "
-              "target record");
+  IREE_ASSERT(target_facts != NULL,
+              "AMDGPU subgroup communication requires AMDGPU target facts");
   const uint32_t default_wavefront_size =
-      processor->properties.wavefront.default_size;
+      target_facts->properties.processor->wavefront.default_size;
   IREE_ASSERT(loom_amdgpu_wavefront_size_is_valid(default_wavefront_size),
               "AMDGPU subgroup communication selected a processor with an "
               "invalid default wavefront size");
@@ -297,10 +293,10 @@ uint32_t loom_amdgpu_target_native_subgroup_width(
 }
 
 bool loom_amdgpu_target_supports_direct_subgroup_width(
-    const loom_module_t* module, loom_symbol_ref_t target_ref,
+    const loom_amdgpu_target_facts_t* target_facts,
     uint32_t source_wavefront_size, uint32_t required_width) {
   const uint32_t native_subgroup_width =
-      loom_amdgpu_target_native_subgroup_width(module, target_ref,
+      loom_amdgpu_target_native_subgroup_width(target_facts,
                                                source_wavefront_size);
   return required_width != 0 && required_width <= native_subgroup_width;
 }
@@ -318,10 +314,11 @@ bool loom_amdgpu_select_direct_subgroup_width(loom_low_lower_context_t* context,
   if (!loom_amdgpu_wavefront_size_is_valid(source_wavefront_size)) {
     return false;
   }
+  const loom_amdgpu_target_facts_t* target_facts =
+      loom_amdgpu_target_facts_cast(
+          loom_low_lower_context_target_facts(context));
   return loom_amdgpu_target_supports_direct_subgroup_width(
-      loom_low_lower_context_module(context),
-      loom_low_lower_context_target_ref(context), source_wavefront_size,
-      required_width);
+      target_facts, source_wavefront_size, required_width);
 }
 
 bool loom_amdgpu_select_full_wave_direct_subgroup_width(
@@ -407,7 +404,7 @@ static bool loom_amdgpu_preamble_query_launch_facts_satisfied(
           facts->module, facts->function.op, facts->fact_table, &cluster_size);
   const bool supports_cluster_launch_state =
       loom_amdgpu_cluster_preamble_target_supports_cluster_launch_state(
-          facts->module, facts->target_ref);
+          facts->target_facts);
   const bool uses_cluster_launch_state =
       has_nontrivial_cluster && supports_cluster_launch_state;
 
@@ -554,7 +551,8 @@ iree_status_t loom_amdgpu_select_preamble_plan(
       .module = loom_low_lower_context_module(context),
       .function = loom_low_lower_context_source_function(context),
       .bundle = loom_low_lower_context_bundle(context),
-      .target_ref = loom_low_lower_context_target_ref(context),
+      .target_facts = loom_amdgpu_target_facts_cast(
+          loom_low_lower_context_target_facts(context)),
       .fact_table = loom_low_lower_context_fact_table(context),
   };
   iree_string_view_t unused_reason = iree_string_view_empty();
@@ -622,16 +620,13 @@ static iree_string_view_t loom_amdgpu_packed_workitem_id_source_name(
 
 static bool loom_amdgpu_uses_packed_workitem_id(
     loom_low_lower_context_t* context) {
-  const loom_amdgpu_processor_info_t* processor =
-      loom_amdgpu_target_processor_from_ref(
-          loom_low_lower_context_module(context),
-          loom_low_lower_context_target_ref(context));
-  if (processor == NULL) {
-    IREE_ASSERT_UNREACHABLE("selected AMDGPU processor target record");
-    IREE_BUILTIN_UNREACHABLE();
-  }
+  const loom_amdgpu_target_facts_t* target_facts =
+      loom_amdgpu_target_facts_cast(
+          loom_low_lower_context_target_facts(context));
+  IREE_ASSERT(target_facts != NULL,
+              "AMDGPU preamble requires AMDGPU target facts");
   return loom_amdgpu_processor_properties_kernel_descriptor_has_flags(
-      &processor->properties,
+      target_facts->properties.processor,
       LOOM_AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID);
 }
 
@@ -2046,7 +2041,8 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_preamble(
       .module = loom_target_low_legality_module(context),
       .function = loom_target_low_legality_function(context),
       .bundle = bundle,
-      .target_ref = loom_target_low_legality_target_ref(context),
+      .target_facts = loom_amdgpu_target_facts_cast(
+          loom_target_low_legality_target_facts(context)),
       .fact_table = loom_target_low_legality_fact_table(context),
   };
   iree_string_view_t reason = iree_string_view_empty();

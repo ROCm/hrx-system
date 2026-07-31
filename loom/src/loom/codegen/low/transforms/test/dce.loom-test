@@ -2,7 +2,7 @@
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @drops_dead_low_packets(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @drops_dead_low_packets(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
   %dead_const = test.const.i32 7
   %dead_sum = test.add.i32 %lhs, %dead_const
   %out = test.add.i32 %lhs, %rhs
@@ -12,7 +12,7 @@ low.func.def target(@test_target) @drops_dead_low_packets(%lhs: reg<test.i32>, %
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @drops_dead_low_packets(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @drops_dead_low_packets(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
   %out = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   low.return %out : reg<test.i32>
 }
@@ -25,7 +25,7 @@ low.func.def target(@test_target) @drops_dead_low_packets(%lhs: reg<test.i32>, %
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @keeps_dead_convergent_low_packets(%value: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @keeps_dead_convergent_low_packets(%value: reg<test.i32>) -> (reg<test.i32>) asm {
   %dead = test.convergent.i32 %value
   return %value
 }
@@ -33,7 +33,7 @@ low.func.def target(@test_target) @keeps_dead_convergent_low_packets(%value: reg
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @keeps_dead_convergent_low_packets(%value: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @keeps_dead_convergent_low_packets(%value: reg<test.i32>) -> (reg<test.i32>) {
   %dead = low.op<test.convergent.i32>(%value) : (reg<test.i32>) -> reg<test.i32>
   low.return %value : reg<test.i32>
 }

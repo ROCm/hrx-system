@@ -17,7 +17,7 @@ func.def target(@target) @spirv_workgroup_storage_i32_roundtrip(%value: i32, %in
 }
 
 // ----
-low.func.def target(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_workgroup_storage_i32_roundtrip(%value: reg<spirv.id>, %bounded_index: reg<spirv.id>) -> (reg<spirv.id>) asm<spirv.logical.core> {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_workgroup_storage_i32_roundtrip(%value: reg<spirv.id>, %bounded_index: reg<spirv.id>) -> (reg<spirv.id>) asm {
   %scratch = storage {byte_alignment = 4, byte_length = 16} : low.storage<workgroup>
   %21 = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
   %scratch_view = OpAccessChain.workgroup.i32.element_index %21, %bounded_index

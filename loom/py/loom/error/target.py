@@ -714,17 +714,17 @@ ERR_TARGET_044 = ErrorDef(
     severity=Severity.ERROR,
     summary="Low descriptor set is not available.",
     message=(
-        "low function '@{function_name}' target '@{target_name}' requires "
-        "descriptor set '{descriptor_set_key}', but the descriptor registry "
-        "does not provide it"
+        "low function '@{function_name}' representation contract "
+        "'{descriptor_set_key}' is not available in the descriptor registry"
     ),
     params=(
         ErrorParam("function_name", ParamKind.STRING),
-        ErrorParam("target_name", ParamKind.STRING),
         ErrorParam("descriptor_set_key", ParamKind.STRING),
     ),
-    fix_hint="Link the descriptor package named by '{descriptor_set_key}' or "
-    "choose a target config whose descriptor set is available",
+    fix_hint=(
+        "Link the descriptor package named by '{descriptor_set_key}' before "
+        "compiling this Low function"
+    ),
 )
 
 # ERR_TARGET_045: Low descriptor is not available.
@@ -1168,6 +1168,29 @@ ERR_TARGET_064 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_065: Low representation contract is not supported by target.
+ERR_TARGET_065 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=65,
+    severity=Severity.ERROR,
+    summary="Low representation contract is not supported by target.",
+    message=(
+        "low function '@{function_name}' representation contract "
+        "'{representation_contract}' cannot represent target "
+        "'{target_name}' native contract '{target_contract}'"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("representation_contract", ParamKind.STRING),
+        ErrorParam("target_name", ParamKind.STRING),
+        ErrorParam("target_contract", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use a representation contract generated for '{target_contract}' or "
+        "a portable contract that includes it"
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1225,4 +1248,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_062,
     ERR_TARGET_063,
     ERR_TARGET_064,
+    ERR_TARGET_065,
 )

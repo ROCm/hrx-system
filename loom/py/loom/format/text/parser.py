@@ -36,9 +36,9 @@ from loom.assembly import (
     FuncArgs,
     Glue,
     IndexList,
+    KeyRef,
     Keyword,
     OperandDict,
-    OpRef,
     OptionalGroup,
     PredicateList,
     Ref,
@@ -863,23 +863,33 @@ def _parse_function_type(
 # ============================================================================
 
 
+_KEYWORD_TOKEN_KINDS = {
+    ",": TokenKind.COMMA,
+    ":": TokenKind.COLON,
+    "->": TokenKind.ARROW,
+    "=": TokenKind.EQUALS,
+    "(": TokenKind.LPAREN,
+    ")": TokenKind.RPAREN,
+    "[": TokenKind.LBRACKET,
+    "]": TokenKind.RBRACKET,
+    "{": TokenKind.LBRACE,
+    "}": TokenKind.RBRACE,
+    "<": TokenKind.LANGLE,
+    ">": TokenKind.RANGLE,
+}
+
+
+def _at_keyword(tokenizer: Tokenizer, text: str) -> bool:
+    """Returns whether the tokenizer is positioned at a keyword."""
+    kind = _KEYWORD_TOKEN_KINDS.get(text)
+    if kind is not None:
+        return tokenizer.at(kind)
+    return tokenizer.at(TokenKind.BARE_IDENT, text)
+
+
 def _expect_keyword(tokenizer: Tokenizer, text: str) -> None:
     """Consume a keyword token, handling both punctuation and words."""
-    keyword_map = {
-        ",": TokenKind.COMMA,
-        ":": TokenKind.COLON,
-        "->": TokenKind.ARROW,
-        "=": TokenKind.EQUALS,
-        "(": TokenKind.LPAREN,
-        ")": TokenKind.RPAREN,
-        "[": TokenKind.LBRACKET,
-        "]": TokenKind.RBRACKET,
-        "{": TokenKind.LBRACE,
-        "}": TokenKind.RBRACE,
-        "<": TokenKind.LANGLE,
-        ">": TokenKind.RANGLE,
-    }
-    kind = keyword_map.get(text)
+    kind = _KEYWORD_TOKEN_KINDS.get(text)
     if kind is not None:
         tokenizer.expect(kind)
     else:
@@ -1433,7 +1443,7 @@ class Parser:
         if element is skip:
             return False
         match element:
-            case Attr(field=name) | SymbolRef(field=name) | OpRef(field=name):
+            case Attr(field=name) | SymbolRef(field=name) | KeyRef(field=name):
                 return name == attr_name
             case TemplateParam(field=name) | PredicateList(field=name):
                 return name == attr_name
@@ -2410,15 +2420,14 @@ class Parser:
                         tok.expect(TokenKind.RANGLE)
                         parsed.attributes[name] = "|".join(parts)
 
-                case OpRef(field=name):
-                    if tok.at(TokenKind.LANGLE):
-                        tok.next()
-                        if tok.at(TokenKind.OP_NAME) or tok.at(TokenKind.BARE_IDENT):
-                            op_name_tok = tok.next()
-                        else:
-                            op_name_tok = tok.expect(TokenKind.OP_NAME)
-                        tok.expect(TokenKind.RANGLE)
-                        parsed.attributes[name] = op_name_tok.text
+                case KeyRef(field=name):
+                    tok.expect(TokenKind.LANGLE)
+                    if tok.at(TokenKind.OP_NAME) or tok.at(TokenKind.BARE_IDENT):
+                        key_tok = tok.next()
+                    else:
+                        key_tok = tok.expect(TokenKind.OP_NAME)
+                    tok.expect(TokenKind.RANGLE)
+                    parsed.attributes[name] = key_tok.text
 
                 case DescriptorRef(key=key, ordinal=ordinal):
                     tok.expect(TokenKind.LANGLE)
@@ -2472,23 +2481,13 @@ class Parser:
         if not inner_elements:
             return False
         tok = self._tokenizer
-        first = inner_elements[0]
+        first = next(
+            (element for element in inner_elements if not isinstance(element, Glue)),
+            None,
+        )
         match first:
-            case Keyword(text=","):
-                result: bool = tok.at(TokenKind.COMMA)
-                return result
-            case Keyword(text="->"):
-                result = tok.at(TokenKind.ARROW)
-                return result
-            case Keyword(text="="):
-                result = tok.at(TokenKind.EQUALS)
-                return result
-            case Keyword(text="{"):
-                result = tok.at(TokenKind.LBRACE)
-                return result
             case Keyword(text=text):
-                result = tok.at(TokenKind.BARE_IDENT, text)
-                return result
+                return _at_keyword(tok, text)
             case Clause(name=name):
                 return (
                     tok.at(TokenKind.BARE_IDENT, name)
@@ -2516,7 +2515,7 @@ class Parser:
             case SymbolRef():
                 return tok.at(TokenKind.SYMBOL)
             case (
-                OpRef()
+                KeyRef()
                 | DescriptorRef()
                 | StableKeyRef()
                 | TemplateParam()

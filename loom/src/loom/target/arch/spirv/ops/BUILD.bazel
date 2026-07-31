@@ -25,6 +25,7 @@ _SPIRV_TOOLING_VISIBILITY = [
 loom_generated_cc_library(
     name = "ops",
     srcs = [
+        "fact_projection.c",
         "registry.c",
     ],
     hdrs = [
@@ -48,6 +49,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/spirv:facts",
         "//loom/src/loom/target/arch/spirv/records:target_records",
         "//runtime/src/iree/base",
     ],

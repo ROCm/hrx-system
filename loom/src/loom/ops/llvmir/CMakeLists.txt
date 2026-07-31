@@ -16,6 +16,7 @@ loom_generated_cc_library(
     loom::py::loom::gen::ops::c_tables_llvmir_generator
   SRCS
     "registry.c"
+    "target_projection.c"
     "target_records.c"
   GENERATED_SRC_FLAGS
     "--builders"
@@ -35,6 +36,7 @@ loom_generated_cc_library(
     loom::ir
     loom::ops::op_defs
     loom::ops::target
+    loom::target::arch::llvmir::facts
     loom::target::types
 )
 

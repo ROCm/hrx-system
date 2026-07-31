@@ -99,7 +99,7 @@ static iree_status_t loom_spirv_module_abi_lookup_value(
 
 static bool loom_spirv_module_abi_uses_raw_bda(
     const loom_low_resolved_target_t* target) {
-  return target->bundle_storage.export_plan.abi_kind ==
+  return loom_low_resolved_target_bundle(target)->export_plan->abi_kind ==
          LOOM_TARGET_ABI_HAL_KERNEL;
 }
 

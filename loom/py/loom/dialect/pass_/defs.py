@@ -9,7 +9,7 @@
 from loom.assembly import (
     Attr,
     AttrDict,
-    OpRef,
+    KeyRef,
     Region,
     SymbolRef,
     TemplateParam,
@@ -159,7 +159,7 @@ pass_where = Op(
         )
     ],
     format=[
-        OpRef("predicate"),
+        KeyRef("predicate"),
         AttrDict("attrs"),
         Region("body", syntax="pipeline"),
     ],
@@ -259,7 +259,7 @@ pass_run = Op(
         AttrDef("options", "dict", optional=True),
     ],
     format=[
-        OpRef("key"),
+        KeyRef("key"),
         AttrDict("options"),
     ],
     examples=[

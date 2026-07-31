@@ -13,7 +13,7 @@ func.def target(@target) @bf16_mfma(%lhs_data: vector<4xbf16>, %rhs_data: vector
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16_mfma(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_mfma(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %15 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %result = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %15
   return %result
@@ -43,7 +43,7 @@ func.def target(@target) @bf16_mfma_four_loop_carried_accumulators(%lhs_data: ve
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16_mfma_four_loop_carried_accumulators(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_mfma_four_loop_carried_accumulators(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
   %zero = s_mov_b32 0
   %one = s_mov_b32 1
   %two = s_mov_b32 2
@@ -81,7 +81,7 @@ func.def target(@target) @bf16_mfma_preserves_accumulator(%lhs_data: vector<4xbf
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16_mfma_preserves_accumulator(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_mfma_preserves_accumulator(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
   %17 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %result = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %17
   return %result, %init
@@ -102,7 +102,7 @@ func.def target(@target) @f32_mfma(%lhs_data: vector<1xf32>, %rhs_data: vector<1
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_mfma(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @f32_mfma(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %15 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %result = v_mfma_f32_16x16x4_f32 %lhs, %rhs, %15
   return %result
@@ -135,7 +135,7 @@ kernel.def target(@target) @bf16_mfma_fragment_memory() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf16_mfma_fragment_memory() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf16_mfma_fragment_memory() asm {
   %19 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -207,7 +207,7 @@ kernel.def target(@target) @bf16_mfma_fragment_memory_bf16_output() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf16_mfma_fragment_memory_bf16_output() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf16_mfma_fragment_memory_bf16_output() asm {
   %20 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -315,7 +315,7 @@ kernel.def target(@target) @bf16_mfma_fragment_memory_bf16_column_major_output()
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf16_mfma_fragment_memory_bf16_column_major_output() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf16_mfma_fragment_memory_bf16_column_major_output() asm {
   %21 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -403,7 +403,7 @@ kernel.def target(@target) @f32_mfma_fragment_memory() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_mfma_fragment_memory() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_mfma_fragment_memory() asm {
   %19 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -479,7 +479,7 @@ kernel.def target(@target) @f32_fragment_memory_dynamic_lds_base() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(256, 1, 1) workgroup_count(1, 1, 1) @f32_fragment_memory_dynamic_lds_base() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(256, 1, 1) workgroup_count(1, 1, 1) @f32_fragment_memory_dynamic_lds_base() asm {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %out_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -552,7 +552,7 @@ kernel.def target(@target) @f16_mfma_fragment_memory() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f16_mfma_fragment_memory() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f16_mfma_fragment_memory() asm {
   %19 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -616,7 +616,7 @@ kernel.def target(@target) @f32_fragment_memory_static_offsets() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_fragment_memory_static_offsets() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_fragment_memory_static_offsets() asm {
   %11 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4352} : reg<amdgpu.sgpr x2>
   %out_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4608} : reg<amdgpu.sgpr x2>
@@ -660,7 +660,7 @@ func.def target(@target) @fp8_mfma_fnuz_schema(%lhs_data: vector<2xi32>, %rhs_da
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @fp8_mfma_fnuz_schema(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @fp8_mfma_fnuz_schema(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %16 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %result = v_mfma_f32_16x16x32_fp8_fp8 %lhs, %rhs, %16
   return %result
@@ -683,7 +683,7 @@ func.def target(@target) @bf16_smfmac(%lhs_data: vector<2xi32>, %rhs_data: vecto
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16_smfmac(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x4>, %sparsity: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_smfmac(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x4>, %sparsity: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm {
   %19 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %result = v_smfmac_f32_16x16x32_bf16 %19, %lhs, %rhs, %sparsity
   return %result
@@ -706,7 +706,7 @@ func.def target(@target) @fp8_bf8_smfmac(%lhs_data: vector<2xi32>, %rhs_data: ve
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @fp8_bf8_smfmac(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x4>, %sparsity: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @fp8_bf8_smfmac(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x4>, %sparsity: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm {
   %19 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %result = v_smfmac_f32_16x16x64_fp8_bf8 %19, %lhs, %rhs, %sparsity
   return %result
@@ -754,7 +754,7 @@ kernel.def target(@target) @fp8_mfma_fragment_memory() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @fp8_mfma_fragment_memory() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @fp8_mfma_fragment_memory() asm {
   %18 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -817,7 +817,7 @@ kernel.def target(@target) @bf8_fp8_mfma_fragment_memory() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf8_fp8_mfma_fragment_memory() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf8_fp8_mfma_fragment_memory() asm {
   %18 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -869,7 +869,7 @@ func.def target(@target) @tf32_mfma_16x16x8(%lhs_data: vector<2xi32>, %rhs_data:
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @tf32_mfma_16x16x8(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @tf32_mfma_16x16x8(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %16 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %result = v_mfma_f32_16x16x8_xf32 %lhs, %rhs, %16
   return %result
@@ -891,7 +891,7 @@ func.def target(@target) @tf32_mfma_32x32x4(%lhs_data: vector<2xi32>, %rhs_data:
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @tf32_mfma_32x32x4(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x16>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @tf32_mfma_32x32x4(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x16>) asm {
   %16 = copy %init : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x16>
   %result = v_mfma_f32_32x32x4_xf32 %lhs, %rhs, %16
   return %result
@@ -924,7 +924,7 @@ kernel.def target(@target) @f32_mfma_32x32x2_fragment_memory() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_mfma_32x32x2_fragment_memory() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_mfma_32x32x2_fragment_memory() asm {
   %18 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
@@ -1023,7 +1023,7 @@ kernel.def target(@target) @f16_mfma_32x32x8_fragment_memory() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f16_mfma_32x32x8_fragment_memory() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f16_mfma_32x32x8_fragment_memory() asm {
   %18 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -1122,7 +1122,7 @@ kernel.def target(@target) @bf16_mfma_32x32x8_fragment_memory() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf16_mfma_32x32x8_fragment_memory() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @bf16_mfma_32x32x8_fragment_memory() asm {
   %18 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -1225,7 +1225,7 @@ kernel.def target(@target) @tf32_mfma_16x16x8_fragment_memory() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @tf32_mfma_16x16x8_fragment_memory() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @tf32_mfma_16x16x8_fragment_memory() asm {
   %22 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
@@ -1292,7 +1292,7 @@ kernel.def target(@target) @tf32_mfma_32x32x4_fragment_memory() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @tf32_mfma_32x32x4_fragment_memory() asm<amdgpu.cdna3.core> {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @tf32_mfma_32x32x4_fragment_memory() asm {
   %22 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>

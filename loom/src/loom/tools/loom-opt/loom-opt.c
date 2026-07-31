@@ -910,7 +910,7 @@ static iree_status_t loom_opt_run_passes(
           &low_registry->registry, &low_lower_policy_registry,
           &low_legality_provider_list, &legalizer_provider_list,
           &math_policy_registry, /*compile_report=*/NULL, target_environment,
-          /*specialization_context=*/NULL, &low_pass_environment_storage),
+          /*function_versions=*/NULL, &low_pass_environment_storage),
       .predicate_provider =
           loom_target_pass_predicate_provider(&predicate_storage),
       .block_pool = block_pool,

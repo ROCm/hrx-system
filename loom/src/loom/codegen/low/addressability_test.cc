@@ -9,6 +9,9 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/error/error_defs.h"
+#include "loom/ops/test/ops.h"
+#include "loom/target/facts_builder.h"
+#include "loom/target/test/target_records.h"
 
 namespace loom {
 namespace {
@@ -50,6 +53,8 @@ struct AddressabilityTestState {
   loom_low_operand_t operands[2] = {};
   loom_low_descriptor_t descriptors[1] = {};
   loom_low_descriptor_set_t descriptor_set = {};
+  // Complete synthetic target facts borrowed by schedule and allocation state.
+  loom_target_facts_t target_facts = {};
   loom_module_t module = {};
   loom_op_t function_op = {};
   loom_op_t packet_op = {};
@@ -103,6 +108,18 @@ void InitializeAddressabilityTestState(
   state->descriptor_set.operand_count = IREE_ARRAYSIZE(state->operands);
   state->descriptor_set.descriptors = state->descriptors;
   state->descriptor_set.descriptor_count = IREE_ARRAYSIZE(state->descriptors);
+  const loom_target_bundle_t* target_bundle = loom_target_bundle_table_lookup(
+      &loom_test_target_bundles, LOOM_TEST_TARGET_KIND_LOW_CORE);
+  IREE_ASSERT(target_bundle != nullptr);
+  loom_target_facts_builder_initialize(&loom_test_target_fact_type,
+                                       target_bundle, &state->target_facts);
+  const loom_low_resolved_target_t target = {
+      /*.target_facts=*/&state->target_facts,
+      /*.target_name=*/target_bundle->name,
+      /*.descriptor_set_key=*/target_bundle->config->contract_set_key,
+      /*.feature_bits=*/target_bundle->config->contract_feature_bits,
+      /*.descriptor_set=*/&state->descriptor_set,
+  };
 
   state->reg_classes[0].name_string_offset =
       ADDRESSABILITY_STRING_OFFSET(reg_gpr);
@@ -179,7 +196,7 @@ void InitializeAddressabilityTestState(
   state->scheduled_node_indices[0] = 0;
   state->schedule.module = &state->module;
   state->schedule.function_op = &state->function_op;
-  state->schedule.target.descriptor_set = &state->descriptor_set;
+  state->schedule.target = target;
   state->schedule.blocks = state->blocks;
   state->schedule.block_count = IREE_ARRAYSIZE(state->blocks);
   state->schedule.nodes = state->nodes;
@@ -230,7 +247,7 @@ void InitializeAddressabilityTestState(
   state->value_ids[1] = 1;
   state->allocation.module = &state->module;
   state->allocation.function_op = &state->function_op;
-  state->allocation.target.descriptor_set = &state->descriptor_set;
+  state->allocation.target = target;
   state->allocation.liveness.value_ids = state->value_ids;
   state->allocation.liveness.value_count = IREE_ARRAYSIZE(state->value_ids);
   state->allocation.assignments = state->assignments;

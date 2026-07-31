@@ -122,10 +122,6 @@ static iree_status_t loom_print_region_body_with_syntax(
                                        entry_args_declared_by_parent);
     case LOOM_REGION_SYNTAX_LOW_ASM_OPTIONAL:
       if (loom_print_low_asm_is_requested(ctx)) {
-        if (iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_REQUIRE_LOW_ASM)) {
-          return loom_print_low_asm_region(ctx, region, region_descriptor,
-                                           entry_args_declared_by_parent);
-        }
         bool printed = false;
         IREE_RETURN_IF_ERROR(loom_print_low_asm_optional_region(
             ctx, region, region_descriptor, entry_args_declared_by_parent,

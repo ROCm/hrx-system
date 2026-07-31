@@ -19,13 +19,12 @@
 #include "loom/ops/op_registry.h"
 #include "loom/sanitizer/options.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
-#include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/ops/registry.h"
 #include "loom/target/arch/amdgpu/profile.h"
-#include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
+#include "loom/target/entry_selection.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/tooling/execution/hal/runtime.h"
 
@@ -67,6 +66,13 @@ static void InitializeFakeHalDevice(const iree_hal_device_spec_t* device_spec,
                                     fake_hal_device_t* out_device) {
   out_device->device_spec = device_spec;
   iree_hal_resource_initialize(&kFakeHalDeviceVtable, &out_device->resource);
+}
+
+static bool AcceptTargetEntry(void* user_data,
+                              const loom_target_entry_t* entry) {
+  (void)user_data;
+  (void)entry;
+  return true;
 }
 
 static iree_status_t CreateAmdgpuExecutableDeviceSpec(
@@ -167,12 +173,14 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
   void SetUp() override {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
+    iree_arena_initialize(&block_pool_, &analysis_arena_);
     IREE_ASSERT_OK(InitializeAmdgpuContext(&context_));
     loom_amdgpu_low_descriptor_registry_initialize(&low_registry_);
   }
 
   void TearDown() override {
     loom_context_deinitialize(&context_);
+    iree_arena_deinitialize(&analysis_arena_);
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
@@ -199,6 +207,9 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
   iree_status_t ParsePreparedArithmeticModule(iree_string_view_t target,
                                               iree_string_view_t target_attrs,
                                               ModulePtr* out_module) {
+    const loom_amdgpu_target_info_t* target_info = nullptr;
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_target_info_lookup_target(target, &target_info));
     std::string source = "amdgpu.target<";
     source.append(target.data, target.size);
     source.append("> @gfx_target");
@@ -207,9 +218,11 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
       source.append(target_attrs.data, target_attrs.size);
       source.append("}");
     }
+    source.append("\nlow.kernel.def target<");
+    source.append(target_info->descriptor_set_key.data,
+                  target_info->descriptor_set_key.size);
     source.append(
-        "\n"
-        "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
+        ">(@gfx_target) workgroup_size(64, 1, 1) "
         "@loom_kernel() {\n"
         "  %zero = low.const<amdgpu.v_mov_b32> {imm32 = 0} : "
         "reg<amdgpu.vgpr>\n"
@@ -229,19 +242,30 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
                                          out_module);
   }
 
-  loom_func_like_t FindKernel(const loom_module_t* module) {
-    const loom_string_id_t name_id =
-        loom_module_lookup_string(module, IREE_SV("loom_kernel"));
-    if (name_id == LOOM_STRING_ID_INVALID) {
-      return {};
+  iree_status_t SelectFunctionDeviceTarget(
+      const loom_module_t* module, const loom_run_hal_runtime_t* runtime,
+      loom_run_hal_device_target_t* out_target) {
+    const loom_target_entry_options_t options = {
+        /*.entry_symbol=*/IREE_SV("loom_kernel"),
+    };
+    loom_target_entry_diagnostic_emitter_t diagnostic_emitter = {};
+    loom_target_entry_diagnostic_emitter_initialize(
+        module, &options, LOOM_EMITTER_VERIFIER, &diagnostic_emitter);
+    const loom_target_entry_predicate_t predicate = {
+        /*.fn=*/AcceptTargetEntry,
+    };
+    bool selected = false;
+    loom_target_entry_t entry = {};
+    IREE_RETURN_IF_ERROR(loom_target_entry_select_entry(
+        module, &options, predicate, &diagnostic_emitter,
+        IREE_SV("AMDGPU HAL test"), &analysis_arena_, &selected, &entry));
+    if (!selected) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "AMDGPU HAL test target entry was not selected");
     }
-    const loom_symbol_id_t symbol_id = loom_module_find_symbol(module, name_id);
-    if (symbol_id == LOOM_SYMBOL_ID_INVALID ||
-        symbol_id >= module->symbols.count) {
-      return {};
-    }
-    return loom_func_like_cast(module,
-                               module->symbols.entries[symbol_id].defining_op);
+    return loom_run_hal_artifact_provider_select_compatible_device_target(
+        &loom_amdgpu_hal_artifact_provider, runtime, entry.target_facts,
+        iree_allocator_system(), out_target);
   }
 
   void ExpectEmitsModuleTarget(iree_string_view_t target_name) {
@@ -250,15 +274,12 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
     ASSERT_NE(module.get(), nullptr);
 
     loom_run_hal_device_target_t target = {};
+    loom_run_candidate_compile_options_t options = {};
+    loom_run_candidate_compile_options_initialize(&options);
     loom_run_hal_artifact_t artifact = {};
     bool emitted = false;
     IREE_ASSERT_OK(loom_amdgpu_hal_artifact_provider.emit_artifact(
-        &loom_amdgpu_hal_artifact_provider, module.get(), &target,
-        /*diagnostic_sink=*/(loom_diagnostic_sink_t){0},
-        /*source_resolver=*/(loom_source_resolver_t){0}, /*max_errors=*/20,
-        /*target_pipeline_options=*/nullptr,
-        /*artifact_flags=*/LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_NONE,
-        /*artifact_manifest=*/nullptr, /*report=*/nullptr,
+        &loom_amdgpu_hal_artifact_provider, module.get(), &target, &options,
         iree_allocator_system(), &emitted, &artifact));
     EXPECT_TRUE(emitted);
     EXPECT_NE(iree_string_view_find(artifact.target_key, target_name, 0),
@@ -283,6 +304,7 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
   }
 
   iree_arena_block_pool_t block_pool_;
+  iree_arena_allocator_t analysis_arena_;
   loom_context_t context_ = {};
   loom_target_low_descriptor_registry_t low_registry_ = {};
 };
@@ -463,8 +485,6 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   IREE_ASSERT_OK(
       ParsePreparedArithmeticModule(IREE_SV("gfx11-generic"), &module));
   ASSERT_NE(module.get(), nullptr);
-  const loom_func_like_t function = FindKernel(module.get());
-  ASSERT_TRUE(loom_func_like_isa(function));
 
   iree_hal_device_spec_t* device_spec = nullptr;
   IREE_ASSERT_OK(CreateAmdgpuExecutableDeviceSpec(
@@ -477,10 +497,7 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   };
 
   loom_run_hal_device_target_t target = {};
-  IREE_ASSERT_OK(
-      loom_amdgpu_hal_artifact_provider.select_function_device_target(
-          &loom_amdgpu_hal_artifact_provider, &runtime, module.get(), function,
-          iree_allocator_system(), &target));
+  IREE_ASSERT_OK(SelectFunctionDeviceTarget(module.get(), &runtime, &target));
 
   const loom_amdgpu_target_profile_t* target_profile =
       loom_amdgpu_target_profile_cast(target.target_profile);
@@ -502,8 +519,6 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   IREE_ASSERT_OK(
       ParsePreparedArithmeticModule(IREE_SV("gfx11-generic"), &module));
   ASSERT_NE(module.get(), nullptr);
-  const loom_func_like_t function = FindKernel(module.get());
-  ASSERT_TRUE(loom_func_like_isa(function));
 
   iree_hal_device_spec_t* device_spec = nullptr;
   IREE_ASSERT_OK(CreateAmdgpuExecutableDeviceSpec(
@@ -516,10 +531,7 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   };
 
   loom_run_hal_device_target_t target = {};
-  IREE_ASSERT_OK(
-      loom_amdgpu_hal_artifact_provider.select_function_device_target(
-          &loom_amdgpu_hal_artifact_provider, &runtime, module.get(), function,
-          iree_allocator_system(), &target));
+  IREE_ASSERT_OK(SelectFunctionDeviceTarget(module.get(), &runtime, &target));
 
   const loom_amdgpu_target_profile_t* target_profile =
       loom_amdgpu_target_profile_cast(target.target_profile);
@@ -541,8 +553,6 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   ModulePtr module;
   IREE_ASSERT_OK(ParsePreparedArithmeticModule(IREE_SV("gfx1151"), &module));
   ASSERT_NE(module.get(), nullptr);
-  const loom_func_like_t function = FindKernel(module.get());
-  ASSERT_TRUE(loom_func_like_isa(function));
 
   iree_hal_device_spec_t* device_spec = nullptr;
   IREE_ASSERT_OK(CreateAmdgpuExecutableDeviceSpec(
@@ -555,10 +565,7 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   };
 
   loom_run_hal_device_target_t target = {};
-  IREE_ASSERT_OK(
-      loom_amdgpu_hal_artifact_provider.select_function_device_target(
-          &loom_amdgpu_hal_artifact_provider, &runtime, module.get(), function,
-          iree_allocator_system(), &target));
+  IREE_ASSERT_OK(SelectFunctionDeviceTarget(module.get(), &runtime, &target));
 
   const loom_amdgpu_target_profile_t* target_profile =
       loom_amdgpu_target_profile_cast(target.target_profile);
@@ -581,8 +588,6 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   ModulePtr module;
   IREE_ASSERT_OK(ParsePreparedArithmeticModule(target_info->name, &module));
   ASSERT_NE(module.get(), nullptr);
-  const loom_func_like_t function = FindKernel(module.get());
-  ASSERT_TRUE(loom_func_like_isa(function));
 
   loom_amdgpu_target_identity_t identity = {};
   loom_amdgpu_target_identity_initialize(target_info, &identity);
@@ -601,10 +606,7 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   };
 
   loom_run_hal_device_target_t target = {};
-  IREE_ASSERT_OK(
-      loom_amdgpu_hal_artifact_provider.select_function_device_target(
-          &loom_amdgpu_hal_artifact_provider, &runtime, module.get(), function,
-          iree_allocator_system(), &target));
+  IREE_ASSERT_OK(SelectFunctionDeviceTarget(module.get(), &runtime, &target));
   const loom_amdgpu_target_profile_t* profile =
       loom_amdgpu_target_profile_cast(target.target_profile);
   ASSERT_NE(profile, nullptr);
@@ -624,8 +626,6 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   ModulePtr module;
   IREE_ASSERT_OK(ParsePreparedArithmeticModule(authored_target->name, &module));
   ASSERT_NE(module.get(), nullptr);
-  const loom_func_like_t function = FindKernel(module.get());
-  ASSERT_TRUE(loom_func_like_isa(function));
 
   loom_amdgpu_target_identity_t device_identity = {};
   loom_amdgpu_target_identity_initialize(device_target, &device_identity);
@@ -647,9 +647,7 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   loom_run_hal_device_target_t target = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
-      loom_amdgpu_hal_artifact_provider.select_function_device_target(
-          &loom_amdgpu_hal_artifact_provider, &runtime, module.get(), function,
-          iree_allocator_system(), &target));
+      SelectFunctionDeviceTarget(module.get(), &runtime, &target));
   EXPECT_EQ(target.target_profile, nullptr);
   EXPECT_EQ(target.hal_target, nullptr);
 
@@ -663,8 +661,6 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   ModulePtr module;
   IREE_ASSERT_OK(ParsePreparedArithmeticModule(IREE_SV("gfx1150"), &module));
   ASSERT_NE(module.get(), nullptr);
-  const loom_func_like_t function = FindKernel(module.get());
-  ASSERT_TRUE(loom_func_like_isa(function));
 
   iree_hal_device_spec_t* device_spec = nullptr;
   IREE_ASSERT_OK(CreateAmdgpuExecutableDeviceSpec(
@@ -679,9 +675,7 @@ TEST_F(AmdgpuHalArtifactProviderTest,
   loom_run_hal_device_target_t target = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
-      loom_amdgpu_hal_artifact_provider.select_function_device_target(
-          &loom_amdgpu_hal_artifact_provider, &runtime, module.get(), function,
-          iree_allocator_system(), &target));
+      SelectFunctionDeviceTarget(module.get(), &runtime, &target));
   EXPECT_EQ(target.target_profile, nullptr);
   EXPECT_EQ(target.hal_target, nullptr);
 
@@ -714,16 +708,15 @@ TEST_F(AmdgpuHalArtifactProviderTest, RecordsDetailedReportRows) {
       /*.target_profile=*/&target_profile.base,
       /*.target_key=*/target_info->name,
   };
+  loom_run_candidate_compile_options_t options = {};
+  loom_run_candidate_compile_options_initialize(&options);
+  options.report = &report;
+  options.artifact_flags = LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_TARGET_LISTING;
   loom_run_hal_artifact_t artifact = {};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_hal_artifact_provider.emit_artifact(
-      &loom_amdgpu_hal_artifact_provider, module.get(), &target,
-      /*diagnostic_sink=*/(loom_diagnostic_sink_t){0},
-      /*source_resolver=*/(loom_source_resolver_t){0}, /*max_errors=*/20,
-      /*target_pipeline_options=*/nullptr,
-      /*artifact_flags=*/LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_TARGET_LISTING,
-      /*artifact_manifest=*/nullptr, &report, iree_allocator_system(), &emitted,
-      &artifact));
+      &loom_amdgpu_hal_artifact_provider, module.get(), &target, &options,
+      iree_allocator_system(), &emitted, &artifact));
   EXPECT_TRUE(emitted);
   EXPECT_EQ(artifact.target_artifact_format, LOOM_TARGET_ARTIFACT_FORMAT_ELF);
   EXPECT_EQ(artifact.target_artifact_data.data, artifact.executable_data.data);
@@ -777,15 +770,13 @@ TEST_F(AmdgpuHalArtifactProviderTest,
           /*.checks=*/LOOM_SANITIZER_CHECK_ACCESS | LOOM_SANITIZER_CHECK_RACE,
       },
   };
+  loom_run_candidate_compile_options_t options = {};
+  loom_run_candidate_compile_options_initialize(&options);
+  options.target_pipeline_options = target_pipeline_options;
   loom_run_hal_artifact_t artifact = {};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_hal_artifact_provider.emit_artifact(
-      &loom_amdgpu_hal_artifact_provider, module.get(), &target,
-      /*diagnostic_sink=*/(loom_diagnostic_sink_t){0},
-      /*source_resolver=*/(loom_source_resolver_t){0}, /*max_errors=*/20,
-      &target_pipeline_options,
-      /*artifact_flags=*/LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_NONE,
-      /*artifact_manifest=*/nullptr, /*report=*/nullptr,
+      &loom_amdgpu_hal_artifact_provider, module.get(), &target, &options,
       iree_allocator_system(), &emitted, &artifact));
 
   EXPECT_TRUE(emitted);
@@ -808,12 +799,12 @@ TEST_F(AmdgpuHalArtifactProviderTest,
 }
 
 TEST_F(AmdgpuHalArtifactProviderTest, EmitsEveryAuthoredModuleTarget) {
-  for (uint32_t target_kind = 1; target_kind < LOOM_AMDGPU_TARGET_KIND_COUNT_;
-       ++target_kind) {
-    const loom_amdgpu_target_record_info_t* target_record =
-        loom_amdgpu_target_record_info_for_kind(target_kind);
-    ASSERT_NE(target_record, nullptr) << "target kind " << target_kind;
-    ExpectEmitsModuleTarget(target_record->target_name);
+  const iree_host_size_t target_count = loom_amdgpu_target_info_target_count();
+  for (iree_host_size_t i = 0; i < target_count; ++i) {
+    const loom_amdgpu_target_info_t* target_info =
+        loom_amdgpu_target_info_target_at(i);
+    ASSERT_NE(target_info, nullptr) << "target index " << i;
+    ExpectEmitsModuleTarget(target_info->name);
   }
 }
 

@@ -42,7 +42,7 @@ loom_cc_library(
     "target_records.c"
   DEPS
     iree::base
-    loom::target::types
+    loom::target::facts
   PUBLIC
 )
 

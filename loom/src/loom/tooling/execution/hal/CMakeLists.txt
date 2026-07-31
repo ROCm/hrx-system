@@ -100,13 +100,16 @@ loom_cc_library(
     iree::base
     iree::hal
     iree::tooling::device_util
+    loom::analysis::symbol_facts
     loom::error::diagnostic
     loom::ir
     loom::ir::facts
     loom::link::linker
+    loom::ops::func_symbol_facts
     loom::ops::kernel
+    loom::ops::op_defs
     loom::ops::special_values
-    loom::pass::types
+    loom::ops::target
     loom::sanitizer::options
     loom::target::provider
     loom::target::types

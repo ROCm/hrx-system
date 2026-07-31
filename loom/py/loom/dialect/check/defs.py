@@ -22,7 +22,7 @@ from loom.assembly import (
     Clause,
     FormatElement,
     IndexList,
-    OpRef,
+    KeyRef,
     OptionalGroup,
     Ref,
     Refs,
@@ -160,7 +160,7 @@ check_requires = Op(
     ],
     traits=_CASE_BODY_TRAITS,
     format=[
-        OpRef("provider"),
+        KeyRef("provider"),
         AttrDict("attrs"),
     ],
     examples=['check.requires<target.feature> {feature = "amdgpu.gfx11"}'],
@@ -177,7 +177,7 @@ check_skip_if = Op(
     ],
     traits=_CASE_BODY_TRAITS,
     format=[
-        OpRef("provider"),
+        KeyRef("provider"),
         AttrDict("attrs"),
         OptionalGroup([Clause("reason", Attr("reason"))], anchor="reason"),
     ],
@@ -423,7 +423,7 @@ check_oracle_call = Op(
     results=[Result("results", ANY, variadic=True)],
     traits=_CASE_BODY_TRAITS,
     format=[
-        OpRef("provider"),
+        KeyRef("provider"),
         OptionalGroup([AttrDict("attrs")], anchor="attrs"),
         Clause("callee", SymbolRef("callee")),
         Clause("inputs", Refs("inputs")),
@@ -545,7 +545,7 @@ check_expect = Op(
     constraints=[SameType("actual", "expected")],
     traits=_CASE_BODY_TRAITS,
     format=[
-        OpRef("provider"),
+        KeyRef("provider"),
         *_EXPECT_VALUE_CLAUSES,
         OptionalGroup([AttrDict("attrs")], anchor="attrs"),
         COLON,
@@ -566,7 +566,7 @@ check_expect_event = Op(
     ],
     traits=_CASE_BODY_TRAITS,
     format=[
-        OpRef("provider"),
+        KeyRef("provider"),
         AttrDict("attrs"),
     ],
     examples=[

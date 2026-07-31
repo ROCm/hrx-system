@@ -13,7 +13,7 @@ func.def target(@target) @prefetch_static(%input: buffer) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @prefetch_static(%input: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @prefetch_static(%input: reg<llvmir.ptr>) asm {
   return
 }
 
@@ -35,7 +35,7 @@ kernel.def target(@target) @prefetch_workgroup_id() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1025, 1, 1) @prefetch_workgroup_id() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1025, 1, 1) @prefetch_workgroup_id() asm {
   return
 }
 
@@ -65,7 +65,7 @@ kernel.def target(@target) @prefetch_fixed_query_offset() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @prefetch_fixed_query_offset() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @prefetch_fixed_query_offset() asm {
   return
 }
 
@@ -88,6 +88,6 @@ kernel.def target(@target) @prefetch_workitem_dropped() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @prefetch_workitem_dropped() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @prefetch_workitem_dropped() asm {
   return
 }

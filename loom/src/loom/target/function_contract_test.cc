@@ -85,14 +85,39 @@ class TargetFunctionContractTest : public ::testing::Test {
     return facts;
   }
 
+  const loom_target_symbol_facts_t* LookupTarget(const loom_module_t* module,
+                                                 iree_string_view_t name) {
+    const loom_symbol_facts_base_t* base_facts = nullptr;
+    IREE_CHECK_OK(loom_symbol_fact_table_lookup(
+        &fact_table_, module, FindSymbol(module, name), &base_facts));
+    const loom_target_symbol_facts_t* facts =
+        loom_target_symbol_facts_cast(base_facts);
+    IREE_ASSERT(facts != nullptr);
+    return facts;
+  }
+
   void ResolveContract(const loom_module_t* module,
                        const loom_func_symbol_facts_t* facts,
                        loom_target_bundle_storage_t* out_storage) {
     bool valid = false;
+    const loom_target_facts_t* target_facts = nullptr;
     IREE_CHECK_OK(loom_target_function_contract_resolve(
         module, &fact_table_, facts, iree_diagnostic_emitter_t{}, &valid,
-        out_storage));
+        &target_facts, out_storage));
     ASSERT_TRUE(valid);
+    ASSERT_NE(target_facts, nullptr);
+  }
+
+  const loom_target_facts_t* ResolveFacts(
+      const loom_module_t* module, const loom_func_symbol_facts_t* facts) {
+    bool valid = false;
+    const loom_target_facts_t* target_facts = nullptr;
+    IREE_CHECK_OK(loom_target_function_contract_resolve_facts(
+        module, &fact_table_, facts, iree_diagnostic_emitter_t{},
+        &analysis_arena_, &valid, &target_facts));
+    IREE_ASSERT(valid);
+    IREE_ASSERT(target_facts != nullptr);
+    return target_facts;
   }
 
   // Block pool shared by parser, module allocation, and analysis storage.
@@ -112,15 +137,15 @@ TEST_F(TargetFunctionContractTest, LowFuncResolvesTargetRecord) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @test_target {contract_feature_bits = 1, default_pointer_bitwidth = 32, index_bitwidth = 32, offset_bitwidth = 32}
 
-low.func.def target(@test_target) @kernel() {
+low.func.def target<test.low.core>(@test_target) @kernel() {
   low.return
 }
 )");
 
   const loom_func_symbol_facts_t* facts =
       LookupFunc(module.get(), IREE_SV("kernel"));
-  loom_target_bundle_storage_t storage = {};
-  ResolveContract(module.get(), facts, &storage);
+  const loom_target_bundle_storage_t& storage =
+      ResolveFacts(module.get(), facts)->storage;
   EXPECT_TRUE(
       iree_string_view_equal(storage.bundle.name, IREE_SV("test_target")));
   EXPECT_EQ(storage.bundle.snapshot, &storage.snapshot);
@@ -138,7 +163,7 @@ test.target<low_core> @test_target {
   abi = hal_kernel
 }
 
-low.kernel.def target(@test_target) export("dispatch") linkage(dso_local) @kernel() {
+low.kernel.def target<test.low.core>(@test_target) export("dispatch") linkage(dso_local) @kernel() {
   low.return
 }
 )");
@@ -155,6 +180,90 @@ low.kernel.def target(@test_target) export("dispatch") linkage(dso_local) @kerne
                                      IREE_SV("dispatch")));
   EXPECT_EQ(storage.export_plan.hal_kernel.flat_workgroup_size_min, 0u);
   EXPECT_EQ(storage.export_plan.hal_kernel.flat_workgroup_size_max, 0u);
+}
+
+TEST_F(TargetFunctionContractTest,
+       FactRefinementPreservesBaseAndRecordsFunctionContract) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @test_target
+
+low.kernel.def target<test.low.core>(@test_target) export("dispatch") linkage(default) @kernel() {
+  low.return
+}
+)");
+
+  const loom_func_symbol_facts_t* func_facts =
+      LookupFunc(module.get(), IREE_SV("kernel"));
+  bool valid = false;
+  const loom_target_facts_t* base_facts =
+      LookupTarget(module.get(), IREE_SV("test_target"))->projection;
+
+  const loom_target_facts_t* effective_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_function_contract_refine_facts(
+      module.get(), func_facts, IREE_SV("test_target"), base_facts,
+      iree_diagnostic_emitter_t{}, &analysis_arena_, &valid, &effective_facts));
+  ASSERT_TRUE(valid);
+  ASSERT_NE(effective_facts, nullptr);
+  EXPECT_NE(effective_facts, base_facts);
+  EXPECT_EQ(effective_facts->fact_type, base_facts->fact_type);
+  EXPECT_EQ(effective_facts->selector, base_facts->selector);
+
+  EXPECT_EQ(base_facts->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_OBJECT_FUNCTION);
+  EXPECT_TRUE(
+      iree_string_view_is_empty(base_facts->storage.export_plan.export_symbol));
+  EXPECT_EQ(base_facts->storage.export_plan.linkage,
+            LOOM_TARGET_LINKAGE_DSO_LOCAL);
+  EXPECT_FALSE(loom_target_facts_field_is_authored(base_facts,
+                                                   LOOM_TARGET_FACT_FIELD_ABI));
+  EXPECT_FALSE(loom_target_facts_field_is_authored(
+      base_facts, LOOM_TARGET_FACT_FIELD_EXPORT_SYMBOL));
+  EXPECT_FALSE(loom_target_facts_field_is_authored(
+      base_facts, LOOM_TARGET_FACT_FIELD_LINKAGE));
+
+  EXPECT_EQ(effective_facts->storage.export_plan.abi_kind,
+            LOOM_TARGET_ABI_HAL_KERNEL);
+  EXPECT_TRUE(iree_string_view_equal(
+      effective_facts->storage.export_plan.export_symbol, IREE_SV("dispatch")));
+  EXPECT_EQ(effective_facts->storage.export_plan.linkage,
+            LOOM_TARGET_LINKAGE_DEFAULT);
+  EXPECT_TRUE(loom_target_facts_field_is_authored(effective_facts,
+                                                  LOOM_TARGET_FACT_FIELD_ABI));
+  EXPECT_TRUE(loom_target_facts_field_is_authored(
+      effective_facts, LOOM_TARGET_FACT_FIELD_EXPORT_SYMBOL));
+  EXPECT_TRUE(loom_target_facts_field_is_authored(
+      effective_facts, LOOM_TARGET_FACT_FIELD_LINKAGE));
+
+  const loom_target_workgroup_size_t required_workgroup_size = {
+      /*.x=*/64,
+      /*.y=*/2,
+      /*.z=*/1,
+  };
+  const loom_target_facts_t* launch_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_function_contract_refine_hal_workgroup_size(
+      func_facts, IREE_SV("test_target"), &required_workgroup_size,
+      effective_facts, iree_diagnostic_emitter_t{}, &analysis_arena_, &valid,
+      &launch_facts));
+  ASSERT_TRUE(valid);
+  ASSERT_NE(launch_facts, nullptr);
+  EXPECT_EQ(
+      effective_facts->storage.export_plan.hal_kernel.required_workgroup_size.x,
+      0u);
+  EXPECT_EQ(
+      effective_facts->storage.export_plan.hal_kernel.required_workgroup_size.y,
+      0u);
+  EXPECT_EQ(
+      effective_facts->storage.export_plan.hal_kernel.required_workgroup_size.z,
+      0u);
+  EXPECT_EQ(
+      launch_facts->storage.export_plan.hal_kernel.required_workgroup_size.x,
+      64u);
+  EXPECT_EQ(
+      launch_facts->storage.export_plan.hal_kernel.required_workgroup_size.y,
+      2u);
+  EXPECT_EQ(
+      launch_facts->storage.export_plan.hal_kernel.required_workgroup_size.z,
+      1u);
 }
 
 TEST_F(TargetFunctionContractTest,

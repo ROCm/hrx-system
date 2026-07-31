@@ -7,7 +7,7 @@ func.def target(@target) @vector_fptrunc_f32x5_to_fp8(%input: vector<5xf32>) -> 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_f32x5_to_fp8(%input: reg<amdgpu.vgpr x5>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @vector_fptrunc_f32x5_to_fp8(%input: reg<amdgpu.vgpr x5>) -> (reg<amdgpu.vgpr x2>) asm {
   %5 = v_mov_b32 1138753536
   %6 = v_mov_b32 3286237184
   %7 = slice %input[0] : reg<amdgpu.vgpr x5> -> reg<amdgpu.vgpr>
@@ -53,7 +53,7 @@ func.def target(@target) @vector_fptrunc_f16x3_to_bf8(%input: vector<3xf16>) -> 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_f16x3_to_bf8(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @vector_fptrunc_f16x3_to_bf8(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %5 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %6 = v_cvt_f32_f16 %5
   %8 = v_lshrrev_b32_src0_inline %5, 16
@@ -83,7 +83,7 @@ func.def target(@target) @vector_fptrunc_bf16x3_to_fp8(%input: vector<3xbf16>) -
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_bf16x3_to_fp8(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @vector_fptrunc_bf16x3_to_fp8(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %5 = v_mov_b32 1138753536
   %6 = v_mov_b32 3286237184
   %7 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
@@ -118,7 +118,7 @@ func.def target(@target) @scalar_fptrunc_f32_to_fp8(%input: f32) -> (f8E4M3) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_fptrunc_f32_to_fp8(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @scalar_fptrunc_f32_to_fp8(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %5 = v_mov_b32 1138753536
   %6 = v_mov_b32 3286237184
   %7 = v_med3_num_f32 %input, %5, %6
@@ -140,7 +140,7 @@ func.def target(@target) @scalar_fptrunc_f16_to_bf8(%input: f16) -> (f8E5M2) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_fptrunc_f16_to_bf8(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @scalar_fptrunc_f16_to_bf8(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %5 = v_cvt_f32_f16 %input
   %6 = v_cvt_pk_bf8_f32_low %5, %5
   %7 = v_bfe_u32_offset_0_width_16_low16 %6
@@ -163,7 +163,7 @@ func.def target(@target) @scalar_fptrunc_bf16_to_bf8(%input: bf16) -> (f8E5M2) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @scalar_fptrunc_bf16_to_bf8(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @scalar_fptrunc_bf16_to_bf8(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %5 = v_lshlrev_b32_src0_inline %input, 16
   %6 = v_cvt_pk_bf8_f32_low %5, %5
   %7 = v_bfe_u32_offset_0_width_16_low16 %6

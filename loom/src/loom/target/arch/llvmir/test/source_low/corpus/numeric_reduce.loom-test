@@ -18,7 +18,7 @@ func.def target(@target) @i32_reduce_add(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_reduce_add(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_reduce_add(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
   %20 = load.i32 %input_view, 0
   %21 = load.i32 %input_view, 4
   %22 = add.i32 %20, %21
@@ -49,7 +49,7 @@ func.def target(@target) @f32_reduce_add(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_reduce_add(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_reduce_add(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
   %init = const.f32 0
   %21 = load.f32 %input_view, 0
   %22 = add.f32 %init, %21
@@ -82,7 +82,7 @@ func.def target(@target) @f32_reduce_add_fastmath(%input: buffer, %output: buffe
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_reduce_add_fastmath(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_reduce_add_fastmath(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
   %20 = load.f32 %input_view, 0
   %21 = load.f32 %input_view, 4
   %22 = add.f32 %20, %21 {fast_math_flags = 11}
@@ -127,7 +127,7 @@ kernel.def target(@target) @f32_configured_width_square_reduce() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_configured_width_square_reduce() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_configured_width_square_reduce() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %lane = kernel.workitem_id.x
@@ -171,7 +171,7 @@ func.def target(@target) @i32_reduce_minui_select_sentinel(%values: vector<4xi32
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_reduce_minui_select_sentinel(%values: reg<llvmir.i32 x4>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_reduce_minui_select_sentinel(%values: reg<llvmir.i32 x4>) -> (reg<llvmir.i32>) asm {
   %45 = const.i32 0
   %46 = const.i32 1
   %47 = const.i32 2

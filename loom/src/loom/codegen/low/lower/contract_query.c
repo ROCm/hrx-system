@@ -137,12 +137,14 @@ static iree_status_t loom_low_lower_descriptor_matrix_make_rejection(
   loom_diagnostic_param_t* params = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       environment->arena, 7, sizeof(*params), (void**)&params));
-  params[0] = loom_param_string(loom_low_lower_contract_query_nonempty(
-      environment->bundle->name, IREE_SV("<empty>")));
+  const loom_target_bundle_t* bundle =
+      loom_target_contract_query_environment_bundle(environment);
+  params[0] = loom_param_string(
+      loom_low_lower_contract_query_nonempty(bundle->name, IREE_SV("<empty>")));
   params[1] = loom_param_string(loom_low_lower_contract_query_nonempty(
-      environment->bundle->export_plan->name, IREE_SV("<empty>")));
+      bundle->export_plan->name, IREE_SV("<empty>")));
   params[2] = loom_param_string(loom_low_lower_contract_query_nonempty(
-      environment->bundle->config->name, IREE_SV("<empty>")));
+      bundle->config->name, IREE_SV("<empty>")));
   params[3] = loom_param_string(
       loom_low_lower_contract_query_function_name(environment));
   params[4] = loom_param_string(loom_op_name(environment->module, source_op));
@@ -355,12 +357,15 @@ iree_status_t loom_low_lower_query_target_contract(
     expression_context_ptr = &expression_context;
   }
 
+  const loom_target_bundle_t* bundle =
+      loom_target_contract_query_environment_bundle(environment);
+
   const loom_low_lower_rule_match_context_t match_context = {
       .module = environment->module,
       .function = environment->function,
-      .bundle = environment->bundle,
+      .bundle = bundle,
       .descriptor_set = environment->descriptor_set,
-      .feature_bits = environment->bundle->config->contract_feature_bits,
+      .feature_bits = bundle->config->contract_feature_bits,
       .map_value = options->map_value,
       .can_materialize = options->can_materialize,
       .descriptor_ref = options->descriptor_ref,

@@ -10,17 +10,13 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/error/error_catalog.h"
+#include "loom/ops/test/ops.h"
+#include "loom/target/facts_builder.h"
 #include "loom/target/test/descriptors.h"
+#include "loom/target/test/target_records.h"
 
 namespace loom {
 namespace {
-
-loom_low_resolved_target_t TestTarget() {
-  loom_low_resolved_target_t target = {};
-  target.descriptor_set = loom_test_low_core_descriptor_set();
-  target.descriptor_set_key = IREE_SV("test.low.core");
-  return target;
-}
 
 typedef struct DiagnosticCapture {
   const loom_error_def_t* error;
@@ -41,7 +37,18 @@ class LowAllocationTargetConstraintsTest : public ::testing::Test {
     iree_arena_block_pool_initialize(/*block_size=*/4096,
                                      iree_allocator_system(), &block_pool_);
     iree_arena_initialize(&block_pool_, &arena_);
-    target_ = TestTarget();
+    const loom_target_bundle_t* target_bundle = loom_target_bundle_table_lookup(
+        &loom_test_target_bundles, LOOM_TEST_TARGET_KIND_LOW_CORE);
+    IREE_ASSERT(target_bundle != nullptr);
+    loom_target_facts_builder_initialize(&loom_test_target_fact_type,
+                                         target_bundle, &target_facts_);
+    target_ = (loom_low_resolved_target_t){
+        /*.target_facts=*/&target_facts_,
+        /*.target_name=*/target_bundle->name,
+        /*.descriptor_set_key=*/target_bundle->config->contract_set_key,
+        /*.feature_bits=*/target_bundle->config->contract_feature_bits,
+        /*.descriptor_set=*/loom_test_low_core_descriptor_set(),
+    };
   }
 
   void TearDown() override {
@@ -60,6 +67,8 @@ class LowAllocationTargetConstraintsTest : public ::testing::Test {
   iree_arena_allocator_t arena_;
   loom_module_t module_ = {};
   loom_op_t function_op_ = {};
+  // Complete synthetic target facts borrowed by |target_|.
+  loom_target_facts_t target_facts_ = {};
   loom_low_resolved_target_t target_ = {};
 };
 

@@ -52,7 +52,8 @@ loom_amdgpu_occupancy_select_target_model(
   const loom_amdgpu_processor_info_t* processor =
       loom_amdgpu_target_processor_from_resolved_target(target);
   IREE_ASSERT(processor != NULL);
-  const uint32_t wave_size = target->bundle_storage.snapshot.subgroup_size;
+  const uint32_t wave_size =
+      loom_low_resolved_target_bundle(target)->snapshot->subgroup_size;
   IREE_ASSERT(loom_amdgpu_processor_properties_support_wavefront_size(
       &processor->properties, wave_size));
   return loom_amdgpu_occupancy_select_model(&processor->properties, wave_size);
@@ -670,8 +671,9 @@ iree_status_t loom_amdgpu_occupancy_build(
                             "AMDGPU occupancy requires an AMDGPU processor "
                             "target record");
   }
-  const uint32_t wave_size =
-      allocation->target.bundle_storage.snapshot.subgroup_size;
+  const loom_target_bundle_t* target_bundle =
+      loom_low_resolved_target_bundle(&allocation->target);
+  const uint32_t wave_size = target_bundle->snapshot->subgroup_size;
   if (wave_size == 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AMDGPU occupancy requires a fixed target "
@@ -717,8 +719,7 @@ iree_status_t loom_amdgpu_occupancy_build(
       .pressure_resource_count = resource_table->resource_count,
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_occupancy_flat_workgroup_size(
-      &allocation->target.bundle_storage.export_plan,
-      &table.flat_workgroup_size));
+      target_bundle->export_plan, &table.flat_workgroup_size));
   for (iree_host_size_t i = 0; i < model->register_class_count; ++i) {
     register_classes[i] = (loom_amdgpu_occupancy_register_class_t){
         .register_class = model->register_classes[i].register_class,

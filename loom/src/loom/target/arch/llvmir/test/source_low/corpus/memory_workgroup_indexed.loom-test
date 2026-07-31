@@ -23,7 +23,7 @@ kernel.def target(@target) @workgroup_memory_workitem_x_b32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_memory_workitem_x_b32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_memory_workitem_x_b32() asm {
   %tid = kernel.workitem_id.x
   %bytes = const.i64 256
   %scratch_view = alloca.workgroup.i8 %bytes, 16

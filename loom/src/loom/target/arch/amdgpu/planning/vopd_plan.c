@@ -582,7 +582,7 @@ static bool loom_amdgpu_vopd_target_supports_base_vopd(
       descriptor_set->target_stable_id != LOOM_AMDGPU_TARGET_STABLE_ID) {
     return false;
   }
-  if (target->bundle_storage.snapshot.subgroup_size != 32) {
+  if (loom_low_resolved_target_bundle(target)->snapshot->subgroup_size != 32) {
     return false;
   }
   return loom_amdgpu_vopd_descriptor_set_supports_packetization(descriptor_set);

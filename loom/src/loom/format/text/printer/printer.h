@@ -39,9 +39,12 @@ enum loom_text_print_flag_bits_e {
   LOOM_TEXT_PRINT_SKIP_REGIONS = 1u << 3,
   // Emit trailing loc() annotations on ops.
   LOOM_TEXT_PRINT_LOCATIONS = 1u << 4,
-  // Require regions declared with optional low asm syntax to print as low asm
-  // when a descriptor-set key is selected.
+  // Require requested optional low asm regions to have a lossless assembly
+  // spelling instead of falling back to canonical syntax.
   LOOM_TEXT_PRINT_REQUIRE_LOW_ASM = 1u << 5,
+  // Prefer low asm for self-describing function regions when a descriptor
+  // environment is available, with canonical syntax as a lossless fallback.
+  LOOM_TEXT_PRINT_PREFER_LOW_ASM = 1u << 6,
 };
 typedef uint32_t loom_text_print_flags_t;
 

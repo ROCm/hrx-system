@@ -72,7 +72,8 @@ amdgpu_target = Op(
             symbol="symbol",
             selector="kind",
             bundle_table="loom_amdgpu_target_bundles",
-            specialization_authored_attrs=("subgroup_size",),
+            fact_type="loom_amdgpu_target_fact_type",
+            fact_projector="loom_amdgpu_target_fact_projector",
         )
     ],
     symbol_def=SymbolDefinition(

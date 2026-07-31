@@ -38,7 +38,7 @@ kernel.def target(@target) @fp4_e4m3_scale16_wmma_global_scale_epilogue() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @fp4_e4m3_scale16_wmma_global_scale_epilogue() asm<amdgpu.rdna4.gfx125x.core> {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @fp4_e4m3_scale16_wmma_global_scale_epilogue() asm {
   %35 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 32} : reg<amdgpu.sgpr x2>
@@ -122,7 +122,7 @@ func.def target(@target) @fp4_e4m3_scale16_wmma_k_loop_final_domain_accumulator(
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @fp4_e4m3_scale16_wmma_k_loop_final_domain_accumulator(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %lhs_block_scale: reg<amdgpu.vgpr x2>, %rhs_block_scale: reg<amdgpu.vgpr x2>, %final_domain_accumulator: reg<amdgpu.vgpr x8>, %lhs_global_scale: reg<amdgpu.vgpr>, %rhs_global_scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @fp4_e4m3_scale16_wmma_k_loop_final_domain_accumulator(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %lhs_block_scale: reg<amdgpu.vgpr x2>, %rhs_block_scale: reg<amdgpu.vgpr x2>, %final_domain_accumulator: reg<amdgpu.vgpr x8>, %lhs_global_scale: reg<amdgpu.vgpr>, %rhs_global_scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm {
   %zero = s_mov_b32 0
   %one = s_mov_b32 1
   %two = s_mov_b32 2

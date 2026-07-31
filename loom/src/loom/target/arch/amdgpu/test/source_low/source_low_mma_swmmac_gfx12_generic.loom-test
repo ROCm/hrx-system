@@ -26,7 +26,7 @@ func.def target(@target) @swmmac_f32_packed8(
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @swmmac_f32_packed8(%fp8_lhs: reg<amdgpu.vgpr x2>, %bf8_lhs: reg<amdgpu.vgpr x2>, %fp8_rhs: reg<amdgpu.vgpr x4>, %bf8_rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x8>, %metadata: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm<amdgpu.gfx12.generic.core> {
+low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @swmmac_f32_packed8(%fp8_lhs: reg<amdgpu.vgpr x2>, %bf8_lhs: reg<amdgpu.vgpr x2>, %fp8_rhs: reg<amdgpu.vgpr x4>, %bf8_rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x8>, %metadata: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm {
   %36 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %fp8_fp8 = v_swmmac_f32_16x16x32_fp8_fp8 %36, %fp8_lhs, %fp8_rhs, %metadata
   %38 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
@@ -69,7 +69,7 @@ func.def target(@target) @swmmac_packed16(
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @swmmac_packed16(%f16_lhs: reg<amdgpu.vgpr x4>, %bf16_lhs: reg<amdgpu.vgpr x4>, %f16_rhs: reg<amdgpu.vgpr x8>, %bf16_rhs: reg<amdgpu.vgpr x8>, %f32_init: reg<amdgpu.vgpr x8>, %f16_init: reg<amdgpu.vgpr x4>, %bf16_init: reg<amdgpu.vgpr x4>, %metadata: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm<amdgpu.gfx12.generic.core> {
+low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @swmmac_packed16(%f16_lhs: reg<amdgpu.vgpr x4>, %bf16_lhs: reg<amdgpu.vgpr x4>, %f16_rhs: reg<amdgpu.vgpr x8>, %bf16_rhs: reg<amdgpu.vgpr x8>, %f32_init: reg<amdgpu.vgpr x8>, %f16_init: reg<amdgpu.vgpr x4>, %bf16_init: reg<amdgpu.vgpr x4>, %metadata: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
   %42 = copy %f32_init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %f32_f16 = v_swmmac_f32_16x16x32_f16 %42, %f16_lhs, %f16_rhs, %metadata
   %44 = copy %f32_init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
@@ -109,7 +109,7 @@ func.def target(@target) @swmmac_i32_iu8(
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @swmmac_i32_iu8(%u8_lhs: reg<amdgpu.vgpr x2>, %i8_lhs: reg<amdgpu.vgpr x2>, %u8_rhs: reg<amdgpu.vgpr x4>, %i8_rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x8>, %metadata: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm<amdgpu.gfx12.generic.core> {
+low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @swmmac_i32_iu8(%u8_lhs: reg<amdgpu.vgpr x2>, %i8_lhs: reg<amdgpu.vgpr x2>, %u8_rhs: reg<amdgpu.vgpr x4>, %i8_rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x8>, %metadata: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm {
   %36 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %u8_u8 = v_swmmac_i32_16x16x32_iu8 %36, %u8_lhs, %u8_rhs, %metadata
   %38 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
@@ -149,7 +149,7 @@ func.def target(@target) @swmmac_i32_iu4_k32(
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @swmmac_i32_iu4_k32(%u4_lhs: reg<amdgpu.vgpr>, %i4_lhs: reg<amdgpu.vgpr>, %u4_rhs: reg<amdgpu.vgpr x2>, %i4_rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x8>, %metadata: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm<amdgpu.gfx12.generic.core> {
+low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @swmmac_i32_iu4_k32(%u4_lhs: reg<amdgpu.vgpr>, %i4_lhs: reg<amdgpu.vgpr>, %u4_rhs: reg<amdgpu.vgpr x2>, %i4_rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x8>, %metadata: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm {
   %36 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %u4_u4 = v_swmmac_i32_16x16x32_iu4 %36, %u4_lhs, %u4_rhs, %metadata
   %38 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
@@ -189,7 +189,7 @@ func.def target(@target) @swmmac_i32_iu4_k64(
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @swmmac_i32_iu4_k64(%u4_lhs: reg<amdgpu.vgpr x2>, %i4_lhs: reg<amdgpu.vgpr x2>, %u4_rhs: reg<amdgpu.vgpr x4>, %i4_rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x8>, %metadata: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm<amdgpu.gfx12.generic.core> {
+low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @swmmac_i32_iu4_k64(%u4_lhs: reg<amdgpu.vgpr x2>, %i4_lhs: reg<amdgpu.vgpr x2>, %u4_rhs: reg<amdgpu.vgpr x4>, %i4_rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x8>, %metadata: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm {
   %36 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %u4_u4 = v_swmmac_i32_16x16x64_iu4 %36, %u4_lhs, %u4_rhs, %metadata
   %38 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>

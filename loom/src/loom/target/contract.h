@@ -28,6 +28,7 @@
 #include "loom/error/error_defs.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/func/ops.h"
+#include "loom/target/facts.h"
 #include "loom/target/types.h"
 #include "loom/util/fact_table.h"
 
@@ -335,14 +336,8 @@ typedef struct loom_target_contract_query_environment_t {
   const loom_module_t* module;
   // Source function containing the queried op.
   loom_func_like_t function;
-  // Target bundle selected for this query.
-  const loom_target_bundle_t* bundle;
-  // Invocation profile whose facts contributed to |bundle|, or NULL when the
-  // effective bundle came only from module target records. Its bundle
-  // projection may be less specific after compatible function refinement.
-  const loom_target_profile_t* target_profile;
-  // Module-local target record symbol selected for this query.
-  loom_symbol_ref_t target_ref;
+  // Borrowed immutable target facts selected for this query.
+  const loom_target_facts_t* target_facts;
   // Low descriptor set selected for this query.
   const loom_low_descriptor_set_t* descriptor_set;
   // Source value facts visible to the query.
@@ -356,6 +351,13 @@ typedef struct loom_target_contract_query_environment_t {
   // Optional scoped storage allocator for target-owned query analyses.
   loom_target_contract_query_state_allocator_t target_state_allocator;
 } loom_target_contract_query_environment_t;
+
+// Returns the common target bundle selected for |environment|.
+static inline const loom_target_bundle_t*
+loom_target_contract_query_environment_bundle(
+    const loom_target_contract_query_environment_t* environment) {
+  return loom_target_facts_bundle(environment->target_facts);
+}
 
 // Returns scoped target-owned query state for |key|, or NULL when the query
 // environment has no state allocator.

@@ -6,12 +6,10 @@
 
 #include <inttypes.h>
 
-#include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/builder.h"
 #include "loom/codegen/low/text_asm_internal.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
-#include "loom/ops/target/facts.h"
 #include "loom/target/registers.h"
 
 static const loom_low_descriptor_registry_t*
@@ -184,64 +182,6 @@ loom_low_descriptor_text_asm_lookup_descriptor_set_with_diagnostics(
       loom_low_descriptor_text_asm_state_storage(state);
   return loom_low_descriptor_text_asm_lookup_descriptor_set(
       storage->descriptor_registry, key, out_descriptor_set);
-}
-
-static iree_status_t
-loom_low_descriptor_text_asm_lookup_target_descriptor_set_from_registry(
-    const loom_low_descriptor_registry_t* registry, const loom_module_t* module,
-    loom_attribute_t target_attr,
-    const loom_text_low_asm_descriptor_set_t** out_descriptor_set) {
-  *out_descriptor_set = NULL;
-  if (target_attr.kind != LOOM_ATTR_SYMBOL) {
-    return iree_ok_status();
-  }
-  loom_symbol_ref_t target_ref = loom_attr_as_symbol(target_attr);
-  if (!loom_symbol_ref_is_valid(target_ref)) {
-    return iree_ok_status();
-  }
-
-  iree_arena_allocator_t arena;
-  iree_arena_initialize(module->arena.block_pool, &arena);
-  loom_symbol_fact_table_t fact_table;
-  loom_symbol_fact_table_initialize(&fact_table, &arena);
-  const loom_symbol_facts_base_t* base_facts = NULL;
-  iree_status_t status = loom_symbol_fact_table_lookup_ref(
-      &fact_table, module, target_ref, &base_facts);
-  const loom_target_symbol_facts_t* target_facts =
-      iree_status_is_ok(status) ? loom_target_symbol_facts_cast(base_facts)
-                                : NULL;
-  if (iree_status_is_ok(status) && target_facts != NULL) {
-    const loom_low_descriptor_set_t* descriptor_set =
-        loom_low_descriptor_registry_lookup(
-            registry, target_facts->storage.config.contract_set_key);
-    if (descriptor_set != NULL) {
-      *out_descriptor_set =
-          loom_low_descriptor_text_asm_descriptor_set_handle(descriptor_set);
-    }
-  }
-  iree_arena_deinitialize(&arena);
-  return status;
-}
-
-static iree_status_t
-loom_low_descriptor_text_asm_lookup_target_descriptor_set_default(
-    const loom_text_low_asm_environment_state_t* state,
-    const loom_module_t* module, loom_attribute_t target_attr,
-    const loom_text_low_asm_descriptor_set_t** out_descriptor_set) {
-  return loom_low_descriptor_text_asm_lookup_target_descriptor_set_from_registry(
-      loom_low_descriptor_text_asm_state_registry(state), module, target_attr,
-      out_descriptor_set);
-}
-
-static iree_status_t
-loom_low_descriptor_text_asm_lookup_target_descriptor_set_with_diagnostics(
-    const loom_text_low_asm_environment_state_t* state,
-    const loom_module_t* module, loom_attribute_t target_attr,
-    const loom_text_low_asm_descriptor_set_t** out_descriptor_set) {
-  const loom_low_descriptor_text_asm_environment_storage_t* storage =
-      loom_low_descriptor_text_asm_state_storage(state);
-  return loom_low_descriptor_text_asm_lookup_target_descriptor_set_from_registry(
-      storage->descriptor_registry, module, target_attr, out_descriptor_set);
 }
 
 static iree_status_t loom_low_descriptor_text_asm_make_packet(
@@ -1541,8 +1481,6 @@ static iree_status_t loom_low_descriptor_text_asm_describe_register_type(
 static const loom_text_low_asm_vtable_t kLowDescriptorTextAsmVtable = {
     .lookup_descriptor_set =
         loom_low_descriptor_text_asm_lookup_descriptor_set_default,
-    .lookup_target_descriptor_set =
-        loom_low_descriptor_text_asm_lookup_target_descriptor_set_default,
     .lookup_packet = loom_low_descriptor_text_asm_lookup_packet,
     .infer_result_type = loom_low_descriptor_text_asm_infer_result_type,
     .validate_result_type = loom_low_descriptor_text_asm_validate_result_type,
@@ -1565,8 +1503,6 @@ static const loom_text_low_asm_vtable_t kLowDescriptorTextAsmVtable = {
 static const loom_text_low_asm_vtable_t kLowDescriptorTextAsmDiagnosticVtable = {
     .lookup_descriptor_set =
         loom_low_descriptor_text_asm_lookup_descriptor_set_with_diagnostics,
-    .lookup_target_descriptor_set =
-        loom_low_descriptor_text_asm_lookup_target_descriptor_set_with_diagnostics,
     .lookup_packet = loom_low_descriptor_text_asm_lookup_packet,
     .diagnose_unknown_mnemonic =
         loom_low_descriptor_text_asm_diagnose_unknown_mnemonic,

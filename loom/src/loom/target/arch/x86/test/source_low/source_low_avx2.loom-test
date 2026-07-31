@@ -9,7 +9,7 @@ func.def target(@target) @i32x4_arith(%lhs: vector<4xi32>, %rhs: vector<4xi32>) 
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x4_arith(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx2.core> {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @i32x4_arith(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %sum = vpaddd.xmm %lhs, %rhs
   %product = vpmulld.xmm %sum, %rhs
   return %product
@@ -27,7 +27,7 @@ func.def target(@target) @f32x4_scalar_lane(%v: vector<4xf32>, %x: f32, %bias: f
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x4_scalar_lane(%v: reg<x86.xmm>, %x: reg<x86.xmm>, %bias: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx2.core> {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @f32x4_scalar_lane(%v: reg<x86.xmm>, %x: reg<x86.xmm>, %bias: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %lane = vpermilps.xmm %v, 2
   %sum = vaddss.xmm %lane, %x
   %13 = copy %bias : reg<x86.xmm> -> reg<x86.xmm>
@@ -46,7 +46,7 @@ func.def target(@target) @i32x4_shuffle_reduce(%v: vector<4xi32>, %init: i32) ->
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x4_shuffle_reduce(%v: reg<x86.xmm>, %init: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm<x86.avx2.core> {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @i32x4_shuffle_reduce(%v: reg<x86.xmm>, %init: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %shuffled = vpshufd.xmm %v, 27
   %9 = vpextrd.xmm %shuffled, 0
   %10 = copy %init : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -74,7 +74,7 @@ func.def target(@target) @f32x4_shuffle_reduce(%v: vector<4xf32>, %init: f32) ->
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x4_shuffle_reduce(%v: reg<x86.xmm>, %init: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx2.core> {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @f32x4_shuffle_reduce(%v: reg<x86.xmm>, %init: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %shuffled = vpermilps.xmm %v, 39
   %9 = vpermilps.xmm %shuffled, 78
   %10 = vaddps.xmm %shuffled, %9
@@ -99,7 +99,7 @@ func.def target(@target) @i32x4_memory_indexed(%input: buffer, %output: buffer, 
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x4_memory_indexed(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm<x86.avx2.core> {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @i32x4_memory_indexed(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm {
   %loaded = vmovdqu32.load.indexed.xmm %input_view, %bounded_i {disp32 = 0, scale = 4}
   vmovdqu32.store.indexed.xmm %loaded, %output_view, %bounded_i {disp32 = 0, scale = 4}
   return
@@ -123,7 +123,7 @@ func.def target(@target) @i32x4_index_madd_scaled_bias_memory(%input: buffer, %o
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x4_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm<x86.avx2.core> {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @i32x4_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm {
   %15 = lea.scale %row {disp32 = 1, scale = 4}
   %loaded = vmovdqu32.load.indexed.xmm %input_view, %15 {disp32 = 0, scale = 4}
   vmovdqu32.store.indexed.xmm %loaded, %output_view, %15 {disp32 = 0, scale = 4}

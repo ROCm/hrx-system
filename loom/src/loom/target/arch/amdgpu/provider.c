@@ -15,12 +15,9 @@
 #include "loom/target/arch/amdgpu/low_verify.h"
 #include "loom/target/arch/amdgpu/lower/lower.h"
 #include "loom/target/arch/amdgpu/math_policy.h"
-#include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/ops/registry.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/pass_registry.h"
 #include "loom/target/arch/amdgpu/profile.h"
-#include "loom/target/materialization.h"
 
 static const loom_target_low_legality_provider_t*
     kLoomAmdgpuLowLegalityProviders[] = {
@@ -45,112 +42,6 @@ static const loom_target_low_asm_diagnostic_provider_t*
 static const loom_low_verify_provider_t* kLoomAmdgpuLowVerifyProviders[] = {
     &loom_amdgpu_low_verify_provider,
 };
-
-// Canonical target rows establish AMDGPU code-object refinement. Target-ID
-// features then refine that relation without coupling policy to a particular
-// feature or stepping name. Common indexed facts preserve structured
-// representation, subgroup, and capacity requirements independently of the
-// family relation.
-static bool loom_amdgpu_provider_satisfies_requirement(
-    loom_target_record_view_t effective_target,
-    loom_target_record_view_t target_requirement) {
-  loom_amdgpu_target_identity_t effective_identity = {0};
-  loom_amdgpu_target_record_resolve_identity(effective_target.facts->target.op,
-                                             &effective_identity);
-  loom_amdgpu_target_identity_t requirement_identity = {0};
-  loom_amdgpu_target_record_resolve_identity(
-      target_requirement.facts->target.op, &requirement_identity);
-  if (!loom_amdgpu_target_identity_satisfies_requirement(
-          &effective_identity, &requirement_identity)) {
-    return false;
-  }
-
-  const loom_target_bundle_storage_t* effective_storage =
-      &effective_target.facts->storage;
-  const loom_target_bundle_storage_t* requirement_storage =
-      &target_requirement.facts->storage;
-  const loom_amdgpu_processor_info_t* effective_processor =
-      loom_amdgpu_target_info_target_processor(effective_identity.target);
-  IREE_ASSERT(effective_processor != NULL);
-
-  // AMDGPU processors may support more than one wavefront size. The target
-  // bundle carries the default used when the author does not choose one, while
-  // an explicit authored subgroup is a function-local codegen choice.
-  loom_target_snapshot_t effective_snapshot = effective_storage->snapshot;
-  const uint32_t required_subgroup_size =
-      requirement_storage->snapshot.subgroup_size;
-  if (required_subgroup_size != 0) {
-    if (!loom_amdgpu_processor_properties_support_wavefront_size(
-            &effective_processor->properties, required_subgroup_size)) {
-      return false;
-    }
-    effective_snapshot.subgroup_size = required_subgroup_size;
-  }
-
-  // Processor refinement deliberately changes a generic descriptor-set
-  // contract into the exact processor contract. An explicitly overridden
-  // contract key remains a requirement instead of being silently discarded.
-  const loom_attribute_t required_contract_set_key =
-      loom_op_attrs(target_requirement.facts->target
-                        .op)[loom_amdgpu_target_contract_set_key_ATTR_INDEX];
-  if (!loom_attr_is_absent(required_contract_set_key) &&
-      !iree_string_view_equal(effective_storage->config.contract_set_key,
-                              requirement_storage->config.contract_set_key)) {
-    return false;
-  }
-
-  // ABI and export facts belong to each function contract. Target
-  // applicability preserves structural target constraints and requires all
-  // authored target feature bits.
-  return loom_target_snapshot_satisfies_requirement(
-             &effective_snapshot, &requirement_storage->snapshot) &&
-         iree_all_bits_set(effective_storage->config.contract_feature_bits,
-                           requirement_storage->config.contract_feature_bits);
-}
-
-static iree_string_view_t loom_amdgpu_provider_materialization_symbol_stem(
-    const loom_target_profile_t* base_profile) {
-  const loom_amdgpu_target_profile_t* profile =
-      loom_amdgpu_target_profile_cast(base_profile);
-  return profile != NULL && profile->identity.target != NULL
-             ? profile->identity.target->name
-             : iree_string_view_empty();
-}
-
-static bool loom_amdgpu_provider_record_matches_effective_target(
-    const loom_module_t* module, const loom_op_t* target_op,
-    const loom_target_profile_t* base_profile,
-    const loom_op_t* authored_target_op) {
-  const loom_amdgpu_target_profile_t* profile =
-      loom_amdgpu_target_profile_cast(base_profile);
-  if (profile == NULL || profile->identity.target == NULL ||
-      loom_amdgpu_target_record_target(target_op) != profile->identity.target) {
-    return false;
-  }
-
-  loom_amdgpu_target_identity_t record_identity = {0};
-  loom_amdgpu_target_record_resolve_identity(target_op, &record_identity);
-  return loom_amdgpu_target_identity_equal(&record_identity,
-                                           &profile->identity) &&
-         loom_target_record_projection_matches_bundle(
-             module, target_op, profile->base.target_bundle,
-             authored_target_op);
-}
-
-static iree_status_t loom_amdgpu_provider_build_effective_target_record(
-    loom_builder_t* builder, const loom_target_profile_t* base_profile,
-    const loom_op_t* authored_target_op, loom_symbol_ref_t symbol,
-    loom_location_id_t location, loom_op_t** out_target_op) {
-  const loom_amdgpu_target_profile_t* profile =
-      loom_amdgpu_target_profile_cast(base_profile);
-  if (profile == NULL || profile->identity.target == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AMDGPU target materialization requires a complete AMDGPU profile");
-  }
-  return loom_amdgpu_target_record_build_for_profile(
-      builder, profile, authored_target_op, symbol, location, out_target_op);
-}
 
 static iree_status_t loom_amdgpu_provider_build_string_attr(
     loom_builder_t* builder, iree_string_view_t name, iree_string_view_t value,
@@ -204,8 +95,7 @@ static iree_status_t loom_amdgpu_provider_contribute_pipeline(
 
   loom_named_attr_t attrs[3] = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_provider_build_string_attr(
-      contribution->builder, IREE_SV("target_op"), IREE_SV("amdgpu.target"),
-      &attrs[0]));
+      contribution->builder, IREE_SV("family"), IREE_SV("amdgpu"), &attrs[0]));
   IREE_RETURN_IF_ERROR(loom_amdgpu_provider_build_string_attr(
       contribution->builder, IREE_SV("codegen"), IREE_SV("low_native"),
       &attrs[1]));
@@ -255,19 +145,6 @@ const loom_target_provider_t loom_amdgpu_target_provider = {
         },
     .pass_registry = &loom_amdgpu_pass_registry,
     .contribute_pipeline = loom_amdgpu_provider_contribute_pipeline,
-    .materialization =
-        {
-            .symbol_stem = loom_amdgpu_provider_materialization_symbol_stem,
-            .record_matches_effective_target =
-                loom_amdgpu_provider_record_matches_effective_target,
-            .build_effective_target_record =
-                loom_amdgpu_provider_build_effective_target_record,
-        },
-    .record_semantics =
-        {
-            .op_kind = LOOM_OP_AMDGPU_TARGET,
-            .satisfies_requirement = loom_amdgpu_provider_satisfies_requirement,
-        },
 };
 
 static const loom_target_provider_t* const kLoomAmdgpuTargetProviders[] = {

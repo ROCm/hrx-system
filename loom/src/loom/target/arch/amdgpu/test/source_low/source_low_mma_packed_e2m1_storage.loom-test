@@ -65,7 +65,7 @@ kernel.def target(@target) @f16_lhs_packed_e2m1_rhs_grouped_scale_wmma() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @f16_lhs_packed_e2m1_rhs_grouped_scale_wmma() asm<amdgpu.rdna4.core> {
+low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @f16_lhs_packed_e2m1_rhs_grouped_scale_wmma() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %payload_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>

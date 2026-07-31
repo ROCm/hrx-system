@@ -12,7 +12,7 @@
       },
       "stdout": {
         "contains": [
-          "low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_arith()",
+          "low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f32_arith()",
           "reg<amdgpu.sgpr x2>",
           "low.op<amdgpu.v_add_f32>"
         ],
@@ -61,7 +61,7 @@
       },
       "stdout": {
         "contains": [
-          "low.kernel.def target(@target) abi_layout({",
+          "low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({",
           "uses_kernarg_segment_ptr = true",
           "low.live_in<amdgpu.kernarg_segment_ptr>",
           "low.op<amdgpu.s_load_dwordx4_offset_only>"

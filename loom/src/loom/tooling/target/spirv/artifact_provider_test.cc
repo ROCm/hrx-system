@@ -202,10 +202,11 @@ class SpirvVulkanHalArtifactProviderTest : public ::testing::Test {
   iree_status_t ParseRawBdaRoundtripModule(ModulePtr* out_module) {
     static const char kSource[] =
         "spirv.target<vulkan1_3> @hal_target {abi = hal_kernel}\n"
-        "low.kernel.def target(@hal_target) workgroup_size(1, 1, 1) "
+        "low.kernel.def target<spirv.logical.core>(@hal_target) "
+        "workgroup_size(1, 1, 1) "
         "@loom_kernel(%byte_offset: "
         "reg<spirv.offset64>) "
-        "asm<spirv.logical.core> {\n"
+        "asm {\n"
         "  %input = resource<hal_binding> {index = 0, source_type = "
         "hal.buffer} : reg<spirv.ptr.storage_buffer>\n"
         "  %output = resource<hal_binding> {index = 1, source_type = "
@@ -233,10 +234,11 @@ class SpirvVulkanHalArtifactProviderTest : public ::testing::Test {
   iree_status_t ParseRawBdaMultiEntryModule(ModulePtr* out_module) {
     static const char kSource[] =
         "spirv.target<vulkan1_3> @hal_target {abi = hal_kernel}\n"
-        "low.kernel.def target(@hal_target) workgroup_size(1, 1, 1) "
+        "low.kernel.def target<spirv.logical.core>(@hal_target) "
+        "workgroup_size(1, 1, 1) "
         "@double_i32(%byte_offset: "
         "reg<spirv.offset64>) "
-        "asm<spirv.logical.core> {\n"
+        "asm {\n"
         "  %input = resource<hal_binding> {index = 0, source_type = "
         "hal.buffer} : reg<spirv.ptr.storage_buffer>\n"
         "  %output = resource<hal_binding> {index = 1, source_type = "
@@ -250,10 +252,11 @@ class SpirvVulkanHalArtifactProviderTest : public ::testing::Test {
         "  OpStore.storage_buffer.i32 %output_view, %result\n"
         "  return\n"
         "}\n"
-        "low.kernel.def target(@hal_target) workgroup_size(1, 1, 1) "
+        "low.kernel.def target<spirv.logical.core>(@hal_target) "
+        "workgroup_size(1, 1, 1) "
         "@copy_i32(%byte_offset: "
         "reg<spirv.offset64>) "
-        "asm<spirv.logical.core> {\n"
+        "asm {\n"
         "  %input = resource<hal_binding> {index = 0, source_type = "
         "hal.buffer} : reg<spirv.ptr.storage_buffer>\n"
         "  %output = resource<hal_binding> {index = 1, source_type = "
@@ -323,15 +326,12 @@ TEST_F(SpirvVulkanHalArtifactProviderTest, EmitsRawBdaSpirvArtifact) {
   IREE_ASSERT_OK(SelectBaselineTarget());
   const loom_run_hal_device_target_t& target = target_;
 
+  loom_run_candidate_compile_options_t options = {};
+  loom_run_candidate_compile_options_initialize(&options);
   loom_run_hal_artifact_t artifact = {};
   bool emitted = false;
   IREE_ASSERT_OK(loom_spirv_vulkan_hal_artifact_provider.emit_artifact(
-      &loom_spirv_vulkan_hal_artifact_provider, module.get(), &target,
-      /*diagnostic_sink=*/(loom_diagnostic_sink_t){0},
-      /*source_resolver=*/(loom_source_resolver_t){0}, /*max_errors=*/20,
-      /*target_pipeline_options=*/nullptr,
-      /*artifact_flags=*/LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_NONE,
-      /*artifact_manifest=*/nullptr, /*report=*/nullptr,
+      &loom_spirv_vulkan_hal_artifact_provider, module.get(), &target, &options,
       iree_allocator_system(), &emitted, &artifact));
 
   EXPECT_TRUE(emitted);
@@ -370,15 +370,12 @@ TEST_F(SpirvVulkanHalArtifactProviderTest, EmitsAllCompatibleEntries) {
   IREE_ASSERT_OK(SelectBaselineTarget());
   const loom_run_hal_device_target_t& target = target_;
 
+  loom_run_candidate_compile_options_t options = {};
+  loom_run_candidate_compile_options_initialize(&options);
   loom_run_hal_artifact_t artifact = {};
   bool emitted = false;
   IREE_ASSERT_OK(loom_spirv_vulkan_hal_artifact_provider.emit_artifact(
-      &loom_spirv_vulkan_hal_artifact_provider, module.get(), &target,
-      /*diagnostic_sink=*/(loom_diagnostic_sink_t){0},
-      /*source_resolver=*/(loom_source_resolver_t){0}, /*max_errors=*/20,
-      /*target_pipeline_options=*/nullptr,
-      /*artifact_flags=*/LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_NONE,
-      /*artifact_manifest=*/nullptr, /*report=*/nullptr,
+      &loom_spirv_vulkan_hal_artifact_provider, module.get(), &target, &options,
       iree_allocator_system(), &emitted, &artifact));
 
   ASSERT_TRUE(emitted);

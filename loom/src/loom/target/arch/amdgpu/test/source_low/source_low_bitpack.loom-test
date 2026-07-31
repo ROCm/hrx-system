@@ -8,7 +8,7 @@ func.def target(@target) @i32x4_to_i8x4_bitpack(%codes: vector<4xi32>) -> (vecto
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32x4_to_i8x4_bitpack(%codes: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x4_to_i8x4_bitpack(%codes: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
   %5 = slice %codes[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %6 = slice %codes[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %7 = slice %codes[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -28,7 +28,7 @@ func.def target(@target) @i32x8_to_i4x8_bitpack(%codes: vector<8xi32>) -> (vecto
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32x8_to_i4x8_bitpack(%codes: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x8_to_i4x8_bitpack(%codes: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr>) asm {
   %5 = slice %codes[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %6 = v_and_b32_src0_inline %5, 15
   %7 = slice %codes[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
@@ -64,7 +64,7 @@ func.def target(@target) @i32x16_to_i2x16_bitpack(%codes: vector<16xi32>) -> (ve
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32x16_to_i2x16_bitpack(%codes: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x16_to_i2x16_bitpack(%codes: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr>) asm {
   %5 = slice %codes[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
   %6 = v_and_b32_src0_inline %5, 3
   %7 = slice %codes[1] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
@@ -124,7 +124,7 @@ func.def target(@target) @i32x32_to_i1x32_bitpack(%mask: vector<32xi32>) -> (vec
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32x32_to_i1x32_bitpack(%mask: reg<amdgpu.vgpr x32>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x32_to_i1x32_bitpack(%mask: reg<amdgpu.vgpr x32>) -> (reg<amdgpu.vgpr>) asm {
   %5 = slice %mask[0] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
   %6 = v_and_b32_src0_inline %5, 1
   %7 = slice %mask[1] : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr>
@@ -242,7 +242,7 @@ kernel.def target(@target) @uniform_global_i32x4_to_i8x4_bitpack_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_global_i32x4_to_i8x4_bitpack_store() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_global_i32x4_to_i8x4_bitpack_store() asm {
   %values_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %13 = s_mov_b32 0

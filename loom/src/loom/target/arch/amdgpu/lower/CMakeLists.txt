@@ -373,6 +373,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::contracts
     loom::target::arch::amdgpu::encoding::encoding_defs
     loom::target::arch::amdgpu::error_defs
+    loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::hal::kernel_abi
     loom::target::arch::amdgpu::lower::candidates::arithmetic_candidates
     loom::target::arch::amdgpu::lower::candidates::async_gather_candidates

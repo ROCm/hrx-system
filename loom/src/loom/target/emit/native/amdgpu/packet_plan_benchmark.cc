@@ -33,7 +33,6 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
-#include "loom/target/arch/amdgpu/ops/ops.h"
 #include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
 #include "loom/target/arch/amdgpu/planning/occupancy.h"
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
@@ -245,7 +244,7 @@ static std::string BuildMemoryControlSource() {
   return R"(
 amdgpu.target<gfx1250> @target
 
-low.kernel.def target(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) export("memory_control") workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @memory_control() {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) export("memory_control") workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @memory_control() {
   %lane = low.live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = low.resource<hal_binding> {extent = 128, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %rhs_view = low.resource<hal_binding> {extent = 128, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
@@ -265,7 +264,7 @@ static std::string BuildMatrixSource(const FixtureSpec& spec) {
   source << R"(
 amdgpu.target<gfx1250> @target
 
-low.kernel.def target(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) export(")"
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) export(")"
          << spec.name
          << R"(") workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @)"
          << spec.name << R"(() {
@@ -491,10 +490,13 @@ class PacketPlanFixture {
           /*.user_data=*/nullptr,
       };
       pipeline_options.max_errors = 20;
-      loom_pass_run_result_t pipeline_result = {};
-      AbortOnError(loom_compile_run_pipeline(
-          module_, &pipeline_options, &module_block_pool_, &pipeline_result));
-      if (pipeline_result.error_count != 0) {
+      loom_compile_pipeline_result_t pipeline_result = {};
+      iree_status_t status = loom_compile_run_pipeline(
+          module_, &pipeline_options, &module_block_pool_, &pipeline_result);
+      const uint32_t error_count = pipeline_result.pass.error_count;
+      loom_compile_pipeline_result_deinitialize(&pipeline_result);
+      AbortOnError(status);
+      if (error_count != 0) {
         std::abort();
       }
     }
@@ -503,12 +505,9 @@ class PacketPlanFixture {
     if (low_function == nullptr) {
       std::abort();
     }
-    loom_low_verify_options_t verify_options = {
-        /*.descriptor_registry=*/&target_registry_.registry,
-        /*.emitter=*/{},
-        /*.provider_list=*/{},
-        /*.max_errors=*/20,
-    };
+    loom_low_verify_options_t verify_options = {};
+    verify_options.descriptor_registry = &target_registry_.registry;
+    verify_options.max_errors = 20;
     loom_low_verify_result_t verify_result = {};
     loom_low_verify_scratch_t verify_scratch =
         loom_low_verify_scratch_for_module(module_);
@@ -518,10 +517,13 @@ class PacketPlanFixture {
       std::abort();
     }
 
+    loom_symbol_fact_table_t symbol_facts = {};
+    loom_symbol_fact_table_initialize(&symbol_facts, &frame_arena_);
     loom_low_resolved_target_t resolved_target = {};
     AbortOnError(loom_low_resolve_function_target(
-        module_, low_function, &target_registry_.registry, /*emitter=*/{},
-        &resolved_target));
+        module_, &symbol_facts, low_function,
+        /*effective_target_facts=*/nullptr, &target_registry_.registry,
+        /*emitter=*/{}, &resolved_target));
     if (resolved_target.descriptor_set == nullptr) {
       std::abort();
     }
@@ -543,23 +545,18 @@ class PacketPlanFixture {
     }
     loom_low_storage_lease_provider_t storage_lease_provider = {};
     loom_amdgpu_storage_lease_provider(&storage_lease_provider);
-    const loom_low_emission_frame_options_t frame_options = {
-        /*.descriptor_registry=*/&target_registry_.registry,
-        /*.memory_access_table=*/loom_low_memory_access_table_empty(),
-        /*.residency_model=*/
-        loom_amdgpu_occupancy_residency_model(&resolved_target),
-        /*.schedule_pair_affinities=*/pair_affinities,
-        /*.schedule_structural_state_reads=*/structural_state_reads,
-        /*.schedule_strategy=*/LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
-        /*.schedule_diagnostic_flags=*/{},
-        /*.allocation_budgets=*/nullptr,
-        /*.allocation_budget_count=*/0,
-        /*.allocation_fixed_values=*/abi_verify_result.fixed_values,
-        /*.allocation_fixed_value_count=*/abi_verify_result.fixed_value_count,
-        /*.allocation_reserved_ranges=*/nullptr,
-        /*.allocation_reserved_range_count=*/0,
-        /*.storage_lease_provider=*/&storage_lease_provider,
-    };
+    loom_low_emission_frame_options_t frame_options = {};
+    frame_options.descriptor_registry = &target_registry_.registry;
+    frame_options.memory_access_table = loom_low_memory_access_table_empty();
+    frame_options.residency_model =
+        loom_amdgpu_occupancy_residency_model(&resolved_target);
+    frame_options.schedule_pair_affinities = pair_affinities;
+    frame_options.schedule_structural_state_reads = structural_state_reads;
+    frame_options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
+    frame_options.allocation_fixed_values = abi_verify_result.fixed_values;
+    frame_options.allocation_fixed_value_count =
+        abi_verify_result.fixed_value_count;
+    frame_options.storage_lease_provider = &storage_lease_provider;
     AbortOnError(loom_low_emission_frame_build(
         module_, low_function, &frame_options, &frame_arena_, &frame_));
     if (frame_.schedule.error_count != 0 ||

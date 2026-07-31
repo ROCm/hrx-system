@@ -195,6 +195,7 @@ TEST_F(InterfaceTest, FuncLikeCastReturnsValidForFunc) {
   EXPECT_EQ(func_like.op, func_op_);
   EXPECT_NE(func_like.vtable, nullptr);
   EXPECT_EQ(loom_func_like_body(func_like), body_);
+  EXPECT_EQ(loom_func_like_repr_contract(func_like), LOOM_STRING_ID_INVALID);
 }
 
 TEST_F(InterfaceTest, FuncLikeCastReturnsNullForNonFunc) {

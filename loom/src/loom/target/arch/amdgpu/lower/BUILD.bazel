@@ -329,6 +329,7 @@ loom_cc_library(
         "//loom/src/loom/target:low_legality",
         "//loom/src/loom/target:registers",
         "//loom/src/loom/target/arch/amdgpu:error_defs",
+        "//loom/src/loom/target/arch/amdgpu:facts",
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu:target_info_defs",
         "//loom/src/loom/target/arch/amdgpu/abi:asan",

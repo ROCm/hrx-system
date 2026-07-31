@@ -2,7 +2,7 @@
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_fast_wmma_result_to_valu(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_fast_wmma_result_to_valu(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x64_fp8_fp8 %lhs, %rhs, %acc
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %sum = v_add_f32 %lane, %addend
@@ -24,7 +24,7 @@ low.func.def target(@gfx1250_target) @gfx1250_fast_wmma_result_to_valu(%lhs: reg
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_wmma_result_to_transcendental(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_wmma_result_to_transcendental(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>) asm {
   %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %exp = v_exp_f32 %lane
@@ -46,7 +46,7 @@ low.func.def target(@gfx1250_target) @gfx1250_wmma_result_to_transcendental(%lhs
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_fast_wmma_result_to_wmma_source(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %acc0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %acc1: reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_fast_wmma_result_to_wmma_source(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %acc0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %acc1: reg<amdgpu.vgpr x8>) asm {
   %first = v_wmma_f32_16x16x64_fp8_fp8 %lhs, %rhs0, %acc0
   %second = v_wmma_f32_16x16x64_fp8_fp8 %first, %rhs1, %acc1
   return
@@ -66,7 +66,7 @@ low.func.def target(@gfx1250_target) @gfx1250_fast_wmma_result_to_wmma_source(%l
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_vopd_pair_advances_one_vector_issue(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %gap_lhs: reg<amdgpu.vgpr>, %gap_rhs: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_vopd_pair_advances_one_vector_issue(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %gap_lhs: reg<amdgpu.vgpr>, %gap_rhs: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
   %gap0 = v_add_f32 %gap_lhs, %gap_rhs
   %gap1 = v_sub_f32 %gap_lhs, %gap_rhs
@@ -90,7 +90,7 @@ low.func.def target(@gfx1250_target) @gfx1250_vopd_pair_advances_one_vector_issu
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_salu_does_not_advance_vector_issue(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %scalar_lhs: reg<amdgpu.sgpr>, %scalar_rhs: reg<amdgpu.sgpr>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_salu_does_not_advance_vector_issue(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %scalar_lhs: reg<amdgpu.sgpr>, %scalar_rhs: reg<amdgpu.sgpr>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
   %gap0 = s_add_u32 %scalar_lhs, %scalar_rhs
   %gap1 = s_sub_u32 %scalar_lhs, %scalar_rhs
@@ -116,7 +116,7 @@ low.func.def target(@gfx1250_target) @gfx1250_salu_does_not_advance_vector_issue
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_wmma_result_crosses_block(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_wmma_result_crosses_block(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
   low.br ^consume
 ^consume:
@@ -141,7 +141,7 @@ low.func.def target(@gfx1250_target) @gfx1250_wmma_result_crosses_block(%lhs: re
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_integer_wmma_uses_sixteen_cycle_rule(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_integer_wmma_uses_sixteen_cycle_rule(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_i32_16x16x64_iu8 %lhs, %rhs, %acc
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %sum = v_add_u32 %lane, %addend
@@ -167,7 +167,7 @@ low.func.def target(@gfx1250_target) @gfx1250_integer_wmma_uses_sixteen_cycle_ru
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_sparse_float_wmma_uses_eight_cycle_rule(%acc: reg<amdgpu.vgpr x8>, %lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x16>, %index: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_sparse_float_wmma_uses_eight_cycle_rule(%acc: reg<amdgpu.vgpr x8>, %lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x16>, %index: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_swmmac_f32_16x16x64_f16 %acc, %lhs, %rhs, %index
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %sum = v_add_f32 %lane, %addend
@@ -190,7 +190,7 @@ low.func.def target(@gfx1250_target) @gfx1250_sparse_float_wmma_uses_eight_cycle
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_sparse_scalar_index(%acc: reg<amdgpu.vgpr x8>, %lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x16>, %index: reg<amdgpu.sgpr>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_sparse_scalar_index(%acc: reg<amdgpu.vgpr x8>, %lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x16>, %index: reg<amdgpu.sgpr>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_swmmac_f32_16x16x64_f16 %acc, %lhs, %rhs, %index
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %sum = v_add_f32 %lane, %addend
@@ -211,7 +211,7 @@ low.func.def target(@gfx1250_target) @gfx1250_sparse_scalar_index(%acc: reg<amdg
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_sparse_integer_wmma_uses_sixteen_cycle_rule(%acc: reg<amdgpu.vgpr x8>, %lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x16>, %index: reg<amdgpu.vgpr x2>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_sparse_integer_wmma_uses_sixteen_cycle_rule(%acc: reg<amdgpu.vgpr x8>, %lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x16>, %index: reg<amdgpu.vgpr x2>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_swmmac_i32_16x16x128_iu8 %acc, %lhs, %rhs, %index
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %sum = v_add_u32 %lane, %addend
@@ -233,7 +233,7 @@ low.func.def target(@gfx1250_target) @gfx1250_sparse_integer_wmma_uses_sixteen_c
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_scaled_fp4_uses_category_six_release_rule(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %scale_a: reg<amdgpu.vgpr>, %scale_b: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_scaled_fp4_uses_category_six_release_rule(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %scale_a: reg<amdgpu.vgpr>, %scale_b: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_scale_f32_16x16x128_f8f6f4_f4_f4 %lhs, %rhs, %acc, %scale_a, %scale_b {matrix_a_fmt = 4, matrix_b_fmt = 4, matrix_a_scale = 0, matrix_b_scale = 0, matrix_a_scale_fmt = 0, matrix_b_scale_fmt = 0, matrix_a_reuse = 0, matrix_b_reuse = 0}
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %sum = v_add_f32 %lane, %addend
@@ -256,7 +256,7 @@ low.func.def target(@gfx1250_target) @gfx1250_scaled_fp4_uses_category_six_relea
 
 amdgpu.target<gfx1250-a0> @gfx1250_a0_target
 
-low.func.def target(@gfx1250_a0_target) @gfx1250_a0_fp4_uses_category_zero_release_rule(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx1250_a0.core> {
+low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@gfx1250_a0_target) @gfx1250_a0_fp4_uses_category_zero_release_rule(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x128_f8f6f4_f4_f4 %lhs, %rhs, %acc {matrix_a_fmt = 4, matrix_b_fmt = 4}
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %sum = v_add_f32 %lane, %addend
@@ -281,7 +281,7 @@ low.func.def target(@gfx1250_a0_target) @gfx1250_a0_fp4_uses_category_zero_relea
 
 amdgpu.target<gfx1250-a0> @gfx1250_a0_target
 
-low.func.def target(@gfx1250_a0_target) @gfx1250_a0_f8f6f4_result_to_valu(%lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx1250_a0.core> {
+low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@gfx1250_a0_target) @gfx1250_a0_f8f6f4_result_to_valu(%lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x128_f8f6f4_f8_f4 %lhs, %rhs, %acc {matrix_a_fmt = 1, matrix_b_fmt = 4}
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %sum = v_add_f32 %lane, %addend
@@ -307,7 +307,7 @@ low.func.def target(@gfx1250_a0_target) @gfx1250_a0_f8f6f4_result_to_valu(%lhs: 
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_tensor_load_advances_vector_issue(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>, %d0: reg<amdgpu.sgpr x4>, %d1: reg<amdgpu.sgpr x8>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_tensor_load_advances_vector_issue(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>, %d0: reg<amdgpu.sgpr x4>, %d1: reg<amdgpu.sgpr x8>) asm {
   %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
   tensor_load_to_lds_d2 %d0, %d1
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
@@ -333,7 +333,7 @@ low.func.def target(@gfx1250_target) @gfx1250_tensor_load_advances_vector_issue(
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_cluster_load_advances_vector_issue(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>, %lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_cluster_load_advances_vector_issue(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>, %lds: reg<amdgpu.vgpr>, %addr: reg<amdgpu.vgpr>, %saddr: reg<amdgpu.sgpr x2>) asm {
   %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
   %m0 = s_mov_b32_m0_imm 0
   cluster_load_async_to_lds_b32 %lds, %addr, %saddr, %m0
@@ -358,7 +358,7 @@ low.func.def target(@gfx1250_target) @gfx1250_cluster_load_advances_vector_issue
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_wmma_source_release_protects_overwrite(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %value_lhs: reg<amdgpu.vgpr>, %value_rhs: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_wmma_source_release_protects_overwrite(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %value_lhs: reg<amdgpu.vgpr>, %value_rhs: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
   %overwrite = v_add_f32 %value_lhs, %value_rhs
   return
@@ -379,7 +379,7 @@ low.func.def target(@gfx1250_target) @gfx1250_wmma_source_release_protects_overw
 
 amdgpu.target<gfx1251> @gfx1251_target
 
-low.func.def target(@gfx1251_target) @gfx1251_wmma_16_cycle_result_to_valu(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx1251.core> {
+low.func.def target<amdgpu.rdna4.gfx1251.core>(@gfx1251_target) @gfx1251_wmma_16_cycle_result_to_valu(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x64_fp8_fp8 %lhs, %rhs, %acc
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %sum = v_add_f32 %lane, %addend
@@ -405,7 +405,7 @@ low.func.def target(@gfx1251_target) @gfx1251_wmma_16_cycle_result_to_valu(%lhs:
 
 amdgpu.target<gfx1251> @gfx1251_target
 
-low.func.def target(@gfx1251_target) @gfx1251_wmma_32_cycle_result_to_valu(%lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x16>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx1251.core> {
+low.func.def target<amdgpu.rdna4.gfx1251.core>(@gfx1251_target) @gfx1251_wmma_32_cycle_result_to_valu(%lhs: reg<amdgpu.vgpr x16>, %rhs: reg<amdgpu.vgpr x16>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x128_fp8_fp8 %lhs, %rhs, %acc
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %sum = v_add_f32 %lane, %addend
@@ -440,7 +440,7 @@ low.func.def target(@gfx1251_target) @gfx1251_wmma_32_cycle_result_to_valu(%lhs:
 
 amdgpu.target<gfx12-5-generic> @gfx12_5_generic_target
 
-low.func.def target(@gfx12_5_generic_target) @gfx12_5_generic_wmma_result_to_valu(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.gfx12_5.generic.core> {
+low.func.def target<amdgpu.gfx12_5.generic.core>(@gfx12_5_generic_target) @gfx12_5_generic_wmma_result_to_valu(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %sum = v_add_f32 %lane, %addend
@@ -466,7 +466,7 @@ low.func.def target(@gfx12_5_generic_target) @gfx12_5_generic_wmma_result_to_val
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_matrix_coexecution_plan(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_matrix_coexecution_plan(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %sum = v_add_f32 %lane, %addend
@@ -485,7 +485,7 @@ state[0] reason=matrix_coexecution_valu_use action=amdgpu.v_nop at=b0:n2/o2 prod
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_matrix_coexecution_native(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_matrix_coexecution_native(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
   %lane = slice %result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %sum = v_add_f32 %lane, %addend
@@ -502,7 +502,7 @@ low.func.def target(@gfx1250_target) @gfx1250_matrix_coexecution_native(%lhs: re
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_matrix_source_reaches_join(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_matrix_source_reaches_join(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>, %cond: reg<amdgpu.scc>) asm {
   low.cond_br %cond, ^matrix, ^plain : reg<amdgpu.scc>
 ^matrix:
   %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
@@ -538,7 +538,7 @@ s_cbranch_scc0 .Lbb2
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_matrix_source_reaches_loop_header(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>, %limit: reg<amdgpu.sgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_matrix_source_reaches_loop_header(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>, %limit: reg<amdgpu.sgpr>) asm {
   %zero = s_mov_b32 0
   low.br ^loop(%acc: reg<amdgpu.vgpr x8>, %zero: reg<amdgpu.sgpr>)
 ^loop(%carried: reg<amdgpu.vgpr x8>, %iteration: reg<amdgpu.sgpr>):
@@ -582,7 +582,7 @@ s_mov_b32 s1, 0
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_matrix_result_edge_copy(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_matrix_result_edge_copy(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %addend: reg<amdgpu.vgpr>) asm {
   %result = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %acc
   low.br ^join(%result: reg<amdgpu.vgpr x8>)
 ^join(%joined: reg<amdgpu.vgpr x8>):
@@ -617,7 +617,7 @@ v_wmma_f32_16x16x32_bf16 v[16:23], v[0:7], v[8:15], v[16:23]
 
 amdgpu.target<gfx1250> @gfx1250_target
 
-low.func.def target(@gfx1250_target) @gfx1250_consumed_matrix_window_does_not_escape_loop(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %header_rhs: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>, %limit: reg<amdgpu.sgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250_target) @gfx1250_consumed_matrix_window_does_not_escape_loop(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %acc: reg<amdgpu.vgpr x8>, %header_rhs: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>, %limit: reg<amdgpu.sgpr>) asm {
   %zero = s_mov_b32 0
   low.br ^loop(%acc: reg<amdgpu.vgpr x8>, %zero: reg<amdgpu.sgpr>)
 ^loop(%carried: reg<amdgpu.vgpr x8>, %iteration: reg<amdgpu.sgpr>):

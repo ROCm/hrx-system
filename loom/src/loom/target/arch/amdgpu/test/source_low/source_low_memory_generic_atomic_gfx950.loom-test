@@ -13,7 +13,7 @@ func.def target(@target) @generic_atomic_i32_static(%input: buffer) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @generic_atomic_i32_static() asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @generic_atomic_i32_static() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %8 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %9 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -43,7 +43,7 @@ func.def target(@target) @generic_atomic_cmpxchg_i32_static(%input: buffer) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @generic_atomic_cmpxchg_i32_static() asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @generic_atomic_cmpxchg_i32_static() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %10 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %11 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>

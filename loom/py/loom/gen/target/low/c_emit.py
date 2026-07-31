@@ -786,6 +786,15 @@ def emit_source_for_views(
             "AsmForms",
             _asm_form_row_lines(compiled, view.asm_forms),
         )
+    for view in views:
+        if not view.spec.supported_target_contract_keys:
+            continue
+        c_arrays.append_value_array(
+            lines,
+            "uint64_t",
+            f"k{view.spec.c_table_prefix}SupportedTargetContractStableIds",
+            [c_spelling.hex_u64_literal(descriptor_stable_id(key)) for key in view.spec.supported_target_contract_keys],
+        )
 
     table_count_fields = {
         "operands": "operand_count",
@@ -831,6 +840,14 @@ def emit_source_for_views(
             f"    .generator_version = {view_spec.generator_version},",
             f"    .stable_id = UINT64_C(0x{descriptor_stable_id(view_spec.key):016x}),",
             f"    .target_stable_id = {c_spelling.hex_u64_literal(descriptor_stable_id(view_spec.target_key)) if view_spec.target_key is not None else 'LOOM_LOW_STABLE_ID_NONE'},",
+            *(
+                [
+                    f"    .supported_target_contract_stable_ids = k{view_spec.c_table_prefix}SupportedTargetContractStableIds,",
+                    f"    .supported_target_contract_count = IREE_ARRAYSIZE(k{view_spec.c_table_prefix}SupportedTargetContractStableIds),",
+                ]
+                if view_spec.supported_target_contract_keys
+                else []
+            ),
             f"    .descriptor_set_ordinal = {c_spelling.u16_literal(view_spec.descriptor_set_ordinal if view_spec.descriptor_set_ordinal is not None else LOW_DESCRIPTOR_SET_ORDINAL_NONE)},",
             f"    .key_string_offset = {pool.ref(_metadata_string_label(spec, view_spec, 'set_key'))},",
             f"    .target_key_string_offset = {c_spelling.optional_string_expr(pool, _metadata_string_label(spec, view_spec, 'target_key') if view_spec.target_key is not None else None)},",

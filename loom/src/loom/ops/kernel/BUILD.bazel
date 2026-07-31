@@ -54,6 +54,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops/view",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:capability_facts",
+        "//loom/src/loom/target:facts",
         "//loom/src/loom/target:types",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:walk",

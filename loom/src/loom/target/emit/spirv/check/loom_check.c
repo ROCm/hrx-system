@@ -265,12 +265,14 @@ static iree_status_t loom_spirv_loom_check_run_source_low_pipeline(
   compile_options.source_resolver = request->source_resolver;
   compile_options.max_errors = 20;
 
-  loom_pass_run_result_t run_result = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_compile_run_pipeline(request->module, &compile_options,
-                                request->case_arena->block_pool, &run_result));
-  if (run_result.error_count != 0 &&
-      request->diagnostic_collector->count == 0) {
+  loom_compile_pipeline_result_t pipeline_result = {0};
+  iree_status_t status = loom_compile_run_pipeline(
+      request->module, &compile_options, request->case_arena->block_pool,
+      &pipeline_result);
+  const uint32_t error_count = pipeline_result.pass.error_count;
+  loom_compile_pipeline_result_deinitialize(&pipeline_result);
+  IREE_RETURN_IF_ERROR(status);
+  if (error_count != 0 && request->diagnostic_collector->count == 0) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
         "source-low pipeline reported errors without diagnostics");
@@ -307,8 +309,8 @@ static iree_status_t loom_spirv_loom_check_verify_low_module(
   loom_low_verify_scratch_t low_verify_scratch =
       loom_low_verify_scratch_for_module(request->module);
   IREE_RETURN_IF_ERROR(loom_target_entry_verify_low_module(
-      request->module, request->low_registry, &verifier_emitter, 20,
-      request->environment->low_verify_provider_list, &low_verify_scratch,
+      request->module, request->low_registry, &entry_options, &verifier_emitter,
+      20, request->environment->low_verify_provider_list, &low_verify_scratch,
       &low_verify_result));
   if (low_verify_result.error_count != 0 &&
       request->diagnostic_collector->count == 0) {

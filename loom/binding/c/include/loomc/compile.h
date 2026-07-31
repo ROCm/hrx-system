@@ -206,6 +206,11 @@ LOOMC_API_EXPORT loomc_status_t loomc_compiler_create(
 /// valid after the call. Its IR contents may have been transformed by the
 /// selected pass program. Callers needing independent later invocations of
 /// the original IR provide independent module storage before compilation.
+/// A successful target-specialized invocation also retains its concrete
+/// function-version facts in the module handle for a later
+/// `loomc_emit_module` call. A subsequent compile replaces that state.
+/// Serialization and cloning preserve IR only and do not persist compiler
+/// facts.
 ///
 /// @lifetime
 /// Returned results and artifacts do not borrow from `workspace` and remain

@@ -18,7 +18,11 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/facts.h"
+#include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
+#include "loom/target/arch/amdgpu/target_info_defs.h"
+#include "loom/target/facts_builder.h"
 #include "loom/testing/diagnostic_matchers.h"
 
 namespace loom {
@@ -53,15 +57,6 @@ uint16_t FindRegisterClassId(const loom_low_descriptor_set_t* descriptor_set,
   return LOOM_LOW_REG_CLASS_NONE;
 }
 
-loom_low_resolved_target_t ResolvedTarget(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  loom_low_resolved_target_t target = {};
-  target.target_name = IREE_SV("gfx942_target");
-  target.descriptor_set_key = IREE_SV("amdgpu.cdna3.core");
-  target.descriptor_set = descriptor_set;
-  return target;
-}
-
 class AmdgpuNativePreflightTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -75,7 +70,6 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"),
                                         &block_pool_, nullptr,
                                         iree_allocator_system(), &module_));
-    BuildLowFunction();
   }
 
   void TearDown() override {
@@ -110,16 +104,43 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     };
   }
 
-  void BuildLowFunction() {
+  void BuildLowFunction(const loom_low_descriptor_set_t* descriptor_set) {
+    const loom_amdgpu_target_record_info_t* target_record =
+        loom_amdgpu_target_record_default_info_for_descriptor_set(
+            descriptor_set->descriptor_set_ordinal);
+    IREE_ASSERT(target_record != nullptr);
+    const loom_amdgpu_target_info_t* target_info =
+        loom_amdgpu_target_info_find_target_by_kind(target_record->target_kind);
+    IREE_ASSERT(target_info != nullptr);
+    target_facts_ = {};
+    loom_target_facts_builder_initialize(&loom_amdgpu_target_fact_type,
+                                         target_record->bundle,
+                                         &target_facts_.base);
+    IREE_ASSERT_LE(target_info->target_kind, UINT8_MAX);
+    target_facts_.base.selector = (uint8_t)target_info->target_kind;
+    loom_amdgpu_target_identity_initialize(target_info,
+                                           &target_facts_.identity);
+    loom_amdgpu_target_properties_resolve(&target_facts_.identity,
+                                          &target_facts_.base.storage.bundle,
+                                          &target_facts_.properties);
+
     loom_builder_t module_builder;
     loom_builder_initialize(module_, &module_->arena,
                             loom_module_block(module_), &module_builder);
     const loom_symbol_ref_t target_ref = AddSymbol(IREE_SV("target"));
     const loom_symbol_ref_t callee_ref = AddSymbol(IREE_SV("preflight"));
+    loom_string_id_t representation_contract = LOOM_STRING_ID_INVALID;
+    IREE_ASSERT_OK(loom_builder_intern_string(
+        &module_builder,
+        loom_low_descriptor_set_string(descriptor_set,
+                                       descriptor_set->key_string_offset),
+        &representation_contract));
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &module_builder, 0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+        &module_builder, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
+        /*visibility=*/0, /*retain=*/0, /*cc=*/0,
         /*purity=*/0,
-        /*allocation=*/0, /*schedule=*/0, target_ref, /*abi=*/0,
+        /*allocation=*/0, /*schedule=*/0,
+        /*descriptor_set=*/representation_contract, target_ref, /*abi=*/0,
         loom_named_attr_slice_t{}, loom_named_attr_slice_t{},
         LOOM_STRING_ID_INVALID, loom_named_attr_slice_t{}, callee_ref,
         /*arg_types=*/nullptr,
@@ -131,6 +152,22 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
         module_, &module_->arena,
         loom_region_entry_block(loom_low_func_def_body(function_op_)),
         &body_builder_);
+  }
+
+  loom_low_resolved_target_t ResolvedTarget(
+      const loom_low_descriptor_set_t* descriptor_set) const {
+    const loom_target_bundle_t* target_bundle =
+        loom_target_facts_bundle(&target_facts_.base);
+    return (loom_low_resolved_target_t){
+        /*.target_facts=*/&target_facts_.base,
+        /*.target_name=*/
+        loom_target_facts_identity_name(&target_facts_.base),
+        /*.descriptor_set_key=*/
+        loom_low_descriptor_set_string(descriptor_set,
+                                       descriptor_set->key_string_offset),
+        /*.feature_bits=*/target_bundle->config->contract_feature_bits,
+        /*.descriptor_set=*/descriptor_set,
+    };
   }
 
   loom_value_id_t Reserve(loom_storage_space_t space, int64_t byte_length,
@@ -171,6 +208,8 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
   loom_module_t* module_ = nullptr;
   loom_op_t* function_op_ = nullptr;
   loom_builder_t body_builder_;
+  // Complete AMDGPU facts matching the selected descriptor set.
+  loom_amdgpu_target_facts_t target_facts_ = {};
 };
 
 TEST_F(AmdgpuNativePreflightTest,
@@ -180,6 +219,7 @@ TEST_F(AmdgpuNativePreflightTest,
   if (descriptor_set == nullptr) {
     GTEST_SKIP() << "amdgpu.cdna3.core is not linked in this build";
   }
+  BuildLowFunction(descriptor_set);
   const uint16_t agpr_reg_class_id =
       FindRegisterClassId(descriptor_set, IREE_SV("amdgpu.agpr"));
   ASSERT_NE(agpr_reg_class_id, LOOM_LOW_REG_CLASS_NONE);
@@ -213,7 +253,7 @@ TEST_F(AmdgpuNativePreflightTest,
   const testing::CapturedDiagnosticEmission& emission = capture.emissions[0];
   EXPECT_EQ(emission.error, LOOM_ERR_AMDGPU_035);
   ASSERT_EQ(emission.string_params.size(), 8u);
-  EXPECT_EQ(emission.string_params[0], "gfx942_target");
+  EXPECT_EQ(emission.string_params[0], "gfx942");
   EXPECT_EQ(emission.string_params[3], "preflight");
   EXPECT_EQ(emission.string_params[4], "<unknown>");
   EXPECT_EQ(emission.string_params[5], "amdgpu.agpr");
@@ -225,6 +265,7 @@ TEST_F(AmdgpuNativePreflightTest, TtmpFixedLocationsDoNotIncreaseSgprMetadata) {
   const loom_low_descriptor_set_t* descriptor_set =
       LookupAmdgpuGfx125xDescriptorSet();
   ASSERT_NE(descriptor_set, nullptr);
+  BuildLowFunction(descriptor_set);
 
   loom_low_schedule_table_t schedule = Schedule(descriptor_set);
   loom_low_allocation_assignment_t assignments[2] = {};
@@ -261,6 +302,7 @@ TEST_F(AmdgpuNativePreflightTest, StackStorageUnsupportedEmitsDiagnostic) {
   if (descriptor_set == nullptr) {
     GTEST_SKIP() << "amdgpu.cdna3.core is not linked in this build";
   }
+  BuildLowFunction(descriptor_set);
   const loom_value_id_t stack_storage = Reserve(LOOM_STORAGE_SPACE_STACK, 8, 4);
 
   const loom_low_schedule_table_t schedule = Schedule(descriptor_set);
@@ -278,7 +320,7 @@ TEST_F(AmdgpuNativePreflightTest, StackStorageUnsupportedEmitsDiagnostic) {
   const testing::CapturedDiagnosticEmission& emission = capture.emissions[0];
   EXPECT_EQ(emission.error, LOOM_ERR_AMDGPU_036);
   ASSERT_EQ(emission.string_params.size(), 6u);
-  EXPECT_EQ(emission.string_params[0], "gfx942_target");
+  EXPECT_EQ(emission.string_params[0], "gfx942");
   EXPECT_EQ(emission.string_params[3], "preflight");
   const iree_string_view_t storage_name =
       loom_low_diagnostic_value_name(module_, stack_storage);

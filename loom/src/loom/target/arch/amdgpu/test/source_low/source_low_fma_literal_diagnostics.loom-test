@@ -9,7 +9,7 @@ func.def target(@target) @f32_fmaak_literal_addend_diagnostics(%a: f32, %b: f32)
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_fmaak_literal_addend_diagnostics(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_fmaak_literal_addend_diagnostics(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_fmaak_f32 %a, %b, 1056964608
   return %result
 }
@@ -25,7 +25,7 @@ func.def target(@target) @f32_fmamk_literal_multiply_rhs_diagnostics(%a: f32, %c
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_fmamk_literal_multiply_rhs_diagnostics(%a: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_fmamk_literal_multiply_rhs_diagnostics(%a: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_fmamk_f32 %a, %c, 1073741824
   return %result
 }
@@ -41,7 +41,7 @@ func.def target(@target) @f32_fmamk_literal_multiply_lhs_diagnostics(%b: f32, %c
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32_fmamk_literal_multiply_lhs_diagnostics(%b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_fmamk_literal_multiply_lhs_diagnostics(%b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_fmamk_f32 %b, %c, 1073741824
   return %result
 }

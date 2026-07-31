@@ -76,20 +76,6 @@ static iree_status_t ContributePreparation(
                                 loom_named_attr_slice_empty(), &run_op);
 }
 
-static bool AlwaysSatisfiesTargetRequirement(
-    loom_target_record_view_t effective_target,
-    loom_target_record_view_t target_requirement) {
-  (void)effective_target;
-  (void)target_requirement;
-  return true;
-}
-
-static iree_string_view_t MaterializationSymbolStem(
-    const loom_target_profile_t* profile) {
-  (void)profile;
-  return IREE_SV("target");
-}
-
 struct PipelineBuildData {
   const loom_target_environment_t* environment;
 };
@@ -288,38 +274,31 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
   loom_target_environment_deinitialize(&environment);
 }
 
-TEST_F(TargetProviderTest, RejectsAmbiguousRecordSemanticsOwnership) {
-  loom_target_provider_t first_provider = {};
-  first_provider.record_semantics = {
-      /*.op_kind=*/LOOM_OP_KIND(LOOM_DIALECT_TEST, 0),
-      /*.satisfies_requirement=*/AlwaysSatisfiesTargetRequirement,
+TEST_F(TargetProviderTest, ReportsOwnedProfileTypes) {
+  static const loom_target_profile_type_t kOwnedProfileType = {
+      /*.name=*/IREE_SVL("owned"),
   };
-  loom_target_provider_t second_provider = {};
-  second_provider.record_semantics = first_provider.record_semantics;
-  const loom_target_provider_t* const providers[] = {
-      &first_provider,
-      &second_provider,
+  static const loom_target_profile_type_t kUnownedProfileType = {
+      /*.name=*/IREE_SVL("unowned"),
   };
-  const loom_target_provider_set_t provider_set =
-      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
-  loom_target_environment_t environment = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_target_environment_initialize(&provider_set, &environment));
-}
-
-TEST_F(TargetProviderTest, RejectsPartialMaterializationContract) {
-  loom_target_provider_t provider = {};
-  provider.materialization.symbol_stem = MaterializationSymbolStem;
-  const loom_target_provider_t* const providers[] = {
+  static const loom_target_provider_t provider = {
+      /*.profile_type=*/&kOwnedProfileType,
+  };
+  static const loom_target_provider_t* const providers[] = {
       &provider,
   };
   const loom_target_provider_set_t provider_set =
       loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
   loom_target_environment_t environment = {};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
+  IREE_ASSERT_OK(
       loom_target_environment_initialize(&provider_set, &environment));
+
+  EXPECT_TRUE(loom_target_environment_supports_profile_type(
+      &environment, &kOwnedProfileType));
+  EXPECT_FALSE(loom_target_environment_supports_profile_type(
+      &environment, &kUnownedProfileType));
+
+  loom_target_environment_deinitialize(&environment);
 }
 
 }  // namespace

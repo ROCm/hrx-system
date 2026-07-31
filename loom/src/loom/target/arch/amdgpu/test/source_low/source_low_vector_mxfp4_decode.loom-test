@@ -9,7 +9,7 @@ func.def target(@target) @decode_mxfp4_group_to_bf16(%payload: vector<4xi32>, %s
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @decode_mxfp4_group_to_bf16(%payload: reg<amdgpu.vgpr x4>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x16>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @decode_mxfp4_group_to_bf16(%payload: reg<amdgpu.vgpr x4>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x16>) asm {
   %8 = slice %payload[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %9 = v_and_b32_lit %scale, 255
   %10 = v_lshlrev_b32_src0_inline %9, 23
@@ -48,7 +48,7 @@ func.def target(@target) @decode_mxfp4_group_to_bf16(%payload: vector<4xi32>, %s
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @decode_mxfp4_group_to_bf16(%payload: reg<amdgpu.vgpr x4>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x16>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @decode_mxfp4_group_to_bf16(%payload: reg<amdgpu.vgpr x4>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x16>) asm {
   %8 = slice %payload[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %9 = v_cvt_scale_pk8_bf16_fp4 %8, %scale
   %10 = slice %payload[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -73,7 +73,7 @@ func.def target(@target) @decode_two_mxfp4_groups_to_bf16(%payload: vector<8xi32
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @decode_two_mxfp4_groups_to_bf16(%payload: reg<amdgpu.vgpr x8>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x32>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @decode_two_mxfp4_groups_to_bf16(%payload: reg<amdgpu.vgpr x8>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x32>) asm {
   %8 = slice %payload[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %9 = v_cvt_scale_pk8_bf16_fp4 %8, %scale
   %10 = slice %payload[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>

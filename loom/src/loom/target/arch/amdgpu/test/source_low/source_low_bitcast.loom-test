@@ -8,7 +8,7 @@ func.def target(@target) @i32_to_i8x4_bitcast(%word: vector<1xi32>) -> (vector<4
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32_to_i8x4_bitcast(%bytes: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_to_i8x4_bitcast(%bytes: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   return %bytes
 }
 
@@ -21,7 +21,7 @@ func.def target(@target) @i32x2_to_i8x8_bitcast(%words: vector<2xi32>) -> (vecto
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32x2_to_i8x8_bitcast(%bytes: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x2_to_i8x8_bitcast(%bytes: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   return %bytes
 }
 
@@ -34,7 +34,7 @@ func.def target(@target) @f32x2_to_i32x2_bitcast(%floats: vector<2xf32>) -> (vec
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32x2_to_i32x2_bitcast(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x2_to_i32x2_bitcast(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   return %bits
 }
 
@@ -47,7 +47,7 @@ func.def target(@target) @f16x2_to_i32_bitcast(%halves: vector<2xf16>) -> (vecto
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f16x2_to_i32_bitcast(%bits: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f16x2_to_i32_bitcast(%bits: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   return %bits
 }
 
@@ -60,7 +60,7 @@ func.def target(@target) @bf16x2_to_i32_bitcast(%halves: vector<2xbf16>) -> (vec
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16x2_to_i32_bitcast(%bits: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16x2_to_i32_bitcast(%bits: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   return %bits
 }
 
@@ -74,7 +74,7 @@ func.def target(@target) @i8x2_f16_shape_changing_bitcast(%bytes: vector<2xi8>, 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x2_f16_shape_changing_bitcast(%to_half: reg<amdgpu.vgpr>, %to_bytes: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x2_f16_shape_changing_bitcast(%to_half: reg<amdgpu.vgpr>, %to_bytes: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   return %to_half, %to_bytes
 }
 
@@ -88,7 +88,7 @@ func.def target(@target) @i8x2_bf16_shape_changing_bitcast(%bytes: vector<2xi8>,
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x2_bf16_shape_changing_bitcast(%to_half: reg<amdgpu.vgpr>, %to_bytes: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x2_bf16_shape_changing_bitcast(%to_half: reg<amdgpu.vgpr>, %to_bytes: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   return %to_half, %to_bytes
 }
 
@@ -102,7 +102,7 @@ func.def target(@target) @f8e4m3_i8x4_bitcast(%floats: vector<4xf8E4M3>, %bytes:
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f8e4m3_i8x4_bitcast(%encoded_bits: reg<amdgpu.vgpr>, %encoded: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f8e4m3_i8x4_bitcast(%encoded_bits: reg<amdgpu.vgpr>, %encoded: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   return %encoded_bits, %encoded
 }
 
@@ -116,6 +116,6 @@ func.def target(@target) @f8e5m2_i8x4_bitcast(%floats: vector<4xf8E5M2>, %bytes:
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f8e5m2_i8x4_bitcast(%encoded_bits: reg<amdgpu.vgpr>, %encoded: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f8e5m2_i8x4_bitcast(%encoded_bits: reg<amdgpu.vgpr>, %encoded: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   return %encoded_bits, %encoded
 }

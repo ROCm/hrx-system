@@ -11,7 +11,7 @@ func.def target(@target) @sanitizer_repeated_dense_access_read(%input: buffer) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @sanitizer_repeated_dense_access_read() asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @sanitizer_repeated_dense_access_read() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %5 = s_getpc_b64
   %6 = slice %5[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -147,7 +147,7 @@ func.def target(@target) @sanitizer_aligned_granule_access_read(%input: buffer) 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @sanitizer_aligned_granule_access_read() asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @sanitizer_aligned_granule_access_read() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
   %6 = s_getpc_b64
   %7 = slice %6[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>

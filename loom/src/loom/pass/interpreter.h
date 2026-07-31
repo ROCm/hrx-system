@@ -37,6 +37,8 @@ typedef struct loom_pass_interpreter_options_t {
   iree_diagnostic_emitter_t diagnostic_emitter;
   // Caller-owned execution environment capabilities.
   loom_pass_environment_t environment;
+  // Concrete compiler function versions participating in this execution.
+  const loom_function_version_list_t* function_versions;
   // Optional caller-owned execution report appended as passes run.
   loom_pass_report_t* report;
   // Optional caller-owned IR trace receiving selected pass boundaries.

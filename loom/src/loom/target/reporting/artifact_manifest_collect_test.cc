@@ -386,7 +386,7 @@ target.generic<reference> @gpu {
   subgroup_size = 64
 }
 
-low.kernel.def target(@gpu) abi_layout({
+low.kernel.def target<test.low.core>(@gpu) abi_layout({
   constant_count = 0,
   direct_arg_count = 0,
   direct_arg_names = {},
@@ -432,7 +432,7 @@ target.generic<reference> @gpu {
   abi = hal_kernel
 }
 
-low.kernel.def target(@gpu) abi_layout({
+low.kernel.def target<test.low.core>(@gpu) abi_layout({
   constant_count = 1,
   direct_arg_count = 1,
   direct_arg_names = {arg0 = "extent"},
@@ -476,7 +476,7 @@ target.generic<reference> @gpu {
   abi = hal_kernel
 }
 
-low.kernel.def target(@gpu) workgroup_size(32, 2, 1) @entry() {
+low.kernel.def target<test.low.core>(@gpu) workgroup_size(32, 2, 1) @entry() {
   %binding0 = low.resource<hal_binding> {index = 0, source_type = i64} : i64
   %binding1 = low.resource<hal_binding> {index = 1, source_type = i64} : i64
   low.return

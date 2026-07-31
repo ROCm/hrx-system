@@ -12,7 +12,7 @@ kernel.def target(@target) @single_wave_barrier() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @single_wave_barrier() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @single_wave_barrier() asm {
   s_barrier
   return
 }
@@ -31,7 +31,7 @@ kernel.def target(@target) @multi_wave_barrier() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_barrier() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_barrier() asm {
   s_barrier
   return
 }
@@ -50,7 +50,7 @@ kernel.def target(@target) @multi_wave_subgroup_barrier() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_subgroup_barrier() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_subgroup_barrier() asm {
   s_waitcnt {lgkmcnt = 0}
   return
 }
@@ -69,7 +69,7 @@ kernel.def target(@target) @single_wave_barrier_gfx12() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @single_wave_barrier_gfx12() asm<amdgpu.gfx12.generic.core> {
+low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @single_wave_barrier_gfx12() asm {
   s_barrier_signal_all
   s_barrier_wait_all
   return
@@ -89,7 +89,7 @@ kernel.def target(@target) @multi_wave_barrier_gfx12() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_barrier_gfx12() asm<amdgpu.gfx12.generic.core> {
+low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_barrier_gfx12() asm {
   s_barrier_signal_all
   s_barrier_wait_all
   return
@@ -109,7 +109,7 @@ kernel.def target(@target) @multi_wave_subgroup_barrier_gfx12() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_subgroup_barrier_gfx12() asm<amdgpu.gfx12.generic.core> {
+low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_subgroup_barrier_gfx12() asm {
   s_wait_dscnt {dscnt = 0}
   return
 }
@@ -128,7 +128,7 @@ kernel.def target(@target) @single_wave_barrier_gfx12_5() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @single_wave_barrier_gfx12_5() asm<amdgpu.gfx12_5.generic.core> {
+low.kernel.def target<amdgpu.gfx12_5.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @single_wave_barrier_gfx12_5() asm {
   s_barrier_signal_all
   s_barrier_wait_all
   return
@@ -148,7 +148,7 @@ kernel.def target(@target) @multi_wave_barrier_gfx12_5() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_barrier_gfx12_5() asm<amdgpu.gfx12_5.generic.core> {
+low.kernel.def target<amdgpu.gfx12_5.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_barrier_gfx12_5() asm {
   s_barrier_signal_all
   s_barrier_wait_all
   return
@@ -168,7 +168,7 @@ kernel.def target(@target) @multi_wave_subgroup_barrier_gfx12_5() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_subgroup_barrier_gfx12_5() asm<amdgpu.gfx12_5.generic.core> {
+low.kernel.def target<amdgpu.gfx12_5.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @multi_wave_subgroup_barrier_gfx12_5() asm {
   s_wait_dscnt {dscnt = 0}
   return
 }
@@ -187,7 +187,7 @@ kernel.def target(@target) @single_wave_barrier_gfx9_4() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @single_wave_barrier_gfx9_4() asm<amdgpu.gfx9_4.generic.core> {
+low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @single_wave_barrier_gfx9_4() asm {
   s_barrier
   return
 }
@@ -206,7 +206,7 @@ kernel.def target(@target) @multi_wave_subgroup_barrier_gfx9_4() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @multi_wave_subgroup_barrier_gfx9_4() asm<amdgpu.gfx9_4.generic.core> {
+low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @multi_wave_subgroup_barrier_gfx9_4() asm {
   s_waitcnt {lgkmcnt = 0}
   return
 }

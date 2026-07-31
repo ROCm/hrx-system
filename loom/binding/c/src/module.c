@@ -17,14 +17,13 @@
 #include "iree/io/file_contents.h"
 #include "iree/io/stdio_stream.h"
 #include "iree/io/stream.h"
-#include "loom/codegen/low/target_binding.h"
 #include "loom/format/bytecode/format.h"
 #include "loom/format/bytecode/reader.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
+#include "loom/ir/function_version.h"
 #include "loom/link/linker.h"
-#include "loom/ops/low/ops.h"
 #include "loomc/iree.h"
 #include "result.h"
 #include "source.h"
@@ -50,6 +49,12 @@ struct loomc_module_t {
 
   // Internal linked, parsed, or optimized module.
   loom_module_t* module;
+
+  // Arena owning compiler products associated with the current module IR.
+  iree_arena_allocator_t function_version_arena;
+
+  // Concrete function versions published by the last successful compilation.
+  loom_function_version_list_t function_versions;
 };
 
 typedef struct loomc_module_resolved_serialize_options_t {
@@ -105,6 +110,7 @@ typedef struct loomc_module_byte_buffer_stream_t {
 
 static void loomc_module_destroy(loomc_module_t* module) {
   loomc_allocator_t allocator = module->allocator;
+  iree_arena_deinitialize(&module->function_version_arena);
   loom_module_free(module->module);
   loomc_workspace_release(module->workspace);
   loomc_context_release(module->context);
@@ -327,106 +333,27 @@ static iree_status_t loomc_module_write_iree_stream(void* user_data,
                               text.data);
 }
 
-static bool loomc_module_is_low_function_op(const loom_op_t* op) {
-  return loom_low_func_def_isa(op) || loom_low_kernel_def_isa(op) ||
-         loom_low_func_decl_isa(op);
-}
-
-static loomc_status_t loomc_module_select_single_low_descriptor_set_key(
-    const loom_module_t* internal_module,
-    const loomc_target_pass_environment_t* target_environment,
-    loomc_string_view_t* out_descriptor_set_key, bool* out_found_low_function,
-    bool* out_found_descriptor_set) {
-  *out_descriptor_set_key = loomc_string_view_empty();
-  *out_found_low_function = false;
-  *out_found_descriptor_set = false;
-  if (internal_module->body == NULL) {
-    return loomc_ok_status();
-  }
-  const loom_block_t* block =
-      loom_region_const_entry_block(internal_module->body);
-  if (block == NULL) {
-    return loomc_ok_status();
-  }
-  const loom_low_descriptor_registry_t* registry =
-      target_environment != NULL
-          ? &target_environment->low_descriptor_registry.registry
-          : NULL;
-  const loom_op_t* op = NULL;
-  loom_block_for_each_op(block, op) {
-    if (!loomc_module_is_low_function_op(op)) {
-      continue;
-    }
-    *out_found_low_function = true;
-    if (registry == NULL) {
-      continue;
-    }
-    loom_low_resolved_target_t target = {0};
-    LOOMC_RETURN_IF_ERROR(
-        loomc_status_from_iree(loom_low_resolve_function_target(
-            internal_module, op, registry, (iree_diagnostic_emitter_t){0},
-            &target)));
-    if (target.descriptor_set == NULL) {
-      return loomc_make_status(
-          LOOMC_STATUS_FAILED_PRECONDITION,
-          "module text serialization could not resolve a target-low "
-          "descriptor set for one or more low functions");
-    }
-    if (!*out_found_descriptor_set) {
-      *out_descriptor_set_key =
-          loomc_string_view_from_iree(target.descriptor_set_key);
-      *out_found_descriptor_set = true;
-      continue;
-    }
-    if (!loomc_string_view_equal(
-            *out_descriptor_set_key,
-            loomc_string_view_from_iree(target.descriptor_set_key))) {
-      return loomc_make_status(
-          LOOMC_STATUS_INVALID_ARGUMENT,
-          "module text serialization found multiple target-low descriptor "
-          "sets; pass low_asm_descriptor_set_key or request generic text");
-    }
-  }
-  return loomc_ok_status();
-}
-
 static loomc_status_t loomc_module_text_print_options(
-    const loomc_module_t* module, const loom_module_t* internal_module,
+    const loomc_module_t* module,
     const loomc_module_resolved_serialize_options_t* options,
     loom_text_print_options_t* out_options) {
   *out_options = (loom_text_print_options_t){
       .flags = LOOM_TEXT_PRINT_DEFAULT,
   };
+  if (options->text_presentation == LOOMC_MODULE_TEXT_PRESENTATION_GENERIC) {
+    return loomc_ok_status();
+  }
   const loomc_target_pass_environment_t* target_environment =
       loomc_context_target_pass_environment(module->context);
   loomc_target_pass_environment_initialize_text_asm_environment(
       target_environment, &out_options->low_asm_environment);
-  if (options->text_presentation == LOOMC_MODULE_TEXT_PRESENTATION_GENERIC) {
-    return loomc_ok_status();
-  }
+  out_options->flags |= LOOM_TEXT_PRINT_PREFER_LOW_ASM;
   if (!loomc_string_view_is_empty(options->low_asm_descriptor_set_key)) {
     out_options->low_asm_descriptor_set_key =
         iree_string_view_from_loomc(options->low_asm_descriptor_set_key);
-    return loomc_ok_status();
-  }
-
-  loomc_string_view_t descriptor_set_key = loomc_string_view_empty();
-  bool found_low_function = false;
-  bool found_descriptor_set = false;
-  LOOMC_RETURN_IF_ERROR(loomc_module_select_single_low_descriptor_set_key(
-      internal_module, target_environment, &descriptor_set_key,
-      &found_low_function, &found_descriptor_set));
-  if (found_descriptor_set) {
-    out_options->low_asm_descriptor_set_key =
-        iree_string_view_from_loomc(descriptor_set_key);
-    return loomc_ok_status();
   }
   if (options->text_presentation == LOOMC_MODULE_TEXT_PRESENTATION_LOW_ASM) {
-    return loomc_make_status(
-        found_low_function ? LOOMC_STATUS_FAILED_PRECONDITION
-                           : LOOMC_STATUS_NOT_FOUND,
-        "module text serialization could not infer a target-low descriptor "
-        "set");
+    out_options->flags |= LOOM_TEXT_PRINT_REQUIRE_LOW_ASM;
   }
   return loomc_ok_status();
 }
@@ -651,8 +578,8 @@ static loomc_status_t loomc_module_serialize_text_to_iree_stream(
       .user_data = target_stream,
   };
   loom_text_print_options_t print_options;
-  LOOMC_RETURN_IF_ERROR(loomc_module_text_print_options(
-      module, internal_module, options, &print_options));
+  LOOMC_RETURN_IF_ERROR(
+      loomc_module_text_print_options(module, options, &print_options));
   return loomc_status_from_iree(loom_text_print_module_with_options(
       internal_module, &output_stream, &print_options));
 }
@@ -663,8 +590,8 @@ static loomc_status_t loomc_module_serialize_text_to_file(
   loom_output_stream_t output_stream;
   loom_output_stream_for_file(file, &output_stream);
   loom_text_print_options_t print_options;
-  LOOMC_RETURN_IF_ERROR(loomc_module_text_print_options(
-      module, internal_module, options, &print_options));
+  LOOMC_RETURN_IF_ERROR(
+      loomc_module_text_print_options(module, options, &print_options));
   return loomc_status_from_iree(loom_text_print_module_with_options(
       internal_module, &output_stream, &print_options));
 }
@@ -678,8 +605,8 @@ static loomc_status_t loomc_module_serialize_text_to_source(
   iree_string_builder_initialize(iree_allocator_from_loomc(allocator),
                                  &builder);
   loom_text_print_options_t print_options;
-  loomc_status_t status = loomc_module_text_print_options(
-      module, internal_module, options, &print_options);
+  loomc_status_t status =
+      loomc_module_text_print_options(module, options, &print_options);
   if (loomc_status_is_ok(status)) {
     status =
         loomc_status_from_iree(loom_text_print_module_to_builder_with_options(
@@ -905,6 +832,8 @@ loomc_status_t loomc_module_create_empty(loomc_context_t* context,
   loomc_context_retain(context);
   module->workspace = workspace;
   loomc_workspace_retain(workspace);
+  iree_arena_initialize(loomc_workspace_block_pool(workspace),
+                        &module->function_version_arena);
 
   *out_module = module;
   return loomc_ok_status();
@@ -944,6 +873,27 @@ loom_module_t* loomc_module_loom_module(loomc_module_t* module) {
 const loom_module_t* loomc_module_const_loom_module(
     const loomc_module_t* module) {
   return module ? module->module : NULL;
+}
+
+iree_arena_allocator_t* loomc_module_prepare_function_versions(
+    loomc_module_t* module) {
+  IREE_ASSERT_ARGUMENT(module);
+  iree_arena_reset(&module->function_version_arena);
+  module->function_versions = (loom_function_version_list_t){0};
+  return &module->function_version_arena;
+}
+
+void loomc_module_publish_function_versions(
+    loomc_module_t* module, loom_function_version_list_t function_versions) {
+  IREE_ASSERT_ARGUMENT(module);
+  module->function_versions = function_versions;
+}
+
+const loom_function_version_list_t* loomc_module_function_versions(
+    const loomc_module_t* module) {
+  return module && module->function_versions.count != 0
+             ? &module->function_versions
+             : NULL;
 }
 
 void loomc_module_retain(loomc_module_t* module) {

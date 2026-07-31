@@ -353,7 +353,7 @@ static iree_status_t iree_run_loom_run_pass_pipeline(
     const iree_run_loom_configuration_t* configuration,
     loom_run_session_t* session, loom_run_module_t* run_module,
     const loom_run_candidate_compile_options_t* compile_options,
-    loom_pass_run_result_t* out_run_result) {
+    loom_compile_pipeline_result_t* out_result) {
   loom_compile_pipeline_options_t pipeline_options = {0};
   loom_compile_pipeline_options_initialize(&pipeline_options);
   pipeline_options.pipeline = iree_make_cstring_view(FLAG_pipeline);
@@ -370,7 +370,7 @@ static iree_status_t iree_run_loom_run_pass_pipeline(
   };
   return loom_compile_run_pipeline(run_module->module, &pipeline_options,
                                    loom_run_session_block_pool(session),
-                                   out_run_result);
+                                   out_result);
 }
 
 static iree_status_t iree_run_loom_make_unknown_backend_status(
@@ -575,6 +575,7 @@ int iree_run_loom_main(int argc, char** argv,
   }
   loom_run_candidate_compile_options_t compile_options = {0};
   loom_run_candidate_compile_options_initialize(&compile_options);
+  loom_compile_pipeline_result_t pipeline_result = {0};
   compile_options.module_name = iree_make_cstring_view(FLAG_module_name);
   if (iree_status_is_ok(status)) {
     status = iree_run_loom_sanitizer_options_initialize(
@@ -618,11 +619,10 @@ int iree_run_loom_main(int argc, char** argv,
         loom_run_module_source_resolver(&run_module);
   }
   if (iree_status_is_ok(status)) {
-    loom_pass_run_result_t pass_run_result = {0};
     status =
         iree_run_loom_run_pass_pipeline(configuration, &session, &run_module,
-                                        &compile_options, &pass_run_result);
-    if (iree_status_is_ok(status) && pass_run_result.error_count != 0) {
+                                        &compile_options, &pipeline_result);
+    if (iree_status_is_ok(status) && pipeline_result.pass.error_count != 0) {
       exit_code = 1;
     }
   }
@@ -654,6 +654,7 @@ int iree_run_loom_main(int argc, char** argv,
 
   loom_run_compile_report_capture_deinitialize(&compile_report_capture);
   loom_run_one_shot_result_deinitialize(&run_result);
+  loom_compile_pipeline_result_deinitialize(&pipeline_result);
   loom_run_module_deinitialize(&run_module);
   iree_io_file_contents_free(contents);
   loom_run_session_deinitialize(&session);

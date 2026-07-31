@@ -12,7 +12,7 @@ func.def target(@target) @i32_uniform_vector_bitcast(%input: buffer) -> (vector<
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32_uniform_vector_bitcast() -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_uniform_vector_bitcast() -> (reg<amdgpu.vgpr x4>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %10 = s_mov_b32 0
   %loaded = s_load_dwordx4 %input_view, %10

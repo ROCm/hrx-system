@@ -120,37 +120,31 @@ static bool loom_print_attr_is_optional(const loom_op_vtable_t* vtable,
                           LOOM_ATTR_OPTIONAL);
 }
 
-static bool loom_print_symbol_ref_targets_register_context(
-    const loom_op_vtable_t* vtable, uint16_t attr_index) {
-  if (!vtable->func_like || !vtable->attr_descriptors ||
-      attr_index >= vtable->attribute_count) {
-    return false;
-  }
-  const loom_attr_descriptor_t* descriptor =
-      &vtable->attr_descriptors[attr_index];
-  return descriptor->symbol_ref &&
-         iree_any_bit_set(descriptor->symbol_ref->interfaces,
-                          LOOM_SYMBOL_INTERFACE_TARGET);
-}
-
-static iree_status_t loom_print_update_register_context_from_target(
+static iree_status_t loom_print_update_low_repr_context(
     loom_print_context_t* ctx, const loom_op_vtable_t* vtable,
     uint16_t attr_index, loom_attribute_t attr) {
-  if (!loom_print_symbol_ref_targets_register_context(vtable, attr_index)) {
+  if (!vtable->func_like ||
+      vtable->func_like->repr_contract_attr_index == LOOM_ATTR_INDEX_NONE ||
+      vtable->func_like->repr_contract_attr_index != attr_index) {
     return iree_ok_status();
   }
+  if (attr.kind != LOOM_ATTR_STRING ||
+      attr.string_id == LOOM_STRING_ID_INVALID ||
+      attr.string_id >= ctx->module->strings.count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "function representation contract must be a valid string key");
+  }
+  ctx->low_repr = (loom_text_low_repr_context_t){
+      .contract_key = ctx->module->strings.entries[attr.string_id],
+  };
   if (!ctx->low_asm_environment.vtable ||
-      !ctx->low_asm_environment.vtable->lookup_target_descriptor_set) {
+      !ctx->low_asm_environment.vtable->lookup_descriptor_set) {
     return iree_ok_status();
   }
-  const loom_text_low_asm_descriptor_set_t* descriptor_set = NULL;
-  IREE_RETURN_IF_ERROR(
-      ctx->low_asm_environment.vtable->lookup_target_descriptor_set(
-          ctx->low_asm_environment.state, ctx->module, attr, &descriptor_set));
-  if (descriptor_set != NULL) {
-    ctx->low_register_descriptor_set = descriptor_set;
-  }
-  return iree_ok_status();
+  return ctx->low_asm_environment.vtable->lookup_descriptor_set(
+      ctx->low_asm_environment.state, ctx->low_repr.contract_key,
+      &ctx->low_repr.descriptor_set);
 }
 
 //===----------------------------------------------------------------------===//
@@ -309,9 +303,6 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         IREE_RETURN_IF_ERROR(loom_print_attr_with_field(
             ctx, &loom_op_attrs(op)[element->field_index], NULL,
             loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index)));
-        IREE_RETURN_IF_ERROR(loom_print_update_register_context_from_target(
-            ctx, vtable, element->field_index,
-            loom_op_attrs(op)[element->field_index]));
         break;
       }
       case LOOM_FORMAT_KIND_OPERAND_TYPE: {
@@ -548,14 +539,14 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         }
         break;
       }
-      case LOOM_FORMAT_KIND_OP_REF: {
-        // Op kind reference in angle brackets, glued to the op name:
-        // func.template<tile.contract>. The field_index references a
-        // string attribute holding the target op name.
+      case LOOM_FORMAT_KIND_KEY_REF: {
+        // Bare symbolic key in angle brackets, glued to the preceding token:
+        // func.template<tile.contract>. The field_index references a string
+        // attribute holding the canonical key spelling.
         if (element->field_index >= op->attribute_count) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
-              "format OP_REF field_index %u out of range (op has %u "
+              "format KEY_REF field_index %u out of range (op has %u "
               "attributes)",
               element->field_index, op->attribute_count);
         }
@@ -563,18 +554,19 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         if (attr.kind == LOOM_ATTR_STRING &&
             attr.string_id != LOOM_STRING_ID_INVALID &&
             attr.string_id < ctx->module->strings.count) {
-          iree_string_view_t op_name =
-              ctx->module->strings.entries[attr.string_id];
-          iree_host_size_t op_ref_start = ctx->stream->offset;
+          iree_string_view_t key = ctx->module->strings.entries[attr.string_id];
+          iree_host_size_t key_ref_start = ctx->stream->offset;
           IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "<", true));
-          IREE_RETURN_IF_ERROR(loom_print_emit(ctx, op_name, true));
+          IREE_RETURN_IF_ERROR(loom_print_emit(ctx, key, true));
           IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ">", true));
           loom_print_did_write(ctx);
           loom_print_report_field(
               ctx,
               loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index),
-              op_ref_start, ctx->stream->offset);
+              key_ref_start, ctx->stream->offset);
         }
+        IREE_RETURN_IF_ERROR(loom_print_update_low_repr_context(
+            ctx, vtable, element->field_index, attr));
         break;
       }
       case LOOM_FORMAT_KIND_DESCRIPTOR_REF:

@@ -8,7 +8,7 @@ func.def target(@target) @workgroup_barrier() {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @workgroup_barrier() asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @workgroup_barrier() asm {
   s_barrier
   return
 }
@@ -22,7 +22,7 @@ func.def target(@target) @subgroup_shared_memory_barrier() {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @subgroup_shared_memory_barrier() asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @subgroup_shared_memory_barrier() asm {
   s_waitcnt {lgkmcnt = 0}
   return
 }

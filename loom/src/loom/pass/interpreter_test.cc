@@ -83,10 +83,31 @@ TEST_F(PassInterpreterTest, RunsFunctionRootProgram) {
                     "}\n"));
   ASSERT_NE(module, nullptr);
 
+  loom_function_version_type_t version_type = {
+      /*.name=*/IREE_SVL("test"),
+  };
+  loom_function_version_t version = {
+      /*.type=*/&version_type,
+      /*.function=*/Function(module, 1),
+  };
+  loom_function_version_t* version_values[] = {&version};
+  const loom_function_version_list_t versions = {
+      /*.values=*/version_values,
+      /*.count=*/IREE_ARRAYSIZE(version_values),
+  };
+
+  PassProgramStorage storage;
+  IREE_ASSERT_OK(Compile(module, Pipeline(module, 0), &storage.program));
   loom_test_pass_trace_t trace = {};
-  IREE_ASSERT_OK(RunFunctionPipeline(module, 0, 1, &trace));
+  loom_pass_interpreter_options_t options = InterpreterOptions(&trace);
+  options.function_versions = &versions;
+  loom_pass_run_result_t result = {};
+  IREE_ASSERT_OK(loom_pass_interpreter_run_function(
+      &storage.program, module, version.function, &options, &result));
 
   EXPECT_EQ(trace.noop_invocation_count, 1);
+  ASSERT_EQ(trace.event_count, 1u);
+  EXPECT_EQ(trace.events[0].function_version, &version);
 }
 
 TEST_F(PassInterpreterTest, AppendsExecutionReportRecords) {
@@ -261,18 +282,49 @@ TEST_F(PassInterpreterTest, AppliesProviderPredicateToCurrentFunction) {
       /*.verify_count=*/{},
       /*.evaluate_count=*/{},
       /*.selected_symbol=*/IREE_SV("selected"),
+      /*.selected_function_version=*/nullptr,
   };
   loom_pass_predicate_provider_t predicate_provider =
       PassTestTargetPredicateProvider(&predicate_capture);
 
+  loom_function_version_type_t version_type = {
+      /*.name=*/IREE_SVL("test"),
+  };
+  loom_function_version_t selected_version = {
+      /*.type=*/&version_type,
+      /*.function=*/Function(module, 1),
+  };
+  loom_function_version_t skipped_version = {
+      /*.type=*/&version_type,
+      /*.function=*/Function(module, 2),
+  };
+  loom_function_version_t* version_values[] = {
+      &selected_version,
+      &skipped_version,
+  };
+  const loom_function_version_list_t versions = {
+      /*.values=*/version_values,
+      /*.count=*/IREE_ARRAYSIZE(version_values),
+  };
+
+  PassProgramStorage storage;
+  IREE_ASSERT_OK(Compile(module, Pipeline(module, 0), &storage.program,
+                         predicate_provider));
   loom_test_pass_trace_t trace = {};
-  IREE_ASSERT_OK(RunModulePipeline(module, 0, &trace, predicate_provider));
+  loom_pass_interpreter_options_t options =
+      InterpreterOptions(&trace, {}, nullptr, predicate_provider);
+  options.function_versions = &versions;
+  loom_pass_run_result_t result = {};
+  IREE_ASSERT_OK(loom_pass_interpreter_run_module(&storage.program, module,
+                                                  &options, &result));
 
   EXPECT_EQ(predicate_capture.verify_count, 1);
   EXPECT_EQ(predicate_capture.evaluate_count, 2);
+  EXPECT_EQ(predicate_capture.selected_function_version, &selected_version);
   ASSERT_EQ(trace.event_count, 1u);
   EXPECT_TRUE(
       iree_string_view_equal(trace.events[0].symbol_name, IREE_SV("selected")));
+  EXPECT_EQ(trace.events[0].function_version, &selected_version);
 }
 
 TEST_F(PassInterpreterTest, RunsIfChangedForEachMutatedAnchor) {

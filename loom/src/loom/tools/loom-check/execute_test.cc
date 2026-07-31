@@ -493,12 +493,12 @@ static const char kVerifyTestLowTarget[] =
 
 TEST_F(ExecuteTest, VerifyRunsLowDescriptorVerifier) {
   loom_check_result_t result;
-  std::string source =
-      std::string("// RUN: verify\n") + kVerifyTestLowTarget +
-      "low.func.def target(@test_target) @constant() -> (reg<test.i32>) {\n"
-      "  %c0 = low.const<test.const.i32> : reg<test.i32>\n"
-      "  low.return %c0 : reg<test.i32>\n"
-      "}\n";
+  std::string source = std::string("// RUN: verify\n") + kVerifyTestLowTarget +
+                       "low.func.def target<test.low.core>(@test_target) "
+                       "@constant() -> (reg<test.i32>) {\n"
+                       "  %c0 = low.const<test.const.i32> : reg<test.i32>\n"
+                       "  low.return %c0 : reg<test.i32>\n"
+                       "}\n";
   IREE_ASSERT_OK(ExecuteFirst(source.c_str(), &result));
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL)
       << "detail: " << DetailString(result);
@@ -1346,8 +1346,9 @@ TEST_F(ExecuteTest, EmitSourceLowLowersEveryTargetedFunction) {
   EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
   const std::string actual_output = ActualOutputString(result);
-  EXPECT_NE(actual_output.find("low.func.def target(@test_target)"),
-            std::string::npos);
+  EXPECT_NE(
+      actual_output.find("low.func.def target<test.low.core>(@test_target)"),
+      std::string::npos);
   EXPECT_NE(actual_output.find("@first()"), std::string::npos);
   EXPECT_NE(actual_output.find("@second()"), std::string::npos);
   EXPECT_EQ(actual_output.find("\nfunc.def target(@test_target) @first"),
@@ -1359,18 +1360,19 @@ TEST_F(ExecuteTest, EmitSourceLowLowersEveryTargetedFunction) {
 
 TEST_F(ExecuteTest, EmitLivenessJsonReportsPressureSummary) {
   loom_check_result_t result;
-  IREE_ASSERT_OK(ExecuteFirst(
-      "// RUN: emit liveness-json @pressure\n"
-      "test.target<low_core> @test_target\n"
-      "low.func.def target(@test_target) @pressure(%a: reg<test.i32>, "
-      "%b: reg<test.i32>, %c: reg<test.i32>) -> "
-      "(reg<test.i32>) {\n"
-      "  %ab = low.copy %a : reg<test.i32> -> reg<test.i32>\n"
-      "  %bc = low.copy %b : reg<test.i32> -> reg<test.i32>\n"
-      "  %cc = low.copy %c : reg<test.i32> -> reg<test.i32>\n"
-      "  low.return %ab : reg<test.i32>\n"
-      "}\n",
-      &result));
+  IREE_ASSERT_OK(
+      ExecuteFirst("// RUN: emit liveness-json @pressure\n"
+                   "test.target<low_core> @test_target\n"
+                   "low.func.def target<test.low.core>(@test_target) "
+                   "@pressure(%a: reg<test.i32>, "
+                   "%b: reg<test.i32>, %c: reg<test.i32>) -> "
+                   "(reg<test.i32>) {\n"
+                   "  %ab = low.copy %a : reg<test.i32> -> reg<test.i32>\n"
+                   "  %bc = low.copy %b : reg<test.i32> -> reg<test.i32>\n"
+                   "  %cc = low.copy %c : reg<test.i32> -> reg<test.i32>\n"
+                   "  low.return %ab : reg<test.i32>\n"
+                   "}\n",
+                   &result));
   EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
   const std::string actual_output = ActualOutputString(result);

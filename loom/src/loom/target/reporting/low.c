@@ -117,8 +117,9 @@ loom_target_compile_report_bank_service(
 static iree_string_view_t
 loom_target_compile_report_low_frame_emitted_function_name(
     const loom_low_emission_frame_t* frame) {
-  const iree_string_view_t export_symbol =
-      frame->target.bundle_storage.export_plan.export_symbol;
+  const loom_target_bundle_t* bundle =
+      loom_low_resolved_target_bundle(&frame->target);
+  const iree_string_view_t export_symbol = bundle->export_plan->export_symbol;
   if (!iree_string_view_is_empty(export_symbol)) {
     return export_symbol;
   }
@@ -128,16 +129,17 @@ loom_target_compile_report_low_frame_emitted_function_name(
 static void loom_target_compile_report_record_low_frame_identity(
     loom_target_compile_report_t* report,
     const loom_low_emission_frame_t* frame) {
+  const loom_target_bundle_t* bundle =
+      loom_low_resolved_target_bundle(&frame->target);
   report->function_name =
       loom_target_compile_report_low_frame_emitted_function_name(frame);
   report->lowered_symbol =
       loom_low_diagnostic_function_name(frame->module, frame->function_op);
-  report->target_bundle_name = frame->target.bundle_storage.bundle.name;
-  report->target_snapshot_name = frame->target.bundle_storage.snapshot.name;
-  report->target_export_name = frame->target.bundle_storage.export_plan.name;
-  report->target_export_symbol =
-      frame->target.bundle_storage.export_plan.export_symbol;
-  report->target_config_name = frame->target.bundle_storage.config.name;
+  report->target_bundle_name = bundle->name;
+  report->target_snapshot_name = bundle->snapshot->name;
+  report->target_export_name = bundle->export_plan->name;
+  report->target_export_symbol = bundle->export_plan->export_symbol;
+  report->target_config_name = bundle->config->name;
 }
 
 static void loom_target_compile_report_record_move_cause_if_nonzero(

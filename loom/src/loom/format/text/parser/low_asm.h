@@ -85,6 +85,11 @@ iree_status_t loom_parse_low_asm_prefixed_region(
     loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
     loom_region_t** out_region);
 
+// Parses `asm { ... }` using the active function representation contract.
+iree_status_t loom_parse_low_asm_marked_region(
+    loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
+    loom_region_t** out_region);
+
 // Parses a braced low-asm region inheriting the active descriptor set.
 iree_status_t loom_parse_low_asm_inherited_region(
     loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,

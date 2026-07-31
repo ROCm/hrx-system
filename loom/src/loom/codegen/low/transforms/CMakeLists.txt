@@ -32,6 +32,7 @@ loom_cc_library(
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::types
+    loom::target::function_version
   PUBLIC
 )
 
@@ -74,6 +75,7 @@ loom_cc_library(
     loom::ops::low
     loom::ops::op_defs
     loom::pass::types
+    loom::target::function_version
     loom::transforms::cleanup::dce
   PUBLIC
 )
@@ -109,6 +111,7 @@ loom_cc_library(
     loom::rewrite::materialize
     loom::rewrite::remap
     loom::rewrite::rewriter
+    loom::target::function_version
   PUBLIC
 )
 

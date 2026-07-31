@@ -35,7 +35,8 @@ loom_generated_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::op_defs
-    loom::target::materialization
+    loom::target::facts
+    loom::target::projection
     loom::target::types
 )
 
@@ -52,7 +53,6 @@ loom_cc_test(
     loom::analysis::symbol_facts
     loom::format::text::parser
     loom::ir
-    loom::target::materialization
     loom::testing::module_ptr
 )
 

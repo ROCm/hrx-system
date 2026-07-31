@@ -12,15 +12,22 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
+#include "loom/ops/func_symbol_facts.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/op_registry.h"
+#include "loom/ops/target/facts.h"
 #include "loom/target/arch/llvmir/descriptors/low_registry.h"
+#include "loom/target/emit/llvmir/artifact_emitter.h"
 #include "loom/target/emit/llvmir/target_presets.h"
 #include "loom/target/emit/llvmir/text_writer.h"
 #include "loom/target/emit/llvmir/verify.h"
+#include "loom/target/function_contract.h"
+#include "loom/target/function_version.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/util/stream.h"
@@ -159,6 +166,15 @@ class LlvmirModuleEmitterTest : public ::testing::Test {
     return ModulePtr(module);
   }
 
+  loom_symbol_id_t FindSymbol(const loom_module_t* module,
+                              iree_string_view_t name) {
+    const loom_string_id_t name_id = loom_module_lookup_string(module, name);
+    IREE_ASSERT(name_id != LOOM_STRING_ID_INVALID);
+    const loom_symbol_id_t symbol_id = loom_module_find_symbol(module, name_id);
+    IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
+    return symbol_id;
+  }
+
   iree_status_t EmitLowModule(loom_module_t* module,
                               DiagnosticEmissionCapture* capture,
                               LlvmirModulePtr* out_module) {
@@ -201,6 +217,46 @@ class LlvmirModuleEmitterTest : public ::testing::Test {
     return status;
   }
 
+  iree_status_t EmitTextArtifact(
+      loom_module_t* module,
+      const loom_function_version_list_t* function_versions,
+      DiagnosticEmissionCapture* capture, std::string* out_text) {
+    const loom_target_emitter_t* text_emitter = nullptr;
+    const loom_target_emitter_list_t emitters =
+        loom_llvmir_artifact_emitter_provider.emitter_list;
+    for (iree_host_size_t i = 0; i < emitters.count; ++i) {
+      if (emitters.values[i]->target_artifact_format ==
+          LOOM_TARGET_ARTIFACT_FORMAT_LLVMIR_TEXT) {
+        text_emitter = emitters.values[i];
+        break;
+      }
+    }
+    IREE_ASSERT(text_emitter != nullptr);
+
+    iree_arena_allocator_t scratch_arena;
+    iree_arena_initialize(&block_pool_, &scratch_arena);
+    loom_target_emit_artifact_t artifact = {};
+    loom_target_emit_request_t request = {};
+    request.low_descriptor_registry = &low_registry_.registry;
+    request.module = module;
+    request.function_versions = function_versions;
+    request.identifier = IREE_SV("module.ll");
+    request.diagnostic_emitter = capture->emitter();
+    request.scratch_arena = &scratch_arena;
+    request.allocator = iree_allocator_system();
+    iree_status_t status = text_emitter->emit(&request, &artifact);
+    if (iree_status_is_ok(status) && artifact.contents.data != nullptr) {
+      out_text->assign(reinterpret_cast<const char*>(artifact.contents.data),
+                       artifact.contents.data_length);
+    }
+    if (artifact.storage != nullptr) {
+      IREE_ASSERT(artifact.release != nullptr);
+      artifact.release(artifact.storage, iree_allocator_system());
+    }
+    iree_arena_deinitialize(&scratch_arena);
+    return status;
+  }
+
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   loom_target_low_descriptor_registry_t low_registry_ = {};
@@ -213,12 +269,12 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 
-low.func.def target(@target) abi(object_function) @first(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @first(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %sum = add.i32 %lhs, %rhs
   return %sum
 }
 
-low.func.def target(@target) abi(object_function) @second(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %bounded_i: reg<llvmir.i64>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @second(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %bounded_i: reg<llvmir.i64>) -> (reg<llvmir.i32>) asm {
   %loaded = load.indexed.i32 %input_view, %bounded_i, 16, 4
   store.indexed.i32 %loaded, %output_view, %bounded_i, 32, 4
   return %loaded
@@ -244,6 +300,89 @@ low.func.def target(@target) abi(object_function) @second(%input_view: reg<llvmi
   EXPECT_NE(text.find("store i32 %loaded"), std::string::npos) << text;
 }
 
+TEST_F(LlvmirModuleEmitterTest,
+       EmitsTargetlessFunctionFromEffectiveFactsWithoutMutatingIR) {
+  ModulePtr module = ParseModule(R"(
+llvmir.target<object> @specialized {
+  triple = "loom-specialized64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+
+low.func.def target<llvmir.generic.core> abi(object_function) @entry() asm {
+  return
+}
+)");
+  const loom_symbol_id_t function_symbol_id =
+      FindSymbol(module.get(), IREE_SV("entry"));
+  const loom_func_like_t function = loom_func_like_cast(
+      module.get(), module->symbols.entries[function_symbol_id].defining_op);
+  ASSERT_TRUE(loom_func_like_isa(function));
+  const loom_symbol_ref_t authored_target = loom_func_like_target(function);
+  ASSERT_FALSE(loom_symbol_ref_is_valid(authored_target));
+  const iree_host_size_t authored_symbol_count = module->symbols.count;
+
+  iree_arena_allocator_t version_arena;
+  iree_arena_initialize(&block_pool_, &version_arena);
+  loom_symbol_fact_table_t symbol_facts = {};
+  loom_symbol_fact_table_initialize(&symbol_facts, &version_arena);
+  const loom_symbol_facts_base_t* base_function_facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup(
+      &symbol_facts, module.get(), function_symbol_id, &base_function_facts));
+  const loom_func_symbol_facts_t* function_facts =
+      loom_func_symbol_facts_cast(base_function_facts);
+  ASSERT_NE(function_facts, nullptr);
+
+  const loom_symbol_id_t exact_target_symbol_id =
+      FindSymbol(module.get(), IREE_SV("specialized"));
+  const loom_symbol_facts_base_t* base_exact_target_facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup(&symbol_facts, module.get(),
+                                               exact_target_symbol_id,
+                                               &base_exact_target_facts));
+  const loom_target_symbol_facts_t* exact_target_facts =
+      loom_target_symbol_facts_cast(base_exact_target_facts);
+  ASSERT_NE(exact_target_facts, nullptr);
+  bool contract_valid = false;
+  const loom_target_facts_t* effective_target_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_function_contract_refine_facts(
+      module.get(), function_facts, exact_target_facts->name,
+      exact_target_facts->projection, iree_diagnostic_emitter_t{},
+      &version_arena, &contract_valid, &effective_target_facts));
+  ASSERT_TRUE(contract_valid);
+  ASSERT_NE(effective_target_facts, nullptr);
+
+  loom_target_function_version_t function_version = {};
+  function_version.base.type = &loom_target_function_version_type;
+  function_version.base.function = function;
+  function_version.effective_target_facts = effective_target_facts;
+  loom_function_version_t* version_values[] = {
+      &function_version.base,
+  };
+  loom_function_version_list_t function_versions = {};
+  function_versions.values = version_values;
+  function_versions.count = IREE_ARRAYSIZE(version_values);
+
+  DiagnosticEmissionCapture exact_capture;
+  std::string exact_text;
+  IREE_ASSERT_OK(EmitTextArtifact(module.get(), &function_versions,
+                                  &exact_capture, &exact_text));
+  EXPECT_TRUE(exact_capture.emissions.empty());
+  EXPECT_FALSE(exact_text.empty());
+  EXPECT_NE(
+      exact_text.find("target triple = \"loom-specialized64-unknown-none\""),
+      std::string::npos)
+      << exact_text;
+  EXPECT_NE(exact_text.find("target datalayout = "
+                            "\"e-p:64:64-i64:64-n8:16:32:64-S128\""),
+            std::string::npos)
+      << exact_text;
+
+  EXPECT_EQ(module->symbols.count, authored_symbol_count);
+  const loom_symbol_ref_t emitted_target = loom_func_like_target(function);
+  EXPECT_EQ(emitted_target.module_id, authored_target.module_id);
+  EXPECT_EQ(emitted_target.symbol_id, authored_target.symbol_id);
+  iree_arena_deinitialize(&version_arena);
+}
+
 TEST_F(LlvmirModuleEmitterTest, EmitsFusedMultiplyAddIntrinsics) {
   ModulePtr module = ParseModule(R"(
 llvmir.target<object> @target {
@@ -251,12 +390,12 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 
-low.func.def target(@target) abi(object_function) @fma_scalar(%a: reg<llvmir.f32>, %b: reg<llvmir.f32>, %c: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @fma_scalar(%a: reg<llvmir.f32>, %b: reg<llvmir.f32>, %c: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %result = fma.f32 %a, %b, %c
   return %result
 }
 
-low.func.def target(@target) abi(object_function) @fma_vector(%a: reg<llvmir.f32 x4>, %b: reg<llvmir.f32 x4>, %c: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @fma_vector(%a: reg<llvmir.f32 x4>, %b: reg<llvmir.f32 x4>, %c: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm {
   %result = fma.v4f32 %a, %b, %c
   return %result
 }
@@ -294,13 +433,13 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 
-low.func.def target(@target) abi(object_function) @unary_scalar(%input: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @unary_scalar(%input: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %negated = neg.f32 %input
   %result = abs.f32 %negated
   return %result
 }
 
-low.func.def target(@target) abi(object_function) @unary_vector(%input: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @unary_vector(%input: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm {
   %negated = neg.v4f32 %input
   %result = abs.v4f32 %negated
   return %result
@@ -340,13 +479,13 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 
-low.func.def target(@target) abi(object_function) @minmax_scalar(%lhs: reg<llvmir.f32>, %rhs: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @minmax_scalar(%lhs: reg<llvmir.f32>, %rhs: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %min = minnum.f32 %lhs, %rhs
   %result = maxnum.f32 %min, %rhs
   return %result
 }
 
-low.func.def target(@target) abi(object_function) @minmax_vector(%lhs: reg<llvmir.f32 x2>, %rhs: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @minmax_vector(%lhs: reg<llvmir.f32 x2>, %rhs: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm {
   %min = minnum.v2f32 %lhs, %rhs
   %result = maxnum.v2f32 %min, %rhs
   return %result
@@ -392,7 +531,7 @@ llvmir.target<object> @target {
   triple = "loom-kernel64-unknown-none"
 }
 
-low.kernel.def target(@target) workgroup_size(128, 2, 1) @dispatch() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(128, 2, 1) @dispatch() asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %value = load.i32 %input, 4
   return
@@ -434,7 +573,7 @@ llvmir.target<object> @target {
   triple = "loom-kernel64-unknown-none"
 }
 
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @dispatch() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) @dispatch() asm {
   %tid = kernel.workitem_id.x
   %bytes = const.i64 256
   %scratch = alloca.workgroup.i8 %bytes, 16
@@ -472,7 +611,7 @@ llvmir.target<object> @target {
   triple = "loom-kernel64-unknown-none"
 }
 
-low.kernel.def target(@target) @dispatch() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) @dispatch() asm {
   return
 }
 )");
@@ -501,7 +640,7 @@ llvmir.target<object> @target {
   triple = "loom-kernel64-unknown-none"
 }
 
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @dispatch() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) @dispatch() asm {
   %tid = kernel.workitem_id.y
   return
 }
@@ -528,7 +667,7 @@ llvmir.target<object> @target {
   triple = "loom-kernel64-unknown-none"
 }
 
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @dispatch(%input: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) @dispatch(%input: reg<llvmir.ptr>) asm {
   return
 }
 )");
@@ -558,7 +697,7 @@ llvmir.target<object> @target {
   triple = "loom-kernel64-unknown-none"
 }
 
-low.func.def target(@target) @dispatch() asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) @dispatch() asm {
   return
 }
 )");
@@ -587,7 +726,7 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 
-low.func.def target(@target) abi(object_function) @multi_result(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>, reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @multi_result(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>, reg<llvmir.i32>) asm {
   %sum = add.i32 %lhs, %rhs
   return %sum, %lhs
 }

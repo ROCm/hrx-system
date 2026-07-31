@@ -224,12 +224,11 @@ iree_status_t loom_print_op(loom_print_context_t* ctx, const loom_op_t* op) {
 
   // Walk format elements. Regions are printed inline when their REGION format
   // element is encountered, properly interleaving tokens with region bodies.
-  const loom_text_low_asm_descriptor_set_t* previous_descriptor_set =
-      ctx->low_register_descriptor_set;
+  const loom_text_low_repr_context_t previous_low_repr = ctx->low_repr;
   if (iree_status_is_ok(status)) {
     status = loom_print_format_elements(ctx, op, vtable);
   }
-  ctx->low_register_descriptor_set = previous_descriptor_set;
+  ctx->low_repr = previous_low_repr;
 
   // Location annotation (omitted for LOOM_LOCATION_UNKNOWN).
   if (iree_status_is_ok(status) && (ctx->flags & LOOM_TEXT_PRINT_LOCATIONS)) {

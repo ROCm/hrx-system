@@ -11,7 +11,7 @@ func.def target(@target) @i32x4_to_i8x4_bitpack(%codes: vector<4xi32>) -> (vecto
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x4_to_i8x4_bitpack(%codes: reg<llvmir.i32 x4>) -> (reg<llvmir.i8 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32x4_to_i8x4_bitpack(%codes: reg<llvmir.i32 x4>) -> (reg<llvmir.i8 x4>) asm {
   %30 = extract.v4i32 %codes, 0
   %31 = const.i32 255
   %32 = and.i32 %30, %31

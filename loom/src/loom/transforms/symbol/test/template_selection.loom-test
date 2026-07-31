@@ -327,14 +327,14 @@ func.def public @entry(%arg: i32) -> (i32) {
 
 // RUN: pass select-templates,inline-callables
 
-test.target<low_core> @gfx11
-test.target<low_core> @gfx12
+test.target<low_core> @low_core
+test.target<quirky> @quirky
 
-func.template<demo.targeted> target(@gfx12) priority(20) @gfx12_provider(%value: i32) -> (i32) {
+func.template<demo.targeted> target(@quirky) priority(20) @quirky_provider(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
-func.template<demo.targeted> target(@gfx11) priority(10) @gfx11_provider(%value: i32) -> (i32) {
+func.template<demo.targeted> target(@low_core) priority(10) @low_core_provider(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
 }
@@ -343,17 +343,17 @@ func.template<demo.targeted> priority(1) @fallback(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
-func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+func.def public target(@low_core) @entry(%arg: i32) -> (i32) {
   %result = func.apply<demo.targeted>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
 // ----
-test.target<low_core> @gfx11
+test.target<low_core> @low_core
 
-test.target<low_core> @gfx12
+test.target<quirky> @quirky
 
-func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+func.def public target(@low_core) @entry(%arg: i32) -> (i32) {
   %doubled = test.addi %arg, %arg : i32
   func.return %doubled : i32
 }
@@ -362,10 +362,10 @@ func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
 
 // RUN: pass select-templates,inline-callables
 
-test.target<low_core> @gfx11
-test.target<low_core> @gfx12
+test.target<low_core> @low_core
+test.target<quirky> @quirky
 
-func.template<demo.target_fallback> target(@gfx12) priority(20) @gfx12_provider(%value: i32) -> (i32) {
+func.template<demo.target_fallback> target(@quirky) priority(20) @quirky_provider(%value: i32) -> (i32) {
   %doubled = test.addi %value, %value : i32
   func.return %doubled : i32
 }
@@ -374,17 +374,17 @@ func.template<demo.target_fallback> priority(1) @fallback(%value: i32) -> (i32) 
   func.return %value : i32
 }
 
-func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+func.def public target(@low_core) @entry(%arg: i32) -> (i32) {
   %result = func.apply<demo.target_fallback>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
 // ----
-test.target<low_core> @gfx11
+test.target<low_core> @low_core
 
-test.target<low_core> @gfx12
+test.target<quirky> @quirky
 
-func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+func.def public target(@low_core) @entry(%arg: i32) -> (i32) {
   func.return %arg : i32
 }
 
@@ -392,26 +392,26 @@ func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
 
 // RUN: pass select-templates,inline-callables
 
-test.target<low_core> @gfx11
-test.target<low_core> @gfx12
+test.target<low_core> @low_core
+test.target<quirky> @quirky
 
-func.ukernel<demo.ukernel_target> target(@gfx12) priority(20) @gfx12_opaque(%value: i32) -> (i32)
+func.ukernel<demo.ukernel_target> target(@quirky) priority(20) @quirky_opaque(%value: i32) -> (i32)
 
 func.template<demo.ukernel_target> priority(1) @fallback(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
-func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+func.def public target(@low_core) @entry(%arg: i32) -> (i32) {
   %result = func.apply<demo.ukernel_target>(%arg) : (i32) -> (i32)
   func.return %result : i32
 }
 
 // ----
-test.target<low_core> @gfx11
+test.target<low_core> @low_core
 
-test.target<low_core> @gfx12
+test.target<quirky> @quirky
 
-func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
+func.def public target(@low_core) @entry(%arg: i32) -> (i32) {
   func.return %arg : i32
 }
 
@@ -419,9 +419,9 @@ func.def public target(@gfx11) @entry(%arg: i32) -> (i32) {
 
 // RUN: pass select-templates{mode=final}
 
-test.target<low_core> @gfx11
+test.target<low_core> @low_core
 
-func.template<demo.targetless_only> target(@gfx11) @gfx11_provider(%value: i32) -> (i32) {
+func.template<demo.targetless_only> target(@low_core) @low_core_provider(%value: i32) -> (i32) {
   func.return %value : i32
 }
 

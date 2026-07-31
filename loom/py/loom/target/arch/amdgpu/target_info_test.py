@@ -42,6 +42,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_TARGET_INFOS,
     amdgpu_descriptor_set_info_by_generator_target,
     amdgpu_descriptor_set_storage_info_by_generator_target,
+    amdgpu_descriptor_set_supported_target_contract_keys,
     amdgpu_descriptor_set_view_infos_by_storage_generator_target,
     amdgpu_generic_code_object_compatibility_info,
     amdgpu_target_descriptor_set_key,
@@ -196,6 +197,42 @@ def test_generic_descriptor_sets_have_independent_contracts() -> None:
             descriptor_sets_by_key[member.descriptor_set.key].generator_target
             for member in exact_members
         } == set(descriptor_set.member_generator_targets)
+
+
+def test_generic_descriptor_sets_derive_supported_target_contracts() -> None:
+    expected_contract_keys_by_generator_target = {
+        "gfx9_4_generic": (
+            "amdgpu.cdna3.core",
+            "amdgpu.cdna4.core",
+        ),
+        "gfx11_generic": (
+            "amdgpu.rdna3.core",
+            "amdgpu.rdna3_5.core",
+        ),
+        "gfx12_generic": ("amdgpu.rdna4.core",),
+        "gfx12_5_generic": (
+            "amdgpu.rdna4.gfx1250_a0.core",
+            "amdgpu.rdna4.gfx1251.core",
+            "amdgpu.rdna4.gfx125x.core",
+        ),
+    }
+
+    for (
+        generator_target,
+        expected_contract_keys,
+    ) in expected_contract_keys_by_generator_target.items():
+        descriptor_set = amdgpu_descriptor_set_info_by_generator_target(
+            generator_target
+        )
+        assert (
+            amdgpu_descriptor_set_supported_target_contract_keys(descriptor_set)
+            == expected_contract_keys
+        )
+
+    exact_descriptor_set = amdgpu_descriptor_set_info_by_generator_target("rdna3_5")
+    assert (
+        amdgpu_descriptor_set_supported_target_contract_keys(exact_descriptor_set) == ()
+    )
 
 
 def test_matrix_feature_profiles_model_replacement_instruction_shapes() -> None:

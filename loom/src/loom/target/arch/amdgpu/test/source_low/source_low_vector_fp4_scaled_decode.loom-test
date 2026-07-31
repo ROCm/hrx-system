@@ -8,7 +8,7 @@ func.def target(@target) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: vector<2xi
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: reg<amdgpu.vgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: reg<amdgpu.vgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm {
   %8 = s_mov_b32 262152
   %9 = s_mov_b32 262148
   %10 = s_mov_b32 1178878528
@@ -120,7 +120,7 @@ func.def target(@target) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: vector<2xi
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: reg<amdgpu.vgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: reg<amdgpu.vgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm {
   %8 = s_mov_b32 262152
   %9 = s_mov_b32 262148
   %10 = s_mov_b32 1178878528
@@ -232,7 +232,7 @@ func.def target(@target) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: vector<2xi
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: reg<amdgpu.vgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: reg<amdgpu.vgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm {
   %8 = s_mov_b32 262152
   %9 = s_mov_b32 262148
   %10 = s_mov_b32 1178878528
@@ -339,7 +339,7 @@ func.def target(@target) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: vector<2xi
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: reg<amdgpu.vgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3_5.core> {
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: reg<amdgpu.vgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm {
   %8 = s_mov_b32 262152
   %9 = s_mov_b32 262148
   %10 = s_mov_b32 1178878528
@@ -446,7 +446,7 @@ func.def target(@target) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: vector<2xi
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: reg<amdgpu.vgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: reg<amdgpu.vgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm {
   %8 = s_mov_b32 262152
   %9 = s_mov_b32 262148
   %10 = s_mov_b32 1178878528
@@ -553,7 +553,7 @@ func.def target(@target) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: vector<2xi
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: reg<amdgpu.vgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @decode_e2m1_e4m3fn_scale16_to_f16(%payload: reg<amdgpu.vgpr x2>, %scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm {
   %8 = s_mov_b32 262152
   %9 = s_mov_b32 262148
   %10 = s_mov_b32 1178878528

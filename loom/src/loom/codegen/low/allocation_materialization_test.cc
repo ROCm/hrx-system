@@ -130,7 +130,7 @@ TEST_F(LowAllocationMaterializationTest, RecomputesTrafficAfterSliceRewrite) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @stale_slice_plan(%wide: reg<test.i32 x4>) -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @stale_slice_plan(%wide: reg<test.i32 x4>) -> (reg<test.i32>) asm {
   %lane = slice %wide[1] : reg<test.i32 x4> -> reg<test.i32>
   return %lane : reg<test.i32>
 }
@@ -240,7 +240,7 @@ TEST_F(LowAllocationMaterializationTest, AppendsStorageAfterSplitReserves) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @split_storage_declarations(
+low.func.def target<test.low.core>(@test_target) @split_storage_declarations(
     %a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>)
     -> (reg<test.i32>) {
   %existing0 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>

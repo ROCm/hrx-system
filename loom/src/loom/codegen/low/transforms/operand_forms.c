@@ -28,6 +28,7 @@
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/function_version.h"
 
 #define LOOM_LOW_SELECT_OPERAND_FORMS_STATISTICS(V, statistics_type)      \
   V(statistics_type, forms_selected, "forms-selected",                    \
@@ -1249,9 +1250,13 @@ static iree_status_t loom_low_select_operand_forms_function(
     const loom_low_descriptor_registry_t* descriptor_registry,
     iree_diagnostic_emitter_t emitter) {
   loom_op_t* low_func_op = function.op;
+  loom_symbol_fact_table_t symbol_facts = {0};
+  loom_symbol_fact_table_initialize(&symbol_facts, pass->arena);
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-      module, low_func_op, descriptor_registry, emitter, &target));
+      module, &symbol_facts, low_func_op,
+      loom_target_function_version_effective_facts(pass->function_version),
+      descriptor_registry, emitter, &target));
   if (!target.descriptor_set) {
     return iree_ok_status();
   }
@@ -1267,8 +1272,8 @@ static iree_status_t loom_low_select_operand_forms_function(
   if (target.descriptor_set->operand_form_count != 0) {
     IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
         pass, module,
-        loom_pass_value_fact_scope_function_for_target(
-            function, &target.bundle_storage.bundle, NULL),
+        loom_pass_value_fact_scope_function_for_target(function,
+                                                       target.target_facts),
         &value_facts));
   }
 

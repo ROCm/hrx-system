@@ -35,9 +35,8 @@ iree_status_t loom_amdgpu_matrix_fragment_contract_candidates(
   }
 
   const loom_amdgpu_matrix_feature_bits_t feature_bits =
-      loom_amdgpu_matrix_fragment_feature_bits_from_target_ref(
-          loom_low_lower_context_module(context),
-          loom_low_lower_context_target_ref(context));
+      loom_amdgpu_matrix_fragment_feature_bits(loom_amdgpu_target_facts_cast(
+          loom_low_lower_context_target_facts(context)));
   const uint32_t wave_size = bundle->snapshot->subgroup_size;
   loom_amdgpu_matrix_fragment_state_t* cache = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_matrix_fragment_state(context, &cache));

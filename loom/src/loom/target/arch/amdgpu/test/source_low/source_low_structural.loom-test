@@ -7,7 +7,7 @@ func.def target(@target) @f32x4_concat_pair(%lhs: vector<4xf32>, %rhs: vector<4x
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32x4_concat_pair(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x4_concat_pair(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x8>) asm {
   %7 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %8 = slice %lhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %9 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -29,7 +29,7 @@ func.def target(@target) @f32x8_deinterleave_pair(%interleaved: vector<8xf32>) -
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32x8_deinterleave_pair(%interleaved: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x8_deinterleave_pair(%interleaved: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
   %8 = slice %interleaved[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %9 = slice %interleaved[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %10 = slice %interleaved[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
@@ -52,7 +52,7 @@ func.def target(@target) @f32x4_interleave_pair(%even: vector<4xf32>, %odd: vect
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32x4_interleave_pair(%even: reg<amdgpu.vgpr x4>, %odd: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x4_interleave_pair(%even: reg<amdgpu.vgpr x4>, %odd: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x8>) asm {
   %7 = slice %even[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %8 = slice %odd[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %9 = slice %even[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -74,7 +74,7 @@ func.def target(@target) @f16x8_deinterleave_pair(%interleaved: vector<8xf16>) -
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f16x8_deinterleave_pair(%interleaved: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f16x8_deinterleave_pair(%interleaved: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %8 = slice %interleaved[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %9 = slice %interleaved[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %10 = v_perm_b32_src2_lit %8, %9, 16778500
@@ -97,7 +97,7 @@ func.def target(@target) @bf16x8_deinterleave_pair(%interleaved: vector<8xbf16>)
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16x8_deinterleave_pair(%interleaved: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16x8_deinterleave_pair(%interleaved: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %8 = slice %interleaved[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %9 = slice %interleaved[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %10 = v_perm_b32_src2_lit %8, %9, 16778500
@@ -120,7 +120,7 @@ func.def target(@target) @bf16x6_deinterleave_pair(%interleaved: vector<6xbf16>)
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16x6_deinterleave_pair(%interleaved: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16x6_deinterleave_pair(%interleaved: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %8 = slice %interleaved[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
   %9 = slice %interleaved[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
   %10 = v_perm_b32_src2_lit %8, %9, 16778500
@@ -142,7 +142,7 @@ func.def target(@target) @f16x4_interleave_pair(%even: vector<4xf16>, %odd: vect
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f16x4_interleave_pair(%even: reg<amdgpu.vgpr x2>, %odd: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f16x4_interleave_pair(%even: reg<amdgpu.vgpr x2>, %odd: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>) asm {
   %7 = slice %even[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %8 = slice %odd[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %9 = v_perm_b32_src2_lit %7, %8, 16778500
@@ -164,7 +164,7 @@ func.def target(@target) @bf16x3_interleave_pair(%even: vector<3xbf16>, %odd: ve
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16x3_interleave_pair(%even: reg<amdgpu.vgpr x2>, %odd: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x3>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16x3_interleave_pair(%even: reg<amdgpu.vgpr x2>, %odd: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x3>) asm {
   %7 = slice %even[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %8 = slice %odd[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %9 = v_perm_b32_src2_lit %7, %8, 16778500
@@ -185,7 +185,7 @@ func.def target(@target) @f32x4_shuffle_reverse(%values: vector<4xf32>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32x4_shuffle_reverse(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x4_shuffle_reverse(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %5 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %6 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %7 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -203,7 +203,7 @@ func.def target(@target) @i32x4_shuffle_duplicate(%values: vector<4xi32>) -> (ve
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32x4_shuffle_duplicate(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x4_shuffle_duplicate(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %5 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %7 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %shuffled = concat(%5, %5, %7, %7) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
@@ -219,7 +219,7 @@ func.def target(@target) @f32x2x4_transpose(%values: vector<2x4xf32>) -> (vector
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32x2x4_transpose(%values: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x2x4_transpose(%values: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
   %5 = slice %values[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %6 = slice %values[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %7 = slice %values[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
@@ -241,7 +241,7 @@ func.def target(@target) @i32x3x2_transpose(%values: vector<3x2xi32>) -> (vector
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32x3x2_transpose(%values: reg<amdgpu.vgpr x6>) -> (reg<amdgpu.vgpr x6>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x3x2_transpose(%values: reg<amdgpu.vgpr x6>) -> (reg<amdgpu.vgpr x6>) asm {
   %5 = slice %values[0] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
   %6 = slice %values[2] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
   %7 = slice %values[4] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
@@ -261,7 +261,7 @@ func.def target(@target) @f32x4x4_extract_row(%values: vector<4x4xf32>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32x4x4_extract_row(%values: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x4x4_extract_row(%values: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x4>) asm {
   %5 = slice %values[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
   %6 = slice %values[9] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
   %7 = slice %values[10] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
@@ -279,7 +279,7 @@ func.def target(@target) @f32x4x4_extract_scalar(%values: vector<4x4xf32>) -> (f
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f32x4x4_extract_scalar(%values: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32x4x4_extract_scalar(%values: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[13] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
   return %lane
 }
@@ -293,7 +293,7 @@ func.def target(@target) @i64x4_extract_scalar(%values: vector<4xi64>) -> (i64) 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i64x4_extract_scalar(%values: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i64x4_extract_scalar(%values: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x2>) asm {
   %5 = slice %values[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %6 = slice %values[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %lane = concat(%5, %6) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
@@ -309,7 +309,7 @@ func.def target(@target) @i64x4x2_extract_tail(%values: vector<4x2xi64>) -> (vec
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i64x4x2_extract_tail(%values: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i64x4x2_extract_tail(%values: reg<amdgpu.vgpr x16>) -> (reg<amdgpu.vgpr x4>) asm {
   %5 = slice %values[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
   %6 = slice %values[5] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
   %7 = slice %values[6] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr>
@@ -327,7 +327,7 @@ func.def target(@target) @f64x2_extract_scalar(%values: vector<2xf64>) -> (f64) 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f64x2_extract_scalar(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f64x2_extract_scalar(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm {
   %5 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %6 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %lane = concat(%5, %6) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
@@ -343,7 +343,7 @@ func.def target(@target) @bf16x3_extract_scalar(%values: vector<3xbf16>) -> (bf1
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16x3_extract_scalar(%values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16x3_extract_scalar(%values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   return %lane
 }
@@ -357,7 +357,7 @@ func.def target(@target) @i64x2_dynamic_extract_scalar(%values: vector<2xi64>, %
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i64x2_dynamic_extract_scalar(%values: reg<amdgpu.vgpr x4>, %index: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i64x2_dynamic_extract_scalar(%values: reg<amdgpu.vgpr x4>, %index: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>) asm {
   %7 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %8 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %9 = v_mov_b32_copy %index

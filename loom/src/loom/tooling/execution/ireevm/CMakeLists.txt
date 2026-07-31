@@ -104,11 +104,18 @@ loom_cc_test(
     iree::vm::bytecode::archive
     iree::vm::bytecode::module
     iree::vm::impl
+    loom::analysis::symbol_facts
+    loom::ops::func_symbol_facts
+    loom::ops::op_defs
     loom::ops::op_registry
+    loom::ops::target
     loom::target::arch::ireevm::descriptors
     loom::target::arch::ireevm::ops
     loom::target::arch::ireevm::provider
     loom::target::emit::ireevm::function_bytecode
+    loom::target::facts_builder
+    loom::target::function_contract
+    loom::target::function_version
     loom::target::provider
     loom::tooling::compile::pipeline
   LABELS

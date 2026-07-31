@@ -16,9 +16,9 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
-#include "loom/pass/types.h"
 #include "loom/sanitizer/options.h"
 #include "loom/target/provider.h"
+#include "loom/tooling/compile/pipeline.h"
 #include "loom/tooling/execution/compile_options.h"
 #include "loom/tooling/execution/hal/artifact.h"
 #include "loom/tooling/execution/hal/candidate.h"
@@ -185,8 +185,8 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   loom_run_hal_prepared_candidate_t prepared_candidate;
   // Dispatch options derived from the compiled source entry.
   loom_run_hal_invocation_options_t invocation_options;
-  // Pass diagnostic counts from the Loom compile pipeline.
-  loom_pass_run_result_t pass_result;
+  // Compiler products retained through artifact emission.
+  loom_compile_pipeline_result_t pipeline_result;
   // Product stage that rejected the compile, when |compile_rejected| is true.
   iree_string_view_t compile_failure_stage;
   // Stable diagnostic category for |compile_rejected|.

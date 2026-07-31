@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 29u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 30u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -964,6 +964,11 @@ typedef struct loom_low_descriptor_set_t {
   uint64_t stable_id;
   // Durable target-family identity derived from the target-family key, or NONE.
   uint64_t target_stable_id;
+  // Native target-contract identities supported by this representation
+  // contract in addition to its own stable identity.
+  const uint64_t* supported_target_contract_stable_ids;
+  // Number of identities in |supported_target_contract_stable_ids|.
+  uint16_t supported_target_contract_count;
   // Target-generated dense descriptor-set ordinal, or NONE when this set is not
   // part of a target-owned dense descriptor-set table.
   uint16_t descriptor_set_ordinal;
@@ -1181,6 +1186,16 @@ uint32_t loom_low_descriptor_set_descriptor_ordinal(
 
 // Returns the durable descriptor identity derived from a descriptor key.
 uint64_t loom_low_descriptor_stable_id_from_key(iree_string_view_t key);
+
+// Returns whether |descriptor_set| can represent low IR for the native target
+// descriptor contract named by |target_contract_key|.
+//
+// Every descriptor set supports its own key. Portable representation
+// contracts additionally carry a generated, directional set of native target
+// contracts whose encodings and semantics they conservatively represent.
+bool loom_low_descriptor_set_supports_target_contract(
+    const loom_low_descriptor_set_t* descriptor_set,
+    iree_string_view_t target_contract_key);
 
 // Returns true if |lhs_operand_index| and |rhs_operand_index| form a tied
 // result/packet-operand pair in |descriptor|. Callers must pass a verified
