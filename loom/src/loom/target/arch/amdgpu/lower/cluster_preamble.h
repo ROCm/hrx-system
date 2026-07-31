@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// gfx1250 clustered-launch identity materialization.
+// Architected workgroup and clustered-launch identity materialization.
 
 #ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_CLUSTER_PREAMBLE_H_
 #define LOOM_TARGET_ARCH_AMDGPU_LOWER_CLUSTER_PREAMBLE_H_
@@ -33,8 +33,13 @@ bool loom_amdgpu_cluster_preamble_required_nontrivial_size(
     const loom_value_fact_table_t* fact_table,
     loom_target_workgroup_cluster_size_t* out_size);
 
-// Returns whether the selected processor defines the clustered launch state.
-bool loom_amdgpu_cluster_preamble_target_supports_launch_state(
+// Returns whether the selected processor carries workgroup coordinates in
+// architected TTMP launch state.
+bool loom_amdgpu_cluster_preamble_target_uses_architected_workgroup_ids(
+    const loom_module_t* module, loom_symbol_ref_t target_ref);
+
+// Returns whether the selected processor defines clustered launch state.
+bool loom_amdgpu_cluster_preamble_target_supports_cluster_launch_state(
     const loom_module_t* module, loom_symbol_ref_t target_ref);
 
 // Returns the static cluster extent along |dimension|.
@@ -42,17 +47,18 @@ uint32_t loom_amdgpu_cluster_preamble_size_dimension(
     const loom_target_workgroup_cluster_size_t* size,
     loom_kernel_dimension_t dimension);
 
-// Reports whether the selected target carries workgroup identity in the
-// gfx1250 launch-state TTMPs. Ordinary and clustered dispatches both do so.
-iree_status_t loom_amdgpu_cluster_preamble_uses_launch_state(
-    loom_low_lower_context_t* context, bool* out_uses_launch_state);
+// Reports whether the selected target carries workgroup identity in
+// architected TTMP launch state.
+iree_status_t loom_amdgpu_cluster_preamble_uses_architected_workgroup_ids(
+    loom_low_lower_context_t* context,
+    bool* out_uses_architected_workgroup_ids);
 
 // Reports whether the current function uses an extended clustered-dispatch
 // packet. Only a statically nontrivial cluster selects that packet ABI.
 iree_status_t loom_amdgpu_cluster_preamble_uses_clustered_dispatch(
     loom_low_lower_context_t* context, bool* out_uses_clustered_dispatch);
 
-// Imports the fixed clustered launch-state registers required by |demands|.
+// Imports the fixed architected launch-state registers required by |demands|.
 iree_status_t loom_amdgpu_cluster_preamble_emit_live_ins(
     loom_low_lower_context_t* context,
     const loom_amdgpu_cluster_preamble_demands_t* demands);

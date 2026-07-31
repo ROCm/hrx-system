@@ -155,9 +155,11 @@ AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS = {
 
 AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION = 1 << 0
 AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE = 1 << 1
+AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS = 1 << 2
 AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS = (
     AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
     | AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE
+    | AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS
 )
 
 AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT = 1 << 0
@@ -1105,7 +1107,10 @@ def rdna4_processor_info(
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor=processor,
-        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+        flags=(
+            AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
+            | AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS
+        ),
         descriptor_set_key=descriptor_set_key,
         elf_machine_flags=elf_machine_flags,
         elf_feature_flags=elf_feature_flags,
@@ -1138,7 +1143,11 @@ def gfx125x_processor_info(
 ) -> AmdgpuProcessorInfo:
     return processor_info(
         processor=processor,
-        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION | processor_flags,
+        flags=(
+            AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION
+            | AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS
+            | processor_flags
+        ),
         descriptor_set_key=descriptor_set_key,
         elf_machine_flags=elf_machine_flags,
         elf_feature_flags=elf_feature_flags,
@@ -1430,6 +1439,7 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
     processor_info(
         "gfx1310",
         0x050,
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS,
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_PACKED_WORKITEM_ID,
     ),

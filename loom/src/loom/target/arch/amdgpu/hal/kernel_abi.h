@@ -121,28 +121,32 @@ extern "C" {
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_WORKGROUP_INFO_XZ_SOURCE_ID \
   UINT64_C(0x59E26B8F464C1C11)
 
-// Stable low.live_in source spelling for cluster_id.y/z in gfx1250 TTMP7.
+// Stable low.live_in source spelling for the packed architected y/z
+// workgroup or cluster coordinates in TTMP7.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_YZ_SOURCE "amdgpu.cluster_id_yz"
 
 // Stable low.live_in source ID for packed cluster_id.y/z.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_YZ_SOURCE_ID \
   UINT64_C(0x5CC9CA25D8E49D3B)
 
-// Stable low.live_in source spelling for cluster_id.y in gfx1250 TTMP7.
+// Stable low.live_in source spelling for the architected y workgroup or
+// cluster coordinate in TTMP7.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_Y_SOURCE "amdgpu.cluster_id_y"
 
 // Stable low.live_in source ID for cluster_id.y.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_Y_SOURCE_ID \
   UINT64_C(0x68A4B9A3B10CE223)
 
-// Stable low.live_in source spelling for cluster_id.z in gfx1250 TTMP7.
+// Stable low.live_in source spelling for the architected z workgroup or
+// cluster coordinate in TTMP7.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_Z_SOURCE "amdgpu.cluster_id_z"
 
 // Stable low.live_in source ID for cluster_id.z.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_Z_SOURCE_ID \
   UINT64_C(0x68A4BAA3B10CE3D6)
 
-// Stable low.live_in source spelling for cluster_id.x in gfx1250 TTMP9.
+// Stable low.live_in source spelling for the architected x workgroup or
+// cluster coordinate in TTMP9.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_CLUSTER_ID_X_SOURCE "amdgpu.cluster_id_x"
 
 // Stable low.live_in source ID for cluster_id.x.
@@ -240,7 +244,7 @@ typedef enum loom_amdgpu_hal_kernel_abi_source_kind_e {
 
 // Maximum number of fixed physical values required by one AMDGPU HAL kernel
 // ABI. This covers hidden user SGPRs, three coordinate dimensions, packed
-// workitem state, M0, and the fixed cluster-launch sources.
+// workitem state, M0, and the fixed architected launch-state sources.
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_MAX_FIXED_VALUE_COUNT (8u + 2u * 3u)
 
 // Returns the stable low.live_in source spelling for |source_kind|, or an
