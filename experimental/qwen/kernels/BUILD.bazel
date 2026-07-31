@@ -104,6 +104,48 @@ iree_executable_test(
     ]),
 )
 
+iree_executable_test(
+    name = "greedy_argmax_partials_bringup_workaround_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :greedy_argmax_bringup_workaround_linked)",
+        "--case=@qwen_greedy_argmax_partials_nontrivial_winner_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":greedy_argmax_bringup_workaround_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "greedy_argmax_partials_tie_bringup_workaround_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :greedy_argmax_bringup_workaround_linked)",
+        "--case=@qwen_greedy_argmax_partials_equal_logit_tie_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":greedy_argmax_bringup_workaround_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
 loom_link_module(
     name = "greedy_argmax_bringup_workaround_runtime_module",
     srcs = ["greedy_argmax_bringup_workaround.loom"],
@@ -403,6 +445,86 @@ iree_executable_test(
         "--sanitizer=access",
     ],
     data = [":linear_q6k_q8_1_x4_bringup_workaround_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+loom_link_module(
+    name = "vocabulary_partial_argmax_bringup_workaround_linked",
+    srcs = [
+        "greedy_argmax_bringup_workaround.loom",
+        "linear_q6k_q8_1_x4_bringup_workaround.loom",
+        "runtime_exports.loom",
+    ],
+    libraries = [
+        "//experimental/qwen_moe/kernels:linear_q6k_q8_1_x4_linked",
+    ],
+    mode = "selective",
+    roots = [
+        "@ggml_linear_q6k_q8_1_x4_full_argmax",
+        "@ggml_linear_q6k_q8_1_x4_full_argmax_benchmark_case",
+        "@ggml_linear_q6k_q8_1_x4_partial_argmax",
+        "@ggml_linear_q6k_q8_1_x4_partial_argmax_benchmark_case",
+        "@ggml_linear_q6k_q8_1_x4_partial_argmax_endpoint",
+        "@ggml_linear_q6k_q8_1_x4_partial_argmax_tail_case",
+        "@ggml_linear_q6k_q8_1_x4_partial_argmax_vocabulary_differential_case",
+        "@qwen_greedy_argmax_bringup_workaround",
+        "@qwen_greedy_argmax_partials_bringup_workaround",
+    ],
+)
+
+iree_executable_test(
+    name = "vocabulary_partial_argmax_bringup_workaround_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :vocabulary_partial_argmax_bringup_workaround_linked)",
+        "--benchmark=@ggml_linear_q6k_q8_1_x4_partial_argmax_endpoint",
+        "--dry-run",
+        "--output-format=jsonl",
+        "--sample-compilation=per_sample",
+    ],
+    data = [":vocabulary_partial_argmax_bringup_workaround_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "vocabulary_partial_argmax_tail_bringup_workaround_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :vocabulary_partial_argmax_bringup_workaround_linked)",
+        "--case=@ggml_linear_q6k_q8_1_x4_partial_argmax_tail_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":vocabulary_partial_argmax_bringup_workaround_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "vocabulary_partial_argmax_vocabulary_bringup_workaround_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :vocabulary_partial_argmax_bringup_workaround_linked)",
+        "--case=@ggml_linear_q6k_q8_1_x4_partial_argmax_vocabulary_differential_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":vocabulary_partial_argmax_bringup_workaround_linked"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",

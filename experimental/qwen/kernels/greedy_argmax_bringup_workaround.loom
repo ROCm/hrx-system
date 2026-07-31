@@ -53,6 +53,52 @@ kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax_b
   kernel.return
 }
 
+// Temporary, non-sanctioned finalizer for the Qwen-owned partial vocabulary
+// projection. This consumes explicit (logit, token ID) pairs; it is not a
+// generic selection framework and disappears with the surrounding bring-up
+// kernels.
+kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax_partials_bringup_workaround") @qwen_greedy_argmax_partials_bringup_workaround(%partial_count: index) {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%partial_count: index, %partial_logits: buffer, %partial_ids: buffer, %token_id: buffer) {
+  %bounded_partial_count = index.assume %partial_count [range(%partial_count, 256, 18992)] : index
+  %zero = index.constant 0 : index
+  %workgroup_size = index.constant 256 : index
+  %largest_i32 = scalar.constant 2147483647 : i32
+  %zero_offset = index.constant 0 : offset
+  %workitem0 = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 255), lt(%workitem0, %bounded_partial_count)] : index
+  %partial_logits_noalias, %partial_ids_noalias, %token_id_noalias = buffer.assume.noalias %partial_logits, %partial_ids, %token_id : buffer, buffer, buffer
+  %partial_logits_view = buffer.view %partial_logits_noalias[%zero_offset] : buffer -> view<[%bounded_partial_count]xf32, #dense>
+  %partial_ids_view = buffer.view %partial_ids_noalias[%zero_offset] : buffer -> view<[%bounded_partial_count]xi32, #dense>
+  %token_id_view = buffer.view %token_id_noalias[%zero_offset] : buffer -> view<1xi32, #dense>
+  %initial_logit = view.load %partial_logits_view[%workitem] : view<[%bounded_partial_count]xf32, #dense> -> f32
+  %initial_id = view.load %partial_ids_view[%workitem] : view<[%bounded_partial_count]xi32, #dense> -> i32
+  %scan_begin = index.add %workitem, %workgroup_size : index
+  %local_logit, %local_id = scf.for %candidate = [%scan_begin to %bounded_partial_count step %workgroup_size](%best_logit = %initial_logit : f32, %best_id = %initial_id : i32) -> (f32, i32) {
+    %candidate_logit = view.load %partial_logits_view[%candidate] : view<[%bounded_partial_count]xf32, #dense> -> f32
+    %candidate_id = view.load %partial_ids_view[%candidate] : view<[%bounded_partial_count]xi32, #dense> -> i32
+    %is_greater = scalar.cmpf ogt, %candidate_logit, %best_logit : f32
+    %is_equal = scalar.cmpf oeq, %candidate_logit, %best_logit : f32
+    %is_lower_id = scalar.cmpi slt, %candidate_id, %best_id : i32
+    %is_lower_tie = scalar.andi %is_equal, %is_lower_id : i1
+    %is_better = scalar.ori %is_greater, %is_lower_tie : i1
+    %next_logit = scf.select %is_better, %candidate_logit, %best_logit : f32
+    %next_id = scf.select %is_better, %candidate_id, %best_id : i32
+    scf.yield %next_logit, %next_id : f32, i32
+  }
+  %winning_logit = kernel.workgroup.reduce<maxnumf> %local_logit : f32
+  %owns_winning_logit = scalar.cmpf oeq, %local_logit, %winning_logit : f32
+  %candidate_winning_id = scf.select %owns_winning_logit, %local_id, %largest_i32 : i32
+  %winning_id = kernel.workgroup.reduce<minsi> %candidate_winning_id : i32
+  %publishes_token = index.cmp eq, %workitem, %zero : index
+  scf.if %publishes_token {
+    view.store %winning_id, %token_id_view[%zero] : i32, view<1xi32, #dense>
+  }
+  kernel.return
+}
+
 // Periodic peaks cross both workitem strides and subgroup boundaries. The
 // first greatest logit is token 1008 even though later periods repeat it.
 check.case public @qwen_greedy_argmax_nontrivial_winner_case {
@@ -71,6 +117,32 @@ check.case public @qwen_greedy_argmax_equal_logit_tie_case {
   %token_id = check.generate.fill value(-1) : tensor<1xi32>
   %expected = check.generate.fill value(0) : tensor<1xi32>
   func.call @qwen_greedy_argmax_bringup_workaround(%logits, %token_id) : (tensor<151936xf32>, tensor<1xi32>)
+  check.expect.equal actual(%token_id) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+// Pair IDs are independent of partial-array ordinals. The greatest logit is at
+// partial 256 and carries vocabulary token 744.
+check.case public @qwen_greedy_argmax_partials_nontrivial_winner_case {
+  %partial_count = check.literal value(512) : index
+  %partial_logits = check.generate.iota offset(0.0) step(1.0) period(257) : tensor<512xf32>
+  %partial_ids = check.generate.iota offset(1000) step(-1) : tensor<512xi32>
+  %token_id = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(744) : tensor<1xi32>
+  func.call @qwen_greedy_argmax_partials_bringup_workaround(%partial_count, %partial_logits, %partial_ids, %token_id) : (index, tensor<512xf32>, tensor<512xi32>, tensor<1xi32>)
+  check.expect.equal actual(%token_id) expected(%expected) : tensor<1xi32>
+  check.return
+}
+
+// A tied partial row selects the lowest carried vocabulary ID, not the lowest
+// partial-array ordinal.
+check.case public @qwen_greedy_argmax_partials_equal_logit_tie_case {
+  %partial_count = check.literal value(512) : index
+  %partial_logits = check.generate.fill value(7.0) : tensor<512xf32>
+  %partial_ids = check.generate.iota offset(511) step(-1) : tensor<512xi32>
+  %token_id = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(0) : tensor<1xi32>
+  func.call @qwen_greedy_argmax_partials_bringup_workaround(%partial_count, %partial_logits, %partial_ids, %token_id) : (index, tensor<512xf32>, tensor<512xi32>, tensor<1xi32>)
   check.expect.equal actual(%token_id) expected(%expected) : tensor<1xi32>
   check.return
 }

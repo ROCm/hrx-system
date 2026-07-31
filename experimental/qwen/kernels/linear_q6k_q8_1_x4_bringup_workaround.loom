@@ -12,15 +12,13 @@
 // Qwen's fixed one-token hidden and vocabulary dimensions.
 func.decl @ggml_q6k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32)
 
-kernel.def @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
-  %eight = index.constant 8 : index
-  %seven = index.constant 7 : index
-  %one = index.constant 1 : index
-  %workgroup_size = index.constant 256 : index
-  %padded_output_size = index.add %output_size, %seven : index
-  %output_tiles = index.div %padded_output_size, %eight : index
-  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%workgroup_size, %one, %one) : index
-} launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+func.decl @qwen_greedy_argmax_bringup_workaround(%logits: buffer, %token_id: buffer)
+
+func.decl @qwen_greedy_argmax_partials_bringup_workaround(%partial_count: index, %partial_logits: buffer, %partial_ids: buffer, %token_id: buffer)
+
+// Shared contraction for the ordinary full-logit export and the bounded
+// endpoint partial-argmax experiment below.
+func.template<qwen.vocabulary.q6k_q8_1_x4.body> device @qwen_vocabulary_q6k_q8_1_x4_body(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer) -> (f32, index, i1, index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 1)] : index
   %bounded_input_size = index.assume %input_size [range(%input_size, 256, 2048), mul(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 151936)] : index
@@ -34,8 +32,6 @@ kernel.def @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %ou
   %twohundredten = index.constant 210 : index
   %twofiftysix = index.constant 256 : index
   %onehundredfortyfour = index.constant 144 : index
-  %zero_i32 = scalar.constant 0 : i32
-  %zero_offset = index.constant 0 : offset
   %token, %launch_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
   %channel_base = index.mul %channel_tile, %eight : index
@@ -51,23 +47,89 @@ kernel.def @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %ou
   %q8_row_byte_count = index.mul %q8_group_count, %onehundredfortyfour : index
   %q8_row_byte_index = index.mul %token, %q8_row_byte_count : index
   %q8_row_byte_base = index.cast %q8_row_byte_index : index to offset
-  %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
   %lane_acc = scf.if %valid_channel -> (f32) {
-    %value = func.call @ggml_q6k_q8_1_x4_row_lane(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
+    %value = func.call @ggml_q6k_q8_1_x4_row_lane(%bounded_input_size, %weight, %weight_row_byte_base, %q8_input, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
     scf.yield %value : f32
   } else {
     %zero_f32 = scalar.constant 0.0 : f32
     scf.yield %zero_f32 : f32
   }
   %dot = kernel.subgroup.reduce<addf> %lane_acc : f32
+  func.return %dot, %channel, %valid_channel, %weight_output_bound : f32, index, i1, index
+}
+
+kernel.def @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
+  %eight = index.constant 8 : index
+  %seven = index.constant 7 : index
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %padded_output_size = index.add %output_size, %seven : index
+  %output_tiles = index.div %padded_output_size, %eight : index
+  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+  %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
+  %dot, %channel, %valid_channel, %output_bound = func.apply<qwen.vocabulary.q6k_q8_1_x4.body>(%token_count, %input_size, %output_size, %q8_noalias, %weight_noalias) : (index, index, index, buffer, buffer) -> (f32, index, i1, index)
+  %zero = index.constant 0 : index
+  %zero_i32 = scalar.constant 0 : i32
+  %zero_offset = index.constant 0 : offset
+  %lane = kernel.subgroup.lane.id : index
   %lane_i32 = index.cast %lane : index to i32
   %is_lane_zero = scalar.cmpi eq, %lane_i32, %zero_i32 : i32
   %writes_output = scalar.andi %valid_channel, %is_lane_zero : i1
   scf.if %writes_output {
-    %bounded_channel, %output_bound = index.assume %channel, %weight_output_bound [lt(%channel, %weight_output_bound)] : index, index
-    %output_index, %output_element_bound = index.assume %bounded_channel, %output_bound [lt(%bounded_channel, %output_bound)] : index, index
+    %bounded_channel, %output_element_bound = index.assume %channel, %output_bound [lt(%channel, %output_bound)] : index, index
+    %output_index = index.assume %bounded_channel [lt(%bounded_channel, %output_element_bound)] : index
     %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<[%output_element_bound]xf32, #dense>
     view.store %dot, %output_view[%output_index] : f32, view<[%output_element_bound]xf32, #dense>
+  }
+  kernel.return
+}
+
+// Temporary, non-sanctioned endpoint specialization. This is not a general
+// projection-selection framework. It publishes one deterministic maximum pair
+// per eight-channel projection tile so the owned model can finalize 18,992
+// pairs instead of rereading all 151,936 logits.
+kernel.def @ggml_linear_q6k_q8_1_x4_partial_argmax(%token_count: index, %input_size: index, %output_size: index) {
+  %eight = index.constant 8 : index
+  %seven = index.constant 7 : index
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %padded_output_size = index.add %output_size, %seven : index
+  %output_tiles = index.div %padded_output_size, %eight : index
+  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %partial_logits: buffer, %partial_ids: buffer) {
+  %q8_noalias, %weight_noalias, %partial_logits_noalias, %partial_ids_noalias = buffer.assume.noalias %q8_input, %weight, %partial_logits, %partial_ids : buffer, buffer, buffer, buffer
+  %dot, %channel, %valid_channel, %output_bound = func.apply<qwen.vocabulary.q6k_q8_1_x4.body>(%token_count, %input_size, %output_size, %q8_noalias, %weight_noalias) : (index, index, index, buffer, buffer) -> (f32, index, i1, index)
+  %zero = index.constant 0 : index
+  %seven = index.constant 7 : index
+  %eight = index.constant 8 : index
+  %zero_i32 = scalar.constant 0 : i32
+  %largest_i32 = scalar.constant 2147483647 : i32
+  %negative_large = scalar.constant -3.4028234663852885e+38 : f32
+  %zero_offset = index.constant 0 : offset
+  %lane = kernel.subgroup.lane.id : index
+  %lane_i32 = index.cast %lane : index to i32
+  %is_lane_zero = scalar.cmpi eq, %lane_i32, %zero_i32 : i32
+  %is_candidate = scalar.andi %valid_channel, %is_lane_zero : i1
+  %candidate_logit = scf.select %is_candidate, %dot, %negative_large : f32
+  %channel_i32 = index.cast %channel : index to i32
+  %candidate_id = scf.select %is_candidate, %channel_i32, %largest_i32 : i32
+  %winning_logit = kernel.workgroup.reduce<maxnumf> %candidate_logit : f32
+  %owns_winning_logit = scalar.cmpf oeq, %candidate_logit, %winning_logit : f32
+  %candidate_winning_id = scf.select %owns_winning_logit, %candidate_id, %largest_i32 : i32
+  %winning_id = kernel.workgroup.reduce<minsi> %candidate_winning_id : i32
+  %workitem = kernel.workitem.id<x> : index
+  %publishes_partial = index.cmp eq, %workitem, %zero : index
+  scf.if %publishes_partial {
+    %padded_output_size = index.add %output_bound, %seven : index
+    %partial_count0 = index.div %padded_output_size, %eight : index
+    %partial_count = index.assume %partial_count0 [range(%partial_count0, 1, 18992)] : index
+    %partial_index0 = kernel.workgroup.id<x> : index
+    %partial_index, %partial_bound = index.assume %partial_index0, %partial_count [lt(%partial_index0, %partial_count)] : index, index
+    %partial_logits_view = buffer.view %partial_logits_noalias[%zero_offset] : buffer -> view<[%partial_bound]xf32, #dense>
+    %partial_ids_view = buffer.view %partial_ids_noalias[%zero_offset] : buffer -> view<[%partial_bound]xi32, #dense>
+    view.store %winning_logit, %partial_logits_view[%partial_index] : f32, view<[%partial_bound]xf32, #dense>
+    view.store %winning_id, %partial_ids_view[%partial_index] : i32, view<[%partial_bound]xi32, #dense>
   }
   kernel.return
 }
@@ -99,3 +161,79 @@ check.case public @ggml_linear_q6k_q8_1_x4_bringup_workaround_vocabulary_plan_ca
 }
 
 check.benchmark<@ggml_linear_q6k_q8_1_x4_bringup_workaround_vocabulary_plan_case> @ggml_linear_q6k_q8_1_x4_bringup_workaround_vocabulary_plan
+
+// The final partial tile owns only token eight. Invalid tail subgroups must not
+// participate in either the maximum or the deterministic ID reduction.
+check.case public @ggml_linear_q6k_q8_1_x4_partial_argmax_tail_case {
+  %token_count = check.literal value(1) : index
+  %input_size = check.literal value(2048) : index
+  %output_size = check.literal value(9) : index
+  %q8_input = check.generate.fill value(0) : tensor<1x2304xi8>
+  %weight = check.generate.fill value(-86) : tensor<9x8x210xi8>
+  %partial_logits = check.generate.fill value(1.0) : tensor<2xf32>
+  %partial_ids = check.generate.fill value(-1) : tensor<2xi32>
+  %expected_logits = check.generate.fill value(0.0) : tensor<2xf32>
+  %expected_ids = check.generate.iota offset(0) step(8) : tensor<2xi32>
+  func.call @ggml_linear_q6k_q8_1_x4_partial_argmax(%token_count, %input_size, %output_size, %q8_input, %weight, %partial_logits, %partial_ids) : (index, index, index, tensor<1x2304xi8>, tensor<9x8x210xi8>, tensor<2xf32>, tensor<2xi32>)
+  check.expect.close actual(%partial_logits) expected(%expected_logits) atol(0.0) rtol(0.0) nan(same) : tensor<2xf32>
+  check.expect.equal actual(%partial_ids) expected(%expected_ids) : tensor<2xi32>
+  check.return
+}
+
+// A fully tied production row forces every local and global tie to resolve to
+// the lowest real vocabulary ID. The ordinary full-row route is the authority.
+check.case public @ggml_linear_q6k_q8_1_x4_partial_argmax_vocabulary_differential_case {
+  %token_count = check.literal value(1) : index
+  %input_size = check.literal value(2048) : index
+  %output_size = check.literal value(151936) : index
+  %partial_count = check.literal value(18992) : index
+  %q8_input = check.generate.fill value(0) : tensor<1x2304xi8>
+  %weight = check.generate.fill value(0) : tensor<151936x8x210xi8>
+  %logits = check.generate.fill value(1.0) : tensor<151936xf32>
+  %partial_logits = check.generate.fill value(1.0) : tensor<18992xf32>
+  %partial_ids = check.generate.fill value(-1) : tensor<18992xi32>
+  %expected_partial_logits = check.generate.fill value(0.0) : tensor<18992xf32>
+  %expected_partial_ids = check.generate.iota offset(0) step(8) : tensor<18992xi32>
+  %expected_token = check.generate.fill value(-1) : tensor<1xi32>
+  %actual_token = check.generate.fill value(-1) : tensor<1xi32>
+  func.call @ggml_linear_q6k_q8_1_x4(%token_count, %input_size, %output_size, %q8_input, %weight, %logits) : (index, index, index, tensor<1x2304xi8>, tensor<151936x8x210xi8>, tensor<151936xf32>)
+  func.call @qwen_greedy_argmax_bringup_workaround(%logits, %expected_token) : (tensor<151936xf32>, tensor<1xi32>)
+  func.call @ggml_linear_q6k_q8_1_x4_partial_argmax(%token_count, %input_size, %output_size, %q8_input, %weight, %partial_logits, %partial_ids) : (index, index, index, tensor<1x2304xi8>, tensor<151936x8x210xi8>, tensor<18992xf32>, tensor<18992xi32>)
+  func.call @qwen_greedy_argmax_partials_bringup_workaround(%partial_count, %partial_logits, %partial_ids, %actual_token) : (index, tensor<18992xf32>, tensor<18992xi32>, tensor<1xi32>)
+  check.expect.close actual(%partial_logits) expected(%expected_partial_logits) atol(0.0) rtol(0.0) nan(same) : tensor<18992xf32>
+  check.expect.equal actual(%partial_ids) expected(%expected_partial_ids) : tensor<18992xi32>
+  check.expect.equal actual(%actual_token) expected(%expected_token) : tensor<1xi32>
+  check.return
+}
+
+check.case public @ggml_linear_q6k_q8_1_x4_full_argmax_benchmark_case {
+  %token_count = check.literal value(1) : index
+  %input_size = check.literal value(2048) : index
+  %output_size = check.literal value(151936) : index
+  %q8_input = check.generate.fill value(0) : tensor<1x2304xi8>
+  %weight = check.generate.fill value(0) : tensor<151936x8x210xi8>
+  %logits = check.generate.fill value(1.0) : tensor<151936xf32>
+  %token = check.generate.fill value(-1) : tensor<1xi32>
+  func.call @ggml_linear_q6k_q8_1_x4(%token_count, %input_size, %output_size, %q8_input, %weight, %logits) : (index, index, index, tensor<1x2304xi8>, tensor<151936x8x210xi8>, tensor<151936xf32>)
+  func.call @qwen_greedy_argmax_bringup_workaround(%logits, %token) : (tensor<151936xf32>, tensor<1xi32>)
+  check.return
+}
+
+check.case public @ggml_linear_q6k_q8_1_x4_partial_argmax_benchmark_case {
+  %token_count = check.literal value(1) : index
+  %input_size = check.literal value(2048) : index
+  %output_size = check.literal value(151936) : index
+  %partial_count = check.literal value(18992) : index
+  %q8_input = check.generate.fill value(0) : tensor<1x2304xi8>
+  %weight = check.generate.fill value(0) : tensor<151936x8x210xi8>
+  %partial_logits = check.generate.fill value(1.0) : tensor<18992xf32>
+  %partial_ids = check.generate.fill value(-1) : tensor<18992xi32>
+  %token = check.generate.fill value(-1) : tensor<1xi32>
+  func.call @ggml_linear_q6k_q8_1_x4_partial_argmax(%token_count, %input_size, %output_size, %q8_input, %weight, %partial_logits, %partial_ids) : (index, index, index, tensor<1x2304xi8>, tensor<151936x8x210xi8>, tensor<18992xf32>, tensor<18992xi32>)
+  func.call @qwen_greedy_argmax_partials_bringup_workaround(%partial_count, %partial_logits, %partial_ids, %token) : (index, tensor<18992xf32>, tensor<18992xi32>, tensor<1xi32>)
+  check.return
+}
+
+check.benchmark<@ggml_linear_q6k_q8_1_x4_full_argmax_benchmark_case> @ggml_linear_q6k_q8_1_x4_full_argmax
+
+check.benchmark<@ggml_linear_q6k_q8_1_x4_partial_argmax_benchmark_case> @ggml_linear_q6k_q8_1_x4_partial_argmax_endpoint
