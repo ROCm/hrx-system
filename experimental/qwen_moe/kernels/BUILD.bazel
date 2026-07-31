@@ -560,6 +560,64 @@ iree_executable_test(
     ]),
 )
 
+iree_executable_test(
+    name = "expert_mlp_q4k_f16_handoff_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :routed_down_quantized_f16_wmma_linked)",
+        "--case=@qwen3_moe_expert_mlp_q4k_f16_handoff_differential_case",
+        "--config=qwen3_moe.routed_down.expert_count=4",
+        "--config=qwen3_moe.routed_down.input_size=256",
+        "--config=qwen3_moe.routed_down.output_size=33",
+        "--config=qwen3_moe.routed_down.route_count=2",
+        "--config=qwen3_moe.routed_gate_up.expert_count=4",
+        "--config=qwen3_moe.routed_gate_up.input_size=512",
+        "--config=qwen3_moe.routed_gate_up.output_size=256",
+        "--config=qwen3_moe.routed_gate_up.route_count=2",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":routed_down_quantized_f16_wmma_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "expert_mlp_q6k_f16_handoff_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :routed_down_quantized_f16_wmma_linked)",
+        "--case=@qwen3_moe_expert_mlp_q6k_f16_handoff_differential_case",
+        "--config=qwen3_moe.routed_down.expert_count=4",
+        "--config=qwen3_moe.routed_down.input_size=256",
+        "--config=qwen3_moe.routed_down.output_size=33",
+        "--config=qwen3_moe.routed_down.route_count=2",
+        "--config=qwen3_moe.routed_gate_up.expert_count=4",
+        "--config=qwen3_moe.routed_gate_up.input_size=512",
+        "--config=qwen3_moe.routed_gate_up.output_size=256",
+        "--config=qwen3_moe.routed_gate_up.route_count=2",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":routed_down_quantized_f16_wmma_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
 loom_link_module(
     name = "routed_down_q4k_linked",
     srcs = ["qwen3_moe/routed_down_q4k.loom"],
@@ -1270,6 +1328,8 @@ test_suite(
         ":dense_linear_q4k_q8_1_x4_plan_test",
         ":dense_linear_q6k_f16_wmma_hal_test",
         ":dense_linear_q6k_f16_wmma_plan_test",
+        ":expert_mlp_q4k_f16_handoff_hal_test",
+        ":expert_mlp_q6k_f16_handoff_hal_test",
         ":flash_attention_decode_f32_f16_wmma_gqa_hal_test",
         ":flash_attention_decode_f32_f16_wmma_plan_test",
         ":flash_attention_decode_f32_f16_wmma_tail_hal_test",
