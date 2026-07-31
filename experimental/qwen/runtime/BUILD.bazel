@@ -40,6 +40,29 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "loom_compile_pool",
+    srcs = ["loom_compile_pool.c"],
+    hdrs = ["loom_compile_pool.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "loom_compile_pool_test",
+    srcs = ["loom_compile_pool_test.cc"],
+    deps = [
+        ":loom_compile_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "loom_jit",
     srcs = ["loom_jit.c"],
     hdrs = ["loom_jit.h"],
