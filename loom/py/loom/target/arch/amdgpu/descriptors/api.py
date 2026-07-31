@@ -36,6 +36,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_PROCESSOR_INFOS,
     AMDGPU_TARGET_INFOS,
     amdgpu_descriptor_set_info_by_generator_target,
+    amdgpu_descriptor_set_supported_target_contract_keys,
     amdgpu_target_descriptor_set_key,
 )
 from loom.target.low_descriptors import InstructionClass
@@ -1487,7 +1488,12 @@ def build_amdgpu_core_descriptor_set_from_specs(
                 f"contract across ISA XML keys '{info.isa_infos[0].isa_xml_key}' "
                 f"and '{isa_info.isa_xml_key}'"
             )
-    return descriptor_set
+    return replace(
+        descriptor_set,
+        supported_target_contract_keys=(
+            amdgpu_descriptor_set_supported_target_contract_keys(info)
+        ),
+    )
 
 
 def build_amdgpu_core_descriptor_set_from_spec(

@@ -6,9 +6,10 @@
 
 // Low function representation and target binding.
 //
-// This layer connects a Low function's intrinsic representation contract and
-// effective target facts to dense Low descriptor tables. The descriptor table
-// ABI itself remains IR-agnostic.
+// This layer resolves a Low function's intrinsic representation contract to
+// dense Low descriptor tables, then verifies that the representation can
+// encode the effective target selected by authored or invocation-refined
+// target facts. The descriptor table ABI itself remains IR-agnostic.
 
 #ifndef LOOM_CODEGEN_LOW_TARGET_BINDING_H_
 #define LOOM_CODEGEN_LOW_TARGET_BINDING_H_

@@ -130,6 +130,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::analysis::symbol_facts
+    loom::error::error_defs
     loom::format::text::parser
     loom::ir
     loom::ops::func_symbol_facts
@@ -137,7 +138,8 @@ loom_cc_test(
     loom::ops::target
     loom::ops::test
     loom::target::function_contract
-    loom::target::test::low_registry
+    loom::target::test::alt_descriptors
+    loom::target::test::descriptors
     loom::testing::module_ptr
 )
 

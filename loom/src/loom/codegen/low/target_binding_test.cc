@@ -9,6 +9,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/error/error_catalog.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -18,13 +19,30 @@
 #include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/target/function_contract.h"
-#include "loom/target/test/low_registry.h"
+#include "loom/target/test/alt_descriptors.h"
+#include "loom/target/test/descriptors.h"
 #include "loom/testing/module_ptr.h"
 
 namespace loom {
 namespace {
 
 using ModulePtr = ::loom::testing::ModulePtr;
+
+static const loom_low_descriptor_set_provider_t kDescriptorSetProviders[] = {
+    loom_test_low_core_descriptor_set,
+    loom_test_low_alt_descriptor_set,
+};
+
+struct DiagnosticCapture {
+  const loom_error_def_t* error = nullptr;
+};
+
+static iree_status_t CaptureDiagnostic(
+    void* user_data, const loom_diagnostic_emission_t* emission) {
+  auto* capture = static_cast<DiagnosticCapture*>(user_data);
+  capture->error = emission->error;
+  return iree_ok_status();
+}
 
 class LowTargetBindingTest : public ::testing::Test {
  protected:
@@ -38,7 +56,9 @@ class LowTargetBindingTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     iree_arena_initialize(&block_pool_, &analysis_arena_);
     loom_symbol_fact_table_initialize(&symbol_facts_, &analysis_arena_);
-    loom_test_low_descriptor_registry_initialize(&registry_);
+    registry_.descriptor_set_providers = kDescriptorSetProviders;
+    registry_.descriptor_set_provider_count =
+        IREE_ARRAYSIZE(kDescriptorSetProviders);
   }
 
   void TearDown() override {
@@ -134,7 +154,7 @@ class LowTargetBindingTest : public ::testing::Test {
   loom_symbol_fact_table_t symbol_facts_;
 
   // Synthetic Low descriptor registry selected by representation contracts.
-  loom_target_low_descriptor_registry_t registry_ = {};
+  loom_low_descriptor_registry_t registry_ = {};
 };
 
 TEST_F(LowTargetBindingTest, ResolvedTargetRetainsImmutableFacts) {
@@ -154,7 +174,7 @@ low.func.def target<test.low.core>(@target) @kernel() {
   IREE_ASSERT_OK(loom_low_resolve_function_target(
       module.get(), &symbol_facts_,
       LookupFunctionOp(module.get(), IREE_SV("kernel")),
-      /*effective_target_facts=*/nullptr, &registry_.registry,
+      /*effective_target_facts=*/nullptr, &registry_,
       iree_diagnostic_emitter_t{}, &target));
 
   ASSERT_NE(target.target_facts, nullptr);
@@ -205,8 +225,8 @@ low.func.def target<test.low.core>(@generic) @kernel() {
 
   loom_low_resolved_target_t exact_target = {};
   IREE_ASSERT_OK(loom_low_resolve_function_target(
-      module.get(), &symbol_facts_, function_op, exact_facts,
-      &registry_.registry, iree_diagnostic_emitter_t{}, &exact_target));
+      module.get(), &symbol_facts_, function_op, exact_facts, &registry_,
+      iree_diagnostic_emitter_t{}, &exact_target));
   EXPECT_EQ(exact_target.target_facts, exact_facts);
   EXPECT_TRUE(
       iree_string_view_equal(exact_target.target_name, IREE_SV("exact")));
@@ -221,7 +241,7 @@ low.func.def target<test.low.core>(@generic) @kernel() {
   loom_low_resolved_target_t authored_target = {};
   IREE_ASSERT_OK(loom_low_resolve_function_target(
       module.get(), &symbol_facts_, function_op,
-      /*effective_target_facts=*/nullptr, &registry_.registry,
+      /*effective_target_facts=*/nullptr, &registry_,
       iree_diagnostic_emitter_t{}, &authored_target));
   EXPECT_NE(authored_target.target_facts, exact_facts);
   EXPECT_TRUE(
@@ -255,11 +275,61 @@ low.func.def target<test.low.core> @kernel() {
   IREE_ASSERT_OK(loom_low_resolve_function_target(
       module.get(), &symbol_facts_,
       LookupFunctionOp(module.get(), IREE_SV("kernel")), exact_facts,
-      &registry_.registry, iree_diagnostic_emitter_t{}, &target));
+      &registry_, iree_diagnostic_emitter_t{}, &target));
   EXPECT_EQ(target.target_facts, exact_facts);
   EXPECT_TRUE(iree_string_view_equal(target.target_name, IREE_SV("exact")));
   EXPECT_EQ(target.feature_bits, 7u);
   ASSERT_NE(target.descriptor_set, nullptr);
+}
+
+TEST_F(LowTargetBindingTest,
+       PortableRepresentationSupportsDeclaredTargetContract) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @exact {
+  contract_set_key = "test.low.alt"
+}
+low.func.def target<test.low.core>(@exact) @kernel() {
+  low.return
+}
+)");
+
+  loom_low_resolved_target_t target = {};
+  IREE_ASSERT_OK(loom_low_resolve_function_target(
+      module.get(), &symbol_facts_,
+      LookupFunctionOp(module.get(), IREE_SV("kernel")),
+      /*effective_target_facts=*/nullptr, &registry_,
+      iree_diagnostic_emitter_t{}, &target));
+
+  ASSERT_NE(target.descriptor_set, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(target.descriptor_set_key,
+                                     IREE_SV("test.low.core")));
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_low_resolved_target_bundle(&target)->config->contract_set_key,
+      IREE_SV("test.low.alt")));
+}
+
+TEST_F(LowTargetBindingTest, RepresentationCompatibilityIsDirectional) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @target
+low.func.def target<test.low.alt>(@target) @kernel() {
+  low.return
+}
+)");
+
+  DiagnosticCapture capture;
+  loom_low_resolved_target_t target = {};
+  IREE_ASSERT_OK(loom_low_resolve_function_target(
+      module.get(), &symbol_facts_,
+      LookupFunctionOp(module.get(), IREE_SV("kernel")),
+      /*effective_target_facts=*/nullptr, &registry_,
+      {
+          /*.fn=*/CaptureDiagnostic,
+          /*.user_data=*/&capture,
+      },
+      &target));
+
+  EXPECT_EQ(capture.error, LOOM_ERR_TARGET_065);
+  EXPECT_EQ(target.descriptor_set, nullptr);
 }
 
 }  // namespace

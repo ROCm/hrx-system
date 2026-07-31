@@ -174,6 +174,24 @@ static iree_status_t loom_low_emit_missing_descriptor_set(
                        IREE_ARRAYSIZE(params), NULL, 0);
 }
 
+static iree_status_t loom_low_emit_unsupported_representation_contract(
+    iree_diagnostic_emitter_t emitter, const loom_module_t* module,
+    const loom_op_t* low_func_op, uint16_t repr_contract_attr_index,
+    iree_string_view_t representation_contract, iree_string_view_t target_name,
+    iree_string_view_t target_contract) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_function_name(module, low_func_op)),
+      loom_param_with_field_ref(
+          loom_param_string(representation_contract),
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+                                    repr_contract_attr_index)),
+      loom_param_string(target_name),
+      loom_param_string(target_contract),
+  };
+  return loom_low_emit(emitter, low_func_op, LOOM_ERR_TARGET_065, params,
+                       IREE_ARRAYSIZE(params), NULL, 0);
+}
+
 static bool loom_low_get_function_target_ref(const loom_op_t* low_func_op,
                                              loom_symbol_ref_t* out_target_ref,
                                              uint16_t* out_target_attr_index) {
@@ -261,6 +279,15 @@ static iree_status_t loom_low_resolve_func_target(
     return loom_low_emit_missing_descriptor_set(
         emitter, module, low_func_op, low_func.vtable->repr_contract_attr_index,
         out_target->descriptor_set_key);
+  }
+  const iree_string_view_t target_contract_key =
+      loom_low_resolved_target_bundle(out_target)->config->contract_set_key;
+  if (!loom_low_descriptor_set_supports_target_contract(descriptor_set,
+                                                        target_contract_key)) {
+    return loom_low_emit_unsupported_representation_contract(
+        emitter, module, low_func_op, low_func.vtable->repr_contract_attr_index,
+        out_target->descriptor_set_key, out_target->target_name,
+        target_contract_key);
   }
   out_target->descriptor_set = descriptor_set;
   return iree_ok_status();

@@ -1120,6 +1120,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
     c_table_prefix="TestLowCore",
     c_enum_prefix="TEST_LOW_CORE",
     generator_version=1,
+    supported_target_contract_keys=("test.low.alt",),
     reg_classes=(
         RegClass(
             _REG_I32,

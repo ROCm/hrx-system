@@ -784,6 +784,50 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   loom_module_free(module);
 }
 
+TEST_F(AmdgpuHalKernelLibraryTest, RejectsIncompatibleRepresentationContract) {
+  const loom_amdgpu_target_info_t* gfx1151 = nullptr;
+  IREE_ASSERT_OK(
+      loom_amdgpu_target_info_lookup_target(IREE_SV("gfx1151"), &gfx1151));
+  ASSERT_NE(gfx1151, nullptr);
+  if (!IsDescriptorSetLinked(IREE_SV("amdgpu.rdna3.core")) ||
+      !IsTargetDescriptorSetLinked(gfx1151)) {
+    GTEST_SKIP() << "RDNA3 and gfx1151 descriptor sets are required";
+  }
+
+  static const char kSource[] =
+      "amdgpu.target<gfx1151> @gfx_target\n"
+      "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
+      "workgroup_size(64, 1, 1) @loom_kernel() {\n"
+      "  low.return\n"
+      "}\n";
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(
+      ParseSource(iree_make_cstring_view(kSource), &module));
+
+  DiagnosticCapture capture;
+  loom_amdgpu_hal_kernel_library_options_t options = {};
+  options.diagnostic_sink = capture.sink();
+  options.max_errors = 20;
+  bool emitted = true;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  EXPECT_FALSE(emitted);
+  ASSERT_EQ(capture.diagnostics.size(), 1u) << DiagnosticSummary(capture);
+  const CapturedDiagnostic* diagnostic =
+      FindDiagnostic(capture, LOOM_ERR_TARGET_065);
+  ASSERT_NE(diagnostic, nullptr);
+  EXPECT_EQ(GetStringParam(*diagnostic, 0), "loom_kernel");
+  EXPECT_EQ(GetStringParam(*diagnostic, 1), "amdgpu.rdna3.core");
+  EXPECT_EQ(GetStringParam(*diagnostic, 2), "gfx_target");
+  EXPECT_EQ(GetStringParam(*diagnostic, 3), "amdgpu.rdna3_5.core");
+
+  loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                              iree_allocator_system());
+  loom_module_free(module);
+}
+
 TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx1250HardwareEntryEnvelope) {
   const loom_amdgpu_target_info_t* target = nullptr;
   IREE_ASSERT_OK(
@@ -1466,7 +1510,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   };
   static const char kSource[] =
       "amdgpu.target<gfx1250> @gfx_target\n"
-      "low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx_target) "
+      "low.kernel.def target<amdgpu.gfx12_5.generic.core>(@gfx_target) "
       "workgroup_size(64, 1, 1) "
       "@loom_kernel() {\n"
       "  %pc = low.op<amdgpu.s_getpc_b64>() : () -> "
@@ -1506,8 +1550,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
       module, &options, iree_allocator_system(), &emitted, &library));
 
-  EXPECT_TRUE(emitted);
-  EXPECT_TRUE(capture.diagnostics.empty());
+  EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
+  EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
   ASSERT_NE(library.hsaco_data, nullptr);
   const std::string hsaco(reinterpret_cast<const char*>(library.hsaco_data),
                           library.hsaco_data_length);
@@ -1555,7 +1599,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
 TEST_F(AmdgpuHalKernelLibraryTest, RejectsRel32AddWithoutPcProvenance) {
   static const char kSource[] =
       "amdgpu.target<gfx11-generic> @gfx_target\n"
-      "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
+      "low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx_target) "
       "workgroup_size(64, 1, 1) "
       "@loom_kernel() {\n"
       "  %zero = low.op<amdgpu.s_mov_b32>() {imm32 = 0} : () -> "
