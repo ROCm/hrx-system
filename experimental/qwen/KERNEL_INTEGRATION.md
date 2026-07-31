@@ -98,8 +98,8 @@ decode-513 programs:
 | FlashAttention | General grouped-query prefill kernel | Fused split-K decode kernel with last-arrival reduction | `qwen3_moe/flash_attention_f32_f16_wmma.loom` and `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` |
 | Attention output | Q4_K F16 WMMA projection with residual accumulation | Q8_1 x4 pack followed by direct Q4_K row contraction with residual accumulation | `qwen3_moe/dense_linear_quantized_f16_wmma.loom` and `ggml/quantize_q8_1_x4.loom` |
 | Feed-forward RMSNorm | F32 RMSNorm | Fused F32 RMSNorm and Q8_1 x4 packing | `qwen3_moe/attention_prepare_quantized.loom` |
-| Router projection | Four-row wave32 schedule | Same current schedule | `qwen3_moe/router_projection_f32.loom` |
-| Top-8 routing | Normalized compact `[token, 8]` rows | Same current wide launch | `qwen3_moe/router_top8_f32.loom` |
+| Router projection | Four-row wave32 schedule | Fused four-row wave64 projection with last-arrival top-8 selection | `qwen3_moe/router_projection_f32.loom` and `qwen3_moe/router_projection_top8_fused.loom` |
+| Top-8 routing | Normalized compact `[token, 8]` rows | Published by the fused projection's last-arriving wave | `qwen3_moe/router_top8_f32.loom` and `qwen3_moe/router_projection_top8_fused.loom` |
 | Expert tables | Assignment table then 32-row partition table | None; compact route IDs directly select expert rows | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` |
 | Gate/up and SwiGLU | Grouped Q4_K F16 WMMA | Raw Q4_K by Q8_1 x4 direct contraction producing F32 SwiGLU rows | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` |
 | SwiGLU packing | None | Eight F32 route rows packed to Q8_1 x4 | `ggml/quantize_q8_1_x4.loom` |
@@ -109,24 +109,26 @@ decode-513 programs:
 Full-model prefill records 726 dispatches. Layers 0 through 46 execute every
 stage over all 512 rows. Layer 47 executes attention over all rows so its cache
 is complete, then executes feed-forward and the vocabulary endpoint only for
-the final row needed to select the next token. Decode records 582 dispatches:
-two request-setup dispatches, six attention and six direct feed-forward
+the final row needed to select the next token. Decode records 534 dispatches:
+two request-setup dispatches, six attention and five direct feed-forward
 dispatches per layer, and four endpoint dispatches. Its reusable dispatch-only
-command buffer contains 581 explicit barriers and one terminal return;
+command buffer contains 533 explicit barriers and one terminal return;
 selected-token publication does not add a transfer operation.
 
-Decode owns one partial-maximum, partial-sum, partial-output, and completion
-counter region sized to its exact context. All 48 sequential layer dispatches
-reuse those spans. A queue fill initializes the four completion counters after
-transient allocation and signals reusable command-buffer execution; every
-attention dispatch returns its counters to zero before the following layer.
-The direct Q8_1 x4 gate/up and fused direct down families are selected for
-full-model decode; grouped F16 WMMA remains the prefill and layer-program route.
+Decode owns partial-maximum, partial-sum, and partial-output regions sized to
+its exact context. Four split-attention counters and one router counter occupy
+one contiguous 20-byte initialization span. All 48 sequential layers reuse
+those spans. One queue fill initializes all five counters after transient
+allocation and signals reusable command-buffer execution; each attention
+dispatch and fused router dispatch returns its counter to zero before the
+following layer. The direct Q8_1 x4 gate/up and fused direct down families are
+selected for full-model decode; grouped F16 WMMA remains the prefill and
+layer-program route.
 
 ## Specialization and ABI
 
 The host chooses semantic kernel families and passes model facts; target launch
-geometry remains in Loom. `program.c` currently selects four
+geometry remains in Loom. `program.c` currently selects five
 shape-dependent families:
 
 - Q/K/V uses separate F32-input WMMA projections at 128 or more rows and the
@@ -135,6 +137,9 @@ shape-dependent families:
   general grouped-query kernel for prefill and layer programs.
 - Attention output uses the direct Q8_1 x4 Q4_K contraction for one-token
   decode and the F16 WMMA contraction for larger shapes.
+- Router projection publishes normalized top-8 rows from the last arriving
+  projection wave for full-model decode. Prefill and layer programs retain
+  separate projection and top-8 dispatches.
 - Feed-forward uses fused RMSNorm/Q8_1 preparation, direct raw-Q4_K gate/up,
   Q8_1 packing, and fused direct down/reduction for full-model decode. Prefill
   and layer programs retain the grouped F16 WMMA route.
@@ -166,6 +171,7 @@ not copied wholesale into a second kernel corpus.
 | --- | --- | --- |
 | `router_projection_f32_bringup_workaround.loom` | `qwen3_moe/router_projection_f32.loom` | Counted-loop propagation does not retain the four-element packet bound through all vector loads. The fork narrows an equivalent exclusive bound and carries it to those loads. |
 | `router_top8_f32_bringup_workaround.loom` | `qwen3_moe/router_top8_f32.loom` | The generic kernel lacks `route_count <= route_id_stride`, while this model has compact `8 == 8` rows. Workload-evaluated decode/prefill workgroup choice also does not reach source-to-low compilation, so the fork pins the wide 256-thread geometry. |
+| `router_projection_top8_fused_bringup_workaround.loom` | `qwen3_moe/router_projection_top8_fused.loom` and `qwen3_moe/router_top8_f32.loom` | The shared generic top-8 helper has the same missing route-count/physical-stride relation. The one-function fork retains the canonical projection and last-arrival schedule, then passes the configured route count as the physical stride for this model's exact compact `8 == 8` rows. |
 | `expert_table_bringup_workaround.loom` | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` | AMDGPU division/remainder lowering needs the exact route-count divisor. The JIT workload already knows eight, but that value does not reach target lowering, so the fork makes eight structural. |
 | `quantize_q8_1_x4_bringup_workaround.loom` | `ggml/quantize_q8_1_x4.loom` | Launch and loop facts do not prove the four-element `vector.load` footprint. The fork adds the equivalent packet-end relation. |
 | `routed_gate_up_q8_bringup_workaround.loom` | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` | Exact one-token, eight-route, 128-expert, and 768-channel workload facts do not reach scalar footprint analysis. The fork makes those dimensions structural while retaining the direct kernel ABI and body. |
@@ -191,6 +197,7 @@ linking, config binding, and launch evaluation without issuing device work:
 ```sh
 iree-bazel-test \
   //experimental/qwen_moe/kernels:router_projection_f32_plan_test \
+  //experimental/qwen_moe/kernels:router_projection_top8_fused_f32_plan_test \
   //experimental/qwen_moe/kernels:attention_qkv_quantized_plan_test \
   //experimental/qwen_moe/kernels:routed_gate_up_swiglu_q4k_f16_wmma_plan_test \
   //experimental/qwen_moe/kernels:flash_attention_decode_f32_f16_wmma_plan_test

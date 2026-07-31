@@ -119,7 +119,8 @@ The working full-model programs now record all 48 layers, embedding, final
 normalization, vocabulary projection, and greedy selection into reusable
 command buffers. Prefill retains the grouped F16 WMMA feed-forward route;
 decode uses fused split-K attention, fused normalization and Q8_1 packing,
-direct raw-Q4_K gate/up, and direct Q4_K or Q6_K down contraction with route
-weighting, reduction, and residual publication fused. The layer runner remains
-a first-class optimization surface so model work can be isolated to a stable
+fused router projection and normalized top-8 selection, direct raw-Q4_K
+gate/up, and direct Q4_K or Q6_K down contraction with route weighting,
+reduction, and residual publication fused. The layer runner remains a
+first-class optimization surface so model work can be isolated to a stable
 benchmark row without forking execution logic.
