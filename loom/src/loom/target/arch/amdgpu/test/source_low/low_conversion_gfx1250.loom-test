@@ -55,3 +55,30 @@ low.func.def target(@target) @gfx1250_native_packed_float_ops(%low: reg<amdgpu.v
   s_delay_alu instid0(VALU_DEP_1)
   v_pk_fma_bf16 v0, v0, v3, v1
   s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx1250_packed8_encode waits=none
+
+amdgpu.target<gfx1250> @target
+low.func.def target(@target) @gfx1250_packed8_encode(%f32_a: reg<amdgpu.vgpr>, %f32_b: reg<amdgpu.vgpr>, %f32_c: reg<amdgpu.vgpr>, %f32_d: reg<amdgpu.vgpr>, %packed_f16_a: reg<amdgpu.vgpr>, %packed_f16_b: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+  %fp8_f32_low = v_cvt_pk_fp8_f32_low %f32_a, %f32_b
+  %fp8_f32 = v_cvt_pk_fp8_f32_high %fp8_f32_low, %f32_c, %f32_d
+  %bf8_f32_low = v_cvt_pk_bf8_f32_low %f32_a, %f32_b
+  %bf8_f32 = v_cvt_pk_bf8_f32_high %bf8_f32_low, %f32_c, %f32_d
+  %fp8_f16_low = v_cvt_pk_fp8_f16_low %packed_f16_a
+  %fp8_f16 = v_cvt_pk_fp8_f16_high %fp8_f16_low, %packed_f16_b
+  %bf8_f16_low = v_cvt_pk_bf8_f16_low %packed_f16_a
+  %bf8_f16 = v_cvt_pk_bf8_f16_high %bf8_f16_low, %packed_f16_b
+  return %fp8_f32, %bf8_f32, %fp8_f16, %bf8_f16
+}
+
+// ----
+  v_cvt_pk_fp8_f32 v6, v0, v1
+  v_cvt_pk_bf8_f32 v0, v0, v1
+  v_cvt_pk_fp8_f16 v1, v2
+  v_cvt_pk_bf8_f16 v2, v2
+  v_cvt_pk_fp8_f32 v6, v3, v4, op_sel:[0,0,1]
+  v_cvt_pk_bf8_f32 v0, v3, v4, op_sel:[0,0,1]
+  v_cvt_pk_fp8_f16 v1, v5, op_sel:[0,1]
+  v_cvt_pk_bf8_f16 v2, v5, op_sel:[0,1]
+  s_endpgm

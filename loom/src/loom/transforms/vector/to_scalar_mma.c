@@ -764,8 +764,8 @@ static iree_status_t loom_vector_to_scalar_mma_materialize_matrix_lane(
       loom_vector_to_scalar_mma_encoded_operand(fragment);
   return loom_vector_to_scalar_build_encoded_matrix_lane(
       state, &operand, raw_lane,
-      loom_vector_to_scalar_lane_type(fragment->type), result_type, row, column,
-      ordinal, out_lane);
+      loom_vector_to_scalar_lane_type(fragment->type), result_type, block, row,
+      column, ordinal, out_lane);
 }
 
 static iree_status_t loom_vector_to_scalar_mma_insert_matrix_lane(

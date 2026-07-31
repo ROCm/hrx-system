@@ -86,6 +86,10 @@ static iree_string_view_t loom_encoding_scale_group_elements_param_name(void) {
   return IREE_SV("scale_group_elements");
 }
 
+static iree_string_view_t loom_encoding_scale_group_shape_param_name(void) {
+  return IREE_SV("scale_group_shape");
+}
+
 static iree_string_view_t loom_encoding_scale_operands_param_name(void) {
   return IREE_SV("scale_operands");
 }
@@ -250,6 +254,40 @@ static bool loom_encoding_static_bool_param_or_default(
   return true;
 }
 
+static bool loom_encoding_static_scale_group_shape(
+    const loom_module_t* module, const loom_encoding_t* encoding,
+    uint32_t scale_topology, uint16_t scale_group_element_count,
+    uint16_t out_shape[LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK]) {
+  for (uint8_t i = 0; i < LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK; ++i) {
+    out_shape[i] = 0;
+  }
+
+  const bool is_1d = iree_any_bit_set(
+      scale_topology, LOOM_VALUE_FACT_SCALE_TOPOLOGY_GROUP_1D |
+                          LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D);
+  const bool is_2d =
+      iree_any_bit_set(scale_topology, LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_2D);
+  const loom_named_attr_t* entry =
+      loom_encoding_find_param(module, loom_encoding_attrs(encoding),
+                               loom_encoding_scale_group_shape_param_name());
+  if (!entry) {
+    if (is_2d) return false;
+    if (is_1d && scale_group_element_count != 0) {
+      out_shape[0] = scale_group_element_count;
+    }
+    return true;
+  }
+  if (entry->value.kind != LOOM_ATTR_I64_ARRAY || entry->value.count == 0 ||
+      entry->value.count > LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK) {
+    return false;
+  }
+
+  for (uint16_t i = 0; i < entry->value.count; ++i) {
+    out_shape[i] = (uint16_t)entry->value.i64_array[i];
+  }
+  return true;
+}
+
 static loom_value_fact_address_layout_t loom_encoding_dense_address_layout(
     void) {
   return (loom_value_fact_address_layout_t){
@@ -329,6 +367,7 @@ static bool loom_encoding_static_matrix_operand_schema(
   uint16_t payload_elements = 0;
   uint16_t payload_registers = 0;
   uint16_t scale_group_elements = 0;
+  uint16_t scale_group_shape[LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK] = {0};
   uint16_t scale_operands = 0;
   uint16_t sparsity_group_elements = 0;
   uint16_t sparsity_group_nonzero_elements = 0;
@@ -407,6 +446,11 @@ static bool loom_encoding_static_matrix_operand_schema(
   rounding_policy = (uint32_t)rounding_policy_value;
   codebook_policy = (uint32_t)codebook_policy_value;
   sparsity_policy = (uint32_t)sparsity_policy_value;
+  if (!loom_encoding_static_scale_group_shape(module, encoding, scale_topology,
+                                              scale_group_elements,
+                                              scale_group_shape)) {
+    return true;
+  }
 
   loom_value_fact_encoded_operand_schema_t encoded_operand = {
       .element_format = element_format,
@@ -425,9 +469,15 @@ static bool loom_encoding_static_matrix_operand_schema(
           },
       .payload_register_count = payload_registers,
       .payload_element_count = payload_elements,
-      .scale_group_element_count = scale_group_elements,
+      .scale_group =
+          {
+              .element_count = scale_group_elements,
+          },
       .scale_operand_count = scale_operands,
   };
+  for (uint8_t i = 0; i < LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK; ++i) {
+    encoded_operand.scale_group.shape[i] = scale_group_shape[i];
+  }
   if (zero_scale_fallback) {
     encoded_operand.flags |=
         LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ZERO_SCALE_FALLBACK;
@@ -475,7 +525,11 @@ static bool loom_encoding_static_ggml_q8_0_schema(
       .scale_topology = LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D,
       .affine_policy = LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY,
       .payload_element_count = block_elements,
-      .scale_group_element_count = block_elements,
+      .scale_group =
+          {
+              .element_count = block_elements,
+              .shape = {block_elements},
+          },
       .scale_operand_count = 1,
   };
   return true;

@@ -987,3 +987,141 @@ func.def @rejects_dynamic_transform_last_axis(%n: index, %v: vector<[%n]xf32>) -
   %r = vector.transform %v, %xf : vector<[%n]xf32>, encoding<transform> -> vector<[%n]xf32>
   func.return %r : vector<[%n]xf32>
 }
+
+// ====
+
+func.def @scalarizes_block_2d_scaled_f8_decode(%payload: vector<3x5xf8E4M3>, %scale: vector<4xf8E4M3>) -> (vector<3x5xf32>) {
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=15, payload_packing=dense_lanes, payload_registers=0, scale_format=f8e4m3fn, scale_group_elements=6, scale_group_shape=[2, 3], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<4xf8E4M3>} : vector<3x5xf8E4M3>, encoding<schema> -> vector<3x5xf32>
+  func.return %decoded : vector<3x5xf32>
+}
+
+// ----
+func.def @scalarizes_block_2d_scaled_f8_decode(%payload: vector<3x5xf8E4M3>, %scale: vector<4xf8E4M3>) -> (vector<3x5xf32>) {
+  %5 = vector.extract %payload[0, 0] : vector<3x5xf8E4M3> -> f8E4M3
+  %6 = scalar.extf %5 : f8E4M3 to f32
+  %7 = vector.extract %scale[0] : vector<4xf8E4M3> -> f8E4M3
+  %8 = scalar.extf %7 : f8E4M3 to f32
+  %9 = scalar.mulf %6, %8 : f32
+  %10 = vector.extract %payload[0, 1] : vector<3x5xf8E4M3> -> f8E4M3
+  %11 = scalar.extf %10 : f8E4M3 to f32
+  %12 = vector.extract %scale[0] : vector<4xf8E4M3> -> f8E4M3
+  %13 = scalar.extf %12 : f8E4M3 to f32
+  %14 = scalar.mulf %11, %13 : f32
+  %15 = vector.extract %payload[0, 2] : vector<3x5xf8E4M3> -> f8E4M3
+  %16 = scalar.extf %15 : f8E4M3 to f32
+  %17 = vector.extract %scale[0] : vector<4xf8E4M3> -> f8E4M3
+  %18 = scalar.extf %17 : f8E4M3 to f32
+  %19 = scalar.mulf %16, %18 : f32
+  %20 = vector.extract %payload[0, 3] : vector<3x5xf8E4M3> -> f8E4M3
+  %21 = scalar.extf %20 : f8E4M3 to f32
+  %22 = vector.extract %scale[1] : vector<4xf8E4M3> -> f8E4M3
+  %23 = scalar.extf %22 : f8E4M3 to f32
+  %24 = scalar.mulf %21, %23 : f32
+  %25 = vector.extract %payload[0, 4] : vector<3x5xf8E4M3> -> f8E4M3
+  %26 = scalar.extf %25 : f8E4M3 to f32
+  %27 = vector.extract %scale[1] : vector<4xf8E4M3> -> f8E4M3
+  %28 = scalar.extf %27 : f8E4M3 to f32
+  %29 = scalar.mulf %26, %28 : f32
+  %30 = vector.extract %payload[1, 0] : vector<3x5xf8E4M3> -> f8E4M3
+  %31 = scalar.extf %30 : f8E4M3 to f32
+  %32 = vector.extract %scale[0] : vector<4xf8E4M3> -> f8E4M3
+  %33 = scalar.extf %32 : f8E4M3 to f32
+  %34 = scalar.mulf %31, %33 : f32
+  %35 = vector.extract %payload[1, 1] : vector<3x5xf8E4M3> -> f8E4M3
+  %36 = scalar.extf %35 : f8E4M3 to f32
+  %37 = vector.extract %scale[0] : vector<4xf8E4M3> -> f8E4M3
+  %38 = scalar.extf %37 : f8E4M3 to f32
+  %39 = scalar.mulf %36, %38 : f32
+  %40 = vector.extract %payload[1, 2] : vector<3x5xf8E4M3> -> f8E4M3
+  %41 = scalar.extf %40 : f8E4M3 to f32
+  %42 = vector.extract %scale[0] : vector<4xf8E4M3> -> f8E4M3
+  %43 = scalar.extf %42 : f8E4M3 to f32
+  %44 = scalar.mulf %41, %43 : f32
+  %45 = vector.extract %payload[1, 3] : vector<3x5xf8E4M3> -> f8E4M3
+  %46 = scalar.extf %45 : f8E4M3 to f32
+  %47 = vector.extract %scale[1] : vector<4xf8E4M3> -> f8E4M3
+  %48 = scalar.extf %47 : f8E4M3 to f32
+  %49 = scalar.mulf %46, %48 : f32
+  %50 = vector.extract %payload[1, 4] : vector<3x5xf8E4M3> -> f8E4M3
+  %51 = scalar.extf %50 : f8E4M3 to f32
+  %52 = vector.extract %scale[1] : vector<4xf8E4M3> -> f8E4M3
+  %53 = scalar.extf %52 : f8E4M3 to f32
+  %54 = scalar.mulf %51, %53 : f32
+  %55 = vector.extract %payload[2, 0] : vector<3x5xf8E4M3> -> f8E4M3
+  %56 = scalar.extf %55 : f8E4M3 to f32
+  %57 = vector.extract %scale[2] : vector<4xf8E4M3> -> f8E4M3
+  %58 = scalar.extf %57 : f8E4M3 to f32
+  %59 = scalar.mulf %56, %58 : f32
+  %60 = vector.extract %payload[2, 1] : vector<3x5xf8E4M3> -> f8E4M3
+  %61 = scalar.extf %60 : f8E4M3 to f32
+  %62 = vector.extract %scale[2] : vector<4xf8E4M3> -> f8E4M3
+  %63 = scalar.extf %62 : f8E4M3 to f32
+  %64 = scalar.mulf %61, %63 : f32
+  %65 = vector.extract %payload[2, 2] : vector<3x5xf8E4M3> -> f8E4M3
+  %66 = scalar.extf %65 : f8E4M3 to f32
+  %67 = vector.extract %scale[2] : vector<4xf8E4M3> -> f8E4M3
+  %68 = scalar.extf %67 : f8E4M3 to f32
+  %69 = scalar.mulf %66, %68 : f32
+  %70 = vector.extract %payload[2, 3] : vector<3x5xf8E4M3> -> f8E4M3
+  %71 = scalar.extf %70 : f8E4M3 to f32
+  %72 = vector.extract %scale[3] : vector<4xf8E4M3> -> f8E4M3
+  %73 = scalar.extf %72 : f8E4M3 to f32
+  %74 = scalar.mulf %71, %73 : f32
+  %75 = vector.extract %payload[2, 4] : vector<3x5xf8E4M3> -> f8E4M3
+  %76 = scalar.extf %75 : f8E4M3 to f32
+  %77 = vector.extract %scale[3] : vector<4xf8E4M3> -> f8E4M3
+  %78 = scalar.extf %77 : f8E4M3 to f32
+  %79 = scalar.mulf %76, %78 : f32
+  %decoded = vector.from_elements %9, %14, %19, %24, %29, %34, %39, %44, %49, %54, %59, %64, %69, %74, %79 : vector<3x5xf32>
+  func.return %decoded : vector<3x5xf32>
+}
+
+// ====
+
+func.def @scalarizes_batched_block_2d_scaled_f8_mma(%lhs_data: vector<2x1x1xf8E4M3>, %rhs_data: vector<2x1x1xf8E4M3>, %init_data: vector<2x1x1xf32>, %lhs_scale: vector<2xf8E4M3>, %rhs_scale: vector<2xf8E4M3>) -> (vector<2x1x1xf32>) {
+  %blocks = index.constant 2 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %k = index.constant 1 : index
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=2, payload_packing=dense_lanes, payload_registers=0, scale_format=f8e4m3fn, scale_group_elements=1, scale_group_shape=[1, 1], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] using {scale = %lhs_scale : vector<2xf8E4M3>, schema = %schema : encoding<schema>} : vector<2x1x1xf8E4M3>
+  %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] using {scale = %rhs_scale : vector<2xf8E4M3>, schema = %schema : encoding<schema>} : vector<2x1x1xf8E4M3>
+  %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<2x1x1xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<2x1x1xf8E4M3>, vector<2x1x1xf8E4M3>, vector<2x1x1xf32>
+  func.return %result : vector<2x1x1xf32>
+}
+
+// ----
+func.def @scalarizes_batched_block_2d_scaled_f8_mma(%lhs_data: vector<2x1x1xf8E4M3>, %rhs_data: vector<2x1x1xf8E4M3>, %init_data: vector<2x1x1xf32>, %lhs_scale: vector<2xf8E4M3>, %rhs_scale: vector<2xf8E4M3>) -> (vector<2x1x1xf32>) {
+  %blocks = index.constant 2 : index
+  %m = index.constant 1 : index
+  %n = index.constant 1 : index
+  %15 = vector.extract %init_data[0, 0, 0] : vector<2x1x1xf32> -> f32
+  %16 = vector.extract %lhs_data[0, 0, 0] : vector<2x1x1xf8E4M3> -> f8E4M3
+  %17 = scalar.extf %16 : f8E4M3 to f32
+  %18 = vector.extract %lhs_scale[0] : vector<2xf8E4M3> -> f8E4M3
+  %19 = scalar.extf %18 : f8E4M3 to f32
+  %20 = scalar.mulf %17, %19 : f32
+  %21 = vector.extract %rhs_data[0, 0, 0] : vector<2x1x1xf8E4M3> -> f8E4M3
+  %22 = scalar.extf %21 : f8E4M3 to f32
+  %23 = vector.extract %rhs_scale[0] : vector<2xf8E4M3> -> f8E4M3
+  %24 = scalar.extf %23 : f8E4M3 to f32
+  %25 = scalar.mulf %22, %24 : f32
+  %26 = scalar.fmaf %20, %25, %15 : f32
+  %27 = vector.extract %init_data[1, 0, 0] : vector<2x1x1xf32> -> f32
+  %28 = vector.extract %lhs_data[1, 0, 0] : vector<2x1x1xf8E4M3> -> f8E4M3
+  %29 = scalar.extf %28 : f8E4M3 to f32
+  %30 = vector.extract %lhs_scale[1] : vector<2xf8E4M3> -> f8E4M3
+  %31 = scalar.extf %30 : f8E4M3 to f32
+  %32 = scalar.mulf %29, %31 : f32
+  %33 = vector.extract %rhs_data[1, 0, 0] : vector<2x1x1xf8E4M3> -> f8E4M3
+  %34 = scalar.extf %33 : f8E4M3 to f32
+  %35 = vector.extract %rhs_scale[1] : vector<2xf8E4M3> -> f8E4M3
+  %36 = scalar.extf %35 : f8E4M3 to f32
+  %37 = scalar.mulf %34, %36 : f32
+  %38 = scalar.fmaf %32, %37, %27 : f32
+  %39 = vector.from_elements %26, %38 : vector<2x1x1xf32>
+  %result = vector.fragment<result> %39 shape [blocks(%blocks), %m, %n] : vector<2x1x1xf32>
+  func.return %result : vector<2x1x1xf32>
+}

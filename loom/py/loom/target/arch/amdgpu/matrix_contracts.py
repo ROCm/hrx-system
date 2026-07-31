@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from loom.target.arch.amdgpu.matrix_formats import GFX125X_MATRIX_PHYSICAL_FORMATS
+from loom.target.arch.amdgpu.matrix_formats import (
+    AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS,
+)
 from loom.target.arch.amdgpu.matrix_fragment_layouts import (
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
     MatrixFragmentReductionGroup,
@@ -127,8 +129,61 @@ def _gfx125x_wmma_f8f6f4_contracts(
                 f"gfx125x_wmma_f32_16x16x128_{lhs_format.token}_{rhs_format.token}"
             ),
         )
-        for lhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS
-        for rhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS
+        for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+        for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+    )
+
+
+def _cdna4_mfma_f8f6f4_contracts(
+    scale_kind: str,
+) -> tuple[AmdgpuMatrixContract, ...]:
+    scale_name = {"none": "", "scale32": "scale."}[scale_kind]
+    features = (
+        ("mfma_gfx950",)
+        if scale_kind == "none"
+        else ("mfma_gfx950", "mfma_gfx950_scale_f8f6f4")
+    )
+    flags = (
+        ("matrix_formats",)
+        if scale_kind == "none"
+        else ("scaled", "matrix_formats", "zero_scale_fallback")
+    )
+    implicit_scale_formats = ("e8m0",) if scale_kind == "scale32" else ()
+    return tuple(
+        AmdgpuMatrixContract(
+            name=(
+                f"mfma.{scale_name}f32.{m}x{n}x{k}.f8f6f4."
+                f"{lhs_format.token}.{rhs_format.token}"
+            ),
+            family="mfma",
+            features=features,
+            flags=flags,
+            tile_shape=(m, n, k),
+            lhs=payload(
+                lhs_format.contract_numeric_type,
+                lhs_format.register_count_for(32),
+                32,
+            ),
+            rhs=payload(
+                rhs_format.contract_numeric_type,
+                rhs_format.register_count_for(32),
+                32,
+            ),
+            accumulator=payload(
+                "f32", accumulator_register_count, accumulator_register_count
+            ),
+            result=payload(
+                "f32", accumulator_register_count, accumulator_register_count
+            ),
+            scale_kind=scale_kind,
+            implicit_scale_formats=implicit_scale_formats,
+        )
+        for m, n, k, accumulator_register_count in (
+            (16, 16, 128, 4),
+            (32, 32, 64, 16),
+        )
+        for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+        for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
     )
 
 
@@ -712,32 +767,8 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         result=payload("i32", 16, 16),
         scale_kind="none",
     ),
-    AmdgpuMatrixContract(
-        name="mfma.scale.f32.16x16x128.f8f6f4",
-        family="mfma",
-        features=("mfma_gfx950", "mfma_gfx950_scale_f8f6f4"),
-        flags=("scaled", "matrix_formats", "zero_scale_fallback"),
-        implicit_scale_formats=("e8m0",),
-        tile_shape=(16, 16, 128),
-        lhs=payload("f8f6f4", 8, 32),
-        rhs=payload("f8f6f4", 8, 32),
-        accumulator=payload("f32", 4, 4),
-        result=payload("f32", 4, 4),
-        scale_kind="scale32",
-    ),
-    AmdgpuMatrixContract(
-        name="mfma.scale.f32.32x32x64.f8f6f4",
-        family="mfma",
-        features=("mfma_gfx950", "mfma_gfx950_scale_f8f6f4"),
-        flags=("scaled", "matrix_formats", "zero_scale_fallback"),
-        implicit_scale_formats=("e8m0",),
-        tile_shape=(32, 32, 64),
-        lhs=payload("f8f6f4", 8, 32),
-        rhs=payload("f8f6f4", 8, 32),
-        accumulator=payload("f32", 16, 16),
-        result=payload("f32", 16, 16),
-        scale_kind="scale32",
-    ),
+    *_cdna4_mfma_f8f6f4_contracts("none"),
+    *_cdna4_mfma_f8f6f4_contracts("scale32"),
     AmdgpuMatrixContract(
         name="smfmac.f32.16x16x128.fp8.fp8",
         family="smfmac",

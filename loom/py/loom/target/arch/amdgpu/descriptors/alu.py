@@ -1004,6 +1004,29 @@ def _v_binary_f32_operand_forms(
     )
 
 
+def _v_med3_num_f32_overlay(
+    *,
+    instruction_name: str = "V_MED3_F32",
+    mnemonic: str = "v_med3_f32",
+) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_med3_num_f32",
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
+        encoding_name="ENC_VOP3",
+        semantic_tag="float.med3_num.f32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("a")),
+            AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("b")),
+            AmdgpuOperandOverlay("SRC2", _sgpr_vgpr_operand("c")),
+        ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _v_add_u32_literal_overlay(instruction_name: str) -> AmdgpuDescriptorOverlay:
     return _v_binary_literal_overlay(
         descriptor_key="amdgpu.v_add_u32.lit",
@@ -2126,7 +2149,7 @@ def _v_lshl_add_u32_shift_immediate_src2_literal_overlay() -> AmdgpuDescriptorOv
                 _native_unsigned_hex_immediate("imm32", 32),
             ),
         ),
-        immediate_fields=("SRC1",),
+        immediate_fields=("SRC1", "LITERAL"),
         immediates=(
             _source_inline_u32_immediate("shift"),
             _LITERAL_U32_IMMEDIATE,
@@ -4062,7 +4085,7 @@ def _v_pk_binary_overlay(
             AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand(lhs_name, units=units)),
             AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand(rhs_name, units=units)),
         ),
-        fixed_encoding_fields=(("OP_SEL_HI", 0x3),),
+        fixed_encoding_fields=(("OP_SEL_HI", 0x7),),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -4881,6 +4904,12 @@ def _v_cvt_pk_f16_packed8_overlay(
 
 # VOP3 stores byte_sel's two logical selector bits in reversed OPSEL bit order.
 _PACKED8_BYTE_SELECTOR_OPSEL_VALUES = (0, 2, 1, 3)
+_PACKED8_BYTE_SELECTOR_OP_SEL_LITERALS = (
+    "",
+    "op_sel:[0,1,0]",
+    "op_sel:[1,0,0]",
+    "op_sel:[1,1,0]",
+)
 
 
 def _v_cvt_f16_packed8_byte_overlay(
@@ -4935,6 +4964,9 @@ def _v_cvt_f16_packed8_byte_overlay(
 
 
 _SCALEF32_PK_PACKED8_ROWS = (
+    ("fp4", "f16", 1),
+    ("fp4", "bf16", 1),
+    ("fp4", "f32", 2),
     ("fp8", "f16", 1),
     ("bf8", "f16", 1),
     ("fp8", "bf16", 1),
@@ -4968,16 +5000,28 @@ _SCALE_PK8_SCALE_SEL_IMMEDIATE = Immediate(
 
 
 def _v_cvt_scalef32_pk_packed8_overlay(
-    source_type: str, target_type: str, result_units: int
+    source_type: str,
+    target_type: str,
+    result_units: int,
+    byte_selector: int,
 ) -> AmdgpuDescriptorOverlay:
+    descriptor_suffix = "" if byte_selector == 0 else f".byte{byte_selector}"
+    mnemonic_suffix = "" if byte_selector == 0 else f"_byte{byte_selector}"
+    semantic_suffix = "" if byte_selector == 0 else f".byte{byte_selector}"
+    native_assembly_mnemonic = f"v_cvt_scalef32_pk_{target_type}_{source_type}"
     return AmdgpuDescriptorOverlay(
-        descriptor_key=(f"amdgpu.v_cvt_scalef32_pk_{target_type}_{source_type}.ocp"),
+        descriptor_key=(
+            f"amdgpu.v_cvt_scalef32_pk_{target_type}_{source_type}"
+            f".ocp{descriptor_suffix}"
+        ),
         instruction_name=(
             f"V_CVT_SCALEF32_PK_{target_type.upper()}_{source_type.upper()}"
         ),
-        mnemonic=f"v_cvt_scalef32_pk_{target_type}_{source_type}",
+        mnemonic=f"{native_assembly_mnemonic}{mnemonic_suffix}",
         encoding_name="ENC_VOP3",
-        semantic_tag=(f"convert.scale.float.{source_type}.ocpx2.{target_type}x2"),
+        semantic_tag=(
+            f"convert.scale.float.{source_type}.ocpx2{semantic_suffix}.{target_type}x2"
+        ),
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result(units=result_units)),
@@ -4987,6 +5031,32 @@ def _v_cvt_scalef32_pk_packed8_overlay(
                 size_exception_reason=_PACKED8_SOURCE_SIZE_REASON,
             ),
             AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("scale")),
+        ),
+        fixed_encoding_fields=(
+            (("OP_SEL", _PACKED8_BYTE_SELECTOR_OPSEL_VALUES[byte_selector]),)
+            if byte_selector != 0
+            else ()
+        ),
+        asm_forms=_asm(
+            native_assembly_mnemonic=(
+                native_assembly_mnemonic if byte_selector != 0 else None
+            ),
+            results=("dst",),
+            operands=("input", "scale"),
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_operand("input"),
+                _native_operand("scale"),
+                *(
+                    (
+                        _native_literal(
+                            _PACKED8_BYTE_SELECTOR_OP_SEL_LITERALS[byte_selector]
+                        ),
+                    )
+                    if byte_selector != 0
+                    else ()
+                ),
+            ),
         ),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -5051,6 +5121,141 @@ def _v_cvt_pk_f16_packed8_overlays(
     )
 
 
+_VOP3_DESTINATION_OP_SEL = 1 << 3
+
+
+def _v_cvt_pk_packed8_encode_overlay(
+    target_type: str,
+    source_type: str,
+    target_semantics: str,
+    result_part: str,
+    *,
+    op_sel_field: str,
+) -> AmdgpuDescriptorOverlay:
+    result_register_part = {
+        "low": _REG_PART_VGPR_LOW16,
+        "high": _REG_PART_VGPR_HIGH16,
+    }[result_part]
+    is_high_result = result_part == "high"
+    if source_type == "f32":
+        source_operands = (
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("low")),
+            AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("high")),
+        )
+        native_source_values = (
+            _native_operand("low"),
+            _native_operand("high"),
+        )
+        high_native_modifier = "op_sel:[0,0,1]"
+    elif source_type == "f16":
+        source_operands = (AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),)
+        native_source_values = (_native_operand("input"),)
+        high_native_modifier = "op_sel:[0,1]"
+    else:
+        raise ValueError(f"unsupported packed8 encode source type '{source_type}'")
+
+    accumulator_operands = (
+        (
+            AmdgpuOperandOverlay(
+                "VDST",
+                Operand(
+                    "acc",
+                    OperandRole.OPERAND,
+                    _VGPR_ALT,
+                    flags=(
+                        OperandFlag.IMPLICIT,
+                        OperandFlag.STORAGE_CONTINUATION,
+                    ),
+                    register_part=_REG_PART_VGPR_LOW16,
+                ),
+                role_exception_reason=(
+                    "the encoded destination register carries the untouched "
+                    "packed byte pair"
+                ),
+            ),
+        )
+        if is_high_result
+        else ()
+    )
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=(
+            f"amdgpu.v_cvt_pk_{target_type}_{source_type}."
+            f"{target_semantics}.{result_part}"
+        ),
+        instruction_name=f"V_CVT_PK_{target_type.upper()}_{source_type.upper()}",
+        mnemonic=f"v_cvt_pk_{target_type}_{source_type}_{result_part}",
+        encoding_name="ENC_VOP3",
+        semantic_tag=(
+            f"convert.float.{source_type}x2."
+            f"{target_type}.{target_semantics}x2.{result_part}"
+        ),
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay(
+                "VDST", _vgpr_result(register_part=result_register_part)
+            ),
+            *accumulator_operands,
+            *source_operands,
+        ),
+        constraints=(
+            (Constraint(ConstraintKind.TIED, 0, 1),) if is_high_result else ()
+        ),
+        fixed_encoding_fields=(
+            (op_sel_field, _VOP3_DESTINATION_OP_SEL if is_high_result else 0),
+        ),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=(
+                *(("acc",) if is_high_result else ()),
+                *(("low", "high") if source_type == "f32" else ("input",)),
+            ),
+            native_assembly_mnemonic=(f"v_cvt_pk_{target_type}_{source_type}"),
+            native_assembly_values=(
+                _native_result("dst"),
+                *native_source_values,
+                *((_native_literal(high_native_modifier),) if is_high_result else ()),
+            ),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_cvt_pk_packed8_from_f32_overlays(
+    target_semantics: str,
+    *,
+    op_sel_field: str,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return tuple(
+        _v_cvt_pk_packed8_encode_overlay(
+            target_type,
+            "f32",
+            target_semantics,
+            result_part,
+            op_sel_field=op_sel_field,
+        )
+        for target_type in ("fp8", "bf8")
+        for result_part in ("low", "high")
+    )
+
+
+def _v_cvt_pk_packed8_from_f16_overlays(
+    target_semantics: str,
+    *,
+    op_sel_field: str,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return tuple(
+        _v_cvt_pk_packed8_encode_overlay(
+            target_type,
+            "f16",
+            target_semantics,
+            result_part,
+            op_sel_field=op_sel_field,
+        )
+        for target_type in ("fp8", "bf8")
+        for result_part in ("low", "high")
+    )
+
+
 def _v_cvt_f16_packed8_byte_overlays(
     source_semantics: str,
 ) -> tuple[AmdgpuDescriptorOverlay, ...]:
@@ -5063,7 +5268,9 @@ def _v_cvt_f16_packed8_byte_overlays(
 
 def _v_cvt_scalef32_pk_packed8_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return tuple(
-        _v_cvt_scalef32_pk_packed8_overlay(*row) for row in _SCALEF32_PK_PACKED8_ROWS
+        _v_cvt_scalef32_pk_packed8_overlay(*row, byte_selector)
+        for row in _SCALEF32_PK_PACKED8_ROWS
+        for byte_selector in range(4)
     )
 
 
@@ -5759,7 +5966,7 @@ def _v_cndmask_b32_literal_inline_overlay(
             immediates=("imm32", inline_operand),
             named_immediates=True,
         ),
-        immediate_fields=(inline_field,),
+        immediate_fields=("LITERAL", inline_field),
         immediates=(
             _LITERAL_U32_IMMEDIATE,
             replace(
@@ -6175,6 +6382,8 @@ __all__ = (
     "_v_cvt_pk_bf16_f32_overlay",
     "_v_cvt_f16_packed8_byte_overlays",
     "_v_cvt_pk_f16_packed8_overlays",
+    "_v_cvt_pk_packed8_from_f16_overlays",
+    "_v_cvt_pk_packed8_from_f32_overlays",
     "_v_cvt_pk_u16_u32_dpp16_overlay",
     "_v_cvt_pk_u16_u32_overlay",
     "_v_cvt_scale_pk8_overlays",
@@ -6265,6 +6474,7 @@ __all__ = (
     "_v_madmk_f16_overlay",
     "_v_mad_u32_u24_literal_overlay",
     "_v_mad_u32_u24_overlay",
+    "_v_med3_num_f32_overlay",
     "_v_log_f32_overlay",
     "_v_max_f32_literal_overlay",
     "_v_max_f32_overlay",

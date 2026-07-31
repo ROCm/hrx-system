@@ -6,6 +6,10 @@ able to read, copy from, and extend: helper decomposition, provider selection,
 local transform intent, correctness policy, and benchmark rows live in source
 without a Python script generating the source itself.
 
+Backend qualification matrices are not authoring examples. Exhaustive numeric
+edges, target sweeps, and instruction-selection cases live with the backend or
+integration contract they test even when the fixture itself is written in Loom.
+
 The examples are tested through production-facing tools:
 
 - `iree-benchmark-loom --dry-run` proves `check.case` and `check.benchmark`
@@ -30,8 +34,6 @@ proof runs belong to `iree-benchmark-loom` flags or embedding APIs.
 | Local unroll intent | `ffn_gate_up_swiglu_q6q8.loom` keeps block/part loops structured and marks the tiny trip-count loops with `unroll`. |
 | Logical indexing | The examples use index/view math for logical rows, blocks, lanes, byte positions, and dense tensor coordinates. |
 | Dynamic case parameters | `mlp_down_projection_residual_bf16.loom` names `rows` on a `check.param.choice` and threads it through shapes, launch geometry, and the kernel ABI. |
-| Finite FP8/BF8 checkpoint storage | `fp8_finite_storage_decode.loom` puts explicit rounding policy on physical storage and materializes E4M3/BF8 rows into F32 and BF16 destinations, including scale-only BF16 decode and compact BF16 GEMM preparation. |
-| Portable GFX9.4 matrix families | `gfx9_4_mfma_families.loom` executes dense F16, BF16, F32, F64, and I8 MFMA plus sparse F16, BF16, and I8 SMFMAC through the authored generic target. |
 | Benchmark slices | `mlp_down_projection_residual_bf16.loom` has an anonymous full sweep plus named decode/full rows with assignment dictionaries. |
 | HIP C++ porting motifs | `hip/README.md` maps HIP/CUDA kernel habits to Loom source spellings, proof commands, diagnostics, and authoring-level report workflows. |
 | Packed field contracts | `hip/packed_field_contracts.loom` shows q2/q3/q4/q5/q6-style fields as explicit storage/decode/repack contracts instead of fake scalar element types. |

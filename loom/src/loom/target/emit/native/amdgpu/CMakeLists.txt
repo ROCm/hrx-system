@@ -64,6 +64,7 @@ loom_cc_library(
     ::hal_kernel_library
     ::spill_lowering
     iree::base
+    iree::base::core_headers
     loom::codegen::low::allocation_json
     loom::codegen::low::frame
     loom::codegen::low::packet_json

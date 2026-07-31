@@ -12,7 +12,9 @@ from dataclasses import dataclass
 from itertools import product
 from math import prod
 
-from loom.target.arch.amdgpu.matrix_formats import GFX125X_MATRIX_PHYSICAL_FORMATS
+from loom.target.arch.amdgpu.matrix_formats import (
+    AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS,
+)
 
 _AXIS_NAMES = ("block", "row", "column", "reduction")
 _MAX_FRAGMENT_REGISTER_COUNT = 32
@@ -962,8 +964,8 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
             rhs_element_bit_count=rhs_format.element_bit_count,
             result_payload_element_count=8,
         )
-        for lhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS
-        for rhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS
+        for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+        for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
     ),
     *(
         _single_tile_layout(

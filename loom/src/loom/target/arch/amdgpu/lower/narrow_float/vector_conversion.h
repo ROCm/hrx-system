@@ -41,6 +41,19 @@ bool loom_amdgpu_vector_decode_can_lower_as_fp8_conversion(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_op_t* source_op);
 
+// Resolves the single scale auxiliary accepted by direct vector.decode
+// lowering and verifies the physical type implied by |scale_format|.
+bool loom_amdgpu_vector_decode_scale_source(
+    const loom_module_t* module, const loom_op_t* source_op,
+    loom_value_fact_numeric_format_flags_t scale_format,
+    loom_value_id_t* out_scale_source);
+
+// Looks up and materializes a selected vector conversion scale as one VGPR.
+iree_status_t loom_amdgpu_lookup_vector_scale_source(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
+    loom_value_id_t* out_low_scale);
+
 // Verifies AMDGPU low legality for direct FP8 vector.decode operations.
 iree_status_t loom_amdgpu_low_legality_verify_vector_decode(
     const loom_target_low_legality_provider_t* provider,

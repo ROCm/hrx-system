@@ -157,6 +157,10 @@ from loom.target.arch.amdgpu.encoding import (
     amdgpu_gfx125x_vgpr_msb_slot,
 )
 from loom.target.arch.amdgpu.isa_xml import AmdgpuIsaEncoding, AmdgpuIsaSpec
+from loom.target.arch.amdgpu.matrix_formats import (
+    AMDGPU_CDNA4_MATRIX_FORMAT_ENUM_DOMAIN_NAMES,
+    AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS,
+)
 from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
@@ -835,18 +839,48 @@ def test_gfx9_4_matrix_schedule_classes_match_member_timings() -> None:
             gfx950_timing.reciprocal_throughput_cycles,
         )
 
-    gfx950_overlays = {
-        overlay.descriptor_key: overlay for overlay in _gfx950_core_overlays()
-    }
-    for descriptor_key in (
-        "amdgpu.v_mfma_scale_f32_16x16x128_f8f6f4",
-        "amdgpu.v_mfma_scale_f32_32x32x64_f8f6f4",
-    ):
-        assert gfx950_overlays[descriptor_key].fixed_encoding_fields == (
-            ("ABID", 1),
-            ("ENCODING", 0x1A7),
-            ("X2ENCODING", 0xD3AC),
-        )
+
+def test_gfx950_f8f6f4_mfma_descriptors_model_physical_abis() -> None:
+    overlays = {overlay.descriptor_key: overlay for overlay in _gfx950_core_overlays()}
+    rows = (
+        ("v_mfma_f32_16x16x128_f8f6f4", 4, False),
+        ("v_mfma_f32_32x32x64_f8f6f4", 16, False),
+        ("v_mfma_scale_f32_16x16x128_f8f6f4", 4, True),
+        ("v_mfma_scale_f32_32x32x64_f8f6f4", 16, True),
+    )
+    for mnemonic, accumulator_units, has_scale_operands in rows:
+        for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS:
+            for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS:
+                key = f"amdgpu.{mnemonic}_{lhs_format.token}_{rhs_format.token}"
+                overlay = overlays[key]
+                assert tuple(
+                    operand.descriptor_operand.unit_count
+                    for operand in overlay.operands
+                ) == (
+                    accumulator_units,
+                    lhs_format.register_count_for(32),
+                    rhs_format.register_count_for(32),
+                    accumulator_units,
+                    *((1, 1) if has_scale_operands else ()),
+                )
+                assert overlay.immediate_fields == ("CBSZ", "BLGP")
+                assert tuple(
+                    immediate.enum_domain for immediate in overlay.immediates
+                ) == (
+                    AMDGPU_CDNA4_MATRIX_FORMAT_ENUM_DOMAIN_NAMES[lhs_format.token],
+                    AMDGPU_CDNA4_MATRIX_FORMAT_ENUM_DOMAIN_NAMES[rhs_format.token],
+                )
+                form = overlay.asm_forms[0]
+                assert form.native_assembly_mnemonic == mnemonic
+                assert tuple(
+                    value.literal for value in form.native_assembly_values[-2:]
+                ) == ("cbsz", "blgp")
+                if has_scale_operands:
+                    assert overlay.fixed_encoding_fields == (
+                        ("ABID", 1),
+                        ("ENCODING", 0x1A7),
+                        ("X2ENCODING", 0xD3AC),
+                    )
 
 
 def test_gfx11_wmma_separates_hardware_latency_from_schedule_distance() -> None:
@@ -2615,6 +2649,24 @@ def test_vop3_shift_immediate_is_constrained_to_inline_source_selector() -> None
     assert immediate.unsigned_max == 64
 
 
+def test_vop3_mixed_inline_literal_immediates_name_both_encoding_fields() -> None:
+    for overlays in (
+        _gfx11_core_overlays(),
+        _gfx117x_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx125x_core_overlays(),
+    ):
+        descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
+        shift_add = descriptors["amdgpu.v_lshl_add_u32.shift_imm.src2_lit"]
+        assert shift_add.immediate_fields == ("SRC1", "LITERAL")
+
+        src0_literal = descriptors["amdgpu.v_cndmask_b32.src0_lit_src1_inline"]
+        assert src0_literal.immediate_fields == ("LITERAL", "SRC1")
+
+        src1_literal = descriptors["amdgpu.v_cndmask_b32.src1_lit_src0_inline"]
+        assert src1_literal.immediate_fields == ("LITERAL", "SRC0")
+
+
 def test_vop2_f32_inline_immediate_uses_enum_domain() -> None:
     descriptor = next(
         overlay
@@ -3152,7 +3204,7 @@ def test_gfx125x_packed_bf16_descriptors_are_arch_scoped() -> None:
             operand.descriptor_operand.unit_count
             for operand in binary_descriptor.operands
         ) == (1, 1, 1)
-        assert binary_descriptor.fixed_encoding_fields == (("OPSEL_HI", 0x3),)
+        assert binary_descriptor.fixed_encoding_fields == (("OPSEL_HI", 0x7),)
 
     fma_descriptor = descriptors["amdgpu.v_pk_fma_bf16"]
     assert fma_descriptor.encoding_name == "ENC_VOP3P"
@@ -3186,6 +3238,68 @@ def test_gfx125x_packed_fp8_to_f16_sources_use_low_half_window() -> None:
             is OperandAddressMapKind.LOW_SUBSET
         )
         assert source.descriptor_operand.addressable_unit_count == 128
+
+
+def test_packed8_encode_descriptors_own_numeric_and_partial_result_semantics() -> None:
+    for descriptor_set, target_semantics, op_sel_field in (
+        (_gfx940_core_overlays(), "fnuz", "OP_SEL"),
+        (_gfx950_core_overlays(), "ocp", "OP_SEL"),
+        (_gfx12_core_overlays(), "ocp", "OPSEL"),
+        (_gfx125x_core_overlays(), "ocp", "OPSEL"),
+    ):
+        descriptors = {
+            descriptor.descriptor_key: descriptor for descriptor in descriptor_set
+        }
+        for target_type in ("fp8", "bf8"):
+            key_prefix = f"amdgpu.v_cvt_pk_{target_type}_f32.{target_semantics}"
+            low_descriptor = descriptors[f"{key_prefix}.low"]
+            high_descriptor = descriptors[f"{key_prefix}.high"]
+
+            assert low_descriptor.operands[0].descriptor_operand.register_part == (
+                _REG_PART_VGPR_LOW16
+            )
+            assert low_descriptor.fixed_encoding_fields == ((op_sel_field, 0),)
+            assert low_descriptor.constraints == ()
+
+            assert high_descriptor.operands[0].descriptor_operand.register_part == (
+                _REG_PART_VGPR_HIGH16
+            )
+            accumulator = high_descriptor.operands[1].descriptor_operand
+            assert accumulator.register_part == _REG_PART_VGPR_LOW16
+            assert OperandFlag.IMPLICIT in accumulator.flags
+            assert OperandFlag.STORAGE_CONTINUATION in accumulator.flags
+            assert high_descriptor.fixed_encoding_fields == ((op_sel_field, 0b1000),)
+            assert tuple(
+                constraint.kind for constraint in high_descriptor.constraints
+            ) == (ConstraintKind.TIED,)
+            assert (
+                high_descriptor.asm_forms[0].native_assembly_values[-1].literal
+                == "op_sel:[0,0,1]"
+            )
+
+    unsupported_f16_descriptor_sets = (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx12_core_overlays(),
+    )
+    for descriptor_set in unsupported_f16_descriptor_sets:
+        descriptor_keys = {descriptor.descriptor_key for descriptor in descriptor_set}
+        assert "amdgpu.v_cvt_pk_fp8_f16.ocp.low" not in descriptor_keys
+        assert "amdgpu.v_cvt_pk_bf8_f16.ocp.low" not in descriptor_keys
+
+    gfx125x_descriptors = {
+        descriptor.descriptor_key: descriptor for descriptor in _gfx125x_core_overlays()
+    }
+    for target_type in ("fp8", "bf8"):
+        key_prefix = f"amdgpu.v_cvt_pk_{target_type}_f16.ocp"
+        low_descriptor = gfx125x_descriptors[f"{key_prefix}.low"]
+        high_descriptor = gfx125x_descriptors[f"{key_prefix}.high"]
+        assert low_descriptor.fixed_encoding_fields == (("OPSEL", 0),)
+        assert high_descriptor.fixed_encoding_fields == (("OPSEL", 0b1000),)
+        assert (
+            high_descriptor.asm_forms[0].native_assembly_values[-1].literal
+            == "op_sel:[0,1]"
+        )
 
 
 def test_packed_binary_descriptors_pin_lane_container_widths() -> None:
@@ -3226,7 +3340,7 @@ def test_packed_binary_descriptors_pin_lane_container_widths() -> None:
             assert tuple(
                 operand.descriptor_operand.unit_count for operand in descriptor.operands
             ) == (1, 1, 1)
-            assert descriptor.fixed_encoding_fields == ((op_sel_hi_field, 0x3),)
+            assert descriptor.fixed_encoding_fields == ((op_sel_hi_field, 0x7),)
 
 
 def test_packed_float_descriptors_follow_target_numeric_semantics() -> None:
@@ -3254,7 +3368,7 @@ def test_packed_float_descriptors_follow_target_numeric_semantics() -> None:
         assert tuple(
             operand.descriptor_operand.unit_count for operand in descriptor.operands
         ) == (1, 1, 1)
-        assert descriptor.fixed_encoding_fields == (("OPSEL_HI", 0x3),)
+        assert descriptor.fixed_encoding_fields == (("OPSEL_HI", 0x7),)
 
     for descriptor_set in (_gfx940_core_overlays(), _gfx950_core_overlays()):
         descriptors = {
@@ -3268,7 +3382,30 @@ def test_packed_float_descriptors_follow_target_numeric_semantics() -> None:
             assert tuple(
                 operand.descriptor_operand.unit_count for operand in descriptor.operands
             ) == (2, 2, 2)
-            assert descriptor.fixed_encoding_fields == (("OP_SEL_HI", 0x3),)
+            assert descriptor.fixed_encoding_fields == (("OP_SEL_HI", 0x7),)
+
+
+def test_f32_med3_descriptors_follow_target_numeric_semantics() -> None:
+    for descriptor_set, instruction_name, mnemonic in (
+        (_gfx940_core_overlays(), "V_MED3_F32", "v_med3_f32"),
+        (_gfx950_core_overlays(), "V_MED3_F32", "v_med3_f32"),
+        (_gfx11_core_overlays(), "V_MED3_F32", "v_med3_f32"),
+        (_gfx12_core_overlays(), "V_MED3_NUM_F32", "v_med3_num_f32"),
+        (_gfx125x_core_overlays(), "V_MED3_NUM_F32", "v_med3_num_f32"),
+    ):
+        descriptors = {
+            descriptor.descriptor_key: descriptor for descriptor in descriptor_set
+        }
+        descriptor = descriptors["amdgpu.v_med3_num_f32"]
+        assert descriptor.instruction_name == instruction_name
+        assert descriptor.mnemonic == mnemonic
+        assert descriptor.semantic_tag == "float.med3_num.f32"
+        assert tuple(operand.xml_field_name for operand in descriptor.operands) == (
+            "VDST",
+            "SRC0",
+            "SRC1",
+            "SRC2",
+        )
 
 
 def test_packed_fma_mad_rdna_literal_forms_cover_source_positions() -> None:

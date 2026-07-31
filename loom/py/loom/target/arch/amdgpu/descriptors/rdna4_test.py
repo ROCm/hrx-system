@@ -16,7 +16,9 @@ from loom.target.arch.amdgpu.descriptors import (
     AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64,
     amdgpu_encoding_field_id,
 )
-from loom.target.arch.amdgpu.matrix_formats import GFX125X_MATRIX_PHYSICAL_FORMATS
+from loom.target.arch.amdgpu.matrix_formats import (
+    AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS,
+)
 from loom.target.low_descriptors import (
     ConstraintKind,
     EncodingFieldValue,
@@ -184,8 +186,8 @@ def test_gfx125x_f8f6f4_wmma_descriptors_model_all_physical_abis() -> None:
         for domain in _AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE.enum_domains
     }
 
-    for lhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
-        for rhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
+    for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS:
+        for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS:
             suffix = f"{lhs_format.token}_{rhs_format.token}"
             descriptor = descriptors[f"amdgpu.v_wmma_f32_16x16x128_f8f6f4_{suffix}"]
             assert tuple(operand.unit_count for operand in descriptor.operands) == (
@@ -233,8 +235,8 @@ def test_gfx125x_scaled_f8f6f4_wmma_descriptors_model_all_physical_abis() -> Non
 
     expected_keys = set()
     for scale_kind in ("scale", "scale16"):
-        for lhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
-            for rhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
+        for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS:
+            for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS:
                 key = (
                     f"amdgpu.v_wmma_{scale_kind}_f32_16x16x128_f8f6f4_"
                     f"{lhs_format.token}_{rhs_format.token}"

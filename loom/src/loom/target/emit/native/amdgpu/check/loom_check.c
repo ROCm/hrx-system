@@ -6,6 +6,9 @@
 
 #include "loom/target/emit/native/amdgpu/check/loom_check.h"
 
+#include <inttypes.h>
+
+#include "iree/base/alignment.h"
 #include "loom/codegen/low/allocation_json.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/packet_json.h"
@@ -84,7 +87,8 @@ static bool loom_amdgpu_loom_check_emit_provider_matches(
                                 IREE_SV("amdgpu-wait-state-plan")) ||
          iree_string_view_equal(target_name,
                                 IREE_SV("amdgpu-wait-state-plan-json")) ||
-         iree_string_view_equal(target_name, IREE_SV("amdgpu-native"));
+         iree_string_view_equal(target_name, IREE_SV("amdgpu-native")) ||
+         iree_string_view_equal(target_name, IREE_SV("amdgpu-native-words"));
 }
 
 static iree_status_t loom_amdgpu_loom_check_parse_key_value_option(
@@ -225,14 +229,13 @@ static iree_status_t loom_amdgpu_loom_check_emit_assembly(
       &frame->schedule, &frame->allocation, &assembly_options, builder, arena);
 }
 
-static iree_status_t loom_amdgpu_loom_check_emit_native(
+static iree_status_t loom_amdgpu_loom_check_encode_native(
     const loom_low_emission_frame_t* frame,
     const loom_amdgpu_loom_check_emit_options_t* options,
-    iree_arena_allocator_t* arena) {
-  iree_const_byte_span_t text = iree_const_byte_span_empty();
+    iree_arena_allocator_t* arena, iree_const_byte_span_t* out_text) {
   if (options->wait_mode == LOOM_AMDGPU_LOOM_CHECK_WAIT_MODE_NONE) {
     return loom_amdgpu_encode_instruction_stream(
-        &frame->schedule, &frame->allocation, &text, arena);
+        &frame->schedule, &frame->allocation, out_text, arena);
   }
 
   loom_amdgpu_packet_plan_t packet_plan = {0};
@@ -242,7 +245,19 @@ static iree_status_t loom_amdgpu_loom_check_emit_native(
       .packet_plan = &packet_plan,
   };
   return loom_amdgpu_encode_instruction_stream_with_options(
-      &frame->schedule, &frame->allocation, &encoding_options, &text, arena);
+      &frame->schedule, &frame->allocation, &encoding_options, out_text, arena);
+}
+
+static iree_status_t loom_amdgpu_loom_check_format_native_words(
+    iree_const_byte_span_t text, iree_string_builder_t* builder) {
+  IREE_ASSERT((text.data_length % sizeof(uint32_t)) == 0);
+  for (iree_host_size_t offset = 0; offset < text.data_length;
+       offset += sizeof(uint32_t)) {
+    const uint32_t word = iree_unaligned_load_le_u32(text.data + offset);
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_format(builder, "0x%08" PRIX32 "\n", word));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_amdgpu_loom_check_emit_wait_state_plan_json(
@@ -467,8 +482,17 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
     return iree_ok_status();
   }
   if (iree_string_view_equal(request->target_name, IREE_SV("amdgpu-native"))) {
-    return loom_amdgpu_loom_check_emit_native(&frame, &options,
-                                              request->case_arena);
+    iree_const_byte_span_t text = iree_const_byte_span_empty();
+    return loom_amdgpu_loom_check_encode_native(&frame, &options,
+                                                request->case_arena, &text);
+  }
+  if (iree_string_view_equal(request->target_name,
+                             IREE_SV("amdgpu-native-words"))) {
+    iree_const_byte_span_t text = iree_const_byte_span_empty();
+    IREE_RETURN_IF_ERROR(loom_amdgpu_loom_check_encode_native(
+        &frame, &options, request->case_arena, &text));
+    return loom_amdgpu_loom_check_format_native_words(
+        text, &request->result->actual_output);
   }
   if (iree_string_view_equal(request->target_name,
                              IREE_SV("amdgpu-allocation-json"))) {

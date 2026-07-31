@@ -34,9 +34,12 @@ loom_value_fact_storage_schema_t EncodedSchema(
                                      : LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D;
   schema.encoded_operand.payload_register_count = 4;
   schema.encoded_operand.payload_element_count = 32;
-  schema.encoded_operand.scale_group_element_count = scale_group_element_count;
+  schema.encoded_operand.scale_group.element_count = scale_group_element_count;
   schema.encoded_operand.scale_operand_count =
       scale_group_element_count == 0 ? 0 : 1;
+  if (scale_group_element_count != 0) {
+    schema.encoded_operand.scale_group.shape[0] = scale_group_element_count;
+  }
   return schema;
 }
 

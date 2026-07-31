@@ -1007,6 +1007,25 @@ TEST_F(BufferViewMatchersTest, MismatchContentsF16) {
   EXPECT_THAT(sb.ToString(), HasSubstr("element at index 0"));
 }
 
+TEST_F(BufferViewMatchersTest, MismatchContentsF8E4M3FN) {
+  const uint8_t lhs_contents[] = {0x7E};
+  const uint8_t rhs_contents[] = {0x63};
+  const iree_hal_dim_t shape[] = {1};
+  IREE_ASSERT_OK_AND_ASSIGN(
+      auto lhs, CreateBufferView(shape, IREE_HAL_ELEMENT_TYPE_FLOAT_8_E4M3_FN,
+                                 lhs_contents));
+  IREE_ASSERT_OK_AND_ASSIGN(
+      auto rhs, CreateBufferView(shape, IREE_HAL_ELEMENT_TYPE_FLOAT_8_E4M3_FN,
+                                 rhs_contents));
+  auto sb = StringBuilder::MakeSystem();
+  bool match = false;
+  IREE_ASSERT_OK(
+      iree_hal_buffer_view_match_equal(kExactEquality, lhs, rhs, sb, &match));
+  EXPECT_FALSE(match);
+  EXPECT_THAT(sb.ToString(), HasSubstr("element at index 0"));
+  EXPECT_THAT(sb.ToString(), HasSubstr("view of 1xf8E4M3FN"));
+}
+
 TEST_F(BufferViewMatchersTest, MatchContentsBF16) {
   const uint16_t lhs_contents[] = {iree_math_f32_to_bf16(2.0f)};
   const uint16_t rhs_contents[] = {iree_math_f32_to_bf16(2.0f)};

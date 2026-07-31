@@ -24,6 +24,7 @@ from loom.target.low_descriptors import (
     AsmForm,
     Descriptor,
     DescriptorSet,
+    EncodingFieldValue,
     Immediate,
     ImmediateFlag,
     ImmediateKind,
@@ -69,6 +70,7 @@ def _descriptor(
     immediates: tuple[Immediate, ...] = (),
     instruction_classes: tuple[InstructionClass, ...] = (),
     operands: tuple[Operand, ...] = (),
+    encoding_field_values: tuple[EncodingFieldValue, ...] = (),
 ) -> Descriptor:
     return Descriptor(
         key=key,
@@ -80,6 +82,7 @@ def _descriptor(
         encoding_format_id=encoding_format_id,
         immediates=immediates,
         instruction_classes=instruction_classes,
+        encoding_field_values=encoding_field_values,
     )
 
 
@@ -269,6 +272,30 @@ def test_descriptor_trait_names_include_resource_and_encoding_facts() -> None:
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_SDWA",
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ISSUE",
     )
+
+
+def test_descriptor_trait_names_include_destination_selection_forwarding() -> None:
+    descriptor_set = _descriptor_set(
+        _descriptor(
+            "amdgpu.v_cvt_pk_fp8_f32.high",
+            schedule_class=_SCHEDULE_VALU,
+            encoding_field_values=(
+                EncodingFieldValue(
+                    AMDGPU_ENCODING_FIELD_IDS["OP_SEL"],
+                    amdgpu_target_refs._DESTINATION_OP_SEL_MASK,
+                ),
+            ),
+        ),
+        _descriptor(
+            "amdgpu.v_cvt_pk_fp8_f32.low",
+            schedule_class=_SCHEDULE_VALU,
+            encoding_field_values=(EncodingFieldValue(AMDGPU_ENCODING_FIELD_IDS["OP_SEL"], 0),),
+        ),
+    )
+    trait_context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
+
+    assert "LOOM_AMDGPU_DESCRIPTOR_TRAIT_DESTINATION_SELECTION_FORWARDING" in amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[0])
+    assert "LOOM_AMDGPU_DESCRIPTOR_TRAIT_DESTINATION_SELECTION_FORWARDING" not in amdgpu_target_refs._descriptor_trait_names(trait_context, descriptor_set.descriptors[1])
 
 
 def test_descriptor_trait_names_include_memory_and_ref_facts() -> None:

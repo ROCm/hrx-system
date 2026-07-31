@@ -22,6 +22,7 @@ from loom.target.arch.amdgpu.lds_bank_service import (
     AMDGPU_LDS_BANK_SERVICE_MODELS_WAVE32_B128_QUAD_PHASES,
 )
 from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_OCP_FP8_NONCANONICAL_NAN,
     AMDGPU_DESCRIPTOR_SET_INFOS,
     AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS,
     AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT,
@@ -87,6 +88,15 @@ def test_descriptor_set_isa_xml_validation_accepts_matching_architecture() -> No
     validate_amdgpu_descriptor_set_isa_xml(
         amdgpu_descriptor_set_info_by_generator_target("rdna4_gfx125x"), spec
     )
+
+
+def test_noncanonical_native_fp8_nan_is_scoped_to_gfx12_descriptor_sets() -> None:
+    flagged_generator_targets = {
+        info.generator_target
+        for info in AMDGPU_DESCRIPTOR_SET_INFOS
+        if info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_OCP_FP8_NONCANONICAL_NAN
+    }
+    assert flagged_generator_targets == {"rdna4", "gfx12_generic"}
 
 
 def test_descriptor_set_isa_xml_validation_rejects_mismatched_architecture() -> None:

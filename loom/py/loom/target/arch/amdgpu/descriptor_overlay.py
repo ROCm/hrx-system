@@ -146,6 +146,14 @@ class AmdgpuDescriptorOverlay:
     asm_surface: DescriptorAsmSurface = DescriptorAsmSurface.AUTHORABLE
     asm_surface_reason: str = ""
 
+    def __post_init__(self) -> None:
+        if self.immediate_fields and len(self.immediate_fields) != len(self.immediates):
+            raise AmdgpuDescriptorOverlayError(
+                f"descriptor overlay '{self.descriptor_key}' maps "
+                f"{len(self.immediate_fields)} immediate encoding fields for "
+                f"{len(self.immediates)} immediates"
+            )
+
 
 def _asm_forms_for_overlay(overlay: AmdgpuDescriptorOverlay) -> tuple[AsmForm, ...]:
     if overlay.asm_forms is not None:
@@ -275,13 +283,13 @@ def _materialize_operand_overlay(operand_overlay: AmdgpuOperandOverlay) -> Opera
 def _materialize_immediates(
     overlay: AmdgpuDescriptorOverlay,
 ) -> tuple[Immediate, ...]:
-    if len(overlay.immediate_fields) != len(overlay.immediates):
+    if not overlay.immediate_fields:
         return overlay.immediates
     try:
         return tuple(
             replace(immediate, encoding_field_id=amdgpu_encoding_field_id(field_name))
             for field_name, immediate in zip(
-                overlay.immediate_fields, overlay.immediates, strict=False
+                overlay.immediate_fields, overlay.immediates, strict=True
             )
         )
     except KeyError as exc:

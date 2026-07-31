@@ -1120,7 +1120,7 @@ static iree_status_t loom_amdgpu_emit_fragment_repack_packed_source_registers(
   }
   for (uint16_t i = 0; i < plan->source_register_count; ++i) {
     if (pre_narrow_source_registers) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_packed_bf16_lane_pair(
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_packed_u16_lane_pair(
           context, source_op, pack_u16_descriptor, source_registers[i],
           paired_source_registers[i], vgpr_type,
           &out_packed_source_registers[i]));
@@ -1771,7 +1771,7 @@ loom_amdgpu_emit_fragment_repack_result_to_lhs_bf16_bpermute(
       }
     }
     if (pre_narrow_source_registers) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_packed_bf16_lane_pair(
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_packed_u16_lane_pair(
           context, source_op, pack_u16_descriptor, elements[0], elements[1],
           vgpr_type, &result_registers[register_index]));
     } else {

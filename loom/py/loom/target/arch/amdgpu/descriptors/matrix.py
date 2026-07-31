@@ -11,9 +11,22 @@
 
 from __future__ import annotations
 
+from ..matrix_formats import (
+    AMDGPU_CDNA4_MATRIX_FORMAT_ENUM_DOMAIN_NAMES,
+    AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS,
+)
 from .common import *
 
 _WMMA_GFX11_WAVE64_ACCUMULATOR_SIZE_REASON = "gfx11-wave64-wmma-half-width-accumulator"
+_CDNA4_F8F6F4_VARIABLE_OPERAND_WIDTH_REASON = (
+    "cdna4-f8f6f4-selector-controls-operand-width"
+)
+
+
+def _cdna4_f8f6f4_operand_width_exception_reason(
+    units: int,
+) -> str | None:
+    return None if units == 8 else _CDNA4_F8F6F4_VARIABLE_OPERAND_WIDTH_REASON
 
 
 def _v_wmma_16x16x16_overlay(
@@ -414,6 +427,50 @@ def _matrix_schedule_class(descriptor_key: str) -> str:
     return _SCHEDULE_MFMA
 
 
+def _cdna4_f8f6f4_matrix_format_immediate(
+    field_name: str, physical_format: str
+) -> Immediate:
+    return Immediate(
+        field_name,
+        ImmediateKind.ENUM,
+        bit_width=3,
+        enum_domain=AMDGPU_CDNA4_MATRIX_FORMAT_ENUM_DOMAIN_NAMES[physical_format],
+    )
+
+
+def _cdna4_f8f6f4_matrix_format_immediates(
+    matrix_physical_formats: tuple[str, str],
+) -> tuple[Immediate, ...]:
+    lhs_physical_format, rhs_physical_format = matrix_physical_formats
+    return (
+        _cdna4_f8f6f4_matrix_format_immediate("matrix_a_fmt", lhs_physical_format),
+        _cdna4_f8f6f4_matrix_format_immediate("matrix_b_fmt", rhs_physical_format),
+    )
+
+
+def _cdna4_f8f6f4_matrix_asm_forms(
+    mnemonic: str, *, has_scale_operands: bool
+) -> tuple[AsmForm, ...]:
+    operands = (
+        ("a", "b", "acc", "scale_src0", "scale_src1")
+        if has_scale_operands
+        else ("a", "b", "acc")
+    )
+    return _asm(
+        native_assembly_mnemonic=mnemonic,
+        results=("dst",),
+        operands=operands,
+        immediates=("matrix_a_fmt", "matrix_b_fmt"),
+        named_immediates=True,
+        native_assembly_values=(
+            _native_result("dst"),
+            *(_native_operand(operand) for operand in operands),
+            _native_amdgpu_required_named_i64_immediate("matrix_a_fmt", name="cbsz"),
+            _native_amdgpu_required_named_i64_immediate("matrix_b_fmt", name="blgp"),
+        ),
+    )
+
+
 def _v_mfma_overlay(
     *,
     instruction_name: str,
@@ -422,9 +479,17 @@ def _v_mfma_overlay(
     lhs_units: int,
     rhs_units: int,
     encoding_name: str = "VOP3P_MFMA",
+    low_mnemonic_suffix: str = "",
+    matrix_physical_formats: tuple[str, str] | None = None,
 ) -> AmdgpuDescriptorOverlay:
-    mnemonic = instruction_name.lower()
+    native_mnemonic = instruction_name.lower()
+    mnemonic = f"{native_mnemonic}{low_mnemonic_suffix}"
     descriptor_key = f"amdgpu.{mnemonic}"
+    matrix_format_immediates = (
+        _cdna4_f8f6f4_matrix_format_immediates(matrix_physical_formats)
+        if matrix_physical_formats is not None
+        else ()
+    )
     return AmdgpuDescriptorOverlay(
         descriptor_key=descriptor_key,
         instruction_name=instruction_name,
@@ -434,14 +499,39 @@ def _v_mfma_overlay(
         schedule_class=_matrix_schedule_class(descriptor_key),
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_agpr_result(units=accumulator_units)),
-            AmdgpuOperandOverlay("SRC0", _vgpr_agpr_operand("a", units=lhs_units)),
-            AmdgpuOperandOverlay("SRC1", _vgpr_agpr_operand("b", units=rhs_units)),
+            AmdgpuOperandOverlay(
+                "SRC0",
+                _vgpr_agpr_operand("a", units=lhs_units),
+                size_exception_reason=(
+                    _cdna4_f8f6f4_operand_width_exception_reason(lhs_units)
+                    if matrix_physical_formats is not None
+                    else None
+                ),
+            ),
+            AmdgpuOperandOverlay(
+                "SRC1",
+                _vgpr_agpr_operand("b", units=rhs_units),
+                size_exception_reason=(
+                    _cdna4_f8f6f4_operand_width_exception_reason(rhs_units)
+                    if matrix_physical_formats is not None
+                    else None
+                ),
+            ),
             AmdgpuOperandOverlay(
                 "SRC2", _vgpr_agpr_const_operand("acc", units=accumulator_units)
             ),
         ),
+        immediate_fields=(
+            ("CBSZ", "BLGP") if matrix_physical_formats is not None else ()
+        ),
+        immediates=matrix_format_immediates,
         constraints=_destructive_accumulator_constraints(3),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        asm_forms=(
+            _cdna4_f8f6f4_matrix_asm_forms(native_mnemonic, has_scale_operands=False)
+            if matrix_physical_formats is not None
+            else None
+        ),
     )
 
 
@@ -452,8 +542,11 @@ def _v_mfma_scale_overlay(
     accumulator_units: int,
     lhs_units: int,
     rhs_units: int,
+    low_mnemonic_suffix: str,
+    matrix_physical_formats: tuple[str, str],
 ) -> AmdgpuDescriptorOverlay:
-    mnemonic = instruction_name.lower()
+    native_mnemonic = instruction_name.lower()
+    mnemonic = f"{native_mnemonic}{low_mnemonic_suffix}"
     descriptor_key = f"amdgpu.{mnemonic}"
     return AmdgpuDescriptorOverlay(
         descriptor_key=descriptor_key,
@@ -464,14 +557,28 @@ def _v_mfma_scale_overlay(
         schedule_class=_matrix_schedule_class(descriptor_key),
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_agpr_result(units=accumulator_units)),
-            AmdgpuOperandOverlay("SRC0", _vgpr_agpr_operand("a", units=lhs_units)),
-            AmdgpuOperandOverlay("SRC1", _vgpr_agpr_operand("b", units=rhs_units)),
+            AmdgpuOperandOverlay(
+                "SRC0",
+                _vgpr_agpr_operand("a", units=lhs_units),
+                size_exception_reason=(
+                    _cdna4_f8f6f4_operand_width_exception_reason(lhs_units)
+                ),
+            ),
+            AmdgpuOperandOverlay(
+                "SRC1",
+                _vgpr_agpr_operand("b", units=rhs_units),
+                size_exception_reason=(
+                    _cdna4_f8f6f4_operand_width_exception_reason(rhs_units)
+                ),
+            ),
             AmdgpuOperandOverlay(
                 "SRC2", _vgpr_agpr_const_operand("acc", units=accumulator_units)
             ),
             AmdgpuOperandOverlay("SCALE_SRC0", _sgpr_vgpr_operand("scale_src0")),
             AmdgpuOperandOverlay("SCALE_SRC1", _sgpr_vgpr_operand("scale_src1")),
         ),
+        immediate_fields=("CBSZ", "BLGP"),
+        immediates=_cdna4_f8f6f4_matrix_format_immediates(matrix_physical_formats),
         fixed_encoding_fields=(
             ("ABID", 1),
             ("ENCODING", 0x1A7),
@@ -479,6 +586,9 @@ def _v_mfma_scale_overlay(
         ),
         constraints=_destructive_accumulator_constraints(3),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        asm_forms=_cdna4_f8f6f4_matrix_asm_forms(
+            native_mnemonic, has_scale_operands=True
+        ),
     )
 
 
@@ -723,6 +833,47 @@ def _cdna3_mfma_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
+def _cdna4_f8f6f4_mfma_overlays(
+    *,
+    instruction_name: str,
+    semantic_tag: str,
+    accumulator_units: int,
+    operand_element_count: int,
+    has_scale_operands: bool,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return tuple(
+        (
+            _v_mfma_scale_overlay(
+                instruction_name=instruction_name,
+                semantic_tag=(f"{semantic_tag}.{lhs_format.token}.{rhs_format.token}"),
+                accumulator_units=accumulator_units,
+                lhs_units=lhs_format.register_count_for(operand_element_count),
+                rhs_units=rhs_format.register_count_for(operand_element_count),
+                low_mnemonic_suffix=(f"_{lhs_format.token}_{rhs_format.token}"),
+                matrix_physical_formats=(
+                    lhs_format.token,
+                    rhs_format.token,
+                ),
+            )
+            if has_scale_operands
+            else _v_mfma_overlay(
+                instruction_name=instruction_name,
+                semantic_tag=(f"{semantic_tag}.{lhs_format.token}.{rhs_format.token}"),
+                accumulator_units=accumulator_units,
+                lhs_units=lhs_format.register_count_for(operand_element_count),
+                rhs_units=rhs_format.register_count_for(operand_element_count),
+                low_mnemonic_suffix=(f"_{lhs_format.token}_{rhs_format.token}"),
+                matrix_physical_formats=(
+                    lhs_format.token,
+                    rhs_format.token,
+                ),
+            )
+        )
+        for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+        for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+    )
+
+
 def _cdna4_mfma_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *(
@@ -776,33 +927,33 @@ def _cdna4_mfma_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             lhs_units=4,
             rhs_units=4,
         ),
-        _v_mfma_overlay(
+        *_cdna4_f8f6f4_mfma_overlays(
             instruction_name="V_MFMA_F32_16X16X128_F8F6F4",
             semantic_tag="matrix.mfma.f32.16x16x128.f8f6f4",
             accumulator_units=4,
-            lhs_units=8,
-            rhs_units=8,
+            operand_element_count=32,
+            has_scale_operands=False,
         ),
-        _v_mfma_overlay(
+        *_cdna4_f8f6f4_mfma_overlays(
             instruction_name="V_MFMA_F32_32X32X64_F8F6F4",
             semantic_tag="matrix.mfma.f32.32x32x64.f8f6f4",
             accumulator_units=16,
-            lhs_units=8,
-            rhs_units=8,
+            operand_element_count=32,
+            has_scale_operands=False,
         ),
-        _v_mfma_scale_overlay(
+        *_cdna4_f8f6f4_mfma_overlays(
             instruction_name="V_MFMA_SCALE_F32_16X16X128_F8F6F4",
             semantic_tag="matrix.mfma.scale.f32.16x16x128.f8f6f4",
             accumulator_units=4,
-            lhs_units=8,
-            rhs_units=8,
+            operand_element_count=32,
+            has_scale_operands=True,
         ),
-        _v_mfma_scale_overlay(
+        *_cdna4_f8f6f4_mfma_overlays(
             instruction_name="V_MFMA_SCALE_F32_32X32X64_F8F6F4",
             semantic_tag="matrix.mfma.scale.f32.32x32x64.f8f6f4",
             accumulator_units=16,
-            lhs_units=8,
-            rhs_units=8,
+            operand_element_count=32,
+            has_scale_operands=True,
         ),
     )
 

@@ -503,19 +503,21 @@ TEST(MatrixContractTest, MatcherSelectedGfx950MfmaDescriptorCarriesLowId) {
             LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_NONE);
 }
 
-TEST(MatrixContractTest, Gfx950ScaledMfmaDescriptor) {
+TEST(MatrixContractTest, Gfx950ScaledFp4MfmaDescriptor) {
   const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
-      FindDescriptor("mfma.scale.f32.32x32x64.f8f6f4");
+      FindDescriptor("mfma.scale.f32.32x32x64.f8f6f4.f4.f4");
   ASSERT_NE(descriptor, nullptr);
   EXPECT_EQ(descriptor->family, LOOM_AMDGPU_MATRIX_FAMILY_MFMA);
   EXPECT_EQ(descriptor->tile_shape.result_row_count, 32);
   EXPECT_EQ(descriptor->tile_shape.result_column_count, 32);
   EXPECT_EQ(descriptor->tile_shape.reduction_count, 64);
   EXPECT_EQ(descriptor->lhs_payload.numeric_type,
-            LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4);
-  EXPECT_EQ(descriptor->lhs_payload.register_count, 8);
+            LOOM_AMDGPU_MATRIX_NUMERIC_FP4);
+  EXPECT_EQ(descriptor->lhs_payload.register_count, 4);
   EXPECT_EQ(descriptor->lhs_payload.element_count, 32);
-  EXPECT_EQ(descriptor->rhs_payload.register_count, 8);
+  EXPECT_EQ(descriptor->rhs_payload.numeric_type,
+            LOOM_AMDGPU_MATRIX_NUMERIC_FP4);
+  EXPECT_EQ(descriptor->rhs_payload.register_count, 4);
   EXPECT_EQ(descriptor->rhs_payload.element_count, 32);
   EXPECT_EQ(descriptor->flags & LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SCALED,
             LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SCALED);
@@ -528,13 +530,115 @@ TEST(MatrixContractTest, Gfx950ScaledMfmaDescriptor) {
   EXPECT_EQ(descriptor->implicit_scale_format_selector_bits,
             1u << LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_E8M0);
   EXPECT_EQ(descriptor->low_descriptor_ref,
-            LOOM_AMDGPU_DESCRIPTOR_REF_V_MFMA_SCALE_F32_32X32X64_F8F6F4);
+            LOOM_AMDGPU_DESCRIPTOR_REF_V_MFMA_SCALE_F32_32X32X64_F8F6F4_F4_F4);
 
   const loom_amdgpu_matrix_contract_descriptor_t* compact_descriptor =
-      FindDescriptor("mfma.scale.f32.16x16x128.f8f6f4");
+      FindDescriptor("mfma.scale.f32.16x16x128.f8f6f4.f4.f4");
   ASSERT_NE(compact_descriptor, nullptr);
   EXPECT_EQ(compact_descriptor->low_descriptor_ref,
-            LOOM_AMDGPU_DESCRIPTOR_REF_V_MFMA_SCALE_F32_16X16X128_F8F6F4);
+            LOOM_AMDGPU_DESCRIPTOR_REF_V_MFMA_SCALE_F32_16X16X128_F8F6F4_F4_F4);
+}
+
+TEST(MatrixContractTest, Gfx950SelectorFormatsChooseEveryPhysicalMfmaAbi) {
+  struct NumericCase {
+    loom_amdgpu_matrix_numeric_type_t numeric_type;
+    const char* physical_token;
+    loom_amdgpu_matrix_numeric_type_t contract_numeric_type;
+    uint16_t register_count;
+  };
+  static const NumericCase numeric_cases[] = {
+      {LOOM_AMDGPU_MATRIX_NUMERIC_FP8, "f8", LOOM_AMDGPU_MATRIX_NUMERIC_F8, 8},
+      {LOOM_AMDGPU_MATRIX_NUMERIC_BF8, "f8", LOOM_AMDGPU_MATRIX_NUMERIC_F8, 8},
+      {LOOM_AMDGPU_MATRIX_NUMERIC_FP6, "f6", LOOM_AMDGPU_MATRIX_NUMERIC_F6, 6},
+      {LOOM_AMDGPU_MATRIX_NUMERIC_BF6, "f6", LOOM_AMDGPU_MATRIX_NUMERIC_F6, 6},
+      {LOOM_AMDGPU_MATRIX_NUMERIC_FP4, "f4", LOOM_AMDGPU_MATRIX_NUMERIC_FP4, 4},
+  };
+  struct TileCase {
+    uint16_t row_count;
+    uint16_t column_count;
+    uint16_t reduction_count;
+    uint16_t accumulator_register_count;
+    const char* shape_token;
+  };
+  static const TileCase tile_cases[] = {
+      {16, 16, 128, 4, "16x16x128"},
+      {32, 32, 64, 16, "32x32x64"},
+  };
+  struct ScaleCase {
+    loom_amdgpu_matrix_scale_kind_t scale_kind;
+    const char* name_prefix;
+  };
+  static const ScaleCase scale_cases[] = {
+      {LOOM_AMDGPU_MATRIX_SCALE_NONE, ""},
+      {LOOM_AMDGPU_MATRIX_SCALE_32, "scale."},
+  };
+
+  for (const ScaleCase& scale_case : scale_cases) {
+    for (const TileCase& tile_case : tile_cases) {
+      for (const NumericCase& lhs_case : numeric_cases) {
+        for (const NumericCase& rhs_case : numeric_cases) {
+          loom_amdgpu_matrix_contract_flags_t available_flags =
+              LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_MATRIX_FORMATS;
+          loom_amdgpu_matrix_contract_flags_t required_flags =
+              LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_MATRIX_FORMATS;
+          if (scale_case.scale_kind == LOOM_AMDGPU_MATRIX_SCALE_32) {
+            available_flags |= LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SCALED |
+                               LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SCALE_FORMATS;
+            required_flags = LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_SCALED;
+          }
+          loom_amdgpu_matrix_contract_match_request_t request = MatchRequest(
+              LOOM_AMDGPU_MATRIX_FAMILY_MFMA, tile_case.row_count,
+              tile_case.column_count, tile_case.reduction_count,
+              lhs_case.numeric_type, rhs_case.numeric_type,
+              LOOM_AMDGPU_MATRIX_NUMERIC_F32, LOOM_AMDGPU_MATRIX_NUMERIC_F32,
+              scale_case.scale_kind,
+              LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950 |
+                  LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4,
+              64, available_flags, required_flags);
+          request.lhs_payload.register_count = lhs_case.register_count;
+          request.lhs_payload.element_count = 32;
+          request.rhs_payload.register_count = rhs_case.register_count;
+          request.rhs_payload.element_count = 32;
+          request.accumulator_payload.register_count =
+              tile_case.accumulator_register_count;
+          request.accumulator_payload.element_count =
+              tile_case.accumulator_register_count;
+          request.result_payload.register_count =
+              tile_case.accumulator_register_count;
+          request.result_payload.element_count =
+              tile_case.accumulator_register_count;
+          if (scale_case.scale_kind == LOOM_AMDGPU_MATRIX_SCALE_32) {
+            request.lhs_scale_format_selector_bits =
+                1u << LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_E8M0;
+            request.rhs_scale_format_selector_bits =
+                1u << LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_E8M0;
+          }
+
+          loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
+          const loom_amdgpu_matrix_contract_descriptor_t* descriptor =
+              loom_amdgpu_matrix_contract_select(&request, &diagnostic);
+          ASSERT_NE(descriptor, nullptr);
+          const std::string expected_name =
+              std::string("mfma.") + scale_case.name_prefix + "f32." +
+              tile_case.shape_token + ".f8f6f4." + lhs_case.physical_token +
+              "." + rhs_case.physical_token;
+          EXPECT_EQ(ToString(descriptor->name), expected_name);
+          EXPECT_EQ(descriptor->lhs_payload.numeric_type,
+                    lhs_case.contract_numeric_type);
+          EXPECT_EQ(descriptor->lhs_payload.register_count,
+                    lhs_case.register_count);
+          EXPECT_EQ(descriptor->rhs_payload.numeric_type,
+                    rhs_case.contract_numeric_type);
+          EXPECT_EQ(descriptor->rhs_payload.register_count,
+                    rhs_case.register_count);
+          EXPECT_NE(descriptor->low_descriptor_ref,
+                    LOOM_AMDGPU_MATRIX_LOW_DESCRIPTOR_REF_NONE);
+          EXPECT_EQ(diagnostic.rejection_bits,
+                    LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_NONE);
+        }
+      }
+    }
+  }
 }
 
 TEST(MatrixContractTest, Gfx1250WmmaScale16Descriptor) {
@@ -2577,7 +2681,7 @@ TEST(MatrixContractTest, MatcherRejectsMissingFeatureAfterSemanticMatch) {
       LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_MATRIX_FORMATS;
   loom_amdgpu_matrix_contract_match_request_t request = MatchRequest(
       LOOM_AMDGPU_MATRIX_FAMILY_MFMA, 32, 32, 64,
-      LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4, LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4,
+      LOOM_AMDGPU_MATRIX_NUMERIC_FP4, LOOM_AMDGPU_MATRIX_NUMERIC_FP4,
       LOOM_AMDGPU_MATRIX_NUMERIC_F32, LOOM_AMDGPU_MATRIX_NUMERIC_F32,
       LOOM_AMDGPU_MATRIX_SCALE_32, LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950, 64,
       scale_flags, scale_flags);
@@ -2628,11 +2732,12 @@ TEST(MatrixContractTest, MatcherRejectsMissingMatrixFormatFacts) {
       LOOM_AMDGPU_MATRIX_CONTRACT_FLAG_MATRIX_FORMATS;
   loom_amdgpu_matrix_contract_match_request_t request = MatchRequest(
       LOOM_AMDGPU_MATRIX_FAMILY_MFMA, 32, 32, 64,
-      LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4, LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4,
+      LOOM_AMDGPU_MATRIX_NUMERIC_FP4, LOOM_AMDGPU_MATRIX_NUMERIC_FP4,
       LOOM_AMDGPU_MATRIX_NUMERIC_F32, LOOM_AMDGPU_MATRIX_NUMERIC_F32,
       LOOM_AMDGPU_MATRIX_SCALE_32,
-      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4, 64, available_flags,
-      required_flags);
+      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950 |
+          LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4,
+      64, available_flags, required_flags);
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
   EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, &diagnostic), nullptr);
   EXPECT_EQ(diagnostic.rejection_bits &
@@ -2665,7 +2770,7 @@ TEST(MatrixContractTest, MatcherAcceptsImplicitScaleFormatFacts) {
       loom_amdgpu_matrix_contract_select(&request, &diagnostic);
   ASSERT_NE(descriptor, nullptr);
   EXPECT_EQ(descriptor->low_descriptor_ref,
-            LOOM_AMDGPU_DESCRIPTOR_REF_V_MFMA_SCALE_F32_16X16X128_F8F6F4);
+            LOOM_AMDGPU_DESCRIPTOR_REF_V_MFMA_SCALE_F32_16X16X128_F8F6F4_F4_F4);
   EXPECT_EQ(diagnostic.rejection_bits,
             LOOM_AMDGPU_MATRIX_CONTRACT_REJECTION_NONE);
 }
@@ -2699,10 +2804,12 @@ TEST(MatrixContractTest, MatcherRejectsImplicitScaleFormatMismatch) {
 TEST(MatrixContractTest, MatcherRejectsScaleKindMismatch) {
   loom_amdgpu_matrix_contract_match_request_t request = MatchRequest(
       LOOM_AMDGPU_MATRIX_FAMILY_MFMA, 32, 32, 64,
-      LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4, LOOM_AMDGPU_MATRIX_NUMERIC_F8F6F4,
+      LOOM_AMDGPU_MATRIX_NUMERIC_FP4, LOOM_AMDGPU_MATRIX_NUMERIC_FP4,
       LOOM_AMDGPU_MATRIX_NUMERIC_F32, LOOM_AMDGPU_MATRIX_NUMERIC_F32,
-      LOOM_AMDGPU_MATRIX_SCALE_NONE,
-      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4, 64, 0, 0);
+      LOOM_AMDGPU_MATRIX_SCALE_16,
+      LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950 |
+          LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950_SCALE_F8F6F4,
+      64, 0, 0);
   loom_amdgpu_matrix_contract_match_diagnostic_t diagnostic = {};
   EXPECT_EQ(loom_amdgpu_matrix_contract_select(&request, &diagnostic), nullptr);
   EXPECT_EQ(diagnostic.rejection_bits,
@@ -2843,7 +2950,7 @@ TEST(MatrixContractTest, ProcessorFeatureBitsGateAvailability) {
                                                        gfx90a_features, 64));
 
   const loom_amdgpu_matrix_contract_descriptor_t* scaled_mfma =
-      FindDescriptor("mfma.scale.f32.16x16x128.f8f6f4");
+      FindDescriptor("mfma.scale.f32.16x16x128.f8f6f4.f4.f4");
   ASSERT_NE(scaled_mfma, nullptr);
   EXPECT_FALSE(loom_amdgpu_matrix_contract_is_available(scaled_mfma,
                                                         gfx942_features, 64));
@@ -2867,7 +2974,7 @@ TEST(MatrixContractTest, ScaleFeatureDoesNotGateUnscaledDescriptors) {
       unscaled_mfma, LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950, 64));
 
   const loom_amdgpu_matrix_contract_descriptor_t* scaled_mfma =
-      FindDescriptor("mfma.scale.f32.16x16x128.f8f6f4");
+      FindDescriptor("mfma.scale.f32.16x16x128.f8f6f4.f4.f4");
   ASSERT_NE(scaled_mfma, nullptr);
   EXPECT_FALSE(loom_amdgpu_matrix_contract_is_available(
       scaled_mfma, LOOM_AMDGPU_MATRIX_FEATURE_MFMA_GFX950, 64));

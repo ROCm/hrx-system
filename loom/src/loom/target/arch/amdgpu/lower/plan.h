@@ -56,12 +56,89 @@ typedef struct loom_amdgpu_constant_plan_t {
   bool i1_value;
 } loom_amdgpu_constant_plan_t;
 
+typedef enum loom_amdgpu_i8_pack_permute_kind_e {
+  LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_NONE = 0,
+  LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_LITERAL_SELECTOR = 1,
+  LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_REGISTER_SELECTOR = 2,
+} loom_amdgpu_i8_pack_permute_kind_t;
+
+typedef struct loom_amdgpu_i8_pack_permute_plan_t {
+  // Representation selected for V_PERM_B32 byte selector operands.
+  loom_amdgpu_i8_pack_permute_kind_t kind;
+  // Descriptor selected for each byte permutation packet.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
+} loom_amdgpu_i8_pack_permute_plan_t;
+
+typedef enum loom_amdgpu_fp8_encode_kind_e {
+  LOOM_AMDGPU_FP8_ENCODE_KIND_NONE = 0,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F32_PAIR = 1,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F32_PAIR_SATURATE_E4M3 = 2,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F16_PAIR = 3,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F32_SOFTWARE_E4M3 = 4,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F32_SOFTWARE_E5M2 = 5,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F32_FNUZ_BRIDGE_E4M3 = 6,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F32_FNUZ_BRIDGE_E5M2 = 7,
+  LOOM_AMDGPU_FP8_ENCODE_KIND_F16_SOFTWARE_E5M2 = 8,
+} loom_amdgpu_fp8_encode_kind_t;
+
+typedef enum loom_amdgpu_fp8_encode_plan_flag_bits_e {
+  LOOM_AMDGPU_FP8_ENCODE_PLAN_FLAG_NONE = 0u,
+  // Packed 16-bit packets can encode complete F16 E5M2 lane groups.
+  LOOM_AMDGPU_FP8_ENCODE_PLAN_FLAG_PACKED_F16_E5M2 = 1u << 0,
+  // Packed 16-bit packets can encode complete F16 E4M3 lane groups.
+  LOOM_AMDGPU_FP8_ENCODE_PLAN_FLAG_PACKED_F16_E4M3 = 1u << 1,
+  // Native OCP pair packets need their packed NaN bytes canonicalized.
+  LOOM_AMDGPU_FP8_ENCODE_PLAN_FLAG_NATIVE_NAN_CANONICALIZATION = 1u << 2,
+} loom_amdgpu_fp8_encode_plan_flag_bits_t;
+typedef uint32_t loom_amdgpu_fp8_encode_plan_flags_t;
+
+typedef struct loom_amdgpu_fp8_encode_plan_t {
+  // Exact encoding strategy selected from the target descriptor set.
+  loom_amdgpu_fp8_encode_kind_t kind;
+  // Optional packet-sequence capabilities refining the selected strategy.
+  loom_amdgpu_fp8_encode_plan_flags_t flags;
+  // Descriptor writing the low encoded byte pair of a result register.
+  loom_amdgpu_descriptor_ref_t low_descriptor_ref;
+  // Descriptor continuing a result register with its high encoded byte pair.
+  loom_amdgpu_descriptor_ref_t high_descriptor_ref;
+  // Optional fused descriptor adding the rounding LSB and literal bias.
+  loom_amdgpu_descriptor_ref_t round_add_descriptor_ref;
+  // Optional descriptor inserting encoded sign bits into a result word.
+  loom_amdgpu_descriptor_ref_t sign_insert_descriptor_ref;
+  // Byte permutation plan selected for encoded bytes or packed sign bits.
+  loom_amdgpu_i8_pack_permute_plan_t packed_i8_permute;
+} loom_amdgpu_fp8_encode_plan_t;
+
 typedef enum loom_amdgpu_vector_16bit_float_conversion_kind_e {
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_NONE = 0,
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_EXTF = 1,
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_FPTRUNC = 2,
   LOOM_AMDGPU_VECTOR_16BIT_FLOAT_CONVERSION_KIND_DECODE = 3,
 } loom_amdgpu_vector_16bit_float_conversion_kind_t;
+
+typedef struct loom_amdgpu_fp4_decode_recipe_t loom_amdgpu_fp4_decode_recipe_t;
+typedef struct loom_amdgpu_fp4_native_pair_decode_recipe_t
+    loom_amdgpu_fp4_native_pair_decode_recipe_t;
+typedef struct loom_amdgpu_fp4_native_pk8_decode_recipe_t
+    loom_amdgpu_fp4_native_pk8_decode_recipe_t;
+
+typedef enum loom_amdgpu_fp4_decode_kind_e {
+  LOOM_AMDGPU_FP4_DECODE_KIND_NONE = 0,
+  LOOM_AMDGPU_FP4_DECODE_KIND_PORTABLE_LOOKUP = 1,
+  LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_SCALEF32_PAIR = 2,
+  LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_E8M0_PK8 = 3,
+} loom_amdgpu_fp4_decode_kind_t;
+
+typedef struct loom_amdgpu_fp4_decode_plan_t {
+  // Packet strategy selected from the schema and target descriptor set.
+  loom_amdgpu_fp4_decode_kind_t kind;
+  // Function-local portable lookup recipe when kind is PORTABLE_LOOKUP.
+  const loom_amdgpu_fp4_decode_recipe_t* portable_recipe;
+  // Function-local scaled-pair recipe when kind is NATIVE_SCALEF32_PAIR.
+  const loom_amdgpu_fp4_native_pair_decode_recipe_t* native_pair_recipe;
+  // Function-local eight-lane recipe when kind is NATIVE_E8M0_PK8.
+  const loom_amdgpu_fp4_native_pk8_decode_recipe_t* native_pk8_recipe;
+} loom_amdgpu_fp4_decode_plan_t;
 
 typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   // Source vector value being converted.
@@ -78,6 +155,10 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   loom_value_fact_numeric_format_flags_t scale_format;
   // Number of logical payload lanes covered by each scale value.
   uint32_t scale_group_element_count;
+  // Number of encoded scale values covering the conversion.
+  uint32_t scale_count;
+  // Number of 32-bit registers carrying the encoded scale values.
+  uint32_t scale_register_count;
   // Conversion operation selected for the source/result type pair.
   loom_amdgpu_vector_16bit_float_conversion_kind_t kind;
   // Source scalar element type.
@@ -102,6 +183,10 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   uint32_t storage_register_count;
   // Number of 32-bit result registers occupied by the result vector.
   uint32_t result_register_count;
+  // Packed FP4 decode strategy, or NONE for other conversions.
+  loom_amdgpu_fp4_decode_plan_t fp4_decode;
+  // Native packed FP8 encode strategy for an FP8-result truncation.
+  loom_amdgpu_fp8_encode_plan_t fp8_encode;
 } loom_amdgpu_vector_16bit_float_conversion_plan_t;
 
 typedef enum loom_amdgpu_index_cast_kind_e {
@@ -237,6 +322,7 @@ typedef enum loom_amdgpu_scalar_conversion_kind_e {
   LOOM_AMDGPU_SCALAR_CONVERSION_KIND_ZERO_EXTEND,
   LOOM_AMDGPU_SCALAR_CONVERSION_KIND_UITOFP_NARROW_TO_F32,
   LOOM_AMDGPU_SCALAR_CONVERSION_KIND_FP8_TO_BF16,
+  LOOM_AMDGPU_SCALAR_CONVERSION_KIND_FP8_ENCODE,
   LOOM_AMDGPU_SCALAR_CONVERSION_KIND_FPTOI_F32_TO_I32,
   LOOM_AMDGPU_SCALAR_CONVERSION_KIND_FPTOI_F32_TO_NARROW,
 } loom_amdgpu_scalar_conversion_kind_t;
@@ -254,6 +340,8 @@ typedef struct loom_amdgpu_scalar_conversion_plan_t {
   uint32_t result_bit_count;
   // Descriptor selected for conversion packets used by the strategy.
   loom_amdgpu_descriptor_ref_t convert_descriptor_ref;
+  // Native packed FP8 encode strategy for an FP8-result truncation.
+  loom_amdgpu_fp8_encode_plan_t fp8_encode;
 } loom_amdgpu_scalar_conversion_plan_t;
 
 typedef enum loom_amdgpu_vector_conversion_kind_e {
@@ -267,19 +355,6 @@ typedef enum loom_amdgpu_vector_conversion_kind_e {
   LOOM_AMDGPU_VECTOR_CONVERSION_KIND_PACKED_U8_TO_F32,
   LOOM_AMDGPU_VECTOR_CONVERSION_KIND_COUNT_,
 } loom_amdgpu_vector_conversion_kind_t;
-
-typedef enum loom_amdgpu_i8_pack_permute_kind_e {
-  LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_NONE = 0,
-  LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_LITERAL_SELECTOR = 1,
-  LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_REGISTER_SELECTOR = 2,
-} loom_amdgpu_i8_pack_permute_kind_t;
-
-typedef struct loom_amdgpu_i8_pack_permute_plan_t {
-  // Representation selected for V_PERM_B32 byte selector operands.
-  loom_amdgpu_i8_pack_permute_kind_t kind;
-  // Descriptor selected for each byte permutation packet.
-  loom_amdgpu_descriptor_ref_t descriptor_ref;
-} loom_amdgpu_i8_pack_permute_plan_t;
 
 typedef struct loom_amdgpu_vector_conversion_plan_t {
   // Source vector value being converted.

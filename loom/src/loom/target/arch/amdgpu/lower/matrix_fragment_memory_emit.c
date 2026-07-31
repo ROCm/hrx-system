@@ -345,7 +345,7 @@ loom_amdgpu_emit_fragment_memory_flush_crosslane_packed_b16_stores(
             low_paired_source_register, vgpr_type, &low_payload_packet);
         break;
       case LOOM_AMDGPU_FRAGMENT_MEMORY_PENDING_STORE_PAYLOAD_FORM_BF16:
-        status = loom_amdgpu_emit_packed_bf16_lane_pair(
+        status = loom_amdgpu_emit_packed_u16_lane_pair(
             context, source_op, pack_u16_descriptor,
             pending_store->low_source_register,
             pending_store->low_paired_source_register, vgpr_type,

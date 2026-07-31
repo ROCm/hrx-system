@@ -205,6 +205,15 @@ static bool loom_amdgpu_scalar_type_register_shape(
   return true;
 }
 
+bool loom_amdgpu_source_type_supported(void* user_data,
+                                       const loom_module_t* module,
+                                       loom_type_t source_type) {
+  (void)user_data;
+  (void)module;
+  return loom_amdgpu_scalar_value_register_mapping_for_type(source_type) !=
+         NULL;
+}
+
 static bool loom_amdgpu_scalar_type_has_register_flag(
     loom_type_t source_type, loom_amdgpu_scalar_value_register_flags_t flag) {
   const loom_amdgpu_scalar_value_register_mapping_t* mapping =

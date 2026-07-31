@@ -17,6 +17,7 @@
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/narrow_float/float16.h"
 #include "loom/target/arch/amdgpu/lower/narrow_float/fp8.h"
+#include "loom/target/arch/amdgpu/lower/narrow_float/vector_conversion.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
@@ -156,20 +157,9 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_f32_software_lane(
       lane_index, &low_byte));
   const loom_amdgpu_fp8_decode_value_flags_t value_flags =
       loom_amdgpu_vector_fp8_decode_value_flags(value_flag_cache, lane_index);
-  IREE_RETURN_IF_ERROR(loom_amdgpu_try_emit_fp8_not_subnormal_to_f32_lane(
+  return loom_amdgpu_emit_fp8_to_f32_lane(
       context, source_op, *decode_plan, low_byte, value_flags, result_lane_type,
-      *mask_type, out_low_lane));
-  if (*out_low_lane != LOOM_VALUE_ID_INVALID) {
-    return iree_ok_status();
-  }
-
-  loom_value_id_t bf16_lane = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_to_bf16_lane(
-      context, source_op, *decode_plan, low_byte, value_flags, result_lane_type,
-      *sgpr_type, *mask_type, &bf16_lane));
-  return loom_amdgpu_emit_vgpr_shift(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHLREV_B32_LIT, 16,
-      bf16_lane, result_lane_type, out_low_lane);
+      *sgpr_type, *mask_type, out_low_lane);
 }
 
 static iree_status_t loom_amdgpu_emit_fp8_lane_to_f32_native(
@@ -598,17 +588,6 @@ static bool loom_amdgpu_vector_fp8_scalef32_is_identity(
          loom_amdgpu_source_lane_as_u32_bits(
              fact_table, module, plan->scale_source, 0, &scale_bit_pattern) &&
          scale_bit_pattern == LOOM_AMDGPU_FP8_F32_IDENTITY_SCALE_BITS;
-}
-
-static iree_status_t loom_amdgpu_lookup_vector_scale_source(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan,
-    loom_value_id_t* out_low_scale) {
-  IREE_ASSERT(loom_amdgpu_vector_16bit_float_conversion_plan_has_scale(plan));
-  IREE_RETURN_IF_ERROR(
-      loom_low_lower_lookup_value(context, plan->scale_source, out_low_scale));
-  return loom_amdgpu_materialize_full_low_vgpr_b32(
-      context, source_op, *out_low_scale, out_low_scale);
 }
 
 static void loom_amdgpu_vector_fp8_unscaled_plan(
@@ -1716,7 +1695,7 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_to_packed_bf16(
                          LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_PACK_U16)
             ? &decode_plan->pack_u16_descriptor
             : NULL;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_packed_bf16_lane_pair(
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_packed_u16_lane_pair(
         context, source_op, pack_u16_descriptor, lanes[0], lanes[1],
         result_lane_type, &packed_registers[register_index]));
   }

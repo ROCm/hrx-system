@@ -360,8 +360,10 @@ static int64_t loom_amdgpu_descriptor_matrix_attr_value(
     const loom_low_immediate_t* immediate) {
   switch (immediate->encoding_field_id) {
     case LOOM_AMDGPU_ENCODING_FIELD_MATRIX_A_FMT:
+    case LOOM_AMDGPU_ENCODING_FIELD_CBSZ:
       return loom_amdgpu_matrix_format_selector_attr(&contract_request->lhs);
     case LOOM_AMDGPU_ENCODING_FIELD_MATRIX_B_FMT:
+    case LOOM_AMDGPU_ENCODING_FIELD_BLGP:
       return loom_amdgpu_matrix_format_selector_attr(&contract_request->rhs);
     case LOOM_AMDGPU_ENCODING_FIELD_MATRIX_A_SCALE_FMT:
       return loom_amdgpu_matrix_scale_format_selector_attr(

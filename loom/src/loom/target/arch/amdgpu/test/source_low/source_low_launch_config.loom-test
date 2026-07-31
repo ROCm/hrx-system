@@ -18,6 +18,48 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1)
 
 // ====
 
+amdgpu.target<gfx1200> @target
+
+kernel.def target(@target) @ordinary_gfx1200_workgroup_identity() {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c4, %c3, %c2) workgroup_size(%c64, %c1, %c1) : index
+} launch(%output: buffer) {
+  %workgroup_x = kernel.workgroup.id<x> : index
+  %workgroup_y = kernel.workgroup.id<y> : index
+  %workgroup_z = kernel.workgroup.id<z> : index
+  %x = index.cast %workgroup_x : index to i32
+  %y = index.cast %workgroup_y : index to i32
+  %z = index.cast %workgroup_z : index to i32
+  %xy = scalar.addi %x, %y : i32
+  %xyz = scalar.addi %xy, %z : i32
+  %result = vector.from_elements %xyz : vector<1xi32>
+  %zero = index.constant 0 : offset
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  vector.store %result, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(4, 3, 2) @ordinary_gfx1200_workgroup_identity() asm<amdgpu.rdna4.core> {
+  %18 = live_in<amdgpu.cluster_id_yz> : reg<amdgpu.sgpr>
+  %x = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %y = s_and_b32_lit %18, 65535
+  %z = s_lshr_b32_rhs_inline %18, 16
+  %xy = s_add_u32 %x, %y
+  %xyz = s_add_u32 %xy, %z
+  %result = v_mov_b32_copy %xyz
+  %26 = v_mov_b32 0
+  global_store_b32_saddr %26, %result, %output_view
+  return
+}
+
+// ====
+
 amdgpu.target<gfx1250> @target
 
 kernel.def target(@target) @static_cluster_size_uses_facts() {

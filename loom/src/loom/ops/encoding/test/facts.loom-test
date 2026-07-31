@@ -170,6 +170,39 @@ func.def @matrix_operand_schema_summary() -> (i64, i64, i64, i64, i64, i64) {
 
 // ====
 
+// Exact logical scale-group shapes distinguish groups with the same element
+// count but different axis boundaries.
+func.def @matrix_operand_scale_group_shapes() -> (i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+  %square = encoding.define #matrix_operand<affine=scale_only, element_format=f4e2m1, payload_elements=256, payload_packing=separate_scale_payload, payload_registers=0, scale_format=f8e4m3fn, scale_group_elements=256, scale_group_shape=[16, 16], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  %row = encoding.define #matrix_operand<affine=scale_only, element_format=f4e2m1, payload_elements=16, payload_packing=separate_scale_payload, payload_registers=0, scale_format=f8e4m3fn, scale_group_elements=16, scale_group_shape=[1, 16], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  %linear = encoding.define #matrix_operand<affine=scale_only, element_format=f4e2m1, payload_elements=32, payload_packing=separate_scale_payload, payload_registers=0, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %square_rank = test.fact_encoding_matrix_field %square["scale_group_rank"] : encoding<schema> -> i64
+  %square_dim0 = test.fact_encoding_matrix_field %square["scale_group_dim0"] : encoding<schema> -> i64
+  %square_dim1 = test.fact_encoding_matrix_field %square["scale_group_dim1"] : encoding<schema> -> i64
+  %row_rank = test.fact_encoding_matrix_field %row["scale_group_rank"] : encoding<schema> -> i64
+  %row_dim0 = test.fact_encoding_matrix_field %row["scale_group_dim0"] : encoding<schema> -> i64
+  %row_dim1 = test.fact_encoding_matrix_field %row["scale_group_dim1"] : encoding<schema> -> i64
+  %linear_rank = test.fact_encoding_matrix_field %linear["scale_group_rank"] : encoding<schema> -> i64
+  %linear_dim0 = test.fact_encoding_matrix_field %linear["scale_group_dim0"] : encoding<schema> -> i64
+  %linear_dim1 = test.fact_encoding_matrix_field %linear["scale_group_dim1"] : encoding<schema> -> i64
+  func.return %square_rank, %square_dim0, %square_dim1, %row_rank, %row_dim0, %row_dim1, %linear_rank, %linear_dim0, %linear_dim1 : i64, i64, i64, i64, i64, i64, i64, i64, i64
+}
+// ----
+func.def @matrix_operand_scale_group_shapes() -> (i64, i64, i64, i64, i64, i64, i64, i64, i64) {
+  %square_rank = scalar.constant 2 : i64
+  %square_dim0 = scalar.constant 16 : i64
+  %square_dim1 = scalar.constant 16 : i64
+  %row_rank = scalar.constant 2 : i64
+  %row_dim0 = scalar.constant 1 : i64
+  %row_dim1 = scalar.constant 16 : i64
+  %linear_rank = scalar.constant 1 : i64
+  %linear_dim0 = scalar.constant 32 : i64
+  %linear_dim1 = scalar.constant 0 : i64
+  func.return %square_rank, %square_dim0, %square_dim1, %row_rank, %row_dim0, %row_dim1, %linear_rank, %linear_dim0, %linear_dim1 : i64, i64, i64, i64, i64, i64, i64, i64, i64
+}
+
+// ====
+
 // Structured-sparsity facts preserve both the logical group extent and the
 // number of physically stored nonzero elements.
 func.def @matrix_operand_structured_sparsity_summary() -> (i64, i64, i64) {

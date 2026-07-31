@@ -258,10 +258,13 @@ typedef enum loom_amdgpu_processor_info_flag_bits_e {
   // Clustered dispatches provide workgroup and cluster identity in the GFX1250
   // launch-state TTMP and IB_STS2 ABI.
   LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE = 1u << 1,
+  // Workgroup coordinates arrive in architected TTMP launch state.
+  LOOM_AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS = 1u << 2,
   // Processor info flags known by the AMDGPU target package.
   LOOM_AMDGPU_PROCESSOR_INFO_KNOWN_FLAGS =
       LOOM_AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION |
-      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE,
+      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE |
+      LOOM_AMDGPU_PROCESSOR_INFO_FLAG_ARCHITECTED_WORKGROUP_IDS,
 } loom_amdgpu_processor_info_flag_bits_t;
 
 // Bitset of loom_amdgpu_processor_info_flag_bits_t values.
@@ -274,8 +277,8 @@ typedef enum loom_amdgpu_processor_scheduling_bit_e {
   LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES = 1u << 1,
   // Nearby VALU reads of SGPRs written by VALU require fixed wait states.
   LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES = 1u << 2,
-  // Sub-DWORD SDWA dst_sel writes require fixed wait states.
-  LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES = 1u << 3,
+  // Destination-selected sub-DWORD writes require fixed wait states.
+  LOOM_AMDGPU_PROCESSOR_SCHEDULING_DESTINATION_SELECTION_WAIT_STATES = 1u << 3,
   // Nearby VALU reads of SGPRs written by VALU require depctr drains.
   LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR = 1u << 4,
   // GFX11+ processors support s_delay_alu for short ALU dependency delays.
@@ -287,7 +290,7 @@ typedef enum loom_amdgpu_processor_scheduling_bit_e {
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR |
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_WAIT_STATES |
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_WAIT_STATES |
-      LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES |
+      LOOM_AMDGPU_PROCESSOR_SCHEDULING_DESTINATION_SELECTION_WAIT_STATES |
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VALU_SGPR_READ_DEPCTR |
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU |
       LOOM_AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER,
@@ -373,12 +376,20 @@ typedef enum loom_amdgpu_descriptor_set_info_flag_bits_e {
   // Descriptor set supports native packed BF16 add, multiply, and FMA.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC =
       UINT64_C(1) << 3,
+  // VOP3 packets may read two distinct scalar-source registers.
+  LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOP3_TWO_SCALAR_SOURCES = UINT64_C(1)
+                                                                 << 4,
+  // Native OCP FP8 encodes require exact NaN canonicalization after conversion.
+  LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_OCP_FP8_NONCANONICAL_NAN =
+      UINT64_C(1) << 5,
   // Descriptor-set info flags known by the AMDGPU target package.
   LOOM_AMDGPU_DESCRIPTOR_SET_INFO_KNOWN_FLAGS =
       LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING |
       LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION |
       LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS |
-      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC,
+      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC |
+      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOP3_TWO_SCALAR_SOURCES |
+      LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_OCP_FP8_NONCANONICAL_NAN,
 } loom_amdgpu_descriptor_set_info_flag_bits_t;
 
 // Bitset of loom_amdgpu_descriptor_set_info_flag_bits_t values.

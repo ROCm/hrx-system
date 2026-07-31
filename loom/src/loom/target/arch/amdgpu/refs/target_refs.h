@@ -45,6 +45,9 @@ typedef enum loom_amdgpu_descriptor_trait_bit_e {
   LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ISSUE = 1u << 9,
   // Descriptor establishes a matrix/vector coexecution retention window.
   LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX_COEXECUTION_SOURCE = 1u << 10,
+  // Descriptor writes a sub-DWORD result through destination-selection
+  // forwarding rather than an ordinary full-register write.
+  LOOM_AMDGPU_DESCRIPTOR_TRAIT_DESTINATION_SELECTION_FORWARDING = 1u << 11,
 } loom_amdgpu_descriptor_trait_bit_t;
 typedef uint32_t loom_amdgpu_descriptor_traits_t;
 

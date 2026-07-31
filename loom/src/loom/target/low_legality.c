@@ -527,6 +527,12 @@ static iree_status_t loom_target_low_legality_verify_scalar_type(
       return iree_ok_status();
     case LOOM_SCALAR_TYPE_F8E4M3:
     case LOOM_SCALAR_TYPE_F8E5M2:
+      if (context->options->type_supported.fn != NULL &&
+          context->options->type_supported.fn(
+              context->options->type_supported.user_data, context->module,
+              type)) {
+        return iree_ok_status();
+      }
       return loom_target_low_legality_emit_type_constraint(
           context, op, type, IREE_SV("scalar.fp8_decode_or_contract"));
     case LOOM_SCALAR_TYPE_COUNT_:

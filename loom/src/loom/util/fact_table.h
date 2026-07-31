@@ -356,6 +356,9 @@ typedef enum loom_value_fact_encoded_operand_flag_bits_e {
 
 typedef uint32_t loom_value_fact_encoded_operand_flags_t;
 
+// Maximum number of logical axes in an exact encoded scale-group shape.
+#define LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK 4
+
 // Target-independent encoded operand facts for storage schemas or prepared
 // matrix/vector fragments. Bulk payload, scale, table, and sparse metadata data
 // remain SSA values; this summary only records compact interpretation facts.
@@ -406,14 +409,35 @@ typedef struct loom_value_fact_encoded_operand_schema_t {
   // Number of logical elements represented by the payload.
   uint16_t payload_element_count;
 
-  // Number of logical elements covered by one primary/local scale value.
-  uint16_t scale_group_element_count;
+  // Logical element block covered by one primary/local scale value.
+  struct {
+    // Cached product of the exact shape, or the known coarse group size when
+    // no exact multidimensional shape is available.
+    uint16_t element_count;
+
+    // Exact extents in logical operand-axis order. Positive dimensions are
+    // contiguous from axis zero and trailing zeroes terminate the rank. An
+    // all-zero shape means only element_count is known.
+    uint16_t shape[LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK];
+  } scale_group;
 
   // Number of explicit scale-like SSA operands required by this schema.
   uint16_t scale_operand_count;
 } loom_value_fact_encoded_operand_schema_t;
-static_assert(sizeof(loom_value_fact_encoded_operand_schema_t) == 64,
+static_assert(sizeof(loom_value_fact_encoded_operand_schema_t) == 72,
               "encoded operand schema must be padding-free for raw equality");
+
+// Returns the number of exact logical scale-group dimensions. The fixed-width
+// shape is canonical: positive extents precede zero-filled trailing entries.
+static inline uint8_t loom_value_fact_encoded_operand_scale_group_rank(
+    const loom_value_fact_encoded_operand_schema_t* schema) {
+  uint8_t rank = 0;
+  while (rank < LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK &&
+         schema->scale_group.shape[rank] != 0) {
+    ++rank;
+  }
+  return rank;
+}
 
 // Summary of a storage-schema encoding.
 typedef struct loom_value_fact_storage_schema_t {

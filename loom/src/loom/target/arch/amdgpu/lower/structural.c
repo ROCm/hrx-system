@@ -38,6 +38,8 @@ static bool loom_amdgpu_vector_bitcast_storage_shape(
 
   return loom_amdgpu_type_packed_integer_storage(type, out_payload_bit_count,
                                                  out_register_count) ||
+         loom_amdgpu_type_packed_8bit_float_storage(type, out_payload_bit_count,
+                                                    out_register_count) ||
          loom_amdgpu_type_packed_16bit_float_storage(
              type, out_payload_bit_count, out_register_count);
 }
@@ -552,7 +554,16 @@ iree_status_t loom_amdgpu_lower_vector_bitcast(
       context, source_op, plan->result, &result_low_type));
   const loom_type_t input_low_type =
       loom_module_value_type(loom_low_lower_context_module(context), low_input);
-  IREE_ASSERT(loom_type_equal(input_low_type, result_low_type));
+  if (!loom_type_equal(input_low_type, result_low_type)) {
+    IREE_ASSERT(loom_amdgpu_low_type_is_register_class(
+        context, input_low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR));
+    IREE_ASSERT(loom_amdgpu_low_type_is_register_class(
+        context, result_low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR));
+    IREE_ASSERT_EQ(loom_low_register_type_unit_count(input_low_type),
+                   loom_low_register_type_unit_count(result_low_type));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32_registers(
+        context, source_op, low_input, &low_input));
+  }
 
   return loom_low_lower_bind_value(context, plan->result, low_input);
 }

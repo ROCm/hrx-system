@@ -82,6 +82,8 @@ static bool loom_encoding_matrix_static_param_name_is_supported(
          loom_encoding_string_id_equal(module, name_id,
                                        IREE_SV("scale_group_elements")) ||
          loom_encoding_string_id_equal(module, name_id,
+                                       IREE_SV("scale_group_shape")) ||
+         loom_encoding_string_id_equal(module, name_id,
                                        IREE_SV("scale_operands")) ||
          loom_encoding_string_id_equal(module, name_id, IREE_SV("affine")) ||
          loom_encoding_string_id_equal(module, name_id, IREE_SV("rounding")) ||
@@ -352,6 +354,83 @@ static iree_status_t loom_encoding_matrix_verify_optional_static_i64(
   return iree_ok_status();
 }
 
+static iree_status_t loom_encoding_matrix_verify_scale_group_shape(
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_encoding_define_param_view_t* params,
+    iree_diagnostic_emitter_t emitter, uint64_t scale_topology,
+    int64_t scale_group_elements,
+    uint16_t out_shape[LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK], bool* out_ok) {
+  for (uint8_t i = 0; i < LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK; ++i) {
+    out_shape[i] = 0;
+  }
+  *out_ok = false;
+
+  const uint32_t topology = (uint32_t)scale_topology;
+  const bool is_1d =
+      iree_any_bit_set(topology, LOOM_VALUE_FACT_SCALE_TOPOLOGY_GROUP_1D |
+                                     LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D);
+  const bool is_2d =
+      iree_any_bit_set(topology, LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_2D);
+  const loom_named_attr_t* entry = loom_encoding_find_param(
+      module, params->static_attrs, IREE_SV("scale_group_shape"));
+  if (!entry) {
+    if (is_2d) {
+      return loom_encoding_emit_param_error(
+          emitter, op, loom_encoding_matrix_operand_name(),
+          LOOM_ERR_ENCODING_007, IREE_SV("scale_group_shape"));
+    }
+    if (is_1d && scale_group_elements > 0) {
+      out_shape[0] = (uint16_t)scale_group_elements;
+    }
+    *out_ok = true;
+    return iree_ok_status();
+  }
+  if (entry->value.kind != LOOM_ATTR_I64_ARRAY) {
+    return loom_encoding_emit_static_kind_error(
+        emitter, op, loom_encoding_matrix_operand_name(),
+        IREE_SV("scale_group_shape"), (loom_attr_kind_t)entry->value.kind,
+        IREE_SV("i64 array"));
+  }
+
+  const uint16_t rank = entry->value.count;
+  if (rank == 0 || rank > LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK) {
+    return loom_encoding_matrix_verify_i64_range(
+        emitter, op, IREE_SV("scale_group_shape"), rank,
+        IREE_SV("1 to 4 positive dimensions"));
+  }
+  if ((is_1d && rank != 1) || (is_2d && rank != 2)) {
+    return loom_encoding_matrix_verify_i64_range(
+        emitter, op, IREE_SV("scale_group_shape"), rank,
+        is_1d ? IREE_SV("rank 1 for a 1D scale topology")
+              : IREE_SV("rank 2 for a 2D scale topology"));
+  }
+
+  uint32_t shape_element_count = 1;
+  for (uint16_t i = 0; i < rank; ++i) {
+    const int64_t dimension = entry->value.i64_array[i];
+    if (dimension <= 0 || dimension > UINT16_MAX) {
+      return loom_encoding_matrix_verify_i64_range(
+          emitter, op, IREE_SV("scale_group_shape"), dimension,
+          IREE_SV("positive dimensions <= 65535"));
+    }
+    if (shape_element_count > UINT16_MAX / (uint32_t)dimension) {
+      return loom_encoding_matrix_verify_i64_range(
+          emitter, op, IREE_SV("scale_group_shape"), UINT16_MAX + 1,
+          IREE_SV("product equal to scale_group_elements and <= 65535"));
+    }
+    shape_element_count *= (uint32_t)dimension;
+    out_shape[i] = (uint16_t)dimension;
+  }
+  if (shape_element_count != (uint32_t)scale_group_elements) {
+    return loom_encoding_matrix_verify_i64_range(
+        emitter, op, IREE_SV("scale_group_shape"), shape_element_count,
+        IREE_SV("product equal to scale_group_elements"));
+  }
+
+  *out_ok = true;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_encoding_matrix_verify_define(
     const loom_module_t* module, const loom_op_t* op,
     const loom_encoding_define_param_view_t* params,
@@ -454,6 +533,12 @@ static iree_status_t loom_encoding_matrix_verify_define(
         IREE_SV("non-negative and <= 65535"));
   }
 
+  uint16_t scale_group_shape[LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK] = {0};
+  IREE_RETURN_IF_ERROR(loom_encoding_matrix_verify_scale_group_shape(
+      module, op, params, emitter, scale_topology, scale_group_elements,
+      scale_group_shape, &param_ok));
+  if (!param_ok) return iree_ok_status();
+
   int64_t scale_operands = 0;
   IREE_RETURN_IF_ERROR(loom_encoding_matrix_verify_optional_static_i64(
       module, op, params, emitter, IREE_SV("scale_operands"),
@@ -532,7 +617,10 @@ static iree_status_t loom_encoding_matrix_verify_define(
       .scale_format = (uint64_t)scale_format,
       .secondary_scale_format = (uint64_t)secondary_scale_format,
       .scale_topology = (uint32_t)scale_topology,
-      .scale_group_element_count = (uint16_t)scale_group_elements,
+      .scale_group =
+          {
+              .element_count = (uint16_t)scale_group_elements,
+          },
       .scale_operand_count = (uint16_t)scale_operands,
       .sparsity_policy = (uint32_t)sparsity,
       .sparsity_group =
@@ -545,6 +633,9 @@ static iree_status_t loom_encoding_matrix_verify_define(
                    ? LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ZERO_SCALE_FALLBACK
                    : 0,
   };
+  for (uint8_t i = 0; i < LOOM_VALUE_FACT_SCALE_GROUP_MAX_RANK; ++i) {
+    encoded_operand.scale_group.shape[i] = scale_group_shape[i];
+  }
   if (!loom_value_fact_encoded_operand_schema_scale_is_complete(
           encoded_operand)) {
     return loom_encoding_matrix_verify_i64_range(
