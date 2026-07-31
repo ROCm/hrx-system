@@ -70,12 +70,16 @@ class AmdgpuStorageLayoutTest : public ::testing::Test {
                             loom_module_block(module_), &module_builder);
     const loom_symbol_ref_t target_ref = AddSymbol(IREE_SV("target"));
     const loom_symbol_ref_t callee_ref = AddSymbol(IREE_SV("storage_layout"));
+    loom_string_id_t representation_contract = LOOM_STRING_ID_INVALID;
+    IREE_ASSERT_OK(loom_builder_intern_string(
+        &module_builder, IREE_SV("test.low.core"), &representation_contract));
     loom_op_t* function_op = nullptr;
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &module_builder, 0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+        &module_builder, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_DESCRIPTOR_SET,
+        /*visibility=*/0, /*retain=*/0, /*cc=*/0,
         /*purity=*/0,
         /*allocation=*/0, /*schedule=*/0,
-        /*descriptor_set=*/LOOM_STRING_ID_INVALID, target_ref, /*abi=*/0,
+        /*descriptor_set=*/representation_contract, target_ref, /*abi=*/0,
         loom_named_attr_slice_t{}, loom_named_attr_slice_t{},
         LOOM_STRING_ID_INVALID, loom_named_attr_slice_t{}, callee_ref,
         /*arg_types=*/nullptr,
