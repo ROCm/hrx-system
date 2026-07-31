@@ -73,6 +73,17 @@ IREE_API_EXPORT iree_status_t qwen_program_prepare(
     qwen_model_t* model, const qwen_program_options_t* options,
     iree_allocator_t host_allocator, qwen_program_t** out_program);
 
+// Prepares multiple reusable programs through one JIT request union.
+//
+// Every program is described before compilation begins. Exact executable
+// requests and compatible code identities are shared across the complete
+// union, then each command buffer is recorded after all executables are ready.
+// On failure every output remains NULL and all partial programs are released.
+IREE_API_EXPORT iree_status_t qwen_program_prepare_batch(
+    qwen_model_t* model, iree_host_size_t program_count,
+    const qwen_program_options_t* options, iree_allocator_t host_allocator,
+    qwen_program_t** out_programs);
+
 // Retains |program| for the caller.
 IREE_API_EXPORT void qwen_program_retain(qwen_program_t* program);
 

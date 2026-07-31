@@ -229,19 +229,29 @@ static iree_host_size_t qwen_generation_cli_decode_context_class(
          QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE;
 }
 
+static void qwen_generation_cli_initialize_decode_program_options(
+    iree_host_size_t context_class, iree_host_size_t token_capacity,
+    iree_host_size_t context_capacity,
+    iree_hal_command_buffer_mode_t command_buffer_mode,
+    qwen_program_options_t* out_options) {
+  qwen_program_options_initialize(out_options);
+  out_options->kind = QWEN_PROGRAM_KIND_DECODE;
+  out_options->token_count = 1;
+  out_options->context_count = context_class;
+  out_options->token_capacity = token_capacity;
+  out_options->context_capacity = context_capacity;
+  out_options->command_buffer_mode = command_buffer_mode;
+}
+
 static iree_status_t qwen_generation_cli_prepare_decode_program(
     qwen_model_t* model, iree_host_size_t context_class,
     iree_host_size_t token_capacity, iree_host_size_t context_capacity,
     iree_hal_command_buffer_mode_t command_buffer_mode,
     iree_allocator_t host_allocator, qwen_program_t** out_program) {
   qwen_program_options_t program_options;
-  qwen_program_options_initialize(&program_options);
-  program_options.kind = QWEN_PROGRAM_KIND_DECODE;
-  program_options.token_count = 1;
-  program_options.context_count = context_class;
-  program_options.token_capacity = token_capacity;
-  program_options.context_capacity = context_capacity;
-  program_options.command_buffer_mode = command_buffer_mode;
+  qwen_generation_cli_initialize_decode_program_options(
+      context_class, token_capacity, context_capacity, command_buffer_mode,
+      &program_options);
   return qwen_program_prepare(model, &program_options, host_allocator,
                               out_program);
 }
@@ -372,30 +382,41 @@ static iree_status_t qwen_generation_cli_run(void) {
   }
 
   qwen_program_t* prefill_program = NULL;
-  if (iree_status_is_ok(status)) {
-    qwen_program_options_t program_options;
-    qwen_program_options_initialize(&program_options);
-    program_options.kind = QWEN_PROGRAM_KIND_PREFILL;
-    program_options.token_count = prompt_token_count;
-    program_options.context_count = prompt_token_count;
-    program_options.token_capacity = prompt_token_count;
-    program_options.context_capacity = context_capacity;
-    program_options.command_buffer_mode = runtime_context.command_buffer_mode;
-    status = qwen_program_prepare(model, &program_options, host_allocator,
-                                  &prefill_program);
-  }
-
   qwen_program_t* decode_programs[QWEN_GENERATION_DECODE_CONTEXT_CLASS_COUNT] =
       {0};
-  if (iree_status_is_ok(status) && max_tokens > 1) {
-    const iree_host_size_t context_class =
-        qwen_generation_cli_decode_context_class(prompt_token_count);
-    const iree_host_size_t class_ordinal =
-        context_class / QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE - 1;
-    status = qwen_generation_cli_prepare_decode_program(
-        model, context_class, prompt_token_count, context_capacity,
-        runtime_context.command_buffer_mode, host_allocator,
-        &decode_programs[class_ordinal]);
+  if (iree_status_is_ok(status)) {
+    qwen_program_options_t program_options[2];
+    qwen_program_options_initialize(&program_options[0]);
+    program_options[0].kind = QWEN_PROGRAM_KIND_PREFILL;
+    program_options[0].token_count = prompt_token_count;
+    program_options[0].context_count = prompt_token_count;
+    program_options[0].token_capacity = prompt_token_count;
+    program_options[0].context_capacity = context_capacity;
+    program_options[0].command_buffer_mode =
+        runtime_context.command_buffer_mode;
+
+    iree_host_size_t program_count = 1;
+    iree_host_size_t initial_decode_class_ordinal = 0;
+    if (max_tokens > 1) {
+      const iree_host_size_t context_class =
+          qwen_generation_cli_decode_context_class(prompt_token_count);
+      initial_decode_class_ordinal =
+          context_class / QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE - 1;
+      qwen_generation_cli_initialize_decode_program_options(
+          context_class, prompt_token_count, context_capacity,
+          runtime_context.command_buffer_mode, &program_options[1]);
+      program_count = 2;
+    }
+
+    qwen_program_t* programs[2] = {0};
+    status = qwen_program_prepare_batch(model, program_count, program_options,
+                                        host_allocator, programs);
+    if (iree_status_is_ok(status)) {
+      prefill_program = programs[0];
+      if (program_count == 2) {
+        decode_programs[initial_decode_class_ordinal] = programs[1];
+      }
+    }
   }
 
   qwen_generation_cli_timepoint_t request_ready = {

@@ -735,20 +735,51 @@ static iree_status_t qwen_program_prepare_batch_append(
   return status;
 }
 
-static iree_status_t qwen_program_prepare_batch_execute(
-    qwen_program_prepare_batch_t* batch) {
-  if (batch->request_count == 0) {
+static iree_status_t qwen_program_prepare_batches_execute(
+    iree_host_size_t batch_count, qwen_program_prepare_batch_t* batches) {
+  iree_host_size_t request_count = 0;
+  for (iree_host_size_t i = 0; i < batch_count; ++i) {
+    if (!iree_host_size_checked_add(request_count, batches[i].request_count,
+                                    &request_count)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "Qwen program prepare request count overflows");
+    }
+  }
+  if (request_count == 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "Qwen program executable batch is empty");
+                            "Qwen program prepare union is empty");
   }
-  qwen_loom_executable_t* outputs[QWEN_PROGRAM_EXECUTABLE_COUNT] = {NULL};
-  IREE_RETURN_IF_ERROR(qwen_loom_jit_prepare_batch(
-      qwen_model_loom_jit(batch->model), batch->request_count, batch->requests,
-      outputs));
-  for (iree_host_size_t i = 0; i < batch->request_count; ++i) {
-    *batch->destinations[i] = outputs[i];
+
+  iree_allocator_t host_allocator = batches[0].host_allocator;
+  qwen_loom_jit_prepare_options_t* requests = NULL;
+  qwen_loom_executable_t** outputs = NULL;
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, request_count, sizeof(requests[0]), (void**)&requests);
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(host_allocator, request_count,
+                                         sizeof(outputs[0]), (void**)&outputs);
   }
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    iree_host_size_t request_ordinal = 0;
+    for (iree_host_size_t i = 0; i < batch_count; ++i) {
+      memcpy(&requests[request_ordinal], batches[i].requests,
+             batches[i].request_count * sizeof(requests[0]));
+      request_ordinal += batches[i].request_count;
+    }
+    status = qwen_loom_jit_prepare_batch(qwen_model_loom_jit(batches[0].model),
+                                         request_count, requests, outputs);
+  }
+  if (iree_status_is_ok(status)) {
+    iree_host_size_t request_ordinal = 0;
+    for (iree_host_size_t i = 0; i < batch_count; ++i) {
+      for (iree_host_size_t j = 0; j < batches[i].request_count; ++j) {
+        *batches[i].destinations[j] = outputs[request_ordinal++];
+      }
+    }
+  }
+  iree_allocator_free(host_allocator, outputs);
+  iree_allocator_free(host_allocator, requests);
+  return status;
 }
 
 // Prepares the temporary decode-attention adapter for one 64-row context class.
@@ -2608,10 +2639,10 @@ void qwen_program_options_initialize(qwen_program_options_t* out_options) {
   };
 }
 
-iree_status_t qwen_program_prepare(qwen_model_t* model,
-                                   const qwen_program_options_t* options,
-                                   iree_allocator_t host_allocator,
-                                   qwen_program_t** out_program) {
+static iree_status_t qwen_program_prepare_describe(
+    qwen_model_t* model, const qwen_program_options_t* options,
+    iree_allocator_t host_allocator,
+    qwen_program_prepare_batch_t* prepare_batch, qwen_program_t** out_program) {
   IREE_ASSERT_ARGUMENT(out_program);
   *out_program = NULL;
   IREE_RETURN_IF_ERROR(qwen_program_validate_options(model, options));
@@ -2654,10 +2685,6 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
   program->expert_table_schedule = qwen_program_select_expert_table_schedule(
       options->kind, options->token_count);
 
-  qwen_program_prepare_batch_t prepare_batch = {
-      .model = model,
-      .host_allocator = host_allocator,
-  };
   iree_status_t status = iree_ok_status();
   if (qwen_program_kind_is_full_model(options->kind)) {
     status = qwen_full_program_layout_calculate(
@@ -2699,28 +2726,12 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
         &program->timeline_semaphore);
   }
   if (iree_status_is_ok(status)) {
-    status = qwen_program_prepare_layer_executables(program, &prepare_batch);
+    status = qwen_program_prepare_layer_executables(program, prepare_batch);
   }
   if (iree_status_is_ok(status) &&
       qwen_program_kind_is_full_model(options->kind)) {
     status =
-        qwen_program_prepare_full_model_executables(program, &prepare_batch);
-  }
-  if (iree_status_is_ok(status)) {
-    status = qwen_program_prepare_batch_execute(&prepare_batch);
-  }
-  qwen_program_prepare_batch_deinitialize(&prepare_batch);
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_create(
-        qwen_model_device(model), options->command_buffer_mode,
-        qwen_program_command_categories(options->kind),
-        qwen_model_queue_affinity(model), QWEN_PROGRAM_BINDING_COUNT,
-        &program->command_buffer);
-  }
-  if (iree_status_is_ok(status)) {
-    status = qwen_program_kind_is_full_model(options->kind)
-                 ? qwen_program_record_full_model(program)
-                 : qwen_program_record_layer(program);
+        qwen_program_prepare_full_model_executables(program, prepare_batch);
   }
 
   if (iree_status_is_ok(status)) {
@@ -2729,6 +2740,96 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
     qwen_program_destroy(program);
   }
   return status;
+}
+
+static iree_status_t qwen_program_prepare_finalize(
+    qwen_program_t* program, const qwen_program_options_t* options) {
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
+      qwen_model_device(program->model), options->command_buffer_mode,
+      qwen_program_command_categories(options->kind),
+      qwen_model_queue_affinity(program->model), QWEN_PROGRAM_BINDING_COUNT,
+      &program->command_buffer));
+  return qwen_program_kind_is_full_model(options->kind)
+             ? qwen_program_record_full_model(program)
+             : qwen_program_record_layer(program);
+}
+
+iree_status_t qwen_program_prepare_batch(qwen_model_t* model,
+                                         iree_host_size_t program_count,
+                                         const qwen_program_options_t* options,
+                                         iree_allocator_t host_allocator,
+                                         qwen_program_t** out_programs) {
+  IREE_ASSERT_ARGUMENT(out_programs);
+  if (program_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen program prepare batch must not be empty");
+  }
+  if (!options) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen program prepare options are required");
+  }
+  for (iree_host_size_t i = 0; i < program_count; ++i) {
+    out_programs[i] = NULL;
+  }
+
+  qwen_program_t** programs = NULL;
+  qwen_program_prepare_batch_t* prepare_batches = NULL;
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, program_count, sizeof(programs[0]), (void**)&programs);
+  if (iree_status_is_ok(status)) {
+    memset(programs, 0, program_count * sizeof(programs[0]));
+    status = iree_allocator_malloc_array(host_allocator, program_count,
+                                         sizeof(prepare_batches[0]),
+                                         (void**)&prepare_batches);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(prepare_batches, 0, program_count * sizeof(prepare_batches[0]));
+  }
+
+  for (iree_host_size_t i = 0; i < program_count && iree_status_is_ok(status);
+       ++i) {
+    prepare_batches[i].model = model;
+    prepare_batches[i].host_allocator = host_allocator;
+    status = qwen_program_prepare_describe(model, &options[i], host_allocator,
+                                           &prepare_batches[i], &programs[i]);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        qwen_program_prepare_batches_execute(program_count, prepare_batches);
+  }
+  for (iree_host_size_t i = 0; i < program_count && iree_status_is_ok(status);
+       ++i) {
+    status = qwen_program_prepare_finalize(programs[i], &options[i]);
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < program_count; ++i) {
+      out_programs[i] = programs[i];
+      programs[i] = NULL;
+    }
+  }
+
+  if (prepare_batches) {
+    for (iree_host_size_t i = 0; i < program_count; ++i) {
+      qwen_program_prepare_batch_deinitialize(&prepare_batches[i]);
+    }
+  }
+  if (programs) {
+    for (iree_host_size_t i = 0; i < program_count; ++i) {
+      if (programs[i]) qwen_program_destroy(programs[i]);
+    }
+  }
+  iree_allocator_free(host_allocator, prepare_batches);
+  iree_allocator_free(host_allocator, programs);
+  return status;
+}
+
+iree_status_t qwen_program_prepare(qwen_model_t* model,
+                                   const qwen_program_options_t* options,
+                                   iree_allocator_t host_allocator,
+                                   qwen_program_t** out_program) {
+  IREE_ASSERT_ARGUMENT(out_program);
+  return qwen_program_prepare_batch(model, 1, options, host_allocator,
+                                    out_program);
 }
 
 void qwen_program_retain(qwen_program_t* program) {
