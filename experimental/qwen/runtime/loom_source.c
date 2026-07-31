@@ -43,6 +43,12 @@ static const qwen_loom_source_mapping_t qwen_loom_source_mappings[] = {
         .embedded_name = IREE_SVL("qwen3_moe_attention_qkv_quantized.loom"),
     },
     {
+        .module_path =
+            IREE_SVL(QWEN_LOOM_SOURCE_ATTENTION_QKV_POSTPROCESS_FUSED),
+        .embedded_name =
+            IREE_SVL("qwen3_moe_attention_qkv_postprocess_fused.loom"),
+    },
+    {
         .module_path = IREE_SVL(QWEN_LOOM_SOURCE_ATTENTION_POSTPROCESS_F32_F16),
         .embedded_name =
             IREE_SVL("qwen3_moe_attention_postprocess_f32_f16.loom"),

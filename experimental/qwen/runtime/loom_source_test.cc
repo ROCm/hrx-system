@@ -49,6 +49,11 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
           "qwen3_moe_attention_qkv_quantized",
       },
       {
+          QWEN_LOOM_SOURCE_ATTENTION_QKV_POSTPROCESS_FUSED,
+          "qwen3_moe_attention_qkv_postprocess_fused.loom",
+          "qwen3_moe_attention_qkv_postprocess_fused_decode",
+      },
+      {
           QWEN_LOOM_SOURCE_ATTENTION_POSTPROCESS_F32_F16,
           "qwen3_moe_attention_postprocess_f32_f16.loom",
           "qwen3_moe_attention_postprocess_f32_f16",

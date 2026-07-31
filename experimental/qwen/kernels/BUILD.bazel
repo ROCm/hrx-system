@@ -232,6 +232,18 @@ loom_link_module(
 )
 
 loom_link_module(
+    name = "attention_qkv_postprocess_fused_runtime_module",
+    srcs = ["runtime_exports.loom"],
+    libraries = [
+        "//experimental/qwen_moe/kernels:attention_qkv_postprocess_fused_linked",
+    ],
+    mode = "selective",
+    output = "qwen3_moe_attention_qkv_postprocess_fused.loom",
+    roots = ["@qwen3_moe_attention_qkv_postprocess_fused_decode"],
+    strip_check = True,
+)
+
+loom_link_module(
     name = "attention_postprocess_f32_f16_runtime_module",
     srcs = ["runtime_exports.loom"],
     libraries = [
@@ -667,6 +679,7 @@ iree_c_embed_data(
         ":attention_metadata_runtime_module",
         ":attention_postprocess_f32_f16_runtime_module",
         ":attention_prepare_quantized_runtime_module",
+        ":attention_qkv_postprocess_fused_runtime_module",
         ":attention_qkv_quantized_runtime_module",
         ":dense_linear_quantized_f16_runtime_module",
         ":flash_attention_decode_split_f32_f16_runtime_module",

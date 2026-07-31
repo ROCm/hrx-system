@@ -32,6 +32,10 @@ extern "C" {
 #define QWEN_LOOM_SOURCE_ATTENTION_QKV_QUANTIZED \
   "qwen3_moe/attention_qkv_quantized"
 
+// Stable runtime path for fused decode Q/K/V and head postprocessing.
+#define QWEN_LOOM_SOURCE_ATTENTION_QKV_POSTPROCESS_FUSED \
+  "qwen3_moe/attention_qkv_postprocess_fused"
+
 // Stable runtime path for the attention RoPE and cache publication module.
 #define QWEN_LOOM_SOURCE_ATTENTION_POSTPROCESS_F32_F16 \
   "qwen3_moe/attention_postprocess_f32_f16"
