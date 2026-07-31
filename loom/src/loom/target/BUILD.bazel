@@ -54,7 +54,24 @@ loom_cc_library(
     deps = [
         ":facts",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "function_version_test",
+    srcs = ["function_version_test.cc"],
+    deps = [
+        ":function_version",
+        "//loom/src/loom/format/text:parser",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/testing:module_ptr",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

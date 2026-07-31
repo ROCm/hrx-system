@@ -56,8 +56,26 @@ loom_cc_library(
   DEPS
     ::facts
     iree::base
+    iree::base::internal::arena
     loom::ir
+    loom::ops::op_defs
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    function_version_test
+  SRCS
+    "function_version_test.cc"
+  DEPS
+    ::function_version
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::test
+    loom::testing::module_ptr
 )
 
 loom_cc_library(
