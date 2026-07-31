@@ -818,22 +818,12 @@ class LowKernelEmitter {
 
     loom_low_storage_lease_provider_t storage_lease_provider = {};
     loom_amdgpu_storage_lease_provider(&storage_lease_provider);
-    loom_low_emission_frame_options_t frame_options = {
-        /*.descriptor_registry=*/&target_registry_.registry,
-        /*.memory_access_table=*/{},
-        /*.pressure_cliffs=*/{},
-        /*.schedule_pair_affinities=*/{},
-        /*.schedule_structural_state_reads=*/{},
-        /*.schedule_strategy=*/{},
-        /*.schedule_diagnostic_flags=*/{},
-        /*.allocation_budgets=*/{},
-        /*.allocation_budget_count=*/{},
-        /*.allocation_fixed_values=*/abi_verify_result.fixed_values,
-        /*.allocation_fixed_value_count=*/abi_verify_result.fixed_value_count,
-        /*.allocation_reserved_ranges=*/{},
-        /*.allocation_reserved_range_count=*/{},
-        /*.storage_lease_provider=*/&storage_lease_provider,
-    };
+    loom_low_emission_frame_options_t frame_options = {};
+    frame_options.descriptor_registry = &target_registry_.registry;
+    frame_options.allocation_fixed_values = abi_verify_result.fixed_values;
+    frame_options.allocation_fixed_value_count =
+        abi_verify_result.fixed_value_count;
+    frame_options.storage_lease_provider = &storage_lease_provider;
     loom_low_emission_frame_t frame = {};
     IREE_RETURN_IF_ERROR(loom_low_emission_frame_build(
         module_, low_function, &frame_options, arena, &frame));

@@ -545,23 +545,18 @@ class PacketPlanFixture {
     }
     loom_low_storage_lease_provider_t storage_lease_provider = {};
     loom_amdgpu_storage_lease_provider(&storage_lease_provider);
-    const loom_low_emission_frame_options_t frame_options = {
-        /*.descriptor_registry=*/&target_registry_.registry,
-        /*.memory_access_table=*/loom_low_memory_access_table_empty(),
-        /*.residency_model=*/
-        loom_amdgpu_occupancy_residency_model(&resolved_target),
-        /*.schedule_pair_affinities=*/pair_affinities,
-        /*.schedule_structural_state_reads=*/structural_state_reads,
-        /*.schedule_strategy=*/LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
-        /*.schedule_diagnostic_flags=*/{},
-        /*.allocation_budgets=*/nullptr,
-        /*.allocation_budget_count=*/0,
-        /*.allocation_fixed_values=*/abi_verify_result.fixed_values,
-        /*.allocation_fixed_value_count=*/abi_verify_result.fixed_value_count,
-        /*.allocation_reserved_ranges=*/nullptr,
-        /*.allocation_reserved_range_count=*/0,
-        /*.storage_lease_provider=*/&storage_lease_provider,
-    };
+    loom_low_emission_frame_options_t frame_options = {};
+    frame_options.descriptor_registry = &target_registry_.registry;
+    frame_options.memory_access_table = loom_low_memory_access_table_empty();
+    frame_options.residency_model =
+        loom_amdgpu_occupancy_residency_model(&resolved_target);
+    frame_options.schedule_pair_affinities = pair_affinities;
+    frame_options.schedule_structural_state_reads = structural_state_reads;
+    frame_options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
+    frame_options.allocation_fixed_values = abi_verify_result.fixed_values;
+    frame_options.allocation_fixed_value_count =
+        abi_verify_result.fixed_value_count;
+    frame_options.storage_lease_provider = &storage_lease_provider;
     AbortOnError(loom_low_emission_frame_build(
         module_, low_function, &frame_options, &frame_arena_, &frame_));
     if (frame_.schedule.error_count != 0 ||
