@@ -10,6 +10,21 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+iree_execution_test_suite(
+  NAME
+    mxfp4_decode_bf16_compile_test
+  MANIFESTS
+    "mxfp4_decode_bf16.test.json"
+  TOOLS
+    "loom-compile=loom::tools::loom-compile"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/mxfp4_decode_bf16.loom"
+  LABELS
+    "hostonly"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 iree_native_test(
   NAME
     "ffn_gate_up_swiglu_q6q8_plan_test"
@@ -164,6 +179,22 @@ iree_native_test(
     loom::tools::iree-benchmark-loom
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom"
+  LABELS
+    "hostonly"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
+iree_native_test(
+  NAME
+    "mxfp4_decode_bf16_plan_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/mxfp4_decode_bf16.loom}}"
+    "--dry-run"
+  SRC
+    loom::tools::iree-benchmark-loom
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/mxfp4_decode_bf16.loom"
   LABELS
     "hostonly"
 )
