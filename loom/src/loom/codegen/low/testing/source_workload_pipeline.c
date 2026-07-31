@@ -212,8 +212,9 @@ iree_status_t loom_low_source_workload_run_pipeline(
       status = loom_pass_value_fact_owner_acquire(
           &value_facts, module,
           loom_pass_value_fact_scope_function_for_target(
-              selection->func, selection->target_bundle,
-              selection->target_profile),
+              selection->func,
+              loom_low_source_selection_target_bundle(selection),
+              /*target_profile=*/NULL),
           &fact_table);
       if (!iree_status_is_ok(status)) {
         break;
@@ -221,8 +222,8 @@ iree_status_t loom_low_source_workload_run_pipeline(
       const loom_low_lower_options_t lower_options = {
           .target_ref = selection->target_ref,
           .target_facts = selection->target_facts,
-          .bundle = selection->target_bundle,
-          .target_profile = selection->target_profile,
+          .bundle = loom_low_source_selection_target_bundle(selection),
+          .target_profile = NULL,
           .descriptor_registry = options->descriptor_registry,
           .policy = selection->policy,
           .fact_table = fact_table,

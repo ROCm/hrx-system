@@ -78,6 +78,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::symbol_facts
     loom::codegen::low::lower
     loom::codegen::low::lower::source_selection
     loom::codegen::low::pipeline::pass_environment
@@ -93,7 +94,8 @@ loom_cc_test(
     loom::pass::registry
     loom::pass::tooling
     loom::pass::value_facts
-    loom::target::profile
+    loom::target::facts_builder
+    loom::target::function_version
     loom::target::test::contracts::core_lower_rules
     loom::target::test::low_registry
     loom::target::test::lower

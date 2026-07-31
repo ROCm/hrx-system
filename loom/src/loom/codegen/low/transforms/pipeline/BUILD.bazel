@@ -76,6 +76,7 @@ loom_cc_test(
     srcs = ["source_to_low_test.cc"],
     deps = [
         ":source_to_low",
+        "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/codegen/low/lower:source_selection",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
@@ -91,7 +92,8 @@ loom_cc_test(
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:tooling",
         "//loom/src/loom/pass:value_facts",
-        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target:facts_builder",
+        "//loom/src/loom/target:function_version",
         "//loom/src/loom/target/test:low_registry",
         "//loom/src/loom/target/test:lower",
         "//loom/src/loom/target/test:target_record_table",
