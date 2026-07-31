@@ -100,16 +100,16 @@ contains no attention algorithm body and is deleted when the unmodified public
 kernel specializes correctly.
 
 The three direct feed-forward forks
-`kernels/routed_gate_up_q8_bringup_workaround.loom`,
+`kernels/routed_gate_up_next_q8_bringup_workaround.loom`,
 `kernels/routed_down_q4_next_q8_bringup_workaround.loom`, and
 `kernels/routed_down_q6_next_q8_bringup_workaround.loom` retain the canonical
-decode ABIs and kernel bodies while making this model's exact one-token,
-eight-route dimensions structural. The routed-down variants also retain the
-canonical last-arrival publication of the following layer's normalized Q8_1 x4
-row. They exist only because those workload facts do not reach source-to-low
-compilation and the direct down route loop therefore cannot be unrolled. Delete
-all three when workload specialization crosses that compiler boundary; they
-are not model-generated kernel variants.
+decode ABIs and device bodies while making this model's exact one-token,
+eight-route dimensions structural. The gate/up variant publishes its F32
+SwiGLU rows and packed Q8_1 x4 groups together; the routed-down variants
+publish the following layer's normalized Q8_1 x4 row. They exist only because
+workload facts and nested device-template requirements do not yet cross every
+source-to-low boundary. Delete all three when those compiler boundaries are
+repaired; they are not model-generated kernel variants.
 
 `kernels/linear_q6k_q8_1_x4_bringup_workaround.loom` is the vocabulary
 projection's one-row specialization. It retains the raw Q6_K by Q8_1 x4

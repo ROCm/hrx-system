@@ -116,7 +116,7 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
       {
           QWEN_LOOM_SOURCE_ROUTED_GATE_UP_Q8,
           "qwen3_moe_routed_gate_up_q8.loom",
-          "qwen3_moe_routed_gate_up_swiglu_q4k_q8",
+          "qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8",
       },
       {
           QWEN_LOOM_SOURCE_ROUTED_DOWN_F16,
@@ -208,7 +208,7 @@ TEST(QwenLoomSourceTest, EmbedsBoundedVocabularyWorkaroundSources) {
             std::string::npos);
 }
 
-TEST(QwenLoomSourceTest, EmbedsDirectGateUpFixedModelWorkaround) {
+TEST(QwenLoomSourceTest, EmbedsDirectGateUpNextQ8FixedModelWorkaround) {
   qwen_loom_source_module_t source_module;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
       IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_Q8), &source_module));
@@ -225,6 +225,11 @@ TEST(QwenLoomSourceTest, EmbedsDirectGateUpFixedModelWorkaround) {
       source_text.find("%bounded_route_stride = index.assume %route_stride "
                        "[range(%route_stride, 8, 8)] : index"),
       std::string::npos);
+  EXPECT_NE(
+      source_text.find("func.apply<qwen3_moe.routed_gate_up.q4k_q8.body>"),
+      std::string::npos);
+  EXPECT_NE(source_text.find("func.apply<ggml.quantize_q8_1_x4.group_body>"),
+            std::string::npos);
 }
 
 TEST(QwenLoomSourceTest, EmbedsDirectDownFixedModelWorkarounds) {
