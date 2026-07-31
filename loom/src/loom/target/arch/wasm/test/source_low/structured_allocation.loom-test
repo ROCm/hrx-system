@@ -2,7 +2,7 @@
 
 wasm.target<simd128> @target
 
-low.func.def target(@target) abi(wasm_function) @nested_if_allocates(%cond: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %fallback: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @nested_if_allocates(%cond: reg<wasm.i32>, %lhs: reg<wasm.v128>, %rhs: reg<wasm.v128>, %fallback: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
   %result = low.scf.if %cond -> (reg<wasm.v128>) {
     %then = i32x4.add %lhs, %rhs
     low.scf.yield %then : reg<wasm.v128>
@@ -22,7 +22,7 @@ low.func.def target(@target) abi(wasm_function) @nested_if_allocates(%cond: reg<
 
 wasm.target<simd128> @target
 
-low.func.def target(@target) abi(wasm_function) @nested_for_allocates(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %seed: reg<wasm.v128>, %rhs: reg<wasm.v128>) -> (reg<wasm.v128>) asm<wasm.core.simd128> {
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @nested_for_allocates(%lo: reg<wasm.i32>, %hi: reg<wasm.i32>, %step: reg<wasm.i32>, %seed: reg<wasm.v128>, %rhs: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
   %result = low.scf.for [%lo to %hi step %step] iter_args(%seed: reg<wasm.v128>) -> (reg<wasm.v128>) do(%iv: reg<wasm.i32>, %acc: reg<wasm.v128>) {
     %copy = copy %acc : reg<wasm.v128> -> reg<wasm.v128>
     %next = i32x4.add %copy, %rhs
