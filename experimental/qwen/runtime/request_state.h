@@ -81,9 +81,14 @@ typedef struct qwen_request_storage_layout_t {
   iree_device_size_t persistent_byte_length;
 } qwen_request_storage_layout_t;
 
+// Validates one active input shape against fixed request capacities.
+iree_status_t qwen_request_active_shape_validate(
+    iree_host_size_t token_capacity, iree_host_size_t context_capacity,
+    iree_host_size_t active_token_count, iree_host_size_t context_base);
+
 // Calculates the fixed request storage layout.
 iree_status_t qwen_request_storage_layout_calculate(
-    iree_host_size_t token_count, iree_host_size_t context_capacity,
+    iree_host_size_t token_capacity, iree_host_size_t context_capacity,
     qwen_request_storage_layout_t* out_layout);
 
 // Returns the model retained by |request|.
@@ -110,6 +115,12 @@ uint64_t qwen_request_timeline_value(const qwen_request_t* request);
 // Returns the input representation established by the latest reset.
 qwen_request_input_kind_t qwen_request_input_kind(
     const qwen_request_t* request);
+
+// Returns the active token count published by the latest successful reset.
+iree_host_size_t qwen_request_active_token_count(const qwen_request_t* request);
+
+// Returns the context base published by the latest successful reset.
+iree_host_size_t qwen_request_context_base(const qwen_request_t* request);
 
 // Commits a successfully submitted program result to the request timeline.
 //

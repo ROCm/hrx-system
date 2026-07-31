@@ -32,8 +32,8 @@ typedef struct qwen_request_options_t {
   iree_host_size_t structure_size;
   // Optional extension chain; must be NULL when no extensions are used.
   const void* next;
-  // Exact physical token count held in the hidden-state span.
-  iree_host_size_t token_count;
+  // Maximum physical token rows held in input and metadata spans.
+  iree_host_size_t token_capacity;
   // Maximum number of K/V rows retained by each layer.
   iree_host_size_t context_capacity;
 } qwen_request_options_t;
@@ -59,26 +59,29 @@ IREE_API_EXPORT void qwen_request_retain(qwen_request_t* request);
 // Releases |request| after its last externally observed operation completes.
 IREE_API_EXPORT void qwen_request_release(qwen_request_t* request);
 
-// Asynchronously resets a base-zero layer request from dense F32 hidden states.
+// Asynchronously publishes dense F32 hidden-state input at |context_base|.
 //
-// |hidden_state_data| must contain exactly token_count * 2048 little-endian
-// IEEE F32 elements. The reset establishes context_base = 0, captures the host
-// data before returning, and publishes caller signals after the device upload
-// completes.
+// |hidden_state_data| must contain one or more complete 2048-element
+// little-endian IEEE F32 rows, up to the request token capacity. The active row
+// count plus |context_base| must fit the request context capacity. The reset
+// captures the host data before returning and publishes caller signals after
+// the device upload completes.
 IREE_API_EXPORT iree_status_t qwen_request_reset_hidden_state(
-    qwen_request_t* request, iree_const_byte_span_t hidden_state_data,
+    qwen_request_t* request, iree_host_size_t context_base,
+    iree_const_byte_span_t hidden_state_data,
     iree_hal_semaphore_list_t wait_semaphore_list,
     iree_hal_semaphore_list_t signal_semaphore_list);
 
-// Asynchronously resets a base-zero full-model request from token IDs.
+// Asynchronously publishes full-model token IDs at |context_base|.
 //
-// |token_ids| must contain exactly token_count values. Every value is validated
-// in [0, QWEN_MODEL_VOCABULARY_SIZE) before any queue operation is submitted.
-// The reset captures the host data before returning, establishes
-// context_base = 0, and publishes caller signals after the device upload
-// completes.
+// |token_ids| must contain one or more values, up to the request token
+// capacity. The active count plus |context_base| must fit the request context
+// capacity. Every value is validated in [0, QWEN_MODEL_VOCABULARY_SIZE) before
+// any queue operation is submitted. The reset captures the host data before
+// returning and publishes caller signals after the device upload completes.
 IREE_API_EXPORT iree_status_t qwen_request_reset_tokens(
-    qwen_request_t* request, iree_tokenizer_token_id_list_t token_ids,
+    qwen_request_t* request, iree_host_size_t context_base,
+    iree_tokenizer_token_id_list_t token_ids,
     iree_hal_semaphore_list_t wait_semaphore_list,
     iree_hal_semaphore_list_t signal_semaphore_list);
 
@@ -99,9 +102,9 @@ IREE_API_EXPORT iree_status_t qwen_request_read_hidden_state(
 IREE_API_EXPORT iree_status_t qwen_request_read_selected_token(
     qwen_request_t* request, iree_tokenizer_token_id_t* out_token_id);
 
-// Returns the exact physical token count owned by |request|.
+// Returns the maximum physical token rows owned by |request|.
 IREE_API_EXPORT iree_host_size_t
-qwen_request_token_count(const qwen_request_t* request);
+qwen_request_token_capacity(const qwen_request_t* request);
 
 // Returns the K/V row capacity owned by |request|.
 IREE_API_EXPORT iree_host_size_t

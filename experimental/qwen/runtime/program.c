@@ -112,9 +112,13 @@ struct qwen_program_t {
   iree_host_size_t first_cache_layer;
   // Number of consecutive model layers covered by the cache bindings.
   iree_host_size_t cache_layer_count;
-  // Exact physical token count.
+  // Exact active token rows consumed by each issue.
   iree_host_size_t token_count;
-  // Exact compatible request context capacity.
+  // Exact initialized K/V rows visible to attention.
+  iree_host_size_t context_count;
+  // Compatible request token-storage capacity.
+  iree_host_size_t token_capacity;
+  // Compatible request K/V storage capacity.
   iree_host_size_t context_capacity;
   // Q/K/V contraction family selected for this token shape.
   qwen_program_qkv_schedule_t qkv_schedule;
@@ -134,6 +138,8 @@ struct qwen_program_t {
   qwen_full_program_layout_t full_layout;
   // Complete per-issue transient allocation size.
   iree_device_size_t transient_byte_length;
+  // Host-visible result bytes written by the recorded command buffer.
+  iree_device_size_t output_staging_byte_length;
   // Reusable merged wait-semaphore pointer storage.
   iree_hal_semaphore_t** wait_semaphores;
   // Reusable merged wait payload storage.
@@ -433,25 +439,29 @@ static qwen_program_qkv_schedule_t qwen_program_select_qkv_schedule(
              : QWEN_PROGRAM_QKV_SCHEDULE_QUANTIZED_ROWS;
 }
 
+static bool qwen_program_kind_is_full_model(qwen_program_kind_t kind) {
+  return kind == QWEN_PROGRAM_KIND_PREFILL || kind == QWEN_PROGRAM_KIND_DECODE;
+}
+
 static iree_status_t qwen_program_prepare_layer_executables(
     qwen_program_t* program) {
   const int64_t token_count = (int64_t)program->token_count;
   const int64_t route_stride = QWEN_MODEL_ROUTE_COUNT;
   const int64_t route_count = QWEN_MODEL_ROUTE_COUNT;
   const int64_t expert_count = QWEN_MODEL_EXPERT_COUNT;
-  const int64_t cache_row_count = (int64_t)program->context_capacity;
+  const int64_t context_count = (int64_t)program->context_count;
   const int64_t token_workload[] = {token_count};
   const int64_t attention_metadata_workload[] = {
       token_count,
-      cache_row_count,
+      context_count,
   };
   const int64_t attention_postprocess_workload[] = {
       token_count,
-      cache_row_count,
+      context_count,
   };
   const int64_t flash_attention_workload[] = {
       token_count,
-      token_count,
+      context_count,
   };
   const int64_t router_top8_workload[] = {
       token_count,
@@ -648,7 +658,7 @@ static iree_status_t qwen_program_prepare_layer_executables(
   return status;
 }
 
-static iree_status_t qwen_program_prepare_prefill_executables(
+static iree_status_t qwen_program_prepare_full_model_executables(
     qwen_program_t* program) {
   const qwen_quantized_storage_t terminal_storage =
       qwen_model_parameter_layout(program->model)
@@ -867,7 +877,7 @@ static iree_status_t qwen_program_record_attention_metadata(
     const qwen_request_storage_layout_t* request_layout) {
   const uint32_t constants[] = {
       (uint32_t)program->token_count,
-      (uint32_t)program->context_capacity,
+      (uint32_t)program->context_count,
   };
   const iree_hal_buffer_ref_t bindings[] = {
       qwen_program_request_ref(request_layout->control),
@@ -923,7 +933,7 @@ static iree_status_t qwen_program_record_attention(
           : QWEN_PROGRAM_EXECUTABLE_ATTENTION_PREPARE_Q8;
 
   const uint32_t token_count = (uint32_t)program->token_count;
-  const uint32_t context_capacity = (uint32_t)program->context_capacity;
+  const uint32_t context_count = (uint32_t)program->context_count;
   const iree_device_size_t layer_cache_offset =
       cache_window_layer_index * request_layout->layer_cache_byte_length;
   iree_status_t status = iree_ok_status();
@@ -1010,7 +1020,7 @@ static iree_status_t qwen_program_record_attention(
 
   const uint32_t attention_postprocess_constants[] = {
       token_count,
-      context_capacity,
+      context_count,
   };
   const iree_hal_buffer_ref_t attention_postprocess_bindings[] = {
       qwen_program_request_ref(request_layout->positions),
@@ -1044,7 +1054,7 @@ static iree_status_t qwen_program_record_attention(
 
   const uint32_t flash_attention_constants[] = {
       token_count,
-      token_count,
+      context_count,
   };
   const iree_hal_buffer_ref_t flash_attention_bindings[] = {
       qwen_program_transient_ref(transient->rotated_query),
@@ -1300,7 +1310,7 @@ static iree_status_t qwen_program_record_terminal_feed_forward(
       &program->full_layout.terminal_layer, &executables);
 }
 
-static iree_status_t qwen_program_record_prefill_endpoint(
+static iree_status_t qwen_program_record_full_model_endpoint(
     qwen_program_t* program,
     const qwen_request_storage_layout_t* request_layout) {
   const qwen_parameter_layout_t* parameters =
@@ -1392,12 +1402,13 @@ static iree_status_t qwen_program_record_hidden_state_copy(
       IREE_HAL_EXECUTION_STAGE_TRANSFER, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
       /*memory_barrier_count=*/1, &output_memory_barrier,
       /*buffer_barrier_count=*/0, /*buffer_barriers=*/NULL));
+  qwen_request_span_t active_hidden_state = request_layout->hidden_state;
+  active_hidden_state.length = program->output_staging_byte_length;
   return iree_hal_command_buffer_copy_buffer(
-      program->command_buffer,
-      qwen_program_request_ref(request_layout->hidden_state),
+      program->command_buffer, qwen_program_request_ref(active_hidden_state),
       iree_hal_make_indirect_buffer_ref(QWEN_PROGRAM_BINDING_OUTPUT_STAGING,
                                         /*offset=*/0,
-                                        request_layout->hidden_state.length),
+                                        active_hidden_state.length),
       IREE_HAL_COPY_FLAG_NONE);
 }
 
@@ -1425,7 +1436,7 @@ static iree_status_t qwen_program_record_selected_token_copy(
 static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
   qwen_request_storage_layout_t request_layout;
   IREE_RETURN_IF_ERROR(qwen_request_storage_layout_calculate(
-      program->token_count, program->context_capacity, &request_layout));
+      program->token_capacity, program->context_capacity, &request_layout));
 
   iree_status_t status = iree_hal_command_buffer_begin(program->command_buffer);
   if (iree_status_is_ok(status)) {
@@ -1445,10 +1456,10 @@ static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
   return status;
 }
 
-static iree_status_t qwen_program_record_prefill(qwen_program_t* program) {
+static iree_status_t qwen_program_record_full_model(qwen_program_t* program) {
   qwen_request_storage_layout_t request_layout;
   IREE_RETURN_IF_ERROR(qwen_request_storage_layout_calculate(
-      program->token_count, program->context_capacity, &request_layout));
+      program->token_capacity, program->context_capacity, &request_layout));
 
   iree_status_t status = iree_hal_command_buffer_begin(program->command_buffer);
   if (iree_status_is_ok(status)) {
@@ -1481,7 +1492,7 @@ static iree_status_t qwen_program_record_prefill(qwen_program_t* program) {
     status = qwen_program_record_dispatch_barrier(program);
   }
   if (iree_status_is_ok(status)) {
-    status = qwen_program_record_prefill_endpoint(program, &request_layout);
+    status = qwen_program_record_full_model_endpoint(program, &request_layout);
   }
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_selected_token_copy(program, &request_layout);
@@ -1507,7 +1518,8 @@ static iree_status_t qwen_program_validate_options(
                             "Qwen program option extensions are unsupported");
   }
   if (options->kind != QWEN_PROGRAM_KIND_LAYER &&
-      options->kind != QWEN_PROGRAM_KIND_PREFILL) {
+      options->kind != QWEN_PROGRAM_KIND_PREFILL &&
+      options->kind != QWEN_PROGRAM_KIND_DECODE) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "Qwen program kind %d is not implemented",
                             (int)options->kind);
@@ -1518,22 +1530,28 @@ static iree_status_t qwen_program_validate_options(
                             "Qwen layer index %" PRIhsz " is outside [0, %d)",
                             options->layer_index, QWEN_MODEL_LAYER_COUNT);
   }
-  if (options->kind == QWEN_PROGRAM_KIND_PREFILL && options->layer_index != 0) {
+  if (qwen_program_kind_is_full_model(options->kind) &&
+      options->layer_index != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "Qwen prefill program layer index must remain zero");
+        "Qwen full-model program layer index must remain zero");
   }
-  if (options->token_count != options->context_capacity) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "Qwen base-zero programs require token count and context capacity to "
-        "match");
+  qwen_request_storage_layout_t request_layout;
+  IREE_RETURN_IF_ERROR(qwen_request_storage_layout_calculate(
+      options->token_capacity, options->context_capacity, &request_layout));
+  if (options->context_count < options->token_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen program context count %" PRIhsz
+                            " is less than token count %" PRIhsz,
+                            options->context_count, options->token_count);
   }
-  if (options->kind == QWEN_PROGRAM_KIND_PREFILL &&
-      options->token_count != 512) {
+  IREE_RETURN_IF_ERROR(qwen_request_active_shape_validate(
+      options->token_capacity, options->context_capacity, options->token_count,
+      options->context_count - options->token_count));
+  if (options->kind == QWEN_PROGRAM_KIND_DECODE && options->token_count != 1) {
     return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "the Qwen full-model fast lane is specialized for prefill 512");
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Qwen decode programs require exactly one active token");
   }
   const iree_hal_command_buffer_mode_t allowed_mode =
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
@@ -1544,7 +1562,7 @@ static iree_status_t qwen_program_validate_options(
         "Qwen reusable programs accept only profiling metadata command-buffer "
         "mode bits");
   }
-  if (options->kind == QWEN_PROGRAM_KIND_PREFILL) {
+  if (qwen_program_kind_is_full_model(options->kind)) {
     qwen_full_program_layout_t layout;
     return qwen_full_program_layout_calculate(options->token_count, &layout);
   }
@@ -1560,6 +1578,8 @@ void qwen_program_options_initialize(qwen_program_options_t* out_options) {
       .kind = QWEN_PROGRAM_KIND_LAYER,
       .layer_index = 0,
       .token_count = 1,
+      .context_count = 1,
+      .token_capacity = 1,
       .context_capacity = 1,
       .command_buffer_mode = IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
   };
@@ -1584,22 +1604,26 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
   program->kind = options->kind;
   program->layer_index = options->layer_index;
   program->first_cache_layer =
-      options->kind == QWEN_PROGRAM_KIND_PREFILL ? 0 : options->layer_index;
-  program->cache_layer_count =
-      options->kind == QWEN_PROGRAM_KIND_PREFILL ? QWEN_MODEL_LAYER_COUNT : 1;
+      qwen_program_kind_is_full_model(options->kind) ? 0 : options->layer_index;
+  program->cache_layer_count = qwen_program_kind_is_full_model(options->kind)
+                                   ? QWEN_MODEL_LAYER_COUNT
+                                   : 1;
   program->token_count = options->token_count;
+  program->context_count = options->context_count;
+  program->token_capacity = options->token_capacity;
   program->context_capacity = options->context_capacity;
   program->qkv_schedule =
       qwen_program_select_qkv_schedule(options->token_count);
 
   iree_status_t status = iree_ok_status();
-  if (options->kind == QWEN_PROGRAM_KIND_PREFILL) {
+  if (qwen_program_kind_is_full_model(options->kind)) {
     status = qwen_full_program_layout_calculate(options->token_count,
                                                 &program->full_layout);
     if (iree_status_is_ok(status)) {
       program->layer_layout = program->full_layout.layer;
       program->transient_byte_length =
           program->full_layout.transient_byte_length;
+      program->output_staging_byte_length = sizeof(int32_t);
     }
   } else {
     status = qwen_layer_program_layout_calculate(options->token_count,
@@ -1607,6 +1631,8 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
     if (iree_status_is_ok(status)) {
       program->transient_byte_length =
           program->layer_layout.transient_byte_length;
+      status = qwen_model_hidden_state_byte_length(
+          options->token_count, &program->output_staging_byte_length);
     }
   }
   if (iree_status_is_ok(status)) {
@@ -1630,8 +1656,9 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
   if (iree_status_is_ok(status)) {
     status = qwen_program_prepare_layer_executables(program);
   }
-  if (iree_status_is_ok(status) && options->kind == QWEN_PROGRAM_KIND_PREFILL) {
-    status = qwen_program_prepare_prefill_executables(program);
+  if (iree_status_is_ok(status) &&
+      qwen_program_kind_is_full_model(options->kind)) {
+    status = qwen_program_prepare_full_model_executables(program);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_create(
@@ -1640,8 +1667,8 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
         QWEN_PROGRAM_BINDING_COUNT, &program->command_buffer);
   }
   if (iree_status_is_ok(status)) {
-    status = options->kind == QWEN_PROGRAM_KIND_PREFILL
-                 ? qwen_program_record_prefill(program)
+    status = qwen_program_kind_is_full_model(options->kind)
+                 ? qwen_program_record_full_model(program)
                  : qwen_program_record_layer(program);
   }
 
@@ -1750,24 +1777,32 @@ iree_status_t qwen_program_issue(
                             "Qwen program and request are required");
   }
   if (qwen_request_model(request) != program->model ||
-      qwen_request_token_count(request) != program->token_count ||
+      qwen_request_token_capacity(request) != program->token_capacity ||
       qwen_request_context_capacity(request) != program->context_capacity) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "Qwen request model, token count, and context capacity must match "
-        "the prepared program");
+        "Qwen request model and storage capacities must match the prepared "
+        "program");
+  }
+  if (qwen_request_active_token_count(request) != program->token_count ||
+      qwen_request_context_base(request) !=
+          program->context_count - program->token_count) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "Qwen request active token count and visible context must match the "
+        "prepared program");
   }
   const qwen_request_input_kind_t expected_input_kind =
-      program->kind == QWEN_PROGRAM_KIND_PREFILL
+      qwen_program_kind_is_full_model(program->kind)
           ? QWEN_REQUEST_INPUT_KIND_TOKEN_IDS
           : QWEN_REQUEST_INPUT_KIND_HIDDEN_STATE;
   if (qwen_request_input_kind(request) != expected_input_kind) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "Qwen %s program requires a %s request reset",
-        program->kind == QWEN_PROGRAM_KIND_PREFILL ? "prefill" : "layer",
-        program->kind == QWEN_PROGRAM_KIND_PREFILL ? "token-ID"
-                                                   : "hidden-state");
+        qwen_program_kind_is_full_model(program->kind) ? "full-model" : "layer",
+        qwen_program_kind_is_full_model(program->kind) ? "token-ID"
+                                                       : "hidden-state");
   }
   if (program->timeline_value > IREE_HAL_SEMAPHORE_MAX_VALUE - 3 ||
       qwen_request_timeline_value(request) == IREE_HAL_SEMAPHORE_MAX_VALUE) {
@@ -1877,9 +1912,7 @@ iree_status_t qwen_program_issue(
           {
               .buffer = qwen_request_output_staging_buffer(request),
               .offset = 0,
-              .length = program->kind == QWEN_PROGRAM_KIND_PREFILL
-                            ? request_layout->selected_token.length
-                            : request_layout->hidden_state.length,
+              .length = program->output_staging_byte_length,
           },
   };
   const iree_hal_buffer_binding_table_t binding_table = {
@@ -1910,7 +1943,7 @@ iree_status_t qwen_program_issue(
 
   program->timeline_value = program_complete_value;
   const qwen_request_result_kind_t result_kind =
-      program->kind == QWEN_PROGRAM_KIND_PREFILL
+      qwen_program_kind_is_full_model(program->kind)
           ? QWEN_REQUEST_RESULT_KIND_SELECTED_TOKEN
           : QWEN_REQUEST_RESULT_KIND_HIDDEN_STATE;
   qwen_request_commit_program_signal(request, request_complete_value,

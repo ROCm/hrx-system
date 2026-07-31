@@ -32,8 +32,10 @@ typedef enum qwen_program_kind_e {
   QWEN_PROGRAM_KIND_INVALID = 0,
   // Executes one transformer layer over uploaded hidden states.
   QWEN_PROGRAM_KIND_LAYER = 1,
-  // Executes base-zero embedding, all layers, and greedy token selection.
+  // Executes embedding, all layers, and greedy selection for a token chunk.
   QWEN_PROGRAM_KIND_PREFILL = 2,
+  // Executes embedding, all layers, and greedy selection for one decode token.
+  QWEN_PROGRAM_KIND_DECODE = 3,
 } qwen_program_kind_t;
 
 // Options controlling program specialization and command recording.
@@ -44,11 +46,15 @@ typedef struct qwen_program_options_t {
   const void* next;
   // Mathematical scope recorded by the program.
   qwen_program_kind_t kind;
-  // Model layer selected by a layer program; must be zero for prefill.
+  // Model layer selected by a layer program; zero for full-model programs.
   iree_host_size_t layer_index;
-  // Exact physical token count consumed by each issue.
+  // Exact active token rows consumed by each issue.
   iree_host_size_t token_count;
-  // Exact request context capacity compatible with this program.
+  // Exact initialized K/V rows visible to attention.
+  iree_host_size_t context_count;
+  // Request token-storage capacity compatible with this program.
+  iree_host_size_t token_capacity;
+  // Request K/V storage capacity compatible with this program.
   iree_host_size_t context_capacity;
   // HAL command-buffer mode used for recording and profiling.
   iree_hal_command_buffer_mode_t command_buffer_mode;
@@ -85,7 +91,7 @@ qwen_program_issue(qwen_program_t* program, qwen_request_t* request,
                    iree_hal_semaphore_list_t wait_semaphore_list,
                    iree_hal_semaphore_list_t signal_semaphore_list);
 
-// Returns the exact physical token count specialized into |program|.
+// Returns the exact active token count specialized into |program|.
 IREE_API_EXPORT iree_host_size_t
 qwen_program_token_count(const qwen_program_t* program);
 

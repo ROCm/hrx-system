@@ -125,7 +125,7 @@ static iree_status_t QwenBenchmarkResetRequest(
   QwenBenchmarkTimepoint signal_timepoint =
       QwenBenchmarkNextTimepoint(environment);
   IREE_RETURN_IF_ERROR(qwen_request_reset_hidden_state(
-      environment->request,
+      environment->request, /*context_base=*/0,
       qwen_tooling_layer_data_input(&environment->layer_data),
       QwenBenchmarkTimepointList(&wait_timepoint),
       QwenBenchmarkTimepointList(&signal_timepoint)));
@@ -210,6 +210,8 @@ static iree_status_t QwenBenchmarkEnvironmentInitialize(
     program_options.kind = QWEN_PROGRAM_KIND_LAYER;
     program_options.layer_index = QWEN_LAYER_INDEX;
     program_options.token_count = QWEN_LAYER_TOKEN_COUNT;
+    program_options.context_count = QWEN_LAYER_TOKEN_COUNT;
+    program_options.token_capacity = QWEN_LAYER_TOKEN_COUNT;
     program_options.context_capacity = QWEN_LAYER_TOKEN_COUNT;
     program_options.command_buffer_mode =
         environment->runtime_context.command_buffer_mode;
@@ -223,7 +225,7 @@ static iree_status_t QwenBenchmarkEnvironmentInitialize(
   if (iree_status_is_ok(status)) {
     qwen_request_options_t request_options;
     qwen_request_options_initialize(&request_options);
-    request_options.token_count = QWEN_LAYER_TOKEN_COUNT;
+    request_options.token_capacity = QWEN_LAYER_TOKEN_COUNT;
     request_options.context_capacity = QWEN_LAYER_TOKEN_COUNT;
     status = qwen_request_create(
         environment->model, &request_options,

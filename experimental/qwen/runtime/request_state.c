@@ -12,6 +12,27 @@
 
 #define QWEN_REQUEST_STORAGE_ALIGNMENT 256
 
+iree_status_t qwen_request_active_shape_validate(
+    iree_host_size_t token_capacity, iree_host_size_t context_capacity,
+    iree_host_size_t active_token_count, iree_host_size_t context_base) {
+  if (active_token_count == 0 || active_token_count > token_capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen active token count %" PRIhsz
+                            " is outside request token capacity [1, %" PRIhsz
+                            "]",
+                            active_token_count, token_capacity);
+  }
+  if (context_base > context_capacity ||
+      active_token_count > context_capacity - context_base) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen context base %" PRIhsz
+                            " plus active token count %" PRIhsz
+                            " exceeds request context capacity %" PRIhsz,
+                            context_base, active_token_count, context_capacity);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t qwen_request_storage_append(
     iree_device_size_t length, iree_device_size_t alignment,
     iree_device_size_t* cursor, qwen_request_span_t* out_span) {
@@ -35,20 +56,20 @@ static iree_status_t qwen_request_storage_append(
 }
 
 iree_status_t qwen_request_storage_layout_calculate(
-    iree_host_size_t token_count, iree_host_size_t context_capacity,
+    iree_host_size_t token_capacity, iree_host_size_t context_capacity,
     qwen_request_storage_layout_t* out_layout) {
   IREE_ASSERT_ARGUMENT(out_layout);
   memset(out_layout, 0, sizeof(*out_layout));
-  if (token_count > context_capacity) {
+  if (token_capacity > context_capacity) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Qwen token count %" PRIhsz
+                            "Qwen token capacity %" PRIhsz
                             " exceeds request context capacity %" PRIhsz,
-                            token_count, context_capacity);
+                            token_capacity, context_capacity);
   }
 
   iree_device_size_t hidden_state_byte_length = 0;
   IREE_RETURN_IF_ERROR(qwen_model_hidden_state_byte_length(
-      token_count, &hidden_state_byte_length));
+      token_capacity, &hidden_state_byte_length));
   IREE_RETURN_IF_ERROR(qwen_model_layer_cache_byte_length(
       context_capacity, &out_layout->layer_cache_byte_length));
 
@@ -58,7 +79,7 @@ iree_status_t qwen_request_storage_layout_calculate(
       &out_layout->hidden_state));
 
   iree_device_size_t token_ids_byte_length = 0;
-  if (!iree_device_size_checked_mul((iree_device_size_t)token_count,
+  if (!iree_device_size_checked_mul((iree_device_size_t)token_capacity,
                                     sizeof(int32_t), &token_ids_byte_length)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Qwen token-ID storage byte length overflows");
@@ -75,7 +96,7 @@ iree_status_t qwen_request_storage_layout_calculate(
   out_layout->reset_upload_byte_length = cursor;
 
   iree_device_size_t positions_byte_length = 0;
-  if (!iree_device_size_checked_mul((iree_device_size_t)token_count,
+  if (!iree_device_size_checked_mul((iree_device_size_t)token_capacity,
                                     sizeof(int32_t), &positions_byte_length)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Qwen position storage byte length overflows");
@@ -85,7 +106,7 @@ iree_status_t qwen_request_storage_layout_calculate(
                                                    &out_layout->positions));
 
   iree_device_size_t indices_byte_length = 0;
-  if (!iree_device_size_checked_mul((iree_device_size_t)token_count,
+  if (!iree_device_size_checked_mul((iree_device_size_t)token_capacity,
                                     sizeof(int64_t), &indices_byte_length)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Qwen cache-index storage byte length overflows");
@@ -99,7 +120,7 @@ iree_status_t qwen_request_storage_layout_calculate(
 
   iree_device_size_t mask_element_count = 0;
   iree_device_size_t mask_byte_length = 0;
-  if (!iree_device_size_checked_mul((iree_device_size_t)token_count,
+  if (!iree_device_size_checked_mul((iree_device_size_t)token_capacity,
                                     (iree_device_size_t)context_capacity,
                                     &mask_element_count) ||
       !iree_device_size_checked_mul(mask_element_count,

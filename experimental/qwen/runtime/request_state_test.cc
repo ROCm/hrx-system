@@ -12,10 +12,37 @@
 
 namespace {
 
+TEST(QwenRequestShapeTest, AcceptsPrefillAndDecodeWithinSameCapacity) {
+  IREE_EXPECT_OK(qwen_request_active_shape_validate(
+      /*token_capacity=*/512, /*context_capacity=*/513,
+      /*active_token_count=*/512, /*context_base=*/0));
+  IREE_EXPECT_OK(qwen_request_active_shape_validate(
+      /*token_capacity=*/512, /*context_capacity=*/513,
+      /*active_token_count=*/1, /*context_base=*/512));
+}
+
+TEST(QwenRequestShapeTest, RejectsEmptyOrExcessInput) {
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        qwen_request_active_shape_validate(
+                            /*token_capacity=*/512, /*context_capacity=*/513,
+                            /*active_token_count=*/0, /*context_base=*/0));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        qwen_request_active_shape_validate(
+                            /*token_capacity=*/512, /*context_capacity=*/513,
+                            /*active_token_count=*/513, /*context_base=*/0));
+}
+
+TEST(QwenRequestShapeTest, RejectsContextOverflow) {
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        qwen_request_active_shape_validate(
+                            /*token_capacity=*/512, /*context_capacity=*/513,
+                            /*active_token_count=*/2, /*context_base=*/512));
+}
+
 TEST(QwenRequestStorageTest, PacksPrefill512WithoutOverlap) {
   qwen_request_storage_layout_t layout;
   IREE_ASSERT_OK(qwen_request_storage_layout_calculate(
-      /*token_count=*/512, /*context_capacity=*/512, &layout));
+      /*token_capacity=*/512, /*context_capacity=*/512, &layout));
 
   EXPECT_EQ(layout.hidden_state.offset, 0u);
   EXPECT_EQ(layout.hidden_state.length, 4u * 1024u * 1024u);
@@ -52,21 +79,31 @@ TEST(QwenRequestStorageTest, PacksPrefill512WithoutOverlap) {
   EXPECT_EQ(layout.value_cache.length, layout.key_cache.length);
 }
 
-TEST(QwenRequestStorageTest, RejectsTokenCountBeyondCapacity) {
+TEST(QwenRequestStorageTest, RejectsTokenCapacityBeyondContextCapacity) {
   qwen_request_storage_layout_t layout;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       qwen_request_storage_layout_calculate(
-          /*token_count=*/512, /*context_capacity=*/128, &layout));
+          /*token_capacity=*/512, /*context_capacity=*/128, &layout));
 }
 
 TEST(QwenRequestStorageTest, AlignsDecodeMaskForVectorLoads) {
   qwen_request_storage_layout_t layout;
   IREE_ASSERT_OK(qwen_request_storage_layout_calculate(
-      /*token_count=*/1, /*context_capacity=*/512, &layout));
+      /*token_capacity=*/1, /*context_capacity=*/512, &layout));
 
   EXPECT_EQ(layout.attention_mask.offset % 16, 0u);
   EXPECT_EQ(layout.attention_mask.length, 1u * 512u * 2u);
+}
+
+TEST(QwenRequestStorageTest, ReservesPackedActiveMaskPrefixes) {
+  qwen_request_storage_layout_t layout;
+  IREE_ASSERT_OK(qwen_request_storage_layout_calculate(
+      /*token_capacity=*/512, /*context_capacity=*/513, &layout));
+
+  EXPECT_EQ(layout.attention_mask.length, 512u * 513u * 2u);
+  EXPECT_LE(512u * 512u * 2u, layout.attention_mask.length);
+  EXPECT_LE(1u * 513u * 2u, layout.attention_mask.length);
 }
 
 }  // namespace

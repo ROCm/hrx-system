@@ -167,6 +167,8 @@ static iree_status_t qwen_prefill_cli_run(void) {
     qwen_program_options_initialize(&program_options);
     program_options.kind = QWEN_PROGRAM_KIND_PREFILL;
     program_options.token_count = QWEN_PREFILL_TOKEN_COUNT;
+    program_options.context_count = QWEN_PREFILL_TOKEN_COUNT;
+    program_options.token_capacity = QWEN_PREFILL_TOKEN_COUNT;
     program_options.context_capacity = QWEN_PREFILL_TOKEN_COUNT;
     program_options.command_buffer_mode = runtime_context.command_buffer_mode;
     status =
@@ -181,7 +183,7 @@ static iree_status_t qwen_prefill_cli_run(void) {
   if (iree_status_is_ok(status)) {
     qwen_request_options_t request_options;
     qwen_request_options_initialize(&request_options);
-    request_options.token_count = QWEN_PREFILL_TOKEN_COUNT;
+    request_options.token_capacity = QWEN_PREFILL_TOKEN_COUNT;
     request_options.context_capacity = QWEN_PREFILL_TOKEN_COUNT;
     status = qwen_request_create(
         model, &request_options, qwen_prefill_cli_timepoint_list(&model_ready),
@@ -195,7 +197,7 @@ static iree_status_t qwen_prefill_cli_run(void) {
   };
   if (iree_status_is_ok(status)) {
     status = qwen_request_reset_tokens(
-        request,
+        request, /*context_base=*/0,
         iree_tokenizer_make_token_id_list(token_ids, QWEN_PREFILL_TOKEN_COUNT),
         qwen_prefill_cli_timepoint_list(&request_ready),
         qwen_prefill_cli_timepoint_list(&tokens_ready));

@@ -130,6 +130,8 @@ static iree_status_t qwen_layer_cli_run(void) {
     program_options.kind = QWEN_PROGRAM_KIND_LAYER;
     program_options.layer_index = QWEN_LAYER_INDEX;
     program_options.token_count = QWEN_LAYER_TOKEN_COUNT;
+    program_options.context_count = QWEN_LAYER_TOKEN_COUNT;
+    program_options.token_capacity = QWEN_LAYER_TOKEN_COUNT;
     program_options.context_capacity = QWEN_LAYER_TOKEN_COUNT;
     program_options.command_buffer_mode = runtime_context.command_buffer_mode;
     status =
@@ -144,7 +146,7 @@ static iree_status_t qwen_layer_cli_run(void) {
   if (iree_status_is_ok(status)) {
     qwen_request_options_t request_options;
     qwen_request_options_initialize(&request_options);
-    request_options.token_count = QWEN_LAYER_TOKEN_COUNT;
+    request_options.token_capacity = QWEN_LAYER_TOKEN_COUNT;
     request_options.context_capacity = QWEN_LAYER_TOKEN_COUNT;
     status = qwen_request_create(
         model, &request_options, qwen_cli_timepoint_list(&model_ready),
@@ -157,7 +159,7 @@ static iree_status_t qwen_layer_cli_run(void) {
   };
   if (iree_status_is_ok(status)) {
     status = qwen_request_reset_hidden_state(
-        request, qwen_tooling_layer_data_input(&layer_data),
+        request, /*context_base=*/0, qwen_tooling_layer_data_input(&layer_data),
         qwen_cli_timepoint_list(&request_ready),
         qwen_cli_timepoint_list(&input_ready));
   }
