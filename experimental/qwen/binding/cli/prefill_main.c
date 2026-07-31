@@ -23,16 +23,23 @@
 #define QWEN_PREFILL_TOKEN_COUNT 512
 #define QWEN_PREFILL_TOKEN_BYTE_LENGTH \
   (QWEN_PREFILL_TOKEN_COUNT * sizeof(iree_tokenizer_token_id_t))
+#define QWEN_FIRST_DECODE_CONTEXT_COUNT (QWEN_PREFILL_TOKEN_COUNT + 1)
 
 IREE_FLAG(string, tokens, "",
           "Raw token IDs: exactly 512 little-endian I32 values.");
 IREE_FLAG(int32_t, expected_token, IREE_TOKENIZER_TOKEN_ID_INVALID,
           "Expected selected token (pinned oracle: 264); omit to skip "
           "validation.");
+IREE_FLAG(bool, decode_one, false,
+          "Append the prefill-selected token at position 512 and execute one "
+          "exact-count decode issue.");
+IREE_FLAG(int32_t, expected_decode_token, IREE_TOKENIZER_TOKEN_ID_INVALID,
+          "Expected token selected by --decode_one; omit to report without "
+          "external validation.");
 
 static const char* const qwen_prefill_cli_usage =
-    "Runs the complete Qwen base-zero prefill-512 program and selects one "
-    "token.\n"
+    "Runs complete Qwen prefill-512 and optional exact-count one-token "
+    "decode.\n"
     "\n"
     "Required flags:\n"
     "  --device=<device URI>\n"
@@ -40,7 +47,12 @@ static const char* const qwen_prefill_cli_usage =
     "  --tokens=<raw 512-element little-endian I32 token path>\n"
     "\n"
     "Optional validation:\n"
-    "  --expected_token=<selected token ID; pinned oracle is 264>\n";
+    "  --expected_token=<prefill-selected token ID; pinned oracle is 264>\n"
+    "  --decode_one\n"
+    "  --expected_decode_token=<decode-selected token ID>\n"
+    "\n"
+    "Profiling flags surround the prefill issue. Use the filtered decode "
+    "benchmark row for an isolated decode profile.\n";
 
 typedef struct qwen_prefill_cli_timepoint_t {
   // Timeline semaphore carrying this timepoint.
@@ -117,6 +129,20 @@ static iree_status_t qwen_prefill_cli_run(void) {
         IREE_STATUS_INVALID_ARGUMENT,
         "--expected_token must be nonnegative when validation is requested");
   }
+  if (FLAG_expected_decode_token < IREE_TOKENIZER_TOKEN_ID_INVALID) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--expected_decode_token must be nonnegative when validation is "
+        "requested");
+  }
+  if (!FLAG_decode_one &&
+      FLAG_expected_decode_token != IREE_TOKENIZER_TOKEN_ID_INVALID) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--expected_decode_token requires --decode_one");
+  }
+  const iree_host_size_t request_context_capacity =
+      FLAG_decode_one ? QWEN_FIRST_DECODE_CONTEXT_COUNT
+                      : QWEN_PREFILL_TOKEN_COUNT;
 
   iree_tokenizer_token_id_t token_ids[QWEN_PREFILL_TOKEN_COUNT];
   iree_io_file_contents_t* token_contents = NULL;
@@ -161,7 +187,7 @@ static iree_status_t qwen_prefill_cli_run(void) {
 
   // Program preparation is synchronous host work and intentionally overlaps
   // the asynchronous model gather above.
-  qwen_program_t* program = NULL;
+  qwen_program_t* prefill_program = NULL;
   if (iree_status_is_ok(status)) {
     qwen_program_options_t program_options;
     qwen_program_options_initialize(&program_options);
@@ -169,10 +195,24 @@ static iree_status_t qwen_prefill_cli_run(void) {
     program_options.token_count = QWEN_PREFILL_TOKEN_COUNT;
     program_options.context_count = QWEN_PREFILL_TOKEN_COUNT;
     program_options.token_capacity = QWEN_PREFILL_TOKEN_COUNT;
-    program_options.context_capacity = QWEN_PREFILL_TOKEN_COUNT;
+    program_options.context_capacity = request_context_capacity;
     program_options.command_buffer_mode = runtime_context.command_buffer_mode;
-    status =
-        qwen_program_prepare(model, &program_options, host_allocator, &program);
+    status = qwen_program_prepare(model, &program_options, host_allocator,
+                                  &prefill_program);
+  }
+
+  qwen_program_t* decode_program = NULL;
+  if (iree_status_is_ok(status) && FLAG_decode_one) {
+    qwen_program_options_t program_options;
+    qwen_program_options_initialize(&program_options);
+    program_options.kind = QWEN_PROGRAM_KIND_DECODE;
+    program_options.token_count = 1;
+    program_options.context_count = QWEN_FIRST_DECODE_CONTEXT_COUNT;
+    program_options.token_capacity = QWEN_PREFILL_TOKEN_COUNT;
+    program_options.context_capacity = request_context_capacity;
+    program_options.command_buffer_mode = runtime_context.command_buffer_mode;
+    status = qwen_program_prepare(model, &program_options, host_allocator,
+                                  &decode_program);
   }
 
   qwen_prefill_cli_timepoint_t request_ready = {
@@ -184,7 +224,7 @@ static iree_status_t qwen_prefill_cli_run(void) {
     qwen_request_options_t request_options;
     qwen_request_options_initialize(&request_options);
     request_options.token_capacity = QWEN_PREFILL_TOKEN_COUNT;
-    request_options.context_capacity = QWEN_PREFILL_TOKEN_COUNT;
+    request_options.context_capacity = request_context_capacity;
     status = qwen_request_create(
         model, &request_options, qwen_prefill_cli_timepoint_list(&model_ready),
         qwen_prefill_cli_timepoint_list(&request_ready), host_allocator,
@@ -220,9 +260,10 @@ static iree_status_t qwen_prefill_cli_run(void) {
       .value = 4,
   };
   if (iree_status_is_ok(status)) {
-    status = qwen_program_issue(
-        program, request, qwen_prefill_cli_timepoint_list(&tokens_ready),
-        qwen_prefill_cli_timepoint_list(&issue_complete));
+    status =
+        qwen_program_issue(prefill_program, request,
+                           qwen_prefill_cli_timepoint_list(&tokens_ready),
+                           qwen_prefill_cli_timepoint_list(&issue_complete));
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_wait(timeline, issue_complete.value,
@@ -253,15 +294,69 @@ static iree_status_t qwen_prefill_cli_run(void) {
             "Qwen prefill 512 selected token %" PRId32 ": %" PRIhsz
             " dispatches, %" PRIu64 " resident bytes, %" PRIu64
             " transient bytes\n",
-            selected_token, qwen_program_dispatch_count(program),
+            selected_token, qwen_program_dispatch_count(prefill_program),
             (uint64_t)model_statistics.allocation_bytes,
-            (uint64_t)qwen_program_transient_byte_length(program));
+            (uint64_t)qwen_program_transient_byte_length(prefill_program));
+  }
+
+  qwen_prefill_cli_timepoint_t decode_tokens_ready = {
+      .semaphore = timeline,
+      .value = 5,
+  };
+  if (iree_status_is_ok(status) && FLAG_decode_one) {
+    status = qwen_request_reset_tokens(
+        request, /*context_base=*/QWEN_PREFILL_TOKEN_COUNT,
+        iree_tokenizer_make_token_id_list(&selected_token, 1),
+        qwen_prefill_cli_timepoint_list(&issue_complete),
+        qwen_prefill_cli_timepoint_list(&decode_tokens_ready));
+  }
+  if (iree_status_is_ok(status) && FLAG_decode_one) {
+    status = iree_hal_semaphore_wait(timeline, decode_tokens_ready.value,
+                                     iree_infinite_timeout(),
+                                     IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+
+  qwen_prefill_cli_timepoint_t decode_complete = {
+      .semaphore = timeline,
+      .value = 6,
+  };
+  if (iree_status_is_ok(status) && FLAG_decode_one) {
+    status = qwen_program_issue(
+        decode_program, request,
+        qwen_prefill_cli_timepoint_list(&decode_tokens_ready),
+        qwen_prefill_cli_timepoint_list(&decode_complete));
+  }
+  if (iree_status_is_ok(status) && FLAG_decode_one) {
+    status = iree_hal_semaphore_wait(timeline, decode_complete.value,
+                                     iree_infinite_timeout(),
+                                     IREE_ASYNC_WAIT_FLAG_NONE);
+  }
+
+  iree_tokenizer_token_id_t decode_token = IREE_TOKENIZER_TOKEN_ID_INVALID;
+  if (iree_status_is_ok(status) && FLAG_decode_one) {
+    status = qwen_request_read_selected_token(request, &decode_token);
+  }
+  if (iree_status_is_ok(status) && FLAG_decode_one &&
+      FLAG_expected_decode_token != IREE_TOKENIZER_TOKEN_ID_INVALID &&
+      decode_token != FLAG_expected_decode_token) {
+    status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "decode selected token %" PRId32
+                              " differs from expected decode token %" PRId32,
+                              decode_token, FLAG_expected_decode_token);
+  }
+  if (iree_status_is_ok(status) && FLAG_decode_one) {
+    fprintf(stdout,
+            "Qwen decode at context 513 selected token %" PRId32 ": %" PRIhsz
+            " dispatches, %" PRIu64 " transient bytes\n",
+            decode_token, qwen_program_dispatch_count(decode_program),
+            (uint64_t)qwen_program_transient_byte_length(decode_program));
   }
 
   status =
       qwen_wait_for_model_ready_bringup_workaround(status, model, &model_ready);
   qwen_request_release(request);
-  qwen_program_release(program);
+  qwen_program_release(decode_program);
+  qwen_program_release(prefill_program);
   qwen_model_release(model);
   iree_hal_semaphore_release(timeline);
   qwen_tooling_runtime_context_deinitialize(&runtime_context);
