@@ -38,12 +38,12 @@ func.def @bare_unroll_resultless_loop() {
   %start = index.constant 0 : index
   %end = index.constant 3 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  test.use %i_0 : index
-  %i_1 = index.constant 1 : index
-  test.use %i_1 : index
-  %i_2 = index.constant 2 : index
-  test.use %i_2 : index
+  %4 = index.constant 0 : index
+  test.use %4 : index
+  %5 = index.constant 1 : index
+  test.use %5 : index
+  %6 = index.constant 2 : index
+  test.use %6 : index
   func.return
 }
 
@@ -65,13 +65,13 @@ func.def @bare_unroll_result_loop(%input: i32) -> (i32) {
   %start = index.constant 0 : index
   %end = index.constant 3 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
+  %9 = index.constant 0 : index
   %next = test.addi %input, %input : i32
-  %i_1 = index.constant 1 : index
-  %next_1 = test.addi %next, %next : i32
-  %i_2 = index.constant 2 : index
-  %next_2 = test.addi %next_1, %next_1 : i32
-  func.return %next_2 : i32
+  %11 = index.constant 1 : index
+  %12 = test.addi %next, %next : i32
+  %13 = index.constant 2 : index
+  %result = test.addi %12, %12 : i32
+  func.return %result : i32
 }
 
 // ====
@@ -92,15 +92,15 @@ func.def @interleaved_unroll_resultless_loop(%input: i32) {
   %start = index.constant 0 : index
   %end = index.constant 3 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
-  %i_2 = index.constant 2 : index
+  %7 = index.constant 0 : index
+  %8 = index.constant 1 : index
+  %9 = index.constant 2 : index
   %first = test.addi %input, %input : i32
-  %first_1 = test.addi %input, %input : i32
-  %first_2 = test.addi %input, %input : i32
+  %11 = test.addi %input, %input : i32
+  %12 = test.addi %input, %input : i32
   %second = test.addi %first, %input : i32
-  %second_1 = test.addi %first_1, %input : i32
-  %second_2 = test.addi %first_2, %input : i32
+  %14 = test.addi %11, %input : i32
+  %15 = test.addi %12, %input : i32
   func.return
 }
 
@@ -124,19 +124,19 @@ func.def @interleaved_unroll_result_loop(%input: i32) -> (i32) {
   %start = index.constant 0 : index
   %end = index.constant 3 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
-  %i_2 = index.constant 2 : index
+  %11 = index.constant 0 : index
+  %12 = index.constant 1 : index
+  %13 = index.constant 2 : index
   %first = test.addi %input, %input : i32
-  %first_1 = test.addi %input, %input : i32
-  %first_2 = test.addi %input, %input : i32
+  %15 = test.addi %input, %input : i32
+  %16 = test.addi %input, %input : i32
   %second = test.addi %first, %input : i32
-  %second_1 = test.addi %first_1, %input : i32
-  %second_2 = test.addi %first_2, %input : i32
+  %18 = test.addi %15, %input : i32
+  %19 = test.addi %16, %input : i32
   %next = test.addi %input, %second : i32
-  %next_1 = test.addi %next, %second_1 : i32
-  %next_2 = test.addi %next_1, %second_2 : i32
-  func.return %next_2 : i32
+  %21 = test.addi %next, %18 : i32
+  %result = test.addi %21, %19 : i32
+  func.return %result : i32
 }
 
 // ====
@@ -158,18 +158,18 @@ func.def @interleaved_unroll_preserves_type_ref_order(%buffer: buffer, %offset: 
   %start = index.constant 0 : index
   %end = index.constant 3 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
-  %i_2 = index.constant 2 : index
+  %8 = index.constant 0 : index
+  %9 = index.constant 1 : index
+  %10 = index.constant 2 : index
   %layout = encoding.layout.dense : encoding<layout>
-  %layout_1 = encoding.layout.dense : encoding<layout>
-  %layout_2 = encoding.layout.dense : encoding<layout>
+  %12 = encoding.layout.dense : encoding<layout>
+  %13 = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
-  %view_1 = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout_1>
-  %view_2 = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout_2>
+  %15 = buffer.view %buffer[%offset] : buffer -> view<4xf32, %12>
+  %16 = buffer.view %buffer[%offset] : buffer -> view<4xf32, %13>
   test.use %view : view<4xf32, %layout>
-  test.use %view_1 : view<4xf32, %layout_1>
-  test.use %view_2 : view<4xf32, %layout_2>
+  test.use %15 : view<4xf32, %12>
+  test.use %16 : view<4xf32, %13>
   func.return
 }
 
@@ -190,12 +190,12 @@ func.def @interleaved_read_effects_commute(%pool: pool<16>) {
   %start = index.constant 0 : index
   %end = index.constant 3 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
-  %i_2 = index.constant 2 : index
+  %6 = index.constant 0 : index
+  %7 = index.constant 1 : index
+  %8 = index.constant 2 : index
   %value = test.read_resource %pool : pool<16> -> i32
-  %value_1 = test.read_resource %pool : pool<16> -> i32
-  %value_2 = test.read_resource %pool : pool<16> -> i32
+  %10 = test.read_resource %pool : pool<16> -> i32
+  %11 = test.read_resource %pool : pool<16> -> i32
   func.return
 }
 
@@ -218,14 +218,14 @@ func.def @interleaved_write_read_hazard_preserves_order(%pool: pool<16>, %input:
   %start = index.constant 0 : index
   %end = index.constant 2 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
+  %7 = index.constant 0 : index
+  %8 = index.constant 1 : index
   test.write_resource %pool, %input : pool<16>, i32
   %value = test.read_resource %pool : pool<16> -> i32
   test.use %value : i32
   test.write_resource %pool, %input : pool<16>, i32
-  %value_1 = test.read_resource %pool : pool<16> -> i32
-  test.use %value_1 : i32
+  %10 = test.read_resource %pool : pool<16> -> i32
+  test.use %10 : i32
   func.return
 }
 
@@ -261,8 +261,8 @@ func.def @interleaved_disjoint_vector_stores_commute(%buffer: buffer) {
   %start = index.constant 0 : index
   %end = index.constant 2 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
+  %12 = index.constant 0 : index
+  %13 = index.constant 1 : index
   vector.store %vec0, %view[0] : vector<4xi32>, view<8xi32, %layout>
   vector.store %vec0, %view[0] : vector<4xi32>, view<8xi32, %layout>
   vector.store %vec1, %view[4] : vector<4xi32>, view<8xi32, %layout>
@@ -306,8 +306,8 @@ func.def @interleaved_noalias_vector_stores_commute(%left: buffer, %right: buffe
   %start = index.constant 0 : index
   %end = index.constant 2 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
+  %16 = index.constant 0 : index
+  %17 = index.constant 1 : index
   vector.store %vec0, %left_view[0] : vector<4xi32>, view<4xi32, %layout>
   vector.store %vec0, %left_view[0] : vector<4xi32>, view<4xi32, %layout>
   vector.store %vec1, %right_view[0] : vector<4xi32>, view<4xi32, %layout>
@@ -345,8 +345,8 @@ func.def @interleaved_dynamic_base_vector_stores_commute(%buffer: buffer, %base:
   %start = index.constant 0 : index
   %end = index.constant 2 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
+  %12 = index.constant 0 : index
+  %13 = index.constant 1 : index
   vector.store %vec0, %view[0] : vector<4xi32>, view<8xi32, %layout>
   vector.store %vec0, %view[0] : vector<4xi32>, view<8xi32, %layout>
   vector.store %vec1, %view[4] : vector<4xi32>, view<8xi32, %layout>
@@ -386,8 +386,8 @@ func.def @interleaved_dynamic_index_vector_stores_commute(%buffer: buffer, %row:
   %start = index.constant 0 : index
   %end = index.constant 2 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
+  %13 = index.constant 0 : index
+  %14 = index.constant 1 : index
   vector.store %vec0, %view[%row, 0] : vector<4xi32>, view<4x8xi32, %layout>
   vector.store %vec0, %view[%row, 0] : vector<4xi32>, view<4x8xi32, %layout>
   vector.store %vec1, %view[%row, 4] : vector<4xi32>, view<4x8xi32, %layout>
@@ -429,15 +429,15 @@ func.def @interleaved_carried_disjoint_vector_stores_commute(%buffer: buffer, %i
   %start = index.constant 0 : index
   %end = index.constant 2 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
+  %17 = index.constant 0 : index
+  %18 = index.constant 1 : index
   %next = test.addi %input, %input : i32
   vector.store %vec0, %view[0] : vector<4xi32>, view<8xi32, %layout>
   vector.store %vec0, %view[0] : vector<4xi32>, view<8xi32, %layout>
   vector.store %vec1, %view[4] : vector<4xi32>, view<8xi32, %layout>
   vector.store %vec1, %view[4] : vector<4xi32>, view<8xi32, %layout>
-  %next_1 = test.addi %next, %input : i32
-  func.return %next_1 : i32
+  %result = test.addi %next, %input : i32
+  func.return %result : i32
 }
 
 // ====
@@ -472,8 +472,8 @@ func.def @interleaved_overlapping_vector_stores_preserve_order(%buffer: buffer) 
   %start = index.constant 0 : index
   %end = index.constant 2 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
+  %12 = index.constant 0 : index
+  %13 = index.constant 1 : index
   vector.store %vec0, %view[0] : vector<4xi32>, view<4xi32, %layout>
   vector.store %vec1, %view[0] : vector<4xi32>, view<4xi32, %layout>
   vector.store %vec0, %view[0] : vector<4xi32>, view<4xi32, %layout>
@@ -516,14 +516,14 @@ func.def @interleaved_induction_vector_stores_preserve_order(%buffer: buffer) {
   %start = index.constant 0 : index
   %end = index.constant 2 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
-  %next = index.add %i_0, %one : index
-  %next_1 = index.add %i_1, %one : index
-  vector.store %vec0, %view[%i_0] : vector<1xi32>, view<4xi32, %layout>
+  %14 = index.constant 0 : index
+  %15 = index.constant 1 : index
+  %next = index.add %14, %one : index
+  %17 = index.add %15, %one : index
+  vector.store %vec0, %view[%14] : vector<1xi32>, view<4xi32, %layout>
   vector.store %vec1, %view[%next] : vector<1xi32>, view<4xi32, %layout>
-  vector.store %vec0, %view[%i_1] : vector<1xi32>, view<4xi32, %layout>
-  vector.store %vec1, %view[%next_1] : vector<1xi32>, view<4xi32, %layout>
+  vector.store %vec0, %view[%15] : vector<1xi32>, view<4xi32, %layout>
+  vector.store %vec1, %view[%17] : vector<1xi32>, view<4xi32, %layout>
   func.return
 }
 
@@ -566,7 +566,7 @@ func.def @bare_unroll_single_trip_result_loop(%input: i32) -> (i32) {
   %start = index.constant 0 : index
   %end = index.constant 1 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
+  %9 = index.constant 0 : index
   %next = test.addi %input, %input : i32
   func.return %next : i32
 }
@@ -591,13 +591,13 @@ func.def @dynamic_exact_unroll_factor(%input: i32) -> (i32) {
   %end = index.constant 3 : index
   %step = index.constant 1 : index
   %factor = index.constant 3 : index
-  %i_0 = index.constant 0 : index
+  %10 = index.constant 0 : index
   %next = test.addi %input, %input : i32
-  %i_1 = index.constant 1 : index
-  %next_1 = test.addi %next, %next : i32
-  %i_2 = index.constant 2 : index
-  %next_2 = test.addi %next_1, %next_1 : i32
-  func.return %next_2 : i32
+  %12 = index.constant 1 : index
+  %13 = test.addi %next, %next : i32
+  %14 = index.constant 2 : index
+  %result = test.addi %13, %13 : i32
+  func.return %result : i32
 }
 
 // ====
@@ -675,10 +675,10 @@ func.def @dynamic_partial_factor_stripmines_with_tail_guard() {
   scf.for %i = [%start to %end step %5] {
     test.use %i : index
     %7 = index.constant 1 : index
-    %i_1 = index.add %i, %7 : index
-    %9 = index.cmp slt, %i_1, %end : index
+    %8 = index.add %i, %7 : index
+    %9 = index.cmp slt, %8, %end : index
     scf.if %9 {
-      test.use %i_1 : index
+      test.use %8 : index
     }
   }
   func.return
@@ -707,8 +707,8 @@ func.def @partial_factor_divisible_trip_count_omits_tail_guard() {
   scf.for %i = [%start to %end step %5] {
     test.use %i : index
     %7 = index.constant 1 : index
-    %i_1 = index.add %i, %7 : index
-    test.use %i_1 : index
+    %8 = index.add %i, %7 : index
+    test.use %8 : index
   }
   func.return
 }
@@ -734,10 +734,10 @@ func.def @partial_factor_dynamic_tail_guard(%end: index) {
   scf.for %i = [%start to %end step %5] {
     test.use %i : index
     %7 = index.constant 1 : index
-    %i_1 = index.add %i, %7 : index
-    %9 = index.cmp slt, %i_1, %end : index
+    %8 = index.add %i, %7 : index
+    %9 = index.cmp slt, %8, %end : index
     scf.if %9 {
-      test.use %i_1 : index
+      test.use %8 : index
     }
   }
   func.return
@@ -764,10 +764,10 @@ func.def @partial_factor_dynamic_tail_guard_step_two(%end: index) {
   scf.for %i = [%start to %end step %5] {
     test.use %i : index
     %7 = index.constant 2 : index
-    %i_2 = index.add %i, %7 : index
-    %9 = index.cmp slt, %i_2, %end : index
+    %8 = index.add %i, %7 : index
+    %9 = index.cmp slt, %8, %end : index
     scf.if %9 {
-      test.use %i_2 : index
+      test.use %8 : index
     }
   }
   func.return
@@ -796,10 +796,10 @@ func.def @partial_factor_dynamic_lower_static_tail_guard(%lane0: index) {
   scf.for %column = [%lane to %end step %6] {
     test.use %column : index
     %8 = index.constant 64 : index
-    %column_64 = index.add %column, %8 : index
-    %10 = index.cmp slt, %column_64, %end : index
+    %9 = index.add %column, %8 : index
+    %10 = index.cmp slt, %9, %end : index
     scf.if %10 {
-      test.use %column_64 : index
+      test.use %9 : index
     }
   }
   func.return
@@ -828,9 +828,9 @@ func.def @interleaved_partial_factor_divisible_trip_count() {
   %6 = index.constant 4 : index
   scf.for %i = [%start to %6 step %5] {
     %8 = index.constant 1 : index
-    %i_1 = index.add %i, %8 : index
+    %9 = index.add %i, %8 : index
     test.use %i : index
-    test.use %i_1 : index
+    test.use %9 : index
   }
   func.return
 }
@@ -858,9 +858,9 @@ func.def @interleaved_partial_factor_static_tail_loop() {
   %6 = index.constant 4 : index
   scf.for %i = [%start to %6 step %5] {
     %8 = index.constant 1 : index
-    %i_1 = index.add %i, %8 : index
+    %9 = index.add %i, %8 : index
     test.use %i : index
-    test.use %i_1 : index
+    test.use %9 : index
   }
   scf.for %i = [%6 to %end step %step] {
     test.use %i : index
@@ -895,9 +895,9 @@ func.def @interleaved_partial_factor_dynamic_tail_loop(%end: index) {
   %12 = index.add %start, %11 : index
   scf.for %i = [%start to %12 step %5] {
     %14 = index.constant 1 : index
-    %i_1 = index.add %i, %14 : index
+    %15 = index.add %i, %14 : index
     test.use %i : index
-    test.use %i_1 : index
+    test.use %15 : index
   }
   scf.for %i = [%12 to %end step %step] {
     test.use %i : index
@@ -936,9 +936,9 @@ func.def @interleaved_partial_config_factor_dynamic_tail_loop(%end: index) {
   %13 = index.add %start, %12 : index
   scf.for %i = [%start to %13 step %6] {
     %15 = index.constant 1 : index
-    %i_1 = index.add %i, %15 : index
+    %16 = index.add %i, %15 : index
     test.use %i : index
-    test.use %i_1 : index
+    test.use %16 : index
   }
   scf.for %i = [%13 to %end step %step] {
     test.use %i : index
@@ -981,9 +981,9 @@ func.def @interleaved_partial_config_step_dynamic_tail_loop(%end: index) {
   %17 = index.add %start, %16 : index
   scf.for %i = [%start to %17 step %6] {
     %19 = index.constant 2 : index
-    %i_2 = index.add %i, %19 : index
+    %20 = index.add %i, %19 : index
     test.use %i : index
-    test.use %i_2 : index
+    test.use %20 : index
   }
   %21 = index.constant 2 : index
   scf.for %i = [%17 to %end step %21] {
@@ -1023,9 +1023,9 @@ func.def @interleaved_partial_factor_dynamic_tail_step_two(%end: index) {
   %16 = index.add %start, %15 : index
   scf.for %i = [%start to %16 step %5] {
     %18 = index.constant 2 : index
-    %i_2 = index.add %i, %18 : index
+    %19 = index.add %i, %18 : index
     test.use %i : index
-    test.use %i_2 : index
+    test.use %19 : index
   }
   %20 = index.constant 2 : index
   scf.for %i = [%16 to %end step %20] {
@@ -1058,10 +1058,10 @@ func.def @interleaved_partial_factor_carried_loop(%input: i32) -> (i32) {
   %11 = index.constant 4 : index
   %result = scf.for %i = [%start to %11 step %10](%acc = %input : i32) -> (i32) {
     %15 = index.constant 1 : index
-    %i_1 = index.add %i, %15 : index
+    %16 = index.add %i, %15 : index
     %next = test.addi %acc, %input : i32
-    %next_1 = test.addi %next, %input : i32
-    scf.yield %next_1 : i32
+    %18 = test.addi %next, %input : i32
+    scf.yield %18 : i32
   }
   func.return %result : i32
 }
@@ -1091,16 +1091,16 @@ func.def @interleaved_carried_loop_with_vector_read(%buffer: buffer, %input: vec
   %start = index.constant 0 : index
   %end = index.constant 3 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
-  %i_2 = index.constant 2 : index
-  %loaded = vector.load %view[%i_0] : view<4xi32, %layout> -> vector<4xi32>
-  %loaded_1 = vector.load %view[%i_1] : view<4xi32, %layout> -> vector<4xi32>
-  %loaded_2 = vector.load %view[%i_2] : view<4xi32, %layout> -> vector<4xi32>
+  %14 = index.constant 0 : index
+  %15 = index.constant 1 : index
+  %16 = index.constant 2 : index
+  %loaded = vector.load %view[%14] : view<4xi32, %layout> -> vector<4xi32>
+  %18 = vector.load %view[%15] : view<4xi32, %layout> -> vector<4xi32>
+  %19 = vector.load %view[%16] : view<4xi32, %layout> -> vector<4xi32>
   %next = vector.addi %input, %loaded : vector<4xi32>
-  %next_1 = vector.addi %next, %loaded_1 : vector<4xi32>
-  %next_2 = vector.addi %next_1, %loaded_2 : vector<4xi32>
-  func.return %next_2 : vector<4xi32>
+  %21 = vector.addi %next, %18 : vector<4xi32>
+  %result = vector.addi %21, %19 : vector<4xi32>
+  func.return %result : vector<4xi32>
 }
 
 // ====
@@ -1122,16 +1122,16 @@ func.def @interleaved_carried_loop_preserves_ordered_writes(%pool: pool<16>, %in
   %start = index.constant 0 : index
   %end = index.constant 3 : index
   %step = index.constant 1 : index
-  %i_0 = index.constant 0 : index
-  %i_1 = index.constant 1 : index
-  %i_2 = index.constant 2 : index
+  %10 = index.constant 0 : index
+  %11 = index.constant 1 : index
+  %12 = index.constant 2 : index
   %next = test.addi %input, %input : i32
   test.write_resource %pool, %next : pool<16>, i32
-  %next_1 = test.addi %next, %next : i32
-  test.write_resource %pool, %next_1 : pool<16>, i32
-  %next_2 = test.addi %next_1, %next_1 : i32
-  test.write_resource %pool, %next_2 : pool<16>, i32
-  func.return %next_2 : i32
+  %14 = test.addi %next, %next : i32
+  test.write_resource %pool, %14 : pool<16>, i32
+  %result = test.addi %14, %14 : i32
+  test.write_resource %pool, %result : pool<16>, i32
+  func.return %result : i32
 }
 
 // ====
@@ -1173,22 +1173,22 @@ func.def @dynamic_bound_factor_stripmines(%end: index) {
   scf.for %i = [%start to %end step %5] {
     test.use %i : index
     %7 = index.constant 1 : index
-    %i_1 = index.add %i, %7 : index
-    %9 = index.cmp slt, %i_1, %end : index
+    %8 = index.add %i, %7 : index
+    %9 = index.cmp slt, %8, %end : index
     scf.if %9 {
-      test.use %i_1 : index
+      test.use %8 : index
     }
     %10 = index.constant 2 : index
-    %i_2 = index.add %i, %10 : index
-    %12 = index.cmp slt, %i_2, %end : index
+    %11 = index.add %i, %10 : index
+    %12 = index.cmp slt, %11, %end : index
     scf.if %12 {
-      test.use %i_2 : index
+      test.use %11 : index
     }
     %13 = index.constant 3 : index
-    %i_3 = index.add %i, %13 : index
-    %15 = index.cmp slt, %i_3, %end : index
+    %14 = index.add %i, %13 : index
+    %15 = index.cmp slt, %14, %end : index
     scf.if %15 {
-      test.use %i_3 : index
+      test.use %14 : index
     }
   }
   func.return
@@ -1218,11 +1218,11 @@ func.def @partial_factor_loop_carried_tail(%input: i32) -> (i32) {
   %result = scf.for %i = [%start to %end step %10](%acc = %input : i32) -> (i32) {
     %next = test.addi %acc, %acc : i32
     %15 = index.constant 1 : index
-    %i_1 = index.add %i, %15 : index
-    %17 = index.cmp slt, %i_1, %end : index
+    %16 = index.add %i, %15 : index
+    %17 = index.cmp slt, %16, %end : index
     %18 = scf.if %17 -> (i32) {
-      %next_1 = test.addi %next, %next : i32
-      scf.yield %next_1 : i32
+      %19 = test.addi %next, %next : i32
+      scf.yield %19 : i32
     } else {
       scf.yield %next : i32
     }
@@ -1263,8 +1263,8 @@ func.def @bare_unroll_dynamic_lower_static_trip_count(%slot0: index) {
   %step = index.constant 8 : index
   test.use %slot : index
   %5 = index.constant 8 : index
-  %i_8 = index.add %slot, %5 : index
-  test.use %i_8 : index
+  %6 = index.add %slot, %5 : index
+  test.use %6 : index
   func.return
 }
 
@@ -1294,8 +1294,8 @@ func.def @bare_unroll_config_specialized_sequence_width(%lane0: index) {
   %workgroup_size = config.get @runtime.workgroup_size : index
   test.use %lane : index
   %7 = index.constant 64 : index
-  %column_64 = index.add %lane, %7 : index
-  test.use %column_64 : index
+  %8 = index.add %lane, %7 : index
+  test.use %8 : index
   func.return
 }
 

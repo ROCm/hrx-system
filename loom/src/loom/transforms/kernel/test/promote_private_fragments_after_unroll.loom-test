@@ -32,11 +32,11 @@ func.def @forward_after_unrolled_private_init(%output: buffer, %lhs: i64, %rhs: 
 func.def @forward_after_unrolled_private_init(%output: buffer, %lhs: i64, %rhs: i64) {
   %zero_bytes = index.constant 0 : offset
   %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
-  %j_0 = index.constant 0 : index
+  %22 = index.constant 0 : index
   %zero = scalar.constant 0 : i64
   %sum = scalar.addi %zero, %lhs : i64
   %xor = scalar.xori %zero, %rhs : i64
   %result = scalar.ori %sum, %xor : i64
-  view.store %result, %output_view[%j_0] : i64, view<1xi64, #dense>
+  view.store %result, %output_view[%22] : i64, view<1xi64, #dense>
   func.return
 }

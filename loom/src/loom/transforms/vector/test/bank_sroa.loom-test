@@ -134,10 +134,10 @@ func.def @nested_configured_bank_updates(%initial: vector<2x2x4xf32>, %increment
   %initial_slot_3 = vector.extract %initial[1, 1] : vector<2x2x4xf32> -> vector<4xf32>
   %result_slot_0, %result_slot_1, %result_slot_2, %result_slot_3 = scf.for %stage = [%zero to %four step %one](%bank_slot_0 = %initial_slot_0 : vector<4xf32>, %bank_slot_1 = %initial_slot_1 : vector<4xf32>, %bank_slot_2 = %initial_slot_2 : vector<4xf32>, %bank_slot_3 = %initial_slot_3 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
     %next$83 = vector.addf %bank_slot_0, %increment : vector<4xf32>
-    %next_1$84 = vector.addf %bank_slot_1, %increment : vector<4xf32>
+    %84 = vector.addf %bank_slot_1, %increment : vector<4xf32>
     %next$85 = vector.addf %bank_slot_2, %increment : vector<4xf32>
-    %next_1$86 = vector.addf %bank_slot_3, %increment : vector<4xf32>
-    scf.yield %next$83, %next_1$84, %next$85, %next_1$86 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+    %86 = vector.addf %bank_slot_3, %increment : vector<4xf32>
+    scf.yield %next$83, %84, %next$85, %86 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
   }
   func.return %result_slot_0, %result_slot_1, %result_slot_2, %result_slot_3 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
 }

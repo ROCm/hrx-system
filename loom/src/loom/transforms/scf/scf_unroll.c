@@ -582,9 +582,10 @@ static bool loom_scf_unroll_shape_is_supported(loom_op_t* op,
   return true;
 }
 
+// Synthesized iteration indices stay anonymous. Their numeric value ids are
+// the compiler identity and the text printer provides names on demand.
 static iree_status_t loom_scf_unroll_build_iteration_index(
     loom_scf_unroll_context_t* context, loom_op_t* op,
-    loom_value_id_t induction_variable,
     const loom_scf_unroll_trip_count_t* trip_count, uint32_t ordinal,
     loom_value_id_t* out_index) {
   *out_index = LOOM_VALUE_ID_INVALID;
@@ -611,16 +612,7 @@ static iree_status_t loom_scf_unroll_build_iteration_index(
         loom_module_value_type(context->module, loom_scf_for_lower_bound(op)),
         op->location, &add_op));
     *out_index = loom_index_add_result(add_op);
-    char suffix[32] = {0};
-    int suffix_length =
-        iree_snprintf(suffix, sizeof(suffix), "%" PRId64, scaled_step);
-    if (suffix_length <= 0 ||
-        (iree_host_size_t)suffix_length >= sizeof(suffix)) {
-      return iree_ok_status();
-    }
-    return loom_rewriter_try_set_derived_value_name(
-        context->rewriter, induction_variable, *out_index,
-        iree_make_string_view(suffix, (iree_host_size_t)suffix_length));
+    return iree_ok_status();
   }
 
   int64_t iteration_value = 0;
@@ -634,22 +626,13 @@ static iree_status_t loom_scf_unroll_build_iteration_index(
       loom_module_value_type(context->module, loom_scf_for_lower_bound(op)),
       op->location, &constant_op));
   *out_index = loom_index_constant_result(constant_op);
-
-  char suffix[32] = {0};
-  int suffix_length =
-      iree_snprintf(suffix, sizeof(suffix), "%" PRId64, iteration_value);
-  if (suffix_length <= 0 || (iree_host_size_t)suffix_length >= sizeof(suffix)) {
-    return iree_ok_status();
-  }
-  return loom_rewriter_try_set_derived_value_name(
-      context->rewriter, induction_variable, *out_index,
-      iree_make_string_view(suffix, (iree_host_size_t)suffix_length));
+  return iree_ok_status();
 }
 
 static iree_status_t loom_scf_unroll_build_strided_iteration_index(
-    loom_scf_unroll_context_t* context, loom_value_id_t induction_variable,
-    loom_value_id_t base_index, loom_type_t index_type, int64_t step,
-    uint32_t ordinal, loom_location_id_t location, loom_value_id_t* out_index) {
+    loom_scf_unroll_context_t* context, loom_value_id_t base_index,
+    loom_type_t index_type, int64_t step, uint32_t ordinal,
+    loom_location_id_t location, loom_value_id_t* out_index) {
   *out_index = LOOM_VALUE_ID_INVALID;
   if (ordinal == 0) {
     *out_index = base_index;
@@ -671,16 +654,7 @@ static iree_status_t loom_scf_unroll_build_strided_iteration_index(
                                             base_index, offset, index_type,
                                             location, &add_op));
   *out_index = loom_index_add_result(add_op);
-
-  char suffix[32] = {0};
-  int suffix_length =
-      iree_snprintf(suffix, sizeof(suffix), "%" PRId64, scaled_step);
-  if (suffix_length <= 0 || (iree_host_size_t)suffix_length >= sizeof(suffix)) {
-    return iree_ok_status();
-  }
-  return loom_rewriter_try_set_derived_value_name(
-      context->rewriter, induction_variable, *out_index,
-      iree_make_string_view(suffix, (iree_host_size_t)suffix_length));
+  return iree_ok_status();
 }
 
 static iree_status_t loom_scf_unroll_build_index_constant(
@@ -718,18 +692,7 @@ static iree_status_t loom_scf_unroll_clone_iteration(
       &context->rewriter->builder, body_block, &remap,
       &(loom_ir_clone_block_options_t){.omit_terminators = true}));
 
-  if (ordinal > 0 &&
-      iree_any_bit_set(context->rewriter->name_policy,
-                       LOOM_REWRITER_NAME_POLICY_DERIVE_DEBUG_NAMES)) {
-    char suffix[32] = {0};
-    int suffix_length =
-        iree_snprintf(suffix, sizeof(suffix), "%" PRIu32, ordinal);
-    if (suffix_length <= 0 ||
-        (iree_host_size_t)suffix_length >= sizeof(suffix)) {
-      return iree_ok_status();
-    }
-    iree_string_view_t suffix_view =
-        iree_make_string_view(suffix, (iree_host_size_t)suffix_length);
+  if (ordinal > 0) {
     for (const loom_op_t* source_op = body_block->first_op;
          source_op && source_op != yield; source_op = source_op->next_op) {
       const loom_value_id_t* source_results = loom_op_const_results(source_op);
@@ -743,8 +706,6 @@ static iree_status_t loom_scf_unroll_clone_iteration(
         }
         IREE_RETURN_IF_ERROR(
             loom_rewriter_clear_value_name(context->rewriter, target_result));
-        IREE_RETURN_IF_ERROR(loom_rewriter_try_set_derived_value_name(
-            context->rewriter, source_result, target_result, suffix_view));
       }
     }
   }
@@ -1017,12 +978,11 @@ static iree_status_t loom_scf_unroll_partial_unroll(
   }
 
   loom_value_id_t outer_index = loom_block_arg_id(new_block, 0);
-  loom_value_id_t source_induction_variable = loom_block_arg_id(old_block, 0);
   for (uint32_t ordinal = 0; ordinal < unroll_factor; ++ordinal) {
     loom_value_id_t iteration_index = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_scf_unroll_build_strided_iteration_index(
-        context, source_induction_variable, outer_index, index_type, step,
-        ordinal, op->location, &iteration_index));
+        context, outer_index, index_type, step, ordinal, op->location,
+        &iteration_index));
     if (iteration_index == LOOM_VALUE_ID_INVALID) {
       return loom_scf_unroll_emit_policy_error(
           context, op, IREE_SV("unroll_factor"), ordinal,
@@ -1837,30 +1797,19 @@ static bool loom_scf_unroll_yield_payload_is_ready(
   return true;
 }
 
-static iree_status_t loom_scf_unroll_rename_cloned_op_results(
-    loom_scf_unroll_context_t* context, const loom_op_t* source_op,
-    loom_op_t* cloned_op, uint32_t ordinal) {
-  if (ordinal == 0 ||
-      !iree_any_bit_set(context->rewriter->name_policy,
-                        LOOM_REWRITER_NAME_POLICY_DERIVE_DEBUG_NAMES)) {
+// Cloning preserves authored display names. Keep the first copy readable and
+// leave later copies anonymous instead of manufacturing per-iteration strings.
+static iree_status_t loom_scf_unroll_clear_cloned_op_result_names(
+    loom_scf_unroll_context_t* context, loom_op_t* cloned_op,
+    uint32_t ordinal) {
+  if (ordinal == 0) {
     return iree_ok_status();
   }
 
-  char suffix[32] = {0};
-  int suffix_length =
-      iree_snprintf(suffix, sizeof(suffix), "%" PRIu32, ordinal);
-  if (suffix_length <= 0 || (iree_host_size_t)suffix_length >= sizeof(suffix)) {
-    return iree_ok_status();
-  }
-  iree_string_view_t suffix_view =
-      iree_make_string_view(suffix, (iree_host_size_t)suffix_length);
-  const loom_value_id_t* source_results = loom_op_const_results(source_op);
   const loom_value_id_t* cloned_results = loom_op_const_results(cloned_op);
-  for (uint16_t i = 0; i < source_op->result_count; ++i) {
+  for (uint16_t i = 0; i < cloned_op->result_count; ++i) {
     IREE_RETURN_IF_ERROR(
         loom_rewriter_clear_value_name(context->rewriter, cloned_results[i]));
-    IREE_RETURN_IF_ERROR(loom_rewriter_try_set_derived_value_name(
-        context->rewriter, source_results[i], cloned_results[i], suffix_view));
   }
   return iree_ok_status();
 }
@@ -1981,8 +1930,7 @@ static iree_status_t loom_scf_unroll_emit_interleaved_tile(
         &remaps[ordinal]));
     loom_value_id_t iteration_index = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_scf_unroll_build_iteration_index(
-        context, op, induction_variable, trip_count, ordinal,
-        &iteration_index));
+        context, op, trip_count, ordinal, &iteration_index));
     if (iteration_index == LOOM_VALUE_ID_INVALID) {
       return loom_scf_unroll_emit_policy_error(
           context, op, IREE_SV("schedule"), ordinal,
@@ -2037,8 +1985,8 @@ static iree_status_t loom_scf_unroll_emit_interleaved_tile(
         IREE_RETURN_IF_ERROR(loom_ir_clone_op(&context->rewriter->builder,
                                               source_op, &remaps[ordinal],
                                               &cloned_op));
-        IREE_RETURN_IF_ERROR(loom_scf_unroll_rename_cloned_op_results(
-            context, source_op, cloned_op, ordinal));
+        IREE_RETURN_IF_ERROR(loom_scf_unroll_clear_cloned_op_result_names(
+            context, cloned_op, ordinal));
         *cloned_slot = true;
         loom_scf_unroll_release_effect_dependencies(&effect_dependency_plan,
                                                     op_index, ordinal);
@@ -2589,12 +2537,10 @@ static iree_status_t loom_scf_unroll_try_unroll(
            (iree_host_size_t)op->result_count * sizeof(*carried_values));
   }
 
-  loom_value_id_t induction_variable = body_block->arg_ids[0];
   for (uint32_t ordinal = 0; ordinal < trip_count.count; ++ordinal) {
     loom_value_id_t iteration_index = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_scf_unroll_build_iteration_index(
-        context, op, induction_variable, &trip_count, ordinal,
-        &iteration_index));
+        context, op, &trip_count, ordinal, &iteration_index));
     if (iteration_index == LOOM_VALUE_ID_INVALID) {
       return loom_scf_unroll_emit_policy_error(
           context, op, IREE_SV("unroll"), ordinal,
