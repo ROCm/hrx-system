@@ -311,6 +311,36 @@ TEST(TargetSpirvTest, IntrinsicReprContractOverridesGlobalLowAsmDefault) {
       << serialized_text;
 }
 
+TEST(TargetSpirvTest, SerializesTargetlessLowFromRepresentationContract) {
+  TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
+  ContextPtr context = CreateSpirvContext(target_environment.get());
+  loomc_workspace_t* workspace_handle = nullptr;
+  LOOMC_ASSERT_OK(loomc_workspace_create(nullptr, loomc_allocator_system(),
+                                         &workspace_handle));
+  WorkspacePtr workspace(workspace_handle);
+  SourcePtr source = CreateTextSource("targetless_low.loom", R"(
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @targetless() asm {
+  OpControlBarrier.subgroup.workgroup.acq_rel
+  return
+}
+)");
+  ModulePtr module =
+      DeserializeModule(context.get(), workspace.get(), source.get());
+
+  SourcePtr serialized =
+      SerializeModuleText(module.get(), LOOMC_MODULE_TEXT_PRESENTATION_LOW_ASM);
+  const std::string serialized_text = SourceContentsToString(serialized.get());
+  EXPECT_NE(
+      serialized_text.find(
+          "low.func.def target<spirv.logical.core> abi(shader_entry_point) "
+          "@targetless() asm {"),
+      std::string::npos)
+      << serialized_text;
+  EXPECT_NE(serialized_text.find("OpControlBarrier.subgroup.workgroup.acq_rel"),
+            std::string::npos)
+      << serialized_text;
+}
+
 TEST(TargetSpirvTest, EmitsSpirvWithDefaultOptions) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   ContextPtr context = CreateSpirvContext(target_environment.get());

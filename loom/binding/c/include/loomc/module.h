@@ -288,16 +288,17 @@ typedef struct loomc_module_global_query_options_t {
 
 /// Text presentation policy used when serializing `.loom` text.
 typedef enum loomc_module_text_presentation_e {
-  /// Prefer target-low assembly syntax when the module selects one descriptor
-  /// set unambiguously; otherwise print canonical text.
+  /// Prefer target-low assembly syntax using each function's representation
+  /// contract, with canonical text as a lossless fallback.
   LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT = 0,
 
   /// Force canonical text with descriptor-backed target-low operations printed
   /// as ordinary `low.op<...>` operations.
   LOOMC_MODULE_TEXT_PRESENTATION_GENERIC = 1,
 
-  /// Force descriptor-backed target-low assembly syntax. Serialization fails
-  /// when no descriptor set is provided or can be selected unambiguously.
+  /// Require descriptor-backed target-low assembly syntax for every
+  /// self-describing target-low function. Serialization fails when a function
+  /// has no lossless assembly spelling for its representation contract.
   LOOMC_MODULE_TEXT_PRESENTATION_LOW_ASM = 2,
 } loomc_module_text_presentation_t;
 
@@ -327,12 +328,13 @@ typedef struct loomc_module_serialize_options_t {
   /// Presentation policy for textual `.loom` output.
   loomc_module_text_presentation_t text_presentation;
 
-  /// Target-low descriptor-set key used by low assembly presentation.
+  /// Fallback representation-contract key used by low assembly presentation.
   ///
-  /// Empty lets the serializer infer a single descriptor set from target-low
-  /// functions in the module. Non-empty requests low assembly presentation
-  /// unless `text_presentation` is `LOOMC_MODULE_TEXT_PRESENTATION_GENERIC`,
-  /// which is rejected as contradictory.
+  /// Function representation contracts take precedence. Non-empty supplies
+  /// the context for low assembly regions that have no enclosing function
+  /// contract and requests low assembly presentation for optional regions.
+  /// `LOOMC_MODULE_TEXT_PRESENTATION_GENERIC` rejects this field as
+  /// contradictory.
   loomc_string_view_t low_asm_descriptor_set_key;
 } loomc_module_serialize_options_t;
 
