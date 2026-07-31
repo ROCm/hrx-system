@@ -16,6 +16,7 @@
 #include "experimental/qwen/tooling/runtime.h"
 #include "iree/base/api.h"
 #include "iree/base/string_builder.h"
+#include "iree/base/time.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
 #include "iree/io/file_contents.h"
@@ -40,6 +41,8 @@ IREE_FLAG(int32_t, context_length, QWEN_GENERATION_DECODE_CONTEXT_LIMIT,
           "Request K/V capacity; currently at most 2048.");
 IREE_FLAG(bool, print_token_ids, false,
           "Print each generated token ID to stderr.");
+IREE_FLAG(bool, qwen_print_timings, false,
+          "Print parseable startup and generation timing statistics.");
 
 static const char* const qwen_generation_cli_usage =
     "Generates Qwen text from one system/user chat turn with greedy "
@@ -60,6 +63,67 @@ typedef struct qwen_generation_cli_timepoint_t {
   // Monotonically increasing timeline value.
   uint64_t value;
 } qwen_generation_cli_timepoint_t;
+
+typedef struct qwen_generation_cli_statistics_t {
+  // Process entry before flag parsing.
+  iree_time_t process_start_ns;
+  // Tokenizer, prompt encoding, and decode-state setup completion.
+  iree_time_t prompt_ready_ns;
+  // Device, provider, profiling, and request timeline setup completion.
+  iree_time_t runtime_ready_ns;
+  // Asynchronous model residency enqueue completion.
+  iree_time_t model_enqueued_ns;
+  // Initial prefill and decode JIT/recording completion.
+  iree_time_t programs_ready_ns;
+  // Prefill issue submission completion.
+  iree_time_t prefill_submitted_ns;
+  // First prefill completion observed by the host.
+  iree_time_t first_token_ready_ns;
+  // First selected token read and validated by the host.
+  iree_time_t first_token_observed_ns;
+  // First selected token emitted to the text stream.
+  iree_time_t first_token_emitted_ns;
+  // Complete requested generation and text finalization.
+  iree_time_t generation_complete_ns;
+  // Resolved compiler worker count used by the model JIT.
+  iree_host_size_t jit_worker_count;
+} qwen_generation_cli_statistics_t;
+
+static double qwen_generation_cli_elapsed_ms(iree_time_t begin_ns,
+                                             iree_time_t end_ns) {
+  return (double)(end_ns - begin_ns) / 1000000.0;
+}
+
+static void qwen_generation_cli_print_statistics(
+    const qwen_generation_cli_statistics_t* statistics) {
+  if (!FLAG_qwen_print_timings) return;
+  fprintf(stderr,
+          "Qwen timing: prompt_ms=%.3f runtime_ms=%.3f model_enqueue_ms=%.3f "
+          "program_prepare_ms=%.3f request_submit_ms=%.3f "
+          "submit_to_ready_ms=%.3f token_observe_ms=%.3f token_emit_ms=%.3f "
+          "ttft_ms=%.3f total_ms=%.3f jit_workers=%" PRIhsz "\n",
+          qwen_generation_cli_elapsed_ms(statistics->process_start_ns,
+                                         statistics->prompt_ready_ns),
+          qwen_generation_cli_elapsed_ms(statistics->prompt_ready_ns,
+                                         statistics->runtime_ready_ns),
+          qwen_generation_cli_elapsed_ms(statistics->runtime_ready_ns,
+                                         statistics->model_enqueued_ns),
+          qwen_generation_cli_elapsed_ms(statistics->model_enqueued_ns,
+                                         statistics->programs_ready_ns),
+          qwen_generation_cli_elapsed_ms(statistics->programs_ready_ns,
+                                         statistics->prefill_submitted_ns),
+          qwen_generation_cli_elapsed_ms(statistics->prefill_submitted_ns,
+                                         statistics->first_token_ready_ns),
+          qwen_generation_cli_elapsed_ms(statistics->first_token_ready_ns,
+                                         statistics->first_token_observed_ns),
+          qwen_generation_cli_elapsed_ms(statistics->first_token_observed_ns,
+                                         statistics->first_token_emitted_ns),
+          qwen_generation_cli_elapsed_ms(statistics->process_start_ns,
+                                         statistics->first_token_emitted_ns),
+          qwen_generation_cli_elapsed_ms(statistics->process_start_ns,
+                                         statistics->generation_complete_ns),
+          statistics->jit_worker_count);
+}
 
 static iree_hal_semaphore_list_t qwen_generation_cli_timepoint_list(
     qwen_generation_cli_timepoint_t* timepoint) {
@@ -264,7 +328,7 @@ static void qwen_generation_cli_release_decode_programs(
   }
 }
 
-static iree_status_t qwen_generation_cli_run(void) {
+static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
   iree_allocator_t host_allocator = iree_allocator_system();
   if (FLAG_max_tokens <= 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -282,6 +346,9 @@ static iree_status_t qwen_generation_cli_run(void) {
         QWEN_GENERATION_DECODE_CONTEXT_LIMIT);
   }
 
+  qwen_generation_cli_statistics_t statistics = {
+      .process_start_ns = process_start_ns,
+  };
   iree_status_t status = iree_ok_status();
   iree_tokenizer_t* tokenizer = NULL;
   status = qwen_generation_cli_load_tokenizer(
@@ -334,6 +401,9 @@ static iree_status_t qwen_generation_cli_run(void) {
         iree_make_byte_span(decode_state_storage, decode_state_storage_size),
         &decode_state);
   }
+  if (iree_status_is_ok(status)) {
+    statistics.prompt_ready_ns = iree_time_now();
+  }
 
   qwen_tooling_runtime_context_t runtime_context;
   memset(&runtime_context, 0, sizeof(runtime_context));
@@ -357,6 +427,9 @@ static iree_status_t qwen_generation_cli_run(void) {
         IREE_HAL_QUEUE_AFFINITY_ANY, /*initial_value=*/0,
         IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &timeline);
   }
+  if (iree_status_is_ok(status)) {
+    statistics.runtime_ready_ns = iree_time_now();
+  }
 
   qwen_generation_cli_timepoint_t model_ready = {
       .semaphore = timeline,
@@ -370,6 +443,7 @@ static iree_status_t qwen_generation_cli_run(void) {
     if (runtime_context.jit_worker_count != 0) {
       model_options.jit_worker_count = runtime_context.jit_worker_count;
     }
+    statistics.jit_worker_count = model_options.jit_worker_count;
     qwen_parameter_source_t parameter_source = {
         .index = runtime_context.parameter_index,
         .provider = runtime_context.parameter_provider,
@@ -379,6 +453,9 @@ static iree_status_t qwen_generation_cli_run(void) {
                              iree_hal_semaphore_list_empty(),
                              qwen_generation_cli_timepoint_list(&model_ready),
                              host_allocator, &model);
+  }
+  if (iree_status_is_ok(status)) {
+    statistics.model_enqueued_ns = iree_time_now();
   }
 
   qwen_program_t* prefill_program = NULL;
@@ -417,6 +494,9 @@ static iree_status_t qwen_generation_cli_run(void) {
         decode_programs[initial_decode_class_ordinal] = programs[1];
       }
     }
+  }
+  if (iree_status_is_ok(status)) {
+    statistics.programs_ready_ns = iree_time_now();
   }
 
   qwen_generation_cli_timepoint_t request_ready = {
@@ -458,6 +538,9 @@ static iree_status_t qwen_generation_cli_run(void) {
                            qwen_generation_cli_timepoint_list(&tokens_ready),
                            qwen_generation_cli_timepoint_list(&issue_complete));
   }
+  if (iree_status_is_ok(status)) {
+    statistics.prefill_submitted_ns = iree_time_now();
+  }
 
   iree_host_size_t generated_token_count = 0;
   bool reached_end_of_sequence = false;
@@ -466,6 +549,9 @@ static iree_status_t qwen_generation_cli_run(void) {
     status = iree_hal_semaphore_wait(
         issue_complete.semaphore, issue_complete.value, iree_infinite_timeout(),
         IREE_ASYNC_WAIT_FLAG_NONE);
+    if (i == 0 && iree_status_is_ok(status)) {
+      statistics.first_token_ready_ns = iree_time_now();
+    }
     iree_tokenizer_token_id_t token_id = IREE_TOKENIZER_TOKEN_ID_INVALID;
     if (iree_status_is_ok(status)) {
       status = qwen_request_read_selected_token(request, &token_id);
@@ -478,16 +564,25 @@ static iree_status_t qwen_generation_cli_run(void) {
     }
     if (!iree_status_is_ok(status)) break;
 
+    if (i == 0) {
+      statistics.first_token_observed_ns = iree_time_now();
+    }
     ++generated_token_count;
     if (FLAG_print_token_ids) {
       fprintf(stderr, "token[%" PRIhsz "]=%" PRId32 "\n",
               generated_token_count - 1, token_id);
     }
     if (token_id == QWEN_MODEL_END_OF_SEQUENCE_TOKEN) {
+      if (i == 0) {
+        statistics.first_token_emitted_ns = statistics.first_token_observed_ns;
+      }
       reached_end_of_sequence = true;
       break;
     }
     status = qwen_generation_cli_emit_token(decode_state, token_id);
+    if (i == 0 && iree_status_is_ok(status)) {
+      statistics.first_token_emitted_ns = iree_time_now();
+    }
     if (!iree_status_is_ok(status) || i + 1 == max_tokens) break;
 
     qwen_generation_cli_timepoint_t next_issue_complete = {
@@ -525,6 +620,8 @@ static iree_status_t qwen_generation_cli_run(void) {
             generated_token_count, generated_token_count == 1 ? "" : "s",
             prompt_token_count,
             reached_end_of_sequence ? " through EOS" : " at the token limit");
+    statistics.generation_complete_ns = iree_time_now();
+    qwen_generation_cli_print_statistics(&statistics);
   }
 
   status = qwen_generation_cli_wait_for_model_ready_workaround(status, model,
@@ -550,6 +647,7 @@ static iree_status_t qwen_generation_cli_run(void) {
 }
 
 int main(int argc, char** argv) {
+  const iree_time_t process_start_ns = iree_time_now();
   iree_flags_set_usage("qwen-cli", qwen_generation_cli_usage);
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 
@@ -559,7 +657,7 @@ int main(int argc, char** argv) {
                               "this command accepts flags but no arguments");
   }
   if (iree_status_is_ok(status)) {
-    status = qwen_generation_cli_run();
+    status = qwen_generation_cli_run(process_start_ns);
   }
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
