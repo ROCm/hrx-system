@@ -95,6 +95,7 @@ loom_cc_library(
     loom::ops::low
     loom::pass::types
     loom::target::arch::amdgpu::facts
+    loom::target::function_version
   PUBLIC
 )
 endif()

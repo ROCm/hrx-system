@@ -13,6 +13,7 @@
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/hal/binding_materialization.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
+#include "loom/target/function_version.h"
 
 #define LOOM_AMDGPU_HAL_KERNEL_ABI_STATISTICS(V, statistics_type) \
   V(statistics_type, errors, "errors",                            \
@@ -79,8 +80,8 @@ iree_status_t loom_amdgpu_materialize_hal_kernel_abi_run(
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       module, &symbol_facts, function.op,
-      /*effective_target_facts=*/NULL, descriptor_registry,
-      pass->diagnostic_emitter, &target));
+      loom_target_function_version_effective_facts(pass->function_version),
+      descriptor_registry, pass->diagnostic_emitter, &target));
   if (!loom_amdgpu_materialize_hal_kernel_abi_matches(&target)) {
     return iree_ok_status();
   }
@@ -125,8 +126,8 @@ iree_status_t loom_amdgpu_materialize_hal_buffer_descriptors_run(
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       module, &symbol_facts, function.op,
-      /*effective_target_facts=*/NULL, descriptor_registry,
-      pass->diagnostic_emitter, &target));
+      loom_target_function_version_effective_facts(pass->function_version),
+      descriptor_registry, pass->diagnostic_emitter, &target));
   if (!loom_amdgpu_materialize_hal_kernel_abi_matches(&target)) {
     return iree_ok_status();
   }

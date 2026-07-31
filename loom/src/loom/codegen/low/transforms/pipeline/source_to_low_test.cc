@@ -15,6 +15,7 @@
 #include "loom/codegen/low/lower/lower_rules.h"
 #include "loom/codegen/low/lower/source_selection.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
+#include "loom/codegen/low/transforms/dce.h"
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
@@ -56,6 +57,16 @@ static iree_status_t CollectDiagnosticEmission(
   ++collector->count;
   collector->last_error = emission->error;
   return iree_ok_status();
+}
+
+static loom_pass_descriptor_t MakeFunctionPassDescriptor(
+    iree_string_view_t key, loom_pass_info_fn_t info,
+    loom_function_pass_fn_t function_run) {
+  loom_pass_descriptor_t descriptor = {};
+  descriptor.key = key;
+  descriptor.info = info;
+  descriptor.function_run = function_run;
+  return descriptor;
 }
 
 class LowLowerPassTest : public ::testing::Test {
@@ -173,6 +184,8 @@ class LowLowerPassTest : public ::testing::Test {
             /*.requirement_defs=*/nullptr,
             /*.requirement_count=*/0,
         },
+        MakeFunctionPassDescriptor(IREE_SV("low-dce"), loom_low_dce_pass_info,
+                                   loom_low_dce_run),
         {
             /*.key=*/IREE_SVL("select-templates"),
             /*.info=*/loom_template_selection_pass_info,
@@ -348,7 +361,7 @@ TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionEffectiveTargetFacts) {
 }
 
 TEST_F(LowLowerPassTest,
-       InvocationBoundTargetlessFunctionSelectsAndLowersWithoutWitness) {
+       InvocationBoundTargetlessFunctionRunsLowPassWithoutWitness) {
   ModulePtr module = Parse(IREE_SV(
       "test.target<low_core> @available_target\n"
       "test.target<quirky> @other_target\n"
@@ -417,6 +430,25 @@ TEST_F(LowLowerPassTest,
   ASSERT_LT(descriptor_set_id, module->strings.count);
   EXPECT_TRUE(iree_string_view_equal(module->strings.entries[descriptor_set_id],
                                      IREE_SV("test.low.core")));
+
+  loom_block_t* low_entry = loom_region_entry_block(
+      loom_func_like_body(function_version.base.function));
+  ASSERT_NE(low_entry, nullptr);
+  iree_host_size_t low_packet_count = 0;
+  for (const loom_op_t* op = low_entry->first_op; op != nullptr;
+       op = op->next_op) {
+    low_packet_count += loom_low_op_isa(op) ? 1 : 0;
+  }
+  EXPECT_EQ(low_packet_count, 1u);
+
+  IREE_ASSERT_OK(
+      RunFlatPipeline(module.get(), IREE_SV("low-dce"), &function_versions));
+  low_packet_count = 0;
+  for (const loom_op_t* op = low_entry->first_op; op != nullptr;
+       op = op->next_op) {
+    low_packet_count += loom_low_op_isa(op) ? 1 : 0;
+  }
+  EXPECT_EQ(low_packet_count, 1u);
   iree_arena_deinitialize(&arena);
 }
 

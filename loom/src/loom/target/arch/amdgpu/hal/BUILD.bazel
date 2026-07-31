@@ -93,6 +93,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/pass:types",
+        "//loom/src/loom/target:function_version",
         "//loom/src/loom/target/arch/amdgpu:facts",
         "//runtime/src/iree/base",
     ],

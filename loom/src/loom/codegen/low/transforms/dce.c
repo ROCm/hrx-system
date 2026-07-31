@@ -11,6 +11,7 @@
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/target/function_version.h"
 #include "loom/transforms/cleanup/dce.h"
 
 static const loom_pass_statistic_field_t kLowDceStatisticFields[] = {
@@ -76,7 +77,8 @@ static iree_status_t loom_low_dce_function(
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       module, &symbol_facts, low_func_op,
-      /*effective_target_facts=*/NULL, descriptor_registry, emitter, &target));
+      loom_target_function_version_effective_facts(pass->function_version),
+      descriptor_registry, emitter, &target));
   if (!target.descriptor_set) {
     return iree_ok_status();
   }

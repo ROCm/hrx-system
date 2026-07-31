@@ -82,6 +82,7 @@ loom_cc_test(
     loom::codegen::low::lower
     loom::codegen::low::lower::source_selection
     loom::codegen::low::pipeline::pass_environment
+    loom::codegen::low::transforms::dce
     loom::error::error_defs
     loom::format::text::parser
     loom::ir

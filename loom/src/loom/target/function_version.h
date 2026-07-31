@@ -53,6 +53,17 @@ loom_target_function_version_const_cast(
              : NULL;
 }
 
+// Returns exact target facts carried by |version|, or NULL for another type.
+static inline const loom_target_facts_t*
+loom_target_function_version_effective_facts(
+    const loom_function_version_t* version) {
+  const loom_target_function_version_t* target_version =
+      loom_target_function_version_const_cast(version);
+  if (target_version == NULL) return NULL;
+  IREE_ASSERT(target_version->effective_target_facts != NULL);
+  return target_version->effective_target_facts;
+}
+
 // Finds the target-refined version currently implemented by |function|.
 loom_target_function_version_t* loom_target_function_version_list_find(
     const loom_function_version_list_t* list, loom_func_like_t function);
