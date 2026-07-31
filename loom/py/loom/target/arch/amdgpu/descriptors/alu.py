@@ -4958,6 +4958,9 @@ def _v_cvt_f16_packed8_byte_overlay(
 
 
 _SCALEF32_PK_PACKED8_ROWS = (
+    ("fp4", "f16", 1),
+    ("fp4", "bf16", 1),
+    ("fp4", "f32", 2),
     ("fp8", "f16", 1),
     ("bf8", "f16", 1),
     ("fp8", "bf16", 1),

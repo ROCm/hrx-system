@@ -21,6 +21,46 @@ low.func.def target(@target) @gfx950_scalef32_packed8_conversions(%fp8: reg<amdg
   s_endpgm
 
 // ====
+// RUN: emit amdgpu-assembly @gfx950_scalef32_fp4_conversions waits=none
+
+amdgpu.target<gfx950> @target
+low.func.def target(@target) @gfx950_scalef32_fp4_conversions(%fp4: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
+  %f16 = v_cvt_scalef32_pk_f16_fp4 %fp4, %scale
+  %bf16 = v_cvt_scalef32_pk_bf16_fp4 %fp4, %scale
+  %f32 = v_cvt_scalef32_pk_f32_fp4 %fp4, %scale
+  return
+}
+
+// ----
+  v_cvt_scalef32_pk_f16_fp4 v2, v0, v1
+  v_cvt_scalef32_pk_bf16_fp4 v2, v0, v1
+  v_cvt_scalef32_pk_f32_fp4 v[0:1], v0, v1
+  s_endpgm
+
+// ====
+// LLVM encodes the fixed-register instructions as
+// [02 00 50 d2 00 03 02 00 03 00 51 d2 00 03 02 00
+//  04 00 3f d2 00 03 02 00].
+// RUN: emit amdgpu-native-words @gfx950_scalef32_fp4_conversion_words waits=none strategy=source fixed=%fp4:physical_register:0:1 fixed=%scale:physical_register:1:1 fixed=%f16:physical_register:2:1 fixed=%bf16:physical_register:3:1 fixed=%f32:physical_register:4:2
+
+amdgpu.target<gfx950> @target
+low.func.def target(@target) @gfx950_scalef32_fp4_conversion_words(%fp4: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
+  %f16 = v_cvt_scalef32_pk_f16_fp4 %fp4, %scale
+  %bf16 = v_cvt_scalef32_pk_bf16_fp4 %fp4, %scale
+  %f32 = v_cvt_scalef32_pk_f32_fp4 %fp4, %scale
+  return
+}
+
+// ----
+0xD2500002
+0x00020300
+0xD2510003
+0x00020300
+0xD23F0004
+0x00020300
+0xBF810000
+
+// ====
 // RUN: emit amdgpu-assembly @gfx950_packed8_encode_f32 waits=none
 
 amdgpu.target<gfx950> @target
