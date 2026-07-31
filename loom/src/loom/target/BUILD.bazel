@@ -37,6 +37,28 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "facts_builder",
+    srcs = ["facts_builder.c"],
+    hdrs = ["facts_builder.h"],
+    deps = [
+        ":facts",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "function_version",
+    srcs = ["function_version.c"],
+    hdrs = ["function_version.h"],
+    deps = [
+        ":facts",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "projection",
     hdrs = ["projection.h"],
     deps = [":facts"],
@@ -44,10 +66,14 @@ loom_cc_library(
 
 loom_cc_library(
     name = "profile",
+    srcs = ["profile.c"],
     hdrs = ["profile.h"],
     deps = [
+        ":facts",
+        ":facts_builder",
         ":types",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 

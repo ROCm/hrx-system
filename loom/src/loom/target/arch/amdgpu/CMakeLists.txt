@@ -172,6 +172,7 @@ loom_cc_test(
   DEPS
     ::profile
     ::target_info
+    iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
     loom::target::arch::amdgpu::records::target_records

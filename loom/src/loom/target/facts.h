@@ -80,6 +80,9 @@ typedef bool (*loom_target_fact_satisfies_requirement_fn_t)(
     const loom_target_facts_t* effective,
     const loom_target_facts_t* requirement);
 
+// Rebinds family-owned views after the common fact storage changes.
+typedef void (*loom_target_fact_rebind_fn_t)(loom_target_facts_t* facts);
+
 // Static type descriptor for one target-family fact representation.
 struct loom_target_fact_type_t {
   // Stable target-family name used in diagnostics and pass predicates.
@@ -90,6 +93,9 @@ struct loom_target_fact_type_t {
 
   // Optional satisfaction relation for distinct same-type fact values.
   loom_target_fact_satisfies_requirement_fn_t satisfies_requirement;
+
+  // Optional family-owned rebind callback used only while constructing facts.
+  loom_target_fact_rebind_fn_t rebind;
 };
 
 // Typed target-neutral facts projected from available target information.
@@ -110,6 +116,12 @@ struct loom_target_facts_t {
   // Owned common target projection after authored attrs are applied.
   loom_target_bundle_storage_t storage;
 };
+
+// Returns the immutable common target bundle projected into |facts|.
+static inline const loom_target_bundle_t* loom_target_facts_bundle(
+    const loom_target_facts_t* facts) {
+  return facts ? &facts->storage.bundle : NULL;
+}
 
 // Returns whether |field| was explicitly present in the authored target
 // witness.

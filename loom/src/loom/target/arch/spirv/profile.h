@@ -10,7 +10,7 @@
 #define LOOM_TARGET_ARCH_SPIRV_PROFILE_H_
 
 #include "iree/base/api.h"
-#include "loom/target/arch/spirv/cooperative_properties.h"
+#include "loom/target/arch/spirv/facts.h"
 #include "loom/target/profile.h"
 
 #ifdef __cplusplus

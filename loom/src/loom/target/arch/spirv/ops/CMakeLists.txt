@@ -16,6 +16,7 @@ loom_generated_cc_library(
   GENERATOR
     loom::py::loom::gen::ops::c_tables_spirv_generator
   SRCS
+    "fact_projection.c"
     "registry.c"
   GENERATED_SRC_FLAGS
     "--builders"
@@ -34,6 +35,7 @@ loom_generated_cc_library(
     loom::ir
     loom::ops::op_defs
     loom::ops::target
+    loom::target::arch::spirv::facts
     loom::target::arch::spirv::records::target_records
     loom::target::types
 )

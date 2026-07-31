@@ -224,6 +224,7 @@ loom_cc_test(
         ":profile",
         ":target_info",
         "//loom/src/loom/target/arch/amdgpu/records:target_records",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

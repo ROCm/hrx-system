@@ -209,13 +209,29 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV)
 loom_cc_library(
   NAME
+    facts
+  HDRS
+    "facts.h"
+  SRCS
+    "facts.c"
+  DEPS
+    ::cooperative_properties
+    iree::base
+    loom::target::facts
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_library(
+  NAME
     profile
   HDRS
     "profile.h"
   SRCS
     "profile.c"
   DEPS
-    ::cooperative_properties
+    ::facts
     iree::base
     loom::target::profile
   PUBLIC
@@ -230,8 +246,10 @@ loom_cc_test(
     "profile_test.cc"
   DEPS
     ::profile
+    iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::target::arch::spirv::records::target_records
   LABELS
     "iree-build-requirement=loom.target.arch.spirv"
 )

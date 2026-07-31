@@ -30,6 +30,8 @@ _SPIRV_EMIT_VISIBILITY = ["//loom/src/loom/target/emit/spirv:__pkg__"]
 
 _SPIRV_LOWER_VISIBILITY = ["//loom/src/loom/target/arch/spirv/lower:__pkg__"]
 
+_SPIRV_OPS_VISIBILITY = ["//loom/src/loom/target/arch/spirv/ops:__pkg__"]
+
 _SPIRV_RECORDS_VISIBILITY = ["//loom/src/loom/target/arch/spirv/records:__pkg__"]
 
 _SPIRV_PROVIDER_VISIBILITY = [
@@ -186,12 +188,24 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "facts",
+    srcs = ["facts.c"],
+    hdrs = ["facts.h"],
+    visibility = _SPIRV_LOWER_VISIBILITY + _SPIRV_OPS_VISIBILITY,
+    deps = [
+        ":cooperative_properties",
+        "//loom/src/loom/target:facts",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "profile",
     srcs = ["profile.c"],
     hdrs = ["profile.h"],
     visibility = _SPIRV_C_API_VISIBILITY + _SPIRV_LOWER_VISIBILITY + _SPIRV_TOOLING_VISIBILITY,
     deps = [
-        ":cooperative_properties",
+        ":facts",
         "//loom/src/loom/target:profile",
         "//runtime/src/iree/base",
     ],
@@ -202,6 +216,8 @@ loom_cc_test(
     srcs = ["profile_test.cc"],
     deps = [
         ":profile",
+        "//loom/src/loom/target/arch/spirv/records:target_records",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

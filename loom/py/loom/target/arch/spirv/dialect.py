@@ -16,7 +16,6 @@ from loom.dsl import (
     Op,
     OpPhase,
     SymbolDefinition,
-    TargetFactSatisfaction,
     TargetLikeInterface,
 )
 
@@ -35,6 +34,9 @@ SpirvTargetKind = EnumDef(
         EnumCase("vulkan1_3", 1, doc="Vulkan 1.3 logical SPIR-V module row."),
     ],
     doc="SPIR-V target row selected by spirv.target.",
+    c_type="loom_spirv_target_kind_t",
+    c_const_prefix="LOOM_SPIRV_TARGET_KIND",
+    c_include="loom/target/arch/spirv/facts.h",
 )
 
 spirv_target = Op(
@@ -50,7 +52,8 @@ spirv_target = Op(
             symbol="symbol",
             selector="kind",
             bundle_table="loom_spirv_target_bundles",
-            fact_satisfaction=TargetFactSatisfaction.STRUCTURAL,
+            fact_type="loom_spirv_target_fact_type",
+            fact_projector="loom_spirv_target_fact_projector",
         )
     ],
     symbol_def=SymbolDefinition(

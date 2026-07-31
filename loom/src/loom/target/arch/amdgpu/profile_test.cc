@@ -6,6 +6,7 @@
 
 #include "loom/target/arch/amdgpu/profile.h"
 
+#include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
@@ -54,6 +55,40 @@ TEST(AmdgpuTargetProfileTest, PreservesStructuredTargetFacts) {
             LOOM_AMDGPU_TARGET_FEATURE_ON);
   EXPECT_EQ(profile.properties.amdhsa_features.xnack,
             LOOM_AMDGPU_TARGET_FEATURE_OFF);
+}
+
+TEST(AmdgpuTargetProfileTest, ProjectsCompilerOwnedTypedFacts) {
+  const loom_amdgpu_target_info_t* target = LookupTarget("gfx1151");
+  loom_amdgpu_target_identity_t identity = {};
+  loom_amdgpu_target_identity_initialize(target, &identity);
+  loom_amdgpu_target_profile_t profile = {};
+  IREE_ASSERT_OK(loom_amdgpu_target_profile_initialize(&identity, &profile));
+
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+
+  loom_target_facts_t* base_facts = nullptr;
+  IREE_ASSERT_OK(
+      loom_target_profile_project_facts(&profile.base, &arena, &base_facts));
+  const loom_amdgpu_target_facts_t* facts =
+      loom_amdgpu_target_facts_cast(base_facts);
+  ASSERT_NE(facts, nullptr);
+  EXPECT_EQ(facts->base.selector, target->target_kind);
+  EXPECT_EQ(facts->identity.target, target);
+  EXPECT_EQ(facts->identity.amdhsa_features.xnack,
+            profile.identity.amdhsa_features.xnack);
+  EXPECT_EQ(facts->properties.target, target);
+  EXPECT_EQ(facts->properties.common, &facts->base.storage.bundle);
+  EXPECT_NE(facts->properties.common, profile.base.target_bundle);
+  EXPECT_EQ(facts->base.storage.snapshot.codegen_format,
+            profile.base.target_bundle->snapshot->codegen_format);
+  EXPECT_FALSE(facts->subgroup_size_authored);
+  EXPECT_FALSE(facts->contract_set_key_authored);
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
 }
 
 TEST(AmdgpuTargetProfileTest, SelectsTargetLocalDescriptorContract) {

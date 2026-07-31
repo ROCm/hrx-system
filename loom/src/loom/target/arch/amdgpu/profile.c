@@ -9,8 +9,26 @@
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 
+static iree_status_t loom_amdgpu_target_profile_project_facts(
+    const loom_target_profile_t* base_profile, iree_arena_allocator_t* arena,
+    loom_target_facts_t* base_facts) {
+  (void)arena;
+  const loom_amdgpu_target_profile_t* profile =
+      loom_amdgpu_target_profile_cast(base_profile);
+  IREE_ASSERT(profile != NULL);
+  IREE_ASSERT_LE(profile->identity.target->target_kind, UINT8_MAX);
+  loom_amdgpu_target_facts_t* facts = (loom_amdgpu_target_facts_t*)base_facts;
+  facts->base.selector = (uint8_t)profile->identity.target->target_kind;
+  facts->identity = profile->identity;
+  loom_amdgpu_target_properties_resolve(
+      &facts->identity, &facts->base.storage.bundle, &facts->properties);
+  return iree_ok_status();
+}
+
 const loom_target_profile_type_t loom_amdgpu_target_profile_type = {
     .name = IREE_SVL("amdgpu"),
+    .fact_type = &loom_amdgpu_target_fact_type,
+    .project_facts = loom_amdgpu_target_profile_project_facts,
 };
 
 static iree_status_t loom_amdgpu_target_profile_normalize_feature(

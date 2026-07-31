@@ -34,6 +34,34 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    facts_builder
+  HDRS
+    "facts_builder.h"
+  SRCS
+    "facts_builder.c"
+  DEPS
+    ::facts
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    function_version
+  HDRS
+    "function_version.h"
+  SRCS
+    "function_version.c"
+  DEPS
+    ::facts
+    iree::base
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     projection
   HDRS
     "projection.h"
@@ -47,9 +75,14 @@ loom_cc_library(
     profile
   HDRS
     "profile.h"
+  SRCS
+    "profile.c"
   DEPS
+    ::facts
+    ::facts_builder
     ::types
     iree::base
+    iree::base::internal::arena
   PUBLIC
 )
 
