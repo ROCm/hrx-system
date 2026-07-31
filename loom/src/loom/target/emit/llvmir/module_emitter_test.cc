@@ -213,12 +213,12 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 
-low.func.def target(@target) abi(object_function) @first(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @first(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {
   %sum = add.i32 %lhs, %rhs
   return %sum
 }
 
-low.func.def target(@target) abi(object_function) @second(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %bounded_i: reg<llvmir.i64>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @second(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %bounded_i: reg<llvmir.i64>) -> (reg<llvmir.i32>) asm {
   %loaded = load.indexed.i32 %input_view, %bounded_i, 16, 4
   store.indexed.i32 %loaded, %output_view, %bounded_i, 32, 4
   return %loaded
@@ -251,12 +251,12 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 
-low.func.def target(@target) abi(object_function) @fma_scalar(%a: reg<llvmir.f32>, %b: reg<llvmir.f32>, %c: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @fma_scalar(%a: reg<llvmir.f32>, %b: reg<llvmir.f32>, %c: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %result = fma.f32 %a, %b, %c
   return %result
 }
 
-low.func.def target(@target) abi(object_function) @fma_vector(%a: reg<llvmir.f32 x4>, %b: reg<llvmir.f32 x4>, %c: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @fma_vector(%a: reg<llvmir.f32 x4>, %b: reg<llvmir.f32 x4>, %c: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm {
   %result = fma.v4f32 %a, %b, %c
   return %result
 }
@@ -294,13 +294,13 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 
-low.func.def target(@target) abi(object_function) @unary_scalar(%input: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @unary_scalar(%input: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %negated = neg.f32 %input
   %result = abs.f32 %negated
   return %result
 }
 
-low.func.def target(@target) abi(object_function) @unary_vector(%input: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @unary_vector(%input: reg<llvmir.f32 x4>) -> (reg<llvmir.f32 x4>) asm {
   %negated = neg.v4f32 %input
   %result = abs.v4f32 %negated
   return %result
@@ -340,13 +340,13 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 
-low.func.def target(@target) abi(object_function) @minmax_scalar(%lhs: reg<llvmir.f32>, %rhs: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @minmax_scalar(%lhs: reg<llvmir.f32>, %rhs: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %min = minnum.f32 %lhs, %rhs
   %result = maxnum.f32 %min, %rhs
   return %result
 }
 
-low.func.def target(@target) abi(object_function) @minmax_vector(%lhs: reg<llvmir.f32 x2>, %rhs: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @minmax_vector(%lhs: reg<llvmir.f32 x2>, %rhs: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm {
   %min = minnum.v2f32 %lhs, %rhs
   %result = maxnum.v2f32 %min, %rhs
   return %result
@@ -392,7 +392,7 @@ llvmir.target<object> @target {
   triple = "loom-kernel64-unknown-none"
 }
 
-low.kernel.def target(@target) workgroup_size(128, 2, 1) @dispatch() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(128, 2, 1) @dispatch() asm {
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %value = load.i32 %input, 4
   return
@@ -434,7 +434,7 @@ llvmir.target<object> @target {
   triple = "loom-kernel64-unknown-none"
 }
 
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @dispatch() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) @dispatch() asm {
   %tid = kernel.workitem_id.x
   %bytes = const.i64 256
   %scratch = alloca.workgroup.i8 %bytes, 16
@@ -472,7 +472,7 @@ llvmir.target<object> @target {
   triple = "loom-kernel64-unknown-none"
 }
 
-low.kernel.def target(@target) @dispatch() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) @dispatch() asm {
   return
 }
 )");
@@ -501,7 +501,7 @@ llvmir.target<object> @target {
   triple = "loom-kernel64-unknown-none"
 }
 
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @dispatch() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) @dispatch() asm {
   %tid = kernel.workitem_id.y
   return
 }
@@ -528,7 +528,7 @@ llvmir.target<object> @target {
   triple = "loom-kernel64-unknown-none"
 }
 
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @dispatch(%input: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) @dispatch(%input: reg<llvmir.ptr>) asm {
   return
 }
 )");
@@ -558,7 +558,7 @@ llvmir.target<object> @target {
   triple = "loom-kernel64-unknown-none"
 }
 
-low.func.def target(@target) @dispatch() asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) @dispatch() asm {
   return
 }
 )");
@@ -587,7 +587,7 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 
-low.func.def target(@target) abi(object_function) @multi_result(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>, reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @multi_result(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>, reg<llvmir.i32>) asm {
   %sum = add.i32 %lhs, %rhs
   return %sum, %lhs
 }

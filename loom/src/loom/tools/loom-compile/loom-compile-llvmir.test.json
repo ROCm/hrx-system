@@ -79,7 +79,7 @@
           "name": "write-source",
           "write": {
             "path": "{tmp}/low_add.loom",
-            "text": "llvmir.target<object> @target {\n  triple = \"loom-direct64-unknown-none\",\n  data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\"\n}\n\nlow.func.def target(@target) abi(object_function) @low_add(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {\n  %sum = add.i32 %lhs, %rhs\n  return %sum\n}\n"
+            "text": "llvmir.target<object> @target {\n  triple = \"loom-direct64-unknown-none\",\n  data_layout = \"e-p:64:64-i64:64-n8:16:32:64-S128\"\n}\n\nlow.func.def target<llvmir.generic.core>(@target) abi(object_function) @low_add(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i32>) asm {\n  %sum = add.i32 %lhs, %rhs\n  return %sum\n}\n"
           }
         },
         {
