@@ -611,32 +611,151 @@ static void qwen_program_destroy(qwen_program_t* program) {
   iree_allocator_free(host_allocator, program);
 }
 
-static iree_status_t qwen_program_prepare_kernel(
-    qwen_model_t* model, iree_string_view_t module_path,
+typedef struct qwen_program_prepare_batch_t {
+  // Model whose JIT consumes every request in this batch.
+  qwen_model_t* model;
+  // Allocator used for copied request descriptors.
+  iree_allocator_t host_allocator;
+  // Number of initialized prepare requests.
+  iree_host_size_t request_count;
+  // Embedded source descriptors kept alive through batch execution.
+  qwen_loom_source_module_t source_modules[QWEN_PROGRAM_EXECUTABLE_COUNT];
+  // Owned exact JIT request descriptors.
+  qwen_loom_jit_prepare_options_t requests[QWEN_PROGRAM_EXECUTABLE_COUNT];
+  // Program executable slots that receive successful batch outputs.
+  qwen_loom_executable_t** destinations[QWEN_PROGRAM_EXECUTABLE_COUNT];
+} qwen_program_prepare_batch_t;
+
+static iree_status_t qwen_program_prepare_copy_string(
+    iree_string_view_t source, iree_allocator_t host_allocator,
+    iree_string_view_t* out_target) {
+  *out_target = iree_string_view_empty();
+  if (iree_string_view_is_empty(source)) return iree_ok_status();
+  char* storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, source.size + 1, sizeof(storage[0]), (void**)&storage));
+  memcpy(storage, source.data, source.size);
+  storage[source.size] = 0;
+  *out_target = iree_make_string_view(storage, source.size);
+  return iree_ok_status();
+}
+
+static void qwen_program_prepare_request_deinitialize(
+    qwen_loom_jit_prepare_options_t* request, iree_allocator_t host_allocator) {
+  iree_allocator_free(host_allocator, (void*)request->workload_arguments);
+  qwen_loom_config_binding_t* config_bindings =
+      (qwen_loom_config_binding_t*)request->config_bindings;
+  if (config_bindings) {
+    for (iree_host_size_t i = 0; i < request->config_binding_count; ++i) {
+      iree_allocator_free(host_allocator, (void*)config_bindings[i].value.data);
+      iree_allocator_free(host_allocator, (void*)config_bindings[i].key.data);
+    }
+  }
+  iree_allocator_free(host_allocator, config_bindings);
+  iree_allocator_free(host_allocator, (void*)request->function_name.data);
+  memset(request, 0, sizeof(*request));
+}
+
+static void qwen_program_prepare_batch_deinitialize(
+    qwen_program_prepare_batch_t* batch) {
+  for (iree_host_size_t i = 0; i < batch->request_count; ++i) {
+    qwen_program_prepare_request_deinitialize(&batch->requests[i],
+                                              batch->host_allocator);
+  }
+  memset(batch, 0, sizeof(*batch));
+}
+
+static iree_status_t qwen_program_prepare_batch_append(
+    qwen_program_prepare_batch_t* batch, iree_string_view_t module_path,
     iree_string_view_t function_name, iree_host_size_t config_binding_count,
     const qwen_loom_config_binding_t* config_bindings,
     iree_host_size_t workload_argument_count, const int64_t* workload_arguments,
-    qwen_loom_executable_t** out_executable) {
-  qwen_loom_source_module_t source_module;
-  IREE_RETURN_IF_ERROR(qwen_loom_source_lookup(module_path, &source_module));
-  const qwen_loom_jit_prepare_options_t prepare_options = {
-      .structure_size = sizeof(prepare_options),
-      .source_module = &source_module,
-      .function_name = function_name,
-      .config_binding_count = config_binding_count,
-      .config_bindings = config_bindings,
-      .workload_argument_count = workload_argument_count,
-      .workload_arguments = workload_arguments,
-  };
-  return qwen_loom_jit_prepare(qwen_model_loom_jit(model), &prepare_options,
-                               out_executable);
+    qwen_loom_executable_t** destination) {
+  if (batch->request_count == QWEN_PROGRAM_EXECUTABLE_COUNT) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "Qwen program executable batch is full");
+  }
+
+  const iree_host_size_t request_ordinal = batch->request_count;
+  qwen_loom_jit_prepare_options_t* request = &batch->requests[request_ordinal];
+  memset(request, 0, sizeof(*request));
+  request->structure_size = sizeof(*request);
+  request->source_module = &batch->source_modules[request_ordinal];
+  request->config_binding_count = config_binding_count;
+  request->workload_argument_count = workload_argument_count;
+
+  iree_status_t status = qwen_loom_source_lookup(
+      module_path, &batch->source_modules[request_ordinal]);
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_prepare_copy_string(
+        function_name, batch->host_allocator, &request->function_name);
+  }
+
+  qwen_loom_config_binding_t* owned_config_bindings = NULL;
+  if (iree_status_is_ok(status) && config_binding_count != 0) {
+    status = iree_allocator_malloc_array(
+        batch->host_allocator, config_binding_count,
+        sizeof(owned_config_bindings[0]), (void**)&owned_config_bindings);
+  }
+  if (iree_status_is_ok(status) && config_binding_count != 0) {
+    memset(owned_config_bindings, 0,
+           config_binding_count * sizeof(owned_config_bindings[0]));
+    request->config_bindings = owned_config_bindings;
+    for (iree_host_size_t i = 0;
+         i < config_binding_count && iree_status_is_ok(status); ++i) {
+      status = qwen_program_prepare_copy_string(config_bindings[i].key,
+                                                batch->host_allocator,
+                                                &owned_config_bindings[i].key);
+      if (iree_status_is_ok(status)) {
+        status = qwen_program_prepare_copy_string(
+            config_bindings[i].value, batch->host_allocator,
+            &owned_config_bindings[i].value);
+      }
+    }
+  }
+
+  int64_t* owned_workload_arguments = NULL;
+  if (iree_status_is_ok(status) && workload_argument_count != 0) {
+    status = iree_allocator_malloc_array(
+        batch->host_allocator, workload_argument_count,
+        sizeof(owned_workload_arguments[0]), (void**)&owned_workload_arguments);
+  }
+  if (iree_status_is_ok(status) && workload_argument_count != 0) {
+    memcpy(owned_workload_arguments, workload_arguments,
+           workload_argument_count * sizeof(owned_workload_arguments[0]));
+    request->workload_arguments = owned_workload_arguments;
+  }
+
+  if (iree_status_is_ok(status)) {
+    batch->destinations[request_ordinal] = destination;
+    ++batch->request_count;
+  } else {
+    qwen_program_prepare_request_deinitialize(request, batch->host_allocator);
+  }
+  return status;
+}
+
+static iree_status_t qwen_program_prepare_batch_execute(
+    qwen_program_prepare_batch_t* batch) {
+  if (batch->request_count == 0) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "Qwen program executable batch is empty");
+  }
+  qwen_loom_executable_t* outputs[QWEN_PROGRAM_EXECUTABLE_COUNT] = {NULL};
+  IREE_RETURN_IF_ERROR(qwen_loom_jit_prepare_batch(
+      qwen_model_loom_jit(batch->model), batch->request_count, batch->requests,
+      outputs));
+  for (iree_host_size_t i = 0; i < batch->request_count; ++i) {
+    *batch->destinations[i] = outputs[i];
+  }
+  return iree_ok_status();
 }
 
 // Prepares the temporary decode-attention adapter for one 64-row context class.
 // Active context is represented by the device-produced mask and therefore does
 // not participate in JIT identity.
 static iree_status_t qwen_program_prepare_decode_flash_attention(
-    qwen_program_t* program) {
+    qwen_program_t* program, qwen_program_prepare_batch_t* batch) {
   char context_capacity_value[32];
   const int context_capacity_value_length =
       iree_snprintf(context_capacity_value, sizeof(context_capacity_value),
@@ -660,9 +779,8 @@ static iree_status_t qwen_program_prepare_decode_flash_attention(
               (iree_host_size_t)context_capacity_value_length),
       };
   const int64_t workload[] = {(int64_t)program->context_count};
-  return qwen_program_prepare_kernel(
-      program->model,
-      IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_DECODE_SPLIT_F32_F16),
+  return qwen_program_prepare_batch_append(
+      batch, IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_DECODE_SPLIT_F32_F16),
       IREE_SV("qwen3_moe_flash_attention_decode_split_f32_f16_wmma"),
       IREE_ARRAYSIZE(config_bindings), config_bindings,
       IREE_ARRAYSIZE(workload), workload,
@@ -753,7 +871,7 @@ static iree_hal_command_category_t qwen_program_command_categories(
 }
 
 static iree_status_t qwen_program_prepare_layer_executables(
-    qwen_program_t* program) {
+    qwen_program_t* program, qwen_program_prepare_batch_t* batch) {
   const int64_t token_count = (int64_t)program->token_count;
   const int64_t route_stride = QWEN_MODEL_ROUTE_COUNT;
   const int64_t route_count = QWEN_MODEL_ROUTE_COUNT;
@@ -808,16 +926,16 @@ static iree_status_t qwen_program_prepare_layer_executables(
       expert_count, QWEN_MODEL_HIDDEN_SIZE,
   };
 
-  iree_status_t status = qwen_program_prepare_kernel(
-      program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_METADATA),
+  iree_status_t status = qwen_program_prepare_batch_append(
+      batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_METADATA),
       IREE_SV("qwen_attention_metadata_bringup_workaround"),
       /*config_binding_count=*/0, /*config_bindings=*/NULL,
       IREE_ARRAYSIZE(attention_metadata_workload), attention_metadata_workload,
       &program->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_METADATA]);
   if (iree_status_is_ok(status) &&
       program->qkv_schedule == QWEN_PROGRAM_QKV_SCHEDULE_QUANTIZED_ROWS) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
         IREE_SV("qwen3_moe_attention_rmsnorm_quantize_q8_1_x4"),
         IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
         qwen_attention_prepare_config_bindings, IREE_ARRAYSIZE(token_workload),
@@ -828,8 +946,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
       program->qkv_schedule == QWEN_PROGRAM_QKV_SCHEDULE_QUANTIZED_ROWS &&
       program->attention_postprocess_schedule ==
           QWEN_PROGRAM_ATTENTION_POSTPROCESS_SCHEDULE_SEPARATE) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_QKV_QUANTIZED),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_QKV_QUANTIZED),
         IREE_SV("qwen3_moe_attention_qkv_quantized"),
         IREE_ARRAYSIZE(qwen_attention_qkv_q4_config_bindings),
         qwen_attention_qkv_q4_config_bindings, IREE_ARRAYSIZE(token_workload),
@@ -840,8 +958,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
       program->qkv_schedule == QWEN_PROGRAM_QKV_SCHEDULE_QUANTIZED_ROWS &&
       program->attention_postprocess_schedule ==
           QWEN_PROGRAM_ATTENTION_POSTPROCESS_SCHEDULE_SEPARATE) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_QKV_QUANTIZED),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_QKV_QUANTIZED),
         IREE_SV("qwen3_moe_attention_qkv_quantized"),
         IREE_ARRAYSIZE(qwen_attention_qkv_q6_config_bindings),
         qwen_attention_qkv_q6_config_bindings, IREE_ARRAYSIZE(token_workload),
@@ -851,9 +969,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->attention_postprocess_schedule ==
           QWEN_PROGRAM_ATTENTION_POSTPROCESS_SCHEDULE_FUSED_QKV) {
-    status = qwen_program_prepare_kernel(
-        program->model,
-        IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_QKV_POSTPROCESS_FUSED),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_QKV_POSTPROCESS_FUSED),
         IREE_SV("qwen3_moe_attention_qkv_postprocess_fused_decode"),
         IREE_ARRAYSIZE(qwen_attention_qkv_postprocess_q4_config_bindings),
         qwen_attention_qkv_postprocess_q4_config_bindings,
@@ -865,9 +982,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->attention_postprocess_schedule ==
           QWEN_PROGRAM_ATTENTION_POSTPROCESS_SCHEDULE_FUSED_QKV) {
-    status = qwen_program_prepare_kernel(
-        program->model,
-        IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_QKV_POSTPROCESS_FUSED),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_QKV_POSTPROCESS_FUSED),
         IREE_SV("qwen3_moe_attention_qkv_postprocess_fused_decode"),
         IREE_ARRAYSIZE(qwen_attention_qkv_postprocess_q6_config_bindings),
         qwen_attention_qkv_postprocess_q6_config_bindings,
@@ -879,8 +995,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->attention_postprocess_schedule ==
           QWEN_PROGRAM_ATTENTION_POSTPROCESS_SCHEDULE_SEPARATE) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_POSTPROCESS_F32_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_POSTPROCESS_F32_F16),
         IREE_SV("qwen3_moe_attention_postprocess_f32_f16"),
         IREE_ARRAYSIZE(qwen_attention_postprocess_config_bindings),
         qwen_attention_postprocess_config_bindings,
@@ -891,9 +1007,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->attention_schedule ==
           QWEN_PROGRAM_ATTENTION_SCHEDULE_PURE_TAIL_ROW_BY_ROW_BRINGUP_WORKAROUND) {
-    status = qwen_program_prepare_kernel(
-        program->model,
-        IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_PREFILL_F32_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_PREFILL_F32_F16),
         IREE_SV("qwen3_moe_flash_attention_f32_f16_wmma"),
         IREE_ARRAYSIZE(qwen_flash_attention_config_bindings),
         qwen_flash_attention_config_bindings,
@@ -903,9 +1018,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   }
   if (iree_status_is_ok(status) &&
       program->attention_schedule == QWEN_PROGRAM_ATTENTION_SCHEDULE_GENERAL) {
-    status = qwen_program_prepare_kernel(
-        program->model,
-        IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_PREFILL_F32_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_PREFILL_F32_F16),
         IREE_SV("qwen3_moe_flash_attention_f32_f16_wmma"),
         IREE_ARRAYSIZE(qwen_flash_attention_config_bindings),
         qwen_flash_attention_config_bindings,
@@ -915,13 +1029,13 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->attention_schedule ==
           QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT) {
-    status = qwen_program_prepare_decode_flash_attention(program);
+    status = qwen_program_prepare_decode_flash_attention(program, batch);
   }
   if (iree_status_is_ok(status) &&
       program->attention_output_schedule ==
           QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_F32_WMMA) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
         IREE_SV("qwen3_moe_dense_linear_q4k_f16_wmma"),
         IREE_ARRAYSIZE(qwen_attention_output_config_bindings),
         qwen_attention_output_config_bindings, IREE_ARRAYSIZE(token_workload),
@@ -932,9 +1046,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->attention_output_schedule ==
           QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8) {
-    status = qwen_program_prepare_kernel(
-        program->model,
-        IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4_BRINGUP_WORKAROUND),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4_BRINGUP_WORKAROUND),
         IREE_SV("ggml_quantize_q8_1_x4_f32"),
         /*config_binding_count=*/0, /*config_bindings=*/NULL,
         IREE_ARRAYSIZE(attention_output_quantize_workload),
@@ -947,8 +1060,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
           QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8 &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
         IREE_SV("qwen3_moe_dense_linear_q4k_q8_1_x4"),
         IREE_ARRAYSIZE(qwen_attention_output_config_bindings),
         qwen_attention_output_config_bindings, IREE_ARRAYSIZE(token_workload),
@@ -961,8 +1074,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
           QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8 &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
         IREE_SV("qwen3_moe_dense_linear_q4k_q8_1_x4_next_q8"),
         IREE_ARRAYSIZE(qwen_attention_output_next_q8_config_bindings),
         qwen_attention_output_next_q8_config_bindings,
@@ -973,8 +1086,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
         IREE_SV("qwen3_moe_rmsnorm_f32"),
         IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
         qwen_attention_prepare_config_bindings, IREE_ARRAYSIZE(token_workload),
@@ -983,8 +1096,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   }
   if (iree_status_is_ok(status) &&
       program->qkv_schedule == QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
         IREE_SV("qwen3_moe_dense_linear_q4k_f16_wmma"),
         IREE_ARRAYSIZE(qwen_attention_query_wmma_config_bindings),
         qwen_attention_query_wmma_config_bindings,
@@ -993,8 +1106,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   }
   if (iree_status_is_ok(status) &&
       program->qkv_schedule == QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
         IREE_SV("qwen3_moe_dense_linear_q4k_f16_wmma"),
         IREE_ARRAYSIZE(qwen_attention_key_value_wmma_config_bindings),
         qwen_attention_key_value_wmma_config_bindings,
@@ -1004,8 +1117,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   }
   if (iree_status_is_ok(status) &&
       program->qkv_schedule == QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
         IREE_SV("qwen3_moe_dense_linear_q6k_f16_wmma"),
         IREE_ARRAYSIZE(qwen_attention_key_value_wmma_config_bindings),
         qwen_attention_key_value_wmma_config_bindings,
@@ -1015,8 +1128,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTER_PROJECTION_F32),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTER_PROJECTION_F32),
         IREE_SV("qwen3_moe_router_projection_f32_four_row_wave32"),
         IREE_ARRAYSIZE(qwen_router_projection_config_bindings),
         qwen_router_projection_config_bindings, IREE_ARRAYSIZE(token_workload),
@@ -1026,8 +1139,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTER_TOP8_F32),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTER_TOP8_F32),
         IREE_SV("qwen3_moe_router_top8_f32"),
         IREE_ARRAYSIZE(qwen_router_top8_config_bindings),
         qwen_router_top8_config_bindings, IREE_ARRAYSIZE(router_top8_workload),
@@ -1037,9 +1150,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
-    status = qwen_program_prepare_kernel(
-        program->model,
-        IREE_SV(QWEN_LOOM_SOURCE_ROUTER_PROJECTION_TOP8_FUSED_F32),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTER_PROJECTION_TOP8_FUSED_F32),
         IREE_SV("qwen3_moe_router_projection_top8_fused_decode_f32"),
         IREE_ARRAYSIZE(qwen_router_projection_top8_config_bindings),
         qwen_router_projection_top8_config_bindings,
@@ -1050,8 +1162,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_build_expert_table"),
         IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
         qwen_gate_up_config_bindings, IREE_ARRAYSIZE(expert_table_workload),
@@ -1061,8 +1173,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_build_expert_partition_table"),
         IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
         qwen_gate_up_config_bindings, IREE_ARRAYSIZE(partition_table_workload),
@@ -1072,8 +1184,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma"),
         IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
         qwen_gate_up_config_bindings, IREE_ARRAYSIZE(token_workload),
@@ -1082,8 +1194,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_Q8),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_Q8),
         IREE_SV("qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8"),
         IREE_ARRAYSIZE(qwen_direct_gate_up_config_bindings),
         qwen_direct_gate_up_config_bindings,
@@ -1093,8 +1205,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         IREE_SV("qwen3_moe_routed_down_q4k_f16_wmma_grouped"),
         IREE_ARRAYSIZE(qwen_routed_down_config_bindings),
         qwen_routed_down_config_bindings, IREE_ARRAYSIZE(token_workload),
@@ -1104,8 +1216,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         IREE_SV("qwen3_moe_routed_down_q6k_f16_wmma_grouped"),
         IREE_ARRAYSIZE(qwen_routed_down_config_bindings),
         qwen_routed_down_config_bindings, IREE_ARRAYSIZE(token_workload),
@@ -1115,8 +1227,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q4_Q8),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q4_Q8),
         IREE_SV("qwen3_moe_routed_down_q4k_q8_1_x4_next_q8"),
         IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
         qwen_attention_prepare_config_bindings,
@@ -1127,8 +1239,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_Q8),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_Q8),
         IREE_SV("qwen3_moe_routed_down_q6k_q8_1_x4_next_q8"),
         IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
         qwen_attention_prepare_config_bindings,
@@ -1139,8 +1251,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         IREE_SV("qwen3_moe_routed_down_weighted_reduce_f16_f32"),
         IREE_ARRAYSIZE(qwen_routed_down_config_bindings),
         qwen_routed_down_config_bindings, IREE_ARRAYSIZE(token_workload),
@@ -1151,7 +1263,7 @@ static iree_status_t qwen_program_prepare_layer_executables(
 }
 
 static iree_status_t qwen_program_prepare_full_model_executables(
-    qwen_program_t* program) {
+    qwen_program_t* program, qwen_program_prepare_batch_t* batch) {
   const qwen_quantized_storage_t terminal_storage =
       qwen_model_parameter_layout(program->model)
           ->layers[QWEN_MODEL_LAYER_COUNT - 1]
@@ -1203,9 +1315,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
       (int64_t)program->token_count,
   };
 
-  iree_status_t status = qwen_program_prepare_kernel(
-      program->model,
-      IREE_SV(QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K_BRINGUP_WORKAROUND),
+  iree_status_t status = qwen_program_prepare_batch_append(
+      batch, IREE_SV(QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K_BRINGUP_WORKAROUND),
       IREE_SV("qwen_token_embedding_q4k_bringup_workaround"),
       /*config_binding_count=*/0, /*config_bindings=*/NULL,
       IREE_ARRAYSIZE(embedding_workload), embedding_workload,
@@ -1213,8 +1324,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_NEXT_RMSNORM_F32),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_NEXT_RMSNORM_F32),
         IREE_SV("qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32"),
         IREE_ARRAYSIZE(qwen_weighted_reduce_next_rmsnorm_config_bindings),
         qwen_weighted_reduce_next_rmsnorm_config_bindings,
@@ -1225,8 +1336,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   if (iree_status_is_ok(status) &&
       program->expert_table_schedule ==
           QWEN_PROGRAM_EXPERT_TABLE_SCHEDULE_FUSED_PREFILL_512) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_EXPERT_TABLE_PARTITION_FUSED),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_EXPERT_TABLE_PARTITION_FUSED),
         IREE_SV("qwen3_moe_build_expert_table_partition_prefill_512"),
         /*config_binding_count=*/0, /*config_bindings=*/NULL,
         IREE_ARRAYSIZE(expert_table_partition_workload),
@@ -1237,8 +1348,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
         IREE_SV("qwen3_moe_rmsnorm_f32"),
         IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
         qwen_attention_prepare_config_bindings,
@@ -1248,8 +1359,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTER_PROJECTION_F32),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTER_PROJECTION_F32),
         IREE_SV("qwen3_moe_router_projection_f32_four_row_wave32"),
         IREE_ARRAYSIZE(qwen_router_projection_config_bindings),
         qwen_router_projection_config_bindings,
@@ -1260,8 +1371,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTER_TOP8_F32),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTER_TOP8_F32),
         IREE_SV("qwen3_moe_router_top8_f32"),
         IREE_ARRAYSIZE(qwen_router_top8_config_bindings),
         qwen_router_top8_config_bindings,
@@ -1272,8 +1383,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_build_expert_table"),
         IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
         qwen_gate_up_config_bindings,
@@ -1284,8 +1395,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_build_expert_partition_table"),
         IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
         qwen_gate_up_config_bindings,
@@ -1297,8 +1408,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma"),
         IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
         qwen_gate_up_config_bindings, IREE_ARRAYSIZE(terminal_token_workload),
@@ -1308,8 +1419,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         terminal_routed_down_function,
         IREE_ARRAYSIZE(qwen_routed_down_config_bindings),
         qwen_routed_down_config_bindings,
@@ -1319,8 +1430,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         IREE_SV("qwen3_moe_routed_down_weighted_reduce_f16_f32"),
         IREE_ARRAYSIZE(qwen_routed_down_config_bindings),
         qwen_routed_down_config_bindings,
@@ -1331,8 +1442,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
         IREE_SV("qwen3_moe_attention_rmsnorm_quantize_q8_1_x4"),
         IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
         qwen_attention_prepare_config_bindings,
@@ -1341,8 +1452,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
              ->executables[QWEN_PROGRAM_EXECUTABLE_FINAL_RMSNORM_QUANTIZE_Q8]);
   }
   if (iree_status_is_ok(status)) {
-    status = qwen_program_prepare_kernel(
-        program->model, IREE_SV(QWEN_LOOM_SOURCE_VOCABULARY_PROJECTION_Q6),
+    status = qwen_program_prepare_batch_append(
+        batch, IREE_SV(QWEN_LOOM_SOURCE_VOCABULARY_PROJECTION_Q6),
         IREE_SV("ggml_linear_q6k_q8_1_x4_partial_argmax"),
         /*config_binding_count=*/0, /*config_bindings=*/NULL,
         IREE_ARRAYSIZE(vocabulary_projection_workload),
@@ -1351,8 +1462,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
              [QWEN_PROGRAM_EXECUTABLE_VOCABULARY_PARTIAL_ARGMAX_Q6]);
   }
   if (iree_status_is_ok(status)) {
-    status = qwen_program_prepare_kernel(
-        program->model,
+    status = qwen_program_prepare_batch_append(
+        batch,
         IREE_SV(QWEN_LOOM_SOURCE_GREEDY_ARGMAX_PARTIALS_BRINGUP_WORKAROUND),
         IREE_SV("qwen_greedy_argmax_partials_bringup_workaround"),
         /*config_binding_count=*/0, /*config_bindings=*/NULL,
@@ -2543,6 +2654,10 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
   program->expert_table_schedule = qwen_program_select_expert_table_schedule(
       options->kind, options->token_count);
 
+  qwen_program_prepare_batch_t prepare_batch = {
+      .model = model,
+      .host_allocator = host_allocator,
+  };
   iree_status_t status = iree_ok_status();
   if (qwen_program_kind_is_full_model(options->kind)) {
     status = qwen_full_program_layout_calculate(
@@ -2584,12 +2699,17 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
         &program->timeline_semaphore);
   }
   if (iree_status_is_ok(status)) {
-    status = qwen_program_prepare_layer_executables(program);
+    status = qwen_program_prepare_layer_executables(program, &prepare_batch);
   }
   if (iree_status_is_ok(status) &&
       qwen_program_kind_is_full_model(options->kind)) {
-    status = qwen_program_prepare_full_model_executables(program);
+    status =
+        qwen_program_prepare_full_model_executables(program, &prepare_batch);
   }
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_prepare_batch_execute(&prepare_batch);
+  }
+  qwen_program_prepare_batch_deinitialize(&prepare_batch);
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_create(
         qwen_model_device(model), options->command_buffer_mode,
