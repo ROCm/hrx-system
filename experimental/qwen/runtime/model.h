@@ -51,6 +51,8 @@ typedef struct qwen_model_options_t {
   iree_host_size_t device_index;
   // Queue affinity used for allocation, gathering, and execution.
   iree_hal_queue_affinity_t queue_affinity;
+  // Number of task workers used for independent Loom compiler jobs.
+  iree_host_size_t jit_worker_count;
   // Loom sanitizer assertions compiled into prepared model executables.
   loomc_sanitizer_checks_t sanitizer_checks;
 } qwen_model_options_t;

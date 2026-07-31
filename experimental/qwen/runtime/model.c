@@ -130,6 +130,7 @@ void qwen_model_options_initialize(qwen_model_options_t* out_options) {
   memset(out_options, 0, sizeof(*out_options));
   out_options->structure_size = sizeof(*out_options);
   out_options->queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  out_options->jit_worker_count = QWEN_LOOM_JIT_DEFAULT_WORKER_COUNT;
 }
 
 static iree_status_t qwen_model_validate_load_options(
@@ -165,6 +166,10 @@ static iree_status_t qwen_model_validate_load_options(
   if (options->queue_affinity == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen model queue affinity must not be zero");
+  }
+  if (options->jit_worker_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen model JIT worker count must not be zero");
   }
   if (!source || !source->index || !source->provider) {
     return iree_make_status(
@@ -216,6 +221,7 @@ iree_status_t qwen_model_load(const qwen_model_options_t* options,
       .device = model->device,
       .queue_affinity = model->queue_affinity,
       .entry_limit = QWEN_LOOM_JIT_DEFAULT_ENTRY_LIMIT,
+      .worker_count = options->jit_worker_count,
       .sanitizer_checks = options->sanitizer_checks,
   };
   iree_status_t status =

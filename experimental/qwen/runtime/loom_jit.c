@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "experimental/qwen/runtime/loom_compile_pool.h"
 #include "iree/base/threading/mutex.h"
 #include "loomc/compile.h"
 #include "loomc/context.h"
@@ -64,8 +65,16 @@ struct qwen_loom_jit_t {
   iree_host_size_t entry_count;
   // Retained exact executable entries in oldest-first order.
   qwen_loom_jit_entry_t* entries;
-  // Serializes lookup, compilation, and cache mutation.
-  iree_slim_mutex_t mutex;
+  // Serializes complete prepare operations and compile-pool batches.
+  iree_slim_mutex_t operation_mutex;
+  // Serializes exact-entry lookup and cache mutation.
+  iree_slim_mutex_t cache_mutex;
+  // Bounded task workers used for independent code groups.
+  qwen_loom_compile_pool_t compile_pool;
+  // Number of initialized worker workspace slots.
+  iree_host_size_t worker_count;
+  // One mutable Loom workspace exclusively owned by each task worker.
+  loomc_workspace_t** worker_workspaces;
   // AMDGPU compiler target package.
   loomc_target_environment_t* target_environment;
   // Loom API context registered with the target package.
@@ -179,6 +188,30 @@ static bool qwen_loom_jit_workload_arguments_equal(iree_host_size_t lhs_count,
   return lhs_count == 0 || memcmp(lhs, rhs, lhs_count * sizeof(lhs[0])) == 0;
 }
 
+static bool qwen_loom_jit_prepare_options_match_code(
+    const qwen_loom_jit_prepare_options_t* lhs,
+    const qwen_loom_jit_prepare_options_t* rhs) {
+  return iree_string_view_equal(lhs->source_module->module_path,
+                                rhs->source_module->module_path) &&
+         iree_string_view_equal(lhs->source_module->source_identifier,
+                                rhs->source_module->source_identifier) &&
+         qwen_loom_jit_byte_spans_equal(lhs->source_module->source_contents,
+                                        rhs->source_module->source_contents) &&
+         iree_string_view_equal(lhs->function_name, rhs->function_name) &&
+         qwen_loom_jit_config_bindings_equal(
+             lhs->config_binding_count, lhs->config_bindings,
+             rhs->config_binding_count, rhs->config_bindings);
+}
+
+static bool qwen_loom_jit_prepare_options_match_exact(
+    const qwen_loom_jit_prepare_options_t* lhs,
+    const qwen_loom_jit_prepare_options_t* rhs) {
+  return qwen_loom_jit_prepare_options_match_code(lhs, rhs) &&
+         qwen_loom_jit_workload_arguments_equal(
+             lhs->workload_argument_count, lhs->workload_arguments,
+             rhs->workload_argument_count, rhs->workload_arguments);
+}
+
 static iree_status_t qwen_loom_jit_require_result(
     iree_string_view_t phase, iree_string_view_t module_path,
     iree_string_view_t function_name, const loomc_result_t* result) {
@@ -219,6 +252,11 @@ static iree_status_t qwen_loom_jit_validate_create_options(
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "Qwen Loom JIT requires a nonzero retained entry limit");
+  }
+  if (options->worker_count == 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Qwen Loom JIT requires a nonzero compiler worker count");
   }
   return iree_ok_status();
 }
@@ -411,9 +449,8 @@ static qwen_loom_jit_entry_t* qwen_loom_jit_lookup_code(
   return NULL;
 }
 
-static iree_status_t qwen_loom_jit_store(
-    qwen_loom_jit_t* jit, const qwen_loom_jit_prepare_options_t* options,
-    qwen_loom_executable_t* executable) {
+static void qwen_loom_jit_store_initialized_entry(
+    qwen_loom_jit_t* jit, qwen_loom_jit_entry_t* entry) {
   if (jit->entry_count == jit->entry_limit) {
     qwen_loom_jit_entry_deinitialize(&jit->entries[0], jit->host_allocator);
     memmove(&jit->entries[0], &jit->entries[1],
@@ -421,11 +458,9 @@ static iree_status_t qwen_loom_jit_store(
     --jit->entry_count;
     memset(&jit->entries[jit->entry_count], 0, sizeof(jit->entries[0]));
   }
-  IREE_RETURN_IF_ERROR(
-      qwen_loom_jit_entry_initialize(options, executable, jit->host_allocator,
-                                     &jit->entries[jit->entry_count]));
+  jit->entries[jit->entry_count] = *entry;
   ++jit->entry_count;
-  return iree_ok_status();
+  memset(entry, 0, sizeof(*entry));
 }
 
 static iree_status_t qwen_loom_jit_make_root_symbol(
@@ -559,6 +594,11 @@ static iree_status_t qwen_loom_executable_create(
 
 static void qwen_loom_jit_destroy(qwen_loom_jit_t* jit) {
   iree_allocator_t host_allocator = jit->host_allocator;
+  qwen_loom_compile_pool_deinitialize(&jit->compile_pool);
+  for (iree_host_size_t i = 0; i < jit->worker_count; ++i) {
+    loomc_workspace_release(jit->worker_workspaces[i]);
+  }
+  iree_allocator_free(host_allocator, jit->worker_workspaces);
   for (iree_host_size_t i = 0; i < jit->entry_count; ++i) {
     qwen_loom_jit_entry_deinitialize(&jit->entries[i], host_allocator);
   }
@@ -570,7 +610,8 @@ static void qwen_loom_jit_destroy(qwen_loom_jit_t* jit) {
   loomc_context_release(jit->context);
   loomc_target_environment_release(jit->target_environment);
   iree_hal_device_release(jit->device);
-  iree_slim_mutex_deinitialize(&jit->mutex);
+  iree_slim_mutex_deinitialize(&jit->cache_mutex);
+  iree_slim_mutex_deinitialize(&jit->operation_mutex);
   iree_allocator_free(host_allocator, jit);
 }
 
@@ -596,7 +637,8 @@ iree_status_t qwen_loom_jit_create(const qwen_loom_jit_options_t* options,
                                             LOOMC_SANITIZER_CHECK_ACCESS)
                                ? LOOMC_AMDGPU_RUNTIME_GLOBAL_ASAN_CONFIG
                                : LOOMC_AMDGPU_RUNTIME_GLOBAL_NONE;
-    iree_slim_mutex_initialize(&jit->mutex);
+    iree_slim_mutex_initialize(&jit->operation_mutex);
+    iree_slim_mutex_initialize(&jit->cache_mutex);
   }
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc_array(host_allocator, jit->entry_limit,
@@ -694,6 +736,27 @@ iree_status_t qwen_loom_jit_create(const qwen_loom_jit_options_t* options,
   loomc_result_release(pass_program_result);
 
   if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(host_allocator, options->worker_count,
+                                         sizeof(jit->worker_workspaces[0]),
+                                         (void**)&jit->worker_workspaces);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(jit->worker_workspaces, 0,
+           options->worker_count * sizeof(jit->worker_workspaces[0]));
+    jit->worker_count = options->worker_count;
+  }
+  for (iree_host_size_t i = 0;
+       i < jit->worker_count && iree_status_is_ok(status); ++i) {
+    status = iree_status_from_loomc(
+        loomc_workspace_create(NULL, loomc_allocator_from_iree(host_allocator),
+                               &jit->worker_workspaces[i]));
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_loom_compile_pool_initialize(
+        jit->worker_count, host_allocator, &jit->compile_pool);
+  }
+
+  if (iree_status_is_ok(status)) {
     *out_jit = jit;
   } else if (jit) {
     qwen_loom_jit_destroy(jit);
@@ -713,11 +776,11 @@ void qwen_loom_jit_release(qwen_loom_jit_t* jit) {
 }
 
 static iree_status_t qwen_loom_jit_prepare_miss(
-    qwen_loom_jit_t* jit, const qwen_loom_jit_prepare_options_t* options,
+    qwen_loom_jit_t* jit, loomc_workspace_t* workspace,
+    const qwen_loom_jit_prepare_options_t* options,
     qwen_loom_executable_t* code_executable,
     qwen_loom_executable_t** out_executable) {
   loomc_config_binding_t* config_bindings = NULL;
-  loomc_workspace_t* workspace = NULL;
   loomc_source_t* source = NULL;
   loomc_link_index_builder_t* link_index_builder = NULL;
   loomc_link_index_t* link_index = NULL;
@@ -747,10 +810,6 @@ static iree_status_t qwen_loom_jit_prepare_miss(
     };
   }
 
-  if (iree_status_is_ok(status)) {
-    status = iree_status_from_loomc(loomc_workspace_create(
-        NULL, loomc_allocator_from_iree(jit->host_allocator), &workspace));
-  }
   if (iree_status_is_ok(status)) {
     const loomc_source_options_t source_options = {
         .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
@@ -1000,8 +1059,233 @@ static iree_status_t qwen_loom_jit_prepare_miss(
   loomc_link_index_release(link_index);
   loomc_link_index_builder_release(link_index_builder);
   loomc_source_release(source);
-  loomc_workspace_release(workspace);
   iree_allocator_free(jit->host_allocator, config_bindings);
+  return status;
+}
+
+typedef struct qwen_loom_jit_batch_item_t {
+  // Exact prepare options borrowed from the public request array.
+  const qwen_loom_jit_prepare_options_t* options;
+  // First item with the same exact identity.
+  iree_host_size_t canonical_item_ordinal;
+  // Unique code group assigned to this cache miss.
+  iree_host_size_t code_group_ordinal;
+  // True when this canonical item requires a new exact cache entry.
+  bool cache_miss;
+  // Prepared executable owned by this canonical item.
+  qwen_loom_executable_t* executable;
+  // Fully initialized entry awaiting atomic cache publication.
+  qwen_loom_jit_entry_t staged_entry;
+} qwen_loom_jit_batch_item_t;
+
+typedef struct qwen_loom_jit_code_group_t {
+  // First canonical cache-miss item with this code identity.
+  iree_host_size_t leader_item_ordinal;
+  // Compatible code retained from the exact-entry cache, when available.
+  qwen_loom_executable_t* cached_code_executable;
+} qwen_loom_jit_code_group_t;
+
+typedef struct qwen_loom_jit_batch_t {
+  // JIT executing the batch.
+  qwen_loom_jit_t* jit;
+  // Number of public request items.
+  iree_host_size_t item_count;
+  // Per-request classification and temporary ownership.
+  qwen_loom_jit_batch_item_t* items;
+  // Number of independent code groups.
+  iree_host_size_t code_group_count;
+  // Per-code-group cache state.
+  qwen_loom_jit_code_group_t* code_groups;
+} qwen_loom_jit_batch_t;
+
+static void qwen_loom_jit_batch_deinitialize(qwen_loom_jit_batch_t* batch) {
+  if (!batch) return;
+  if (batch->items) {
+    for (iree_host_size_t i = 0; i < batch->item_count; ++i) {
+      qwen_loom_jit_entry_deinitialize(&batch->items[i].staged_entry,
+                                       batch->jit->host_allocator);
+      qwen_loom_executable_release(batch->items[i].executable);
+    }
+  }
+  if (batch->code_groups) {
+    for (iree_host_size_t i = 0; i < batch->code_group_count; ++i) {
+      qwen_loom_executable_release(
+          batch->code_groups[i].cached_code_executable);
+    }
+  }
+  iree_allocator_free(batch->jit->host_allocator, batch->code_groups);
+  iree_allocator_free(batch->jit->host_allocator, batch->items);
+  memset(batch, 0, sizeof(*batch));
+}
+
+static iree_status_t qwen_loom_jit_batch_initialize(
+    qwen_loom_jit_t* jit, iree_host_size_t request_count,
+    const qwen_loom_jit_prepare_options_t* requests,
+    qwen_loom_jit_batch_t* out_batch) {
+  memset(out_batch, 0, sizeof(*out_batch));
+  out_batch->jit = jit;
+  out_batch->item_count = request_count;
+
+  iree_status_t status = iree_allocator_malloc_array(
+      jit->host_allocator, request_count, sizeof(out_batch->items[0]),
+      (void**)&out_batch->items);
+  if (iree_status_is_ok(status)) {
+    memset(out_batch->items, 0, request_count * sizeof(out_batch->items[0]));
+    status = iree_allocator_malloc_array(jit->host_allocator, request_count,
+                                         sizeof(out_batch->code_groups[0]),
+                                         (void**)&out_batch->code_groups);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(out_batch->code_groups, 0,
+           request_count * sizeof(out_batch->code_groups[0]));
+  }
+  if (!iree_status_is_ok(status)) {
+    qwen_loom_jit_batch_deinitialize(out_batch);
+    return status;
+  }
+
+  iree_slim_mutex_lock(&jit->cache_mutex);
+  for (iree_host_size_t i = 0; i < request_count; ++i) {
+    qwen_loom_jit_batch_item_t* item = &out_batch->items[i];
+    item->options = &requests[i];
+    item->canonical_item_ordinal = i;
+    item->code_group_ordinal = IREE_HOST_SIZE_MAX;
+
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      if (qwen_loom_jit_prepare_options_match_exact(item->options,
+                                                    &requests[j])) {
+        item->canonical_item_ordinal =
+            out_batch->items[j].canonical_item_ordinal;
+        break;
+      }
+    }
+    if (item->canonical_item_ordinal != i) continue;
+
+    qwen_loom_jit_entry_t* exact_entry =
+        qwen_loom_jit_lookup_exact(jit, item->options);
+    if (exact_entry) {
+      item->executable = exact_entry->executable;
+      qwen_loom_executable_retain(item->executable);
+      continue;
+    }
+
+    item->cache_miss = true;
+    for (iree_host_size_t j = 0; j < out_batch->code_group_count; ++j) {
+      const qwen_loom_jit_batch_item_t* leader =
+          &out_batch->items[out_batch->code_groups[j].leader_item_ordinal];
+      if (qwen_loom_jit_prepare_options_match_code(item->options,
+                                                   leader->options)) {
+        item->code_group_ordinal = j;
+        break;
+      }
+    }
+    if (item->code_group_ordinal != IREE_HOST_SIZE_MAX) continue;
+
+    item->code_group_ordinal = out_batch->code_group_count;
+    qwen_loom_jit_code_group_t* code_group =
+        &out_batch->code_groups[out_batch->code_group_count++];
+    code_group->leader_item_ordinal = i;
+    qwen_loom_jit_entry_t* code_entry =
+        qwen_loom_jit_lookup_code(jit, item->options);
+    if (code_entry) {
+      code_group->cached_code_executable = code_entry->executable;
+      qwen_loom_executable_retain(code_group->cached_code_executable);
+    }
+  }
+  iree_slim_mutex_unlock(&jit->cache_mutex);
+  return iree_ok_status();
+}
+
+static iree_status_t qwen_loom_jit_batch_prepare_code_group(
+    void* user_data, iree_host_size_t worker_ordinal,
+    iree_host_size_t code_group_ordinal) {
+  qwen_loom_jit_batch_t* batch = (qwen_loom_jit_batch_t*)user_data;
+  qwen_loom_jit_t* jit = batch->jit;
+  qwen_loom_jit_code_group_t* code_group =
+      &batch->code_groups[code_group_ordinal];
+  qwen_loom_executable_t* code_executable = code_group->cached_code_executable;
+
+  for (iree_host_size_t i = 0; i < batch->item_count; ++i) {
+    qwen_loom_jit_batch_item_t* item = &batch->items[i];
+    if (item->canonical_item_ordinal != i || !item->cache_miss ||
+        item->code_group_ordinal != code_group_ordinal) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(qwen_loom_jit_prepare_miss(
+        jit, jit->worker_workspaces[worker_ordinal], item->options,
+        code_executable, &item->executable));
+    if (!code_executable) code_executable = item->executable;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t qwen_loom_jit_batch_stage_entries(
+    qwen_loom_jit_batch_t* batch) {
+  for (iree_host_size_t i = 0; i < batch->item_count; ++i) {
+    qwen_loom_jit_batch_item_t* item = &batch->items[i];
+    if (item->canonical_item_ordinal != i || !item->cache_miss) continue;
+    IREE_RETURN_IF_ERROR(qwen_loom_jit_entry_initialize(
+        item->options, item->executable, batch->jit->host_allocator,
+        &item->staged_entry));
+  }
+  return iree_ok_status();
+}
+
+static void qwen_loom_jit_batch_publish_entries(qwen_loom_jit_batch_t* batch) {
+  iree_slim_mutex_lock(&batch->jit->cache_mutex);
+  for (iree_host_size_t i = 0; i < batch->item_count; ++i) {
+    qwen_loom_jit_batch_item_t* item = &batch->items[i];
+    if (item->canonical_item_ordinal == i && item->cache_miss) {
+      qwen_loom_jit_store_initialized_entry(batch->jit, &item->staged_entry);
+    }
+  }
+  iree_slim_mutex_unlock(&batch->jit->cache_mutex);
+}
+
+iree_status_t qwen_loom_jit_prepare_batch(
+    qwen_loom_jit_t* jit, iree_host_size_t request_count,
+    const qwen_loom_jit_prepare_options_t* requests,
+    qwen_loom_executable_t** out_executables) {
+  IREE_ASSERT_ARGUMENT(jit);
+  IREE_ASSERT_ARGUMENT(out_executables);
+  if (request_count == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen Loom prepare batch must not be empty");
+  }
+  if (!requests) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen Loom prepare requests are required");
+  }
+  for (iree_host_size_t i = 0; i < request_count; ++i) {
+    out_executables[i] = NULL;
+  }
+  for (iree_host_size_t i = 0; i < request_count; ++i) {
+    IREE_RETURN_IF_ERROR(qwen_loom_jit_validate_prepare_options(&requests[i]));
+  }
+
+  iree_slim_mutex_lock(&jit->operation_mutex);
+  qwen_loom_jit_batch_t batch;
+  iree_status_t status =
+      qwen_loom_jit_batch_initialize(jit, request_count, requests, &batch);
+  if (iree_status_is_ok(status) && batch.code_group_count != 0) {
+    status = qwen_loom_compile_pool_run_batch(
+        &jit->compile_pool, batch.code_group_count,
+        qwen_loom_jit_batch_prepare_code_group, &batch);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_loom_jit_batch_stage_entries(&batch);
+  }
+  if (iree_status_is_ok(status)) {
+    qwen_loom_jit_batch_publish_entries(&batch);
+    for (iree_host_size_t i = 0; i < request_count; ++i) {
+      qwen_loom_executable_t* executable =
+          batch.items[batch.items[i].canonical_item_ordinal].executable;
+      qwen_loom_executable_retain(executable);
+      out_executables[i] = executable;
+    }
+  }
+  qwen_loom_jit_batch_deinitialize(&batch);
+  iree_slim_mutex_unlock(&jit->operation_mutex);
   return status;
 }
 
@@ -1010,39 +1294,14 @@ iree_status_t qwen_loom_jit_prepare(
     qwen_loom_executable_t** out_executable) {
   IREE_ASSERT_ARGUMENT(jit);
   IREE_ASSERT_ARGUMENT(out_executable);
-  *out_executable = NULL;
-  IREE_RETURN_IF_ERROR(qwen_loom_jit_validate_prepare_options(options));
-
-  iree_slim_mutex_lock(&jit->mutex);
-  qwen_loom_jit_entry_t* entry = qwen_loom_jit_lookup_exact(jit, options);
-  if (entry) {
-    qwen_loom_executable_retain(entry->executable);
-    *out_executable = entry->executable;
-    iree_slim_mutex_unlock(&jit->mutex);
-    return iree_ok_status();
-  }
-
-  qwen_loom_jit_entry_t* code_entry = qwen_loom_jit_lookup_code(jit, options);
-  qwen_loom_executable_t* executable = NULL;
-  iree_status_t status = qwen_loom_jit_prepare_miss(
-      jit, options, code_entry ? code_entry->executable : NULL, &executable);
-  if (iree_status_is_ok(status)) {
-    status = qwen_loom_jit_store(jit, options, executable);
-  }
-  if (iree_status_is_ok(status)) {
-    *out_executable = executable;
-    executable = NULL;
-  }
-  qwen_loom_executable_release(executable);
-  iree_slim_mutex_unlock(&jit->mutex);
-  return status;
+  return qwen_loom_jit_prepare_batch(jit, 1, options, out_executable);
 }
 
 iree_host_size_t qwen_loom_jit_entry_count(qwen_loom_jit_t* jit) {
   if (!jit) return 0;
-  iree_slim_mutex_lock(&jit->mutex);
+  iree_slim_mutex_lock(&jit->cache_mutex);
   const iree_host_size_t entry_count = jit->entry_count;
-  iree_slim_mutex_unlock(&jit->mutex);
+  iree_slim_mutex_unlock(&jit->cache_mutex);
   return entry_count;
 }
 

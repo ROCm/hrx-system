@@ -21,6 +21,9 @@ extern "C" {
 // Default number of exact prepared executables retained by one JIT.
 #define QWEN_LOOM_JIT_DEFAULT_ENTRY_LIMIT 64
 
+// Default number of concurrent Loom compiler workers owned by one JIT.
+#define QWEN_LOOM_JIT_DEFAULT_WORKER_COUNT 4
+
 // Reusable device-specific Loom compiler and executable cache.
 typedef struct qwen_loom_jit_t qwen_loom_jit_t;
 
@@ -47,6 +50,8 @@ typedef struct qwen_loom_jit_options_t {
   iree_hal_queue_affinity_t queue_affinity;
   // Maximum exact prepared executables retained by the cache.
   iree_host_size_t entry_limit;
+  // Number of task workers used for independent compiler jobs.
+  iree_host_size_t worker_count;
   // Loom sanitizer assertions compiled into prepared executables.
   loomc_sanitizer_checks_t sanitizer_checks;
 } qwen_loom_jit_options_t;
@@ -87,11 +92,23 @@ void qwen_loom_jit_release(qwen_loom_jit_t* jit);
 // Source identity and bytes, function name, config bindings, and workload
 // arguments all participate in exact prepared-entry identity. Entries with the
 // same source, root, and configuration share loaded code while retaining their
-// workload-derived dispatch geometry. Concurrent cache misses are serialized by
-// the JIT.
+// workload-derived dispatch geometry. Concurrent calls are serialized by the
+// JIT; use the batch API to compile independent code groups concurrently.
 iree_status_t qwen_loom_jit_prepare(
     qwen_loom_jit_t* jit, const qwen_loom_jit_prepare_options_t* options,
     qwen_loom_executable_t** out_executable);
+
+// Prepares or reuses a batch of exact exported executables.
+//
+// Exact duplicates produce retained references to one prepared entry. Requests
+// with the same source, root, and configuration compile once while preserving
+// workload-derived dispatch geometry for each output. Independent code groups
+// run concurrently on the JIT's bounded compiler workers. All option storage is
+// borrowed until this call returns.
+iree_status_t qwen_loom_jit_prepare_batch(
+    qwen_loom_jit_t* jit, iree_host_size_t request_count,
+    const qwen_loom_jit_prepare_options_t* requests,
+    qwen_loom_executable_t** out_executables);
 
 // Returns the current number of retained exact cache entries.
 iree_host_size_t qwen_loom_jit_entry_count(qwen_loom_jit_t* jit);

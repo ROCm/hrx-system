@@ -261,6 +261,7 @@ static iree_status_t RunRmsnormFixture(const std::string& fixture_directory) {
       .device = device.get(),
       .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
       .entry_limit = 4,
+      .worker_count = 2,
       .sanitizer_checks = LOOMC_SANITIZER_CHECK_ACCESS,
   };
   IREE_RETURN_IF_ERROR(
@@ -292,12 +293,26 @@ static iree_status_t RunRmsnormFixture(const std::string& fixture_directory) {
       .workload_arguments = workload_arguments,
   };
 
-  qwen_loom_executable_t* executable = nullptr;
+  const int64_t distinct_workload_arguments[] = {511};
+  qwen_loom_jit_prepare_options_t batch_requests[] = {
+      prepare_options,
+      prepare_options,
+  };
+  batch_requests[1].workload_arguments = distinct_workload_arguments;
+  qwen_loom_executable_t* batch_executables[IREE_ARRAYSIZE(batch_requests)] = {
+      nullptr,
+  };
   IREE_RETURN_IF_ERROR(
-      qwen_loom_jit_prepare(jit_ptr.get(), &prepare_options, &executable));
+      qwen_loom_jit_prepare_batch(jit_ptr.get(), IREE_ARRAYSIZE(batch_requests),
+                                  batch_requests, batch_executables));
+  qwen_loom_executable_t* executable = batch_executables[0];
   ExecutablePtr executable_ptr(executable);
+  qwen_loom_executable_t* distinct_executable = batch_executables[1];
+  ExecutablePtr distinct_executable_ptr(distinct_executable);
   const iree_hal_dispatch_config_t dispatch_config =
       qwen_loom_executable_dispatch_config(executable_ptr.get());
+  const iree_hal_dispatch_config_t distinct_dispatch_config =
+      qwen_loom_executable_dispatch_config(distinct_executable_ptr.get());
   iree_hal_executable_function_info_t function_info;
   IREE_RETURN_IF_ERROR(iree_hal_executable_function_info(
       qwen_loom_executable_hal_executable(executable_ptr.get()),
@@ -315,26 +330,6 @@ static iree_status_t RunRmsnormFixture(const std::string& fixture_directory) {
         IREE_STATUS_FAILED_PRECONDITION,
         "workload 512 resolved unexpected RMSNorm launch geometry");
   }
-
-  qwen_loom_executable_t* cache_hit = nullptr;
-  IREE_RETURN_IF_ERROR(
-      qwen_loom_jit_prepare(jit_ptr.get(), &prepare_options, &cache_hit));
-  ExecutablePtr cache_hit_ptr(cache_hit);
-  if (cache_hit != executable_ptr.get() ||
-      qwen_loom_jit_entry_count(jit_ptr.get()) != 1) {
-    return iree_make_status(
-        IREE_STATUS_INTERNAL,
-        "identical Qwen Loom specialization did not reuse its cache entry");
-  }
-
-  const int64_t distinct_workload_arguments[] = {511};
-  prepare_options.workload_arguments = distinct_workload_arguments;
-  qwen_loom_executable_t* distinct_executable = nullptr;
-  IREE_RETURN_IF_ERROR(qwen_loom_jit_prepare(jit_ptr.get(), &prepare_options,
-                                             &distinct_executable));
-  ExecutablePtr distinct_executable_ptr(distinct_executable);
-  const iree_hal_dispatch_config_t distinct_dispatch_config =
-      qwen_loom_executable_dispatch_config(distinct_executable_ptr.get());
   if (distinct_executable == executable_ptr.get() ||
       qwen_loom_jit_entry_count(jit_ptr.get()) != 2 ||
       distinct_dispatch_config.workgroup_count[0] != 511 ||
@@ -342,7 +337,18 @@ static iree_status_t RunRmsnormFixture(const std::string& fixture_directory) {
           qwen_loom_executable_hal_executable(executable_ptr.get())) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
-        "workload values did not retain exact geometry over shared code");
+        "batched workloads did not retain exact geometry over shared code");
+  }
+
+  qwen_loom_executable_t* cache_hit = nullptr;
+  IREE_RETURN_IF_ERROR(
+      qwen_loom_jit_prepare(jit_ptr.get(), &prepare_options, &cache_hit));
+  ExecutablePtr cache_hit_ptr(cache_hit);
+  if (cache_hit != executable_ptr.get() ||
+      qwen_loom_jit_entry_count(jit_ptr.get()) != 2) {
+    return iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "identical Qwen Loom specialization did not reuse its cache entry");
   }
 
   iree_hal_buffer_view_t* input_view = nullptr;
