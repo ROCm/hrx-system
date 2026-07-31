@@ -849,6 +849,19 @@ def test_gfx9_4_matrix_schedule_classes_match_member_timings() -> None:
         )
 
 
+def test_gfx11_wmma_separates_hardware_latency_from_schedule_distance() -> None:
+    schedule_classes = {
+        schedule_class.name: schedule_class
+        for schedule_class in (
+            _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE.schedule_classes
+        )
+    }
+    schedule_class = schedule_classes[_SCHEDULE_WMMA]
+    assert schedule_class.latency_kind is LatencyKind.ESTIMATE
+    assert schedule_class.latency_cycles == 5
+    assert schedule_class.schedule_distance_cycles == 32
+
+
 def test_gfx12_matrix_schedule_classes_match_processor_model() -> None:
     schedule_classes = {
         schedule_class.name: schedule_class

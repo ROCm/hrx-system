@@ -640,9 +640,9 @@ static uint64_t loom_low_schedule_ready_schedule_key(
           state->node_dependency_latency_cycles != NULL
               ? state->node_dependency_latency_cycles[node_index]
               : 0;
-      const uint16_t latency = node->schedule_class != NULL
-                                   ? node->schedule_class->latency_cycles
-                                   : 0;
+      const uint16_t latency =
+          loom_low_schedule_class_schedule_distance_cycles(
+              node->schedule_class);
       return ((uint64_t)dependency_latency << 32) |
              (uint64_t)(UINT16_MAX - latency);
     }
@@ -1386,7 +1386,7 @@ void loom_low_schedule_pressure_score_candidate(
       loom_low_schedule_ready_policy_preferred_anchor_priority(state, indegrees,
                                                                node_index);
   const uint16_t latency_cycles =
-      node->schedule_class ? node->schedule_class->latency_cycles : 0;
+      loom_low_schedule_class_schedule_distance_cycles(node->schedule_class);
   *out_score = (loom_low_schedule_candidate_score_t){
       .projected_live_units = projected_live_units,
       .killed_live_units = killed_live_units,
@@ -1588,9 +1588,8 @@ void loom_low_schedule_pressure_compute_node_priorities(
         const loom_low_schedule_class_t* producer_schedule_class =
             state->nodes[producer_node].schedule_class;
         const uint16_t producer_latency =
-            producer_schedule_class != NULL
-                ? producer_schedule_class->latency_cycles
-                : 0;
+            loom_low_schedule_class_schedule_distance_cycles(
+                producer_schedule_class);
         dependency_latency_cycles =
             iree_max(dependency_latency_cycles, producer_latency);
       }
@@ -1663,7 +1662,8 @@ void loom_low_schedule_pressure_compute_node_priorities(
     }
     if (state->node_critical_path_cycles != NULL) {
       const uint16_t latency_cycles =
-          node->schedule_class ? node->schedule_class->latency_cycles : 0;
+          loom_low_schedule_class_schedule_distance_cycles(
+              node->schedule_class);
       state->node_critical_path_cycles[node_index] =
           iree_math_saturating_add_u32(latency_cycles, successor_path_cycles);
     }

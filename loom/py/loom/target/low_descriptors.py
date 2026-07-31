@@ -523,6 +523,7 @@ class ScheduleClass:
     latency_kind: LatencyKind
     model_quality: ModelQuality
     latency_cycles: int = 0
+    schedule_distance_cycles: int = 0
     issue_uses: tuple[IssueUse, ...] = ()
     hazards: tuple[Hazard, ...] = ()
     flags: tuple[ScheduleClassFlag, ...] = ()

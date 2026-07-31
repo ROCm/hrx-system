@@ -756,6 +756,10 @@ typedef struct loom_low_schedule_class_t {
   loom_bstring_table_offset_t name_string_offset;
   // Latency in cycles when latency_kind is exact or estimated.
   uint16_t latency_cycles;
+  // Scheduler dependency distance in cycles, or zero to use latency_cycles.
+  // This permits target models to keep hardware dependency latency separate
+  // from a conservative readiness distance used only for instruction order.
+  uint16_t schedule_distance_cycles;
   // Latency interpretation for scheduling and diagnostics.
   loom_low_latency_kind_t latency_kind;
   // First issue-use row for this schedule class.
@@ -775,6 +779,16 @@ typedef struct loom_low_schedule_class_t {
   // Number of pressure-delta rows for this schedule class.
   uint16_t pressure_delta_count;
 } loom_low_schedule_class_t;
+
+// Returns the scheduler dependency distance for |schedule_class|.
+// A zero override preserves the historical latency_cycles behavior.
+static inline uint16_t loom_low_schedule_class_schedule_distance_cycles(
+    const loom_low_schedule_class_t* schedule_class) {
+  if (schedule_class == NULL) return 0;
+  return schedule_class->schedule_distance_cycles != 0
+             ? schedule_class->schedule_distance_cycles
+             : schedule_class->latency_cycles;
+}
 
 typedef struct loom_low_descriptor_t {
   // String-table offset for the stable descriptor key.
