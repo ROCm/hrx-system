@@ -120,45 +120,6 @@ static bool loom_print_attr_is_optional(const loom_op_vtable_t* vtable,
                           LOOM_ATTR_OPTIONAL);
 }
 
-static bool loom_print_symbol_ref_targets_register_context(
-    const loom_op_vtable_t* vtable, uint16_t attr_index) {
-  if (!vtable->func_like || !vtable->attr_descriptors ||
-      attr_index >= vtable->attribute_count) {
-    return false;
-  }
-  const loom_attr_descriptor_t* descriptor =
-      &vtable->attr_descriptors[attr_index];
-  return descriptor->symbol_ref &&
-         iree_any_bit_set(descriptor->symbol_ref->interfaces,
-                          LOOM_SYMBOL_INTERFACE_TARGET);
-}
-
-static iree_status_t loom_print_update_register_context_from_target(
-    loom_print_context_t* ctx, const loom_op_vtable_t* vtable,
-    const loom_op_t* op, uint16_t attr_index, loom_attribute_t attr) {
-  if (!loom_print_symbol_ref_targets_register_context(vtable, attr_index)) {
-    return iree_ok_status();
-  }
-  if (vtable->func_like &&
-      vtable->func_like->repr_contract_attr_index != LOOM_ATTR_INDEX_NONE &&
-      vtable->func_like->repr_contract_attr_index < op->attribute_count &&
-      !loom_attr_is_absent(
-          loom_op_attrs(op)[vtable->func_like->repr_contract_attr_index])) {
-    return iree_ok_status();
-  }
-  ctx->low_repr = (loom_text_low_repr_context_t){0};
-  if (!ctx->low_asm_environment.vtable ||
-      !ctx->low_asm_environment.vtable->lookup_target_descriptor_set) {
-    return iree_ok_status();
-  }
-  const loom_text_low_asm_descriptor_set_t* descriptor_set = NULL;
-  IREE_RETURN_IF_ERROR(
-      ctx->low_asm_environment.vtable->lookup_target_descriptor_set(
-          ctx->low_asm_environment.state, ctx->module, attr, &descriptor_set));
-  ctx->low_repr.descriptor_set = descriptor_set;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_print_update_low_repr_context(
     loom_print_context_t* ctx, const loom_op_vtable_t* vtable,
     uint16_t attr_index, loom_attribute_t attr) {
@@ -342,9 +303,6 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         IREE_RETURN_IF_ERROR(loom_print_attr_with_field(
             ctx, &loom_op_attrs(op)[element->field_index], NULL,
             loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index)));
-        IREE_RETURN_IF_ERROR(loom_print_update_register_context_from_target(
-            ctx, vtable, op, element->field_index,
-            loom_op_attrs(op)[element->field_index]));
         break;
       }
       case LOOM_FORMAT_KIND_OPERAND_TYPE: {
