@@ -105,3 +105,9 @@ corpus is qualified end to end at the kernel-test boundary on gfx1100. New
 targets and model geometries should retain the semantic roots and add providers
 only when an interleaved production-shaped benchmark demonstrates a distinct
 schedule requirement.
+
+The standalone owned runtime's
+[kernel integration map](../qwen/KERNEL_INTEGRATION.md) records the exact
+prefill/decode routing, selective-link and HAL export boundary, fixed GGUF
+layout, and the transient compiler-fact workarounds required by the current
+end-to-end vertical slice.

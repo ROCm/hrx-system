@@ -20,6 +20,10 @@ runtime embeds the resulting selectively linked source. `experimental/id4` is
 reference evidence only; this package has no source, build, or ABI dependency
 on it.
 
+See [KERNEL_INTEGRATION.md](KERNEL_INTEGRATION.md) for the exact authored-source
+map, prefill/decode routing, JIT and export boundary, and the compiler facts
+exposed by each transient bring-up workaround.
+
 The first integration milestone is one complete layer-0 prefill-512 execution:
 
 1. validate and gather the real GGUF parameter set;
