@@ -428,7 +428,7 @@ ResultPtr EmitModule(loomc_target_environment_t* target_environment,
 }
 
 TEST(AmdgpuTargetTest,
-     CompileSpecializesGenericHalKernelAndEmitsExactArtifact) {
+     SpecializationPreservesGenericHalTargetAndEmitsExactArtifact) {
   TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
   ContextPtr context = CreateAmdgpuContext(target_environment.get());
   WorkspacePtr workspace = CreateWorkspace();
@@ -510,12 +510,18 @@ kernel.def target(@gfx11_generic) @configured_store() {
   ASSERT_NE(text_artifact, nullptr);
   EXPECT_EQ(ToString(text_artifact->identifier), "configured_store.loom");
   const std::string module_text = ToString(text_artifact->contents);
-  EXPECT_NE(module_text.find("amdgpu.target<gfx1151> @gfx1151"),
+  EXPECT_NE(module_text.find("amdgpu.target<gfx11-generic> @gfx11_generic"),
             std::string::npos)
       << module_text;
-  EXPECT_NE(
-      module_text.find("low.kernel.def target<amdgpu.rdna3_5.core>(@gfx1151)"),
+  EXPECT_NE(module_text.find(
+                "low.kernel.def target<amdgpu.rdna3_5.core>(@gfx11_generic)"),
+            std::string::npos)
+      << module_text;
+  EXPECT_EQ(
+      module_text.find("low.kernel.def target<amdgpu.gfx11.generic.core>"),
       std::string::npos)
+      << module_text;
+  EXPECT_EQ(module_text.find("amdgpu.target<gfx1151>"), std::string::npos)
       << module_text;
   EXPECT_NE(module_text.find("@configured_store("), std::string::npos)
       << module_text;

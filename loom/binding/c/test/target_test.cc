@@ -936,7 +936,7 @@ TEST(TargetTest, RejectsSanitizerOptionsOnPlainPassProgramOptions) {
   EXPECT_EQ(pass_program, nullptr);
 }
 
-TEST(TargetTest, RetainsSpecializationFactsInModuleStorage) {
+TEST(TargetTest, RetainsSpecializationVersionWithoutChangingTargetlessIr) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
   ContextPtr context = CreateSpirvContext(target_environment.get());
@@ -979,9 +979,13 @@ TEST(TargetTest, RetainsSpecializationFactsInModuleStorage) {
         loomc_module_function_versions(module.get());
     ASSERT_NE(function_versions, nullptr);
     ASSERT_EQ(function_versions->count, 1u);
+    ASSERT_NE(function_versions->values[0], nullptr);
+    EXPECT_NE(function_versions->values[0]->type, nullptr);
+    EXPECT_NE(function_versions->values[0]->function.op, nullptr);
     const std::string text = SerializeModuleToText(module.get());
-    EXPECT_NE(text.find("spirv.target<"), std::string::npos);
-    EXPECT_NE(text.find("func.def public target(@"), std::string::npos);
+    EXPECT_EQ(text.find("spirv.target<"), std::string::npos) << text;
+    EXPECT_EQ(text.find("func.def public target(@"), std::string::npos) << text;
+    EXPECT_NE(text.find("func.def public @entry"), std::string::npos) << text;
 
     const loomc_target_specialization_t missing_specialization = {
         /*.function_symbol=*/loomc_make_cstring_view("missing"),

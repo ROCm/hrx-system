@@ -8,8 +8,8 @@
 //
 // Specialization is an invocation-local compiler action. Each request names
 // one function version and supplies the structured target profile that should
-// become its exact effective target. The result carries compiler-owned
-// function-version facts alongside the compatibility diagnostic outcome.
+// become its exact effective target. It produces compiler-owned function
+// versions without creating target records or changing authored target attrs.
 
 #ifndef LOOM_TARGET_SPECIALIZATION_H_
 #define LOOM_TARGET_SPECIALIZATION_H_
@@ -45,7 +45,7 @@ typedef struct loom_target_specialization_request_list_t {
   iree_host_size_t count;
 } loom_target_specialization_request_list_t;
 
-// Result of binding a specialization request list.
+// Result of resolving a specialization request list.
 typedef struct loom_target_specialization_result_t {
   // Concrete target-refined function versions participating in compilation.
   loom_function_version_list_t function_versions;
@@ -55,17 +55,18 @@ typedef struct loom_target_specialization_result_t {
   uint32_t error_count;
 } loom_target_specialization_result_t;
 
-// Resolves and binds every target specialization request.
+// Resolves every target specialization request into a function version.
 //
-// The input module must be verified and mutable for this compiler invocation.
-// All function names, profiles, authored target requirements, and
-// function-local contracts are resolved before any function target attribute
-// is changed. Source incompatibilities emit structured diagnostics and return
-// OK with a nonzero |error_count|; malformed external requests and
-// infrastructure failures return a status.
+// The input module must be verified for this compiler invocation. All function
+// names, profiles, authored target requirements, and function-local contracts
+// are resolved before any versions are published. The module and its authored
+// target witnesses remain unchanged. Source incompatibilities emit structured
+// diagnostics and return OK with a nonzero |error_count|; malformed external
+// requests and infrastructure failures return a status.
 //
-// Target profiles and |arena| storage must outlive every pass that consumes the
-// returned function versions.
+// |arena| storage must outlive every pass and output consumer that uses the
+// returned function versions. Target profiles need only remain live for this
+// call.
 iree_status_t loom_target_specialize_functions(
     const loom_target_environment_t* environment, loom_module_t* module,
     loom_target_specialization_request_list_t requests,

@@ -12,32 +12,25 @@
 #include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
-#include "loom/rewrite/rewriter.h"
 #include "loom/target/facts_builder.h"
 #include "loom/target/function_contract.h"
 #include "loom/target/provider.h"
 
 typedef struct loom_target_resolved_specialization_t {
-  // Function receiving the effective target.
+  // Authored function represented by the compiler version.
   loom_func_like_t function;
 
-  // Stable function name string ID used by the supplemental context.
+  // Stable function name string ID used for diagnostics.
   loom_string_id_t function_name_id;
 
   // Structured profile borrowed from the request.
   const loom_target_profile_t* target_profile;
-
-  // Authored target requirement, or NULL for a targetless function.
-  const loom_op_t* authored_target_op;
 
   // Function facts projected at specialization construction.
   const loom_func_symbol_facts_t* function_facts;
 
   // Authored target facts, or NULL for a targetless function.
   const loom_target_symbol_facts_t* authored_target;
-
-  // Exact target record materialized from |target_profile|.
-  loom_symbol_ref_t effective_target_ref;
 
   // Compiler-owned target-refined function version.
   loom_target_function_version_t* version;
@@ -127,11 +120,8 @@ static iree_status_t loom_target_specialization_resolve_function(
   }
 
   const loom_symbol_ref_t authored_target_ref = function_facts->target_symbol;
-  const loom_op_t* authored_target_op = NULL;
   const loom_target_symbol_facts_t* authored_target = NULL;
   if (loom_symbol_ref_is_valid(authored_target_ref)) {
-    authored_target_op =
-        module->symbols.entries[authored_target_ref.symbol_id].defining_op;
     IREE_RETURN_IF_ERROR(loom_target_specialization_lookup_target(
         module, fact_table, authored_target_ref, &authored_target));
   }
@@ -139,7 +129,6 @@ static iree_status_t loom_target_specialization_resolve_function(
   *out_specialization = (loom_target_resolved_specialization_t){
       .function = function,
       .function_name_id = function_name_id,
-      .authored_target_op = authored_target_op,
       .function_facts = function_facts,
       .authored_target = authored_target,
   };
@@ -231,26 +220,6 @@ static iree_status_t loom_target_specialization_prepare_versions(
   return iree_ok_status();
 }
 
-static iree_status_t loom_target_specialization_bind_functions(
-    loom_module_t* module,
-    const loom_target_resolved_specialization_t* specializations,
-    iree_host_size_t specialization_count, iree_arena_allocator_t* arena) {
-  loom_rewriter_t rewriter = {0};
-  IREE_RETURN_IF_ERROR(loom_rewriter_initialize(&rewriter, module, arena));
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0;
-       i < specialization_count && iree_status_is_ok(status); ++i) {
-    const loom_target_resolved_specialization_t* specialization =
-        &specializations[i];
-    status = loom_rewriter_set_attr(
-        &rewriter, specialization->function.op,
-        specialization->function.vtable->target_attr_index,
-        loom_attr_symbol(specialization->effective_target_ref));
-  }
-  loom_rewriter_deinitialize(&rewriter);
-  return status;
-}
-
 iree_status_t loom_target_specialize_functions(
     const loom_target_environment_t* environment, loom_module_t* module,
     loom_target_specialization_request_list_t requests,
@@ -329,17 +298,6 @@ iree_status_t loom_target_specialize_functions(
     return iree_ok_status();
   }
 
-  for (iree_host_size_t i = 0; i < requests.count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_target_environment_materialize_effective_target(
-        environment, module, specializations[i].target_profile,
-        specializations[i].authored_target_op,
-        &specializations[i].effective_target_ref));
-    IREE_ASSERT(
-        loom_symbol_ref_is_valid(specializations[i].effective_target_ref));
-  }
-
-  IREE_RETURN_IF_ERROR(loom_target_specialization_bind_functions(
-      module, specializations, requests.count, arena));
   out_result->function_versions = (loom_function_version_list_t){
       .values = version_values,
       .count = requests.count,

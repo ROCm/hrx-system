@@ -16,9 +16,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
-#include "loom/ops/target/facts.h"
 #include "loom/ops/test/ops.h"
-#include "loom/target/materialization.h"
 #include "loom/target/provider.h"
 #include "loom/target/test/target_records.h"
 #include "loom/testing/module_ptr.h"
@@ -49,13 +47,6 @@ static const loom_target_profile_type_t kTestProfileType = {
     /*.project_facts=*/ProjectTestProfileFacts,
 };
 
-static const TestTargetProfile* TestProfileCast(
-    const loom_target_profile_t* profile) {
-  return loom_target_profile_has_type(profile, &kTestProfileType)
-             ? reinterpret_cast<const TestTargetProfile*>(profile)
-             : nullptr;
-}
-
 static TestTargetProfile MakeTestProfile(loom_test_target_kind_t kind) {
   return TestTargetProfile{
       /*.base=*/
@@ -66,40 +57,6 @@ static TestTargetProfile MakeTestProfile(loom_test_target_kind_t kind) {
       },
       /*.kind=*/kind,
   };
-}
-
-static iree_string_view_t TestMaterializationSymbolStem(
-    const loom_target_profile_t* profile) {
-  const TestTargetProfile* test_profile = TestProfileCast(profile);
-  return test_profile ? test_profile->base.target_bundle->name
-                      : iree_string_view_empty();
-}
-
-static bool TestRecordMatchesEffectiveTarget(
-    const loom_module_t* module, const loom_op_t* target_op,
-    const loom_target_profile_t* profile, const loom_op_t* authored_target_op) {
-  const TestTargetProfile* test_profile = TestProfileCast(profile);
-  return test_profile != nullptr && loom_test_target_isa(target_op) &&
-         loom_test_target_kind(target_op) == test_profile->kind &&
-         loom_target_record_projection_matches_bundle(
-             module, target_op, test_profile->base.target_bundle,
-             authored_target_op);
-}
-
-static iree_status_t BuildTestEffectiveTargetRecord(
-    loom_builder_t* builder, const loom_target_profile_t* profile,
-    const loom_op_t* authored_target_op, loom_symbol_ref_t symbol,
-    loom_location_id_t location, loom_op_t** out_target_op) {
-  const TestTargetProfile* test_profile = TestProfileCast(profile);
-  if (test_profile == nullptr) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "expected a specialization test profile");
-  }
-  return loom_target_record_projection_build(
-      builder, LOOM_OP_TEST_TARGET, test_profile->kind, symbol,
-      test_profile->base.target_bundle, authored_target_op,
-      /*extension_attrs=*/nullptr, /*extension_attr_count=*/0, location,
-      out_target_op);
 }
 
 static const loom_target_provider_t kTestProvider = {
@@ -116,15 +73,7 @@ static const loom_target_provider_t kTestProvider = {
     /*.emitter_list=*/{},
     /*.pass_registry=*/nullptr,
     /*.contribute_pipeline=*/nullptr,
-    /*.materialization=*/
-    {
-        /*.op_kind=*/LOOM_OP_TEST_TARGET,
-        /*.symbol_stem=*/TestMaterializationSymbolStem,
-        /*.record_matches_effective_target=*/
-        TestRecordMatchesEffectiveTarget,
-        /*.build_effective_target_record=*/
-        BuildTestEffectiveTargetRecord,
-    },
+    /*.materialization=*/{},
 };
 
 static const loom_target_provider_t* const kTestProviders[] = {
@@ -218,17 +167,6 @@ class TargetSpecializationTest : public ::testing::Test {
     return loom_test_target_kind(target_op);
   }
 
-  const loom_op_t* FunctionTargetOp(const loom_module_t* module,
-                                    loom_func_like_t function) {
-    const loom_symbol_ref_t target_ref = loom_func_like_target(function);
-    IREE_ASSERT(loom_symbol_ref_is_valid(target_ref));
-    IREE_ASSERT(target_ref.module_id == 0);
-    const loom_op_t* target_op =
-        module->symbols.entries[target_ref.symbol_id].defining_op;
-    IREE_ASSERT(loom_test_target_isa(target_op));
-    return target_op;
-  }
-
   loom_target_specialization_result_t Specialize(
       loom_module_t* module,
       const loom_target_specialization_request_t* requests,
@@ -256,7 +194,7 @@ class TargetSpecializationTest : public ::testing::Test {
 };
 
 TEST_F(TargetSpecializationTest,
-       BindsSeveralFunctionsWithoutChangingUnrequestedFunctions) {
+       ProducesFunctionVersionsWithoutChangingAuthoredTargets) {
   ModulePtr module = Parse(R"(
 test.target<low_core> @family
 test.target<quirky> @unrequested_family
@@ -285,24 +223,31 @@ func.def public target(@unrequested_family) @unrequested() {
           /*.target_profile=*/&exact_profile.base,
       },
   };
-
-  const loom_target_specialization_result_t result =
-      Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
-  ASSERT_EQ(result.error_count, 0u);
-  ASSERT_EQ(result.function_versions.count, 2u);
-
   const loom_func_like_t generic = Function(module.get(), IREE_SV("generic"));
   const loom_func_like_t targetless =
       Function(module.get(), IREE_SV("targetless"));
   const loom_func_like_t unrequested =
       Function(module.get(), IREE_SV("unrequested"));
+  const loom_symbol_ref_t generic_target = loom_func_like_target(generic);
+  const loom_symbol_ref_t unrequested_target =
+      loom_func_like_target(unrequested);
+  const iree_host_size_t symbol_count = module->symbols.count;
+
+  const loom_target_specialization_result_t result =
+      Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
+  ASSERT_EQ(result.error_count, 0u);
+  ASSERT_EQ(result.function_versions.count, 2u);
+  EXPECT_EQ(module->symbols.count, symbol_count);
   EXPECT_EQ(TargetKind(module.get(), generic), LOOM_TEST_TARGET_KIND_LOW_CORE);
-  EXPECT_EQ(TargetKind(module.get(), targetless),
-            LOOM_TEST_TARGET_KIND_LOW_CORE);
+  EXPECT_EQ(loom_func_like_target(generic).module_id, generic_target.module_id);
+  EXPECT_EQ(loom_func_like_target(generic).symbol_id, generic_target.symbol_id);
+  EXPECT_FALSE(loom_symbol_ref_is_valid(loom_func_like_target(targetless)));
   EXPECT_EQ(TargetKind(module.get(), unrequested),
             LOOM_TEST_TARGET_KIND_QUIRKY);
-  EXPECT_EQ(loom_func_like_target(generic).symbol_id,
-            loom_func_like_target(targetless).symbol_id);
+  EXPECT_EQ(loom_func_like_target(unrequested).module_id,
+            unrequested_target.module_id);
+  EXPECT_EQ(loom_func_like_target(unrequested).symbol_id,
+            unrequested_target.symbol_id);
 
   const loom_target_function_version_t* generic_version =
       loom_target_function_version_list_find(&result.function_versions,
@@ -328,7 +273,7 @@ func.def public target(@unrequested_family) @unrequested() {
             nullptr);
 }
 
-TEST_F(TargetSpecializationTest, ReusesMatchingAuthoredExactTarget) {
+TEST_F(TargetSpecializationTest, PreservesMatchingAuthoredExactTarget) {
   ModulePtr module = Parse(R"(
 test.target<low_core> @exact
 
@@ -363,7 +308,7 @@ func.def public target(@exact) @entry() {
 }
 
 TEST_F(TargetSpecializationTest,
-       ProducesVersionFactsBesideDistinctBoundTargets) {
+       RefinesDistinctAuthoredFunctionFactsWithoutCreatingTargetRecords) {
   ModulePtr module = Parse(R"(
 test.target<low_core> @left_requirement {
   abi = hal_kernel,
@@ -394,13 +339,21 @@ func.def public target(@right_requirement) export("right_function") @right() {
           /*.target_profile=*/&exact_profile.base,
       },
   };
+  const loom_func_like_t left = Function(module.get(), IREE_SV("left"));
+  const loom_func_like_t right = Function(module.get(), IREE_SV("right"));
+  const loom_symbol_ref_t left_target = loom_func_like_target(left);
+  const loom_symbol_ref_t right_target = loom_func_like_target(right);
+  const iree_host_size_t symbol_count = module->symbols.count;
 
   const loom_target_specialization_result_t result =
       Specialize(module.get(), requests, IREE_ARRAYSIZE(requests));
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_EQ(result.function_versions.count, 2u);
-  const loom_func_like_t left = Function(module.get(), IREE_SV("left"));
-  const loom_func_like_t right = Function(module.get(), IREE_SV("right"));
+  EXPECT_EQ(module->symbols.count, symbol_count);
+  EXPECT_EQ(loom_func_like_target(left).module_id, left_target.module_id);
+  EXPECT_EQ(loom_func_like_target(left).symbol_id, left_target.symbol_id);
+  EXPECT_EQ(loom_func_like_target(right).module_id, right_target.module_id);
+  EXPECT_EQ(loom_func_like_target(right).symbol_id, right_target.symbol_id);
   const loom_target_function_version_t* left_version =
       loom_target_function_version_list_find(&result.function_versions, left);
   const loom_target_function_version_t* right_version =
@@ -427,17 +380,6 @@ func.def public target(@right_requirement) export("right_function") @right() {
             LOOM_TARGET_LINKAGE_DSO_LOCAL);
   EXPECT_EQ(right_version_facts->storage.export_plan.linkage,
             LOOM_TARGET_LINKAGE_DEFAULT);
-
-  const loom_symbol_ref_t left_ref = loom_func_like_target(left);
-  const loom_symbol_ref_t right_ref = loom_func_like_target(right);
-  EXPECT_NE(left_ref.symbol_id, right_ref.symbol_id);
-
-  const loom_op_t* left_target_op = FunctionTargetOp(module.get(), left);
-  const loom_op_t* right_target_op = FunctionTargetOp(module.get(), right);
-  EXPECT_EQ(loom_test_target_kind(left_target_op),
-            LOOM_TEST_TARGET_KIND_LOW_CORE);
-  EXPECT_EQ(loom_test_target_kind(right_target_op),
-            LOOM_TEST_TARGET_KIND_LOW_CORE);
 }
 
 TEST_F(TargetSpecializationTest,
