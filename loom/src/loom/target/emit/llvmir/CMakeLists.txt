@@ -103,6 +103,7 @@ loom_cc_library(
     loom::ops::low
     loom::target::arch::llvmir::descriptors::descriptors_ids
     loom::target::arch::llvmir::facts
+    loom::target::function_version
     loom::target::launch
     loom::target::low_descriptor_registry
     loom::target::registers
@@ -329,18 +330,25 @@ loom_cc_test(
   SRCS
     "module_emitter_test.cc"
   DEPS
+    ::artifact_emitter
     ::core
     ::module_emitter
     ::target_presets
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::symbol_facts
     loom::codegen::low::text_asm
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
+    loom::ops::func_symbol_facts
+    loom::ops::op_defs
     loom::ops::op_registry
+    loom::ops::target
     loom::target::arch::llvmir::descriptors::low_registry
+    loom::target::function_contract
+    loom::target::function_version
     loom::testing::diagnostic_matchers
     loom::testing::module_ptr
     loom::util::stream

@@ -199,6 +199,8 @@ typedef struct loom_llvmir_emit_module_state_t {
   iree_diagnostic_emitter_t diagnostic_emitter;
   // Case/module scratch arena.
   iree_arena_allocator_t* scratch_arena;
+  // Function versions observed against the immutable module symbol table.
+  loom_target_function_version_snapshot_t function_versions;
   // Optional registry of linked target profiles for kernel projection.
   const loom_llvmir_target_profile_registry_t* target_profile_registry;
   // Cached symbol facts shared by target resolution for every function.
@@ -3779,11 +3781,18 @@ static iree_status_t loom_llvmir_emit_low_function_into_module(
                             "definition");
   }
 
+  const loom_func_like_t function =
+      loom_func_like_cast(module_state->module, low_function_op);
+  const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
+  const loom_target_function_version_t* function_version =
+      loom_target_function_version_snapshot_at(&module_state->function_versions,
+                                               function_ref.symbol_id);
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       module_state->module, &module_state->symbol_facts, low_function_op,
-      /*effective_target_facts=*/NULL, module_state->descriptor_registry,
-      module_state->diagnostic_emitter, &target));
+      function_version ? function_version->effective_target_facts : NULL,
+      module_state->descriptor_registry, module_state->diagnostic_emitter,
+      &target));
   if (target.descriptor_set == NULL) {
     ++module_state->error_count;
     return iree_ok_status();
@@ -3884,6 +3893,9 @@ iree_status_t loom_llvmir_emit_low_module(
           options ? options->target_profile_registry : NULL,
   };
   loom_symbol_fact_table_initialize(&state.symbol_facts, scratch_arena);
+  IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
+      module, options ? options->function_versions : NULL, scratch_arena,
+      &state.function_versions));
 
   iree_status_t status = iree_ok_status();
   loom_op_t* op = NULL;
