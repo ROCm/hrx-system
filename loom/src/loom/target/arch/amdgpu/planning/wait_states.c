@@ -809,11 +809,17 @@ static iree_status_t loom_amdgpu_wait_state_read_dst_sel_immediate(
 }
 
 static iree_status_t
-loom_amdgpu_wait_state_packet_has_dst_sel_forwarding_hazard(
+loom_amdgpu_wait_state_packet_has_destination_selection_forwarding_hazard(
     const loom_amdgpu_wait_state_builder_t* builder,
     const loom_low_packet_view_t* packet,
     loom_amdgpu_descriptor_traits_t descriptor_traits, bool* out_has_hazard) {
   *out_has_hazard = false;
+  if (iree_any_bit_set(
+          descriptor_traits,
+          LOOM_AMDGPU_DESCRIPTOR_TRAIT_DESTINATION_SELECTION_FORWARDING)) {
+    *out_has_hazard = true;
+    return iree_ok_status();
+  }
   if (!iree_any_bit_set(descriptor_traits, LOOM_AMDGPU_DESCRIPTOR_TRAIT_SDWA)) {
     return iree_ok_status();
   }
@@ -2051,10 +2057,11 @@ static iree_status_t loom_amdgpu_wait_state_packet_analyze(
   }
 
   if (loom_amdgpu_wait_state_has_scheduling(
-          builder, LOOM_AMDGPU_PROCESSOR_SCHEDULING_SDWA_DST_SEL_WAIT_STATES)) {
+          builder,
+          LOOM_AMDGPU_PROCESSOR_SCHEDULING_DESTINATION_SELECTION_WAIT_STATES)) {
     bool has_forwarding_hazard = false;
     IREE_RETURN_IF_ERROR(
-        loom_amdgpu_wait_state_packet_has_dst_sel_forwarding_hazard(
+        loom_amdgpu_wait_state_packet_has_destination_selection_forwarding_hazard(
             builder, packet, descriptor_traits, &has_forwarding_hazard));
     if (has_forwarding_hazard) {
       out_info->flags |=

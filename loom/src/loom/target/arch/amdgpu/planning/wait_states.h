@@ -10,9 +10,10 @@
 // packets need fixed scalar no-op cycles both after matrix results before
 // ordinary VGPR consumers and after legacy VALU writes before matrix source,
 // DPP, or fixed-lane VGPR-to-SGPR reads. GFX940-family transcendental VALU
-// results and sub-DWORD SDWA destination writes also need fixed waits before
-// dependent VALU consumers, and nearby VALU or VMEM reads of VALU-written SGPRs
-// need fixed waits because the hardware does not interlock those dependencies.
+// results and destination-selected sub-DWORD writes also need fixed waits
+// before dependent VALU consumers, and nearby VALU or VMEM reads of
+// VALU-written SGPRs need fixed waits because the hardware does not interlock
+// those dependencies.
 // RDNA3+ processors can use `s_delay_alu` for short ALU dependency windows.
 // This table records target-owned insertion points after scheduling and
 // allocation, where physical register identity is known.

@@ -184,6 +184,13 @@ _XCNT_IMPLICIT_DRAIN_DESCRIPTOR_KEY_PREFIXES = (
 )
 
 _DST_SEL_ENCODING_FIELD_ID = AMDGPU_ENCODING_FIELD_IDS["DST_SEL"]
+_DESTINATION_OP_SEL_ENCODING_FIELD_IDS = frozenset(
+    (
+        AMDGPU_ENCODING_FIELD_IDS["OPSEL"],
+        AMDGPU_ENCODING_FIELD_IDS["OP_SEL"],
+    )
+)
+_DESTINATION_OP_SEL_MASK = 1 << 3
 _LITERAL_ENCODING_FIELD_ID = AMDGPU_ENCODING_FIELD_IDS["LITERAL"]
 _REL32_SYMBOL_IMMEDIATE_SLOT = 0
 _REL32_BYTE_OFFSET_IMMEDIATE_SLOT = 1
@@ -481,6 +488,8 @@ def _descriptor_trait_names(
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ISSUE")
     if matrix_coexecution_sources:
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX_COEXECUTION_SOURCE")
+    if uses_vector_alu and any(field.encoding_field_id in _DESTINATION_OP_SEL_ENCODING_FIELD_IDS and field.value & _DESTINATION_OP_SEL_MASK for field in descriptor.encoding_field_values):
+        trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_DESTINATION_SELECTION_FORWARDING")
     return tuple(trait_names)
 
 
