@@ -35,13 +35,16 @@ iree_status_t loom_target_function_version_snapshot_build(
   }
 
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, module->symbols.count, sizeof(*out_snapshot->values_by_symbol),
-      (void**)&out_snapshot->values_by_symbol));
-  memset(out_snapshot->values_by_symbol, 0,
-         module->symbols.count * sizeof(*out_snapshot->values_by_symbol));
+      arena, module->symbols.count,
+      sizeof(*out_snapshot->version_handles_by_symbol),
+      (void**)&out_snapshot->version_handles_by_symbol));
+  memset(
+      out_snapshot->version_handles_by_symbol, 0,
+      module->symbols.count * sizeof(*out_snapshot->version_handles_by_symbol));
   for (iree_host_size_t i = 0; i < function_versions->count; ++i) {
+    loom_function_version_t* version_handle = function_versions->values[i];
     const loom_target_function_version_t* function_version =
-        loom_target_function_version_const_cast(function_versions->values[i]);
+        loom_target_function_version_const_cast(version_handle);
     if (function_version == NULL) continue;
     IREE_ASSERT(function_version->effective_target_facts != NULL);
     const loom_symbol_ref_t function_ref =
@@ -51,8 +54,11 @@ iree_status_t loom_target_function_version_snapshot_build(
     IREE_ASSERT(function_ref.symbol_id < module->symbols.count);
     IREE_ASSERT(module->symbols.entries[function_ref.symbol_id].defining_op ==
                 function_version->base.function.op);
-    IREE_ASSERT(out_snapshot->values_by_symbol[function_ref.symbol_id] == NULL);
-    out_snapshot->values_by_symbol[function_ref.symbol_id] = function_version;
+    IREE_ASSERT(
+        out_snapshot->version_handles_by_symbol[function_ref.symbol_id] ==
+        NULL);
+    out_snapshot->version_handles_by_symbol[function_ref.symbol_id] =
+        version_handle;
   }
   return iree_ok_status();
 }

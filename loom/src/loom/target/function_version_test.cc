@@ -126,7 +126,13 @@ test.func @second() {
   EXPECT_EQ(loom_target_function_version_snapshot_at(
                 &snapshot, FindSymbol(module.get(), IREE_SV("first"))),
             &first_version);
+  EXPECT_EQ(loom_target_function_version_snapshot_handle_at(
+                &snapshot, FindSymbol(module.get(), IREE_SV("first"))),
+            &first_version.base);
   EXPECT_EQ(loom_target_function_version_snapshot_at(
+                &snapshot, FindSymbol(module.get(), IREE_SV("unversioned"))),
+            nullptr);
+  EXPECT_EQ(loom_target_function_version_snapshot_handle_at(
                 &snapshot, FindSymbol(module.get(), IREE_SV("unversioned"))),
             nullptr);
   EXPECT_EQ(

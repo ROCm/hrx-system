@@ -64,10 +64,11 @@ loom_target_function_version_t* loom_target_function_version_list_find(
 // Compiler version objects remain the semantic identity; this transient vector
 // only reconciles them with one mutable module observation boundary.
 typedef struct loom_target_function_version_snapshot_t {
-  // Arena-owned pointer vector borrowing versions by module symbol ID.
-  const loom_target_function_version_t** values_by_symbol;
+  // Arena-owned pointer vector borrowing stable version handles by module
+  // symbol ID.
+  loom_function_version_t** version_handles_by_symbol;
 
-  // Number of module symbols represented by |values_by_symbol|.
+  // Number of module symbols represented by |version_handles_by_symbol|.
   iree_host_size_t symbol_count;
 } loom_target_function_version_snapshot_t;
 
@@ -83,15 +84,27 @@ iree_status_t loom_target_function_version_snapshot_build(
     iree_arena_allocator_t* arena,
     loom_target_function_version_snapshot_t* out_snapshot);
 
-// Returns the target-refined version observed at |symbol_id|, or NULL.
+// Returns the stable generic version handle observed at |symbol_id|, or NULL.
+//
+// The handle may be transferred to a replacement function after the snapshot
+// is no longer used. Target-family facts remain immutable.
+static inline loom_function_version_t*
+loom_target_function_version_snapshot_handle_at(
+    const loom_target_function_version_snapshot_t* snapshot,
+    loom_symbol_id_t symbol_id) {
+  IREE_ASSERT_LT(symbol_id, snapshot->symbol_count);
+  return snapshot->version_handles_by_symbol != NULL
+             ? snapshot->version_handles_by_symbol[symbol_id]
+             : NULL;
+}
+
+// Returns an immutable target-refined view observed at |symbol_id|, or NULL.
 static inline const loom_target_function_version_t*
 loom_target_function_version_snapshot_at(
     const loom_target_function_version_snapshot_t* snapshot,
     loom_symbol_id_t symbol_id) {
-  IREE_ASSERT_LT(symbol_id, snapshot->symbol_count);
-  return snapshot->values_by_symbol != NULL
-             ? snapshot->values_by_symbol[symbol_id]
-             : NULL;
+  return loom_target_function_version_const_cast(
+      loom_target_function_version_snapshot_handle_at(snapshot, symbol_id));
 }
 
 #ifdef __cplusplus
