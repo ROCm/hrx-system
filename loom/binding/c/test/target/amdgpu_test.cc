@@ -195,7 +195,7 @@ ModulePtr CreatePreparedArithmeticModule(loomc_context_t* context,
   SourcePtr source = CreateTextSource("amdgpu_prepared_arithmetic.loom", R"(
 amdgpu.target<gfx11-generic> @gfx_target
 
-low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) @loom_kernel() {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx_target) workgroup_size(64, 1, 1) @loom_kernel() {
   %zero = low.const<amdgpu.v_mov_b32> {imm32 = 0} : reg<amdgpu.vgpr>
   %one = low.const<amdgpu.v_mov_b32> {imm32 = 1} : reg<amdgpu.vgpr>
   %sum = low.op<amdgpu.v_add_u32>(%zero, %one) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
