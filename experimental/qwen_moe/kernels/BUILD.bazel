@@ -19,6 +19,7 @@ exports_files([
     "ggml/quantize_q8_1_x4.loom",
     "qwen3_moe/attention_postprocess_f32_f16.loom",
     "qwen3_moe/attention_prepare_quantized.loom",
+    "qwen3_moe/attention_qkv_postprocess_fused.loom",
     "qwen3_moe/attention_qkv_quantized.loom",
     "qwen3_moe/dense_linear_quantized_f16_wmma.loom",
     "qwen3_moe/flash_attention_decode_f32_f16_wmma.loom",
@@ -391,6 +392,98 @@ iree_executable_test(
         "--sanitizer=access",
     ],
     data = [":attention_qkv_quantized_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+loom_link_module(
+    name = "attention_qkv_postprocess_fused_linked",
+    srcs = ["qwen3_moe/attention_qkv_postprocess_fused.loom"],
+    libraries = [
+        ":attention_postprocess_f32_f16_linked",
+        ":attention_qkv_quantized_linked",
+    ],
+)
+
+iree_executable_test(
+    name = "attention_qkv_postprocess_fused_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :attention_qkv_postprocess_fused_linked)",
+        "--benchmark=@qwen3_moe_attention_qkv_postprocess_fused_boundary_decode",
+        "--config=qwen3_moe.attention.head_size=128",
+        "--config=qwen3_moe.attention.key_value_size=512",
+        "--config=qwen3_moe.attention.query_size=4096",
+        "--config=qwen3_moe.attention.value_uses_q6=1",
+        "--config=qwen3_moe.dense_quantized.input_size=2048",
+        "--config=qwen3_moe.dense_quantized.output_accumulation=0",
+        "--config=qwen3_moe.dense_quantized.output_size=512",
+        "--config=qwen3_moe.model.hidden_size=2048",
+        "--config=qwen3_moe.model.rms_epsilon=0.000001",
+        "--dry-run",
+        "--output-format=jsonl",
+        "--sample-compilation=per_sample",
+    ],
+    data = [":attention_qkv_postprocess_fused_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "attention_qkv_postprocess_fused_q6_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :attention_qkv_postprocess_fused_linked)",
+        "--case=@qwen3_moe_attention_qkv_postprocess_fused_differential_case",
+        "--config=qwen3_moe.attention.head_size=128",
+        "--config=qwen3_moe.attention.key_value_size=512",
+        "--config=qwen3_moe.attention.query_size=4096",
+        "--config=qwen3_moe.attention.value_uses_q6=1",
+        "--config=qwen3_moe.dense_quantized.input_size=2048",
+        "--config=qwen3_moe.dense_quantized.output_accumulation=0",
+        "--config=qwen3_moe.dense_quantized.output_size=512",
+        "--config=qwen3_moe.model.hidden_size=2048",
+        "--config=qwen3_moe.model.rms_epsilon=0.000001",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":attention_qkv_postprocess_fused_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "attention_qkv_postprocess_fused_q4_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :attention_qkv_postprocess_fused_linked)",
+        "--case=@qwen3_moe_attention_qkv_postprocess_fused_differential_case",
+        "--config=qwen3_moe.attention.head_size=128",
+        "--config=qwen3_moe.attention.key_value_size=512",
+        "--config=qwen3_moe.attention.query_size=4096",
+        "--config=qwen3_moe.attention.value_uses_q6=0",
+        "--config=qwen3_moe.dense_quantized.input_size=2048",
+        "--config=qwen3_moe.dense_quantized.output_accumulation=0",
+        "--config=qwen3_moe.dense_quantized.output_size=512",
+        "--config=qwen3_moe.model.hidden_size=2048",
+        "--config=qwen3_moe.model.rms_epsilon=0.000001",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":attention_qkv_postprocess_fused_linked"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",
@@ -1689,6 +1782,9 @@ test_suite(
         ":attention_prepare_quantized_hal_test",
         ":attention_prepare_quantized_multistripe_hal_test",
         ":attention_prepare_quantized_plan_test",
+        ":attention_qkv_postprocess_fused_plan_test",
+        ":attention_qkv_postprocess_fused_q4_hal_test",
+        ":attention_qkv_postprocess_fused_q6_hal_test",
         ":attention_qkv_quantized_plan_test",
         ":attention_qkv_quantized_q4_hal_test",
         ":attention_qkv_quantized_q6_hal_test",
