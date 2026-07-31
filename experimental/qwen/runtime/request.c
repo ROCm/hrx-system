@@ -28,7 +28,7 @@ struct qwen_request_t {
   qwen_model_t* model;
   // Device-local request storage.
   iree_hal_buffer_t* storage_buffer;
-  // Host-visible result staging buffer.
+  // Host-visible authoritative result buffer.
   iree_hal_buffer_t* output_staging_buffer;
   // Persistent mapping of |output_staging_buffer|.
   iree_hal_buffer_mapping_t output_staging_mapping;
@@ -170,7 +170,8 @@ iree_status_t qwen_request_create(
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &request->timeline_semaphore);
 
   iree_hal_buffer_params_t staging_params = {
-      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
+      .usage = IREE_HAL_BUFFER_USAGE_DISPATCH_STORAGE |
+               IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
                IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT |
                IREE_HAL_BUFFER_USAGE_MAPPING_ACCESS_RANDOM,
       .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,

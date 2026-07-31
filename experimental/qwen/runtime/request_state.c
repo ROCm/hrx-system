@@ -87,9 +87,6 @@ iree_status_t qwen_request_storage_layout_calculate(
   IREE_RETURN_IF_ERROR(qwen_request_storage_append(token_ids_byte_length,
                                                    _Alignof(int32_t), &cursor,
                                                    &out_layout->token_ids));
-  IREE_RETURN_IF_ERROR(
-      qwen_request_storage_append(sizeof(int32_t), _Alignof(int32_t), &cursor,
-                                  &out_layout->selected_token));
   IREE_RETURN_IF_ERROR(qwen_request_storage_append(
       sizeof(qwen_request_control_t), _Alignof(qwen_request_control_t), &cursor,
       &out_layout->control));

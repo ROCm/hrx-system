@@ -493,6 +493,14 @@ static bool qwen_program_kind_is_full_model(qwen_program_kind_t kind) {
   return kind == QWEN_PROGRAM_KIND_PREFILL || kind == QWEN_PROGRAM_KIND_DECODE;
 }
 
+static iree_hal_command_category_t qwen_program_command_categories(
+    qwen_program_kind_t kind) {
+  return qwen_program_kind_is_full_model(kind)
+             ? IREE_HAL_COMMAND_CATEGORY_DISPATCH
+             : IREE_HAL_COMMAND_CATEGORY_DISPATCH |
+                   IREE_HAL_COMMAND_CATEGORY_TRANSFER;
+}
+
 static iree_status_t qwen_program_prepare_layer_executables(
     qwen_program_t* program) {
   const int64_t token_count = (int64_t)program->token_count;
@@ -1015,6 +1023,12 @@ static iree_hal_buffer_ref_t qwen_program_request_ref(
     qwen_request_span_t span) {
   return iree_hal_make_indirect_buffer_ref(QWEN_PROGRAM_BINDING_REQUEST_STATE,
                                            span.offset, span.length);
+}
+
+static iree_hal_buffer_ref_t qwen_program_output_staging_ref(
+    iree_device_size_t length) {
+  return iree_hal_make_indirect_buffer_ref(QWEN_PROGRAM_BINDING_OUTPUT_STAGING,
+                                           /*offset=*/0, length);
 }
 
 static iree_status_t qwen_program_record_dispatch(
@@ -1746,7 +1760,7 @@ static iree_status_t qwen_program_record_full_model_endpoint(
 
   const iree_hal_buffer_ref_t argmax_bindings[] = {
       qwen_program_transient_ref(transient->vocabulary_logits),
-      qwen_program_request_ref(request_layout->selected_token),
+      qwen_program_output_staging_ref(sizeof(int32_t)),
   };
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_dispatch(
@@ -1776,27 +1790,6 @@ static iree_status_t qwen_program_record_hidden_state_copy(
       iree_hal_make_indirect_buffer_ref(QWEN_PROGRAM_BINDING_OUTPUT_STAGING,
                                         /*offset=*/0,
                                         active_hidden_state.length),
-      IREE_HAL_COPY_FLAG_NONE);
-}
-
-static iree_status_t qwen_program_record_selected_token_copy(
-    qwen_program_t* program,
-    const qwen_request_storage_layout_t* request_layout) {
-  const iree_hal_memory_barrier_t output_memory_barrier = {
-      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
-      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
-  };
-  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_execution_barrier(
-      program->command_buffer, IREE_HAL_EXECUTION_STAGE_DISPATCH,
-      IREE_HAL_EXECUTION_STAGE_TRANSFER, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
-      /*memory_barrier_count=*/1, &output_memory_barrier,
-      /*buffer_barrier_count=*/0, /*buffer_barriers=*/NULL));
-  return iree_hal_command_buffer_copy_buffer(
-      program->command_buffer,
-      qwen_program_request_ref(request_layout->selected_token),
-      iree_hal_make_indirect_buffer_ref(QWEN_PROGRAM_BINDING_OUTPUT_STAGING,
-                                        /*offset=*/0,
-                                        request_layout->selected_token.length),
       IREE_HAL_COPY_FLAG_NONE);
 }
 
@@ -1860,9 +1853,6 @@ static iree_status_t qwen_program_record_full_model(qwen_program_t* program) {
   }
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_full_model_endpoint(program, &request_layout);
-  }
-  if (iree_status_is_ok(status)) {
-    status = qwen_program_record_selected_token_copy(program, &request_layout);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_end(program->command_buffer);
@@ -2034,8 +2024,9 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_create(
         qwen_model_device(model), options->command_buffer_mode,
-        IREE_HAL_COMMAND_CATEGORY_ANY, qwen_model_queue_affinity(model),
-        QWEN_PROGRAM_BINDING_COUNT, &program->command_buffer);
+        qwen_program_command_categories(options->kind),
+        qwen_model_queue_affinity(model), QWEN_PROGRAM_BINDING_COUNT,
+        &program->command_buffer);
   }
   if (iree_status_is_ok(status)) {
     status = qwen_program_kind_is_full_model(options->kind)

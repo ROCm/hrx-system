@@ -18,10 +18,10 @@ extern "C" {
 
 // Mutable request-local Qwen execution state.
 //
-// A request owns token IDs, hidden states, all layer K/V caches, the selected
-// token, control data, and host-visible result staging. Request operations form
-// one internal timeline; callers may add dependencies and observe completion
-// with their own timeline. Requests are thread-compatible: callers externally
+// A request owns token IDs, hidden states, all layer K/V caches, control data,
+// and authoritative host-visible result storage. Request operations form one
+// internal timeline; callers may add dependencies and observe completion with
+// their own timeline. Requests are thread-compatible: callers externally
 // synchronize reset, issue, and read operations on the same request or use
 // distinct request objects.
 typedef struct qwen_request_t qwen_request_t;
@@ -97,8 +97,8 @@ IREE_API_EXPORT iree_status_t qwen_request_read_hidden_state(
 // Reads the token selected by a completed full-model program.
 //
 // The caller must first observe the signal from qwen_program_issue. This
-// invalidates the four-byte host staging span when required by the HAL memory
-// type and copies the authoritative I32 token into |out_token_id|.
+// invalidates the authoritative four-byte host-visible span when required by
+// the HAL memory type and copies its I32 token into |out_token_id|.
 IREE_API_EXPORT iree_status_t qwen_request_read_selected_token(
     qwen_request_t* request, iree_tokenizer_token_id_t* out_token_id);
 

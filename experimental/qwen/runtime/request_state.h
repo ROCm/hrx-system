@@ -55,8 +55,6 @@ typedef struct qwen_request_storage_layout_t {
   qwen_request_span_t hidden_state;
   // Validated I32 token IDs consumed by the embedding producer.
   qwen_request_span_t token_ids;
-  // Authoritative I32 token selected by the latest full-model issue.
-  qwen_request_span_t selected_token;
   // Compact control record uploaded by request reset.
   qwen_request_span_t control;
   // Device-derived I32 logical position for each physical token.
@@ -97,7 +95,7 @@ qwen_model_t* qwen_request_model(const qwen_request_t* request);
 // Returns request-local device storage.
 iree_hal_buffer_t* qwen_request_storage_buffer(const qwen_request_t* request);
 
-// Returns persistently mapped layer-output staging storage.
+// Returns the persistently mapped authoritative result storage.
 iree_hal_buffer_t* qwen_request_output_staging_buffer(
     const qwen_request_t* request);
 
