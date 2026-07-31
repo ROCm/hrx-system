@@ -10,6 +10,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -538,6 +539,32 @@ class CliTest(unittest.TestCase):
             bazel_dev.REPO_ROOT / "loom/binding/c/include/loomc/context.h",
         )
         self.assertIsNone(bazel_dev.header_path_for_include("stdio.h"))
+
+    def test_bazel_try_finds_exported_header_owner_in_subpackage(self):
+        direct_query = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        recursive_query = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="//loom/binding/c/target/amdgpu:amdgpu\n",
+            stderr="",
+        )
+        with mock.patch.object(
+            bazel_dev,
+            "run_captured",
+            side_effect=(direct_query, recursive_query),
+        ) as run_captured:
+            dep = bazel_dev.infer_dep_for_header(
+                "bazel", "loomc/target/amdgpu.h", env=None
+            )
+
+        self.assertEqual(dep, "//loom/binding/c/target/amdgpu:amdgpu")
+        self.assertEqual(run_captured.call_count, 2)
+        direct_expression = run_captured.call_args_list[0].args[0][2]
+        recursive_expression = run_captured.call_args_list[1].args[0][2]
+        self.assertIn("//loom/binding/c:*", direct_expression)
+        self.assertIn("//loom/binding/c/...", recursive_expression)
 
     def test_bazel_fuzz_builds_with_fuzzer_config_before_running_binary(self):
         args = cli.parse_arguments(

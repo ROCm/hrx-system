@@ -978,17 +978,40 @@ def infer_dep_for_header_path(
         return None
     package_label = "//" + package_dir.relative_to(REPO_ROOT).as_posix()
     header_label_path = re.escape(header_path.relative_to(package_dir).as_posix())
+    labels = query_rules_with_header(
+        bazel,
+        header_label_path=header_label_path,
+        target_pattern=f"{package_label}:*",
+        env=env,
+    )
+    if not labels:
+        labels = query_rules_with_header(
+            bazel,
+            header_label_path=header_label_path,
+            target_pattern=f"{package_label}/...",
+            env=env,
+        )
+    if labels:
+        return labels[0]
+    return fallback_dep_for_header_dir(package_dir)
+
+
+def query_rules_with_header(
+    bazel: str,
+    *,
+    header_label_path: str,
+    target_pattern: str,
+    env: dict[str, str] | None,
+) -> list[str]:
     query_expression = (
-        f'kind(".* rule", attr("hdrs", "{header_label_path}", {package_label}:*))'
+        f'kind(".* rule", attr("hdrs", "{header_label_path}", {target_pattern}))'
     )
     completed = run_captured([bazel, "query", query_expression], cwd=REPO_ROOT, env=env)
     if completed.returncode == 0:
-        labels = sorted(
+        return sorted(
             line.strip() for line in completed.stdout.splitlines() if line.strip()
         )
-        if labels:
-            return labels[0]
-    return fallback_dep_for_header_dir(package_dir)
+    return []
 
 
 def nearest_package_dir(path: Path) -> Path | None:
