@@ -16,6 +16,7 @@
 #include "iree/base/api.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
+#include "loom/ir/function_version.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
@@ -93,6 +94,11 @@ typedef struct loom_low_verify_options_t {
   // target-owned static data; IR verification only uses it to resolve selected
   // descriptor sets and packet semantics.
   const loom_low_descriptor_registry_t* descriptor_registry;
+  // Optional compiler-owned function versions carrying effective target facts.
+  // The list and its entries are borrowed for the duration of verification and
+  // must describe the current module symbol table. NULL resolves only authored
+  // target witnesses.
+  const loom_function_version_list_t* function_versions;
   // Structured diagnostic emitter for user IR failures.
   iree_diagnostic_emitter_t emitter;
   // Optional target-owned low verification providers.

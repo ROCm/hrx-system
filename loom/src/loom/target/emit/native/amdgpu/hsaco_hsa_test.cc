@@ -799,16 +799,13 @@ class LowKernelEmitter {
           "AMDGPU HSA low kernel failed HAL ABI verification");
     }
 
-    loom_low_verify_options_t verify_options = {
-        /*.descriptor_registry=*/&target_registry_.registry,
-        /*.emitter=*/
-        {
-            /*.fn=*/PrintLowVerifyDiagnostic,
-            /*.user_data=*/nullptr,
-        },
-        /*.provider_list=*/{},
-        /*.max_errors=*/20,
+    loom_low_verify_options_t verify_options = {};
+    verify_options.descriptor_registry = &target_registry_.registry;
+    verify_options.emitter = {
+        /*.fn=*/PrintLowVerifyDiagnostic,
+        /*.user_data=*/nullptr,
     };
+    verify_options.max_errors = 20;
     loom_low_verify_result_t verify_result = {};
     loom_low_verify_scratch_t verify_scratch =
         loom_low_verify_scratch_for_module(module_);

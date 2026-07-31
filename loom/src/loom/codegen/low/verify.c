@@ -16,6 +16,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/function_version.h"
 #include "loom/target/registers.h"
 #include "loom/util/walk.h"
 
@@ -30,6 +31,8 @@ typedef struct loom_low_verify_state_t {
   iree_arena_allocator_t arena;
   iree_arena_allocator_t walk_arena;
   loom_symbol_fact_table_t symbol_facts;
+  // Version handles densely indexed by the observed module symbol table.
+  loom_target_function_version_snapshot_t function_version_snapshot;
   // Per-provider state retained for the full module verification run.
   void** provider_module_states;
 } loom_low_verify_state_t;
@@ -200,6 +203,24 @@ static loom_region_t* loom_low_verify_function_body(
     return loom_low_kernel_def_body(low_func_op);
   }
   return NULL;
+}
+
+static const loom_target_facts_t*
+loom_low_verify_function_effective_target_facts(
+    const loom_low_verify_state_t* state, const loom_op_t* low_func_op) {
+  const loom_func_like_t function =
+      loom_func_like_cast(state->module, (loom_op_t*)low_func_op);
+  if (!loom_func_like_isa(function)) {
+    return NULL;
+  }
+  const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
+  if (!loom_symbol_ref_is_valid(function_ref) || function_ref.module_id != 0 ||
+      function_ref.symbol_id >= state->function_version_snapshot.symbol_count) {
+    return NULL;
+  }
+  return loom_target_function_version_effective_facts(
+      loom_target_function_version_snapshot_handle_at(
+          &state->function_version_snapshot, function_ref.symbol_id));
 }
 
 static iree_string_view_t loom_low_verify_string_or_empty(
@@ -1950,8 +1971,8 @@ static iree_status_t loom_low_verify_function(loom_low_verify_state_t* state,
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
       state->module, &state->symbol_facts, low_func_op,
-      /*effective_target_facts=*/NULL, state->registry, counting_emitter,
-      &target));
+      loom_low_verify_function_effective_target_facts(state, low_func_op),
+      state->registry, counting_emitter, &target));
   loom_region_t* body = loom_low_verify_function_body(low_func_op);
   if (target.descriptor_set == NULL || loom_low_verify_should_stop(state)) {
     return iree_ok_status();
@@ -2023,7 +2044,12 @@ iree_status_t loom_low_verify_module(const loom_module_t* module,
   loom_value_u32_scratch_acquire_zeroed(scratch->value_scratch,
                                         module->values.count);
 
-  iree_status_t status = loom_low_verify_begin_module_providers(&state);
+  iree_status_t status = loom_target_function_version_snapshot_build(
+      module, options->function_versions, &state.arena,
+      &state.function_version_snapshot);
+  if (iree_status_is_ok(status)) {
+    status = loom_low_verify_begin_module_providers(&state);
+  }
   if (iree_status_is_ok(status) && module->body &&
       module->body->block_count > 0) {
     loom_block_t* entry_block = loom_region_entry_block(module->body);

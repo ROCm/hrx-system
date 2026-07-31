@@ -242,12 +242,10 @@ class AmdgpuSanitizerAccessTest : public ::testing::Test {
   }
 
   void VerifyLowModuleOk() {
-    loom_low_verify_options_t options = {
-        /*.descriptor_registry=*/&low_registry_.registry,
-        /*.emitter=*/{EmitDiagnosticToStderr, NULL},
-        /*.provider_list=*/{},
-        /*.max_errors=*/20,
-    };
+    loom_low_verify_options_t options = {};
+    options.descriptor_registry = &low_registry_.registry;
+    options.emitter = {EmitDiagnosticToStderr, NULL};
+    options.max_errors = 20;
     loom_low_verify_scratch_t scratch =
         loom_low_verify_scratch_for_module(module_);
     loom_low_verify_result_t result = {};

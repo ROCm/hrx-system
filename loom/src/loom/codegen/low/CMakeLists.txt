@@ -797,6 +797,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::low
+    loom::target::function_version
     loom::target::registers
     loom::util::walk
   PUBLIC
@@ -813,13 +814,17 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::symbol_facts
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
     loom::ops::func
+    loom::ops::func_symbol_facts
     loom::ops::low
     loom::ops::target
     loom::ops::test
+    loom::target::function_contract
+    loom::target::function_version
     loom::target::test::low_registry
     loom::testing::diagnostic_matchers
     loom::testing::module_ptr
