@@ -1,7 +1,7 @@
 // RUN: verify
 
 amdgpu.target<gfx1100> @gfx11_target
-low.kernel.def target(@gfx11_target) workgroup_size(64, 1, 1) @gfx11_wmma_zero_hal_kernel() {
+low.kernel.def target<amdgpu.rdna3.core>(@gfx11_target) workgroup_size(64, 1, 1) @gfx11_wmma_zero_hal_kernel() {
   %output = low.resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %zero = low.const<amdgpu.v_mov_b32> {imm32 = 0} : reg<amdgpu.vgpr>
   %a = low.concat(%zero, %zero, %zero, %zero) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>

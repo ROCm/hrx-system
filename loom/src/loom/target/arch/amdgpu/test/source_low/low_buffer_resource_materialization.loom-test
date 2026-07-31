@@ -2,7 +2,7 @@
 
 amdgpu.target<gfx942> @target
 
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @legacy_record(%binding: reg<amdgpu.sgpr x2>) {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @legacy_record(%binding: reg<amdgpu.sgpr x2>) {
   %descriptor = low.op<amdgpu.hal.buffer_descriptor>(%binding) {cache_swizzle_stride = 0, extent = 16} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x4>
   low.return
 }
@@ -10,7 +10,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @legacy_record(%binding:
 // ----
 amdgpu.target<gfx942> @target
 
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @legacy_record(%binding: reg<amdgpu.sgpr x2>) {
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @legacy_record(%binding: reg<amdgpu.sgpr x2>) {
   %2 = low.slice %binding[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %3 = low.slice %binding[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %4 = low.const<amdgpu.s_mov_b32> {imm32 = 65535} : reg<amdgpu.sgpr>
@@ -26,7 +26,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @legacy_record(%binding:
 
 amdgpu.target<gfx1100> @target
 
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @unified_record(%binding: reg<amdgpu.sgpr x2>) {
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @unified_record(%binding: reg<amdgpu.sgpr x2>) {
   %descriptor = low.op<amdgpu.hal.buffer_descriptor>(%binding) {cache_swizzle_stride = 0, extent = 16} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x4>
   low.return
 }
@@ -34,7 +34,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @unified_record(%binding
 // ----
 amdgpu.target<gfx1100> @target
 
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @unified_record(%binding: reg<amdgpu.sgpr x2>) {
+low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @unified_record(%binding: reg<amdgpu.sgpr x2>) {
   %2 = low.slice %binding[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %3 = low.slice %binding[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %4 = low.const<amdgpu.s_mov_b32> {imm32 = 65535} : reg<amdgpu.sgpr>
@@ -50,7 +50,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @unified_record(%binding
 
 amdgpu.target<gfx1250> @target
 
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @extended_static_record(%binding: reg<amdgpu.sgpr x2>) {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) @extended_static_record(%binding: reg<amdgpu.sgpr x2>) {
   %descriptor = low.op<amdgpu.hal.buffer_descriptor>(%binding) {cache_swizzle_stride = 0, extent = 291} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x4>
   low.return
 }
@@ -58,7 +58,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @extended_static_record(
 // ----
 amdgpu.target<gfx1250> @target
 
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @extended_static_record(%binding: reg<amdgpu.sgpr x2>) {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) @extended_static_record(%binding: reg<amdgpu.sgpr x2>) {
   %2 = low.slice %binding[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %3 = low.slice %binding[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %4 = low.const<amdgpu.s_mov_b32> {imm32 = 2} : reg<amdgpu.sgpr>
@@ -74,7 +74,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @extended_static_record(
 
 amdgpu.target<gfx1250> @target
 
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @extended_dynamic_record(%binding: reg<amdgpu.sgpr x2>, %extent: reg<amdgpu.sgpr>) {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) @extended_dynamic_record(%binding: reg<amdgpu.sgpr x2>, %extent: reg<amdgpu.sgpr>) {
   %descriptor = low.op<amdgpu.hal.buffer_descriptor.extent>(%binding, %extent) {cache_swizzle_stride = 0} : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   low.return
 }
@@ -82,7 +82,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @extended_dynamic_record
 // ----
 amdgpu.target<gfx1250> @target
 
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @extended_dynamic_record(%binding: reg<amdgpu.sgpr x2>, %extent: reg<amdgpu.sgpr>) {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) @extended_dynamic_record(%binding: reg<amdgpu.sgpr x2>, %extent: reg<amdgpu.sgpr>) {
   %3 = low.slice %binding[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %4 = low.slice %binding[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %5 = low.op<amdgpu.s_lshl_b32.rhs_inline>(%extent) {imm32 = 25} : (reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr>
@@ -98,7 +98,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @extended_dynamic_record
 
 amdgpu.target<gfx950> @target
 
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @cache_swizzled_record(%binding: reg<amdgpu.sgpr x2>) {
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) @cache_swizzled_record(%binding: reg<amdgpu.sgpr x2>) {
   %descriptor = low.op<amdgpu.hal.buffer_descriptor>(%binding) {cache_swizzle_stride = 14, extent = 16} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x4>
   low.return
 }
@@ -106,7 +106,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @cache_swizzled_record(%
 // ----
 amdgpu.target<gfx950> @target
 
-low.kernel.def target(@target) workgroup_size(64, 1, 1) @cache_swizzled_record(%binding: reg<amdgpu.sgpr x2>) {
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) @cache_swizzled_record(%binding: reg<amdgpu.sgpr x2>) {
   %2 = low.slice %binding[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %3 = low.slice %binding[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %4 = low.const<amdgpu.s_mov_b32> {imm32 = 65535} : reg<amdgpu.sgpr>
@@ -124,7 +124,7 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) @cache_swizzled_record(%
 
 amdgpu.target<gfx12-5-generic> @target
 
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @generic_extended_record(%binding: reg<amdgpu.sgpr x2>) {
+low.kernel.def target<amdgpu.gfx12_5.generic.core>(@target) workgroup_size(32, 1, 1) @generic_extended_record(%binding: reg<amdgpu.sgpr x2>) {
   %descriptor = low.op<amdgpu.hal.buffer_descriptor>(%binding) {cache_swizzle_stride = 0, extent = 291} : (reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x4>
   low.return
 }
@@ -132,7 +132,7 @@ low.kernel.def target(@target) workgroup_size(32, 1, 1) @generic_extended_record
 // ----
 amdgpu.target<gfx12-5-generic> @target
 
-low.kernel.def target(@target) workgroup_size(32, 1, 1) @generic_extended_record(%binding: reg<amdgpu.sgpr x2>) {
+low.kernel.def target<amdgpu.gfx12_5.generic.core>(@target) workgroup_size(32, 1, 1) @generic_extended_record(%binding: reg<amdgpu.sgpr x2>) {
   %2 = low.slice %binding[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %3 = low.slice %binding[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %4 = low.const<amdgpu.s_mov_b32> {imm32 = 2} : reg<amdgpu.sgpr>
