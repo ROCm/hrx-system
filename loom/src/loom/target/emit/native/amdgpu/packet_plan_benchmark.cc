@@ -244,7 +244,7 @@ static std::string BuildMemoryControlSource() {
   return R"(
 amdgpu.target<gfx1250> @target
 
-low.kernel.def target(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) export("memory_control") workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @memory_control() {
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) export("memory_control") workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @memory_control() {
   %lane = low.live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = low.resource<hal_binding> {extent = 128, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %rhs_view = low.resource<hal_binding> {extent = 128, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
@@ -264,7 +264,7 @@ static std::string BuildMatrixSource(const FixtureSpec& spec) {
   source << R"(
 amdgpu.target<gfx1250> @target
 
-low.kernel.def target(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) export(")"
+low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) export(")"
          << spec.name
          << R"(") workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @)"
          << spec.name << R"(() {
