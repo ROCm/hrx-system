@@ -157,6 +157,10 @@ from loom.target.arch.amdgpu.encoding import (
     amdgpu_gfx125x_vgpr_msb_slot,
 )
 from loom.target.arch.amdgpu.isa_xml import AmdgpuIsaEncoding, AmdgpuIsaSpec
+from loom.target.arch.amdgpu.matrix_formats import (
+    AMDGPU_CDNA4_MATRIX_FORMAT_ENUM_DOMAIN_NAMES,
+    AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS,
+)
 from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
@@ -835,18 +839,48 @@ def test_gfx9_4_matrix_schedule_classes_match_member_timings() -> None:
             gfx950_timing.reciprocal_throughput_cycles,
         )
 
-    gfx950_overlays = {
-        overlay.descriptor_key: overlay for overlay in _gfx950_core_overlays()
-    }
-    for descriptor_key in (
-        "amdgpu.v_mfma_scale_f32_16x16x128_f8f6f4",
-        "amdgpu.v_mfma_scale_f32_32x32x64_f8f6f4",
-    ):
-        assert gfx950_overlays[descriptor_key].fixed_encoding_fields == (
-            ("ABID", 1),
-            ("ENCODING", 0x1A7),
-            ("X2ENCODING", 0xD3AC),
-        )
+
+def test_gfx950_f8f6f4_mfma_descriptors_model_physical_abis() -> None:
+    overlays = {overlay.descriptor_key: overlay for overlay in _gfx950_core_overlays()}
+    rows = (
+        ("v_mfma_f32_16x16x128_f8f6f4", 4, False),
+        ("v_mfma_f32_32x32x64_f8f6f4", 16, False),
+        ("v_mfma_scale_f32_16x16x128_f8f6f4", 4, True),
+        ("v_mfma_scale_f32_32x32x64_f8f6f4", 16, True),
+    )
+    for mnemonic, accumulator_units, has_scale_operands in rows:
+        for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS:
+            for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS:
+                key = f"amdgpu.{mnemonic}_{lhs_format.token}_{rhs_format.token}"
+                overlay = overlays[key]
+                assert tuple(
+                    operand.descriptor_operand.unit_count
+                    for operand in overlay.operands
+                ) == (
+                    accumulator_units,
+                    lhs_format.register_count_for(32),
+                    rhs_format.register_count_for(32),
+                    accumulator_units,
+                    *((1, 1) if has_scale_operands else ()),
+                )
+                assert overlay.immediate_fields == ("CBSZ", "BLGP")
+                assert tuple(
+                    immediate.enum_domain for immediate in overlay.immediates
+                ) == (
+                    AMDGPU_CDNA4_MATRIX_FORMAT_ENUM_DOMAIN_NAMES[lhs_format.token],
+                    AMDGPU_CDNA4_MATRIX_FORMAT_ENUM_DOMAIN_NAMES[rhs_format.token],
+                )
+                form = overlay.asm_forms[0]
+                assert form.native_assembly_mnemonic == mnemonic
+                assert tuple(
+                    value.literal for value in form.native_assembly_values[-2:]
+                ) == ("cbsz", "blgp")
+                if has_scale_operands:
+                    assert overlay.fixed_encoding_fields == (
+                        ("ABID", 1),
+                        ("ENCODING", 0x1A7),
+                        ("X2ENCODING", 0xD3AC),
+                    )
 
 
 def test_gfx11_wmma_separates_hardware_latency_from_schedule_distance() -> None:

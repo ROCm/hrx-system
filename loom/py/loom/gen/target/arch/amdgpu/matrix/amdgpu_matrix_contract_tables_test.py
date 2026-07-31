@@ -16,7 +16,9 @@ from loom.target.arch.amdgpu.matrix_contracts import (
     AmdgpuMatrixContract,
     payload,
 )
-from loom.target.arch.amdgpu.matrix_formats import GFX125X_MATRIX_PHYSICAL_FORMATS
+from loom.target.arch.amdgpu.matrix_formats import (
+    AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS,
+)
 from loom.target.arch.amdgpu.matrix_fragment_layouts import (
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
 )
@@ -167,8 +169,8 @@ def test_generation_resolves_gfx1250_supplemental_matrix_descriptors() -> None:
 
 def test_generation_resolves_every_gfx125x_selector_driven_wmma_abi() -> None:
     for scale_name in ("", "scale.", "scale16."):
-        for lhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
-            for rhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
+        for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS:
+            for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS:
                 name = f"wmma.{scale_name}f32.16x16x128.f8f6f4.{lhs_format.token}.{rhs_format.token}"
                 contract = _contract(name)
                 initializer = _contract_initializer(contract)
@@ -185,8 +187,27 @@ def test_generation_resolves_every_gfx125x_selector_driven_wmma_abi() -> None:
                 assert contract.rhs.element_count == 64
 
 
+def test_generation_resolves_every_cdna4_selector_driven_mfma_abi() -> None:
+    for scale_name in ("", "scale."):
+        for tile_shape in ("16x16x128", "32x32x64"):
+            for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS:
+                for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS:
+                    name = f"mfma.{scale_name}f32.{tile_shape}.f8f6f4.{lhs_format.token}.{rhs_format.token}"
+                    contract = _contract(name)
+                    initializer = _contract_initializer(contract)
+                    descriptor_suffix = name.removeprefix("mfma.").replace(".", "_").upper()
+
+                    assert (f".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_MFMA_{descriptor_suffix}") in initializer
+                    assert contract.lhs.numeric_type == (lhs_format.contract_numeric_type)
+                    assert contract.lhs.register_count == (lhs_format.register_count_for(32))
+                    assert contract.lhs.element_count == 32
+                    assert contract.rhs.numeric_type == (rhs_format.contract_numeric_type)
+                    assert contract.rhs.register_count == (rhs_format.register_count_for(32))
+                    assert contract.rhs.element_count == 32
+
+
 def test_generation_emits_gfx950_implicit_scale_format_masks() -> None:
-    initializer = _contract_initializer(_contract("mfma.scale.f32.16x16x128.f8f6f4"))
+    initializer = _contract_initializer(_contract("mfma.scale.f32.16x16x128.f8f6f4.f4.f4"))
 
     assert (".implicit_scale_format_selector_bits = (loom_amdgpu_matrix_scale_format_selector_bits_t)((1u << LOOM_AMDGPU_MATRIX_SCALE_FORMAT_SELECTOR_E8M0))") in initializer
 
@@ -479,7 +500,7 @@ def test_generation_rejects_selector_and_implicit_scale_format_overlap() -> None
 
 def test_generation_rejects_scaled_contract_without_scale_format_policy() -> None:
     contract = replace(
-        _contract("mfma.scale.f32.16x16x128.f8f6f4"),
+        _contract("mfma.scale.f32.16x16x128.f8f6f4.f4.f4"),
         implicit_scale_formats=(),
     )
 
@@ -487,7 +508,7 @@ def test_generation_rejects_scaled_contract_without_scale_format_policy() -> Non
         _contract_initializer(contract)
     except ValueError as exc:
         message = str(exc)
-        assert "AMDGPU matrix contract 'mfma.scale.f32.16x16x128.f8f6f4'" in message
+        assert "AMDGPU matrix contract 'mfma.scale.f32.16x16x128.f8f6f4.f4.f4'" in message
         assert "selector operands or implicit scale formats" in message
     else:
         raise AssertionError("expected scale format policy validation to fail")

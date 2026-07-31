@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from ..matrix_formats import GFX125X_MATRIX_PHYSICAL_FORMATS
+from ..matrix_formats import AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
 from .common import *
 from .control import *
 
@@ -27,7 +27,7 @@ _SCHEDULE_MATRIX_XDL_ESTIMATED_32 = f"{_SCHEDULE_MATRIX}.xdl.estimated.32"
 
 _GFX125X_MATRIX_FORMAT_ENUM_DOMAIN_NAMES = {
     physical_format.token: (f"amdgpu.gfx125x.matrix_format.{physical_format.token}")
-    for physical_format in GFX125X_MATRIX_PHYSICAL_FORMATS
+    for physical_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
 }
 _GFX125X_MATRIX_SCALE_FORMAT_ENUM_DOMAIN_NAME = "amdgpu.gfx125x.matrix_scale_format"
 _GFX125X_MATRIX_ENUM_DOMAINS = (
@@ -39,7 +39,7 @@ _GFX125X_MATRIX_ENUM_DOMAINS = (
                 for token, value in physical_format.selector_values
             ),
         )
-        for physical_format in GFX125X_MATRIX_PHYSICAL_FORMATS
+        for physical_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
     ),
     EnumDomain(
         _GFX125X_MATRIX_SCALE_FORMAT_ENUM_DOMAIN_NAME,
@@ -590,8 +590,8 @@ def _gfx125x_wmma_f8f6f4_descriptors() -> tuple[Descriptor, ...]:
             rhs_format.token,
             rhs_format.register_count_for(64),
         )
-        for lhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS
-        for rhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS
+        for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+        for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
     )
 
 
@@ -616,8 +616,8 @@ _GFX125X_WMMA_SCALE_ROW_GROUPS = (
                 ("scale", 0x35, 1),
                 ("scale16", 0x3A, 2),
             )
-            for lhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS
-            for rhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS
+            for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+            for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
         ),
     ),
     (

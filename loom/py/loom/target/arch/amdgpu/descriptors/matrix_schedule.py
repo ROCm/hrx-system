@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..matrix_formats import AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+
 
 @dataclass(frozen=True, slots=True)
 class _AmdgpuMatrixTiming:
@@ -17,6 +19,16 @@ class _AmdgpuMatrixTiming:
 
     latency_cycles: int
     reciprocal_throughput_cycles: int
+
+
+def _f8f6f4_physical_timing_rows(
+    descriptor_key_prefix: str, timing: _AmdgpuMatrixTiming
+) -> dict[str, _AmdgpuMatrixTiming]:
+    return {
+        f"{descriptor_key_prefix}_{lhs_format.token}_{rhs_format.token}": timing
+        for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+        for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS
+    }
 
 
 # These are the matrix operations that LLVM exposes on gfx9-4-generic. The
@@ -89,10 +101,22 @@ _AMDGPU_GFX950_MATRIX_TIMINGS = {
     "amdgpu.v_mfma_f32_32x32x16_bf16": _AmdgpuMatrixTiming(12, 8),
     "amdgpu.v_mfma_i32_16x16x64_i8": _AmdgpuMatrixTiming(8, 4),
     "amdgpu.v_mfma_i32_32x32x32_i8": _AmdgpuMatrixTiming(12, 8),
-    "amdgpu.v_mfma_f32_16x16x128_f8f6f4": _AmdgpuMatrixTiming(8, 4),
-    "amdgpu.v_mfma_f32_32x32x64_f8f6f4": _AmdgpuMatrixTiming(12, 8),
-    "amdgpu.v_mfma_scale_f32_16x16x128_f8f6f4": _AmdgpuMatrixTiming(8, 4),
-    "amdgpu.v_mfma_scale_f32_32x32x64_f8f6f4": _AmdgpuMatrixTiming(12, 8),
+    **_f8f6f4_physical_timing_rows(
+        "amdgpu.v_mfma_f32_16x16x128_f8f6f4",
+        _AmdgpuMatrixTiming(8, 4),
+    ),
+    **_f8f6f4_physical_timing_rows(
+        "amdgpu.v_mfma_f32_32x32x64_f8f6f4",
+        _AmdgpuMatrixTiming(12, 8),
+    ),
+    **_f8f6f4_physical_timing_rows(
+        "amdgpu.v_mfma_scale_f32_16x16x128_f8f6f4",
+        _AmdgpuMatrixTiming(8, 4),
+    ),
+    **_f8f6f4_physical_timing_rows(
+        "amdgpu.v_mfma_scale_f32_32x32x64_f8f6f4",
+        _AmdgpuMatrixTiming(12, 8),
+    ),
     "amdgpu.v_smfmac_f32_16x16x64_f16": _AmdgpuMatrixTiming(8, 4),
     "amdgpu.v_smfmac_f32_16x16x64_bf16": _AmdgpuMatrixTiming(8, 4),
     "amdgpu.v_smfmac_f32_16x16x128_bf8_bf8": _AmdgpuMatrixTiming(8, 4),

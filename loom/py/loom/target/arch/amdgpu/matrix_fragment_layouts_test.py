@@ -12,7 +12,9 @@ from dataclasses import replace
 
 import pytest
 
-from loom.target.arch.amdgpu.matrix_formats import GFX125X_MATRIX_PHYSICAL_FORMATS
+from loom.target.arch.amdgpu.matrix_formats import (
+    AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS,
+)
 from loom.target.arch.amdgpu.matrix_fragment_layouts import (
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS,
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
@@ -71,8 +73,8 @@ def test_rdna3_integer_wmma_layout_matches_instruction_coordinates(
 
 
 def test_gfx125x_selector_layouts_cover_every_physical_operand_abi() -> None:
-    for lhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
-        for rhs_format in GFX125X_MATRIX_PHYSICAL_FORMATS:
+    for lhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS:
+        for rhs_format in AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS:
             layout = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY[
                 f"gfx125x_wmma_f32_16x16x128_{lhs_format.token}_{rhs_format.token}"
             ]
