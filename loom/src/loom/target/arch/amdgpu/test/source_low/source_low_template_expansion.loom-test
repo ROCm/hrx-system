@@ -1,0 +1,89 @@
+// RUN: emit source-low output=low
+
+// Provider expansion must expose call-site constants before memory lowering.
+//
+// A reusable provider may carry optional behavior selected by a constant at
+// each application site. Here the optional output aliases the live output, but
+// its store is unreachable. If memory packet selection observes that dead
+// store, it scalarizes the authored vector loads and store. The default target
+// pipeline must instead retain the two 128-bit loads and one 128-bit store.
+amdgpu.target<gfx11-generic> @gfx11 {subgroup_size = 32}
+
+func.template<hip.recipe.vector_loop> device @vector_loop_provider(%publish_optional: i1, %input: buffer, %weight: buffer, %optional_output: buffer, %output: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %onezerotwofour = index.constant 1024 : index
+  %twentyfortyeight = index.constant 2048 : index
+  %zero_offset = index.constant 0 : offset
+  %zero_f32x4 = vector.constant 0.0 : vector<4xf32>
+  %workitem = kernel.workitem.id<x> : index
+  %word_element_add = index.mul %workitem, %four : index
+  %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
+  %input_view = buffer.view %input_noalias[%zero_offset] : buffer -> view<2048xf32, #dense>
+  %weight_view = buffer.view %weight_noalias[%zero_offset] : buffer -> view<2048xf32, #dense>
+  %optional_output_view = buffer.view %optional_output[%zero_offset] : buffer -> view<2048xf32, #dense>
+  %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<2048xf32, #dense>
+  scf.for %stripe_base = [%zero to %twentyfortyeight step %onezerotwofour] {
+    %channel = index.add %stripe_base, %word_element_add : index
+    %mask = vector.mask.range [%channel to %twentyfortyeight step %one] : index -> vector<4xi1>
+    %input_values = vector.load.mask %input_view[%channel], %mask, %zero_f32x4 : view<2048xf32, #dense>, vector<4xi1>, vector<4xf32>
+    %weight_values = vector.load.mask %weight_view[%channel], %mask, %zero_f32x4 : view<2048xf32, #dense>, vector<4xi1>, vector<4xf32>
+    %result = vector.mulf %input_values, %weight_values : vector<4xf32>
+    scf.if %publish_optional {
+      vector.store.mask %result, %optional_output_view[%channel], %mask : vector<4xf32>, view<2048xf32, #dense>, vector<4xi1>
+    }
+    vector.store.mask %result, %output_view[%channel], %mask : vector<4xf32>, view<2048xf32, #dense>, vector<4xi1>
+  }
+  func.return
+}
+
+kernel.def target(@gfx11) @template_constant_pruning_memory_width() {
+  %one = index.constant 1 : index
+  %twofiftysix = index.constant 256 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%twofiftysix, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %false = scalar.constant false : i1
+  %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
+  func.apply<hip.recipe.vector_loop>(%false, %input_noalias, %weight_noalias, %output_noalias, %output_noalias) : (i1, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+// ----
+low.kernel.def target(@gfx11) workgroup_size(256, 1, 1) workgroup_count(1, 1, 1) @template_constant_pruning_memory_width() asm<amdgpu.gfx11.generic.core> {
+  %workitem = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8192} : reg<amdgpu.sgpr x2>
+  %weight_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 8192} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 8192} : reg<amdgpu.sgpr x2>
+  %zero = s_mov_b32 0
+  %onezerotwofour = s_mov_b32 1024
+  %twentyfortyeight = s_mov_b32 2048
+  low.br ^_bb1(%zero: reg<amdgpu.sgpr>)
+^_bb1(%stripe_base: reg<amdgpu.sgpr>):
+  %51 = s_cmp_lt_i32 %stripe_base, %twentyfortyeight
+  low.cond_br %51, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %52 = v_mov_b32_copy %stripe_base
+  %53 = v_lshl_add_u32_shift_imm %workitem, %52, 2
+  %54 = v_lshlrev_b32_src0_inline %53, 2
+  %input_values = global_load_b128_saddr %54, %input_view
+  %weight_values = global_load_b128_saddr %54, %weight_view
+  %60 = slice %input_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %61 = slice %weight_values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %62 = v_mul_f32 %60, %61
+  %63 = slice %input_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %64 = slice %weight_values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %65 = v_mul_f32 %63, %64
+  %66 = slice %input_values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %67 = slice %weight_values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %68 = v_mul_f32 %66, %67
+  %69 = slice %input_values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %70 = slice %weight_values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %71 = v_mul_f32 %69, %70
+  %result = concat(%62, %65, %68, %71) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %54, %result, %output_view
+  %76 = s_add_u32 %stripe_base, %onezerotwofour
+  low.br ^_bb1(%76: reg<amdgpu.sgpr>)
+^_bb3:
+  return
+}

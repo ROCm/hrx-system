@@ -571,25 +571,43 @@ static iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
   IREE_ASSERT_GT(source_memory_access->dynamic_term_count, 0);
 
   if (loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
-          source_memory_access)) {
+          source_memory_access) &&
+      loom_low_lower_source_value_has_low_mapping(
+          context, source_memory_access->dynamic_view_base_value_id)) {
     return loom_low_lower_lookup_value(
         context, source_memory_access->dynamic_view_base_value_id,
         out_value_id);
   }
 
   loom_value_id_t accumulator = LOOM_VALUE_ID_INVALID;
-  for (uint8_t i = 0; i < source_memory_access->dynamic_term_count; ++i) {
+  uint8_t term_ordinal = 0;
+  uint8_t realization_ordinal = 0;
+  while (term_ordinal < source_memory_access->dynamic_term_count) {
+    const loom_low_source_memory_dynamic_term_t* term =
+        &source_memory_access->dynamic_terms[term_ordinal];
+    uint8_t consumed_term_count = 1;
+    if (realization_ordinal < source_memory_access->dynamic_realization_count &&
+        source_memory_access->dynamic_realizations[realization_ordinal]
+                .first_term == term_ordinal) {
+      const loom_low_source_memory_dynamic_realization_t* realization =
+          &source_memory_access->dynamic_realizations[realization_ordinal++];
+      if (loom_low_lower_source_value_has_low_mapping(
+              context, realization->term.index)) {
+        term = &realization->term;
+        consumed_term_count = realization->term_count;
+      }
+    }
     loom_value_id_t term_value = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_materialize_source_memory_term(
-        context, rule_set, source_op, source_memory,
-        &source_memory_access->dynamic_terms[i], &term_value));
+        context, rule_set, source_op, source_memory, term, &term_value));
     if (accumulator == LOOM_VALUE_ID_INVALID) {
       accumulator = term_value;
-      continue;
+    } else {
+      IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_i64_binary_op(
+          context, rule_set, source_memory->byte_offset_add_i64_descriptor_ref,
+          accumulator, term_value, source_op->location, &accumulator));
     }
-    IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_i64_binary_op(
-        context, rule_set, source_memory->byte_offset_add_i64_descriptor_ref,
-        accumulator, term_value, source_op->location, &accumulator));
+    term_ordinal = (uint8_t)(term_ordinal + consumed_term_count);
   }
 
   IREE_ASSERT_NE(accumulator, LOOM_VALUE_ID_INVALID);
@@ -1448,7 +1466,8 @@ static bool loom_low_lower_source_memory_dynamic_terms_match(
     const loom_low_source_memory_access_plan_t* access) {
   if (source_memory->dynamic_term_count ==
       LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_TERM_COUNT_ANY) {
-    return true;
+    return access->dynamic_term_count >=
+           source_memory->dynamic_term_count_minimum;
   }
   if (access->dynamic_term_count != source_memory->dynamic_term_count) {
     return false;
@@ -1540,6 +1559,10 @@ static bool loom_low_lower_source_memory_matches(
        access.minimum_alignment < source_memory->minimum_alignment) ||
       access.cache_policy.build_flags !=
           source_memory->cache_policy_build_flags ||
+      (source_memory->dynamic_view_base_term_count !=
+           LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_VIEW_BASE_TERM_COUNT_ANY &&
+       access.dynamic_view_base_term_count !=
+           source_memory->dynamic_view_base_term_count) ||
       !loom_low_lower_source_memory_dynamic_terms_match(source_memory,
                                                         &access)) {
     return false;

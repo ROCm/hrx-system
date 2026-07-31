@@ -507,6 +507,8 @@ TEST_F(LowContractQuerySourceMemoryTest,
       /*.static_byte_offset_maximum=*/INT64_MAX,
       /*.minimum_alignment=*/0,
       /*.dynamic_term_count=*/1,
+      /*.dynamic_term_count_minimum=*/0,
+      /*.dynamic_view_base_term_count=*/0,
       /*.dynamic_index_source=*/
       LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE,
       /*.dynamic_byte_stride=*/4,

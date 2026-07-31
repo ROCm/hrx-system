@@ -2391,9 +2391,9 @@ low.kernel.def target(@wave64_target) workgroup_size(32, 1, 1) workgroup_count(3
   %rhs_k_inner = v_and_b32 %i, %87
   %rhs_col_inner = v_lshrrev_b32_lit %i, 4
   %90 = v_mov_b32_copy %kk
-  %rhs_k = v_add_u32 %90, %rhs_k_inner
-  %rhs_index = v_mad_u32_u24_src1_lit %rhs_col_inner, %rhs_k, 3072
-  %93 = v_lshlrev_b32_src0_inline %rhs_index, 2
+  %91 = v_add_u32 %rhs_k_inner, %90
+  %92 = v_mad_u32_u24_src1_lit %rhs_col_inner, %91, 3072
+  %93 = v_lshlrev_b32_src0_inline %92, 2
   %rhs_f32 = global_load_b32_saddr %93, %src1_view
   %next = v_add_f32 %inner_acc, %rhs_f32
   %96 = v_mov_b32 64

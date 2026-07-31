@@ -18,6 +18,13 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
   }
   select-templates(mode = "final")
   inline-callables
+  if changed {
+    for func {
+      where target {
+        canonicalize
+      }
+    }
+  }
   for func {
     where target {
       legalize-math

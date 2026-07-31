@@ -1099,11 +1099,13 @@ low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) 
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %column = kernel.workitem_id.x
   %row = kernel.workitem_id.y
-  %22 = const.i64 8
-  %23 = mul.i64 %row, %22
-  %24 = add.i64 %23, %column
-  %loaded = load.indexed.i32 %input_view, %24, 0, 4
-  store.indexed.i32 %loaded, %output_view, %24, 0, 4
+  %22 = const.i64 2
+  %23 = shl.i64 %column, %22
+  %24 = const.i64 5
+  %25 = shl.i64 %row, %24
+  %26 = add.i64 %23, %25
+  %loaded = load.indexed.i32 %input_view, %26, 0, 1
+  store.indexed.i32 %loaded, %output_view, %26, 0, 1
   return
 }
 
@@ -1134,11 +1136,13 @@ low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) 
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %column = kernel.workitem_id.x
   %row = kernel.workitem_id.y
-  %22 = const.i64 8
-  %23 = mul.i64 %row, %22
-  %24 = add.i64 %23, %column
-  %loaded = load.indexed.i32 %input_view, %24, 0, 4
-  store.indexed.i32 %loaded, %output_view, %24, 0, 4
+  %22 = const.i64 2
+  %23 = shl.i64 %column, %22
+  %24 = const.i64 5
+  %25 = shl.i64 %row, %24
+  %26 = add.i64 %23, %25
+  %loaded = load.indexed.i32 %input_view, %26, 0, 1
+  store.indexed.i32 %loaded, %output_view, %26, 0, 1
   return
 }
 

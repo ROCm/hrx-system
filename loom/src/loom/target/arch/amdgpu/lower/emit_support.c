@@ -11,6 +11,7 @@
 #include "loom/ir/context.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
+#include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
@@ -626,9 +627,12 @@ iree_status_t loom_amdgpu_emit_sgpr_byte_offset_terms(
   loom_type_t sgpr_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_type(context, &sgpr_type));
 
+  loom_amdgpu_memory_dynamic_term_sequence_t sequence = {0};
+  loom_amdgpu_memory_access_resolve_dynamic_terms(
+      context, source, dynamic_term_kinds, &sequence);
   loom_value_id_t low_accumulator = LOOM_VALUE_ID_INVALID;
-  for (uint8_t i = 0; i < source->dynamic_term_count; ++i) {
-    switch (dynamic_term_kinds[i]) {
+  for (uint8_t i = 0; i < sequence.count; ++i) {
+    switch (sequence.kinds[i]) {
       case LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_SOFFSET:
         break;
       case LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_VADDR:
@@ -637,8 +641,7 @@ iree_status_t loom_amdgpu_emit_sgpr_byte_offset_terms(
         IREE_ASSERT_UNREACHABLE("unknown AMDGPU memory dynamic index kind");
         IREE_BUILTIN_UNREACHABLE();
     }
-    const loom_low_source_memory_dynamic_term_t* term =
-        &source->dynamic_terms[i];
+    const loom_low_source_memory_dynamic_term_t* term = sequence.terms[i];
     loom_value_id_t low_term = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr_byte_offset_term(
         context, source_op, term, &low_term));

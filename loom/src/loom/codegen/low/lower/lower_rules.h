@@ -407,6 +407,7 @@ typedef enum loom_low_lower_source_memory_root_kind_e {
    << LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC)
 
 #define LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_TERM_COUNT_ANY UINT8_MAX
+#define LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_VIEW_BASE_TERM_COUNT_ANY UINT8_MAX
 
 typedef uint16_t loom_low_lower_source_memory_flags_t;
 
@@ -440,6 +441,10 @@ typedef struct loom_low_lower_source_memory_t {
   uint32_t minimum_alignment;
   // Required number of dynamic address terms.
   uint8_t dynamic_term_count;
+  // Minimum accepted dynamic term count when dynamic_term_count is ANY.
+  uint8_t dynamic_term_count_minimum;
+  // Required number of dynamic view-base terms, or ANY if unconstrained.
+  uint8_t dynamic_view_base_term_count;
   // Required provenance for each dynamic address term.
   loom_low_source_memory_dynamic_index_source_t dynamic_index_source;
   // Required byte stride for each dynamic address term unless ANY is set.

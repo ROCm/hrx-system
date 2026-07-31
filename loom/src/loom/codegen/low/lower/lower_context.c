@@ -959,6 +959,17 @@ iree_status_t loom_low_lower_lookup_value(loom_low_lower_context_t* context,
   return iree_ok_status();
 }
 
+bool loom_low_lower_source_value_has_low_mapping(
+    const loom_low_lower_context_t* context, loom_value_id_t source_value_id) {
+  const loom_value_ordinal_t source_ordinal =
+      loom_low_lowering_frame_value_ordinal(&context->lowering,
+                                            source_value_id);
+  const loom_value_id_t low_value_id =
+      context->lowering.value_map[source_ordinal];
+  return low_value_id != LOOM_VALUE_ID_INVALID &&
+         low_value_id != LOOM_LOW_LOWER_VALUE_ID_ELIDED;
+}
+
 iree_status_t loom_low_lower_copy_value_name(loom_low_lower_context_t* context,
                                              loom_value_id_t source_value_id,
                                              loom_value_id_t low_value_id) {

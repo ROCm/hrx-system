@@ -423,14 +423,10 @@ low.func.def target(@target) abi(hal_kernel) @paged_kv_cache_block_load(%sequenc
   %50 = s_addc_u32 %47, %48
   %51 = concat(%49, %50) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %page = global_load_b32_saddr %42, %51
-  %58 = v_lshlrev_b32_src0_inline %page, 12
-  %59 = s_lshl_b32_rhs_inline %lane, 3
-  %60 = slice %kv_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %61 = slice %kv_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %63 = s_add_u32 %60, %59
-  %64 = s_addc_u32 %61, %48
-  %65 = concat(%63, %64) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %key_values = global_load_b64_saddr %58, %65
+  %58 = v_mov_b32_copy %lane
+  %59 = v_lshl_add_u32_shift_imm %page, %58, 9
+  %60 = v_lshlrev_b32_src0_inline %59, 3
+  %key_values = global_load_b64_saddr %60, %kv_view
   return %page, %key_values
 }
 

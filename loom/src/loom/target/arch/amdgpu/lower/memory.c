@@ -473,6 +473,47 @@ void loom_amdgpu_mark_source_memory_plan_root_storage_demands(
   loom_amdgpu_mark_source_memory_plan_dynamic_storage_demands(context, source);
 }
 
+void loom_amdgpu_memory_access_resolve_dynamic_terms(
+    const loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source,
+    const loom_amdgpu_memory_dynamic_index_kind_t* dynamic_term_kinds,
+    loom_amdgpu_memory_dynamic_term_sequence_t* out_sequence) {
+  *out_sequence = (loom_amdgpu_memory_dynamic_term_sequence_t){0};
+  uint8_t term_index = 0;
+  uint8_t realization_index = 0;
+  while (term_index < source->dynamic_term_count) {
+    const loom_low_source_memory_dynamic_realization_t* realization = NULL;
+    if (realization_index < source->dynamic_realization_count &&
+        source->dynamic_realizations[realization_index].first_term ==
+            term_index) {
+      realization = &source->dynamic_realizations[realization_index++];
+    }
+
+    bool use_realization =
+        realization != NULL && loom_low_lower_source_value_has_low_mapping(
+                                   context, realization->term.index);
+    if (use_realization) {
+      const loom_amdgpu_memory_dynamic_index_kind_t realization_kind =
+          dynamic_term_kinds[term_index];
+      for (uint8_t i = 1; i < realization->term_count; ++i) {
+        use_realization &=
+            dynamic_term_kinds[term_index + i] == realization_kind;
+      }
+    }
+
+    const uint8_t sequence_index = out_sequence->count++;
+    if (use_realization) {
+      out_sequence->terms[sequence_index] = &realization->term;
+      out_sequence->kinds[sequence_index] = dynamic_term_kinds[term_index];
+      term_index = (uint8_t)(term_index + realization->term_count);
+    } else {
+      out_sequence->terms[sequence_index] = &source->dynamic_terms[term_index];
+      out_sequence->kinds[sequence_index] = dynamic_term_kinds[term_index];
+      ++term_index;
+    }
+  }
+}
+
 static loom_value_id_t loom_amdgpu_memory_access_payload_value(
     const loom_module_t* module, const loom_op_t* source_op) {
   const loom_memory_access_t access =
@@ -543,6 +584,22 @@ static bool loom_amdgpu_memory_access_select_dynamic_term_kinds_from_plan(
         materialization_plan,
     loom_amdgpu_memory_access_t* access,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic) {
+  bool has_workgroup_coordinate = false;
+  bool has_vaddr_only_term = false;
+  for (uint8_t term_index = 0; term_index < access->source.dynamic_term_count;
+       ++term_index) {
+    const loom_low_source_memory_dynamic_term_t* term =
+        &access->source.dynamic_terms[term_index];
+    has_workgroup_coordinate |=
+        term->source ==
+        LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKGROUP_ID;
+    has_vaddr_only_term |=
+        materialization_plan->terms[term_index].can_materialize_vaddr &&
+        !materialization_plan->terms[term_index].can_materialize_soffset;
+  }
+  const bool route_value_terms_through_vaddr =
+      has_vaddr_only_term && !has_workgroup_coordinate;
+
   for (uint8_t term_index = 0; term_index < access->source.dynamic_term_count;
        ++term_index) {
     const loom_low_source_memory_dynamic_term_t* term =
@@ -551,6 +608,13 @@ static bool loom_amdgpu_memory_access_select_dynamic_term_kinds_from_plan(
         materialization_plan->dynamic_view_base_can_materialize_soffset) {
       access->dynamic_term_kinds[term_index] =
           LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_SOFFSET;
+      continue;
+    }
+    if (route_value_terms_through_vaddr &&
+        term->source == LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE &&
+        materialization_plan->terms[term_index].can_materialize_vaddr) {
+      access->dynamic_term_kinds[term_index] =
+          LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_VADDR;
       continue;
     }
     loom_amdgpu_memory_dynamic_index_kind_t dynamic_index_kind =
@@ -589,6 +653,16 @@ bool loom_amdgpu_source_memory_offset_fits_u32(
 
 static bool loom_amdgpu_memory_vaddr_offset_fits_u32(
     const loom_amdgpu_memory_access_t* access, int64_t static_byte_offset) {
+  bool all_dynamic_terms_are_vaddr = true;
+  for (uint8_t i = 0; i < access->source.dynamic_term_count; ++i) {
+    all_dynamic_terms_are_vaddr &=
+        access->dynamic_term_kinds[i] == LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_VADDR;
+  }
+  if (all_dynamic_terms_are_vaddr) {
+    return loom_low_source_memory_dynamic_offset_fits_unsigned_bit_count(
+        &access->source, static_byte_offset, 32);
+  }
+
   loom_value_facts_t offset_facts =
       loom_value_facts_exact_i64(static_byte_offset);
   for (uint8_t i = 0; i < access->source.dynamic_term_count; ++i) {

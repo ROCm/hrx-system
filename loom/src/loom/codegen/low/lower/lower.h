@@ -1042,6 +1042,12 @@ loom_low_lower_selected_plan_view_t loom_low_lower_context_selected_plan_view(
 void loom_low_lower_require_source_value_storage(
     loom_low_lower_context_t* context, loom_value_id_t source_value_id);
 
+// Returns true when |source_value_id| already has a non-elided low SSA mapping.
+// Emission callbacks may use this to select an optional equivalent source
+// realization. Required operands must use loom_low_lower_lookup_value.
+bool loom_low_lower_source_value_has_low_mapping(
+    const loom_low_lower_context_t* context, loom_value_id_t source_value_id);
+
 // Requires low SSA storage for every operand of |source_op|. This is the
 // conservative callback-plan fallback used when a target does not provide exact
 // storage demands for a selected plan.

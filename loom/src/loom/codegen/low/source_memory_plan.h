@@ -111,6 +111,9 @@ bool loom_low_source_memory_operation_kind_from_access(
 
 #define LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE UINT8_MAX
 #define LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY (LOOM_TYPE_MAX_RANK + 1)
+// Each realization covers at least two canonical dynamic terms.
+#define LOOM_LOW_SOURCE_MEMORY_DYNAMIC_REALIZATION_CAPACITY \
+  (LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY / 2)
 
 typedef struct loom_low_source_memory_dynamic_term_t {
   // Dynamic source SSA value multiplied into this address term.
@@ -138,6 +141,15 @@ typedef struct loom_low_source_memory_dynamic_term_t {
   // multiplied separately.
   uint32_t byte_shift;
 } loom_low_source_memory_dynamic_term_t;
+
+typedef struct loom_low_source_memory_dynamic_realization_t {
+  // Equivalent source SSA term available when already materialized.
+  loom_low_source_memory_dynamic_term_t term;
+  // First canonical dynamic term represented by term.
+  uint8_t first_term;
+  // Number of contiguous canonical dynamic terms represented by term.
+  uint8_t term_count;
+} loom_low_source_memory_dynamic_realization_t;
 
 typedef struct loom_low_source_memory_access_plan_t {
   // Source operation category being planned.
@@ -180,6 +192,13 @@ typedef struct loom_low_source_memory_access_plan_t {
   // Number of leading dynamic address terms contributed by the source view
   // base.
   uint8_t dynamic_view_base_term_count;
+  // Optional source expressions equivalent to contiguous canonical term
+  // ranges. These preserve reusable SSA provenance without changing the
+  // canonical address representation used for analysis.
+  loom_low_source_memory_dynamic_realization_t
+      dynamic_realizations[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_REALIZATION_CAPACITY];
+  // Number of populated dynamic realization entries.
+  uint8_t dynamic_realization_count;
   // Optional cache policy copied from the source memory op.
   loom_vector_memory_cache_policy_t cache_policy;
 } loom_low_source_memory_access_plan_t;
@@ -230,6 +249,13 @@ static inline bool loom_low_source_memory_dynamic_term_fits_unsigned_bit_count(
     const loom_low_source_memory_dynamic_term_t* term, uint8_t bit_count) {
   return loom_value_facts_fit_unsigned_bit_count(term->byte_facts, bit_count);
 }
+
+// Returns facts for the complete dynamic byte offset plus
+// |static_byte_offset|. Exact affine realizations retain relational bounds
+// that cannot be represented independently on their canonical terms.
+loom_value_facts_t loom_low_source_memory_dynamic_offset_facts(
+    const loom_low_source_memory_access_plan_t* plan,
+    int64_t static_byte_offset);
 
 // Returns true when the sum of all dynamic byte terms plus
 // |static_byte_offset| is proven to fit in an unsigned integer with
