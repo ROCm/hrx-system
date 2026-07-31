@@ -537,6 +537,8 @@ loom_link_module(
         "qwen3_moe/routed_linear_q4k_f16_wmma.loom",
         "qwen3_moe/routed_down_q4k.loom",
         "qwen3_moe/routed_down_q6k.loom",
+        "qwen3_moe/attention_prepare_quantized.loom",
+        "qwen3_moe/model_config.loom",
         "ggml/linear_q6k_q8_1_x4.loom",
         "qwen3_moe/routed_gate_up_swiglu_q4k.loom",
         "ggml/quantize_q8_1_x4.loom",
