@@ -87,6 +87,8 @@ typedef enum loom_amdgpu_fp8_encode_plan_flag_bits_e {
   LOOM_AMDGPU_FP8_ENCODE_PLAN_FLAG_PACKED_F16_E5M2 = 1u << 0,
   // Packed 16-bit packets can encode complete F16 E4M3 lane groups.
   LOOM_AMDGPU_FP8_ENCODE_PLAN_FLAG_PACKED_F16_E4M3 = 1u << 1,
+  // Native OCP pair packets need their packed NaN bytes canonicalized.
+  LOOM_AMDGPU_FP8_ENCODE_PLAN_FLAG_NATIVE_NAN_CANONICALIZATION = 1u << 2,
 } loom_amdgpu_fp8_encode_plan_flag_bits_t;
 typedef uint32_t loom_amdgpu_fp8_encode_plan_flags_t;
 

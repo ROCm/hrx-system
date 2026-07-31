@@ -157,6 +157,10 @@ bool loom_amdgpu_fp8_encode_plan_has_packed_f16_e5m2(
 bool loom_amdgpu_fp8_encode_plan_is_fnuz_bridge(
     const loom_amdgpu_fp8_encode_plan_t* plan);
 
+// Returns true when native OCP output needs exact packed NaN canonicalization.
+bool loom_amdgpu_fp8_encode_plan_canonicalizes_native_nan(
+    const loom_amdgpu_fp8_encode_plan_t* plan);
+
 // Initializes function-local values shared by every packet emitted for |plan|.
 // |encoded_lane_count| bounds pair-specific constants needed by the operation.
 iree_status_t loom_amdgpu_initialize_fp8_encode_emission(
@@ -235,6 +239,16 @@ iree_status_t loom_amdgpu_emit_fp8_encode_high_pair(
     const loom_amdgpu_fp8_encode_emission_state_t* state,
     loom_value_id_t packed, loom_value_id_t low_source,
     loom_value_id_t high_source, loom_value_id_t* out_packed);
+
+// Canonicalizes native OCP NaN bytes in |packed| while preserving native
+// finite encodings. |source_lanes| contains the F32 inputs for the two or four
+// logical packed bytes requiring canonicalization.
+iree_status_t loom_amdgpu_emit_fp8_encode_native_nan_canonicalization(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_fp8_encode_plan_t* plan,
+    const loom_amdgpu_fp8_encode_emission_state_t* state,
+    const loom_value_id_t* source_lanes, uint32_t source_lane_count,
+    loom_value_id_t packed, loom_value_id_t* out_packed);
 
 // Returns the stable compile-report strategy key for |plan|.
 iree_string_view_t loom_amdgpu_fp8_encode_plan_key(

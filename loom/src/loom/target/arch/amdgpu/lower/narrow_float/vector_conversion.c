@@ -1209,6 +1209,15 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_encode(
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_high_pair(
           context, source_op, &plan->fp8_encode, &emission_state, packed,
           f32_lanes[2], f32_lanes[3], &packed));
+      if (loom_amdgpu_fp8_encode_plan_canonicalizes_native_nan(
+              &plan->fp8_encode)) {
+        const uint32_t canonical_lane_count =
+            register_lane_count <= 2u ? 2u : 4u;
+        IREE_RETURN_IF_ERROR(
+            loom_amdgpu_emit_fp8_encode_native_nan_canonicalization(
+                context, source_op, &plan->fp8_encode, &emission_state,
+                f32_lanes, canonical_lane_count, packed, &packed));
+      }
     }
     result_registers[result_register_index] = packed;
   }

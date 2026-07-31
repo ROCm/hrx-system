@@ -34,8 +34,8 @@ func.def target(@target) @report_f16_to_bf8_via_f32_native(%input: vector<4xf16>
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=1 emitted_ops=12 rows=1
-COMPILE-REPORT: source_low[0] function=report_f16_to_bf8_via_f32_native source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.f16_via_f32_pair_native emitted_ops=12
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=21 rows=1
+COMPILE-REPORT: source_low[0] function=report_f16_to_bf8_via_f32_native source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.f16_via_f32_pair_native_nan_canonicalized emitted_ops=21
 
 // ====
 
@@ -47,8 +47,8 @@ func.def target(@target) @report_f32_to_fp8_saturating_native(%input: vector<4xf
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=1 emitted_ops=20 rows=1
-COMPILE-REPORT: source_low[0] function=report_f32_to_fp8_saturating_native source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.f32_pair_saturating_native emitted_ops=20
+COMPILE-REPORT: source_low selected_ops=1 emitted_ops=24 rows=1
+COMPILE-REPORT: source_low[0] function=report_f32_to_fp8_saturating_native source_op=vector.fptrunc selection=plan plan_key=amdgpu.fp8_encode.strategy.f32_pair_saturating_native_nan_canonicalized emitted_ops=24
 
 // ====
 

@@ -27,7 +27,11 @@ low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_f32x4_to_fp8(%input
   %21 = v_med3_num_f32 %10, %5, %6
   %22 = v_cmp_u_f32 %10, %10
   %23 = v_cndmask_b32 %21, %10, %22
-  %converted = v_cvt_pk_fp8_f32_high %17, %20, %23
+  %24 = v_cvt_pk_fp8_f32_high %17, %20, %23
+  %25 = v_perm_b32_src2_lit %7, %8, 775
+  %26 = v_bfi_b32_src0_lit %25, %24, 32896
+  %27 = v_perm_b32_src2_lit %9, %10, 50790400
+  %converted = v_bfi_b32_src0_lit %27, %26, 2155872256
   return %converted
 }
 
@@ -48,6 +52,15 @@ low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_f16x3_to_bf8(%input
   %10 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %11 = v_cvt_f32_f16 %10
   %12 = v_cvt_pk_bf8_f32_low %6, %9
-  %converted = v_cvt_pk_bf8_f32_high %12, %11, %11
+  %13 = v_cvt_pk_bf8_f32_high %12, %11, %11
+  %14 = v_and_b32_lit %13, 2139062143
+  %15 = v_add_u32_lit %14, 50529027
+  %16 = v_and_b32_lit %15, 2155905152
+  %17 = v_lshrrev_b32_src0_inline %16, 7
+  %18 = v_or_b32 %14, %17
+  %19 = v_perm_b32_src2_lit %6, %9, 775
+  %20 = v_bfi_b32_src0_lit %19, %18, 32896
+  %21 = v_perm_b32_src2_lit %11, %11, 50790400
+  %converted = v_bfi_b32_src0_lit %21, %20, 2155872256
   return %converted
 }

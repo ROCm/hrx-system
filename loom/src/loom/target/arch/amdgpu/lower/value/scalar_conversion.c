@@ -763,6 +763,14 @@ static iree_status_t loom_amdgpu_emit_scalar_fp8_encode(
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_fp8_encode_low_pair(
       context, source_op, &plan->fp8_encode, &emission_state, encoded_source,
       high_source, &low_result));
+  if (loom_amdgpu_fp8_encode_plan_canonicalizes_native_nan(&plan->fp8_encode)) {
+    const loom_value_id_t source_lanes[2] = {encoded_source, high_source};
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_emit_fp8_encode_native_nan_canonicalization(
+            context, source_op, &plan->fp8_encode, &emission_state,
+            source_lanes, IREE_ARRAYSIZE(source_lanes), low_result,
+            &low_result));
+  }
   return loom_low_lower_bind_value(context, plan->result, low_result);
 }
 
