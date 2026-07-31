@@ -378,43 +378,33 @@ bool loom_value_fact_encoded_operand_schema_is_unknown(
   return loom_value_fact_encoded_operand_schema_equal(schema, unknown);
 }
 
-typedef struct loom_value_fact_encoded_operand_scale_schema_t {
-  uint64_t scale_format;
-  uint64_t secondary_scale_format;
-  uint32_t scale_topology;
-  uint32_t flags;
-  uint16_t scale_group_element_count;
-  uint16_t scale_operand_count;
-} loom_value_fact_encoded_operand_scale_schema_t;
-
-static loom_value_fact_encoded_operand_scale_schema_t
-loom_value_fact_encoded_operand_scale_schema(
-    loom_value_fact_encoded_operand_schema_t schema) {
-  loom_value_fact_encoded_operand_scale_schema_t scale_schema;
-  memset(&scale_schema, 0, sizeof(scale_schema));
-  scale_schema.scale_format = schema.scale_format;
-  scale_schema.secondary_scale_format = schema.secondary_scale_format;
-  scale_schema.scale_topology = schema.scale_topology;
-  scale_schema.flags = schema.flags;
-  scale_schema.scale_group_element_count = schema.scale_group_element_count;
-  scale_schema.scale_operand_count = schema.scale_operand_count;
-  return scale_schema;
-}
-
 bool loom_value_fact_encoded_operand_schema_has_scale(
     loom_value_fact_encoded_operand_schema_t schema) {
-  loom_value_fact_encoded_operand_scale_schema_t scale_schema =
-      loom_value_fact_encoded_operand_scale_schema(schema);
-  loom_value_fact_encoded_operand_scale_schema_t empty;
-  memset(&empty, 0, sizeof(empty));
-  return memcmp(&scale_schema, &empty, sizeof(scale_schema)) != 0;
+  return schema.scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE ||
+         schema.secondary_scale_format != LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE ||
+         schema.scale_topology != LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE ||
+         schema.flags != 0 || schema.scale_group.element_count != 0 ||
+         schema.scale_group.shape[0] != 0 || schema.scale_operand_count != 0;
 }
 
 bool loom_value_fact_encoded_operand_schema_scale_is_complete(
     loom_value_fact_encoded_operand_schema_t schema) {
   if (!loom_value_fact_encoded_operand_schema_has_scale(schema)) return true;
-  return schema.scale_topology != 0 && schema.scale_group_element_count != 0 &&
-         schema.scale_operand_count != 0;
+  if (schema.scale_topology == 0 || schema.scale_group.element_count == 0 ||
+      schema.scale_operand_count == 0) {
+    return false;
+  }
+  if (iree_any_bit_set(schema.scale_topology,
+                       LOOM_VALUE_FACT_SCALE_TOPOLOGY_GROUP_1D |
+                           LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D)) {
+    return schema.scale_group.shape[0] != 0 && schema.scale_group.shape[1] == 0;
+  }
+  if (iree_any_bit_set(schema.scale_topology,
+                       LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_2D)) {
+    return schema.scale_group.shape[0] != 0 &&
+           schema.scale_group.shape[1] != 0 && schema.scale_group.shape[2] == 0;
+  }
+  return true;
 }
 
 bool loom_value_fact_encoded_operand_schema_sparsity_is_complete(

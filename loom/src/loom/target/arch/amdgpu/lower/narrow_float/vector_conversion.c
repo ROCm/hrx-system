@@ -426,7 +426,7 @@ loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
       source_format = summary.storage_schema.encoded_operand.element_format;
       scale_format = summary.storage_schema.encoded_operand.scale_format;
       scale_group_element_count =
-          summary.storage_schema.encoded_operand.scale_group_element_count;
+          summary.storage_schema.encoded_operand.scale_group.element_count;
       if (loom_amdgpu_vector_decode_scale_source(module, source_op,
                                                  scale_format, &scale_source)) {
         scale_source = loom_amdgpu_vector_decode_materialized_scale_source(

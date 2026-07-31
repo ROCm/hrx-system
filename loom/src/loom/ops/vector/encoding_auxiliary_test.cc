@@ -144,7 +144,7 @@ TEST(VectorEncodingAuxiliaryKeysTest, RequiredKeysComeFromSchemaFacts) {
       /*.sparsity_group=*/{},
       /*.payload_register_count=*/{},
       /*.payload_element_count=*/{},
-      /*.scale_group_element_count=*/{},
+      /*.scale_group=*/{},
       /*.scale_operand_count=*/2,
   };
 
@@ -177,7 +177,7 @@ TEST(VectorEncodingAuxiliaryKeysTest, RequiredKeysRejectUnsupportedScaleCount) {
       /*.sparsity_group=*/{},
       /*.payload_register_count=*/{},
       /*.payload_element_count=*/{},
-      /*.scale_group_element_count=*/{},
+      /*.scale_group=*/{},
       /*.scale_operand_count=*/9,
   };
 

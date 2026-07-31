@@ -349,7 +349,22 @@ iree_status_t loom_test_fact_encoding_matrix_field_facts(
     value = (int64_t)encoded.payload_element_count;
   } else if (loom_test_string_id_equal(module, field,
                                        IREE_SV("scale_group_elements"))) {
-    value = (int64_t)encoded.scale_group_element_count;
+    value = (int64_t)encoded.scale_group.element_count;
+  } else if (loom_test_string_id_equal(module, field,
+                                       IREE_SV("scale_group_rank"))) {
+    value = loom_value_fact_encoded_operand_scale_group_rank(&encoded);
+  } else if (loom_test_string_id_equal(module, field,
+                                       IREE_SV("scale_group_dim0"))) {
+    value = (int64_t)encoded.scale_group.shape[0];
+  } else if (loom_test_string_id_equal(module, field,
+                                       IREE_SV("scale_group_dim1"))) {
+    value = (int64_t)encoded.scale_group.shape[1];
+  } else if (loom_test_string_id_equal(module, field,
+                                       IREE_SV("scale_group_dim2"))) {
+    value = (int64_t)encoded.scale_group.shape[2];
+  } else if (loom_test_string_id_equal(module, field,
+                                       IREE_SV("scale_group_dim3"))) {
+    value = (int64_t)encoded.scale_group.shape[3];
   } else if (loom_test_string_id_equal(module, field,
                                        IREE_SV("scale_operands"))) {
     value = (int64_t)encoded.scale_operand_count;

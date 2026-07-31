@@ -19,6 +19,16 @@ func.def @dynamic_encoding_attachment(%group_size: index) {
 
 // ====
 
+// Multidimensional scale groups are logical schema structure; physical scale
+// tensor padding and swizzling remain in the enclosing storage layout.
+func.def @multidimensional_scale_group() {
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f4e2m1, payload_elements=256, payload_packing=separate_scale_payload, payload_registers=0, scale_format=f8e4m3fn, scale_group_elements=256, scale_group_shape=[16, 16], scale_operands=1, scale_topology=block_2d> : encoding<schema>
+  test.use %schema : encoding<schema>
+  func.return
+}
+
+// ====
+
 // Layout assumptions are explicit SSA refinements for block/function argument
 // layout values whose concrete layout was not locally constructed.
 func.def @layout_assumptions(%layout: encoding<layout>) {

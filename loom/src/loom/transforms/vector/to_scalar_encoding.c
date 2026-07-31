@@ -211,7 +211,7 @@ static bool loom_vector_to_scalar_encoded_schema_is_supported(
     if (iree_any_bit_set(schema.scale_topology,
                          LOOM_VALUE_FACT_SCALE_TOPOLOGY_GROUP_1D |
                              LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D) &&
-        schema.scale_group_element_count == 0) {
+        schema.scale_group.element_count == 0) {
       return false;
     }
   } else if (schema.scale_topology != LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE ||
@@ -495,7 +495,7 @@ static iree_status_t loom_vector_to_scalar_encoded_scale_index(
       return loom_vector_to_scalar_build_term_binary(
           state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_DIV, ordinal,
           loom_vector_to_scalar_static_term(
-              operand->schema.scale_group_element_count),
+              operand->schema.scale_group.element_count),
           out_index);
     case LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE:
     default:

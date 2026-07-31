@@ -214,7 +214,7 @@ static bool loom_amdgpu_fp4_unscaled_schema_matches(
          schema.flags == 0 &&
          schema.payload_register_count == shape->source_register_count &&
          schema.payload_element_count == shape->lane_count &&
-         schema.scale_group_element_count == 0 &&
+         schema.scale_group.element_count == 0 &&
          schema.scale_operand_count == 0;
 }
 
@@ -238,7 +238,7 @@ static bool loom_amdgpu_fp4_e4m3fn_scale16_schema_matches(
               LOOM_VALUE_FACT_ENCODED_OPERAND_FLAG_ZERO_SCALE_FALLBACK) &&
          schema.payload_register_count == shape->source_register_count &&
          schema.payload_element_count == shape->lane_count &&
-         schema.scale_group_element_count == 16 &&
+         schema.scale_group.element_count == 16 &&
          schema.scale_operand_count == 1;
 }
 

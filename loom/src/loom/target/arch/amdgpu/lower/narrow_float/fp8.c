@@ -236,7 +236,7 @@ bool loom_amdgpu_fp8_encoded_operand_schema_matches(
       schema.payload_element_count != lane_count ||
       schema.scale_operand_count != requirement->scale_operand_count ||
       !loom_amdgpu_fp8_scale_group_matches(lane_count,
-                                           schema.scale_group_element_count,
+                                           schema.scale_group.element_count,
                                            requirement->scale_group_mode)) {
     return false;
   }

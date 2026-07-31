@@ -34,7 +34,8 @@ loom_value_fact_storage_schema_t ScaledEncodedTargetSchema() {
       LOOM_VALUE_FACT_NUMERIC_FORMAT_F4_E2M1;
   schema.encoded_operand.scale_topology =
       LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D;
-  schema.encoded_operand.scale_group_element_count = 32;
+  schema.encoded_operand.scale_group.element_count = 32;
+  schema.encoded_operand.scale_group.shape[0] = 32;
   schema.encoded_operand.scale_operand_count = 1;
   return schema;
 }

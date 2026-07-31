@@ -137,7 +137,7 @@ bool loom_contract_scale_kind_from_storage_schema(
   if (operand.scale_topology == 0 || operand.scale_operand_count == 0) {
     return false;
   }
-  switch (operand.scale_group_element_count) {
+  switch (operand.scale_group.element_count) {
     case 32:
       *out_scale_kind = LOOM_CONTRACT_SCALE_32;
       return true;

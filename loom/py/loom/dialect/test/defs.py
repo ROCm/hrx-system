@@ -669,7 +669,8 @@ test_fact_encoding_matrix_field = Op(
         "scale_topology, scale_format, secondary_scale_format, affine, "
         "rounding, codebook, sparsity, sparsity_group_elements, "
         "sparsity_group_nonzero_elements, payload_registers, "
-        "payload_elements, scale_group_elements, scale_operands, "
+        "payload_elements, scale_group_elements, scale_group_rank, "
+        "scale_group_dim0 through scale_group_dim3, scale_operands, "
         "zero_scale_fallback, and static_spec."
     ),
     operands=[Operand("value", ANY_ENCODING)],
