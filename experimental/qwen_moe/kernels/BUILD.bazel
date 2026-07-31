@@ -425,6 +425,7 @@ iree_executable_test(
         "$(location ggml/quantize_q8_1_x4.loom)",
         "--case=@ggml_quantize_q8_1_x4_f32_nonzero_case",
         "--device=amdgpu://0",
+        "--sanitizer=access",
     ],
     data = ["ggml/quantize_q8_1_x4.loom"],
     tags = [
@@ -1209,6 +1210,28 @@ iree_executable_test(
         "$(location :routed_gate_up_swiglu_q4k_linked)",
         "--case=@qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_tail_case",
         "--config=qwen3_moe.routed_gate_up.input_size=512",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":routed_gate_up_swiglu_q4k_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "routed_gate_up_swiglu_q4k_next_q8_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :routed_gate_up_swiglu_q4k_linked)",
+        "--case=@qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8_differential_case",
+        "--config=qwen3_moe.routed_gate_up.input_size=2048",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
