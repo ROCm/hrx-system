@@ -444,6 +444,14 @@ loom_target_emitter_list_t loom_target_environment_emitter_list(
 const loom_pass_registry_t* loom_target_environment_pass_registry(
     const loom_target_environment_t* environment);
 
+// Returns whether |environment| owns |profile_type|.
+//
+// This is a cold external-input boundary check used before accepting a
+// structured profile for specialization.
+bool loom_target_environment_supports_profile_type(
+    const loom_target_environment_t* environment,
+    const loom_target_profile_type_t* profile_type);
+
 // Invokes target-provider pass-pipeline contributions for |phase|. The caller
 // owns phase ordering, surrounding pass.for/pass.where scopes, and global
 // cleanup insertion.

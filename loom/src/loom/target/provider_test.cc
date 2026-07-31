@@ -304,6 +304,33 @@ TEST_F(TargetProviderTest, ComposesTargetPassRegistries) {
   loom_target_environment_deinitialize(&environment);
 }
 
+TEST_F(TargetProviderTest, ReportsOwnedProfileTypes) {
+  static const loom_target_profile_type_t kOwnedProfileType = {
+      /*.name=*/IREE_SVL("owned"),
+  };
+  static const loom_target_profile_type_t kUnownedProfileType = {
+      /*.name=*/IREE_SVL("unowned"),
+  };
+  static const loom_target_provider_t provider = {
+      /*.profile_type=*/&kOwnedProfileType,
+  };
+  static const loom_target_provider_t* const providers[] = {
+      &provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+  IREE_ASSERT_OK(
+      loom_target_environment_initialize(&provider_set, &environment));
+
+  EXPECT_TRUE(loom_target_environment_supports_profile_type(
+      &environment, &kOwnedProfileType));
+  EXPECT_FALSE(loom_target_environment_supports_profile_type(
+      &environment, &kUnownedProfileType));
+
+  loom_target_environment_deinitialize(&environment);
+}
+
 TEST_F(TargetProviderTest, RejectsAmbiguousMaterializationOwnership) {
   static const loom_target_profile_type_t kProfileType = {
       /*.name=*/IREE_SVL("test"),

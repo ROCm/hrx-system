@@ -387,6 +387,20 @@ const loom_pass_registry_t* loom_target_environment_pass_registry(
       &environment->pass_registry_storage);
 }
 
+bool loom_target_environment_supports_profile_type(
+    const loom_target_environment_t* environment,
+    const loom_target_profile_type_t* profile_type) {
+  IREE_ASSERT_ARGUMENT(environment);
+  IREE_ASSERT_ARGUMENT(profile_type);
+  for (iree_host_size_t i = 0; i < environment->provider_set->provider_count;
+       ++i) {
+    if (environment->provider_set->providers[i]->profile_type == profile_type) {
+      return true;
+    }
+  }
+  return false;
+}
+
 iree_status_t loom_target_environment_contribute_pipeline(
     const loom_target_environment_t* environment,
     loom_target_pipeline_phase_t phase,
