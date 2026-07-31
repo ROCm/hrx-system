@@ -203,11 +203,13 @@ TEST_F(LowAsmPrinterTest, PrintsCanonicalStructuralCall) {
   const char* source =
       "test.target<low_core> @test_target\n"
       "\n"
-      "low.func.decl target(@test_target) @callee(%arg: reg<test.i32>) -> "
+      "low.func.decl target<test.low.core>(@test_target) "
+      "@callee(%arg: reg<test.i32>) -> "
       "(reg<test.i32>)\n"
       "\n"
-      "low.func.def target(@test_target) @caller(%arg: reg<test.i32>) -> "
-      "(reg<test.i32>) asm<test.low.core> {\n"
+      "low.func.def target<test.low.core>(@test_target) "
+      "@caller(%arg: reg<test.i32>) -> "
+      "(reg<test.i32>) asm {\n"
       "  %result = low.func.call @callee(%arg) : (reg<test.i32>) -> "
       "(reg<test.i32>)\n"
       "  return %result\n"
@@ -222,10 +224,10 @@ TEST_F(LowAsmPrinterTest, NestedRegionsInheritRepresentationContract) {
   const char* source =
       "test.target<low_core> @test_target\n"
       "\n"
-      "low.func.def target(@test_target) @select("
+      "low.func.def target<test.low.core>(@test_target) @select("
       "%condition: reg<test.i32>, %then_value: reg<test.i32>, "
       "%else_value: reg<test.i32>) -> (reg<test.i32>) "
-      "asm<test.low.core> {\n"
+      "asm {\n"
       "  %result = low.scf.if %condition -> (reg<test.i32>) {\n"
       "    low.scf.yield %then_value : reg<test.i32>\n"
       "  } else {\n"
@@ -310,37 +312,31 @@ TEST_F(LowAsmPrinterTest, RequiredOptionalLowAsmRejectsCanonicalFallback) {
   const char* source =
       "test.target<low_core> @test_target\n"
       "\n"
-      "low.func.def target(@test_target) @add(%lhs: reg<test.i32>, "
-      "%rhs: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {\n"
-      "  %sum = test.add.i32 %lhs, %rhs\n"
-      "  return %sum\n"
+      "low.func.def target<test.low.alt>(@test_target) "
+      "@add(%lhs: reg<test.i32>, "
+      "%rhs: reg<test.i32>) -> (reg<test.i32>) {\n"
+      "  %sum = low.op<test.add.i32>(%lhs, %rhs) : "
+      "(reg<test.i32>, reg<test.i32>) -> reg<test.i32>\n"
+      "  low.return %sum : reg<test.i32>\n"
       "}\n";
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
-  EXPECT_EQ(PrintModule(module, IREE_SV("test.low.alt")),
-            "test.target<low_core> @test_target\n"
-            "\n"
-            "low.func.def target(@test_target) @add(%lhs: reg<test.i32>, "
-            "%rhs: reg<test.i32>) -> (reg<test.i32>) {\n"
-            "  %sum = low.op<test.add.i32>(%lhs, %rhs) : "
-            "(reg<test.i32>, reg<test.i32>) -> reg<test.i32>\n"
-            "  low.return %sum : reg<test.i32>\n"
-            "}\n");
+  EXPECT_EQ(PrintModule(module, IREE_SV("test.low.core")), source);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
-                        PrintModuleStatus(module, IREE_SV("test.low.alt"),
+                        PrintModuleStatus(module, IREE_SV("test.low.core"),
                                           /*configure_environment=*/true,
                                           LOOM_TEXT_PRINT_DEFAULT |
                                               LOOM_TEXT_PRINT_REQUIRE_LOW_ASM));
   loom_module_free(module);
 }
 
-TEST_F(LowAsmPrinterTest,
-       RequiredLowAsmAllowsCanonicalMetadataOnlyForMatchingSet) {
+TEST_F(LowAsmPrinterTest, RequiredLowAsmUsesFunctionRepresentationContract) {
   const char* source =
       "test.target<low_core> @test_target\n"
       "\n"
-      "low.func.def target(@test_target) @add(%lhs: reg<test.i32>, "
-      "%rhs: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {\n"
+      "low.func.def target<test.low.core>(@test_target) "
+      "@add(%lhs: reg<test.i32>, "
+      "%rhs: reg<test.i32>) -> (reg<test.i32>) asm {\n"
       "  %sum = low.op<test.add.i32>(%lhs, %rhs) "
       "memory_access([0, 3, 7, -1, 35, 64, 0, 16, 0, 0, 0, 0, 0]) : "
       "(reg<test.i32>, reg<test.i32>) -> reg<test.i32>\n"
@@ -349,14 +345,9 @@ TEST_F(LowAsmPrinterTest,
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
   EXPECT_EQ(
-      PrintModule(module, IREE_SV("test.low.core"),
+      PrintModule(module, IREE_SV("test.low.alt"),
                   LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM),
       source);
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
-                        PrintModuleStatus(module, IREE_SV("test.low.alt"),
-                                          /*configure_environment=*/true,
-                                          LOOM_TEXT_PRINT_DEFAULT |
-                                              LOOM_TEXT_PRINT_REQUIRE_LOW_ASM));
   loom_module_free(module);
 }
 

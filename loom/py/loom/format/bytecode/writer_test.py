@@ -1549,8 +1549,8 @@ class TestCrossFormatRoundTrip:
 
     def test_low_func_target_and_register_body_survive_bytecode(self) -> None:
         text = (
-            "test.record @test_target\n\n"
-            "low.func.def target(@test_target) "
+            "test.target<low_core> @test_target\n\n"
+            "low.func.def target<test.low.core>(@test_target) "
             "@add(%lhs: reg<test.ptr>, %rhs: reg<test.ptr>) "
             "-> (reg<test.ptr>) {\n"
             "  %sum = low.op<test.add.i32>(%lhs, %rhs) : "
@@ -1566,18 +1566,20 @@ class TestCrossFormatRoundTrip:
         assert symbol.op is not None
         assert symbol.op.attributes["callee"] == "add"
         assert symbol.op.attributes["target"] == "test_target"
+        assert symbol.op.attributes["descriptor_set"] == "test.low.core"
         assert _roundtrip_text_through_bytecode(text, include_low=True) == text
 
     def test_low_invoke_and_low_function_survive_bytecode(self) -> None:
         text = (
-            "test.record @test_target\n\n"
+            "test.target<low_core> @test_target\n\n"
             "func.def @caller(%lhs: i32, %rhs: i32) -> (i32) {\n"
             "  %sum = low.invoke @test_add(%lhs, %rhs) : "
             "(i32, i32) -> (i32)\n"
             "  func.return %sum : i32\n"
             "}\n\n"
-            "low.func.decl target(@test_target) @test_add(%lhs: reg<test.ptr>, "
-            "%rhs: reg<test.ptr>) -> (reg<test.ptr>)\n"
+            "low.func.decl target<test.low.core>(@test_target) "
+            "@test_add(%lhs: reg<test.ptr>, %rhs: reg<test.ptr>) "
+            "-> (reg<test.ptr>)\n"
         )
 
         loaded = _parse_write_read(text, include_low=True)
@@ -1585,6 +1587,7 @@ class TestCrossFormatRoundTrip:
         low_symbol = loaded.symbols[2]
         assert low_symbol.op is not None
         assert "source" not in low_symbol.op.attributes
+        assert low_symbol.op.attributes["descriptor_set"] == "test.low.core"
         assert _roundtrip_text_through_bytecode(text, include_low=True) == text
 
     def test_enum_future_ordinal_survives_bytecode(self) -> None:

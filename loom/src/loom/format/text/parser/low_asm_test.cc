@@ -351,6 +351,38 @@ TEST_F(LowAsmParserTest, FunctionRepresentationContractSelectsDescriptorSet) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmParserTest, RejectsRedundantFunctionAsmContract) {
+  const auto& diagnostics = ParseExpectErrors(
+      "test.target<low_core> @test_target\n"
+      "\n"
+      "low.func.def target<test.low.core>(@test_target) @constant() -> "
+      "(reg<test.i32>) asm<test.low.core> {\n"
+      "  %value = test.const.i32 7\n"
+      "  return %value\n"
+      "}\n");
+  const CapturedDiagnostic* diagnostic = FindDiagnostic(
+      capture_, loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 3));
+  ASSERT_NE(diagnostic, nullptr);
+  EXPECT_EQ(GetStringParam(*diagnostic, 0), "<");
+  EXPECT_EQ(GetStringParam(*diagnostic, 1), "'{'");
+  (void)diagnostics;
+}
+
+TEST_F(LowAsmParserTest, RejectsUnavailableFunctionRepresentationContract) {
+  const auto& diagnostics = ParseExpectErrors(
+      "test.target<low_core> @test_target\n"
+      "\n"
+      "low.func.def target<test.low.missing>(@test_target) @empty() asm {\n"
+      "  return\n"
+      "}\n");
+  const CapturedDiagnostic* diagnostic = FindDiagnostic(
+      capture_, loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 34));
+  ASSERT_NE(diagnostic, nullptr);
+  EXPECT_EQ(GetStringParam(*diagnostic, 0),
+            "function representation contract is not available");
+  (void)diagnostics;
+}
+
 TEST_F(LowAsmParserTest, BuildsStructuralCopy) {
   loom_module_t* module = ParseOk(
       "test.low_asm_region asm<test.low.core> {\n"
