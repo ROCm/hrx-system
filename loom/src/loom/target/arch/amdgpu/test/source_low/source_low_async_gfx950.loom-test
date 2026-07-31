@@ -21,7 +21,7 @@ kernel.def target(@target) @async_gather_dword() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_dword() asm<amdgpu.cdna4.core> {
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_dword() asm {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %14 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %16 = v_mov_b32 0
@@ -53,7 +53,7 @@ kernel.def target(@target) @async_gather_b128() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_b128() asm<amdgpu.cdna4.core> {
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_b128() asm {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %14 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %16 = v_mov_b32 0
@@ -90,7 +90,7 @@ kernel.def target(@target) @async_gather_two_stage() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_two_stage() asm<amdgpu.cdna4.core> {
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_two_stage() asm {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %18 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
   %20 = v_mov_b32 0
@@ -132,7 +132,7 @@ kernel.def target(@target) @async_gather_multi_packet_newer_group() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_multi_packet_newer_group() asm<amdgpu.cdna4.core> {
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_multi_packet_newer_group() asm {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %20 = storage {byte_alignment = 16, byte_length = 3072} : low.storage<workgroup>
   %22 = v_mov_b32 0
@@ -171,7 +171,7 @@ kernel.def target(@target) @async_gather_second_lds_slot() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_second_lds_slot() asm<amdgpu.cdna4.core> {
+low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @async_gather_second_lds_slot() asm {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %16 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %18 = v_mov_b32 0

@@ -10,7 +10,7 @@ func.def target(@target) @i32x4_arith(%lhs: vector<4xi32>, %rhs: vector<4xi32>) 
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x4_arith(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @i32x4_arith(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %sum = vpaddd.xmm %lhs, %rhs
   %diff = vpsubd.xmm %sum, %rhs
   return %diff
@@ -27,7 +27,7 @@ func.def target(@target) @f32x4_arith(%lhs: vector<4xf32>, %rhs: vector<4xf32>) 
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x4_arith(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x4_arith(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %sum = vaddps.xmm %lhs, %rhs
   %product = vmulps.xmm %sum, %rhs
   return %product
@@ -44,7 +44,7 @@ func.def target(@target) @f32x4_lane_extract(%v: vector<4xf32>, %x: f32) -> (f32
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x4_lane_extract(%v: reg<x86.xmm>, %x: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x4_lane_extract(%v: reg<x86.xmm>, %x: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %lane = vpermilps.xmm %v, 2
   %sum = vaddss.xmm %lane, %x
   return %sum
@@ -62,7 +62,7 @@ func.def target(@target) @f32x4_lane_edit(%v: vector<4xf32>, %x: f32) -> (vector
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x4_lane_edit(%v: reg<x86.xmm>, %x: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x4_lane_edit(%v: reg<x86.xmm>, %x: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %lane = vpermilps.xmm %v, 1
   %sum = vaddss.xmm %lane, %x
   %updated = vinsertps.xmm %v, %sum, 32
@@ -80,7 +80,7 @@ func.def target(@target) @i32x4_splat_add(%value: i32, %rhs: vector<4xi32>) -> (
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x4_splat_add(%value: reg<x86.gpr32>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @i32x4_splat_add(%value: reg<x86.gpr32>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %splat = vpbroadcastd.xmm %value
   %sum = vpaddd.xmm %splat, %rhs
   return %sum
@@ -98,7 +98,7 @@ func.def target(@target) @i32x4_lane_edit(%v: vector<4xi32>, %x: i32) -> (vector
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x4_lane_edit(%v: reg<x86.xmm>, %x: reg<x86.gpr32>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @i32x4_lane_edit(%v: reg<x86.xmm>, %x: reg<x86.gpr32>) -> (reg<x86.xmm>) asm {
   %lane = vpextrd.xmm %v, 1
   %10 = copy %lane : reg<x86.gpr32> -> reg<x86.gpr32>
   %sum = add.gpr32 %10, %x
@@ -116,7 +116,7 @@ func.def target(@target) @i32x4_shuffle(%v: vector<4xi32>) -> (vector<4xi32>) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x4_shuffle(%v: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @i32x4_shuffle(%v: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %shuffled = vpshufd.xmm %v, 27
   return %shuffled
 }
@@ -132,7 +132,7 @@ func.def target(@target) @i32x4_shuffle_reduce(%v: vector<4xi32>, %init: i32) ->
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x4_shuffle_reduce(%v: reg<x86.xmm>, %init: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @i32x4_shuffle_reduce(%v: reg<x86.xmm>, %init: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %reversed = vpshufd.xmm %v, 27
   %9 = vpextrd.xmm %reversed, 0
   %10 = copy %init : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -159,7 +159,7 @@ func.def target(@target) @f32x4_shuffle(%v: vector<4xf32>) -> (vector<4xf32>) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x4_shuffle(%v: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x4_shuffle(%v: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %shuffled = vpermilps.xmm %v, 39
   return %shuffled
 }
@@ -175,7 +175,7 @@ func.def target(@target) @f32x4_shuffle_reduce(%v: vector<4xf32>, %init: f32) ->
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x4_shuffle_reduce(%v: reg<x86.xmm>, %init: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x4_shuffle_reduce(%v: reg<x86.xmm>, %init: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %shuffled = vpermilps.xmm %v, 39
   %9 = vpermilps.xmm %shuffled, 78
   %10 = vaddps.xmm %shuffled, %9
@@ -196,7 +196,7 @@ func.def target(@target) @i32x4_select(%lhs: vector<4xi32>, %rhs: vector<4xi32>,
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x4_select(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @i32x4_select(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %mask = vpcmpd.slt.xmm %lhs, %rhs
   %selected = vpblendmd.xmm %mask, %true_value, %false_value
   return %selected
@@ -213,7 +213,7 @@ func.def target(@target) @f32x4_select(%lhs: vector<4xf32>, %rhs: vector<4xf32>,
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x4_select(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x4_select(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %mask = vcmpps.olt.xmm %lhs, %rhs
   %selected = vblendmps.xmm %mask, %true_value, %false_value
   return %selected
@@ -233,7 +233,7 @@ func.def target(@target) @i32x4_memory_copy(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x4_memory_copy(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @i32x4_memory_copy(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
   %loaded = vmovdqu32.load.xmm %input_view {disp32 = 0}
   vmovdqu32.store.xmm %loaded, %output_view {disp32 = 0}
   return
@@ -254,7 +254,7 @@ func.def target(@target) @i32x4_memory_indexed(%input: buffer, %output: buffer, 
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32x4_memory_indexed(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @i32x4_memory_indexed(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm {
   %loaded = vmovdqu32.load.indexed.xmm %input_view, %bounded_i {disp32 = 0, scale = 4}
   vmovdqu32.store.indexed.xmm %loaded, %output_view, %bounded_i {disp32 = 0, scale = 4}
   return
@@ -274,7 +274,7 @@ func.def target(@target) @f32x4_memory_copy(%input: buffer, %output: buffer) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x4_memory_copy(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x4_memory_copy(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
   %loaded = vmovdqu32.load.xmm %input_view {disp32 = 0}
   vmovdqu32.store.xmm %loaded, %output_view {disp32 = 0}
   return
@@ -298,7 +298,7 @@ func.def target(@target) @f32x4_memory_indexed_add(%lhs: buffer, %rhs: buffer, %
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x4_memory_indexed_add(%lhs_view: reg<x86.gpr64>, %rhs_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x4_memory_indexed_add(%lhs_view: reg<x86.gpr64>, %rhs_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %bounded_i: reg<x86.gpr64>) asm {
   %lhs_v = vmovdqu32.load.indexed.xmm %lhs_view, %bounded_i {disp32 = 0, scale = 4}
   %rhs_v = vmovdqu32.load.indexed.xmm %rhs_view, %bounded_i {disp32 = 0, scale = 4}
   %sum = vaddps.xmm %lhs_v, %rhs_v

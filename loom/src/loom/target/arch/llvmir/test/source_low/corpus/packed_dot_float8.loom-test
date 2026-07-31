@@ -11,7 +11,7 @@ func.def target(@target) @dot4f8_fp8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot4f8_fp8bf8(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4f8_fp8bf8(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %512 = const.i32 255
   %513 = const.i32 8
   %514 = const.i32 16
@@ -330,7 +330,7 @@ func.def target(@target) @dot4f8_bf8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot4f8_bf8fp8(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4f8_bf8fp8(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %512 = const.i32 255
   %513 = const.i32 8
   %514 = const.i32 16
@@ -649,7 +649,7 @@ func.def target(@target) @dot4f8_fp8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot4f8_fp8fp8(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4f8_fp8fp8(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %532 = const.i32 255
   %533 = const.i32 8
   %534 = const.i32 16
@@ -974,7 +974,7 @@ func.def target(@target) @dot4f8_bf8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @dot4f8_bf8bf8(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @dot4f8_bf8bf8(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>, %acc: reg<llvmir.f32>) -> (reg<llvmir.f32>) asm {
   %492 = const.i32 255
   %493 = const.i32 8
   %494 = const.i32 16

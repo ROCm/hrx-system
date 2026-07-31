@@ -8,7 +8,7 @@ func.def target(@target) @i32_to_u8x4_bitunpack(%packed: vector<1xi32>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32_to_u8x4_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_to_u8x4_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm {
   %5 = v_and_b32_lit %packed, 255
   %6 = v_bfe_u32_offset_width_inline %packed {offset = 8, width = 8}
   %7 = v_bfe_u32_offset_width_inline %packed {offset = 16, width = 8}
@@ -26,7 +26,7 @@ func.def target(@target) @i32_to_s8x4_bitunpack(%packed: vector<1xi32>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32_to_s8x4_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_to_s8x4_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm {
   %5 = v_bfe_i32_offset_width_inline %packed {offset = 0, width = 8}
   %6 = v_bfe_i32_offset_width_inline %packed {offset = 8, width = 8}
   %7 = v_bfe_i32_offset_width_inline %packed {offset = 16, width = 8}
@@ -44,7 +44,7 @@ func.def target(@target) @i32_to_u4x8_bitunpack(%packed: vector<1xi32>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32_to_u4x8_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_to_u4x8_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm {
   %5 = v_and_b32_src0_inline %packed, 15
   %6 = v_bfe_u32_offset_width_inline %packed {offset = 4, width = 4}
   %7 = v_bfe_u32_offset_width_inline %packed {offset = 8, width = 4}
@@ -66,7 +66,7 @@ func.def target(@target) @i8x2_to_u2x8_bitunpack(%packed: vector<2xi8>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x2_to_u2x8_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x2_to_u2x8_bitunpack(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm {
   %5 = v_and_b32_src0_inline %packed, 3
   %6 = v_bfe_u32_offset_width_inline %packed {offset = 2, width = 2}
   %7 = v_bfe_u32_offset_width_inline %packed {offset = 4, width = 2}
@@ -88,7 +88,7 @@ func.def target(@target) @i32_to_u8x4_bitunpack_i8_result(%packed: vector<1xi32>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i32_to_u8x4_bitunpack_i8_result(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32_to_u8x4_bitunpack_i8_result(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %5 = v_and_b32_lit %packed, 255
   %6 = v_bfe_u32_offset_width_inline %packed {offset = 8, width = 8}
   %7 = v_lshl_add_u32_shift_imm %6, %5, 8
@@ -108,7 +108,7 @@ func.def target(@target) @i8x2_to_u4x4_bitunpack_i8_result(%packed: vector<2xi8>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x2_to_u4x4_bitunpack_i8_result(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x2_to_u4x4_bitunpack_i8_result(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %5 = v_and_b32_src0_inline %packed, 15
   %6 = v_bfe_u32_offset_width_inline %packed {offset = 4, width = 4}
   %7 = v_lshl_add_u32_shift_imm %6, %5, 8
@@ -128,7 +128,7 @@ func.def target(@target) @i8x2_to_s4x4_bitunpack_i8_result(%packed: vector<2xi8>
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i8x2_to_s4x4_bitunpack_i8_result(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x2_to_s4x4_bitunpack_i8_result(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %5 = v_bfe_i32_offset_width_inline %packed {offset = 0, width = 4}
   %6 = v_and_b32_lit %5, 255
   %7 = v_bfe_i32_offset_width_inline %packed {offset = 4, width = 4}
@@ -162,7 +162,7 @@ kernel.def target(@target) @uniform_global_i32_to_u8x4_bitunpack_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_global_i32_to_u8x4_bitunpack_store() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_global_i32_to_u8x4_bitunpack_store() asm {
   %values_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %13 = s_mov_b32 0

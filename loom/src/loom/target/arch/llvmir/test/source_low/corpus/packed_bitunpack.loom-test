@@ -11,7 +11,7 @@ func.def target(@target) @i32_to_u8x4_bitunpack(%packed: vector<1xi32>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_to_u8x4_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_to_u8x4_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x4>) asm {
   %29 = const.i32 255
   %30 = and.i32 %packed, %29
   %31 = const.i32 8
@@ -39,7 +39,7 @@ func.def target(@target) @i32_to_s8x4_bitunpack(%packed: vector<1xi32>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_to_s8x4_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_to_s8x4_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x4>) asm {
   %45 = const.i32 255
   %46 = and.i32 %packed, %45
   %47 = const.i32 24
@@ -75,7 +75,7 @@ func.def target(@target) @i32_to_u4x8_bitunpack(%packed: vector<1xi32>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_to_u4x8_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x8>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_to_u4x8_bitunpack(%packed: reg<llvmir.i32>) -> (reg<llvmir.i32 x8>) asm {
   %53 = const.i32 15
   %54 = and.i32 %packed, %53
   %55 = const.i32 4
@@ -115,7 +115,7 @@ func.def target(@target) @i8x2_to_u2x8_bitunpack(%packed: vector<2xi8>) -> (vect
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i8x2_to_u2x8_bitunpack(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i32 x8>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i8x2_to_u2x8_bitunpack(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i32 x8>) asm {
   %54 = extract.v2i8 %packed, 0
   %55 = zext.i8.i32 %54
   %56 = const.i32 3
@@ -152,7 +152,7 @@ func.def target(@target) @i32_to_u8x4_bitunpack_i8_result(%packed: vector<1xi32>
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_to_u8x4_bitunpack_i8_result(%packed: reg<llvmir.i32>) -> (reg<llvmir.i8 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_to_u8x4_bitunpack_i8_result(%packed: reg<llvmir.i32>) -> (reg<llvmir.i8 x4>) asm {
   %33 = const.i32 255
   %34 = and.i32 %packed, %33
   %35 = trunc.i32.i8 %34
@@ -184,7 +184,7 @@ func.def target(@target) @i8x2_to_u4x4_bitunpack_i8_result(%packed: vector<2xi8>
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i8x2_to_u4x4_bitunpack_i8_result(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i8 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i8x2_to_u4x4_bitunpack_i8_result(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i8 x4>) asm {
   %34 = extract.v2i8 %packed, 0
   %35 = zext.i8.i32 %34
   %36 = const.i32 15
@@ -215,7 +215,7 @@ func.def target(@target) @i8x2_to_s4x4_bitunpack_i8_result(%packed: vector<2xi8>
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i8x2_to_s4x4_bitunpack_i8_result(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i8 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i8x2_to_s4x4_bitunpack_i8_result(%packed: reg<llvmir.i8 x2>) -> (reg<llvmir.i8 x4>) asm {
   %50 = extract.v2i8 %packed, 0
   %51 = zext.i8.i32 %50
   %52 = const.i32 15

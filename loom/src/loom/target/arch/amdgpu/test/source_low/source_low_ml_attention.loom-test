@@ -17,7 +17,7 @@ func.def target(@target) @online_softmax_update(%old_max: f32, %old_sum: f32, %o
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @online_softmax_update(%old_max: reg<amdgpu.vgpr>, %old_sum: reg<amdgpu.vgpr>, %old_acc: reg<amdgpu.vgpr x4>, %score: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @online_softmax_update(%old_max: reg<amdgpu.vgpr>, %old_sum: reg<amdgpu.vgpr>, %old_acc: reg<amdgpu.vgpr x4>, %score: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>) asm {
   %new_max = v_max_f32 %old_max, %score
   %old_delta = v_sub_f32 %old_max, %new_max
   %score_delta = v_sub_f32 %score, %new_max
@@ -72,7 +72,7 @@ kernel.def target(@target) @attention_probability_value_mma_repack() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_probability_value_mma_repack(%probability_fragment: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_probability_value_mma_repack(%probability_fragment: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) asm {
   %22 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %24 = slice %probability_fragment[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
@@ -221,7 +221,7 @@ kernel.def target(@target) @attention_loop_carried_accumulator_barrier() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_loop_carried_accumulator_barrier(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_loop_carried_accumulator_barrier(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) asm {
   %30 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %32 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
@@ -288,7 +288,7 @@ kernel.def target(@target) @attention_tail_peel_accumulator_merge() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_tail_peel_accumulator_merge(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %tail_tile_count: reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @attention_tail_peel_accumulator_merge(%lhs: reg<amdgpu.vgpr x8>, %rhs0: reg<amdgpu.vgpr x8>, %rhs1: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %tail_tile_count: reg<amdgpu.sgpr>) asm {
   %37 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %zero_i32 = s_mov_b32 0
@@ -352,7 +352,7 @@ func.def target(@target) @tail_masked_score_block(%scores: vector<4xf32>, %valid
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @tail_masked_score_block(%scores: reg<amdgpu.vgpr x4>, %valid_count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @tail_masked_score_block(%scores: reg<amdgpu.vgpr x4>, %valid_count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %37 = v_mov_b32_copy %valid_count
   %40 = v_cmp_lt_i32_src0_inline %37 {lhs = 0}
   %42 = v_cmp_lt_i32_src0_inline %37 {lhs = 1}
@@ -409,7 +409,7 @@ func.def target(@target) @paged_kv_cache_block_load(%page_table: buffer, %page_p
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @paged_kv_cache_block_load(%sequence: reg<amdgpu.sgpr>, %block: reg<amdgpu.sgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @paged_kv_cache_block_load(%sequence: reg<amdgpu.sgpr>, %block: reg<amdgpu.sgpr>, %lane: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
   %page_entry_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %kv_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %42 = v_mov_b32 0
@@ -446,7 +446,7 @@ func.def target(@target) @rope_pair_rotate(%even: f32, %odd: f32, %angle: f32) -
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @rope_pair_rotate(%even: reg<amdgpu.vgpr>, %odd: reg<amdgpu.vgpr>, %angle: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @rope_pair_rotate(%even: reg<amdgpu.vgpr>, %odd: reg<amdgpu.vgpr>, %angle: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %24 = v_mul_f32_src0_inline %angle, 1042479491
   %sine = v_sin_f32 %24
   %cosine = v_cos_f32 %24
@@ -475,7 +475,7 @@ func.def target(@target) @routing_top2_update(%score: f32, %expert: i32, %best_s
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @routing_top2_update(%score: reg<amdgpu.vgpr>, %expert: reg<amdgpu.sgpr>, %best_score: reg<amdgpu.vgpr>, %best_expert: reg<amdgpu.sgpr>, %second_score: reg<amdgpu.vgpr>, %second_expert: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @routing_top2_update(%score: reg<amdgpu.vgpr>, %expert: reg<amdgpu.sgpr>, %best_score: reg<amdgpu.vgpr>, %best_expert: reg<amdgpu.sgpr>, %second_score: reg<amdgpu.vgpr>, %second_expert: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %beats_best = v_cmp_lt_f32 %best_score, %score
   %beats_second = v_cmp_lt_f32 %second_score, %score
   %candidate_second_score = v_cndmask_b32 %second_score, %score, %beats_second

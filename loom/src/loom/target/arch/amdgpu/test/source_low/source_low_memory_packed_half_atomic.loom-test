@@ -18,7 +18,7 @@ kernel.def target(@target) @lds_packed_f16_atomic_add() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_packed_f16_atomic_add(%value: reg<amdgpu.vgpr>) asm<amdgpu.gfx9_4.generic.core> {
+low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_packed_f16_atomic_add(%value: reg<amdgpu.vgpr>) asm {
   %14 = storage {byte_alignment = 4, byte_length = 64} : low.storage<workgroup>
   %scratch_view = storage_address %14 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   ds_pk_add_f16 %scratch_view, %value
@@ -46,7 +46,7 @@ kernel.def target(@target) @lds_packed_f16_atomic_add_from_elements_offsets() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_packed_f16_atomic_add_from_elements_offsets(%value: reg<amdgpu.vgpr>) asm<amdgpu.gfx9_4.generic.core> {
+low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_packed_f16_atomic_add_from_elements_offsets(%value: reg<amdgpu.vgpr>) asm {
   %11 = storage {byte_alignment = 4, byte_length = 64} : low.storage<workgroup>
   %scratch_view = storage_address %11 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   ds_pk_add_f16 %scratch_view, %value
@@ -74,7 +74,7 @@ kernel.def target(@target) @lds_packed_bf16_atomic_add() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_packed_bf16_atomic_add(%value: reg<amdgpu.vgpr>) asm<amdgpu.gfx9_4.generic.core> {
+low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_packed_bf16_atomic_add(%value: reg<amdgpu.vgpr>) asm {
   %14 = storage {byte_alignment = 4, byte_length = 64} : low.storage<workgroup>
   %scratch_view = storage_address %14 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   ds_pk_add_bf16 %scratch_view, %value
@@ -102,7 +102,7 @@ kernel.def target(@target) @global_packed_f16_atomic_add() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_packed_f16_atomic_add(%value: reg<amdgpu.vgpr>) asm<amdgpu.gfx12.generic.core> {
+low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_packed_f16_atomic_add(%value: reg<amdgpu.vgpr>) asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %16 = v_mov_b32 0
   global_atomic_pk_add_f16_saddr %16, %value, %view {scope = 2}
@@ -127,7 +127,7 @@ func.def target(@target) @generic_packed_f16_atomic_add(%input: buffer, %value: 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @generic_packed_f16_atomic_add(%value: reg<amdgpu.vgpr>) asm<amdgpu.gfx12.generic.core> {
+low.func.def target<amdgpu.gfx12.generic.core>(@target) abi(hal_kernel) @generic_packed_f16_atomic_add(%value: reg<amdgpu.vgpr>) asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
   %15 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %16 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>

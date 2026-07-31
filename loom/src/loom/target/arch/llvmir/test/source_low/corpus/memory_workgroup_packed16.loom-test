@@ -24,7 +24,7 @@ kernel.def target(@target) @lds_f16x4_b64_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_f16x4_b64_roundtrip() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_f16x4_b64_roundtrip() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %bytes = const.i64 512
@@ -61,7 +61,7 @@ kernel.def target(@target) @lds_f16x8_b128_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_f16x8_b128_roundtrip() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_f16x8_b128_roundtrip() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %bytes = const.i64 1024
@@ -111,7 +111,7 @@ kernel.def target(@target) @lds_f16x8_b128_extract_scalar_stores() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_f16x8_b128_extract_scalar_stores() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_f16x8_b128_extract_scalar_stores() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %bytes = const.i64 16
@@ -163,7 +163,7 @@ kernel.def target(@target) @lds_bf16x4_b64_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_bf16x4_b64_roundtrip() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_bf16x4_b64_roundtrip() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %bytes = const.i64 512
@@ -200,7 +200,7 @@ kernel.def target(@target) @lds_bf16x8_b128_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_bf16x8_b128_roundtrip() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_bf16x8_b128_roundtrip() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %bytes = const.i64 1024
@@ -237,7 +237,7 @@ kernel.def target(@target) @lds_f16_scalar_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_f16_scalar_roundtrip() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_f16_scalar_roundtrip() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %bytes = const.i64 128
@@ -274,7 +274,7 @@ kernel.def target(@target) @lds_bf16_scalar_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_bf16_scalar_roundtrip() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_bf16_scalar_roundtrip() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %bytes = const.i64 128
@@ -315,7 +315,7 @@ kernel.def target(@target) @lds_f16_strided_scalar_roundtrip() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(16, 16, 1) workgroup_count(1, 1, 1) @lds_f16_strided_scalar_roundtrip() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(16, 16, 1) workgroup_count(1, 1, 1) @lds_f16_strided_scalar_roundtrip() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %row = kernel.workitem_id.x

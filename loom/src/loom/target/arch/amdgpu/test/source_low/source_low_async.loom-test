@@ -9,6 +9,6 @@ func.def target(@target) @async_empty_group_wait() {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @async_empty_group_wait() asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @async_empty_group_wait() asm {
   return
 }

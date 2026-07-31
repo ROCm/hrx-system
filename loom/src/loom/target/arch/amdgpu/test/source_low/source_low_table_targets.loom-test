@@ -8,7 +8,7 @@ func.def target(@gfx950) @i8_table_lookup_u4_dynamic_table_gfx950(%grid: vector<
 }
 
 // ----
-low.func.def target(@gfx950) abi(hal_kernel) @i8_table_lookup_u4_dynamic_table_gfx950(%grid: reg<amdgpu.vgpr x4>, %packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@gfx950) abi(hal_kernel) @i8_table_lookup_u4_dynamic_table_gfx950(%grid: reg<amdgpu.vgpr x4>, %packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %8 = v_and_b32_src0_inline %packed, 15
   %9 = v_bfe_u32_offset_width_inline %packed {offset = 4, width = 4}
   %10 = v_lshl_add_u32_shift_imm %9, %8, 8
@@ -40,7 +40,7 @@ func.def target(@gfx1200) @i8_table_lookup_u4_dynamic_table_gfx1200(%grid: vecto
 }
 
 // ----
-low.func.def target(@gfx1200) abi(hal_kernel) @i8_table_lookup_u4_dynamic_table_gfx1200(%grid: reg<amdgpu.vgpr x4>, %packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@gfx1200) abi(hal_kernel) @i8_table_lookup_u4_dynamic_table_gfx1200(%grid: reg<amdgpu.vgpr x4>, %packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %8 = v_and_b32_src0_inline %packed, 15
   %9 = v_bfe_u32_offset_width_inline %packed {offset = 4, width = 4}
   %10 = v_lshl_add_u32_shift_imm %9, %8, 8
@@ -72,7 +72,7 @@ func.def target(@gfx1250) @i8_table_lookup_u4_dynamic_table_gfx1250(%grid: vecto
 }
 
 // ----
-low.func.def target(@gfx1250) abi(hal_kernel) @i8_table_lookup_u4_dynamic_table_gfx1250(%grid: reg<amdgpu.vgpr x4>, %packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@gfx1250) abi(hal_kernel) @i8_table_lookup_u4_dynamic_table_gfx1250(%grid: reg<amdgpu.vgpr x4>, %packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %8 = v_and_b32_src0_inline %packed, 15
   %9 = v_bfe_u32_offset_width_inline %packed {offset = 4, width = 4}
   %10 = v_lshl_add_u32_shift_imm %9, %8, 8

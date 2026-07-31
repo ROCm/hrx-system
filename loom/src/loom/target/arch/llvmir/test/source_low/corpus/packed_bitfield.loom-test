@@ -16,7 +16,7 @@ func.def target(@target) @i32_bitfield_extractu(%input: buffer, %output: buffer)
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_bitfield_extractu(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_bitfield_extractu(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
   %16 = load.i32 %input_view, 0
   %17 = const.i32 4
   %18 = lshr.i32 %16, %17
@@ -43,7 +43,7 @@ func.def target(@target) @i32_bitfield_extracts(%input: buffer, %output: buffer)
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_bitfield_extracts(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_bitfield_extracts(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
   %16 = load.i32 %input_view, 0
   %17 = const.i32 24
   %18 = shl.i32 %16, %17
@@ -72,7 +72,7 @@ func.def target(@target) @i32_bitfield_insert(%field_buffer: buffer, %base_buffe
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_bitfield_insert(%field_view: reg<llvmir.ptr>, %base_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_bitfield_insert(%field_view: reg<llvmir.ptr>, %base_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
   %27 = load.i32 %field_view, 0
   %28 = load.i32 %base_view, 0
   %29 = const.i32 15
@@ -107,7 +107,7 @@ func.def target(@target) @i32_bitfield_b128_shape(%input: buffer, %output: buffe
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_bitfield_b128_shape(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_bitfield_b128_shape(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
   %86 = load.i32 %input_view, 0
   %87 = const.i32 4
   %88 = lshr.i32 %86, %87

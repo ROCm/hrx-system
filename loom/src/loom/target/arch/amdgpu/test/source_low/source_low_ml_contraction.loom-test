@@ -14,7 +14,7 @@ func.def target(@target) @packed_i8_dequant_gemv_two_outputs(%packed: vector<1xi
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @packed_i8_dequant_gemv_two_outputs(%packed: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr x4>, %rhs1: reg<amdgpu.vgpr x4>, %acc0: reg<amdgpu.vgpr>, %acc1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @packed_i8_dequant_gemv_two_outputs(%packed: reg<amdgpu.vgpr>, %scale: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr x4>, %rhs1: reg<amdgpu.vgpr x4>, %acc0: reg<amdgpu.vgpr>, %acc1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %23 = v_bfe_i32_offset_width_inline %packed {offset = 0, width = 8}
   %24 = v_bfe_i32_offset_width_inline %packed {offset = 8, width = 8}
   %25 = v_bfe_i32_offset_width_inline %packed {offset = 16, width = 8}
@@ -66,7 +66,7 @@ func.def target(@target) @packed_i8_dequant_gemv_two_k_blocks(%packed0: vector<1
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @packed_i8_dequant_gemv_two_k_blocks(%packed0: reg<amdgpu.vgpr>, %packed1: reg<amdgpu.vgpr>, %scale0: reg<amdgpu.vgpr>, %scale1: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr x4>, %rhs1: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @packed_i8_dequant_gemv_two_k_blocks(%packed0: reg<amdgpu.vgpr>, %packed1: reg<amdgpu.vgpr>, %scale0: reg<amdgpu.vgpr>, %scale1: reg<amdgpu.vgpr>, %rhs0: reg<amdgpu.vgpr x4>, %rhs1: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %28 = v_bfe_i32_offset_width_inline %packed0 {offset = 0, width = 8}
   %29 = v_bfe_i32_offset_width_inline %packed0 {offset = 8, width = 8}
   %30 = v_bfe_i32_offset_width_inline %packed0 {offset = 16, width = 8}
@@ -120,7 +120,7 @@ func.def target(@target) @bf16_gemv_dot2_two_outputs(%lhs: vector<8xbf16>, %rhs0
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16_gemv_dot2_two_outputs(%lhs: reg<amdgpu.vgpr x4>, %rhs0: reg<amdgpu.vgpr x4>, %rhs1: reg<amdgpu.vgpr x4>, %acc0: reg<amdgpu.vgpr x4>, %acc1: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16_gemv_dot2_two_outputs(%lhs: reg<amdgpu.vgpr x4>, %rhs0: reg<amdgpu.vgpr x4>, %rhs1: reg<amdgpu.vgpr x4>, %acc0: reg<amdgpu.vgpr x4>, %acc1: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
   %16 = copy %acc0 : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %17 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %18 = slice %rhs0[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -176,7 +176,7 @@ func.def target(@target) @i4_dot8_two_k_blocks(%lhs0: vector<2xi32>, %rhs0: vect
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @i4_dot8_two_k_blocks(%lhs0: reg<amdgpu.vgpr x2>, %rhs0: reg<amdgpu.vgpr x2>, %lhs1: reg<amdgpu.vgpr x2>, %rhs1: reg<amdgpu.vgpr x2>, %acc: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i4_dot8_two_k_blocks(%lhs0: reg<amdgpu.vgpr x2>, %rhs0: reg<amdgpu.vgpr x2>, %lhs1: reg<amdgpu.vgpr x2>, %rhs1: reg<amdgpu.vgpr x2>, %acc: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %14 = slice %lhs0[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %15 = slice %rhs0[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %16 = slice %acc[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
@@ -222,7 +222,7 @@ kernel.def target(@target) @workgroup_cached_dot4i_u8s8_tile() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_cached_dot4i_u8s8_tile() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @workgroup_cached_dot4i_u8s8_tile() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
@@ -262,7 +262,7 @@ func.def target(@target) @tail_selected_f32_dot(%lhs: vector<4xf32>, %rhs: vecto
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @tail_selected_f32_dot(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr>, %lane: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @tail_selected_f32_dot(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %acc: reg<amdgpu.vgpr>, %lane: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
   %15 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %16 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %17 = v_fma_f32 %15, %16, %acc

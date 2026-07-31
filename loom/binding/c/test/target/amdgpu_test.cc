@@ -513,8 +513,9 @@ kernel.def target(@gfx11_generic) @configured_store() {
   EXPECT_NE(module_text.find("amdgpu.target<gfx1151> @gfx1151"),
             std::string::npos)
       << module_text;
-  EXPECT_NE(module_text.find("low.kernel.def target(@gfx1151)"),
-            std::string::npos)
+  EXPECT_NE(
+      module_text.find("low.kernel.def target<amdgpu.rdna3_5.core>(@gfx1151)"),
+      std::string::npos)
       << module_text;
   EXPECT_NE(module_text.find("@configured_store("), std::string::npos)
       << module_text;

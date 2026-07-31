@@ -12,7 +12,7 @@ func.def target(@target) @vector_sitofp_i32x2(%input: vector<2xi32>, %scale: vec
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @vector_sitofp_i32x2(%input: reg<llvmir.i32 x2>, %scale: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @vector_sitofp_i32x2(%input: reg<llvmir.i32 x2>, %scale: reg<llvmir.f32 x2>) -> (reg<llvmir.f32 x2>) asm {
   %converted = sitofp.v2i32.v2f32 %input
   %scaled = mul.v2f32 %converted, %scale
   return %scaled
@@ -30,7 +30,7 @@ func.def target(@target) @scalar_uitofp_i32(%input: i32) -> (f32) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_uitofp_i32(%input: reg<llvmir.i32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_uitofp_i32(%input: reg<llvmir.i32>) -> (reg<llvmir.f32>) asm {
   %converted = uitofp.i32.f32 %input
   return %converted
 }
@@ -47,7 +47,7 @@ func.def target(@target) @scalar_sitofp_i32(%input: i32) -> (f32) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_sitofp_i32(%input: reg<llvmir.i32>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_sitofp_i32(%input: reg<llvmir.i32>) -> (reg<llvmir.f32>) asm {
   %converted = sitofp.i32.f32 %input
   return %converted
 }
@@ -64,7 +64,7 @@ func.def target(@target) @scalar_trunci_i32_to_i8(%input: i32) -> (i8) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_trunci_i32_to_i8(%input: reg<llvmir.i32>) -> (reg<llvmir.i8>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_trunci_i32_to_i8(%input: reg<llvmir.i32>) -> (reg<llvmir.i8>) asm {
   %converted = trunc.i32.i8 %input
   return %converted
 }
@@ -81,7 +81,7 @@ func.def target(@target) @scalar_trunci_i32_to_i16(%input: i32) -> (i16) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_trunci_i32_to_i16(%input: reg<llvmir.i32>) -> (reg<llvmir.i16>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_trunci_i32_to_i16(%input: reg<llvmir.i32>) -> (reg<llvmir.i16>) asm {
   %converted = trunc.i32.i16 %input
   return %converted
 }
@@ -109,7 +109,7 @@ kernel.def target(@target) @scalar_sitofp_i8_load_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @scalar_sitofp_i8_load_store() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @scalar_sitofp_i8_load_store() asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %loaded = load.i8 %input_view, 0
@@ -130,7 +130,7 @@ func.def target(@target) @scalar_extf_f16(%input: f16) -> (f32) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_extf_f16(%input: reg<llvmir.f16>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_extf_f16(%input: reg<llvmir.f16>) -> (reg<llvmir.f32>) asm {
   %converted = fpext.f16.f32 %input
   return %converted
 }
@@ -147,7 +147,7 @@ func.def target(@target) @scalar_extf_bf16(%input: bf16) -> (f32) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_extf_bf16(%input: reg<llvmir.bf16>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_extf_bf16(%input: reg<llvmir.bf16>) -> (reg<llvmir.f32>) asm {
   %converted = fpext.bf16.f32 %input
   return %converted
 }
@@ -167,7 +167,7 @@ func.def target(@target) @scalar_fptrunc_f32_store(%output: buffer, %input: f32)
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_fptrunc_f32_store(%output_view: reg<llvmir.ptr>, %input: reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_fptrunc_f32_store(%output_view: reg<llvmir.ptr>, %input: reg<llvmir.f32>) asm {
   %converted = fptrunc.f32.f16 %input
   store.f16 %converted, %output_view, 0
   return
@@ -188,7 +188,7 @@ func.def target(@target) @scalar_fptrunc_bf16_store(%output: buffer, %input: f32
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_fptrunc_bf16_store(%output_view: reg<llvmir.ptr>, %input: reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_fptrunc_bf16_store(%output_view: reg<llvmir.ptr>, %input: reg<llvmir.f32>) asm {
   %converted = fptrunc.f32.bf16 %input
   store.bf16 %converted, %output_view, 0
   return
@@ -206,7 +206,7 @@ func.def target(@target) @vector_extf_bf16x3(%input: vector<3xbf16>) -> (vector<
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @vector_extf_bf16x3(%input: reg<llvmir.bf16 x3>) -> (reg<llvmir.f32 x3>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @vector_extf_bf16x3(%input: reg<llvmir.bf16 x3>) -> (reg<llvmir.f32 x3>) asm {
   %converted = fpext.v3bf16.v3f32 %input
   return %converted
 }
@@ -223,7 +223,7 @@ func.def target(@target) @vector_fptrunc_bf16x3(%input: vector<3xf32>) -> (vecto
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @vector_fptrunc_bf16x3(%input: reg<llvmir.f32 x3>) -> (reg<llvmir.bf16 x3>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @vector_fptrunc_bf16x3(%input: reg<llvmir.f32 x3>) -> (reg<llvmir.bf16 x3>) asm {
   %converted = fptrunc.v3f32.v3bf16 %input
   return %converted
 }
@@ -240,7 +240,7 @@ func.def target(@target) @scalar_bitcast_f32_to_i32(%input: f32) -> (i32) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_bitcast_f32_to_i32(%input: reg<llvmir.f32>) -> (reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_bitcast_f32_to_i32(%input: reg<llvmir.f32>) -> (reg<llvmir.i32>) asm {
   %bits = bitcast.f32.i32 %input
   return %bits
 }
@@ -265,7 +265,7 @@ kernel.def target(@target) @scalar_bitcast_direct_i32_arg_f32_store() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @scalar_bitcast_direct_i32_arg_f32_store(%scale_bits: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @scalar_bitcast_direct_i32_arg_f32_store(%scale_bits: reg<llvmir.i32>) asm {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %scale = bitcast.i32.f32 %scale_bits
   store.f32 %scale, %output_view, 0
@@ -284,7 +284,7 @@ func.def target(@target) @vector_uitofp_i32x2(%input: vector<2xi32>) -> (vector<
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @vector_uitofp_i32x2(%input: reg<llvmir.i32 x2>) -> (reg<llvmir.f32 x2>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @vector_uitofp_i32x2(%input: reg<llvmir.i32 x2>) -> (reg<llvmir.f32 x2>) asm {
   %converted = uitofp.v2i32.v2f32 %input
   return %converted
 }
@@ -304,7 +304,7 @@ func.def target(@target) @scalar_extsi_i32_store(%output: buffer, %input: i32) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_extsi_i32_store(%output_view: reg<llvmir.ptr>, %input: reg<llvmir.i32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_extsi_i32_store(%output_view: reg<llvmir.ptr>, %input: reg<llvmir.i32>) asm {
   %converted = sext.i32.i64 %input
   store.i64 %converted, %output_view, 0
   return

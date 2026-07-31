@@ -16,7 +16,7 @@ func.def target(@target) @generic_atomic_i32_static(%input: buffer) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @generic_atomic_i32_static(%view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @generic_atomic_i32_static(%view: reg<llvmir.ptr>) asm {
   %one = const.i32 1
   atomic.reduce.add.i32 %one, %view, 0, 0, 3
   %old_add = atomic.rmw.add.i32 %one, %view, 0, 0, 3
@@ -40,7 +40,7 @@ func.def target(@target) @generic_atomic_cmpxchg_i32_static(%input: buffer) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @generic_atomic_cmpxchg_i32_static(%view: reg<llvmir.ptr>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @generic_atomic_cmpxchg_i32_static(%view: reg<llvmir.ptr>) asm {
   %expected = const.i32 7
   %replacement = const.i32 9
   %old_cmpxchg = atomic.cmpxchg.i32 %expected, %replacement, %view, 0, 0, 0, 3

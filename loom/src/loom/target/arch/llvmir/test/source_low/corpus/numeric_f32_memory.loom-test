@@ -25,7 +25,7 @@ kernel.def target(@target) @f32_arith() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f32_arith() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f32_arith() asm {
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<llvmir.ptr>
@@ -64,7 +64,7 @@ kernel.def target(@target) @f32_fma() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f32_fma() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f32_fma() asm {
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<llvmir.ptr>
@@ -100,7 +100,7 @@ kernel.def target(@target) @f32_arcp_div() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f32_arcp_div() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f32_arcp_div() asm {
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<llvmir.ptr>
@@ -149,7 +149,7 @@ kernel.def target(@target) @f32_scalarized() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f32_scalarized() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f32_scalarized() asm {
   %lhs_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %rhs_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<llvmir.ptr>
@@ -193,7 +193,7 @@ func.def target(@target) @f32_uniform_vector_bitops(%input: buffer) -> (vector<4
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_uniform_vector_bitops(%input_view: reg<llvmir.ptr>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_uniform_vector_bitops(%input_view: reg<llvmir.ptr>) -> (reg<llvmir.f32 x4>) asm {
   %loaded = load.v4f32 %input_view, 0
   %negated = neg.v4f32 %loaded
   %absolute = abs.v4f32 %loaded
@@ -228,7 +228,7 @@ func.def target(@target) @f32_uniform_vector_binary(%lhs_buffer: buffer, %rhs_bu
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_uniform_vector_binary(%lhs_view: reg<llvmir.ptr>, %rhs_view: reg<llvmir.ptr>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_uniform_vector_binary(%lhs_view: reg<llvmir.ptr>, %rhs_view: reg<llvmir.ptr>) -> (reg<llvmir.f32 x4>) asm {
   %lhs = load.v4f32 %lhs_view, 0
   %rhs = load.v4f32 %rhs_view, 0
   %product = mul.v4f32 %lhs, %rhs
@@ -262,7 +262,7 @@ func.def target(@target) @f32_uniform_scalar_binary(%lhs_buffer: buffer, %rhs_bu
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_uniform_scalar_binary(%lhs_view: reg<llvmir.ptr>, %rhs_view: reg<llvmir.ptr>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_uniform_scalar_binary(%lhs_view: reg<llvmir.ptr>, %rhs_view: reg<llvmir.ptr>) -> (reg<llvmir.f32>) asm {
   %lhs = load.f32 %lhs_view, 0
   %rhs = load.f32 %rhs_view, 0
   %sum = add.f32 %lhs, %rhs
@@ -292,7 +292,7 @@ func.def target(@target) @f32_uniform_scalar_fma(%a_buffer: buffer, %b_buffer: b
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_uniform_scalar_fma(%a_view: reg<llvmir.ptr>, %b_view: reg<llvmir.ptr>, %c_view: reg<llvmir.ptr>) -> (reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_uniform_scalar_fma(%a_view: reg<llvmir.ptr>, %b_view: reg<llvmir.ptr>, %c_view: reg<llvmir.ptr>) -> (reg<llvmir.f32>) asm {
   %a = load.f32 %a_view, 0
   %b = load.f32 %b_view, 0
   %c = load.f32 %c_view, 0
@@ -323,7 +323,7 @@ func.def target(@target) @f32_uniform_vector_fma(%a_buffer: buffer, %b_buffer: b
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32_uniform_vector_fma(%a_view: reg<llvmir.ptr>, %b_view: reg<llvmir.ptr>, %c_view: reg<llvmir.ptr>) -> (reg<llvmir.f32 x4>) asm<llvmir.generic.core> {
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_uniform_vector_fma(%a_view: reg<llvmir.ptr>, %b_view: reg<llvmir.ptr>, %c_view: reg<llvmir.ptr>) -> (reg<llvmir.f32 x4>) asm {
   %a = load.v4f32 %a_view, 0
   %b = load.v4f32 %b_view, 0
   %c = load.v4f32 %c_view, 0
@@ -350,7 +350,7 @@ kernel.def target(@target) @f32_direct_arg_scale() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f32_direct_arg_scale(%scale: reg<llvmir.f32>) asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @f32_direct_arg_scale(%scale: reg<llvmir.f32>) asm {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   store.f32 %scale, %output_view, 0
   return

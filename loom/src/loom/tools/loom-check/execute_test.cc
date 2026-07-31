@@ -1346,8 +1346,9 @@ TEST_F(ExecuteTest, EmitSourceLowLowersEveryTargetedFunction) {
   EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
   const std::string actual_output = ActualOutputString(result);
-  EXPECT_NE(actual_output.find("low.func.def target(@test_target)"),
-            std::string::npos);
+  EXPECT_NE(
+      actual_output.find("low.func.def target<test.low.core>(@test_target)"),
+      std::string::npos);
   EXPECT_NE(actual_output.find("@first()"), std::string::npos);
   EXPECT_NE(actual_output.find("@second()"), std::string::npos);
   EXPECT_EQ(actual_output.find("\nfunc.def target(@test_target) @first"),

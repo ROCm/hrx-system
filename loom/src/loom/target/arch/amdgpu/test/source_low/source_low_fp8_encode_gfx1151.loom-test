@@ -7,7 +7,7 @@ func.def target(@target) @vector_fptrunc_f16x3_to_bf8(%input: vector<3xf16>) -> 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_f16x3_to_bf8(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm<amdgpu.rdna3_5.core> {
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @vector_fptrunc_f16x3_to_bf8(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
   %5 = s_mov_b32 524296
   %6 = s_mov_b32 8323199
   %7 = s_mov_b32 67044351
@@ -50,7 +50,7 @@ func.def target(@target) @vector_fptrunc_bf16x5_to_fp8(%input: vector<5xbf16>) -
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_bf16x5_to_fp8(%input: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.rdna3_5.core> {
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @vector_fptrunc_bf16x5_to_fp8(%input: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x2>) asm {
   %5 = v_mov_b32 1138753536
   %6 = v_mov_b32 2139095040
   %7 = v_mov_b32 1015021568

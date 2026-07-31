@@ -7,7 +7,7 @@ func.def target(@target) @f16_dot2f(%lhs: vector<2xf16>, %rhs: vector<2xf16>, %a
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f16_dot2f(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @f16_dot2f(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %9 = copy %acc : reg<amdgpu.vgpr> -> reg<amdgpu.vgpr>
   %dot = v_dot2_f32_f16 %lhs, %rhs, %9
   return %dot
@@ -22,7 +22,7 @@ func.def target(@target) @bf16_dot2f(%lhs: vector<2xbf16>, %rhs: vector<2xbf16>,
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16_dot2f(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_dot2f(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %9 = v_lshlrev_b32_lit %lhs, 16
   %10 = v_lshlrev_b32_lit %rhs, 16
   %11 = v_and_b32_lit %lhs, 4294901760
@@ -41,7 +41,7 @@ func.def target(@target) @bf16_dot2f_wide(%lhs: vector<4xbf16>, %rhs: vector<4xb
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16_dot2f_wide(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %acc: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_dot2f_wide(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %acc: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
   %9 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %10 = v_lshlrev_b32_lit %9, 16
   %11 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
@@ -80,7 +80,7 @@ func.def target(@target) @bf16_score_gather_dot2(%query: vector<2xbf16>, %key_ca
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16_score_gather_dot2(%query: reg<amdgpu.vgpr>, %token_offset: reg<amdgpu.sgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bf16_score_gather_dot2(%query: reg<amdgpu.vgpr>, %token_offset: reg<amdgpu.sgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %key_cache_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8192} : reg<amdgpu.sgpr x2>
   %26 = v_mov_b32 0
   %27 = s_lshl_b32_rhs_inline %token_offset, 1
@@ -119,7 +119,7 @@ func.def target(@target) @dot4i_s8s8(%lhs: vector<4xi8>, %rhs: vector<4xi8>, %ac
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @dot4i_s8s8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @dot4i_s8s8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %dot = v_dot4_i32_i8 %lhs, %rhs, %acc
   return %dot
 }
@@ -140,7 +140,7 @@ func.def target(@target) @model2_q8_0_two_row_dot4_scaled(%row0_codes: vector<4x
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @model2_q8_0_two_row_dot4_scaled(%row0_codes: reg<amdgpu.vgpr>, %row1_codes: reg<amdgpu.vgpr>, %activation_codes: reg<amdgpu.vgpr>, %row0_accumulator: reg<amdgpu.vgpr>, %row1_accumulator: reg<amdgpu.vgpr>, %row0_scale: reg<amdgpu.vgpr>, %row1_scale: reg<amdgpu.vgpr>, %activation_scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @model2_q8_0_two_row_dot4_scaled(%row0_codes: reg<amdgpu.vgpr>, %row1_codes: reg<amdgpu.vgpr>, %activation_codes: reg<amdgpu.vgpr>, %row0_accumulator: reg<amdgpu.vgpr>, %row1_accumulator: reg<amdgpu.vgpr>, %row0_scale: reg<amdgpu.vgpr>, %row1_scale: reg<amdgpu.vgpr>, %activation_scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %row0_dot = v_dot4_i32_i8 %row0_codes, %activation_codes, %row0_accumulator
   %row1_dot = v_dot4_i32_i8 %row1_codes, %activation_codes, %row1_accumulator
   %row0_dotf = v_cvt_f32_i32 %row0_dot
@@ -170,7 +170,7 @@ func.def target(@target) @dot8i4_s4s4(%lhs: vector<1xi32>, %rhs: vector<1xi32>, 
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @dot8i4_s4s4(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @dot8i4_s4s4(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %dot = v_dot8_i32_i4 %lhs, %rhs, %acc
   return %dot
 }

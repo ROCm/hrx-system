@@ -18,7 +18,7 @@ kernel.def target(@target) @global_atomic_release_reduce_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_release_reduce_i32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_release_reduce_i32() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %one = const.i32 1
   atomic.reduce.add.i32 %one, %view, 0, 2, 3
@@ -44,7 +44,7 @@ kernel.def target(@target) @global_atomic_acquire_rmw_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_acquire_rmw_i32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_acquire_rmw_i32() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %one = const.i32 1
   %old = atomic.rmw.add.i32 %one, %view, 0, 1, 3
@@ -70,7 +70,7 @@ kernel.def target(@target) @global_atomic_acq_rel_rmw_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_acq_rel_rmw_i32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_acq_rel_rmw_i32() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %one = const.i32 1
   %old = atomic.rmw.add.i32 %one, %view, 0, 3, 3
@@ -97,7 +97,7 @@ kernel.def target(@target) @global_atomic_acq_rel_cmpxchg_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_acq_rel_cmpxchg_i32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_acq_rel_cmpxchg_i32() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %expected = const.i32 7
   %replacement = const.i32 9
@@ -124,7 +124,7 @@ kernel.def target(@target) @global_atomic_seq_cst_reduce_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_seq_cst_reduce_i32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_seq_cst_reduce_i32() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %one = const.i32 1
   atomic.reduce.add.i32 %one, %view, 0, 4, 3

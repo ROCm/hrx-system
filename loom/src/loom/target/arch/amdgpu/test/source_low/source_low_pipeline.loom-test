@@ -181,7 +181,7 @@ func.def target(@gfx11) @target_template_prunes_nonmatching_provider(%codes: vec
 }
 
 // ----
-low.func.def target(@gfx11) abi(hal_kernel) @target_template_prunes_nonmatching_provider(%codes: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@gfx11) abi(hal_kernel) @target_template_prunes_nonmatching_provider(%codes: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
   %15 = slice %codes[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %16 = slice %codes[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %17 = slice %codes[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -296,7 +296,7 @@ func.def target(@target) @module_output_prints_low_asm(%lhs: i32, %rhs: i32) -> 
 // ----
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target(@target) abi(hal_kernel) @module_output_prints_low_asm(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @module_output_prints_low_asm(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
   %product = s_mul_i32 %lhs, %rhs
   return %product
 }
@@ -339,7 +339,7 @@ kernel.def target(@target) @target_legalization_precedes_cfg_finalization() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @target_legalization_precedes_cfg_finalization() asm<amdgpu.gfx11.generic.core> {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @target_legalization_precedes_cfg_finalization() asm {
   %293 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 2048} : reg<amdgpu.sgpr x2>
   %295 = v_mov_b32 16256

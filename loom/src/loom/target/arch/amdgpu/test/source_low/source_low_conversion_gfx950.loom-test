@@ -7,7 +7,7 @@ func.def target(@target) @vector_fptrunc_bf16x3(%input: vector<3xf32>) -> (vecto
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_fptrunc_bf16x3(%input: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @vector_fptrunc_bf16x3(%input: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x2>) asm {
   %5 = slice %input[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
   %6 = slice %input[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
   %7 = v_cvt_pk_bf16_f32 %5, %6
@@ -27,7 +27,7 @@ func.def target(@target) @vector_uitofp_i8x4(%input: vector<4xi8>) -> (vector<4x
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_uitofp_i8x4(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @vector_uitofp_i8x4(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm {
   %5 = v_cvt_f32_ubyte0 %input
   %6 = v_cvt_f32_ubyte1 %input
   %7 = v_cvt_f32_ubyte2 %input
@@ -45,7 +45,7 @@ func.def target(@target) @vector_fptosi_i8x8(%input: vector<8xf32>) -> (vector<8
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_fptosi_i8x8(%input: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @vector_fptosi_i8x8(%input: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x2>) asm {
   %5 = slice %input[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %6 = v_cvt_i32_f32 %5
   %7 = slice %input[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
@@ -83,7 +83,7 @@ func.def target(@target) @vector_fptoui_i8x8(%input: vector<8xf32>) -> (vector<8
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @vector_fptoui_i8x8(%input: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x2>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @vector_fptoui_i8x8(%input: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x2>) asm {
   %5 = slice %input[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
   %6 = v_cvt_u32_f32 %5
   %7 = slice %input[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>

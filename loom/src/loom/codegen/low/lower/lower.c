@@ -63,6 +63,16 @@ static iree_string_view_t loom_low_lower_descriptor_string(
   return loom_low_descriptor_set_string(context->descriptor_set, string_offset);
 }
 
+static iree_status_t loom_low_lower_intern_descriptor_set_key(
+    loom_low_lower_context_t* context,
+    loom_string_id_t* out_descriptor_set_key) {
+  iree_string_view_t descriptor_set_key = loom_low_descriptor_set_string(
+      context->descriptor_set, context->descriptor_set->key_string_offset);
+  IREE_ASSERT_FALSE(iree_string_view_is_empty(descriptor_set_key));
+  return loom_module_intern_string(context->module, descriptor_set_key,
+                                   out_descriptor_set_key);
+}
+
 static void loom_low_lower_populate_report_descriptor(
     const loom_low_lower_context_t* context,
     const loom_low_descriptor_t* descriptor, loom_low_lower_report_row_t* row) {
@@ -1822,7 +1832,8 @@ static iree_status_t loom_low_lower_create_func_op(
   const loom_predicate_t* predicates =
       loom_func_like_predicates(context->source_function, &predicate_count);
 
-  loom_low_func_def_build_flags_t build_flags = 0;
+  loom_low_func_def_build_flags_t build_flags =
+      LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_DESCRIPTOR_SET;
   uint8_t visibility = loom_func_like_visibility(context->source_function);
   uint8_t cc = loom_func_like_cc(context->source_function);
   uint8_t purity = loom_func_like_purity(context->source_function);
@@ -1862,12 +1873,15 @@ static iree_status_t loom_low_lower_create_func_op(
                           loom_module_block(context->module),
                           &context->builder);
   loom_builder_set_before(&context->builder, context->source_function.op);
+  loom_string_id_t descriptor_set_key = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_intern_descriptor_set_key(context, &descriptor_set_key));
   IREE_RETURN_IF_ERROR(loom_low_func_def_build(
       &context->builder, build_flags, visibility, retain, cc, purity,
-      /*allocation=*/0, /*schedule=*/0,
-      /*descriptor_set=*/LOOM_STRING_ID_INVALID, context->options->target_ref,
-      abi, abi_attrs, abi_layout, export_symbol, export_attrs, low_func_ref,
-      arg_types, arg_count, result_types, result_count,
+      /*allocation=*/0, /*schedule=*/0, descriptor_set_key,
+      context->options->target_ref, abi, abi_attrs, abi_layout, export_symbol,
+      export_attrs, low_func_ref, arg_types, arg_count, result_types,
+      result_count,
       /*tied_results=*/NULL, /*tied_result_count=*/0, predicates,
       predicate_count, context->source_function.op->location,
       &context->low_func_op));
@@ -1885,7 +1899,8 @@ static iree_status_t loom_low_lower_create_kernel_op(
   const loom_predicate_t* predicates =
       loom_func_like_predicates(context->source_function, &predicate_count);
 
-  loom_low_kernel_def_build_flags_t build_flags = 0;
+  loom_low_kernel_def_build_flags_t build_flags =
+      LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_DESCRIPTOR_SET;
   loom_string_id_t export_symbol =
       loom_func_like_export_symbol(context->source_function);
   if (export_symbol != LOOM_STRING_ID_INVALID) {
@@ -1938,12 +1953,15 @@ static iree_status_t loom_low_lower_create_kernel_op(
   IREE_RETURN_IF_ERROR(loom_low_lower_map_abi_layout(
       context, LOOM_LOW_LOWER_ABI_LAYOUT_KIND_KERNEL, arg_types, arg_count,
       /*result_types=*/NULL, /*result_count=*/0, &abi_layout));
+  loom_string_id_t descriptor_set_key = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_intern_descriptor_set_key(context, &descriptor_set_key));
   IREE_RETURN_IF_ERROR(loom_low_kernel_def_build(
       &context->builder, build_flags, retain, /*allocation=*/0, /*schedule=*/0,
-      /*descriptor_set=*/LOOM_STRING_ID_INVALID, context->options->target_ref,
-      abi_layout, export_symbol, export_linkage, workgroup_size.x,
-      workgroup_size.y, workgroup_size.z, workgroup_count.x, workgroup_count.y,
-      workgroup_count.z, workgroup_cluster_size.x, workgroup_cluster_size.y,
+      descriptor_set_key, context->options->target_ref, abi_layout,
+      export_symbol, export_linkage, workgroup_size.x, workgroup_size.y,
+      workgroup_size.z, workgroup_count.x, workgroup_count.y, workgroup_count.z,
+      workgroup_cluster_size.x, workgroup_cluster_size.y,
       workgroup_cluster_size.z, low_func_ref, arg_types, arg_count, predicates,
       predicate_count, context->source_function.op->location,
       &context->low_func_op));
@@ -2111,7 +2129,8 @@ iree_status_t loom_low_lower_import_declaration(
     IREE_ASSERT_LT(code_symbol, module->strings.count);
     loom_low_func_decl_build_flags_t build_flags =
         LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_KIND |
-        LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL;
+        LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL |
+        LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_DESCRIPTOR_SET;
     const uint8_t visibility = loom_func_like_visibility(source_declaration);
     const uint8_t cc = loom_func_like_cc(source_declaration);
     const uint8_t purity = loom_func_like_purity(source_declaration);
@@ -2157,16 +2176,20 @@ iree_status_t loom_low_lower_import_declaration(
       loom_builder_initialize(module, &module->arena, loom_module_block(module),
                               &context.builder);
       loom_builder_set_before(&context.builder, source_declaration.op);
-      status = loom_low_func_decl_build(
-          &context.builder, build_flags, visibility, retain, cc, purity,
-          /*allocation=*/0, /*schedule=*/0,
-          (uint8_t)options->policy->import_decl_kind, code_symbol,
-          /*descriptor_set=*/LOOM_STRING_ID_INVALID, options->target_ref, abi,
-          abi_attrs, abi_layout, export_symbol, export_attrs, low_func_ref,
-          arg_types, arg_count, result_types, result_count,
-          /*tied_results=*/NULL, /*tied_result_count=*/0, predicates,
-          predicate_count, source_declaration.op->location,
-          &context.low_func_op);
+      loom_string_id_t descriptor_set_key = LOOM_STRING_ID_INVALID;
+      status = loom_low_lower_intern_descriptor_set_key(&context,
+                                                        &descriptor_set_key);
+      if (iree_status_is_ok(status)) {
+        status = loom_low_func_decl_build(
+            &context.builder, build_flags, visibility, retain, cc, purity,
+            /*allocation=*/0, /*schedule=*/0,
+            (uint8_t)options->policy->import_decl_kind, code_symbol,
+            descriptor_set_key, options->target_ref, abi, abi_attrs, abi_layout,
+            export_symbol, export_attrs, low_func_ref, arg_types, arg_count,
+            result_types, result_count, /*tied_results=*/NULL,
+            /*tied_result_count=*/0, predicates, predicate_count,
+            source_declaration.op->location, &context.low_func_op);
+      }
     }
   }
 

@@ -380,6 +380,11 @@ TEST_F(LowLowerPassTest,
       loom_low_func_def_target(entry_symbol->defining_op);
   EXPECT_EQ(lowered_target.module_id, low_core_ref.module_id);
   EXPECT_EQ(lowered_target.symbol_id, low_core_ref.symbol_id);
+  const loom_string_id_t descriptor_set_id =
+      loom_low_func_def_descriptor_set(entry_symbol->defining_op);
+  ASSERT_LT(descriptor_set_id, module->strings.count);
+  EXPECT_TRUE(iree_string_view_equal(module->strings.entries[descriptor_set_id],
+                                     IREE_SV("test.low.core")));
 }
 
 TEST_F(LowLowerPassTest,

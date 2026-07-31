@@ -13,7 +13,7 @@ func.def target(@target) @bf16_mfma(%lhs_data: vector<4xbf16>, %rhs_data: vector
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @bf16_mfma(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.gfx9_4.generic.core> {
+low.func.def target<amdgpu.gfx9_4.generic.core>(@target) abi(hal_kernel) @bf16_mfma(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %15 = copy %init : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %result = v_mfma_f32_16x16x16_bf16 %lhs, %rhs, %15
   return %result
@@ -36,7 +36,7 @@ func.def target(@target) @f64_mfma_constants() -> (vector<4xf64>) {
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @f64_mfma_constants() -> (reg<amdgpu.vgpr x8>) asm<amdgpu.gfx9_4.generic.core> {
+low.func.def target<amdgpu.gfx9_4.generic.core>(@target) abi(hal_kernel) @f64_mfma_constants() -> (reg<amdgpu.vgpr x8>) asm {
   %11 = v_mov_b32 0
   %12 = v_mov_b32 1072693248
   %rhs = concat(%11, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>

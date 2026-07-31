@@ -33,7 +33,7 @@ func.def target(@target) @nvfp4_f16_mfma_gfx942(%lhs_payload: vector<2xi32>, %lh
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @nvfp4_f16_mfma_gfx942(%lhs_payload: reg<amdgpu.vgpr x2>, %lhs_scale: reg<amdgpu.vgpr>, %rhs_payload: reg<amdgpu.vgpr x2>, %rhs_scale: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna3.core> {
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @nvfp4_f16_mfma_gfx942(%lhs_payload: reg<amdgpu.vgpr x2>, %lhs_scale: reg<amdgpu.vgpr>, %rhs_payload: reg<amdgpu.vgpr x2>, %rhs_scale: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %39 = s_mov_b32 262152
   %40 = s_mov_b32 262148
   %41 = s_mov_b32 1178878528
@@ -257,7 +257,7 @@ func.def target(@target) @nvfp4_f16_mfma_gfx950(%lhs_payload: vector<2xi32>, %lh
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @nvfp4_f16_mfma_gfx950(%lhs_payload: reg<amdgpu.vgpr x2>, %lhs_scale: reg<amdgpu.vgpr>, %rhs_payload: reg<amdgpu.vgpr x2>, %rhs_scale: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm<amdgpu.cdna4.core> {
+low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @nvfp4_f16_mfma_gfx950(%lhs_payload: reg<amdgpu.vgpr x2>, %lhs_scale: reg<amdgpu.vgpr>, %rhs_payload: reg<amdgpu.vgpr x2>, %rhs_scale: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
   %29 = s_mov_b32 262152
   %30 = s_mov_b32 262148
   %31 = s_mov_b32 1178878528
@@ -466,7 +466,7 @@ func.def target(@target) @nvfp4_f16_wmma_gfx1100(%lhs_payload: vector<2xi32>, %l
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @nvfp4_f16_wmma_gfx1100(%lhs_payload: reg<amdgpu.vgpr x2>, %lhs_scale: reg<amdgpu.vgpr>, %rhs_payload: reg<amdgpu.vgpr x2>, %rhs_scale: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3.core> {
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @nvfp4_f16_wmma_gfx1100(%lhs_payload: reg<amdgpu.vgpr x2>, %lhs_scale: reg<amdgpu.vgpr>, %rhs_payload: reg<amdgpu.vgpr x2>, %rhs_scale: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
   %22 = s_mov_b32 262152
   %23 = s_mov_b32 262148
   %24 = s_mov_b32 1178878528
@@ -666,7 +666,7 @@ func.def target(@target) @nvfp4_f16_wmma_gfx1151(%lhs_payload: vector<2xi32>, %l
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @nvfp4_f16_wmma_gfx1151(%lhs_payload: reg<amdgpu.vgpr x2>, %lhs_scale: reg<amdgpu.vgpr>, %rhs_payload: reg<amdgpu.vgpr x2>, %rhs_scale: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna3_5.core> {
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @nvfp4_f16_wmma_gfx1151(%lhs_payload: reg<amdgpu.vgpr x2>, %lhs_scale: reg<amdgpu.vgpr>, %rhs_payload: reg<amdgpu.vgpr x2>, %rhs_scale: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
   %22 = s_mov_b32 262152
   %23 = s_mov_b32 262148
   %24 = s_mov_b32 1178878528
@@ -873,7 +873,7 @@ func.def target(@target) @nvfp4_f16_wmma_gfx1200(%lhs_payload: vector<2xi32>, %l
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @nvfp4_f16_wmma_gfx1200(%lhs_payload: reg<amdgpu.vgpr x2>, %lhs_scale: reg<amdgpu.vgpr>, %rhs_payload: reg<amdgpu.vgpr x2>, %rhs_scale: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.core> {
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @nvfp4_f16_wmma_gfx1200(%lhs_payload: reg<amdgpu.vgpr x2>, %lhs_scale: reg<amdgpu.vgpr>, %rhs_payload: reg<amdgpu.vgpr x2>, %rhs_scale: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
   %29 = s_mov_b32 262152
   %30 = s_mov_b32 262148
   %31 = s_mov_b32 1178878528
@@ -1077,7 +1077,7 @@ func.def target(@target) @nvfp4_f16_wmma_gfx1250(%lhs_payload: vector<2xi32>, %l
 }
 
 // ----
-low.func.def target(@target) abi(hal_kernel) @nvfp4_f16_wmma_gfx1250(%lhs_payload: reg<amdgpu.vgpr x2>, %lhs_scale: reg<amdgpu.vgpr>, %rhs_payload: reg<amdgpu.vgpr x2>, %rhs_scale: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm<amdgpu.rdna4.gfx125x.core> {
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @nvfp4_f16_wmma_gfx1250(%lhs_payload: reg<amdgpu.vgpr x2>, %lhs_scale: reg<amdgpu.vgpr>, %rhs_payload: reg<amdgpu.vgpr x2>, %rhs_scale: reg<amdgpu.vgpr>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
   %22 = s_mov_b32 262152
   %23 = s_mov_b32 262148
   %24 = s_mov_b32 1178878528

@@ -20,7 +20,7 @@ kernel.def target(@target) @lds_atomic_add_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_add_i32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_add_i32() asm {
   %bytes = const.i64 256
   %scratch_view = alloca.workgroup.i8 %bytes, 4
   %one = const.i32 1
@@ -53,7 +53,7 @@ kernel.def target(@target) @lds_atomic_ordering_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_ordering_i32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_ordering_i32() asm {
   %bytes = const.i64 256
   %scratch_view = alloca.workgroup.i8 %bytes, 4
   %one = const.i32 1
@@ -86,7 +86,7 @@ kernel.def target(@target) @lds_atomic_add_f32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_add_f32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_add_f32() asm {
   %bytes = const.i64 256
   %scratch_view = alloca.workgroup.i8 %bytes, 4
   %one = const.f32 1065353216
@@ -118,7 +118,7 @@ kernel.def target(@target) @lds_atomic_minnum_maxnum_f32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_minnum_maxnum_f32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_minnum_maxnum_f32() asm {
   %bytes = const.i64 256
   %scratch_view = alloca.workgroup.i8 %bytes, 4
   %limit = const.f32 1065353216
@@ -154,7 +154,7 @@ kernel.def target(@target) @lds_atomic_bitwise_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_bitwise_i32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_bitwise_i32() asm {
   %bytes = const.i64 256
   %scratch_view = alloca.workgroup.i8 %bytes, 4
   %mask = const.i32 255
@@ -188,7 +188,7 @@ kernel.def target(@target) @lds_atomic_sub_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_sub_i32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_sub_i32() asm {
   %bytes = const.i64 256
   %scratch_view = alloca.workgroup.i8 %bytes, 4
   %delta = const.i32 1
@@ -217,7 +217,7 @@ kernel.def target(@target) @lds_atomic_exchange_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_exchange_i32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_exchange_i32() asm {
   %bytes = const.i64 256
   %scratch_view = alloca.workgroup.i8 %bytes, 4
   %value = const.i32 7
@@ -246,7 +246,7 @@ kernel.def target(@target) @lds_atomic_cmpxchg_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_cmpxchg_i32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_cmpxchg_i32() asm {
   %bytes = const.i64 256
   %scratch_view = alloca.workgroup.i8 %bytes, 4
   %expected = const.i32 7
@@ -282,7 +282,7 @@ kernel.def target(@target) @lds_atomic_minmax_i32() {
 }
 
 // ----
-low.kernel.def target(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_minmax_i32() asm<llvmir.generic.core> {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_minmax_i32() asm {
   %bytes = const.i64 256
   %scratch_view = alloca.workgroup.i8 %bytes, 4
   %limit = const.i32 1

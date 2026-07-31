@@ -8,7 +8,7 @@ func.def target(@target) @i64_to_index_identity(%value: i64) -> (index) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i64_to_index_identity(%index: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @i64_to_index_identity(%index: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   return %index
 }
 
@@ -25,7 +25,7 @@ func.def target(@target) @index_add_sub_disp(%base: index) -> (index) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @index_add_sub_disp(%base: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @index_add_sub_disp(%base: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %plus = lea.disp %base {disp32 = 24}
   %result = lea.disp %plus {disp32 = -8}
   return %result
@@ -44,7 +44,7 @@ func.def target(@target) @offset_add_sub_disp(%base: offset) -> (offset) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @offset_add_sub_disp(%base: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @offset_add_sub_disp(%base: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %plus = lea.disp %base {disp32 = 128}
   %result = lea.disp %plus {disp32 = -16}
   return %result
@@ -61,7 +61,7 @@ func.def target(@target) @scalar_addi_and_index_add(%lhs: i32, %rhs: i32, %i: in
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @scalar_addi_and_index_add(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_addi_and_index_add(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr64>) asm {
   %14 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
   %sum = add.gpr32 %14, %rhs
   %addr = lea %i, %j
@@ -81,7 +81,7 @@ func.def target(@target) @index_scale_forms(%i: index) -> (index, index) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @index_scale_forms(%i: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @index_scale_forms(%i: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
   %mul = lea.scale %i {disp32 = 0, scale = 4}
   %shift = lea.scale %i {disp32 = 0, scale = 8}
   return %mul, %shift
@@ -100,7 +100,7 @@ func.def target(@target) @index_madd_scaled_forms(%row: index, %col: index) -> (
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @index_madd_scaled_forms(%row: reg<x86.gpr64>, %col: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @index_madd_scaled_forms(%row: reg<x86.gpr64>, %col: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
   %linear = lea.add_scale %col, %row {disp32 = 0, scale = 4}
   %biased = lea.scale %row {disp32 = 7, scale = 4}
   return %linear, %biased
@@ -117,7 +117,7 @@ func.def target(@target) @index_madd_dynamic_stride_constant_bias(%row: index, %
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @index_madd_dynamic_stride_constant_bias(%row: reg<x86.gpr64>, %stride: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @index_madd_dynamic_stride_constant_bias(%row: reg<x86.gpr64>, %stride: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %8 = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
   %9 = imul.gpr64 %8, %stride
   %linear = lea.disp %9 {disp32 = 5}
@@ -142,7 +142,7 @@ func.def target(@target) @f32x16_index_madd_scaled_bias_memory(%input: buffer, %
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @f32x16_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x16_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm {
   %15 = lea.scale %row {disp32 = 1, scale = 4}
   %loaded = vmovdqu32.load.indexed %input_view, %15 {disp32 = 0, scale = 4}
   vmovdqu32.store.indexed %loaded, %output_view, %15 {disp32 = 0, scale = 4}
@@ -168,7 +168,7 @@ func.def target(@target) @i32_index_madd_scaled_bias_memory(%input: buffer, %out
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i32_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @i32_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm {
   %16 = lea.scale %row {disp32 = 1, scale = 4}
   %loaded = mov.load.indexed.gpr32 %input_view, %16 {disp32 = 0, scale = 4}
   %18 = copy %loaded : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -196,7 +196,7 @@ func.def target(@target) @i64_index_madd_scaled_bias_memory(%input: buffer, %out
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i64_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @i64_index_madd_scaled_bias_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm {
   %16 = lea.scale %row {disp32 = 1, scale = 4}
   %loaded = mov.load.indexed.gpr64 %input_view, %16 {disp32 = 0, scale = 8}
   %18 = copy %loaded : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -224,7 +224,7 @@ func.def target(@target) @i64_index_add_madd_memory(%input: buffer, %output: buf
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @i64_index_add_madd_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @i64_index_add_madd_memory(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>, %row: reg<x86.gpr64>) asm {
   %sum = lea %i, %j
   %bounded_linear = lea.add_scale %sum, %row {disp32 = 0, scale = 4}
   %loaded = mov.load.indexed.gpr64 %input_view, %bounded_linear {disp32 = 0, scale = 8}
@@ -257,7 +257,7 @@ func.def target(@target) @guarded_loaded_i64_index_address(%control: buffer, %ou
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @guarded_loaded_i64_index_address(%control_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @guarded_loaded_i64_index_address(%control_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
   %row = mov.load.gpr64 %control_view {disp32 = 0}
   %zero_i64 = mov.imm64 0
   %limit_i64 = mov.imm64 64
@@ -296,7 +296,7 @@ func.def target(@target) @guarded_loaded_i32_index_address(%control: buffer, %ou
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @guarded_loaded_i32_index_address(%control_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @guarded_loaded_i32_index_address(%control_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
   %row_i32 = mov.load.gpr32 %control_view {disp32 = 0}
   %row = movsxd.gpr64.gpr32 %row_i32
   %zero_i32 = mov.imm32 0
@@ -324,7 +324,7 @@ func.def target(@target) @nonnegative_i32_to_index(%value_i32: i32) -> (index) {
 }
 
 // ----
-low.func.def target(@target) abi(object_function) @nonnegative_i32_to_index(%bounded_i32: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @nonnegative_i32_to_index(%bounded_i32: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
   %index = movzx.gpr64.gpr32 %bounded_i32
   return %index
 }
