@@ -1935,6 +1935,7 @@ static iree_status_t loom_scf_unroll_initialize_scheduled_tile(
     loom_scf_unroll_context_t* context, loom_op_t* op,
     const loom_block_t* body_block, loom_op_t* yield,
     const loom_scf_unroll_trip_count_t* trip_count,
+    loom_value_id_t iteration_upper_bound,
     const loom_value_id_t* initial_carried_values, uint16_t carried_count,
     loom_scf_for_unroll_schedule_t schedule,
     iree_arena_allocator_t* scratch_arena,
@@ -1990,6 +1991,10 @@ static iree_status_t loom_scf_unroll_initialize_scheduled_tile(
       &out_tile->effect_dependency_plan));
 
   const loom_value_id_t induction_variable = body_block->arg_ids[0];
+  loom_value_id_t* iteration_indices = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      scratch_arena, out_tile->unroll_count, sizeof(*iteration_indices),
+      (void**)&iteration_indices));
   for (uint32_t ordinal = 0; ordinal < out_tile->unroll_count; ++ordinal) {
     IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
         context->module, context->module, scratch_arena,
@@ -1998,17 +2003,57 @@ static iree_status_t loom_scf_unroll_initialize_scheduled_tile(
             .remap_symbol = loom_ir_remap_symbol_callback_empty(),
         },
         &out_tile->remaps[ordinal]));
-    loom_value_id_t iteration_index = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_scf_unroll_build_iteration_index(
         context, op, induction_variable, trip_count, ordinal,
-        &iteration_index));
-    if (iteration_index == LOOM_VALUE_ID_INVALID) {
+        &iteration_indices[ordinal]));
+    if (iteration_indices[ordinal] == LOOM_VALUE_ID_INVALID) {
       return loom_scf_unroll_emit_policy_error(
           context, op, IREE_SV("schedule"), ordinal,
           IREE_SV("iteration index representable as i64"));
     }
-    IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(
-        &out_tile->remaps[ordinal], induction_variable, iteration_index));
+  }
+
+  const loom_value_id_t* remapped_iteration_indices = iteration_indices;
+  // Dynamic partial unrolling replaces the source upper bound with an aligned
+  // main-loop bound. Preserve the source bound on every materialized index so
+  // consumers do not have to reconstruct the split arithmetic.
+  if (iteration_upper_bound != LOOM_VALUE_ID_INVALID) {
+    loom_predicate_t* predicates = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(scratch_arena, out_tile->unroll_count,
+                                  sizeof(*predicates), (void**)&predicates));
+    loom_type_t* result_types = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch_arena, out_tile->unroll_count, sizeof(*result_types),
+        (void**)&result_types));
+    for (uint32_t ordinal = 0; ordinal < out_tile->unroll_count; ++ordinal) {
+      predicates[ordinal] = (loom_predicate_t){
+          .kind = LOOM_PREDICATE_LT,
+          .arg_count = 2,
+          .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,
+                       LOOM_PRED_ARG_NONE},
+          .args = {iteration_indices[ordinal], iteration_upper_bound, 0},
+      };
+      result_types[ordinal] =
+          loom_module_value_type(context->module, iteration_indices[ordinal]);
+    }
+    loom_op_t* assume_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_index_assume_build(
+        &context->rewriter->builder, iteration_indices, out_tile->unroll_count,
+        predicates, out_tile->unroll_count, result_types,
+        out_tile->unroll_count, op->location, &assume_op));
+    remapped_iteration_indices = loom_index_assume_results(assume_op).values;
+    for (uint32_t ordinal = 0; ordinal < out_tile->unroll_count; ++ordinal) {
+      IREE_RETURN_IF_ERROR(loom_rewriter_move_value_name(
+          context->rewriter, iteration_indices[ordinal],
+          remapped_iteration_indices[ordinal]));
+    }
+  }
+
+  for (uint32_t ordinal = 0; ordinal < out_tile->unroll_count; ++ordinal) {
+    IREE_RETURN_IF_ERROR(
+        loom_ir_remap_map_value(&out_tile->remaps[ordinal], induction_variable,
+                                remapped_iteration_indices[ordinal]));
   }
   for (uint16_t i = 0; i < carried_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(&out_tile->remaps[0],
@@ -2278,6 +2323,7 @@ static iree_status_t loom_scf_unroll_emit_scheduled_tile(
     loom_scf_unroll_context_t* context, loom_op_t* op,
     const loom_block_t* body_block, loom_op_t* yield,
     const loom_scf_unroll_trip_count_t* trip_count,
+    loom_value_id_t iteration_upper_bound,
     const loom_value_id_t* initial_carried_values, uint16_t carried_count,
     loom_scf_for_unroll_schedule_t schedule,
     iree_arena_allocator_t* scratch_arena,
@@ -2292,8 +2338,8 @@ static iree_status_t loom_scf_unroll_emit_scheduled_tile(
 
   loom_scf_unroll_scheduled_tile_t tile = {0};
   IREE_RETURN_IF_ERROR(loom_scf_unroll_initialize_scheduled_tile(
-      context, op, body_block, yield, trip_count, initial_carried_values,
-      carried_count, schedule, scratch_arena, &tile));
+      context, op, body_block, yield, trip_count, iteration_upper_bound,
+      initial_carried_values, carried_count, schedule, scratch_arena, &tile));
   if (loom_pass_has_error_diagnostics(context->pass)) return iree_ok_status();
 
   switch (schedule) {
@@ -2337,8 +2383,9 @@ static iree_status_t loom_scf_unroll_full_unroll_scheduled_with_arena(
   loom_value_id_t value_checkpoint =
       loom_rewriter_value_checkpoint(context->rewriter);
   iree_status_t status = loom_scf_unroll_emit_scheduled_tile(
-      context, op, body_block, yield, trip_count, iter_args.values,
-      carried_count, schedule, scratch_arena, final_carried_values);
+      context, op, body_block, yield, trip_count, LOOM_VALUE_ID_INVALID,
+      iter_args.values, carried_count, schedule, scratch_arena,
+      final_carried_values);
   loom_builder_restore(&context->rewriter->builder, saved_ip);
   IREE_RETURN_IF_ERROR(status);
   if (loom_pass_has_error_diagnostics(context->pass)) return iree_ok_status();
@@ -2600,8 +2647,10 @@ static iree_status_t loom_scf_unroll_partial_unroll_scheduled_with_arena(
       .lower_range_max = 0,
   };
   iree_status_t status = loom_scf_unroll_emit_scheduled_tile(
-      context, op, old_block, yield, &tile_trip_count, main_carried_values,
-      op->result_count, schedule, scratch_arena, final_main_carried_values);
+      context, op, old_block, yield, &tile_trip_count,
+      trip_count ? LOOM_VALUE_ID_INVALID : loom_scf_for_upper_bound(op),
+      main_carried_values, op->result_count, schedule, scratch_arena,
+      final_main_carried_values);
   if (iree_status_is_ok(status)) {
     loom_op_t* main_yield = NULL;
     status = loom_scf_yield_build(&context->rewriter->builder,

@@ -893,9 +893,10 @@ func.def @interleaved_partial_factor_dynamic_tail_loop(%end: index) {
   %10 = index.div %8, %9 : index
   %11 = index.mul %10, %5 : index
   %12 = index.add %start, %11 : index
-  scf.for %i = [%start to %12 step %5] {
+  scf.for %13 = [%start to %12 step %5] {
     %14 = index.constant 1 : index
-    %i_1 = index.add %i, %14 : index
+    %15 = index.add %13, %14 : index
+    %i, %i_1 = index.assume %13, %15 [lt(%13, %end), lt(%15, %end)] : index, index
     test.use %i : index
     test.use %i_1 : index
   }
@@ -934,9 +935,10 @@ func.def @interleaved_partial_config_factor_dynamic_tail_loop(%end: index) {
   %11 = index.div %9, %10 : index
   %12 = index.mul %11, %6 : index
   %13 = index.add %start, %12 : index
-  scf.for %i = [%start to %13 step %6] {
+  scf.for %14 = [%start to %13 step %6] {
     %15 = index.constant 1 : index
-    %i_1 = index.add %i, %15 : index
+    %16 = index.add %14, %15 : index
+    %i, %i_1 = index.assume %14, %16 [lt(%14, %end), lt(%16, %end)] : index, index
     test.use %i : index
     test.use %i_1 : index
   }
@@ -979,14 +981,15 @@ func.def @interleaved_partial_config_step_dynamic_tail_loop(%end: index) {
   %15 = index.div %13, %14 : index
   %16 = index.mul %15, %6 : index
   %17 = index.add %start, %16 : index
-  scf.for %i = [%start to %17 step %6] {
+  scf.for %18 = [%start to %17 step %6] {
     %19 = index.constant 2 : index
-    %i_2 = index.add %i, %19 : index
+    %20 = index.add %18, %19 : index
+    %i, %i_2 = index.assume %18, %20 [lt(%18, %end), lt(%20, %end)] : index, index
     test.use %i : index
     test.use %i_2 : index
   }
-  %21 = index.constant 2 : index
-  scf.for %i = [%17 to %end step %21] {
+  %23 = index.constant 2 : index
+  scf.for %i = [%17 to %end step %23] {
     test.use %i : index
   }
   func.return
@@ -1021,14 +1024,15 @@ func.def @interleaved_partial_factor_dynamic_tail_step_two(%end: index) {
   %14 = index.div %12, %13 : index
   %15 = index.mul %14, %5 : index
   %16 = index.add %start, %15 : index
-  scf.for %i = [%start to %16 step %5] {
+  scf.for %17 = [%start to %16 step %5] {
     %18 = index.constant 2 : index
-    %i_2 = index.add %i, %18 : index
+    %19 = index.add %17, %18 : index
+    %i, %i_2 = index.assume %17, %19 [lt(%17, %end), lt(%19, %end)] : index, index
     test.use %i : index
     test.use %i_2 : index
   }
-  %20 = index.constant 2 : index
-  scf.for %i = [%16 to %end step %20] {
+  %22 = index.constant 2 : index
+  scf.for %i = [%16 to %end step %22] {
     test.use %i : index
   }
   func.return
@@ -1227,11 +1231,12 @@ func.def @recurrence_partial_factor_dynamic_tail(%end: index, %input: i32) -> (i
   %16 = index.div %14, %15 : index
   %17 = index.mul %16, %11 : index
   %18 = index.add %start, %17 : index
-  %21 = scf.for %i = [%start to %18 step %11](%acc = %input : i32) -> (i32) {
+  %21 = scf.for %19 = [%start to %18 step %11](%acc = %input : i32) -> (i32) {
     %22 = index.constant 1 : index
-    %i_1 = index.add %i, %22 : index
+    %23 = index.add %19, %22 : index
     %24 = index.constant 2 : index
-    %i_2 = index.add %i, %24 : index
+    %25 = index.add %19, %24 : index
+    %i, %i_1, %i_2 = index.assume %19, %23, %25 [lt(%19, %end), lt(%23, %end), lt(%25, %end)] : index, index, index
     %producer = test.addi %input, %input : i32
     %producer_1 = test.addi %input, %input : i32
     scf.schedule.fence
