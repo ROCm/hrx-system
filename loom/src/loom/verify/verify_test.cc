@@ -1020,7 +1020,7 @@ TEST_F(VerifyTest, LowFuncHasRegisterBlockArgConstraint) {
 TEST_F(VerifyTest, LowFuncRejectsNonRegisterBlockArg) {
   const char kSource[] =
       "test.target<low_core> @gfx1100\n"
-      "low.func.def target(@gfx1100) @bad(%input: i32) {\n"
+      "low.func.def target<test.low.core>(@gfx1100) @bad(%input: i32) {\n"
       "  low.return\n"
       "}\n";
   loom_module_t* parsed_module =

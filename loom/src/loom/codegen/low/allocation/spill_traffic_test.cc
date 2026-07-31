@@ -92,7 +92,7 @@ TEST_F(LowAllocationSpillTrafficTest, DetectsMaterializedSpillTraffic) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @roundtrip(%input: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @roundtrip(%input: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>) {
   %storage = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<scratch>
   low.spill %input, %storage : reg<test.i32>, low.storage<scratch>
   %reload = low.reload %storage : low.storage<scratch> -> reg<test.i32>

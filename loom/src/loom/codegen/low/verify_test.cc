@@ -91,7 +91,7 @@ class LowVerifyTest : public ::testing::Test {
 TEST_F(LowVerifyTest, AcceptsWorkgroupStorageWithoutTargetLimit) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @target
-low.func.def target(@target) @uses_workgroup_storage() {
+low.func.def target<test.low.core>(@target) @uses_workgroup_storage() {
   %storage = low.storage.reserve {byte_alignment = 16, byte_length = 80} : low.storage<workgroup>
   low.return
 }
@@ -106,7 +106,7 @@ low.func.def target(@target) @uses_workgroup_storage() {
 TEST_F(LowVerifyTest, RejectsWorkgroupStorageAboveDurableTargetLimit) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @target {max_workgroup_storage_bytes = 64}
-low.func.def target(@target) @uses_workgroup_storage() {
+low.func.def target<test.low.core>(@target) @uses_workgroup_storage() {
   %storage = low.storage.reserve {byte_alignment = 16, byte_length = 80} : low.storage<workgroup>
   low.return
 }
@@ -132,7 +132,7 @@ low.func.def target(@target) @uses_workgroup_storage() {
 TEST_F(LowVerifyTest, RejectsDescriptorOrdinalKeyMismatch) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @target
-low.func.def target(@target) @ordinal_key_mismatch(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@target) @ordinal_key_mismatch(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
   %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   low.return %sum : reg<test.i32>
 }

@@ -102,7 +102,7 @@ class LowAllocationMoveTopologyTest : public ::testing::Test {
 static const char kBranchOnlyConcatFunction[] = R"(
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @branch_only_concat(%cond: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32 x2>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @branch_only_concat(%cond: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32 x2>) asm {
   %copy = copy %lhs : reg<test.i32> -> reg<test.i32>
   %pair = concat(%copy, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
   low.cond_br %cond, ^then, ^else : reg<test.i32>
@@ -118,7 +118,7 @@ low.func.def target(@test_target) @branch_only_concat(%cond: reg<test.i32>, %lhs
 static const char kMaterializedConcatFunction[] = R"(
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @materialized_concat(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32 x2>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @materialized_concat(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32 x2>) asm {
   %pair = concat(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
   return %pair
 }

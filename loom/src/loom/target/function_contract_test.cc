@@ -114,7 +114,7 @@ TEST_F(TargetFunctionContractTest, LowFuncResolvesTargetRecord) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @test_target {contract_feature_bits = 1, default_pointer_bitwidth = 32, index_bitwidth = 32, offset_bitwidth = 32}
 
-low.func.def target(@test_target) @kernel() {
+low.func.def target<test.low.core>(@test_target) @kernel() {
   low.return
 }
 )");
@@ -140,7 +140,7 @@ test.target<low_core> @test_target {
   abi = hal_kernel
 }
 
-low.kernel.def target(@test_target) export("dispatch") linkage(dso_local) @kernel() {
+low.kernel.def target<test.low.core>(@test_target) export("dispatch") linkage(dso_local) @kernel() {
   low.return
 }
 )");

@@ -110,7 +110,7 @@ class LowHiddenAttrVerifyTest : public ::testing::Test {
 TEST_F(LowHiddenAttrVerifyTest, DescriptorOrdinalRejectsInvalidNegative) {
   loom_module_t* module = ParseSource(
       "test.target<low_core> @target\n"
-      "low.func.def target(@target) @add(%lhs: reg<test.i32>, "
+      "low.func.def target<test.low.core>(@target) @add(%lhs: reg<test.i32>, "
       "%rhs: reg<test.i32>) -> (reg<test.i32>) {\n"
       "  %sum = low.op<test.add.i32>(%lhs, %rhs) : "
       "(reg<test.i32>, reg<test.i32>) -> reg<test.i32>\n"
@@ -141,7 +141,8 @@ TEST_F(LowHiddenAttrVerifyTest, DescriptorOrdinalRejectsInvalidNegative) {
 TEST_F(LowHiddenAttrVerifyTest, LiveInSourceIdMatchesSourceStableId) {
   loom_module_t* module = ParseSource(
       "test.target<low_core> @target\n"
-      "low.func.def target(@target) @live_in() -> (reg<test.i32>) {\n"
+      "low.func.def target<test.low.core>(@target) @live_in() -> "
+      "(reg<test.i32>) {\n"
       "  %arg0 = low.live_in<test.arg0> : reg<test.i32>\n"
       "  low.return %arg0 : reg<test.i32>\n"
       "}\n");

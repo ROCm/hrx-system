@@ -98,7 +98,7 @@ class LowMemoryAccessIrTest : public ::testing::Test {
 TEST_F(LowMemoryAccessIrTest, AttachesAndReconstructsStridedInterval) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @target
-low.func.def target(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
   %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   return %sum : reg<test.i32>
 }
@@ -161,7 +161,7 @@ low.func.def target(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.
 TEST_F(LowMemoryAccessIrTest, RejectsUnsupportedUnserializablePrecision) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @target
-low.func.def target(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
   %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   return %sum : reg<test.i32>
 }
@@ -186,7 +186,7 @@ low.func.def target(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.
 TEST_F(LowMemoryAccessIrTest, RejectsFieldsWithoutMatchingPrecision) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @target
-low.func.def target(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
   %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   return %sum : reg<test.i32>
 }
@@ -210,7 +210,7 @@ low.func.def target(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.
 TEST_F(LowMemoryAccessIrTest, RejectsMalformedFieldCount) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @target
-low.func.def target(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
   %sum = low.op<test.add.i32>(%lhs, %rhs) memory_access([0, 3]) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   return %sum : reg<test.i32>
 }
@@ -231,7 +231,7 @@ low.func.def target(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.
 TEST_F(LowMemoryAccessIrTest, RejectsUnsupportedVersion) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @target
-low.func.def target(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
   %sum = low.op<test.add.i32>(%lhs, %rhs) memory_access([1, 3, 7, -1, 35, 64, 0, 16, 0, 0, 0, 0, 0]) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   return %sum : reg<test.i32>
 }
@@ -252,7 +252,7 @@ low.func.def target(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.
 TEST_F(LowMemoryAccessIrTest, RejectsSentinelPreciseAliasRoot) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @target
-low.func.def target(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
   %sum = low.op<test.add.i32>(%lhs, %rhs) memory_access([0, 3, 4294967295, -1, 35, 64, 0, 16, 0, 0, 0, 0, 0]) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   return %sum : reg<test.i32>
 }
@@ -273,7 +273,7 @@ low.func.def target(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.
 TEST_F(LowMemoryAccessIrTest, RejectsImpreciseConcreteSpace) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @target
-low.func.def target(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@target) @memory_access(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
   %sum = low.op<test.add.i32>(%lhs, %rhs) memory_access([0, 3, 7, -1, 2, 0, 0, 0, 0, 0, 0, 0, 0]) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   return %sum : reg<test.i32>
 }

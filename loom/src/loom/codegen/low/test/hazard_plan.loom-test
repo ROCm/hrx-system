@@ -2,7 +2,7 @@
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @physical_overlap_action(%lhs: reg<test.phys>, %rhs: reg<test.phys>, %other: reg<test.phys>) -> (reg<test.phys>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @physical_overlap_action(%lhs: reg<test.phys>, %rhs: reg<test.phys>, %other: reg<test.phys>) -> (reg<test.phys>) asm {
   %producer = test.add.phys %lhs, %rhs
   %consumer = test.add.phys %producer, %other
   return %consumer
@@ -17,7 +17,7 @@ low.func.def target(@test_target) @physical_overlap_action(%lhs: reg<test.phys>,
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @physical_overlap_negative(%lhs: reg<test.phys>, %rhs: reg<test.phys>, %other: reg<test.phys>) -> (reg<test.phys>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @physical_overlap_negative(%lhs: reg<test.phys>, %rhs: reg<test.phys>, %other: reg<test.phys>) -> (reg<test.phys>) asm {
   %producer = test.add.phys %lhs, %rhs
   %consumer = test.add.phys %producer, %other
   return %consumer
@@ -32,7 +32,7 @@ low.func.def target(@test_target) @physical_overlap_negative(%lhs: reg<test.phys
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @missing_target_data(%lhs: reg<test.phys>, %rhs: reg<test.phys>, %other: reg<test.phys>) -> (reg<test.phys>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @missing_target_data(%lhs: reg<test.phys>, %rhs: reg<test.phys>, %other: reg<test.phys>) -> (reg<test.phys>) asm {
   %producer = test.add.phys %lhs, %rhs
   %consumer = test.add.phys %producer, %other
   return %consumer

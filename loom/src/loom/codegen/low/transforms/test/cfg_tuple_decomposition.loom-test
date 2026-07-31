@@ -2,7 +2,7 @@
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @decomposes_lane_sliced_block_arg(%cond: reg<test.i32>, %init: reg<test.i32 x4>, %a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @decomposes_lane_sliced_block_arg(%cond: reg<test.i32>, %init: reg<test.i32 x4>, %a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>) -> (reg<test.i32>) {
   low.cond_br %cond, ^init_edge, ^concat_edge : reg<test.i32>
 ^init_edge:
   low.br ^join(%init: reg<test.i32 x4>)
@@ -19,7 +19,7 @@ low.func.def target(@test_target) @decomposes_lane_sliced_block_arg(%cond: reg<t
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @decomposes_lane_sliced_block_arg(%cond: reg<test.i32>, %init: reg<test.i32 x4>, %a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @decomposes_lane_sliced_block_arg(%cond: reg<test.i32>, %init: reg<test.i32 x4>, %a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>) -> (reg<test.i32>) {
   low.cond_br %cond, ^init_edge, ^concat_edge : reg<test.i32>
 ^init_edge:
   %16 = low.slice %init[0] : reg<test.i32 x4> -> reg<test.i32>
@@ -42,7 +42,7 @@ low.func.def target(@test_target) @decomposes_lane_sliced_block_arg(%cond: reg<t
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @preserves_whole_tuple_uses(%init: reg<test.i32 x2>) -> (reg<test.i32 x2>) {
+low.func.def target<test.low.core>(@test_target) @preserves_whole_tuple_uses(%init: reg<test.i32 x2>) -> (reg<test.i32 x2>) {
   low.br ^join(%init: reg<test.i32 x2>)
 ^join(%state: reg<test.i32 x2>):
   %s0 = low.slice %state[0] : reg<test.i32 x2> -> reg<test.i32>
@@ -54,7 +54,7 @@ low.func.def target(@test_target) @preserves_whole_tuple_uses(%init: reg<test.i3
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @preserves_whole_tuple_uses(%init: reg<test.i32 x2>) -> (reg<test.i32 x2>) {
+low.func.def target<test.low.core>(@test_target) @preserves_whole_tuple_uses(%init: reg<test.i32 x2>) -> (reg<test.i32 x2>) {
   low.br ^join(%init: reg<test.i32 x2>)
 ^join(%state: reg<test.i32 x2>):
   %copy = low.copy %state : reg<test.i32 x2> -> reg<test.i32 x2>
@@ -69,7 +69,7 @@ low.func.def target(@test_target) @preserves_whole_tuple_uses(%init: reg<test.i3
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @decomposes_loop_carried_lane_tuple(%cond: reg<test.i32>, %init: reg<test.i32 x4>, %step: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @decomposes_loop_carried_lane_tuple(%cond: reg<test.i32>, %init: reg<test.i32 x4>, %step: reg<test.i32>) -> (reg<test.i32>) {
   low.br ^loop(%init: reg<test.i32 x4>)
 ^loop(%state: reg<test.i32 x4>):
   %s0 = low.slice %state[0] : reg<test.i32 x4> -> reg<test.i32>
@@ -94,7 +94,7 @@ low.func.def target(@test_target) @decomposes_loop_carried_lane_tuple(%cond: reg
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @decomposes_loop_carried_lane_tuple(%cond: reg<test.i32>, %init: reg<test.i32 x4>, %step: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @decomposes_loop_carried_lane_tuple(%cond: reg<test.i32>, %init: reg<test.i32 x4>, %step: reg<test.i32>) -> (reg<test.i32>) {
   %19 = low.slice %init[0] : reg<test.i32 x4> -> reg<test.i32>
   %20 = low.slice %init[1] : reg<test.i32 x4> -> reg<test.i32>
   %21 = low.slice %init[2] : reg<test.i32 x4> -> reg<test.i32>

@@ -230,7 +230,7 @@ TEST_F(FuncSymbolFactsTest, LowKernelDefFactsDefaultToExportedSymbolName) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @target
 
-low.kernel.def target(@target) workgroup_size(1, 1, 1) @kernel() {
+low.kernel.def target<test.low.core>(@target) workgroup_size(1, 1, 1) @kernel() {
   low.return
 }
 )");

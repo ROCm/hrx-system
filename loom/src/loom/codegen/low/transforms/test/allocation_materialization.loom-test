@@ -2,7 +2,7 @@
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
   %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %sum = low.op<test.add.i32>(%ab, %bc) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
@@ -13,7 +13,7 @@ low.func.def target(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
   %spill_spill_storage_0 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
   low.spill %a, %spill_spill_storage_0 : reg<test.i32>, low.storage<private>
   %9 = low.reload %spill_spill_storage_0 : low.storage<private> -> reg<test.i32>
@@ -31,7 +31,7 @@ low.func.def target(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @live_in_spill_storage_prefix() -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @live_in_spill_storage_prefix() -> (reg<test.i32>) asm {
   %live = live_in<test.arg0> : reg<test.i32>
   %seed0 = test.const.i32 1
   %seed1 = test.const.i32 2
@@ -45,7 +45,7 @@ low.func.def target(@test_target) @live_in_spill_storage_prefix() -> (reg<test.i
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @live_in_spill_storage_prefix() -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @live_in_spill_storage_prefix() -> (reg<test.i32>) {
   %live = low.live_in<test.arg0> : reg<test.i32>
   %live_in_spill_storage_prefix_spill_storage_0 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
   low.spill %live, %live_in_spill_storage_prefix_spill_storage_0 : reg<test.i32>, low.storage<private>
@@ -66,7 +66,7 @@ low.func.def target(@test_target) @live_in_spill_storage_prefix() -> (reg<test.i
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @live_in_spill_diagnostic() -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @live_in_spill_diagnostic() -> (reg<test.i32>) asm {
   // WARNING@+1: BACKEND/009 "value 'live'" "produced by 'low.live_in'" "test.i32" "live_in_spill_diagnostic_spill_storage_0"
   %live = live_in<test.arg0> : reg<test.i32>
   %seed0 = test.const.i32 1
@@ -86,7 +86,7 @@ low.func.def target(@test_target) @live_in_spill_diagnostic() -> (reg<test.i32>)
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @block_arg_spill(%row: reg<test.i32>, %carry: reg<test.i32>) -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @block_arg_spill(%row: reg<test.i32>, %carry: reg<test.i32>) -> (reg<test.i32>) asm {
   low.br ^late
 ^join(%state: reg<test.i32>):
   %sum = test.add.i32 %row, %carry
@@ -100,7 +100,7 @@ low.func.def target(@test_target) @block_arg_spill(%row: reg<test.i32>, %carry: 
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @block_arg_spill(%row: reg<test.i32>, %carry: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @block_arg_spill(%row: reg<test.i32>, %carry: reg<test.i32>) -> (reg<test.i32>) {
   %block_arg_spill_spill_storage_0 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
   %block_arg_spill_spill_storage_1 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
   %block_arg_spill_spill_storage_2 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
@@ -126,7 +126,7 @@ low.func.def target(@test_target) @block_arg_spill(%row: reg<test.i32>, %carry: 
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @wide_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x4>) -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @wide_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x4>) -> (reg<test.i32>) asm {
   %blocker_use = test.add.i32 %blocker, %blocker
   %wide0 = slice %wide[0] : reg<test.i32 x4> -> reg<test.i32>
   %wide1 = slice %wide[1] : reg<test.i32 x4> -> reg<test.i32>
@@ -142,7 +142,7 @@ low.func.def target(@test_target) @wide_slice_reload_cluster(%blocker: reg<test.
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @wide_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x4>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @wide_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x4>) -> (reg<test.i32>) {
   %wide_slice_reload_cluster_spill_storage_0 = low.storage.reserve {byte_alignment = 16, byte_length = 16} : low.storage<private>
   low.spill %wide, %wide_slice_reload_cluster_spill_storage_0 : reg<test.i32 x4>, low.storage<private>
   %blocker_use = low.op<test.add.i32>(%blocker, %blocker) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
@@ -163,7 +163,7 @@ low.func.def target(@test_target) @wide_slice_reload_cluster(%blocker: reg<test.
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @dense_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) asm<test.low.core> {
+low.func.def target<test.low.core>(@test_target) @dense_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) asm {
   %pressure = test.add.i32 %blocker, %blocker
   %wide0 = slice %wide[0] : reg<test.i32 x8> -> reg<test.i32>
   %wide1 = slice %wide[1] : reg<test.i32 x8> -> reg<test.i32>
@@ -186,7 +186,7 @@ low.func.def target(@test_target) @dense_slice_reload_cluster(%blocker: reg<test
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @dense_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @dense_slice_reload_cluster(%blocker: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) {
   %dense_slice_reload_cluster_spill_storage_0 = low.storage.reserve {byte_alignment = 16, byte_length = 32} : low.storage<private>
   low.spill %wide, %dense_slice_reload_cluster_spill_storage_0 : reg<test.i32 x8>, low.storage<private>
   %pressure = low.op<test.add.i32>(%blocker, %blocker) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
@@ -216,7 +216,7 @@ low.func.def target(@test_target) @dense_slice_reload_cluster(%blocker: reg<test
 test.target<low_core> @test_target
 
 // WARNING@+1: BACKEND/009 "value 'a'" "produced by '<block-argument>'" "test.i32" "spill_spill_storage_0"
-low.func.def target(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
   %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %sum = low.op<test.add.i32>(%ab, %bc) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
@@ -233,7 +233,7 @@ low.func.def target(@test_target) @spill(%a: reg<test.i32>, %b: reg<test.i32>, %
 test.target<low_core> @test_target
 
 // ERROR@+1: BACKEND/019 {function_name="unsupported_stack_spill_space", value_class="test.alias32", spill_slot_space="stack", storage_space="stack"}
-low.func.def target(@test_target) @unsupported_stack_spill_space(%lhs: reg<test.alias32>, %rhs: reg<test.alias32>) -> (reg<test.alias32>, reg<test.alias32>) {
+low.func.def target<test.low.core>(@test_target) @unsupported_stack_spill_space(%lhs: reg<test.alias32>, %rhs: reg<test.alias32>) -> (reg<test.alias32>, reg<test.alias32>) {
   low.return %lhs, %rhs : reg<test.alias32>, reg<test.alias32>
 }
 
@@ -243,7 +243,7 @@ low.func.def target(@test_target) @unsupported_stack_spill_space(%lhs: reg<test.
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @rematerialize_spill_plan(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @rematerialize_spill_plan(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
   %literal = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
   %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
@@ -256,7 +256,7 @@ low.func.def target(@test_target) @rematerialize_spill_plan(%a: reg<test.i32>, %
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @rematerialize_spill_plan(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @rematerialize_spill_plan(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
   %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %literal_remat$10 = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
@@ -273,7 +273,7 @@ low.func.def target(@test_target) @rematerialize_spill_plan(%a: reg<test.i32>, %
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @rematerialize_descriptor_op(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @rematerialize_descriptor_op(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
   %derived = low.op<test.rematerialize.i32>(%c) : (reg<test.i32>) -> reg<test.i32>
   %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
@@ -286,7 +286,7 @@ low.func.def target(@test_target) @rematerialize_descriptor_op(%a: reg<test.i32>
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @rematerialize_descriptor_op(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @rematerialize_descriptor_op(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
   %rematerialize_descriptor_op_spill_storage_0 = low.storage.reserve {byte_alignment = 4, byte_length = 4} : low.storage<private>
   %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
@@ -307,7 +307,7 @@ low.func.def target(@test_target) @rematerialize_descriptor_op(%a: reg<test.i32>
 test.target<low_core> @test_target
 
 // REMARK@+1: BACKEND/045 {function_name="rematerialize_spill_plan_diagnostics", value_name="literal", value_class="test.i32", trigger_kind="spill-plan", cloned_packet_count="2", rewritten_operand_count="2", reason_key="descriptor-rematerializable"}
-low.func.def target(@test_target) @rematerialize_spill_plan_diagnostics(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @rematerialize_spill_plan_diagnostics(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
   %literal = low.const<test.const.i32> {i32_value = 7} : reg<test.i32>
   %ab = low.op<test.add.i32>(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   %bc = low.op<test.add.i32>(%b, %c) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
@@ -325,7 +325,7 @@ low.func.def target(@test_target) @rematerialize_spill_plan_diagnostics(%a: reg<
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @dense_slice_reloads_per_cfg_block(%condition: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @dense_slice_reloads_per_cfg_block(%condition: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) {
   low.cond_br %condition, ^left, ^right : reg<test.i32>
 ^left:
   %left0 = low.slice %wide[0] : reg<test.i32 x8> -> reg<test.i32>
@@ -366,7 +366,7 @@ low.func.def target(@test_target) @dense_slice_reloads_per_cfg_block(%condition:
 // ----
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @dense_slice_reloads_per_cfg_block(%condition: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @dense_slice_reloads_per_cfg_block(%condition: reg<test.i32>, %wide: reg<test.i32 x8>) -> (reg<test.i32>) {
   %dense_slice_reloads_per_cfg_block_spill_storage_0 = low.storage.reserve {byte_alignment = 16, byte_length = 32} : low.storage<private>
   low.spill %wide, %dense_slice_reloads_per_cfg_block_spill_storage_0 : reg<test.i32 x8>, low.storage<private>
   low.cond_br %condition, ^left, ^right : reg<test.i32>

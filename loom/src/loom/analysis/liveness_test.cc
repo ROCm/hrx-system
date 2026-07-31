@@ -469,7 +469,7 @@ func.def @tied_update(%tile: tile<4xf32>, %tensor: tensor<4xf32>, %off: index) -
 TEST_F(LivenessTest, RegisterPressureGroupsByRegisterClassUnits) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @test_target
-low.func.def target(@test_target) @register_pressure(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @register_pressure(%a: reg<test.i32>, %b: reg<test.i32>, %c: reg<test.i32>) -> (reg<test.i32>) {
   %ab = low.copy %a : reg<test.i32> -> reg<test.i32>
   %bc = low.copy %b : reg<test.i32> -> reg<test.i32>
   %cc = low.copy %c : reg<test.i32> -> reg<test.i32>
@@ -542,7 +542,7 @@ func.def @region_tree_pressure(%input: tile<4xf32>, %bias: f32) -> (tile<4xf32>)
 TEST_F(LivenessTest, PressureBudgetReportsHighUnrolledRegisterUse) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @test_target
-low.func.def target(@test_target) @high_pressure(%a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>, %a4: reg<test.i32>, %a5: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @high_pressure(%a0: reg<test.i32>, %a1: reg<test.i32>, %a2: reg<test.i32>, %a3: reg<test.i32>, %a4: reg<test.i32>, %a5: reg<test.i32>) -> (reg<test.i32>) {
   %r0 = low.copy %a0 : reg<test.i32> -> reg<test.i32>
   %r1 = low.copy %a1 : reg<test.i32> -> reg<test.i32>
   %r2 = low.copy %a2 : reg<test.i32> -> reg<test.i32>
@@ -582,7 +582,7 @@ low.func.def target(@test_target) @high_pressure(%a0: reg<test.i32>, %a1: reg<te
 TEST_F(LivenessTest, FormatsMachineReadableJsonSummary) {
   ModulePtr module = ParseModule(R"(
 test.target<low_core> @test_target
-low.func.def target(@test_target) @json_pressure(%a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) {
+low.func.def target<test.low.core>(@test_target) @json_pressure(%a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) {
   %r = low.copy %a : reg<test.i32> -> reg<test.i32>
   %dead = low.copy %b : reg<test.i32> -> reg<test.i32>
   low.return %r : reg<test.i32>
