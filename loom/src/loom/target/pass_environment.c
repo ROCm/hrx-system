@@ -29,7 +29,8 @@ const loom_pass_environment_capability_type_t loom_target_pass_capability_type =
 
 loom_target_pass_capability_t loom_target_pass_capability_make(
     const loom_target_environment_t* target_environment,
-    const loom_target_specialization_context_t* specialization_context) {
+    const loom_target_specialization_context_t* specialization_context,
+    const loom_function_version_list_t* function_versions) {
   return (loom_target_pass_capability_t){
       .base =
           {
@@ -37,6 +38,7 @@ loom_target_pass_capability_t loom_target_pass_capability_make(
           },
       .target_environment = target_environment,
       .specialization_context = specialization_context,
+      .function_versions = function_versions,
   };
 }
 
@@ -66,6 +68,12 @@ const loom_target_specialization_context_t*
 loom_target_pass_capability_specialization_context(
     const loom_target_pass_capability_t* capability) {
   return capability ? capability->specialization_context : NULL;
+}
+
+const loom_function_version_list_t*
+loom_target_pass_capability_function_versions(
+    const loom_target_pass_capability_t* capability) {
+  return capability ? capability->function_versions : NULL;
 }
 
 const loom_target_profile_t* loom_target_pass_capability_specialization_profile(

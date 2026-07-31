@@ -83,7 +83,8 @@ class AmdgpuSanitizerSiteTableTest : public ::testing::Test {
             /*legalizer_provider_list=*/nullptr,
             /*math_policy_registry=*/nullptr, /*compile_report=*/nullptr,
             /*target_environment=*/nullptr,
-            /*specialization_context=*/nullptr, &environment_storage);
+            /*specialization_context=*/nullptr,
+            /*function_versions=*/nullptr, &environment_storage);
     loom_pass_tool_run_options_t run_options = {
         /*.registry=*/loom_pass_builtin_registry(),
         /*.environment=*/environment,

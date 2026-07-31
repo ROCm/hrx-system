@@ -179,6 +179,7 @@ loom_cc_library(
     hdrs = ["pass_environment.h"],
     deps = [
         ":function_contract",
+        ":function_version",
         ":profile",
         ":specialization",
         ":types",

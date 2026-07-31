@@ -60,9 +60,10 @@ loom_pass_environment_t loom_low_pass_environment_storage_initialize(
     loom_target_compile_report_t* compile_report,
     const loom_target_environment_t* target_environment,
     const loom_target_specialization_context_t* specialization_context,
+    const loom_function_version_list_t* function_versions,
     loom_low_pass_environment_storage_t* out_storage) {
   out_storage->target_capability = loom_target_pass_capability_make(
-      target_environment, specialization_context);
+      target_environment, specialization_context, function_versions);
   out_storage->low_capability = loom_low_pass_capability_make(
       descriptor_registry, lower_policy_registry, legality_provider_list,
       legalizer_provider_list, compile_report);

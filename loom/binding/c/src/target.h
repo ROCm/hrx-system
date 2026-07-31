@@ -123,6 +123,7 @@ LOOMC_API_PRIVATE loom_pass_environment_t
 loomc_target_pass_environment_make_loom_pass_environment(
     const loomc_target_pass_environment_t* environment,
     const loom_target_specialization_context_t* specialization_context,
+    const loom_function_version_list_t* function_versions,
     loom_low_pass_environment_storage_t* out_storage);
 
 // Initializes a target-aware text low-asm environment over prepared target

@@ -208,6 +208,7 @@ loom_cc_library(
     "pass_environment.c"
   DEPS
     ::function_contract
+    ::function_version
     ::profile
     ::specialization
     ::types

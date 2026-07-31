@@ -15,6 +15,7 @@
 #include "loom/pass/environment.h"
 #include "loom/pass/interpreter.h"
 #include "loom/target/predicate.h"
+#include "loom/target/specialization.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
 #include "loomc/iree.h"
@@ -114,7 +115,7 @@ static iree_status_t loomc_compile_capture_diagnostic_emission(
 static loomc_status_t loomc_compile_run_pass_program(
     loomc_compiler_t* compiler, loomc_workspace_t* workspace,
     const loomc_pass_program_t* pass_program, loom_module_t* internal_module,
-    const loom_target_specialization_context_t* specialization_context,
+    const loom_target_specialization_result_t* specialization_result,
     loomc_result_t* result) {
   loomc_compile_diagnostic_capture_t capture = {
       .result = result,
@@ -127,7 +128,8 @@ static loomc_status_t loomc_compile_run_pass_program(
       loomc_context_target_pass_environment(compiler->context);
   if (target_environment != NULL) {
     pass_environment = loomc_target_pass_environment_make_loom_pass_environment(
-        target_environment, specialization_context, &low_environment_storage);
+        target_environment, &specialization_result->context,
+        &specialization_result->function_versions, &low_environment_storage);
     loom_target_pass_predicate_provider_storage_initialize(
         loomc_workspace_block_pool(workspace), &predicate_storage);
     predicate_provider =
@@ -142,6 +144,7 @@ static loomc_status_t loomc_compile_run_pass_program(
               .user_data = &capture,
           },
       .environment = pass_environment,
+      .function_versions = &specialization_result->function_versions,
   };
   loom_pass_run_result_t run_result = {0};
   LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(loom_pass_interpreter_run_module(
@@ -157,8 +160,8 @@ static loomc_status_t loomc_compile_specialize_functions(
     const loomc_target_environment_t* target_environment,
     const loomc_target_specialization_options_t* options, loom_module_t* module,
     loomc_result_t* result, iree_arena_allocator_t* arena,
-    loom_target_specialization_context_t* out_context) {
-  *out_context = (loom_target_specialization_context_t){0};
+    loom_target_specialization_result_t* out_specialization_result) {
+  *out_specialization_result = (loom_target_specialization_result_t){0};
   if (options == NULL || options->specialization_count == 0) {
     return loomc_ok_status();
   }
@@ -181,7 +184,6 @@ static loomc_status_t loomc_compile_specialize_functions(
   loomc_compile_diagnostic_capture_t capture = {
       .result = result,
   };
-  loom_target_specialization_result_t specialization_result = {0};
   LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(loom_target_specialize_functions(
       loomc_target_environment_loom_target_environment(target_environment),
       module,
@@ -193,9 +195,8 @@ static loomc_status_t loomc_compile_specialize_functions(
           .fn = loomc_compile_capture_diagnostic_emission,
           .user_data = &capture,
       },
-      arena, &specialization_result)));
-  *out_context = specialization_result.context;
-  if (specialization_result.error_count != 0) {
+      arena, out_specialization_result)));
+  if (out_specialization_result->error_count != 0) {
     return loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
   }
   return loomc_ok_status();
@@ -473,7 +474,7 @@ loomc_status_t loomc_compile_module(loomc_compiler_t* compiler,
   iree_arena_allocator_t specialization_arena;
   iree_arena_initialize(loomc_workspace_block_pool(workspace),
                         &specialization_arena);
-  loom_target_specialization_context_t specialization_context = {0};
+  loom_target_specialization_result_t specialization_result = {0};
 
   loomc_status_t status =
       loomc_result_verify_loom_module(internal_module, /*source=*/NULL, result);
@@ -494,12 +495,12 @@ loomc_status_t loomc_compile_module(loomc_compiler_t* compiler,
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_compile_specialize_functions(
         context_target_environment, target_specialization, internal_module,
-        result, &specialization_arena, &specialization_context);
+        result, &specialization_arena, &specialization_result);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     status = loomc_compile_run_pass_program(compiler, workspace, pass_program,
                                             internal_module,
-                                            &specialization_context, result);
+                                            &specialization_result, result);
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_compile_emit_requested_artifacts(result, options, module);

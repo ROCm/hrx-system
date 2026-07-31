@@ -247,7 +247,7 @@ iree_status_t loom_compile_run_pipeline(
           &low_lower_policy_registry, &low_legality_provider_list,
           &legalizer_provider_list, &math_policy_registry, options->report,
           options->target_environment, &specialization_result.context,
-          &low_pass_environment_storage),
+          &out_result->function_versions, &low_pass_environment_storage),
       .function_versions = &out_result->function_versions,
       .predicate_provider =
           loom_target_pass_predicate_provider(&predicate_storage),
