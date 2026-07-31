@@ -127,13 +127,15 @@ iree_status_t loom_target_entry_verify_module(
     const loom_module_t* module, const loom_target_entry_options_t* options,
     uint32_t default_max_errors, loom_verify_result_t* out_result);
 
-// Runs target-low semantic verification. Status is reserved for infrastructure
-// failures; verification errors are reported through |out_result|.
+// Runs target-low semantic verification using function versions and diagnostic
+// policy from |options|. Status is reserved for infrastructure failures;
+// verification errors are reported through |out_result|.
 iree_status_t loom_target_entry_verify_low_module(
     const loom_module_t* module,
     const loom_target_low_descriptor_registry_t* low_registry,
+    const loom_target_entry_options_t* options,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
-    uint32_t max_errors,
+    uint32_t default_max_errors,
     loom_low_verify_provider_list_t low_verify_provider_list,
     loom_low_verify_scratch_t* scratch, loom_low_verify_result_t* out_result);
 

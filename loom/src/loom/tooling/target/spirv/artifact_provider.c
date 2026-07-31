@@ -157,10 +157,9 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_entries(
   loom_low_verify_scratch_t low_verify_scratch =
       loom_low_verify_scratch_for_module(module);
   IREE_RETURN_IF_ERROR(loom_target_entry_verify_low_module(
-      module, low_registry, diagnostic_emitter,
-      loom_target_entry_max_errors(target_options, /*default_max_errors=*/20),
-      loom_spirv_low_verify_provider_list(), &low_verify_scratch,
-      &low_verify_result));
+      module, low_registry, target_options, diagnostic_emitter,
+      /*default_max_errors=*/20, loom_spirv_low_verify_provider_list(),
+      &low_verify_scratch, &low_verify_result));
   if (low_verify_result.error_count != 0) {
     return iree_ok_status();
   }

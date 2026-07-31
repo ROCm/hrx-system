@@ -12,23 +12,32 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_registry.h"
 #include "loom/ops/sanitizer/ops.h"
+#include "loom/ops/target/facts.h"
 #include "loom/sanitizer/site_table.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
+#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/planning/wait_counters.h"
+#include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/provider.h"
 #include "loom/target/arch/amdgpu/records/target_records.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 #include "loom/target/emit/native/elf.h"
+#include "loom/target/facts_builder.h"
+#include "loom/target/function_contract.h"
+#include "loom/target/function_version.h"
+#include "loom/target/profile.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/tooling/compile/pipeline.h"
 
@@ -649,6 +658,130 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx942Kernel) {
 
   EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
   EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+}
+
+TEST_F(AmdgpuHalKernelLibraryTest,
+       EmitsGenericGfx11RepresentationForGfx1151Version) {
+  const loom_amdgpu_target_info_t* gfx1151 = nullptr;
+  IREE_ASSERT_OK(
+      loom_amdgpu_target_info_lookup_target(IREE_SV("gfx1151"), &gfx1151));
+  ASSERT_NE(gfx1151, nullptr);
+  if (!IsDescriptorSetLinked(IREE_SV("amdgpu.gfx11.generic.core")) ||
+      !IsTargetDescriptorSetLinked(gfx1151)) {
+    GTEST_SKIP() << "generic gfx11 and gfx1151 descriptor sets are required";
+  }
+
+  static const char kSource[] =
+      "amdgpu.target<gfx11-generic> @authored_target\n"
+      "low.kernel.def target<amdgpu.gfx11.generic.core>(@authored_target) "
+      "workgroup_size(64, 1, 1) @loom_kernel() {\n"
+      "  low.return\n"
+      "}\n";
+  loom_module_t* module = nullptr;
+  ASSERT_NO_FATAL_FAILURE(
+      ParseSource(iree_make_cstring_view(kSource), &module));
+
+  iree_arena_allocator_t version_arena;
+  iree_arena_initialize(&block_pool_, &version_arena);
+  loom_symbol_fact_table_t symbol_facts = {};
+  loom_symbol_fact_table_initialize(&symbol_facts, &version_arena);
+  const loom_string_id_t function_name_id =
+      loom_module_lookup_string(module, IREE_SV("loom_kernel"));
+  ASSERT_NE(function_name_id, LOOM_STRING_ID_INVALID);
+  const loom_symbol_id_t function_symbol_id =
+      loom_module_find_symbol(module, function_name_id);
+  ASSERT_NE(function_symbol_id, LOOM_SYMBOL_ID_INVALID);
+  const loom_symbol_facts_base_t* function_base_facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup(
+      &symbol_facts, module, function_symbol_id, &function_base_facts));
+  const loom_func_symbol_facts_t* function_facts =
+      loom_func_symbol_facts_cast(function_base_facts);
+  ASSERT_NE(function_facts, nullptr);
+  const loom_symbol_facts_base_t* target_base_facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup_ref(
+      &symbol_facts, module, function_facts->target_symbol,
+      &target_base_facts));
+  const loom_target_symbol_facts_t* authored_target =
+      loom_target_symbol_facts_cast(target_base_facts);
+  ASSERT_NE(authored_target, nullptr);
+
+  loom_amdgpu_target_identity_t identity = {};
+  loom_amdgpu_target_identity_initialize(gfx1151, &identity);
+  loom_amdgpu_target_profile_t target_profile = {};
+  IREE_ASSERT_OK(
+      loom_amdgpu_target_profile_initialize(&identity, &target_profile));
+  loom_target_facts_t* exact_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_profile_project_facts(
+      &target_profile.base, &version_arena, &exact_facts));
+  ASSERT_TRUE(loom_target_facts_satisfy_requirement(
+      exact_facts, authored_target->projection));
+  loom_target_facts_builder_apply_requirement(authored_target->projection,
+                                              exact_facts);
+
+  bool contract_valid = false;
+  const loom_target_facts_t* effective_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_function_contract_refine_facts(
+      module, function_facts, authored_target->name, exact_facts,
+      iree_diagnostic_emitter_t{}, &version_arena, &contract_valid,
+      &effective_facts));
+  ASSERT_TRUE(contract_valid);
+  ASSERT_NE(effective_facts, nullptr);
+  loom_target_function_version_t function_version = {};
+  function_version.base.type = &loom_target_function_version_type;
+  function_version.base.function = loom_func_like_cast(
+      module, module->symbols.entries[function_symbol_id].defining_op);
+  ASSERT_TRUE(loom_func_like_isa(function_version.base.function));
+  function_version.authored_target_name = authored_target->name;
+  function_version.authored_target_facts = authored_target->projection;
+  function_version.effective_target_facts = effective_facts;
+  loom_function_version_t* version_values[] = {
+      &function_version.base,
+  };
+  loom_function_version_list_t function_versions = {};
+  function_versions.values = version_values;
+  function_versions.count = IREE_ARRAYSIZE(version_values);
+
+  loom_target_compile_report_t report = {};
+  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  DiagnosticCapture capture;
+  loom_amdgpu_hal_kernel_library_options_t options = {};
+  options.function_versions = &function_versions;
+  options.diagnostic_sink = capture.sink();
+  options.max_errors = 20;
+  options.report = &report;
+  bool emitted = false;
+  loom_amdgpu_hal_kernel_library_t library = {};
+  IREE_ASSERT_OK(loom_amdgpu_emit_hal_kernel_library(
+      module, &options, iree_allocator_system(), &emitted, &library));
+
+  EXPECT_TRUE(emitted) << DiagnosticSummary(capture);
+  EXPECT_TRUE(capture.diagnostics.empty()) << DiagnosticSummary(capture);
+  char expected_target_key_storage[128] = {};
+  iree_string_view_t expected_target_key = iree_string_view_empty();
+  IREE_ASSERT_OK(loom_amdgpu_artifact_target_key_format(
+      &identity, sizeof(expected_target_key_storage),
+      expected_target_key_storage, &expected_target_key));
+  EXPECT_TRUE(iree_string_view_equal(library.target_key, expected_target_key))
+      << "actual: " << StringViewToString(library.target_key)
+      << ", expected: " << StringViewToString(expected_target_key);
+  EXPECT_TRUE(
+      HasTargetCapabilityString(report, "amdgpu", "processor", "gfx1151"));
+  EXPECT_TRUE(HasTargetCapabilityString(report, "amdgpu", "descriptor_set",
+                                        "amdgpu.rdna3_5.core"));
+  ASSERT_EQ(authored_target->symbol.module_id, 0u);
+  ASSERT_LT(authored_target->symbol.symbol_id, module->symbols.count);
+  const loom_op_t* retained_target_op =
+      module->symbols.entries[authored_target->symbol.symbol_id].defining_op;
+  ASSERT_NE(retained_target_op, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_amdgpu_target_record_target_name(retained_target_op),
+      IREE_SV("gfx11-generic")));
+
+  loom_amdgpu_hal_kernel_library_deinitialize(&library,
+                                              iree_allocator_system());
+  loom_target_compile_report_deinitialize(&report);
+  iree_arena_deinitialize(&version_arena);
+  loom_module_free(module);
 }
 
 TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx1250HardwareEntryEnvelope) {

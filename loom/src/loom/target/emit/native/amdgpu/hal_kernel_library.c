@@ -737,6 +737,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   loom_amdgpu_storage_lease_provider(&storage_lease_provider);
   const loom_low_emission_frame_options_t frame_options = {
       .descriptor_registry = &low_registry->registry,
+      .effective_target_facts = effective_target_facts,
       .residency_model = residency_model,
       .schedule_pair_affinities = schedule_pair_affinities,
       .schedule_structural_state_reads = schedule_state_reads,
@@ -1034,7 +1035,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
       loom_low_verify_scratch_for_module(module);
   if (iree_status_is_ok(status) && !diagnostics_failed) {
     status = loom_target_entry_verify_low_module(
-        module, low_registry, diagnostic_emitter, max_errors,
+        module, low_registry, target_options, diagnostic_emitter,
+        LOOM_AMDGPU_HAL_KERNEL_LIBRARY_DEFAULT_MAX_ERRORS,
         low_verify_provider_list, &low_verify_scratch, &low_verify_result);
     if (iree_status_is_ok(status) && low_verify_result.error_count != 0) {
       diagnostics_failed = true;
@@ -1163,6 +1165,7 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
         LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_KERNEL_LIBRARY;
   }
   const loom_target_entry_options_t target_options = {
+      .function_versions = options ? options->function_versions : NULL,
       .diagnostic_sink =
           options ? options->diagnostic_sink : (loom_diagnostic_sink_t){0},
       .source_resolver =

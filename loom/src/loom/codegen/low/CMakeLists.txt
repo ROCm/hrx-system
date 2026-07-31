@@ -670,6 +670,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::low
+    loom::target::facts
     loom::target::residency
   PUBLIC
 )

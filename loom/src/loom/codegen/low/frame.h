@@ -27,6 +27,7 @@
 #include "loom/codegen/low/storage_lease.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/target/facts.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,6 +37,10 @@ extern "C" {
 typedef struct loom_low_emission_frame_options_t {
   // Descriptor registry available to scheduling and allocation.
   const loom_low_descriptor_registry_t* descriptor_registry;
+  // Optional borrowed invocation-refined facts for the function. These facts
+  // already include the function contract and remain immutable for the build.
+  // When omitted, frame construction resolves the target from authored IR.
+  const loom_target_facts_t* effective_target_facts;
   // Optional source-derived memory summaries for the scheduled low function.
   // When empty, frame construction rebuilds the table from durable low.op
   // memory_access attributes.

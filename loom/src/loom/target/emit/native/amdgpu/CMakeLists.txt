@@ -606,21 +606,30 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::analysis::symbol_facts
     loom::codegen::low::text_asm
     loom::error::error_defs
     loom::format::text::parser
     loom::ir
+    loom::ops::func_symbol_facts
     loom::ops::op_registry
     loom::ops::sanitizer
+    loom::ops::target
     loom::sanitizer::site_table
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::matrix::contract
+    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::planning::wait_counters
+    loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::provider
     loom::target::arch::amdgpu::records::target_records
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::emit::native::elf
+    loom::target::facts_builder
+    loom::target::function_contract
+    loom::target::function_version
+    loom::target::profile
     loom::testing::diagnostic_matchers
     loom::tooling::compile::pipeline
   LABELS
