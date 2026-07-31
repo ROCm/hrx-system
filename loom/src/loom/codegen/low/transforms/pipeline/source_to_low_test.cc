@@ -350,13 +350,23 @@ TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionEffectiveTargetFacts) {
 }
 
 TEST_F(LowLowerPassTest,
-       InvocationBoundTargetlessFunctionLowersWithoutAuthoredWitness) {
-  ModulePtr module =
-      Parse(IREE_SV("test.target<low_core> @available_target\n"
-                    "func.def public @entry(%arg: i32) -> (i32) {\n"
-                    "  %result = scalar.addi %arg, %arg : i32\n"
-                    "  func.return %result : i32\n"
-                    "}\n"));
+       InvocationBoundTargetlessFunctionSelectsAndLowersWithoutWitness) {
+  ModulePtr module = Parse(IREE_SV(
+      "test.target<low_core> @available_target\n"
+      "test.target<quirky> @other_target\n"
+      "func.template<demo.targeted> target(@available_target) priority(20) "
+      "@selected(%value: i32) -> (i32) {\n"
+      "  %sum = scalar.addi %value, %value : i32\n"
+      "  func.return %sum : i32\n"
+      "}\n"
+      "func.template<demo.targeted> target(@other_target) priority(30) "
+      "@other(%value: i32) -> (i32) {\n"
+      "  func.return %value : i32\n"
+      "}\n"
+      "func.def public @entry(%arg: i32) -> (i32) {\n"
+      "  %result = func.apply<demo.targeted>(%arg) : (i32) -> (i32)\n"
+      "  func.return %result : i32\n"
+      "}\n"));
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
   const loom_symbol_ref_t available_target_ref =
@@ -385,6 +395,19 @@ TEST_F(LowLowerPassTest,
       /*.values=*/function_version_values,
       /*.count=*/IREE_ARRAYSIZE(function_version_values),
   };
+
+  IREE_ASSERT_OK(RunFlatPipeline(
+      module.get(), IREE_SV("select-templates,inline-callables,symbol-dce"),
+      &function_versions));
+  bool selected_provider_inlined = false;
+  loom_block_t* source_entry = loom_region_entry_block(
+      loom_func_like_body(function_version.base.function));
+  ASSERT_NE(source_entry, nullptr);
+  for (const loom_op_t* op = source_entry->first_op; op != nullptr;
+       op = op->next_op) {
+    selected_provider_inlined |= loom_scalar_addi_isa(op);
+  }
+  EXPECT_TRUE(selected_provider_inlined);
 
   IREE_ASSERT_OK(RunSourceToLow(&policy_registry_, module.get(), nullptr,
                                 &function_versions));
