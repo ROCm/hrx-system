@@ -521,7 +521,8 @@ typedef struct loom_value_fact_buffer_reference_t {
   // Target-independent memory space for the storage root.
   loom_value_fact_memory_space_t memory_space;
 
-  // SSA value that represents the root storage identity.
+  // SSA value that represents the root storage identity. INVALID means the
+  // value carrying these facts is itself the dynamic storage root.
   loom_value_id_t root_value_id;
 
   // Comparable alias scope for disjointness proofs, or NONE.
@@ -530,6 +531,17 @@ typedef struct loom_value_fact_buffer_reference_t {
   // Known nullability for the storage root.
   loom_value_fact_reference_nullability_t nullability;
 } loom_value_fact_buffer_reference_t;
+
+// Resolves the concrete storage root for |reference_value_id|. Buffer fact
+// joins use a self-root when control flow chooses between distinct roots.
+static inline loom_value_id_t
+loom_value_fact_buffer_reference_resolve_root_value(
+    loom_value_fact_buffer_reference_t reference,
+    loom_value_id_t reference_value_id) {
+  return reference.root_value_id == LOOM_VALUE_ID_INVALID
+             ? reference_value_id
+             : reference.root_value_id;
+}
 
 // View value is a typed projection over a storage root.
 typedef struct loom_value_fact_view_reference_t {

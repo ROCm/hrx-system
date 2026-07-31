@@ -456,7 +456,8 @@ iree_status_t loom_test_fact_view_root_matches_facts(
   loom_value_fact_view_reference_t other_view_reference = {0};
   if (loom_value_facts_query_buffer_reference(context, operand_facts[1],
                                               &buffer_reference)) {
-    root_value_id = buffer_reference.root_value_id;
+    root_value_id = loom_value_fact_buffer_reference_resolve_root_value(
+        buffer_reference, root_value_id);
   } else if (loom_value_facts_query_view_reference(context, operand_facts[1],
                                                    &other_view_reference)) {
     root_value_id = other_view_reference.root_value_id;

@@ -242,6 +242,7 @@ loom_generated_cc_library(
     ::storage_facts
     iree::base
     loom::ir
+    loom::ops::buffer
     loom::ops::vector
     loom::util::fact_table
 )

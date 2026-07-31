@@ -212,6 +212,7 @@ loom_generated_cc_library(
         ":op_defs",
         ":storage_facts",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",

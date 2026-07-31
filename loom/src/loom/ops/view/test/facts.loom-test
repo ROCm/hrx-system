@@ -107,6 +107,74 @@ func.def @assume_memory_space_feeds_view(%buffer: buffer, %offset: offset) -> (i
 
 // ====
 
+// Selecting between roots with the same storage contract preserves their
+// shared memory space and makes the selected descriptor the new dynamic root.
+func.def @select_global_buffer_preserves_reference(%condition: i1, %lhs: buffer, %rhs: buffer, %offset: offset) -> (i1, i64, i64, i1) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %global_lhs = buffer.assume.memory_space<global> %lhs : buffer
+  %global_rhs = buffer.assume.memory_space<global> %rhs : buffer
+  %selected = scf.select %condition, %global_lhs, %global_rhs : buffer
+  %view = buffer.view %selected[%offset] : buffer -> view<4xf32, %layout>
+  %is_reference = test.fact_is_buffer_reference %selected : buffer -> i1
+  %buffer_space = test.fact_buffer_memory_space %selected : buffer -> i64
+  %view_space = test.fact_view_memory_space %view : view<4xf32, %layout> -> i64
+  %root_matches = test.fact_view_root_matches %view, %selected : view<4xf32, %layout>, buffer -> i1
+  func.return %is_reference, %buffer_space, %view_space, %root_matches : i1, i64, i64, i1
+}
+// ----
+func.def @select_global_buffer_preserves_reference(%condition: i1, %lhs: buffer, %rhs: buffer, %offset: offset) -> (i1, i64, i64, i1) {
+  %is_reference = scalar.constant true : i1
+  %buffer_space = scalar.constant 1 : i64
+  %view_space = scalar.constant 1 : i64
+  %root_matches = scalar.constant true : i1
+  func.return %is_reference, %buffer_space, %view_space, %root_matches : i1, i64, i64, i1
+}
+
+// ====
+
+// Selecting roots from different memory spaces keeps the dynamic storage root
+// but conservatively drops the incompatible memory-space fact.
+func.def @select_mixed_buffer_space_degrades_space(%condition: i1, %external: buffer, %offset: offset) -> (i1, i64, i64, i1) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %external : buffer
+  %workgroup = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %selected = scf.select %condition, %global, %workgroup : buffer
+  %view = buffer.view %selected[%offset] : buffer -> view<4xf32, %layout>
+  %is_reference = test.fact_is_buffer_reference %selected : buffer -> i1
+  %buffer_space = test.fact_buffer_memory_space %selected : buffer -> i64
+  %view_space = test.fact_view_memory_space %view : view<4xf32, %layout> -> i64
+  %root_matches = test.fact_view_root_matches %view, %selected : view<4xf32, %layout>, buffer -> i1
+  func.return %is_reference, %buffer_space, %view_space, %root_matches : i1, i64, i64, i1
+}
+// ----
+func.def @select_mixed_buffer_space_degrades_space(%condition: i1, %external: buffer, %offset: offset) -> (i1, i64, i64, i1) {
+  %is_reference = scalar.constant true : i1
+  %buffer_space = scalar.constant -1 : i64
+  %view_space = scalar.constant -1 : i64
+  %root_matches = scalar.constant true : i1
+  func.return %is_reference, %buffer_space, %view_space, %root_matches : i1, i64, i64, i1
+}
+
+// ====
+
+// A dynamic root retains only the alignment guaranteed by both candidates.
+func.def @select_buffer_meets_alignment(%condition: i1) -> (i64) {
+  %bytes = index.constant 64 : offset
+  %lhs = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
+  %rhs = buffer.alloca %bytes {base_alignment = 128, memory_space = workgroup} : buffer
+  %selected = scf.select %condition, %lhs, %rhs : buffer
+  %alignment = test.fact_buffer_min_alignment %selected : buffer -> i64
+  func.return %alignment : i64
+}
+// ----
+func.def @select_buffer_meets_alignment(%condition: i1) -> (i64) {
+  %alignment = scalar.constant 64 : i64
+  func.return %alignment : i64
+}
+
+// ====
+
 // External buffer arguments are storage provenance roots but do not get a
 // comparable noalias scope until an explicit contract says so.
 func.def @external_buffer_arg_has_no_alias_scope(%buffer: buffer) -> (i1) {
