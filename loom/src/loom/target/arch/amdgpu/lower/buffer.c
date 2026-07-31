@@ -68,10 +68,7 @@ iree_status_t loom_amdgpu_select_buffer_plan(loom_low_lower_context_t* context,
         return iree_ok_status();
       }
       IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_record_lower_alloca(
-          context, loom_buffer_alloca_memory_space(source_op),
-          loom_buffer_alloca_result(source_op),
-          (uint64_t)local_plan.byte_length,
-          (uint64_t)local_plan.base_alignment));
+          context, source_op, (uint64_t)local_plan.byte_length));
       loom_amdgpu_buffer_alloca_plan_t* plan_data = NULL;
       IREE_RETURN_IF_ERROR(loom_low_lower_allocate_plan_data(
           context, sizeof(*plan_data), (void**)&plan_data));
@@ -100,27 +97,27 @@ iree_status_t loom_amdgpu_low_legality_record_buffer_op(
     return iree_ok_status();
   }
   return loom_amdgpu_source_alloca_layout_record_low_legality_alloca(
-      context, loom_buffer_alloca_memory_space(op),
-      loom_buffer_alloca_result(op), (uint64_t)plan.byte_length,
-      (uint64_t)plan.base_alignment);
+      context, op, (uint64_t)plan.byte_length);
 }
 
 static iree_status_t loom_amdgpu_lower_buffer_alloca(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_buffer_alloca_plan_t* plan) {
   loom_builder_t* builder = loom_low_lower_context_builder(context);
-  loom_op_t* storage_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_storage_reserve_build(
-      builder, plan->byte_length, plan->base_alignment,
-      loom_type_storage(plan->storage_space), source_op->location,
-      &storage_op));
+  const loom_amdgpu_source_alloca_layout_t* layout = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_source_alloca_layout_for_lower_context(context, &layout));
+  loom_value_id_t storage_root = LOOM_VALUE_ID_INVALID;
+  loom_amdgpu_source_alloca_layout_lookup_low_storage(
+      layout, loom_buffer_alloca_memory_space(source_op),
+      loom_buffer_alloca_result(source_op), &storage_root);
 
   loom_type_t vgpr_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_make_vgpr_type(context, &vgpr_type));
   loom_op_t* address_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_storage_address_build(
-      builder, loom_low_storage_reserve_storage(storage_op),
-      /*offset=*/0, vgpr_type, source_op->location, &address_op));
+      builder, storage_root, /*offset=*/0, vgpr_type, source_op->location,
+      &address_op));
   return loom_low_lower_bind_value(context,
                                    loom_buffer_alloca_result(source_op),
                                    loom_low_storage_address_result(address_op));

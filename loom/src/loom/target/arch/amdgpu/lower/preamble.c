@@ -1793,6 +1793,8 @@ iree_status_t loom_amdgpu_emit_entry_setup(void* user_data,
                                            loom_low_lower_context_t* context) {
   (void)user_data;
   IREE_RETURN_IF_ERROR(loom_amdgpu_cluster_preamble_emit_entry_setup(context));
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_source_alloca_layout_emit_low_storage_roots(context));
 
   const loom_op_t* first_workgroup_count_ops[LOOM_KERNEL_DIMENSION_COUNT_];
   loom_amdgpu_find_first_dynamic_count_ops(

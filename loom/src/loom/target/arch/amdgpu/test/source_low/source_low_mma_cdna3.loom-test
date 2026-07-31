@@ -483,9 +483,9 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(256, 1, 1) work
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %out_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
+  %27 = storage {byte_alignment = 16, byte_length = 4096} : low.storage<workgroup>
   %wave = v_lshrrev_b32_lit %tid, 6
   %wave_offset = v_lshlrev_b32_lit %wave, 10
-  %29 = storage {byte_alignment = 16, byte_length = 4096} : low.storage<workgroup>
   %31 = v_and_b32_src0_inline %tid, 63
   %32 = v_and_b32_src0_inline %31, 15
   %33 = v_lshlrev_b32_src0_inline %32, 2

@@ -36,11 +36,11 @@ kernel.def target(@target) @report_static_lds_address_fields() {
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=1x1x1 flat_workgroup_size=1 workgroup_count=1x1x1 dispatch_workgroup_count=1 dispatch_workitem_count=1
-COMPILE-REPORT: source_low selected_ops=6 emitted_ops=5 rows=6
+COMPILE-REPORT: source_low selected_ops=6 emitted_ops=4 rows=6
 COMPILE-REPORT: source_low_memory roots=1 arguments=0 argument_packets=0 strategies=0 packets=1 loads=0 stores=1 scalar_packets=1 vector_packets=0 source_lanes=1 source_bytes=4 read_bytes=0 write_bytes=4 issued_read_bytes=0 issued_write_bytes=4 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=0 strided_vector_packets=0 unknown_stride_vector_packets=0 exact_dynamic_packets=1 unknown_dynamic_packets=0 dynamic_packets=1 dynamic_source_bytes=4 dynamic_read_bytes=0 dynamic_write_bytes=4 dynamic_issued_read_bytes=0 dynamic_issued_write_bytes=4 dynamic_issued_read_unknown_widths=0 dynamic_issued_write_unknown_widths=0 dispatch_source_read_bytes=0 dispatch_source_write_bytes=4 dispatch_source_total_bytes=4 dispatch_issued_read_bytes=0 dispatch_issued_write_bytes=4 dispatch_issued_total_bytes=4 interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:4,byte_count:4} write_interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:4,byte_count:4}
 COMPILE-REPORT: source_low[0] function=report_static_lds_address_fields source_op=index.constant selection=plan emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_static_lds_address_fields source_op=index.constant selection=plan emitted_ops=0
-COMPILE-REPORT: source_low[2] function=report_static_lds_address_fields source_op=buffer.alloca selection=plan emitted_ops=2
+COMPILE-REPORT: source_low[2] function=report_static_lds_address_fields source_op=buffer.alloca selection=plan emitted_ops=1
 COMPILE-REPORT: source_low[3] function=report_static_lds_address_fields source_op=buffer.view selection=rule emitted_ops=0
 COMPILE-REPORT: source_low[4] function=report_static_lds_address_fields source_op=vector.constant selection=plan emitted_ops=1
 COMPILE-REPORT: source_low[5] function=report_static_lds_address_fields source_op=vector.store selection=plan emitted_ops=2
@@ -73,12 +73,12 @@ kernel.def target(@target) @report_lds_f16_subword_stride_fields() {
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64 workgroup_count=1x1x1 dispatch_workgroup_count=1 dispatch_workitem_count=64
-COMPILE-REPORT: source_low selected_ops=11 emitted_ops=10 rows=11
+COMPILE-REPORT: source_low selected_ops=11 emitted_ops=9 rows=11
 COMPILE-REPORT: source_low_memory roots=3 arguments=2 argument_packets=2 strategies=0 packets=4 loads=2 stores=2 scalar_packets=0 vector_packets=4 source_lanes=8 source_bytes=16 read_bytes=8 write_bytes=8 issued_read_bytes=8 issued_write_bytes=8 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=4 strided_vector_packets=0 unknown_stride_vector_packets=0 exact_dynamic_packets=4 unknown_dynamic_packets=0 dynamic_packets=4 dynamic_source_bytes=16 dynamic_read_bytes=8 dynamic_write_bytes=8 dynamic_issued_read_bytes=8 dynamic_issued_write_bytes=8 dynamic_issued_read_unknown_widths=0 dynamic_issued_write_unknown_widths=0 dispatch_source_read_bytes=512 dispatch_source_write_bytes=512 dispatch_source_total_bytes=1024 dispatch_issued_read_bytes=512 dispatch_issued_write_bytes=512 dispatch_issued_total_bytes=1024 interval_envelope={packets:4,begin_min_bytes:0,end_max_bytes:130,byte_count:130} read_interval_envelope={packets:2,begin_min_bytes:0,end_max_bytes:130,byte_count:130} write_interval_envelope={packets:2,begin_min_bytes:0,end_max_bytes:130,byte_count:130}
 COMPILE-REPORT: source_low[0] function=report_lds_f16_subword_stride_fields source_op=kernel.workitem.id selection=plan emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_lds_f16_subword_stride_fields source_op=index.constant selection=plan emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_lds_f16_subword_stride_fields source_op=index.constant selection=plan emitted_ops=0
-COMPILE-REPORT: source_low[3] function=report_lds_f16_subword_stride_fields source_op=buffer.alloca selection=plan emitted_ops=2
+COMPILE-REPORT: source_low[3] function=report_lds_f16_subword_stride_fields source_op=buffer.alloca selection=plan emitted_ops=1
 COMPILE-REPORT: source_low[4] function=report_lds_f16_subword_stride_fields source_op=buffer.view selection=rule emitted_ops=0
 COMPILE-REPORT: source_low[5] function=report_lds_f16_subword_stride_fields source_op=buffer.view selection=rule emitted_ops=0
 COMPILE-REPORT: source_low[6] function=report_lds_f16_subword_stride_fields source_op=buffer.view selection=rule emitted_ops=0
@@ -124,12 +124,12 @@ kernel.def target(@target) @report_lds_read2_write2_address_fields() {
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64 workgroup_count=1x1x1 dispatch_workgroup_count=1 dispatch_workitem_count=64
-COMPILE-REPORT: source_low selected_ops=10 emitted_ops=13 rows=10
+COMPILE-REPORT: source_low selected_ops=10 emitted_ops=12 rows=10
 COMPILE-REPORT: source_low_memory roots=2 arguments=1 argument_packets=1 strategies=0 packets=3 loads=1 stores=2 scalar_packets=0 vector_packets=3 source_lanes=6 source_bytes=24 read_bytes=8 write_bytes=16 issued_read_bytes=8 issued_write_bytes=16 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=1 strided_vector_packets=2 unknown_stride_vector_packets=0 exact_dynamic_packets=3 unknown_dynamic_packets=0 dynamic_packets=3 dynamic_source_bytes=24 dynamic_read_bytes=8 dynamic_write_bytes=16 dynamic_issued_read_bytes=8 dynamic_issued_write_bytes=16 dynamic_issued_read_unknown_widths=0 dynamic_issued_write_unknown_widths=0 dispatch_source_read_bytes=512 dispatch_source_write_bytes=1024 dispatch_source_total_bytes=1536 dispatch_issued_read_bytes=512 dispatch_issued_write_bytes=1024 dispatch_issued_total_bytes=1536 interval_envelope={packets:3,begin_min_bytes:0,end_max_bytes:2028,byte_count:2028} read_interval_envelope={packets:1,begin_min_bytes:0,end_max_bytes:2028,byte_count:2028} write_interval_envelope={packets:2,begin_min_bytes:0,end_max_bytes:2028,byte_count:2028}
 COMPILE-REPORT: source_low[0] function=report_lds_read2_write2_address_fields source_op=kernel.workitem.id selection=plan emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_lds_read2_write2_address_fields source_op=index.constant selection=plan emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_lds_read2_write2_address_fields source_op=index.constant selection=plan emitted_ops=0
-COMPILE-REPORT: source_low[3] function=report_lds_read2_write2_address_fields source_op=buffer.alloca selection=plan emitted_ops=2
+COMPILE-REPORT: source_low[3] function=report_lds_read2_write2_address_fields source_op=buffer.alloca selection=plan emitted_ops=1
 COMPILE-REPORT: source_low[4] function=report_lds_read2_write2_address_fields source_op=buffer.view selection=rule emitted_ops=0
 COMPILE-REPORT: source_low[5] function=report_lds_read2_write2_address_fields source_op=buffer.view selection=rule emitted_ops=0
 COMPILE-REPORT: source_low[6] function=report_lds_read2_write2_address_fields source_op=vector.constant selection=plan emitted_ops=3
@@ -171,12 +171,12 @@ kernel.def target(@target) @report_lds_b128_single_lane_extract() {
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64 workgroup_count=1x1x1 dispatch_workgroup_count=1 dispatch_workitem_count=64
-COMPILE-REPORT: source_low selected_ops=12 emitted_ops=11 rows=12
+COMPILE-REPORT: source_low selected_ops=12 emitted_ops=10 rows=12
 COMPILE-REPORT: source_low_memory roots=3 arguments=2 argument_packets=2 strategies=0 packets=4 loads=2 stores=2 scalar_packets=1 vector_packets=3 source_lanes=13 source_bytes=52 read_bytes=32 write_bytes=20 issued_read_bytes=32 issued_write_bytes=20 issued_read_unknown_widths=0 issued_write_unknown_widths=0 contiguous_vector_packets=3 strided_vector_packets=0 unknown_stride_vector_packets=0 exact_dynamic_packets=4 unknown_dynamic_packets=0 dynamic_packets=4 dynamic_source_bytes=52 dynamic_read_bytes=32 dynamic_write_bytes=20 dynamic_issued_read_bytes=32 dynamic_issued_write_bytes=20 dynamic_issued_read_unknown_widths=0 dynamic_issued_write_unknown_widths=0 dispatch_source_read_bytes=2048 dispatch_source_write_bytes=1280 dispatch_source_total_bytes=3328 dispatch_issued_read_bytes=2048 dispatch_issued_write_bytes=1280 dispatch_issued_total_bytes=3328 interval_envelope={packets:4,begin_min_bytes:0,end_max_bytes:1024,byte_count:1024} read_interval_envelope={packets:2,begin_min_bytes:0,end_max_bytes:1024,byte_count:1024} write_interval_envelope={packets:2,begin_min_bytes:0,end_max_bytes:1024,byte_count:1024}
 COMPILE-REPORT: source_low[0] function=report_lds_b128_single_lane_extract source_op=kernel.workitem.id selection=plan emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_lds_b128_single_lane_extract source_op=index.constant selection=plan emitted_ops=0
 COMPILE-REPORT: source_low[2] function=report_lds_b128_single_lane_extract source_op=index.constant selection=plan emitted_ops=0
-COMPILE-REPORT: source_low[3] function=report_lds_b128_single_lane_extract source_op=buffer.alloca selection=plan emitted_ops=2
+COMPILE-REPORT: source_low[3] function=report_lds_b128_single_lane_extract source_op=buffer.alloca selection=plan emitted_ops=1
 COMPILE-REPORT: source_low[4] function=report_lds_b128_single_lane_extract source_op=buffer.view selection=rule emitted_ops=0
 COMPILE-REPORT: source_low[5] function=report_lds_b128_single_lane_extract source_op=buffer.view selection=rule emitted_ops=0
 COMPILE-REPORT: source_low[6] function=report_lds_b128_single_lane_extract source_op=buffer.view selection=rule emitted_ops=0

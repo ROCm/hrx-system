@@ -43,9 +43,15 @@ iree_status_t loom_amdgpu_source_alloca_layout_for_lower_context(
 // Source-to-low planning calls this while visiting buffer.alloca ops, so later
 // selectors can resolve allocation roots without scanning source IR.
 iree_status_t loom_amdgpu_source_alloca_layout_record_lower_alloca(
-    loom_low_lower_context_t* context,
-    loom_value_fact_memory_space_t memory_space, loom_value_id_t root_value_id,
-    uint64_t byte_length, uint64_t byte_alignment);
+    loom_low_lower_context_t* context, const loom_op_t* alloca_op,
+    uint64_t byte_length);
+
+// Emits one physical low-storage root for each planned source-allocation slot.
+// Mutually exclusive logical allocations share a slot and therefore share its
+// root. Source allocation plans are complete before entry setup, so each root
+// carries the final maximum capacity and alignment of its occupants.
+iree_status_t loom_amdgpu_source_alloca_layout_emit_low_storage_roots(
+    loom_low_lower_context_t* context);
 
 // Returns the function-local source allocation layout analysis for low-legality
 // verification. The returned object is allocated from the legality context's
@@ -58,9 +64,8 @@ iree_status_t loom_amdgpu_source_alloca_layout_for_low_legality(
 // verification calls this while visiting buffer.alloca ops, so later provider
 // checks can resolve allocation roots without scanning source IR.
 iree_status_t loom_amdgpu_source_alloca_layout_record_low_legality_alloca(
-    loom_target_low_legality_context_t* context,
-    loom_value_fact_memory_space_t memory_space, loom_value_id_t root_value_id,
-    uint64_t byte_length, uint64_t byte_alignment);
+    loom_target_low_legality_context_t* context, const loom_op_t* alloca_op,
+    uint64_t byte_length);
 
 // Resolves the analyzed storage base for a source buffer.alloca root in the
 // requested memory space. Returns false when the analysis cannot prove the root
@@ -69,6 +74,15 @@ bool loom_amdgpu_source_alloca_layout_lookup_root(
     const loom_amdgpu_source_alloca_layout_t* layout,
     loom_value_fact_memory_space_t memory_space, loom_value_id_t root_value_id,
     uint64_t* out_byte_offset);
+
+// Resolves the emitted physical low-storage root for a planned source
+// allocation. Entry setup must have emitted the roots before this is called
+// during body lowering. Packet planning separately consumes the allocation's
+// analyzed suballocation offset through lookup_root.
+void loom_amdgpu_source_alloca_layout_lookup_low_storage(
+    const loom_amdgpu_source_alloca_layout_t* layout,
+    loom_value_fact_memory_space_t memory_space, loom_value_id_t root_value_id,
+    loom_value_id_t* out_storage_value_id);
 
 // Returns the exact wavefront size selected by the active target bundle.
 uint32_t loom_amdgpu_target_wavefront_size(const loom_target_bundle_t* bundle);

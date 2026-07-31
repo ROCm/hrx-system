@@ -122,10 +122,10 @@ kernel.def target(@target) @workgroup_memory_scalar_loop_index_b32() {
 
 // ----
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 1, 1) workgroup_count(1, 1, 1) @workgroup_memory_scalar_loop_index_b32() asm {
+  %17 = storage {byte_alignment = 16, byte_length = 32} : low.storage<workgroup>
   %zero_index = s_mov_b32 0
   %eight = s_mov_b32 8
   %one_index = s_mov_b32 1
-  %20 = storage {byte_alignment = 16, byte_length = 32} : low.storage<workgroup>
   %one = v_mov_b32 1
   low.br ^_bb1(%zero_index: reg<amdgpu.sgpr>)
 ^_bb1(%i: reg<amdgpu.sgpr>):
@@ -205,7 +205,7 @@ kernel.def target(@target) @wave_sized_workgroup_memory_second_allocation_b32() 
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_second_allocation_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %13 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
-  %15 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
+  %14 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %one = v_mov_b32 1
   %two = v_mov_b32 2
   %19 = v_lshlrev_b32_src0_inline %lane, 2
@@ -386,10 +386,10 @@ kernel.def target(@target) @wave_sized_workgroup_memory_select_scaled_lane_b32()
 // ----
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @wave_sized_workgroup_memory_select_scaled_lane_b32() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %17 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %scaled_lane = v_lshlrev_b32_lit %lane, 1
   %inside = v_cmp_lt_u32_src1_inline %lane {rhs = 16}
   %element_index = v_cndmask_b32 %scaled_lane, %lane, %inside
-  %20 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %one = v_mov_b32 1
   %23 = v_lshlrev_b32_src0_inline %element_index, 2
   low.op<amdgpu.ds_write_b32>(%23, %one) {offset = 0} memory_access([0, 3, 10, -1, 43, 4, 0, 4, 3, 0, 248, 4, 252]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)

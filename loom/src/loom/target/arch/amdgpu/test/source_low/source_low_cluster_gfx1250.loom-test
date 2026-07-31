@@ -67,8 +67,8 @@ kernel.def target(@target) @cluster_gather_packet_widths() {
 low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 2, 1) cluster_size(1, 2, 1) @cluster_gather_packet_widths() asm {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 48} : reg<amdgpu.sgpr x2>
   %24 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
+  %25 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
   %26 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
-  %28 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
   %30 = v_mov_b32 0
   %32 = s_mov_b32_m0_imm 3
   low.op<amdgpu.cluster_load_async_to_lds_b8>(%30, %30, %global, %32) {offset = 0, scope = 0, th = 0} memory_access([0, 3, 13, -1, 11, 0, 0, 0, 3, 0, 0, 1, 1]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
@@ -160,10 +160,10 @@ kernel.def target(@target) @cluster_gather_two_stage_wait_depth() {
 low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 2, 1) cluster_size(1, 2, 1) @cluster_gather_two_stage_wait_depth() asm {
   %global = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %27 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
+  %28 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
   %29 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
+  %30 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
   %31 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
-  %33 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
-  %35 = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
   %37 = v_mov_b32 0
   %39 = s_mov_b32_m0_imm 3
   low.op<amdgpu.cluster_load_async_to_lds_b128>(%37, %37, %global, %39) {offset = 0, scope = 2, th = 0} memory_access([0, 3, 9, -1, 11, 0, 0, 0, 3, 0, 0, 16, 16]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)
@@ -284,8 +284,8 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %global_input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %payload_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %28 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %29 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
-  %31 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
   %33 = v_lshlrev_b32_src0_inline %lane, 4
   %35 = s_mov_b32_m0_imm 3
   low.op<amdgpu.cluster_load_async_to_lds_b128>(%33, %33, %global_input, %35) {offset = 0, scope = 2, th = 0} memory_access([0, 3, 16, -1, 43, 16, 0, 16, 3, 0, 1008, 16, 1024]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.m0>)

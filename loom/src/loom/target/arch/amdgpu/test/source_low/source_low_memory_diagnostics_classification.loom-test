@@ -261,10 +261,10 @@ kernel.def target(@target) @multi_term_lds_address_fields() {
 // ----
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) @multi_term_lds_address_fields() asm {
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
+  %11 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %lane_x = v_and_b32_lit %packed_tid, 1023
-  %12 = v_lshrrev_b32_src0_inline %packed_tid, 10
-  %lane_y = v_and_b32_lit %12, 1023
-  %14 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
+  %13 = v_lshrrev_b32_src0_inline %packed_tid, 10
+  %lane_y = v_and_b32_lit %13, 1023
   %one = v_mov_b32 1
   %17 = v_lshl_add_u32_shift_imm %lane_x, %lane_y, 2
   %18 = v_lshlrev_b32_src0_inline %17, 2
