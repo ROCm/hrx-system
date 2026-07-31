@@ -303,15 +303,6 @@ func.def public target(@unrequested_family) @unrequested() {
             LOOM_TEST_TARGET_KIND_QUIRKY);
   EXPECT_EQ(loom_func_like_target(generic).symbol_id,
             loom_func_like_target(targetless).symbol_id);
-  EXPECT_EQ(loom_target_specialization_context_lookup(&result.context,
-                                                      module.get(), generic),
-            &exact_profile.base);
-  EXPECT_EQ(loom_target_specialization_context_lookup(&result.context,
-                                                      module.get(), targetless),
-            &exact_profile.base);
-  EXPECT_EQ(loom_target_specialization_context_lookup(
-                &result.context, module.get(), unrequested),
-            nullptr);
 
   const loom_target_function_version_t* generic_version =
       loom_target_function_version_list_find(&result.function_versions,
@@ -495,7 +486,6 @@ func.def public @otherwise_compatible() {
   EXPECT_EQ(conflict_ref.symbol_id, authored_ref.symbol_id);
   EXPECT_FALSE(loom_symbol_ref_is_valid(loom_func_like_target(
       Function(module.get(), IREE_SV("otherwise_compatible")))));
-  EXPECT_EQ(result.context.profiles_by_function_name_id, nullptr);
 }
 
 TEST_F(TargetSpecializationTest, RejectsUnlinkedProfileFamily) {

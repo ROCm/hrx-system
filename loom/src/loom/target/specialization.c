@@ -6,8 +6,6 @@
 
 #include "loom/target/specialization.h"
 
-#include <string.h>
-
 #include "loom/analysis/symbol_facts.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
@@ -340,46 +338,11 @@ iree_status_t loom_target_specialize_functions(
         loom_symbol_ref_is_valid(specializations[i].effective_target_ref));
   }
 
-  const loom_target_profile_t** profiles_by_function_name_id = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, module->strings.count, sizeof(*profiles_by_function_name_id),
-      (void**)&profiles_by_function_name_id));
-  memset(profiles_by_function_name_id, 0,
-         module->strings.count * sizeof(*profiles_by_function_name_id));
-  for (iree_host_size_t i = 0; i < requests.count; ++i) {
-    profiles_by_function_name_id[specializations[i].function_name_id] =
-        specializations[i].target_profile;
-  }
-
   IREE_RETURN_IF_ERROR(loom_target_specialization_bind_functions(
       module, specializations, requests.count, arena));
-  out_result->context = (loom_target_specialization_context_t){
-      .profiles_by_function_name_id = profiles_by_function_name_id,
-      .profile_capacity = module->strings.count,
-  };
   out_result->function_versions = (loom_function_version_list_t){
       .values = version_values,
       .count = requests.count,
   };
   return iree_ok_status();
-}
-
-const loom_target_profile_t* loom_target_specialization_context_lookup(
-    const loom_target_specialization_context_t* context,
-    const loom_module_t* module, loom_func_like_t function) {
-  if (context == NULL || context->profiles_by_function_name_id == NULL ||
-      module == NULL || !loom_func_like_isa(function)) {
-    return NULL;
-  }
-  const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
-  if (!loom_symbol_ref_is_valid(function_ref) || function_ref.module_id != 0 ||
-      function_ref.symbol_id >= module->symbols.count) {
-    return NULL;
-  }
-  const loom_string_id_t function_name_id =
-      module->symbols.entries[function_ref.symbol_id].name_id;
-  if (function_name_id >= context->profile_capacity) {
-    return NULL;
-  }
-  return context->profiles_by_function_name_id[function_name_id];
 }

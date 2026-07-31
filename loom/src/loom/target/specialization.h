@@ -9,8 +9,7 @@
 // Specialization is an invocation-local compiler action. Each request names
 // one function version and supplies the structured target profile that should
 // become its exact effective target. The result carries compiler-owned
-// function-version facts alongside the currently bound target identity and
-// supplemental profile context.
+// function-version facts alongside the compatibility diagnostic outcome.
 
 #ifndef LOOM_TARGET_SPECIALIZATION_H_
 #define LOOM_TARGET_SPECIALIZATION_H_
@@ -46,26 +45,10 @@ typedef struct loom_target_specialization_request_list_t {
   iree_host_size_t count;
 } loom_target_specialization_request_list_t;
 
-// Supplemental per-function target facts for one specialization invocation.
-//
-// Durable effective targets live on function ops. This context contains only
-// profile facts that cannot be reconstructed from target records and must not
-// be used as a fallback target source.
-typedef struct loom_target_specialization_context_t {
-  // Profile table indexed by stable module string ID.
-  const loom_target_profile_t* const* profiles_by_function_name_id;
-
-  // Number of entries in |profiles_by_function_name_id|.
-  iree_host_size_t profile_capacity;
-} loom_target_specialization_context_t;
-
 // Result of binding a specialization request list.
 typedef struct loom_target_specialization_result_t {
   // Concrete target-refined function versions participating in compilation.
   loom_function_version_list_t function_versions;
-
-  // Supplemental profile context for successfully bound functions.
-  loom_target_specialization_context_t context;
 
   // Number of source compatibility diagnostics emitted while validating the
   // complete request list.
@@ -82,20 +65,12 @@ typedef struct loom_target_specialization_result_t {
 // infrastructure failures return a status.
 //
 // Target profiles and |arena| storage must outlive every pass that consumes the
-// returned context or function versions.
+// returned function versions.
 iree_status_t loom_target_specialize_functions(
     const loom_target_environment_t* environment, loom_module_t* module,
     loom_target_specialization_request_list_t requests,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
     loom_target_specialization_result_t* out_result);
-
-// Returns the supplemental profile assigned to |function|, or NULL.
-//
-// This query never infers a target from another function or from the module.
-// Callers resolve durable target identity from loom_func_like_target().
-const loom_target_profile_t* loom_target_specialization_context_lookup(
-    const loom_target_specialization_context_t* context,
-    const loom_module_t* module, loom_func_like_t function);
 
 #ifdef __cplusplus
 }  // extern "C"
