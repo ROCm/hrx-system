@@ -396,7 +396,9 @@ LOOMC_API_EXPORT void loomc_module_release(loomc_module_t* module);
 /// @lifetime
 /// The cloned module retains `workspace` and returns its arena blocks when the
 /// module is released. The clone does not borrow from `source_module`; both
-/// modules may be mutated independently after this call returns.
+/// modules may be mutated independently after this call returns. Cloning
+/// preserves module IR only; invocation-local compiler facts retained by a
+/// prior compilation are not copied.
 ///
 /// @thread_safety
 /// Cloning reads `source_module` and mutates `workspace`. Concurrent clones of

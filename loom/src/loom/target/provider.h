@@ -20,6 +20,7 @@
 #include "loom/codegen/low/lower/lower.h"
 #include "loom/codegen/low/verify.h"
 #include "loom/ir/context.h"
+#include "loom/ir/function_version.h"
 #include "loom/ir/ir.h"
 #include "loom/pass/environment.h"
 #include "loom/pass/registry.h"
@@ -164,6 +165,9 @@ typedef struct loom_target_emit_request_t {
 
   // Mutable module containing already-prepared target-low IR.
   loom_module_t* module;
+
+  // Concrete compiler function versions participating in this emission.
+  const loom_function_version_list_t* function_versions;
 
   // Embedding-owned option chain borrowed for the duration of the call.
   const void* option_chain;

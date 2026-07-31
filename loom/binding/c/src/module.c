@@ -22,6 +22,7 @@
 #include "loom/format/bytecode/writer.h"
 #include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
+#include "loom/ir/function_version.h"
 #include "loom/link/linker.h"
 #include "loomc/iree.h"
 #include "result.h"
@@ -48,6 +49,12 @@ struct loomc_module_t {
 
   // Internal linked, parsed, or optimized module.
   loom_module_t* module;
+
+  // Arena owning compiler products associated with the current module IR.
+  iree_arena_allocator_t function_version_arena;
+
+  // Concrete function versions published by the last successful compilation.
+  loom_function_version_list_t function_versions;
 };
 
 typedef struct loomc_module_resolved_serialize_options_t {
@@ -103,6 +110,7 @@ typedef struct loomc_module_byte_buffer_stream_t {
 
 static void loomc_module_destroy(loomc_module_t* module) {
   loomc_allocator_t allocator = module->allocator;
+  iree_arena_deinitialize(&module->function_version_arena);
   loom_module_free(module->module);
   loomc_workspace_release(module->workspace);
   loomc_context_release(module->context);
@@ -824,6 +832,8 @@ loomc_status_t loomc_module_create_empty(loomc_context_t* context,
   loomc_context_retain(context);
   module->workspace = workspace;
   loomc_workspace_retain(workspace);
+  iree_arena_initialize(loomc_workspace_block_pool(workspace),
+                        &module->function_version_arena);
 
   *out_module = module;
   return loomc_ok_status();
@@ -863,6 +873,27 @@ loom_module_t* loomc_module_loom_module(loomc_module_t* module) {
 const loom_module_t* loomc_module_const_loom_module(
     const loomc_module_t* module) {
   return module ? module->module : NULL;
+}
+
+iree_arena_allocator_t* loomc_module_prepare_function_versions(
+    loomc_module_t* module) {
+  IREE_ASSERT_ARGUMENT(module);
+  iree_arena_reset(&module->function_version_arena);
+  module->function_versions = (loom_function_version_list_t){0};
+  return &module->function_version_arena;
+}
+
+void loomc_module_publish_function_versions(
+    loomc_module_t* module, loom_function_version_list_t function_versions) {
+  IREE_ASSERT_ARGUMENT(module);
+  module->function_versions = function_versions;
+}
+
+const loom_function_version_list_t* loomc_module_function_versions(
+    const loomc_module_t* module) {
+  return module && module->function_versions.count != 0
+             ? &module->function_versions
+             : NULL;
 }
 
 void loomc_module_retain(loomc_module_t* module) {

@@ -817,6 +817,7 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
           .low_descriptor_registry =
               &pass_environment->low_descriptor_registry.registry,
           .module = internal_module,
+          .function_versions = loomc_module_function_versions(module),
           .option_chain = resolved_options.option_chain,
           .identifier = iree_string_view_from_loomc(
               loomc_emit_identifier(&resolved_options, emitter)),

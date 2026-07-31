@@ -26,6 +26,7 @@
 #include "loomc/target/spirv/base.h"
 #include "loomc/target/spirv/profile.h"
 #include "loomc/workspace.h"
+#include "module.h"
 #include "target.h"
 #include "test/util.h"
 
@@ -935,7 +936,7 @@ TEST(TargetTest, RejectsSanitizerOptionsOnPlainPassProgramOptions) {
   EXPECT_EQ(pass_program, nullptr);
 }
 
-TEST(TargetTest, BorrowsSpecializationRowsAcrossCompileWorkspaces) {
+TEST(TargetTest, RetainsSpecializationFactsInModuleStorage) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   TargetProfilePtr profile = CreateSpirvProfile(target_environment.get());
   ContextPtr context = CreateSpirvContext(target_environment.get());
@@ -973,9 +974,29 @@ TEST(TargetTest, BorrowsSpecializationRowsAcrossCompileWorkspaces) {
     LOOMC_EXPECT_OK(status);
     ResultPtr result_ptr(result);
     ExpectSucceededResult(result_ptr.get());
+    loomc_workspace_trim(workspace.get());
+    const loom_function_version_list_t* function_versions =
+        loomc_module_function_versions(module.get());
+    ASSERT_NE(function_versions, nullptr);
+    ASSERT_EQ(function_versions->count, 1u);
     const std::string text = SerializeModuleToText(module.get());
     EXPECT_NE(text.find("spirv.target<"), std::string::npos);
     EXPECT_NE(text.find("func.def public target(@"), std::string::npos);
+
+    const loomc_target_specialization_t missing_specialization = {
+        /*.function_symbol=*/loomc_make_cstring_view("missing"),
+        /*.target_profile=*/profile.get(),
+    };
+    target_options.specializations = &missing_specialization;
+    result = nullptr;
+    LOOMC_EXPECT_STATUS_IS(
+        LOOMC_STATUS_NOT_FOUND,
+        loomc_compile_module(compiler.get(), workspace.get(),
+                             pass_program.get(), module.get(), &compile_options,
+                             loomc_allocator_system(), &result));
+    EXPECT_EQ(result, nullptr);
+    EXPECT_EQ(loomc_module_function_versions(module.get()), nullptr);
+    target_options.specializations = &specialization;
   }
 }
 
