@@ -22,6 +22,7 @@ exports_files([
     "qwen3_moe/attention_qkv_postprocess_fused.loom",
     "qwen3_moe/attention_qkv_quantized.loom",
     "qwen3_moe/dense_linear_quantized_f16_wmma.loom",
+    "qwen3_moe/expert_table_partition_fused.loom",
     "qwen3_moe/flash_attention_decode_f32_f16_wmma.loom",
     "qwen3_moe/flash_attention_decode_q128_f32_f16_wmma.loom",
     "qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom",
@@ -1080,6 +1081,50 @@ loom_link_module(
 )
 
 loom_link_module(
+    name = "expert_table_partition_fused_linked",
+    srcs = ["qwen3_moe/expert_table_partition_fused.loom"],
+    libraries = [
+        "qwen3_moe/routed_gate_up_swiglu_q4k.loom",
+        "ggml/quantize_q8_1_x4.loom",
+    ],
+)
+
+iree_executable_test(
+    name = "expert_table_partition_fused_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :expert_table_partition_fused_linked)",
+        "--benchmark=@qwen3_moe_expert_table_partition_fused_prefill_512",
+        "--dry-run",
+        "--output-format=jsonl",
+        "--sample-compilation=per_sample",
+    ],
+    data = [":expert_table_partition_fused_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "expert_table_partition_fused_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :expert_table_partition_fused_linked)",
+        "--case=@qwen3_moe_expert_table_partition_fused_differential_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":expert_table_partition_fused_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+loom_link_module(
     name = "routed_gate_up_swiglu_q4k_f16_wmma_linked",
     srcs = ["qwen3_moe/routed_linear_q4k_f16_wmma.loom"],
     libraries = [
@@ -1799,6 +1844,8 @@ test_suite(
         ":dense_linear_q6k_f16_wmma_plan_test",
         ":expert_mlp_q4k_f16_handoff_hal_test",
         ":expert_mlp_q6k_f16_handoff_hal_test",
+        ":expert_table_partition_fused_hal_test",
+        ":expert_table_partition_fused_plan_test",
         ":flash_attention_decode_f32_f16_wmma_gqa_hal_test",
         ":flash_attention_decode_f32_f16_wmma_plan_test",
         ":flash_attention_decode_f32_f16_wmma_tail_hal_test",
