@@ -38,6 +38,11 @@ constexpr LayerParameterSpec kLayerParameterSpecs[] = {
     {"ffn_down_exps.weight", 113246208, 165150720},
 };
 
+// Physical tensor order in the fixed Qwen3-30B-A3B GGUF files.
+constexpr iree_host_size_t kGgufLayerParameterOrder[] = {
+    2, 5, 0, 6, 1, 4, 3, 11, 9, 8, 7, 10,
+};
+
 class ParameterIndex {
  public:
   ParameterIndex() {
@@ -92,14 +97,15 @@ static void AddEntryUnlessOmitted(ParameterIndex& index,
 
 static void PopulateFixedSchema(ParameterIndex& index,
                                 const SchemaMutation& mutation = {}) {
-  // Insert in GGUF file order to prove packing is independent of index order.
+  // Insert in GGUF file order so source and target spans can be coalesced.
   AddEntryUnlessOmitted(index, mutation, "output.weight", 255252480);
   AddEntryUnlessOmitted(index, mutation, "output_norm.weight", 8192);
   AddEntryUnlessOmitted(index, mutation, "token_embd.weight", 175030272);
 
   for (iree_host_size_t layer = 0; layer < QWEN_MODEL_LAYER_COUNT; ++layer) {
     const bool use_q6 = layer % 2 == 0;
-    for (const LayerParameterSpec& spec : kLayerParameterSpecs) {
+    for (iree_host_size_t spec_ordinal : kGgufLayerParameterOrder) {
+      const LayerParameterSpec& spec = kLayerParameterSpecs[spec_ordinal];
       const std::string key = LayerKey(layer, spec.suffix);
       uint64_t length =
           use_q6 && spec.q6_length != 0 ? spec.q6_length : spec.q4_length;
@@ -111,22 +117,23 @@ static void PopulateFixedSchema(ParameterIndex& index,
     }
   }
 
-  if (!mutation.omitted_key.empty() || mutation.add_extra_entry) {
+  if (mutation.add_extra_entry) {
     index.Add("unexpected.weight", 512);
   }
 }
 
-static std::vector<std::string> ExpectedPackingOrder() {
+static std::vector<std::string> ExpectedSourceOrder() {
   std::vector<std::string> keys;
   keys.reserve(QWEN_PARAMETER_COUNT);
+  keys.push_back("output.weight");
+  keys.push_back("output_norm.weight");
   keys.push_back("token_embd.weight");
   for (iree_host_size_t layer = 0; layer < QWEN_MODEL_LAYER_COUNT; ++layer) {
-    for (const LayerParameterSpec& spec : kLayerParameterSpecs) {
+    for (iree_host_size_t spec_ordinal : kGgufLayerParameterOrder) {
+      const LayerParameterSpec& spec = kLayerParameterSpecs[spec_ordinal];
       keys.push_back(LayerKey(layer, spec.suffix));
     }
   }
-  keys.push_back("output_norm.weight");
-  keys.push_back("output.weight");
   return keys;
 }
 
@@ -143,16 +150,23 @@ TEST(QwenParameterLayoutTest, ValidatesAndPacksFixedSchema) {
   EXPECT_EQ(layout.statistics.allocation_bytes, 18550716672ull);
   EXPECT_GT(layout.statistics.allocation_bytes, UINT32_MAX);
 
-  EXPECT_EQ(layout.token_embedding.offset, 0);
+  EXPECT_EQ(layout.output.offset, 0);
+  EXPECT_EQ(layout.output_norm.offset,
+            layout.output.offset + layout.output.length);
+  EXPECT_EQ(layout.token_embedding.offset,
+            layout.output_norm.offset + layout.output_norm.length);
   EXPECT_EQ(layout.token_embedding.length, 175030272);
+  EXPECT_EQ(layout.layers[0].key.offset,
+            layout.token_embedding.offset + layout.token_embedding.length);
   EXPECT_EQ(layout.layers[0].value_and_down_storage,
             QWEN_QUANTIZED_STORAGE_Q6_K);
   EXPECT_EQ(layout.layers[1].value_and_down_storage,
             QWEN_QUANTIZED_STORAGE_Q4_K);
-  EXPECT_EQ(layout.output.offset + layout.output.length,
+  EXPECT_EQ(layout.layers[QWEN_MODEL_LAYER_COUNT - 1].expert_up.offset +
+                layout.layers[QWEN_MODEL_LAYER_COUNT - 1].expert_up.length,
             layout.rope_inverse_frequencies.offset);
 
-  const std::vector<std::string> expected_keys = ExpectedPackingOrder();
+  const std::vector<std::string> expected_keys = ExpectedSourceOrder();
   ASSERT_EQ(expected_keys.size(), QWEN_PARAMETER_COUNT);
   std::unordered_set<std::string> observed_keys;
   iree_device_size_t previous_end = 0;
@@ -168,21 +182,32 @@ TEST(QwenParameterLayoutTest, ValidatesAndPacksFixedSchema) {
     EXPECT_TRUE(observed_keys.insert(key_string).second);
     EXPECT_EQ(span.parameter_offset, 0);
     EXPECT_EQ(span.buffer_offset % 256, 0);
-    EXPECT_GE(span.buffer_offset, previous_end);
+    EXPECT_EQ(span.buffer_offset, previous_end);
     previous_end = span.buffer_offset + span.length;
     enumerated_bytes += span.length;
   }
   EXPECT_EQ(observed_keys.size(), QWEN_PARAMETER_COUNT);
   EXPECT_EQ(enumerated_bytes, layout.statistics.encoded_parameter_bytes);
-  EXPECT_EQ(previous_end, layout.output.offset + layout.output.length);
+  EXPECT_EQ(previous_end, layout.rope_inverse_frequencies.offset);
 }
 
-TEST(QwenParameterLayoutTest, RejectsMissingEntryAtExactCount) {
+TEST(QwenParameterLayoutTest, RejectsUnknownEntryAtExactCount) {
   ParameterIndex index;
   PopulateFixedSchema(index, {.omitted_key = "blk.17.ffn_gate_exps.weight"});
+  index.Add("unexpected.weight", 512);
 
   qwen_parameter_layout_t layout;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        qwen_parameter_layout_build(index.get(), &layout));
+}
+
+TEST(QwenParameterLayoutTest, RejectsDuplicateEntryAtExactCount) {
+  ParameterIndex index;
+  PopulateFixedSchema(index, {.omitted_key = "blk.17.ffn_gate_exps.weight"});
+  index.Add("output.weight", 255252480);
+
+  qwen_parameter_layout_t layout;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         qwen_parameter_layout_build(index.get(), &layout));
 }
 

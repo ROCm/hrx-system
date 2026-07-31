@@ -91,6 +91,8 @@ typedef struct qwen_parameter_layout_t {
   qwen_parameter_span_t output_norm;
   // Quantized vocabulary projection weights.
   qwen_parameter_span_t output;
+  // Logical parameter ordinal for each source index entry.
+  uint16_t source_parameter_ordinals[QWEN_PARAMETER_COUNT];
   // Immutable RoPE inverse-frequency table.
   qwen_parameter_span_t rope_inverse_frequencies;
   // Allocation statistics derived while packing the spans.
@@ -101,12 +103,14 @@ typedef struct qwen_parameter_layout_t {
 //
 // The index must contain exactly QWEN_PARAMETER_COUNT entries. Every fixed key
 // and encoded length is validated, and each layer's value and expert-down
-// tensors must select the same Q4_K or Q6_K storage.
+// tensors must select the same Q4_K or Q6_K storage. Resident spans are
+// assigned in source index order so physically adjacent GGUF tensors remain
+// adjacent in the target allocation.
 iree_status_t qwen_parameter_layout_build(
     iree_io_parameter_index_t* parameter_index,
     qwen_parameter_layout_t* out_layout);
 
-// Enumerates one source key and target span in deterministic packing order.
+// Enumerates one source key and target span in source index packing order.
 //
 // |key_storage| receives any formatted layer key. The returned |out_key| is
 // valid until |key_storage| is modified.

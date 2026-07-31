@@ -113,6 +113,67 @@ _Static_assert(
         QWEN_PARAMETER_COUNT,
     "top-level and layer parameter counts must cover the fixed index");
 
+#define QWEN_LAYER_PARAMETER_COUNT IREE_ARRAYSIZE(qwen_layer_parameter_specs)
+#define QWEN_FIRST_LAYER_PARAMETER_ORDINAL 1
+#define QWEN_OUTPUT_NORM_PARAMETER_ORDINAL \
+  (QWEN_FIRST_LAYER_PARAMETER_ORDINAL +    \
+   QWEN_MODEL_LAYER_COUNT * QWEN_LAYER_PARAMETER_COUNT)
+#define QWEN_OUTPUT_PARAMETER_ORDINAL (QWEN_OUTPUT_NORM_PARAMETER_ORDINAL + 1)
+
+typedef struct qwen_parameter_descriptor_t {
+  // Byte offset of the typed span within qwen_parameter_layout_t.
+  iree_host_size_t span_offset;
+  // Layer ordinal, or QWEN_MODEL_LAYER_COUNT for top-level parameters.
+  iree_host_size_t layer;
+  // Layer parameter specification, or NULL for top-level parameters.
+  const qwen_layer_parameter_spec_t* layer_spec;
+  // Required encoded length, or Q4_K length when an alternative is present.
+  iree_device_size_t encoded_length;
+  // Optional Q6_K encoded length.
+  iree_device_size_t alternate_encoded_length;
+} qwen_parameter_descriptor_t;
+
+static qwen_parameter_descriptor_t
+qwen_parameter_descriptor_for_logical_ordinal(
+    iree_host_size_t logical_ordinal) {
+  IREE_ASSERT(logical_ordinal < QWEN_PARAMETER_COUNT);
+  if (logical_ordinal == 0) {
+    return (qwen_parameter_descriptor_t){
+        .span_offset = offsetof(qwen_parameter_layout_t, token_embedding),
+        .layer = QWEN_MODEL_LAYER_COUNT,
+        .encoded_length = 175030272,
+    };
+  }
+  if (logical_ordinal < QWEN_OUTPUT_NORM_PARAMETER_ORDINAL) {
+    const iree_host_size_t layer_ordinal =
+        logical_ordinal - QWEN_FIRST_LAYER_PARAMETER_ORDINAL;
+    const iree_host_size_t layer = layer_ordinal / QWEN_LAYER_PARAMETER_COUNT;
+    const qwen_layer_parameter_spec_t* spec =
+        &qwen_layer_parameter_specs[layer_ordinal % QWEN_LAYER_PARAMETER_COUNT];
+    return (qwen_parameter_descriptor_t){
+        .span_offset = offsetof(qwen_parameter_layout_t, layers) +
+                       layer * sizeof(qwen_layer_parameters_t) +
+                       spec->span_offset,
+        .layer = layer,
+        .layer_spec = spec,
+        .encoded_length = spec->encoded_length,
+        .alternate_encoded_length = spec->alternate_encoded_length,
+    };
+  }
+  if (logical_ordinal == QWEN_OUTPUT_NORM_PARAMETER_ORDINAL) {
+    return (qwen_parameter_descriptor_t){
+        .span_offset = offsetof(qwen_parameter_layout_t, output_norm),
+        .layer = QWEN_MODEL_LAYER_COUNT,
+        .encoded_length = 8192,
+    };
+  }
+  return (qwen_parameter_descriptor_t){
+      .span_offset = offsetof(qwen_parameter_layout_t, output),
+      .layer = QWEN_MODEL_LAYER_COUNT,
+      .encoded_length = 255252480,
+  };
+}
+
 static iree_status_t qwen_parameter_format_layer_key(
     iree_host_size_t layer, const char* suffix,
     char key_storage[QWEN_PARAMETER_KEY_CAPACITY],
@@ -129,39 +190,96 @@ static iree_status_t qwen_parameter_format_layer_key(
   return iree_ok_status();
 }
 
+static iree_status_t qwen_parameter_format_logical_key(
+    iree_host_size_t logical_ordinal,
+    char key_storage[QWEN_PARAMETER_KEY_CAPACITY],
+    iree_string_view_t* out_key) {
+  if (logical_ordinal == 0) {
+    *out_key = IREE_SV("token_embd.weight");
+    return iree_ok_status();
+  }
+  if (logical_ordinal < QWEN_OUTPUT_NORM_PARAMETER_ORDINAL) {
+    const iree_host_size_t layer_ordinal =
+        logical_ordinal - QWEN_FIRST_LAYER_PARAMETER_ORDINAL;
+    const iree_host_size_t layer = layer_ordinal / QWEN_LAYER_PARAMETER_COUNT;
+    const qwen_layer_parameter_spec_t* spec =
+        &qwen_layer_parameter_specs[layer_ordinal % QWEN_LAYER_PARAMETER_COUNT];
+    return qwen_parameter_format_layer_key(layer, spec->suffix, key_storage,
+                                           out_key);
+  }
+  if (logical_ordinal == QWEN_OUTPUT_NORM_PARAMETER_ORDINAL) {
+    *out_key = IREE_SV("output_norm.weight");
+  } else {
+    *out_key = IREE_SV("output.weight");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t qwen_parameter_resolve_logical_ordinal(
+    iree_string_view_t key, iree_host_size_t* out_logical_ordinal) {
+  if (iree_string_view_equal(key, IREE_SV("token_embd.weight"))) {
+    *out_logical_ordinal = 0;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(key, IREE_SV("output_norm.weight"))) {
+    *out_logical_ordinal = QWEN_OUTPUT_NORM_PARAMETER_ORDINAL;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(key, IREE_SV("output.weight"))) {
+    *out_logical_ordinal = QWEN_OUTPUT_PARAMETER_ORDINAL;
+    return iree_ok_status();
+  }
+
+  iree_string_view_t layer_key = key;
+  if (iree_string_view_consume_prefix(&layer_key, IREE_SV("blk."))) {
+    iree_string_view_t layer_string = iree_string_view_empty();
+    iree_string_view_t suffix = iree_string_view_empty();
+    iree_string_view_split(layer_key, '.', &layer_string, &suffix);
+    uint32_t layer = 0;
+    if (iree_string_view_atoi_uint32(layer_string, &layer) &&
+        layer < QWEN_MODEL_LAYER_COUNT) {
+      for (iree_host_size_t i = 0; i < QWEN_LAYER_PARAMETER_COUNT; ++i) {
+        if (iree_string_view_equal(
+                suffix,
+                iree_make_cstring_view(qwen_layer_parameter_specs[i].suffix))) {
+          *out_logical_ordinal =
+              QWEN_FIRST_LAYER_PARAMETER_ORDINAL +
+              (iree_host_size_t)layer * QWEN_LAYER_PARAMETER_COUNT + i;
+          return iree_ok_status();
+        }
+      }
+    }
+  }
+
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "unexpected Qwen parameter '%.*s'", (int)key.size,
+                          key.data);
+}
+
 static iree_status_t qwen_parameter_pack_index_entry(
-    iree_io_parameter_index_t* parameter_index, iree_string_view_t key,
-    iree_device_size_t encoded_length,
-    iree_device_size_t alternate_encoded_length,
+    const iree_io_parameter_index_entry_t* entry,
+    const qwen_parameter_descriptor_t* descriptor,
     iree_device_size_t* inout_cursor,
     qwen_parameter_statistics_t* inout_statistics,
     qwen_parameter_span_t* out_span, qwen_quantized_storage_t* out_storage) {
-  const iree_io_parameter_index_entry_t* entry = NULL;
-  iree_status_t status =
-      iree_io_parameter_index_lookup(parameter_index, key, &entry);
-  if (!iree_status_is_ok(status)) {
-    return iree_status_annotate_f(status, "required Qwen parameter '%.*s'",
-                                  (int)key.size, key.data);
-  }
-
   qwen_quantized_storage_t storage = QWEN_QUANTIZED_STORAGE_Q4_K;
-  if (entry->length == alternate_encoded_length &&
-      alternate_encoded_length != 0) {
+  if (entry->length == descriptor->alternate_encoded_length &&
+      descriptor->alternate_encoded_length != 0) {
     storage = QWEN_QUANTIZED_STORAGE_Q6_K;
-  } else if (entry->length != encoded_length) {
-    if (alternate_encoded_length != 0) {
+  } else if (entry->length != descriptor->encoded_length) {
+    if (descriptor->alternate_encoded_length != 0) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "Qwen parameter '%.*s' has encoded length %" PRIu64
           "; expected %" PRIu64 " (Q4_K) or %" PRIu64 " (Q6_K)",
-          (int)key.size, key.data, entry->length, encoded_length,
-          alternate_encoded_length);
+          (int)entry->key.size, entry->key.data, entry->length,
+          descriptor->encoded_length, descriptor->alternate_encoded_length);
     }
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen parameter '%.*s' has encoded length %" PRIu64
                             "; expected %" PRIu64,
-                            (int)key.size, key.data, entry->length,
-                            encoded_length);
+                            (int)entry->key.size, entry->key.data,
+                            entry->length, descriptor->encoded_length);
   }
 
   const iree_device_size_t aligned_cursor =
@@ -197,50 +315,54 @@ iree_status_t qwen_parameter_layout_build(
   qwen_parameter_statistics_t statistics;
   memset(&statistics, 0, sizeof(statistics));
 
-  IREE_RETURN_IF_ERROR(qwen_parameter_pack_index_entry(
-      parameter_index, IREE_SV("token_embd.weight"), 175030272, 0, &cursor,
-      &statistics, &out_layout->token_embedding, NULL));
+  bool seen_logical_ordinals[QWEN_PARAMETER_COUNT] = {false};
+  qwen_quantized_storage_t value_storage[QWEN_MODEL_LAYER_COUNT] = {0};
+  qwen_quantized_storage_t down_storage[QWEN_MODEL_LAYER_COUNT] = {0};
+  for (iree_host_size_t source_ordinal = 0;
+       source_ordinal < QWEN_PARAMETER_COUNT; ++source_ordinal) {
+    const iree_io_parameter_index_entry_t* entry = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_io_parameter_index_get(parameter_index, source_ordinal, &entry));
+
+    iree_host_size_t logical_ordinal = 0;
+    IREE_RETURN_IF_ERROR(
+        qwen_parameter_resolve_logical_ordinal(entry->key, &logical_ordinal));
+    if (seen_logical_ordinals[logical_ordinal]) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "duplicate Qwen parameter '%.*s'",
+                              (int)entry->key.size, entry->key.data);
+    }
+    seen_logical_ordinals[logical_ordinal] = true;
+    out_layout->source_parameter_ordinals[source_ordinal] =
+        (uint16_t)logical_ordinal;
+
+    const qwen_parameter_descriptor_t descriptor =
+        qwen_parameter_descriptor_for_logical_ordinal(logical_ordinal);
+    qwen_parameter_span_t* span =
+        (qwen_parameter_span_t*)((uint8_t*)out_layout + descriptor.span_offset);
+    qwen_quantized_storage_t* storage = NULL;
+    if (descriptor.layer_spec && descriptor.layer_spec->storage_selector ==
+                                     QWEN_LAYER_STORAGE_SELECTOR_VALUE) {
+      storage = &value_storage[descriptor.layer];
+    } else if (descriptor.layer_spec &&
+               descriptor.layer_spec->storage_selector ==
+                   QWEN_LAYER_STORAGE_SELECTOR_DOWN) {
+      storage = &down_storage[descriptor.layer];
+    }
+    IREE_RETURN_IF_ERROR(qwen_parameter_pack_index_entry(
+        entry, &descriptor, &cursor, &statistics, span, storage));
+  }
 
   for (iree_host_size_t layer = 0; layer < QWEN_MODEL_LAYER_COUNT; ++layer) {
-    qwen_layer_parameters_t* layer_parameters = &out_layout->layers[layer];
-    qwen_quantized_storage_t value_storage = QWEN_QUANTIZED_STORAGE_Q4_K;
-    qwen_quantized_storage_t down_storage = QWEN_QUANTIZED_STORAGE_Q4_K;
-    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(qwen_layer_parameter_specs);
-         ++i) {
-      const qwen_layer_parameter_spec_t* spec = &qwen_layer_parameter_specs[i];
-      char key_storage[QWEN_PARAMETER_KEY_CAPACITY];
-      iree_string_view_t key = iree_string_view_empty();
-      IREE_RETURN_IF_ERROR(qwen_parameter_format_layer_key(layer, spec->suffix,
-                                                           key_storage, &key));
-      qwen_parameter_span_t* span =
-          (qwen_parameter_span_t*)((uint8_t*)layer_parameters +
-                                   spec->span_offset);
-      qwen_quantized_storage_t* storage = NULL;
-      if (spec->storage_selector == QWEN_LAYER_STORAGE_SELECTOR_VALUE) {
-        storage = &value_storage;
-      } else if (spec->storage_selector == QWEN_LAYER_STORAGE_SELECTOR_DOWN) {
-        storage = &down_storage;
-      }
-      IREE_RETURN_IF_ERROR(qwen_parameter_pack_index_entry(
-          parameter_index, key, spec->encoded_length,
-          spec->alternate_encoded_length, &cursor, &statistics, span, storage));
-    }
-    if (value_storage != down_storage) {
+    if (value_storage[layer] != down_storage[layer]) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "Qwen layer %" PRIhsz
           " uses different storage for attn_v and ffn_down_exps",
           layer);
     }
-    layer_parameters->value_and_down_storage = value_storage;
+    out_layout->layers[layer].value_and_down_storage = value_storage[layer];
   }
-
-  IREE_RETURN_IF_ERROR(qwen_parameter_pack_index_entry(
-      parameter_index, IREE_SV("output_norm.weight"), 8192, 0, &cursor,
-      &statistics, &out_layout->output_norm, NULL));
-  IREE_RETURN_IF_ERROR(qwen_parameter_pack_index_entry(
-      parameter_index, IREE_SV("output.weight"), 255252480, 0, &cursor,
-      &statistics, &out_layout->output, NULL));
 
   const iree_device_size_t auxiliary_offset =
       iree_align_uint64(cursor, QWEN_PARAMETER_BASE_ALIGNMENT);
@@ -268,35 +390,22 @@ iree_status_t qwen_parameter_layout_enumerate(
   *out_key = iree_string_view_empty();
   memset(out_span, 0, sizeof(*out_span));
 
-  const qwen_parameter_span_t* parameter_span = NULL;
-  if (index == 0) {
-    *out_key = IREE_SV("token_embd.weight");
-    parameter_span = &layout->token_embedding;
-  } else if (index <= QWEN_MODEL_LAYER_COUNT *
-                          IREE_ARRAYSIZE(qwen_layer_parameter_specs)) {
-    const iree_host_size_t layer_ordinal = index - 1;
-    const iree_host_size_t layer =
-        layer_ordinal / IREE_ARRAYSIZE(qwen_layer_parameter_specs);
-    const qwen_layer_parameter_spec_t* spec =
-        &qwen_layer_parameter_specs[layer_ordinal %
-                                    IREE_ARRAYSIZE(qwen_layer_parameter_specs)];
-    IREE_RETURN_IF_ERROR(qwen_parameter_format_layer_key(layer, spec->suffix,
-                                                         key_storage, out_key));
-    parameter_span =
-        (const qwen_parameter_span_t*)((const uint8_t*)&layout->layers[layer] +
-                                       spec->span_offset);
-  } else if (index == QWEN_PARAMETER_COUNT - 2) {
-    *out_key = IREE_SV("output_norm.weight");
-    parameter_span = &layout->output_norm;
-  } else if (index == QWEN_PARAMETER_COUNT - 1) {
-    *out_key = IREE_SV("output.weight");
-    parameter_span = &layout->output;
-  } else {
+  if (index >= QWEN_PARAMETER_COUNT) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Qwen parameter ordinal %" PRIhsz
                             " out of range; expected [0, %d)",
                             index, QWEN_PARAMETER_COUNT);
   }
+
+  const iree_host_size_t logical_ordinal =
+      layout->source_parameter_ordinals[index];
+  const qwen_parameter_descriptor_t descriptor =
+      qwen_parameter_descriptor_for_logical_ordinal(logical_ordinal);
+  IREE_RETURN_IF_ERROR(
+      qwen_parameter_format_logical_key(logical_ordinal, key_storage, out_key));
+  const qwen_parameter_span_t* parameter_span =
+      (const qwen_parameter_span_t*)((const uint8_t*)layout +
+                                     descriptor.span_offset);
 
   *out_span = (iree_io_parameter_span_t){
       .parameter_offset = 0,
