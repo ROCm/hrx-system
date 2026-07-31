@@ -640,9 +640,8 @@ static uint64_t loom_low_schedule_ready_schedule_key(
           state->node_dependency_latency_cycles != NULL
               ? state->node_dependency_latency_cycles[node_index]
               : 0;
-      const uint16_t latency =
-          loom_low_schedule_class_schedule_distance_cycles(
-              node->schedule_class);
+      const uint16_t latency = loom_low_schedule_class_schedule_distance_cycles(
+          node->schedule_class);
       return ((uint64_t)dependency_latency << 32) |
              (uint64_t)(UINT16_MAX - latency);
     }

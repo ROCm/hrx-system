@@ -147,11 +147,11 @@ low.func.def target(@test_target) @resource_stall_hides_load_latency(
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_places_concat_before_payload_ready strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule-json @resource_stall_prefers_live_value_compaction_over_storage_progress strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
-low.func.def target(@test_target) @resource_stall_places_concat_before_payload_ready(
+low.func.def target(@test_target) @resource_stall_prefers_live_value_compaction_over_storage_progress(
     %lhs0: reg<test.i32 x4>, %rhs0: reg<test.i32 x4>,
     %lhs1: reg<test.i32 x4>, %rhs1: reg<test.i32 x4>,
     %lhs: reg<test.i32>, %rhs: reg<test.i32>) ->
@@ -162,9 +162,9 @@ low.func.def target(@test_target) @resource_stall_places_concat_before_payload_r
   // REMARK@+1: BACKEND/015
   %part1 = low.op<test.add.v4i32>(%lhs1, %rhs1) :
       (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x4>
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="low.concat", rejected_packet="test.mul.i32", chosen_data_ready_stall_cycles="0"}
   %packed = low.concat(%part0, %part1) :
       (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.mul.i32", rejected_packet="low.concat", chosen_data_ready_stall_cycles="0"}
   %independent = low.op<test.mul.i32>(%lhs, %rhs) :
       (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
   low.return %packed, %independent : reg<test.i32 x8>, reg<test.i32>
