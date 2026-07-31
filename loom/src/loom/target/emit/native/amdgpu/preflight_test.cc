@@ -57,7 +57,8 @@ loom_low_resolved_target_t ResolvedTarget(
     const loom_low_descriptor_set_t* descriptor_set) {
   loom_low_resolved_target_t target = {};
   target.target_name = IREE_SV("gfx942_target");
-  target.descriptor_set_key = IREE_SV("amdgpu.cdna3.core");
+  target.descriptor_set_key = loom_low_descriptor_set_string(
+      descriptor_set, descriptor_set->key_string_offset);
   target.descriptor_set = descriptor_set;
   return target;
 }
@@ -75,7 +76,6 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"),
                                         &block_pool_, nullptr,
                                         iree_allocator_system(), &module_));
-    BuildLowFunction();
   }
 
   void TearDown() override {
@@ -110,17 +110,24 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
     };
   }
 
-  void BuildLowFunction() {
+  void BuildLowFunction(const loom_low_descriptor_set_t* descriptor_set) {
     loom_builder_t module_builder;
     loom_builder_initialize(module_, &module_->arena,
                             loom_module_block(module_), &module_builder);
     const loom_symbol_ref_t target_ref = AddSymbol(IREE_SV("target"));
     const loom_symbol_ref_t callee_ref = AddSymbol(IREE_SV("preflight"));
+    loom_string_id_t representation_contract = LOOM_STRING_ID_INVALID;
+    IREE_ASSERT_OK(loom_builder_intern_string(
+        &module_builder,
+        loom_low_descriptor_set_string(descriptor_set,
+                                       descriptor_set->key_string_offset),
+        &representation_contract));
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &module_builder, 0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
+        &module_builder, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_DESCRIPTOR_SET,
+        /*visibility=*/0, /*retain=*/0, /*cc=*/0,
         /*purity=*/0,
         /*allocation=*/0, /*schedule=*/0,
-        /*descriptor_set=*/LOOM_STRING_ID_INVALID, target_ref, /*abi=*/0,
+        /*descriptor_set=*/representation_contract, target_ref, /*abi=*/0,
         loom_named_attr_slice_t{}, loom_named_attr_slice_t{},
         LOOM_STRING_ID_INVALID, loom_named_attr_slice_t{}, callee_ref,
         /*arg_types=*/nullptr,
@@ -181,6 +188,7 @@ TEST_F(AmdgpuNativePreflightTest,
   if (descriptor_set == nullptr) {
     GTEST_SKIP() << "amdgpu.cdna3.core is not linked in this build";
   }
+  BuildLowFunction(descriptor_set);
   const uint16_t agpr_reg_class_id =
       FindRegisterClassId(descriptor_set, IREE_SV("amdgpu.agpr"));
   ASSERT_NE(agpr_reg_class_id, LOOM_LOW_REG_CLASS_NONE);
@@ -226,6 +234,7 @@ TEST_F(AmdgpuNativePreflightTest, TtmpFixedLocationsDoNotIncreaseSgprMetadata) {
   const loom_low_descriptor_set_t* descriptor_set =
       LookupAmdgpuGfx125xDescriptorSet();
   ASSERT_NE(descriptor_set, nullptr);
+  BuildLowFunction(descriptor_set);
 
   loom_low_schedule_table_t schedule = Schedule(descriptor_set);
   loom_low_allocation_assignment_t assignments[2] = {};
@@ -262,6 +271,7 @@ TEST_F(AmdgpuNativePreflightTest, StackStorageUnsupportedEmitsDiagnostic) {
   if (descriptor_set == nullptr) {
     GTEST_SKIP() << "amdgpu.cdna3.core is not linked in this build";
   }
+  BuildLowFunction(descriptor_set);
   const loom_value_id_t stack_storage = Reserve(LOOM_STORAGE_SPACE_STACK, 8, 4);
 
   const loom_low_schedule_table_t schedule = Schedule(descriptor_set);
