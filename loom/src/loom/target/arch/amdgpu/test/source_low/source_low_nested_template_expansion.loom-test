@@ -1,0 +1,82 @@
+// RUN: emit source-low output=low
+
+// Nested provider predicates acquire their useful facts only after each outer
+// provider has been selected and inlined at the concrete application site.
+// Both conditional levels must select their specialized provider before the
+// source-to-low pipeline begins. The nested device providers similarly defer
+// their required kernel ancestry until the outer provider reaches its caller.
+amdgpu.target<gfx11-generic> @target
+
+func.template<nested.leaf> priority(20) @leaf_specialized(%value: index) -> (index) where [range(%value, 1, 256)] {
+  %one = index.constant 1 : index
+  %result = index.add %value, %one : index
+  func.return %result : index
+}
+
+func.template<nested.leaf> priority(10) @leaf_fallback(%value: index) -> (index) {
+  %zero = index.constant 0 : index
+  func.return %zero : index
+}
+
+func.template<nested.middle> priority(20) @middle_specialized(%value: index) -> (index) where [range(%value, 1, 256)] {
+  %result = func.apply<nested.leaf>(%value) : (index) -> (index)
+  func.return %result : index
+}
+
+func.template<nested.middle> priority(10) @middle_fallback(%value: index) -> (index) {
+  %zero = index.constant 0 : index
+  func.return %zero : index
+}
+
+func.template<nested.outer> @outer(%value: index) -> (index) {
+  %result = func.apply<nested.middle>(%value) : (index) -> (index)
+  func.return %result : index
+}
+
+func.template<nested.kernel_inner> device @kernel_inner() {
+  %workitem = kernel.workitem.id<x> : index
+  func.return
+}
+
+func.template<nested.kernel_outer> device @kernel_outer() {
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  func.apply<nested.kernel_inner>() : ()
+  func.return
+}
+
+func.def target(@target) @nested_template_expansion() -> (index) {
+  %value = index.constant 64 : index
+  %result = func.apply<nested.outer>(%value) : (index) -> (index)
+  func.return %result : index
+}
+
+func.def target(@target) @nested_template_fallback() -> (index) {
+  %value = index.constant 512 : index
+  %result = func.apply<nested.outer>(%value) : (index) -> (index)
+  func.return %result : index
+}
+
+kernel.def target(@target) @nested_kernel_template_expansion() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch() {
+  func.apply<nested.kernel_outer>() : ()
+  kernel.return
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @nested_template_expansion() -> (reg<amdgpu.sgpr>) asm {
+  %result = s_mov_b32 65
+  return %result
+}
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @nested_template_fallback() -> (reg<amdgpu.sgpr>) asm {
+  %zero = s_mov_b32 0
+  return %zero
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @nested_kernel_template_expansion() asm {
+  s_barrier
+  return
+}

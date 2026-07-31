@@ -963,21 +963,40 @@ static bool loom_template_selection_apply_has_ancestor(
   return false;
 }
 
-static bool loom_template_selection_provider_context_matches(
+// A template body acquires the physical ancestors of its application site only
+// after selection and inlining.
+static bool loom_template_selection_has_deferred_caller_context(
+    const loom_symbol_liveness_contributor_context_t* context) {
+  return context && context->source_symbol &&
+         context->source_symbol->defining_op &&
+         loom_func_template_isa(context->source_symbol->defining_op);
+}
+
+static loom_template_provider_feasibility_t
+loom_template_selection_provider_context_feasibility(
+    const loom_symbol_liveness_contributor_context_t* context,
     const loom_op_t* apply_op, const loom_func_provider_summary_t* provider) {
+  loom_template_provider_feasibility_t feasibility =
+      LOOM_TEMPLATE_PROVIDER_MATCH;
+  const bool has_deferred_caller_context =
+      loom_template_selection_has_deferred_caller_context(context);
   for (uint16_t i = 0; i < provider->required_caller_ancestor_count; ++i) {
     if (!loom_template_selection_apply_has_ancestor(
             apply_op, provider->required_caller_ancestors[i])) {
-      return false;
+      if (!has_deferred_caller_context) return LOOM_TEMPLATE_PROVIDER_REJECT;
+      feasibility = LOOM_TEMPLATE_PROVIDER_MAYBE;
     }
   }
   for (uint16_t i = 0; i < provider->forbidden_caller_ancestor_count; ++i) {
     if (loom_template_selection_apply_has_ancestor(
             apply_op, provider->forbidden_caller_ancestors[i])) {
-      return false;
+      return LOOM_TEMPLATE_PROVIDER_REJECT;
+    }
+    if (has_deferred_caller_context) {
+      feasibility = LOOM_TEMPLATE_PROVIDER_MAYBE;
     }
   }
-  return true;
+  return feasibility;
 }
 
 static iree_status_t loom_template_selection_classify_provider(
@@ -990,16 +1009,28 @@ static iree_status_t loom_template_selection_classify_provider(
   IREE_RETURN_IF_ERROR(loom_template_selection_types_match(
       state, apply_op, provider, &types_match));
   if (!types_match) return iree_ok_status();
-  if (!loom_template_selection_provider_context_matches(apply_op, provider)) {
+  loom_template_provider_feasibility_t context_feasibility =
+      loom_template_selection_provider_context_feasibility(context, apply_op,
+                                                           provider);
+  if (context_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
     return iree_ok_status();
   }
 
+  loom_template_provider_feasibility_t predicate_feasibility =
+      LOOM_TEMPLATE_PROVIDER_MATCH;
   if (provider->predicate_count > 0) {
-    return loom_template_selection_evaluate_predicates(
-        state, context, apply_op, provider, out_feasibility);
+    IREE_RETURN_IF_ERROR(loom_template_selection_evaluate_predicates(
+        state, context, apply_op, provider, &predicate_feasibility));
+    if (predicate_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
+      return iree_ok_status();
+    }
   }
 
-  *out_feasibility = LOOM_TEMPLATE_PROVIDER_MATCH;
+  *out_feasibility =
+      context_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE ||
+              predicate_feasibility == LOOM_TEMPLATE_PROVIDER_MAYBE
+          ? LOOM_TEMPLATE_PROVIDER_MAYBE
+          : LOOM_TEMPLATE_PROVIDER_MATCH;
   return iree_ok_status();
 }
 
@@ -1009,6 +1040,22 @@ static iree_status_t loom_template_selection_mark_provider_live(
     const loom_func_provider_summary_t* provider) {
   ++state->statistics->provider_edges;
   return loom_symbol_liveness_mark_symbol_ref(context, provider->symbol);
+}
+
+// Keeps rejected candidate evidence live until the final selection boundary
+// emits the concrete target or placement diagnostic.
+static iree_status_t loom_template_selection_preserve_rejected_providers(
+    loom_template_selection_state_t* state,
+    loom_symbol_liveness_contributor_context_t* context,
+    loom_func_provider_slice_t providers) {
+  if (state->mode != LOOM_TEMPLATE_SELECTION_MODE_EARLY) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < providers.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_template_selection_mark_provider_live(
+        state, context, &providers.providers[i]));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_template_selection_append_entry(
@@ -1211,6 +1258,8 @@ static iree_status_t loom_template_selection_analyze_apply(
   if (target_applicable_count == 0) {
     loom_template_selection_record_blocker(
         state, entry, LOOM_TEMPLATE_SELECTION_BLOCKER_TARGET_MISMATCH);
+    IREE_RETURN_IF_ERROR(loom_template_selection_preserve_rejected_providers(
+        state, context, providers));
     return loom_template_selection_append_report_detail(
         state, context, entry, &apply_target, providers.count,
         target_applicable_count, possible_count, best_exact_count,
@@ -1220,6 +1269,8 @@ static iree_status_t loom_template_selection_analyze_apply(
   if (possible_count == 0) {
     loom_template_selection_record_blocker(
         state, entry, LOOM_TEMPLATE_SELECTION_BLOCKER_ALL_REJECTED);
+    IREE_RETURN_IF_ERROR(loom_template_selection_preserve_rejected_providers(
+        state, context, providers));
     return loom_template_selection_append_report_detail(
         state, context, entry, &apply_target, providers.count,
         target_applicable_count, possible_count, best_exact_count,
