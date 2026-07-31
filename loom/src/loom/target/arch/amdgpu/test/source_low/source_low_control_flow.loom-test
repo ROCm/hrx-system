@@ -243,7 +243,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform
 
 amdgpu.target<gfx11-generic> @target
 
-low.func.def target(@target) @uniform_branch_condition_combined_with_lane_mask_assembly(%values: reg<amdgpu.vgpr x2>, %x: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.sgpr>, %false_value: reg<amdgpu.sgpr>, %output: reg<amdgpu.sgpr x2>) asm<amdgpu.gfx11.generic.core> {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @uniform_branch_condition_combined_with_lane_mask_assembly(%values: reg<amdgpu.vgpr x2>, %x: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %true_value: reg<amdgpu.sgpr>, %false_value: reg<amdgpu.sgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %zero = s_mov_b32 0
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %limit_vgpr = v_mov_b32_copy %limit
