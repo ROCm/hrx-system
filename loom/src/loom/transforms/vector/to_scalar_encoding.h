@@ -60,13 +60,15 @@ uint32_t loom_vector_to_scalar_encoded_matrix_operand_rejection_bits(
     loom_type_t raw_lane_type, loom_type_t result_type);
 
 // Builds one decoded logical lane from |raw_lane|. The caller provides the
-// logical matrix coordinates and row-major logical ordinal so scale/table
-// topologies remain explicit SSA computations in the generated reference IR.
+// logical matrix block/row/column coordinates and row-major logical ordinal so
+// scale/table topologies remain explicit SSA computations in the generated
+// reference IR.
 iree_status_t loom_vector_to_scalar_build_encoded_matrix_lane(
     loom_vector_to_scalar_state_t* state,
     const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
     loom_value_id_t raw_lane, loom_type_t raw_lane_type,
-    loom_type_t result_type, loom_vector_to_scalar_index_term_t row,
+    loom_type_t result_type, loom_vector_to_scalar_index_term_t block,
+    loom_vector_to_scalar_index_term_t row,
     loom_vector_to_scalar_index_term_t column,
     loom_vector_to_scalar_index_term_t ordinal, loom_value_id_t* out_lane);
 

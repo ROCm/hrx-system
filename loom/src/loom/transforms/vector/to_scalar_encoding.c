@@ -49,6 +49,7 @@ static bool loom_vector_to_scalar_numeric_format_to_scalar_type(
       *out_scalar_type = LOOM_SCALAR_TYPE_BF16;
       return true;
     case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3:
+    case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN:
     case LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ:
       *out_scalar_type = LOOM_SCALAR_TYPE_F8E4M3;
       return true;
@@ -143,6 +144,7 @@ static bool loom_vector_to_scalar_encoded_schema_is_supported(
               LOOM_VALUE_FACT_NUMERIC_FORMAT_F16 |
               LOOM_VALUE_FACT_NUMERIC_FORMAT_BF16 |
               LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3 |
+              LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN |
               LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ |
               LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2 |
               LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2FNUZ |
@@ -164,6 +166,7 @@ static bool loom_vector_to_scalar_encoded_schema_is_supported(
                                    LOOM_VALUE_FACT_NUMERIC_FORMAT_F16 |
                                    LOOM_VALUE_FACT_NUMERIC_FORMAT_BF16 |
                                    LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3 |
+                                   LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN |
                                    LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FNUZ |
                                    LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E5M2)) {
     return false;
@@ -178,7 +181,8 @@ static bool loom_vector_to_scalar_encoded_schema_is_supported(
               LOOM_VALUE_FACT_SCALE_TOPOLOGY_ROW |
               LOOM_VALUE_FACT_SCALE_TOPOLOGY_COLUMN |
               LOOM_VALUE_FACT_SCALE_TOPOLOGY_GROUP_1D |
-              LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D)) {
+              LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D |
+              LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_2D)) {
     return false;
   }
   if (!loom_vector_to_scalar_one_of_flags_are_supported(
@@ -205,13 +209,8 @@ static bool loom_vector_to_scalar_encoded_schema_is_supported(
   if (loom_vector_to_scalar_encoded_schema_has_scale(schema)) {
     if (!loom_vector_to_scalar_encoded_schema_has_scale_affine(schema) ||
         schema.scale_topology == LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE ||
-        schema.scale_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE) {
-      return false;
-    }
-    if (iree_any_bit_set(schema.scale_topology,
-                         LOOM_VALUE_FACT_SCALE_TOPOLOGY_GROUP_1D |
-                             LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D) &&
-        schema.scale_group.element_count == 0) {
+        schema.scale_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE ||
+        !loom_value_fact_encoded_operand_schema_scale_is_complete(schema)) {
       return false;
     }
   } else if (schema.scale_topology != LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE ||
@@ -473,9 +472,23 @@ static iree_status_t loom_vector_to_scalar_encoded_auxiliary_lane(
                                                 out_lane);
 }
 
+static iree_status_t loom_vector_to_scalar_encoded_ceil_div(
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_index_term_t value, uint16_t divisor,
+    loom_vector_to_scalar_index_term_t* out_result) {
+  loom_vector_to_scalar_index_term_t adjusted = {0};
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+      state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, value,
+      loom_vector_to_scalar_static_term((int64_t)divisor - 1), &adjusted));
+  return loom_vector_to_scalar_build_term_binary(
+      state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_DIV, adjusted,
+      loom_vector_to_scalar_static_term(divisor), out_result);
+}
+
 static iree_status_t loom_vector_to_scalar_encoded_scale_index(
     loom_vector_to_scalar_state_t* state,
     const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
+    loom_vector_to_scalar_index_term_t block,
     loom_vector_to_scalar_index_term_t row,
     loom_vector_to_scalar_index_term_t column,
     loom_vector_to_scalar_index_term_t ordinal,
@@ -497,6 +510,51 @@ static iree_status_t loom_vector_to_scalar_encoded_scale_index(
           loom_vector_to_scalar_static_term(
               operand->schema.scale_group.element_count),
           out_index);
+    case LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_2D: {
+      const uint16_t scale_block_row_extent =
+          operand->schema.scale_group.shape[0];
+      const uint16_t scale_block_column_extent =
+          operand->schema.scale_group.shape[1];
+      loom_vector_to_scalar_index_term_t scale_column_count = {0};
+      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_ceil_div(
+          state, operand->columns, scale_block_column_extent,
+          &scale_column_count));
+      loom_vector_to_scalar_index_term_t scale_row = {0};
+      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_DIV, row,
+          loom_vector_to_scalar_static_term(scale_block_row_extent),
+          &scale_row));
+      loom_vector_to_scalar_index_term_t scale_column = {0};
+      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_DIV, column,
+          loom_vector_to_scalar_static_term(scale_block_column_extent),
+          &scale_column));
+
+      loom_vector_to_scalar_index_term_t scale_row_offset = {0};
+      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, scale_row,
+          scale_column_count, &scale_row_offset));
+      loom_vector_to_scalar_index_term_t scale_index = scale_row_offset;
+      if (block.is_dynamic || block.static_value != 0) {
+        loom_vector_to_scalar_index_term_t scale_row_count = {0};
+        IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_ceil_div(
+            state, operand->rows, scale_block_row_extent, &scale_row_count));
+        loom_vector_to_scalar_index_term_t scales_per_block = {0};
+        IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+            state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, scale_row_count,
+            scale_column_count, &scales_per_block));
+        loom_vector_to_scalar_index_term_t scale_block_offset = {0};
+        IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+            state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, block,
+            scales_per_block, &scale_block_offset));
+        IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
+            state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, scale_block_offset,
+            scale_row_offset, &scale_index));
+      }
+      return loom_vector_to_scalar_build_term_binary(
+          state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, scale_index,
+          scale_column, out_index);
+    }
     case LOOM_VALUE_FACT_SCALE_TOPOLOGY_NONE:
     default:
       *out_index = loom_vector_to_scalar_static_term(0);
@@ -635,7 +693,8 @@ iree_status_t loom_vector_to_scalar_build_encoded_matrix_lane(
     loom_vector_to_scalar_state_t* state,
     const loom_vector_to_scalar_encoded_matrix_operand_t* operand,
     loom_value_id_t raw_lane, loom_type_t raw_lane_type,
-    loom_type_t result_type, loom_vector_to_scalar_index_term_t row,
+    loom_type_t result_type, loom_vector_to_scalar_index_term_t block,
+    loom_vector_to_scalar_index_term_t row,
     loom_vector_to_scalar_index_term_t column,
     loom_vector_to_scalar_index_term_t ordinal, loom_value_id_t* out_lane) {
   IREE_ASSERT_ARGUMENT(state);
@@ -652,7 +711,7 @@ iree_status_t loom_vector_to_scalar_build_encoded_matrix_lane(
 
   loom_vector_to_scalar_index_term_t scale_index = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_encoded_scale_index(
-      state, operand, row, column, ordinal, &scale_index));
+      state, operand, block, row, column, ordinal, &scale_index));
   return loom_vector_to_scalar_encoded_apply_affine(
       state, operand, scale_index, result_type, decoded, out_lane);
 }
@@ -771,6 +830,6 @@ iree_status_t loom_vector_to_scalar_build_decode_lane(
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_decode_coordinates(
       state, indices, ordinal, &row, &column));
   return loom_vector_to_scalar_build_encoded_matrix_lane(
-      state, &operand, raw_lane, raw_lane_type, state->result_scalar_type, row,
-      column, ordinal, out_lane);
+      state, &operand, raw_lane, raw_lane_type, state->result_scalar_type,
+      loom_vector_to_scalar_static_term(0), row, column, ordinal, out_lane);
 }
