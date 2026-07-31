@@ -79,8 +79,20 @@ static const qwen_loom_source_mapping_t qwen_loom_source_mappings[] = {
         .embedded_name = IREE_SVL("qwen3_moe_routed_gate_up_f16.loom"),
     },
     {
+        .module_path = IREE_SVL(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_Q8),
+        .embedded_name = IREE_SVL("qwen3_moe_routed_gate_up_q8.loom"),
+    },
+    {
         .module_path = IREE_SVL(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         .embedded_name = IREE_SVL("qwen3_moe_routed_down_f16.loom"),
+    },
+    {
+        .module_path = IREE_SVL(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q4_Q8),
+        .embedded_name = IREE_SVL("qwen3_moe_routed_down_q4_q8.loom"),
+    },
+    {
+        .module_path = IREE_SVL(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_Q8),
+        .embedded_name = IREE_SVL("qwen3_moe_routed_down_q6_q8.loom"),
     },
 };
 

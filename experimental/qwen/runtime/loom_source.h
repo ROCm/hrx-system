@@ -61,8 +61,17 @@ extern "C" {
 // Stable runtime path for grouped routed gate/up projection.
 #define QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16 "qwen3_moe/routed_gate_up_f16"
 
+// Stable runtime path for direct Q8_1 routed gate/up projection.
+#define QWEN_LOOM_SOURCE_ROUTED_GATE_UP_Q8 "qwen3_moe/routed_gate_up_q8"
+
 // Stable runtime path for grouped routed down projection and reduction.
 #define QWEN_LOOM_SOURCE_ROUTED_DOWN_F16 "qwen3_moe/routed_down_f16"
+
+// Stable runtime path for direct Q4_K routed down and residual publication.
+#define QWEN_LOOM_SOURCE_ROUTED_DOWN_Q4_Q8 "qwen3_moe/routed_down_q4_q8"
+
+// Stable runtime path for direct Q6_K routed down and residual publication.
+#define QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_Q8 "qwen3_moe/routed_down_q6_q8"
 
 // Borrowed embedded Loom module source.
 typedef struct qwen_loom_source_module_t {
