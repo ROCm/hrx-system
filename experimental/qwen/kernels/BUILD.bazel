@@ -147,11 +147,11 @@ iree_executable_test(
 )
 
 loom_link_module(
-    name = "greedy_argmax_bringup_workaround_runtime_module",
+    name = "greedy_argmax_partials_bringup_workaround_runtime_module",
     srcs = ["greedy_argmax_bringup_workaround.loom"],
     mode = "selective",
-    output = "qwen_greedy_argmax_bringup_workaround.loom",
-    roots = ["@qwen_greedy_argmax_bringup_workaround"],
+    output = "qwen_greedy_argmax_partials_bringup_workaround.loom",
+    roots = ["@qwen_greedy_argmax_partials_bringup_workaround"],
     strip_check = True,
 )
 
@@ -547,7 +547,7 @@ loom_link_module(
     ],
     mode = "selective",
     output = "qwen3_moe_vocabulary_projection_q6.loom",
-    roots = ["@ggml_linear_q6k_q8_1_x4"],
+    roots = ["@ggml_linear_q6k_q8_1_x4_partial_argmax"],
     strip_check = True,
 )
 
@@ -671,7 +671,7 @@ iree_c_embed_data(
         ":dense_linear_quantized_f16_runtime_module",
         ":flash_attention_decode_split_f32_f16_runtime_module",
         ":flash_attention_prefill_f32_f16_runtime_module",
-        ":greedy_argmax_bringup_workaround_runtime_module",
+        ":greedy_argmax_partials_bringup_workaround_runtime_module",
         ":quantize_q8_1_x4_bringup_workaround_runtime_module",
         ":routed_down_f16_runtime_module",
         ":routed_down_q4_q8_runtime_module",

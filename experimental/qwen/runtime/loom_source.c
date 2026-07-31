@@ -25,9 +25,10 @@ static const qwen_loom_source_mapping_t qwen_loom_source_mappings[] = {
             IREE_SVL("qwen_token_embedding_q4k_bringup_workaround.loom"),
     },
     {
-        .module_path =
-            IREE_SVL(QWEN_LOOM_SOURCE_GREEDY_ARGMAX_BRINGUP_WORKAROUND),
-        .embedded_name = IREE_SVL("qwen_greedy_argmax_bringup_workaround.loom"),
+        .module_path = IREE_SVL(
+            QWEN_LOOM_SOURCE_GREEDY_ARGMAX_PARTIALS_BRINGUP_WORKAROUND),
+        .embedded_name =
+            IREE_SVL("qwen_greedy_argmax_partials_bringup_workaround.loom"),
     },
     {
         .module_path = IREE_SVL(QWEN_LOOM_SOURCE_ATTENTION_METADATA),

@@ -115,11 +115,15 @@ repaired; they are not model-generated kernel variants.
 projection's one-row specialization. It retains the raw Q6_K by Q8_1 x4
 contraction while exposing the guarded output-channel bound needed by address
 planning. Its fixed vocabulary and hidden dimensions are model facts, not a
-general vocabulary-kernel authoring mechanism.
+general vocabulary-kernel authoring mechanism. The endpoint export reduces each
+workgroup's eight finite logits to one deterministic maximum pair; the compact
+argmax bring-up kernel finalizes those 18,992 pairs with lowest-token tie
+breaking.
 
 The working full-model programs now record all 48 layers, embedding, final
-normalization, vocabulary projection, and greedy selection into reusable
-command buffers. Prefill retains the grouped F16 WMMA feed-forward route;
+normalization, partial vocabulary projection, and compact greedy finalization
+into reusable command buffers. Prefill retains the grouped F16 WMMA
+feed-forward route;
 decode uses fused split-K attention, fused normalization and Q8_1 packing,
 direct attention output with fused feed-forward F32/Q8_1 publication, fused
 router projection and normalized top-8 selection, direct raw-Q4_K gate/up with

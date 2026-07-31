@@ -40,6 +40,13 @@ extern "C" {
 // Number of output vocabulary rows.
 #define QWEN_MODEL_VOCABULARY_SIZE 151936
 
+// Number of vocabulary logits reduced by each endpoint projection workgroup.
+#define QWEN_MODEL_VOCABULARY_PARTIAL_WIDTH 8
+
+// Number of endpoint maximum pairs finalized into one selected token.
+#define QWEN_MODEL_VOCABULARY_PARTIAL_COUNT \
+  (QWEN_MODEL_VOCABULARY_SIZE / QWEN_MODEL_VOCABULARY_PARTIAL_WIDTH)
+
 // Token terminating ordinary generation.
 #define QWEN_MODEL_END_OF_SEQUENCE_TOKEN 151645
 

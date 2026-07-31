@@ -29,9 +29,9 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
           "qwen_token_embedding_q4k_bringup_workaround",
       },
       {
-          QWEN_LOOM_SOURCE_GREEDY_ARGMAX_BRINGUP_WORKAROUND,
-          "qwen_greedy_argmax_bringup_workaround.loom",
-          "qwen_greedy_argmax_bringup_workaround",
+          QWEN_LOOM_SOURCE_GREEDY_ARGMAX_PARTIALS_BRINGUP_WORKAROUND,
+          "qwen_greedy_argmax_partials_bringup_workaround.loom",
+          "qwen_greedy_argmax_partials_bringup_workaround",
       },
       {
           QWEN_LOOM_SOURCE_ATTENTION_METADATA,
@@ -91,7 +91,7 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
       {
           QWEN_LOOM_SOURCE_VOCABULARY_PROJECTION_Q6,
           "qwen3_moe_vocabulary_projection_q6.loom",
-          "ggml_linear_q6k_q8_1_x4",
+          "ggml_linear_q6k_q8_1_x4_partial_argmax",
       },
       {
           QWEN_LOOM_SOURCE_ROUTER_PROJECTION_F32,
@@ -201,10 +201,14 @@ TEST(QwenLoomSourceTest, EmbedsBoundedVocabularyWorkaroundSources) {
       projection_text.find("%bounded_token_count = index.assume %token_count "
                            "[range(%token_count, 1, 1)] : index"),
       std::string::npos);
+  EXPECT_NE(
+      projection_text.find("%partial_count = index.assume %partial_count0 "
+                           "[range(%partial_count0, 1, 18992)] : index"),
+      std::string::npos);
   EXPECT_NE(projection_text.find(
-                "%output_index, %output_element_bound = index.assume "
-                "%bounded_channel, %output_bound "
-                "[lt(%bounded_channel, %output_bound)] : index, index"),
+                "%partial_index, %partial_bound = index.assume "
+                "%partial_index0, %partial_count "
+                "[lt(%partial_index0, %partial_count)] : index, index"),
             std::string::npos);
 }
 
