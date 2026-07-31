@@ -135,6 +135,7 @@ struct KmtApi {
   PFND3DKMT_MAPGPUVIRTUALADDRESS map_gpu_virtual_address = nullptr;
   PFND3DKMT_FREEGPUVIRTUALADDRESS free_gpu_virtual_address = nullptr;
   PFND3DKMT_MAKERESIDENT make_resident = nullptr;
+  PFND3DKMT_QUERYVIDEOMEMORYINFO query_video_memory_info = nullptr;
   PFND3DKMT_LOCK2 lock2 = nullptr;
   PFND3DKMT_UNLOCK2 unlock2 = nullptr;
   PFND3DKMT_INVALIDATECACHE invalidate_cache = nullptr;

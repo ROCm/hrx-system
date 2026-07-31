@@ -14,6 +14,7 @@
 #include "iree/hal/drivers/amdxdna/direct_command_buffer.h"
 #include "iree/hal/drivers/amdxdna/executable.h"
 #include "iree/hal/drivers/amdxdna/executable_internal.h"
+#include "iree/hal/drivers/amdxdna/shim/ert.h"
 #include "iree/schemas/amdxdna_xclbin_executable_def_builder.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -314,6 +315,36 @@ TEST(ExecutableXclbinTest, LinuxCapsDoNotSelectPartialElfContext) {
   EXPECT_TRUE(partial_elf_plan.use_native_partial_elf_context);
 
   iree_hal_executable_release(base_executable);
+}
+
+TEST(ExecutableXclbinTest, ErtStartNpuPreemptElfUsesPreemptDataPayload) {
+  std::vector<uint32_t> packet(32, 0);
+  auto* start = reinterpret_cast<ert_start_kernel_cmd*>(packet.data());
+  start->state = ERT_CMD_STATE_NEW;
+  start->opcode = ERT_START_NPU_PREEMPT_ELF;
+  start->type = ERT_CU;
+  start->cu_mask = 1;
+  start->count =
+      1 + sizeof(ert_npu_preempt_data) / sizeof(uint32_t) + 2;
+
+  ert_npu_preempt_data* npu_data = get_ert_npu_elf_data(start);
+  ASSERT_NE(npu_data, nullptr);
+  npu_data->instruction_buffer = 0x100000000ull;
+  npu_data->save_buffer = 0x200000000ull;
+  npu_data->restore_buffer = 0x300000000ull;
+  npu_data->instruction_buffer_size = 0x4000;
+  npu_data->save_buffer_size = 0x1000;
+  npu_data->restore_buffer_size = 0x1000;
+  npu_data->instruction_prop_count = 0;
+
+  uint32_t* regmap = get_ert_regmap_begin(start);
+  regmap[0] = 3;
+  regmap[1] = 0;
+
+  EXPECT_TRUE(ert_valid_opcode(reinterpret_cast<ert_packet*>(start)));
+  EXPECT_EQ(regmap, start->data +
+                        sizeof(ert_npu_preempt_data) / sizeof(uint32_t));
+  EXPECT_EQ(get_ert_npu_preempt_data(start), nullptr);
 }
 
 static void ExpectInvalidXadxExecutable(

@@ -252,12 +252,11 @@ TEST_F(CommandBufferTest, ApplyResolvesIndirectBindingRefsAndResetsOneShot) {
       &command_buffer));
 
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-  iree_hal_buffer_barrier_t buffer_barrier = {
-      .source_scope = IREE_HAL_ACCESS_SCOPE_HOST_WRITE,
-      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
-      .buffer_ref = iree_hal_make_indirect_buffer_ref(
-          /*buffer_slot=*/0, /*offset=*/8, /*length=*/16),
-  };
+  iree_hal_buffer_barrier_t buffer_barrier = {};
+  buffer_barrier.source_scope = IREE_HAL_ACCESS_SCOPE_HOST_WRITE;
+  buffer_barrier.target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ;
+  buffer_barrier.buffer_ref = iree_hal_make_indirect_buffer_ref(
+      /*buffer_slot=*/0, /*offset=*/8, /*length=*/16);
   IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
       command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
       IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
@@ -308,10 +307,9 @@ TEST_F(CommandBufferTest, ApplySkipsMemoryOnlyBarriers) {
       &command_buffer));
 
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-  const iree_hal_memory_barrier_t memory_barrier = {
-      .source_scope = IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE,
-      .target_scope = IREE_HAL_ACCESS_SCOPE_MEMORY_READ,
-  };
+  iree_hal_memory_barrier_t memory_barrier = {};
+  memory_barrier.source_scope = IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE;
+  memory_barrier.target_scope = IREE_HAL_ACCESS_SCOPE_MEMORY_READ;
   IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
       command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
       IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
@@ -348,12 +346,11 @@ TEST_F(CommandBufferTest, ApplyRetainsBufferBarriers) {
       &command_buffer));
 
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-  iree_hal_buffer_barrier_t buffer_barrier = {
-      .source_scope = IREE_HAL_ACCESS_SCOPE_HOST_WRITE,
-      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
-      .buffer_ref = iree_hal_make_indirect_buffer_ref(
-          /*buffer_slot=*/0, /*offset=*/8, /*length=*/16),
-  };
+  iree_hal_buffer_barrier_t buffer_barrier = {};
+  buffer_barrier.source_scope = IREE_HAL_ACCESS_SCOPE_HOST_WRITE;
+  buffer_barrier.target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ;
+  buffer_barrier.buffer_ref = iree_hal_make_indirect_buffer_ref(
+      /*buffer_slot=*/0, /*offset=*/8, /*length=*/16);
   IREE_ASSERT_OK(iree_hal_command_buffer_execution_barrier(
       command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
       IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
