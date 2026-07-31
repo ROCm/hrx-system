@@ -27,8 +27,8 @@ typedef struct qwen_decode_completion_layout_t {
   qwen_program_span_t initialization;
   // Per-KV-head counters reset by every split-attention dispatch.
   qwen_program_span_t attention;
-  // Per-route physical-group counters reset by every fused gate/up dispatch.
-  qwen_program_span_t gate_up;
+  // Counters reused by sequential QKV-head and gate/up-group publications.
+  qwen_program_span_t grouped_stage;
   // Counter reset after each sequential fused decode-stage publication.
   qwen_program_span_t shared;
 } qwen_decode_completion_layout_t;
@@ -49,7 +49,7 @@ enum qwen_full_program_layout_flag_bits_e {
   // Reserves partial and completion storage for fused split-K decode attention.
   QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION = 1u << 0,
 
-  // Reserves completion storage for fused decode-stage publications.
+  // Reserves completion storage for QKV, gate/up, and shared publications.
   QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_STAGE_COMPLETION = 1u << 1,
 };
 

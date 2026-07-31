@@ -15,6 +15,11 @@
 #define QWEN_PROGRAM_Q8_1_X4_GROUP_BYTE_LENGTH 144
 #define QWEN_PROGRAM_SPLIT_ATTENTION_KEY_VALUE_BLOCK_LENGTH 64
 #define QWEN_PROGRAM_SPLIT_ATTENTION_QUERY_ROW_CAPACITY 16
+#define QWEN_PROGRAM_DECODE_QKV_COMPLETION_COUNTER_COUNT \
+  (QWEN_MODEL_QUERY_HEAD_COUNT + 2 * QWEN_MODEL_KEY_VALUE_HEAD_COUNT)
+#define QWEN_PROGRAM_DECODE_GATE_UP_COMPLETION_COUNTER_COUNT       \
+  (QWEN_MODEL_ROUTE_COUNT * (QWEN_MODEL_EXPERT_INTERMEDIATE_SIZE / \
+                             QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT))
 
 static_assert(QWEN_MODEL_HIDDEN_SIZE %
                       QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT ==
@@ -24,11 +29,14 @@ static_assert((QWEN_MODEL_QUERY_HEAD_COUNT * QWEN_MODEL_HEAD_SIZE) %
                       QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT ==
                   0,
               "Qwen attention rows must contain complete GGML Q8_1 x4 groups");
-static_assert((QWEN_MODEL_KEY_VALUE_HEAD_COUNT * sizeof(int32_t)) % 16 == 0,
-              "Qwen split-attention counters must align gate/up counters");
-static_assert((QWEN_MODEL_ROUTE_COUNT *
-               (QWEN_MODEL_EXPERT_INTERMEDIATE_SIZE /
-                QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT) *
+static_assert(
+    (QWEN_MODEL_KEY_VALUE_HEAD_COUNT * sizeof(int32_t)) % 16 == 0,
+    "Qwen split-attention counters must align grouped-stage counters");
+static_assert(
+    (QWEN_PROGRAM_DECODE_QKV_COMPLETION_COUNTER_COUNT * sizeof(int32_t)) % 16 ==
+        0,
+    "Qwen QKV-head counters must align grouped-stage counters");
+static_assert((QWEN_PROGRAM_DECODE_GATE_UP_COMPLETION_COUNTER_COUNT *
                sizeof(int32_t)) %
                       16 ==
                   0,
@@ -280,22 +288,20 @@ iree_status_t qwen_full_program_layout_calculate(
           QWEN_MODEL_KEY_VALUE_HEAD_COUNT, sizeof(int32_t),
           &attention_byte_length));
     }
-    iree_device_size_t gate_up_byte_length = 0;
+    iree_device_size_t grouped_stage_byte_length = 0;
     if (reserves_fused_stage_completion) {
-      iree_device_size_t gate_up_counter_count = 0;
+      const iree_device_size_t grouped_stage_counter_count =
+          iree_max(QWEN_PROGRAM_DECODE_QKV_COMPLETION_COUNTER_COUNT,
+                   QWEN_PROGRAM_DECODE_GATE_UP_COMPLETION_COUNTER_COUNT);
       IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
-          QWEN_MODEL_ROUTE_COUNT,
-          QWEN_MODEL_EXPERT_INTERMEDIATE_SIZE /
-              QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT,
-          &gate_up_counter_count));
-      IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
-          gate_up_counter_count, sizeof(int32_t), &gate_up_byte_length));
+          grouped_stage_counter_count, sizeof(int32_t),
+          &grouped_stage_byte_length));
     }
     const iree_device_size_t shared_byte_length =
         reserves_fused_stage_completion ? sizeof(int32_t) : 0;
     iree_device_size_t initialization_byte_length = 0;
     if (!iree_device_size_checked_add(attention_byte_length,
-                                      gate_up_byte_length,
+                                      grouped_stage_byte_length,
                                       &initialization_byte_length) ||
         !iree_device_size_checked_add(initialization_byte_length,
                                       shared_byte_length,
@@ -310,14 +316,14 @@ iree_status_t qwen_full_program_layout_calculate(
         .offset = out_layout->decode_completion.initialization.offset,
         .length = attention_byte_length,
     };
-    out_layout->decode_completion.gate_up = (qwen_program_span_t){
+    out_layout->decode_completion.grouped_stage = (qwen_program_span_t){
         .offset = out_layout->decode_completion.initialization.offset +
                   attention_byte_length,
-        .length = gate_up_byte_length,
+        .length = grouped_stage_byte_length,
     };
     out_layout->decode_completion.shared = (qwen_program_span_t){
-        .offset =
-            out_layout->decode_completion.gate_up.offset + gate_up_byte_length,
+        .offset = out_layout->decode_completion.grouped_stage.offset +
+                  grouped_stage_byte_length,
         .length = shared_byte_length,
     };
   }

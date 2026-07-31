@@ -1745,7 +1745,7 @@ static iree_status_t qwen_program_record_layer_body(
         qwen_model_parameter_layout(program->model)
             ->layers[layer_index + 1]
             .attention_norm,
-        program->full_layout.decode_completion.gate_up,
+        program->full_layout.decode_completion.grouped_stage,
         program->full_layout.decode_completion.shared,
         program->layer_layout.projection_input_scratch);
   }
@@ -1795,7 +1795,7 @@ static iree_status_t qwen_program_record_terminal_feed_forward(
         program, layer_index, /*token_count=*/1, hidden_state,
         &program->full_layout.terminal_layer,
         qwen_model_parameter_layout(program->model)->output_norm,
-        program->full_layout.decode_completion.gate_up,
+        program->full_layout.decode_completion.grouped_stage,
         program->full_layout.decode_completion.shared,
         program->full_layout.final_quantized_hidden_state);
   }
