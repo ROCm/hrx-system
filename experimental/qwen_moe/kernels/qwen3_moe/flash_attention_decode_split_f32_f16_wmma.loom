@@ -818,6 +818,34 @@ check.case public @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_case {
   check.return
 }
 
+// The production Decode-513 shape combines eight full blocks with a one-row
+// tail and selects the cooperative fused reducer. Constant nonzero V keeps the
+// expected result exact while all four KV heads, 32 GQA heads, completion
+// counters, partial tensors, and tail guards participate. A second invocation
+// reuses the partial and counter storage with a different V tensor, making the
+// completion-counter reset observable.
+check.case public @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_decode_513_case {
+  %key_value_token_count = check.literal value(513) : index
+  %query = check.generate.fill value(1.0) : tensor<32x128xf32>
+  %key = check.generate.fill value(1.0) : tensor<513x4x128xf16>
+  %value0 = check.generate.fill value(2.0) : tensor<513x4x128xf16>
+  %value1 = check.generate.fill value(3.0) : tensor<513x4x128xf16>
+  %mask = check.generate.fill value(0.0) : tensor<513xf16>
+  %partial_max = check.generate.fill value(-1.0) : tensor<4x9x16xf32>
+  %partial_sum = check.generate.fill value(-1.0) : tensor<4x9x16xf32>
+  %partial_output = check.generate.fill value(-1.0) : tensor<4x9x16x128xf16>
+  %completion_counter = check.generate.fill value(0) : tensor<4xi32>
+  %output0 = check.generate.fill value(-1.0) : tensor<32x128xf32>
+  %output1 = check.generate.fill value(-1.0) : tensor<32x128xf32>
+  %expected0 = check.generate.fill value(2.0) : tensor<32x128xf32>
+  %expected1 = check.generate.fill value(3.0) : tensor<32x128xf32>
+  func.call @qwen3_moe_flash_attention_decode_split_f32_f16_wmma(%key_value_token_count, %query, %key, %value0, %mask, %partial_max, %partial_sum, %partial_output, %completion_counter, %output0) : (index, tensor<32x128xf32>, tensor<513x4x128xf16>, tensor<513x4x128xf16>, tensor<513xf16>, tensor<4x9x16xf32>, tensor<4x9x16xf32>, tensor<4x9x16x128xf16>, tensor<4xi32>, tensor<32x128xf32>)
+  func.call @qwen3_moe_flash_attention_decode_split_f32_f16_wmma(%key_value_token_count, %query, %key, %value1, %mask, %partial_max, %partial_sum, %partial_output, %completion_counter, %output1) : (index, tensor<32x128xf32>, tensor<513x4x128xf16>, tensor<513x4x128xf16>, tensor<513xf16>, tensor<4x9x16xf32>, tensor<4x9x16xf32>, tensor<4x9x16x128xf16>, tensor<4xi32>, tensor<32x128xf32>)
+  check.expect.close actual(%output0) expected(%expected0) atol(0.001) rtol(0.001) nan(same) : tensor<32x128xf32>
+  check.expect.close actual(%output1) expected(%expected1) atol(0.001) rtol(0.001) nan(same) : tensor<32x128xf32>
+  check.return
+}
+
 // Sixty-five KV rows force a second split containing one valid row. The mask
 // selects that final row, whose iota values begin at 1024, so an omitted or
 // uninitialized tail cannot accidentally satisfy the check.
@@ -858,7 +886,7 @@ check.case public @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_long_case
 }
 
 check.case public @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_benchmark_case {
-  %key_value_token_count = check.param.choice values([64, 65, 128, 256, 512, 768, 1024, 1280, 2048]) name("key_value_token_count") : index
+  %key_value_token_count = check.param.choice values([64, 65, 128, 256, 512, 513, 768, 1024, 1280, 2048]) name("key_value_token_count") : index
   %query = check.generate.fill value(0.0) : tensor<32x128xf32>
   %key = check.generate.fill value(0.0) : tensor<[%key_value_token_count]x4x128xf16>
   %value = check.generate.fill value(0.0) : tensor<[%key_value_token_count]x4x128xf16>
@@ -905,6 +933,8 @@ check.benchmark<@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_benchmark_c
 check.benchmark<@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_benchmark_case> @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_decode_256 {key_value_token_count = 256}
 
 check.benchmark<@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_benchmark_case> @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_decode_512 {key_value_token_count = 512}
+
+check.benchmark<@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_benchmark_case> @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_decode_513 {key_value_token_count = 513}
 
 check.benchmark<@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_benchmark_case> @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_decode_768 {key_value_token_count = 768}
 
