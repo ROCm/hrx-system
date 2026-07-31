@@ -242,6 +242,45 @@ TEST_F(LowAsmPrinterTest, NestedRegionsInheritRepresentationContract) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmPrinterTest, FunctionRepresentationContractSelectsDescriptorSet) {
+  const char* source =
+      "test.target<low_core> @test_target\n"
+      "\n"
+      "low.func.def target<test.low.alt>(@test_target) @constant() -> "
+      "(reg<test.i32>) asm {\n"
+      "  %value = test.alt.const.i32 11\n"
+      "  return %value\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module, IREE_SV("test.low.core")), source);
+  loom_module_free(module);
+}
+
+TEST_F(LowAsmPrinterTest, PrintsMixedFunctionRepresentationContracts) {
+  const char* source =
+      "test.target<low_core> @test_target\n"
+      "\n"
+      "low.func.def target<test.low.core>(@test_target) "
+      "@core() -> (reg<test.i32>) asm {\n"
+      "  %value = test.const.i32 7\n"
+      "  return %value\n"
+      "}\n"
+      "\n"
+      "low.func.def target<test.low.alt>(@test_target) "
+      "@alt() -> (reg<test.i32>) asm {\n"
+      "  %value = test.alt.const.i32 11\n"
+      "  return %value\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(
+      PrintModule(module, iree_string_view_empty(),
+                  LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_PREFER_LOW_ASM),
+      source);
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmPrinterTest, RejectsMissingPrintEnvironment) {
   loom_module_t* module = ParseOk(
       "test.low_asm_region asm<test.low.core> {\n"

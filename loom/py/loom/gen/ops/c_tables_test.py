@@ -59,6 +59,7 @@ from loom.dsl import (
     ElementWidthGreaterThan,
     EnumCase,
     EnumDef,
+    FuncLikeInterface,
     HasParent,
     IterArgsMatchResults,
     LiteralMatchesElementType,
@@ -1223,6 +1224,51 @@ def test_generate_tables_emits_call_like_interface() -> None:
     assert ".operand_offset = 0," in tables_c
     assert ".result_offset = 0," in tables_c
     assert ".kind = LOOM_CALL_LIKE_KIND_SEMANTIC," in tables_c
+
+
+def test_generate_tables_emits_func_like_representation_contract() -> None:
+    op = Op(
+        "test.func",
+        group=Dialect("test"),
+        attrs=[
+            AttrDef("callee", ATTR_TYPE_SYMBOL),
+            AttrDef("representation", ATTR_TYPE_STRING, optional=True),
+        ],
+        interfaces=[
+            FuncLikeInterface(
+                callee="callee",
+                repr_contract="representation",
+            )
+        ],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert ".callee_attr_index = 0," in tables_c
+    assert ".repr_contract_attr_index = 1," in tables_c
+
+
+def test_generate_tables_rejects_non_string_representation_contract() -> None:
+    op = Op(
+        "test.func",
+        group=Dialect("test"),
+        attrs=[
+            AttrDef("callee", ATTR_TYPE_SYMBOL),
+            AttrDef("representation", ATTR_TYPE_I64, optional=True),
+        ],
+        interfaces=[
+            FuncLikeInterface(
+                callee="callee",
+                repr_contract="representation",
+            )
+        ],
+    )
+
+    with _raises_value_error(
+        r"FuncLikeInterface on 'test\.func': attr 'representation' referenced "
+        r"by 'repr_contract' must have type 'string', got 'i64'"
+    ):
+        generate_tables_c("test", 0, [op])
 
 
 def _make_counted_loop_op(

@@ -3375,6 +3375,10 @@ class FuncLikeInterface(NamedTuple):
     import_symbol: str | None = None
     # Optional symbol ref attr naming the resolved target record.
     target: str | None = None
+    # Optional string attr naming the intrinsic contract under which the
+    # function signature and body are represented. None means the op does not
+    # expose an intrinsic representation contract.
+    repr_contract: str | None = None
     # Optional ABI enum attr for concrete target-bound functions.
     abi: str | None = None
     # Optional ABI payload dictionary attr.

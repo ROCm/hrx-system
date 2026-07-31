@@ -115,7 +115,7 @@ typedef enum loom_low_scf_for_unroll_policy_e {
 } loom_low_scf_for_unroll_policy_t;
 
 // LOOM_OP_LOW_FUNC_DEF: Target-bound low function definition with register-typed signature values.
-// low.func.def target(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {
+// low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {
 //   %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>
 //   low.return %sum : reg<amdgpu.vgpr x1>
 // }
@@ -123,18 +123,19 @@ LOOM_DEFINE_ISA(loom_low_func_def_isa, LOOM_OP_LOW_FUNC_DEF)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_low_func_def_results, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_low_func_def_callee, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_low_func_def_target, 1)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_abi, 2, loom_target_abi_kind_t)
-LOOM_DEFINE_ATTR_DICT(loom_low_func_def_abi_attrs, 3)
-LOOM_DEFINE_ATTR_DICT(loom_low_func_def_abi_layout, 4)
-LOOM_DEFINE_ATTR_STRING(loom_low_func_def_export_symbol, 5)
-LOOM_DEFINE_ATTR_DICT(loom_low_func_def_export_attrs, 6)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_visibility, 7, loom_low_visibility_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_cc, 8, loom_low_cc_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_purity, 9, loom_low_purity_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_allocation, 10, loom_low_allocation_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_schedule, 11, loom_low_schedule_t)
-LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_def_predicates, 12)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_retain, 13, loom_low_retain_t)
+LOOM_DEFINE_ATTR_STRING(loom_low_func_def_descriptor_set, 2)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_abi, 3, loom_target_abi_kind_t)
+LOOM_DEFINE_ATTR_DICT(loom_low_func_def_abi_attrs, 4)
+LOOM_DEFINE_ATTR_DICT(loom_low_func_def_abi_layout, 5)
+LOOM_DEFINE_ATTR_STRING(loom_low_func_def_export_symbol, 6)
+LOOM_DEFINE_ATTR_DICT(loom_low_func_def_export_attrs, 7)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_visibility, 8, loom_low_visibility_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_cc, 9, loom_low_cc_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_purity, 10, loom_low_purity_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_allocation, 11, loom_low_allocation_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_schedule, 12, loom_low_schedule_t)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_def_predicates, 13)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_def_retain, 14, loom_low_retain_t)
 LOOM_DEFINE_REGION(loom_low_func_def_body, 0)
 enum loom_low_func_def_build_flag_bits_e {
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
@@ -143,8 +144,9 @@ enum loom_low_func_def_build_flag_bits_e {
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_PURITY = 1u << 3,
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ALLOCATION = 1u << 4,
   LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_SCHEDULE = 1u << 5,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI = 1u << 6,
-  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 7,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_DESCRIPTOR_SET = 1u << 6,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI = 1u << 7,
+  LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 8,
 };
 typedef uint32_t loom_low_func_def_build_flags_t;
 iree_status_t loom_low_func_def_build(
@@ -156,6 +158,7 @@ iree_status_t loom_low_func_def_build(
     loom_optional uint8_t purity,
     loom_optional uint8_t allocation,
     loom_optional uint8_t schedule,
+    loom_optional loom_string_id_t descriptor_set,
     loom_symbol_ref_t target,
     loom_optional uint8_t abi,
     loom_optional loom_named_attr_slice_t abi_attrs,
@@ -178,44 +181,46 @@ iree_status_t loom_low_func_def_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_LOW_KERNEL_DEF: Target-bound low kernel entry with register-typed launch ABI values. Helper calls stay in low.func.def; kernel launch/export contracts live on this entry op.
-// low.kernel.def target(@gfx11_generic) export("matmul") workgroup_size(16, 4, 1) @matmul(%lhs: reg<amdgpu.sgpr x4>, %rhs: reg<amdgpu.sgpr x4>, %out: reg<amdgpu.sgpr x4>) {
+// low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) export("matmul") workgroup_size(16, 4, 1) @matmul(%lhs: reg<amdgpu.sgpr x4>, %rhs: reg<amdgpu.sgpr x4>, %out: reg<amdgpu.sgpr x4>) {
 //   low.return
 // }
 LOOM_DEFINE_ISA(loom_low_kernel_def_isa, LOOM_OP_LOW_KERNEL_DEF)
 LOOM_DEFINE_ATTR_SYMBOL(loom_low_kernel_def_callee, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_low_kernel_def_target, 1)
-LOOM_DEFINE_ATTR_DICT(loom_low_kernel_def_abi_layout, 2)
-LOOM_DEFINE_ATTR_STRING(loom_low_kernel_def_export_symbol, 3)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_kernel_def_export_linkage, 4, loom_target_linkage_t)
-LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_size_x, 5)
-LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_size_y, 6)
-LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_size_z, 7)
-LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_count_x, 8)
-LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_count_y, 9)
-LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_count_z, 10)
-LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_cluster_size_x, 11)
-LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_cluster_size_y, 12)
-LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_cluster_size_z, 13)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_kernel_def_allocation, 14, loom_low_allocation_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_kernel_def_schedule, 15, loom_low_schedule_t)
-LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_kernel_def_predicates, 16)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_kernel_def_retain, 17, loom_low_retain_t)
+LOOM_DEFINE_ATTR_STRING(loom_low_kernel_def_descriptor_set, 2)
+LOOM_DEFINE_ATTR_DICT(loom_low_kernel_def_abi_layout, 3)
+LOOM_DEFINE_ATTR_STRING(loom_low_kernel_def_export_symbol, 4)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_kernel_def_export_linkage, 5, loom_target_linkage_t)
+LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_size_x, 6)
+LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_size_y, 7)
+LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_size_z, 8)
+LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_count_x, 9)
+LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_count_y, 10)
+LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_count_z, 11)
+LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_cluster_size_x, 12)
+LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_cluster_size_y, 13)
+LOOM_DEFINE_ATTR_I64(loom_low_kernel_def_workgroup_cluster_size_z, 14)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_kernel_def_allocation, 15, loom_low_allocation_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_kernel_def_schedule, 16, loom_low_schedule_t)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_kernel_def_predicates, 17)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_kernel_def_retain, 18, loom_low_retain_t)
 LOOM_DEFINE_REGION(loom_low_kernel_def_body, 0)
 enum loom_low_kernel_def_build_flag_bits_e {
   LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_RETAIN = 1u << 0,
   LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_ALLOCATION = 1u << 1,
   LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_SCHEDULE = 1u << 2,
-  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 3,
-  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_EXPORT_LINKAGE = 1u << 4,
-  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_SIZE_X = 1u << 5,
-  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_SIZE_Y = 1u << 6,
-  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_SIZE_Z = 1u << 7,
-  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_COUNT_X = 1u << 8,
-  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_COUNT_Y = 1u << 9,
-  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_COUNT_Z = 1u << 10,
-  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_X = 1u << 11,
-  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Y = 1u << 12,
-  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Z = 1u << 13,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_DESCRIPTOR_SET = 1u << 3,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 4,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_EXPORT_LINKAGE = 1u << 5,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_SIZE_X = 1u << 6,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_SIZE_Y = 1u << 7,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_SIZE_Z = 1u << 8,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_COUNT_X = 1u << 9,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_COUNT_Y = 1u << 10,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_COUNT_Z = 1u << 11,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_X = 1u << 12,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Y = 1u << 13,
+  LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_WORKGROUP_CLUSTER_SIZE_Z = 1u << 14,
 };
 typedef uint32_t loom_low_kernel_def_build_flags_t;
 iree_status_t loom_low_kernel_def_build(
@@ -224,6 +229,7 @@ iree_status_t loom_low_kernel_def_build(
     loom_optional uint8_t retain,
     loom_optional uint8_t allocation,
     loom_optional uint8_t schedule,
+    loom_optional loom_string_id_t descriptor_set,
     loom_symbol_ref_t target,
     loom_optional loom_named_attr_slice_t abi_layout,
     loom_optional loom_string_id_t export_symbol,
@@ -249,26 +255,27 @@ iree_status_t loom_low_kernel_def_verify(
     iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_LOW_FUNC_DECL: Target-bound low function declaration with register-typed signature values.
-// low.func.decl target(@gfx11_generic) @extern_add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>)
+// low.func.decl target<amdgpu.gfx11.generic.core>(@gfx11_generic) @extern_add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>)
 LOOM_DEFINE_ISA(loom_low_func_decl_isa, LOOM_OP_LOW_FUNC_DECL)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_func_decl_args, 0)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_low_func_decl_results, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_low_func_decl_callee, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_low_func_decl_target, 1)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_abi, 2, loom_target_abi_kind_t)
-LOOM_DEFINE_ATTR_DICT(loom_low_func_decl_abi_attrs, 3)
-LOOM_DEFINE_ATTR_DICT(loom_low_func_decl_abi_layout, 4)
-LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_export_symbol, 5)
-LOOM_DEFINE_ATTR_DICT(loom_low_func_decl_export_attrs, 6)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_visibility, 7, loom_low_visibility_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_cc, 8, loom_low_cc_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_purity, 9, loom_low_purity_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_allocation, 10, loom_low_allocation_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_schedule, 11, loom_low_schedule_t)
-LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_decl_predicates, 12)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_retain, 13, loom_low_retain_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_import_kind, 14, loom_low_func_decl_import_kind_t)
-LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_code_symbol, 15)
+LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_descriptor_set, 2)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_abi, 3, loom_target_abi_kind_t)
+LOOM_DEFINE_ATTR_DICT(loom_low_func_decl_abi_attrs, 4)
+LOOM_DEFINE_ATTR_DICT(loom_low_func_decl_abi_layout, 5)
+LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_export_symbol, 6)
+LOOM_DEFINE_ATTR_DICT(loom_low_func_decl_export_attrs, 7)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_visibility, 8, loom_low_visibility_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_cc, 9, loom_low_cc_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_purity, 10, loom_low_purity_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_allocation, 11, loom_low_allocation_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_schedule, 12, loom_low_schedule_t)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_low_func_decl_predicates, 13)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_retain, 14, loom_low_retain_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_low_func_decl_import_kind, 15, loom_low_func_decl_import_kind_t)
+LOOM_DEFINE_ATTR_STRING(loom_low_func_decl_code_symbol, 16)
 enum loom_low_func_decl_build_flag_bits_e {
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_RETAIN = 1u << 1,
@@ -278,8 +285,9 @@ enum loom_low_func_decl_build_flag_bits_e {
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_SCHEDULE = 1u << 5,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_KIND = 1u << 6,
   LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_CODE_SYMBOL = 1u << 7,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI = 1u << 8,
-  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 9,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_DESCRIPTOR_SET = 1u << 8,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI = 1u << 9,
+  LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 10,
 };
 typedef uint32_t loom_low_func_decl_build_flags_t;
 iree_status_t loom_low_func_decl_build(
@@ -293,6 +301,7 @@ iree_status_t loom_low_func_decl_build(
     loom_optional uint8_t schedule,
     loom_optional uint8_t import_kind,
     loom_optional loom_string_id_t code_symbol,
+    loom_optional loom_string_id_t descriptor_set,
     loom_symbol_ref_t target,
     loom_optional uint8_t abi,
     loom_optional loom_named_attr_slice_t abi_attrs,

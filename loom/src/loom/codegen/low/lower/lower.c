@@ -1864,11 +1864,13 @@ static iree_status_t loom_low_lower_create_func_op(
   loom_builder_set_before(&context->builder, context->source_function.op);
   IREE_RETURN_IF_ERROR(loom_low_func_def_build(
       &context->builder, build_flags, visibility, retain, cc, purity,
-      /*allocation=*/0, /*schedule=*/0, context->options->target_ref, abi,
-      abi_attrs, abi_layout, export_symbol, export_attrs, low_func_ref,
-      arg_types, arg_count, result_types, result_count, /*tied_results=*/NULL,
-      /*tied_result_count=*/0, predicates, predicate_count,
-      context->source_function.op->location, &context->low_func_op));
+      /*allocation=*/0, /*schedule=*/0,
+      /*descriptor_set=*/LOOM_STRING_ID_INVALID, context->options->target_ref,
+      abi, abi_attrs, abi_layout, export_symbol, export_attrs, low_func_ref,
+      arg_types, arg_count, result_types, result_count,
+      /*tied_results=*/NULL, /*tied_result_count=*/0, predicates,
+      predicate_count, context->source_function.op->location,
+      &context->low_func_op));
 
   loom_region_t* low_body = loom_low_lower_low_body(context);
   low_body->flags = source_body->flags;
@@ -1938,12 +1940,13 @@ static iree_status_t loom_low_lower_create_kernel_op(
       /*result_types=*/NULL, /*result_count=*/0, &abi_layout));
   IREE_RETURN_IF_ERROR(loom_low_kernel_def_build(
       &context->builder, build_flags, retain, /*allocation=*/0, /*schedule=*/0,
-      context->options->target_ref, abi_layout, export_symbol, export_linkage,
-      workgroup_size.x, workgroup_size.y, workgroup_size.z, workgroup_count.x,
-      workgroup_count.y, workgroup_count.z, workgroup_cluster_size.x,
-      workgroup_cluster_size.y, workgroup_cluster_size.z, low_func_ref,
-      arg_types, arg_count, predicates, predicate_count,
-      context->source_function.op->location, &context->low_func_op));
+      /*descriptor_set=*/LOOM_STRING_ID_INVALID, context->options->target_ref,
+      abi_layout, export_symbol, export_linkage, workgroup_size.x,
+      workgroup_size.y, workgroup_size.z, workgroup_count.x, workgroup_count.y,
+      workgroup_count.z, workgroup_cluster_size.x, workgroup_cluster_size.y,
+      workgroup_cluster_size.z, low_func_ref, arg_types, arg_count, predicates,
+      predicate_count, context->source_function.op->location,
+      &context->low_func_op));
 
   loom_region_t* low_body = loom_low_lower_low_body(context);
   low_body->flags = source_body->flags;
@@ -2158,10 +2161,11 @@ iree_status_t loom_low_lower_import_declaration(
           &context.builder, build_flags, visibility, retain, cc, purity,
           /*allocation=*/0, /*schedule=*/0,
           (uint8_t)options->policy->import_decl_kind, code_symbol,
-          options->target_ref, abi, abi_attrs, abi_layout, export_symbol,
-          export_attrs, low_func_ref, arg_types, arg_count, result_types,
-          result_count, /*tied_results=*/NULL, /*tied_result_count=*/0,
-          predicates, predicate_count, source_declaration.op->location,
+          /*descriptor_set=*/LOOM_STRING_ID_INVALID, options->target_ref, abi,
+          abi_attrs, abi_layout, export_symbol, export_attrs, low_func_ref,
+          arg_types, arg_count, result_types, result_count,
+          /*tied_results=*/NULL, /*tied_result_count=*/0, predicates,
+          predicate_count, source_declaration.op->location,
           &context.low_func_op);
     }
   }

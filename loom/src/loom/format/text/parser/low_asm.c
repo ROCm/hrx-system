@@ -967,6 +967,23 @@ iree_status_t loom_parse_low_asm_prefixed_region(
                                           out_region);
 }
 
+iree_status_t loom_parse_low_asm_marked_region(
+    loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
+    loom_region_t** out_region) {
+  loom_token_t marker_token = loom_tokenizer_peek(&parser->tokenizer);
+  if (!loom_tokenizer_try_consume_keyword(&parser->tokenizer, IREE_SV("asm"))) {
+    return loom_parser_emit_unexpected_token(parser, marker_token,
+                                             IREE_SV("'asm'"));
+  }
+  if (parser->low_repr.descriptor_set == NULL) {
+    return loom_parser_emit_low_asm_error(
+        parser, marker_token,
+        IREE_SV("function representation contract is not available"));
+  }
+  return loom_parse_low_asm_braced_region(parser, region_descriptor,
+                                          parser->low_repr, out_region);
+}
+
 iree_status_t loom_parse_low_asm_inherited_region(
     loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
     loom_region_t** out_region) {

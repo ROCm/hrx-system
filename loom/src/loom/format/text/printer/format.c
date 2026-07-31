@@ -135,8 +135,15 @@ static bool loom_print_symbol_ref_targets_register_context(
 
 static iree_status_t loom_print_update_register_context_from_target(
     loom_print_context_t* ctx, const loom_op_vtable_t* vtable,
-    uint16_t attr_index, loom_attribute_t attr) {
+    const loom_op_t* op, uint16_t attr_index, loom_attribute_t attr) {
   if (!loom_print_symbol_ref_targets_register_context(vtable, attr_index)) {
+    return iree_ok_status();
+  }
+  if (vtable->func_like &&
+      vtable->func_like->repr_contract_attr_index != LOOM_ATTR_INDEX_NONE &&
+      vtable->func_like->repr_contract_attr_index < op->attribute_count &&
+      !loom_attr_is_absent(
+          loom_op_attrs(op)[vtable->func_like->repr_contract_attr_index])) {
     return iree_ok_status();
   }
   ctx->low_repr = (loom_text_low_repr_context_t){0};
@@ -150,6 +157,33 @@ static iree_status_t loom_print_update_register_context_from_target(
           ctx->low_asm_environment.state, ctx->module, attr, &descriptor_set));
   ctx->low_repr.descriptor_set = descriptor_set;
   return iree_ok_status();
+}
+
+static iree_status_t loom_print_update_low_repr_context(
+    loom_print_context_t* ctx, const loom_op_vtable_t* vtable,
+    uint16_t attr_index, loom_attribute_t attr) {
+  if (!vtable->func_like ||
+      vtable->func_like->repr_contract_attr_index == LOOM_ATTR_INDEX_NONE ||
+      vtable->func_like->repr_contract_attr_index != attr_index) {
+    return iree_ok_status();
+  }
+  if (attr.kind != LOOM_ATTR_STRING ||
+      attr.string_id == LOOM_STRING_ID_INVALID ||
+      attr.string_id >= ctx->module->strings.count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "function representation contract must be a valid string key");
+  }
+  ctx->low_repr = (loom_text_low_repr_context_t){
+      .contract_key = ctx->module->strings.entries[attr.string_id],
+  };
+  if (!ctx->low_asm_environment.vtable ||
+      !ctx->low_asm_environment.vtable->lookup_descriptor_set) {
+    return iree_ok_status();
+  }
+  return ctx->low_asm_environment.vtable->lookup_descriptor_set(
+      ctx->low_asm_environment.state, ctx->low_repr.contract_key,
+      &ctx->low_repr.descriptor_set);
 }
 
 //===----------------------------------------------------------------------===//
@@ -309,7 +343,7 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
             ctx, &loom_op_attrs(op)[element->field_index], NULL,
             loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index)));
         IREE_RETURN_IF_ERROR(loom_print_update_register_context_from_target(
-            ctx, vtable, element->field_index,
+            ctx, vtable, op, element->field_index,
             loom_op_attrs(op)[element->field_index]));
         break;
       }
@@ -573,6 +607,8 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
               loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index),
               key_ref_start, ctx->stream->offset);
         }
+        IREE_RETURN_IF_ERROR(loom_print_update_low_repr_context(
+            ctx, vtable, element->field_index, attr));
         break;
       }
       case LOOM_FORMAT_KIND_DESCRIPTOR_REF:

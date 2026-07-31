@@ -396,7 +396,8 @@ static iree_status_t loom_parse_format_flags(loom_parser_t* parser,
 // Parses a bare symbolic key reference: <key.name>.
 static iree_status_t loom_parse_format_key_ref(
     loom_parser_t* parser, const loom_format_element_t* element,
-    loom_parsed_op_t* parsed) {
+    loom_parsed_op_t* parsed, iree_string_view_t* out_key) {
+  *out_key = iree_string_view_empty();
   loom_token_t key_ref_start_token = loom_tokenizer_peek(&parser->tokenizer);
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LANGLE)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
@@ -419,6 +420,7 @@ static iree_status_t loom_parse_format_key_ref(
   loom_attribute_t attr = loom_attr_string(name_id);
   IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
       parsed, &parser->parser_arena, element->field_index, attr));
+  *out_key = name_token.text;
   return loom_parse_format_add_field_span(
       parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE, element->field_index,
       key_ref_start_token);
@@ -706,9 +708,16 @@ static bool loom_parse_format_symbol_ref_targets_register_context(
 
 static iree_status_t loom_parse_format_update_register_context_from_target(
     loom_parser_t* parser, const loom_op_vtable_t* vtable, uint16_t attr_index,
-    loom_attribute_t attr) {
+    const loom_parsed_op_t* parsed, loom_attribute_t attr) {
   if (!loom_parse_format_symbol_ref_targets_register_context(vtable,
                                                              attr_index)) {
+    return iree_ok_status();
+  }
+  if (vtable->func_like &&
+      vtable->func_like->repr_contract_attr_index != LOOM_ATTR_INDEX_NONE &&
+      vtable->func_like->repr_contract_attr_index < parsed->attribute_count &&
+      !loom_attr_is_absent(
+          parsed->attributes[vtable->func_like->repr_contract_attr_index])) {
     return iree_ok_status();
   }
   parser->low_repr = (loom_text_low_repr_context_t){0};
@@ -723,6 +732,25 @@ static iree_status_t loom_parse_format_update_register_context_from_target(
           &descriptor_set));
   parser->low_repr.descriptor_set = descriptor_set;
   return iree_ok_status();
+}
+
+static iree_status_t loom_parse_format_update_low_repr_context(
+    loom_parser_t* parser, const loom_op_vtable_t* vtable, uint16_t attr_index,
+    iree_string_view_t key) {
+  if (!vtable->func_like ||
+      vtable->func_like->repr_contract_attr_index == LOOM_ATTR_INDEX_NONE ||
+      vtable->func_like->repr_contract_attr_index != attr_index) {
+    return iree_ok_status();
+  }
+  parser->low_repr = (loom_text_low_repr_context_t){
+      .contract_key = key,
+  };
+  if (!parser->low_asm_environment.vtable ||
+      !parser->low_asm_environment.vtable->lookup_descriptor_set) {
+    return iree_ok_status();
+  }
+  return parser->low_asm_environment.vtable->lookup_descriptor_set(
+      parser->low_asm_environment.state, key, &parser->low_repr.descriptor_set);
 }
 
 iree_status_t loom_parser_walk_format(loom_parser_t* parser,
@@ -899,7 +927,7 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
             element->field_index, token, token.line, token.end_column));
         IREE_RETURN_IF_ERROR(
             loom_parse_format_update_register_context_from_target(
-                parser, vtable, element->field_index, attr));
+                parser, vtable, element->field_index, parsed, attr));
         break;
       }
 
@@ -1061,8 +1089,11 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
       }
 
       case LOOM_FORMAT_KIND_KEY_REF: {
+        iree_string_view_t key = iree_string_view_empty();
         IREE_RETURN_IF_ERROR(
-            loom_parse_format_key_ref(parser, element, parsed));
+            loom_parse_format_key_ref(parser, element, parsed, &key));
+        IREE_RETURN_IF_ERROR(loom_parse_format_update_low_repr_context(
+            parser, vtable, element->field_index, key));
         break;
       }
 

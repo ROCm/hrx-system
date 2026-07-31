@@ -161,15 +161,14 @@ static iree_status_t loom_low_emit_unresolved_symbol(
 
 static iree_status_t loom_low_emit_missing_descriptor_set(
     iree_diagnostic_emitter_t emitter, const loom_module_t* module,
-    const loom_op_t* low_func_op, uint16_t target_attr_index,
-    iree_string_view_t descriptor_set_key, iree_string_view_t target_name) {
+    const loom_op_t* low_func_op, uint16_t contract_attr_index,
+    iree_string_view_t descriptor_set_key) {
   loom_diagnostic_param_t params[] = {
       loom_param_string(loom_low_function_name(module, low_func_op)),
       loom_param_with_field_ref(
-          loom_param_string(target_name),
+          loom_param_string(descriptor_set_key),
           loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
-                                    target_attr_index)),
-      loom_param_string(descriptor_set_key),
+                                    contract_attr_index)),
   };
   return loom_low_emit(emitter, low_func_op, LOOM_ERR_TARGET_044, params,
                        IREE_ARRAYSIZE(params), NULL, 0);
@@ -207,8 +206,18 @@ static iree_status_t loom_low_resolve_func_target(
         "low function target resolution requires a descriptor registry");
   }
 
-  loom_symbol_ref_t func_ref = loom_func_like_callee(
-      loom_func_like_cast(module, (loom_op_t*)low_func_op));
+  const loom_func_like_t low_func =
+      loom_func_like_cast(module, (loom_op_t*)low_func_op);
+  const loom_symbol_ref_t func_ref = loom_func_like_callee(low_func);
+  const loom_string_id_t repr_contract_id =
+      loom_func_like_repr_contract(low_func);
+  const bool has_repr_contract = repr_contract_id != LOOM_STRING_ID_INVALID;
+  uint16_t descriptor_set_attr_index = target_attr_index;
+  if (has_repr_contract) {
+    out_target->descriptor_set_key =
+        loom_low_string_or_empty(module, repr_contract_id);
+    descriptor_set_attr_index = low_func.vtable->repr_contract_attr_index;
+  }
 
   const loom_symbol_facts_base_t* base_facts = NULL;
   iree_status_t status = loom_symbol_fact_table_lookup_ref(
@@ -235,8 +244,10 @@ static iree_status_t loom_low_resolve_func_target(
         &out_target->bundle_storage, &contract_valid);
   }
   if (iree_status_is_ok(status) && contract_valid) {
-    out_target->descriptor_set_key =
-        out_target->bundle_storage.config.contract_set_key;
+    if (!has_repr_contract) {
+      out_target->descriptor_set_key =
+          out_target->bundle_storage.config.contract_set_key;
+    }
     out_target->feature_bits =
         out_target->bundle_storage.config.contract_feature_bits;
   }
@@ -252,9 +263,9 @@ static iree_status_t loom_low_resolve_func_target(
       loom_low_descriptor_registry_lookup(registry,
                                           out_target->descriptor_set_key);
   if (!descriptor_set) {
-    return loom_low_emit_missing_descriptor_set(
-        emitter, module, low_func_op, target_attr_index,
-        out_target->descriptor_set_key, out_target->target_name);
+    return loom_low_emit_missing_descriptor_set(emitter, module, low_func_op,
+                                                descriptor_set_attr_index,
+                                                out_target->descriptor_set_key);
   }
   out_target->descriptor_set = descriptor_set;
   return iree_ok_status();

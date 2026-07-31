@@ -988,6 +988,11 @@ iree_status_t loom_parse_region_with_syntax(
     }
     case LOOM_REGION_SYNTAX_LOW_ASM_OPTIONAL: {
       if (loom_tokenizer_at_keyword(&parser->tokenizer, IREE_SV("asm"))) {
+        if (parser->low_asm_region_depth == 0 &&
+            !iree_string_view_is_empty(parser->low_repr.contract_key)) {
+          return loom_parse_low_asm_marked_region(parser, region_descriptor,
+                                                  out_region);
+        }
         return loom_parse_low_asm_prefixed_region(parser, region_descriptor,
                                                   out_region);
       }

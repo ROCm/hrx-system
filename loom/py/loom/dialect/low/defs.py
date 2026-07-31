@@ -32,6 +32,7 @@ from loom.assembly import (
     DescriptorRef,
     FormatElement,
     FuncArgs,
+    KeyRef,
     OptionalGroup,
     PredicateList,
     Ref,
@@ -209,6 +210,12 @@ _FUNC_COMMON_ATTRS = [
         symbol_ref=SymbolReference("target", ["target"]),
     ),
     AttrDef(
+        "descriptor_set",
+        "string",
+        optional=True,
+        doc="Canonical descriptor-set key governing the low representation.",
+    ),
+    AttrDef(
         "abi",
         ATTR_TYPE_ENUM,
         enum_def=ExportAbiKind,
@@ -234,6 +241,12 @@ _KERNEL_COMMON_ATTRS = [
         "target",
         "symbol",
         symbol_ref=SymbolReference("target", ["target"]),
+    ),
+    AttrDef(
+        "descriptor_set",
+        "string",
+        optional=True,
+        doc="Canonical descriptor-set key governing the low representation.",
     ),
     AttrDef("abi_layout", "dict", optional=True),
     AttrDef("export_symbol", "string", optional=True),
@@ -287,6 +300,10 @@ _LOW_EXACTNESS_FORMAT: list[FormatElement] = [
 
 _FUNC_TARGET_FORMAT: list[FormatElement] = [
     kw("target"),
+    OptionalGroup(
+        [KeyRef("descriptor_set")],
+        anchor="descriptor_set",
+    ),
     GLUE,
     LPAREN,
     SymbolRef("target"),
@@ -445,6 +462,7 @@ _KERNEL_SIGNATURE_FORMAT: list[FormatElement] = [
 _FUNC_LIKE_COMMON: dict[str, Any] = dict(
     callee="callee",
     target="target",
+    repr_contract="descriptor_set",
     abi="abi",
     abi_attrs="abi_attrs",
     export_symbol="export_symbol",
@@ -458,6 +476,7 @@ _FUNC_LIKE_COMMON: dict[str, Any] = dict(
 _KERNEL_FUNC_LIKE_COMMON: dict[str, Any] = dict(
     callee="callee",
     target="target",
+    repr_contract="descriptor_set",
     export_symbol="export_symbol",
     export_linkage="export_linkage",
     predicates="predicates",
@@ -501,7 +520,7 @@ low_func_def = Op(
         Region("body", syntax="low.asm.optional"),
     ],
     examples=[
-        "low.func.def target(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {\n  %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>\n  low.return %sum : reg<amdgpu.vgpr x1>\n}",
+        "low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {\n  %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>\n  low.return %sum : reg<amdgpu.vgpr x1>\n}",
         "low.func.def allocation(fixed) schedule(locked) target(@gfx11_generic) @agent_authored(%lhs: reg<amdgpu.vgpr x1>) {\n  low.return\n}",
     ],
 )
@@ -543,7 +562,7 @@ low_kernel_def = Op(
         Region("body", syntax="low.asm.optional"),
     ],
     examples=[
-        'low.kernel.def target(@gfx11_generic) export("matmul") workgroup_size(16, 4, 1) @matmul(%lhs: reg<amdgpu.sgpr x4>, %rhs: reg<amdgpu.sgpr x4>, %out: reg<amdgpu.sgpr x4>) {\n  low.return\n}',
+        'low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) export("matmul") workgroup_size(16, 4, 1) @matmul(%lhs: reg<amdgpu.sgpr x4>, %rhs: reg<amdgpu.sgpr x4>, %out: reg<amdgpu.sgpr x4>) {\n  low.return\n}',
     ],
 )
 
@@ -580,7 +599,7 @@ low_func_decl = Op(
         *_FUNC_SIGNATURE_FORMAT,
     ],
     examples=[
-        "low.func.decl target(@gfx11_generic) @extern_add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>)",
+        "low.func.decl target<amdgpu.gfx11.generic.core>(@gfx11_generic) @extern_add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>)",
         'low.func.decl allocation(fixed) schedule(locked) import(rocasm, "mfma_16x16_seq") target(@gfx11_generic) @mfma_rocasm(%acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>)',
     ],
 )

@@ -714,17 +714,17 @@ ERR_TARGET_044 = ErrorDef(
     severity=Severity.ERROR,
     summary="Low descriptor set is not available.",
     message=(
-        "low function '@{function_name}' target '@{target_name}' requires "
-        "descriptor set '{descriptor_set_key}', but the descriptor registry "
-        "does not provide it"
+        "low function '@{function_name}' representation contract "
+        "'{descriptor_set_key}' is not available in the descriptor registry"
     ),
     params=(
         ErrorParam("function_name", ParamKind.STRING),
-        ErrorParam("target_name", ParamKind.STRING),
         ErrorParam("descriptor_set_key", ParamKind.STRING),
     ),
-    fix_hint="Link the descriptor package named by '{descriptor_set_key}' or "
-    "choose a target config whose descriptor set is available",
+    fix_hint=(
+        "Link the descriptor package named by '{descriptor_set_key}' before "
+        "compiling this Low function"
+    ),
 )
 
 # ERR_TARGET_045: Low descriptor is not available.

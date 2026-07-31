@@ -960,6 +960,19 @@ loom_symbol_ref_t loom_func_like_target(loom_func_like_t func) {
       loom_op_attrs(func.op)[func.vtable->target_attr_index]);
 }
 
+loom_string_id_t loom_func_like_repr_contract(loom_func_like_t func) {
+  if (!func.vtable ||
+      func.vtable->repr_contract_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return LOOM_STRING_ID_INVALID;
+  }
+  loom_attribute_t attr =
+      loom_op_attrs(func.op)[func.vtable->repr_contract_attr_index];
+  if (loom_attr_is_absent(attr)) {
+    return LOOM_STRING_ID_INVALID;
+  }
+  return loom_attr_as_string_id(attr);
+}
+
 uint8_t loom_func_like_abi(loom_func_like_t func) {
   if (!func.vtable || func.vtable->abi_attr_index == LOOM_ATTR_INDEX_NONE) {
     return 0;

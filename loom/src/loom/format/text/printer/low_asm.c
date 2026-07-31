@@ -23,8 +23,10 @@ typedef enum loom_print_low_asm_preflight_failure_kind_e {
 typedef enum loom_print_low_asm_prefix_e {
   // Nested region inheriting its parent's representation contract.
   LOOM_PRINT_LOW_ASM_PREFIX_NONE = 0,
+  // Function body whose representation contract is carried by the function.
+  LOOM_PRINT_LOW_ASM_PREFIX_MARKER = 1,
   // Standalone region carrying its own representation-contract key.
-  LOOM_PRINT_LOW_ASM_PREFIX_CONTRACT = 1,
+  LOOM_PRINT_LOW_ASM_PREFIX_CONTRACT = 2,
 } loom_print_low_asm_prefix_t;
 
 typedef struct loom_print_low_asm_preflight_failure_t {
@@ -76,7 +78,14 @@ static iree_status_t loom_print_low_asm_resolve_repr(
 }
 
 bool loom_print_low_asm_is_requested(loom_print_context_t* ctx) {
-  return !iree_string_view_is_empty(ctx->low_asm_descriptor_set_key);
+  if (!iree_string_view_is_empty(ctx->low_asm_descriptor_set_key)) {
+    return true;
+  }
+  return loom_text_low_asm_environment_supports_printing(
+             &ctx->low_asm_environment) &&
+         !iree_string_view_is_empty(ctx->low_repr.contract_key) &&
+         iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_PREFER_LOW_ASM |
+                                          LOOM_TEXT_PRINT_REQUIRE_LOW_ASM);
 }
 
 static bool loom_print_low_asm_allows_canonical_op(loom_print_context_t* ctx,
@@ -811,16 +820,7 @@ static iree_status_t loom_print_low_asm_region_body(
       if (statement.kind == LOOM_TEXT_LOW_ASM_STATEMENT_UNKNOWN) {
         if (loom_print_low_asm_allows_canonical_op(ctx, current_op)) {
           IREE_RETURN_IF_ERROR(loom_print_indent(ctx));
-          // Canonical fallback retains the operation's original register
-          // types, which may belong to a different descriptor set than the
-          // requested low-assembly spelling. Resolve each register type from
-          // its embedded stable descriptor-set identity instead of forcing the
-          // requested low-assembly set onto canonical syntax.
-          const loom_text_low_repr_context_t previous_low_repr = ctx->low_repr;
-          ctx->low_repr = (loom_text_low_repr_context_t){0};
-          iree_status_t status = loom_print_op(ctx, current_op);
-          ctx->low_repr = previous_low_repr;
-          IREE_RETURN_IF_ERROR(status);
+          IREE_RETURN_IF_ERROR(loom_print_op(ctx, current_op));
           continue;
         }
         iree_string_view_t op_name = loom_op_name(ctx->module, current_op);
@@ -917,6 +917,9 @@ static iree_status_t loom_print_low_asm_region_with_repr(
   switch (prefix) {
     case LOOM_PRINT_LOW_ASM_PREFIX_NONE:
       break;
+    case LOOM_PRINT_LOW_ASM_PREFIX_MARKER:
+      status = loom_print_emit_cstr(ctx, "asm", false);
+      break;
     case LOOM_PRINT_LOW_ASM_PREFIX_CONTRACT:
       status = loom_print_emit_cstr(ctx, "asm", false);
       if (iree_status_is_ok(status)) {
@@ -985,6 +988,8 @@ iree_status_t loom_print_low_asm_optional_region(
     const loom_region_descriptor_t* region_descriptor,
     bool entry_args_declared_by_parent, bool* out_printed) {
   *out_printed = false;
+  const bool has_parent_repr =
+      !iree_string_view_is_empty(ctx->low_repr.contract_key);
   loom_text_low_repr_context_t low_repr = {0};
   loom_print_low_asm_preflight_failure_t failure = {0};
   bool available = false;
@@ -999,8 +1004,12 @@ iree_status_t loom_print_low_asm_optional_region(
     return iree_ok_status();
   }
   *out_printed = true;
-  return loom_print_low_asm_region_with_repr(
-      ctx, region, region_descriptor, entry_args_declared_by_parent, low_repr,
-      ctx->low_asm_region_depth == 0 ? LOOM_PRINT_LOW_ASM_PREFIX_CONTRACT
-                                     : LOOM_PRINT_LOW_ASM_PREFIX_NONE);
+  loom_print_low_asm_prefix_t prefix = LOOM_PRINT_LOW_ASM_PREFIX_NONE;
+  if (ctx->low_asm_region_depth == 0) {
+    prefix = has_parent_repr ? LOOM_PRINT_LOW_ASM_PREFIX_MARKER
+                             : LOOM_PRINT_LOW_ASM_PREFIX_CONTRACT;
+  }
+  return loom_print_low_asm_region_with_repr(ctx, region, region_descriptor,
+                                             entry_args_declared_by_parent,
+                                             low_repr, prefix);
 }

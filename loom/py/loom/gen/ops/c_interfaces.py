@@ -14,6 +14,7 @@ from typing import Any
 
 from loom.dsl import (
     ATTR_TYPE_FLAGS,
+    ATTR_TYPE_STRING,
     CallLikeInterface,
     CallLikeKind,
     EffectKind,
@@ -72,6 +73,8 @@ class InterfaceFieldSpec:
         resolve to a declared op field.
     c_pointee_type: For kind="c_ptr", the const pointee type used to emit an
         extern declaration for the referenced C symbol.
+    expected_attr_type: For kind="attr", the required AttrDef type. Empty when
+        the interface field accepts any non-flags attribute.
     """
 
     py_field: str
@@ -80,6 +83,7 @@ class InterfaceFieldSpec:
     region_field: str = ""
     required: bool = False
     c_pointee_type: str = ""
+    expected_attr_type: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +135,12 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("import_module", "import_module_attr_index", "attr"),
             InterfaceFieldSpec("import_symbol", "import_symbol_attr_index", "attr"),
             InterfaceFieldSpec("target", "target_attr_index", "attr"),
+            InterfaceFieldSpec(
+                "repr_contract",
+                "repr_contract_attr_index",
+                "attr",
+                expected_attr_type=ATTR_TYPE_STRING,
+            ),
             InterfaceFieldSpec("abi", "abi_attr_index", "attr"),
             InterfaceFieldSpec("abi_attrs", "abi_attrs_attr_index", "attr"),
             InterfaceFieldSpec("export_symbol", "export_symbol_attr_index", "attr"),
@@ -309,7 +319,14 @@ def _resolve_interface_field(
     if _interface_soft_default_is_absent(op, iface, field_spec, py_value):
         return "255"
     if field_spec.kind == "attr":
-        return str(c_queries.resolve_attr_index(op, py_value, interface_name))
+        attr_index = c_queries.resolve_attr_index(op, py_value, interface_name)
+        if attr_index != 0xFF and field_spec.expected_attr_type:
+            attr_def = c_queries.non_flags_attrs(op)[attr_index]
+            if attr_def.attr_type != field_spec.expected_attr_type:
+                raise ValueError(
+                    f"{interface_name} on {op.name!r}: attr {py_value!r} referenced by {field_spec.py_field!r} must have type {field_spec.expected_attr_type!r}, got {attr_def.attr_type!r}"
+                )
+        return str(attr_index)
     if field_spec.kind == "region":
         return str(c_queries.resolve_region_index(op, py_value, interface_name))
     if field_spec.kind == "operand":

@@ -1330,6 +1330,10 @@ loom_string_id_t loom_func_like_import_symbol(loom_func_like_t func);
 // |func| has no target contract.
 loom_symbol_ref_t loom_func_like_target(loom_func_like_t func);
 
+// Returns the authored representation-contract key for a func-like op, or
+// LOOM_STRING_ID_INVALID when none is present.
+loom_string_id_t loom_func_like_repr_contract(loom_func_like_t func);
+
 // Returns the target ABI enum value, or 0 if |func| has no explicit ABI.
 uint8_t loom_func_like_abi(loom_func_like_t func);
 

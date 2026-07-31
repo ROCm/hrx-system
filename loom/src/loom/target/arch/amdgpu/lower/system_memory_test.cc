@@ -97,7 +97,8 @@ class AmdgpuSystemMemoryTest : public ::testing::Test {
     loom_op_t* function_op = NULL;
     IREE_ASSERT_OK(loom_low_func_def_build(
         &builder_, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
-        /*purity=*/0, /*allocation=*/0, /*schedule=*/0, target, /*abi=*/0,
+        /*purity=*/0, /*allocation=*/0, /*schedule=*/0,
+        /*descriptor_set=*/LOOM_STRING_ID_INVALID, target, /*abi=*/0,
         loom_make_named_attr_slice(NULL, 0),
         loom_make_named_attr_slice(NULL, 0),
         /*export_symbol=*/LOOM_STRING_ID_INVALID,

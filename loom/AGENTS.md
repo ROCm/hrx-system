@@ -61,12 +61,14 @@ must remain separate from program semantics.
 
 ## Assembly Formatting Is A Source Contract
 
-Target assembly regions are a durable, readable source form rather than a
-disposable view of canonical low IR. Parsing and printing an `asm<...>` region
+A Low function's `target<representation_contract>` binds its assembly
+vocabulary independently of its optional target symbol witness. When the
+function is marked `asm`, its body is a durable, readable source form rather
+than a disposable view of canonical low IR. Parsing and printing that form
 must preserve its target mnemonics, canonical structural operations, compiler
-hints, comments, and descriptor-selected register spellings without replacing
-the region with generic low syntax. Downstream authoring, review, diagnostic,
-and comparison workflows rely on that stable representation.
+hints, comments, and contract-selected register spellings without replacing
+the body with generic low syntax. Downstream authoring, review, diagnostic, and
+comparison workflows rely on that stable representation.
 
 A change that makes valid operations unprintable inside target assembly, drops
 them while formatting, or weakens a round-trip test by rewriting the input into
