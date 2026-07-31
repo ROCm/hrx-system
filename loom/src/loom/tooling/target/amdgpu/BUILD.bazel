@@ -148,6 +148,7 @@ iree_execution_test_suite(
 iree_execution_test_suite(
     name = "iree_test_loom_asan_execution_test",
     data = [
+        "test/amdgpu_unused_kernargs.loom",
         "//loom/src/loom/test/corpus/sanitizer:amdgpu_asan_actual.loom",
     ],
     manifests = ["test/iree-test-loom_amdgpu_asan.test.json"],

@@ -155,6 +155,7 @@ iree_execution_test_suite(
     "iree-test-loom=loom::tools::iree-test-loom"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/sanitizer/amdgpu_asan_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/amdgpu_unused_kernargs.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "requires-gpu-amd"

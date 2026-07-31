@@ -941,6 +941,10 @@ loom_builder_t* loom_low_lower_context_builder(
 loom_func_like_t loom_low_lower_context_source_function(
     const loom_low_lower_context_t* context);
 
+// Returns true when the source function is retained as a module root.
+bool loom_low_lower_context_source_is_retained(
+    const loom_low_lower_context_t* context);
+
 // Returns the source function entry argument index for |source_plan|'s memory
 // root, or UINT16_MAX when the root is not an entry argument.
 uint16_t loom_low_lower_source_memory_root_argument_index(

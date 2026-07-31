@@ -281,7 +281,8 @@ iree_status_t loom_amdgpu_map_abi_layout(
   }
   loom_func_like_t source_function =
       loom_low_lower_context_source_function(context);
-  if (loom_func_like_export_symbol(source_function) == LOOM_STRING_ID_INVALID) {
+  if (loom_func_like_export_symbol(source_function) == LOOM_STRING_ID_INVALID &&
+      !loom_low_lower_context_source_is_retained(context)) {
     return iree_ok_status();
   }
   IREE_ASSERT_EQ(result_count, 0,

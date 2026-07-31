@@ -957,7 +957,8 @@ static iree_status_t loom_link_cli_link_plan(
     loom_link_plan_mode_t mode, bool strip_check, loom_link_cli_input_t* inputs,
     iree_host_size_t input_count, const loom_tooling_config_set_t* config_set,
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
-    iree_allocator_t allocator, loom_module_t** out_module) {
+    iree_string_view_list_t output_roots, iree_allocator_t allocator,
+    loom_module_t** out_module) {
   *out_module = NULL;
 
   loom_linker_t* linker = NULL;
@@ -1006,6 +1007,9 @@ static iree_status_t loom_link_cli_link_plan(
     }
   }
 
+  if (iree_status_is_ok(status) && output_roots.count != 0) {
+    status = loom_linker_finalize_roots(linker, output_roots);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_linker_finish(linker, out_module);
   }
@@ -1377,9 +1381,14 @@ int main(int argc, char** argv) {
         plan, plan_mode, iree_make_cstring_view(FLAG_output), allocator);
   }
   if (iree_status_is_ok(status) && !FLAG_list_symbols && !FLAG_print_plan) {
-    status = loom_link_cli_link_plan(
-        &cli_index, plan, plan_mode, FLAG_strip_check, inputs, input_count,
-        &config_set, &context, &block_pool, allocator, &linked_module);
+    status = loom_link_cli_link_plan(&cli_index, plan, plan_mode,
+                                     FLAG_strip_check, inputs, input_count,
+                                     &config_set, &context, &block_pool,
+                                     (iree_string_view_list_t){
+                                         .count = roots.count,
+                                         .values = roots.values,
+                                     },
+                                     allocator, &linked_module);
   }
   if (iree_status_is_ok(status) && linked_module) {
     status = loom_link_cli_collect_source_entries(

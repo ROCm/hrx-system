@@ -137,7 +137,8 @@ typedef struct loomc_link_options_t {
   /// Output module name for this invocation. Empty uses the linker's default.
   loomc_string_view_t module_name;
 
-  /// Root symbol names for selective linking.
+  /// Root symbol names for selective linking. Function-like roots are retained
+  /// as module-boundary entries in the linked output.
   const loomc_string_view_t* root_symbols;
 
   /// Number of entries in `root_symbols`.

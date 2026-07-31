@@ -683,6 +683,18 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
         operation_status);
   }
   before_diagnostics = loomc_result_diagnostic_count(result);
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
+      options->root_symbol_count != 0) {
+    operation_status = loom_linker_finalize_roots(
+        internal_linker, (iree_string_view_list_t){
+                             .count = options->root_symbol_count,
+                             .values = root_symbols,
+                         });
+    status = loomc_link_translate_operation_status(
+        result, before_diagnostics, loomc_make_cstring_view("LINK/ROOTS"),
+        operation_status);
+  }
+  before_diagnostics = loomc_result_diagnostic_count(result);
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     operation_status = loom_linker_finish(internal_linker, &linked_module);
     status = loomc_link_translate_operation_status(

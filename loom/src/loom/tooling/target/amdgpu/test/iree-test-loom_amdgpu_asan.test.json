@@ -52,6 +52,31 @@
           ]
         }
       }
+    },
+    {
+      "name": "runs selected kernargs with access instrumentation",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/amdgpu_unused_kernargs.loom",
+          "--device=amdgpu",
+          "--sanitizer=access"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            {
+              "regex": "\"case\":\"selected_lhs_case\"[^}]*\"passed\":true"
+            },
+            {
+              "regex": "\"case\":\"selected_rhs_case\"[^}]*\"passed\":true"
+            },
+            "\"failed_sample_count\":0"
+          ]
+        }
+      }
     }
   ]
 }

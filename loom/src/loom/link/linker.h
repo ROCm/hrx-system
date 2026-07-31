@@ -29,8 +29,8 @@ extern "C" {
 typedef struct loom_link_options_t {
   // Name assigned to the linked output module.
   iree_string_view_t module_name;
-  // Root symbol names to materialize. An empty list links every materialized
-  // source symbol.
+  // Root symbol names to materialize. Function-like roots are retained in the
+  // linked output. An empty list links every materialized source symbol.
   iree_string_view_list_t root_symbols;
 } loom_link_options_t;
 
@@ -46,8 +46,9 @@ typedef struct loom_linker_options_t {
 
 // Options controlling one input module add.
 typedef struct loom_linker_add_options_t {
-  // Root symbol names to materialize from this module. An empty list links
-  // every materialized top-level symbol in the module.
+  // Reachability anchor names to materialize from this module. An empty list
+  // links every materialized top-level symbol in the module. Anchors are not
+  // output roots until passed to loom_linker_finalize_roots.
   iree_string_view_list_t root_symbols;
 } loom_linker_add_options_t;
 
@@ -82,6 +83,16 @@ void loom_linker_free(loom_linker_t* linker);
 iree_status_t loom_linker_add_module(loom_linker_t* linker,
                                      const loom_module_t* source_module,
                                      const loom_linker_add_options_t* options);
+
+// Finalizes explicit output |root_symbols| after all modules have been added.
+//
+// Every named root must have a materialized definition or declaration.
+// Function-like roots are marked retained so their module-boundary identity
+// survives later transforms. Per-add root symbols are reachability anchors and
+// may include transitive dependencies selected by a higher-level link plan;
+// they are not finalized automatically.
+iree_status_t loom_linker_finalize_roots(loom_linker_t* linker,
+                                         iree_string_view_list_t root_symbols);
 
 // Finalizes the linked output module and transfers ownership to the caller.
 //
