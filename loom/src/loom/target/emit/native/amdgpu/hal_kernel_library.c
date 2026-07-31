@@ -17,11 +17,11 @@
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/storage_layout.h"
+#include "loom/codegen/low/target_binding.h"
 #include "loom/codegen/low/verify.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
-#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
@@ -43,9 +43,6 @@
 #include "loom/target/emit/native/amdgpu/runtime_globals.h"
 #include "loom/target/emit/native/amdgpu/spill_lowering.h"
 #include "loom/target/entry_selection.h"
-#include "loom/target/facts_builder.h"
-#include "loom/target/function_contract.h"
-#include "loom/target/profile.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/low.h"
 
@@ -66,10 +63,10 @@ static bool loom_amdgpu_hal_kernel_library_bundle_is_compatible(
 }
 
 typedef struct loom_amdgpu_hal_kernel_library_kernel_plan_t {
-  // Target-resolved function entry used to build this kernel.
-  loom_target_entry_t* entry;
   // Selected prepared low.kernel.def op for frame.
   loom_op_t* low_function_op;
+  // Resolved representation contract and effective target facts.
+  loom_low_resolved_target_t target;
   // ABI layout derived from prepared target-low IR.
   loom_amdgpu_hal_kernel_abi_layout_t abi_layout;
   // Verified ABI facts retained for allocation and native emission.
@@ -528,64 +525,30 @@ static const loom_target_artifact_manifest_target_projection_t
         .project = loom_amdgpu_hal_kernel_library_project_manifest_target,
 };
 
-static iree_status_t loom_amdgpu_hal_kernel_library_lookup_func_facts(
-    const loom_module_t* module, loom_symbol_ref_t func_ref,
-    iree_arena_allocator_t* table_arena,
-    const loom_func_symbol_facts_t** out_func_facts) {
-  *out_func_facts = NULL;
-  loom_symbol_fact_table_t fact_table = {0};
-  loom_symbol_fact_table_initialize(&fact_table, table_arena);
-  const loom_symbol_facts_base_t* base_facts = NULL;
-  IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
-      &fact_table, module, func_ref, &base_facts));
-  *out_func_facts = loom_func_symbol_facts_cast(base_facts);
-  IREE_ASSERT(*out_func_facts != NULL,
-              "selected AMDGPU HAL kernel-library entries have func facts");
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_hal_kernel_library_apply_low_kernel_contract(
-    const loom_module_t* module, const loom_op_t* low_function_op,
-    loom_target_entry_t* entry,
-    loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
-    iree_arena_allocator_t* table_arena, bool* out_valid) {
-  *out_valid = true;
-  loom_target_workgroup_size_t workgroup_size = {0};
-  if (!loom_low_kernel_def_static_workgroup_size(low_function_op,
-                                                 &workgroup_size)) {
-    return iree_ok_status();
-  }
-
-  const loom_func_symbol_facts_t* func_facts = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_library_lookup_func_facts(
-      module, entry->func_ref, table_arena, &func_facts));
-
-  return loom_target_function_contract_apply_hal_workgroup_size(
-      func_facts, entry->bundle_storage.bundle.name, &workgroup_size,
-      loom_target_entry_emitter(diagnostic_emitter), &entry->bundle_storage,
-      out_valid);
-}
-
 static iree_status_t loom_amdgpu_hal_kernel_library_prepare_kernel_plan(
     loom_module_t* module, loom_target_entry_t* entry,
+    const loom_target_low_descriptor_registry_t* low_registry,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     iree_arena_allocator_t* table_arena, loom_target_compile_report_t* report,
     loom_amdgpu_hal_kernel_library_kernel_plan_t* out_plan) {
-  *out_plan = (loom_amdgpu_hal_kernel_library_kernel_plan_t){
-      .entry = entry,
-      .low_function_op = entry->func.op,
-  };
+  *out_plan = (loom_amdgpu_hal_kernel_library_kernel_plan_t){0};
 
-  bool kernel_contract_valid = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_library_apply_low_kernel_contract(
-      module, out_plan->low_function_op, entry, diagnostic_emitter, table_arena,
-      &kernel_contract_valid));
-  if (!kernel_contract_valid) {
+  loom_symbol_fact_table_t symbol_facts = {0};
+  loom_symbol_fact_table_initialize(&symbol_facts, table_arena);
+  IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
+      module, &symbol_facts, entry->func.op, entry->target_facts,
+      &low_registry->registry, loom_target_entry_emitter(diagnostic_emitter),
+      &out_plan->target));
+  if (out_plan->target.descriptor_set == NULL) {
     return iree_ok_status();
   }
+  out_plan->low_function_op = entry->func.op;
+  entry->bundle_storage = out_plan->target.target_facts->storage;
+  loom_target_bundle_storage_rebind(&entry->bundle_storage);
+
   if (report != NULL) {
     const loom_amdgpu_target_facts_t* target_facts =
-        loom_amdgpu_target_facts_cast(entry->target_facts);
+        loom_amdgpu_target_facts_cast(out_plan->target.target_facts);
     IREE_ASSERT(target_facts != NULL);
     report->function_name = entry->func_name;
     loom_target_compile_report_record_target_bundle(
@@ -608,18 +571,13 @@ static iree_status_t loom_amdgpu_hal_kernel_library_prepare_kernel_plan(
 
 static iree_status_t loom_amdgpu_hal_kernel_library_verify_kernel_abi(
     const loom_module_t* module,
-    const loom_target_low_descriptor_registry_t* low_registry,
     loom_amdgpu_hal_kernel_library_kernel_plan_t* plan,
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     uint32_t max_errors, bool* out_failed,
     iree_arena_allocator_t* table_arena) {
   *out_failed = false;
-  const loom_low_descriptor_set_t* descriptor_set = NULL;
-  IREE_RETURN_IF_ERROR(loom_target_low_descriptor_set_select_for_bundle(
-      &low_registry->registry, &plan->entry->bundle_storage.bundle,
-      &descriptor_set));
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
-      module, plan->low_function_op, descriptor_set, max_errors,
+      module, plan->low_function_op, plan->target.descriptor_set, max_errors,
       loom_target_entry_emitter(diagnostic_emitter), &plan->abi_verify,
       table_arena));
   *out_failed = plan->abi_verify.error_count != 0;
@@ -704,30 +662,12 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
     loom_amdgpu_kernel_hsaco_contribution_t* out_contribution) {
   *out_contribution = (loom_amdgpu_kernel_hsaco_contribution_t){0};
 
-  const loom_low_descriptor_set_t* descriptor_set = NULL;
-  IREE_RETURN_IF_ERROR(loom_target_low_descriptor_set_select_for_bundle(
-      &low_registry->registry, &plan->entry->bundle_storage.bundle,
-      &descriptor_set));
-  loom_target_facts_t* effective_target_facts = NULL;
-  IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(
-      plan->entry->target_facts, table_arena, &effective_target_facts));
-  loom_target_facts_builder_replace_bundle(&plan->entry->bundle_storage.bundle,
-                                           effective_target_facts);
-  const loom_target_bundle_t* target_bundle =
-      loom_target_facts_bundle(effective_target_facts);
   loom_low_schedule_pair_affinity_list_t schedule_pair_affinities =
       loom_low_schedule_pair_affinity_list_empty();
-  loom_low_resolved_target_t resolved_target = {
-      .target_facts = effective_target_facts,
-      .target_name = loom_target_facts_identity_name(effective_target_facts),
-      .descriptor_set_key = target_bundle->config->contract_set_key,
-      .feature_bits = target_bundle->config->contract_feature_bits,
-      .descriptor_set = descriptor_set,
-  };
   const loom_target_residency_model_t* residency_model =
-      loom_amdgpu_occupancy_residency_model(&resolved_target);
+      loom_amdgpu_occupancy_residency_model(&plan->target);
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_build_schedule_pair_affinities(
-      &resolved_target, table_arena, &schedule_pair_affinities));
+      &plan->target, table_arena, &schedule_pair_affinities));
   loom_low_schedule_structural_state_read_list_t schedule_state_reads =
       loom_amdgpu_descriptor_structural_state_reads();
 
@@ -737,7 +677,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   loom_amdgpu_storage_lease_provider(&storage_lease_provider);
   const loom_low_emission_frame_options_t frame_options = {
       .descriptor_registry = &low_registry->registry,
-      .effective_target_facts = effective_target_facts,
+      .effective_target_facts = plan->target.target_facts,
       .residency_model = residency_model,
       .schedule_pair_affinities = schedule_pair_affinities,
       .schedule_structural_state_reads = schedule_state_reads,
@@ -756,7 +696,7 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel_contribution(
   loom_amdgpu_native_preflight_t preflight = {0};
   loom_amdgpu_hal_kernel_library_spill_lowering_context_t
       spill_lowering_context = {
-          .descriptor_set = descriptor_set,
+          .descriptor_set = plan->target.descriptor_set,
       };
   iree_diagnostic_emitter_t final_validation_emitter = frame_options.emitter;
   const loom_low_emission_frame_spill_free_options_t spill_free_options = {
@@ -991,8 +931,9 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
        i < entries.count && iree_status_is_ok(status) && !diagnostics_failed;
        ++i) {
     status = loom_amdgpu_hal_kernel_library_prepare_kernel_plan(
-        module, &entries.values[i], diagnostic_emitter, table_arena,
-        entry_reports != NULL ? &entry_reports[i] : NULL, &plans[i]);
+        module, &entries.values[i], low_registry, diagnostic_emitter,
+        table_arena, entry_reports != NULL ? &entry_reports[i] : NULL,
+        &plans[i]);
     if (iree_status_is_ok(status) && plans[i].low_function_op == NULL) {
       diagnostics_failed = true;
     }
@@ -1004,8 +945,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
        ++i) {
     bool plan_failed = false;
     status = loom_amdgpu_hal_kernel_library_verify_kernel_abi(
-        module, low_registry, &plans[i], diagnostic_emitter, max_errors,
-        &plan_failed, table_arena);
+        module, &plans[i], diagnostic_emitter, max_errors, &plan_failed,
+        table_arena);
     if (iree_status_is_ok(status)) {
       abi_failed |= plan_failed;
     }

@@ -675,6 +675,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
       "amdgpu.target<gfx11-generic> @authored_target\n"
       "low.kernel.def target<amdgpu.gfx11.generic.core>(@authored_target) "
       "workgroup_size(64, 1, 1) @loom_kernel() {\n"
+      "  %lane = low.live_in<amdgpu.workitem_id.x> : "
+      "reg<amdgpu.vgpr>\n"
       "  low.return\n"
       "}\n";
   loom_module_t* module = nullptr;
@@ -820,7 +822,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, RejectsIncompatibleRepresentationContract) {
   ASSERT_NE(diagnostic, nullptr);
   EXPECT_EQ(GetStringParam(*diagnostic, 0), "loom_kernel");
   EXPECT_EQ(GetStringParam(*diagnostic, 1), "amdgpu.rdna3.core");
-  EXPECT_EQ(GetStringParam(*diagnostic, 2), "gfx_target");
+  EXPECT_EQ(GetStringParam(*diagnostic, 2), "gfx1151");
   EXPECT_EQ(GetStringParam(*diagnostic, 3), "amdgpu.rdna3_5.core");
 
   loom_amdgpu_hal_kernel_library_deinitialize(&library,

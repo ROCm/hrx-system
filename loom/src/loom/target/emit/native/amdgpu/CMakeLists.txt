@@ -560,11 +560,11 @@ loom_cc_library(
     loom::codegen::low::diagnostics
     loom::codegen::low::frame
     loom::codegen::low::storage_layout
+    loom::codegen::low::target_binding
     loom::codegen::low::verify
     loom::error::diagnostic
     loom::error::error_defs
     loom::ir
-    loom::ops::func_symbol_facts
     loom::ops::global
     loom::ops::low
     loom::ops::target
@@ -580,9 +580,6 @@ loom_cc_library(
     loom::target::arch::amdgpu::target_id
     loom::target::arch::amdgpu::target_info
     loom::target::entry_selection
-    loom::target::facts_builder
-    loom::target::function_contract
-    loom::target::profile
     loom::target::provider
     loom::target::reporting::artifact_manifest_collect
     loom::target::reporting::low
