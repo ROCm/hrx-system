@@ -787,6 +787,8 @@ loom_link_module(
     name = "routed_down_q4k_linked",
     srcs = ["qwen3_moe/routed_down_q4k.loom"],
     libraries = [
+        "qwen3_moe/attention_prepare_quantized.loom",
+        "qwen3_moe/model_config.loom",
         "qwen3_moe/routed_gate_up_swiglu_q4k.loom",
         "ggml/quantize_q8_1_x4.loom",
     ],
@@ -810,6 +812,29 @@ iree_executable_test(
     args = [
         "$(location :routed_down_q4k_linked)",
         "--case=@qwen3_moe_routed_down_q4k_q8_1_x4_nonzero_residual_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":routed_down_q4k_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "routed_down_q4k_next_q8_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :routed_down_q4k_linked)",
+        "--case=@qwen3_moe_routed_down_q4k_q8_1_x4_next_q8_differential_case",
+        "--config=qwen3_moe.model.hidden_size=2048",
+        "--config=qwen3_moe.model.rms_epsilon=0.000001",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
@@ -853,6 +878,8 @@ loom_link_module(
         "ggml/linear_q6k_f32.loom",
         "ggml/linear_q6k_q8_1_x4.loom",
         "ggml/quantize_q8_1_x4.loom",
+        "qwen3_moe/attention_prepare_quantized.loom",
+        "qwen3_moe/model_config.loom",
     ],
 )
 
@@ -874,6 +901,29 @@ iree_executable_test(
     args = [
         "$(location :routed_down_q6k_linked)",
         "--case=@qwen3_moe_routed_down_q6k_f32_wave64_differential_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":routed_down_q6k_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "routed_down_q6k_next_q8_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :routed_down_q6k_linked)",
+        "--case=@qwen3_moe_routed_down_q6k_q8_1_x4_next_q8_differential_case",
+        "--config=qwen3_moe.model.hidden_size=2048",
+        "--config=qwen3_moe.model.rms_epsilon=0.000001",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
@@ -1607,8 +1657,16 @@ test_suite(
         ":quantize_q8_1_x4_hal_test",
         ":quantize_q8_1_x4_plan_test",
         ":routed_down_q4k_f16_wmma_hal_test",
+        ":routed_down_q4k_hal_test",
+        ":routed_down_q4k_next_q8_hal_test",
+        ":routed_down_q4k_plan_test",
+        ":routed_down_q4k_prefill_hal_test",
         ":routed_down_q6k_f16_wmma_hal_test",
         ":routed_down_q6k_f32_hal_test",
+        ":routed_down_q6k_hal_test",
+        ":routed_down_q6k_next_q8_hal_test",
+        ":routed_down_q6k_plan_test",
+        ":routed_down_q6k_prefill_hal_test",
         ":routed_down_quantized_f16_wmma_plan_test",
         ":routed_down_weighted_reduce_next_rmsnorm_f32_hal_test",
         ":routed_down_weighted_reduce_next_rmsnorm_f32_plan_test",
