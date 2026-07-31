@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "experimental/qwen/runtime/model.h"
+#include "experimental/qwen/runtime/model_shape.h"
 #include "experimental/qwen/runtime/program.h"
 #include "experimental/qwen/runtime/request.h"
 #include "experimental/qwen/tooling/layer_data.h"
@@ -17,29 +18,34 @@
 #include "iree/base/api.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
+#include "iree/io/file_contents.h"
 #include "iree/tooling/device_util.h"
 
-#define QWEN_LAYER_INDEX 0
-#define QWEN_LAYER_TOKEN_COUNT 512
-
 IREE_FLAG(string, input, "",
-          "Raw pre-attention layer_inp: exactly 512x2048 little-endian F32 "
+          "Raw pre-attention layer_inp: token_count x 2048 little-endian F32 "
           "values.");
 IREE_FLAG(string, expected, "",
           "Raw complete post-attention/post-MoE residual l_out in the same "
           "F32 layout; ffn_moe_out is not a complete layer output.");
+IREE_FLAG(string, output, "", "Optional raw F32 actual-output path.");
+IREE_FLAG(int32_t, layer, 0, "Zero-based model layer index.");
+IREE_FLAG(int32_t, token_count, 512, "Exact active token-row count.");
 IREE_FLAG(float, atol, 0.05f, "Absolute output comparison tolerance.");
 IREE_FLAG(float, rtol, 0.02f, "Relative output comparison tolerance.");
 
 static const char* const qwen_layer_cli_usage =
-    "Runs the complete Qwen layer-0 prefill-512 program and validates its "
-    "output.\n"
+    "Runs one complete Qwen layer program and validates its output.\n"
     "\n"
     "Required flags:\n"
     "  --device=<device URI>\n"
     "  --parameters=<GGUF or parameter archive path>\n"
     "  --input=<raw F32 hidden-state path>\n"
-    "  --expected=<raw F32 expected-output path>\n";
+    "  --expected=<raw F32 expected-output path>\n"
+    "  --layer=<zero-based layer index>\n"
+    "  --token_count=<active token rows>\n"
+    "\n"
+    "Optional diagnostics:\n"
+    "  --output=<raw F32 actual-output path>\n";
 
 typedef struct qwen_cli_timepoint_t {
   // Timeline semaphore carrying this timepoint.
@@ -80,11 +86,22 @@ static iree_status_t qwen_layer_cli_run(void) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "--atol and --rtol must be nonnegative");
   }
+  if (FLAG_layer < 0 || FLAG_layer >= QWEN_MODEL_LAYER_COUNT) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "--layer must be in [0, %d)",
+                            QWEN_MODEL_LAYER_COUNT);
+  }
+  if (FLAG_token_count <= 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--token_count must be greater than zero");
+  }
+  const iree_host_size_t layer_index = (iree_host_size_t)FLAG_layer;
+  const iree_host_size_t token_count = (iree_host_size_t)FLAG_token_count;
 
   qwen_tooling_layer_data_t layer_data;
   status = qwen_tooling_layer_data_initialize(
       iree_make_cstring_view(FLAG_input), iree_make_cstring_view(FLAG_expected),
-      QWEN_LAYER_TOKEN_COUNT, host_allocator, &layer_data);
+      token_count, host_allocator, &layer_data);
 
   qwen_tooling_runtime_context_t runtime_context;
   if (iree_status_is_ok(status)) {
@@ -128,11 +145,11 @@ static iree_status_t qwen_layer_cli_run(void) {
     qwen_program_options_t program_options;
     qwen_program_options_initialize(&program_options);
     program_options.kind = QWEN_PROGRAM_KIND_LAYER;
-    program_options.layer_index = QWEN_LAYER_INDEX;
-    program_options.token_count = QWEN_LAYER_TOKEN_COUNT;
-    program_options.context_count = QWEN_LAYER_TOKEN_COUNT;
-    program_options.token_capacity = QWEN_LAYER_TOKEN_COUNT;
-    program_options.context_capacity = QWEN_LAYER_TOKEN_COUNT;
+    program_options.layer_index = layer_index;
+    program_options.token_count = token_count;
+    program_options.context_count = token_count;
+    program_options.token_capacity = token_count;
+    program_options.context_capacity = token_count;
     program_options.command_buffer_mode = runtime_context.command_buffer_mode;
     status =
         qwen_program_prepare(model, &program_options, host_allocator, &program);
@@ -146,8 +163,8 @@ static iree_status_t qwen_layer_cli_run(void) {
   if (iree_status_is_ok(status)) {
     qwen_request_options_t request_options;
     qwen_request_options_initialize(&request_options);
-    request_options.token_capacity = QWEN_LAYER_TOKEN_COUNT;
-    request_options.context_capacity = QWEN_LAYER_TOKEN_COUNT;
+    request_options.token_capacity = token_count;
+    request_options.context_capacity = token_count;
     status = qwen_request_create(
         model, &request_options, qwen_cli_timepoint_list(&model_ready),
         qwen_cli_timepoint_list(&request_ready), host_allocator, &request);
@@ -206,6 +223,12 @@ static iree_status_t qwen_layer_cli_run(void) {
   if (iree_status_is_ok(status)) {
     status = qwen_request_read_hidden_state(request, output_data);
   }
+  if (iree_status_is_ok(status) && FLAG_output[0] != '\0') {
+    status = iree_io_file_contents_write(
+        iree_make_cstring_view(FLAG_output),
+        iree_make_const_byte_span(output_data.data, output_data.data_length),
+        host_allocator);
+  }
 
   qwen_tooling_layer_comparison_t comparison;
   if (iree_status_is_ok(status)) {
@@ -218,9 +241,11 @@ static iree_status_t qwen_layer_cli_run(void) {
     const qwen_model_statistics_t model_statistics =
         qwen_model_statistics(model);
     fprintf(stdout,
-            "Qwen layer 0 prefill 512 passed: %" PRIhsz " F32 values, %" PRIhsz
-            " dispatches, %" PRIu64 " resident bytes, max_abs=%g, max_rel=%g\n",
-            comparison.element_count, qwen_program_dispatch_count(program),
+            "Qwen layer %" PRIhsz " with %" PRIhsz " tokens passed: %" PRIhsz
+            " F32 values, %" PRIhsz " dispatches, %" PRIu64
+            " resident bytes, max_abs=%g, max_rel=%g\n",
+            layer_index, token_count, comparison.element_count,
+            qwen_program_dispatch_count(program),
             (uint64_t)model_statistics.allocation_bytes,
             comparison.maximum_absolute_error,
             comparison.maximum_relative_error);

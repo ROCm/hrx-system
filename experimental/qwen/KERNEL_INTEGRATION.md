@@ -136,7 +136,7 @@ cuts in order:
 | Layer order | Exported function | Canonical source | Executed adapter, if any |
 | ---: | --- | --- | --- |
 | 1 | `qwen3_moe_attention_qkv_postprocess_fused_decode` | `qwen3_moe/attention_qkv_postprocess_fused.loom`, using `qwen3_moe/attention_qkv_quantized.loom` and `qwen3_moe/attention_postprocess_f32_f16.loom` | None |
-| 2 | `qwen3_moe_flash_attention_decode_split_f32_f16_wmma` | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` | `flash_attention_decode_split_bringup_workaround.loom` carries the exact context-513 topology |
+| 2 | `qwen3_moe_flash_attention_decode_split_f32_f16_wmma` | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` | `flash_attention_decode_split_bringup_workaround.loom` carries the runtime's exact context through a temporary config binding |
 | 3 | `ggml_quantize_q8_1_x4_f32` for the attention result | `ggml/quantize_q8_1_x4.loom` | `quantize_q8_1_x4_bringup_workaround.loom` |
 | 4 | `qwen3_moe_dense_linear_q4k_q8_1_x4_next_q8`, including output residual and feed-forward RMSNorm/Q8_1 x4 publication | `qwen3_moe/dense_linear_quantized_f16_wmma.loom` and `qwen3_moe/attention_prepare_quantized.loom` | None |
 | 5 | `qwen3_moe_router_projection_top8_fused_decode_f32` | `qwen3_moe/router_projection_top8_fused_f32.loom`, using `qwen3_moe/router_projection_f32.loom` and `qwen3_moe/router_top8_f32.loom` | `router_projection_top8_fused_bringup_workaround.loom` |
@@ -156,7 +156,10 @@ these canonical families:
   `qwen3_moe/attention_postprocess_f32_f16.loom`;
 - `qwen3_moe_flash_attention_f32_f16_wmma` from
   `qwen3_moe/flash_attention_f32_f16_wmma.loom`; the current runtime applies
-  `flash_attention_bringup_workaround.py`, which is not a porting source;
+  `flash_attention_bringup_workaround.py`, which is not a porting source. The
+  canonical pure-tail multirow path currently corrupts nonleading query rows;
+  contexts below one 64-token key tile temporarily record the proven one-row
+  specialization once per query row;
 - `qwen3_moe_router_projection_f32_four_row_wave32` and
   `qwen3_moe_router_top8_f32` from their correspondingly named canonical
   files; the current runtime uses the correspondingly named Qwen workaround
@@ -229,7 +232,10 @@ shape-dependent families:
   normalization, RoPE, and K/V cache publication; ordinary one-token layer
   programs retain separate quantized projection and postprocess dispatches.
 - FlashAttention uses fused split-K execution for full-model decode and the
-  general grouped-query kernel for prefill and layer programs.
+  general grouped-query kernel for prefill and layer programs. Until the
+  canonical pure-tail multirow path is fixed, contexts below one 64-token key
+  tile reuse that general kernel's one-row specialization and record one
+  dispatch per query row.
 - Attention output uses the direct Q8_1 x4 Q4_K contraction for one-token
   shapes and the F16 WMMA contraction for larger shapes. Full-model decode
   extends that direct contraction with last-arrival publication of the
@@ -277,8 +283,9 @@ not copied wholesale into a second kernel corpus.
 | `routed_down_q4_next_q8_bringup_workaround.loom` | `qwen3_moe/routed_down_q4k.loom` | Exact decode dimensions do not reach source-to-low, so the eight-iteration route loop cannot be unrolled. The one-function fork delegates contraction and residual arithmetic to the canonical body, then retains the canonical last-arrival next-row publication. |
 | `routed_down_q6_next_q8_bringup_workaround.loom` | `qwen3_moe/routed_down_q6k.loom` | The same source-to-low specialization gap blocks the storage-selected Q6_K direct route. The one-function fork delegates the contraction while making only the model dimensions structural and retaining next-row publication. |
 | `linear_q6k_q8_1_x4_bringup_workaround.loom` | `ggml/linear_q6k_q8_1_x4.loom` | A guarded tail store loses its channel bound during address planning. The one-row fork uses a safe masked weight channel and narrows generic maxima to hidden width 2048 and vocabulary size 151936. Its endpoint export shares that contraction and publishes one deterministic maximum pair per eight logits. |
-| `flash_attention_decode_split_bringup_workaround.loom` | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` | Exact context 513 does not reach reducer-template selection or launch topology analysis. The fork carries that exact range to the canonical template applications and makes only the `9 x 4 x 1` launch structural. |
+| `flash_attention_decode_split_bringup_workaround.loom` | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` | Exact context workloads do not reach reducer-template selection, launch topology, dynamic view bounds, or address-width analysis. The adapter carries the exact runtime value as temporary config, applies the canonical producer, and directly selects the canonical cooperative reducer without copying either body. |
 | `flash_attention_bringup_workaround.py` | `qwen3_moe/flash_attention_f32_f16_wmma.loom` | Bounded subtraction facts are lost in full-tile and tail paths, and a dynamic zero-or-capacity workgroup allocation violates the fixed-frame contract. The exact-text patch expresses tails as remainders, introduces the path-local lower bound, and reserves the full 8192-byte tail stage inside the resulting 23808-byte LDS frame. |
+| Runtime pure-tail row-by-row recording | `qwen3_moe/flash_attention_f32_f16_wmma.loom` | The canonical multirow specialization corrupts nonleading query rows when the context consists entirely of a key-tile tail. The same canonical kernel specialized for one query row is exact, so the command buffer temporarily records that specialization once per prompt row without introducing another Loom source. |
 | `token_embedding_bringup_workaround.loom` | No corpus provider yet | Fixed Q4_K GGUF row decoding into the 2048-wide F32 hidden layout. This is endpoint glue, not an assumption repair. |
 | `attention_metadata_bringup_workaround.loom` | No corpus provider yet | Direct no-ring K/V indices, positions, and dense causal-mask construction from one context-base word. This is request-policy glue, not an assumption repair. |
 | `greedy_argmax_bringup_workaround.loom` | No corpus provider yet | Compact finalization over 18992 finite F32/I32 maximum pairs with lowest-token tie breaking. This is endpoint glue, not an assumption repair. |

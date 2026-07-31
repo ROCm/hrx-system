@@ -36,6 +36,28 @@ execution:
 5. exercise that same runtime path from a CLI smoke and a filterable
    `Qwen/Layer0/Prefill/512` benchmark row.
 
+The `qwen-cli` target is the text-generation owner. It loads a matching
+HuggingFace `tokenizer.json`, applies the ordinary Qwen system/user/assistant
+chat form, uploads the encoded prompt once, and streams greedily selected UTF-8
+until EOS or `--max_tokens`. Each full-model issue publishes its selected
+token into device-local request input before signaling completion. The host
+reads a separate observation copy for text and EOS only; decode never waits on
+a host token upload.
+
+```sh
+build_tools/bin/iree-bazel-run //experimental/qwen/binding/cli:qwen-cli -- \
+  --device=amdgpu://0 \
+  --parameters=/path/to/Qwen3-30B-A3B-Q4_K_M.gguf \
+  --tokenizer=/path/to/Qwen3-30B-A3B/tokenizer.json \
+  --prompt='Reply with one word: hello' \
+  --max_tokens=16
+```
+
+The bring-up generation lane currently prepares one exact reusable program per
+decode position and is bounded to context 2048 by the cooperative
+decode-attention adapter. Program reuse across a capacity bucket is a separate
+runtime optimization; it does not change token ownership.
+
 ## Temporary bring-up workarounds
 
 `kernels/flash_attention_bringup_workaround.py` is an explicitly
@@ -93,11 +115,26 @@ It is not a kernel framework or a generator and must not accumulate alternate
 indexing policies. Delete it when the canonical producer lands.
 
 `kernels/flash_attention_decode_split_bringup_workaround.loom` retains the
-canonical split-K decode ABI and both canonical template applications. It makes
-the exact context-513 range and `9 x 4 x 1` launch structural because those
-workload facts do not reach template selection or topology analysis. It
-contains no attention algorithm body and is deleted when the unmodified public
-kernel specializes correctly.
+canonical split-K decode ABI and algorithm bodies. The runtime temporarily
+binds each exact context count as `qwen.decode.key_value_token_count` because
+positional workload facts do not reach template selection, topology, and
+address analysis. The adapter uses that exact config for launch evaluation,
+applies the canonical producer, and directly calls the canonical cooperative
+reducer. It contains no attention algorithm body or generated variants and is
+deleted when the unmodified public kernel specializes correctly.
+
+Pure-tail prompt attention currently uses a second, explicitly temporary
+runtime workaround: contexts below the 64-token key tile are recorded as one
+canonical general-attention dispatch per query row. There is no alternate Loom
+source for this path. The multirow specialization corrupts nonleading query
+rows, while the same kernel specialized for one row matches the real layer-0
+oracle. On the 14-token chat prompt, row-by-row recording reduced the
+post-attention maximum absolute error from 0.183716 to 0.000976562, reduced the
+complete-layer maximum absolute error to 0.000900745, and reproduced eight
+greedy reference token IDs exactly. This non-sanctioned schedule adds one
+dispatch per prompt row per layer; prefill-512 and split-K decode retain their
+established schedules. Delete it when the canonical pure-tail multirow path
+passes the same differential.
 
 The three direct feed-forward forks
 `kernels/routed_gate_up_next_q8_bringup_workaround.loom`,
