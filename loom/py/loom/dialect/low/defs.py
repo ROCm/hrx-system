@@ -521,7 +521,7 @@ low_func_def = Op(
     ],
     examples=[
         "low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {\n  %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>\n  low.return %sum : reg<amdgpu.vgpr x1>\n}",
-        "low.func.def allocation(fixed) schedule(locked) target(@gfx11_generic) @agent_authored(%lhs: reg<amdgpu.vgpr x1>) {\n  low.return\n}",
+        "low.func.def allocation(fixed) schedule(locked) target<amdgpu.gfx11.generic.core>(@gfx11_generic) @agent_authored(%lhs: reg<amdgpu.vgpr x1>) {\n  low.return\n}",
     ],
 )
 
@@ -600,7 +600,7 @@ low_func_decl = Op(
     ],
     examples=[
         "low.func.decl target<amdgpu.gfx11.generic.core>(@gfx11_generic) @extern_add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>)",
-        'low.func.decl allocation(fixed) schedule(locked) import(rocasm, "mfma_16x16_seq") target(@gfx11_generic) @mfma_rocasm(%acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>)',
+        'low.func.decl allocation(fixed) schedule(locked) import(rocasm, "mfma_16x16_seq") target<amdgpu.gfx11.generic.core>(@gfx11_generic) @mfma_rocasm(%acc: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>)',
     ],
 )
 
