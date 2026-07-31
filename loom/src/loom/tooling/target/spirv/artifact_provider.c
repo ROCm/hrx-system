@@ -29,7 +29,7 @@ static bool loom_spirv_hal_artifact_provider_bundle_is_compatible(
     void* user_data, const loom_target_entry_t* entry) {
   const loom_target_bundle_t* device_bundle =
       (const loom_target_bundle_t*)user_data;
-  const loom_target_bundle_t* bundle = &entry->bundle_storage.bundle;
+  const loom_target_bundle_t* bundle = loom_target_entry_bundle(entry);
   const loom_target_snapshot_t* snapshot = bundle->snapshot;
   const loom_target_export_plan_t* export_plan = bundle->export_plan;
   return snapshot != NULL && export_plan != NULL &&
@@ -186,7 +186,7 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_entries(
       loom_target_entry_emitter(diagnostic_emitter), arena, &emit_options,
       &storage->module, allocator);
   if (iree_status_is_ok(status) && diagnostic_emitter->error_count == 0) {
-    storage->target_bundle_storage = entries.values[0].bundle_storage;
+    storage->target_bundle_storage = entries.values[0].target_facts->storage;
     loom_target_bundle_storage_rebind(&storage->target_bundle_storage);
   }
   if (iree_status_is_ok(status) && diagnostic_emitter->error_count == 0) {
@@ -305,7 +305,7 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_artifact(
       diagnostic_emitter.error_count == 0) {
     if (options->report != NULL) {
       loom_target_compile_report_record_target_bundle(
-          options->report, &entries.values[0].bundle_storage.bundle);
+          options->report, loom_target_entry_bundle(&entries.values[0]));
     }
     status = loom_spirv_hal_artifact_provider_emit_entries(
         module, &target_options, entries, target, &diagnostic_emitter,

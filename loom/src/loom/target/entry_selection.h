@@ -58,10 +58,13 @@ typedef struct loom_target_entry_t {
   const loom_target_function_version_t* function_version;
   // Immutable effective facts selected for this function.
   const loom_target_facts_t* target_facts;
-  // Entry-owned copy of the effective target bundle. The embedded bundle
-  // points at the copied snapshot, export plan, and config.
-  loom_target_bundle_storage_t bundle_storage;
 } loom_target_entry_t;
+
+// Returns the common target bundle projected into |entry->target_facts|.
+static inline const loom_target_bundle_t* loom_target_entry_bundle(
+    const loom_target_entry_t* entry) {
+  return entry ? loom_target_facts_bundle(entry->target_facts) : NULL;
+}
 
 typedef struct loom_target_entry_list_t {
   // Arena-owned entry descriptors in module order.

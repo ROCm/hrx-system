@@ -53,7 +53,7 @@ static bool loom_amdgpu_hal_kernel_library_bundle_is_compatible(
   if (!loom_low_kernel_def_isa(entry->func.op)) {
     return false;
   }
-  const loom_target_bundle_t* bundle = &entry->bundle_storage.bundle;
+  const loom_target_bundle_t* bundle = loom_target_entry_bundle(entry);
   return bundle && bundle->snapshot && bundle->export_plan &&
          loom_amdgpu_target_facts_cast(entry->target_facts) != NULL &&
          bundle->snapshot->codegen_format ==
@@ -543,21 +543,20 @@ static iree_status_t loom_amdgpu_hal_kernel_library_prepare_kernel_plan(
     return iree_ok_status();
   }
   out_plan->low_function_op = entry->func.op;
-  entry->bundle_storage = out_plan->target.target_facts->storage;
-  loom_target_bundle_storage_rebind(&entry->bundle_storage);
+  entry->target_facts = out_plan->target.target_facts;
 
   if (report != NULL) {
     const loom_amdgpu_target_facts_t* target_facts =
         loom_amdgpu_target_facts_cast(out_plan->target.target_facts);
     IREE_ASSERT(target_facts != NULL);
     report->function_name = entry->func_name;
-    loom_target_compile_report_record_target_bundle(
-        report, &entry->bundle_storage.bundle);
+    const loom_target_bundle_t* bundle = loom_target_entry_bundle(entry);
+    loom_target_compile_report_record_target_bundle(report, bundle);
     report->lowered_symbol =
         loom_amdgpu_hal_kernel_library_symbol_name(module, entry->func_ref);
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_hal_kernel_library_record_target_snapshot_capabilities(
-            &entry->bundle_storage.bundle, entry->func_name, report));
+            bundle, entry->func_name, report));
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_hal_kernel_library_record_target_profile_capabilities(
             target_facts->identity.target,
@@ -1038,7 +1037,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_entries(
     }
     if (iree_status_is_ok(status)) {
       hsaco = iree_const_byte_span_empty();
-      out_library->target_bundle_storage = entries.values[0].bundle_storage;
+      out_library->target_bundle_storage =
+          entries.values[0].target_facts->storage;
       loom_target_bundle_storage_rebind(&out_library->target_bundle_storage);
       if (capture_target_listing &&
           iree_string_builder_size(&target_listing) != 0) {
@@ -1151,12 +1151,13 @@ iree_status_t loom_amdgpu_emit_hal_kernel_library(
       diagnostic_emitter.error_count == 0 && report != NULL) {
     if (entries.count == 1) {
       loom_target_compile_report_record_target_bundle(
-          report, &entries.values[0].bundle_storage.bundle);
+          report, loom_target_entry_bundle(&entries.values[0]));
     } else if (entries.count > 0) {
-      report->target_bundle_name = entries.values[0].bundle_storage.bundle.name;
-      if (entries.values[0].bundle_storage.bundle.snapshot != NULL) {
-        report->target_snapshot_name =
-            entries.values[0].bundle_storage.bundle.snapshot->name;
+      const loom_target_bundle_t* bundle =
+          loom_target_entry_bundle(&entries.values[0]);
+      report->target_bundle_name = bundle->name;
+      if (bundle->snapshot != NULL) {
+        report->target_snapshot_name = bundle->snapshot->name;
       }
     }
   }

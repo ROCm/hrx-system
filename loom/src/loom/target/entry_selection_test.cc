@@ -178,14 +178,10 @@ func.def public target(@generic) @entry() {
       SelectNamedEntry(module.get(), IREE_SV("entry"), &function_versions);
   EXPECT_EQ(entry.function_version, &function_version);
   EXPECT_EQ(entry.target_facts, effective_facts);
-  EXPECT_EQ(entry.bundle_storage.snapshot.subgroup_size, 7u);
-  EXPECT_TRUE(iree_string_view_equal(entry.bundle_storage.bundle.name,
-                                     IREE_SV("test-quirky")));
-  EXPECT_EQ(entry.bundle_storage.bundle.snapshot,
-            &entry.bundle_storage.snapshot);
-  EXPECT_EQ(entry.bundle_storage.bundle.export_plan,
-            &entry.bundle_storage.export_plan);
-  EXPECT_EQ(entry.bundle_storage.bundle.config, &entry.bundle_storage.config);
+  const loom_target_bundle_t* bundle = loom_target_entry_bundle(&entry);
+  EXPECT_EQ(bundle, loom_target_facts_bundle(effective_facts));
+  EXPECT_EQ(bundle->snapshot->subgroup_size, 7u);
+  EXPECT_TRUE(iree_string_view_equal(bundle->name, IREE_SV("test-quirky")));
 }
 
 TEST_F(TargetEntrySelectionTest, RefinedVersionSelectsTargetlessFunction) {
@@ -219,8 +215,9 @@ func.def public @targetless() {
       SelectNamedEntry(module.get(), IREE_SV("targetless"), &function_versions);
   EXPECT_EQ(entry.function_version, &function_version);
   EXPECT_EQ(entry.target_facts, effective_facts);
-  EXPECT_TRUE(iree_string_view_equal(entry.bundle_storage.export_plan.name,
-                                     IREE_SV("targetless")));
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_target_entry_bundle(&entry)->export_plan->name,
+      IREE_SV("targetless")));
 }
 
 }  // namespace

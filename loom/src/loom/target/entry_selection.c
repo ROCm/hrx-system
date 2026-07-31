@@ -270,12 +270,6 @@ static void loom_target_entry_from_facts(
   };
 }
 
-static void loom_target_entry_assign_entry(const loom_target_entry_t* source,
-                                           loom_target_entry_t* out_entry) {
-  *out_entry = *source;
-  loom_target_bundle_storage_rebind(&out_entry->bundle_storage);
-}
-
 static iree_status_t loom_target_entry_emit_missing_target_record(
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     const loom_op_t* op, iree_string_view_t pipeline_name,
@@ -291,7 +285,7 @@ static iree_status_t loom_target_entry_emit_missing_target_record(
 static iree_status_t loom_target_entry_emit_incompatible_bundle(
     loom_target_entry_diagnostic_emitter_t* diagnostic_emitter,
     const loom_target_entry_t* entry, iree_string_view_t pipeline_name) {
-  const loom_target_bundle_t* bundle = &entry->bundle_storage.bundle;
+  const loom_target_bundle_t* bundle = loom_target_entry_bundle(entry);
   const loom_target_snapshot_t* snapshot = bundle->snapshot;
   const loom_target_export_plan_t* export_plan = bundle->export_plan;
   const loom_target_config_t* config = bundle->config;
@@ -397,8 +391,6 @@ static iree_status_t loom_target_entry_try_entry(
   if (!contract_valid) {
     return iree_ok_status();
   }
-  entry.bundle_storage = entry.target_facts->storage;
-  loom_target_bundle_storage_rebind(&entry.bundle_storage);
   if (!predicate.fn(predicate.user_data, &entry)) {
     if (!require_compatible) {
       return iree_ok_status();
@@ -408,7 +400,7 @@ static iree_status_t loom_target_entry_try_entry(
     return iree_ok_status();
   }
 
-  loom_target_entry_assign_entry(&entry, out_entry);
+  *out_entry = entry;
   *out_compatible = true;
   return iree_ok_status();
 }
@@ -459,7 +451,7 @@ static iree_status_t loom_target_entry_select_single_entry(
     }
     ++candidate_count;
     if (candidate_count == 1) {
-      loom_target_entry_assign_entry(&candidate, out_entry);
+      *out_entry = candidate;
     }
   }
 
@@ -550,7 +542,7 @@ iree_status_t loom_target_entry_select_all_entries(
                               "exported compatible entries",
                               (int)entry_kind.size, entry_kind.data);
     }
-    loom_target_entry_assign_entry(&candidate, &entries[entry_count++]);
+    entries[entry_count++] = candidate;
   }
 
   if (entry_count == 0) {
