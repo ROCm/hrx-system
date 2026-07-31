@@ -116,6 +116,42 @@ endif()
 if(IREE_HAL_DRIVER_VULKAN AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
 loom_cc_test(
   NAME
+    module_emitter_test
+  SRCS
+    "module_emitter_test.cc"
+  DEPS
+    ::vulkan_profile
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbol_facts
+    loom::codegen::low::text_asm
+    loom::format::text::parser
+    loom::ir
+    loom::ops::func_symbol_facts
+    loom::ops::op_defs
+    loom::ops::op_registry
+    loom::ops::target
+    loom::target::arch::spirv::descriptors::low_registry
+    loom::target::arch::spirv::features
+    loom::target::arch::spirv::ops
+    loom::target::arch::spirv::profile
+    loom::target::emit::spirv::module_emitter
+    loom::target::facts_builder
+    loom::target::function_contract
+    loom::target::function_version
+    loom::target::profile
+    loom::target::types
+    loom::testing::module_ptr
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
+    "iree-build-requirement=loom.emit.spirv"
+)
+endif()
+
+if(IREE_HAL_DRIVER_VULKAN AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)
+loom_cc_test(
+  NAME
     vulkan_profile_test
   SRCS
     "vulkan_profile_test.cc"

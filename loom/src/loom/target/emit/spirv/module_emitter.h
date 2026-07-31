@@ -17,6 +17,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/error/emitter.h"
+#include "loom/ir/function_version.h"
 #include "loom/ir/ir.h"
 #include "loom/target/emit/spirv/module_builder.h"
 #include "loom/target/low_descriptor_registry.h"
@@ -27,6 +28,9 @@ extern "C" {
 #endif
 
 typedef struct loom_spirv_emit_low_module_options_t {
+  // Optional compiler-owned function versions participating in emission. The
+  // list and its version objects are borrowed for the call.
+  const loom_function_version_list_t* function_versions;
   // Selected target-low function ops to emit. NULL emits every target-low
   // function definition in the module.
   loom_op_t* const* entry_ops;

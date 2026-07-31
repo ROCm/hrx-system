@@ -172,6 +172,7 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_entries(
   }
   loom_spirv_emit_low_module_options_t emit_options = {0};
   loom_spirv_emit_low_module_options_initialize(&emit_options);
+  emit_options.function_versions = target_options->function_versions;
   emit_options.entry_ops = entry_ops;
   emit_options.entry_count = entries.count;
 
