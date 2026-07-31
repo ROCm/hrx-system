@@ -167,7 +167,7 @@ kernel.def @f32_bits_to_bf8_bytes(%row_count: index) {
 }
 
 check.case public @f32_to_fp8_random_case {
-  %row_count = check.param.choice values([257]) name("row_count") : index
+  %row_count = check.literal value(257) : index
   %seed = check.param.seed base(0x463332465038) count(1) : i64
   %input = check.generate.random.uniform seed(%seed) range(-1024.0 to 1024.0) : tensor<[%row_count]x4xf32>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E4M3>
@@ -178,7 +178,7 @@ check.case public @f32_to_fp8_random_case {
 }
 
 check.case public @f32_to_fp8_subnormal_case {
-  %row_count = check.param.choice values([257]) name("row_count") : index
+  %row_count = check.literal value(257) : index
   %seed = check.param.seed base(0x4633324650385355) count(1) : i64
   %input = check.generate.random.uniform seed(%seed) range(-0.02 to 0.02) : tensor<[%row_count]x4xf32>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E4M3>
@@ -189,7 +189,7 @@ check.case public @f32_to_fp8_subnormal_case {
 }
 
 check.case public @f32_to_bf8_random_case {
-  %row_count = check.param.choice values([257]) name("row_count") : index
+  %row_count = check.literal value(257) : index
   %seed = check.param.seed base(0x463332424638) count(1) : i64
   %input = check.generate.random.uniform seed(%seed) range(-100000.0 to 100000.0) : tensor<[%row_count]x4xf32>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E5M2>
@@ -200,7 +200,7 @@ check.case public @f32_to_bf8_random_case {
 }
 
 check.case public @f32_to_bf8_subnormal_case {
-  %row_count = check.param.choice values([257]) name("row_count") : index
+  %row_count = check.literal value(257) : index
   %seed = check.param.seed base(0x4633324246385355) count(1) : i64
   %input = check.generate.random.uniform seed(%seed) range(-0.0001 to 0.0001) : tensor<[%row_count]x4xf32>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E5M2>
@@ -213,7 +213,7 @@ check.case public @f32_to_bf8_subnormal_case {
 check.case public @f16_to_bf8_case {
   // Power-of-two steps are exactly representable in F16, including BF8
   // subnormal ties at half of one BF8 subnormal quantum.
-  %row_count = check.param.choice values([129]) name("row_count") : index
+  %row_count = check.literal value(129) : index
   %input = check.generate.iota offset(-0.001953125) step(0.00000762939453125) : tensor<[%row_count]x4xf16>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E5M2>
   %expected = check.generate.iota offset(-0.001953125) step(0.00000762939453125) : tensor<[%row_count]x4xf8E5M2>
@@ -224,7 +224,7 @@ check.case public @f16_to_bf8_case {
 
 check.case public @bf16_to_fp8_case {
   // Multiples of two in this range are exactly representable in BF16.
-  %row_count = check.param.choice values([129]) name("row_count") : index
+  %row_count = check.literal value(129) : index
   %input = check.generate.iota offset(-448.0) step(2.0) : tensor<[%row_count]x4xbf16>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E4M3>
   %expected = check.generate.iota offset(-448.0) step(2.0) : tensor<[%row_count]x4xf8E4M3>
@@ -234,7 +234,7 @@ check.case public @bf16_to_fp8_case {
 }
 
 check.case public @fp8_special_payload_case {
-  %row_count = check.param.choice values([1]) name("row_count") : index
+  %row_count = check.literal value(1) : index
 
   %positive_infinity = check.generate.fill value(2139095040) : tensor<[%row_count]x4xi32>
   %positive_infinity_output = check.generate.fill value(0) : tensor<[%row_count]x4xi8>
@@ -276,7 +276,7 @@ check.case public @fp8_special_payload_case {
 }
 
 check.case public @bf8_special_payload_case {
-  %row_count = check.param.choice values([1]) name("row_count") : index
+  %row_count = check.literal value(1) : index
 
   %positive_infinity = check.generate.fill value(2139095040) : tensor<[%row_count]x4xi32>
   %positive_infinity_output = check.generate.fill value(0) : tensor<[%row_count]x4xi8>
@@ -316,12 +316,3 @@ check.case public @bf8_special_payload_case {
   check.expect.equal actual(%positive_zero_tie_output) expected(%positive_zero_tie_expected) : tensor<[%row_count]x4xi8>
   check.return
 }
-
-check.benchmark<@f32_to_fp8_random_case>
-check.benchmark<@f32_to_fp8_subnormal_case>
-check.benchmark<@f32_to_bf8_random_case>
-check.benchmark<@f32_to_bf8_subnormal_case>
-check.benchmark<@f16_to_bf8_case>
-check.benchmark<@bf16_to_fp8_case>
-check.benchmark<@fp8_special_payload_case>
-check.benchmark<@bf8_special_payload_case>

@@ -10,21 +10,6 @@
 iree_add_all_subdirs()
 
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-iree_execution_test_suite(
-  NAME
-    mxfp4_decode_bf16_compile_test
-  MANIFESTS
-    "mxfp4_decode_bf16.test.json"
-  TOOLS
-    "loom-compile=loom::tools::loom-compile"
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/mxfp4_decode_bf16.loom"
-  LABELS
-    "hostonly"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 iree_native_test(
   NAME
     "ffn_gate_up_swiglu_q6q8_plan_test"
@@ -43,86 +28,6 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 iree_native_test(
   NAME
-    "fragment_repack_bf16_plan_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fragment_repack_bf16.loom}}"
-    "--dry-run"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fragment_repack_bf16.loom"
-  LABELS
-    "hostonly"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-iree_native_test(
-  NAME
-    "fp8_encode_plan_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fp8_encode.loom}}"
-    "--dry-run"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fp8_encode.loom"
-  LABELS
-    "hostonly"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-iree_native_test(
-  NAME
-    "fp8_finite_storage_decode_plan_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fp8_finite_storage_decode.loom}}"
-    "--dry-run"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fp8_finite_storage_decode.loom"
-  LABELS
-    "hostonly"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-iree_native_test(
-  NAME
-    "gfx11_wmma_families_plan_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/gfx11_wmma_families.loom}}"
-    "--dry-run"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/gfx11_wmma_families.loom"
-  LABELS
-    "hostonly"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-iree_native_test(
-  NAME
-    "gfx9_4_mfma_families_plan_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/gfx9_4_mfma_families.loom}}"
-    "--dry-run"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/gfx9_4_mfma_families.loom"
-  LABELS
-    "hostonly"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-iree_native_test(
-  NAME
     "indexed_row_gather_f32_plan_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/indexed_row_gather_f32.loom}}"
@@ -131,22 +36,6 @@ iree_native_test(
     loom::tools::iree-benchmark-loom
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/indexed_row_gather_f32.loom"
-  LABELS
-    "hostonly"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-iree_native_test(
-  NAME
-    "loop_carried_lane_liveness_plan_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/loop_carried_lane_liveness.loom}}"
-    "--dry-run"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/loop_carried_lane_liveness.loom"
   LABELS
     "hostonly"
 )
@@ -184,22 +73,6 @@ iree_native_test(
 )
 endif()
 
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
-iree_native_test(
-  NAME
-    "mxfp4_decode_bf16_plan_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/mxfp4_decode_bf16.loom}}"
-    "--dry-run"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/mxfp4_decode_bf16.loom"
-  LABELS
-    "hostonly"
-)
-endif()
-
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
@@ -229,141 +102,6 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
-    "fragment_repack_bf16_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fragment_repack_bf16.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--sample-compilation=per_sample"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fragment_repack_bf16.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "fp8_encode_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fp8_encode.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--sample-compilation=per_sample"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fp8_encode.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "fp8_finite_storage_decode_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fp8_finite_storage_decode.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--sample-compilation=per_sample"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/fp8_finite_storage_decode.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "gfx11_wmma_families_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/gfx11_wmma_families.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--sample-compilation=per_sample"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/gfx11_wmma_families.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "gfx9_4_mfma_families_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/gfx9_4_mfma_families.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--sample-compilation=per_sample"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/gfx9_4_mfma_families.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
     "indexed_row_gather_f32_amdgpu_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/indexed_row_gather_f32.loom}}"
@@ -380,33 +118,6 @@ iree_native_test(
     loom::tools::iree-benchmark-loom
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/indexed_row_gather_f32.loom"
-  LABELS
-    "iree-run-requirement=runtime.resource.amd_gpu"
-    "manual"
-    "requires-gpu-amd"
-    "runtime-resource=amd-gpu"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
-iree_native_test(
-  NAME
-    "loop_carried_lane_liveness_amdgpu_test"
-  ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/loop_carried_lane_liveness.loom}}"
-    "--device=amdgpu"
-    "--measure=dispatch_complete"
-    "--sample-compilation=per_sample"
-    "--iterations=1"
-    "--warmup-iterations=0"
-    "--batch-size=1"
-    "--min-time-ms=0"
-    "--max-batches=1"
-    "--input-ring-count=1"
-  SRC
-    loom::tools::iree-benchmark-loom
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/loop_carried_lane_liveness.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "manual"

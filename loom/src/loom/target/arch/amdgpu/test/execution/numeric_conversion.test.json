@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "executes exact FP8 encoding cases",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/fp8_encode.loom",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case_count\":8",
+            "\"sample_count\":8",
+            "\"failed_sample_count\":0",
+            "\"skipped_case_count\":0",
+            "\"planning_issue_count\":0"
+          ]
+        }
+      }
+    },
+    {
+      "name": "executes exact group-scaled FP4 decode cases",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/mxfp4_decode_bf16.loom",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case_count\":1",
+            "\"sample_count\":1",
+            "\"failed_sample_count\":0",
+            "\"skipped_case_count\":0",
+            "\"planning_issue_count\":0",
+            "\"expectation_count\":13"
+          ]
+        }
+      }
+    }
+  ]
+}

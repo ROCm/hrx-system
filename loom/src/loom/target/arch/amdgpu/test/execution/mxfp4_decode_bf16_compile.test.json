@@ -2,12 +2,12 @@
   "version": 1,
   "cases": [
     {
-      "name": "compiles portable MXFP4 decode for gfx942",
+      "name": "compiles group-scaled FP4 decode for gfx942",
       "run": {
         "tool": "loom-compile",
         "args": [
           "{srcdir}/mxfp4_decode_bf16.loom",
-          "--root=@decode_mxfp4_group_bits_gfx9_4",
+          "--root=@decode_mxfp4_group_bits",
           "--backend=amdgpu-hal",
           "--target=gfx942",
           "--output={tmp}/gfx942.vmfb",
@@ -26,12 +26,12 @@
       ]
     },
     {
-      "name": "compiles MXFP4 decode for gfx950",
+      "name": "compiles group-scaled FP4 decode for gfx950",
       "run": {
         "tool": "loom-compile",
         "args": [
           "{srcdir}/mxfp4_decode_bf16.loom",
-          "--root=@decode_mxfp4_group_bits_gfx950",
+          "--root=@decode_mxfp4_group_bits",
           "--backend=amdgpu-hal",
           "--target=gfx950",
           "--output={tmp}/gfx950.vmfb",
@@ -50,12 +50,12 @@
       ]
     },
     {
-      "name": "compiles portable MXFP4 decode for gfx1100",
+      "name": "compiles group-scaled FP4 decode for gfx1100",
       "run": {
         "tool": "loom-compile",
         "args": [
           "{srcdir}/mxfp4_decode_bf16.loom",
-          "--root=@decode_mxfp4_group_bits_gfx11",
+          "--root=@decode_mxfp4_group_bits",
           "--backend=amdgpu-hal",
           "--target=gfx1100",
           "--output={tmp}/gfx1100.vmfb",
@@ -74,12 +74,12 @@
       ]
     },
     {
-      "name": "compiles portable MXFP4 decode for gfx1151",
+      "name": "compiles group-scaled FP4 decode for gfx1151",
       "run": {
         "tool": "loom-compile",
         "args": [
           "{srcdir}/mxfp4_decode_bf16.loom",
-          "--root=@decode_mxfp4_group_bits_gfx11",
+          "--root=@decode_mxfp4_group_bits",
           "--backend=amdgpu-hal",
           "--target=gfx1151",
           "--output={tmp}/gfx1151.vmfb",
@@ -98,12 +98,12 @@
       ]
     },
     {
-      "name": "compiles portable MXFP4 decode for gfx1200",
+      "name": "compiles group-scaled FP4 decode for gfx1200",
       "run": {
         "tool": "loom-compile",
         "args": [
           "{srcdir}/mxfp4_decode_bf16.loom",
-          "--root=@decode_mxfp4_group_bits_gfx12",
+          "--root=@decode_mxfp4_group_bits",
           "--backend=amdgpu-hal",
           "--target=gfx1200",
           "--output={tmp}/gfx1200.vmfb",
@@ -122,12 +122,12 @@
       ]
     },
     {
-      "name": "compiles portable MXFP4 decode for gfx1201",
+      "name": "compiles group-scaled FP4 decode for gfx1201",
       "run": {
         "tool": "loom-compile",
         "args": [
           "{srcdir}/mxfp4_decode_bf16.loom",
-          "--root=@decode_mxfp4_group_bits_gfx12",
+          "--root=@decode_mxfp4_group_bits",
           "--backend=amdgpu-hal",
           "--target=gfx1201",
           "--output={tmp}/gfx1201.vmfb",
@@ -146,12 +146,12 @@
       ]
     },
     {
-      "name": "compiles MXFP4 decode for gfx1250",
+      "name": "compiles group-scaled FP4 decode for gfx1250",
       "run": {
         "tool": "loom-compile",
         "args": [
           "{srcdir}/mxfp4_decode_bf16.loom",
-          "--root=@decode_mxfp4_group_bits_gfx12_5",
+          "--root=@decode_mxfp4_group_bits",
           "--backend=amdgpu-hal",
           "--target=gfx1250",
           "--output={tmp}/gfx1250.vmfb",
