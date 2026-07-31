@@ -332,6 +332,14 @@ static iree_status_t qwen_generation_cli_run(void) {
         host_allocator, &runtime_context);
   }
 
+  // Generation profiling includes model residency and program preparation so a
+  // single capture describes the complete text-to-text lifecycle.
+  iree_hal_profiling_from_flags_t* profiling = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_begin_device_group_profiling_from_flags(
+        runtime_context.device_group, host_allocator, &profiling);
+  }
+
   iree_hal_semaphore_t* timeline = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_create(
@@ -497,6 +505,10 @@ static iree_status_t qwen_generation_cli_run(void) {
 
   status = qwen_generation_cli_wait_for_model_ready_workaround(status, model,
                                                                &model_ready);
+  if (profiling) {
+    status =
+        iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
+  }
   qwen_request_release(request);
   qwen_generation_cli_release_decode_programs(decode_programs);
   qwen_program_release(prefill_program);
