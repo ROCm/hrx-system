@@ -123,7 +123,7 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
                                        descriptor_set->key_string_offset),
         &representation_contract));
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &module_builder, /*build_flags=*/0,
+        &module_builder, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
         /*visibility=*/0, /*retain=*/0, /*cc=*/0,
         /*purity=*/0,
         /*allocation=*/0, /*schedule=*/0,

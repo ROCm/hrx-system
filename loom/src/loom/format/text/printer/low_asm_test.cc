@@ -259,6 +259,20 @@ TEST_F(LowAsmPrinterTest, FunctionRepresentationContractSelectsDescriptorSet) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmPrinterTest,
+       TargetlessFunctionRepresentationContractSelectsDescriptorSet) {
+  const char* source =
+      "low.func.def target<test.low.alt> @constant() -> "
+      "(reg<test.i32>) asm {\n"
+      "  %value = test.alt.const.i32 11\n"
+      "  return %value\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module, IREE_SV("test.low.core")), source);
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmPrinterTest, PrintsMixedFunctionRepresentationContracts) {
   const char* source =
       "test.target<low_core> @test_target\n"

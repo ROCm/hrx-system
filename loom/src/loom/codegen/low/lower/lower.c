@@ -234,9 +234,10 @@ static void loom_low_lower_assert_options(
   IREE_ASSERT(options != NULL);
   IREE_ASSERT(source_function.op->kind == LOOM_OP_FUNC_DEF ||
               source_function.op->kind == LOOM_OP_KERNEL_DEF);
-  IREE_ASSERT(loom_symbol_ref_is_valid(options->target_ref));
-  IREE_ASSERT_EQ(options->target_ref.module_id, 0);
-  IREE_ASSERT_LT(options->target_ref.symbol_id, module->symbols.count);
+  if (loom_symbol_ref_is_valid(options->target_ref)) {
+    IREE_ASSERT_EQ(options->target_ref.module_id, 0);
+    IREE_ASSERT_LT(options->target_ref.symbol_id, module->symbols.count);
+  }
   IREE_ASSERT(options->target_facts != NULL);
   IREE_ASSERT(options->bundle != NULL);
   IREE_ASSERT(options->bundle->snapshot != NULL);
@@ -1862,6 +1863,9 @@ static iree_status_t loom_low_lower_create_func_op(
   if (export_symbol != LOOM_STRING_ID_INVALID) {
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL;
   }
+  if (loom_symbol_ref_is_valid(context->options->target_ref)) {
+    build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET;
+  }
   uint8_t retain = 0;
   if (loom_low_lower_source_is_retained(context->module,
                                         context->source_function)) {
@@ -1909,6 +1913,9 @@ static iree_status_t loom_low_lower_create_kernel_op(
   if (loom_func_like_export_linkage(context->source_function,
                                     &export_linkage)) {
     build_flags |= LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_EXPORT_LINKAGE;
+  }
+  if (loom_symbol_ref_is_valid(context->options->target_ref)) {
+    build_flags |= LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_TARGET;
   }
 
   loom_target_workgroup_size_t workgroup_size = {0};
@@ -2159,6 +2166,9 @@ iree_status_t loom_low_lower_import_declaration(
     }
     if (export_symbol != LOOM_STRING_ID_INVALID) {
       build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL;
+    }
+    if (loom_symbol_ref_is_valid(options->target_ref)) {
+      build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_TARGET;
     }
     uint8_t retain = 0;
     if (loom_low_lower_source_is_retained(module, source_declaration)) {

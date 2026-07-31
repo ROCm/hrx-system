@@ -207,6 +207,7 @@ _FUNC_COMMON_ATTRS = [
     AttrDef(
         "target",
         "symbol",
+        optional=True,
         symbol_ref=SymbolReference("target", ["target"]),
     ),
     AttrDef(
@@ -239,6 +240,7 @@ _KERNEL_COMMON_ATTRS = [
     AttrDef(
         "target",
         "symbol",
+        optional=True,
         symbol_ref=SymbolReference("target", ["target"]),
     ),
     AttrDef(
@@ -296,14 +298,13 @@ _LOW_EXACTNESS_FORMAT: list[FormatElement] = [
     ),
 ]
 
-_FUNC_TARGET_FORMAT: list[FormatElement] = [
+_LOW_TARGET_FORMAT: list[FormatElement] = [
     kw("target"),
     KeyRef("descriptor_set"),
-    GLUE,
-    LPAREN,
-    SymbolRef("target"),
-    GLUE,
-    RPAREN,
+    OptionalGroup(
+        [GLUE, LPAREN, SymbolRef("target"), GLUE, RPAREN],
+        anchor="target",
+    ),
 ]
 
 _FUNC_ABI_FORMAT: list[FormatElement] = [
@@ -507,7 +508,7 @@ low_func_def = Op(
     ],
     format=[
         *_FUNC_MODIFIER_FORMAT,
-        *_FUNC_TARGET_FORMAT,
+        *_LOW_TARGET_FORMAT,
         *_FUNC_ABI_FORMAT,
         *_KERNEL_ABI_LAYOUT_FORMAT,
         *_FUNC_EXPORT_FORMAT,
@@ -516,6 +517,7 @@ low_func_def = Op(
     ],
     examples=[
         "low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic) @add(%lhs: reg<amdgpu.vgpr x1>, %rhs: reg<amdgpu.vgpr x1>) -> (reg<amdgpu.vgpr x1>) {\n  %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>\n  low.return %sum : reg<amdgpu.vgpr x1>\n}",
+        "low.func.def target<amdgpu.rdna3_5.core> @invocation_bound() {\n  low.return\n}",
         "low.func.def allocation(fixed) schedule(locked) target<amdgpu.gfx11.generic.core>(@gfx11_generic) @agent_authored(%lhs: reg<amdgpu.vgpr x1>) {\n  low.return\n}",
     ],
 )
@@ -547,7 +549,7 @@ low_kernel_def = Op(
     ],
     format=[
         *_LOW_EXACTNESS_FORMAT,
-        *_FUNC_TARGET_FORMAT,
+        *_LOW_TARGET_FORMAT,
         *_KERNEL_ABI_LAYOUT_FORMAT,
         *_KERNEL_EXPORT_FORMAT,
         *_KERNEL_WORKGROUP_SIZE_FORMAT,
@@ -587,7 +589,7 @@ low_func_decl = Op(
     format=[
         *_FUNC_MODIFIER_FORMAT,
         *_FUNC_IMPORT_FORMAT,
-        *_FUNC_TARGET_FORMAT,
+        *_LOW_TARGET_FORMAT,
         *_FUNC_ABI_FORMAT,
         *_KERNEL_ABI_LAYOUT_FORMAT,
         *_FUNC_EXPORT_FORMAT,

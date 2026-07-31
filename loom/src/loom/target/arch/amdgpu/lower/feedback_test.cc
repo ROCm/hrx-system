@@ -148,7 +148,7 @@ class AmdgpuFeedbackTest : public ::testing::Test {
     loom_symbol_ref_t callee = AddSymbol(IREE_SV("test_fn"));
     loom_op_t* function_op = NULL;
     IREE_CHECK_OK(loom_low_func_def_build(
-        &builder_, /*build_flags=*/0,
+        &builder_, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET,
         /*visibility=*/0, /*retain=*/0, /*cc=*/0,
         /*purity=*/0, /*allocation=*/0, /*schedule=*/0,
         /*descriptor_set=*/representation_contract, target, /*abi=*/0,

@@ -1569,6 +1569,17 @@ class TestCrossFormatRoundTrip:
         assert symbol.op.attributes["descriptor_set"] == "test.low.core"
         assert _roundtrip_text_through_bytecode(text, include_low=True) == text
 
+    def test_targetless_low_func_contract_survives_bytecode(self) -> None:
+        text = "low.func.def target<test.low.core> @targetless() {\n  low.return\n}\n"
+
+        loaded = _parse_write_read(text, include_low=True)
+        assert len(loaded.symbols) == 1
+        symbol = loaded.symbols[0]
+        assert symbol.op is not None
+        assert symbol.op.attributes["descriptor_set"] == "test.low.core"
+        assert "target" not in symbol.op.attributes
+        assert _roundtrip_text_through_bytecode(text, include_low=True) == text
+
     def test_low_invoke_and_low_function_survive_bytecode(self) -> None:
         text = (
             "test.target<low_core> @test_target\n\n"
