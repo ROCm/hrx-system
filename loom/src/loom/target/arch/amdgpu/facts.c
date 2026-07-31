@@ -175,9 +175,18 @@ static void loom_amdgpu_target_facts_rebind(loom_target_facts_t* base_facts) {
       &facts->base, LOOM_TARGET_FACT_FIELD_CONTRACT_SET_KEY);
 }
 
+static iree_string_view_t loom_amdgpu_target_facts_identity_name(
+    const loom_target_facts_t* base_facts) {
+  const loom_amdgpu_target_facts_t* facts =
+      (const loom_amdgpu_target_facts_t*)base_facts;
+  return facts->identity.target != NULL ? facts->identity.target->name
+                                        : iree_string_view_empty();
+}
+
 const loom_target_fact_type_t loom_amdgpu_target_fact_type = {
     .name = IREE_SVL("amdgpu"),
     .storage_size = sizeof(loom_amdgpu_target_facts_t),
     .satisfies_requirement = loom_amdgpu_target_facts_satisfy_requirement,
     .rebind = loom_amdgpu_target_facts_rebind,
+    .identity_name = loom_amdgpu_target_facts_identity_name,
 };

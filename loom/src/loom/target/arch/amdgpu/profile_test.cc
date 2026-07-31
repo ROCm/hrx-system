@@ -79,6 +79,8 @@ TEST(AmdgpuTargetProfileTest, ProjectsCompilerOwnedTypedFacts) {
   EXPECT_EQ(facts->identity.target, target);
   EXPECT_EQ(facts->identity.amdhsa_features.xnack,
             profile.identity.amdhsa_features.xnack);
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_target_facts_identity_name(base_facts), IREE_SV("gfx1151")));
   EXPECT_EQ(facts->properties.target, target);
   EXPECT_EQ(facts->properties.common, &facts->base.storage.bundle);
   EXPECT_NE(facts->properties.common, profile.base.target_bundle);

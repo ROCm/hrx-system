@@ -83,6 +83,13 @@ typedef bool (*loom_target_fact_satisfies_requirement_fn_t)(
 // Rebinds family-owned views after the common fact storage changes.
 typedef void (*loom_target_fact_rebind_fn_t)(loom_target_facts_t* facts);
 
+// Returns a concise identity name derived from structured target facts.
+//
+// This is presentation-only. Target compatibility, specialization, and
+// lowering must consume the structured facts rather than comparing this name.
+typedef iree_string_view_t (*loom_target_fact_identity_name_fn_t)(
+    const loom_target_facts_t* facts);
+
 // Static type descriptor for one target-family fact representation.
 struct loom_target_fact_type_t {
   // Stable target-family name used in diagnostics and pass predicates.
@@ -96,6 +103,9 @@ struct loom_target_fact_type_t {
 
   // Optional family-owned rebind callback used only while constructing facts.
   loom_target_fact_rebind_fn_t rebind;
+
+  // Optional presentation projection for diagnostics and reports.
+  loom_target_fact_identity_name_fn_t identity_name;
 };
 
 // Typed target-neutral facts projected from available target information.
@@ -121,6 +131,20 @@ struct loom_target_facts_t {
 static inline const loom_target_bundle_t* loom_target_facts_bundle(
     const loom_target_facts_t* facts) {
   return facts ? &facts->storage.bundle : NULL;
+}
+
+// Returns a concise identity name derived from |facts|.
+//
+// Families without a structured presentation callback use the common bundle
+// name as a diagnostic fallback.
+static inline iree_string_view_t loom_target_facts_identity_name(
+    const loom_target_facts_t* facts) {
+  if (facts == NULL) {
+    return iree_string_view_empty();
+  }
+  return facts->fact_type->identity_name != NULL
+             ? facts->fact_type->identity_name(facts)
+             : facts->storage.bundle.name;
 }
 
 // Returns whether |field| was explicitly present in the authored target
