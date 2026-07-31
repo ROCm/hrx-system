@@ -32,6 +32,8 @@ typedef enum qwen_program_kind_e {
   QWEN_PROGRAM_KIND_INVALID = 0,
   // Executes one transformer layer over uploaded hidden states.
   QWEN_PROGRAM_KIND_LAYER = 1,
+  // Executes base-zero embedding, all layers, and greedy token selection.
+  QWEN_PROGRAM_KIND_PREFILL = 2,
 } qwen_program_kind_t;
 
 // Options controlling program specialization and command recording.
@@ -42,7 +44,7 @@ typedef struct qwen_program_options_t {
   const void* next;
   // Mathematical scope recorded by the program.
   qwen_program_kind_t kind;
-  // Model layer selected by a layer program.
+  // Model layer selected by a layer program; must be zero for prefill.
   iree_host_size_t layer_index;
   // Exact physical token count consumed by each issue.
   iree_host_size_t token_count;
