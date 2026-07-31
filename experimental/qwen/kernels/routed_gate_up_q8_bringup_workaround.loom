@@ -1,0 +1,119 @@
+// Temporary, non-sanctioned one-function fork for Qwen decode bring-up. This
+// is not a second kernel authoring path. Delete it when the exact workload or
+// the route_count <= route_stride relation reaches scalar footprint analysis
+// for the canonical direct gate/up kernel. The function retains the canonical
+// ABI and body while making only this model's one-token dimensions structural.
+config.decl @qwen3_moe.routed_gate_up.input_size : %value: index where [range(%value, 2048, 2048), mul(%value, 512)]
+
+func.decl @qwen3_moe_q4k_q8_1_chunk(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group: index, %q4_half: index, %q8_values: vector<16xi8>, %q8_d: f32, %q8_s: f32) -> (f32)
+
+kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 1)] : index
+  %bounded_route_count = index.assume %route_count [range(%route_count, 8, 8)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 768, 768)] : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%bounded_output_size, %bounded_route_count, %bounded_token_count) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+  %input_size = config.get @qwen3_moe.routed_gate_up.input_size : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 1)] : index
+  %bounded_route_count = index.assume %route_count [range(%route_count, 8, 8)] : index
+  %bounded_route_stride = index.assume %route_stride [range(%route_stride, 8, 8)] : index
+  %bounded_expert_count = index.assume %expert_count [range(%expert_count, 128, 128)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 768, 768)] : index
+  %channel = kernel.workgroup.id<x> : index
+  %route = kernel.workgroup.id<y> : index
+  %token = kernel.workgroup.id<z> : index
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %onetwentyeight = index.constant 128 : index
+  %twofiftysix = index.constant 256 : index
+  %fiveonetwo = index.constant 512 : index
+  %q4_block_bytes = index.constant 144 : index
+  %q8_group_bytes = index.constant 144 : offset
+  %q8_payload_byte_add = index.constant 16 : offset
+  %one_byte = index.constant 1 : offset
+  %zero_f32 = scalar.constant 0.0 : f32
+  %zero_i32 = scalar.constant 0 : i32
+  %zero_offset = index.constant 0 : offset
+  %q4_block_count = index.div %input_size, %twofiftysix : index
+  %weight_row_bytes = index.mul %q4_block_count, %q4_block_bytes : index
+  %weight_expert_bytes = index.mul %bounded_output_size, %weight_row_bytes : index
+  %route_storage_count = index.mul %bounded_token_count, %bounded_route_stride : index
+  %output_route_count = index.mul %bounded_token_count, %bounded_route_count : index
+  %output_element_count = index.mul %output_route_count, %bounded_output_size : index
+  %q8_group_count = index.div %input_size, %onetwentyeight : index
+  %q8_bytes_per_token = index.mul %q8_group_count, %q4_block_bytes : index
+  %iteration_count = index.div %input_size, %fiveonetwo : index
+  %q8_noalias, %route_ids_noalias, %gate_noalias, %up_noalias, %output_noalias = buffer.assume.noalias %q8_input, %route_ids, %gate_weight, %up_weight, %output : buffer, buffer, buffer, buffer, buffer
+  %route_ids_view = buffer.view %route_ids_noalias[%zero_offset] : buffer -> view<[%route_storage_count]xi32, #dense>
+  %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<[%output_element_count]xf32, #dense>
+  %route_token_base = index.mul %token, %bounded_route_stride : index
+  %route_id_index = index.add %route_token_base, %route : index
+  %expert_i32 = view.load %route_ids_view[%route_id_index] : view<[%route_storage_count]xi32, #dense> -> i32
+  %expert0 = index.cast %expert_i32 : i32 to index
+  %expert = index.assume %expert0 [range(%expert0, 0, 127)] : index
+  %expert_byte_base = index.mul %expert, %weight_expert_bytes : index
+  %channel_byte_add = index.mul %channel, %weight_row_bytes : index
+  %row_byte_index = index.add %expert_byte_base, %channel_byte_add : index
+  %row_byte_base = index.scale %row_byte_index, %one_byte : index, offset -> offset
+  %q8_token_byte_index = index.mul %token, %q8_bytes_per_token : index
+  %q8_token_byte_base = index.scale %q8_token_byte_index, %one_byte : index, offset -> offset
+  %q4_group0 = index.div %lane, %two : index
+  %q4_group1 = index.rem %q4_group0, %eight : index
+  %q4_group = index.assume %q4_group1 [range(%q4_group1, 0, 7)] : index
+  %q4_half0 = index.rem %lane, %two : index
+  %q4_half = index.assume %q4_half0 [range(%q4_half0, 0, 1)] : index
+  %lane_q4_block = index.div %lane, %sixteen : index
+  %lane_q8_group = index.div %lane, %eight : index
+  %q8_inner_block0 = index.div %lane, %two : index
+  %q8_inner_block1 = index.rem %q8_inner_block0, %four : index
+  %q8_inner_block = index.assume %q8_inner_block1 [range(%q8_inner_block1, 0, 3)] : index
+  %q8_inner_word_base = index.mul %q8_inner_block, %eight : index
+  %q8_half_word_add = index.mul %q4_half, %four : index
+  %q8_word_index0 = index.add %q8_inner_word_base, %q8_half_word_add : index
+  %q8_word_index = index.assume %q8_word_index0 [range(%q8_word_index0, 0, 28)] : index
+  %q8_ds_index = index.mul %q8_inner_block, %two : index
+  %q8_s_index = index.add %q8_ds_index, %one : index
+  %gate_acc, %up_acc = scf.for %iteration = [%zero to %iteration_count step %one](%gate_iter = %zero_f32 : f32, %up_iter = %zero_f32 : f32) -> (f32, f32) unroll {
+    %iteration_q4_block = index.mul %iteration, %two : index
+    %q4_block = index.add %iteration_q4_block, %lane_q4_block : index
+    %iteration_q8_group = index.mul %iteration, %four : index
+    %q8_group = index.add %iteration_q8_group, %lane_q8_group : index
+    %q8_group_byte_add = index.scale %q8_group, %q8_group_bytes : index, offset -> offset
+    %q8_group_byte_base = index.add %q8_token_byte_base, %q8_group_byte_add : offset
+    %q8_payload_byte_base = index.add %q8_group_byte_base, %q8_payload_byte_add : offset
+    %q8_ds_view = buffer.view %q8_noalias[%q8_group_byte_base] : buffer -> view<8xf16, #dense>
+    %q8_words_view = buffer.view %q8_noalias[%q8_payload_byte_base] : buffer -> view<32xi32, #dense>
+    %q8_d_f16 = view.load %q8_ds_view[%q8_ds_index] : view<8xf16, #dense> -> f16
+    %q8_s_f16 = view.load %q8_ds_view[%q8_s_index] : view<8xf16, #dense> -> f16
+    %q8_d = scalar.extf %q8_d_f16 : f16 to f32
+    %q8_s = scalar.extf %q8_s_f16 : f16 to f32
+    %q8_words = vector.load %q8_words_view[%q8_word_index] : view<32xi32, #dense> -> vector<4xi32>
+    %q8_values = vector.bitcast %q8_words : vector<4xi32> to vector<16xi8>
+    %gate_contribution = func.call @qwen3_moe_q4k_q8_1_chunk(%gate_noalias, %row_byte_base, %q4_block, %q4_group, %q4_half, %q8_values, %q8_d, %q8_s) : (buffer, offset, index, index, index, vector<16xi8>, f32, f32) -> (f32)
+    %up_contribution = func.call @qwen3_moe_q4k_q8_1_chunk(%up_noalias, %row_byte_base, %q4_block, %q4_group, %q4_half, %q8_values, %q8_d, %q8_s) : (buffer, offset, index, index, index, vector<16xi8>, f32, f32) -> (f32)
+    %gate_next = scalar.addf %gate_iter, %gate_contribution : f32
+    %up_next = scalar.addf %up_iter, %up_contribution : f32
+    scf.yield %gate_next, %up_next : f32, f32
+  }
+  %gate_dot = kernel.subgroup.reduce<addf> %gate_acc : f32
+  %up_dot = kernel.subgroup.reduce<addf> %up_acc : f32
+  %lane_i32 = index.cast %lane : index to i32
+  %is_lane_zero = scalar.cmpi eq, %lane_i32, %zero_i32 : i32
+  scf.if %is_lane_zero {
+    %gate_silu = scalar.siluf %gate_dot : f32
+    %result = scalar.mulf %gate_silu, %up_dot : f32
+    %output_token_base = index.mul %token, %bounded_route_count : index
+    %output_token_route = index.add %output_token_base, %route : index
+    %output_route_base = index.mul %output_token_route, %bounded_output_size : index
+    %output_index = index.add %output_route_base, %channel : index
+    view.store %result, %output_view[%output_index] : f32, view<[%output_element_count]xf32, #dense>
+  }
+  kernel.return
+}

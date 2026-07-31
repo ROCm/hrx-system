@@ -49,6 +49,13 @@ typedef enum qwen_program_attention_output_schedule_e {
   QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_F32_WMMA = 1,
 } qwen_program_attention_output_schedule_t;
 
+typedef enum qwen_program_feed_forward_schedule_e {
+  // Materialized F32 RMSNorm plus grouped F16 routed projections.
+  QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16 = 0,
+  // Fused RMSNorm/Q8 production plus direct quantized routed projections.
+  QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8 = 1,
+} qwen_program_feed_forward_schedule_t;
+
 typedef enum qwen_program_executable_ordinal_e {
   QWEN_PROGRAM_EXECUTABLE_ATTENTION_METADATA = 0,
   QWEN_PROGRAM_EXECUTABLE_ATTENTION_PREPARE_Q8 = 1,
@@ -83,11 +90,16 @@ typedef enum qwen_program_executable_ordinal_e {
   QWEN_PROGRAM_EXECUTABLE_FINAL_QUANTIZE_Q8 = 30,
   QWEN_PROGRAM_EXECUTABLE_VOCABULARY_PROJECTION_Q6 = 31,
   QWEN_PROGRAM_EXECUTABLE_GREEDY_ARGMAX = 32,
-  QWEN_PROGRAM_EXECUTABLE_COUNT = 33,
+  QWEN_PROGRAM_EXECUTABLE_FEED_FORWARD_PREPARE_Q8 = 33,
+  QWEN_PROGRAM_EXECUTABLE_GATE_UP_Q8 = 34,
+  QWEN_PROGRAM_EXECUTABLE_SWIGLU_QUANTIZE_Q8 = 35,
+  QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4_Q8 = 36,
+  QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6_Q8 = 37,
+  QWEN_PROGRAM_EXECUTABLE_COUNT = 38,
 } qwen_program_executable_ordinal_t;
 
-// Executable specializations consumed by one feed-forward recording.
-typedef struct qwen_program_feed_forward_executables_t {
+// Executable specializations consumed by one grouped feed-forward recording.
+typedef struct qwen_program_grouped_feed_forward_executables_t {
   // F32 RMSNorm specialization.
   qwen_program_executable_ordinal_t rmsnorm;
   // Router projection specialization.
@@ -104,7 +116,7 @@ typedef struct qwen_program_feed_forward_executables_t {
   qwen_program_executable_ordinal_t routed_down;
   // Routed residual reduction specialization.
   qwen_program_executable_ordinal_t weighted_reduce;
-} qwen_program_feed_forward_executables_t;
+} qwen_program_grouped_feed_forward_executables_t;
 
 struct qwen_program_t {
   // Reference count for shared program ownership.
@@ -133,6 +145,8 @@ struct qwen_program_t {
   qwen_program_qkv_schedule_t qkv_schedule;
   // Attention output contraction family selected for this token shape.
   qwen_program_attention_output_schedule_t attention_output_schedule;
+  // Routed feed-forward family selected for this program role.
+  qwen_program_feed_forward_schedule_t feed_forward_schedule;
   // Prepared executable for each unique recorded kernel specialization.
   qwen_loom_executable_t* executables[QWEN_PROGRAM_EXECUTABLE_COUNT];
   // Number of dispatches recorded in the command buffer.
@@ -339,6 +353,14 @@ static const qwen_loom_config_binding_t qwen_gate_up_config_bindings[] = {
     },
 };
 
+static const qwen_loom_config_binding_t qwen_direct_gate_up_config_bindings[] =
+    {
+        {
+            .key = IREE_SVL("qwen3_moe.routed_gate_up.input_size"),
+            .value = IREE_SVL("2048"),
+        },
+};
+
 static const qwen_loom_config_binding_t qwen_routed_down_config_bindings[] = {
     {
         .key = IREE_SVL("qwen3_moe.routed_down.input_size"),
@@ -458,6 +480,15 @@ qwen_program_select_attention_output_schedule(iree_host_size_t token_count) {
                           : QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_F32_WMMA;
 }
 
+static qwen_program_feed_forward_schedule_t
+qwen_program_select_feed_forward_schedule(qwen_program_kind_t kind) {
+  // The direct route is established for full-model decode. Layer programs and
+  // every prefill row retain the grouped correctness and performance baseline.
+  return kind == QWEN_PROGRAM_KIND_DECODE
+             ? QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8
+             : QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16;
+}
+
 static bool qwen_program_kind_is_full_model(qwen_program_kind_t kind) {
   return kind == QWEN_PROGRAM_KIND_PREFILL || kind == QWEN_PROGRAM_KIND_DECODE;
 }
@@ -500,6 +531,22 @@ static iree_status_t qwen_program_prepare_layer_executables(
       token_count,
       route_count,
       expert_count,
+  };
+  const int64_t direct_gate_up_workload[] = {
+      token_count,
+      route_count,
+      route_stride,
+      expert_count,
+      QWEN_MODEL_EXPERT_INTERMEDIATE_SIZE,
+  };
+  const int64_t swiglu_quantize_workload[] = {
+      token_count * route_count,
+      QWEN_MODEL_EXPERT_INTERMEDIATE_SIZE,
+  };
+  const int64_t direct_routed_down_workload[] = {
+      token_count,  QWEN_MODEL_EXPERT_INTERMEDIATE_SIZE,
+      route_count,  route_stride,
+      expert_count, QWEN_MODEL_HIDDEN_SIZE,
   };
 
   iree_status_t status = qwen_program_prepare_kernel(
@@ -595,7 +642,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
         &program
              ->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT_Q4_DIRECT]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
         IREE_SV("qwen3_moe_rmsnorm_f32"),
@@ -603,6 +652,17 @@ static iree_status_t qwen_program_prepare_layer_executables(
         qwen_attention_prepare_config_bindings, IREE_ARRAYSIZE(token_workload),
         token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_RMSNORM_F32]);
+  }
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
+    status = qwen_program_prepare_kernel(
+        program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
+        IREE_SV("qwen3_moe_rmsnorm_f32_quantize_q8_1_x4"),
+        IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
+        qwen_attention_prepare_config_bindings, IREE_ARRAYSIZE(token_workload),
+        token_workload,
+        &program->executables[QWEN_PROGRAM_EXECUTABLE_FEED_FORWARD_PREPARE_Q8]);
   }
   if (iree_status_is_ok(status) &&
       program->qkv_schedule == QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA) {
@@ -653,7 +713,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
         router_top8_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_ROUTER_TOP8]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_build_expert_table"),
@@ -662,7 +724,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
         expert_table_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_EXPERT_TABLE]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_build_expert_partition_table"),
@@ -671,7 +735,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
         partition_table_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_PARTITION_TABLE]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma"),
@@ -679,7 +745,31 @@ static iree_status_t qwen_program_prepare_layer_executables(
         qwen_gate_up_config_bindings, IREE_ARRAYSIZE(token_workload),
         token_workload, &program->executables[QWEN_PROGRAM_EXECUTABLE_GATE_UP]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
+    status = qwen_program_prepare_kernel(
+        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_Q8),
+        IREE_SV("qwen3_moe_routed_gate_up_swiglu_q4k_q8"),
+        IREE_ARRAYSIZE(qwen_direct_gate_up_config_bindings),
+        qwen_direct_gate_up_config_bindings,
+        IREE_ARRAYSIZE(direct_gate_up_workload), direct_gate_up_workload,
+        &program->executables[QWEN_PROGRAM_EXECUTABLE_GATE_UP_Q8]);
+  }
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
+    status = qwen_program_prepare_kernel(
+        program->model,
+        IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4_BRINGUP_WORKAROUND),
+        IREE_SV("ggml_quantize_q8_1_x4_f32"),
+        /*config_binding_count=*/0, /*config_bindings=*/NULL,
+        IREE_ARRAYSIZE(swiglu_quantize_workload), swiglu_quantize_workload,
+        &program->executables[QWEN_PROGRAM_EXECUTABLE_SWIGLU_QUANTIZE_Q8]);
+  }
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         IREE_SV("qwen3_moe_routed_down_q4k_f16_wmma_grouped"),
@@ -688,7 +778,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
         token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         IREE_SV("qwen3_moe_routed_down_q6k_f16_wmma_grouped"),
@@ -697,7 +789,31 @@ static iree_status_t qwen_program_prepare_layer_executables(
         token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
+    status = qwen_program_prepare_kernel(
+        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q4_Q8),
+        IREE_SV("qwen3_moe_routed_down_q4k_q8_1_x4"),
+        /*config_binding_count=*/0, /*config_bindings=*/NULL,
+        IREE_ARRAYSIZE(direct_routed_down_workload),
+        direct_routed_down_workload,
+        &program->executables[QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4_Q8]);
+  }
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
+    status = qwen_program_prepare_kernel(
+        program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_Q8),
+        IREE_SV("qwen3_moe_routed_down_q6k_q8_1_x4"),
+        /*config_binding_count=*/0, /*config_bindings=*/NULL,
+        IREE_ARRAYSIZE(direct_routed_down_workload),
+        direct_routed_down_workload,
+        &program->executables[QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6_Q8]);
+  }
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         IREE_SV("qwen3_moe_routed_down_weighted_reduce_f16_f32"),
@@ -769,7 +885,9 @@ static iree_status_t qwen_program_prepare_full_model_executables(
         IREE_ARRAYSIZE(terminal_token_workload), terminal_token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_RMSNORM_F32]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTER_PROJECTION_F32),
         IREE_SV("qwen3_moe_router_projection_f32_four_row_wave32"),
@@ -779,7 +897,9 @@ static iree_status_t qwen_program_prepare_full_model_executables(
         &program
              ->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTER_PROJECTION]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTER_TOP8_F32),
         IREE_SV("qwen3_moe_router_top8_f32"),
@@ -789,7 +909,9 @@ static iree_status_t qwen_program_prepare_full_model_executables(
         terminal_router_top8_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTER_TOP8]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_build_expert_table"),
@@ -799,7 +921,9 @@ static iree_status_t qwen_program_prepare_full_model_executables(
         terminal_expert_table_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_EXPERT_TABLE]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_build_expert_partition_table"),
@@ -810,7 +934,9 @@ static iree_status_t qwen_program_prepare_full_model_executables(
         &program
              ->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_PARTITION_TABLE]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma"),
@@ -819,7 +945,9 @@ static iree_status_t qwen_program_prepare_full_model_executables(
         terminal_token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_GATE_UP]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         terminal_routed_down_function,
@@ -828,7 +956,9 @@ static iree_status_t qwen_program_prepare_full_model_executables(
         IREE_ARRAYSIZE(terminal_token_workload), terminal_token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTED_DOWN]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         IREE_SV("qwen3_moe_routed_down_weighted_reduce_f16_f32"),
@@ -1184,11 +1314,11 @@ static iree_status_t qwen_program_record_attention(
   return status;
 }
 
-static iree_status_t qwen_program_record_feed_forward(
+static iree_status_t qwen_program_record_grouped_feed_forward(
     qwen_program_t* program, iree_host_size_t layer_index, uint32_t token_count,
     iree_hal_buffer_ref_t hidden_state,
     const qwen_layer_program_layout_t* transient,
-    const qwen_program_feed_forward_executables_t* executables) {
+    const qwen_program_grouped_feed_forward_executables_t* executables) {
   const qwen_layer_parameters_t* parameters =
       &qwen_model_parameter_layout(program->model)->layers[layer_index];
   const uint32_t route_count = QWEN_MODEL_ROUTE_COUNT;
@@ -1338,15 +1468,159 @@ static iree_status_t qwen_program_record_feed_forward(
   return status;
 }
 
+static iree_status_t qwen_program_record_direct_feed_forward(
+    qwen_program_t* program, iree_host_size_t layer_index, uint32_t token_count,
+    iree_hal_buffer_ref_t hidden_state,
+    const qwen_layer_program_layout_t* transient) {
+  const qwen_layer_parameters_t* parameters =
+      &qwen_model_parameter_layout(program->model)->layers[layer_index];
+  const qwen_program_executable_ordinal_t routed_down_ordinal =
+      parameters->value_and_down_storage == QWEN_QUANTIZED_STORAGE_Q6_K
+          ? QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6_Q8
+          : QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4_Q8;
+  const uint32_t route_count = QWEN_MODEL_ROUTE_COUNT;
+  const uint32_t route_stride = QWEN_MODEL_ROUTE_COUNT;
+  const uint32_t expert_count = QWEN_MODEL_EXPERT_COUNT;
+  const uint32_t routed_row_count = token_count * route_count;
+  iree_status_t status = iree_ok_status();
+
+  const uint32_t feed_forward_prepare_constants[] = {token_count};
+  const iree_hal_buffer_ref_t feed_forward_prepare_bindings[] = {
+      hidden_state,
+      qwen_program_model_ref(parameters->feed_forward_norm),
+      qwen_program_transient_ref(transient->feed_forward_norm),
+      qwen_program_transient_ref(transient->projection_input_scratch),
+  };
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_record_dispatch(
+        program, QWEN_PROGRAM_EXECUTABLE_FEED_FORWARD_PREPARE_Q8,
+        IREE_ARRAYSIZE(feed_forward_prepare_constants),
+        feed_forward_prepare_constants,
+        IREE_ARRAYSIZE(feed_forward_prepare_bindings),
+        feed_forward_prepare_bindings);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_record_dispatch_barrier(program);
+  }
+
+  const uint32_t router_projection_constants[] = {token_count};
+  const iree_hal_buffer_ref_t router_projection_bindings[] = {
+      qwen_program_transient_ref(transient->feed_forward_norm),
+      qwen_program_model_ref(parameters->router),
+      qwen_program_transient_ref(transient->router_logits),
+  };
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_record_dispatch(
+        program, QWEN_PROGRAM_EXECUTABLE_ROUTER_PROJECTION,
+        IREE_ARRAYSIZE(router_projection_constants),
+        router_projection_constants, IREE_ARRAYSIZE(router_projection_bindings),
+        router_projection_bindings);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_record_dispatch_barrier(program);
+  }
+
+  const uint32_t router_top8_constants[] = {
+      token_count,
+      route_stride,
+  };
+  const iree_hal_buffer_ref_t router_top8_bindings[] = {
+      qwen_program_transient_ref(transient->router_logits),
+      qwen_program_transient_ref(transient->route_ids),
+      qwen_program_transient_ref(transient->route_weights),
+  };
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_record_dispatch(
+        program, QWEN_PROGRAM_EXECUTABLE_ROUTER_TOP8,
+        IREE_ARRAYSIZE(router_top8_constants), router_top8_constants,
+        IREE_ARRAYSIZE(router_top8_bindings), router_top8_bindings);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_record_dispatch_barrier(program);
+  }
+
+  const uint32_t gate_up_constants[] = {
+      token_count,
+      route_count,
+      route_stride,
+      expert_count,
+      QWEN_MODEL_EXPERT_INTERMEDIATE_SIZE,
+  };
+  const iree_hal_buffer_ref_t gate_up_bindings[] = {
+      qwen_program_transient_ref(transient->projection_input_scratch),
+      qwen_program_transient_ref(transient->route_ids),
+      qwen_program_model_ref(parameters->expert_gate),
+      qwen_program_model_ref(parameters->expert_up),
+      qwen_program_transient_ref(transient->swiglu),
+  };
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_record_dispatch(
+        program, QWEN_PROGRAM_EXECUTABLE_GATE_UP_Q8,
+        IREE_ARRAYSIZE(gate_up_constants), gate_up_constants,
+        IREE_ARRAYSIZE(gate_up_bindings), gate_up_bindings);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_record_dispatch_barrier(program);
+  }
+
+  const uint32_t swiglu_quantize_constants[] = {
+      routed_row_count,
+      QWEN_MODEL_EXPERT_INTERMEDIATE_SIZE,
+  };
+  const iree_hal_buffer_ref_t swiglu_quantize_bindings[] = {
+      qwen_program_transient_ref(transient->swiglu),
+      qwen_program_transient_ref(transient->routed_projection_scratch),
+  };
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_record_dispatch(
+        program, QWEN_PROGRAM_EXECUTABLE_SWIGLU_QUANTIZE_Q8,
+        IREE_ARRAYSIZE(swiglu_quantize_constants), swiglu_quantize_constants,
+        IREE_ARRAYSIZE(swiglu_quantize_bindings), swiglu_quantize_bindings);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_record_dispatch_barrier(program);
+  }
+
+  const uint32_t routed_down_constants[] = {
+      token_count,  QWEN_MODEL_EXPERT_INTERMEDIATE_SIZE,
+      route_count,  route_stride,
+      expert_count, QWEN_MODEL_HIDDEN_SIZE,
+  };
+  const iree_hal_buffer_ref_t routed_down_bindings[] = {
+      qwen_program_transient_ref(transient->routed_projection_scratch),
+      qwen_program_transient_ref(transient->route_ids),
+      qwen_program_transient_ref(transient->route_weights),
+      qwen_program_model_ref(parameters->expert_down),
+      hidden_state,
+  };
+  if (iree_status_is_ok(status)) {
+    status = qwen_program_record_dispatch(
+        program, routed_down_ordinal, IREE_ARRAYSIZE(routed_down_constants),
+        routed_down_constants, IREE_ARRAYSIZE(routed_down_bindings),
+        routed_down_bindings);
+  }
+  return status;
+}
+
 static iree_status_t qwen_program_record_layer_body(
     qwen_program_t* program, iree_host_size_t layer_index,
     iree_host_size_t cache_window_layer_index,
     const qwen_request_storage_layout_t* request_layout) {
+  IREE_RETURN_IF_ERROR(qwen_program_record_attention(
+      program, layer_index, cache_window_layer_index, request_layout));
+  if (program->feed_forward_schedule ==
+      QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
+    return qwen_program_record_direct_feed_forward(
+        program, layer_index, (uint32_t)program->token_count,
+        qwen_program_request_ref(request_layout->hidden_state),
+        &program->layer_layout);
+  }
+
   const bool uses_q6 =
       qwen_model_parameter_layout(program->model)
           ->layers[layer_index]
           .value_and_down_storage == QWEN_QUANTIZED_STORAGE_Q6_K;
-  const qwen_program_feed_forward_executables_t executables = {
+  const qwen_program_grouped_feed_forward_executables_t executables = {
       .rmsnorm = QWEN_PROGRAM_EXECUTABLE_RMSNORM_F32,
       .router_projection = QWEN_PROGRAM_EXECUTABLE_ROUTER_PROJECTION,
       .router_top8 = QWEN_PROGRAM_EXECUTABLE_ROUTER_TOP8,
@@ -1357,9 +1631,7 @@ static iree_status_t qwen_program_record_layer_body(
                              : QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4,
       .weighted_reduce = QWEN_PROGRAM_EXECUTABLE_WEIGHTED_REDUCE,
   };
-  IREE_RETURN_IF_ERROR(qwen_program_record_attention(
-      program, layer_index, cache_window_layer_index, request_layout));
-  return qwen_program_record_feed_forward(
+  return qwen_program_record_grouped_feed_forward(
       program, layer_index, (uint32_t)program->token_count,
       qwen_program_request_ref(request_layout->hidden_state),
       &program->layer_layout, &executables);
@@ -1381,7 +1653,16 @@ static iree_status_t qwen_program_record_terminal_feed_forward(
     qwen_program_t* program,
     const qwen_request_storage_layout_t* request_layout) {
   const iree_host_size_t layer_index = QWEN_MODEL_LAYER_COUNT - 1;
-  const qwen_program_feed_forward_executables_t executables = {
+  const iree_hal_buffer_ref_t hidden_state = qwen_program_request_ref(
+      qwen_program_last_hidden_state_row(program, request_layout));
+  if (program->feed_forward_schedule ==
+      QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
+    return qwen_program_record_direct_feed_forward(
+        program, layer_index, /*token_count=*/1, hidden_state,
+        &program->full_layout.terminal_layer);
+  }
+
+  const qwen_program_grouped_feed_forward_executables_t executables = {
       .rmsnorm = QWEN_PROGRAM_EXECUTABLE_TERMINAL_RMSNORM_F32,
       .router_projection = QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTER_PROJECTION,
       .router_top8 = QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTER_TOP8,
@@ -1391,10 +1672,8 @@ static iree_status_t qwen_program_record_terminal_feed_forward(
       .routed_down = QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTED_DOWN,
       .weighted_reduce = QWEN_PROGRAM_EXECUTABLE_TERMINAL_WEIGHTED_REDUCE,
   };
-  return qwen_program_record_feed_forward(
-      program, layer_index, /*token_count=*/1,
-      qwen_program_request_ref(
-          qwen_program_last_hidden_state_row(program, request_layout)),
+  return qwen_program_record_grouped_feed_forward(
+      program, layer_index, /*token_count=*/1, hidden_state,
       &program->full_layout.terminal_layer, &executables);
 }
 
@@ -1704,6 +1983,8 @@ iree_status_t qwen_program_prepare(qwen_model_t* model,
       qwen_program_select_qkv_schedule(options->token_count);
   program->attention_output_schedule =
       qwen_program_select_attention_output_schedule(options->token_count);
+  program->feed_forward_schedule =
+      qwen_program_select_feed_forward_schedule(options->kind);
 
   iree_status_t status = iree_ok_status();
   if (qwen_program_kind_is_full_model(options->kind)) {
