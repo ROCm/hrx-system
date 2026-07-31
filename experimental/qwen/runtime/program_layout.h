@@ -21,6 +21,16 @@ typedef struct qwen_program_span_t {
   iree_device_size_t length;
 } qwen_program_span_t;
 
+// Decode-only completion-counter storage initialized before command execution.
+typedef struct qwen_decode_completion_layout_t {
+  // Contiguous byte range covered by the issue-time initialization fill.
+  qwen_program_span_t initialization;
+  // Per-KV-head counters reset by every split-attention dispatch.
+  qwen_program_span_t attention;
+  // Router-projection counter reset after every normalized top-8 publication.
+  qwen_program_span_t router;
+} qwen_decode_completion_layout_t;
+
 // Full-model transient layout features.
 typedef uint32_t qwen_full_program_layout_flags_t;
 enum qwen_full_program_layout_flag_bits_e {
@@ -28,6 +38,9 @@ enum qwen_full_program_layout_flag_bits_e {
 
   // Reserves partial and completion storage for fused split-K decode attention.
   QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION = 1u << 0,
+
+  // Reserves completion storage for fused decode projection and routing.
+  QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_ROUTER = 1u << 1,
 };
 
 // Named transient spans used by one complete layer program.
@@ -85,8 +98,8 @@ typedef struct qwen_full_program_layout_t {
   qwen_program_span_t attention_partial_sums;
   // Per-KV-block F16 attention outputs reused by every decode layer.
   qwen_program_span_t attention_partial_outputs;
-  // Per-KV-head I32 completion counters reset by every decode layer.
-  qwen_program_span_t attention_completion_counters;
+  // Decode-only completion counters reused sequentially by every layer.
+  qwen_decode_completion_layout_t decode_completion;
   // Final RMSNorm output containing one F32 hidden-state row.
   qwen_program_span_t final_normalized_hidden_state;
   // GGML Q8_1 x4 packing of the final normalized hidden-state row.

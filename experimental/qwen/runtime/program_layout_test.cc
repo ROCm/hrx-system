@@ -134,7 +134,9 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512FullProgram) {
   EXPECT_EQ(layout.attention_partial_maximums.length, 0u);
   EXPECT_EQ(layout.attention_partial_sums.length, 0u);
   EXPECT_EQ(layout.attention_partial_outputs.length, 0u);
-  EXPECT_EQ(layout.attention_completion_counters.length, 0u);
+  EXPECT_EQ(layout.decode_completion.initialization.length, 0u);
+  EXPECT_EQ(layout.decode_completion.attention.length, 0u);
+  EXPECT_EQ(layout.decode_completion.router.length, 0u);
 
   ExpectOrdered(layout.layer.routed_projection_scratch,
                 layout.terminal_layer.projection_input_scratch);
@@ -177,16 +179,25 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512FullProgram) {
   EXPECT_EQ(layout.transient_byte_length, 66318592u);
 }
 
-TEST(QwenProgramLayoutTest, ReservesReusableSplitAttentionForDecode513) {
+TEST(QwenProgramLayoutTest, ReservesReusableCompletionForDecode513) {
   qwen_full_program_layout_t layout;
   IREE_ASSERT_OK(qwen_full_program_layout_calculate(
       /*token_count=*/1, /*context_count=*/513,
-      QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION, &layout));
+      QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION |
+          QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_ROUTER,
+      &layout));
 
   EXPECT_EQ(layout.attention_partial_maximums.length, 2304u);
   EXPECT_EQ(layout.attention_partial_sums.length, 2304u);
   EXPECT_EQ(layout.attention_partial_outputs.length, 147456u);
-  EXPECT_EQ(layout.attention_completion_counters.length, 16u);
+  EXPECT_EQ(layout.decode_completion.initialization.length, 20u);
+  EXPECT_EQ(layout.decode_completion.attention.length, 16u);
+  EXPECT_EQ(layout.decode_completion.router.length, 4u);
+  EXPECT_EQ(layout.decode_completion.attention.offset,
+            layout.decode_completion.initialization.offset);
+  EXPECT_EQ(layout.decode_completion.router.offset,
+            layout.decode_completion.attention.offset +
+                layout.decode_completion.attention.length);
   ExpectOrdered(layout.terminal_layer.routed_projection_scratch,
                 layout.attention_partial_maximums);
   ExpectOrdered(layout.attention_partial_maximums,
@@ -194,8 +205,8 @@ TEST(QwenProgramLayoutTest, ReservesReusableSplitAttentionForDecode513) {
   ExpectOrdered(layout.attention_partial_sums,
                 layout.attention_partial_outputs);
   ExpectOrdered(layout.attention_partial_outputs,
-                layout.attention_completion_counters);
-  ExpectOrdered(layout.attention_completion_counters,
+                layout.decode_completion.initialization);
+  ExpectOrdered(layout.decode_completion.initialization,
                 layout.final_normalized_hidden_state);
   EXPECT_EQ(layout.transient_byte_length, 1030144u);
 }
@@ -214,7 +225,9 @@ TEST(QwenProgramLayoutTest, RejectsUnsupportedFullProgramContextCount) {
       IREE_STATUS_OUT_OF_RANGE,
       qwen_full_program_layout_calculate(
           /*token_count=*/1, /*context_count=*/0,
-          QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION, &layout));
+          QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION |
+              QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_ROUTER,
+          &layout));
 }
 
 TEST(QwenProgramLayoutTest, RejectsUnsupportedFullProgramLayoutFlags) {

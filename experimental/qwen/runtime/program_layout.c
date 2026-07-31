@@ -24,6 +24,8 @@ static_assert((QWEN_MODEL_QUERY_HEAD_COUNT * QWEN_MODEL_HEAD_SIZE) %
                       QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT ==
                   0,
               "Qwen attention rows must contain complete GGML Q8_1 x4 groups");
+static_assert((QWEN_MODEL_KEY_VALUE_HEAD_COUNT * sizeof(int32_t)) % 16 == 0,
+              "Qwen split-attention counters must align the router counter");
 
 static iree_status_t qwen_program_layout_checked_product(
     iree_device_size_t lhs, iree_device_size_t rhs,
@@ -208,8 +210,10 @@ iree_status_t qwen_full_program_layout_calculate(
     qwen_full_program_layout_t* out_layout) {
   IREE_ASSERT_ARGUMENT(out_layout);
   memset(out_layout, 0, sizeof(*out_layout));
-  if (iree_any_bit_set(flags,
-                       ~QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION)) {
+  const qwen_full_program_layout_flags_t supported_flags =
+      QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION |
+      QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_ROUTER;
+  if (iree_any_bit_set(flags, ~supported_flags)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen full-program layout flags are unsupported");
   }
@@ -256,11 +260,39 @@ iree_status_t qwen_full_program_layout_calculate(
         byte_length, /*F16 byte length=*/2, &byte_length));
     IREE_RETURN_IF_ERROR(qwen_program_layout_append(
         byte_length, &cursor, &out_layout->attention_partial_outputs));
+  }
 
-    IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
-        QWEN_MODEL_KEY_VALUE_HEAD_COUNT, sizeof(int32_t), &byte_length));
+  const bool reserves_attention_completion = iree_any_bit_set(
+      flags, QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION);
+  const bool reserves_router_completion = iree_any_bit_set(
+      flags, QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_ROUTER);
+  if (reserves_attention_completion || reserves_router_completion) {
+    iree_device_size_t attention_byte_length = 0;
+    if (reserves_attention_completion) {
+      IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
+          QWEN_MODEL_KEY_VALUE_HEAD_COUNT, sizeof(int32_t),
+          &attention_byte_length));
+    }
+    const iree_device_size_t router_byte_length =
+        reserves_router_completion ? sizeof(int32_t) : 0;
+    iree_device_size_t initialization_byte_length = 0;
+    if (!iree_device_size_checked_add(attention_byte_length, router_byte_length,
+                                      &initialization_byte_length)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "Qwen completion storage length overflows");
+    }
     IREE_RETURN_IF_ERROR(qwen_program_layout_append(
-        byte_length, &cursor, &out_layout->attention_completion_counters));
+        initialization_byte_length, &cursor,
+        &out_layout->decode_completion.initialization));
+    out_layout->decode_completion.attention = (qwen_program_span_t){
+        .offset = out_layout->decode_completion.initialization.offset,
+        .length = attention_byte_length,
+    };
+    out_layout->decode_completion.router = (qwen_program_span_t){
+        .offset = out_layout->decode_completion.initialization.offset +
+                  attention_byte_length,
+        .length = router_byte_length,
+    };
   }
 
   IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
