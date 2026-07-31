@@ -264,6 +264,7 @@ loom_link_module(
     roots = [
         "@qwen3_moe_dense_linear_q4k_f16_wmma",
         "@qwen3_moe_dense_linear_q4k_q8_1_x4",
+        "@qwen3_moe_dense_linear_q4k_q8_1_x4_next_q8",
         "@qwen3_moe_dense_linear_q6k_f16_wmma",
     ],
     strip_check = True,

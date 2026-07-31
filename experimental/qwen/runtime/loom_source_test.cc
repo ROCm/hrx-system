@@ -81,6 +81,11 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
       {
           QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16,
           "qwen3_moe_dense_linear_quantized_f16.loom",
+          "qwen3_moe_dense_linear_q4k_q8_1_x4_next_q8",
+      },
+      {
+          QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16,
+          "qwen3_moe_dense_linear_quantized_f16.loom",
           "qwen3_moe_dense_linear_q6k_f16_wmma",
       },
       {
