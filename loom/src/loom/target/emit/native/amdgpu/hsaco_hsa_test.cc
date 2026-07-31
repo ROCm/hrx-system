@@ -36,7 +36,7 @@
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/hal/binding_materialization.h"
 #include "loom/target/arch/amdgpu/hal/kernel_abi.h"
-#include "loom/target/arch/amdgpu/ops/ops.h"
+#include "loom/target/arch/amdgpu/ops/registry.h"
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 #include "loom/target/arch/amdgpu/planning/storage_lease.h"
 #include "loom/target/arch/amdgpu/profile.h"
@@ -118,7 +118,7 @@ void RegisterDialect(loom_context_t* context, uint8_t dialect_id,
 
 void InitializeLowKernelContext(loom_context_t* context) {
   loom_context_initialize(iree_allocator_system(), context);
-  RegisterDialect(context, LOOM_DIALECT_AMDGPU, loom_amdgpu_dialect_vtables);
+  IREE_ASSERT_OK(loom_amdgpu_ops_register_dialect(context));
   RegisterDialect(context, LOOM_DIALECT_LOW, loom_low_dialect_vtables);
   IREE_ASSERT_OK(loom_context_finalize(context));
 }

@@ -25,7 +25,6 @@
 #include "loom/sanitizer/site_table.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
-#include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/planning/wait_counters.h"
 #include "loom/target/arch/amdgpu/profile.h"
 #include "loom/target/arch/amdgpu/provider.h"
@@ -706,6 +705,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   const loom_target_symbol_facts_t* authored_target =
       loom_target_symbol_facts_cast(target_base_facts);
   ASSERT_NE(authored_target, nullptr);
+  const loom_symbol_ref_t authored_target_symbol = authored_target->symbol;
 
   loom_amdgpu_target_identity_t identity = {};
   loom_amdgpu_target_identity_initialize(gfx1151, &identity);
@@ -770,13 +770,18 @@ TEST_F(AmdgpuHalKernelLibraryTest,
       HasTargetCapabilityString(report, "amdgpu", "processor", "gfx1151"));
   EXPECT_TRUE(HasTargetCapabilityString(report, "amdgpu", "descriptor_set",
                                         "amdgpu.rdna3_5.core"));
-  ASSERT_EQ(authored_target->symbol.module_id, 0u);
-  ASSERT_LT(authored_target->symbol.symbol_id, module->symbols.count);
-  const loom_op_t* retained_target_op =
-      module->symbols.entries[authored_target->symbol.symbol_id].defining_op;
-  ASSERT_NE(retained_target_op, nullptr);
+  loom_symbol_fact_table_t retained_symbol_facts = {};
+  loom_symbol_fact_table_initialize(&retained_symbol_facts, &version_arena);
+  const loom_symbol_facts_base_t* retained_target_base_facts = nullptr;
+  IREE_ASSERT_OK(loom_symbol_fact_table_lookup_ref(
+      &retained_symbol_facts, module, authored_target_symbol,
+      &retained_target_base_facts));
+  const loom_target_symbol_facts_t* retained_target =
+      loom_target_symbol_facts_cast(retained_target_base_facts);
+  ASSERT_NE(retained_target, nullptr);
+  ASSERT_NE(retained_target->projection, nullptr);
   EXPECT_TRUE(iree_string_view_equal(
-      loom_amdgpu_target_record_target_name(retained_target_op),
+      loom_target_facts_identity_name(retained_target->projection),
       IREE_SV("gfx11-generic")));
 
   loom_amdgpu_hal_kernel_library_deinitialize(&library,

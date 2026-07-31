@@ -615,7 +615,6 @@ loom_cc_test(
     loom::sanitizer::site_table
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::matrix::contract
-    loom::target::arch::amdgpu::ops
     loom::target::arch::amdgpu::planning::wait_counters
     loom::target::arch::amdgpu::profile
     loom::target::arch::amdgpu::provider
