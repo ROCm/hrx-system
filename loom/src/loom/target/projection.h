@@ -32,14 +32,6 @@ enum loom_target_projection_value_bits_e {
 };
 typedef uint8_t loom_target_projection_value_kind_t;
 
-typedef uint8_t loom_target_projection_specialization_t;
-enum {
-  // Structured target profiles own this field during specialization.
-  LOOM_TARGET_PROJECTION_SPECIALIZATION_PROFILE = 0,
-  // An explicit authored value survives profile specialization.
-  LOOM_TARGET_PROJECTION_SPECIALIZATION_AUTHORED = 1,
-};
-
 typedef struct loom_target_projection_t {
   // Byte offset into loom_target_bundle_storage_t for the destination field.
   uint16_t storage_offset;
@@ -49,8 +41,6 @@ typedef struct loom_target_projection_t {
   loom_target_fact_field_t fact_field;
   // Projection operation used to copy the present attr payload.
   loom_target_projection_value_kind_t value_kind;
-  // Source that owns this field when specializing an authored target.
-  loom_target_projection_specialization_t specialization;
 } loom_target_projection_t;
 
 static_assert(sizeof(loom_target_projection_t) == 6,

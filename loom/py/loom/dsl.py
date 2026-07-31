@@ -3456,10 +3456,6 @@ class TargetLikeInterface(NamedTuple):
     # Satisfaction relation used by a generated common fact type. Family-owned
     # fact types carry their relation in the named descriptor instead.
     fact_satisfaction: TargetFactSatisfaction = TargetFactSatisfaction.IDENTITY
-    # Common target attrs owned by the authored function contract during
-    # specialization. Target-family identity, capabilities, and limits remain
-    # profile-owned unless listed here.
-    specialization_authored_attrs: tuple[str, ...] = ()
 
 
 class LoopLikeInterface(NamedTuple):
