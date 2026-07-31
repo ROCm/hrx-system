@@ -2418,8 +2418,7 @@ static iree_status_t loom_value_fact_table_seed_block_args(
             loom_value_fact_table_seed_scalar_arg(table, module, value_id));
       }
     }
-    if ((has_workgroup_uniform_args || has_cluster_uniform_args) &&
-        loom_type_is_scalar(type)) {
+    if (has_workgroup_uniform_args || has_cluster_uniform_args) {
       loom_value_facts_t facts = loom_value_fact_table_lookup(table, value_id);
       if (has_cluster_uniform_args) {
         loom_value_facts_mark_cluster_uniform(&facts);

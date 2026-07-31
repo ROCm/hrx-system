@@ -210,3 +210,43 @@ low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(128, 1
   s_waitcnt {lgkmcnt = 0}
   return
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+// A read-only control value loaded from a uniform global address is uniform
+// across the workgroup and may guard a convergent barrier.
+kernel.def target(@target) @uniform_global_load_controls_barrier() {
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%control: buffer) {
+  %zero_index = index.constant 0 : index
+  %zero_offset = index.constant 0 : offset
+  %zero_i32 = scalar.constant 0 : i32
+  %control_view = buffer.view %control[%zero_offset] : buffer -> view<1xi32, #dense>
+  %control_value = view.load %control_view[%zero_index] : view<1xi32, #dense> -> i32
+  %is_zero = scalar.cmpi eq, %control_value, %zero_i32 : i32
+  scf.if %is_zero {
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.yield
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @uniform_global_load_controls_barrier() asm {
+  %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %10 = v_mov_b32 0
+  %control_value = global_load_b32_saddr %10, %control_view
+  %is_zero = v_cmp_eq_i32_src1_inline %control_value {rhs = 0}
+  %13, %14 = s_and_saveexec_b64 %is_zero
+  low.cond_br %14, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+^_bb1:
+  s_barrier
+  low.br ^_bb2
+^_bb2:
+  s_mov_b64_exec %13
+  return
+}
