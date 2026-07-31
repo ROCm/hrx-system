@@ -60,9 +60,34 @@ typedef struct qwen_layer_program_layout_t {
   iree_device_size_t transient_byte_length;
 } qwen_layer_program_layout_t;
 
+// Named transient spans used by one complete full-model program.
+//
+// The reusable layer owns scratch for the program token count. The terminal
+// layer owns distinct one-token scratch for the final-token layer-47 workload.
+// Both nested layouts use offsets from the full allocation base, while each
+// nested transient_byte_length remains the exact size of its own region.
+typedef struct qwen_full_program_layout_t {
+  // Reusable complete-layer scratch for the program token count.
+  qwen_layer_program_layout_t layer;
+  // Complete one-token scratch for the terminal layer-47 workload.
+  qwen_layer_program_layout_t terminal_layer;
+  // Final RMSNorm output containing one F32 hidden-state row.
+  qwen_program_span_t final_normalized_hidden_state;
+  // GGML Q8_1 x4 packing of the final normalized hidden-state row.
+  qwen_program_span_t final_quantized_hidden_state;
+  // Output projection result containing one F32 vocabulary row.
+  qwen_program_span_t vocabulary_logits;
+  // Complete transient allocation size.
+  iree_device_size_t transient_byte_length;
+} qwen_full_program_layout_t;
+
 // Calculates the exact complete-layer transient layout.
 iree_status_t qwen_layer_program_layout_calculate(
     iree_host_size_t token_count, qwen_layer_program_layout_t* out_layout);
+
+// Calculates the exact complete full-model transient layout.
+iree_status_t qwen_full_program_layout_calculate(
+    iree_host_size_t token_count, qwen_full_program_layout_t* out_layout);
 
 #ifdef __cplusplus
 }  // extern "C"

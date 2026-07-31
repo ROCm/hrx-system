@@ -11,6 +11,13 @@
 #include "experimental/qwen/runtime/model_shape.h"
 
 #define QWEN_PROGRAM_STORAGE_ALIGNMENT 256
+#define QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT 128
+#define QWEN_PROGRAM_Q8_1_X4_GROUP_BYTE_LENGTH 144
+
+static_assert(QWEN_MODEL_HIDDEN_SIZE %
+                      QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT ==
+                  0,
+              "Qwen hidden rows must contain complete GGML Q8_1 x4 groups");
 
 static iree_status_t qwen_program_layout_checked_product(
     iree_device_size_t lhs, iree_device_size_t rhs,
@@ -53,6 +60,36 @@ static iree_status_t qwen_program_layout_append(iree_device_size_t length,
       .length = length,
   };
   *cursor = next_cursor;
+  return iree_ok_status();
+}
+
+static iree_status_t qwen_program_layout_rebase_layer(
+    iree_device_size_t base_offset, qwen_layer_program_layout_t* layout) {
+  qwen_program_span_t* spans[] = {
+      &layout->attention_projection_input,
+      &layout->raw_query,
+      &layout->raw_key,
+      &layout->raw_value,
+      &layout->rotated_query,
+      &layout->attention_output,
+      &layout->feed_forward_norm,
+      &layout->router_logits,
+      &layout->route_ids,
+      &layout->route_weights,
+      &layout->expert_table,
+      &layout->partition_table,
+      &layout->swiglu,
+      &layout->routed_down,
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(spans); ++i) {
+    iree_device_size_t rebased_offset = 0;
+    if (!iree_device_size_checked_add(base_offset, spans[i]->offset,
+                                      &rebased_offset)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "Qwen nested transient span offset overflows");
+    }
+    spans[i]->offset = rebased_offset;
+  }
   return iree_ok_status();
 }
 
@@ -145,6 +182,45 @@ iree_status_t qwen_layer_program_layout_calculate(
       /*F16 byte length=*/2, &byte_length));
   IREE_RETURN_IF_ERROR(qwen_program_layout_append(byte_length, &cursor,
                                                   &out_layout->routed_down));
+
+  out_layout->transient_byte_length = cursor;
+  return iree_ok_status();
+}
+
+iree_status_t qwen_full_program_layout_calculate(
+    iree_host_size_t token_count, qwen_full_program_layout_t* out_layout) {
+  IREE_ASSERT_ARGUMENT(out_layout);
+  memset(out_layout, 0, sizeof(*out_layout));
+
+  IREE_RETURN_IF_ERROR(
+      qwen_layer_program_layout_calculate(token_count, &out_layout->layer));
+  IREE_RETURN_IF_ERROR(
+      qwen_layer_program_layout_calculate(1, &out_layout->terminal_layer));
+
+  iree_device_size_t cursor = out_layout->layer.transient_byte_length;
+  qwen_program_span_t terminal_layer_storage;
+  IREE_RETURN_IF_ERROR(qwen_program_layout_append(
+      out_layout->terminal_layer.transient_byte_length, &cursor,
+      &terminal_layer_storage));
+  IREE_RETURN_IF_ERROR(qwen_program_layout_rebase_layer(
+      terminal_layer_storage.offset, &out_layout->terminal_layer));
+
+  iree_device_size_t byte_length = 0;
+  IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
+      QWEN_MODEL_HIDDEN_SIZE, sizeof(float), &byte_length));
+  IREE_RETURN_IF_ERROR(qwen_program_layout_append(
+      byte_length, &cursor, &out_layout->final_normalized_hidden_state));
+
+  IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
+      QWEN_MODEL_HIDDEN_SIZE / QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT,
+      QWEN_PROGRAM_Q8_1_X4_GROUP_BYTE_LENGTH, &byte_length));
+  IREE_RETURN_IF_ERROR(qwen_program_layout_append(
+      byte_length, &cursor, &out_layout->final_quantized_hidden_state));
+
+  IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
+      QWEN_MODEL_VOCABULARY_SIZE, sizeof(float), &byte_length));
+  IREE_RETURN_IF_ERROR(qwen_program_layout_append(
+      byte_length, &cursor, &out_layout->vocabulary_logits));
 
   out_layout->transient_byte_length = cursor;
   return iree_ok_status();

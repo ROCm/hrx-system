@@ -15,6 +15,36 @@ static void ExpectOrdered(qwen_program_span_t lhs, qwen_program_span_t rhs) {
   EXPECT_GE(rhs.offset, lhs.offset + lhs.length);
 }
 
+static void ExpectRebased(qwen_program_span_t expected,
+                          qwen_program_span_t actual,
+                          iree_device_size_t base_offset) {
+  EXPECT_EQ(actual.offset, base_offset + expected.offset);
+  EXPECT_EQ(actual.length, expected.length);
+}
+
+static void ExpectRebasedLayer(const qwen_layer_program_layout_t& expected,
+                               const qwen_layer_program_layout_t& actual,
+                               iree_device_size_t base_offset) {
+  ExpectRebased(expected.attention_projection_input,
+                actual.attention_projection_input, base_offset);
+  ExpectRebased(expected.raw_query, actual.raw_query, base_offset);
+  ExpectRebased(expected.raw_key, actual.raw_key, base_offset);
+  ExpectRebased(expected.raw_value, actual.raw_value, base_offset);
+  ExpectRebased(expected.rotated_query, actual.rotated_query, base_offset);
+  ExpectRebased(expected.attention_output, actual.attention_output,
+                base_offset);
+  ExpectRebased(expected.feed_forward_norm, actual.feed_forward_norm,
+                base_offset);
+  ExpectRebased(expected.router_logits, actual.router_logits, base_offset);
+  ExpectRebased(expected.route_ids, actual.route_ids, base_offset);
+  ExpectRebased(expected.route_weights, actual.route_weights, base_offset);
+  ExpectRebased(expected.expert_table, actual.expert_table, base_offset);
+  ExpectRebased(expected.partition_table, actual.partition_table, base_offset);
+  ExpectRebased(expected.swiglu, actual.swiglu, base_offset);
+  ExpectRebased(expected.routed_down, actual.routed_down, base_offset);
+  EXPECT_EQ(actual.transient_byte_length, expected.transient_byte_length);
+}
+
 TEST(QwenProgramLayoutTest, PacksCompletePrefill512Layer) {
   qwen_layer_program_layout_t layout;
   IREE_ASSERT_OK(qwen_layer_program_layout_calculate(
@@ -60,6 +90,88 @@ TEST(QwenProgramLayoutTest, ReservesEveryExpertTailPartitionForDecode) {
       qwen_layer_program_layout_calculate(/*token_count=*/1, &layout));
 
   EXPECT_EQ(layout.partition_table.length, 130u * sizeof(int32_t));
+}
+
+TEST(QwenProgramLayoutTest, PacksCompletePrefill512FullProgram) {
+  qwen_layer_program_layout_t prefill_layer;
+  IREE_ASSERT_OK(qwen_layer_program_layout_calculate(
+      /*token_count=*/512, &prefill_layer));
+  qwen_layer_program_layout_t terminal_layer;
+  IREE_ASSERT_OK(qwen_layer_program_layout_calculate(
+      /*token_count=*/1, &terminal_layer));
+
+  qwen_full_program_layout_t layout;
+  IREE_ASSERT_OK(qwen_full_program_layout_calculate(
+      /*token_count=*/512, &layout));
+
+  ExpectRebasedLayer(prefill_layer, layout.layer, /*base_offset=*/0);
+  EXPECT_EQ(layout.layer.transient_byte_length, 65570560u);
+
+  const iree_device_size_t terminal_layer_base =
+      layout.layer.transient_byte_length;
+  ExpectRebasedLayer(terminal_layer, layout.terminal_layer,
+                     terminal_layer_base);
+  EXPECT_EQ(layout.terminal_layer.attention_projection_input.length, 8192u);
+  EXPECT_EQ(layout.terminal_layer.raw_query.length, 16384u);
+  EXPECT_EQ(layout.terminal_layer.raw_key.length, 2048u);
+  EXPECT_EQ(layout.terminal_layer.raw_value.length, 2048u);
+  EXPECT_EQ(layout.terminal_layer.rotated_query.length, 16384u);
+  EXPECT_EQ(layout.terminal_layer.attention_output.length, 16384u);
+  EXPECT_EQ(layout.terminal_layer.feed_forward_norm.length, 8192u);
+  EXPECT_EQ(layout.terminal_layer.router_logits.length, 512u);
+  EXPECT_EQ(layout.terminal_layer.route_ids.length, 32u);
+  EXPECT_EQ(layout.terminal_layer.route_weights.length, 32u);
+  EXPECT_EQ(layout.terminal_layer.expert_table.length, 1024u);
+  EXPECT_EQ(layout.terminal_layer.partition_table.length, 520u);
+  EXPECT_EQ(layout.terminal_layer.swiglu.length, 24576u);
+  EXPECT_EQ(layout.terminal_layer.routed_down.length, 32768u);
+  EXPECT_EQ(layout.terminal_layer.transient_byte_length, 129792u);
+
+  ExpectOrdered(layout.layer.routed_down,
+                layout.terminal_layer.attention_projection_input);
+  ExpectOrdered(layout.terminal_layer.attention_projection_input,
+                layout.terminal_layer.raw_query);
+  ExpectOrdered(layout.terminal_layer.raw_query, layout.terminal_layer.raw_key);
+  ExpectOrdered(layout.terminal_layer.raw_key, layout.terminal_layer.raw_value);
+  ExpectOrdered(layout.terminal_layer.raw_value,
+                layout.terminal_layer.rotated_query);
+  ExpectOrdered(layout.terminal_layer.rotated_query,
+                layout.terminal_layer.attention_output);
+  ExpectOrdered(layout.terminal_layer.attention_output,
+                layout.terminal_layer.feed_forward_norm);
+  ExpectOrdered(layout.terminal_layer.feed_forward_norm,
+                layout.terminal_layer.router_logits);
+  ExpectOrdered(layout.terminal_layer.router_logits,
+                layout.terminal_layer.route_ids);
+  ExpectOrdered(layout.terminal_layer.route_ids,
+                layout.terminal_layer.route_weights);
+  ExpectOrdered(layout.terminal_layer.route_weights,
+                layout.terminal_layer.expert_table);
+  ExpectOrdered(layout.terminal_layer.expert_table,
+                layout.terminal_layer.partition_table);
+  ExpectOrdered(layout.terminal_layer.partition_table,
+                layout.terminal_layer.swiglu);
+  ExpectOrdered(layout.terminal_layer.swiglu,
+                layout.terminal_layer.routed_down);
+  ExpectOrdered(layout.terminal_layer.routed_down,
+                layout.final_normalized_hidden_state);
+  ExpectOrdered(layout.final_normalized_hidden_state,
+                layout.final_quantized_hidden_state);
+  ExpectOrdered(layout.final_quantized_hidden_state, layout.vocabulary_logits);
+
+  EXPECT_EQ(layout.final_normalized_hidden_state.offset, 65700352u);
+  EXPECT_EQ(layout.final_normalized_hidden_state.length, 8192u);
+  EXPECT_EQ(layout.final_quantized_hidden_state.offset, 65708544u);
+  EXPECT_EQ(layout.final_quantized_hidden_state.length, 2304u);
+  EXPECT_EQ(layout.vocabulary_logits.offset, 65710848u);
+  EXPECT_EQ(layout.vocabulary_logits.length, 607744u);
+  EXPECT_EQ(layout.transient_byte_length, 66318592u);
+}
+
+TEST(QwenProgramLayoutTest, RejectsUnsupportedFullProgramTokenCount) {
+  qwen_full_program_layout_t layout;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        qwen_full_program_layout_calculate(0, &layout));
 }
 
 }  // namespace
