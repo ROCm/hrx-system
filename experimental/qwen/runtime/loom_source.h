@@ -79,6 +79,10 @@ extern "C" {
 // Stable runtime path for grouped routed down projection and reduction.
 #define QWEN_LOOM_SOURCE_ROUTED_DOWN_F16 "qwen3_moe/routed_down_f16"
 
+// Stable runtime path for fused prefill residual and next-layer normalization.
+#define QWEN_LOOM_SOURCE_ROUTED_DOWN_NEXT_RMSNORM_F32 \
+  "qwen3_moe/routed_down_next_rmsnorm_f32"
+
 // Stable runtime path for direct Q4_K routed down and residual publication.
 #define QWEN_LOOM_SOURCE_ROUTED_DOWN_Q4_Q8 "qwen3_moe/routed_down_q4_q8"
 

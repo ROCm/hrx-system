@@ -129,8 +129,8 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
           "qwen3_moe_routed_down_weighted_reduce_f16_f32",
       },
       {
-          QWEN_LOOM_SOURCE_ROUTED_DOWN_F16,
-          "qwen3_moe_routed_down_f16.loom",
+          QWEN_LOOM_SOURCE_ROUTED_DOWN_NEXT_RMSNORM_F32,
+          "qwen3_moe_routed_down_next_rmsnorm_f32.loom",
           "qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32",
       },
       {
