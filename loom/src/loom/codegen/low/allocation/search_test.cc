@@ -79,7 +79,7 @@ loom_liveness_interval_t Interval(loom_value_id_t value_id, uint32_t start,
 loom_low_allocation_assignment_t Assignment(
     loom_value_id_t value_id, uint32_t start, uint32_t end,
     loom_liveness_value_class_t value_class, uint32_t location_base,
-    uint32_t location_count, uint32_t unit_end_point_start) {
+    uint32_t location_count, uint32_t unit_point_start) {
   loom_low_allocation_assignment_t assignment = {};
   assignment.value_id = value_id;
   assignment.value_class = value_class;
@@ -90,7 +90,7 @@ loom_low_allocation_assignment_t Assignment(
   assignment.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
   assignment.location_base = location_base;
   assignment.location_count = location_count;
-  assignment.unit_end_point_start = unit_end_point_start;
+  assignment.unit_point_start = unit_point_start;
   return assignment;
 }
 
@@ -196,13 +196,13 @@ uint32_t FindFreeLocationWithPlacement(
   liveness.value_count = IREE_ARRAYSIZE(value_ids);
   liveness.value_interval_indices = interval_indices;
 
-  uint32_t unit_end_point_starts[] = {0, 1};
+  uint32_t unit_point_starts[] = {0, 1};
   uint32_t unit_end_points[] = {6, 1};
   uint64_t edge_handoff_words[] = {0};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
+  unit_liveness.point_starts_by_value_ordinal = unit_point_starts;
   unit_liveness.end_points = unit_end_points;
-  unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
   unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
                                                            edge_handoff_words};
 
@@ -220,7 +220,7 @@ uint32_t FindFreeLocationWithPlacement(
   const loom_low_allocation_assignment_t assignments[] = {
       Assignment(counterpart_value, /*start=*/0, /*end=*/1, value_class,
                  /*location_base=*/0, /*location_count=*/1,
-                 /*unit_end_point_start=*/1),
+                 /*unit_point_start=*/1),
   };
   const uint32_t assignment_indices_by_value_ordinal[] = {UINT32_MAX, 0};
   loom_low_allocation_assignment_map_t assignment_map = {};
@@ -314,13 +314,13 @@ uint32_t FindFreeLocationWithStorageLease(
   liveness.value_count = IREE_ARRAYSIZE(value_ids);
   liveness.value_interval_indices = interval_indices;
 
-  uint32_t unit_end_point_starts[] = {0, 1};
+  uint32_t unit_point_starts[] = {0, 1};
   uint32_t unit_end_points[] = {4, 1};
   uint64_t edge_handoff_words[] = {0};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
+  unit_liveness.point_starts_by_value_ordinal = unit_point_starts;
   unit_liveness.end_points = unit_end_points;
-  unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
   unit_liveness.values_with_incomplete_storage_segments = {
       liveness.value_count,
       edge_handoff_words,
@@ -340,7 +340,7 @@ uint32_t FindFreeLocationWithStorageLease(
   const loom_low_allocation_assignment_t assignments[] = {
       Assignment(leased_value, /*start=*/0, /*end=*/1, value_class,
                  /*location_base=*/0, /*location_count=*/1,
-                 /*unit_end_point_start=*/1),
+                 /*unit_point_start=*/1),
   };
   const uint32_t assignment_indices_by_value_ordinal[] = {UINT32_MAX, 0};
   loom_low_allocation_assignment_map_t assignment_map = {};
@@ -581,13 +581,13 @@ TEST_F(LowAllocationSearchTest, FindsFreeLocationAfterActiveAndReservedRanges) {
   liveness.value_count = IREE_ARRAYSIZE(value_ids);
   liveness.value_interval_indices = interval_indices;
 
-  uint32_t unit_end_point_starts[] = {0, 2};
+  uint32_t unit_point_starts[] = {0, 2};
   uint32_t unit_end_points[] = {6, 6, 10, 10};
   uint64_t edge_handoff_words[] = {0};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
+  unit_liveness.point_starts_by_value_ordinal = unit_point_starts;
   unit_liveness.end_points = unit_end_points;
-  unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
   unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
                                                            edge_handoff_words};
 
@@ -615,7 +615,7 @@ TEST_F(LowAllocationSearchTest, FindsFreeLocationAfterActiveAndReservedRanges) {
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(active_value, /*start=*/0, /*end=*/10, value_class,
                  /*location_base=*/0, /*location_count=*/2,
-                 /*unit_end_point_start=*/2),
+                 /*unit_point_start=*/2),
   };
   uint32_t assignment_indices_by_value_ordinal[] = {UINT32_MAX, 0};
   loom_low_allocation_assignment_map_t assignment_map = {};
@@ -690,13 +690,13 @@ TEST_F(LowAllocationSearchTest,
   liveness.value_count = IREE_ARRAYSIZE(value_ids);
   liveness.value_interval_indices = interval_indices;
 
-  uint32_t unit_end_point_starts[] = {0, 2};
+  uint32_t unit_point_starts[] = {0, 2};
   uint32_t unit_end_points[] = {6, 6, 12, 12};
   uint64_t edge_handoff_words[] = {0};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
+  unit_liveness.point_starts_by_value_ordinal = unit_point_starts;
   unit_liveness.end_points = unit_end_points;
-  unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
   unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
                                                            edge_handoff_words};
 
@@ -714,7 +714,7 @@ TEST_F(LowAllocationSearchTest,
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(active_value, /*start=*/0, /*end=*/12, value_class,
                  /*location_base=*/0, /*location_count=*/2,
-                 /*unit_end_point_start=*/2),
+                 /*unit_point_start=*/2),
   };
   uint32_t assignment_indices_by_value_ordinal[] = {UINT32_MAX, 0};
   loom_low_allocation_assignment_map_t assignment_map = {};
@@ -850,13 +850,13 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   liveness.value_count = IREE_ARRAYSIZE(value_ids);
   liveness.value_interval_indices = interval_indices;
 
-  uint32_t unit_end_point_starts[] = {0, 2, 4};
+  uint32_t unit_point_starts[] = {0, 2, 4};
   uint32_t unit_end_points[] = {8, 8, 20, 20, 12, 12};
   uint64_t edge_handoff_words[] = {0};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
+  unit_liveness.point_starts_by_value_ordinal = unit_point_starts;
   unit_liveness.end_points = unit_end_points;
-  unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
   unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
                                                            edge_handoff_words};
 
@@ -874,10 +874,10 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(expensive_value, /*start=*/0, /*end=*/20, value_class,
                  /*location_base=*/0, /*location_count=*/2,
-                 /*unit_end_point_start=*/2),
+                 /*unit_point_start=*/2),
       Assignment(cheap_value, /*start=*/0, /*end=*/12, value_class,
                  /*location_base=*/2, /*location_count=*/2,
-                 /*unit_end_point_start=*/4),
+                 /*unit_point_start=*/4),
   };
   uint32_t assignment_indices_by_value_ordinal[] = {UINT32_MAX, 0, 1};
   loom_low_allocation_assignment_map_t assignment_map = {};
@@ -985,13 +985,13 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
   liveness.value_count = IREE_ARRAYSIZE(value_ids);
   liveness.value_interval_indices = interval_indices;
 
-  uint32_t unit_end_point_starts[] = {0, 2, 4, 5};
+  uint32_t unit_point_starts[] = {0, 2, 4, 5};
   uint32_t unit_end_points[] = {8, 8, 28, 28, 12, 12};
   uint64_t edge_handoff_words[] = {0};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.end_point_starts_by_value_ordinal = unit_end_point_starts;
+  unit_liveness.point_starts_by_value_ordinal = unit_point_starts;
   unit_liveness.end_points = unit_end_points;
-  unit_liveness.end_point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
   unit_liveness.values_with_incomplete_storage_segments = {liveness.value_count,
                                                            edge_handoff_words};
 
@@ -1009,13 +1009,13 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(expensive_value, /*start=*/0, /*end=*/28, value_class,
                  /*location_base=*/0, /*location_count=*/2,
-                 /*unit_end_point_start=*/2),
+                 /*unit_point_start=*/2),
       Assignment(cheap_value0, /*start=*/0, /*end=*/12, value_class,
                  /*location_base=*/2, /*location_count=*/1,
-                 /*unit_end_point_start=*/4),
+                 /*unit_point_start=*/4),
       Assignment(cheap_value1, /*start=*/0, /*end=*/12, value_class,
                  /*location_base=*/3, /*location_count=*/1,
-                 /*unit_end_point_start=*/5),
+                 /*unit_point_start=*/5),
   };
   uint32_t assignment_indices_by_value_ordinal[] = {UINT32_MAX, 0, 1, 2};
   loom_low_allocation_assignment_map_t assignment_map = {};

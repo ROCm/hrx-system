@@ -640,6 +640,28 @@ TEST_F(SymbolicExprTest, DynamicMultiplyFallsBackToResultSymbol) {
   EXPECT_EQ(expression.terms[0].value_id, result);
 }
 
+TEST_F(SymbolicExprTest, BoundedDynamicMaddFallsBackToResultSymbol) {
+  loom_value_id_t left = DefineIndexValue();
+  loom_value_id_t right = DefineIndexValue();
+  loom_value_id_t addend = DefineIndexValue();
+  loom_op_t* madd_op = nullptr;
+  IREE_ASSERT_OK(loom_index_madd_build(&builder_, left, right, addend,
+                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                                       LOOM_LOCATION_UNKNOWN, &madd_op));
+  loom_value_id_t result = loom_index_madd_result(madd_op);
+
+  loom_symbolic_term_t terms[2] = {};
+  loom_symbolic_expr_t expression = {};
+  loom_symbolic_expr_from_value_bounded(module_, &fact_table_, result, terms,
+                                        IREE_ARRAYSIZE(terms), &expression);
+
+  ASSERT_TRUE(loom_symbolic_expr_is_linear(&expression));
+  EXPECT_EQ(expression.constant, 0);
+  ASSERT_EQ(expression.term_count, 1);
+  EXPECT_EQ(expression.terms[0].coefficient, 1);
+  EXPECT_EQ(expression.terms[0].value_id, result);
+}
+
 TEST_F(SymbolicExprTest, ProvesLessEqualFromTermFacts) {
   loom_value_id_t value_id = DefineIndexValue();
   DefineFacts(value_id, loom_value_facts_make(0, 10, 1));

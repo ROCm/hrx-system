@@ -172,8 +172,8 @@ low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) 
   %x = v_and_b32_lit %packed_tid, 1023
   %17 = v_lshrrev_b32_src0_inline %packed_tid, 10
   %y = v_and_b32_lit %17, 1023
-  %linear = v_lshl_add_u32_shift_imm %y, %x, 3
-  %20 = v_lshlrev_b32_src0_inline %linear, 2
+  %19 = v_lshl_add_u32_shift_imm %y, %x, 3
+  %20 = v_lshlrev_b32_src0_inline %19, 2
   %loaded = global_load_b32_saddr %20, %input_view
   global_store_b32_saddr %20, %loaded, %output_view
   return

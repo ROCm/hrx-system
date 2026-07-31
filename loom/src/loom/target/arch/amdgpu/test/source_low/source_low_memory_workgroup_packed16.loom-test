@@ -384,11 +384,10 @@ low.kernel.def target(@target) workgroup_size(16, 16, 1) workgroup_count(1, 1, 1
   %31 = v_lshlrev_b32_src0_inline %30, 1
   %loaded = global_load_d16_b16_saddr %31, %input_view
   %33 = v_bfe_u32_offset_0_width_16_low16 %loaded
-  %34 = v_lshlrev_b32_src0_inline %row, 1
-  %35 = v_lshlrev_b32_src0_inline %column, 5
-  %36 = v_add_u32 %34, %35
-  low.op<amdgpu.ds_write_b16>(%36, %33) {offset = 0} memory_access([0, 3, 9, -1, 11, 0, 0, 0, 3, 0, 510, 2, 512]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
-  %roundtrip = low.op<amdgpu.ds_read_u16>(%36) {offset = 0} memory_access([0, 3, 9, -1, 11, 0, 0, 0, 3, 0, 510, 2, 512]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %34 = v_lshl_add_u32_shift_imm %column, %row, 4
+  %35 = v_lshlrev_b32_src0_inline %34, 1
+  low.op<amdgpu.ds_write_b16>(%35, %33) {offset = 0} memory_access([0, 3, 9, -1, 43, 2, 0, 2, 3, 0, 510, 2, 512]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %roundtrip = low.op<amdgpu.ds_read_u16>(%35) {offset = 0} memory_access([0, 3, 9, -1, 43, 2, 0, 2, 3, 0, 510, 2, 512]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
   global_store_short_saddr %31, %roundtrip, %output_view
   return
 }

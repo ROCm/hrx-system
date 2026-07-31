@@ -5,6 +5,7 @@ wasm.target<simd128> @target
 
 low.func.def target(@target) abi(wasm_function) @double(%value: reg<wasm.v128>) -> (reg<wasm.v128>) {
   %sum = low.op<wasm.i32x4.add>(%value, %value) : (reg<wasm.v128>, reg<wasm.v128>) -> reg<wasm.v128>
+  low.schedule.fence
   low.return %sum : reg<wasm.v128>
 }
 

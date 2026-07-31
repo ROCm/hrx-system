@@ -29,11 +29,13 @@ low.kernel.def target(@target) workgroup_size(4, 4, 1) workgroup_count(1, 1, 1) 
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %x = kernel.workitem_id.x
   %y = kernel.workitem_id.y
-  %row_stride = const.i64 4
-  %19 = mul.i64 %y, %row_stride
-  %linear = add.i64 %19, %x
-  %loaded = load.indexed.i32 %input_view, %linear, 0, 4
-  store.indexed.i32 %loaded, %output_view, %linear, 0, 4
+  %18 = const.i64 2
+  %19 = shl.i64 %x, %18
+  %20 = const.i64 4
+  %21 = shl.i64 %y, %20
+  %22 = add.i64 %19, %21
+  %loaded = load.indexed.i32 %input_view, %22, 0, 1
+  store.indexed.i32 %loaded, %output_view, %22, 0, 1
   return
 }
 
@@ -68,11 +70,13 @@ low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) 
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %x = kernel.workitem_id.x
   %y = kernel.workitem_id.y
-  %row_stride = const.i64 9
-  %20 = mul.i64 %y, %row_stride
-  %linear = add.i64 %20, %x
-  %loaded = load.indexed.i32 %input_view, %linear, 0, 4
-  store.indexed.i32 %loaded, %output_view, %linear, 0, 4
+  %19 = const.i64 2
+  %20 = shl.i64 %x, %19
+  %21 = const.i64 36
+  %22 = mul.i64 %y, %21
+  %23 = add.i64 %20, %22
+  %loaded = load.indexed.i32 %input_view, %23, 0, 1
+  store.indexed.i32 %loaded, %output_view, %23, 0, 1
   return
 }
 
@@ -107,11 +111,13 @@ low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) 
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %x = kernel.workitem_id.x
   %y = kernel.workitem_id.y
-  %row_stride = const.i64 9
-  %20 = mul.i64 %row_stride, %y
-  %linear = add.i64 %20, %x
-  %loaded = load.indexed.i32 %input_view, %linear, 0, 4
-  store.indexed.i32 %loaded, %output_view, %linear, 0, 4
+  %19 = const.i64 2
+  %20 = shl.i64 %x, %19
+  %21 = const.i64 36
+  %22 = mul.i64 %y, %21
+  %23 = add.i64 %20, %22
+  %loaded = load.indexed.i32 %input_view, %23, 0, 1
+  store.indexed.i32 %loaded, %output_view, %23, 0, 1
   return
 }
 
@@ -149,8 +155,8 @@ low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) 
   %column = const.i64 1
   %20 = mul.i64 %y, %x
   %linear = add.i64 %20, %column
-  %loaded = load.indexed.i32 %input_view, %linear, 4, 4
-  store.indexed.i32 %loaded, %output_view, %linear, 4, 4
+  %loaded = load.indexed.i32 %input_view, %linear, 0, 4
+  store.indexed.i32 %loaded, %output_view, %linear, 0, 4
   return
 }
 
@@ -436,10 +442,12 @@ low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) 
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %dispatch_x = kernel.workitem_dispatch_id.x
   %dispatch_y = kernel.workitem_dispatch_id.y
-  %row_stride = const.i64 32
-  %17 = mul.i64 %dispatch_y, %row_stride
-  %linear = add.i64 %17, %dispatch_x
   %one = const.i32 1
-  store.indexed.i32 %one, %output_view, %linear, 0, 4
+  %17 = const.i64 2
+  %18 = shl.i64 %dispatch_x, %17
+  %19 = const.i64 7
+  %20 = shl.i64 %dispatch_y, %19
+  %21 = add.i64 %18, %20
+  store.indexed.i32 %one, %output_view, %21, 0, 1
   return
 }

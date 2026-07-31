@@ -3441,6 +3441,9 @@ static iree_status_t loom_llvmir_emit_return(
 
 static iree_status_t loom_llvmir_emit_low_op(
     loom_llvmir_emit_function_state_t* state, const loom_op_t* op) {
+  if (iree_any_bit_set(op->traits, LOOM_TRAIT_HINT)) {
+    return iree_ok_status();
+  }
   if (loom_low_return_isa(op)) {
     return loom_llvmir_emit_return(state, op);
   }

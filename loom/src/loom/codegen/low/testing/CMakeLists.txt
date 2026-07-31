@@ -21,6 +21,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::analysis::liveness
     loom::codegen::low::allocation::assignment
+    loom::codegen::low::allocation::live_range
     loom::codegen::low::allocation::storage
     loom::codegen::low::frame
     loom::codegen::low::placement

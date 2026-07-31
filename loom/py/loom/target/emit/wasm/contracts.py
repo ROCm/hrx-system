@@ -434,6 +434,7 @@ def _source_memory_constraint(
         vector_lane_byte_stride=4,
         static_byte_offset=0,
         dynamic_term_count=1 if dynamic else 0,
+        dynamic_view_base_term_count=0,
         dynamic_index_source=(
             SourceMemoryDynamicIndexSource.VALUE
             if dynamic

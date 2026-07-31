@@ -67,8 +67,12 @@ bool loom_print_low_asm_is_requested(loom_print_context_t* ctx) {
   return !iree_string_view_is_empty(ctx->low_asm_descriptor_set_key);
 }
 
-static bool loom_print_low_asm_allows_canonical_structural_op(
-    loom_print_context_t* ctx, const loom_op_t* op) {
+static bool loom_print_low_asm_allows_canonical_op(loom_print_context_t* ctx,
+                                                   const loom_op_t* op) {
+  if (iree_any_bit_set(loom_op_effective_traits(ctx->module, op),
+                       LOOM_TRAIT_HINT)) {
+    return true;
+  }
   iree_string_view_t op_name = loom_op_name(ctx->module, op);
   return iree_string_view_equal(op_name, IREE_SV("low.br")) ||
          iree_string_view_equal(op_name, IREE_SV("low.cond_br")) ||
@@ -297,8 +301,7 @@ static iree_status_t loom_print_low_asm_region_preflight(
       IREE_RETURN_IF_ERROR(loom_print_low_asm_describe_operation(
           ctx, descriptor_set, current_op, &statement));
       if (statement.kind == LOOM_TEXT_LOW_ASM_STATEMENT_UNKNOWN) {
-        if (!loom_print_low_asm_allows_canonical_structural_op(ctx,
-                                                               current_op)) {
+        if (!loom_print_low_asm_allows_canonical_op(ctx, current_op)) {
           *out_available = false;
           loom_print_low_asm_record_operation_failure(ctx, out_failure,
                                                       block_index, current_op);
@@ -794,8 +797,7 @@ static iree_status_t loom_print_low_asm_region_body(
       IREE_RETURN_IF_ERROR(loom_print_low_asm_describe_operation(
           ctx, descriptor_set, current_op, &statement));
       if (statement.kind == LOOM_TEXT_LOW_ASM_STATEMENT_UNKNOWN) {
-        if (loom_print_low_asm_allows_canonical_structural_op(ctx,
-                                                              current_op)) {
+        if (loom_print_low_asm_allows_canonical_op(ctx, current_op)) {
           IREE_RETURN_IF_ERROR(loom_print_indent(ctx));
           // Canonical fallback retains the operation's original register
           // types, which may belong to a different descriptor set than the

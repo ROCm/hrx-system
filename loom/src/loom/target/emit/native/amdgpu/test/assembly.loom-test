@@ -17,6 +17,37 @@ low.func.def target(@gfx11_target) @gfx11_constants(%resource: reg<amdgpu.sgpr x
 
 // ====
 
+// Compiler hints partition the low schedule but have no target representation.
+// RUN: emit amdgpu-assembly @gfx11_compiler_hint waits=none strategy=source
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_compiler_hint() asm<amdgpu.rdna3.core> {
+  s_delay_alu {delay = 1}
+  low.schedule.fence
+  s_delay_alu {delay = 1}
+  return
+}
+
+// ----
+  s_delay_alu instid0(VALU_DEP_1)
+  s_delay_alu instid0(VALU_DEP_1)
+  s_endpgm
+
+// ====
+
+// The native encoder consumes the same trait rather than recognizing an ISA.
+// RUN: emit amdgpu-native @gfx11_compiler_hint_native waits=none strategy=source
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target(@gfx11_target) @gfx11_compiler_hint_native() asm<amdgpu.rdna3.core> {
+  s_delay_alu {delay = 1}
+  low.schedule.fence
+  s_delay_alu {delay = 1}
+  return
+}
+
+// ----
+
+// ====
+
 // RUN: emit amdgpu-assembly @gfx11_div_scale_vcc_state waits=none
 amdgpu.target<gfx1100> @gfx11_target
 low.func.def target(@gfx11_target) @gfx11_div_scale_vcc_state(%value: reg<amdgpu.vgpr>) asm<amdgpu.rdna3.core> {

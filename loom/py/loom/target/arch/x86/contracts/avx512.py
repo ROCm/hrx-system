@@ -236,7 +236,9 @@ def _source_memory_constraint(
     dynamic: bool,
     dynamic_byte_stride_factor: int = 1,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> SourceMemoryConstraint:
+    accepts_any_dynamic_terms = materialize_byte_offset or preserve_source_index
     return SourceMemoryConstraint(
         operation=operation,
         root_kind=SourceMemoryRootKind.BLOCK_ARGUMENT,
@@ -246,15 +248,19 @@ def _source_memory_constraint(
         vector_lane_byte_stride=4,
         static_byte_offset_minimum=_DISP32_MIN,
         static_byte_offset_maximum=_DISP32_MAX,
-        dynamic_term_count=1 if dynamic else 0,
+        dynamic_term_count=(
+            None if dynamic and accepts_any_dynamic_terms else 1 if dynamic else 0
+        ),
+        dynamic_term_count_minimum=(1 if dynamic and accepts_any_dynamic_terms else 0),
+        dynamic_view_base_term_count=None if materialize_byte_offset else 0,
         dynamic_index_source=(
             SourceMemoryDynamicIndexSource.VALUE
-            if dynamic
+            if dynamic and not accepts_any_dynamic_terms
             else SourceMemoryDynamicIndexSource.NONE
         ),
         dynamic_byte_stride=(
-            None
-            if dynamic and materialize_byte_offset
+            0
+            if dynamic and accepts_any_dynamic_terms
             else 4 * dynamic_byte_stride_factor
         )
         if dynamic
@@ -267,13 +273,18 @@ def _memory_immediates(
     dynamic: bool,
     *,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> dict[str, SourceMemoryProject | int]:
     immediates: dict[str, SourceMemoryProject | int] = {
         "disp32": SourceMemoryProject.static_byte_offset()
     }
     if dynamic:
         immediates["scale"] = (
-            1 if materialize_byte_offset else SourceMemoryProject.dynamic_byte_stride()
+            1
+            if materialize_byte_offset
+            else 4
+            if preserve_source_index
+            else SourceMemoryProject.dynamic_byte_stride()
         )
     return immediates
 
@@ -286,6 +297,7 @@ def _vector_load_rule(
     descriptor_key: str,
     dynamic_byte_stride_factor: int = 1,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     operands = {"base": ValueRef.operand("view")}
@@ -302,6 +314,7 @@ def _vector_load_rule(
         dynamic=dynamic,
         dynamic_byte_stride_factor=dynamic_byte_stride_factor,
         materialize_byte_offset=materialize_byte_offset,
+        preserve_source_index=preserve_source_index,
     )
     memory_emit = _op_emit(
         descriptor=descriptor,
@@ -313,6 +326,7 @@ def _vector_load_rule(
             else _memory_immediates(
                 dynamic,
                 materialize_byte_offset=materialize_byte_offset,
+                preserve_source_index=preserve_source_index,
             )
         ),
         source_memory=source_memory,
@@ -338,7 +352,11 @@ def _vector_load_rule(
         source_op=vector.vector_load,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 1 if dynamic else 0),
+            *(
+                ()
+                if materialize_byte_offset
+                else (Guard.operand_segment_count("indices", 1 if dynamic else 0),)
+            ),
             Guard.value_type("result", result_type),
         ),
         emit=emit,
@@ -353,6 +371,7 @@ def _vector_store_rule(
     descriptor_key: str,
     dynamic_byte_stride_factor: int = 1,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     operands = {
@@ -372,6 +391,7 @@ def _vector_store_rule(
         dynamic=dynamic,
         dynamic_byte_stride_factor=dynamic_byte_stride_factor,
         materialize_byte_offset=materialize_byte_offset,
+        preserve_source_index=preserve_source_index,
     )
     memory_emit = _op_emit(
         descriptor=descriptor,
@@ -382,6 +402,7 @@ def _vector_store_rule(
             else _memory_immediates(
                 dynamic,
                 materialize_byte_offset=materialize_byte_offset,
+                preserve_source_index=preserve_source_index,
             )
         ),
         source_memory=source_memory,
@@ -407,7 +428,11 @@ def _vector_store_rule(
         source_op=vector.vector_store,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 1 if dynamic else 0),
+            *(
+                ()
+                if materialize_byte_offset
+                else (Guard.operand_segment_count("indices", 1 if dynamic else 0),)
+            ),
             Guard.value_type("value", value_type),
         ),
         emit=emit,
@@ -461,6 +486,15 @@ def _memory_rules() -> tuple[DescriptorRule, ...]:
                         lanes=lanes,
                         dynamic=True,
                         descriptor_key=descriptor_key,
+                        preserve_source_index=True,
+                    )
+                )
+                rules.append(
+                    _vector_load_rule(
+                        value_type,
+                        lanes=lanes,
+                        dynamic=True,
+                        descriptor_key=descriptor_key,
                         materialize_byte_offset=True,
                     )
                 )
@@ -487,6 +521,15 @@ def _memory_rules() -> tuple[DescriptorRule, ...]:
                         dynamic_byte_stride_factor=dynamic_byte_stride_factor,
                     )
                     for dynamic_byte_stride_factor in (2, 4, 8)
+                )
+                rules.append(
+                    _vector_store_rule(
+                        value_type,
+                        lanes=lanes,
+                        dynamic=True,
+                        descriptor_key=descriptor_key,
+                        preserve_source_index=True,
+                    )
                 )
                 rules.append(
                     _vector_store_rule(

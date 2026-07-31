@@ -610,6 +610,31 @@ def _s_bcnt1_i32_overlay(
     )
 
 
+def _s_ctz_i32_overlay(
+    source_bit_count: int,
+    encoding_condition: str,
+    instruction_name: str,
+) -> AmdgpuDescriptorOverlay:
+    if source_bit_count not in (32, 64):
+        raise ValueError("scalar CTZ source width must be 32 or 64")
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=f"amdgpu.s_ctz_i32_b{source_bit_count}",
+        instruction_name=instruction_name,
+        mnemonic=instruction_name.lower(),
+        encoding_name="ENC_SOP1",
+        encoding_condition=encoding_condition,
+        semantic_tag=f"integer.cttz.u{source_bit_count}.native_zero_minus_one",
+        schedule_class=_SCHEDULE_SALU,
+        operands=(
+            AmdgpuOperandOverlay("SDST", _sgpr_result()),
+            AmdgpuOperandOverlay(
+                "SSRC0", _sgpr_operand("input", units=source_bit_count // 32)
+            ),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _v_bcnt_u32_b32_overlay() -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key="amdgpu.v_bcnt_u32_b32",
@@ -622,6 +647,22 @@ def _v_bcnt_u32_b32_overlay() -> AmdgpuDescriptorOverlay:
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
             AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
             AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("addend")),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_ctz_i32_b32_overlay(instruction_name: str) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_ctz_i32_b32",
+        instruction_name=instruction_name,
+        mnemonic=instruction_name.lower(),
+        encoding_name="ENC_VOP1",
+        semantic_tag="integer.cttz.u32.native_zero_minus_one",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
         ),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -646,12 +687,35 @@ def _v_bcnt_u32_b32_src1_zero_overlay() -> AmdgpuDescriptorOverlay:
 
 def _integer_bit_count_overlays(
     sop1_encoding_condition: str = "default",
+    *,
+    scalar_ctz_instruction_names: tuple[str, str] = (
+        "S_FF1_I32_B32",
+        "S_FF1_I32_B64",
+    ),
+    vector_ctz_instruction_name: str = "V_FFBL_B32",
 ) -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         _s_bcnt1_i32_overlay(32, sop1_encoding_condition),
         _s_bcnt1_i32_overlay(64, sop1_encoding_condition),
+        _s_ctz_i32_overlay(
+            32, sop1_encoding_condition, scalar_ctz_instruction_names[0]
+        ),
+        _s_ctz_i32_overlay(
+            64, sop1_encoding_condition, scalar_ctz_instruction_names[1]
+        ),
         _v_bcnt_u32_b32_overlay(),
         _v_bcnt_u32_b32_src1_zero_overlay(),
+        _v_ctz_i32_b32_overlay(vector_ctz_instruction_name),
+    )
+
+
+def _rdna_integer_bit_count_overlays(
+    sop1_encoding_condition: str,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return _integer_bit_count_overlays(
+        sop1_encoding_condition,
+        scalar_ctz_instruction_names=("S_CTZ_I32_B32", "S_CTZ_I32_B64"),
+        vector_ctz_instruction_name="V_CTZ_I32_B32",
     )
 
 
@@ -5998,6 +6062,7 @@ __all__ = (
     "_integer_bit_count_overlays",
     "_integer_bitwise_permute_overlays",
     "_integer_bitwise_shift_overlays",
+    "_rdna_integer_bit_count_overlays",
     "_s_add_u32_overlay",
     "_s_add_u32_rhs_inline_overlay",
     "_s_addk_i32_overlay",

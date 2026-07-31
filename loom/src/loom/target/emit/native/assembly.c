@@ -186,6 +186,9 @@ static iree_status_t loom_native_assembly_append_block(
         (iree_host_size_t)block->scheduled_node_start + i;
     const loom_low_packet_view_t packet =
         loom_low_packet_at(schedule, packet_index);
+    if (loom_low_packet_is_compiler_hint(&packet)) {
+      continue;
+    }
     const bool packet_is_visible =
         !loom_low_live_in_isa(packet.node->op) &&
         !loom_low_storage_reserve_isa(packet.node->op) &&

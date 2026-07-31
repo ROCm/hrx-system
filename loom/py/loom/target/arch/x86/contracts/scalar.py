@@ -324,7 +324,9 @@ def _source_memory_constraint(
     element_byte_count: int,
     dynamic_byte_stride_factor: int = 1,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> SourceMemoryConstraint:
+    accepts_any_dynamic_terms = materialize_byte_offset or preserve_source_index
     return SourceMemoryConstraint(
         operation=operation,
         root_kind=SourceMemoryRootKind.BLOCK_ARGUMENT,
@@ -334,15 +336,19 @@ def _source_memory_constraint(
         vector_lane_byte_stride=element_byte_count,
         static_byte_offset_minimum=_DISP32_MIN,
         static_byte_offset_maximum=_DISP32_MAX,
-        dynamic_term_count=1 if dynamic else 0,
+        dynamic_term_count=(
+            None if dynamic and accepts_any_dynamic_terms else 1 if dynamic else 0
+        ),
+        dynamic_term_count_minimum=(1 if dynamic and accepts_any_dynamic_terms else 0),
+        dynamic_view_base_term_count=None if materialize_byte_offset else 0,
         dynamic_index_source=(
             SourceMemoryDynamicIndexSource.VALUE
-            if dynamic
+            if dynamic and not accepts_any_dynamic_terms
             else SourceMemoryDynamicIndexSource.NONE
         ),
         dynamic_byte_stride=(
-            None
-            if dynamic and materialize_byte_offset
+            0
+            if dynamic and accepts_any_dynamic_terms
             else element_byte_count * dynamic_byte_stride_factor
         )
         if dynamic
@@ -364,14 +370,20 @@ def x86_factored_memory_immediates(
 def _memory_immediates(
     dynamic: bool,
     *,
+    element_byte_count: int,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> dict[str, SourceMemoryProject | int]:
     immediates: dict[str, SourceMemoryProject | int] = {
         "disp32": SourceMemoryProject.static_byte_offset()
     }
     if dynamic:
         immediates["scale"] = (
-            1 if materialize_byte_offset else SourceMemoryProject.dynamic_byte_stride()
+            1
+            if materialize_byte_offset
+            else element_byte_count
+            if preserve_source_index
+            else SourceMemoryProject.dynamic_byte_stride()
         )
     return immediates
 
@@ -407,6 +419,7 @@ def _view_load_rule(
     descriptor_lookup: _DescriptorLookup,
     dynamic_byte_stride_factor: int = 1,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> DescriptorRule:
     descriptor = descriptor_lookup(descriptor_key)
     operands = {"base": ValueRef.operand("view")}
@@ -423,6 +436,7 @@ def _view_load_rule(
         element_byte_count=element_byte_count,
         dynamic_byte_stride_factor=dynamic_byte_stride_factor,
         materialize_byte_offset=materialize_byte_offset,
+        preserve_source_index=preserve_source_index,
     )
     emit: tuple[EmitDescriptorOp, ...]
     memory_emit = _op_emit(
@@ -434,7 +448,9 @@ def _view_load_rule(
             if dynamic and dynamic_byte_stride_factor != 1
             else _memory_immediates(
                 dynamic,
+                element_byte_count=element_byte_count,
                 materialize_byte_offset=materialize_byte_offset,
+                preserve_source_index=preserve_source_index,
             )
         ),
         source_memory=source_memory,
@@ -460,7 +476,11 @@ def _view_load_rule(
         source_op=view.view_load,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 1 if dynamic else 0),
+            *(
+                ()
+                if materialize_byte_offset
+                else (Guard.operand_segment_count("indices", 1 if dynamic else 0),)
+            ),
             Guard.value_type("result", result_type),
         ),
         emit=emit,
@@ -476,6 +496,7 @@ def _view_store_rule(
     descriptor_lookup: _DescriptorLookup,
     dynamic_byte_stride_factor: int = 1,
     materialize_byte_offset: bool = False,
+    preserve_source_index: bool = False,
 ) -> DescriptorRule:
     descriptor = descriptor_lookup(descriptor_key)
     operands = {
@@ -495,6 +516,7 @@ def _view_store_rule(
         element_byte_count=element_byte_count,
         dynamic_byte_stride_factor=dynamic_byte_stride_factor,
         materialize_byte_offset=materialize_byte_offset,
+        preserve_source_index=preserve_source_index,
     )
     memory_emit = _op_emit(
         descriptor=descriptor,
@@ -504,7 +526,9 @@ def _view_store_rule(
             if dynamic and dynamic_byte_stride_factor != 1
             else _memory_immediates(
                 dynamic,
+                element_byte_count=element_byte_count,
                 materialize_byte_offset=materialize_byte_offset,
+                preserve_source_index=preserve_source_index,
             )
         ),
         source_memory=source_memory,
@@ -530,7 +554,11 @@ def _view_store_rule(
         source_op=view.view_store,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 1 if dynamic else 0),
+            *(
+                ()
+                if materialize_byte_offset
+                else (Guard.operand_segment_count("indices", 1 if dynamic else 0),)
+            ),
             Guard.value_type("value", value_type),
         ),
         emit=emit,
@@ -589,6 +617,16 @@ def _memory_rules(
                         element_byte_count=element_byte_count,
                         descriptor_key=descriptor_key,
                         descriptor_lookup=descriptor_lookup,
+                        preserve_source_index=True,
+                    )
+                )
+                rules.append(
+                    _view_load_rule(
+                        value_type,
+                        dynamic=True,
+                        element_byte_count=element_byte_count,
+                        descriptor_key=descriptor_key,
+                        descriptor_lookup=descriptor_lookup,
                         materialize_byte_offset=True,
                     )
                 )
@@ -617,6 +655,16 @@ def _memory_rules(
                         dynamic_byte_stride_factor=dynamic_byte_stride_factor,
                     )
                     for dynamic_byte_stride_factor in (2, 4, 8)
+                )
+                rules.append(
+                    _view_store_rule(
+                        value_type,
+                        dynamic=True,
+                        element_byte_count=element_byte_count,
+                        descriptor_key=descriptor_key,
+                        descriptor_lookup=descriptor_lookup,
+                        preserve_source_index=True,
+                    )
                 )
                 rules.append(
                     _view_store_rule(

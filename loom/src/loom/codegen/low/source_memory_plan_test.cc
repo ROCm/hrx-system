@@ -599,6 +599,44 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadTracksViewBaseBoundary) {
   EXPECT_EQ(plan.dynamic_terms[0].byte_shift, 0u);
 }
 
+TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsScaledViewBase) {
+  loom_value_id_t buffer = DefineBufferArg();
+  loom_value_id_t element = DefineIndexArg();
+  loom_value_id_t layout = BuildDenseLayout();
+  loom_value_id_t byte_stride =
+      loom_index_constant_result(BuildOffsetConstant(4));
+  loom_op_t* byte_offset_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_index_scale_build(&builder_, element, byte_stride,
+                             loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+                             LOOM_LOCATION_UNKNOWN, &byte_offset_op));
+
+  loom_op_t* view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(
+      &builder_, buffer, loom_index_scale_result(byte_offset_op),
+      ViewType1D(LOOM_SCALAR_TYPE_I32, 1, layout), LOOM_LOCATION_UNKNOWN,
+      &view_op));
+  int64_t static_indices[] = {0};
+  loom_op_t* load_op = nullptr;
+  IREE_ASSERT_OK(loom_view_load_build(
+      &builder_, 0, loom_buffer_view_result(view_op), nullptr, 0,
+      static_indices, IREE_ARRAYSIZE(static_indices), 0, 0,
+      loom_type_scalar(LOOM_SCALAR_TYPE_I32), LOOM_LOCATION_UNKNOWN, &load_op));
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+  ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
+  EXPECT_EQ(plan.dynamic_view_base_value_id,
+            loom_index_scale_result(byte_offset_op));
+  ASSERT_EQ(plan.dynamic_term_count, 1u);
+  EXPECT_EQ(plan.dynamic_view_base_term_count, 1u);
+  EXPECT_EQ(plan.dynamic_terms[0].index, element);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_stride, 4);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_shift, 2u);
+}
+
 TEST_F(SourceMemoryPlanTest, DynamicDenseLoadTracksMaterializedI32ViewBase) {
   loom_value_id_t buffer = DefineBufferArg();
   loom_value_id_t layout = BuildDenseLayout();
@@ -1376,7 +1414,7 @@ TEST_F(SourceMemoryPlanTest, LinearizedScalarViewLoadRecoversCoordinateTerms) {
 }
 
 TEST_F(SourceMemoryPlanTest,
-       LinearizedUniformAndVaryingViewLoadPeelsStaticSuffix) {
+       LinearizedUniformAndVaryingViewLoadCanonicalizesPrefixTerms) {
   loom_value_id_t buffer = DefineBufferArg();
   loom_value_id_t layout = BuildDenseLayout();
   loom_value_id_t base_offset =
@@ -1428,21 +1466,36 @@ TEST_F(SourceMemoryPlanTest,
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
   ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
   EXPECT_EQ(plan.static_byte_offset, 1024);
-  ASSERT_EQ(plan.dynamic_term_count, 1u);
-  EXPECT_EQ(plan.dynamic_terms[0].index,
-            loom_index_madd_result(staged_lane_op));
+  ASSERT_EQ(plan.dynamic_term_count, 2u);
+  EXPECT_EQ(plan.dynamic_terms[0].index, stage);
   EXPECT_EQ(plan.dynamic_terms[0].source,
             LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE);
-  EXPECT_EQ(plan.dynamic_terms[0].byte_stride, 4);
-  EXPECT_EQ(plan.dynamic_terms[0].byte_shift, 2u);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_stride, 256);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_shift, 8u);
   EXPECT_EQ(plan.dynamic_terms[0].byte_facts.range_lo, 0);
-  EXPECT_EQ(plan.dynamic_terms[0].byte_facts.range_hi, 380);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_facts.range_hi, 256);
+  EXPECT_EQ(plan.dynamic_terms[1].index, lane);
+  EXPECT_EQ(plan.dynamic_terms[1].source,
+            LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKITEM_ID);
+  EXPECT_EQ(plan.dynamic_terms[1].dimension, LOOM_KERNEL_DIMENSION_X);
+  EXPECT_EQ(plan.dynamic_terms[1].byte_stride, 4);
+  EXPECT_EQ(plan.dynamic_terms[1].byte_shift, 2u);
+  EXPECT_EQ(plan.dynamic_terms[1].byte_facts.range_lo, 0);
+  EXPECT_EQ(plan.dynamic_terms[1].byte_facts.range_hi, 124);
+  ASSERT_EQ(plan.dynamic_realization_count, 1u);
+  EXPECT_EQ(plan.dynamic_realizations[0].term.index,
+            loom_index_madd_result(staged_lane_op));
+  EXPECT_EQ(plan.dynamic_realizations[0].term.byte_stride, 4);
+  EXPECT_EQ(plan.dynamic_realizations[0].term.byte_facts.range_lo, 0);
+  EXPECT_EQ(plan.dynamic_realizations[0].term.byte_facts.range_hi, 380);
+  EXPECT_EQ(plan.dynamic_realizations[0].first_term, 0u);
+  EXPECT_EQ(plan.dynamic_realizations[0].term_count, 2u);
   EXPECT_TRUE(loom_value_facts_is_lane_varying(
-      loom_value_fact_table_lookup(&facts, plan.dynamic_terms[0].index)));
+      loom_value_fact_table_lookup(&facts, plan.dynamic_terms[1].index)));
 }
 
 TEST_F(SourceMemoryPlanTest,
-       LinearizedUnknownAndVaryingViewLoadKeepsSingleTerm) {
+       LinearizedConstrainedAndVaryingViewLoadPreservesAggregateFacts) {
   loom_value_id_t buffer = DefineBufferArg();
   loom_value_id_t layout = BuildDenseLayout();
   loom_value_id_t base_offset =
@@ -1465,9 +1518,11 @@ TEST_F(SourceMemoryPlanTest,
                                        loom_kernel_workitem_id_result(lane_op),
                                        loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                        LOOM_LOCATION_UNKNOWN, &linear_op));
+  const loom_value_id_t constrained_linear =
+      BuildIndexAssumeRange(loom_index_madd_result(linear_op), 0, 1023);
 
   const loom_value_id_t dynamic_indices[] = {
-      loom_index_madd_result(linear_op),
+      constrained_linear,
   };
   int64_t static_indices[] = {INT64_MIN};
   loom_op_t* load_op = nullptr;
@@ -1483,24 +1538,50 @@ TEST_F(SourceMemoryPlanTest,
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
   ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
   EXPECT_EQ(plan.static_byte_offset, 0);
-  ASSERT_EQ(plan.dynamic_term_count, 1u);
-  EXPECT_EQ(plan.dynamic_terms[0].index, loom_index_madd_result(linear_op));
+  ASSERT_EQ(plan.dynamic_term_count, 2u);
+  EXPECT_EQ(plan.dynamic_terms[0].index, unknown);
   EXPECT_EQ(plan.dynamic_terms[0].source,
             LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE);
-  EXPECT_EQ(plan.dynamic_terms[0].byte_stride, 4);
-  EXPECT_EQ(plan.dynamic_terms[0].byte_shift, 2u);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_stride, 256);
+  EXPECT_EQ(plan.dynamic_terms[0].byte_shift, 8u);
+  EXPECT_EQ(plan.dynamic_terms[1].index,
+            loom_kernel_workitem_id_result(lane_op));
+  EXPECT_EQ(plan.dynamic_terms[1].source,
+            LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKITEM_ID);
+  EXPECT_EQ(plan.dynamic_terms[1].dimension, LOOM_KERNEL_DIMENSION_X);
+  EXPECT_EQ(plan.dynamic_terms[1].byte_stride, 4);
+  EXPECT_EQ(plan.dynamic_terms[1].byte_shift, 2u);
+  ASSERT_EQ(plan.dynamic_realization_count, 1u);
+  EXPECT_EQ(plan.dynamic_realizations[0].term.index, constrained_linear);
+  EXPECT_EQ(plan.dynamic_realizations[0].term.byte_stride, 4);
+  EXPECT_EQ(plan.dynamic_realizations[0].term.byte_facts.range_lo, 0);
+  EXPECT_EQ(plan.dynamic_realizations[0].term.byte_facts.range_hi, 4092);
+  EXPECT_EQ(plan.dynamic_realizations[0].first_term, 0u);
+  EXPECT_EQ(plan.dynamic_realizations[0].term_count, 2u);
+  const loom_value_facts_t offset_facts =
+      loom_low_source_memory_dynamic_offset_facts(&plan,
+                                                  plan.static_byte_offset);
+  EXPECT_EQ(offset_facts.range_lo, 0);
+  EXPECT_EQ(offset_facts.range_hi, 4092);
+  EXPECT_TRUE(loom_low_source_memory_dynamic_offset_fits_unsigned_bit_count(
+      &plan, plan.static_byte_offset, 12));
 }
 
-TEST_F(SourceMemoryPlanTest, LinearizedWorkitemViewLoadKeepsSingleTerm) {
+TEST_F(SourceMemoryPlanTest,
+       RankedAndLinearizedWorkitemIndicesShareCanonicalAddressTerms) {
   loom_value_id_t buffer = DefineBufferArg();
   loom_value_id_t layout = BuildDenseLayout();
   loom_value_id_t base_offset =
       loom_index_constant_result(BuildOffsetConstant(0));
 
-  loom_op_t* view_op = nullptr;
-  IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
-                                        ViewType1D(16, layout),
-                                        LOOM_LOCATION_UNKNOWN, &view_op));
+  loom_op_t* ranked_view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(
+      &builder_, buffer, base_offset, ViewType2D(4, 4, layout),
+      LOOM_LOCATION_UNKNOWN, &ranked_view_op));
+  loom_op_t* linear_view_op = nullptr;
+  IREE_ASSERT_OK(loom_buffer_view_build(
+      &builder_, buffer, base_offset, ViewType1D(16, layout),
+      LOOM_LOCATION_UNKNOWN, &linear_view_op));
   loom_op_t* row_op = nullptr;
   IREE_ASSERT_OK(
       loom_kernel_workitem_id_build(&builder_, LOOM_KERNEL_DIMENSION_Y,
@@ -1522,31 +1603,76 @@ TEST_F(SourceMemoryPlanTest, LinearizedWorkitemViewLoadKeepsSingleTerm) {
                                        loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                        LOOM_LOCATION_UNKNOWN, &linear_op));
 
-  const loom_value_id_t dynamic_indices[] = {loom_index_madd_result(linear_op)};
-  int64_t static_indices[] = {INT64_MIN};
-  loom_op_t* load_op = nullptr;
+  const loom_value_id_t ranked_dynamic_indices[] = {row, column};
+  int64_t ranked_static_indices[] = {INT64_MIN, INT64_MIN};
+  loom_op_t* ranked_load_op = nullptr;
   IREE_ASSERT_OK(loom_view_load_build(
-      &builder_, 0, loom_buffer_view_result(view_op), dynamic_indices,
-      IREE_ARRAYSIZE(dynamic_indices), static_indices,
-      IREE_ARRAYSIZE(static_indices), 0, 0,
-      loom_type_scalar(LOOM_SCALAR_TYPE_F32), LOOM_LOCATION_UNKNOWN, &load_op));
+      &builder_, 0, loom_buffer_view_result(ranked_view_op),
+      ranked_dynamic_indices, IREE_ARRAYSIZE(ranked_dynamic_indices),
+      ranked_static_indices, IREE_ARRAYSIZE(ranked_static_indices), 0, 0,
+      loom_type_scalar(LOOM_SCALAR_TYPE_F32), LOOM_LOCATION_UNKNOWN,
+      &ranked_load_op));
+  const loom_value_id_t linear_dynamic_indices[] = {
+      loom_index_madd_result(linear_op)};
+  int64_t linear_static_indices[] = {INT64_MIN};
+  loom_op_t* linear_load_op = nullptr;
+  IREE_ASSERT_OK(loom_view_load_build(
+      &builder_, 0, loom_buffer_view_result(linear_view_op),
+      linear_dynamic_indices, IREE_ARRAYSIZE(linear_dynamic_indices),
+      linear_static_indices, IREE_ARRAYSIZE(linear_static_indices), 0, 0,
+      loom_type_scalar(LOOM_SCALAR_TYPE_F32), LOOM_LOCATION_UNKNOWN,
+      &linear_load_op));
 
   loom_value_fact_table_t facts = {0};
   ComputeFacts(&facts);
-  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_plan_t ranked_plan = {};
+  loom_low_source_memory_access_diagnostic_t ranked_diagnostic = {0};
+  ASSERT_TRUE(
+      BuildPlan(&facts, ranked_load_op, &ranked_plan, &ranked_diagnostic));
+  loom_low_source_memory_access_plan_t linear_plan = {};
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
-  ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
-  EXPECT_EQ(plan.static_byte_offset, 0);
-  ASSERT_EQ(plan.dynamic_term_count, 1u);
-  EXPECT_EQ(plan.dynamic_terms[0].index, loom_index_madd_result(linear_op));
-  EXPECT_EQ(plan.dynamic_terms[0].source,
-            LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE);
-  EXPECT_EQ(plan.dynamic_terms[0].dimension, LOOM_KERNEL_DIMENSION_COUNT_);
-  EXPECT_EQ(plan.dynamic_terms[0].axis, 0u);
-  EXPECT_EQ(plan.dynamic_terms[0].byte_stride, 4);
-  EXPECT_EQ(plan.dynamic_terms[0].byte_shift, 2u);
-  EXPECT_EQ(plan.vector_lane_count, 1u);
-  EXPECT_EQ(plan.vector_lane_byte_stride, 4);
+  ASSERT_TRUE(BuildPlan(&facts, linear_load_op, &linear_plan, &diagnostic));
+
+  EXPECT_EQ(linear_plan.static_byte_offset, ranked_plan.static_byte_offset);
+  ASSERT_EQ(linear_plan.dynamic_term_count, ranked_plan.dynamic_term_count);
+  for (uint8_t i = 0; i < linear_plan.dynamic_term_count; ++i) {
+    const loom_low_source_memory_dynamic_term_t& ranked_term =
+        ranked_plan.dynamic_terms[i];
+    const loom_low_source_memory_dynamic_term_t& linear_term =
+        linear_plan.dynamic_terms[i];
+    EXPECT_EQ(linear_term.index, ranked_term.index);
+    EXPECT_EQ(linear_term.source, ranked_term.source);
+    EXPECT_EQ(linear_term.dimension, ranked_term.dimension);
+    EXPECT_EQ(linear_term.byte_stride, ranked_term.byte_stride);
+    EXPECT_EQ(linear_term.byte_shift, ranked_term.byte_shift);
+    EXPECT_EQ(linear_term.byte_facts.range_lo, ranked_term.byte_facts.range_lo);
+    EXPECT_EQ(linear_term.byte_facts.range_hi, ranked_term.byte_facts.range_hi);
+    EXPECT_EQ(linear_term.byte_facts.known_divisor,
+              ranked_term.byte_facts.known_divisor);
+  }
+
+  ASSERT_EQ(linear_plan.dynamic_term_count, 2u);
+  EXPECT_EQ(linear_plan.dynamic_terms[0].index, row);
+  EXPECT_EQ(linear_plan.dynamic_terms[0].source,
+            LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKITEM_ID);
+  EXPECT_EQ(linear_plan.dynamic_terms[0].dimension, LOOM_KERNEL_DIMENSION_Y);
+  EXPECT_EQ(linear_plan.dynamic_terms[0].byte_stride, 16);
+  EXPECT_EQ(linear_plan.dynamic_terms[0].byte_shift, 4u);
+  EXPECT_EQ(linear_plan.dynamic_terms[1].index, column);
+  EXPECT_EQ(linear_plan.dynamic_terms[1].source,
+            LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKITEM_ID);
+  EXPECT_EQ(linear_plan.dynamic_terms[1].dimension, LOOM_KERNEL_DIMENSION_X);
+  EXPECT_EQ(linear_plan.dynamic_terms[1].byte_stride, 4);
+  EXPECT_EQ(linear_plan.dynamic_terms[1].byte_shift, 2u);
+  ASSERT_EQ(linear_plan.dynamic_realization_count, 1u);
+  EXPECT_EQ(linear_plan.dynamic_realizations[0].term.index,
+            loom_index_madd_result(linear_op));
+  EXPECT_EQ(linear_plan.dynamic_realizations[0].term.byte_stride, 4);
+  EXPECT_EQ(linear_plan.dynamic_realizations[0].first_term, 0u);
+  EXPECT_EQ(linear_plan.dynamic_realizations[0].term_count, 2u);
+  EXPECT_EQ(linear_plan.vector_lane_count, ranked_plan.vector_lane_count);
+  EXPECT_EQ(linear_plan.vector_lane_byte_stride,
+            ranked_plan.vector_lane_byte_stride);
 }
 
 TEST_F(SourceMemoryPlanTest, ExactDynamicIndexFoldsIntoStaticOffset) {

@@ -1154,6 +1154,146 @@ func.def @interleaved_carried_loop_rejects_nested_region(%input: i32) -> (i32) {
 
 // ====
 
+func.def @recurrence_unroll_rolling_window(%left: i32, %right: i32, %input: i32) -> (i32, i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %left_result, %right_result = scf.for %i = [%start to %end step %step](%left_acc = %left : i32, %right_acc = %right : i32) -> (i32, i32) unroll schedule(recurrence) {
+    %producer0 = test.addi %input, %input : i32
+    %producer1 = test.addi %producer0, %input : i32
+    %left_next = test.addi %left_acc, %producer1 : i32
+    %right_next = test.addi %right_acc, %producer1 : i32
+    scf.yield %left_next, %right_next : i32, i32
+  }
+  func.return %left_result, %right_result : i32, i32
+}
+
+// ----
+func.def @recurrence_unroll_rolling_window(%left: i32, %right: i32, %input: i32) -> (i32, i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %i_0 = index.constant 0 : index
+  %i_1 = index.constant 1 : index
+  %i_2 = index.constant 2 : index
+  %i_3 = index.constant 3 : index
+  %producer0 = test.addi %input, %input : i32
+  %producer1 = test.addi %producer0, %input : i32
+  %producer0_1 = test.addi %input, %input : i32
+  %producer1_1 = test.addi %producer0_1, %input : i32
+  scf.schedule.fence
+  %left_next = test.addi %left, %producer1 : i32
+  %right_next = test.addi %right, %producer1 : i32
+  %producer0_2 = test.addi %input, %input : i32
+  %producer1_2 = test.addi %producer0_2, %input : i32
+  scf.schedule.fence
+  %left_next_1 = test.addi %left_next, %producer1_1 : i32
+  %right_next_1 = test.addi %right_next, %producer1_1 : i32
+  %producer0_3 = test.addi %input, %input : i32
+  %producer1_3 = test.addi %producer0_3, %input : i32
+  scf.schedule.fence
+  %left_next_2 = test.addi %left_next_1, %producer1_2 : i32
+  %right_next_2 = test.addi %right_next_1, %producer1_2 : i32
+  scf.schedule.fence
+  %left_next_3 = test.addi %left_next_2, %producer1_3 : i32
+  %right_next_3 = test.addi %right_next_2, %producer1_3 : i32
+  func.return %left_next_3, %right_next_3 : i32, i32
+}
+
+// ====
+
+func.def @recurrence_partial_factor_dynamic_tail(%end: index, %input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 3 : index
+  %result = scf.for %i = [%start to %end step %step](%acc = %input : i32) -> (i32) unroll(%factor) schedule(recurrence) {
+    %producer = test.addi %input, %input : i32
+    %next = test.addi %acc, %producer : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @recurrence_partial_factor_dynamic_tail(%end: index, %input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %step = index.constant 1 : index
+  %factor = index.constant 3 : index
+  %11 = index.constant 3 : index
+  %12 = index.constant 0 : index
+  %13 = index.sub %end, %start : index
+  %14 = index.max %13, %12 : index
+  %15 = index.constant 3 : index
+  %16 = index.div %14, %15 : index
+  %17 = index.mul %16, %11 : index
+  %18 = index.add %start, %17 : index
+  %21 = scf.for %i = [%start to %18 step %11](%acc = %input : i32) -> (i32) {
+    %22 = index.constant 1 : index
+    %i_1 = index.add %i, %22 : index
+    %24 = index.constant 2 : index
+    %i_2 = index.add %i, %24 : index
+    %producer = test.addi %input, %input : i32
+    %producer_1 = test.addi %input, %input : i32
+    scf.schedule.fence
+    %next = test.addi %acc, %producer : i32
+    %producer_2 = test.addi %input, %input : i32
+    scf.schedule.fence
+    %next_1 = test.addi %next, %producer_1 : i32
+    scf.schedule.fence
+    %next_2 = test.addi %next_1, %producer_2 : i32
+    scf.yield %next_2 : i32
+  }
+  %result = scf.for %i = [%18 to %end step %step](%acc = %21 : i32) -> (i32) {
+    %producer = test.addi %input, %input : i32
+    %next = test.addi %acc, %producer : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+func.def @recurrence_rejects_resultless_loop(%input: i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  // ERROR@+1: STRUCTURE/014 {attr_name="schedule", expected_constraint="one or more loop-carried values"}
+  scf.for %i = [%start to %end step %step] unroll schedule(recurrence) {
+    %producer = test.addi %input, %input : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @recurrence_rejects_missing_producer(%input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  // ERROR@+1: STRUCTURE/014 {attr_name="schedule", expected_constraint="one or more loop-carried-independent producer operations"}
+  %result = scf.for %i = [%start to %end step %step](%acc = %input : i32) -> (i32) unroll schedule(recurrence) {
+    %next = test.addi %acc, %input : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+func.def @recurrence_rejects_missing_consumer(%input: i32) -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  // ERROR@+1: STRUCTURE/014 {attr_name="schedule", expected_constraint="one or more loop-carried-dependent consumer operations"}
+  %result = scf.for %i = [%start to %end step %step](%acc = %input : i32) -> (i32) unroll schedule(recurrence) {
+    %producer = test.addi %input, %input : i32
+    scf.yield %acc : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
 func.def @dynamic_bound_factor_stripmines(%end: index) {
   %start = index.constant 0 : index
   %step = index.constant 1 : index

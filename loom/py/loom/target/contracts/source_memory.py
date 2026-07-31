@@ -90,6 +90,8 @@ class SourceMemoryConstraint:
     static_byte_offset_maximum: int
     minimum_alignment: int = 0
     dynamic_term_count: int | None = 0
+    dynamic_term_count_minimum: int = 0
+    dynamic_view_base_term_count: int | None = None
     dynamic_index_source: SourceMemoryDynamicIndexSource = (
         SourceMemoryDynamicIndexSource.NONE
     )
@@ -114,6 +116,8 @@ class SourceMemoryConstraint:
         static_byte_offset_maximum: int | None = None,
         minimum_alignment: int = 0,
         dynamic_term_count: int | None = 0,
+        dynamic_term_count_minimum: int = 0,
+        dynamic_view_base_term_count: int | None = None,
         dynamic_index_source: SourceMemoryDynamicIndexSource = (
             SourceMemoryDynamicIndexSource.NONE
         ),
@@ -139,6 +143,16 @@ class SourceMemoryConstraint:
         object.__setattr__(self, "static_byte_offset_maximum", maximum)
         object.__setattr__(self, "minimum_alignment", minimum_alignment)
         object.__setattr__(self, "dynamic_term_count", dynamic_term_count)
+        object.__setattr__(
+            self,
+            "dynamic_term_count_minimum",
+            dynamic_term_count_minimum,
+        )
+        object.__setattr__(
+            self,
+            "dynamic_view_base_term_count",
+            dynamic_view_base_term_count,
+        )
         object.__setattr__(self, "dynamic_index_source", dynamic_index_source)
         object.__setattr__(self, "dynamic_byte_stride", dynamic_byte_stride)
         object.__setattr__(
@@ -194,6 +208,10 @@ class SourceMemoryConstraint:
             raise ValueError("source memory minimum alignment must be a power of two")
         dynamic_term_count = self.dynamic_term_count
         if dynamic_term_count is None:
+            if not 0 <= self.dynamic_term_count_minimum < _U8_MAX:
+                raise ValueError(
+                    "source memory minimum dynamic term count must fit in u8"
+                )
             if self.dynamic_index_source != SourceMemoryDynamicIndexSource.NONE:
                 raise ValueError(
                     "source memory with any dynamic term count cannot require "
@@ -204,6 +222,11 @@ class SourceMemoryConstraint:
                     "source memory with any dynamic term count cannot require "
                     "a dynamic stride"
                 )
+        elif self.dynamic_term_count_minimum != 0:
+            raise ValueError(
+                "source memory with a fixed dynamic term count cannot also "
+                "require a minimum"
+            )
         elif not 0 <= dynamic_term_count < _U8_MAX:
             raise ValueError("source memory dynamic term count must be non-negative")
         elif dynamic_term_count == 0:
@@ -215,6 +238,12 @@ class SourceMemoryConstraint:
             raise ValueError("dynamic source memory needs an index source")
         elif self.dynamic_byte_stride == 0:
             raise ValueError("dynamic source memory stride must be non-zero")
+        if self.dynamic_view_base_term_count is not None and not (
+            0 <= self.dynamic_view_base_term_count < _U8_MAX
+        ):
+            raise ValueError(
+                "source memory dynamic view-base term count must fit in u8"
+            )
         if self.allow_dynamic_stride_values and (
             dynamic_term_count is None or dynamic_term_count == 0
         ):

@@ -70,6 +70,16 @@ typedef struct loom_low_allocation_search_spill_victim_set_t {
   bool found;
 } loom_low_allocation_search_spill_victim_set_t;
 
+// Returns true when |candidate| conflicts with active assignments, fixed
+// values, reserved ranges, or storage leases.
+bool loom_low_allocation_search_assignment_conflicts(
+    loom_low_allocation_search_context_t* context,
+    const loom_low_allocation_assignment_t* candidate,
+    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    const loom_value_id_t* ignored_storage_lease_value_ids,
+    uint16_t ignored_storage_lease_value_count,
+    loom_low_allocation_storage_release_policy_t release_policy);
+
 // Returns true when the interval assignment candidate conflicts with active
 // assignments, fixed values, reserved ranges, or storage leases.
 bool loom_low_allocation_search_location_conflicts(

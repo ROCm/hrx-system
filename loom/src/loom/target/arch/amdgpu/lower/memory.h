@@ -28,6 +28,17 @@ extern "C" {
 typedef struct loom_amdgpu_source_alloca_layout_t
     loom_amdgpu_source_alloca_layout_t;
 
+typedef struct loom_amdgpu_memory_dynamic_term_sequence_t {
+  // Dynamic terms selected for emission in address-expression order.
+  const loom_low_source_memory_dynamic_term_t*
+      terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
+  // Target operand path selected for each emitted term.
+  loom_amdgpu_memory_dynamic_index_kind_t
+      kinds[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
+  // Number of populated term and kind entries.
+  uint8_t count;
+} loom_amdgpu_memory_dynamic_term_sequence_t;
+
 typedef uint32_t loom_amdgpu_memory_access_rejection_flags_t;
 
 #define LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_VECTOR_TYPE ((uint32_t)1u << 0)
@@ -193,6 +204,15 @@ bool loom_amdgpu_memory_access_select_dynamic_term_kinds(
     const loom_view_region_table_t* view_regions,
     loom_amdgpu_memory_access_t* access,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic);
+
+// Resolves canonical address terms to their emission sequence. An equivalent
+// source realization replaces its canonical term range only when the source
+// value is already materialized for another use.
+void loom_amdgpu_memory_access_resolve_dynamic_terms(
+    const loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source,
+    const loom_amdgpu_memory_dynamic_index_kind_t* dynamic_term_kinds,
+    loom_amdgpu_memory_dynamic_term_sequence_t* out_sequence);
 
 // Routes all dynamic source terms through the VGPR byte-address operand.
 void loom_amdgpu_memory_access_route_dynamic_terms_through_vaddr(

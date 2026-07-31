@@ -266,10 +266,9 @@ low.kernel.def target(@target) workgroup_size(8, 4, 1) workgroup_count(1, 1, 1) 
   %lane_y = v_and_b32_lit %12, 1023
   %14 = storage {byte_alignment = 16, byte_length = 128} : low.storage<workgroup>
   %one = v_mov_b32 1
-  %17 = v_lshlrev_b32_src0_inline %lane_x, 4
-  %18 = v_lshlrev_b32_src0_inline %lane_y, 2
-  %19 = v_add_u32 %17, %18
-  low.op<amdgpu.ds_write_b32>(%19, %one) {offset = 0} memory_access([0, 3, 7, -1, 11, 0, 0, 0, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %17 = v_lshl_add_u32_shift_imm %lane_x, %lane_y, 2
+  %18 = v_lshlrev_b32_src0_inline %17, 2
+  low.op<amdgpu.ds_write_b32>(%18, %one) {offset = 0} memory_access([0, 3, 7, -1, 43, 4, 0, 4, 3, 0, 124, 4, 128]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
   return
 }
 

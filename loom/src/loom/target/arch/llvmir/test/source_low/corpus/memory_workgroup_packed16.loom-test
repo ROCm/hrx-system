@@ -322,17 +322,17 @@ low.kernel.def target(@target) workgroup_size(16, 16, 1) workgroup_count(1, 1, 1
   %col = kernel.workitem_id.y
   %bytes = const.i64 512
   %scratch_view = alloca.workgroup.i8 %bytes, 2
-  %30 = const.i64 16
-  %31 = mul.i64 %row, %30
-  %32 = add.i64 %31, %col
-  %loaded = load.indexed.f16 %input_view, %32, 0, 2
-  %34 = const.i64 1
-  %35 = shl.i64 %row, %34
-  %36 = const.i64 5
-  %37 = shl.i64 %col, %36
-  %38 = add.i64 %35, %37
-  store.indexed.f16 %loaded, %scratch_view, %38, 0, 1
-  %roundtrip = load.indexed.f16 %scratch_view, %38, 0, 1
-  store.indexed.f16 %roundtrip, %output_view, %32, 0, 2
+  %30 = const.i64 5
+  %31 = shl.i64 %row, %30
+  %32 = const.i64 1
+  %33 = shl.i64 %col, %32
+  %34 = add.i64 %31, %33
+  %loaded = load.indexed.f16 %input_view, %34, 0, 1
+  %37 = shl.i64 %row, %32
+  %39 = shl.i64 %col, %30
+  %40 = add.i64 %37, %39
+  store.indexed.f16 %loaded, %scratch_view, %40, 0, 1
+  %roundtrip = load.indexed.f16 %scratch_view, %40, 0, 1
+  store.indexed.f16 %roundtrip, %output_view, %34, 0, 1
   return
 }

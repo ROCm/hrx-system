@@ -110,13 +110,6 @@ static iree_status_t loom_target_pipeline_build_target_legalize(
       builder, IREE_SV("target-legalize"), IREE_SV("mode"), mode);
 }
 
-static iree_status_t loom_target_pipeline_build_authoring_expansion(
-    loom_builder_t* builder) {
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run_with_string_option(
-      builder, IREE_SV("select-templates"), IREE_SV("mode"), IREE_SV("final")));
-  return loom_target_pipeline_build_run(builder, IREE_SV("inline-callables"));
-}
-
 static iree_status_t loom_target_pipeline_build_sanitizer_assertion_selection(
     loom_builder_t* builder, void* user_data) {
   const loom_target_pipeline_build_context_t* context =
@@ -168,6 +161,37 @@ static iree_status_t loom_target_pipeline_build_for_target_functions(
   return loom_pass_ir_build_for(builder, LOOM_PASS_ANCHOR_FUNC,
                                 loom_target_pipeline_build_target_function_body,
                                 (void*)&body, out_for_op);
+}
+
+static iree_status_t
+loom_target_pipeline_build_cleanup_expanded_target_function(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  return loom_target_pipeline_build_run(builder, IREE_SV("canonicalize"));
+}
+
+static iree_status_t
+loom_target_pipeline_build_cleanup_expanded_target_functions(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  loom_op_t* for_op = NULL;
+  return loom_target_pipeline_build_for_target_functions(
+      builder, loom_target_pipeline_build_cleanup_expanded_target_function,
+      NULL, &for_op);
+}
+
+static iree_status_t loom_target_pipeline_build_authoring_expansion(
+    loom_builder_t* builder) {
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run_with_string_option(
+      builder, IREE_SV("select-templates"), IREE_SV("mode"), IREE_SV("final")));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_run(builder, IREE_SV("inline-callables")));
+  // Clean up constants, dead operations, and redundant structure exposed by
+  // inlining before target legalization observes the expanded functions.
+  loom_op_t* if_changed_op = NULL;
+  return loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_cleanup_expanded_target_functions,
+      NULL, &if_changed_op);
 }
 
 static iree_status_t loom_target_pipeline_build_source_to_low(
@@ -260,19 +284,24 @@ static iree_status_t loom_target_pipeline_build_cleanup_body(
 }
 
 static iree_status_t
-loom_target_pipeline_build_source_normalization_before_legalize(
+loom_target_pipeline_build_source_normalization_before_authoring_expansion(
     loom_builder_t* builder, void* user_data) {
   const loom_target_pipeline_build_context_t* context =
       (const loom_target_pipeline_build_context_t*)user_data;
   IREE_RETURN_IF_ERROR(loom_target_pipeline_contribute_phase(
       builder, context, LOOM_TARGET_PIPELINE_PHASE_SOURCE_NORMALIZATION));
-  IREE_RETURN_IF_ERROR(
-      loom_target_pipeline_build_run(builder, IREE_SV("legalize-math")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("normalize-kernel-resources")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("promote-private-fragments")));
   return loom_target_pipeline_build_cleanup(builder);
+}
+
+static iree_status_t
+loom_target_pipeline_build_math_legalization_after_authoring_expansion(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  return loom_target_pipeline_build_run(builder, IREE_SV("legalize-math"));
 }
 
 static iree_status_t
@@ -366,9 +395,14 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
       context->options, &control_flow_lowering));
   loom_op_t* for_op = NULL;
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
-      builder, loom_target_pipeline_build_source_normalization_before_legalize,
+      builder,
+      loom_target_pipeline_build_source_normalization_before_authoring_expansion,
       user_data, &for_op));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_authoring_expansion(builder));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
+      builder,
+      loom_target_pipeline_build_math_legalization_after_authoring_expansion,
+      user_data, &for_op));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_target_legalize(builder, IREE_SV("eager")));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(

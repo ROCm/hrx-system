@@ -765,6 +765,7 @@ def test_source_memory_row_emits_dynamic_byte_stride_any_flag() -> None:
             static_byte_offset_minimum=0,
             static_byte_offset_maximum=128,
             dynamic_term_count=1,
+            dynamic_view_base_term_count=0,
             dynamic_index_source=SourceMemoryDynamicIndexSource.VALUE,
             dynamic_byte_stride=None,
         ),
@@ -776,7 +777,32 @@ def test_source_memory_row_emits_dynamic_byte_stride_any_flag() -> None:
 
     assert ".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_BYTE_STRIDE_ANY" in fields
     assert ".dynamic_term_count = 1" in fields
+    assert ".dynamic_view_base_term_count = 0" in fields
     assert ".dynamic_byte_stride = " not in "\n".join(fields)
+
+
+def test_source_memory_row_emits_any_positive_dynamic_term_count() -> None:
+    row = LowerSourceMemory(
+        constraint=SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset_minimum=0,
+            static_byte_offset_maximum=128,
+            dynamic_term_count=None,
+            dynamic_term_count_minimum=1,
+        ),
+        diagnostic_index=3,
+        dynamic_offset_diagnostic_index=4,
+    )
+
+    fields = source_memory_row({}, row)
+
+    assert (".dynamic_term_count = LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_TERM_COUNT_ANY") in fields
+    assert ".dynamic_term_count_minimum = 1" in fields
+    assert (".dynamic_view_base_term_count = LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_VIEW_BASE_TERM_COUNT_ANY") in fields
 
 
 def test_source_memory_row_emits_portable_signed_i64_values() -> None:

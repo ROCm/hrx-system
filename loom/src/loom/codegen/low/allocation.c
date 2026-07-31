@@ -147,7 +147,7 @@ iree_status_t loom_low_allocate_function(
         &state.liveness, arena, &state.unit_liveness);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
-    status = loom_low_allocation_unit_liveness_extend_for_tied_results(
+    status = loom_low_allocation_unit_liveness_propagate_storage_relations(
         &state.unit_liveness, &state.liveness, &state.placement);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
@@ -286,8 +286,9 @@ iree_status_t loom_low_allocate_function(
             },
         .assignment_indices_by_value_ordinal =
             state.interval_assignment.assignment_indices_by_value_ordinal,
+        .unit_start_points = state.unit_liveness.start_points,
         .unit_end_points = state.unit_liveness.end_points,
-        .unit_end_point_count = state.unit_liveness.end_point_count,
+        .unit_point_count = state.unit_liveness.point_count,
         .spill_plans = state.interval_assignment.spill_plans,
         .spill_plan_count = state.interval_assignment.spill_plan_count,
         .remarks = state.interval_assignment.remarks,

@@ -1373,6 +1373,9 @@ static iree_status_t loom_spirv_emit_scf_for(loom_spirv_emit_state_t* state,
 
 static iree_status_t loom_spirv_emit_low_op(loom_spirv_emit_state_t* state,
                                             const loom_op_t* op) {
+  if (iree_any_bit_set(op->traits, LOOM_TRAIT_HINT)) {
+    return iree_ok_status();
+  }
   if (loom_low_scf_if_isa(op)) {
     return loom_spirv_emit_scf_if(state, op);
   }

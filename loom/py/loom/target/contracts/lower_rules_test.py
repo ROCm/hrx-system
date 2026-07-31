@@ -35,6 +35,7 @@ from loom.target.contracts import (
     OrdinalValueAliasRule,
     RecipeRule,
     Scalar,
+    SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
@@ -59,6 +60,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_FROM_ELEMENTS_V4I32_DESCRIPTOR,
     TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+    TEST_LOW_MUL_I32_DESCRIPTOR,
 )
 
 
@@ -519,6 +521,7 @@ def test_compile_lower_rule_set_compiles_source_memory_dynamic_term_operand() ->
                             static_byte_offset_minimum=-(2**63),
                             static_byte_offset_maximum=(2**63) - 1,
                             dynamic_term_count=1,
+                            dynamic_view_base_term_count=0,
                             dynamic_index_source=SourceMemoryDynamicIndexSource.VALUE,
                             dynamic_byte_stride=None,
                         ),
@@ -541,6 +544,66 @@ def test_compile_lower_rule_set_compiles_source_memory_dynamic_term_operand() ->
     assert tuple(value_ref.index for value_ref in value_refs) == (0, 0)
     source_memory = compiled.source_memories[emit.source_memory_ordinal - 1]
     assert source_memory.constraint is table.cases[0].emit[0].source_memory
+    assert source_memory.constraint.dynamic_view_base_term_count == 0
+
+
+def test_compile_lower_rule_set_compiles_any_positive_dynamic_byte_offset() -> None:
+    table = ContractFragment(
+        name="test.source-memory-byte-offset",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=vector.vector_load,
+                descriptor=TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+                guards=(Guard.value_type("result", Vector("i32", lanes=4)),),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+                        operands={
+                            "address": ValueRef.operand("view"),
+                            "index": ValueRef.source_memory_dynamic_byte_offset(),
+                        },
+                        results={"dst": ValueRef.result("result")},
+                        source_memory=SourceMemoryConstraint(
+                            operation=SourceMemoryOperation.LOAD,
+                            memory_spaces=("unknown", "global"),
+                            element_byte_count=4,
+                            vector_lane_count=4,
+                            vector_lane_byte_stride=4,
+                            static_byte_offset_minimum=-(2**63),
+                            static_byte_offset_maximum=(2**63) - 1,
+                            dynamic_term_count=None,
+                            dynamic_term_count_minimum=1,
+                        ),
+                        source_memory_byte_offset_materializer=(
+                            SourceMemoryByteOffsetMaterializer(
+                                const_i64=TEST_LOW_CONST_I32_DESCRIPTOR,
+                                add_i64=TEST_LOW_ADD_I32_DESCRIPTOR,
+                                mul_i64=TEST_LOW_MUL_I32_DESCRIPTOR,
+                                shl_i64=None,
+                                const_i64_immediate="i32_value",
+                            )
+                        ),
+                    ),
+                ),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    emit = compiled.emits[0]
+    value_refs = compiled.value_refs[
+        emit.operand_ref_start : emit.operand_ref_start + emit.operand_ref_count
+    ]
+    assert tuple(value_ref.kind for value_ref in value_refs) == (
+        SourceValueKind.OPERAND,
+        SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET,
+    )
+    source_memory = compiled.source_memories[emit.source_memory_ordinal - 1]
+    assert source_memory.constraint.dynamic_term_count is None
+    assert source_memory.constraint.dynamic_term_count_minimum == 1
+    assert source_memory.constraint.dynamic_view_base_term_count is None
 
 
 def test_compile_lower_rule_set_compiles_source_memory_static_offset_projects() -> None:

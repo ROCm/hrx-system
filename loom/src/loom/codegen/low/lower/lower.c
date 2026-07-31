@@ -375,6 +375,7 @@ static bool loom_low_lower_op_is_structural(const loom_module_t* module,
     case LOOM_OP_KERNEL_RETURN:
     case LOOM_OP_SCF_FOR:
     case LOOM_OP_SCF_IF:
+    case LOOM_OP_SCF_SCHEDULE_FENCE:
     case LOOM_OP_SCF_YIELD:
       return true;
     default:
@@ -532,8 +533,22 @@ static void loom_low_lower_mark_source_memory_access_storage_demands(
     const loom_low_source_memory_access_plan_t* access) {
   if (loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
           access)) {
-    loom_low_lower_mark_value_storage_required(
-        context, access->dynamic_view_base_value_id);
+    // Canonical address terms normally replace the source view-base
+    // expression. Preserve the exact view base when that expression also
+    // carries an integer-to-index conversion required by target lowering.
+    for (uint8_t term_ordinal = 0;
+         term_ordinal < access->dynamic_view_base_term_count; ++term_ordinal) {
+      const loom_type_t term_type = loom_module_value_type(
+          context->module, access->dynamic_terms[term_ordinal].index);
+      if (!loom_type_equal(term_type,
+                           loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)) &&
+          !loom_type_equal(term_type,
+                           loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET))) {
+        loom_low_lower_mark_value_storage_required(
+            context, access->dynamic_view_base_value_id);
+        break;
+      }
+    }
   }
   for (uint8_t term_ordinal = 0; term_ordinal < access->dynamic_term_count;
        ++term_ordinal) {
@@ -619,24 +634,17 @@ static void loom_low_lower_mark_rule_storage_demands(
   }
   if (rule->alias_ref_count == 0) return;
 
-  // Alias rules can erase projection ops whose operands are still referenced
-  // by facts consumed by later plans, such as dynamic byte offsets used during
-  // source-memory address emission. Exact operands are already captured by the
-  // facts themselves and do not need low SSA storage.
+  // Canonical source-memory plans own the storage demands for addresses through
+  // buffer.view aliases. Requiring the original byte-offset expression here
+  // would make an equivalent source realization mandatory target IR.
   const loom_op_t* source_op = selected_plan->source_op;
-  const loom_value_fact_table_t* fact_table = context->lowering.fact_table;
   if (loom_buffer_view_isa(source_op)) {
-    const loom_value_id_t byte_offset = loom_buffer_view_byte_offset(source_op);
-    int64_t exact_offset = 0;
-    if (fact_table == NULL ||
-        !loom_value_facts_as_exact_i64(
-            loom_value_fact_table_lookup(fact_table, byte_offset),
-            &exact_offset)) {
-      loom_low_lower_mark_value_storage_required(context, byte_offset);
-    }
     return;
   }
 
+  // Other variadic aliases can erase projection ops whose non-exact operands
+  // remain referenced by facts consumed by later plans.
+  const loom_value_fact_table_t* fact_table = context->lowering.fact_table;
   const loom_op_vtable_t* vtable = loom_op_vtable(context->module, source_op);
   if (vtable == NULL || !iree_any_bit_set(vtable->vtable_flags,
                                           LOOM_OP_VTABLE_VARIADIC_OPERANDS)) {
@@ -2652,6 +2660,11 @@ static iree_status_t loom_low_lower_structural_op(
       loom_op_t* low_return_op = NULL;
       return loom_low_return_build(&context->builder, NULL, 0,
                                    source_op->location, &low_return_op);
+    }
+    case LOOM_OP_SCF_SCHEDULE_FENCE: {
+      loom_op_t* low_fence_op = NULL;
+      return loom_low_schedule_fence_build(&context->builder,
+                                           source_op->location, &low_fence_op);
     }
     case LOOM_OP_CFG_BR: {
       loom_block_t* low_dest = NULL;

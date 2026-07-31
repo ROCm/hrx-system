@@ -1172,17 +1172,18 @@ bool loom_low_allocation_target_constraints_fixed_value_conflicts(
         .location_kind = fixed_value->location_kind,
         .location_base = fixed_value->location_base,
         .location_count = fixed_value->location_count,
-        .unit_end_point_start =
-            loom_low_allocation_unit_liveness_end_point_start_for_value_ordinal(
+        .unit_point_start =
+            loom_low_allocation_unit_liveness_point_start_for_value_ordinal(
                 unit_liveness, liveness, fixed_value->value_ordinal),
     };
     fixed_assignment.end_point =
         loom_low_allocation_live_range_assignment_max_unit_end_point(
-            unit_liveness->end_points, unit_liveness->end_point_count,
+            unit_liveness->end_points, unit_liveness->point_count,
             &fixed_assignment);
     if (loom_low_allocation_live_range_assignments_conflict(
-            descriptor_set, liveness, unit_liveness->end_points,
-            unit_liveness->end_point_count, &fixed_assignment, candidate)) {
+            descriptor_set, liveness, unit_liveness->start_points,
+            unit_liveness->end_points, unit_liveness->point_count,
+            &fixed_assignment, candidate)) {
       return true;
     }
   }

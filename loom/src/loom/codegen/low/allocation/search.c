@@ -73,16 +73,16 @@ loom_low_allocation_search_candidate_assignment(
       .location_kind = location_kind,
       .location_base = location_base,
       .location_count = location_count,
-      .unit_end_point_start =
+      .unit_point_start =
           has_value_ordinal
-              ? loom_low_allocation_unit_liveness_end_point_start_for_value_ordinal(
+              ? loom_low_allocation_unit_liveness_point_start_for_value_ordinal(
                     context->unit_liveness, context->liveness, value_ordinal)
               : UINT32_MAX,
   };
   candidate.end_point =
       loom_low_allocation_live_range_assignment_max_unit_end_point(
           context->unit_liveness->end_points,
-          context->unit_liveness->end_point_count, &candidate);
+          context->unit_liveness->point_count, &candidate);
   return candidate;
 }
 
@@ -226,7 +226,7 @@ static uint32_t loom_low_allocation_search_location_preference_penalty(
   return penalty;
 }
 
-static bool loom_low_allocation_search_candidate_conflicts(
+bool loom_low_allocation_search_assignment_conflicts(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* candidate,
     const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
@@ -234,9 +234,7 @@ static bool loom_low_allocation_search_candidate_conflicts(
     uint16_t ignored_storage_lease_value_count,
     loom_low_allocation_storage_release_policy_t release_policy) {
   if (loom_low_allocation_active_set_conflicts(
-          context->active_set, context->descriptor_set,
-          context->unit_liveness->end_points,
-          context->unit_liveness->end_point_count,
+          context->active_set, context->descriptor_set, context->unit_liveness,
           context->assignment_map->assignments,
           context->assignment_map->assignment_count, candidate,
           ignored_value_ids, ignored_value_count)) {
@@ -276,7 +274,7 @@ bool loom_low_allocation_search_location_conflicts(
       loom_low_allocation_search_candidate_assignment(
           context, interval, reg_class_id, location_kind, location_base,
           location_count);
-  return loom_low_allocation_search_candidate_conflicts(
+  return loom_low_allocation_search_assignment_conflicts(
       context, &candidate, ignored_value_ids, ignored_value_count,
       ignored_storage_lease_value_ids, ignored_storage_lease_value_count,
       release_policy);
@@ -304,7 +302,7 @@ static void loom_low_allocation_search_find_location_for_release_policy(
   for (uint32_t base = 0; base <= last_base;) {
     loom_low_allocation_assignment_t candidate = *candidate_template;
     candidate.location_base = base;
-    if (!loom_low_allocation_search_candidate_conflicts(
+    if (!loom_low_allocation_search_assignment_conflicts(
             context, &candidate,
             /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
             /*ignored_storage_lease_value_ids=*/NULL,
@@ -577,8 +575,7 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_active_unit_index_collect_conflicts(
             &context->active_set->units, context->descriptor_set,
-            context->liveness, context->unit_liveness->end_points,
-            context->unit_liveness->end_point_count,
+            context->liveness, context->unit_liveness,
             context->assignment_map->assignments,
             context->assignment_map->assignment_count, &candidate,
             /*ignored_value_ids=*/NULL,
@@ -605,8 +602,7 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
           &context->assignment_map->assignments[assignment_index];
       if (!loom_low_allocation_active_assignment_conflicts(
               context->descriptor_set, context->liveness,
-              context->unit_liveness->end_points,
-              context->unit_liveness->end_point_count, assignment, &candidate,
+              context->unit_liveness, assignment, &candidate,
               /*ignored_value_ids=*/NULL,
               /*ignored_value_count=*/0)) {
         continue;

@@ -280,10 +280,12 @@ typedef struct loom_low_allocation_table_t {
   // Assignment indices by liveness local value ordinal. Entries without an
   // assignment contain UINT32_MAX.
   const uint32_t* assignment_indices_by_value_ordinal;
+  // First live storage program point for each assigned unit.
+  const uint32_t* unit_start_points;
   // One-past-last live program point for each assigned unit.
   const uint32_t* unit_end_points;
-  // Number of records in |unit_end_points|.
-  iree_host_size_t unit_end_point_count;
+  // Number of records in |unit_start_points| and |unit_end_points|.
+  iree_host_size_t unit_point_count;
   // Spill materialization plans in assignment order.
   const loom_low_allocation_spill_plan_t* spill_plans;
   // Number of records in |spill_plans|.

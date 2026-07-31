@@ -45,6 +45,7 @@ python dev.py bazel run //loom/src/loom/tools/loom-opt:loom-opt -- \
 | `q2`, `q3`, `q4`, `q5`, `q6`, split high bits, lookup tables, offset-binary, packed-dot repack | `vector.bitunpacku`, `vector.bitfield.extractu`, `vector.bitfield.insert`, `vector.table.lookup`, `vector.dot8i4` | `packed_field_contracts.loom` |
 | dynamic lower-bound unroll, missing facts | structured diagnostic, exact/range facts | `q8_hip_shaped_unroll_unresolved.loom` |
 | `#if __gfx*__`, template, macro, arch-specialization, fallback | `func.apply`, `func.template`, `target(@...)`, `priority(...)` | `target_provider_selection.loom` |
+| template device function, `expf`, target math policy, inline | authoring expansion before target math legalization | `template_math_legalization.loom` |
 | `__cluster_dims__`, cluster multicast, async-to-LDS, `s_wait_asynccnt`, b128 | static `cluster_size`, `kernel.async.cluster.gather`, async groups and waits | `cluster_b128_multicast.loom` |
 
 ## Lane Distribution

@@ -63,6 +63,7 @@
 #include "loom/target/arch/amdgpu/lower/sync.h"
 #include "loom/target/arch/amdgpu/lower/table.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
+#include "loom/target/arch/amdgpu/lower/value/bit_count.h"
 #include "loom/target/arch/amdgpu/lower/value/integer64.h"
 #include "loom/target/arch/amdgpu/lower/value/scalar_conversion.h"
 #include "loom/target/arch/amdgpu/lower/value/storage.h"
@@ -309,6 +310,14 @@ LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_scalar_i64_ctpop_dispatch,
 LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_scalar_i64_ctpop_dispatch,
                              loom_amdgpu_scalar_i64_ctpop_plan_t,
                              loom_amdgpu_lower_scalar_i64_ctpop)
+
+LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_scalar_cttz_dispatch,
+                               loom_amdgpu_scalar_cttz_plan_t,
+                               loom_amdgpu_select_scalar_cttz_plan)
+
+LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_scalar_cttz_dispatch,
+                             loom_amdgpu_scalar_cttz_plan_t,
+                             loom_amdgpu_lower_scalar_cttz)
 
 LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_scalar_conversion_dispatch,
                                loom_amdgpu_scalar_conversion_plan_t,
@@ -1100,6 +1109,8 @@ LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_scalar_i64_alu_plan_t, rhs,
                                         1);
 LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_scalar_i64_ctpop_plan_t,
                                         source, 0);
+LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_scalar_cttz_plan_t, source,
+                                        0);
 LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_scalar_conversion_plan_t,
                                         source, 0);
 LOOM_AMDGPU_ASSERT_LEADING_SOURCE_FIELD(loom_amdgpu_vector_conversion_plan_t,

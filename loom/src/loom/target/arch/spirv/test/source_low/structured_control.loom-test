@@ -10,7 +10,6 @@ func.def target(@target) @structured_pipeline_probe(%value: i32) -> (i32) {
 pass.pipeline<module> @__loom_check_source_low pipeline {
   for func {
     where target {
-      legalize-math
       normalize-kernel-resources
       promote-private-fragments
       canonicalize
@@ -19,6 +18,18 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
   }
   select-templates(mode = "final")
   inline-callables
+  if changed {
+    for func {
+      where target {
+        canonicalize
+      }
+    }
+  }
+  for func {
+    where target {
+      legalize-math
+    }
+  }
   target-legalize(mode = "eager")
   for func {
     where target {

@@ -216,6 +216,17 @@ def source_memory_row(
     )
     _append_field(
         fields,
+        "dynamic_term_count_minimum",
+        constraint.dynamic_term_count_minimum,
+    )
+    _append_field(
+        fields,
+        "dynamic_view_base_term_count",
+        ("LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_VIEW_BASE_TERM_COUNT_ANY" if constraint.dynamic_view_base_term_count is None else constraint.dynamic_view_base_term_count),
+        always=True,
+    )
+    _append_field(
+        fields,
         "dynamic_index_source",
         lower_rule_spelling.SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_C_NAMES[constraint.dynamic_index_source],
         default="LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_NONE",

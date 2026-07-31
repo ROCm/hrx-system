@@ -140,6 +140,118 @@ def _add_bank_service_group(
     }
 
 
+def _add_fragment_packet_evidence(
+    report: dict[str, object],
+    *,
+    expanded: bool,
+) -> None:
+    entry = report["entries"]["rows"][0]
+    entry["wait_plan"] = {"full_drain_count": 18}
+    entry["static_instruction_mix"] = {"register_move_count": 64}
+    if expanded:
+        packet_count = 128
+        scalar_packet_count = 128
+        vector_packet_count = 0
+        contiguous_vector_packet_count = 0
+        emitted_low_op_count = 248
+        packet_rows = [
+            {
+                "index": 0,
+                "function": "routed_linear",
+                "source_root": "weights",
+                "source_root_argument_index": 1,
+                "memory_space": "global",
+                "operation": "load",
+                "packet": "amdgpu.global_load_b16_d16_saddr",
+                "strategy": "strided_d16_packed_b16_fragment_load",
+                "fallback_reason": None,
+                "storage": {"element_format": "f16"},
+                "packet_count": 64,
+                "scalar_packet_count": 64,
+                "contiguous_vector_packet_count": 0,
+            },
+            {
+                "index": 1,
+                "function": "routed_linear",
+                "source_root": "weights",
+                "source_root_argument_index": 1,
+                "memory_space": "global",
+                "operation": "load",
+                "packet": "amdgpu.global_load_b16_d16_hi_saddr",
+                "strategy": "strided_d16_packed_b16_fragment_load",
+                "fallback_reason": None,
+                "storage": {"element_format": "f16"},
+                "packet_count": 64,
+                "scalar_packet_count": 64,
+                "contiguous_vector_packet_count": 0,
+            },
+        ]
+    else:
+        packet_count = 8
+        scalar_packet_count = 0
+        vector_packet_count = 8
+        contiguous_vector_packet_count = 8
+        emitted_low_op_count = 16
+        packet_rows = [
+            {
+                "index": 0,
+                "function": "routed_linear",
+                "source_root": "weights",
+                "source_root_argument_index": 1,
+                "memory_space": "global",
+                "operation": "load",
+                "packet": "amdgpu.global_load_b128_saddr",
+                "strategy": "contiguous_b128_fragment_load",
+                "fallback_reason": None,
+                "storage": {"element_format": "f16"},
+                "packet_count": 8,
+                "scalar_packet_count": 0,
+                "contiguous_vector_packet_count": 8,
+            }
+        ]
+    report["source_low"] = {
+        "selection_summaries": {
+            "count": 1,
+            "rows": [
+                {
+                    "index": 0,
+                    "function": "routed_linear",
+                    "source_op": "vector.fragment.load",
+                    "source_op_kind": 80,
+                    "selection": "plan",
+                    "plan_key": (
+                        "strided_d16_packed_b16_fragment_load"
+                        if expanded
+                        else "contiguous_b128_fragment_load"
+                    ),
+                    "descriptor_key": None,
+                    "descriptor_semantic_tag": None,
+                    "selected_op_count": 8,
+                    "emitted_low_op_count": emitted_low_op_count,
+                }
+            ],
+        },
+        "memory": {
+            "argument_count": 1,
+            "arguments": [
+                {
+                    "index": 0,
+                    "function": "routed_linear",
+                    "source_root": "weights",
+                    "source_root_argument_index": 1,
+                    "memory_space": "global",
+                    "packet_count": packet_count,
+                    "scalar_packet_count": scalar_packet_count,
+                    "vector_packet_count": vector_packet_count,
+                    "contiguous_vector_packet_count": (contiguous_vector_packet_count),
+                }
+            ],
+            "argument_packet_count": len(packet_rows),
+            "argument_packets": packet_rows,
+        },
+    }
+
+
 def test_suggests_ordered_experiments_from_exact_target_evidence() -> None:
     document = parse_compile_report(_compile_report(), source="report.json")
 
@@ -220,6 +332,44 @@ def test_private_memory_is_reported_once_without_spill_evidence() -> None:
         "amdgpu.residency_cliff",
         "amdgpu.nondefault_wave_size",
     ]
+
+
+def test_fragment_packet_expansion_cites_source_packets_and_pressure() -> None:
+    report = _compile_report()
+    _add_fragment_packet_evidence(report, expanded=True)
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    suggestion = next(
+        suggestion
+        for suggestion in result.suggestions
+        if suggestion.suggestion_id == "amdgpu.fragment_packet_expansion"
+    )
+    assert "vector.fragment.load/weights/global" in suggestion.action
+    assert "128 scalar load packets" in suggestion.action
+    assert "strided_d16_packed_b16_fragment_load" in suggestion.action
+    evidence = {item.path: item.value for item in suggestion.evidence}
+    assert evidence["source_low.memory.argument_packets[0].scalar_packet_count"] == 64
+    assert evidence["source_low.memory.argument_packets[1].scalar_packet_count"] == 64
+    assert (
+        evidence["source_low.memory.argument_packets[0].contiguous_vector_packet_count"]
+        == 0
+    )
+    assert evidence["entries.rows[0].wait_plan.full_drain_count"] == 18
+    assert evidence["entries.rows[0].static_instruction_mix.register_move_count"] == 64
+
+
+def test_contiguous_fragment_packets_do_not_suggest_expansion() -> None:
+    report = _compile_report()
+    _add_fragment_packet_evidence(report, expanded=False)
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    assert "amdgpu.fragment_packet_expansion" not in {
+        suggestion.suggestion_id for suggestion in result.suggestions
+    }
 
 
 def test_unvalidated_bank_model_is_explicitly_opt_in() -> None:

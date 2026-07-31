@@ -254,6 +254,34 @@ TEST_F(LowAsmParserTest, BuildsCanonicalLowOps) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmParserTest, BuildsCanonicalHintAmongTargetPackets) {
+  loom_module_t* module = ParseOk(
+      "test.low_asm_region asm<test.low.core> {\n"
+      "  %c0 = test.const.i32 7\n"
+      "  low.schedule.fence\n"
+      "  %sum = test.add.i32 %c0, %c0\n"
+      "  return %sum\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_block_t* module_block = loom_module_block(module);
+  ASSERT_EQ(module_block->op_count, 1u);
+  loom_op_t* region_op = loom_block_op(module_block, 0);
+  ASSERT_TRUE(loom_test_low_asm_region_isa(region_op));
+
+  loom_region_t* region = loom_test_low_asm_region_body(region_op);
+  ASSERT_NE(region, nullptr);
+  loom_block_t* entry = GetEntryBlock(region);
+  ASSERT_NE(entry, nullptr);
+  ASSERT_EQ(entry->op_count, 4u);
+  EXPECT_TRUE(loom_low_const_isa(loom_block_op(entry, 0)));
+  EXPECT_TRUE(loom_low_schedule_fence_isa(loom_block_op(entry, 1)));
+  EXPECT_TRUE(loom_low_op_isa(loom_block_op(entry, 2)));
+  EXPECT_TRUE(loom_low_return_isa(loom_block_op(entry, 3)));
+
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmParserTest, SelectsDescriptorSet) {
   loom_module_t* module = ParseOk(
       "test.low_asm_region asm<test.low.alt> {\n"

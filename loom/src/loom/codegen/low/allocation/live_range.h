@@ -48,14 +48,22 @@ uint32_t loom_low_allocation_live_range_interval_alignment(
 // end point, matching whole-assignment lifetime semantics. |unit_end_points|
 // may be NULL only when no in-domain unit offset will be read.
 uint32_t loom_low_allocation_live_range_assignment_unit_end_point(
-    const uint32_t* unit_end_points, iree_host_size_t unit_end_point_count,
+    const uint32_t* unit_end_points, iree_host_size_t unit_point_count,
+    const loom_low_allocation_assignment_t* assignment, uint32_t unit_offset);
+
+// Returns the live start point for |unit_offset| in |assignment|. Unit offsets
+// outside the assignment domain and assignments without refined starts use the
+// whole-assignment start point. |unit_start_points| may be NULL only when no
+// in-domain refined unit offset will be read.
+uint32_t loom_low_allocation_live_range_assignment_unit_start_point(
+    const uint32_t* unit_start_points, iree_host_size_t unit_start_point_count,
     const loom_low_allocation_assignment_t* assignment, uint32_t unit_offset);
 
 // Returns the maximum one-past-last live program point across all assigned
 // units and the whole-assignment end point. |unit_end_points| may be NULL only
 // when |assignment| has no units.
 uint32_t loom_low_allocation_live_range_assignment_max_unit_end_point(
-    const uint32_t* unit_end_points, iree_host_size_t unit_end_point_count,
+    const uint32_t* unit_end_points, iree_host_size_t unit_point_count,
     const loom_low_allocation_assignment_t* assignment);
 
 // Returns true when two value live ranges can overlap in at least one CFG
@@ -69,14 +77,12 @@ bool loom_low_allocation_live_range_values_overlap(
     uint32_t rhs_end_point);
 
 // Returns true when two assignments have overlapping live target-visible
-// storage units under descriptor aliasing and per-unit end points.
+// storage units under descriptor aliasing and per-unit storage lifetimes.
 // Assignment sparse segment ranges, when present, must belong to |liveness|.
-// |unit_end_points| may be NULL only when no in-domain unit offset will be
-// read.
 bool loom_low_allocation_live_range_assignments_conflict(
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_liveness_analysis_t* liveness, const uint32_t* unit_end_points,
-    iree_host_size_t unit_end_point_count,
+    const loom_liveness_analysis_t* liveness, const uint32_t* unit_start_points,
+    const uint32_t* unit_end_points, iree_host_size_t unit_point_count,
     const loom_low_allocation_assignment_t* lhs,
     const loom_low_allocation_assignment_t* rhs);
 

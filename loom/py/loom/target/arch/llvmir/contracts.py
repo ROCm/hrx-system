@@ -663,15 +663,16 @@ def _select_rule(type_pattern: TypePattern, descriptor_key: str) -> DescriptorRu
 def _source_memory_constraint(
     operation: SourceMemoryOperation,
     *,
-    dynamic_term_count: int,
+    dynamic_term_count: int | None,
     element_byte_count: int,
     vector_lane_count: int = 1,
     allow_dynamic_stride_values: bool = False,
+    dynamic_view_base_term_count: int | None = None,
     cache_policy: bool = False,
 ) -> SourceMemoryConstraint:
-    if dynamic_term_count == 0:
+    if dynamic_term_count is None or dynamic_term_count == 0:
         dynamic_index_source = SourceMemoryDynamicIndexSource.NONE
-        dynamic_byte_stride: int | None = 0
+        dynamic_byte_stride = 0
     else:
         dynamic_index_source = SourceMemoryDynamicIndexSource.VALUE
         dynamic_byte_stride = None
@@ -693,6 +694,8 @@ def _source_memory_constraint(
         static_byte_offset_minimum=-(2**63),
         static_byte_offset_maximum=(2**63) - 1,
         dynamic_term_count=dynamic_term_count,
+        dynamic_term_count_minimum=1 if dynamic_term_count is None else 0,
+        dynamic_view_base_term_count=dynamic_view_base_term_count,
         dynamic_index_source=dynamic_index_source,
         dynamic_byte_stride=dynamic_byte_stride,
         allow_dynamic_stride_values=allow_dynamic_stride_values,
@@ -705,7 +708,7 @@ def _source_memory_constraint(
 
 def _memory_immediates(
     *,
-    dynamic_term_count: int,
+    dynamic_term_count: int | None,
     materialize_byte_offset: bool,
     cache_policy: bool = False,
 ) -> dict[str, SourceMemoryProject | AttrProject | int]:
@@ -733,7 +736,7 @@ def _cache_policy_guards(cache_policy: bool) -> tuple[Guard, ...]:
 
 def _atomic_immediates(
     *,
-    dynamic_term_count: int,
+    dynamic_term_count: int | None,
     materialize_byte_offset: bool,
     cache_policy: bool = False,
 ) -> dict[str, SourceMemoryProject | AttrProject | int]:
@@ -749,7 +752,7 @@ def _atomic_immediates(
 
 def _atomic_cmpxchg_immediates(
     *,
-    dynamic_term_count: int,
+    dynamic_term_count: int | None,
     materialize_byte_offset: bool,
     cache_policy: bool = False,
 ) -> dict[str, SourceMemoryProject | AttrProject | int]:
@@ -770,8 +773,8 @@ def _view_load_rule(
     result_type: TypePattern,
     descriptor_key: str,
     *,
-    source_dynamic_count: int,
-    dynamic_term_count: int,
+    source_dynamic_count: int | None,
+    dynamic_term_count: int | None,
     element_byte_count: int,
     vector_lane_count: int = 1,
     low_result_type: TypePattern | None = None,
@@ -781,8 +784,10 @@ def _view_load_rule(
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     if materialize_byte_offset is None:
-        materialize_byte_offset = dynamic_term_count > 1 or (
-            dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count
+        materialize_byte_offset = (
+            dynamic_term_count is None
+            or (dynamic_term_count > 1)
+            or (dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count)
         )
     if allow_dynamic_stride_values and not materialize_byte_offset:
         raise ValueError("dynamic stride values require byte-offset materialization")
@@ -798,7 +803,11 @@ def _view_load_rule(
         source_op=source_op,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", source_dynamic_count),
+            *(
+                ()
+                if source_dynamic_count is None
+                else (Guard.operand_segment_count("indices", source_dynamic_count),)
+            ),
             Guard.value_type("result", result_type),
             *_cache_policy_guards(cache_policy),
         ),
@@ -821,6 +830,9 @@ def _view_load_rule(
                     element_byte_count=element_byte_count,
                     vector_lane_count=vector_lane_count,
                     allow_dynamic_stride_values=allow_dynamic_stride_values,
+                    dynamic_view_base_term_count=(
+                        None if materialize_byte_offset else 0
+                    ),
                     cache_policy=cache_policy,
                 ),
                 source_memory_byte_offset_materializer=(
@@ -839,8 +851,8 @@ def _view_store_rule(
     value_type: TypePattern,
     descriptor_key: str,
     *,
-    source_dynamic_count: int,
-    dynamic_term_count: int,
+    source_dynamic_count: int | None,
+    dynamic_term_count: int | None,
     element_byte_count: int,
     vector_lane_count: int = 1,
     materialize_byte_offset: bool | None = None,
@@ -849,8 +861,10 @@ def _view_store_rule(
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     if materialize_byte_offset is None:
-        materialize_byte_offset = dynamic_term_count > 1 or (
-            dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count
+        materialize_byte_offset = (
+            dynamic_term_count is None
+            or (dynamic_term_count > 1)
+            or (dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count)
         )
     if allow_dynamic_stride_values and not materialize_byte_offset:
         raise ValueError("dynamic stride values require byte-offset materialization")
@@ -869,7 +883,11 @@ def _view_store_rule(
         source_op=source_op,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", source_dynamic_count),
+            *(
+                ()
+                if source_dynamic_count is None
+                else (Guard.operand_segment_count("indices", source_dynamic_count),)
+            ),
             Guard.value_type("value", value_type),
             *_cache_policy_guards(cache_policy),
         ),
@@ -888,6 +906,9 @@ def _view_store_rule(
                     element_byte_count=element_byte_count,
                     vector_lane_count=vector_lane_count,
                     allow_dynamic_stride_values=allow_dynamic_stride_values,
+                    dynamic_view_base_term_count=(
+                        None if materialize_byte_offset else 0
+                    ),
                     cache_policy=cache_policy,
                 ),
                 source_memory_byte_offset_materializer=(
@@ -906,14 +927,16 @@ def _view_load_rule_variants(
     result_type: TypePattern,
     descriptor_key: str,
     *,
-    source_dynamic_count: int,
-    dynamic_term_count: int,
+    source_dynamic_count: int | None,
+    dynamic_term_count: int | None,
     element_byte_count: int,
     vector_lane_count: int = 1,
     low_result_type: TypePattern | None = None,
 ) -> tuple[DescriptorRule, ...]:
-    materializes_byte_offset = dynamic_term_count > 1 or (
-        dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count
+    materializes_byte_offset = (
+        dynamic_term_count is None
+        or (dynamic_term_count > 1)
+        or (dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count)
     )
     rules = [
         _view_load_rule(
@@ -926,7 +949,9 @@ def _view_load_rule_variants(
             element_byte_count=element_byte_count,
             vector_lane_count=vector_lane_count,
             low_result_type=low_result_type,
-            allow_dynamic_stride_values=materializes_byte_offset,
+            allow_dynamic_stride_values=(
+                materializes_byte_offset and dynamic_term_count is not None
+            ),
         )
     ]
     rules.append(
@@ -940,7 +965,9 @@ def _view_load_rule_variants(
             element_byte_count=element_byte_count,
             vector_lane_count=vector_lane_count,
             low_result_type=low_result_type,
-            allow_dynamic_stride_values=materializes_byte_offset,
+            allow_dynamic_stride_values=(
+                materializes_byte_offset and dynamic_term_count is not None
+            ),
             cache_policy=True,
         )
     )
@@ -985,13 +1012,15 @@ def _view_store_rule_variants(
     value_type: TypePattern,
     descriptor_key: str,
     *,
-    source_dynamic_count: int,
-    dynamic_term_count: int,
+    source_dynamic_count: int | None,
+    dynamic_term_count: int | None,
     element_byte_count: int,
     vector_lane_count: int = 1,
 ) -> tuple[DescriptorRule, ...]:
-    materializes_byte_offset = dynamic_term_count > 1 or (
-        dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count
+    materializes_byte_offset = (
+        dynamic_term_count is None
+        or (dynamic_term_count > 1)
+        or (dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count)
     )
     rules = [
         _view_store_rule(
@@ -1003,7 +1032,9 @@ def _view_store_rule_variants(
             dynamic_term_count=dynamic_term_count,
             element_byte_count=element_byte_count,
             vector_lane_count=vector_lane_count,
-            allow_dynamic_stride_values=materializes_byte_offset,
+            allow_dynamic_stride_values=(
+                materializes_byte_offset and dynamic_term_count is not None
+            ),
         )
     ]
     rules.append(
@@ -1016,7 +1047,9 @@ def _view_store_rule_variants(
             dynamic_term_count=dynamic_term_count,
             element_byte_count=element_byte_count,
             vector_lane_count=vector_lane_count,
-            allow_dynamic_stride_values=materializes_byte_offset,
+            allow_dynamic_stride_values=(
+                materializes_byte_offset and dynamic_term_count is not None
+            ),
             cache_policy=True,
         )
     )
@@ -1058,8 +1091,8 @@ def _view_atomic_rule(
     value_type: TypePattern,
     descriptor_key: str,
     *,
-    source_dynamic_count: int,
-    dynamic_term_count: int,
+    source_dynamic_count: int | None,
+    dynamic_term_count: int | None,
     element_byte_count: int,
     operation: SourceMemoryOperation,
     atomic_kind: str,
@@ -1069,8 +1102,10 @@ def _view_atomic_rule(
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     if materialize_byte_offset is None:
-        materialize_byte_offset = dynamic_term_count > 1 or (
-            dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count
+        materialize_byte_offset = (
+            dynamic_term_count is None
+            or (dynamic_term_count > 1)
+            or (dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count)
         )
     if allow_dynamic_stride_values and not materialize_byte_offset:
         raise ValueError("dynamic stride values require byte-offset materialization")
@@ -1093,7 +1128,11 @@ def _view_atomic_rule(
         descriptor=descriptor,
         guards=(
             Guard.enum_attr_equals("kind", atomic_kind),
-            Guard.operand_segment_count("indices", source_dynamic_count),
+            *(
+                ()
+                if source_dynamic_count is None
+                else (Guard.operand_segment_count("indices", source_dynamic_count),)
+            ),
             Guard.value_type("value", value_type),
             Guard.attr_kind("ordering", "enum"),
             Guard.attr_kind("scope", "enum"),
@@ -1114,6 +1153,9 @@ def _view_atomic_rule(
                     dynamic_term_count=dynamic_term_count,
                     element_byte_count=element_byte_count,
                     allow_dynamic_stride_values=allow_dynamic_stride_values,
+                    dynamic_view_base_term_count=(
+                        None if materialize_byte_offset else 0
+                    ),
                     cache_policy=cache_policy,
                 ),
                 source_memory_byte_offset_materializer=(
@@ -1131,14 +1173,16 @@ def _view_atomic_rule_variants(
     value_type: TypePattern,
     descriptor_key: str,
     *,
-    source_dynamic_count: int,
-    dynamic_term_count: int,
+    source_dynamic_count: int | None,
+    dynamic_term_count: int | None,
     element_byte_count: int,
     operation: SourceMemoryOperation,
     atomic_kind: str,
 ) -> tuple[DescriptorRule, ...]:
-    materializes_byte_offset = dynamic_term_count > 1 or (
-        dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count
+    materializes_byte_offset = (
+        dynamic_term_count is None
+        or (dynamic_term_count > 1)
+        or (dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count)
     )
     rules = [
         _view_atomic_rule(
@@ -1150,7 +1194,9 @@ def _view_atomic_rule_variants(
             element_byte_count=element_byte_count,
             operation=operation,
             atomic_kind=atomic_kind,
-            allow_dynamic_stride_values=materializes_byte_offset,
+            allow_dynamic_stride_values=(
+                materializes_byte_offset and dynamic_term_count is not None
+            ),
         )
     ]
     rules.append(
@@ -1163,7 +1209,9 @@ def _view_atomic_rule_variants(
             element_byte_count=element_byte_count,
             operation=operation,
             atomic_kind=atomic_kind,
-            allow_dynamic_stride_values=materializes_byte_offset,
+            allow_dynamic_stride_values=(
+                materializes_byte_offset and dynamic_term_count is not None
+            ),
             cache_policy=True,
         )
     )
@@ -1204,8 +1252,8 @@ def _view_atomic_cmpxchg_rule(
     value_type: TypePattern,
     descriptor_key: str,
     *,
-    source_dynamic_count: int,
-    dynamic_term_count: int,
+    source_dynamic_count: int | None,
+    dynamic_term_count: int | None,
     element_byte_count: int,
     materialize_byte_offset: bool | None = None,
     allow_dynamic_stride_values: bool = False,
@@ -1213,8 +1261,10 @@ def _view_atomic_cmpxchg_rule(
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     if materialize_byte_offset is None:
-        materialize_byte_offset = dynamic_term_count > 1 or (
-            dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count
+        materialize_byte_offset = (
+            dynamic_term_count is None
+            or (dynamic_term_count > 1)
+            or (dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count)
         )
     if allow_dynamic_stride_values and not materialize_byte_offset:
         raise ValueError("dynamic stride values require byte-offset materialization")
@@ -1234,7 +1284,11 @@ def _view_atomic_cmpxchg_rule(
         source_op=view.view_atomic_cmpxchg,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", source_dynamic_count),
+            *(
+                ()
+                if source_dynamic_count is None
+                else (Guard.operand_segment_count("indices", source_dynamic_count),)
+            ),
             Guard.value_type("expected", value_type),
             Guard.value_type("replacement", value_type),
             Guard.value_type("old", value_type),
@@ -1258,6 +1312,9 @@ def _view_atomic_cmpxchg_rule(
                     dynamic_term_count=dynamic_term_count,
                     element_byte_count=element_byte_count,
                     allow_dynamic_stride_values=allow_dynamic_stride_values,
+                    dynamic_view_base_term_count=(
+                        None if materialize_byte_offset else 0
+                    ),
                     cache_policy=cache_policy,
                 ),
                 source_memory_byte_offset_materializer=(
@@ -1274,12 +1331,14 @@ def _view_atomic_cmpxchg_rule_variants(
     value_type: TypePattern,
     descriptor_key: str,
     *,
-    source_dynamic_count: int,
-    dynamic_term_count: int,
+    source_dynamic_count: int | None,
+    dynamic_term_count: int | None,
     element_byte_count: int,
 ) -> tuple[DescriptorRule, ...]:
-    materializes_byte_offset = dynamic_term_count > 1 or (
-        dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count
+    materializes_byte_offset = (
+        dynamic_term_count is None
+        or (dynamic_term_count > 1)
+        or (dynamic_term_count != 0 and source_dynamic_count != dynamic_term_count)
     )
     rules = [
         _view_atomic_cmpxchg_rule(
@@ -1288,7 +1347,9 @@ def _view_atomic_cmpxchg_rule_variants(
             source_dynamic_count=source_dynamic_count,
             dynamic_term_count=dynamic_term_count,
             element_byte_count=element_byte_count,
-            allow_dynamic_stride_values=materializes_byte_offset,
+            allow_dynamic_stride_values=(
+                materializes_byte_offset and dynamic_term_count is not None
+            ),
         )
     ]
     rules.append(
@@ -1298,7 +1359,9 @@ def _view_atomic_cmpxchg_rule_variants(
             source_dynamic_count=source_dynamic_count,
             dynamic_term_count=dynamic_term_count,
             element_byte_count=element_byte_count,
-            allow_dynamic_stride_values=materializes_byte_offset,
+            allow_dynamic_stride_values=(
+                materializes_byte_offset and dynamic_term_count is not None
+            ),
             cache_policy=True,
         )
     )
@@ -1538,6 +1601,29 @@ def _index_madd_rule() -> DescriptorRule:
                 operands={
                     "lhs": ValueRef.temporary("product"),
                     "rhs": ValueRef.operand("c"),
+                },
+                results={"dst": ValueRef.result("result")},
+            ),
+        ),
+    )
+
+
+def _index_scale_rule() -> DescriptorRule:
+    descriptor = _descriptor("llvmir.mul.i64")
+    return DescriptorRule(
+        source_op=index.index_scale,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("index", _INDEX),
+            Guard.value_type("stride", _OFFSET),
+            Guard.value_type("result", _OFFSET),
+        ),
+        emit=(
+            _op_emit(
+                descriptor=descriptor,
+                operands={
+                    "lhs": ValueRef.operand("index"),
+                    "rhs": ValueRef.operand("stride"),
                 },
                 results={"dst": ValueRef.result("result")},
             ),
@@ -2578,6 +2664,7 @@ def _memory_rules() -> tuple[DescriptorRule, ...]:
             (1, 2),
             (2, 1),
             (2, 2),
+            (None, None),
         ):
             rules.extend(
                 _view_load_rule_variants(
@@ -2707,6 +2794,7 @@ def _atomic_rules() -> tuple[DescriptorRule, ...]:
         (1, 2),
         (2, 1),
         (2, 2),
+        (None, None),
     )
     for element, element_byte_count in _ATOMIC_INTEGER_VALUE_TYPES:
         value_type = Scalar(element)
@@ -2920,6 +3008,7 @@ LLVMIR_GENERIC_CORE_CONTRACT_FRAGMENT = ContractFragment(
         _binary_rule(index.index_div, _INDEX, "llvmir.udiv.i64"),
         _binary_rule(index.index_rem, _INDEX, "llvmir.urem.i64"),
         _index_madd_rule(),
+        _index_scale_rule(),
         *_index_minmax_rules(),
         *_index_bitwise_rules(),
         _binary_rule(index.index_add, _OFFSET, "llvmir.add.i64"),

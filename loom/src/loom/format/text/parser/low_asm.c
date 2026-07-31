@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/error/error_catalog.h"
+#include "loom/ir/context.h"
 
 //===----------------------------------------------------------------------===//
 // Target-low asm packet parsing
@@ -801,15 +802,28 @@ static iree_status_t loom_parse_low_asm_packet(
   return status;
 }
 
-static bool loom_low_asm_token_is_canonical_op(loom_token_t token) {
-  return token.kind == LOOM_TOKEN_OP_NAME &&
-         (iree_string_view_equal(token.text, IREE_SV("low.br")) ||
-          iree_string_view_equal(token.text, IREE_SV("low.cond_br")) ||
-          iree_string_view_equal(token.text, IREE_SV("low.func.call")) ||
-          iree_string_view_equal(token.text, IREE_SV("low.op")) ||
-          iree_string_view_equal(token.text, IREE_SV("low.scf.yield")) ||
-          iree_string_view_equal(token.text, IREE_SV("low.scf.if")) ||
-          iree_string_view_equal(token.text, IREE_SV("low.scf.for")));
+static bool loom_low_asm_token_is_canonical_op(loom_parser_t* parser,
+                                               loom_token_t token) {
+  if (token.kind != LOOM_TOKEN_OP_NAME) {
+    return false;
+  }
+  if (iree_string_view_equal(token.text, IREE_SV("low.br")) ||
+      iree_string_view_equal(token.text, IREE_SV("low.cond_br")) ||
+      iree_string_view_equal(token.text, IREE_SV("low.func.call")) ||
+      iree_string_view_equal(token.text, IREE_SV("low.op")) ||
+      iree_string_view_equal(token.text, IREE_SV("low.scf.yield")) ||
+      iree_string_view_equal(token.text, IREE_SV("low.scf.if")) ||
+      iree_string_view_equal(token.text, IREE_SV("low.scf.for"))) {
+    return true;
+  }
+
+  // Target mnemonics and canonical Loom op names share the same token shape.
+  // Registered compiler hints retain their canonical spelling inside an asm
+  // region while unregistered dotted mnemonics remain target-owned syntax.
+  loom_op_kind_t ignored_kind = 0;
+  const loom_op_vtable_t* vtable = loom_context_lookup_op_by_name(
+      parser->context, token.text, &ignored_kind);
+  return vtable != NULL && iree_any_bit_set(vtable->traits, LOOM_TRAIT_HINT);
 }
 
 static iree_status_t loom_low_asm_next_statement_is_canonical_op(
@@ -830,8 +844,8 @@ static iree_status_t loom_low_asm_next_statement_is_canonical_op(
       return loom_tokenizer_consume_status(&lookahead);
     }
   }
-  *out_canonical =
-      loom_low_asm_token_is_canonical_op(loom_tokenizer_peek(&lookahead));
+  *out_canonical = loom_low_asm_token_is_canonical_op(
+      parser, loom_tokenizer_peek(&lookahead));
   return loom_tokenizer_consume_status(&lookahead);
 }
 

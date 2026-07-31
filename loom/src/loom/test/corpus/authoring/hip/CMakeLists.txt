@@ -32,6 +32,7 @@ iree_execution_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/shared_memory_wave_tile.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/target_provider_selection.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/template_math_legalization.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/authoring/hip/wave64_reductions.loom"
   LABELS
     "hostonly"

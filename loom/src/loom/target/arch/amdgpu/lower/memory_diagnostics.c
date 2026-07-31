@@ -221,13 +221,8 @@ static iree_status_t loom_amdgpu_emit_memory_access_flat_dynamic_error(
 
 static loom_value_facts_t loom_amdgpu_source_memory_byte_offset_facts(
     const loom_low_source_memory_access_plan_t* source) {
-  loom_value_facts_t offset_facts =
-      loom_value_facts_exact_i64(source->static_byte_offset);
-  for (uint8_t i = 0; i < source->dynamic_term_count; ++i) {
-    loom_value_facts_addi(&offset_facts, &source->dynamic_terms[i].byte_facts,
-                          &offset_facts);
-  }
-  return offset_facts;
+  return loom_low_source_memory_dynamic_offset_facts(
+      source, source->static_byte_offset);
 }
 
 static iree_status_t loom_amdgpu_emit_memory_access_dynamic_offset_error(

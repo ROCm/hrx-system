@@ -321,8 +321,10 @@ func.def target(@target) @f32x16_index_add_memory(%input: buffer, %output: buffe
 // ----
 low.func.def target(@target) abi(object_function) @f32x16_index_add_memory(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %i: reg<llvmir.i64>, %j: reg<llvmir.i64>) asm<llvmir.generic.core> {
   %bounded_sum = add.i64 %i, %j
-  %loaded = load.indexed.v16f32 %input_view, %bounded_sum, 0, 4
-  store.indexed.v16f32 %loaded, %output_view, %bounded_sum, 0, 4
+  %15 = const.i64 2
+  %16 = shl.i64 %bounded_sum, %15
+  %loaded = load.indexed.v16f32 %input_view, %16, 0, 1
+  store.indexed.v16f32 %loaded, %output_view, %16, 0, 1
   return
 }
 

@@ -446,6 +446,15 @@ def _validate_c_table_shape(
                 dynamic_term_count,
                 f"{row_subject} dynamic term count",
             )
+        _require_u8_not_reserved_any(
+            constraint.dynamic_term_count_minimum,
+            f"{row_subject} minimum dynamic term count",
+        )
+        if constraint.dynamic_view_base_term_count is not None:
+            _require_u8_not_reserved_any(
+                constraint.dynamic_view_base_term_count,
+                f"{row_subject} dynamic view-base term count",
+            )
         if constraint.dynamic_byte_stride is not None:
             _require_i64(
                 constraint.dynamic_byte_stride,

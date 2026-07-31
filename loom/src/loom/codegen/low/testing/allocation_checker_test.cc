@@ -31,7 +31,7 @@ loom_liveness_interval_t MakeInterval(loom_value_id_t value_id,
 
 loom_low_allocation_assignment_t MakeAssignment(
     loom_value_id_t value_id, uint32_t start_point, uint32_t end_point,
-    uint32_t location_base, uint32_t unit_end_point_start,
+    uint32_t location_base, uint32_t unit_point_start,
     loom_liveness_value_class_t value_class) {
   loom_low_allocation_assignment_t assignment = {};
   assignment.value_id = value_id;
@@ -43,7 +43,7 @@ loom_low_allocation_assignment_t MakeAssignment(
   assignment.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
   assignment.location_base = location_base;
   assignment.location_count = 1;
-  assignment.unit_end_point_start = unit_end_point_start;
+  assignment.unit_point_start = unit_point_start;
   return assignment;
 }
 
@@ -84,6 +84,7 @@ class AllocationCheckerTest : public ::testing::Test {
     for (uint32_t i = 0; i < 2; ++i) {
       intervals_[i] = MakeInterval(value_ids_[i], 0, 4, value_class_);
       assignments_[i] = MakeAssignment(value_ids_[i], 0, 4, i, i, value_class_);
+      unit_start_points_[i] = 0;
       unit_end_points_[i] = 4;
     }
 
@@ -102,8 +103,9 @@ class AllocationCheckerTest : public ::testing::Test {
     frame_.allocation.assignments = assignments_;
     frame_.allocation.assignment_count = 2;
     frame_.allocation.assignment_indices_by_value_ordinal = assignment_indices_;
+    frame_.allocation.unit_start_points = unit_start_points_;
     frame_.allocation.unit_end_points = unit_end_points_;
-    frame_.allocation.unit_end_point_count = 2;
+    frame_.allocation.unit_point_count = 2;
   }
 
   void TearDown() override {
@@ -117,6 +119,32 @@ class AllocationCheckerTest : public ::testing::Test {
     return result;
   }
 
+  void ConfigureRefinedReservation(uint32_t temporary_end_point) {
+    intervals_[0] = MakeInterval(value_ids_[0], /*start_point=*/2,
+                                 /*end_point=*/4, value_class_);
+    intervals_[0].unit_count = 2;
+    assignments_[0] = MakeAssignment(
+        value_ids_[0], /*start_point=*/0, /*end_point=*/4,
+        /*location_base=*/0, /*unit_point_start=*/0, value_class_);
+    assignments_[0].unit_count = 2;
+    assignments_[0].location_count = 2;
+    assignments_[0].flags =
+        LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS;
+    unit_start_points_[0] = 0;
+    unit_start_points_[1] = 2;
+    unit_end_points_[0] = 4;
+    unit_end_points_[1] = 4;
+
+    intervals_[1] = MakeInterval(value_ids_[1], /*start_point=*/0,
+                                 temporary_end_point, value_class_);
+    assignments_[1] = MakeAssignment(
+        value_ids_[1], /*start_point=*/0, temporary_end_point,
+        /*location_base=*/1, /*unit_point_start=*/2, value_class_);
+    unit_start_points_[2] = 0;
+    unit_end_points_[2] = temporary_end_point;
+    frame_.allocation.unit_point_count = 3;
+  }
+
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t arena_;
   loom_low_reg_class_t reg_class_ = {};
@@ -127,7 +155,8 @@ class AllocationCheckerTest : public ::testing::Test {
   uint32_t assignment_indices_[2] = {};
   loom_liveness_interval_t intervals_[2] = {};
   loom_low_allocation_assignment_t assignments_[2] = {};
-  uint32_t unit_end_points_[2] = {};
+  uint32_t unit_start_points_[3] = {};
+  uint32_t unit_end_points_[3] = {};
   loom_low_emission_frame_t frame_ = {};
 };
 
@@ -144,6 +173,20 @@ TEST_F(AllocationCheckerTest, RejectsOverlappingLiveAssignments) {
             LOOM_LOW_ALLOCATION_CHECK_VIOLATION_STORAGE_CONFLICT);
   EXPECT_EQ(result.first_violation.value_id, value_ids_[0]);
   EXPECT_EQ(result.first_violation.related_value_id, value_ids_[1]);
+}
+
+TEST_F(AllocationCheckerTest, AcceptsReuseEndingAtFutureUnitStart) {
+  ConfigureRefinedReservation(/*temporary_end_point=*/2);
+  const loom_low_allocation_check_result_t result = Check();
+  EXPECT_EQ(result.violation_count, 0u);
+}
+
+TEST_F(AllocationCheckerTest, RejectsReuseOverlappingFutureUnitStart) {
+  ConfigureRefinedReservation(/*temporary_end_point=*/3);
+  const loom_low_allocation_check_result_t result = Check();
+  EXPECT_GT(result.violation_count, 0u);
+  EXPECT_EQ(result.first_violation.kind,
+            LOOM_LOW_ALLOCATION_CHECK_VIOLATION_STORAGE_CONFLICT);
 }
 
 TEST_F(AllocationCheckerTest, AcceptsExplicitStorageAlias) {

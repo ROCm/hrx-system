@@ -290,25 +290,22 @@ low.kernel.def target(@target) workgroup_size(64, 1, 1) workgroup_count(64, 1, 1
   %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %19 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 262144} : reg<amdgpu.sgpr x2>
-  %six = s_mov_b32 6
   %subgroup = v_lshrrev_b32_src0_inline %19, 5
-  %workgroup_base = s_lshl_b32 %workgroup, %six
-  %subgroup_base = v_lshlrev_b32_lit %subgroup, 4
-  %25 = v_mov_b32_copy %workgroup_base
-  %row = v_add_u32 %25, %subgroup_base
-  %27 = v_mov_b32 0
-  %36 = v_and_b32_src0_inline %19, 31
-  %37 = v_lshlrev_b32_src0_inline %row, 6
-  %38 = v_lshlrev_b32_src0_inline %36, 2
-  %39 = v_add_u32 %37, %38
-  global_store_b32_saddr %39, %27, %output_view
-  global_store_b32_saddr %39, %27, %output_view {offset = 128}
-  global_store_b32_saddr %39, %27, %output_view {offset = 256}
-  global_store_b32_saddr %39, %27, %output_view {offset = 384}
-  global_store_b32_saddr %39, %27, %output_view {offset = 512}
-  global_store_b32_saddr %39, %27, %output_view {offset = 640}
-  global_store_b32_saddr %39, %27, %output_view {offset = 768}
-  global_store_b32_saddr %39, %27, %output_view {offset = 896}
+  %22 = v_mov_b32 0
+  %31 = v_and_b32_src0_inline %19, 31
+  %32 = s_lshl_b32_rhs_inline %workgroup, 12
+  %33 = v_lshlrev_b32_src0_inline %subgroup, 10
+  %34 = v_add_u32 %32, %33
+  %35 = v_lshlrev_b32_src0_inline %31, 2
+  %36 = v_add_u32 %34, %35
+  global_store_b32_saddr %36, %22, %output_view
+  global_store_b32_saddr %36, %22, %output_view {offset = 128}
+  global_store_b32_saddr %36, %22, %output_view {offset = 256}
+  global_store_b32_saddr %36, %22, %output_view {offset = 384}
+  global_store_b32_saddr %36, %22, %output_view {offset = 512}
+  global_store_b32_saddr %36, %22, %output_view {offset = 640}
+  global_store_b32_saddr %36, %22, %output_view {offset = 768}
+  global_store_b32_saddr %36, %22, %output_view {offset = 896}
   return
 }
 

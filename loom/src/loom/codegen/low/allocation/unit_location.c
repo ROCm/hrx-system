@@ -52,10 +52,11 @@ bool loom_low_allocation_unit_locations_form_register_move(
 bool loom_low_allocation_unit_location_is_live_at_point(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_assignment_t* assignments,
-    iree_host_size_t assignment_count, const uint32_t* unit_end_points,
-    iree_host_size_t unit_end_point_count,
+    iree_host_size_t assignment_count,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_move_location_t* location, uint32_t point) {
   IREE_ASSERT_ARGUMENT(descriptor_set);
+  IREE_ASSERT_ARGUMENT(unit_liveness);
   IREE_ASSERT_ARGUMENT(location);
   for (iree_host_size_t i = 0; i < assignment_count; ++i) {
     const loom_low_allocation_assignment_t* assignment = &assignments[i];
@@ -76,9 +77,15 @@ bool loom_low_allocation_unit_location_is_live_at_point(
     }
     const uint32_t unit_offset =
         (uint32_t)(location->location - assignment->location_base);
-    if (point <
+    const uint32_t unit_start_point =
+        loom_low_allocation_live_range_assignment_unit_start_point(
+            unit_liveness->start_points, unit_liveness->point_count, assignment,
+            unit_offset);
+    const uint32_t unit_end_point =
         loom_low_allocation_live_range_assignment_unit_end_point(
-            unit_end_points, unit_end_point_count, assignment, unit_offset)) {
+            unit_liveness->end_points, unit_liveness->point_count, assignment,
+            unit_offset);
+    if (point >= unit_start_point && point < unit_end_point) {
       return true;
     }
   }

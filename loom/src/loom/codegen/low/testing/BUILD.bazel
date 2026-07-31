@@ -27,6 +27,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/codegen/low:storage_lease",
         "//loom/src/loom/codegen/low/allocation:assignment",
+        "//loom/src/loom/codegen/low/allocation:live_range",
         "//loom/src/loom/codegen/low/allocation:storage",
         "//loom/src/loom/target:registers",
         "//runtime/src/iree/base",
