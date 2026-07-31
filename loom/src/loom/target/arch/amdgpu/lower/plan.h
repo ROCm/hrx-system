@@ -115,6 +115,23 @@ typedef enum loom_amdgpu_vector_16bit_float_conversion_kind_e {
 } loom_amdgpu_vector_16bit_float_conversion_kind_t;
 
 typedef struct loom_amdgpu_fp4_decode_recipe_t loom_amdgpu_fp4_decode_recipe_t;
+typedef struct loom_amdgpu_fp4_native_decode_recipe_t
+    loom_amdgpu_fp4_native_decode_recipe_t;
+
+typedef enum loom_amdgpu_fp4_decode_kind_e {
+  LOOM_AMDGPU_FP4_DECODE_KIND_NONE = 0,
+  LOOM_AMDGPU_FP4_DECODE_KIND_PORTABLE_LOOKUP = 1,
+  LOOM_AMDGPU_FP4_DECODE_KIND_NATIVE_SCALEF32_PAIR = 2,
+} loom_amdgpu_fp4_decode_kind_t;
+
+typedef struct loom_amdgpu_fp4_decode_plan_t {
+  // Packet strategy selected from the schema and target descriptor set.
+  loom_amdgpu_fp4_decode_kind_t kind;
+  // Function-local portable lookup recipe when kind is PORTABLE_LOOKUP.
+  const loom_amdgpu_fp4_decode_recipe_t* portable_recipe;
+  // Function-local native pair recipe when kind is NATIVE_SCALEF32_PAIR.
+  const loom_amdgpu_fp4_native_decode_recipe_t* native_recipe;
+} loom_amdgpu_fp4_decode_plan_t;
 
 typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   // Source vector value being converted.
@@ -131,6 +148,10 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   loom_value_fact_numeric_format_flags_t scale_format;
   // Number of logical payload lanes covered by each scale value.
   uint32_t scale_group_element_count;
+  // Number of encoded scale values covering the conversion.
+  uint32_t scale_count;
+  // Number of 32-bit registers carrying the encoded scale values.
+  uint32_t scale_register_count;
   // Conversion operation selected for the source/result type pair.
   loom_amdgpu_vector_16bit_float_conversion_kind_t kind;
   // Source scalar element type.
@@ -155,8 +176,8 @@ typedef struct loom_amdgpu_vector_16bit_float_conversion_plan_t {
   uint32_t storage_register_count;
   // Number of 32-bit result registers occupied by the result vector.
   uint32_t result_register_count;
-  // Function-local packed FP4 decode recipe, or NULL for other conversions.
-  const loom_amdgpu_fp4_decode_recipe_t* fp4_decode_recipe;
+  // Packed FP4 decode strategy, or NONE for other conversions.
+  loom_amdgpu_fp4_decode_plan_t fp4_decode;
   // Native packed FP8 encode strategy for an FP8-result truncation.
   loom_amdgpu_fp8_encode_plan_t fp8_encode;
 } loom_amdgpu_vector_16bit_float_conversion_plan_t;

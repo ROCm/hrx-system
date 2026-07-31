@@ -7,7 +7,7 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/mxfp4_decode_bf16.loom",
-          "--root=@decode_mxfp4_group_bits",
+          "--root=@decode_mxfp4_second_group_bits",
           "--backend=amdgpu-hal",
           "--target=gfx942",
           "--output={tmp}/gfx942.vmfb",
@@ -31,7 +31,7 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/mxfp4_decode_bf16.loom",
-          "--root=@decode_mxfp4_group_bits",
+          "--root=@decode_mxfp4_second_group_bits",
           "--backend=amdgpu-hal",
           "--target=gfx950",
           "--output={tmp}/gfx950.vmfb",
@@ -55,7 +55,7 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/mxfp4_decode_bf16.loom",
-          "--root=@decode_mxfp4_group_bits",
+          "--root=@decode_mxfp4_second_group_bits",
           "--backend=amdgpu-hal",
           "--target=gfx1100",
           "--output={tmp}/gfx1100.vmfb",
@@ -79,7 +79,7 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/mxfp4_decode_bf16.loom",
-          "--root=@decode_mxfp4_group_bits",
+          "--root=@decode_mxfp4_second_group_bits",
           "--backend=amdgpu-hal",
           "--target=gfx1151",
           "--output={tmp}/gfx1151.vmfb",
@@ -103,7 +103,7 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/mxfp4_decode_bf16.loom",
-          "--root=@decode_mxfp4_group_bits",
+          "--root=@decode_mxfp4_second_group_bits",
           "--backend=amdgpu-hal",
           "--target=gfx1200",
           "--output={tmp}/gfx1200.vmfb",
@@ -127,7 +127,7 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/mxfp4_decode_bf16.loom",
-          "--root=@decode_mxfp4_group_bits",
+          "--root=@decode_mxfp4_second_group_bits",
           "--backend=amdgpu-hal",
           "--target=gfx1201",
           "--output={tmp}/gfx1201.vmfb",
@@ -151,7 +151,7 @@
         "tool": "loom-compile",
         "args": [
           "{srcdir}/mxfp4_decode_bf16.loom",
-          "--root=@decode_mxfp4_group_bits",
+          "--root=@decode_mxfp4_second_group_bits",
           "--backend=amdgpu-hal",
           "--target=gfx1250",
           "--output={tmp}/gfx1250.vmfb",

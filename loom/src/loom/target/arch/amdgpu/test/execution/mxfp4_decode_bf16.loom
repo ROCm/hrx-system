@@ -10,6 +10,17 @@ func.def inline @decode_mxfp4_group_bits_impl(%payload: vector<4xi32>, %scale: v
   func.return %bits : vector<16xi32>
 }
 
+// Returns the second of two consecutive MXFP4 groups. This distinguishes the
+// second encoded scale byte from the first while keeping the expected payload
+// uniform and exact.
+func.def inline @decode_mxfp4_second_group_bits_impl(%payload: vector<8xi32>, %scale: vector<1xi32>) -> (vector<16xi32>) {
+  %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f4e2m1, payload_elements=64, payload_packing=little_endian_nibbles, payload_registers=8, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
+  %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xi32>} : vector<8xi32>, encoding<schema> -> vector<64xbf16>
+  %second_group = vector.slice %decoded[32] : vector<64xbf16> -> vector<32xbf16>
+  %bits = vector.bitcast %second_group : vector<32xbf16> to vector<16xi32>
+  func.return %bits : vector<16xi32>
+}
+
 kernel.def @decode_mxfp4_group_bits() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -21,6 +32,21 @@ kernel.def @decode_mxfp4_group_bits() {
   %payload = vector.load %payload_view[0] : view<4xi32, #dense> -> vector<4xi32>
   %scale = vector.load %scale_view[0] : view<1xi32, #dense> -> vector<1xi32>
   %bits = func.call @decode_mxfp4_group_bits_impl(%payload, %scale) : (vector<4xi32>, vector<1xi32>) -> (vector<16xi32>)
+  vector.store %bits, %out_view[0] : vector<16xi32>, view<16xi32, #dense>
+  kernel.return
+}
+
+kernel.def @decode_mxfp4_second_group_bits() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%payload_buffer: buffer, %scale_buffer: buffer, %out_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %payload_view = buffer.view %payload_buffer[%base] : buffer -> view<8xi32, #dense>
+  %scale_view = buffer.view %scale_buffer[%base] : buffer -> view<1xi32, #dense>
+  %out_view = buffer.view %out_buffer[%base] : buffer -> view<16xi32, #dense>
+  %payload = vector.load %payload_view[0] : view<8xi32, #dense> -> vector<8xi32>
+  %scale = vector.load %scale_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %bits = func.call @decode_mxfp4_second_group_bits_impl(%payload, %scale) : (vector<8xi32>, vector<1xi32>) -> (vector<16xi32>)
   vector.store %bits, %out_view[0] : vector<16xi32>, view<16xi32, #dense>
   kernel.return
 }
@@ -105,5 +131,14 @@ check.case public @decode_mxfp4_group_bits_edges_case {
   %positive_nan_expected = check.generate.fill value(2143322048) : tensor<16xi32>
   func.call @decode_mxfp4_group_bits(%positive_zero_payload, %nan_scale, %positive_nan_output) : (tensor<4xi32>, tensor<1xi32>, tensor<16xi32>)
   check.expect.equal actual(%positive_nan_output) expected(%positive_nan_expected) : tensor<16xi32>
+
+  // Low scale byte 127 is identity; the second byte 128 doubles the selected
+  // second group's positive halves to BF16 one.
+  %two_group_half_payload = check.generate.fill value(286331153) : tensor<8xi32>
+  %distinct_group_scales = check.generate.fill value(32895) : tensor<1xi32>
+  %second_group_output = check.generate.fill value(0) : tensor<16xi32>
+  %second_group_expected = check.generate.fill value(1065369472) : tensor<16xi32>
+  func.call @decode_mxfp4_second_group_bits(%two_group_half_payload, %distinct_group_scales, %second_group_output) : (tensor<8xi32>, tensor<1xi32>, tensor<16xi32>)
+  check.expect.equal actual(%second_group_output) expected(%second_group_expected) : tensor<16xi32>
   check.return
 }

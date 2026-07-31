@@ -674,7 +674,8 @@ iree_status_t loom_amdgpu_select_vector_16bit_float_conversion_plan(
     IREE_RETURN_IF_ERROR(loom_amdgpu_select_arithmetic_contract(
         context, source_op, out_selected));
   }
-  if (*out_selected && out_plan->fp4_decode_recipe == NULL) {
+  if (*out_selected &&
+      out_plan->fp4_decode.kind == LOOM_AMDGPU_FP4_DECODE_KIND_NONE) {
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_vector_16bit_float_conversion_plan_from_accepted_op(
             context, source_op,
@@ -692,7 +693,7 @@ static bool loom_amdgpu_scalar_type_is_fp8(loom_scalar_type_t type) {
 iree_string_view_t loom_amdgpu_vector_16bit_float_conversion_plan_key(
     loom_low_lower_context_t* context,
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
-  if (plan->fp4_decode_recipe != NULL) {
+  if (plan->fp4_decode.kind != LOOM_AMDGPU_FP4_DECODE_KIND_NONE) {
     return loom_amdgpu_fp4_decode_plan_key(plan);
   }
   if (plan->fp8_encode.kind != LOOM_AMDGPU_FP8_ENCODE_KIND_NONE) {
@@ -750,7 +751,7 @@ iree_string_view_t loom_amdgpu_vector_16bit_float_conversion_plan_key(
 static iree_status_t loom_amdgpu_lower_vector_16bit_float_extf(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_vector_16bit_float_conversion_plan_t* plan) {
-  if (plan->fp4_decode_recipe != NULL) {
+  if (plan->fp4_decode.kind != LOOM_AMDGPU_FP4_DECODE_KIND_NONE) {
     return loom_amdgpu_lower_vector_fp4_decode(context, source_op, plan);
   }
   loom_value_id_t low_source = LOOM_VALUE_ID_INVALID;
