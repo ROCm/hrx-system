@@ -924,6 +924,13 @@ iree_status_t PrepareTargetProfileForLowHsaco(
                                                out_target_profile);
 }
 
+void AppendLowKernelTargetClause(iree_string_view_t representation_contract,
+                                 std::string* source) {
+  source->append("target<");
+  source->append(representation_contract.data, representation_contract.size);
+  source->append(">(@gfx_target)");
+}
+
 iree_status_t EmitWorkitemStoreKernelForAmdgpu(const AmdgpuHsaTarget& target,
                                                std::string* out_hsaco) {
   IREE_ASSERT_ARGUMENT(out_hsaco);
@@ -934,9 +941,11 @@ iree_status_t EmitWorkitemStoreKernelForAmdgpu(const AmdgpuHsaTarget& target,
 
   TestArena arena;
   LowKernelEmitter emitter;
-  return emitter.EmitKernel(
-      &target_profile,
-      "low.kernel.def target(@gfx_target) @loom_kernel() {\n"
+  std::string source = "low.kernel.def ";
+  AppendLowKernelTargetClause(
+      target_profile.identity.target->descriptor_set_key, &source);
+  source.append(
+      " @loom_kernel() {\n"
       "  %tid = low.live_in<" LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_X_SOURCE
       "> : reg<amdgpu.vgpr>\n"
       "  %four = low.const<amdgpu.v_mov_b32> {imm32 = 4} : "
@@ -954,8 +963,8 @@ iree_status_t EmitWorkitemStoreKernelForAmdgpu(const AmdgpuHsaTarget& target,
       "%zero) {offset = 0} : (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x4>, "
       "reg<amdgpu.vgpr>, reg<amdgpu.sgpr>)\n"
       "  low.return\n"
-      "}\n",
-      out_hsaco, arena.arena());
+      "}\n");
+  return emitter.EmitKernel(&target_profile, source, out_hsaco, arena.arena());
 }
 
 iree_status_t EmitB128CopyKernelForAmdgpu(const AmdgpuHsaTarget& target,
@@ -969,8 +978,11 @@ iree_status_t EmitB128CopyKernelForAmdgpu(const AmdgpuHsaTarget& target,
       loom_amdgpu_target_info_target_processor(target_profile.identity.target);
   IREE_ASSERT(processor != nullptr);
 
-  std::string source =
-      "low.kernel.def target(@gfx_target) @loom_kernel() {\n"
+  std::string source = "low.kernel.def ";
+  AppendLowKernelTargetClause(
+      target_profile.identity.target->descriptor_set_key, &source);
+  source.append(
+      " @loom_kernel() {\n"
       "  %tid = low.live_in<" LOOM_AMDGPU_HAL_KERNEL_ABI_WORKITEM_ID_X_SOURCE
       "> : reg<amdgpu.vgpr>\n"
       "  %byte_offset = low.op<amdgpu.v_lshlrev_b32.src0_inline>(%tid) "
@@ -978,7 +990,7 @@ iree_status_t EmitB128CopyKernelForAmdgpu(const AmdgpuHsaTarget& target,
       "  %source = low.resource<hal_binding> {index = 0, source_type "
       "= hal.buffer} : reg<amdgpu.sgpr x2>\n"
       "  %target = low.resource<hal_binding> {index = 1, source_type "
-      "= hal.buffer} : reg<amdgpu.sgpr x2>\n";
+      "= hal.buffer} : reg<amdgpu.sgpr x2>\n");
   switch (target_profile.identity.target->descriptor_set_ordinal) {
     case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3:
     case LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA4:
