@@ -1,7 +1,7 @@
 // RUN: emit x86-asm @x86_fragment
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm {
   %loaded = vmovdqu32.load %base {disp32 = 0}
   %sum = vpaddd %loaded, %lhs
   vmovdqu32.store %sum, %base {disp32 = 64}
@@ -17,7 +17,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>) asm {
   %index = lea %i, %j
   %loaded = vmovdqu32.load.indexed %input, %index {disp32 = 16, scale = 4}
   vmovdqu32.store.indexed %loaded, %output, %index {disp32 = 32, scale = 4}
@@ -34,7 +34,7 @@ low.func.def target(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: 
 
 x86.target<scalar> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %index: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %index: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) asm {
   %base_disp = lea.disp %base {disp32 = 24}
   %base_neg = lea.disp %base {disp32 = -8}
   %scaled1 = lea.add_scale %base_disp, %index {disp32 = 0, scale = 1}
@@ -59,7 +59,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %index: re
 
 x86.target<scalar> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>, %factor: reg<x86.gpr32>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@x86_target) @x86_fragment(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>, %factor: reg<x86.gpr32>) asm {
   %sum = add.gpr32 %lhs, %rhs
   %difference = sub.gpr32 %sum, %factor
   %result = imul.gpr32 %difference, %rhs
@@ -76,7 +76,7 @@ low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.gpr32>, %rhs: reg<x
 
 x86.target<scalar> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@x86_target) @x86_fragment(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) asm {
   %mask = mov.imm32 255
   %masked = and.gpr32 %lhs, %mask
   %tag = mov.imm32 240
@@ -107,7 +107,7 @@ low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.gpr32>, %rhs: reg<x
 
 x86.target<scalar> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%condition: reg<x86.gpr32>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@x86_target) @x86_fragment(%condition: reg<x86.gpr32>) asm {
   low.cond_br %condition, ^then, ^else : reg<x86.gpr32>
 ^then:
   return
@@ -128,7 +128,7 @@ low.func.def target(@x86_target) @x86_fragment(%condition: reg<x86.gpr32>) asm<x
 
 x86.target<scalar> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %index: reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %index: reg<x86.gpr64>) asm {
   %static = mov.load.gpr32 %input {disp32 = 8}
   %loaded = mov.load.indexed.gpr32 %input, %index {disp32 = 12, scale = 4}
   %sum = add.gpr32 %static, %loaded
@@ -149,7 +149,7 @@ low.func.def target(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: 
 
 x86.target<scalar> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@x86_target) @x86_fragment(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) asm {
   %eq = cmp.eq.gpr32 %lhs, %rhs
   %signed = cmp.slt.gpr32 %lhs, %rhs
   %unsigned = cmp.uge.gpr32 %lhs, %rhs
@@ -184,7 +184,7 @@ low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.gpr32>, %rhs: reg<x
 
 x86.target<scalar> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %index: reg<x86.gpr64>, %lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %index: reg<x86.gpr64>, %lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) asm {
   %bias = mov.imm64 17
   %sum = add.gpr64 %lhs, %rhs
   %difference = sub.gpr64 %sum, %bias
@@ -247,7 +247,7 @@ low.func.def target(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: 
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>, %base: reg<x86.gpr64>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>, %base: reg<x86.gpr64>) asm {
   %copy = copy %lhs : reg<x86.zmm> -> reg<x86.zmm>
   %sum = vpaddd %copy, %rhs
   %second = vpaddd %lhs, %sum
@@ -265,7 +265,7 @@ low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.zmm>, %rhs: reg<x86
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%value: reg<x86.zmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%value: reg<x86.zmm>) asm {
   %addr = mov.imm64 1024
   vmovdqu32.store %value, %addr {disp32 = -16}
   return
@@ -280,7 +280,7 @@ low.func.def target(@x86_target) @x86_fragment(%value: reg<x86.zmm>) asm<x86.avx
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %value: reg<x86.gpr32>, %rhs: reg<x86.zmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %value: reg<x86.gpr32>, %rhs: reg<x86.zmm>) asm {
   %splat = vpbroadcastd %value
   %sum = vpaddd %splat, %rhs
   vmovdqu32.store %sum, %base {disp32 = 128}
@@ -297,7 +297,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %value: re
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %value: reg<x86.xmm>, %rhs: reg<x86.zmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %value: reg<x86.xmm>, %rhs: reg<x86.zmm>) asm {
   %splat = vbroadcastss %value
   %sum = vaddps %splat, %rhs
   vmovdqu32.store %sum, %base {disp32 = 192}
@@ -314,7 +314,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %value: re
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm {
   %min_s = vpminsd %lhs, %rhs
   %max_s = vpmaxsd %lhs, %rhs
   %min_u = vpminud %lhs, %rhs
@@ -347,7 +347,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>, %fallback: reg<x86.zmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>, %fallback: reg<x86.zmm>) asm {
   %signed = vpcmpd.sgt %lhs, %rhs
   %unsigned = vpcmpud.ugt %lhs, %rhs
   %ordered_lt = vcmpps.olt %lhs, %rhs
@@ -372,7 +372,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm {
   %greater = vpcmpd.sgt %lhs, %rhs
   %less = vpcmpd.slt %lhs, %rhs
   %either = korq %greater, %less
@@ -407,7 +407,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>) asm {
   low.br ^join(%lhs: reg<x86.zmm>)
 ^join(%incoming: reg<x86.zmm>):
   %sum = vpaddd %incoming, %lhs
@@ -426,7 +426,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm {
   low.br ^join(%rhs: reg<x86.zmm>, %lhs: reg<x86.zmm>)
 ^join(%a: reg<x86.zmm>, %b: reg<x86.zmm>):
   %sum = vpaddd %a, %b
@@ -445,7 +445,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>) asm {
   low.br ^loop(%rhs: reg<x86.zmm>, %lhs: reg<x86.zmm>)
 ^loop(%a: reg<x86.zmm>, %b: reg<x86.zmm>):
   low.br ^loop(%b: reg<x86.zmm>, %a: reg<x86.zmm>)
@@ -463,7 +463,7 @@ low.func.def target(@x86_target) @x86_fragment(%lhs: reg<x86.zmm>, %rhs: reg<x86
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %row: reg<x86.gpr64>, %stride: reg<x86.gpr64>, %col: reg<x86.gpr64>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %row: reg<x86.gpr64>, %stride: reg<x86.gpr64>, %col: reg<x86.gpr64>) asm {
   %bias = mov.imm64 256
   %row_copy = copy %row : reg<x86.gpr64> -> reg<x86.gpr64>
   %linear = imul.gpr64 %row_copy, %stride
@@ -487,7 +487,7 @@ low.func.def target(@x86_target) @x86_fragment(%input: reg<x86.gpr64>, %output: 
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.zmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.zmm>) asm {
   %quarter = vextractf32x4.xmm %v, 2
   vmovdqu32.store.xmm %quarter, %base {disp32 = 112}
   return
@@ -502,7 +502,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x8
 
 x86.target<avx2> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.xmm>, %init: reg<x86.gpr32>) asm<x86.avx2.core> {
+low.func.def target<x86.avx2.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.xmm>, %init: reg<x86.gpr32>) asm {
   %reversed = vpshufd.xmm %v, 27
   %lane0 = vpextrd.xmm %reversed, 0
   %init_copy = copy %init : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -539,7 +539,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x8
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.xmm>) asm {
   %shuffled = vpermilps.xmm %v, 39
   vmovdqu32.store.xmm %shuffled, %base {disp32 = 32}
   return
@@ -554,7 +554,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x8
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.xmm>, %x: reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.xmm>, %x: reg<x86.xmm>) asm {
   %lane = vpermilps.xmm %v, 1
   %sum = vaddss.xmm %lane, %x
   %updated = vinsertps.xmm %v, %sum, 32
@@ -573,7 +573,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x8
 
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.xmm>, %init: reg<x86.xmm>) asm<x86.avx512.core> {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x86.xmm>, %init: reg<x86.xmm>) asm {
   %paired = vpermilps.xmm %v, 78
   %pair_sum = vaddps.xmm %v, %paired
   %neighbor = vpermilps.xmm %pair_sum, 177
@@ -596,7 +596,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %v: reg<x8
 
 x86.target<avx2> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %bias: reg<x86.xmm>) asm<x86.avx2.core> {
+low.func.def target<x86.avx2.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %bias: reg<x86.xmm>) asm {
   %sum = vaddss.xmm %lhs, %rhs
   %difference = vsubss.xmm %sum, %bias
   %product = vmulss.xmm %difference, %rhs
@@ -618,7 +618,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %lhs: reg<
 
 x86.target<avx512_packed_dot> @x86_target
 
-low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %bf16_acc: reg<x86.zmm>, %bf16_lhs: reg<x86.zmm>, %bf16_rhs: reg<x86.zmm>, %i8_acc: reg<x86.zmm>, %i8_lhs: reg<x86.zmm>, %i8_rhs: reg<x86.zmm>) asm<x86.avx512_packed_dot.core> {
+low.func.def target<x86.avx512_packed_dot.core>(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %bf16_acc: reg<x86.zmm>, %bf16_lhs: reg<x86.zmm>, %bf16_rhs: reg<x86.zmm>, %i8_acc: reg<x86.zmm>, %i8_lhs: reg<x86.zmm>, %i8_rhs: reg<x86.zmm>) asm {
   %bf16_dot = avx512_bf16.vdpbf16ps %bf16_acc, %bf16_lhs, %bf16_rhs
   vmovdqu32.store %bf16_dot, %base {disp32 = 0}
   %i8_dot = avx512_vnni.vpdpbusd %i8_acc, %i8_lhs, %i8_rhs
@@ -638,7 +638,7 @@ low.func.def target(@x86_target) @x86_fragment(%base: reg<x86.gpr64>, %bf16_acc:
 // RUN: emit x86-asm @x86_avx2_low_subset_rejects_high_xmm strategy=source fixed=%sum:physical_register:16:1
 x86.target<avx512> @x86_target
 
-low.func.def target(@x86_target) @x86_avx2_low_subset_rejects_high_xmm(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) {
+low.func.def target<x86.avx512.core>(@x86_target) @x86_avx2_low_subset_rejects_high_xmm(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) {
   // ERROR@+1: BACKEND/020 {function_name="x86_avx2_low_subset_rejects_high_xmm", packet_key="x86.avx2.vpaddd.xmm", operand_field="dst", value_name="sum", value_class="x86.xmm", assigned_base="16", address_map_kind="low_subset", addressable_units="16"}
   %sum = low.op<x86.avx2.vpaddd.xmm>(%lhs, %rhs) : (reg<x86.xmm>, reg<x86.xmm>) -> reg<x86.xmm>
   low.return %sum : reg<x86.xmm>
@@ -649,7 +649,7 @@ low.func.def target(@x86_target) @x86_avx2_low_subset_rejects_high_xmm(%lhs: reg
 // RUN: emit x86-asm @x86_avx_vnni_low_subset_rejects_high_ymm strategy=source fixed=%acc_copy:physical_register:16:1 fixed=%dot:physical_register:16:1
 x86.target<avx512_packed_dot> @x86_target
 
-low.func.def target(@x86_target) @x86_avx_vnni_low_subset_rejects_high_ymm(%acc: reg<x86.ymm>, %lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>) -> (reg<x86.ymm>) {
+low.func.def target<x86.avx512_packed_dot.core>(@x86_target) @x86_avx_vnni_low_subset_rejects_high_ymm(%acc: reg<x86.ymm>, %lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>) -> (reg<x86.ymm>) {
   %acc_copy = low.copy %acc : reg<x86.ymm> -> reg<x86.ymm>
   // ERROR@+2: BACKEND/020 {function_name="x86_avx_vnni_low_subset_rejects_high_ymm", packet_key="x86.avx_vnni.vpdpbusd.ymm", operand_field="acc", value_name="acc_copy", value_class="x86.ymm", assigned_base="16", address_map_kind="low_subset", addressable_units="16"}
   // ERROR@+1: BACKEND/020 {function_name="x86_avx_vnni_low_subset_rejects_high_ymm", packet_key="x86.avx_vnni.vpdpbusd.ymm", operand_field="dst", value_name="dot", value_class="x86.ymm", assigned_base="16", address_map_kind="low_subset", addressable_units="16"}
@@ -663,6 +663,6 @@ low.func.def target(@x86_target) @x86_avx_vnni_low_subset_rejects_high_ymm(%acc:
 x86.target<scalar> @x86_target
 
 // ERROR@+1: BACKEND/005 {function_name="x86_spill_traffic_register_exhaustion_reports_allocation_gap", value_class="x86.gpr32", budget="1", failure_code="spill-traffic-register-exhausted"}
-low.func.def target(@x86_target) @x86_spill_traffic_register_exhaustion_reports_allocation_gap(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm<x86.scalar.core> {
+low.func.def target<x86.scalar.core>(@x86_target) @x86_spill_traffic_register_exhaustion_reports_allocation_gap(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
   return %lhs, %rhs
 }
