@@ -4904,6 +4904,12 @@ def _v_cvt_pk_f16_packed8_overlay(
 
 # VOP3 stores byte_sel's two logical selector bits in reversed OPSEL bit order.
 _PACKED8_BYTE_SELECTOR_OPSEL_VALUES = (0, 2, 1, 3)
+_PACKED8_BYTE_SELECTOR_OP_SEL_LITERALS = (
+    "",
+    "op_sel:[0,1,0]",
+    "op_sel:[1,0,0]",
+    "op_sel:[1,1,0]",
+)
 
 
 def _v_cvt_f16_packed8_byte_overlay(
@@ -4994,16 +5000,28 @@ _SCALE_PK8_SCALE_SEL_IMMEDIATE = Immediate(
 
 
 def _v_cvt_scalef32_pk_packed8_overlay(
-    source_type: str, target_type: str, result_units: int
+    source_type: str,
+    target_type: str,
+    result_units: int,
+    byte_selector: int,
 ) -> AmdgpuDescriptorOverlay:
+    descriptor_suffix = "" if byte_selector == 0 else f".byte{byte_selector}"
+    mnemonic_suffix = "" if byte_selector == 0 else f"_byte{byte_selector}"
+    semantic_suffix = "" if byte_selector == 0 else f".byte{byte_selector}"
+    native_assembly_mnemonic = f"v_cvt_scalef32_pk_{target_type}_{source_type}"
     return AmdgpuDescriptorOverlay(
-        descriptor_key=(f"amdgpu.v_cvt_scalef32_pk_{target_type}_{source_type}.ocp"),
+        descriptor_key=(
+            f"amdgpu.v_cvt_scalef32_pk_{target_type}_{source_type}"
+            f".ocp{descriptor_suffix}"
+        ),
         instruction_name=(
             f"V_CVT_SCALEF32_PK_{target_type.upper()}_{source_type.upper()}"
         ),
-        mnemonic=f"v_cvt_scalef32_pk_{target_type}_{source_type}",
+        mnemonic=f"{native_assembly_mnemonic}{mnemonic_suffix}",
         encoding_name="ENC_VOP3",
-        semantic_tag=(f"convert.scale.float.{source_type}.ocpx2.{target_type}x2"),
+        semantic_tag=(
+            f"convert.scale.float.{source_type}.ocpx2{semantic_suffix}.{target_type}x2"
+        ),
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result(units=result_units)),
@@ -5013,6 +5031,32 @@ def _v_cvt_scalef32_pk_packed8_overlay(
                 size_exception_reason=_PACKED8_SOURCE_SIZE_REASON,
             ),
             AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("scale")),
+        ),
+        fixed_encoding_fields=(
+            (("OP_SEL", _PACKED8_BYTE_SELECTOR_OPSEL_VALUES[byte_selector]),)
+            if byte_selector != 0
+            else ()
+        ),
+        asm_forms=_asm(
+            native_assembly_mnemonic=(
+                native_assembly_mnemonic if byte_selector != 0 else None
+            ),
+            results=("dst",),
+            operands=("input", "scale"),
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_operand("input"),
+                _native_operand("scale"),
+                *(
+                    (
+                        _native_literal(
+                            _PACKED8_BYTE_SELECTOR_OP_SEL_LITERALS[byte_selector]
+                        ),
+                    )
+                    if byte_selector != 0
+                    else ()
+                ),
+            ),
         ),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -5224,7 +5268,9 @@ def _v_cvt_f16_packed8_byte_overlays(
 
 def _v_cvt_scalef32_pk_packed8_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return tuple(
-        _v_cvt_scalef32_pk_packed8_overlay(*row) for row in _SCALEF32_PK_PACKED8_ROWS
+        _v_cvt_scalef32_pk_packed8_overlay(*row, byte_selector)
+        for row in _SCALEF32_PK_PACKED8_ROWS
+        for byte_selector in range(4)
     )
 
 
