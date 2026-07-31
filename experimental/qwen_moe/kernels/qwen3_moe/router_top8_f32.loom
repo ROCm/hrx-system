@@ -18,42 +18,24 @@
 // avoiding exponentials for experts that cannot contribute to the result.
 amdgpu.target<gfx11-generic> @qwen3_moe_router_gfx11_wave64 {subgroup_size = 64}
 
-kernel.def target(@qwen3_moe_router_gfx11_wave64) @qwen3_moe_router_top8_f32(%token_count: index, %route_id_stride: index) {
-  %one = index.constant 1 : index
-  %three = index.constant 3 : index
-  %four = index.constant 4 : index
-  %wave_size = index.constant 64 : index
-  %wide_workgroup_size = index.constant 256 : index
-  %uses_decode_geometry = index.cmp eq, %token_count, %one : index
-  %subgroup_count = scf.select %uses_decode_geometry, %one, %four : index
-  %workgroup_size = scf.select %uses_decode_geometry, %wave_size, %wide_workgroup_size : index
-  %padded_token_count = index.add %token_count, %three : index
-  %wide_workgroup_count = index.div %padded_token_count, %four : index
-  %workgroup_count = scf.select %uses_decode_geometry, %token_count, %wide_workgroup_count : index
-  kernel.launch.config workgroups(%workgroup_count, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
-} launch(%token_count: index, %route_id_stride: index, %logits: buffer, %route_ids: buffer, %route_weights: buffer) {
+// Selects and normalizes one logical router row. The caller owns mapping a
+// subgroup to a safe physical row and tells the helper whether that row should
+// publish. Keeping row semantics independent of launch geometry lets fused
+// producers consume this exact tie-breaking and normalization contract.
+func.template<qwen3_moe.router.top8.row> device @qwen3_moe_router_top8_row_f32(%valid_token: i1, %token: index, %token_count: index, %route_id_stride: index, %logits: buffer, %route_ids: buffer, %route_weights: buffer) {
   %expert_count0 = config.get @qwen3_moe.router.expert_count : index
   %route_count0 = config.get @qwen3_moe.router.route_count : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_route_id_stride = index.assume %route_id_stride [range(%route_id_stride, 1, 512)] : index
   %expert_count, %route_count = index.assume %expert_count0, %route_count0 [range(%expert_count0, 32, 512), mul(%expert_count0, 32), range(%route_count0, 1, 32), le(%route_count0, %expert_count0)] : index, index
-  %token_workgroup = kernel.workgroup.id<x> : index
-  %subgroup = kernel.subgroup.id : index
+  %safe_token, %launch_token_count = index.assume %token, %bounded_token_count [lt(%token, %bounded_token_count)] : index, index
   %lane = kernel.subgroup.lane.id : index
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %four = index.constant 4 : index
   %wave_size = index.constant 64 : index
   %negative_large = scalar.constant -3.4028234663852885e+38 : f32
   %largest_i32 = scalar.constant 2147483647 : i32
   %zero_offset = index.constant 0 : offset
-  %uses_decode_geometry = index.cmp eq, %bounded_token_count, %one : index
-  %subgroup_count = scf.select %uses_decode_geometry, %one, %four : index
-  %token_base = index.mul %token_workgroup, %subgroup_count : index
-  %token0 = index.add %token_base, %subgroup : index
-  %valid_token = index.cmp ult, %token0, %bounded_token_count : index
-  %safe_token0 = scf.select %valid_token, %token0, %zero : index
-  %token, %launch_token_count = index.assume %safe_token0, %bounded_token_count [lt(%safe_token0, %bounded_token_count)] : index, index
   %experts_per_lane0 = index.div %expert_count, %wave_size : index
   %experts_per_lane = index.assume %experts_per_lane0 [range(%experts_per_lane0, 1, 16)] : index
   %lane_expert_base = index.mul %lane, %experts_per_lane : index
@@ -63,7 +45,7 @@ kernel.def target(@qwen3_moe_router_gfx11_wave64) @qwen3_moe_router_top8_f32(%to
   %logits_view = buffer.view %logits_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%expert_count]xf32, #dense>
   %route_ids_view = buffer.view %route_ids_noalias[%zero_offset] : buffer -> view<[%route_id_storage_count]xi32, #dense>
   %route_weights_view = buffer.view %route_weights_noalias[%zero_offset] : buffer -> view<[%route_weight_storage_count]xf32, #dense>
-  %initial_logits = vector.load %logits_view[%token, %lane_expert_base] : view<[%launch_token_count]x[%expert_count]xf32, #dense> -> vector<[%experts_per_lane]xf32>
+  %initial_logits = vector.load %logits_view[%safe_token, %lane_expert_base] : view<[%launch_token_count]x[%expert_count]xf32, #dense> -> vector<[%experts_per_lane]xf32>
   %remaining_final, %selected_logit = scf.for %route = [%zero to %route_count step %one](%remaining_logits = %initial_logits : vector<[%experts_per_lane]xf32>, %lane_selected_logit = %negative_large : f32) -> (vector<[%experts_per_lane]xf32>, f32) {
     %local_value, %local_id = scf.for %slot = [%zero to %experts_per_lane step %one](%best_value = %negative_large : f32, %best_id = %largest_i32 : i32) -> (f32, i32) unroll {
       %candidate_value = vector.extract %remaining_logits[%slot] : vector<[%experts_per_lane]xf32> -> f32
@@ -100,7 +82,7 @@ kernel.def target(@qwen3_moe_router_gfx11_wave64) @qwen3_moe_router_top8_f32(%to
     }
     %publishes_route_id = scalar.andi %valid_token, %owns_winner : i1
     scf.if %publishes_route_id {
-      %route_id_token_base = index.mul %token, %bounded_route_id_stride : index
+      %route_id_token_base = index.mul %safe_token, %bounded_route_id_stride : index
       %route_id_index = index.add %route_id_token_base, %route : index
       view.store %local_id, %route_ids_view[%route_id_index] : i32, view<[%route_id_storage_count]xi32, #dense>
     }
@@ -121,10 +103,40 @@ kernel.def target(@qwen3_moe_router_gfx11_wave64) @qwen3_moe_router_top8_f32(%to
   %lane_publishes_weight = index.cmp ult, %lane, %route_count : index
   %publishes_weight = scalar.andi %valid_token, %lane_publishes_weight : i1
   scf.if %publishes_weight {
-    %route_weight_token_base = index.mul %token, %route_count : index
+    %route_weight_token_base = index.mul %safe_token, %route_count : index
     %route_weight_index = index.add %route_weight_token_base, %lane : index
     view.store %route_weight, %route_weights_view[%route_weight_index] : f32, view<[%route_weight_storage_count]xf32, #dense>
   }
+  func.return
+}
+
+kernel.def target(@qwen3_moe_router_gfx11_wave64) @qwen3_moe_router_top8_f32(%token_count: index, %route_id_stride: index) {
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %wave_size = index.constant 64 : index
+  %wide_workgroup_size = index.constant 256 : index
+  %uses_decode_geometry = index.cmp eq, %token_count, %one : index
+  %subgroup_count = scf.select %uses_decode_geometry, %one, %four : index
+  %workgroup_size = scf.select %uses_decode_geometry, %wave_size, %wide_workgroup_size : index
+  %padded_token_count = index.add %token_count, %three : index
+  %wide_workgroup_count = index.div %padded_token_count, %four : index
+  %workgroup_count = scf.select %uses_decode_geometry, %token_count, %wide_workgroup_count : index
+  kernel.launch.config workgroups(%workgroup_count, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%token_count: index, %route_id_stride: index, %logits: buffer, %route_ids: buffer, %route_weights: buffer) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %token_workgroup = kernel.workgroup.id<x> : index
+  %subgroup = kernel.subgroup.id : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %uses_decode_geometry = index.cmp eq, %bounded_token_count, %one : index
+  %subgroup_count = scf.select %uses_decode_geometry, %one, %four : index
+  %token_base = index.mul %token_workgroup, %subgroup_count : index
+  %token0 = index.add %token_base, %subgroup : index
+  %valid_token = index.cmp ult, %token0, %bounded_token_count : index
+  %safe_token = scf.select %valid_token, %token0, %zero : index
+  func.apply<qwen3_moe.router.top8.row>(%valid_token, %safe_token, %bounded_token_count, %route_id_stride, %logits, %route_ids, %route_weights) : (i1, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
