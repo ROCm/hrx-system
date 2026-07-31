@@ -114,6 +114,11 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
           "qwen3_moe_router_top8_f32",
       },
       {
+          QWEN_LOOM_SOURCE_EXPERT_TABLE_PARTITION_FUSED,
+          "qwen3_moe_expert_table_partition_fused.loom",
+          "qwen3_moe_build_expert_table_partition_prefill_512",
+      },
+      {
           QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16,
           "qwen3_moe_routed_gate_up_f16.loom",
           "qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma",

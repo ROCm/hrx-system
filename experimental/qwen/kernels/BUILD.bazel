@@ -613,6 +613,18 @@ loom_link_module(
 )
 
 loom_link_module(
+    name = "expert_table_partition_fused_runtime_module",
+    srcs = ["runtime_exports.loom"],
+    libraries = [
+        "//experimental/qwen_moe/kernels:expert_table_partition_fused_linked",
+    ],
+    mode = "selective",
+    output = "qwen3_moe_expert_table_partition_fused.loom",
+    roots = ["@qwen3_moe_build_expert_table_partition_prefill_512"],
+    strip_check = True,
+)
+
+loom_link_module(
     name = "routed_gate_up_q8_runtime_module",
     srcs = [
         "routed_gate_up_next_q8_bringup_workaround.loom",
@@ -696,6 +708,7 @@ iree_c_embed_data(
         ":attention_qkv_postprocess_fused_runtime_module",
         ":attention_qkv_quantized_runtime_module",
         ":dense_linear_quantized_f16_runtime_module",
+        ":expert_table_partition_fused_runtime_module",
         ":flash_attention_decode_split_f32_f16_runtime_module",
         ":flash_attention_prefill_f32_f16_runtime_module",
         ":greedy_argmax_partials_bringup_workaround_runtime_module",

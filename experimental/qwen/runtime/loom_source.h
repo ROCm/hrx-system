@@ -70,6 +70,11 @@ extern "C" {
 // Stable runtime path for the normalized top-8 router module.
 #define QWEN_LOOM_SOURCE_ROUTER_TOP8_F32 "qwen3_moe/router_top8_f32"
 
+// Stable runtime path for fused prefill expert and partition table
+// construction.
+#define QWEN_LOOM_SOURCE_EXPERT_TABLE_PARTITION_FUSED \
+  "qwen3_moe/expert_table_partition_fused"
+
 // Stable runtime path for grouped routed gate/up projection.
 #define QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16 "qwen3_moe/routed_gate_up_f16"
 
