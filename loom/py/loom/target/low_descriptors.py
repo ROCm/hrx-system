@@ -14,7 +14,7 @@ from pathlib import Path
 
 from loom.stable_id import stable_id_from_string
 
-LOW_DESCRIPTOR_SET_ABI_VERSION = 29
+LOW_DESCRIPTOR_SET_ABI_VERSION = 30
 LOW_DESCRIPTOR_ENCODING_ID_NONE = (2**16) - 1
 LOW_DESCRIPTOR_SET_ORDINAL_NONE = (2**16) - 1
 
@@ -578,8 +578,43 @@ class DescriptorSet:
     categories: tuple[DescriptorCategory, ...] = ()
     default_category: DescriptorCategory | None = None
     requires_explicit_asm_surface: bool = False
+    supported_target_contract_keys: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        canonical_target_contract_keys = tuple(
+            sorted(set(self.supported_target_contract_keys))
+        )
+        if self.supported_target_contract_keys != canonical_target_contract_keys:
+            raise ValueError(
+                f"DescriptorSet '{self.key}': supported target contract keys "
+                "must be sorted and unique"
+            )
+        if len(self.supported_target_contract_keys) > (2**16) - 1:
+            raise ValueError(
+                f"DescriptorSet '{self.key}': supported target contract count "
+                "does not fit the generated u16 table field"
+            )
+        descriptor_set_stable_id = descriptor_stable_id(self.key)
+        supported_target_contract_stable_ids: set[int] = set()
+        for target_contract_key in self.supported_target_contract_keys:
+            _validate_metadata_key("target contract", target_contract_key)
+            if target_contract_key == self.key:
+                raise ValueError(
+                    f"DescriptorSet '{self.key}': support for its own target "
+                    "contract is implicit"
+                )
+            target_contract_stable_id = descriptor_stable_id(target_contract_key)
+            if target_contract_stable_id == descriptor_set_stable_id:
+                raise ValueError(
+                    f"DescriptorSet '{self.key}': supported target contract "
+                    f"'{target_contract_key}' has the same stable ID"
+                )
+            if target_contract_stable_id in supported_target_contract_stable_ids:
+                raise ValueError(
+                    f"DescriptorSet '{self.key}': supported target contract "
+                    f"'{target_contract_key}' has a colliding stable ID"
+                )
+            supported_target_contract_stable_ids.add(target_contract_stable_id)
         if (
             self.default_category is not None
             and self.default_category not in self.categories

@@ -24,6 +24,24 @@ uint64_t loom_low_descriptor_stable_id_from_key(iree_string_view_t key) {
   return loom_stable_id_from_string(key);
 }
 
+bool loom_low_descriptor_set_supports_target_contract(
+    const loom_low_descriptor_set_t* descriptor_set,
+    iree_string_view_t target_contract_key) {
+  const uint64_t target_contract_stable_id =
+      loom_low_descriptor_stable_id_from_key(target_contract_key);
+  if (descriptor_set->stable_id == target_contract_stable_id) {
+    return true;
+  }
+  for (uint16_t i = 0; i < descriptor_set->supported_target_contract_count;
+       ++i) {
+    if (descriptor_set->supported_target_contract_stable_ids[i] ==
+        target_contract_stable_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool loom_low_descriptor_constraint_ties_operands(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t result_operand_index,
