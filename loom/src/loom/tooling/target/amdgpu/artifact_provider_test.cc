@@ -199,6 +199,9 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
   iree_status_t ParsePreparedArithmeticModule(iree_string_view_t target,
                                               iree_string_view_t target_attrs,
                                               ModulePtr* out_module) {
+    const loom_amdgpu_target_info_t* target_info = nullptr;
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_target_info_lookup_target(target, &target_info));
     std::string source = "amdgpu.target<";
     source.append(target.data, target.size);
     source.append("> @gfx_target");
@@ -207,9 +210,11 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
       source.append(target_attrs.data, target_attrs.size);
       source.append("}");
     }
+    source.append("\nlow.kernel.def target<");
+    source.append(target_info->descriptor_set_key.data,
+                  target_info->descriptor_set_key.size);
     source.append(
-        "\n"
-        "low.kernel.def target(@gfx_target) workgroup_size(64, 1, 1) "
+        ">(@gfx_target) workgroup_size(64, 1, 1) "
         "@loom_kernel() {\n"
         "  %zero = low.const<amdgpu.v_mov_b32> {imm32 = 0} : "
         "reg<amdgpu.vgpr>\n"
