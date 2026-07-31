@@ -10,7 +10,72 @@
 
 #include "loom/ir/module.h"
 #include "loom/ops/target/ops.h"
-#include "loom/target/materialization.h"
+
+static void loom_target_symbol_fact_initialize_storage(
+    const loom_target_bundle_t* bundle, iree_string_view_t record_name,
+    loom_target_bundle_storage_t* out_storage) {
+  *out_storage = (loom_target_bundle_storage_t){
+      .snapshot = *bundle->snapshot,
+      .export_plan = *bundle->export_plan,
+      .config = *bundle->config,
+  };
+  out_storage->snapshot.name = record_name;
+  out_storage->export_plan.name = record_name;
+  out_storage->config.name = record_name;
+  out_storage->bundle.name = record_name;
+  loom_target_bundle_storage_rebind(out_storage);
+}
+
+static void loom_target_symbol_fact_project_attr(
+    const loom_module_t* module, const loom_op_t* target_op,
+    const loom_target_projection_t* projection,
+    loom_target_bundle_storage_t* storage) {
+  const loom_attribute_t attr =
+      loom_op_const_attrs(target_op)[projection->attr_index];
+  if (loom_attr_is_absent(attr)) {
+    return;
+  }
+
+  uint8_t* storage_base = (uint8_t*)storage;
+  void* destination = storage_base + projection->storage_offset;
+  switch (projection->value_kind) {
+    case LOOM_TARGET_PROJECTION_VALUE_ENUM_U8:
+      *(uint8_t*)destination = (uint8_t)loom_attr_as_enum(attr);
+      break;
+    case LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32:
+      *(uint32_t*)destination = (uint32_t)loom_attr_as_i64(attr);
+      break;
+    case LOOM_TARGET_PROJECTION_VALUE_I64_TO_U64:
+      *(uint64_t*)destination = (uint64_t)loom_attr_as_i64(attr);
+      break;
+    case LOOM_TARGET_PROJECTION_VALUE_STRING_VIEW:
+      *(iree_string_view_t*)destination =
+          module->strings.entries[loom_attr_as_string_id(attr)];
+      break;
+  }
+}
+
+static void loom_target_symbol_fact_project_record(
+    const loom_module_t* module, loom_target_like_t target,
+    const loom_target_like_descriptor_t* descriptor,
+    const loom_target_bundle_t* row_bundle, iree_string_view_t record_name,
+    loom_target_bundle_storage_t* out_storage,
+    loom_target_fact_field_set_t* out_authored_fields) {
+  loom_target_symbol_fact_initialize_storage(row_bundle, record_name,
+                                             out_storage);
+  *out_authored_fields = 0;
+  for (uint8_t i = 0; i < descriptor->projection_count; ++i) {
+    const loom_target_projection_t* projection = &descriptor->projections[i];
+    const loom_attribute_t attr =
+        loom_op_const_attrs(target.op)[projection->attr_index];
+    if (!loom_attr_is_absent(attr)) {
+      loom_target_fact_field_set_insert(out_authored_fields,
+                                        projection->fact_field);
+    }
+    loom_target_symbol_fact_project_attr(module, target.op, projection,
+                                         out_storage);
+  }
+}
 
 static const loom_target_snapshot_t kGenericReferenceSnapshot = {
     .name = IREE_SVL("target-generic-reference"),
@@ -75,11 +140,10 @@ static iree_status_t loom_target_symbol_fact_compute(
   memset(projection, 0, fact_type->storage_size);
   projection->fact_type = fact_type;
   projection->selector = selector;
-  const bool resolved = loom_target_record_projection_resolve(
-      module, target, module->strings.entries[symbol->name_id],
-      &projection->storage, &projection->authored_fields);
-  IREE_ASSERT(resolved);
-  (void)resolved;
+  loom_target_symbol_fact_project_record(
+      module, target, descriptor, row_bundle,
+      module->strings.entries[symbol->name_id], &projection->storage,
+      &projection->authored_fields);
   if (descriptor->fact_projector != NULL) {
     descriptor->fact_projector->project(module, target.op, projection);
   }

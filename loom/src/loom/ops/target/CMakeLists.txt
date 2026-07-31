@@ -36,7 +36,6 @@ loom_generated_cc_library(
     loom::ir
     loom::ops::op_defs
     loom::target::facts
-    loom::target::materialization
     loom::target::projection
     loom::target::types
 )
