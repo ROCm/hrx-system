@@ -80,12 +80,11 @@ static iree_status_t loom_run_hal_candidate_emit_selected_target(
 
   loom_target_compile_report_t* report =
       options->report != NULL ? &candidate->compile_report : NULL;
+  loom_run_candidate_compile_options_t provider_options = *options;
+  provider_options.report = report;
   iree_status_t status = provider->emit_artifact(
       provider, run_module->module, &candidate->device_target,
-      options->diagnostic_sink, options->source_resolver, options->max_errors,
-      &options->target_pipeline_options, options->artifact_flags,
-      &options->artifact_manifest, report, allocator, &candidate->compiled,
-      &candidate->artifact);
+      &provider_options, allocator, &candidate->compiled, &candidate->artifact);
   if (iree_status_is_ok(status) && candidate->compiled &&
       candidate->artifact.target_bundle == NULL) {
     return iree_make_status(

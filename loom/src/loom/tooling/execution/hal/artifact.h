@@ -106,13 +106,9 @@ typedef void (*loom_run_hal_deinitialize_device_target_fn_t)(
 typedef iree_status_t (*loom_run_hal_emit_artifact_fn_t)(
     const loom_run_hal_artifact_provider_t* provider, loom_module_t* module,
     const loom_run_hal_device_target_t* target,
-    loom_diagnostic_sink_t diagnostic_sink,
-    loom_source_resolver_t source_resolver, uint32_t max_errors,
-    const loom_target_pipeline_options_t* target_pipeline_options,
-    loom_run_candidate_artifact_flags_t artifact_flags,
-    const loom_run_candidate_artifact_manifest_options_t* artifact_manifest,
-    loom_target_compile_report_t* report, iree_allocator_t allocator,
-    bool* out_emitted, loom_run_hal_artifact_t* out_artifact);
+    const loom_run_candidate_compile_options_t* options,
+    iree_allocator_t allocator, bool* out_emitted,
+    loom_run_hal_artifact_t* out_artifact);
 
 typedef void (*loom_run_hal_deinitialize_artifact_fn_t)(
     const loom_run_hal_artifact_provider_t* provider,

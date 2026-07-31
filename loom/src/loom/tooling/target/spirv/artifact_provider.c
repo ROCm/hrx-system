@@ -252,28 +252,22 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_entries(
 static iree_status_t loom_spirv_hal_artifact_provider_emit_artifact(
     const loom_run_hal_artifact_provider_t* provider, loom_module_t* module,
     const loom_run_hal_device_target_t* target,
-    loom_diagnostic_sink_t diagnostic_sink,
-    loom_source_resolver_t source_resolver, uint32_t max_errors,
-    const loom_target_pipeline_options_t* target_pipeline_options,
-    loom_run_candidate_artifact_flags_t artifact_flags,
-    const loom_run_candidate_artifact_manifest_options_t* artifact_manifest,
-    loom_target_compile_report_t* report, iree_allocator_t allocator,
-    bool* out_emitted, loom_run_hal_artifact_t* out_artifact) {
+    const loom_run_candidate_compile_options_t* options,
+    iree_allocator_t allocator, bool* out_emitted,
+    loom_run_hal_artifact_t* out_artifact) {
   IREE_ASSERT_ARGUMENT(provider);
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT_ARGUMENT(target);
   IREE_ASSERT_ARGUMENT(out_emitted);
   IREE_ASSERT_ARGUMENT(out_artifact);
-  (void)target_pipeline_options;
-  (void)artifact_flags;
 
   *out_emitted = false;
   *out_artifact = (loom_run_hal_artifact_t){0};
 
   const loom_target_entry_options_t target_options = {
-      .diagnostic_sink = diagnostic_sink,
-      .source_resolver = source_resolver,
-      .max_errors = max_errors,
+      .diagnostic_sink = options->diagnostic_sink,
+      .source_resolver = options->source_resolver,
+      .max_errors = options->max_errors,
   };
   loom_target_entry_diagnostic_emitter_t diagnostic_emitter = {0};
   loom_target_entry_diagnostic_emitter_initialize(
@@ -307,17 +301,18 @@ static iree_status_t loom_spirv_hal_artifact_provider_emit_artifact(
   }
   if (iree_status_is_ok(status) && verify_result.error_count == 0 && selected &&
       diagnostic_emitter.error_count == 0) {
-    if (report != NULL) {
+    if (options->report != NULL) {
       loom_target_compile_report_record_target_bundle(
-          report, &entries.values[0].bundle_storage.bundle);
+          options->report, &entries.values[0].bundle_storage.bundle);
     }
     status = loom_spirv_hal_artifact_provider_emit_entries(
         module, &target_options, entries, target, &diagnostic_emitter,
-        &low_registry, artifact_manifest, &arena, allocator, out_emitted,
-        out_artifact);
+        &low_registry, &options->artifact_manifest, &arena, allocator,
+        out_emitted, out_artifact);
   }
-  if (report != NULL) {
-    loom_target_compile_report_record_status(report, iree_status_code(status));
+  if (options->report != NULL) {
+    loom_target_compile_report_record_status(options->report,
+                                             iree_status_code(status));
   }
 
   iree_arena_deinitialize(&arena);

@@ -406,13 +406,9 @@ loom_amdgpu_hal_artifact_provider_runtime_globals(
 static iree_status_t loom_amdgpu_hal_artifact_provider_emit_artifact(
     const loom_run_hal_artifact_provider_t* provider, loom_module_t* module,
     const loom_run_hal_device_target_t* target,
-    loom_diagnostic_sink_t diagnostic_sink,
-    loom_source_resolver_t source_resolver, uint32_t max_errors,
-    const loom_target_pipeline_options_t* target_pipeline_options,
-    loom_run_candidate_artifact_flags_t artifact_flags,
-    const loom_run_candidate_artifact_manifest_options_t* artifact_manifest,
-    loom_target_compile_report_t* report, iree_allocator_t allocator,
-    bool* out_emitted, loom_run_hal_artifact_t* out_artifact) {
+    const loom_run_candidate_compile_options_t* options,
+    iree_allocator_t allocator, bool* out_emitted,
+    loom_run_hal_artifact_t* out_artifact) {
   IREE_ASSERT_ARGUMENT(provider);
   IREE_ASSERT_ARGUMENT(target);
   IREE_ASSERT_ARGUMENT(out_emitted);
@@ -428,23 +424,19 @@ static iree_status_t loom_amdgpu_hal_artifact_provider_emit_artifact(
 
   const loom_amdgpu_hal_kernel_library_options_t library_options = {
       .runtime_globals = loom_amdgpu_hal_artifact_provider_runtime_globals(
-          target_pipeline_options),
-      .diagnostic_sink = diagnostic_sink,
-      .source_resolver = source_resolver,
-      .max_errors = max_errors,
-      .report = report,
-      .capture_target_listing = iree_all_bits_set(
-          artifact_flags, LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_TARGET_LISTING),
-      .artifact_name = artifact_manifest ? artifact_manifest->artifact_name
-                                         : iree_string_view_empty(),
-      .artifact_manifest_identifier = artifact_manifest
-                                          ? artifact_manifest->identifier
-                                          : iree_string_view_empty(),
+          &options->target_pipeline_options),
+      .diagnostic_sink = options->diagnostic_sink,
+      .source_resolver = options->source_resolver,
+      .max_errors = options->max_errors,
+      .report = options->report,
+      .capture_target_listing =
+          iree_all_bits_set(options->artifact_flags,
+                            LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_TARGET_LISTING),
+      .artifact_name = options->artifact_manifest.artifact_name,
+      .artifact_manifest_identifier = options->artifact_manifest.identifier,
       .artifact_manifest =
           {
-              .mode = artifact_manifest
-                          ? artifact_manifest->mode
-                          : LOOM_TARGET_ARTIFACT_MANIFEST_MODE_NONE,
+              .mode = options->artifact_manifest.mode,
           },
   };
   bool library_emitted = false;

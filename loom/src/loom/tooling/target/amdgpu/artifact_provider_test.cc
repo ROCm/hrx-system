@@ -255,15 +255,12 @@ class AmdgpuHalArtifactProviderTest : public ::testing::Test {
     ASSERT_NE(module.get(), nullptr);
 
     loom_run_hal_device_target_t target = {};
+    loom_run_candidate_compile_options_t options = {};
+    loom_run_candidate_compile_options_initialize(&options);
     loom_run_hal_artifact_t artifact = {};
     bool emitted = false;
     IREE_ASSERT_OK(loom_amdgpu_hal_artifact_provider.emit_artifact(
-        &loom_amdgpu_hal_artifact_provider, module.get(), &target,
-        /*diagnostic_sink=*/(loom_diagnostic_sink_t){0},
-        /*source_resolver=*/(loom_source_resolver_t){0}, /*max_errors=*/20,
-        /*target_pipeline_options=*/nullptr,
-        /*artifact_flags=*/LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_NONE,
-        /*artifact_manifest=*/nullptr, /*report=*/nullptr,
+        &loom_amdgpu_hal_artifact_provider, module.get(), &target, &options,
         iree_allocator_system(), &emitted, &artifact));
     EXPECT_TRUE(emitted);
     EXPECT_NE(iree_string_view_find(artifact.target_key, target_name, 0),
@@ -719,16 +716,15 @@ TEST_F(AmdgpuHalArtifactProviderTest, RecordsDetailedReportRows) {
       /*.target_profile=*/&target_profile.base,
       /*.target_key=*/target_info->name,
   };
+  loom_run_candidate_compile_options_t options = {};
+  loom_run_candidate_compile_options_initialize(&options);
+  options.report = &report;
+  options.artifact_flags = LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_TARGET_LISTING;
   loom_run_hal_artifact_t artifact = {};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_hal_artifact_provider.emit_artifact(
-      &loom_amdgpu_hal_artifact_provider, module.get(), &target,
-      /*diagnostic_sink=*/(loom_diagnostic_sink_t){0},
-      /*source_resolver=*/(loom_source_resolver_t){0}, /*max_errors=*/20,
-      /*target_pipeline_options=*/nullptr,
-      /*artifact_flags=*/LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_TARGET_LISTING,
-      /*artifact_manifest=*/nullptr, &report, iree_allocator_system(), &emitted,
-      &artifact));
+      &loom_amdgpu_hal_artifact_provider, module.get(), &target, &options,
+      iree_allocator_system(), &emitted, &artifact));
   EXPECT_TRUE(emitted);
   EXPECT_EQ(artifact.target_artifact_format, LOOM_TARGET_ARTIFACT_FORMAT_ELF);
   EXPECT_EQ(artifact.target_artifact_data.data, artifact.executable_data.data);
@@ -782,15 +778,13 @@ TEST_F(AmdgpuHalArtifactProviderTest,
           /*.checks=*/LOOM_SANITIZER_CHECK_ACCESS | LOOM_SANITIZER_CHECK_RACE,
       },
   };
+  loom_run_candidate_compile_options_t options = {};
+  loom_run_candidate_compile_options_initialize(&options);
+  options.target_pipeline_options = target_pipeline_options;
   loom_run_hal_artifact_t artifact = {};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_hal_artifact_provider.emit_artifact(
-      &loom_amdgpu_hal_artifact_provider, module.get(), &target,
-      /*diagnostic_sink=*/(loom_diagnostic_sink_t){0},
-      /*source_resolver=*/(loom_source_resolver_t){0}, /*max_errors=*/20,
-      &target_pipeline_options,
-      /*artifact_flags=*/LOOM_RUN_CANDIDATE_ARTIFACT_FLAG_NONE,
-      /*artifact_manifest=*/nullptr, /*report=*/nullptr,
+      &loom_amdgpu_hal_artifact_provider, module.get(), &target, &options,
       iree_allocator_system(), &emitted, &artifact));
 
   EXPECT_TRUE(emitted);
