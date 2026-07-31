@@ -212,7 +212,7 @@ iree_status_t qwen_full_program_layout_calculate(
   memset(out_layout, 0, sizeof(*out_layout));
   const qwen_full_program_layout_flags_t supported_flags =
       QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION |
-      QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_ROUTER;
+      QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SHARED_COMPLETION;
   if (iree_any_bit_set(flags, ~supported_flags)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen full-program layout flags are unsupported");
@@ -264,19 +264,19 @@ iree_status_t qwen_full_program_layout_calculate(
 
   const bool reserves_attention_completion = iree_any_bit_set(
       flags, QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION);
-  const bool reserves_router_completion = iree_any_bit_set(
-      flags, QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_ROUTER);
-  if (reserves_attention_completion || reserves_router_completion) {
+  const bool reserves_shared_completion = iree_any_bit_set(
+      flags, QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SHARED_COMPLETION);
+  if (reserves_attention_completion || reserves_shared_completion) {
     iree_device_size_t attention_byte_length = 0;
     if (reserves_attention_completion) {
       IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
           QWEN_MODEL_KEY_VALUE_HEAD_COUNT, sizeof(int32_t),
           &attention_byte_length));
     }
-    const iree_device_size_t router_byte_length =
-        reserves_router_completion ? sizeof(int32_t) : 0;
+    const iree_device_size_t shared_byte_length =
+        reserves_shared_completion ? sizeof(int32_t) : 0;
     iree_device_size_t initialization_byte_length = 0;
-    if (!iree_device_size_checked_add(attention_byte_length, router_byte_length,
+    if (!iree_device_size_checked_add(attention_byte_length, shared_byte_length,
                                       &initialization_byte_length)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "Qwen completion storage length overflows");
@@ -288,10 +288,10 @@ iree_status_t qwen_full_program_layout_calculate(
         .offset = out_layout->decode_completion.initialization.offset,
         .length = attention_byte_length,
     };
-    out_layout->decode_completion.router = (qwen_program_span_t){
+    out_layout->decode_completion.shared = (qwen_program_span_t){
         .offset = out_layout->decode_completion.initialization.offset +
                   attention_byte_length,
-        .length = router_byte_length,
+        .length = shared_byte_length,
     };
   }
 

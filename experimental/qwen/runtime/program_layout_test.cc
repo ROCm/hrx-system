@@ -136,7 +136,7 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512FullProgram) {
   EXPECT_EQ(layout.attention_partial_outputs.length, 0u);
   EXPECT_EQ(layout.decode_completion.initialization.length, 0u);
   EXPECT_EQ(layout.decode_completion.attention.length, 0u);
-  EXPECT_EQ(layout.decode_completion.router.length, 0u);
+  EXPECT_EQ(layout.decode_completion.shared.length, 0u);
 
   ExpectOrdered(layout.layer.routed_projection_scratch,
                 layout.terminal_layer.projection_input_scratch);
@@ -180,7 +180,7 @@ TEST(QwenProgramLayoutTest, ReservesReusableCompletionForDecode513) {
   IREE_ASSERT_OK(qwen_full_program_layout_calculate(
       /*token_count=*/1, /*context_count=*/513,
       QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION |
-          QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_ROUTER,
+          QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SHARED_COMPLETION,
       &layout));
 
   EXPECT_EQ(layout.attention_partial_maximums.length, 2304u);
@@ -188,10 +188,10 @@ TEST(QwenProgramLayoutTest, ReservesReusableCompletionForDecode513) {
   EXPECT_EQ(layout.attention_partial_outputs.length, 147456u);
   EXPECT_EQ(layout.decode_completion.initialization.length, 20u);
   EXPECT_EQ(layout.decode_completion.attention.length, 16u);
-  EXPECT_EQ(layout.decode_completion.router.length, 4u);
+  EXPECT_EQ(layout.decode_completion.shared.length, 4u);
   EXPECT_EQ(layout.decode_completion.attention.offset,
             layout.decode_completion.initialization.offset);
-  EXPECT_EQ(layout.decode_completion.router.offset,
+  EXPECT_EQ(layout.decode_completion.shared.offset,
             layout.decode_completion.attention.offset +
                 layout.decode_completion.attention.length);
   ExpectOrdered(layout.terminal_layer.routed_projection_scratch,
@@ -222,7 +222,7 @@ TEST(QwenProgramLayoutTest, RejectsUnsupportedFullProgramContextCount) {
       qwen_full_program_layout_calculate(
           /*token_count=*/1, /*context_count=*/0,
           QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION |
-              QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_ROUTER,
+              QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SHARED_COMPLETION,
           &layout));
 }
 

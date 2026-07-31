@@ -100,8 +100,8 @@ typedef enum qwen_program_executable_ordinal_e {
   QWEN_PROGRAM_EXECUTABLE_FEED_FORWARD_PREPARE_Q8 = 33,
   QWEN_PROGRAM_EXECUTABLE_GATE_UP_Q8 = 34,
   QWEN_PROGRAM_EXECUTABLE_SWIGLU_QUANTIZE_Q8 = 35,
-  QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4_Q8 = 36,
-  QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6_Q8 = 37,
+  QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4_NEXT_Q8 = 36,
+  QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6_NEXT_Q8 = 37,
   QWEN_PROGRAM_EXECUTABLE_ROUTER_PROJECTION_TOP8_FUSED = 38,
   QWEN_PROGRAM_EXECUTABLE_COUNT = 39,
 } qwen_program_executable_ordinal_t;
@@ -530,7 +530,7 @@ static qwen_full_program_layout_flags_t qwen_program_full_layout_flags(
     qwen_program_kind_t kind) {
   return kind == QWEN_PROGRAM_KIND_DECODE
              ? QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION |
-                   QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_ROUTER
+                   QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SHARED_COMPLETION
              : QWEN_FULL_PROGRAM_LAYOUT_FLAG_NONE;
 }
 
@@ -877,22 +877,24 @@ static iree_status_t qwen_program_prepare_layer_executables(
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q4_Q8),
-        IREE_SV("qwen3_moe_routed_down_q4k_q8_1_x4"),
-        /*config_binding_count=*/0, /*config_bindings=*/NULL,
+        IREE_SV("qwen3_moe_routed_down_q4k_q8_1_x4_next_q8"),
+        IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
+        qwen_attention_prepare_config_bindings,
         IREE_ARRAYSIZE(direct_routed_down_workload),
         direct_routed_down_workload,
-        &program->executables[QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4_Q8]);
+        &program->executables[QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4_NEXT_Q8]);
   }
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
           QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_Q8),
-        IREE_SV("qwen3_moe_routed_down_q6k_q8_1_x4"),
-        /*config_binding_count=*/0, /*config_bindings=*/NULL,
+        IREE_SV("qwen3_moe_routed_down_q6k_q8_1_x4_next_q8"),
+        IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
+        qwen_attention_prepare_config_bindings,
         IREE_ARRAYSIZE(direct_routed_down_workload),
         direct_routed_down_workload,
-        &program->executables[QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6_Q8]);
+        &program->executables[QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6_NEXT_Q8]);
   }
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
@@ -1049,7 +1051,9 @@ static iree_status_t qwen_program_prepare_full_model_executables(
         &program
              ->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_WEIGHTED_REDUCE]);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
         IREE_SV("qwen3_moe_attention_rmsnorm_quantize_q8_1_x4"),
@@ -1200,6 +1204,11 @@ static iree_status_t qwen_program_record_attention(
       program->qkv_schedule == QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA
           ? QWEN_PROGRAM_EXECUTABLE_RMSNORM_F32
           : QWEN_PROGRAM_EXECUTABLE_ATTENTION_PREPARE_Q8;
+  const bool input_was_published_by_previous_layer =
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_DIRECT_Q8 &&
+      layer_index > 0;
+  const bool records_attention_prepare = !input_was_published_by_previous_layer;
 
   const uint32_t token_count = (uint32_t)program->token_count;
   const uint32_t context_count = (uint32_t)program->context_count;
@@ -1213,14 +1222,14 @@ static iree_status_t qwen_program_record_attention(
       qwen_program_model_ref(parameters->attention_norm),
       qwen_program_transient_ref(transient->projection_input_scratch),
   };
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && records_attention_prepare) {
     status = qwen_program_record_dispatch(
         program, attention_prepare_ordinal,
         IREE_ARRAYSIZE(attention_prepare_constants),
         attention_prepare_constants, IREE_ARRAYSIZE(attention_prepare_bindings),
         attention_prepare_bindings);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && records_attention_prepare) {
     status = qwen_program_record_dispatch_barrier(program);
   }
 
@@ -1590,13 +1599,15 @@ static iree_status_t qwen_program_record_direct_feed_forward(
     qwen_program_t* program, iree_host_size_t layer_index, uint32_t token_count,
     iree_hal_buffer_ref_t hidden_state,
     const qwen_layer_program_layout_t* transient,
-    qwen_program_span_t router_completion_counter) {
+    qwen_parameter_span_t next_norm_weight,
+    qwen_program_span_t shared_completion_counter,
+    qwen_program_span_t next_q8_output) {
   const qwen_layer_parameters_t* parameters =
       &qwen_model_parameter_layout(program->model)->layers[layer_index];
   const qwen_program_executable_ordinal_t routed_down_ordinal =
       parameters->value_and_down_storage == QWEN_QUANTIZED_STORAGE_Q6_K
-          ? QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6_Q8
-          : QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4_Q8;
+          ? QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6_NEXT_Q8
+          : QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4_NEXT_Q8;
   const uint32_t route_count = QWEN_MODEL_ROUTE_COUNT;
   const uint32_t route_stride = QWEN_MODEL_ROUTE_COUNT;
   const uint32_t expert_count = QWEN_MODEL_EXPERT_COUNT;
@@ -1630,7 +1641,7 @@ static iree_status_t qwen_program_record_direct_feed_forward(
       qwen_program_transient_ref(transient->feed_forward_norm),
       qwen_program_model_ref(parameters->router),
       qwen_program_transient_ref(transient->router_logits),
-      qwen_program_transient_ref(router_completion_counter),
+      qwen_program_transient_ref(shared_completion_counter),
       qwen_program_transient_ref(transient->route_ids),
       qwen_program_transient_ref(transient->route_weights),
   };
@@ -1697,6 +1708,9 @@ static iree_status_t qwen_program_record_direct_feed_forward(
       qwen_program_transient_ref(transient->route_weights),
       qwen_program_model_ref(parameters->expert_down),
       hidden_state,
+      qwen_program_model_ref(next_norm_weight),
+      qwen_program_transient_ref(shared_completion_counter),
+      qwen_program_transient_ref(next_q8_output),
   };
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_dispatch(
@@ -1718,7 +1732,12 @@ static iree_status_t qwen_program_record_layer_body(
     return qwen_program_record_direct_feed_forward(
         program, layer_index, (uint32_t)program->token_count,
         qwen_program_request_ref(request_layout->hidden_state),
-        &program->layer_layout, program->full_layout.decode_completion.router);
+        &program->layer_layout,
+        qwen_model_parameter_layout(program->model)
+            ->layers[layer_index + 1]
+            .attention_norm,
+        program->full_layout.decode_completion.shared,
+        program->layer_layout.projection_input_scratch);
   }
 
   const bool uses_q6 =
@@ -1765,7 +1784,9 @@ static iree_status_t qwen_program_record_terminal_feed_forward(
     return qwen_program_record_direct_feed_forward(
         program, layer_index, /*token_count=*/1, hidden_state,
         &program->full_layout.terminal_layer,
-        program->full_layout.decode_completion.router);
+        qwen_model_parameter_layout(program->model)->output_norm,
+        program->full_layout.decode_completion.shared,
+        program->full_layout.final_quantized_hidden_state);
   }
 
   const qwen_program_grouped_feed_forward_executables_t executables = {
@@ -1800,13 +1821,17 @@ static iree_status_t qwen_program_record_full_model_endpoint(
       qwen_program_model_ref(parameters->output_norm),
       qwen_program_transient_ref(transient->final_quantized_hidden_state),
   };
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_record_dispatch(
         program, QWEN_PROGRAM_EXECUTABLE_FINAL_RMSNORM_QUANTIZE_Q8,
         IREE_ARRAYSIZE(final_prepare_constants), final_prepare_constants,
         IREE_ARRAYSIZE(final_prepare_bindings), final_prepare_bindings);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_record_dispatch_barrier(program);
   }
 

@@ -27,8 +27,8 @@ typedef struct qwen_decode_completion_layout_t {
   qwen_program_span_t initialization;
   // Per-KV-head counters reset by every split-attention dispatch.
   qwen_program_span_t attention;
-  // Router-projection counter reset after every normalized top-8 publication.
-  qwen_program_span_t router;
+  // Counter reset after each sequential fused decode-stage publication.
+  qwen_program_span_t shared;
 } qwen_decode_completion_layout_t;
 
 // Full-model transient layout features.
@@ -39,8 +39,8 @@ enum qwen_full_program_layout_flag_bits_e {
   // Reserves partial and completion storage for fused split-K decode attention.
   QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SPLIT_ATTENTION = 1u << 0,
 
-  // Reserves completion storage for fused decode projection and routing.
-  QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_FUSED_ROUTER = 1u << 1,
+  // Reserves completion storage shared by sequential fused decode stages.
+  QWEN_FULL_PROGRAM_LAYOUT_FLAG_DECODE_SHARED_COMPLETION = 1u << 1,
 };
 
 // Named transient spans used by one complete layer program.

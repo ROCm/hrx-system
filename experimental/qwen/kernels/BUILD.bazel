@@ -512,7 +512,7 @@ loom_link_module(
 loom_link_module(
     name = "routed_down_q4_q8_runtime_module",
     srcs = [
-        "routed_down_q4_q8_bringup_workaround.loom",
+        "routed_down_q4_next_q8_bringup_workaround.loom",
         "runtime_exports.loom",
     ],
     libraries = [
@@ -520,14 +520,14 @@ loom_link_module(
     ],
     mode = "selective",
     output = "qwen3_moe_routed_down_q4_q8.loom",
-    roots = ["@qwen3_moe_routed_down_q4k_q8_1_x4"],
+    roots = ["@qwen3_moe_routed_down_q4k_q8_1_x4_next_q8"],
     strip_check = True,
 )
 
 loom_link_module(
     name = "routed_down_q6_q8_runtime_module",
     srcs = [
-        "routed_down_q6_q8_bringup_workaround.loom",
+        "routed_down_q6_next_q8_bringup_workaround.loom",
         "runtime_exports.loom",
     ],
     libraries = [
@@ -535,7 +535,7 @@ loom_link_module(
     ],
     mode = "selective",
     output = "qwen3_moe_routed_down_q6_q8.loom",
-    roots = ["@qwen3_moe_routed_down_q6k_q8_1_x4"],
+    roots = ["@qwen3_moe_routed_down_q6k_q8_1_x4_next_q8"],
     strip_check = True,
 )
 

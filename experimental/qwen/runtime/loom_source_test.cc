@@ -126,12 +126,12 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
       {
           QWEN_LOOM_SOURCE_ROUTED_DOWN_Q4_Q8,
           "qwen3_moe_routed_down_q4_q8.loom",
-          "qwen3_moe_routed_down_q4k_q8_1_x4",
+          "qwen3_moe_routed_down_q4k_q8_1_x4_next_q8",
       },
       {
           QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_Q8,
           "qwen3_moe_routed_down_q6_q8.loom",
-          "qwen3_moe_routed_down_q6k_q8_1_x4",
+          "qwen3_moe_routed_down_q6k_q8_1_x4_next_q8",
       },
   };
 
@@ -250,7 +250,11 @@ TEST(QwenLoomSourceTest, EmbedsDirectDownFixedModelWorkarounds) {
         std::string::npos);
     EXPECT_NE(
         source_text.find("%bounded_output_size = index.assume %output_size "
-                         "[range(%output_size, 2048, 2048)] : index"),
+                         "[range(%output_size, 2048, 2048), "
+                         "mul(%output_size, 128)] : index"),
+        std::string::npos);
+    EXPECT_NE(
+        source_text.find("func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>"),
         std::string::npos);
   }
 }

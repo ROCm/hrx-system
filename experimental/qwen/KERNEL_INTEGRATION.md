@@ -103,25 +103,29 @@ decode-513 programs:
 | Expert tables | Assignment table then 32-row partition table | None; compact route IDs directly select expert rows | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` |
 | Gate/up and SwiGLU | Grouped Q4_K F16 WMMA | Raw Q4_K by Q8_1 x4 direct contraction producing F32 SwiGLU rows | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` |
 | SwiGLU packing | None | Eight F32 route rows packed to Q8_1 x4 | `ggml/quantize_q8_1_x4.loom` |
-| Routed down and reduction | Grouped Q4_K or Q6_K F16 WMMA followed by weighted reduction | Storage-selected direct Q4_K or Q6_K contraction with route weighting, reduction, and residual update fused | `qwen3_moe/routed_down_q4k.loom` and `qwen3_moe/routed_down_q6k.loom` |
-| Vocabulary endpoint | Fused RMSNorm/Q8_1 x4 pack, raw Q6_K contraction, finite-logit argmax | Same | `qwen3_moe/attention_prepare_quantized.loom`, `ggml/linear_q6k_q8_1_x4.loom`, and an owned argmax bring-up kernel |
+| Routed down and reduction | Grouped Q4_K or Q6_K F16 WMMA followed by weighted reduction | Storage-selected direct Q4_K or Q6_K contraction with route weighting, reduction, and residual update fused; the last-arriving workgroup also publishes the next layer's normalized Q8_1 x4 row | `qwen3_moe/routed_down_q4k.loom` and `qwen3_moe/routed_down_q6k.loom` |
+| Vocabulary endpoint | Fused RMSNorm/Q8_1 x4 pack, raw Q6_K contraction, finite-logit argmax | The final routed-down dispatch publishes the normalized Q8_1 x4 row; the endpoint performs the raw Q6_K contraction and finite-logit argmax | `qwen3_moe/routed_down_q4k.loom`, `qwen3_moe/routed_down_q6k.loom`, `ggml/linear_q6k_q8_1_x4.loom`, and an owned argmax bring-up kernel |
 
 Full-model prefill records 725 dispatches. Layers 0 through 46 execute every
 stage over all 512 rows. Layer 47 executes attention over all rows so its cache
 is complete, then executes feed-forward and the vocabulary endpoint only for
-the final row needed to select the next token. Decode records 533 dispatches:
-two request-setup dispatches, six attention and five direct feed-forward
-dispatches per layer, and three endpoint dispatches. Its reusable dispatch-only
-command buffer contains 532 explicit barriers and one terminal return;
-selected-token publication does not add a transfer operation.
+the final row needed to select the next token. Decode records 485 dispatches:
+two request-setup dispatches, six attention dispatches in layer 0, five
+attention dispatches in each remaining layer, five direct feed-forward
+dispatches per layer, and two endpoint dispatches. Each routed-down dispatch
+publishes the normalized Q8_1 x4 row consumed by the following layer or
+vocabulary projection. Its reusable dispatch-only command buffer contains 484
+explicit barriers and one terminal return; selected-token publication does not
+add a transfer operation.
 
 Decode owns partial-maximum, partial-sum, and partial-output regions sized to
-its exact context. Four split-attention counters and one router counter occupy
-one contiguous 20-byte initialization span. All 48 sequential layers reuse
-those spans. One queue fill initializes all five counters after transient
-allocation and signals reusable command-buffer execution; each attention
-dispatch and fused router dispatch returns its counter to zero before the
-following layer. The direct Q8_1 x4 gate/up and fused direct down families are
+its exact context. Four split-attention counters and one shared fused-stage
+counter occupy one contiguous 20-byte initialization span. All 48 sequential
+layers reuse those spans. One queue fill initializes all five counters after
+transient allocation and signals reusable command-buffer execution; each
+attention dispatch returns its counters to zero, while the fused router and
+routed-down dispatches sequentially return the shared counter to zero before
+its next use. The direct Q8_1 x4 gate/up and fused direct down families are
 selected for full-model decode; grouped F16 WMMA remains the prefill and
 layer-program route.
 
@@ -175,8 +179,8 @@ not copied wholesale into a second kernel corpus.
 | `expert_table_bringup_workaround.loom` | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` | AMDGPU division/remainder lowering needs the exact route-count divisor. The JIT workload already knows eight, but that value does not reach target lowering, so the fork makes eight structural. |
 | `quantize_q8_1_x4_bringup_workaround.loom` | `ggml/quantize_q8_1_x4.loom` | Launch and loop facts do not prove the four-element `vector.load` footprint. The fork adds the equivalent packet-end relation. |
 | `routed_gate_up_q8_bringup_workaround.loom` | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` | Exact one-token, eight-route, 128-expert, and 768-channel workload facts do not reach scalar footprint analysis. The fork makes those dimensions structural while retaining the direct kernel ABI and body. |
-| `routed_down_q4_q8_bringup_workaround.loom` | `qwen3_moe/routed_down_q4k.loom` | Exact decode dimensions do not reach source-to-low, so the eight-iteration route loop cannot be unrolled. The fork makes the one-token Q4_K workload structural while retaining the direct fused ABI and body. |
-| `routed_down_q6_q8_bringup_workaround.loom` | `qwen3_moe/routed_down_q6k.loom` | The same source-to-low specialization gap blocks the storage-selected Q6_K direct route. The fork fixes only the model dimensions needed to expose its eight-iteration route loop. |
+| `routed_down_q4_next_q8_bringup_workaround.loom` | `qwen3_moe/routed_down_q4k.loom` | Exact decode dimensions do not reach source-to-low, so the eight-iteration route loop cannot be unrolled. The one-function fork delegates contraction and residual arithmetic to the canonical body, then retains the canonical last-arrival next-row publication. |
+| `routed_down_q6_next_q8_bringup_workaround.loom` | `qwen3_moe/routed_down_q6k.loom` | The same source-to-low specialization gap blocks the storage-selected Q6_K direct route. The one-function fork delegates the contraction while making only the model dimensions structural and retaining next-row publication. |
 | `linear_q6k_q8_1_x4_bringup_workaround.loom` | `ggml/linear_q6k_q8_1_x4.loom` | A guarded tail store loses its channel bound during address planning. The one-row fork uses a safe masked weight channel, repeats the guarded output relation, and narrows generic maxima to hidden width 2048 and vocabulary size 151936. |
 | `flash_attention_decode_split_bringup_workaround.loom` | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` | Exact context 513 does not reach reducer-template selection or launch topology analysis. The fork carries that exact range to the canonical template applications and makes only the `9 x 4 x 1` launch structural. |
 | `flash_attention_bringup_workaround.py` | `qwen3_moe/flash_attention_f32_f16_wmma.loom` | Bounded subtraction facts are lost in full-tile and tail paths, and a dynamic zero-or-capacity workgroup allocation violates the fixed-frame contract. The exact-text patch expresses tails as remainders, introduces the path-local lower bound, and reserves the full 8192-byte tail stage inside the resulting 23808-byte LDS frame. |
