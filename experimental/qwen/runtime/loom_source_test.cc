@@ -24,6 +24,11 @@ struct ExpectedSource {
 TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
   const ExpectedSource expected_sources[] = {
       {
+          QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K_BRINGUP_WORKAROUND,
+          "qwen_token_embedding_q4k_bringup_workaround.loom",
+          "qwen_token_embedding_q4k_bringup_workaround",
+      },
+      {
           QWEN_LOOM_SOURCE_ATTENTION_METADATA,
           "qwen_attention_metadata.loom",
           "qwen_attention_metadata_bringup_workaround",

@@ -16,6 +16,55 @@ package(
 )
 
 loom_link_module(
+    name = "token_embedding_bringup_workaround_linked",
+    srcs = ["token_embedding_bringup_workaround.loom"],
+)
+
+iree_executable_test(
+    name = "token_embedding_bringup_workaround_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :token_embedding_bringup_workaround_linked)",
+        "--benchmark=@qwen_token_embedding_q4k_prefill_512",
+        "--dry-run",
+        "--output-format=jsonl",
+        "--sample-compilation=per_sample",
+    ],
+    data = [":token_embedding_bringup_workaround_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "token_embedding_bringup_workaround_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :token_embedding_bringup_workaround_linked)",
+        "--case=@qwen_token_embedding_q4k_row_access_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":token_embedding_bringup_workaround_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+loom_link_module(
+    name = "token_embedding_bringup_workaround_runtime_module",
+    srcs = ["token_embedding_bringup_workaround.loom"],
+    mode = "selective",
+    output = "qwen_token_embedding_q4k_bringup_workaround.loom",
+    roots = ["@qwen_token_embedding_q4k_bringup_workaround"],
+    strip_check = True,
+)
+
+loom_link_module(
     name = "attention_metadata_bringup_workaround_linked",
     srcs = ["attention_metadata_bringup_workaround.loom"],
 )
@@ -220,6 +269,7 @@ iree_c_embed_data(
         ":routed_gate_up_f16_runtime_module",
         ":router_projection_f32_runtime_module",
         ":router_top8_f32_runtime_module",
+        ":token_embedding_bringup_workaround_runtime_module",
     ],
     c_file_output = "runtime_modules.c",
     flatten = True,
