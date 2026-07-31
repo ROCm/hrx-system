@@ -11,10 +11,10 @@ from typing import Any
 
 import pytest
 
-from loom.assembly import TypeOf
+from loom.assembly import GLUE, LPAREN, RPAREN, OptionalGroup, Ref, TypeOf, kw
 from loom.builtin_types import ALL_BUILTIN_TYPES
-from loom.dialect.test import ALL_TEST_OPS
-from loom.dsl import ANY, TypeDef, TypeParam
+from loom.dialect.test import ALL_TEST_OPS, test_ops
+from loom.dsl import ANY, Op, Operand, TypeDef, TypeParam
 from loom.format.bytecode.reader import read_module
 from loom.format.bytecode.writer import write_module
 from loom.format.text.parser import (
@@ -845,6 +845,37 @@ class TestParseSegmentedOp:
             "rhs1",
         ]
         assert op.operand_segment_counts == (1, 0, 0, 2)
+
+
+class TestParseOptionalGroup:
+    def test_parenthesized_operand_after_glue(self) -> None:
+        optional_operand_op = Op(
+            "test.optional_parenthesized_operand",
+            group=test_ops,
+            operands=[Operand("value", ANY, optional=True)],
+            format=[
+                kw("contract"),
+                OptionalGroup(
+                    [GLUE, LPAREN, Ref("value"), RPAREN],
+                    anchor="value",
+                ),
+            ],
+        )
+        parser = Parser()
+        parser.register_ops([optional_operand_op])
+        module, scope = _setup_scope(("value", I32))
+
+        op = parser.parse_operation_from_text(
+            "test.optional_parenthesized_operand contract(%value)",
+            module=module,
+            scope=scope,
+        )
+        absent_op = parser.parse_operation_from_text(
+            "test.optional_parenthesized_operand contract"
+        )
+
+        assert op.operands == [0]
+        assert absent_op.operands == []
 
 
 class TestParseAttrDictOp:

@@ -863,23 +863,33 @@ def _parse_function_type(
 # ============================================================================
 
 
+_KEYWORD_TOKEN_KINDS = {
+    ",": TokenKind.COMMA,
+    ":": TokenKind.COLON,
+    "->": TokenKind.ARROW,
+    "=": TokenKind.EQUALS,
+    "(": TokenKind.LPAREN,
+    ")": TokenKind.RPAREN,
+    "[": TokenKind.LBRACKET,
+    "]": TokenKind.RBRACKET,
+    "{": TokenKind.LBRACE,
+    "}": TokenKind.RBRACE,
+    "<": TokenKind.LANGLE,
+    ">": TokenKind.RANGLE,
+}
+
+
+def _at_keyword(tokenizer: Tokenizer, text: str) -> bool:
+    """Returns whether the tokenizer is positioned at a keyword."""
+    kind = _KEYWORD_TOKEN_KINDS.get(text)
+    if kind is not None:
+        return tokenizer.at(kind)
+    return tokenizer.at(TokenKind.BARE_IDENT, text)
+
+
 def _expect_keyword(tokenizer: Tokenizer, text: str) -> None:
     """Consume a keyword token, handling both punctuation and words."""
-    keyword_map = {
-        ",": TokenKind.COMMA,
-        ":": TokenKind.COLON,
-        "->": TokenKind.ARROW,
-        "=": TokenKind.EQUALS,
-        "(": TokenKind.LPAREN,
-        ")": TokenKind.RPAREN,
-        "[": TokenKind.LBRACKET,
-        "]": TokenKind.RBRACKET,
-        "{": TokenKind.LBRACE,
-        "}": TokenKind.RBRACE,
-        "<": TokenKind.LANGLE,
-        ">": TokenKind.RANGLE,
-    }
-    kind = keyword_map.get(text)
+    kind = _KEYWORD_TOKEN_KINDS.get(text)
     if kind is not None:
         tokenizer.expect(kind)
     else:
@@ -2471,23 +2481,13 @@ class Parser:
         if not inner_elements:
             return False
         tok = self._tokenizer
-        first = inner_elements[0]
+        first = next(
+            (element for element in inner_elements if not isinstance(element, Glue)),
+            None,
+        )
         match first:
-            case Keyword(text=","):
-                result: bool = tok.at(TokenKind.COMMA)
-                return result
-            case Keyword(text="->"):
-                result = tok.at(TokenKind.ARROW)
-                return result
-            case Keyword(text="="):
-                result = tok.at(TokenKind.EQUALS)
-                return result
-            case Keyword(text="{"):
-                result = tok.at(TokenKind.LBRACE)
-                return result
             case Keyword(text=text):
-                result = tok.at(TokenKind.BARE_IDENT, text)
-                return result
+                return _at_keyword(tok, text)
             case Clause(name=name):
                 return (
                     tok.at(TokenKind.BARE_IDENT, name)
