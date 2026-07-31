@@ -165,18 +165,14 @@ TEST(QwenProgramLayoutTest, PacksCompletePrefill512FullProgram) {
   ExpectOrdered(layout.terminal_layer.swiglu,
                 layout.terminal_layer.routed_projection_scratch);
   ExpectOrdered(layout.terminal_layer.routed_projection_scratch,
-                layout.final_normalized_hidden_state);
-  ExpectOrdered(layout.final_normalized_hidden_state,
                 layout.final_quantized_hidden_state);
   ExpectOrdered(layout.final_quantized_hidden_state, layout.vocabulary_logits);
 
-  EXPECT_EQ(layout.final_normalized_hidden_state.offset, 65700352u);
-  EXPECT_EQ(layout.final_normalized_hidden_state.length, 8192u);
-  EXPECT_EQ(layout.final_quantized_hidden_state.offset, 65708544u);
+  EXPECT_EQ(layout.final_quantized_hidden_state.offset, 65700352u);
   EXPECT_EQ(layout.final_quantized_hidden_state.length, 2304u);
-  EXPECT_EQ(layout.vocabulary_logits.offset, 65710848u);
+  EXPECT_EQ(layout.vocabulary_logits.offset, 65702656u);
   EXPECT_EQ(layout.vocabulary_logits.length, 607744u);
-  EXPECT_EQ(layout.transient_byte_length, 66318592u);
+  EXPECT_EQ(layout.transient_byte_length, 66310400u);
 }
 
 TEST(QwenProgramLayoutTest, ReservesReusableCompletionForDecode513) {
@@ -207,8 +203,8 @@ TEST(QwenProgramLayoutTest, ReservesReusableCompletionForDecode513) {
   ExpectOrdered(layout.attention_partial_outputs,
                 layout.decode_completion.initialization);
   ExpectOrdered(layout.decode_completion.initialization,
-                layout.final_normalized_hidden_state);
-  EXPECT_EQ(layout.transient_byte_length, 1030144u);
+                layout.final_quantized_hidden_state);
+  EXPECT_EQ(layout.transient_byte_length, 1021952u);
 }
 
 TEST(QwenProgramLayoutTest, RejectsUnsupportedFullProgramTokenCount) {

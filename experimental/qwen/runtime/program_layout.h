@@ -100,8 +100,6 @@ typedef struct qwen_full_program_layout_t {
   qwen_program_span_t attention_partial_outputs;
   // Decode-only completion counters reused sequentially by every layer.
   qwen_decode_completion_layout_t decode_completion;
-  // Final RMSNorm output containing one F32 hidden-state row.
-  qwen_program_span_t final_normalized_hidden_state;
   // GGML Q8_1 x4 packing of the final normalized hidden-state row.
   qwen_program_span_t final_quantized_hidden_state;
   // Output projection result containing one F32 vocabulary row.

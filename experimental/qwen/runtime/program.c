@@ -94,7 +94,7 @@ typedef enum qwen_program_executable_ordinal_e {
   QWEN_PROGRAM_EXECUTABLE_TERMINAL_GATE_UP = 27,
   QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTED_DOWN = 28,
   QWEN_PROGRAM_EXECUTABLE_TERMINAL_WEIGHTED_REDUCE = 29,
-  QWEN_PROGRAM_EXECUTABLE_FINAL_QUANTIZE_Q8 = 30,
+  QWEN_PROGRAM_EXECUTABLE_FINAL_RMSNORM_QUANTIZE_Q8 = 30,
   QWEN_PROGRAM_EXECUTABLE_VOCABULARY_PROJECTION_Q6 = 31,
   QWEN_PROGRAM_EXECUTABLE_GREEDY_ARGMAX = 32,
   QWEN_PROGRAM_EXECUTABLE_FEED_FORWARD_PREPARE_Q8 = 33,
@@ -942,10 +942,6 @@ static iree_status_t qwen_program_prepare_full_model_executables(
       route_count,
       expert_count,
   };
-  const int64_t final_quantize_workload[] = {
-      terminal_token_count,
-      QWEN_MODEL_HIDDEN_SIZE,
-  };
   const int64_t vocabulary_projection_workload[] = {
       terminal_token_count,
       QWEN_MODEL_HIDDEN_SIZE,
@@ -959,7 +955,9 @@ static iree_status_t qwen_program_prepare_full_model_executables(
       /*config_binding_count=*/0, /*config_bindings=*/NULL,
       IREE_ARRAYSIZE(embedding_workload), embedding_workload,
       &program->executables[QWEN_PROGRAM_EXECUTABLE_TOKEN_EMBEDDING]);
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) &&
+      program->feed_forward_schedule ==
+          QWEN_PROGRAM_FEED_FORWARD_SCHEDULE_GROUPED_F16) {
     status = qwen_program_prepare_kernel(
         program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
         IREE_SV("qwen3_moe_rmsnorm_f32"),
@@ -1053,12 +1051,13 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   }
   if (iree_status_is_ok(status)) {
     status = qwen_program_prepare_kernel(
-        program->model,
-        IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4_BRINGUP_WORKAROUND),
-        IREE_SV("ggml_quantize_q8_1_x4_f32"),
-        /*config_binding_count=*/0, /*config_bindings=*/NULL,
-        IREE_ARRAYSIZE(final_quantize_workload), final_quantize_workload,
-        &program->executables[QWEN_PROGRAM_EXECUTABLE_FINAL_QUANTIZE_Q8]);
+        program->model, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
+        IREE_SV("qwen3_moe_attention_rmsnorm_quantize_q8_1_x4"),
+        IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
+        qwen_attention_prepare_config_bindings,
+        IREE_ARRAYSIZE(terminal_token_workload), terminal_token_workload,
+        &program
+             ->executables[QWEN_PROGRAM_EXECUTABLE_FINAL_RMSNORM_QUANTIZE_Q8]);
   }
   if (iree_status_is_ok(status)) {
     status = qwen_program_prepare_kernel(
@@ -1795,35 +1794,17 @@ static iree_status_t qwen_program_record_full_model_endpoint(
   const uint32_t terminal_token_count = 1;
   iree_status_t status = iree_ok_status();
 
-  const uint32_t final_norm_constants[] = {terminal_token_count};
-  const iree_hal_buffer_ref_t final_norm_bindings[] = {
+  const uint32_t final_prepare_constants[] = {terminal_token_count};
+  const iree_hal_buffer_ref_t final_prepare_bindings[] = {
       final_hidden_state,
       qwen_program_model_ref(parameters->output_norm),
-      qwen_program_transient_ref(transient->final_normalized_hidden_state),
-  };
-  if (iree_status_is_ok(status)) {
-    status = qwen_program_record_dispatch(
-        program, QWEN_PROGRAM_EXECUTABLE_TERMINAL_RMSNORM_F32,
-        IREE_ARRAYSIZE(final_norm_constants), final_norm_constants,
-        IREE_ARRAYSIZE(final_norm_bindings), final_norm_bindings);
-  }
-  if (iree_status_is_ok(status)) {
-    status = qwen_program_record_dispatch_barrier(program);
-  }
-
-  const uint32_t final_quantize_constants[] = {
-      terminal_token_count,
-      QWEN_MODEL_HIDDEN_SIZE,
-  };
-  const iree_hal_buffer_ref_t final_quantize_bindings[] = {
-      qwen_program_transient_ref(transient->final_normalized_hidden_state),
       qwen_program_transient_ref(transient->final_quantized_hidden_state),
   };
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_dispatch(
-        program, QWEN_PROGRAM_EXECUTABLE_FINAL_QUANTIZE_Q8,
-        IREE_ARRAYSIZE(final_quantize_constants), final_quantize_constants,
-        IREE_ARRAYSIZE(final_quantize_bindings), final_quantize_bindings);
+        program, QWEN_PROGRAM_EXECUTABLE_FINAL_RMSNORM_QUANTIZE_Q8,
+        IREE_ARRAYSIZE(final_prepare_constants), final_prepare_constants,
+        IREE_ARRAYSIZE(final_prepare_bindings), final_prepare_bindings);
   }
   if (iree_status_is_ok(status)) {
     status = qwen_program_record_dispatch_barrier(program);

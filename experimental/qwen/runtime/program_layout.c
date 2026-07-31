@@ -296,11 +296,6 @@ iree_status_t qwen_full_program_layout_calculate(
   }
 
   IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
-      QWEN_MODEL_HIDDEN_SIZE, sizeof(float), &byte_length));
-  IREE_RETURN_IF_ERROR(qwen_program_layout_append(
-      byte_length, &cursor, &out_layout->final_normalized_hidden_state));
-
-  IREE_RETURN_IF_ERROR(qwen_program_layout_checked_product(
       QWEN_MODEL_HIDDEN_SIZE / QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT,
       QWEN_PROGRAM_Q8_1_X4_GROUP_BYTE_LENGTH, &byte_length));
   IREE_RETURN_IF_ERROR(qwen_program_layout_append(

@@ -104,15 +104,15 @@ decode-513 programs:
 | Gate/up and SwiGLU | Grouped Q4_K F16 WMMA | Raw Q4_K by Q8_1 x4 direct contraction producing F32 SwiGLU rows | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` |
 | SwiGLU packing | None | Eight F32 route rows packed to Q8_1 x4 | `ggml/quantize_q8_1_x4.loom` |
 | Routed down and reduction | Grouped Q4_K or Q6_K F16 WMMA followed by weighted reduction | Storage-selected direct Q4_K or Q6_K contraction with route weighting, reduction, and residual update fused | `qwen3_moe/routed_down_q4k.loom` and `qwen3_moe/routed_down_q6k.loom` |
-| Vocabulary endpoint | Q8_1 x4 pack, raw Q6_K contraction, finite-logit argmax | Same | `ggml/quantize_q8_1_x4.loom`, `ggml/linear_q6k_q8_1_x4.loom`, and an owned argmax bring-up kernel |
+| Vocabulary endpoint | Fused RMSNorm/Q8_1 x4 pack, raw Q6_K contraction, finite-logit argmax | Same | `qwen3_moe/attention_prepare_quantized.loom`, `ggml/linear_q6k_q8_1_x4.loom`, and an owned argmax bring-up kernel |
 
-Full-model prefill records 726 dispatches. Layers 0 through 46 execute every
+Full-model prefill records 725 dispatches. Layers 0 through 46 execute every
 stage over all 512 rows. Layer 47 executes attention over all rows so its cache
 is complete, then executes feed-forward and the vocabulary endpoint only for
-the final row needed to select the next token. Decode records 534 dispatches:
+the final row needed to select the next token. Decode records 533 dispatches:
 two request-setup dispatches, six attention and five direct feed-forward
-dispatches per layer, and four endpoint dispatches. Its reusable dispatch-only
-command buffer contains 533 explicit barriers and one terminal return;
+dispatches per layer, and three endpoint dispatches. Its reusable dispatch-only
+command buffer contains 532 explicit barriers and one terminal return;
 selected-token publication does not add a transfer operation.
 
 Decode owns partial-maximum, partial-sum, and partial-output regions sized to
