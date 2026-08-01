@@ -74,3 +74,17 @@ loom_generated_cc_library(
         "//loom/src/loom/util:stable_id",
     ],
 )
+
+loom_cc_test(
+    name = "callable_contract_test",
+    srcs = ["callable_contract_test.cc"],
+    deps = [
+        ":low",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/rewrite:callable",
+        "//loom/src/loom/rewrite:rewriter",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

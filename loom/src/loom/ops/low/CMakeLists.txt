@@ -47,4 +47,19 @@ loom_generated_cc_library(
     loom::util::stable_id
 )
 
+loom_cc_test(
+  NAME
+    callable_contract_test
+  SRCS
+    "callable_contract_test.cc"
+  DEPS
+    ::low
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::rewrite::callable
+    loom::rewrite::rewriter
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

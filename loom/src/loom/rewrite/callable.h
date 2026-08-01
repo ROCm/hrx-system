@@ -99,6 +99,8 @@ iree_status_t loom_callable_import_definition(
 // and type-use lists. The replacement func.call returns every selected value
 // needed outside the range, including values needed only by dynamic result
 // types, so erasing the original range leaves no dangling SSA or type refs.
+// Ranges inside representation-bound functions are rejected because the
+// generic func.def created by this helper cannot preserve their contract.
 iree_status_t loom_callable_outline_range(
     loom_rewriter_t* rewriter, loom_op_t* first_op, loom_op_t* after_last_op,
     loom_symbol_ref_t outlined_ref, loom_callable_outline_result_t* out_result);
