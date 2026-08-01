@@ -795,8 +795,6 @@ def _view_load_rule(
     if dynamic_term_count != 0:
         if materialize_byte_offset:
             operands["index"] = ValueRef.source_memory_dynamic_byte_offset()
-        elif source_dynamic_count:
-            operands["index"] = ValueRef.operand("indices")
         else:
             operands["index"] = ValueRef.source_memory_dynamic_term()
     return DescriptorRule(
@@ -875,8 +873,6 @@ def _view_store_rule(
     if dynamic_term_count != 0:
         if materialize_byte_offset:
             operands["index"] = ValueRef.source_memory_dynamic_byte_offset()
-        elif source_dynamic_count:
-            operands["index"] = ValueRef.operand("indices")
         else:
             operands["index"] = ValueRef.source_memory_dynamic_term()
     return DescriptorRule(
@@ -1116,8 +1112,6 @@ def _view_atomic_rule(
     if dynamic_term_count != 0:
         if materialize_byte_offset:
             operands["index"] = ValueRef.source_memory_dynamic_byte_offset()
-        elif source_dynamic_count:
-            operands["index"] = ValueRef.operand("indices")
         else:
             operands["index"] = ValueRef.source_memory_dynamic_term()
     results = {}
@@ -1276,8 +1270,6 @@ def _view_atomic_cmpxchg_rule(
     if dynamic_term_count != 0:
         if materialize_byte_offset:
             operands["index"] = ValueRef.source_memory_dynamic_byte_offset()
-        elif source_dynamic_count:
-            operands["index"] = ValueRef.operand("indices")
         else:
             operands["index"] = ValueRef.source_memory_dynamic_term()
     return DescriptorRule(

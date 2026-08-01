@@ -781,6 +781,30 @@ def test_source_memory_row_emits_dynamic_byte_stride_any_flag() -> None:
     assert ".dynamic_byte_stride = " not in "\n".join(fields)
 
 
+def test_source_memory_row_emits_preserve_source_index_flag() -> None:
+    row = LowerSourceMemory(
+        constraint=SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset_minimum=0,
+            static_byte_offset_maximum=128,
+            dynamic_term_count=None,
+            dynamic_term_count_minimum=1,
+            dynamic_view_base_term_count=0,
+            preserve_source_index=True,
+        ),
+        diagnostic_index=3,
+        dynamic_offset_diagnostic_index=4,
+    )
+
+    fields = source_memory_row({}, row)
+
+    assert ".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_PRESERVE_SOURCE_INDEX" in fields
+
+
 def test_source_memory_row_emits_any_positive_dynamic_term_count() -> None:
     row = LowerSourceMemory(
         constraint=SourceMemoryConstraint(

@@ -78,13 +78,10 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
   %mask = const.i64 3
   %swizzle_bits = and.i64 %shifted, %mask
   %swizzled = xor.i64 %tid, %swizzle_bits
-  %50 = const.i64 2
-  %51 = shl.i64 %tid, %50
-  %loaded = load.indexed.v4i32 %input_view, %51, 0, 16
-  %53 = shl.i64 %swizzled, %50
-  store.indexed.v4i32 %loaded, %scratch_view, %53, 0, 16
-  %roundtrip = load.indexed.v4i32 %scratch_view, %53, 0, 16
-  store.indexed.v4i32 %roundtrip, %output_view, %51, 0, 16
+  %loaded = load.indexed.v4i32 %input_view, %tid, 0, 16
+  store.indexed.v4i32 %loaded, %scratch_view, %swizzled, 0, 16
+  %roundtrip = load.indexed.v4i32 %scratch_view, %swizzled, 0, 16
+  store.indexed.v4i32 %roundtrip, %output_view, %tid, 0, 16
   return
 }
 

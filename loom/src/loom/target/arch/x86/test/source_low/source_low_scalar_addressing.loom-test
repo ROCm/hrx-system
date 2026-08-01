@@ -328,3 +328,183 @@ low.func.def target<x86.scalar.core>(@target) abi(object_function) @nonnegative_
   %index = movzx.gpr64.gpr32 %bounded_i32
   return %index
 }
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @i32_source_index_static_suffix(%input: buffer, %output: buffer, %i: index) {
+  %zero = index.constant 0 : offset
+  %four = index.constant 4 : index
+  %element_index = index.add %i, %four : index
+  %bounded_index = index.assume %element_index [range(%element_index, 0, 31)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %loaded = view.load %input_view[%bounded_index] : view<64xi32, #dense> -> i32
+  view.store %loaded, %output_view[%bounded_index] : i32, view<64xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @i32_source_index_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>) asm {
+  %loaded = mov.load.indexed.gpr32 %input_view, %i {disp32 = 16, scale = 4}
+  mov.store.indexed.gpr32 %loaded, %output_view, %i {disp32 = 16, scale = 4}
+  return
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @f32x4_source_index_static_suffix(%input: buffer, %output: buffer, %i: index) {
+  %zero = index.constant 0 : offset
+  %four = index.constant 4 : index
+  %element_index = index.add %i, %four : index
+  %bounded_index = index.assume %element_index [range(%element_index, 0, 31)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %loaded = vector.load %input_view[%bounded_index] : view<64xf32, #dense> -> vector<4xf32>
+  vector.store %loaded, %output_view[%bounded_index] : vector<4xf32>, view<64xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @f32x4_source_index_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>) asm {
+  %loaded = vmovdqu32.load.indexed.xmm %input_view, %i {disp32 = 16, scale = 4}
+  vmovdqu32.store.indexed.xmm %loaded, %output_view, %i {disp32 = 16, scale = 4}
+  return
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @f32x16_source_index_static_suffix(%input: buffer, %output: buffer, %i: index) {
+  %zero = index.constant 0 : offset
+  %four = index.constant 4 : index
+  %element_index = index.add %i, %four : index
+  %bounded_index = index.assume %element_index [range(%element_index, 0, 31)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %loaded = vector.load %input_view[%bounded_index] : view<64xf32, #dense> -> vector<16xf32>
+  vector.store %loaded, %output_view[%bounded_index] : vector<16xf32>, view<64xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x16_source_index_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>) asm {
+  %loaded = vmovdqu32.load.indexed %input_view, %i {disp32 = 16, scale = 4}
+  vmovdqu32.store.indexed %loaded, %output_view, %i {disp32 = 16, scale = 4}
+  return
+}
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @i32_multi_term_static_suffix(%input: buffer, %output: buffer, %i: index, %j: index) {
+  %zero = index.constant 0 : offset
+  %four = index.constant 4 : index
+  %linear = index.add %i, %j : index
+  %element_index = index.add %linear, %four : index
+  %bounded_index = index.assume %element_index [range(%element_index, 0, 31)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %loaded = view.load %input_view[%bounded_index] : view<64xi32, #dense> -> i32
+  view.store %loaded, %output_view[%bounded_index] : i32, view<64xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @i32_multi_term_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>) asm {
+  %18 = mov.imm64 4
+  %19 = copy %i : reg<x86.gpr64> -> reg<x86.gpr64>
+  %20 = imul.gpr64 %19, %18
+  %22 = copy %j : reg<x86.gpr64> -> reg<x86.gpr64>
+  %23 = imul.gpr64 %22, %18
+  %24 = copy %20 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %25 = add.gpr64 %24, %23
+  %loaded = mov.load.indexed.gpr32 %input_view, %25 {disp32 = 16, scale = 1}
+  %28 = copy %i : reg<x86.gpr64> -> reg<x86.gpr64>
+  %29 = imul.gpr64 %28, %18
+  %31 = copy %j : reg<x86.gpr64> -> reg<x86.gpr64>
+  %32 = imul.gpr64 %31, %18
+  %33 = copy %29 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %34 = add.gpr64 %33, %32
+  mov.store.indexed.gpr32 %loaded, %output_view, %34 {disp32 = 16, scale = 1}
+  return
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @f32x4_multi_term_static_suffix(%input: buffer, %output: buffer, %i: index, %j: index) {
+  %zero = index.constant 0 : offset
+  %four = index.constant 4 : index
+  %linear = index.add %i, %j : index
+  %element_index = index.add %linear, %four : index
+  %bounded_index = index.assume %element_index [range(%element_index, 0, 31)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %loaded = vector.load %input_view[%bounded_index] : view<64xf32, #dense> -> vector<4xf32>
+  vector.store %loaded, %output_view[%bounded_index] : vector<4xf32>, view<64xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @f32x4_multi_term_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>) asm {
+  %18 = mov.imm64 4
+  %19 = copy %i : reg<x86.gpr64> -> reg<x86.gpr64>
+  %20 = imul.gpr64 %19, %18
+  %22 = copy %j : reg<x86.gpr64> -> reg<x86.gpr64>
+  %23 = imul.gpr64 %22, %18
+  %24 = copy %20 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %25 = add.gpr64 %24, %23
+  %loaded = vmovdqu32.load.indexed.xmm %input_view, %25 {disp32 = 16, scale = 1}
+  %28 = copy %i : reg<x86.gpr64> -> reg<x86.gpr64>
+  %29 = imul.gpr64 %28, %18
+  %31 = copy %j : reg<x86.gpr64> -> reg<x86.gpr64>
+  %32 = imul.gpr64 %31, %18
+  %33 = copy %29 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %34 = add.gpr64 %33, %32
+  vmovdqu32.store.indexed.xmm %loaded, %output_view, %34 {disp32 = 16, scale = 1}
+  return
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @f32x16_multi_term_static_suffix(%input: buffer, %output: buffer, %i: index, %j: index) {
+  %zero = index.constant 0 : offset
+  %four = index.constant 4 : index
+  %linear = index.add %i, %j : index
+  %element_index = index.add %linear, %four : index
+  %bounded_index = index.assume %element_index [range(%element_index, 0, 31)] : index
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %loaded = vector.load %input_view[%bounded_index] : view<64xf32, #dense> -> vector<16xf32>
+  vector.store %loaded, %output_view[%bounded_index] : vector<16xf32>, view<64xf32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x16_multi_term_static_suffix(%input_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>, %i: reg<x86.gpr64>, %j: reg<x86.gpr64>) asm {
+  %18 = mov.imm64 4
+  %19 = copy %i : reg<x86.gpr64> -> reg<x86.gpr64>
+  %20 = imul.gpr64 %19, %18
+  %22 = copy %j : reg<x86.gpr64> -> reg<x86.gpr64>
+  %23 = imul.gpr64 %22, %18
+  %24 = copy %20 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %25 = add.gpr64 %24, %23
+  %loaded = vmovdqu32.load.indexed %input_view, %25 {disp32 = 16, scale = 1}
+  %28 = copy %i : reg<x86.gpr64> -> reg<x86.gpr64>
+  %29 = imul.gpr64 %28, %18
+  %31 = copy %j : reg<x86.gpr64> -> reg<x86.gpr64>
+  %32 = imul.gpr64 %31, %18
+  %33 = copy %29 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %34 = add.gpr64 %33, %32
+  vmovdqu32.store.indexed %loaded, %output_view, %34 {disp32 = 16, scale = 1}
+  return
+}

@@ -188,12 +188,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(4, 1, 1) work
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %x = kernel.workitem_id.x
-  %row_stride = const.i64 4
-  %column = const.i64 1
-  %18 = mul.i64 %x, %row_stride
-  %linear = add.i64 %18, %column
-  %loaded = load.indexed.i32 %input_view, %linear, 4, 16
-  store.indexed.i32 %loaded, %output_view, %linear, 4, 16
+  %loaded = load.indexed.i32 %input_view, %x, 4, 16
+  store.indexed.i32 %loaded, %output_view, %x, 4, 16
   return
 }
 
@@ -224,10 +220,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(4, 1, 1) work
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %x = kernel.workitem_id.x
-  %shift = const.i64 2
-  %linear = shl.i64 %x, %shift
-  %loaded = load.indexed.i32 %input_view, %linear, 0, 16
-  store.indexed.i32 %loaded, %output_view, %linear, 0, 16
+  %loaded = load.indexed.i32 %input_view, %x, 0, 16
+  store.indexed.i32 %loaded, %output_view, %x, 0, 16
   return
 }
 
@@ -260,10 +254,8 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(31, 1, 1) wor
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %lane = kernel.workitem_id.x
-  %shift = const.i64 2
-  %linear = shl.i64 %lane, %shift
-  %loaded = load.indexed.v4i32 %input_view, %linear, 0, 16
-  store.indexed.v4i32 %loaded, %output_view, %linear, 0, 16
+  %loaded = load.indexed.v4i32 %input_view, %lane, 0, 16
+  store.indexed.v4i32 %loaded, %output_view, %lane, 0, 16
   return
 }
 

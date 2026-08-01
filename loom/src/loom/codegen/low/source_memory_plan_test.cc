@@ -988,6 +988,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadKeepsAssumedWorkitemSource) {
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
   ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
   EXPECT_EQ(plan.static_byte_offset, 8);
+  EXPECT_FALSE(plan.source_index_static_offset_extracted);
   ASSERT_EQ(plan.dynamic_term_count, 1u);
   EXPECT_EQ(plan.dynamic_terms[0].index, assumed_index);
   EXPECT_EQ(plan.dynamic_terms[0].source,
@@ -1080,6 +1081,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsScaledWorkitemIndex) {
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
   ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
   EXPECT_EQ(plan.static_byte_offset, 8);
+  EXPECT_FALSE(plan.source_index_static_offset_extracted);
   ASSERT_EQ(plan.dynamic_term_count, 1u);
   EXPECT_EQ(plan.dynamic_terms[0].index,
             loom_kernel_workitem_id_result(workitem_op));
@@ -1137,6 +1139,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsScaledOffsetWorkitemIndex) {
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
   ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
   EXPECT_EQ(plan.static_byte_offset, 12);
+  EXPECT_TRUE(plan.source_index_static_offset_extracted);
   ASSERT_EQ(plan.dynamic_term_count, 1u);
   EXPECT_EQ(plan.dynamic_terms[0].index,
             loom_kernel_workitem_id_result(workitem_op));
@@ -1189,6 +1192,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsMaddWorkitemIndex) {
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
   ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
   EXPECT_EQ(plan.static_byte_offset, 12);
+  EXPECT_TRUE(plan.source_index_static_offset_extracted);
   ASSERT_EQ(plan.dynamic_term_count, 1u);
   EXPECT_EQ(plan.dynamic_terms[0].index,
             loom_kernel_workitem_id_result(workitem_op));
@@ -1384,6 +1388,7 @@ TEST_F(SourceMemoryPlanTest, LinearizedScalarViewLoadRecoversCoordinateTerms) {
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
   ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
   EXPECT_EQ(plan.static_byte_offset, 0);
+  EXPECT_FALSE(plan.source_index_static_offset_extracted);
   ASSERT_EQ(plan.dynamic_term_count, 3u);
   EXPECT_EQ(plan.dynamic_terms[0].index, block);
   EXPECT_EQ(plan.dynamic_terms[0].source,
@@ -1466,6 +1471,7 @@ TEST_F(SourceMemoryPlanTest,
   loom_low_source_memory_access_diagnostic_t diagnostic = {0};
   ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
   EXPECT_EQ(plan.static_byte_offset, 1024);
+  EXPECT_TRUE(plan.source_index_static_offset_extracted);
   ASSERT_EQ(plan.dynamic_term_count, 2u);
   EXPECT_EQ(plan.dynamic_terms[0].index, stage);
   EXPECT_EQ(plan.dynamic_terms[0].source,

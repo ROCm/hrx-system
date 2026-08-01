@@ -1462,10 +1462,14 @@ static bool loom_low_source_memory_access_plan_from_components(
     // Peel a simple scale/static suffix before canonicalizing the remaining
     // affine expression. This retains any reusable dynamic prefix while
     // keeping the final canonical terms independent of source spelling.
-    (void)loom_low_source_memory_access_scaled_dynamic_index(
-        module, fact_table, dynamic_index, byte_stride, static_byte_offset,
-        &dynamic_index, &dynamic_index_multiplier, &dynamic_index_offset,
-        &byte_stride, &static_byte_offset, &expression_facts);
+    const int64_t unscaled_static_byte_offset = static_byte_offset;
+    if (loom_low_source_memory_access_scaled_dynamic_index(
+            module, fact_table, dynamic_index, byte_stride, static_byte_offset,
+            &dynamic_index, &dynamic_index_multiplier, &dynamic_index_offset,
+            &byte_stride, &static_byte_offset, &expression_facts) &&
+        static_byte_offset != unscaled_static_byte_offset) {
+      out_plan->source_index_static_offset_extracted = true;
+    }
 
     loom_low_source_memory_affine_index_term_t
         affine_terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY] = {0};
@@ -1491,6 +1495,9 @@ static bool loom_low_source_memory_access_plan_from_components(
     }
     if (affine_expanded) {
       const uint8_t first_affine_term = out_plan->dynamic_term_count;
+      if (affine_static_byte_offset != static_byte_offset) {
+        out_plan->source_index_static_offset_extracted = true;
+      }
       static_byte_offset = affine_static_byte_offset;
       for (uint8_t term_ordinal = 0; term_ordinal < affine_term_count;
            ++term_ordinal) {

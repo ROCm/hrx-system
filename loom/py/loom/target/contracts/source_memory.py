@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, unique
 
-from loom.dsl import Op
+from loom.dsl import MemoryAccessInterface, Op
 from loom.target.contracts.guards import GuardDiagnostic
 from loom.target.low_descriptors import Descriptor
 
@@ -97,6 +97,7 @@ class SourceMemoryConstraint:
     )
     dynamic_byte_stride: int | None = 0
     allow_dynamic_stride_values: bool = False
+    preserve_source_index: bool = False
     dynamic_offset_unsigned_bit_count: int = 0
     dynamic_offset_diagnostic: GuardDiagnostic | None = None
     cache_policy_build_flags: int = 0
@@ -123,6 +124,7 @@ class SourceMemoryConstraint:
         ),
         dynamic_byte_stride: int | None = 0,
         allow_dynamic_stride_values: bool = False,
+        preserve_source_index: bool = False,
         dynamic_offset_unsigned_bit_count: int = 0,
         dynamic_offset_diagnostic: GuardDiagnostic | None = None,
         cache_policy_build_flags: int = 0,
@@ -160,6 +162,7 @@ class SourceMemoryConstraint:
             "allow_dynamic_stride_values",
             allow_dynamic_stride_values,
         )
+        object.__setattr__(self, "preserve_source_index", preserve_source_index)
         object.__setattr__(
             self,
             "dynamic_offset_unsigned_bit_count",
@@ -251,6 +254,17 @@ class SourceMemoryConstraint:
                 "dynamic source memory stride values require a fixed nonzero "
                 "dynamic term count"
             )
+        if self.preserve_source_index:
+            if dynamic_term_count == 0 or (
+                dynamic_term_count is None and self.dynamic_term_count_minimum == 0
+            ):
+                raise ValueError(
+                    "source-index preservation requires dynamic source memory"
+                )
+            if self.dynamic_view_base_term_count != 0:
+                raise ValueError(
+                    "source-index preservation requires zero dynamic view-base terms"
+                )
         if self.dynamic_byte_stride is not None and not (
             _I64_MIN <= self.dynamic_byte_stride <= _I64_MAX
         ):
@@ -263,7 +277,21 @@ class SourceMemoryConstraint:
             raise ValueError("source memory cache policy flags must fit in u32")
 
     def validate(self, source_op: Op) -> None:
-        del source_op
+        if not self.preserve_source_index:
+            return
+        memory_access = next(
+            (
+                interface
+                for interface in source_op.interfaces
+                if isinstance(interface, MemoryAccessInterface)
+            ),
+            None,
+        )
+        if memory_access is None or memory_access.indices is None:
+            raise ValueError(
+                f"{source_op.name}: source-index preservation requires a "
+                "memory-access index operand"
+            )
 
 
 def _resolve_static_byte_offset_range(

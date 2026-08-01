@@ -441,6 +441,7 @@ def _source_memory_constraint(
             else SourceMemoryDynamicIndexSource.NONE
         ),
         dynamic_byte_stride=4 if dynamic else 0,
+        preserve_source_index=dynamic,
         dynamic_offset_unsigned_bit_count=32 if dynamic else 0,
         dynamic_offset_diagnostic=(_WASM32_ADDRESS_DIAGNOSTIC if dynamic else None),
         diagnostic=_SOURCE_MEMORY_DIAGNOSTIC,

@@ -93,6 +93,71 @@ def _expect_value_error(callable_obj: Callable[[], object], message: str) -> Non
     assert message in str(error)
 
 
+def _source_index_rule(
+    *,
+    preserve: bool,
+    use_original_index: bool,
+    additional_preserve: bool | None = None,
+) -> ContractFragment:
+    result_type = Vector("i32", lanes=4)
+    index = (
+        ValueRef.operand("indices")
+        if use_original_index
+        else ValueRef.source_memory_dynamic_term()
+    )
+
+    def source_memory(preserve_source_index: bool) -> SourceMemoryConstraint:
+        return SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=4,
+            vector_lane_byte_stride=4,
+            static_byte_offset_minimum=0,
+            static_byte_offset_maximum=128,
+            dynamic_term_count=1,
+            dynamic_view_base_term_count=0,
+            dynamic_index_source=SourceMemoryDynamicIndexSource.VALUE,
+            dynamic_byte_stride=4,
+            preserve_source_index=preserve_source_index,
+        )
+
+    emits = []
+    if additional_preserve is not None:
+        emits.append(
+            EmitDescriptorOp(
+                descriptor=TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+                operands={"address": ValueRef.operand("view"), "index": index},
+                results={"dst": ValueRef.temporary("additional_result")},
+                result_types={"dst": result_type},
+                source_memory=source_memory(additional_preserve),
+            )
+        )
+    emits.append(
+        EmitDescriptorOp(
+            descriptor=TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+            operands={"address": ValueRef.operand("view"), "index": index},
+            results={"dst": ValueRef.result("result")},
+            source_memory=source_memory(preserve),
+        )
+    )
+    return ContractFragment(
+        name="test.source-index",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=vector.vector_load,
+                descriptor=TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+                guards=(
+                    Guard.operand_segment_count("indices", 1),
+                    Guard.value_type("result", result_type),
+                ),
+                emit=tuple(emits),
+            )
+        ],
+    )
+
+
 def _binary_rule(
     *,
     source_op: Op,
@@ -545,6 +610,91 @@ def test_compile_lower_rule_set_compiles_source_memory_dynamic_term_operand() ->
     source_memory = compiled.source_memories[emit.source_memory_ordinal - 1]
     assert source_memory.constraint is table.cases[0].emit[0].source_memory
     assert source_memory.constraint.dynamic_view_base_term_count == 0
+
+
+def test_compile_lower_rule_set_compiles_preserved_source_index() -> None:
+    table = _source_index_rule(preserve=True, use_original_index=True)
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    source_memory = compiled.source_memories[0]
+    assert source_memory.constraint.preserve_source_index
+
+
+def test_compile_lower_rule_set_requires_source_index_preservation() -> None:
+    _expect_value_error(
+        lambda: compile_lower_rule_set(
+            _source_index_rule(
+                preserve=False,
+                use_original_index=True,
+            ),
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        ),
+        "vector.load: source-memory rules that consume the original "
+        "'indices' operand must preserve the source index",
+    )
+
+
+def test_compile_lower_rule_set_rejects_unused_source_index_preservation() -> None:
+    _expect_value_error(
+        lambda: compile_lower_rule_set(
+            _source_index_rule(
+                preserve=True,
+                use_original_index=False,
+            ),
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        ),
+        "vector.load: source-index preservation requires the original "
+        "'indices' operand",
+    )
+
+
+def test_compile_lower_rule_set_rejects_any_unused_source_index_preservation() -> None:
+    _expect_value_error(
+        lambda: compile_lower_rule_set(
+            _source_index_rule(
+                preserve=False,
+                use_original_index=False,
+                additional_preserve=True,
+            ),
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        ),
+        "vector.load: source-index preservation requires the original "
+        "'indices' operand",
+    )
+
+
+def test_source_memory_constraint_rejects_static_source_index_preservation() -> None:
+    _expect_value_error(
+        lambda: SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+            preserve_source_index=True,
+        ),
+        "source-index preservation requires dynamic source memory",
+    )
+
+
+def test_source_memory_constraint_rejects_dynamic_view_base_preservation() -> None:
+    _expect_value_error(
+        lambda: SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+            dynamic_term_count=1,
+            dynamic_index_source=SourceMemoryDynamicIndexSource.VALUE,
+            dynamic_byte_stride=4,
+            preserve_source_index=True,
+        ),
+        "source-index preservation requires zero dynamic view-base terms",
+    )
 
 
 def test_compile_lower_rule_set_compiles_any_positive_dynamic_byte_offset() -> None:
