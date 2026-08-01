@@ -32,6 +32,21 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_i
 
 // ====
 
+// XFAIL: LLVMIR scalar bitfield extraction is unsupported
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scalar_i32_bitfield_sgpr(%word: i32) -> (i32, i32, i32, i32) {
+  %unsigned_byte = scalar.bitfield.extractu %word {offset = 8, width = 8} : i32 -> i32
+  %signed_byte = scalar.bitfield.extracts %word {offset = 16, width = 8} : i32 -> i32
+  %unsigned_nibble = scalar.bitfield.extractu %word {offset = 4, width = 4} : i32 -> i32
+  %signed_nibble = scalar.bitfield.extracts %word {offset = 4, width = 4} : i32 -> i32
+  func.return %unsigned_byte, %signed_byte, %unsigned_nibble, %signed_nibble : i32, i32, i32, i32
+}
+
+// ====
+
 llvmir.target<object> @target {
   triple = "loom-direct64-unknown-none",
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
@@ -45,6 +60,19 @@ func.def target(@target) @scalar_i32_compare_scc(%lhs: i32, %rhs: i32) -> (i1) {
 low.func.def target<llvmir.generic.core>(@target) abi(object_function) @scalar_i32_compare_scc(%lhs: reg<llvmir.i32>, %rhs: reg<llvmir.i32>) -> (reg<llvmir.i1>) asm {
   %cmp = cmp.slt.i32 %lhs, %rhs
   return %cmp
+}
+
+// ====
+
+// XFAIL: LLVMIR i1 scalar constants are unsupported
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @scalar_i1_constants_scc() -> (i1, i1) {
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  func.return %true, %false : i1, i1
 }
 
 // ====
