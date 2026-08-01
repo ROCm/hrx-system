@@ -132,6 +132,7 @@ loom_cc_test(
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
+    loom::ops::op_defs
     loom::target::low_descriptor_registry_core_test
     loom::test::corpus::text::golden_text_corpus
     loom::testing::context

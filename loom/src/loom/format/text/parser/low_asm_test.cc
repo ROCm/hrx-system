@@ -189,6 +189,75 @@ static void ExpectDescriptorOrdinal(
   EXPECT_EQ(actual_descriptor_ordinal, expected_descriptor_ordinal);
 }
 
+static void ExpectFunctionPacketIdentity(
+    const loom_module_t* module, loom_op_t* function_op,
+    const loom_low_descriptor_set_t* descriptor_set,
+    iree_string_view_t const_key, iree_string_view_t op_key) {
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
+  const loom_func_like_t function = loom_func_like_cast(module, function_op);
+  ASSERT_TRUE(loom_func_like_isa(function));
+  const loom_string_id_t contract_id = loom_func_like_repr_contract(function);
+  ASSERT_LT(contract_id, module->strings.count);
+  EXPECT_TRUE(iree_string_view_equal(
+      module->strings.entries[contract_id],
+      loom_low_descriptor_set_string(descriptor_set,
+                                     descriptor_set->key_string_offset)));
+
+  loom_region_t* body_region = loom_low_func_def_body(function_op);
+  ASSERT_NE(body_region, nullptr);
+  loom_block_t* body = loom_region_entry_block(body_region);
+  ASSERT_NE(body, nullptr);
+  ASSERT_EQ(body->op_count, 3u);
+  const loom_op_t* const_op = loom_block_op(body, 0);
+  const loom_op_t* packet_op = loom_block_op(body, 1);
+  ASSERT_TRUE(loom_low_const_isa(const_op));
+  ASSERT_TRUE(loom_low_op_isa(packet_op));
+
+  ExpectDescriptorOrdinal(descriptor_set, loom_low_const_descriptor(const_op),
+                          const_key);
+  ExpectDescriptorOrdinal(descriptor_set, loom_low_op_descriptor(packet_op),
+                          op_key);
+  EXPECT_EQ(const_op->traits, LOOM_TRAIT_PURE);
+  EXPECT_EQ(packet_op->traits, LOOM_TRAIT_PURE);
+
+  const loom_type_t result_type =
+      loom_module_value_type(module, loom_low_const_result(const_op));
+  ASSERT_TRUE(loom_type_is_register(result_type));
+  EXPECT_EQ(loom_low_register_type_descriptor_set_stable_id(result_type),
+            descriptor_set->stable_id);
+}
+
+TEST_F(LowAsmParserTest, ResolvesPacketIdentityPerFunctionContract) {
+  loom_module_t* module = ParseOk(
+      "low.func.def target<test.low.core> @core() -> "
+      "(reg<test.i32>) asm {\n"
+      "  %value = test.const.i32 7\n"
+      "  %sum = test.add.i32 %value, %value\n"
+      "  return %sum\n"
+      "}\n"
+      "\n"
+      "low.func.def target<test.low.alt> @alt() -> "
+      "(reg<test.i32>) asm {\n"
+      "  %value = test.alt.const.i32 11\n"
+      "  %negated = test.alt.neg.i32 %value\n"
+      "  return %negated\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_block_t* module_block = loom_module_block(module);
+  ASSERT_EQ(module_block->op_count, 2u);
+  ExpectFunctionPacketIdentity(module, loom_block_op(module_block, 0),
+                               loom_test_low_core_descriptor_set(),
+                               IREE_SV("test.const.i32"),
+                               IREE_SV("test.add.i32"));
+  ExpectFunctionPacketIdentity(module, loom_block_op(module_block, 1),
+                               loom_test_low_alt_descriptor_set(),
+                               IREE_SV("test.alt.const.i32"),
+                               IREE_SV("test.alt.neg.i32"));
+
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmParserTest, BuildsCanonicalLowOps) {
   loom_module_t* module = ParseOk(
       "low.func.def target<test.low.core> @packet() -> "
