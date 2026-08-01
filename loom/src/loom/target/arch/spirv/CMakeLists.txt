@@ -435,12 +435,21 @@ loom_check_test_suite(
   SRCS
     "test/source_low/barrier.loom-test"
     "test/source_low/baseline.loom-test"
+    "test/source_low/corpus/numeric_minmax.loom-test"
+    "test/source_low/corpus/numeric_scalar_f32.loom-test"
+    "test/source_low/corpus/numeric_scalar_i32.loom-test"
+    "test/source_low/corpus/numeric_scalar_i64.loom-test"
     "test/source_low/low_verify_diagnostics.loom-test"
     "test/source_low/source_low.loom-test"
     "test/source_low/source_low_diagnostics.loom-test"
     "test/source_low/structured_control.loom-test"
     "test/source_low/target_legalize.loom-test"
     "test/source_low/workgroup_storage.loom-test"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_minmax.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_f32.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i64.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"
 )
