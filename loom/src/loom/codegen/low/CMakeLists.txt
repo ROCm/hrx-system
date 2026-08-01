@@ -41,6 +41,33 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    repr
+  HDRS
+    "repr.h"
+  SRCS
+    "repr.c"
+  DEPS
+    ::descriptor_traits
+    ::descriptors
+    iree::base
+    loom::format::low_repr
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    repr_test
+  SRCS
+    "repr_test.cc"
+  DEPS
+    ::repr
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::test::descriptors
+)
+
+loom_cc_library(
+  NAME
     builder
   HDRS
     "builder.h"

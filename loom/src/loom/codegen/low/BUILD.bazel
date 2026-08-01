@@ -32,7 +32,7 @@ _LOW_DESCRIPTOR_VISIBILITY = [
     "//loom/src/loom/tools/loom-check:__pkg__",
 ]
 
-_LOW_TEXT_ASM_VISIBILITY = [
+_LOW_FORMAT_CODEC_VISIBILITY = [
     "//loom/binding/c:__subpackages__",
     "//loom/src:__subpackages__",
 ]
@@ -65,6 +65,30 @@ loom_cc_library(
         ":descriptors",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "repr",
+    srcs = ["repr.c"],
+    hdrs = ["repr.h"],
+    visibility = _LOW_FORMAT_CODEC_VISIBILITY,
+    deps = [
+        ":descriptor_traits",
+        ":descriptors",
+        "//loom/src/loom/format:low_repr",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "repr_test",
+    srcs = ["repr_test.cc"],
+    deps = [
+        ":repr",
+        "//loom/src/loom/target/test:descriptors",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -103,7 +127,7 @@ loom_cc_library(
         "text_asm.h",
         "text_asm_internal.h",
     ],
-    visibility = _LOW_TEXT_ASM_VISIBILITY,
+    visibility = _LOW_FORMAT_CODEC_VISIBILITY,
     deps = [
         ":builder",
         ":descriptors",
