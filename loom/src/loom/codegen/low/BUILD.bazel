@@ -131,6 +131,7 @@ loom_cc_library(
     deps = [
         ":builder",
         ":descriptors",
+        ":repr",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/format/text:low_asm",
         "//loom/src/loom/format/text:printer",

@@ -17,6 +17,7 @@
 #include "visibility.h"
 
 typedef struct loom_text_low_asm_environment_t loom_text_low_asm_environment_t;
+typedef struct loom_low_repr_environment_t loom_low_repr_environment_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -132,6 +133,14 @@ LOOMC_API_PRIVATE void
 loomc_target_pass_environment_initialize_text_asm_environment(
     const loomc_target_pass_environment_t* environment,
     loom_text_low_asm_environment_t* out_environment);
+
+// Initializes the stable Low representation codec over prepared target
+// descriptor tables. A target-free context produces an empty codec suitable
+// only for formats that do not materialize scoped Low representation values.
+LOOMC_API_PRIVATE void
+loomc_target_pass_environment_initialize_low_repr_environment(
+    const loomc_target_pass_environment_t* environment,
+    loom_low_repr_environment_t* out_environment);
 
 #ifdef __cplusplus
 }  // extern "C"

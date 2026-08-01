@@ -17,6 +17,7 @@
 
 #include "iree/base/api.h"
 #include "loom/error/error_defs.h"
+#include "loom/format/low_repr.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/op_defs.h"
 
@@ -337,6 +338,8 @@ typedef struct loom_text_low_asm_vtable_t {
 } loom_text_low_asm_vtable_t;
 
 typedef struct loom_text_low_asm_environment_t {
+  // Stable-key codec for canonical Low representation values.
+  loom_low_repr_environment_t low_repr;
   // Function table implementing low asm lookup, type inference, and builders.
   const loom_text_low_asm_vtable_t* vtable;
   // Environment-owned state passed to every vtable callback.

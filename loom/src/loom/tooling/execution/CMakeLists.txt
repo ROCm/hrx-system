@@ -125,6 +125,7 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::arena
+    loom::codegen::low::repr
     loom::codegen::low::text_asm
     loom::error::diagnostic
     loom::format::bytecode::format

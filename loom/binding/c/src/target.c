@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/internal/atomics.h"
+#include "loom/codegen/low/repr.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/pass/builtin_registry.h"
 #include "loomc/iree.h"
@@ -395,6 +396,20 @@ void loomc_target_pass_environment_initialize_text_asm_environment(
     return;
   }
   loom_low_descriptor_text_asm_environment_initialize(
+      &environment->low_descriptor_registry.registry, out_environment);
+}
+
+void loomc_target_pass_environment_initialize_low_repr_environment(
+    const loomc_target_pass_environment_t* environment,
+    loom_low_repr_environment_t* out_environment) {
+  if (environment == NULL) {
+    // Target-free contexts can still read and write generic modules. The
+    // format boundary rejects this empty codec if it encounters a scoped Low
+    // representation value.
+    *out_environment = (loom_low_repr_environment_t){0};
+    return;
+  }
+  loom_low_repr_environment_initialize(
       &environment->low_descriptor_registry.registry, out_environment);
 }
 

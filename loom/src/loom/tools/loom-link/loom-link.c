@@ -15,6 +15,8 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/io/stream.h"
 #include "iree/io/vec_stream.h"
+#include "loom/codegen/low/repr.h"
+#include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
 #include "loom/format/bytecode/reader.h"
 #include "loom/format/bytecode/writer.h"
@@ -26,6 +28,7 @@
 #include "loom/link/module_index.h"
 #include "loom/link/planner.h"
 #include "loom/target/configured/provider.h"
+#include "loom/target/provider.h"
 #include "loom/tooling/cli/help.h"
 #include "loom/tooling/config/config.h"
 #include "loom/tooling/context/context.h"
@@ -320,6 +323,12 @@ static iree_status_t loom_link_cli_read_input(
       .diagnostic_sink = {.fn = loom_diagnostic_stderr_sink},
       .max_errors = 20,
   };
+  loom_target_low_descriptor_registry_t low_registry = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_target_environment_initialize_low_descriptor_registry(
+          loom_configured_target_environment(), &low_registry));
+  loom_low_descriptor_text_asm_environment_initialize(
+      &low_registry.registry, &parse_options.low_asm_environment);
   loom_module_t* module = NULL;
   iree_string_view_t source =
       loom_tooling_file_contents_string_view(out_input->contents);
@@ -377,6 +386,12 @@ static iree_status_t loom_link_cli_materialize_bytecode_module(
       .verify_module = false,
       .verify_max_errors = 0,
   };
+  loom_target_low_descriptor_registry_t low_registry = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_target_environment_initialize_low_descriptor_registry(
+          loom_configured_target_environment(), &low_registry));
+  loom_low_repr_environment_initialize(&low_registry.registry,
+                                       &read_options.low_repr_environment);
   loom_bytecode_read_result_t read_result = {0};
   loom_module_t* module = NULL;
   IREE_RETURN_IF_ERROR(loom_bytecode_read_module_ordinal(
@@ -1105,6 +1120,13 @@ static iree_status_t loom_link_cli_write_bytecode_output(
       .producer = IREE_SV("loom-link"),
       .location_mode = LOOM_BYTECODE_LOCATION_MODE_SOURCE_LOCATIONS,
   };
+  loom_target_low_descriptor_registry_t low_registry = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_target_environment_initialize_low_descriptor_registry(
+        loom_configured_target_environment(), &low_registry);
+  }
+  loom_low_repr_environment_initialize(&low_registry.registry,
+                                       &write_options.low_repr_environment);
   if (iree_status_is_ok(status)) {
     status =
         loom_bytecode_write_module(module, stream, &write_options, block_pool);

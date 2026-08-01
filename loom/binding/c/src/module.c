@@ -628,21 +628,26 @@ static loomc_status_t loomc_module_serialize_text_to_source(
 }
 
 static loomc_status_t loomc_module_serialize_bytecode_to_stream(
-    const loom_module_t* internal_module, iree_io_stream_t* target_stream,
-    loomc_allocator_t allocator) {
+    const loomc_module_t* module, const loom_module_t* internal_module,
+    iree_io_stream_t* target_stream, loomc_allocator_t allocator) {
   iree_arena_block_pool_t block_pool;
   iree_arena_block_pool_initialize(LOOMC_MODULE_SERIALIZE_BLOCK_SIZE,
                                    iree_allocator_from_loomc(allocator),
                                    &block_pool);
+  loom_bytecode_write_options_t write_options = {0};
+  loomc_target_pass_environment_initialize_low_repr_environment(
+      loomc_context_target_pass_environment(module->context),
+      &write_options.low_repr_environment);
   loomc_status_t status = loomc_status_from_iree(loom_bytecode_write_module(
-      internal_module, target_stream, /*options=*/NULL, &block_pool));
+      internal_module, target_stream, &write_options, &block_pool));
   iree_arena_block_pool_deinitialize(&block_pool);
   return status;
 }
 
 static loomc_status_t loomc_module_serialize_bytecode_to_source(
-    const loom_module_t* internal_module, loomc_string_view_t identifier,
-    loomc_allocator_t allocator, loomc_source_t** out_source) {
+    const loomc_module_t* module, const loom_module_t* internal_module,
+    loomc_string_view_t identifier, loomc_allocator_t allocator,
+    loomc_source_t** out_source) {
   *out_source = NULL;
   loomc_module_byte_buffer_stream_t* stream = NULL;
   loomc_status_t status =
@@ -650,7 +655,7 @@ static loomc_status_t loomc_module_serialize_bytecode_to_source(
   iree_io_stream_t* base_stream = NULL;
   if (loomc_status_is_ok(status)) {
     base_stream = &stream->base;
-    status = loomc_module_serialize_bytecode_to_stream(internal_module,
+    status = loomc_module_serialize_bytecode_to_stream(module, internal_module,
                                                        base_stream, allocator);
   }
 
@@ -740,6 +745,9 @@ static loomc_status_t loomc_module_deserialize_bytecode_source(
               .user_data = &capture,
           },
   };
+  loomc_target_pass_environment_initialize_low_repr_environment(
+      loomc_context_target_pass_environment(context),
+      &read_options.low_repr_environment);
   loom_bytecode_read_result_t read_result = {0};
   loomc_status_t status = loomc_status_from_iree(loom_bytecode_read_module(
       iree_make_const_byte_span(contents.data, contents.data_length),
@@ -1121,7 +1129,8 @@ loomc_status_t loomc_module_serialize_to_source(
           module, internal_module, &resolved_options, allocator, out_source);
     case LOOMC_SOURCE_FORMAT_BYTECODE:
       return loomc_module_serialize_bytecode_to_source(
-          internal_module, resolved_options.identifier, allocator, out_source);
+          module, internal_module, resolved_options.identifier, allocator,
+          out_source);
     default:
       return loomc_make_status(
           LOOMC_STATUS_INVALID_ARGUMENT,
@@ -1151,7 +1160,7 @@ loomc_status_t loomc_module_serialize_to_file(
 
   loomc_source_t* source = NULL;
   loomc_status_t status = loomc_module_serialize_bytecode_to_source(
-      internal_module, resolved_options.identifier,
+      module, internal_module, resolved_options.identifier,
       loomc_module_allocator(module), &source);
   if (loomc_status_is_ok(status)) {
     loomc_byte_span_t contents = loomc_source_contents(source);
@@ -1196,8 +1205,8 @@ loomc_status_t loomc_module_serialize_to_path(
       status = loomc_module_serialize_text_to_iree_stream(
           module, internal_module, &resolved_options, stream);
     } else {
-      status = loomc_module_serialize_bytecode_to_stream(internal_module,
-                                                         stream, allocator);
+      status = loomc_module_serialize_bytecode_to_stream(
+          module, internal_module, stream, allocator);
     }
   }
   iree_io_stream_release(stream);

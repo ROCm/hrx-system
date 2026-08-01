@@ -109,6 +109,7 @@ loom_cc_library(
   DEPS
     ::builder
     ::descriptors
+    ::repr
     iree::base
     loom::analysis::symbol_facts
     loom::format::text::low_asm

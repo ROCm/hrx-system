@@ -18,6 +18,7 @@
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/repr.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
 #include "loom/format/bytecode/reader.h"
@@ -51,6 +52,8 @@ class ReaderCorpusTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_testing_context_register_all_dialects(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     loom_target_core_test_low_descriptor_registry_initialize(&low_registry_);
+    loom_low_repr_environment_initialize(&low_registry_.registry,
+                                         &low_repr_environment_);
   }
 
   void TearDown() override {
@@ -98,8 +101,10 @@ class ReaderCorpusTest : public ::testing::Test {
         IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE |
             IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_RESIZABLE,
         4096, iree_allocator_system(), &stream));
+    loom_bytecode_write_options_t options = {};
+    options.low_repr_environment = low_repr_environment_;
     iree_status_t status =
-        loom_bytecode_write_module(module, stream, NULL, &block_pool_);
+        loom_bytecode_write_module(module, stream, &options, &block_pool_);
 
     if (iree_status_is_ok(status)) {
       iree_io_stream_pos_t length = iree_io_stream_length(stream);
@@ -128,6 +133,7 @@ class ReaderCorpusTest : public ::testing::Test {
         // programs, so this test isolates bytecode reader/writer canonicality.
         /*.verify_module=*/false,
         /*.verify_max_errors=*/20,
+        /*.low_repr_environment=*/low_repr_environment_,
     };
     loom_bytecode_read_result_t result = {0};
     IREE_EXPECT_OK(loom_bytecode_read_module(
@@ -140,6 +146,7 @@ class ReaderCorpusTest : public ::testing::Test {
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   loom_target_low_descriptor_registry_t low_registry_;
+  loom_low_repr_environment_t low_repr_environment_;
 };
 
 TEST_F(ReaderCorpusTest, CorpusIsNotEmpty) {

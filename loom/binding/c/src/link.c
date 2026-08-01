@@ -22,6 +22,7 @@
 #include "module.h"
 #include "result.h"
 #include "source.h"
+#include "target.h"
 #include "workspace.h"
 
 enum {
@@ -211,6 +212,9 @@ static iree_status_t loomc_link_read_bytecode_module(
               .user_data = &capture,
           },
   };
+  loomc_target_pass_environment_initialize_low_repr_environment(
+      loomc_context_target_pass_environment(cache->linker->context),
+      &read_options.low_repr_environment);
   loom_bytecode_read_result_t read_result = {0};
   loom_module_t* materialized_module = NULL;
   IREE_RETURN_IF_ERROR(loom_bytecode_read_module_ordinal(

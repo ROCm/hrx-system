@@ -1542,6 +1542,9 @@ class BytecodeReader:
                         f"bytes attr length {byte_length} exceeds payload size"
                     )
                 return data[offset:end_offset], end_offset
+            case 12:  # SCOPED_ENUM
+                string_id, offset = decode_varint(data, offset)
+                return self._strings[string_id], offset
             case _:
                 raise BytecodeError(f"unknown attr value kind: {kind}")
 

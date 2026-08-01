@@ -20,6 +20,8 @@ loom_cc_binary(
     iree::base::tooling::flags
     iree::io::file_handle
     iree::io::stream
+    loom::codegen::low::repr
+    loom::codegen::low::text_asm
     loom::error::diagnostic
     loom::format::bytecode::reader
     loom::format::bytecode::writer
@@ -30,6 +32,7 @@ loom_cc_binary(
     loom::link::module_index
     loom::link::planner
     loom::target::configured::provider
+    loom::target::provider
     loom::tooling::cli::help
     loom::tooling::config
     loom::tooling::context

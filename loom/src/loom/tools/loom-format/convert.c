@@ -94,12 +94,14 @@ static iree_status_t loom_format_read_text_module(
 static iree_status_t loom_format_read_bytecode_module(
     iree_const_byte_span_t input, iree_string_view_t filename,
     loom_context_t* context, iree_arena_block_pool_t* block_pool,
-    loom_diagnostic_sink_t diagnostic_sink, loom_module_t** out_module,
-    iree_allocator_t allocator) {
+    loom_diagnostic_sink_t diagnostic_sink,
+    loom_text_low_asm_environment_t low_asm_environment,
+    loom_module_t** out_module, iree_allocator_t allocator) {
   loom_bytecode_read_options_t read_options = {
       .diagnostic_sink = diagnostic_sink,
       .verify_module = false,
       .verify_max_errors = 0,
+      .low_repr_environment = low_asm_environment.low_repr,
   };
   loom_bytecode_read_result_t read_result = {0};
   IREE_RETURN_IF_ERROR(loom_bytecode_read_module(
@@ -129,9 +131,9 @@ static iree_status_t loom_format_read_module(
                                           diagnostic_sink, low_asm_environment,
                                           out_module);
     case LOOM_MODULE_FORMAT_BYTECODE:
-      return loom_format_read_bytecode_module(input, filename, context,
-                                              block_pool, diagnostic_sink,
-                                              out_module, allocator);
+      return loom_format_read_bytecode_module(
+          input, filename, context, block_pool, diagnostic_sink,
+          low_asm_environment, out_module, allocator);
     case LOOM_MODULE_FORMAT_AUTO:
       break;
   }
@@ -164,6 +166,7 @@ static iree_status_t loom_format_write_text_output(
 
 static iree_status_t loom_format_write_bytecode_output(
     const loom_module_t* module, iree_arena_block_pool_t* block_pool,
+    loom_text_low_asm_environment_t low_asm_environment,
     loom_format_output_t* out_output, iree_allocator_t allocator) {
   iree_io_stream_t* stream = NULL;
   iree_status_t status = iree_io_vec_stream_create(
@@ -174,6 +177,7 @@ static iree_status_t loom_format_write_bytecode_output(
   loom_bytecode_write_options_t write_options = {
       .producer = IREE_SV("loom-format"),
       .location_mode = LOOM_BYTECODE_LOCATION_MODE_SOURCE_LOCATIONS,
+      .low_repr_environment = low_asm_environment.low_repr,
   };
   if (iree_status_is_ok(status)) {
     status =
@@ -222,8 +226,8 @@ static iree_status_t loom_format_write_output(
       return loom_format_write_text_output(module, low_asm_environment,
                                            out_output, allocator);
     case LOOM_MODULE_FORMAT_BYTECODE:
-      return loom_format_write_bytecode_output(module, block_pool, out_output,
-                                               allocator);
+      return loom_format_write_bytecode_output(
+          module, block_pool, low_asm_environment, out_output, allocator);
     case LOOM_MODULE_FORMAT_AUTO:
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "output format must be explicit");
@@ -246,12 +250,9 @@ iree_status_t loom_format_convert(iree_const_byte_span_t input,
                                   iree_allocator_t allocator) {
   *out_output = (loom_format_output_t){0};
 
-  loom_format_convert_options_t resolved_options = {
-      .input_format = LOOM_MODULE_FORMAT_AUTO,
-      .output_format = LOOM_MODULE_FORMAT_TEXT,
-      .diagnostic_sink = {0},
-      .low_asm_environment = {0},
-  };
+  loom_format_convert_options_t resolved_options = {0};
+  resolved_options.input_format = LOOM_MODULE_FORMAT_AUTO;
+  resolved_options.output_format = LOOM_MODULE_FORMAT_TEXT;
   if (options != NULL) {
     resolved_options = *options;
   }

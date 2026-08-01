@@ -130,6 +130,7 @@ ATTR_KIND_PREDICATE_LIST = 8
 ATTR_KIND_DICT = 9
 ATTR_KIND_ENCODING = 10
 ATTR_KIND_BYTES = 11
+ATTR_KIND_SCOPED_ENUM = 12
 
 # Type kind bytes. These must match loom_bytecode_type_kind_e, not just the
 # current Python enum spelling.
@@ -156,7 +157,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 16
+FORMAT_VERSION = 17
 PRODUCER = "loom-py"
 
 SYMBOL_FLAG_PUBLIC = 0x0001
@@ -1187,6 +1188,15 @@ class BytecodeWriter:
                     )
             buf.write_u8(ATTR_KIND_ENUM)
             buf.write_u8(value)
+            return
+        if attr_type == "scoped_enum":
+            if not isinstance(value, str):
+                raise TypeError(
+                    "scoped enum attribute value must be a stable string key, "
+                    f"got {value!r}"
+                )
+            buf.write_u8(ATTR_KIND_SCOPED_ENUM)
+            buf.write_varint(self._ctx.strings[value])
             return
         if attr_type == "type":
             if not isinstance(value, _IR_TYPE_CLASSES):

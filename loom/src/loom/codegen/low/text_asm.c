@@ -7,6 +7,7 @@
 #include <inttypes.h>
 
 #include "loom/codegen/low/builder.h"
+#include "loom/codegen/low/repr.h"
 #include "loom/codegen/low/text_asm_internal.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -1532,6 +1533,8 @@ void loom_low_descriptor_text_asm_environment_initialize(
       .state =
           (const loom_text_low_asm_environment_state_t*)descriptor_registry,
   };
+  loom_low_repr_environment_initialize(descriptor_registry,
+                                       &out_environment->low_repr);
 }
 
 void loom_low_descriptor_text_asm_environment_initialize_with_diagnostics(
@@ -1547,6 +1550,8 @@ void loom_low_descriptor_text_asm_environment_initialize_with_diagnostics(
       .vtable = &kLowDescriptorTextAsmDiagnosticVtable,
       .state = (const loom_text_low_asm_environment_state_t*)out_storage,
   };
+  loom_low_repr_environment_initialize(descriptor_registry,
+                                       &out_environment->low_repr);
 }
 
 void loom_low_descriptor_text_print_context_initialize(

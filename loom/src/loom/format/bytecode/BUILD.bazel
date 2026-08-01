@@ -73,6 +73,7 @@ loom_cc_library(
         ":varint",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/format:low_repr",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/verify",
@@ -108,6 +109,7 @@ loom_cc_test(
     deps = [
         ":reader",
         ":writer",
+        "//loom/src/loom/codegen/low:repr",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/format/text:parser",
@@ -130,6 +132,7 @@ loom_cc_library(
     deps = [
         ":format",
         ":varint",
+        "//loom/src/loom/format:low_repr",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
@@ -161,8 +164,10 @@ loom_cc_fuzz(
     deps = [
         ":reader",
         ":writer",
+        "//loom/src/loom/codegen/low:repr",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/ir",
+        "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/testing:context",
         "//loom/src/loom/testing:gen",
         "//runtime/src/iree/base",

@@ -157,6 +157,7 @@ loom_cc_library(
     ],
     deps = [
         "//loom/src/loom/analysis:kernel_launch_config",
+        "//loom/src/loom/codegen/low:repr",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
