@@ -14,6 +14,8 @@ iree_py_library(
     package
   SRCS
     "__init__.py"
+  IMPORTS
+    "../.."
 )
 
 iree_py_library(
@@ -21,6 +23,26 @@ iree_py_library(
     bootstrap
   SRCS
     "bootstrap.py"
+  DEPS
+    loom::py::loom::gen::package
+)
+
+iree_py_test(
+  NAME
+    bootstrap_test
+  MAIN
+    "../tools/pytest_style_runner.py"
+  SRCS
+    "bootstrap_test.py"
+    "../tools/pytest_style_runner.py"
+  ARGS
+    "loom.gen.bootstrap_test"
+  DEPS
+    loom::py::loom::gen::bootstrap
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

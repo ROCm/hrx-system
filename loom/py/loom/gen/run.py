@@ -60,7 +60,7 @@ def main(argv: list[str]) -> int:
         print(_usage(), file=sys.stderr)
         return 2
 
-    repo_root = bootstrap.ensure_runtime_py_on_path(Path(__file__))
+    repo_root = bootstrap.ensure_repository_packages_on_path(Path(__file__))
     if Path.cwd().resolve() != repo_root:
         print(f"error: run from repository root: {repo_root}", file=sys.stderr)
         return 2
