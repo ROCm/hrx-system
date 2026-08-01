@@ -1705,12 +1705,6 @@ iree_status_t loom_scalar_cmpf_canonicalize(loom_op_t* op,
 iree_status_t loom_scalar_extf_canonicalize(loom_op_t* op,
                                             loom_rewriter_t* rewriter) {
   loom_value_id_t input = loom_scalar_extf_input(op);
-  loom_type_t input_type = loom_module_value_type(rewriter->module, input);
-  if (loom_type_equal(input_type,
-                      loom_scalar_single_result_type(rewriter, op))) {
-    return loom_scalar_replace_single_result_with_value(op, rewriter, input);
-  }
-
   loom_op_t* input_def = loom_scalar_defining_op(rewriter, input);
   if (input_def && loom_scalar_extf_isa(input_def)) {
     loom_value_id_t inner_input = loom_scalar_extf_input(input_def);
@@ -1724,12 +1718,6 @@ iree_status_t loom_scalar_extf_canonicalize(loom_op_t* op,
 iree_status_t loom_scalar_fptrunc_canonicalize(loom_op_t* op,
                                                loom_rewriter_t* rewriter) {
   loom_value_id_t input = loom_scalar_fptrunc_input(op);
-  loom_type_t input_type = loom_module_value_type(rewriter->module, input);
-  if (loom_type_equal(input_type,
-                      loom_scalar_single_result_type(rewriter, op))) {
-    return loom_scalar_replace_single_result_with_value(op, rewriter, input);
-  }
-
   loom_op_t* input_def = loom_scalar_defining_op(rewriter, input);
   if (input_def && loom_scalar_extf_isa(input_def)) {
     loom_value_id_t inner_input = loom_scalar_extf_input(input_def);
@@ -1743,12 +1731,6 @@ iree_status_t loom_scalar_fptrunc_canonicalize(loom_op_t* op,
 iree_status_t loom_scalar_extsi_canonicalize(loom_op_t* op,
                                              loom_rewriter_t* rewriter) {
   loom_value_id_t input = loom_scalar_extsi_input(op);
-  loom_type_t input_type = loom_module_value_type(rewriter->module, input);
-  if (loom_type_equal(input_type,
-                      loom_scalar_single_result_type(rewriter, op))) {
-    return loom_scalar_replace_single_result_with_value(op, rewriter, input);
-  }
-
   loom_op_t* input_def = loom_scalar_defining_op(rewriter, input);
   if (input_def && loom_scalar_extsi_isa(input_def)) {
     loom_value_id_t inner_input = loom_scalar_extsi_input(input_def);
@@ -1770,12 +1752,6 @@ iree_status_t loom_scalar_extsi_canonicalize(loom_op_t* op,
 iree_status_t loom_scalar_extui_canonicalize(loom_op_t* op,
                                              loom_rewriter_t* rewriter) {
   loom_value_id_t input = loom_scalar_extui_input(op);
-  loom_type_t input_type = loom_module_value_type(rewriter->module, input);
-  if (loom_type_equal(input_type,
-                      loom_scalar_single_result_type(rewriter, op))) {
-    return loom_scalar_replace_single_result_with_value(op, rewriter, input);
-  }
-
   loom_op_t* input_def = loom_scalar_defining_op(rewriter, input);
   if (input_def && loom_scalar_extui_isa(input_def)) {
     loom_value_id_t inner_input = loom_scalar_extui_input(input_def);
@@ -1801,10 +1777,6 @@ iree_status_t loom_scalar_trunci_canonicalize(loom_op_t* op,
   loom_value_id_t input = loom_scalar_trunci_input(op);
   loom_type_t input_type = loom_module_value_type(rewriter->module, input);
   loom_type_t result_type = loom_scalar_single_result_type(rewriter, op);
-  if (loom_type_equal(input_type, result_type)) {
-    return loom_scalar_replace_single_result_with_value(op, rewriter, input);
-  }
-
   loom_op_t* input_def = loom_scalar_defining_op(rewriter, input);
   if (input_def && loom_scalar_extsi_isa(input_def)) {
     loom_value_id_t inner_input = loom_scalar_extsi_input(input_def);

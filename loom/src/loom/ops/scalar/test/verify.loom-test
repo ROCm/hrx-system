@@ -98,6 +98,113 @@ func.def @assume_rejects_count_mismatch(%x: i64, %y: i64) -> (i64) {
 
 // ====
 
+// Scalar extensions and truncations encode a strict width direction in the
+// operation name.
+func.def @extf_wrong_width(%x: f32) {
+  // ERROR@+1: TYPE/004 "result" "element bit width greater than input"
+  %r = scalar.extf %x : f32 to f16
+  func.return
+}
+
+// ====
+
+// Equal-width float formats require a format-conversion operation rather than
+// pretending that either format extends the other.
+func.def @extf_equal_width(%x: f16) {
+  // ERROR@+1: TYPE/004 "result" "element bit width greater than input"
+  %r = scalar.extf %x : f16 to bf16
+  func.return
+}
+
+// ====
+
+func.def @fptrunc_wrong_width(%x: f16) {
+  // ERROR@+1: TYPE/004 "result" "element bit width less than input"
+  %r = scalar.fptrunc %x : f16 to f32
+  func.return
+}
+
+// ====
+
+func.def @fptrunc_equal_width(%x: bf16) {
+  // ERROR@+1: TYPE/004 "result" "element bit width less than input"
+  %r = scalar.fptrunc %x : bf16 to f16
+  func.return
+}
+
+// ====
+
+func.def @extsi_wrong_width(%x: i32) {
+  // ERROR@+1: TYPE/004 "result" "element bit width greater than input"
+  %r = scalar.extsi %x : i32 to i8
+  func.return
+}
+
+// ====
+
+func.def @extsi_equal_width(%x: i32) {
+  // ERROR@+1: TYPE/004 "result" "element bit width greater than input"
+  %r = scalar.extsi %x : i32 to i32
+  func.return
+}
+
+// ====
+
+func.def @extui_wrong_width(%x: i64) {
+  // ERROR@+1: TYPE/004 "result" "element bit width greater than input"
+  %r = scalar.extui %x : i64 to i16
+  func.return
+}
+
+// ====
+
+func.def @extui_equal_width(%x: i16) {
+  // ERROR@+1: TYPE/004 "result" "element bit width greater than input"
+  %r = scalar.extui %x : i16 to i16
+  func.return
+}
+
+// ====
+
+func.def @trunci_wrong_width(%x: i8) {
+  // ERROR@+1: TYPE/004 "result" "element bit width less than input"
+  %r = scalar.trunci %x : i8 to i32
+  func.return
+}
+
+// ====
+
+func.def @trunci_equal_width(%x: i64) {
+  // ERROR@+1: TYPE/004 "result" "element bit width less than input"
+  %r = scalar.trunci %x : i64 to i64
+  func.return
+}
+
+// ====
+
+// Scalar bitcasts preserve the complete payload bit count.
+func.def @bitcast_width_mismatch(%x: f32) {
+  // ERROR@+1: TYPE/004 "provably same total bit count as input"
+  %r = scalar.bitcast %x : f32 to i64
+  func.return
+}
+
+// ====
+
+// Every legal direction and representation constraint composes in one normal
+// verified program.
+func.def @valid_scalar_cast_widths(%f16_value: f16, %i8_value: i8) -> (f16, i8, i32) {
+  %f32_value = scalar.extf %f16_value : f16 to f32
+  %f16_result = scalar.fptrunc %f32_value : f32 to f16
+  %signed = scalar.extsi %i8_value : i8 to i32
+  %unsigned = scalar.extui %i8_value : i8 to i32
+  %i8_result = scalar.trunci %unsigned : i32 to i8
+  %bits = scalar.bitcast %f32_value : f32 to i32
+  func.return %f16_result, %i8_result, %bits : f16, i8, i32
+}
+
+// ====
+
 // Bitfield extraction requires positive field widths.
 func.def @bitfield_extract_zero_width(%x: i8) {
   // ERROR@+1: STRUCTURE/014 "width" "0" "positive bitfield width"

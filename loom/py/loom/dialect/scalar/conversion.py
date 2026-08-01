@@ -21,10 +21,13 @@ from loom.dsl import (
     PURE,
     SCALAR,
     AttrDef,
+    ElementWidthGreaterThan,
+    ElementWidthLessThan,
     Op,
     OperandRole,
     OpPhase,
     Result,
+    TotalBitCountEqual,
     cast_op,
 )
 
@@ -85,7 +88,8 @@ scalar_extf = cast_op(
     phase=OpPhase.EXECUTABLE,
     from_constraint=FLOAT,
     to_constraint=FLOAT,
-    doc="Float precision extension (widen): e.g. f16 to f32.",
+    doc="Float precision extension to a strictly wider format: e.g. f16 to f32.",
+    constraints=[ElementWidthGreaterThan("result", "input")],
     input_role=OperandRole.FLOAT_EXTENSION_SOURCE,
     canonicalize="loom_scalar_extf_canonicalize",
     facts="loom_scalar_extf_facts",
@@ -99,10 +103,12 @@ scalar_fptrunc = cast_op(
     to_constraint=FLOAT,
     doc=(
         "Float precision truncation using round-to-nearest, ties-to-even. "
+        "The result format must be strictly narrower than the input format. "
         "Special values follow the destination format: f8E4M3 saturates "
         "finite overflow and infinities to its signed maximum finite value "
         "while preserving NaNs; IEEE formats preserve infinities and NaNs."
     ),
+    constraints=[ElementWidthLessThan("result", "input")],
     canonicalize="loom_scalar_fptrunc_canonicalize",
     facts="loom_scalar_fptrunc_facts",
     examples=["%result = scalar.fptrunc %input : f32 to f16"],
@@ -118,7 +124,8 @@ scalar_extsi = cast_op(
     phase=OpPhase.EXECUTABLE,
     from_constraint=INTEGER,
     to_constraint=INTEGER,
-    doc="Signed integer extension (sign-extend): e.g. i8 to i32.",
+    doc="Signed integer extension to a strictly wider type: e.g. i8 to i32.",
+    constraints=[ElementWidthGreaterThan("result", "input")],
     canonicalize="loom_scalar_extsi_canonicalize",
     facts="loom_scalar_extsi_facts",
     traits=[DISTRIBUTION_TRANSFER],
@@ -130,7 +137,8 @@ scalar_extui = cast_op(
     phase=OpPhase.EXECUTABLE,
     from_constraint=INTEGER,
     to_constraint=INTEGER,
-    doc="Unsigned integer extension (zero-extend): e.g. i8 to i32.",
+    doc="Unsigned integer extension to a strictly wider type: e.g. i8 to i32.",
+    constraints=[ElementWidthGreaterThan("result", "input")],
     canonicalize="loom_scalar_extui_canonicalize",
     facts="loom_scalar_extui_facts",
     traits=[DISTRIBUTION_TRANSFER],
@@ -142,7 +150,8 @@ scalar_trunci = cast_op(
     phase=OpPhase.EXECUTABLE,
     from_constraint=INTEGER,
     to_constraint=INTEGER,
-    doc="Integer truncation (narrow): e.g. i32 to i8.",
+    doc="Integer truncation to a strictly narrower type: e.g. i32 to i8.",
+    constraints=[ElementWidthLessThan("result", "input")],
     canonicalize="loom_scalar_trunci_canonicalize",
     facts="loom_scalar_trunci_facts",
     traits=[DISTRIBUTION_TRANSFER],
@@ -159,7 +168,8 @@ scalar_bitcast = cast_op(
     phase=OpPhase.EXECUTABLE,
     from_constraint=SCALAR,
     to_constraint=SCALAR,
-    doc="Bitwise reinterpretation: same bits, different type. No conversion.",
+    doc=("Bitwise reinterpretation between scalar types with the same bit count. No numeric conversion is performed."),
+    constraints=[TotalBitCountEqual("input", "result")],
     canonicalize="loom_scalar_bitcast_canonicalize",
     facts="loom_scalar_bitcast_facts",
     examples=["%result = scalar.bitcast %input : f32 to i32"],

@@ -1533,7 +1533,7 @@ iree_status_t loom_scalar_fptoui_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_EXTF: Float precision extension (widen): e.g. f16 to f32.
+// LOOM_OP_SCALAR_EXTF: Float precision extension to a strictly wider format: e.g. f16 to f32.
 // %result = scalar.extf %input : f16 to f32
 LOOM_DEFINE_ISA(loom_scalar_extf_isa, LOOM_OP_SCALAR_EXTF)
 LOOM_DEFINE_OPERAND(loom_scalar_extf_input, 0)
@@ -1549,7 +1549,7 @@ iree_status_t loom_scalar_extf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_FPTRUNC: Float precision truncation using round-to-nearest, ties-to-even. Special values follow the destination format: f8E4M3 saturates finite overflow and infinities to its signed maximum finite value while preserving NaNs; IEEE formats preserve infinities and NaNs.
+// LOOM_OP_SCALAR_FPTRUNC: Float precision truncation using round-to-nearest, ties-to-even. The result format must be strictly narrower than the input format. Special values follow the destination format: f8E4M3 saturates finite overflow and infinities to its signed maximum finite value while preserving NaNs; IEEE formats preserve infinities and NaNs.
 // %result = scalar.fptrunc %input : f32 to f16
 LOOM_DEFINE_ISA(loom_scalar_fptrunc_isa, LOOM_OP_SCALAR_FPTRUNC)
 LOOM_DEFINE_OPERAND(loom_scalar_fptrunc_input, 0)
@@ -1565,7 +1565,7 @@ iree_status_t loom_scalar_fptrunc_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_EXTSI: Signed integer extension (sign-extend): e.g. i8 to i32.
+// LOOM_OP_SCALAR_EXTSI: Signed integer extension to a strictly wider type: e.g. i8 to i32.
 // %result = scalar.extsi %input : i8 to i32
 LOOM_DEFINE_ISA(loom_scalar_extsi_isa, LOOM_OP_SCALAR_EXTSI)
 LOOM_DEFINE_OPERAND(loom_scalar_extsi_input, 0)
@@ -1581,7 +1581,7 @@ iree_status_t loom_scalar_extsi_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_EXTUI: Unsigned integer extension (zero-extend): e.g. i8 to i32.
+// LOOM_OP_SCALAR_EXTUI: Unsigned integer extension to a strictly wider type: e.g. i8 to i32.
 // %result = scalar.extui %input : i8 to i32
 LOOM_DEFINE_ISA(loom_scalar_extui_isa, LOOM_OP_SCALAR_EXTUI)
 LOOM_DEFINE_OPERAND(loom_scalar_extui_input, 0)
@@ -1597,7 +1597,7 @@ iree_status_t loom_scalar_extui_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_TRUNCI: Integer truncation (narrow): e.g. i32 to i8.
+// LOOM_OP_SCALAR_TRUNCI: Integer truncation to a strictly narrower type: e.g. i32 to i8.
 // %result = scalar.trunci %input : i32 to i8
 LOOM_DEFINE_ISA(loom_scalar_trunci_isa, LOOM_OP_SCALAR_TRUNCI)
 LOOM_DEFINE_OPERAND(loom_scalar_trunci_input, 0)
@@ -1613,7 +1613,7 @@ iree_status_t loom_scalar_trunci_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_BITCAST: Bitwise reinterpretation: same bits, different type. No conversion.
+// LOOM_OP_SCALAR_BITCAST: Bitwise reinterpretation between scalar types with the same bit count. No numeric conversion is performed.
 // %result = scalar.bitcast %input : f32 to i32
 LOOM_DEFINE_ISA(loom_scalar_bitcast_isa, LOOM_OP_SCALAR_BITCAST)
 LOOM_DEFINE_OPERAND(loom_scalar_bitcast_input, 0)
