@@ -86,6 +86,8 @@ struct loom_parsed_op_t {
   uint16_t tied_result_capacity;
   uint16_t field_span_count;
   uint16_t field_span_capacity;
+  // Effective traits resolved with a representation-scoped identity.
+  loom_trait_flags_t effective_traits;
   uint8_t attribute_count;
   uint8_t attribute_capacity;
   uint8_t region_count;
@@ -93,6 +95,8 @@ struct loom_parsed_op_t {
   uint8_t operand_segment_count;
   uint8_t operand_segment_capacity;
   uint8_t instance_flags;
+  // True when |effective_traits| replaces the operation's static traits.
+  bool has_effective_traits;
 
   loom_value_id_t inline_operand_ids[LOOM_PARSED_OP_INLINE_OPERANDS];
   loom_block_t* inline_successors[LOOM_PARSED_OP_INLINE_SUCCESSORS];

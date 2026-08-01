@@ -249,6 +249,11 @@ enum loom_format_kind_e {
   // Variadic operand references with adjacent type annotations:
   // %a: type, %b: type.
   LOOM_FORMAT_KIND_OPERAND_TYPED_REFS = 30,
+
+  // Representation-scoped enum in angle brackets: <amdgpu.v_add_u32>. The
+  // field_index references one SCOPED_ENUM attribute. Text parsing resolves the
+  // stable spelling to a dense ordinal in the enclosing function contract.
+  LOOM_FORMAT_KIND_SCOPED_ENUM_REF = 31,
 };
 typedef uint8_t loom_format_kind_t;
 

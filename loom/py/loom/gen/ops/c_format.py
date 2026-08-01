@@ -33,6 +33,7 @@ from loom.assembly import (
     ResultType,
     ResultTypeList,
     Scope,
+    ScopedEnumRef,
     StableKeyRef,
     SymbolRef,
     TemplateParam,
@@ -335,6 +336,21 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                             "LOOM_FORMAT_KIND_DESCRIPTOR_REF",
                             key_index,
                             str(ordinal_index),
+                        )
+                    )
+
+                case ScopedEnumRef(field=name):
+                    kind, index = resolve_field(name)
+                    attr = op.attr(name)
+                    if kind != FieldKind.ATTR:
+                        raise ValueError(f"Op '{op.name}': ScopedEnumRef field '{name}' is not an attr field")
+                    if attr is None or attr.attr_type != "scoped_enum":
+                        raise ValueError(f"Op '{op.name}': ScopedEnumRef field '{name}' must be a scoped_enum attr")
+                    elements.append(
+                        (
+                            "LOOM_FORMAT_KIND_SCOPED_ENUM_REF",
+                            index,
+                            "0",
                         )
                     )
 

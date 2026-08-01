@@ -85,6 +85,7 @@ __all__ = [
     "Flags",
     "KeyRef",
     "DescriptorRef",
+    "ScopedEnumRef",
     "StableKeyRef",
     "TemplateParam",
     "TemplateParamFlags",
@@ -714,6 +715,20 @@ class DescriptorRef:
 
 
 @dataclass(frozen=True, slots=True)
+class ScopedEnumRef:
+    """Stable symbolic spelling for a representation-scoped enum value.
+
+    Prints/parses ``<case.key>`` glued to the op name. The field names the op's
+    one required ``scoped_enum`` identity attribute. Python authoring and
+    bytecode tooling retain the stable spelling at their format boundary; the
+    C compiler parser resolves it to the active Low function contract's dense
+    ordinal and effective traits while constructing canonical IR.
+    """
+
+    field: str
+
+
+@dataclass(frozen=True, slots=True)
 class StableKeyRef:
     """Symbolic key reference resolved to a stable numeric key identity.
 
@@ -858,6 +873,7 @@ type FormatElement = (
     | Flags
     | KeyRef
     | DescriptorRef
+    | ScopedEnumRef
     | StableKeyRef
     | TemplateParam
     | TemplateParamFlags

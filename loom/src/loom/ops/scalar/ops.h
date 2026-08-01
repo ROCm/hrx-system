@@ -1549,7 +1549,7 @@ iree_status_t loom_scalar_extf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_FPTRUNC: Float precision truncation (narrow): e.g. f32 to f16.
+// LOOM_OP_SCALAR_FPTRUNC: Float precision truncation using round-to-nearest, ties-to-even. Special values follow the destination format: f8E4M3 saturates finite overflow and infinities to its signed maximum finite value while preserving NaNs; IEEE formats preserve infinities and NaNs.
 // %result = scalar.fptrunc %input : f32 to f16
 LOOM_DEFINE_ISA(loom_scalar_fptrunc_isa, LOOM_OP_SCALAR_FPTRUNC)
 LOOM_DEFINE_OPERAND(loom_scalar_fptrunc_input, 0)

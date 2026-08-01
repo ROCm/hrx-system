@@ -11,10 +11,19 @@ from typing import Any
 
 import pytest
 
-from loom.assembly import GLUE, LPAREN, RPAREN, OptionalGroup, Ref, TypeOf, kw
+from loom.assembly import (
+    GLUE,
+    LPAREN,
+    RPAREN,
+    OptionalGroup,
+    Ref,
+    ScopedEnumRef,
+    TypeOf,
+    kw,
+)
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.test import ALL_TEST_OPS, test_ops
-from loom.dsl import ANY, Op, Operand, TypeDef, TypeParam
+from loom.dsl import ANY, AttrDef, Op, Operand, TypeDef, TypeParam
 from loom.format.bytecode.reader import read_module
 from loom.format.bytecode.writer import write_module
 from loom.format.text.parser import (
@@ -876,6 +885,29 @@ class TestParseOptionalGroup:
 
         assert op.operands == [0]
         assert absent_op.operands == []
+
+
+class TestParseScopedEnumRef:
+    def test_stable_spelling_roundtrips_at_python_format_boundary(self) -> None:
+        packet_op = Op(
+            "test.packet",
+            group=test_ops,
+            attrs=[AttrDef("descriptor", "scoped_enum")],
+            format=[ScopedEnumRef("descriptor")],
+            generate_c_builder=False,
+        )
+        parser = Parser()
+        parser.register_ops([packet_op])
+        module = Module()
+
+        op = parser.parse_operation_from_text(
+            "test.packet<amdgpu.v_add_u32>", module=module
+        )
+
+        assert op.attributes["descriptor"] == "amdgpu.v_add_u32"
+        printer = Printer()
+        printer.register_ops([packet_op])
+        assert printer.print_operation(op, module) == "test.packet<amdgpu.v_add_u32>"
 
 
 class TestParseAttrDictOp:

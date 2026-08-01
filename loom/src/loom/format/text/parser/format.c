@@ -14,6 +14,7 @@
 #include "loom/format/text/parser/diagnostics.h"
 #include "loom/format/text/parser/format_signatures.h"
 #include "loom/format/text/parser/format_tables.h"
+#include "loom/format/text/parser/low_asm.h"
 #include "loom/format/text/parser/regions.h"
 #include "loom/format/text/parser/scope.h"
 #include "loom/format/text/parser/types.h"
@@ -292,6 +293,7 @@ static iree_status_t loom_parse_format_optional_group(
       } else if (first_inner &&
                  (first_inner->kind == LOOM_FORMAT_KIND_KEY_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_DESCRIPTOR_REF ||
+                  first_inner->kind == LOOM_FORMAT_KIND_SCOPED_ENUM_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_STABLE_KEY_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_TEMPLATE_PARAM ||
                   first_inner->kind == LOOM_FORMAT_KIND_TEMPLATE_PARAM_FLAGS)) {
@@ -461,6 +463,58 @@ static iree_status_t loom_parse_format_descriptor_ref(
       descriptor_ref_start_token));
   return loom_parse_format_add_field_span(
       parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE, element->data,
+      descriptor_ref_start_token);
+}
+
+// Parses a stable case key directly into the active representation contract's
+// dense enum ordinal: <target.descriptor>.
+static iree_status_t loom_parse_format_scoped_enum_ref(
+    loom_parser_t* parser, const loom_format_element_t* element,
+    loom_parsed_op_t* parsed) {
+  loom_token_t descriptor_ref_start_token =
+      loom_tokenizer_peek(&parser->tokenizer);
+  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LANGLE)) {
+    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+    return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'<'"));
+  }
+  loom_token_t key_token = loom_tokenizer_peek(&parser->tokenizer);
+  if (key_token.kind != LOOM_TOKEN_OP_NAME &&
+      key_token.kind != LOOM_TOKEN_BARE_IDENT) {
+    return loom_parser_emit_unexpected_token(parser, key_token,
+                                             IREE_SV("descriptor key"));
+  }
+  key_token = loom_tokenizer_next(&parser->tokenizer);
+  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RANGLE)) {
+    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+    return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'>'"));
+  }
+  if (!parser->low_repr.descriptor_set) {
+    return loom_parser_emit_low_asm_error(
+        parser, key_token,
+        IREE_SV(
+            "descriptor requires an enclosing Low representation contract"));
+  }
+  if (!parser->low_asm_environment.low_repr.vtable) {
+    return loom_parser_emit_low_asm_error(
+        parser, key_token,
+        IREE_SV("Low representation environment is not configured"));
+  }
+  loom_low_repr_descriptor_value_t value = {0};
+  if (!loom_low_repr_resolve_descriptor(&parser->low_asm_environment.low_repr,
+                                        parser->low_repr.descriptor_set,
+                                        key_token.text, &value)) {
+    return loom_parser_emit_low_asm_error(
+        parser, key_token,
+        IREE_SV(
+            "unknown descriptor in the active Low representation contract"));
+  }
+  IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
+      parsed, &parser->parser_arena, element->field_index,
+      loom_attr_scoped_enum(value.ordinal)));
+  parsed->effective_traits = value.effective_traits;
+  parsed->has_effective_traits = true;
+  return loom_parse_format_add_field_span(
+      parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE, element->field_index,
       descriptor_ref_start_token);
 }
 
@@ -1056,6 +1110,12 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
       case LOOM_FORMAT_KIND_DESCRIPTOR_REF: {
         IREE_RETURN_IF_ERROR(
             loom_parse_format_descriptor_ref(parser, element, parsed));
+        break;
+      }
+
+      case LOOM_FORMAT_KIND_SCOPED_ENUM_REF: {
+        IREE_RETURN_IF_ERROR(
+            loom_parse_format_scoped_enum_ref(parser, element, parsed));
         break;
       }
 

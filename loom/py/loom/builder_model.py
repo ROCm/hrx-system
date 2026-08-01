@@ -42,6 +42,7 @@ from loom.assembly import (
     ResultType,
     ResultTypeList,
     Scope,
+    ScopedEnumRef,
     StableKeyRef,
     SymbolRef,
     TemplateParam,
@@ -76,6 +77,7 @@ class BuilderParamKind(Enum):
     ATTR = auto()
     BLOCK_ARGS = auto()
     DESCRIPTOR_REF = auto()
+    STABLE_KEY_REF = auto()
     FLAGS = auto()
     FUNC_ARGS = auto()
     INDEX_LIST = auto()
@@ -312,6 +314,80 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
             )
         )
 
+    def append_symbolic_ref_param(
+        element: DescriptorRef | ScopedEnumRef | StableKeyRef,
+    ) -> None:
+        match element:
+            case DescriptorRef(key=name, ordinal=ordinal):
+                attr_def = op.attr(name)
+                ordinal_attr = op.attr(ordinal)
+                if attr_def is None or attr_def.attr_type != "string":
+                    raise ValueError(
+                        f"Op '{op.name}': DescriptorRef key field "
+                        f"'{name}' must be a string attr"
+                    )
+                if ordinal_attr is None or ordinal_attr.attr_type != "i64":
+                    raise ValueError(
+                        f"Op '{op.name}': DescriptorRef ordinal field "
+                        f"'{ordinal}' must be an i64 attr"
+                    )
+                params.append(
+                    BuilderParam(
+                        name=name,
+                        kind=BuilderParamKind.DESCRIPTOR_REF,
+                        type_hint=attr_type_hint(attr_def),
+                        attr_def=attr_def,
+                        ordinal_field=ordinal,
+                        doc=attr_def.doc,
+                    )
+                )
+                covered_attrs.add(name)
+                covered_attrs.add(ordinal)
+
+            case ScopedEnumRef(field=name):
+                attr_def = op.attr(name)
+                if attr_def is None or attr_def.attr_type != "scoped_enum":
+                    raise ValueError(
+                        f"Op '{op.name}': ScopedEnumRef field '{name}' "
+                        "must be a scoped_enum attr"
+                    )
+                params.append(
+                    BuilderParam(
+                        name=name,
+                        kind=BuilderParamKind.ATTR,
+                        type_hint="str",
+                        attr_def=attr_def,
+                        doc=attr_def.doc,
+                    )
+                )
+                covered_attrs.add(name)
+
+            case StableKeyRef(key=name, stable_id=stable_id):
+                attr_def = op.attr(name)
+                stable_id_attr = op.attr(stable_id)
+                if attr_def is None or attr_def.attr_type != "string":
+                    raise ValueError(
+                        f"Op '{op.name}': StableKeyRef key field "
+                        f"'{name}' must be a string attr"
+                    )
+                if stable_id_attr is None or stable_id_attr.attr_type != "i64":
+                    raise ValueError(
+                        f"Op '{op.name}': StableKeyRef stable ID field "
+                        f"'{stable_id}' must be an i64 attr"
+                    )
+                params.append(
+                    BuilderParam(
+                        name=name,
+                        kind=BuilderParamKind.STABLE_KEY_REF,
+                        type_hint=attr_type_hint(attr_def),
+                        attr_def=attr_def,
+                        stable_id_field=stable_id,
+                        doc=attr_def.doc,
+                    )
+                )
+                covered_attrs.add(name)
+                covered_attrs.add(stable_id)
+
     def walk(elements: tuple[FormatElement, ...] | list[FormatElement]) -> None:
         for element in elements:
             match element:
@@ -508,57 +584,8 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                     )
                     covered_attrs.add(name)
 
-                case DescriptorRef(key=name, ordinal=ordinal):
-                    attr_def = op.attr(name)
-                    ordinal_attr = op.attr(ordinal)
-                    if attr_def is None or attr_def.attr_type != "string":
-                        raise ValueError(
-                            f"Op '{op.name}': DescriptorRef key field "
-                            f"'{name}' must be a string attr"
-                        )
-                    if ordinal_attr is None or ordinal_attr.attr_type != "i64":
-                        raise ValueError(
-                            f"Op '{op.name}': DescriptorRef ordinal field "
-                            f"'{ordinal}' must be an i64 attr"
-                        )
-                    params.append(
-                        BuilderParam(
-                            name=name,
-                            kind=BuilderParamKind.DESCRIPTOR_REF,
-                            type_hint=attr_type_hint(attr_def),
-                            attr_def=attr_def,
-                            ordinal_field=ordinal,
-                            doc=attr_def.doc,
-                        )
-                    )
-                    covered_attrs.add(name)
-                    covered_attrs.add(ordinal)
-
-                case StableKeyRef(key=name, stable_id=stable_id):
-                    attr_def = op.attr(name)
-                    stable_id_attr = op.attr(stable_id)
-                    if attr_def is None or attr_def.attr_type != "string":
-                        raise ValueError(
-                            f"Op '{op.name}': StableKeyRef key field "
-                            f"'{name}' must be a string attr"
-                        )
-                    if stable_id_attr is None or stable_id_attr.attr_type != "i64":
-                        raise ValueError(
-                            f"Op '{op.name}': StableKeyRef stable ID field "
-                            f"'{stable_id}' must be an i64 attr"
-                        )
-                    params.append(
-                        BuilderParam(
-                            name=name,
-                            kind=BuilderParamKind.DESCRIPTOR_REF,
-                            type_hint=attr_type_hint(attr_def),
-                            attr_def=attr_def,
-                            stable_id_field=stable_id,
-                            doc=attr_def.doc,
-                        )
-                    )
-                    covered_attrs.add(name)
-                    covered_attrs.add(stable_id)
+                case DescriptorRef() | ScopedEnumRef() | StableKeyRef():
+                    append_symbolic_ref_param(element)
 
                 case PredicateList(field=name):
                     attr_def = op.attr(name)

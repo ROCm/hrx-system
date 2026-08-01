@@ -520,6 +520,9 @@ static iree_status_t loom_finalize_op(
   // parse construction boundary. Later use/def rebuilds must not recompute
   // semantic traits.
   loom_op_refresh_effective_traits(parser->module, op);
+  if (parsed->has_effective_traits) {
+    op->traits = parsed->effective_traits;
+  }
 
   // Link symbol-defining ops incrementally so the symbol table has
   // valid defining_op pointers throughout parsing. Use-def chains

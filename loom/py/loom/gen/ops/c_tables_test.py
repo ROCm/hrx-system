@@ -23,6 +23,7 @@ from loom.assembly import (
     Region,
     ResultType,
     ResultTypeList,
+    ScopedEnumRef,
     SymbolRef,
     TemplateParam,
     TemplateParamFlags,
@@ -1572,6 +1573,38 @@ def test_types_of_result_field_generates_result_type_list_format() -> None:
 
     assert "LOOM_FORMAT_KIND_RESULT_TYPE_LIST" in tables_c
     assert "LOOM_FORMAT_KIND_OPERAND_TYPES" not in tables_c
+
+
+def test_scoped_enum_generates_domain_aware_format_metadata() -> None:
+    op = Op(
+        "test.packet",
+        group=Dialect("test"),
+        attrs=[AttrDef("descriptor", "scoped_enum")],
+        format=[ScopedEnumRef("descriptor")],
+        generate_c_builder=False,
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert "LOOM_DEFINE_ATTR_SCOPED_ENUM(loom_test_packet_descriptor, 0)" in ops_h
+    assert "loom_test_packet_build(" not in ops_h
+    assert "loom_test_packet_build(" not in builders_c
+    assert '_BSTRING(10, "descriptor"), LOOM_ATTR_SCOPED_ENUM' in tables_c
+    assert "{LOOM_FORMAT_KIND_SCOPED_ENUM_REF, 0, 0}," in tables_c
+
+
+def test_scoped_enum_rejects_context_free_c_builder() -> None:
+    op = Op(
+        "test.packet",
+        group=Dialect("test"),
+        attrs=[AttrDef("descriptor", "scoped_enum")],
+        format=[ScopedEnumRef("descriptor")],
+    )
+
+    with _raises_value_error("requires a domain-aware handwritten C builder"):
+        generate_ops_h("test", 0, [op])
 
 
 def test_region_syntax_generates_format_selector() -> None:

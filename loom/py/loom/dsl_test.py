@@ -23,6 +23,7 @@ from loom.assembly import (
     Region,
     ResultType,
     Scope,
+    ScopedEnumRef,
     TypeOf,
     kw,
 )
@@ -2178,3 +2179,34 @@ class TestComparisonOp:
         # COLON TypeOf(lhs)
         assert len(op.format) == 7
         assert isinstance(op.format[0], Attr)
+
+
+class TestScopedEnumOp:
+    def test_scoped_enum_requires_one_top_level_reference(self) -> None:
+        with _raises(ValueError, match="exactly one top-level ScopedEnumRef"):
+            Op("test.packet", attrs=[AttrDef("descriptor", "scoped_enum")])
+        op = Op(
+            "test.packet",
+            attrs=[AttrDef("descriptor", "scoped_enum")],
+            format=[ScopedEnumRef("descriptor")],
+        )
+        assert op.attr("descriptor") is not None
+
+    def test_op_has_at_most_one_scoped_enum_identity(self) -> None:
+        with _raises(ValueError, match="at most one scoped_enum attr"):
+            Op(
+                "test.packet",
+                attrs=[
+                    AttrDef("first", "scoped_enum"),
+                    AttrDef("second", "scoped_enum"),
+                ],
+                format=[ScopedEnumRef("first"), ScopedEnumRef("second")],
+            )
+
+    def test_scoped_enum_reference_requires_scoped_enum_attr(self) -> None:
+        with _raises(ValueError, match="must name a scoped_enum attr"):
+            Op(
+                "test.packet",
+                attrs=[AttrDef("descriptor", "string")],
+                format=[ScopedEnumRef("descriptor")],
+            )

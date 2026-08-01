@@ -27,8 +27,7 @@ extern "C" {
 
 typedef struct loom_text_low_asm_environment_state_t
     loom_text_low_asm_environment_state_t;
-typedef struct loom_text_low_asm_descriptor_set_t
-    loom_text_low_asm_descriptor_set_t;
+typedef loom_low_repr_descriptor_set_t loom_text_low_asm_descriptor_set_t;
 typedef struct loom_text_low_asm_form_t loom_text_low_asm_form_t;
 typedef struct loom_text_low_asm_descriptor_handle_t
     loom_text_low_asm_descriptor_handle_t;

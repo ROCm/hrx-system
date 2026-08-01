@@ -762,6 +762,8 @@ def generate_builders_c(dialect_name: str, ops: Sequence[Op], *, include_path: s
     lines.append("")
 
     for op in ops:
+        if not op.generate_c_builder:
+            continue
         prefix = _c_prefix(op)
         enum_name = _c_enum_name(op)
         pattern = c_builder_model.detect_builder_pattern(op)

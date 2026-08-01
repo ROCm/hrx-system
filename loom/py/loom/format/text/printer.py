@@ -57,6 +57,7 @@ from loom.assembly import (
     ResultType,
     ResultTypeList,
     Scope,
+    ScopedEnumRef,
     StableKeyRef,
     SymbolRef,
     TemplateParam,
@@ -1556,6 +1557,12 @@ class Printer:
                     covered_attrs.add(key)
                     covered_attrs.add(ordinal)
                     value = fields.attr(key)
+                    if value:
+                        stream.emit(f"<{value}>", glue=True)
+
+                case ScopedEnumRef(field=name):
+                    covered_attrs.add(name)
+                    value = fields.attr(name)
                     if value:
                         stream.emit(f"<{value}>", glue=True)
 

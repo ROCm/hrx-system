@@ -1152,7 +1152,7 @@ iree_status_t loom_test_fact_encoding_layout_stride_hi_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_TEST_FACT_ENCODING_MATRIX_FIELD: Exposes an encoded-operand storage-schema summary field as an i64 constant. Supported fields are element_format, payload_packing, scale_topology, scale_format, secondary_scale_format, affine, rounding, codebook, sparsity, sparsity_group_elements, sparsity_group_nonzero_elements, payload_registers, payload_elements, scale_group_elements, scale_operands, zero_scale_fallback, and static_spec.
+// LOOM_OP_TEST_FACT_ENCODING_MATRIX_FIELD: Exposes an encoded-operand storage-schema summary field as an i64 constant. Supported fields are element_format, payload_packing, scale_topology, scale_format, secondary_scale_format, affine, rounding, codebook, sparsity, sparsity_group_elements, sparsity_group_nonzero_elements, payload_registers, payload_elements, scale_group_elements, scale_group_rank, scale_group_dim0 through scale_group_dim3, scale_operands, zero_scale_fallback, and static_spec.
 // %format = test.fact_encoding_matrix_field %schema["element_format"] : encoding<schema> -> i64
 LOOM_DEFINE_ISA(loom_test_fact_encoding_matrix_field_isa, LOOM_OP_TEST_FACT_ENCODING_MATRIX_FIELD)
 LOOM_DEFINE_OPERAND(loom_test_fact_encoding_matrix_field_value, 0)

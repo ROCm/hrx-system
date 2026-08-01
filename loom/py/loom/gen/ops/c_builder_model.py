@@ -35,6 +35,7 @@ from loom.assembly import (
     ResultType,
     ResultTypeList,
     Scope,
+    ScopedEnumRef,
     StableKeyRef,
     SymbolRef,
     TemplateParam,
@@ -589,6 +590,9 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                     )
                     covered_attrs.add(name)
                     covered_attrs.add(ordinal)
+
+                case ScopedEnumRef(field=name):
+                    raise ValueError(f"Op '{op.name}': scoped enum field '{name}' requires a domain-aware handwritten C builder")
 
                 case StableKeyRef(key=name, stable_id=stable_id):
                     attr_def = op.attr(name)

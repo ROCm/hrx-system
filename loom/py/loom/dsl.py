@@ -2816,6 +2816,7 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
         ResultTypeList,
         ScalarOf,
         Scope,
+        ScopedEnumRef,
         ShapeOf,
         StableKeyRef,
         SymbolRef,
@@ -2836,6 +2837,7 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
                 | SymbolRef(field=f)
                 | Flags(field=f)
                 | KeyRef(field=f)
+                | ScopedEnumRef(field=f)
                 | TemplateParam(field=f)
             ):
                 fields.add(f)
@@ -2957,6 +2959,42 @@ def _validate_format_fields(
             f"Op '{op_name}': format references undeclared fields: "
             f"{sorted(unknown)}. Declared: {sorted(declared)}"
         )
+
+
+def _validate_scoped_enum_fields(
+    op_name: str,
+    format_elements: tuple[FormatElement, ...],
+    attrs: tuple[AttrDef, ...],
+) -> None:
+    """Validates required representation-scoped enum syntax."""
+    from loom.assembly import ScopedEnumRef
+
+    scoped_attrs = [attr for attr in attrs if attr.attr_type == ATTR_TYPE_SCOPED_ENUM]
+    if len(scoped_attrs) > 1:
+        raise ValueError(
+            f"Op '{op_name}': at most one scoped_enum attr may define its "
+            "representation-scoped identity"
+        )
+    direct_refs = [
+        element.field
+        for element in format_elements
+        if isinstance(element, ScopedEnumRef)
+    ]
+    attrs_by_name = {attr.name: attr for attr in attrs}
+    for field in direct_refs:
+        attr = attrs_by_name.get(field)
+        if attr is None or attr.attr_type != ATTR_TYPE_SCOPED_ENUM:
+            raise ValueError(
+                f"Op '{op_name}': ScopedEnumRef field '{field}' must name a "
+                "scoped_enum attr"
+            )
+    for attr in scoped_attrs:
+        ref_count = direct_refs.count(attr.name)
+        if ref_count != 1:
+            raise ValueError(
+                f"Op '{op_name}': scoped_enum attr '{attr.name}' requires "
+                "exactly one top-level ScopedEnumRef"
+            )
 
 
 def _validate_legacy_formats(
@@ -3834,6 +3872,7 @@ class Op:
     type_transfer: str = ""  # C function name for semantic type transfer, or "".
     verify: str = ""  # C function name for op-specific verification, or "".
     builder_name: str | None = None  # Python builder method override, or None.
+    generate_c_builder: bool = True  # False when construction requires domain context.
     phase: OpPhase | None = None
     contracts: tuple[ContractFamily, ...] = ()
     category: OpCategory | None = None
@@ -3868,6 +3907,7 @@ class Op:
         type_transfer: str = "",
         verify: str = "",
         builder_name: str | None = None,
+        generate_c_builder: bool = True,
         phase: OpPhase | None = None,
         contracts: list[ContractFamily] | tuple[ContractFamily, ...] = (),
         category: OpCategory | None = None,
@@ -3906,6 +3946,7 @@ class Op:
         object.__setattr__(self, "type_transfer", type_transfer)
         object.__setattr__(self, "verify", verify)
         object.__setattr__(self, "builder_name", builder_name)
+        object.__setattr__(self, "generate_c_builder", generate_c_builder)
         object.__setattr__(self, "phase", phase)
         object.__setattr__(self, "contracts", tuple(contracts))
         if (
@@ -3998,6 +4039,7 @@ class Op:
         _validate_trait_field_contracts(
             name, frozen_operands, frozen_results, tuple(traits)
         )
+        _validate_scoped_enum_fields(name, frozen_format, frozen_attrs)
         # Validate that format elements reference declared fields.
         if frozen_format:
             _validate_format_fields(

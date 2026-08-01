@@ -208,6 +208,7 @@ def generate_ops_h(dialect_name: str, dialect_id: int, ops: Sequence[Op]) -> str
                 "dict": "LOOM_DEFINE_ATTR_DICT",
                 "encoding": "LOOM_DEFINE_ATTR_ENCODING",
                 "enum": "LOOM_DEFINE_ATTR_ENUM",
+                "scoped_enum": "LOOM_DEFINE_ATTR_SCOPED_ENUM",
                 "symbol": "LOOM_DEFINE_ATTR_SYMBOL",
                 "type": "LOOM_DEFINE_ATTR_TYPE",
                 "any": "LOOM_DEFINE_ATTR_ANY",
@@ -228,8 +229,10 @@ def generate_ops_h(dialect_name: str, dialect_id: int, ops: Sequence[Op]) -> str
             else:
                 lines.append(f"LOOM_DEFINE_REGION({prefix}_{region_def.name}, {desc.index})")
 
-        # Builder declaration.
-        lines.extend(c_builders.generate_builder_header_lines(op, shared_enums))
+        # Builder declaration. Some operations require domain-aware
+        # construction and deliberately expose only their handwritten builder.
+        if op.generate_c_builder:
+            lines.extend(c_builders.generate_builder_header_lines(op, shared_enums))
 
         # Canonicalize function declaration (hand-written, linked in).
         if op.canonicalize and op.canonicalize not in emitted_canonicalize_declarations:

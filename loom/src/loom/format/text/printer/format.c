@@ -608,6 +608,55 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         }
         break;
       }
+      case LOOM_FORMAT_KIND_SCOPED_ENUM_REF: {
+        // Stable spelling of a representation-scoped enum, glued to the op
+        // name: low.op<amdgpu.v_add_u32>.
+        if (element->field_index >= op->attribute_count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "format SCOPED_ENUM_REF field_index %u out of range (op has %u "
+              "attributes)",
+              element->field_index, op->attribute_count);
+        }
+        loom_attribute_t attr = loom_op_attrs(op)[element->field_index];
+        if (attr.kind != LOOM_ATTR_SCOPED_ENUM) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "format SCOPED_ENUM_REF field %u is not a scoped enum",
+              element->field_index);
+        }
+        if (!ctx->low_repr.descriptor_set) {
+          return iree_make_status(
+              IREE_STATUS_FAILED_PRECONDITION,
+              "printing a scoped descriptor requires an enclosing Low "
+              "representation contract");
+        }
+        if (!ctx->low_asm_environment.low_repr.vtable) {
+          return iree_make_status(
+              IREE_STATUS_FAILED_PRECONDITION,
+              "printing a scoped descriptor requires a Low representation "
+              "environment");
+        }
+        iree_string_view_t key = loom_low_repr_descriptor_key(
+            &ctx->low_asm_environment.low_repr, ctx->low_repr.descriptor_set,
+            loom_attr_as_scoped_enum(attr));
+        if (iree_string_view_is_empty(key)) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "scoped enum ordinal is outside the active Low representation "
+              "contract");
+        }
+        iree_host_size_t ref_start = ctx->stream->offset;
+        IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "<", true));
+        IREE_RETURN_IF_ERROR(loom_print_emit(ctx, key, true));
+        IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ">", true));
+        loom_print_did_write(ctx);
+        loom_print_report_field(
+            ctx,
+            loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index),
+            ref_start, ctx->stream->offset);
+        break;
+      }
       case LOOM_FORMAT_KIND_TEMPLATE_PARAM: {
         // Required compile-time op parameter in angle brackets, glued to
         // the op name: vector.reduce<addf>.

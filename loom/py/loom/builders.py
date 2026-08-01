@@ -198,17 +198,22 @@ class OpCallable:
                 case BuilderParamKind.DESCRIPTOR_REF:
                     if value is not None:
                         attributes[param.name] = value
-                        if param.stable_id_field is not None:
-                            attributes[param.stable_id_field] = stable_id_from_string(
-                                value
-                            )
-                        elif param.ordinal_field is not None:
+                        if param.ordinal_field is not None:
                             attributes[param.ordinal_field] = -1
                         else:
                             raise ValueError(
                                 f"descriptor ref builder parameter '{param.name}' "
-                                "has no hidden identity field"
+                                "has no ordinal field"
                             )
+                case BuilderParamKind.STABLE_KEY_REF:
+                    if value is not None:
+                        attributes[param.name] = value
+                        if param.stable_id_field is None:
+                            raise ValueError(
+                                f"stable key builder parameter '{param.name}' "
+                                "has no stable ID field"
+                            )
+                        attributes[param.stable_id_field] = stable_id_from_string(value)
                 case BuilderParamKind.FLAGS:
                     if value is not None:
                         attributes[param.name] = value
