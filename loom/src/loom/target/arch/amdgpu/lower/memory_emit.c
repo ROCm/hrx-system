@@ -532,11 +532,9 @@ static iree_status_t loom_amdgpu_emit_memory_packet(
     loom_named_attr_slice_t attrs, const loom_type_t* result_types,
     iree_host_size_t result_count, loom_op_t** out_op) {
   IREE_ASSERT(packet->access.descriptor != NULL);
-  IREE_ASSERT(packet->opcode_id != LOOM_STRING_ID_INVALID);
   *out_op = NULL;
   const loom_low_lower_resolved_descriptor_t descriptor = {
       .descriptor = packet->access.descriptor,
-      .opcode_id = packet->opcode_id,
   };
   IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
       context, &descriptor, operands, operand_count, attrs, result_types,
@@ -572,7 +570,6 @@ static iree_status_t loom_amdgpu_emit_memory_implicit_m0(
   *out_low_m0 = LOOM_VALUE_ID_INVALID;
   const loom_low_lower_resolved_descriptor_t packet_descriptor = {
       .descriptor = packet->access.descriptor,
-      .opcode_id = packet->opcode_id,
   };
   return loom_amdgpu_emit_m0_u32(context, source_op, &packet_descriptor, 0,
                                  out_low_m0);
@@ -2006,7 +2003,6 @@ static iree_status_t loom_amdgpu_lower_memory_packet_load(
     if (access->address_form == LOOM_AMDGPU_MEMORY_ADDRESS_FORM_DS_ADDTID) {
       const loom_low_lower_resolved_descriptor_t packet_descriptor = {
           .descriptor = access->descriptor,
-          .opcode_id = packet->opcode_id,
       };
       loom_value_id_t low_m0 = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_m0_u32(
@@ -2207,7 +2203,6 @@ static iree_status_t loom_amdgpu_lower_memory_packet_store(
     if (access->address_form == LOOM_AMDGPU_MEMORY_ADDRESS_FORM_DS_ADDTID) {
       const loom_low_lower_resolved_descriptor_t packet_descriptor = {
           .descriptor = access->descriptor,
-          .opcode_id = packet->opcode_id,
       };
       loom_value_id_t low_m0 = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_m0_u32(

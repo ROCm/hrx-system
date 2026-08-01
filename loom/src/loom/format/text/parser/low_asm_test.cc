@@ -180,6 +180,15 @@ static void ExpectTestLowCoreRegisterType(loom_type_t type,
   EXPECT_EQ(loom_low_register_type_unit_count(type), unit_count);
 }
 
+static void ExpectDescriptorOrdinal(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint32_t actual_descriptor_ordinal, iree_string_view_t descriptor_key) {
+  const uint32_t expected_descriptor_ordinal =
+      loom_low_descriptor_set_lookup_descriptor(descriptor_set, descriptor_key);
+  ASSERT_NE(expected_descriptor_ordinal, LOOM_LOW_DESCRIPTOR_ORDINAL_NONE);
+  EXPECT_EQ(actual_descriptor_ordinal, expected_descriptor_ordinal);
+}
+
 TEST_F(LowAsmParserTest, BuildsCanonicalLowOps) {
   loom_module_t* module = ParseOk(
       "test.low_asm_region asm<test.low.core> {\n"
@@ -204,8 +213,9 @@ TEST_F(LowAsmParserTest, BuildsCanonicalLowOps) {
 
   loom_op_t* const_op = loom_block_op(entry, 0);
   ASSERT_TRUE(loom_low_const_isa(const_op));
-  EXPECT_EQ(StringFromId(module, loom_low_const_opcode(const_op)),
-            "test.const.i32");
+  ExpectDescriptorOrdinal(loom_test_low_core_descriptor_set(),
+                          loom_low_const_descriptor(const_op),
+                          IREE_SV("test.const.i32"));
   loom_named_attr_slice_t const_attrs = loom_low_const_attrs(const_op);
   const loom_named_attr_t* i32_value =
       FindNamedAttr(module, const_attrs, IREE_SV("i32_value"));
@@ -220,7 +230,9 @@ TEST_F(LowAsmParserTest, BuildsCanonicalLowOps) {
 
   loom_op_t* add_op = loom_block_op(entry, 1);
   ASSERT_TRUE(loom_low_op_isa(add_op));
-  EXPECT_EQ(StringFromId(module, loom_low_op_opcode(add_op)), "test.add.i32");
+  ExpectDescriptorOrdinal(loom_test_low_core_descriptor_set(),
+                          loom_low_op_descriptor(add_op),
+                          IREE_SV("test.add.i32"));
   loom_value_slice_t add_operands = loom_low_op_operands(add_op);
   ASSERT_EQ(add_operands.count, 2u);
   EXPECT_EQ(add_operands.values[0], loom_low_const_result(const_op));
@@ -228,8 +240,9 @@ TEST_F(LowAsmParserTest, BuildsCanonicalLowOps) {
 
   loom_op_t* spv_op = loom_block_op(entry, 2);
   ASSERT_TRUE(loom_low_op_isa(spv_op));
-  EXPECT_EQ(StringFromId(module, loom_low_op_opcode(spv_op)),
-            "test.spv.op_iadd.i32");
+  ExpectDescriptorOrdinal(loom_test_low_core_descriptor_set(),
+                          loom_low_op_descriptor(spv_op),
+                          IREE_SV("test.spv.op_iadd.i32"));
   loom_value_slice_t spv_operands = loom_low_op_operands(spv_op);
   ASSERT_EQ(spv_operands.count, 2u);
   EXPECT_EQ(spv_operands.values[0], loom_low_op_results(add_op).values[0]);
@@ -237,7 +250,9 @@ TEST_F(LowAsmParserTest, BuildsCanonicalLowOps) {
 
   loom_op_t* call_op = loom_block_op(entry, 3);
   ASSERT_TRUE(loom_low_op_isa(call_op));
-  EXPECT_EQ(StringFromId(module, loom_low_op_opcode(call_op)), "test.call.i32");
+  ExpectDescriptorOrdinal(loom_test_low_core_descriptor_set(),
+                          loom_low_op_descriptor(call_op),
+                          IREE_SV("test.call.i32"));
   loom_named_attr_slice_t call_attrs = loom_low_op_attrs(call_op);
   const loom_named_attr_t* callee_ordinal =
       FindNamedAttr(module, call_attrs, IREE_SV("callee_ordinal"));
@@ -304,13 +319,15 @@ TEST_F(LowAsmParserTest, SelectsDescriptorSet) {
 
   loom_op_t* const_op = loom_block_op(entry, 0);
   ASSERT_TRUE(loom_low_const_isa(const_op));
-  EXPECT_EQ(StringFromId(module, loom_low_const_opcode(const_op)),
-            "test.alt.const.i32");
+  ExpectDescriptorOrdinal(loom_test_low_alt_descriptor_set(),
+                          loom_low_const_descriptor(const_op),
+                          IREE_SV("test.alt.const.i32"));
 
   loom_op_t* neg_op = loom_block_op(entry, 1);
   ASSERT_TRUE(loom_low_op_isa(neg_op));
-  EXPECT_EQ(StringFromId(module, loom_low_op_opcode(neg_op)),
-            "test.alt.neg.i32");
+  ExpectDescriptorOrdinal(loom_test_low_alt_descriptor_set(),
+                          loom_low_op_descriptor(neg_op),
+                          IREE_SV("test.alt.neg.i32"));
 
   loom_module_free(module);
 }
@@ -342,6 +359,8 @@ TEST_F(LowAsmParserTest, FunctionRepresentationContractSelectsDescriptorSet) {
   ASSERT_TRUE(loom_low_const_isa(const_op));
   const loom_low_descriptor_set_t* descriptor_set =
       loom_test_low_alt_descriptor_set();
+  ExpectDescriptorOrdinal(descriptor_set, loom_low_const_descriptor(const_op),
+                          IREE_SV("test.alt.const.i32"));
   const loom_type_t result_type =
       loom_module_value_type(module, loom_low_const_result(const_op));
   ASSERT_TRUE(loom_type_is_register(result_type));
@@ -407,7 +426,7 @@ TEST_F(LowAsmParserTest, RejectsUnavailableFunctionRepresentationContract) {
       capture_, loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 34));
   ASSERT_NE(diagnostic, nullptr);
   EXPECT_EQ(GetStringParam(*diagnostic, 0),
-            "function representation contract is not available");
+            "unknown Low representation contract");
   (void)diagnostics;
 }
 

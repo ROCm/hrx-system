@@ -2716,7 +2716,6 @@ static bool loom_amdgpu_memory_access_plan_push_packet(
   out_plan->packets[out_plan->packet_count++] =
       (loom_amdgpu_memory_packet_plan_t){
           .access = *access,
-          .opcode_id = LOOM_STRING_ID_INVALID,
           .source_register_offset = source_register_offset,
       };
   return true;
@@ -2982,22 +2981,6 @@ static iree_status_t loom_amdgpu_memory_access_plan_select_from_context(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_memory_access_plan_resolve(
-    loom_low_lower_context_t* context,
-    const loom_amdgpu_memory_access_plan_t* selected_plan,
-    loom_amdgpu_memory_access_plan_t* out_plan) {
-  *out_plan = *selected_plan;
-  for (uint32_t i = 0; i < out_plan->packet_count; ++i) {
-    loom_amdgpu_memory_packet_plan_t* packet = &out_plan->packets[i];
-    IREE_ASSERT(packet->access.descriptor != NULL);
-    loom_low_lower_resolved_descriptor_t descriptor = {0};
-    IREE_RETURN_IF_ERROR(loom_low_lower_resolve_descriptor_row(
-        context, packet->access.descriptor, &descriptor));
-    packet->opcode_id = descriptor.opcode_id;
-  }
-  return iree_ok_status();
-}
-
 static bool loom_amdgpu_memory_access_plan_cache_policy_can_lower(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_plan_t* plan) {
@@ -3026,8 +3009,7 @@ iree_status_t loom_amdgpu_select_memory_load_plan(
           loom_low_lower_context_descriptor_set(context), &selected_plan)) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_amdgpu_memory_access_plan_resolve(
-      context, &selected_plan, out_plan));
+  *out_plan = selected_plan;
   *out_selected = true;
   return iree_ok_status();
 }
@@ -3048,8 +3030,7 @@ iree_status_t loom_amdgpu_select_memory_store_plan(
           loom_low_lower_context_descriptor_set(context), &selected_plan)) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_amdgpu_memory_access_plan_resolve(
-      context, &selected_plan, out_plan));
+  *out_plan = selected_plan;
   *out_selected = true;
   return iree_ok_status();
 }

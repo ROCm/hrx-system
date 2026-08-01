@@ -171,6 +171,7 @@ loom_cc_test(
     srcs = ["target_binding_test.cc"],
     deps = [
         ":target_binding",
+        ":text_asm",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/format/text:parser",

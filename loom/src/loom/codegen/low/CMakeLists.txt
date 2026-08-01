@@ -154,6 +154,7 @@ loom_cc_test(
     "target_binding_test.cc"
   DEPS
     ::target_binding
+    ::text_asm
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main

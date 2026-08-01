@@ -368,50 +368,21 @@ iree_status_t loom_low_func_call_verify(
 LOOM_DEFINE_ISA(loom_low_op_isa, LOOM_OP_LOW_OP)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_op_operands, 0)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_low_op_results, 0)
-LOOM_DEFINE_ATTR_STRING(loom_low_op_opcode, 0)
-LOOM_DEFINE_ATTR_I64(loom_low_op_descriptor_ordinal, 1)
-LOOM_DEFINE_ATTR_DICT(loom_low_op_attrs, 2)
-LOOM_DEFINE_ATTR_I64_ARRAY(loom_low_op_memory_access, 3)
-iree_status_t loom_low_op_build(
-    loom_builder_t* builder,
-    loom_string_id_t opcode,
-    loom_may_consume const loom_value_id_t* operands,
-    iree_host_size_t operands_count,
-    loom_optional loom_named_attr_slice_t attrs,
-    loom_optional const int64_t* memory_access,
-    iree_host_size_t memory_access_count,
-    const loom_type_t* result_types,
-    iree_host_size_t result_count,
-    const loom_tied_result_t* tied_results,
-    iree_host_size_t tied_result_count,
-    loom_location_id_t location,
-    loom_op_t** out_op);
-iree_status_t loom_low_op_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter);
+LOOM_DEFINE_ATTR_SCOPED_ENUM(loom_low_op_descriptor, 0)
+LOOM_DEFINE_ATTR_DICT(loom_low_op_attrs, 1)
+LOOM_DEFINE_ATTR_I64_ARRAY(loom_low_op_memory_access, 2)
 
 // LOOM_OP_LOW_CONST: Descriptor-backed constant or immediate materialization into a register.
 // %c0 = low.const<amdgpu.s_mov_b32> {imm = 0} : reg<amdgpu.sgpr x1>
 LOOM_DEFINE_ISA(loom_low_const_isa, LOOM_OP_LOW_CONST)
 LOOM_DEFINE_RESULT(loom_low_const_result, 0)
-LOOM_DEFINE_ATTR_STRING(loom_low_const_opcode, 0)
-LOOM_DEFINE_ATTR_I64(loom_low_const_descriptor_ordinal, 1)
-LOOM_DEFINE_ATTR_DICT(loom_low_const_attrs, 2)
-iree_status_t loom_low_const_build(
-    loom_builder_t* builder,
-    loom_string_id_t opcode,
-    loom_optional loom_named_attr_slice_t attrs,
-    loom_type_t result_type,
-    loom_location_id_t location,
-    loom_op_t** out_op);
+LOOM_DEFINE_ATTR_SCOPED_ENUM(loom_low_const_descriptor, 0)
+LOOM_DEFINE_ATTR_DICT(loom_low_const_attrs, 1)
 iree_status_t loom_low_const_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
-iree_status_t loom_low_const_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_LOW_COPY: Explicit virtual-register copy used by lowering and allocation. Each copy produces a fresh virtual-register identity.
 // %copy = low.copy %value : reg<amdgpu.vgpr x1> -> reg<amdgpu.vgpr x1>

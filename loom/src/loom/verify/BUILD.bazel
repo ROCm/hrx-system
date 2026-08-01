@@ -53,6 +53,7 @@ loom_cc_test(
     srcs = ["verify_test.cc"],
     deps = [
         ":verify",
+        "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:json_sink",
@@ -62,6 +63,7 @@ loom_cc_test(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/testing:diagnostic_matchers",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base/internal:arena",

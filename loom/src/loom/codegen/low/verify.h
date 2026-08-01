@@ -37,7 +37,7 @@ typedef iree_status_t (*loom_low_verify_provider_begin_function_fn_t)(
 typedef iree_status_t (*loom_low_verify_provider_verify_op_fn_t)(
     const loom_low_verify_provider_t* provider,
     loom_low_verify_context_t* context, void* provider_state,
-    const loom_low_resolved_descriptor_packet_t* packet);
+    const loom_low_descriptor_packet_t* packet);
 typedef iree_status_t (*loom_low_verify_provider_end_function_fn_t)(
     const loom_low_verify_provider_t* provider,
     loom_low_verify_context_t* context, void* provider_state);

@@ -243,8 +243,7 @@ static iree_status_t loom_amdgpu_prefetch_select(
                                           &descriptor, &unused_decision_key)) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_low_lower_resolve_descriptor_row(
-      context, descriptor, &out_plan->descriptor));
+  out_plan->descriptor.descriptor = descriptor;
   IREE_RETURN_IF_ERROR(loom_amdgpu_intern(context, IREE_SV("offset"),
                                           &out_plan->offset_attr_name_id));
   IREE_RETURN_IF_ERROR(loom_amdgpu_intern(context, IREE_SV("count"),

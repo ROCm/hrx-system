@@ -662,11 +662,13 @@ loom_cc_test(
     "function_contract_test.cc"
   DEPS
     ::function_contract
+    ::low_descriptor_registry_core_test
     ::types
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
     loom::analysis::symbol_facts
+    loom::codegen::low::text_asm
     loom::error::error_defs
     loom::format::text::parser
     loom::ir

@@ -306,22 +306,22 @@ iree_status_t loom_spirv_select_workgroup_plan(
   }
 }
 
-static iree_status_t loom_spirv_resolve_descriptor_ref(
-    loom_low_lower_context_t* context, uint32_t descriptor_ref,
-    loom_low_lower_resolved_descriptor_t* out_descriptor) {
+static loom_low_lower_resolved_descriptor_t loom_spirv_resolve_descriptor_ref(
+    uint32_t descriptor_ref) {
   const loom_low_descriptor_t* descriptor =
       loom_low_descriptor_set_descriptor_at(
           loom_spirv_logical_core_descriptor_set(), descriptor_ref);
-  return loom_low_lower_resolve_descriptor_row(context, descriptor,
-                                               out_descriptor);
+  return (loom_low_lower_resolved_descriptor_t){
+      .descriptor = descriptor,
+  };
 }
 
 static iree_status_t loom_spirv_emit_i32_constant(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     int64_t value, loom_value_id_t* out_value_id) {
-  loom_low_lower_resolved_descriptor_t descriptor = {0};
-  IREE_RETURN_IF_ERROR(loom_spirv_resolve_descriptor_ref(
-      context, SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_CONSTANT_I32, &descriptor));
+  const loom_low_lower_resolved_descriptor_t descriptor =
+      loom_spirv_resolve_descriptor_ref(
+          SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_CONSTANT_I32);
   loom_string_id_t value_name_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_module_intern_string(loom_low_lower_context_module(context),
@@ -349,9 +349,9 @@ static iree_status_t loom_spirv_emit_i32_add(loom_low_lower_context_t* context,
                                              loom_value_id_t lhs,
                                              loom_value_id_t rhs,
                                              loom_value_id_t* out_value_id) {
-  loom_low_lower_resolved_descriptor_t descriptor = {0};
-  IREE_RETURN_IF_ERROR(loom_spirv_resolve_descriptor_ref(
-      context, SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_IADD_I32, &descriptor));
+  const loom_low_lower_resolved_descriptor_t descriptor =
+      loom_spirv_resolve_descriptor_ref(
+          SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_IADD_I32);
   loom_type_t result_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_lower_make_register_type(
       context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, 1, &result_type));
@@ -420,9 +420,8 @@ static iree_status_t loom_spirv_lower_workgroup_view(
   IREE_RETURN_IF_ERROR(
       loom_spirv_emit_workgroup_index(context, source_op, plan, &index));
 
-  loom_low_lower_resolved_descriptor_t descriptor = {0};
-  IREE_RETURN_IF_ERROR(loom_spirv_resolve_descriptor_ref(
-      context, plan->access_chain_descriptor_ref, &descriptor));
+  const loom_low_lower_resolved_descriptor_t descriptor =
+      loom_spirv_resolve_descriptor_ref(plan->access_chain_descriptor_ref);
   loom_type_t element_pointer_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_lower_make_register_type(
       context, plan->element_pointer_reg_class_id, 1, &element_pointer_type));

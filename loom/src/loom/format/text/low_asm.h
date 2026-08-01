@@ -48,8 +48,8 @@ typedef struct loom_text_low_asm_packet_descriptor_t {
   const loom_text_low_asm_form_t* form;
   // Opaque low descriptor handle owned by the environment implementation.
   const loom_text_low_asm_descriptor_handle_t* descriptor;
-  // Stable canonical opcode key to store on the emitted low operation.
-  iree_string_view_t opcode_key;
+  // Stable canonical descriptor key used only at presentation boundaries.
+  iree_string_view_t descriptor_key;
   // Surface mnemonic emitted or parsed for this asm packet.
   iree_string_view_t mnemonic;
   // Number of SSA results produced by this asm packet.
@@ -207,13 +207,13 @@ typedef iree_status_t (*loom_text_low_asm_lookup_packet_fn_t)(
     iree_string_view_t mnemonic,
     loom_text_low_asm_packet_descriptor_t* out_packet);
 
-// Attempts to explain an otherwise unknown mnemonic with a target-owned
-// structured diagnostic. Returns OK with |out_diagnostic->error| NULL when no
-// diagnostic matches.
-typedef iree_status_t (*loom_text_low_asm_diagnose_unknown_mnemonic_fn_t)(
+// Attempts to explain an otherwise unknown stable descriptor key or compact
+// assembly mnemonic with a target-owned structured diagnostic. Returns OK with
+// |out_diagnostic->error| NULL when no diagnostic matches.
+typedef iree_status_t (*loom_text_low_asm_diagnose_unknown_packet_fn_t)(
     const loom_text_low_asm_environment_state_t* state,
     const loom_text_low_asm_descriptor_set_t* descriptor_set,
-    iree_string_view_t mnemonic,
+    iree_string_view_t packet_name,
     loom_text_low_asm_diagnostic_t* out_diagnostic);
 
 typedef iree_status_t (*loom_text_low_asm_infer_result_type_fn_t)(
@@ -303,8 +303,8 @@ typedef struct loom_text_low_asm_vtable_t {
   loom_text_low_asm_lookup_descriptor_set_fn_t lookup_descriptor_set;
   // Resolves a mnemonic within a descriptor-set handle to a packet descriptor.
   loom_text_low_asm_lookup_packet_fn_t lookup_packet;
-  // Optional target-owned explanation for unknown mnemonics.
-  loom_text_low_asm_diagnose_unknown_mnemonic_fn_t diagnose_unknown_mnemonic;
+  // Optional target-owned explanation for unknown packet names.
+  loom_text_low_asm_diagnose_unknown_packet_fn_t diagnose_unknown_packet;
   // Infers a result type when the asm packet omits explicit type annotations.
   loom_text_low_asm_infer_result_type_fn_t infer_result_type;
   // Validates an explicit asm result type annotation against the descriptor.

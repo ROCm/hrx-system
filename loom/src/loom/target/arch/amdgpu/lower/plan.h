@@ -1250,8 +1250,6 @@ typedef struct loom_amdgpu_memory_access_t {
 typedef struct loom_amdgpu_memory_packet_plan_t {
   // Selected access form for this emitted direct memory packet.
   loom_amdgpu_memory_access_t access;
-  // Module string ID for access.descriptor's opcode spelling.
-  loom_string_id_t opcode_id;
   // First 32-bit source register moved by this packet.
   uint32_t source_register_offset;
 } loom_amdgpu_memory_packet_plan_t;

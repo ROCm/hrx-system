@@ -141,7 +141,7 @@ static iree_status_t loom_wasm_low_begin_function(
 static iree_status_t loom_wasm_low_verify_op(
     const loom_low_verify_provider_t* provider,
     loom_low_verify_context_t* context, void* provider_state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   (void)provider;
   loom_wasm_low_verify_state_t* state =
       (loom_wasm_low_verify_state_t*)provider_state;

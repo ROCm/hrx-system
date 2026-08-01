@@ -13,7 +13,6 @@
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/instruction_constraints.h"
-#include "loom/target/arch/amdgpu/low_aliases.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 typedef struct loom_amdgpu_low_verify_state_t {
@@ -58,10 +57,15 @@ static iree_status_t loom_amdgpu_low_verify_begin_function(
 static iree_status_t loom_amdgpu_low_verify_instruction_constraints(
     loom_low_verify_context_t* context,
     const loom_amdgpu_low_verify_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   if (state->properties.instruction_constraints == 0) {
     return iree_ok_status();
   }
+  const iree_string_view_t descriptor_key =
+      loom_low_descriptor_packet_diagnostic_key(state->target->descriptor_set,
+                                                packet);
+  const uint16_t descriptor_attr_index =
+      loom_low_descriptor_packet_attribute_index(packet);
   loom_amdgpu_instruction_constraint_bits_t active_constraints =
       loom_amdgpu_instruction_constraints_for_descriptor(
           state->target->descriptor_set, packet->descriptor) &
@@ -77,9 +81,9 @@ static iree_status_t loom_amdgpu_low_verify_instruction_constraints(
     const loom_diagnostic_param_t params[] = {
         loom_param_string(state->function_name),
         loom_param_with_field_ref(
-            loom_param_string(packet->key),
+            loom_param_string(descriptor_key),
             loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
-                                      packet->key_attr_index)),
+                                      descriptor_attr_index)),
         loom_param_string(state->target->descriptor_set_key),
         loom_param_string(state->target_name),
         loom_param_string(
@@ -94,29 +98,6 @@ static iree_status_t loom_amdgpu_low_verify_instruction_constraints(
     if (loom_low_verify_context_should_stop(context)) break;
   }
   return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_low_emit_blocked_alias(
-    loom_low_verify_context_t* context,
-    const loom_amdgpu_low_verify_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
-    const loom_amdgpu_low_blocked_alias_t* alias) {
-  const loom_diagnostic_param_t params[] = {
-      loom_param_string(state->function_name),
-      loom_param_with_field_ref(
-          loom_param_string(packet->key),
-          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
-                                    packet->key_attr_index)),
-      loom_param_string(state->target->descriptor_set_key),
-      loom_param_string(alias->alias_mnemonic),
-      loom_param_string(alias->alias_semantics),
-      loom_param_string(alias->replacement_descriptor_name),
-      loom_param_string(alias->replacement_mnemonic),
-      loom_param_string(alias->decision_key),
-      loom_param_string(alias->reason_key),
-  };
-  return loom_low_verify_context_emit(context, packet->op, LOOM_ERR_AMDGPU_031,
-                                      params, IREE_ARRAYSIZE(params));
 }
 
 static const loom_low_immediate_t* loom_amdgpu_low_find_dpp_control_immediate(
@@ -173,7 +154,7 @@ static bool loom_amdgpu_low_find_immediate_value(
 static iree_status_t loom_amdgpu_low_verify_dpp_control(
     loom_low_verify_context_t* context,
     const loom_amdgpu_low_verify_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   const loom_low_descriptor_t* descriptor = packet->descriptor;
   const loom_amdgpu_encoding_format_flags_t format_flags =
       loom_amdgpu_encoding_format_flags(descriptor->encoding_format_id);
@@ -184,6 +165,8 @@ static iree_status_t loom_amdgpu_low_verify_dpp_control(
 
   const loom_low_descriptor_set_t* descriptor_set =
       state->target->descriptor_set;
+  const iree_string_view_t descriptor_key =
+      loom_low_descriptor_packet_diagnostic_key(descriptor_set, packet);
   const loom_low_immediate_t* immediate =
       loom_amdgpu_low_find_dpp_control_immediate(descriptor_set, descriptor);
   if (immediate == NULL) {
@@ -208,9 +191,10 @@ static iree_status_t loom_amdgpu_low_verify_dpp_control(
   const loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_with_field_ref(
-          loom_param_string(packet->key),
-          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
-                                    packet->key_attr_index)),
+          loom_param_string(descriptor_key),
+          loom_diagnostic_field_ref(
+              LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+              loom_low_descriptor_packet_attribute_index(packet))),
       loom_param_string(state->target->descriptor_set_key),
       loom_param_with_field_ref(
           loom_param_string(immediate_name),
@@ -258,7 +242,7 @@ static iree_status_t loom_amdgpu_low_verify_storage_address(
 static iree_status_t loom_amdgpu_low_verify_op(
     const loom_low_verify_provider_t* provider,
     loom_low_verify_context_t* context, void* provider_state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   (void)provider;
   loom_amdgpu_low_verify_state_t* state =
       (loom_amdgpu_low_verify_state_t*)provider_state;
@@ -270,18 +254,9 @@ static iree_status_t loom_amdgpu_low_verify_op(
   if (packet->kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     return iree_ok_status();
   }
-  if (packet->descriptor != NULL) {
-    IREE_RETURN_IF_ERROR(
-        loom_amdgpu_low_verify_dpp_control(context, state, packet));
-    return loom_amdgpu_low_verify_instruction_constraints(context, state,
-                                                          packet);
-  }
-  const loom_amdgpu_low_blocked_alias_t* alias =
-      loom_amdgpu_low_blocked_alias_lookup(packet->key);
-  if (alias == NULL) {
-    return iree_ok_status();
-  }
-  return loom_amdgpu_low_emit_blocked_alias(context, state, packet, alias);
+  IREE_RETURN_IF_ERROR(
+      loom_amdgpu_low_verify_dpp_control(context, state, packet));
+  return loom_amdgpu_low_verify_instruction_constraints(context, state, packet);
 }
 
 const loom_low_verify_provider_t loom_amdgpu_low_verify_provider = {

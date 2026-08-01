@@ -12,6 +12,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/symbol_dependencies.h"
+#include "loom/codegen/low/text_asm.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -20,6 +21,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/target/entry_selection.h"
+#include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/target/reporting/artifact_manifest.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/util/stream.h"
@@ -46,6 +48,7 @@ class ArtifactManifestCollectTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_GLOBAL, loom_global_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
+    loom_target_core_test_low_descriptor_registry_initialize(&low_registry_);
     iree_arena_initialize(&block_pool_, &analysis_arena_);
   }
 
@@ -69,6 +72,8 @@ class ArtifactManifestCollectTest : public ::testing::Test {
   ModulePtr ParseModule(const char* source) {
     loom_module_t* module = nullptr;
     loom_text_parse_options_t options = {};
+    loom_low_descriptor_text_asm_environment_initialize(
+        &low_registry_.registry, &options.low_asm_environment);
     IREE_CHECK_OK(loom_text_parse(iree_make_cstring_view(source),
                                   IREE_SV("artifact_manifest_collect.loom"),
                                   &context_, &block_pool_, &options, &module));
@@ -125,6 +130,7 @@ class ArtifactManifestCollectTest : public ::testing::Test {
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   iree_arena_allocator_t analysis_arena_;
+  loom_target_low_descriptor_registry_t low_registry_ = {};
 };
 
 TEST_F(ArtifactManifestCollectTest, CollectsSummaryFunctionsAndGlobals) {

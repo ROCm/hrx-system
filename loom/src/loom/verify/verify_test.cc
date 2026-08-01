@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
 #include "loom/error/error_defs.h"
 #include "loom/error/json_sink.h"
@@ -22,6 +23,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/util/stream.h"
 
@@ -116,6 +118,7 @@ class VerifyTest : public ::testing::Test {
     RegisterTestDialect(&context_);
     RegisterLowDialect(&context_);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
+    loom_target_core_test_low_descriptor_registry_initialize(&low_registry_);
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("verify_test"),
                                         &block_pool_, NULL,
                                         iree_allocator_system(), &module_));
@@ -200,6 +203,8 @@ class VerifyTest : public ::testing::Test {
     loom_text_parse_options_t parse_options = {};
     parse_options.diagnostic_sink = parse_capture.sink();
     parse_options.max_errors = 20;
+    loom_low_descriptor_text_asm_environment_initialize(
+        &low_registry_.registry, &parse_options.low_asm_environment);
     loom_module_t* parsed_module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(
         iree_make_cstring_view(source), iree_make_cstring_view(filename),
@@ -314,6 +319,7 @@ class VerifyTest : public ::testing::Test {
 
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
+  loom_target_low_descriptor_registry_t low_registry_ = {};
   loom_module_t* module_ = nullptr;
   loom_builder_t builder_;
   DiagnosticCollector collector_;

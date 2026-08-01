@@ -213,9 +213,8 @@ static bool loom_low_select_operand_form_matches(
 }
 
 static bool loom_low_packet_has_operand_forms(
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   return packet->kind == LOOM_LOW_DESCRIPTOR_PACKET_OP &&
-         packet->descriptor != NULL &&
          packet->descriptor->operand_form_count != 0;
 }
 
@@ -349,12 +348,11 @@ static iree_status_t loom_low_select_operand_forms_function_has_candidate(
       if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
         continue;
       }
-      loom_low_resolved_descriptor_packet_t packet = {0};
-      IREE_RETURN_IF_ERROR(
-          loom_low_resolve_descriptor_packet(module, target, op, &packet));
+      loom_low_descriptor_packet_t packet = {0};
+      loom_low_descriptor_packet_initialize(target->descriptor_set, op,
+                                            &packet);
       if (loom_low_packet_has_operand_forms(&packet) ||
           (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_OP &&
-           packet.descriptor != NULL &&
            loom_low_descriptor_is_select(target->descriptor_set,
                                          packet.descriptor))) {
         *out_has_candidate = true;
@@ -814,9 +812,9 @@ static iree_status_t loom_low_select_operand_form_rematerialize_operand(
     return iree_ok_status();
   }
 
-  loom_low_resolved_descriptor_packet_t producer_packet = {0};
-  IREE_RETURN_IF_ERROR(loom_low_resolve_descriptor_packet(
-      state->module, state->target, defining_op, &producer_packet));
+  loom_low_descriptor_packet_t producer_packet = {0};
+  loom_low_descriptor_packet_initialize(state->target->descriptor_set,
+                                        defining_op, &producer_packet);
   if (!loom_low_packet_kind_may_rematerialize(producer_packet.kind) ||
       !loom_low_descriptor_result_can_rematerialize(
           state->target->descriptor_set, producer_packet.descriptor,
@@ -1074,12 +1072,6 @@ static iree_status_t loom_low_select_operand_form_rewrite_packet(
   const loom_low_descriptor_t* replacement_descriptor =
       &descriptor_set->descriptors[form->replacement_descriptor_ordinal];
 
-  iree_string_view_t replacement_key = loom_low_descriptor_set_string(
-      descriptor_set, replacement_descriptor->key_string_offset);
-  loom_string_id_t replacement_key_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_builder_intern_string(
-      &rewriter->builder, replacement_key, &replacement_key_id));
-
   loom_value_id_t* operands = NULL;
   if (form->operand_map_count != 0) {
     IREE_RETURN_IF_ERROR(
@@ -1162,10 +1154,10 @@ static iree_status_t loom_low_select_operand_form_rewrite_packet(
   loom_builder_set_before(&rewriter->builder, op);
   loom_op_t* replacement_op = NULL;
   iree_status_t status = loom_low_build_resolved_descriptor_op(
-      &rewriter->builder, descriptor_set, replacement_descriptor,
-      replacement_key_id, operands, form->operand_map_count, replacement_attrs,
-      result_types, op->result_count, tied_results, tied_result_count,
-      op->location, &replacement_op);
+      &rewriter->builder, descriptor_set, replacement_descriptor, operands,
+      form->operand_map_count, replacement_attrs, result_types,
+      op->result_count, tied_results, tied_result_count, op->location,
+      &replacement_op);
   loom_builder_restore(&rewriter->builder, saved_ip);
   IREE_RETURN_IF_ERROR(status);
   loom_op_attrs(replacement_op)[loom_low_op_memory_access_ATTR_INDEX] =
@@ -1187,12 +1179,11 @@ static iree_status_t loom_low_select_operand_form_rewrite_packet(
 static iree_status_t loom_low_select_operand_forms_try_rewrite_packet(
     loom_low_select_operand_forms_state_t* state, loom_rewriter_t* rewriter,
     loom_op_t* op) {
-  loom_low_resolved_descriptor_packet_t packet = {0};
-  IREE_RETURN_IF_ERROR(loom_low_resolve_descriptor_packet(
-      state->module, state->target, op, &packet));
+  loom_low_descriptor_packet_t packet = {0};
+  loom_low_descriptor_packet_initialize(state->target->descriptor_set, op,
+                                        &packet);
   if (!loom_low_packet_has_operand_forms(&packet)) {
-    if (packet.kind != LOOM_LOW_DESCRIPTOR_PACKET_OP ||
-        packet.descriptor == NULL) {
+    if (packet.kind != LOOM_LOW_DESCRIPTOR_PACKET_OP) {
       return iree_ok_status();
     }
     bool folded = false;

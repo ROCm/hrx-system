@@ -63,6 +63,14 @@ iree_status_t loom_parser_emit_low_asm_error(loom_parser_t* parser,
                                              loom_token_t token,
                                              iree_string_view_t detail);
 
+// Gives the active representation provider an opportunity to diagnose an
+// unknown stable descriptor key or compact-assembly mnemonic. Sets
+// |out_emitted| when the provider emitted a structured diagnostic.
+iree_status_t loom_parser_try_emit_unknown_low_packet_diagnostic(
+    loom_parser_t* parser,
+    const loom_text_low_asm_descriptor_set_t* descriptor_set,
+    loom_token_t name_token, bool* out_emitted);
+
 // Emits a low-asm result-count mismatch diagnostic.
 iree_status_t loom_parser_emit_low_asm_result_count_mismatch(
     loom_parser_t* parser, loom_token_t mnemonic_token, uint32_t expected_count,

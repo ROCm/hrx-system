@@ -119,12 +119,9 @@ class AmdgpuControlPacketTest : public ::testing::Test {
     ASSERT_TRUE(loom_low_op_isa(op));
     const loom_low_descriptor_t* descriptor = DescriptorForRef(descriptor_ref);
     ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(loom_low_op_descriptor_ordinal(op),
+    EXPECT_EQ(loom_low_op_descriptor(op),
               loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                          descriptor));
-    EXPECT_EQ(ToString(String(loom_low_op_opcode(op))),
-              ToString(loom_low_descriptor_set_string(
-                  descriptor_set_, descriptor->key_string_offset)));
   }
 
   void ExpectLowConstDescriptorRef(
@@ -132,12 +129,9 @@ class AmdgpuControlPacketTest : public ::testing::Test {
     ASSERT_TRUE(loom_low_const_isa(op));
     const loom_low_descriptor_t* descriptor = DescriptorForRef(descriptor_ref);
     ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(loom_low_const_descriptor_ordinal(op),
+    EXPECT_EQ(loom_low_const_descriptor(op),
               loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                          descriptor));
-    EXPECT_EQ(ToString(String(loom_low_const_opcode(op))),
-              ToString(loom_low_descriptor_set_string(
-                  descriptor_set_, descriptor->key_string_offset)));
   }
 
   void ExpectControlOp(const loom_op_t* op,

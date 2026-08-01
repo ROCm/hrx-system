@@ -19,6 +19,7 @@
 #include "loom/codegen/low/descriptors.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/ops/low/ops.h"
 #include "loom/target/facts.h"
 #include "loom/target/types.h"
 
@@ -79,42 +80,76 @@ typedef enum loom_low_descriptor_packet_kind_e {
   LOOM_LOW_DESCRIPTOR_PACKET_CONST = 2,
 } loom_low_descriptor_packet_kind_t;
 
-typedef enum loom_low_descriptor_packet_resolution_e {
-  // Not a descriptor-backed low packet.
-  LOOM_LOW_DESCRIPTOR_PACKET_RESOLUTION_NONE = 0,
-  // Packet key resolved to a descriptor row in the selected target contract.
-  LOOM_LOW_DESCRIPTOR_PACKET_RESOLUTION_RESOLVED = 1,
-  // Packet key was not present in the selected target contract.
-  LOOM_LOW_DESCRIPTOR_PACKET_RESOLUTION_MISSING = 2,
-  // Packet carried an explicit descriptor ordinal whose row key differs from
-  // the packet key in the selected target contract.
-  LOOM_LOW_DESCRIPTOR_PACKET_RESOLUTION_ORDINAL_KEY_MISMATCH = 3,
-} loom_low_descriptor_packet_resolution_t;
-
 // Target-bound descriptor row for one descriptor-backed low packet.
 //
-// Text IR names descriptor packets with stable spellings and stores an
-// unresolved ordinal sentinel. This boundary resolves the spelling through the
-// selected descriptor set; compiled in-memory consumers carry the descriptor
-// pointer directly.
-typedef struct loom_low_resolved_descriptor_packet_t {
+// Canonical Low IR stores a required dense descriptor ordinal in the enclosing
+// function's selected representation contract. Compiler consumers project the
+// corresponding descriptor pointer directly; stable descriptor spellings are
+// recovered only at text, bytecode, and diagnostic boundaries.
+typedef struct loom_low_descriptor_packet_t {
   // Operation represented by this packet record.
   const loom_op_t* op;
   // Descriptor packet kind, or NONE for non-packet ops.
   loom_low_descriptor_packet_kind_t kind;
-  // Borrowed textual descriptor key used for diagnostics.
-  iree_string_view_t key;
-  // Attribute index containing |key| in text-form IR.
-  uint16_t key_attr_index;
-  // Resolution state for descriptor-backed packets.
-  loom_low_descriptor_packet_resolution_t resolution;
-  // Dense descriptor ordinal used for explicit packet rows or lookup results.
+  // Dense descriptor ordinal in the function's representation contract.
   uint32_t descriptor_ordinal;
-  // Borrowed descriptor row key, or empty when no row was resolved.
-  iree_string_view_t descriptor_key;
-  // Descriptor row in |target->descriptor_set|, or NULL when unresolved.
+  // Borrowed descriptor row in the function's representation contract.
   const loom_low_descriptor_t* descriptor;
-} loom_low_resolved_descriptor_packet_t;
+} loom_low_descriptor_packet_t;
+
+// Returns the descriptor packet kind for |op|.
+static inline loom_low_descriptor_packet_kind_t loom_low_descriptor_packet_kind(
+    const loom_op_t* op) {
+  if (loom_low_op_isa(op)) return LOOM_LOW_DESCRIPTOR_PACKET_OP;
+  if (loom_low_const_isa(op)) return LOOM_LOW_DESCRIPTOR_PACKET_CONST;
+  return LOOM_LOW_DESCRIPTOR_PACKET_NONE;
+}
+
+// Returns the required descriptor ordinal for a descriptor-backed packet.
+static inline uint32_t loom_low_descriptor_packet_ordinal(
+    const loom_op_t* op, loom_low_descriptor_packet_kind_t kind) {
+  return kind == LOOM_LOW_DESCRIPTOR_PACKET_OP ? loom_low_op_descriptor(op)
+                                               : loom_low_const_descriptor(op);
+}
+
+// Projects one verified Low packet into its descriptor row.
+//
+// The function-scoped Low verifier proves that packet ordinals are in range.
+// Subsequent compiler passes use that invariant directly: this helper performs
+// no lookup, fallback, or repeated validation.
+static inline void loom_low_descriptor_packet_initialize(
+    const loom_low_descriptor_set_t* descriptor_set, const loom_op_t* op,
+    loom_low_descriptor_packet_t* out_packet) {
+  const loom_low_descriptor_packet_kind_t kind =
+      loom_low_descriptor_packet_kind(op);
+  *out_packet = (loom_low_descriptor_packet_t){
+      /*.op=*/op,
+      /*.kind=*/kind,
+  };
+  if (kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) return;
+  out_packet->descriptor_ordinal = loom_low_descriptor_packet_ordinal(op, kind);
+  out_packet->descriptor =
+      &descriptor_set->descriptors[out_packet->descriptor_ordinal];
+}
+
+// Returns the packet field index used to attach descriptor diagnostics.
+static inline uint16_t loom_low_descriptor_packet_attribute_index(
+    const loom_low_descriptor_packet_t* packet) {
+  if (packet->kind == LOOM_LOW_DESCRIPTOR_PACKET_OP) {
+    return loom_low_op_descriptor_ATTR_INDEX;
+  }
+  return loom_low_const_descriptor_ATTR_INDEX;
+}
+
+// Returns the stable descriptor spelling for diagnostics and presentation.
+// Compiler matching and dispatch must use |descriptor_ordinal| or
+// |descriptor| instead.
+static inline iree_string_view_t loom_low_descriptor_packet_diagnostic_key(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_packet_t* packet) {
+  return loom_low_descriptor_set_string(descriptor_set,
+                                        packet->descriptor->key_string_offset);
+}
 
 // Resolves the effective target facts and descriptor set for |low_func_op|
 // using caller-owned symbol facts.
@@ -132,15 +167,6 @@ iree_status_t loom_low_resolve_function_target(
     const loom_target_facts_t* effective_target_facts,
     const loom_low_descriptor_registry_t* registry,
     iree_diagnostic_emitter_t emitter, loom_low_resolved_target_t* out_target);
-
-// Resolves |op| as a descriptor-backed low packet in |target|.
-//
-// Non-packet ops return OK with kind NONE. Missing user descriptors return OK
-// with a non-NONE kind and NULL descriptor so callers can emit diagnostics
-// using their own error domains and continue when appropriate.
-iree_status_t loom_low_resolve_descriptor_packet(
-    const loom_module_t* module, const loom_low_resolved_target_t* target,
-    const loom_op_t* op, loom_low_resolved_descriptor_packet_t* out_packet);
 
 #ifdef __cplusplus
 }  // extern "C"

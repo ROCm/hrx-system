@@ -45,19 +45,6 @@ static iree_status_t loom_low_schedule_emit_with_related(
   return iree_diagnostic_emit(state->options->emitter, &emission);
 }
 
-iree_status_t loom_low_schedule_emit_missing_descriptor(
-    loom_low_schedule_build_state_t* state, const loom_op_t* op,
-    iree_string_view_t opcode) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(
-          loom_low_diagnostic_function_name(state->module, state->function_op)),
-      loom_param_string(opcode),
-      loom_param_string(state->target.descriptor_set_key),
-  };
-  return loom_low_schedule_emit(state, op, LOOM_ERR_TARGET_045, params,
-                                IREE_ARRAYSIZE(params));
-}
-
 static iree_string_view_t loom_low_schedule_dependency_kind_name(
     loom_low_schedule_dependency_kind_t kind) {
   switch (kind) {

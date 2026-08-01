@@ -120,7 +120,7 @@ static bool loom_print_attr_is_optional(const loom_op_vtable_t* vtable,
                           LOOM_ATTR_OPTIONAL);
 }
 
-static iree_status_t loom_print_update_low_repr_context(
+static iree_status_t loom_print_bind_function_low_repr(
     loom_print_context_t* ctx, const loom_op_vtable_t* vtable,
     uint16_t attr_index, loom_attribute_t attr) {
   if (!vtable->func_like ||
@@ -139,12 +139,20 @@ static iree_status_t loom_print_update_low_repr_context(
       .contract_key = ctx->module->strings.entries[attr.string_id],
   };
   if (!ctx->low_asm_environment.vtable ||
-      !ctx->low_asm_environment.vtable->lookup_descriptor_set) {
-    return iree_ok_status();
+      !ctx->low_asm_environment.low_repr.vtable) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "printing a Low function requires a representation environment");
   }
-  return ctx->low_asm_environment.vtable->lookup_descriptor_set(
-      ctx->low_asm_environment.state, ctx->low_repr.contract_key,
-      &ctx->low_repr.descriptor_set);
+  ctx->low_repr.descriptor_set = loom_low_repr_lookup_descriptor_set(
+      &ctx->low_asm_environment.low_repr, ctx->low_repr.contract_key);
+  if (!ctx->low_repr.descriptor_set) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "Low representation contract '%.*s' was not found",
+                            (int)ctx->low_repr.contract_key.size,
+                            ctx->low_repr.contract_key.data);
+  }
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -565,7 +573,7 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
               loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index),
               key_ref_start, ctx->stream->offset);
         }
-        IREE_RETURN_IF_ERROR(loom_print_update_low_repr_context(
+        IREE_RETURN_IF_ERROR(loom_print_bind_function_low_repr(
             ctx, vtable, element->field_index, attr));
         break;
       }

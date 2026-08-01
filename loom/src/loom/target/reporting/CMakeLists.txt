@@ -166,6 +166,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::analysis::symbol_dependencies
+    loom::codegen::low::text_asm
     loom::format::text::parser
     loom::ir
     loom::ops::func
@@ -173,6 +174,7 @@ loom_cc_test(
     loom::ops::low
     loom::ops::target
     loom::target::entry_selection
+    loom::target::low_descriptor_registry_core_test
     loom::testing::module_ptr
     loom::util::stream
 )

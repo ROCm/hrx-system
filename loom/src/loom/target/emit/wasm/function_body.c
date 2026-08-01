@@ -1241,16 +1241,11 @@ static iree_status_t loom_wasm_emit_op(loom_wasm_emit_state_t* state,
   if (iree_any_bit_set(op->traits, LOOM_TRAIT_HINT)) {
     return iree_ok_status();
   }
-  loom_low_resolved_descriptor_packet_t packet = {0};
-  IREE_RETURN_IF_ERROR(loom_low_resolve_descriptor_packet(
-      state->allocation->module, &state->allocation->target, op, &packet));
+  loom_low_descriptor_packet_t packet = {0};
+  loom_low_descriptor_packet_initialize(
+      state->allocation->target.descriptor_set, op, &packet);
   if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     return loom_wasm_emit_structural_op(state, op);
-  }
-  if (packet.descriptor == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "Wasm descriptor packet '%.*s' did not resolve",
-                            (int)packet.key.size, packet.key.data);
   }
   IREE_RETURN_IF_ERROR(
       loom_wasm_record_descriptor_flags(state, packet.descriptor));

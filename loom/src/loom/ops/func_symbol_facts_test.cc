@@ -10,6 +10,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/symbol_facts.h"
+#include "loom/codegen/low/text_asm.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -18,6 +19,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/target/types.h"
 #include "loom/testing/module_ptr.h"
 
@@ -38,6 +40,7 @@ class FuncSymbolFactsTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_LOW, loom_low_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
+    loom_target_core_test_low_descriptor_registry_initialize(&low_registry_);
     iree_arena_initialize(&block_pool_, &analysis_arena_);
     loom_symbol_fact_table_initialize(&fact_table_, &analysis_arena_);
   }
@@ -61,6 +64,8 @@ class FuncSymbolFactsTest : public ::testing::Test {
   ModulePtr ParseModule(const char* source) {
     loom_module_t* module = nullptr;
     loom_text_parse_options_t options = {};
+    loom_low_descriptor_text_asm_environment_initialize(
+        &low_registry_.registry, &options.low_asm_environment);
     IREE_CHECK_OK(loom_text_parse(iree_make_cstring_view(source),
                                   IREE_SV("func_symbol_facts_test.loom"),
                                   &context_, &block_pool_, &options, &module));
@@ -98,6 +103,9 @@ class FuncSymbolFactsTest : public ::testing::Test {
 
   // Dense symbol fact table under test.
   loom_symbol_fact_table_t fact_table_;
+
+  // Descriptor tables required by Low function representation contracts.
+  loom_target_low_descriptor_registry_t low_registry_ = {};
 };
 
 TEST_F(FuncSymbolFactsTest, SourceFuncFactsRemainTargetIndependent) {

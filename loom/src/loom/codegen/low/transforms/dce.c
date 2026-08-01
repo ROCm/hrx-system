@@ -47,9 +47,9 @@ static iree_status_t loom_low_dce_deadness_query(void* user_data,
       (loom_low_dce_deadness_context_t*)user_data;
   *out_is_dead = false;
 
-  loom_low_resolved_descriptor_packet_t packet = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_resolve_descriptor_packet(module, context->target, op, &packet));
+  loom_low_descriptor_packet_t packet = {0};
+  loom_low_descriptor_packet_initialize(context->target->descriptor_set, op,
+                                        &packet);
   if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     *out_is_dead = loom_op_is_trivially_dead(module, op);
     return iree_ok_status();
@@ -59,9 +59,6 @@ static iree_status_t loom_low_dce_deadness_query(void* user_data,
     return iree_ok_status();
   }
 
-  if (packet.descriptor == NULL) {
-    return iree_ok_status();
-  }
   *out_is_dead = iree_any_bit_set(packet.descriptor->flags,
                                   LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE);
   return iree_ok_status();

@@ -340,13 +340,13 @@ static loomc_status_t loomc_module_text_print_options(
   *out_options = (loom_text_print_options_t){
       .flags = LOOM_TEXT_PRINT_DEFAULT,
   };
-  if (options->text_presentation == LOOMC_MODULE_TEXT_PRESENTATION_GENERIC) {
-    return loomc_ok_status();
-  }
   const loomc_target_pass_environment_t* target_environment =
       loomc_context_target_pass_environment(module->context);
   loomc_target_pass_environment_initialize_text_asm_environment(
       target_environment, &out_options->low_asm_environment);
+  if (options->text_presentation == LOOMC_MODULE_TEXT_PRESENTATION_GENERIC) {
+    return loomc_ok_status();
+  }
   out_options->flags |= LOOM_TEXT_PRINT_PREFER_LOW_ASM;
   if (!loomc_string_view_is_empty(options->low_asm_descriptor_set_key)) {
     out_options->low_asm_descriptor_set_key =

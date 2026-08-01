@@ -398,8 +398,10 @@ static iree_status_t loom_parse_format_flags(loom_parser_t* parser,
 // Parses a bare symbolic key reference: <key.name>.
 static iree_status_t loom_parse_format_key_ref(
     loom_parser_t* parser, const loom_format_element_t* element,
-    loom_parsed_op_t* parsed, iree_string_view_t* out_key) {
+    loom_parsed_op_t* parsed, iree_string_view_t* out_key,
+    loom_token_t* out_key_token) {
   *out_key = iree_string_view_empty();
+  *out_key_token = loom_token_none();
   loom_token_t key_ref_start_token = loom_tokenizer_peek(&parser->tokenizer);
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LANGLE)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
@@ -423,6 +425,7 @@ static iree_status_t loom_parse_format_key_ref(
   IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
       parsed, &parser->parser_arena, element->field_index, attr));
   *out_key = name_token.text;
+  *out_key_token = name_token;
   return loom_parse_format_add_field_span(
       parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE, element->field_index,
       key_ref_start_token);
@@ -503,6 +506,11 @@ static iree_status_t loom_parse_format_scoped_enum_ref(
   if (!loom_low_repr_resolve_descriptor(&parser->low_asm_environment.low_repr,
                                         parser->low_repr.descriptor_set,
                                         key_token.text, &value)) {
+    bool diagnostic_emitted = false;
+    IREE_RETURN_IF_ERROR(loom_parser_try_emit_unknown_low_packet_diagnostic(
+        parser, parser->low_repr.descriptor_set, key_token,
+        &diagnostic_emitted));
+    if (diagnostic_emitted) return iree_ok_status();
     return loom_parser_emit_low_asm_error(
         parser, key_token,
         IREE_SV(
@@ -747,9 +755,9 @@ static iree_status_t loom_parse_format_project_func_args(
   return iree_ok_status();
 }
 
-static iree_status_t loom_parse_format_update_low_repr_context(
+static iree_status_t loom_parse_format_bind_function_low_repr(
     loom_parser_t* parser, const loom_op_vtable_t* vtable, uint16_t attr_index,
-    iree_string_view_t key) {
+    iree_string_view_t key, loom_token_t key_token) {
   if (!vtable->func_like ||
       vtable->func_like->repr_contract_attr_index == LOOM_ATTR_INDEX_NONE ||
       vtable->func_like->repr_contract_attr_index != attr_index) {
@@ -759,11 +767,18 @@ static iree_status_t loom_parse_format_update_low_repr_context(
       .contract_key = key,
   };
   if (!parser->low_asm_environment.vtable ||
-      !parser->low_asm_environment.vtable->lookup_descriptor_set) {
-    return iree_ok_status();
+      !parser->low_asm_environment.low_repr.vtable) {
+    return loom_parser_emit_low_asm_error(
+        parser, key_token,
+        IREE_SV("Low representation environment is not configured"));
   }
-  return parser->low_asm_environment.vtable->lookup_descriptor_set(
-      parser->low_asm_environment.state, key, &parser->low_repr.descriptor_set);
+  parser->low_repr.descriptor_set = loom_low_repr_lookup_descriptor_set(
+      &parser->low_asm_environment.low_repr, key);
+  if (!parser->low_repr.descriptor_set) {
+    return loom_parser_emit_low_asm_error(
+        parser, key_token, IREE_SV("unknown Low representation contract"));
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_parser_walk_format(loom_parser_t* parser,
@@ -1100,10 +1115,11 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
 
       case LOOM_FORMAT_KIND_KEY_REF: {
         iree_string_view_t key = iree_string_view_empty();
-        IREE_RETURN_IF_ERROR(
-            loom_parse_format_key_ref(parser, element, parsed, &key));
-        IREE_RETURN_IF_ERROR(loom_parse_format_update_low_repr_context(
-            parser, vtable, element->field_index, key));
+        loom_token_t key_token = loom_token_none();
+        IREE_RETURN_IF_ERROR(loom_parse_format_key_ref(parser, element, parsed,
+                                                       &key, &key_token));
+        IREE_RETURN_IF_ERROR(loom_parse_format_bind_function_low_repr(
+            parser, vtable, element->field_index, key, key_token));
         break;
       }
 

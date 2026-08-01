@@ -58,13 +58,14 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::codegen::low::text_asm
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
-    loom::ops::config
-    loom::ops::func
-    loom::ops::target
+    loom::ops::op_registry
     loom::ops::test
+    loom::target::test::alt_descriptors
+    loom::target::test::descriptors
     loom::verify
 )
 

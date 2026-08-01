@@ -22,10 +22,10 @@ static bool loom_amdgpu_low_asm_descriptor_set_is_amdgpu(
                                       IREE_SV("amdgpu."));
 }
 
-static iree_status_t loom_amdgpu_low_asm_try_unknown_mnemonic(
+static iree_status_t loom_amdgpu_low_asm_try_unknown_packet(
     const loom_target_low_asm_diagnostic_provider_t* provider,
     const loom_low_descriptor_set_t* descriptor_set,
-    iree_string_view_t mnemonic,
+    iree_string_view_t packet_name,
     loom_text_low_asm_diagnostic_t* out_diagnostic) {
   (void)provider;
   *out_diagnostic = (loom_text_low_asm_diagnostic_t){0};
@@ -36,7 +36,7 @@ static iree_status_t loom_amdgpu_low_asm_try_unknown_mnemonic(
   }
 
   const loom_amdgpu_low_blocked_alias_t* alias =
-      loom_amdgpu_low_blocked_alias_lookup(mnemonic);
+      loom_amdgpu_low_blocked_alias_lookup(packet_name);
   if (alias == NULL) {
     return iree_ok_status();
   }
@@ -57,5 +57,5 @@ static iree_status_t loom_amdgpu_low_asm_try_unknown_mnemonic(
 const loom_target_low_asm_diagnostic_provider_t
     loom_amdgpu_low_asm_diagnostic_provider = {
         .name = IREE_SVL("amdgpu"),
-        .try_unknown_mnemonic = loom_amdgpu_low_asm_try_unknown_mnemonic,
+        .try_unknown_packet = loom_amdgpu_low_asm_try_unknown_packet,
 };

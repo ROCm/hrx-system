@@ -338,10 +338,17 @@ low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @sdwa_selector_out_of_ran
 // ====
 
 amdgpu.target<gfx1100> @gfx11_target
-low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @dx9_zero_fma_alias_rejected(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) {
-  // ERROR@+1: AMDGPU/031 {descriptor_name="amdgpu.v_fma_dx9_zero_f32", descriptor_set_name="amdgpu.rdna3.core", alias_mnemonic="v_fma_dx9_zero_f32", alias_semantics="dx9_zero", replacement_descriptor_name="amdgpu.v_fma_f32", replacement_mnemonic="v_fma_f32", decision_key="rejected", reason_key="compatibility_zero_semantics"}
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @dx9_zero_fma_alias_rejected(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %c: reg<amdgpu.vgpr>) {
+  // ERROR@+1: AMDGPU/032 {descriptor_set_name="amdgpu.rdna3.core", alias_mnemonic="v_fma_dx9_zero_f32", alias_semantics="dx9_zero", replacement_descriptor_name="amdgpu.v_fma_f32", replacement_mnemonic="v_fma_f32", decision_key="rejected", reason_key="compatibility_zero_semantics"}
   %fma = low.op<amdgpu.v_fma_dx9_zero_f32>(%a, %b, %c) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
-  // ERROR@+1: AMDGPU/031 {descriptor_name="amdgpu.v_fmac_dx9_zero_f32", descriptor_set_name="amdgpu.rdna3.core", alias_mnemonic="v_fmac_dx9_zero_f32", alias_semantics="dx9_zero", replacement_descriptor_name="amdgpu.v_fmac_f32", replacement_mnemonic="v_fmac_f32", decision_key="rejected", reason_key="compatibility_zero_semantics"}
+  low.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @gfx11_target
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @dx9_zero_fmac_alias_rejected(%acc: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>) {
+  // ERROR@+1: AMDGPU/032 {descriptor_set_name="amdgpu.rdna3.core", alias_mnemonic="v_fmac_dx9_zero_f32", alias_semantics="dx9_zero", replacement_descriptor_name="amdgpu.v_fmac_f32", replacement_mnemonic="v_fmac_f32", decision_key="rejected", reason_key="compatibility_zero_semantics"}
   %fmac = low.op<amdgpu.v_fmac_dx9_zero_f32>(%acc, %a, %b) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> %acc as reg<amdgpu.vgpr>
   low.return
 }

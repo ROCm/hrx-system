@@ -36,8 +36,8 @@ typedef struct loom_print_low_asm_preflight_failure_t {
   uint16_t block_index;
   // Canonical Loom operation name such as `low.op`.
   iree_string_view_t operation_name;
-  // Descriptor-backed packet opcode when the operation is `low.op`/`low.const`.
-  iree_string_view_t packet_opcode;
+  // Descriptor key when the operation is `low.op` or `low.const`.
+  iree_string_view_t packet_descriptor_key;
   // Number of SSA results on the failed operation.
   uint16_t result_count;
   // Number of SSA operands on the failed operation.
@@ -109,8 +109,10 @@ static iree_status_t loom_print_low_asm_region_preflight(
     bool entry_args_declared_by_parent,
     loom_print_low_asm_preflight_failure_t* out_failure, bool* out_available);
 
-static iree_string_view_t loom_print_low_asm_packet_opcode(
-    loom_print_context_t* ctx, const loom_op_t* op) {
+static iree_string_view_t loom_print_low_asm_packet_descriptor_key(
+    loom_print_context_t* ctx,
+    const loom_text_low_asm_descriptor_set_t* descriptor_set,
+    const loom_op_t* op) {
   iree_string_view_t op_name = loom_op_name(ctx->module, op);
   if (!iree_string_view_equal(op_name, IREE_SV("low.op")) &&
       !iree_string_view_equal(op_name, IREE_SV("low.const"))) {
@@ -119,14 +121,13 @@ static iree_string_view_t loom_print_low_asm_packet_opcode(
   if (op->attribute_count == 0) {
     return iree_string_view_empty();
   }
-  const loom_attribute_t opcode_attr = loom_op_const_attrs(op)[0];
-  if (opcode_attr.kind != LOOM_ATTR_STRING) {
+  const loom_attribute_t descriptor_attr = loom_op_const_attrs(op)[0];
+  if (descriptor_attr.kind != LOOM_ATTR_SCOPED_ENUM) {
     return iree_string_view_empty();
   }
-  const loom_string_id_t opcode_id = loom_attr_as_string_id(opcode_attr);
-  return opcode_id < ctx->module->strings.count
-             ? ctx->module->strings.entries[opcode_id]
-             : iree_string_view_empty();
+  return loom_low_repr_descriptor_key(
+      &ctx->low_asm_environment.low_repr, descriptor_set,
+      loom_attr_as_scoped_enum(descriptor_attr));
 }
 
 static void loom_print_low_asm_record_entry_args_failure(
@@ -142,6 +143,7 @@ static void loom_print_low_asm_record_entry_args_failure(
 
 static void loom_print_low_asm_record_operation_failure(
     loom_print_context_t* ctx,
+    const loom_text_low_asm_descriptor_set_t* descriptor_set,
     loom_print_low_asm_preflight_failure_t* out_failure, uint16_t block_index,
     const loom_op_t* op) {
   if (out_failure->kind != LOOM_PRINT_LOW_ASM_PREFLIGHT_FAILURE_NONE) {
@@ -151,7 +153,8 @@ static void loom_print_low_asm_record_operation_failure(
       .kind = LOOM_PRINT_LOW_ASM_PREFLIGHT_FAILURE_OPERATION,
       .block_index = block_index,
       .operation_name = loom_op_name(ctx->module, op),
-      .packet_opcode = loom_print_low_asm_packet_opcode(ctx, op),
+      .packet_descriptor_key =
+          loom_print_low_asm_packet_descriptor_key(ctx, descriptor_set, op),
       .result_count = op->result_count,
       .operand_count = op->operand_count,
   };
@@ -166,8 +169,8 @@ static iree_status_t loom_print_low_asm_preflight_canonical_structural_op(
   if (iree_string_view_equal(op_name, IREE_SV("low.scf.if"))) {
     if (op->region_count < 1 || loom_op_regions(op)[0] == NULL) {
       *out_available = false;
-      loom_print_low_asm_record_operation_failure(ctx, out_failure, block_index,
-                                                  op);
+      loom_print_low_asm_record_operation_failure(ctx, descriptor_set,
+                                                  out_failure, block_index, op);
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(loom_print_low_asm_region_preflight(
@@ -184,8 +187,8 @@ static iree_status_t loom_print_low_asm_preflight_canonical_structural_op(
   } else if (iree_string_view_equal(op_name, IREE_SV("low.scf.for"))) {
     if (op->region_count < 1 || loom_op_regions(op)[0] == NULL) {
       *out_available = false;
-      loom_print_low_asm_record_operation_failure(ctx, out_failure, block_index,
-                                                  op);
+      loom_print_low_asm_record_operation_failure(ctx, descriptor_set,
+                                                  out_failure, block_index, op);
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(loom_print_low_asm_region_preflight(
@@ -238,12 +241,13 @@ static iree_status_t loom_print_low_asm_find_immediate_attr(
   if (out_immediate->has_default_value) {
     return iree_ok_status();
   }
-  return iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "low asm packet '%.*s' is missing immediate "
-      "attribute '%.*s'",
-      (int)statement->packet.opcode_key.size, statement->packet.opcode_key.data,
-      (int)out_immediate->field_name.size, out_immediate->field_name.data);
+  return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                          "low asm packet '%.*s' is missing immediate "
+                          "attribute '%.*s'",
+                          (int)statement->packet.descriptor_key.size,
+                          statement->packet.descriptor_key.data,
+                          (int)out_immediate->field_name.size,
+                          out_immediate->field_name.data);
 }
 
 static bool loom_print_low_asm_immediate_attr_is_default(
@@ -288,8 +292,8 @@ static iree_status_t loom_print_low_asm_result_types_require_annotation(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "low asm packet '%.*s' result %u cannot be "
                               "printed: %.*s",
-                              (int)statement->packet.opcode_key.size,
-                              statement->packet.opcode_key.data, i,
+                              (int)statement->packet.descriptor_key.size,
+                              statement->packet.descriptor_key.data, i,
                               (int)diagnostic_detail.size,
                               diagnostic_detail.data);
     }
@@ -324,8 +328,8 @@ static iree_status_t loom_print_low_asm_region_preflight(
       if (statement.kind == LOOM_TEXT_LOW_ASM_STATEMENT_UNKNOWN) {
         if (!loom_print_low_asm_allows_canonical_op(ctx, current_op)) {
           *out_available = false;
-          loom_print_low_asm_record_operation_failure(ctx, out_failure,
-                                                      block_index, current_op);
+          loom_print_low_asm_record_operation_failure(
+              ctx, descriptor_set, out_failure, block_index, current_op);
           return iree_ok_status();
         }
         IREE_RETURN_IF_ERROR(
@@ -437,8 +441,8 @@ static iree_status_t loom_print_low_asm_positional_immediates(
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "low asm packet '%.*s' cannot omit positional immediate '%.*s'",
-          (int)statement->packet.opcode_key.size,
-          statement->packet.opcode_key.data, (int)immediate.field_name.size,
+          (int)statement->packet.descriptor_key.size,
+          statement->packet.descriptor_key.data, (int)immediate.field_name.size,
           immediate.field_name.data);
     }
     IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
@@ -869,18 +873,19 @@ static iree_status_t loom_print_low_asm_make_unavailable_status(
           "by the parent",
           (int)repr_contract.size, repr_contract.data, failure->block_index);
     case LOOM_PRINT_LOW_ASM_PREFLIGHT_FAILURE_OPERATION:
-      if (!iree_string_view_is_empty(failure->packet_opcode)) {
+      if (!iree_string_view_is_empty(failure->packet_descriptor_key)) {
         return iree_make_status(
             IREE_STATUS_UNIMPLEMENTED,
             "region has no lossless low asm spelling for representation "
             "contract "
-            "'%.*s': operation '%.*s' with packet opcode '%.*s' in block %u "
+            "'%.*s': operation '%.*s' with packet descriptor '%.*s' in block "
+            "%u "
             "has no matching low asm packet form (%u results, %u operands)",
             (int)repr_contract.size, repr_contract.data,
             (int)failure->operation_name.size, failure->operation_name.data,
-            (int)failure->packet_opcode.size, failure->packet_opcode.data,
-            failure->block_index, failure->result_count,
-            failure->operand_count);
+            (int)failure->packet_descriptor_key.size,
+            failure->packet_descriptor_key.data, failure->block_index,
+            failure->result_count, failure->operand_count);
       }
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,

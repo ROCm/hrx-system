@@ -60,13 +60,10 @@ bool loom_amdgpu_descriptor_requirement_present(
     loom_amdgpu_descriptor_ref_t descriptor_ref,
     iree_string_view_t* out_constraint_key);
 
-// Resolves |descriptor_ref| to a descriptor row and interns its opcode spelling
-// in the builder module.
-iree_status_t loom_amdgpu_lookup_descriptor_ref(
-    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
-    loom_amdgpu_descriptor_ref_t descriptor_ref,
-    const loom_low_descriptor_t** out_descriptor,
-    loom_string_id_t* out_opcode_id);
+// Returns the descriptor row for a required generated reference.
+const loom_low_descriptor_t* loom_amdgpu_lookup_descriptor_ref(
+    const loom_low_descriptor_set_t* descriptor_set,
+    loom_amdgpu_descriptor_ref_t descriptor_ref);
 
 // Returns whether |descriptor| declares an immediate named |name|.
 bool loom_amdgpu_descriptor_has_immediate(

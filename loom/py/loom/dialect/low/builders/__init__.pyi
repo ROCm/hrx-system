@@ -112,7 +112,7 @@ class LowBuilder(DialectBuilder):
     def op(
         self,
         *,
-        opcode: str,
+        descriptor: str,
         operands: list[ValueRef] = ...,
         attrs: Mapping[str, Any] | None = ...,
         memory_access: list[int] | None = ...,
@@ -125,7 +125,7 @@ class LowBuilder(DialectBuilder):
     def const(
         self,
         *,
-        opcode: str,
+        descriptor: str,
         attrs: Mapping[str, Any] | None = ...,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,

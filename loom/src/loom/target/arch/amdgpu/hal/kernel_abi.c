@@ -204,26 +204,9 @@ static iree_string_view_t loom_amdgpu_hal_kernel_abi_module_string(
 }
 
 static const loom_low_descriptor_t*
-loom_amdgpu_hal_kernel_abi_resolve_low_op_descriptor(
-    const loom_module_t* module,
+loom_amdgpu_hal_kernel_abi_low_op_descriptor(
     const loom_low_descriptor_set_t* descriptor_set, const loom_op_t* op) {
-  const int64_t packet_ordinal = loom_low_op_descriptor_ordinal(op);
-  if (packet_ordinal >= 0 && (uint64_t)packet_ordinal <= UINT32_MAX) {
-    return loom_low_descriptor_set_descriptor_at(descriptor_set,
-                                                 (uint32_t)packet_ordinal);
-  }
-  if (packet_ordinal != -1) {
-    return NULL;
-  }
-  iree_string_view_t key =
-      loom_amdgpu_hal_kernel_abi_module_string(module, loom_low_op_opcode(op));
-  const uint32_t descriptor_ordinal =
-      loom_low_descriptor_set_lookup_descriptor(descriptor_set, key);
-  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return NULL;
-  }
-  return loom_low_descriptor_set_descriptor_at(descriptor_set,
-                                               descriptor_ordinal);
+  return &descriptor_set->descriptors[loom_low_op_descriptor(op)];
 }
 
 static loom_type_t loom_amdgpu_hal_kernel_abi_type_attr(
@@ -1290,16 +1273,14 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_verify_low_ops(
         continue;
       }
       const loom_low_descriptor_t* descriptor =
-          loom_amdgpu_hal_kernel_abi_resolve_low_op_descriptor(
-              module, descriptor_set, op);
-      if (descriptor != NULL &&
-          descriptor == cluster_workgroup_flat_id_descriptor) {
+          loom_amdgpu_hal_kernel_abi_low_op_descriptor(descriptor_set, op);
+      if (descriptor == cluster_workgroup_flat_id_descriptor) {
         result->launch_workgroup_id_flags |=
             LOOM_AMDGPU_HAL_KERNEL_ABI_LAUNCH_WORKGROUP_ID_KNOWN_FLAGS;
         continue;
       }
-      if (descriptor == NULL || (descriptor != static_buffer_descriptor &&
-                                 descriptor != dynamic_buffer_descriptor)) {
+      if (descriptor != static_buffer_descriptor &&
+          descriptor != dynamic_buffer_descriptor) {
         continue;
       }
 

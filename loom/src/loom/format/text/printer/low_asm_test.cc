@@ -309,29 +309,16 @@ TEST_F(LowAsmPrinterTest, RejectsMissingPrintEnvironment) {
   loom_module_free(module);
 }
 
-TEST_F(LowAsmPrinterTest, RejectsDescriptorWithoutAsmFormInSelectedSet) {
-  loom_module_t* module = ParseOk(
-      "test.low_asm_region asm<test.low.core> {\n"
-      "  %c0 = test.const.i32 7\n"
-      "  return %c0\n"
-      "}\n");
-  ASSERT_NE(module, nullptr);
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
-                        PrintModuleStatus(module, IREE_SV("test.low.alt"),
-                                          /*configure_environment=*/true));
-  loom_module_free(module);
-}
-
 TEST_F(LowAsmPrinterTest, RequiredOptionalLowAsmRejectsCanonicalFallback) {
   const char* source =
       "test.target<low_core> @test_target\n"
       "\n"
-      "low.func.def target<test.low.alt>(@test_target) "
-      "@add(%lhs: reg<test.i32>, "
-      "%rhs: reg<test.i32>) -> (reg<test.i32>) {\n"
-      "  %sum = low.op<test.add.i32>(%lhs, %rhs) : "
-      "(reg<test.i32>, reg<test.i32>) -> reg<test.i32>\n"
-      "  low.return %sum : reg<test.i32>\n"
+      "low.func.def target<test.low.core>(@test_target) "
+      "@spill(%value: reg<test.i32>) -> (reg<test.i32>) {\n"
+      "  %slot = low.storage.reserve "
+      "{byte_alignment = 4, byte_length = 4} : low.storage<private>\n"
+      "  low.spill %value, %slot : reg<test.i32>, low.storage<private>\n"
+      "  low.return %value : reg<test.i32>\n"
       "}\n";
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
