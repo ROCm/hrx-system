@@ -15,6 +15,7 @@ from loom.target.low_descriptors import (
     AsmImmediate,
     Descriptor,
     DescriptorFlag,
+    DescriptorOpKind,
     DescriptorSet,
     Effect,
     EffectFlag,
@@ -453,6 +454,7 @@ def _const_i_descriptor(
         mnemonic="const",
         semantic_tag=f"llvmir.const.{suffix}",
         operands=(_result(type_name, unit_count=unit_count),),
+        op_kind=DescriptorOpKind.CONST,
         immediates=(_I64_VALUE_IMMEDIATE,),
         asm_forms=_asm(
             mnemonic=f"const.{suffix}",
@@ -477,6 +479,7 @@ def _const_f_descriptor(
         mnemonic="const",
         semantic_tag=f"llvmir.const.{suffix}",
         operands=(_result(type_name, unit_count=unit_count),),
+        op_kind=DescriptorOpKind.CONST,
         immediates=(immediate,),
         asm_forms=_asm(
             mnemonic=f"const.{suffix}",

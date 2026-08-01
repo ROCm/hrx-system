@@ -639,6 +639,14 @@ static iree_status_t loom_low_verify_asm_form(
   }
   const loom_low_descriptor_t* descriptor =
       &descriptor_set->descriptors[asm_form->descriptor_ordinal];
+  if (descriptor->op_kind == LOOM_LOW_DESCRIPTOR_OP_KIND_CONST &&
+      (asm_form->result_operand_index_count != 1 ||
+       asm_form->operand_index_count != 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low.const asm form %" PRIu32
+                            " must expose exactly one result and no operands",
+                            asm_form_index);
+  }
   IREE_RETURN_IF_ERROR(loom_low_verify_span(
       asm_form->result_operand_index_start,
       asm_form->result_operand_index_count,
@@ -1618,6 +1626,45 @@ static iree_status_t loom_low_verify_descriptor_operand_roles(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_verify_descriptor_op_kind(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor, uint32_t descriptor_index) {
+  switch (descriptor->op_kind) {
+    case LOOM_LOW_DESCRIPTOR_OP_KIND_OP:
+      return iree_ok_status();
+    case LOOM_LOW_DESCRIPTOR_OP_KIND_CONST:
+      if (descriptor->result_count != 1) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "low descriptor %" PRIu32
+                                " uses low.const but has %" PRIu16 " results",
+                                descriptor_index, descriptor->result_count);
+      }
+      for (uint16_t i = 0; i < descriptor->operand_count; ++i) {
+        const loom_low_operand_t* operand =
+            &descriptor_set->operands[descriptor->operand_start + i];
+        if (loom_low_operand_role_is_packet_operand(operand->role)) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "low descriptor %" PRIu32
+                                  " uses low.const but has packet operands",
+                                  descriptor_index);
+        }
+      }
+      if (descriptor->effect_count != 0) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "low descriptor %" PRIu32
+                                " uses low.const but has %" PRIu16
+                                " effect rows",
+                                descriptor_index, descriptor->effect_count);
+      }
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low descriptor %" PRIu32
+                              " has invalid operation kind %u",
+                              descriptor_index, (unsigned)descriptor->op_kind);
+  }
+}
+
 static iree_status_t loom_low_verify_descriptor_state_operands(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint32_t descriptor_index) {
@@ -1918,6 +1965,8 @@ static iree_status_t loom_low_verify_descriptor(
                             descriptor_index);
   }
   IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_operand_roles(
+      descriptor_set, descriptor, descriptor_index));
+  IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_op_kind(
       descriptor_set, descriptor, descriptor_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_state_operands(
       descriptor_set, descriptor, descriptor_index));

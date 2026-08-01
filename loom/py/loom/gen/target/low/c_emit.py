@@ -258,6 +258,7 @@ def _descriptor_row_lines(
             f".operand_form_count = {descriptor_rows[i]['operand_form_count']},",
             f".schedule_class_id = {compiled.schedule_class_ids[descriptor.schedule_class]},",
             f".flags = {c_spelling.flag_expr(descriptor.flags)},",
+            f".op_kind = {descriptor.op_kind.c_name},",
             f".instruction_class_flags = {c_spelling.flag_expr(instruction_classes[i])},",
             f".canonical_asm_form_ordinal = {c_spelling.canonical_asm_form_ordinal_expr(canonical_asm_form_ordinals[i])},",
         ]

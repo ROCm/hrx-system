@@ -14,7 +14,7 @@ from pathlib import Path
 
 from loom.stable_id import stable_id_from_string
 
-LOW_DESCRIPTOR_SET_ABI_VERSION = 30
+LOW_DESCRIPTOR_SET_ABI_VERSION = 31
 LOW_DESCRIPTOR_ENCODING_ID_NONE = (2**16) - 1
 LOW_DESCRIPTOR_SET_ORDINAL_NONE = (2**16) - 1
 
@@ -210,6 +210,13 @@ class DescriptorFlag(CEnum):
     PSEUDO = "LOOM_LOW_DESCRIPTOR_FLAG_PSEUDO"
     BARRIER = "LOOM_LOW_DESCRIPTOR_FLAG_BARRIER"
     EARLY_CLOBBER = "LOOM_LOW_DESCRIPTOR_FLAG_EARLY_CLOBBER"
+
+
+class DescriptorOpKind(CEnum):
+    """Canonical low IR operation used to represent a descriptor packet."""
+
+    OP = "LOOM_LOW_DESCRIPTOR_OP_KIND_OP"
+    CONST = "LOOM_LOW_DESCRIPTOR_OP_KIND_CONST"
 
 
 class InstructionClass(CEnum):
@@ -538,6 +545,7 @@ class Descriptor:
     semantic_tag: str | None
     operands: tuple[Operand, ...]
     schedule_class: str
+    op_kind: DescriptorOpKind = DescriptorOpKind.OP
     immediates: tuple[Immediate, ...] = ()
     encoding_field_values: tuple[EncodingFieldValue, ...] = ()
     asm_forms: tuple[AsmForm, ...] = ()
