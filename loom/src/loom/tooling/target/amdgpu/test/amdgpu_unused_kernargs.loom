@@ -13,3 +13,67 @@ check.case @unused_kernargs_case {
   check.expect.equal actual(%actual) expected(%expected) : tensor<4xi32>
   check.return
 }
+
+// Public binding ordinals remain part of the HAL ABI after internal dead-code
+// elimination removes an unused resource in the middle of the signature.
+kernel.def @unused_middle_binding() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %unused: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %value = view.load %input_view[0] : view<1xi32, #dense> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+check.case @unused_middle_binding_case {
+  %input = check.generate.fill value(29) : tensor<1xi32>
+  %unused = check.generate.fill value(-1) : tensor<1xi32>
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  func.call @unused_middle_binding(%input, %unused, %output) : (tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  check.expect.equal actual(%output) expected(%input) : tensor<1xi32>
+  check.return
+}
+
+// Buffer-valued control flow retains every possible binding root while
+// specialization selects one input for the checked invocation.
+kernel.def @selected_buffer(%select_rhs: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%select_rhs: index, %lhs: buffer, %rhs: buffer, %output: buffer) {
+  %one = index.constant 1 : index
+  %zero = index.constant 0 : offset
+  %use_rhs = index.cmp eq, %select_rhs, %one : index
+  %selected = scf.if %use_rhs -> (buffer) {
+    scf.yield %rhs : buffer
+  } else {
+    scf.yield %lhs : buffer
+  }
+  %selected_view = buffer.view %selected[%zero] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %value = view.load %selected_view[0] : view<1xi32, #dense> -> i32
+  view.store %value, %output_view[0] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+check.case @selected_lhs_case {
+  %select_lhs = check.literal value(0) : index
+  %lhs = check.generate.fill value(17) : tensor<1xi32>
+  %rhs = check.generate.fill value(42) : tensor<1xi32>
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  func.call @selected_buffer(%select_lhs, %lhs, %rhs, %output) : (index, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  check.expect.equal actual(%output) expected(%lhs) : tensor<1xi32>
+  check.return
+}
+
+check.case @selected_rhs_case {
+  %select_rhs = check.literal value(1) : index
+  %lhs = check.generate.fill value(17) : tensor<1xi32>
+  %rhs = check.generate.fill value(42) : tensor<1xi32>
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  func.call @selected_buffer(%select_rhs, %lhs, %rhs, %output) : (index, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  check.expect.equal actual(%output) expected(%rhs) : tensor<1xi32>
+  check.return
+}

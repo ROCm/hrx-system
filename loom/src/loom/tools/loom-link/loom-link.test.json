@@ -122,7 +122,7 @@
           "stdout": {
             "contains": [
               "func.def @identity(%x: i32) -> (i32) {",
-              "func.def @caller(%x: i32) -> (i32) {"
+              "func.def retain @caller(%x: i32) -> (i32) {"
             ],
             "not_contains": [
               "func.def @unused",

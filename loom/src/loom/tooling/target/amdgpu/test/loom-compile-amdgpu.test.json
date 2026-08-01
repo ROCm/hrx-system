@@ -2,6 +2,30 @@
   "version": 1,
   "cases": [
     {
+      "name": "preserves HAL binding identity without authored export names",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/amdgpu_unused_kernargs.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx1100",
+          "--root=@unused_middle_binding",
+          "--output={tmp}/binding_identity.hal",
+          "--emit-target-artifact={tmp}/binding_identity.hsaco"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/binding_identity.hal",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/binding_identity.hsaco",
+          "non_empty": true
+        }
+      ]
+    },
+    {
       "name": "compiles parameterized gfx1250 matrix kernel",
       "run": {
         "tool": "loom-compile",

@@ -1817,15 +1817,6 @@ static bool loom_low_lower_source_is_kernel_def(
   return loom_kernel_def_isa(context->source_function.op);
 }
 
-static bool loom_low_lower_source_is_retained(const loom_module_t* module,
-                                              loom_func_like_t source) {
-  const loom_symbol_ref_t source_ref = loom_func_like_callee(source);
-  return loom_symbol_ref_is_valid(source_ref) && source_ref.module_id == 0 &&
-         source_ref.symbol_id < module->symbols.count &&
-         iree_any_bit_set(module->symbols.entries[source_ref.symbol_id].flags,
-                          LOOM_SYMBOL_FLAG_RETAIN);
-}
-
 static iree_status_t loom_low_lower_create_func_op(
     loom_low_lower_context_t* context, loom_region_t* source_body,
     loom_symbol_ref_t low_func_ref, const loom_type_t* arg_types,
@@ -1869,8 +1860,7 @@ static iree_status_t loom_low_lower_create_func_op(
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET;
   }
   uint8_t retain = 0;
-  if (loom_low_lower_source_is_retained(context->module,
-                                        context->source_function)) {
+  if (loom_low_lower_context_source_is_retained(context)) {
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_RETAIN;
     retain = LOOM_LOW_RETAIN_RETAIN;
   }
@@ -1946,8 +1936,7 @@ static iree_status_t loom_low_lower_create_kernel_op(
     workgroup_cluster_size = context->result->static_workgroup_cluster_size;
   }
   uint8_t retain = 0;
-  if (loom_low_lower_source_is_retained(context->module,
-                                        context->source_function)) {
+  if (loom_low_lower_context_source_is_retained(context)) {
     build_flags |= LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_RETAIN;
     retain = LOOM_LOW_RETAIN_RETAIN;
   }
@@ -2175,7 +2164,7 @@ iree_status_t loom_low_lower_import_declaration(
       build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_TARGET;
     }
     uint8_t retain = 0;
-    if (loom_low_lower_source_is_retained(module, source_declaration)) {
+    if (loom_low_lower_context_source_is_retained(&context)) {
       build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_RETAIN;
       retain = LOOM_LOW_RETAIN_RETAIN;
     }

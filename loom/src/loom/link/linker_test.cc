@@ -242,7 +242,7 @@ func.def @unused(%x: i32) -> (i32) {
 
   std::string text = Print(linked);
   EXPECT_NE(text.find("test.target<low_core> @test_target"), std::string::npos);
-  EXPECT_NE(text.find("func.def @caller"), std::string::npos);
+  EXPECT_NE(text.find("func.def retain @caller"), std::string::npos);
   EXPECT_NE(text.find("func.call @identity"), std::string::npos);
   EXPECT_NE(text.find("func.def target(@test_target) @identity"),
             std::string::npos);
@@ -270,7 +270,7 @@ func.def @caller(%x: i32) -> (i32) {
   Verify(linked);
 
   std::string text = Print(linked);
-  EXPECT_NE(text.find("func.def @caller"), std::string::npos);
+  EXPECT_NE(text.find("func.def retain @caller"), std::string::npos);
   EXPECT_NE(text.find("func.apply<demo.apply>"), std::string::npos);
   EXPECT_NE(text.find("func.template<demo.apply>"), std::string::npos);
   EXPECT_EQ(text.find("func.template<demo.unused>"), std::string::npos);
@@ -297,7 +297,7 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
   Verify(linked);
 
   std::string text = Print(linked);
-  EXPECT_NE(text.find("func.def @caller"), std::string::npos);
+  EXPECT_NE(text.find("func.def retain @caller"), std::string::npos);
   EXPECT_NE(text.find("func.apply<demo.apply>"), std::string::npos);
   EXPECT_NE(text.find("func.template<demo.apply>"), std::string::npos);
   EXPECT_EQ(text.find("func.template<demo.unused>"), std::string::npos);
@@ -328,7 +328,7 @@ func.def @identity(%x: i32) -> (i32) {
   std::string text = Print(linked);
   size_t before = text.find("func.def @before");
   size_t identity = text.find("func.def @identity");
-  size_t after = text.find("func.def @after");
+  size_t after = text.find("func.def retain @after");
   EXPECT_NE(identity, std::string::npos);
   EXPECT_NE(after, std::string::npos);
   EXPECT_LT(identity, after);
@@ -356,7 +356,7 @@ func.def @caller(%x: i32) -> (i32) {
   std::string text = Print(linked);
   EXPECT_EQ(text.find("func.decl @identity"), std::string::npos);
   EXPECT_NE(text.find("func.def @identity"), std::string::npos);
-  EXPECT_NE(text.find("func.def @caller"), std::string::npos);
+  EXPECT_NE(text.find("func.def retain @caller"), std::string::npos);
   EXPECT_NE(text.find("func.call @identity"), std::string::npos);
 }
 
@@ -382,7 +382,7 @@ func.def @unused(%x: i32) -> (i32) {
   Verify(linked);
 
   std::string text = Print(linked);
-  EXPECT_NE(text.find("func.def @caller"), std::string::npos);
+  EXPECT_NE(text.find("func.def retain @caller"), std::string::npos);
   EXPECT_EQ(text.find("func.def @unused"), std::string::npos);
 }
 
@@ -447,7 +447,7 @@ func.def @unrelated(%x: index) -> (index) {
   std::string text = Print(linked);
   EXPECT_NE(text.find("config.decl @model36.model.hidden_size"),
             std::string::npos);
-  EXPECT_NE(text.find("func.def @read_config"), std::string::npos);
+  EXPECT_NE(text.find("func.def retain @read_config"), std::string::npos);
   EXPECT_EQ(text.find("func.def @unrelated"), std::string::npos);
 }
 
@@ -691,7 +691,7 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_EQ(Print(linked_a), Print(linked_b));
 }
 
-TEST_F(LinkerTest, IncrementalAddDoesNotRetainPreviousSourceModule) {
+TEST_F(LinkerTest, IncrementalLinkDoesNotReferenceReleasedSourceModules) {
   loom_linker_t* linker = nullptr;
   loom_linker_options_t linker_options = {
       /*.module_name=*/IREE_SV("linked"),
@@ -723,6 +723,7 @@ func.def @identity(%x: i32) -> (i32) {
     IREE_ASSERT_OK(loom_linker_add_module(linker, corpus.get(), &add_options));
   }
 
+  IREE_ASSERT_OK(loom_linker_finalize_roots(linker, add_options.root_symbols));
   loom_module_t* linked = nullptr;
   IREE_ASSERT_OK(loom_linker_finish(linker, &linked));
   loom_linker_free(linker);
@@ -732,7 +733,7 @@ func.def @identity(%x: i32) -> (i32) {
   std::string text = Print(linked);
   EXPECT_EQ(text.find("func.decl @identity"), std::string::npos);
   EXPECT_NE(text.find("func.def @identity"), std::string::npos);
-  EXPECT_NE(text.find("func.def @caller"), std::string::npos);
+  EXPECT_NE(text.find("func.def retain @caller"), std::string::npos);
   EXPECT_NE(text.find("func.call @identity"), std::string::npos);
 }
 

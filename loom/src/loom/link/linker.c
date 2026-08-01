@@ -1261,6 +1261,22 @@ void loom_linker_free(loom_linker_t* linker) {
   iree_allocator_free(linker->allocator, linker);
 }
 
+static void loom_linker_retain_function_root(loom_linker_t* linker,
+                                             loom_symbol_t* symbol) {
+  loom_op_t* op = symbol->defining_op;
+  loom_func_like_t function = loom_func_like_cast(linker->target_module, op);
+  if (!loom_func_like_isa(function)) return;
+
+  const loom_op_vtable_t* vtable = loom_op_vtable(linker->target_module, op);
+  IREE_ASSERT(vtable->symbol_def);
+  IREE_ASSERT(vtable->symbol_def->retain_attr_index_plus_one);
+  const uint8_t retain_attr_index =
+      vtable->symbol_def->retain_attr_index_plus_one - 1;
+  IREE_ASSERT_LT(retain_attr_index, op->attribute_count);
+  loom_op_attrs(op)[retain_attr_index] = loom_attr_enum(1);
+  loom_module_link_symbol_defining_op(linker->target_module, op, vtable);
+}
+
 iree_status_t loom_linker_add_module(loom_linker_t* linker,
                                      const loom_module_t* source_module,
                                      const loom_linker_add_options_t* options) {
@@ -1329,9 +1345,58 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
   if (iree_status_is_ok(status)) {
     status = loom_linker_clone_module_body(&source);
   }
-
   iree_arena_deinitialize(&source_arena);
   return status;
+}
+
+iree_status_t loom_linker_finalize_roots(loom_linker_t* linker,
+                                         iree_string_view_list_t root_symbols) {
+  if (!linker) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "linker must not be NULL");
+  }
+  if (linker->finished || !linker->target_module) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "cannot finalize roots after linker finish");
+  }
+  if (root_symbols.count != 0 && !root_symbols.values) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "root_symbols count is non-zero but values is NULL");
+  }
+
+  for (iree_host_size_t i = 0; i < root_symbols.count; ++i) {
+    iree_string_view_t root_name =
+        loom_link_normalize_root_name(root_symbols.values[i]);
+    if (iree_string_view_is_empty(root_name)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "root symbol name must not be empty");
+    }
+    loom_string_id_t target_name_id =
+        loom_module_lookup_string(linker->target_module, root_name);
+    if (target_name_id == LOOM_STRING_ID_INVALID) {
+      return iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "root symbol '@%.*s' was not found",
+                              (int)root_name.size, root_name.data);
+    }
+    uint16_t target_symbol_id =
+        loom_symbol_map_find(&linker->target_symbol_lookup, target_name_id);
+    if (target_symbol_id == LOOM_SYMBOL_ID_INVALID) {
+      return iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "root symbol '@%.*s' was not found",
+                              (int)root_name.size, root_name.data);
+    }
+    loom_symbol_t* target_symbol =
+        &linker->target_module->symbols.entries[target_symbol_id];
+    if (!target_symbol->defining_op) {
+      return iree_make_status(
+          IREE_STATUS_NOT_FOUND,
+          "root symbol '@%.*s' has no materialized definition or declaration",
+          (int)root_name.size, root_name.data);
+    }
+    loom_linker_retain_function_root(linker, target_symbol);
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_linker_finish(loom_linker_t* linker,
@@ -1417,42 +1482,6 @@ static iree_status_t loom_link_module_contains_root(
   return iree_ok_status();
 }
 
-static iree_status_t loom_link_check_finished_roots(
-    const loom_linker_t* linker, const loom_link_options_t* options) {
-  if (!options) return iree_ok_status();
-  for (iree_host_size_t i = 0; i < options->root_symbols.count; ++i) {
-    iree_string_view_t root_name =
-        loom_link_normalize_root_name(options->root_symbols.values[i]);
-    if (iree_string_view_is_empty(root_name)) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "root symbol name must not be empty");
-    }
-    loom_string_id_t target_name_id =
-        loom_module_lookup_string(linker->target_module, root_name);
-    if (target_name_id == LOOM_STRING_ID_INVALID) {
-      return iree_make_status(IREE_STATUS_NOT_FOUND,
-                              "root symbol '@%.*s' was not found",
-                              (int)root_name.size, root_name.data);
-    }
-    uint16_t target_symbol_id =
-        loom_symbol_map_find(&linker->target_symbol_lookup, target_name_id);
-    if (target_symbol_id == LOOM_SYMBOL_ID_INVALID) {
-      return iree_make_status(IREE_STATUS_NOT_FOUND,
-                              "root symbol '@%.*s' was not found",
-                              (int)root_name.size, root_name.data);
-    }
-    const loom_symbol_t* target_symbol =
-        &linker->target_module->symbols.entries[target_symbol_id];
-    if (!target_symbol->defining_op) {
-      return iree_make_status(
-          IREE_STATUS_NOT_FOUND,
-          "root symbol '@%.*s' has no materialized definition or declaration",
-          (int)root_name.size, root_name.data);
-    }
-  }
-  return iree_ok_status();
-}
-
 iree_status_t loom_link_materialized_modules(
     const loom_module_t* const* source_modules,
     iree_host_size_t source_module_count, const loom_link_options_t* options,
@@ -1512,7 +1541,7 @@ iree_status_t loom_link_materialized_modules(
     status = loom_linker_add_module(linker, source_modules[i], &add_options);
   }
   if (iree_status_is_ok(status) && root_symbol_count > 0) {
-    status = loom_link_check_finished_roots(linker, options);
+    status = loom_linker_finalize_roots(linker, options->root_symbols);
   }
   if (iree_status_is_ok(status)) {
     status = loom_linker_finish(linker, out_module);

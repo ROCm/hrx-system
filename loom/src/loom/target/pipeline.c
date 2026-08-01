@@ -180,18 +180,35 @@ loom_target_pipeline_build_cleanup_expanded_target_functions(
       NULL, &for_op);
 }
 
-static iree_status_t loom_target_pipeline_build_authoring_expansion(
-    loom_builder_t* builder) {
+static iree_status_t loom_target_pipeline_build_authoring_expansion_iteration(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run_with_string_option(
-      builder, IREE_SV("select-templates"), IREE_SV("mode"), IREE_SV("final")));
+      builder, IREE_SV("select-templates"), IREE_SV("mode"), IREE_SV("early")));
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("inline-callables")));
-  // Clean up constants, dead operations, and redundant structure exposed by
-  // inlining before target legalization observes the expanded functions.
+  // Expose constants and facts at each newly inlined application site before
+  // the next selection iteration considers nested template predicates.
   loom_op_t* if_changed_op = NULL;
   return loom_pass_ir_build_if_changed(
       builder, loom_target_pipeline_build_cleanup_expanded_target_functions,
       NULL, &if_changed_op);
+}
+
+static iree_status_t loom_target_pipeline_build_authoring_expansion(
+    loom_builder_t* builder) {
+  // Template providers may contain applications whose predicates depend on
+  // facts available only at the outer application site. Expand from the
+  // outside in until all resolvable applications have reached their concrete
+  // call sites, then diagnose any demands that remain unresolved.
+  loom_op_t* repeat_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_pass_ir_build_repeat(
+      builder, LOOM_PASS_REPEAT_BUILD_FLAG_HAS_MAX_ITERATIONS,
+      LOOM_PASS_REPEAT_MODE_UNTIL_CONVERGED, 0, 64,
+      loom_target_pipeline_build_authoring_expansion_iteration, NULL,
+      &repeat_op));
+  return loom_target_pipeline_build_run_with_string_option(
+      builder, IREE_SV("select-templates"), IREE_SV("mode"), IREE_SV("final"));
 }
 
 static iree_status_t loom_target_pipeline_build_source_to_low(

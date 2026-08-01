@@ -16,15 +16,18 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
       cse
     }
   }
-  select-templates(mode = "final")
-  inline-callables
-  if changed {
-    for func {
-      where target {
-        canonicalize
+  repeat until_converged(max_iterations = 64) {
+    select-templates(mode = "early")
+    inline-callables
+    if changed {
+      for func {
+        where target {
+          canonicalize
+        }
       }
     }
   }
+  select-templates(mode = "final")
   for func {
     where target {
       legalize-math
@@ -92,15 +95,18 @@ pass.pipeline<module> @__loom_check_source_low pipeline {
       cse
     }
   }
-  select-templates(mode = "final")
-  inline-callables
-  if changed {
-    for func {
-      where target {
-        canonicalize
+  repeat until_converged(max_iterations = 64) {
+    select-templates(mode = "early")
+    inline-callables
+    if changed {
+      for func {
+        where target {
+          canonicalize
+        }
       }
     }
   }
+  select-templates(mode = "final")
   for func {
     where target {
       legalize-math
@@ -214,15 +220,18 @@ pass.pipeline<module> @__loom_check_prepared_low pipeline {
       cse
     }
   }
-  select-templates(mode = "final")
-  inline-callables
-  if changed {
-    for func {
-      where target {
-        canonicalize
+  repeat until_converged(max_iterations = 64) {
+    select-templates(mode = "early")
+    inline-callables
+    if changed {
+      for func {
+        where target {
+          canonicalize
+        }
       }
     }
   }
+  select-templates(mode = "final")
   for func {
     where target {
       legalize-math

@@ -4481,3 +4481,124 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   global_store_b128_saddr %125, %sum, %sum_output_view
   return
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @workgroup_reduce_result_drives_divergent_control() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane : index to i32
+  %sum = kernel.workgroup.reduce<addi> %lane_i32 : i32
+  %expected = scalar.constant 496 : i32
+  %matches = scalar.cmpi eq, %sum, %expected : i32
+  %zero = index.constant 0 : index
+  %zero_offset = index.constant 0 : offset
+  %one_i32 = scalar.constant 1 : i32
+  %output_view = buffer.view %output[%zero_offset] : buffer -> view<1xi32, #dense>
+  scf.if %matches {
+    view.store %one_i32, %output_view[%zero] : i32, view<1xi32, #dense>
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @workgroup_reduce_result_drives_divergent_control() asm {
+  %lane_i32 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %14 = v_mov_b32_dpp16 %lane_i32 {dpp_ctrl = 177}
+  %15 = v_add_u32 %lane_i32, %14
+  %16 = v_mov_b32_dpp16 %15 {dpp_ctrl = 78}
+  %17 = v_add_u32 %15, %16
+  %18 = v_mov_b32_dpp16 %17 {dpp_ctrl = 321}
+  %19 = v_add_u32 %17, %18
+  %20 = v_mov_b32_dpp16 %19 {dpp_ctrl = 320}
+  %21 = v_add_u32 %19, %20
+  %22 = v_permlanex16_b32_src12_inline %21, 0, 0
+  %sum = v_add_u32 %21, %22
+  %26 = v_mov_b32 496
+  %matches = v_cmp_eq_i32 %sum, %26
+  %28, %29 = s_and_saveexec_b64 %matches
+  low.cond_br %29, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+^_bb1:
+  %30 = v_mov_b32 1
+  %31 = v_mov_b32 0
+  global_store_b32_saddr %31, %30, %output_view
+  low.br ^_bb2
+^_bb2:
+  s_mov_b64_exec %28
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @workgroup_scan_result_drives_divergent_control() {
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 16 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane : index to i32
+  %sum = kernel.workgroup.scan<addi> %lane_i32 {direction = forward, mode = inclusive} : i32
+  %expected = scalar.constant 0 : i32
+  %matches = scalar.cmpi eq, %sum, %expected : i32
+  %zero = index.constant 0 : index
+  %zero_offset = index.constant 0 : offset
+  %one_i32 = scalar.constant 1 : i32
+  %output_view = buffer.view %output[%zero_offset] : buffer -> view<1xi32, #dense>
+  scf.if %matches {
+    view.store %one_i32, %output_view[%zero] : i32, view<1xi32, #dense>
+  }
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(16, 1, 1) workgroup_count(1, 1, 1) @workgroup_scan_result_drives_divergent_control() asm {
+  %lane_i32 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %14 = v_mov_b32 1
+  %15 = v_sub_nc_u32 %lane_i32, %14
+  %16 = v_cmp_ge_u32 %lane_i32, %14
+  %17 = v_lshlrev_b32_src0_inline %15, 2
+  %18 = v_mov_b32 2
+  %19 = v_sub_nc_u32 %lane_i32, %18
+  %20 = v_cmp_ge_u32 %lane_i32, %18
+  %21 = v_lshlrev_b32_src0_inline %19, 2
+  %22 = v_mov_b32 4
+  %23 = v_sub_nc_u32 %lane_i32, %22
+  %24 = v_cmp_ge_u32 %lane_i32, %22
+  %25 = v_lshlrev_b32_src0_inline %23, 2
+  %26 = v_mov_b32 8
+  %27 = v_sub_nc_u32 %lane_i32, %26
+  %28 = v_cmp_ge_u32 %lane_i32, %26
+  %29 = v_lshlrev_b32_src0_inline %27, 2
+  %30 = ds_bpermute_b32 %17, %lane_i32
+  %31 = v_add_u32 %lane_i32, %30
+  %32 = v_cndmask_b32 %lane_i32, %31, %16
+  %33 = ds_bpermute_b32 %21, %32
+  %34 = v_add_u32 %32, %33
+  %35 = v_cndmask_b32 %32, %34, %20
+  %36 = ds_bpermute_b32 %25, %35
+  %37 = v_add_u32 %35, %36
+  %38 = v_cndmask_b32 %35, %37, %24
+  %39 = ds_bpermute_b32 %29, %38
+  %40 = v_add_u32 %38, %39
+  %sum = v_cndmask_b32 %38, %40, %28
+  %matches = v_cmp_eq_i32_src1_inline %sum {rhs = 0}
+  %44, %45 = s_and_saveexec_b64 %matches
+  low.cond_br %45, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+^_bb1:
+  %46 = v_mov_b32 1
+  %47 = v_mov_b32 0
+  global_store_b32_saddr %47, %46, %output_view
+  low.br ^_bb2
+^_bb2:
+  s_mov_b64_exec %44
+  return
+}

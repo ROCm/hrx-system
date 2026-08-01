@@ -547,7 +547,8 @@ func.def public @unused_library(%x: i32) -> (i32) {
             "linked.loom");
   std::string linked_text =
       ToString(loomc_source_contents(serialized_text.get()));
-  EXPECT_NE(linked_text.find("func.def public @caller"), std::string::npos);
+  EXPECT_NE(linked_text.find("func.def public retain @caller"),
+            std::string::npos);
   EXPECT_NE(linked_text.find("func.def public @identity"), std::string::npos);
   EXPECT_EQ(linked_text.find("unused_harness"), std::string::npos);
   EXPECT_EQ(linked_text.find("unused_library"), std::string::npos);
@@ -1193,7 +1194,8 @@ func.def public @specialized_rgb() -> (index) {
   ASSERT_TRUE(loomc_result_succeeded(result.get()));
   ASSERT_NE(module.get(), nullptr);
   std::string text = SerializeModuleToText(module.get());
-  EXPECT_NE(text.find("func.def public @specialized_rgb"), std::string::npos);
+  EXPECT_NE(text.find("func.def public retain @specialized_rgb"),
+            std::string::npos);
   EXPECT_EQ(text.find("func.def public @generic"), std::string::npos);
   EXPECT_EQ(text.find("id4.vae.conv3x3_bias.output_channel_count"),
             std::string::npos);

@@ -104,7 +104,7 @@
           "stdout": {
             "contains": {
               "unordered": [
-                "kernel.def export(\"scale_i32_buffer\") @scale_i32_buffer",
+                "kernel.def retain export(\"scale_i32_buffer\") @scale_i32_buffer",
                 "func.template<authoring.link.scale_i32> target(@gfx1100)",
                 "func.template<authoring.link.scale_i32> target(@gfx1200)",
                 "func.template<authoring.link.scale_i32> priority(1) @scale_i32_fallback"
