@@ -202,6 +202,30 @@
           ]
         },
         {
+          "name": "compile-targetless-math-with-invocation-target",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/selected_root_amdgpu.loom",
+              "--backend=amdgpu-hal",
+              "--root=@targetless_math_f32",
+              "--target=gfx1100",
+              "--output={tmp}/targetless_math_amdgpu.hal",
+              "--emit-target-artifact={tmp}/targetless_math_amdgpu.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/targetless_math_amdgpu.hal",
+              "non_empty": true
+            },
+            {
+              "path": "{tmp}/targetless_math_amdgpu.hsaco",
+              "non_empty": true
+            }
+          ]
+        },
+        {
           "name": "reject-targetless-root-without-invocation-target",
           "run": {
             "tool": "loom-compile",

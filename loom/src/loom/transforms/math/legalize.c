@@ -8,15 +8,12 @@
 
 #include <string.h>
 
-#include "loom/analysis/symbol_facts.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
-#include "loom/ops/func_symbol_facts.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
-#include "loom/ops/target/facts.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
@@ -64,6 +61,8 @@ typedef struct loom_math_legalize_options_t {
 typedef struct loom_math_legalize_target_state_t {
   // True after this function's target policy lookup has run.
   bool resolved;
+  // True when the function has effective target facts.
+  bool available;
   // Contract-set key selected for this function, or a synthetic key.
   iree_string_view_t contract_set_key;
   // Target bundle selected for this function, if any.
@@ -83,8 +82,6 @@ typedef struct loom_math_legalize_state_t {
   loom_func_like_t function;
   // Target math policy registry linked into the current compiler binary.
   const loom_target_math_policy_registry_t* policy_registry;
-  // Symbol facts used to resolve function target contracts.
-  loom_symbol_fact_table_t symbol_facts;
   // Optional target compile report receiving math legalization rows.
   loom_target_compile_report_t* compile_report;
   // Lazily resolved target policy state for |function|.
@@ -366,60 +363,6 @@ static bool loom_math_legalize_query_for_op(
   return false;
 }
 
-static iree_status_t loom_math_legalize_lookup_func_facts(
-    loom_math_legalize_state_t* state,
-    const loom_func_symbol_facts_t** out_facts) {
-  *out_facts = NULL;
-  const loom_symbol_ref_t symbol_ref = loom_func_like_callee(state->function);
-  if (!loom_symbol_ref_is_valid(symbol_ref)) {
-    return iree_ok_status();
-  }
-  const loom_symbol_facts_base_t* base_facts = NULL;
-  IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
-      &state->symbol_facts, state->module, symbol_ref, &base_facts));
-  *out_facts = loom_func_symbol_facts_cast(base_facts);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_math_legalize_lookup_target_facts(
-    loom_math_legalize_state_t* state,
-    const loom_target_symbol_facts_t** out_target) {
-  *out_target = NULL;
-  const loom_func_symbol_facts_t* func_facts = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_math_legalize_lookup_func_facts(state, &func_facts));
-  const loom_symbol_ref_t authored_target_ref =
-      func_facts != NULL ? func_facts->target_symbol
-                         : loom_func_like_target(state->function);
-  const loom_symbol_ref_t target_ref = authored_target_ref;
-  if (!loom_symbol_ref_is_valid(target_ref)) {
-    return iree_ok_status();
-  }
-  if (target_ref.module_id != 0 ||
-      target_ref.symbol_id >= state->module->symbols.count) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "legalize-math effective target ref %u:%u is outside the module symbol "
-        "table",
-        (unsigned)target_ref.module_id, (unsigned)target_ref.symbol_id);
-  }
-
-  const loom_symbol_facts_base_t* base_facts = NULL;
-  IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
-      &state->symbol_facts, state->module, target_ref, &base_facts));
-  const loom_target_symbol_facts_t* target =
-      loom_target_symbol_facts_cast(base_facts);
-  if (target == NULL) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "legalize-math effective target symbol %u does not resolve to target "
-        "facts",
-        (unsigned)target_ref.symbol_id);
-  }
-  *out_target = target;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_math_legalize_resolve_policy(
     loom_math_legalize_state_t* state) {
   if (state->target.resolved) {
@@ -430,13 +373,17 @@ static iree_status_t loom_math_legalize_resolve_policy(
       .contract_set_key = IREE_SV("<targetless>"),
   };
 
-  const loom_target_symbol_facts_t* target = NULL;
-  IREE_RETURN_IF_ERROR(loom_math_legalize_lookup_target_facts(state, &target));
-  if (target == NULL) {
+  bool target_resolved = false;
+  const loom_target_facts_t* target_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_pass_resolve_function_facts(
+      state->pass, state->module, state->function, &target_resolved,
+      &target_facts));
+  if (!target_resolved) {
     return iree_ok_status();
   }
 
-  const loom_target_bundle_storage_t* storage = &target->projection->storage;
+  state->target.available = true;
+  const loom_target_bundle_storage_t* storage = &target_facts->storage;
   state->target.contract_set_key = storage->config.contract_set_key;
   state->target.target_bundle_name = storage->bundle.name;
   state->target.target_config_name = storage->bundle.config
@@ -598,6 +545,9 @@ static iree_status_t loom_math_legalize_rewrite_op(
   if (loom_pass_has_error_diagnostics(state->pass)) {
     return iree_ok_status();
   }
+  if (!state->target.available) {
+    return iree_ok_status();
+  }
   if (state->target.policy == NULL) {
     IREE_RETURN_IF_ERROR(loom_math_legalize_record_report_row(
         state, op, &query, /*decision=*/NULL,
@@ -665,10 +615,6 @@ iree_status_t loom_math_legalize_run(loom_pass_t* pass, loom_module_t* module,
   if (!loom_func_like_body(function)) {
     return iree_ok_status();
   }
-  const loom_symbol_ref_t target_ref = loom_func_like_target(function);
-  if (!loom_symbol_ref_is_valid(target_ref)) {
-    return iree_ok_status();
-  }
 
   const loom_target_math_pass_capability_t* math_capability =
       loom_target_math_pass_capability_from_pass(pass);
@@ -683,8 +629,6 @@ iree_status_t loom_math_legalize_run(loom_pass_t* pass, loom_module_t* module,
       .policy_registry = policy_registry,
       .compile_report = compile_report,
   };
-  loom_symbol_fact_table_initialize(&state.symbol_facts, pass->instance_arena);
-
   loom_greedy_rewrite_driver_t driver;
   loom_greedy_rewrite_driver_initialize(module, pass->arena, pass->value_facts,
                                         &driver);
