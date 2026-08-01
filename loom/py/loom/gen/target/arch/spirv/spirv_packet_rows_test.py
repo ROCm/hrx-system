@@ -6,10 +6,75 @@
 
 from __future__ import annotations
 
-from loom.gen.target.arch.spirv.spirv_packet_rows import _descriptor_ref_constant_name, generate_tables
+import re
+from dataclasses import replace
+
+import pytest
+
+from loom.gen.target.arch.spirv.spirv_packet_rows import (
+    _PACKETLESS_DESCRIPTOR_KEYS,
+    _descriptor_ref_constant_name,
+    _packet_rows,
+    _PacketRow,
+    _validate_rows,
+    generate_tables,
+)
 from loom.target.arch.spirv.builtins import BUILTIN_DIMENSIONS, BUILTIN_INDEX_QUERIES
 from loom.target.arch.spirv.cooperative_matrix import cooperative_matrix_descriptor_key
 from loom.target.arch.spirv.scalar_memory import STORAGE_BUFFER_SCALARS
+
+
+def _expect_row_validation_error(rows: tuple[_PacketRow, ...], expected_message: str) -> None:
+    with pytest.raises(ValueError, match=re.escape(expected_message)):
+        _validate_rows(rows)
+
+
+def test_validation_rejects_duplicate_packet_descriptor_keys() -> None:
+    rows = _packet_rows()
+
+    _expect_row_validation_error(
+        (*rows, rows[0]),
+        "SPIR-V packet descriptor keys must be unique: spirv.op_constant.i32",
+    )
+
+
+def test_validation_rejects_packet_rows_without_descriptors() -> None:
+    rows = _packet_rows()
+    rows_with_unknown_descriptor = (
+        replace(rows[0], descriptor_key="spirv.op_missing.test"),
+        *rows[1:],
+    )
+
+    _expect_row_validation_error(
+        rows_with_unknown_descriptor,
+        "SPIR-V packet rows reference missing descriptors: spirv.op_missing.test",
+    )
+
+
+def test_validation_rejects_descriptors_without_packet_rows() -> None:
+    rows = _packet_rows()
+
+    _expect_row_validation_error(
+        rows[1:],
+        "SPIR-V descriptors are missing packet rows: spirv.op_constant.i32",
+    )
+
+
+def test_validation_preserves_the_deliberate_packetless_descriptor() -> None:
+    assert _PACKETLESS_DESCRIPTOR_KEYS == frozenset({"spirv.op_variable.function.ptr"})
+    rows = _packet_rows()
+    rows_with_packetless_descriptor = (
+        replace(
+            rows[0],
+            descriptor_key="spirv.op_variable.function.ptr",
+        ),
+        *rows[1:],
+    )
+
+    _expect_row_validation_error(
+        rows_with_packetless_descriptor,
+        "SPIR-V packetless descriptors must not have packet rows: spirv.op_variable.function.ptr",
+    )
 
 
 def _generated_row(tables: str, descriptor_key: str) -> str:
