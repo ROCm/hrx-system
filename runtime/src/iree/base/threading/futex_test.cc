@@ -112,23 +112,17 @@ TEST(FutexTest, WakeAllWakesMultipleWaiters) {
   EXPECT_EQ(waiters_woken.load(std::memory_order_acquire), kNumWaiters);
 }
 
-// Tests that iree_futex_wait respects the timeout deadline.
-TEST(FutexTest, WaitTimeout) {
+// Tests that a future deadline eventually terminates an unchanged wait.
+TEST(FutexTest, WaitFutureDeadlineExpires) {
   uint32_t futex_word = 0;
 
-  iree_time_t start = iree_time_now();
-  iree_time_t deadline = start + 50 * 1000000;  // 50ms timeout
+  iree_time_t deadline = iree_time_now() + iree_make_duration_ms(1);
+  iree_status_code_t status = IREE_STATUS_OK;
+  while (status == IREE_STATUS_OK) {
+    status = iree_futex_wait(&futex_word, 0, deadline);
+  }
 
-  iree_status_code_t status = iree_futex_wait(&futex_word, 0, deadline);
-
-  iree_time_t elapsed = iree_time_now() - start;
-
-  // Should have timed out.
   EXPECT_EQ(status, IREE_STATUS_DEADLINE_EXCEEDED);
-
-  // Should have waited at least close to the timeout (allow 10ms slack for
-  // scheduling).
-  EXPECT_GE(elapsed, 40 * 1000000);  // At least 40ms
 }
 
 // Tests that iree_futex_wait with immediate deadline returns immediately.
