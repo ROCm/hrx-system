@@ -284,6 +284,7 @@ loom_check_test_suite(
   SRCS
     "test/barrier.loom-test"
     "test/emit.loom-test"
+    "test/integer_boolean.loom-test"
     "test/source_structured_control.loom-test"
     "test/workgroup_storage.loom-test"
   DATA

@@ -40,6 +40,7 @@ typedef enum loom_spirv_packet_form_e {
   LOOM_SPIRV_PACKET_FORM_COOPERATIVE_MATRIX_MUL_ADD = 13,
   LOOM_SPIRV_PACKET_FORM_CONTROL_BARRIER = 14,
   LOOM_SPIRV_PACKET_FORM_ACCESS_CHAIN = 15,
+  LOOM_SPIRV_PACKET_FORM_BOOLEAN_CONSTANT = 16,
 } loom_spirv_packet_form_t;
 
 typedef struct loom_spirv_packet_row_t {

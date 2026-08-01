@@ -36,8 +36,11 @@ from loom.target.arch.spirv.cooperative_matrix import (  # noqa: E402
 )
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET  # noqa: E402
 from loom.target.arch.spirv.scalar_alu import (  # noqa: E402
+    BOOLEAN_BINARY_OPERATIONS,
+    BOOLEAN_CONSTANTS,
     FLOAT_BINARY_OPERATIONS,
     FLOAT_SCALAR_ALU_TYPES,
+    INTEGER_BITWISE_BINARY_OPERATIONS,
     INTEGER_SCALAR_ALU_TYPE_PAIRS,
     OFFSET64_COMPARE_PREDICATES,
     SCALAR_ALU_TYPES,
@@ -46,6 +49,8 @@ from loom.target.arch.spirv.scalar_alu import (  # noqa: E402
     SIGNED_INTEGER_SCALAR_ALU_TYPES,
     UNSIGNED_INTEGER_BINARY_OPERATIONS,
     UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES,
+    BooleanConstant,
+    IntegerAluTypePair,
     ScalarAluType,
     ScalarBinaryOperation,
 )
@@ -435,10 +440,47 @@ def _scalar_binary_row(scalar: ScalarAluType, operation: ScalarBinaryOperation) 
     )
 
 
+def _integer_constant_row(scalar_pair: IntegerAluTypePair) -> _PacketRow:
+    scalar = scalar_pair.signed
+    return _PacketRow(
+        f"spirv.op_constant.{scalar.suffix}",
+        opcode="LOOM_SPIRV_OP_CONSTANT",
+        form="LOOM_SPIRV_PACKET_FORM_INTEGER_CONSTANT",
+        result_type=_alu_scalar_value(scalar),
+        result_count=1,
+        immediate_index=0,
+        literal_word_count=scalar_pair.literal_word_count,
+    )
+
+
+def _boolean_constant_row(row: BooleanConstant) -> _PacketRow:
+    return _PacketRow(
+        f"spirv.op_constant_{row.descriptor_suffix}.bool",
+        opcode=row.opcode,
+        form="LOOM_SPIRV_PACKET_FORM_BOOLEAN_CONSTANT",
+        result_type=_bool_value(),
+        result_count=1,
+    )
+
+
+def _boolean_binary_row(operation: ScalarBinaryOperation) -> _PacketRow:
+    bool_value = _bool_value()
+    return _PacketRow(
+        f"spirv.op_{operation.descriptor_suffix}.bool",
+        opcode=operation.opcode,
+        form="LOOM_SPIRV_PACKET_FORM_BINARY_SAME_TYPE",
+        result_type=bool_value,
+        operand_types=(bool_value, bool_value),
+        result_count=1,
+    )
+
+
 def _scalar_binary_rows() -> list[_PacketRow]:
     rows = [_scalar_binary_row(scalar, operation) for scalar in SIGNED_INTEGER_SCALAR_ALU_TYPES for operation in SIGNED_INTEGER_BINARY_OPERATIONS]
+    rows.extend(_scalar_binary_row(scalar, operation) for scalar in SIGNED_INTEGER_SCALAR_ALU_TYPES for operation in INTEGER_BITWISE_BINARY_OPERATIONS)
     rows.extend(_scalar_binary_row(scalar_pair.unsigned, operation) for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS for operation in UNSIGNED_INTEGER_BINARY_OPERATIONS)
     rows.extend(_scalar_binary_row(scalar, operation) for scalar in FLOAT_SCALAR_ALU_TYPES for operation in FLOAT_BINARY_OPERATIONS)
+    rows.extend(_boolean_binary_row(operation) for operation in BOOLEAN_BINARY_OPERATIONS)
     return rows
 
 
@@ -505,17 +547,8 @@ def _builtin_index_rows() -> list[_PacketRow]:
 
 
 def _coordinate_binary_rows() -> list[_PacketRow]:
-    i32_value = _value_type("LOOM_SPIRV_VALUE_CLASS_SCALAR", "LOOM_SPIRV_SCALAR_TYPE_S32")
     offset64_value = _offset64_value()
     rows = [
-        _PacketRow(
-            "spirv.op_shift_left_logical.i32",
-            opcode="LOOM_SPIRV_OP_SHIFT_LEFT_LOGICAL",
-            form="LOOM_SPIRV_PACKET_FORM_BINARY_SAME_TYPE",
-            result_type=i32_value,
-            operand_types=(i32_value, i32_value),
-            result_count=1,
-        ),
         _PacketRow(
             "spirv.op_iadd.offset64",
             opcode="LOOM_SPIRV_OP_I_ADD",
@@ -618,6 +651,16 @@ def _select_rows() -> list[_PacketRow]:
     ]
     rows.append(
         _PacketRow(
+            "spirv.op_select.bool",
+            opcode="LOOM_SPIRV_OP_SELECT",
+            form="LOOM_SPIRV_PACKET_FORM_SELECT",
+            result_type=bool_value,
+            operand_types=(bool_value, bool_value, bool_value),
+            result_count=1,
+        )
+    )
+    rows.append(
+        _PacketRow(
             "spirv.op_select.offset64",
             opcode="LOOM_SPIRV_OP_SELECT",
             form="LOOM_SPIRV_PACKET_FORM_SELECT",
@@ -638,17 +681,9 @@ _PACKETLESS_DESCRIPTOR_KEYS = frozenset(
 
 
 def _packet_rows() -> tuple[_PacketRow, ...]:
-    i32_value = _value_type("LOOM_SPIRV_VALUE_CLASS_SCALAR", "LOOM_SPIRV_SCALAR_TYPE_S32")
     return (
-        _PacketRow(
-            "spirv.op_constant.i32",
-            opcode="LOOM_SPIRV_OP_CONSTANT",
-            form="LOOM_SPIRV_PACKET_FORM_INTEGER_CONSTANT",
-            result_type=i32_value,
-            result_count=1,
-            immediate_index=0,
-            literal_word_count=1,
-        ),
+        *(_boolean_constant_row(row) for row in BOOLEAN_CONSTANTS),
+        *(_integer_constant_row(scalar_pair) for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS),
         _PacketRow(
             "spirv.op_constant.offset64",
             opcode="LOOM_SPIRV_OP_CONSTANT",
