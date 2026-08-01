@@ -1768,6 +1768,13 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
     return (enum_type)loom_attr_as_enum(loom_op_attrs(op)[(index)]); \
   }
 
+// Defines a function that reads a representation-scoped enum by index.
+#define LOOM_DEFINE_ATTR_SCOPED_ENUM(func_name, index)           \
+  enum { func_name##_ATTR_INDEX = (index) };                     \
+  static inline uint32_t func_name(const loom_op_t* op) {        \
+    return loom_attr_as_scoped_enum(loom_op_attrs(op)[(index)]); \
+  }
+
 // Defines a function that reads a symbol attribute by index.
 #define LOOM_DEFINE_ATTR_SYMBOL(func_name, index)                  \
   enum { func_name##_ATTR_INDEX = (index) };                       \

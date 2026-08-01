@@ -98,6 +98,7 @@ __all__ = [
     "ATTR_TYPE_STRING",
     "ATTR_TYPE_BOOL",
     "ATTR_TYPE_ENUM",
+    "ATTR_TYPE_SCOPED_ENUM",
     "ATTR_TYPE_TYPE",
     "ATTR_TYPE_I64_ARRAY",
     "ATTR_TYPE_BYTES",
@@ -492,6 +493,7 @@ ATTR_TYPE_F64 = "f64"
 ATTR_TYPE_STRING = "string"
 ATTR_TYPE_BOOL = "bool"
 ATTR_TYPE_ENUM = "enum"
+ATTR_TYPE_SCOPED_ENUM = "scoped_enum"
 ATTR_TYPE_TYPE = "type"
 ATTR_TYPE_I64_ARRAY = "i64_array"
 ATTR_TYPE_BYTES = "bytes"
@@ -509,6 +511,7 @@ _VALID_ATTR_TYPES = frozenset(
         ATTR_TYPE_STRING,
         ATTR_TYPE_BOOL,
         ATTR_TYPE_ENUM,
+        ATTR_TYPE_SCOPED_ENUM,
         ATTR_TYPE_TYPE,
         ATTR_TYPE_I64_ARRAY,
         ATTR_TYPE_BYTES,
@@ -632,7 +635,9 @@ class AttrDef:
           positional in the format spec).
     attr_type: The kind of attribute value. Must be one of the
         ATTR_TYPE_* constants: "i64", "f64", "string", "bool",
-        "enum", "type", "i64_array", "bytes", "encoding", "any".
+        "enum", "scoped_enum", "type", "i64_array", "bytes", "encoding",
+        "any". Scoped enums use a stable key at format boundaries and a dense
+        ordinal interpreted by the enclosing representation contract in C IR.
     doc: Human-readable description.
     default: Default value (None = required, not optional).
     enum_def: For enum attrs, the EnumDef describing valid values.
@@ -674,6 +679,16 @@ class AttrDef:
             raise ValueError(
                 f"AttrDef '{self.name}': open_enum requires attr_type='enum'"
             )
+        if self.attr_type == ATTR_TYPE_SCOPED_ENUM:
+            if self.optional:
+                raise ValueError(
+                    f"AttrDef '{self.name}': scoped_enum attributes are required"
+                )
+            if self.default is not None:
+                raise ValueError(
+                    f"AttrDef '{self.name}': scoped_enum attributes cannot "
+                    "have defaults"
+                )
         if self.symbol_ref is not None and self.attr_type != ATTR_TYPE_SYMBOL:
             raise ValueError(
                 f"AttrDef '{self.name}': symbol_ref requires attr_type='symbol'"

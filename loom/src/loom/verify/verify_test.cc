@@ -583,6 +583,27 @@ TEST_F(VerifyTest, ValidAddiPasses) {
   EXPECT_EQ(result.error_count, 0u);
 }
 
+TEST_F(VerifyTest, ScopedEnumsRequireExplicitAttributeDescriptors) {
+  loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  EnterTestFunc(nullptr, 0, nullptr);
+
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_scoped_enum(0),
+                                          i32_type, LOOM_LOCATION_UNKNOWN,
+                                          &op));
+
+  TerminateFunc();
+  DiagnosticCapture capture;
+  auto result = VerifyStructured(&capture);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry =
+      FindDiagnostic(capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 5));
+  ASSERT_NE(entry, nullptr) << "Expected TYPE/005 attribute-kind diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "value");
+  ExpectU32Param(*entry, 1, LOOM_ATTR_SCOPED_ENUM);
+  ExpectU32Param(*entry, 2, LOOM_ATTR_ANY);
+}
+
 TEST_F(VerifyTest, RejectsPredicateArityMismatch) {
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_value_id_t argument = LOOM_VALUE_ID_INVALID;

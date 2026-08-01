@@ -331,9 +331,24 @@ class TestAttrDef:
 
     def test_all_valid_attr_types(self) -> None:
         """All documented attr_type values are accepted."""
-        for attr_type in ["i64", "f64", "string", "bool", "type", "i64_array", "any"]:
+        for attr_type in [
+            "i64",
+            "f64",
+            "string",
+            "bool",
+            "type",
+            "i64_array",
+            "any",
+            "scoped_enum",
+        ]:
             AttrDef("test", attr_type)  # Should not raise.
         AttrDef("test", "enum", enum_def=_cmpi_preds)  # enum needs enum_def.
+
+    def test_scoped_enum_is_never_optional_or_defaulted(self) -> None:
+        with _raises(ValueError, match="scoped_enum attributes are required"):
+            AttrDef("descriptor", "scoped_enum", optional=True)
+        with _raises(ValueError, match="scoped_enum attributes cannot have defaults"):
+            AttrDef("descriptor", "scoped_enum", default=0)
 
 
 class TestEnumDef:

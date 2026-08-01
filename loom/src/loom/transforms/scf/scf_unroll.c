@@ -1213,6 +1213,7 @@ static iree_status_t loom_scf_unroll_attr_refs_are_ready(
     case LOOM_ATTR_STRING:
     case LOOM_ATTR_BOOL:
     case LOOM_ATTR_ENUM:
+    case LOOM_ATTR_SCOPED_ENUM:
     case LOOM_ATTR_I64_ARRAY:
     case LOOM_ATTR_SYMBOL:
     case LOOM_ATTR_BYTES:
