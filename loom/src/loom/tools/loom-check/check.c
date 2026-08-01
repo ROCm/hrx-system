@@ -1221,10 +1221,10 @@ static bool loom_check_line_is_file_preamble_comment(
 // Finds the leading file preamble used by template-synchronized files.
 //
 // Ordinary .loom-test files treat leading RUN/REQUIRES directives as part of
-// the first case. A TEMPLATE directive is different: it is file metadata for
-// update tooling, so the leading directive/comment block containing it is a
-// real file preamble. The preamble ends at the first blank line after the
-// TEMPLATE block, the first case separator, or the first IR/annotation line.
+// the first case. A TEMPLATE directive is different: it declares file-level
+// provenance, so the leading directive/comment block containing it is a real
+// file preamble. The preamble ends at the first blank line after the TEMPLATE
+// block, the first case separator, or the first IR/annotation line.
 static void loom_check_find_template_preamble_prefix(
     iree_string_view_t source, loom_check_source_range_t* out_range) {
   *out_range = loom_check_source_range_empty();

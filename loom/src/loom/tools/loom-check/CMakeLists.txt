@@ -315,6 +315,23 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    file_test
+  SRCS
+    "file_test.cc"
+  DEPS
+    ::file
+    iree::base
+    iree::base::internal::arena
+    iree::io::file_handle
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+    loom::ir
+    loom::testing::context
+)
+
 loom_cc_library(
   NAME
     main

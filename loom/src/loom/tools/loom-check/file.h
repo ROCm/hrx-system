@@ -31,6 +31,9 @@ typedef struct loom_check_process_options_t {
   loom_check_json_output_mode_t json_output_mode;
   // Logical source path normalization used for diagnostics and loc() output.
   loom_tooling_source_path_options_t source_path_options;
+  // Filesystem root used to resolve root-relative TEMPLATE paths. An empty
+  // value resolves them from the current working directory.
+  iree_string_view_t template_root;
 } loom_check_process_options_t;
 
 // Reads a source from stdin or a file path, then processes it.

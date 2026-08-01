@@ -20,11 +20,14 @@
 
 IREE_FLAG(bool, update, false,
           "Rewrite test files with actual output in the expected\n"
-          "section (after // ----). Inserts the separator for non-empty\n"
-          "output when absent.\n"
+          "section (after // ----) and synchronize TEMPLATE cases. Inserts\n"
+          "the separator for non-empty output when absent.\n"
           "Cannot be used with stdin or verify mode.");
 IREE_FLAG(bool, verbose, false,
           "Print PASS/FAIL/SKIP for every case, not just failures.");
+IREE_FLAG(string, template_root, "",
+          "Filesystem root used to resolve root-relative TEMPLATE paths.\n"
+          "Defaults to the current working directory.");
 
 typedef struct loom_check_json_flag_t {
   bool enabled;
@@ -112,6 +115,11 @@ static void loom_check_print_agents_markdown(FILE* stream) {
       "//loom/src/loom/tools/loom-check/test:test\n"
       "```\n"
       "\n"
+      "Template-backed fixtures are rebuilt in memory during every ordinary\n"
+      "run. Drift fails before any case executes; Bazel and CMake test "
+      "targets\n"
+      "supply the template root and declare the template inputs they consume.\n"
+      "\n"
       "### Update expected output\n"
       "\n"
       "Pass the update flag through Bazel with `--test_arg=--update`:\n"
@@ -138,11 +146,13 @@ static void loom_check_print_agents_markdown(FILE* stream) {
       "```shell\n"
       "iree-bazel-run //loom/src/loom/tools/loom-check -- "
       "path/to/file.loom-test\n"
-      "iree-bazel-run //loom/src/loom/tools/loom-check -- --update "
-      "path/to/file.loom-test\n"
+      "iree-bazel-run //loom/src/loom/tools/loom-check -- "
+      "--template-root=. --update path/to/file.loom-test\n"
       "```\n"
       "\n"
-      "`--update` cannot be used with stdin or verify-mode cases.\n"
+      "Direct runs resolve TEMPLATE paths from the current directory unless\n"
+      "`--template-root` is explicit. `--update` cannot be used with stdin or\n"
+      "verify-mode cases.\n"
       "\n"
       "### Emit output discipline\n"
       "\n"
@@ -246,12 +256,13 @@ int loom_check_main(int argc, char** argv,
       "                            annotations for roundtrip and pass output.\n"
       "    // REQUIRES: <name>[, ...] Skip when requirements are unavailable.\n"
       "    // XFAIL: <reason>       Mark as expected failure.\n"
-      "    // TEMPLATE: <path>      File-level corpus template metadata.\n"
+      "    // TEMPLATE: <path>      Root-relative authoritative corpus "
+      "source.\n"
       "    Known REQUIRES names: loom-check-test-unavailable and names from "
       "providers linked\n"
       "    into this runner.\n"
       "    TEMPLATE is only accepted in the file preamble before the first "
-      "// ====.\n"
+      "// ==== and stale files fail before case execution.\n"
       "    CASE directives are intentionally unsupported; function symbols are "
       "case names.\n"
       "\n"
@@ -317,6 +328,7 @@ int loom_check_main(int argc, char** argv,
           {
               .prefix_maps = FLAG_source_prefix_map_list(),
           },
+      .template_root = iree_make_cstring_view(FLAG_template_root),
   };
 
   if (iree_status_is_ok(status)) {

@@ -59,9 +59,9 @@
 //                           Skip the case when external tools or target
 //                           backends are unavailable.
 //   // XFAIL: <reason>      Mark case as expected failure.
-//   // TEMPLATE: <path>      Declare that this file is synchronized from a
+//   // TEMPLATE: <path>      Require this file to remain synchronized with a
 //                           root-relative corpus template. File-level only;
-//                           ignored by ordinary execution.
+//                           ordinary execution rejects stale files.
 //
 // Separators:
 //   // ====                 Case separator. The first separator must appear
@@ -80,13 +80,15 @@
 //   file defaults, plus any case-local requirements it declares.
 //
 // TEMPLATE:
-//   A // TEMPLATE: directive in the leading file preamble declares a source
-//   corpus template for generated target-specific expectation files. It is
-//   metadata for update tooling, not a linking mechanism and not a case
-//   namespace. The preamble is the leading directive/comment block containing
-//   TEMPLATE; do not add a // ==== separator before the first real case.
-//   Individual case names are the function symbols inside the case IR;
-//   // CASE directives are intentionally unsupported.
+//   A // TEMPLATE: directive in the leading file preamble declares the source
+//   corpus for a target-specific expectation file. loom-check rebuilds the
+//   authoritative source in memory on every run and rejects stale concrete
+//   files before executing any case. --update is the only mode that writes the
+//   synchronized source. TEMPLATE is a provenance contract, not a linking
+//   mechanism or case namespace. The preamble is the leading directive/comment
+//   block containing TEMPLATE; do not add a // ==== separator before the first
+//   real case. Individual case names are the function symbols inside the case
+//   IR; // CASE directives are intentionally unsupported.
 //
 // Annotations (for verify mode — uppercase to distinguish from comments):
 //   // ERROR: DOMAIN/CODE "substring"

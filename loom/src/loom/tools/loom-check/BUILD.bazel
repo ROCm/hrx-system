@@ -466,6 +466,22 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "file_test",
+    srcs = ["file_test.cc"],
+    deps = [
+        ":file",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/testing:context",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+)
+
 loom_cc_library(
     name = "main",
     testonly = True,
