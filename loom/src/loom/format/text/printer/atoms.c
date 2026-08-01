@@ -708,12 +708,11 @@ iree_status_t loom_text_print_type_with_options(
                                         : iree_string_view_empty(),
   };
   if (!iree_string_view_is_empty(ctx.low_asm_descriptor_set_key) &&
-      ctx.low_asm_environment.vtable &&
-      ctx.low_asm_environment.vtable->lookup_descriptor_set) {
+      ctx.low_asm_environment.low_repr.vtable &&
+      ctx.low_asm_environment.low_repr.state) {
     ctx.low_repr.contract_key = ctx.low_asm_descriptor_set_key;
-    IREE_RETURN_IF_ERROR(ctx.low_asm_environment.vtable->lookup_descriptor_set(
-        ctx.low_asm_environment.state, ctx.low_asm_descriptor_set_key,
-        &ctx.low_repr.descriptor_set));
+    ctx.low_repr.descriptor_set = loom_low_repr_lookup_descriptor_set(
+        &ctx.low_asm_environment.low_repr, ctx.low_asm_descriptor_set_key);
   }
   return loom_text_print_type_impl(type, module, stream, &ctx);
 }

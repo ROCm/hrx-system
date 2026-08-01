@@ -153,38 +153,6 @@ static iree_status_t loom_low_descriptor_text_asm_form_references_immediate(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_descriptor_text_asm_lookup_descriptor_set(
-    const loom_low_descriptor_registry_t* registry, iree_string_view_t key,
-    const loom_text_low_asm_descriptor_set_t** out_descriptor_set) {
-  *out_descriptor_set = NULL;
-  const loom_low_descriptor_set_t* descriptor_set =
-      loom_low_descriptor_registry_lookup(registry, key);
-  if (descriptor_set == NULL) {
-    return iree_ok_status();
-  }
-  *out_descriptor_set =
-      loom_low_descriptor_text_asm_descriptor_set_handle(descriptor_set);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_low_descriptor_text_asm_lookup_descriptor_set_default(
-    const loom_text_low_asm_environment_state_t* state, iree_string_view_t key,
-    const loom_text_low_asm_descriptor_set_t** out_descriptor_set) {
-  return loom_low_descriptor_text_asm_lookup_descriptor_set(
-      loom_low_descriptor_text_asm_state_registry(state), key,
-      out_descriptor_set);
-}
-
-static iree_status_t
-loom_low_descriptor_text_asm_lookup_descriptor_set_with_diagnostics(
-    const loom_text_low_asm_environment_state_t* state, iree_string_view_t key,
-    const loom_text_low_asm_descriptor_set_t** out_descriptor_set) {
-  const loom_low_descriptor_text_asm_environment_storage_t* storage =
-      loom_low_descriptor_text_asm_state_storage(state);
-  return loom_low_descriptor_text_asm_lookup_descriptor_set(
-      storage->descriptor_registry, key, out_descriptor_set);
-}
-
 static iree_status_t loom_low_descriptor_text_asm_make_packet(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_asm_form_t* asm_form,
@@ -1464,8 +1432,6 @@ static iree_status_t loom_low_descriptor_text_asm_describe_register_type(
 }
 
 static const loom_text_low_asm_vtable_t kLowDescriptorTextAsmVtable = {
-    .lookup_descriptor_set =
-        loom_low_descriptor_text_asm_lookup_descriptor_set_default,
     .lookup_packet = loom_low_descriptor_text_asm_lookup_packet,
     .infer_result_type = loom_low_descriptor_text_asm_infer_result_type,
     .validate_result_type = loom_low_descriptor_text_asm_validate_result_type,
@@ -1486,8 +1452,6 @@ static const loom_text_low_asm_vtable_t kLowDescriptorTextAsmVtable = {
 };
 
 static const loom_text_low_asm_vtable_t kLowDescriptorTextAsmDiagnosticVtable = {
-    .lookup_descriptor_set =
-        loom_low_descriptor_text_asm_lookup_descriptor_set_with_diagnostics,
     .lookup_packet = loom_low_descriptor_text_asm_lookup_packet,
     .diagnose_unknown_packet =
         loom_low_descriptor_text_asm_diagnose_unknown_packet,

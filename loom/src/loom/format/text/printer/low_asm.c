@@ -64,9 +64,8 @@ static iree_status_t loom_print_low_asm_resolve_repr(
         "low asm region printing requires a representation-contract key");
   }
   if (out_low_repr->descriptor_set == NULL) {
-    IREE_RETURN_IF_ERROR(ctx->low_asm_environment.vtable->lookup_descriptor_set(
-        ctx->low_asm_environment.state, out_low_repr->contract_key,
-        &out_low_repr->descriptor_set));
+    out_low_repr->descriptor_set = loom_low_repr_lookup_descriptor_set(
+        &ctx->low_asm_environment.low_repr, out_low_repr->contract_key);
   }
   if (out_low_repr->descriptor_set == NULL) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,

@@ -179,10 +179,8 @@ static iree_status_t loom_parse_low_asm_descriptor_set(
         parser, key_token, IREE_SV("low asm environment is not configured"));
   }
 
-  IREE_RETURN_IF_ERROR(
-      parser->low_asm_environment.vtable->lookup_descriptor_set(
-          parser->low_asm_environment.state, key_token.text,
-          &out_low_repr->descriptor_set));
+  out_low_repr->descriptor_set = loom_low_repr_lookup_descriptor_set(
+      &parser->low_asm_environment.low_repr, key_token.text);
   if (out_low_repr->descriptor_set == NULL) {
     return loom_parser_emit_low_asm_error(
         parser, key_token, IREE_SV("unknown low descriptor set"));

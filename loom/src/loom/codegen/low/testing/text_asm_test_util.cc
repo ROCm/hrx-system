@@ -72,9 +72,14 @@ void LowTextAsmTypeInferenceHarness::Deinitialize() {
 iree_status_t LowTextAsmTypeInferenceHarness::LookupPacket(
     iree_string_view_t descriptor_set_key, iree_string_view_t mnemonic,
     loom_text_low_asm_packet_descriptor_t* out_packet) const {
-  const loom_text_low_asm_descriptor_set_t* descriptor_set = nullptr;
-  IREE_RETURN_IF_ERROR(environment_.vtable->lookup_descriptor_set(
-      environment_.state, descriptor_set_key, &descriptor_set));
+  const loom_text_low_asm_descriptor_set_t* descriptor_set =
+      loom_low_repr_lookup_descriptor_set(&environment_.low_repr,
+                                          descriptor_set_key);
+  if (!descriptor_set) {
+    return iree_make_status(
+        IREE_STATUS_NOT_FOUND, "descriptor set '%.*s' was not found",
+        (int)descriptor_set_key.size, descriptor_set_key.data);
+  }
   return environment_.vtable->lookup_packet(environment_.state, descriptor_set,
                                             mnemonic, out_packet);
 }
@@ -83,12 +88,13 @@ iree_status_t LowTextAsmTypeInferenceHarness::MakeRegisterType(
     iree_string_view_t reg_class_name, uint16_t unit_count,
     loom_type_t* out_type) const {
   const loom_low_descriptor_set_t* descriptor_set = descriptor_set_provider_();
-  const loom_text_low_asm_descriptor_set_t* descriptor_set_handle = nullptr;
-  IREE_RETURN_IF_ERROR(environment_.vtable->lookup_descriptor_set(
-      environment_.state,
-      loom_low_descriptor_set_string(descriptor_set,
-                                     descriptor_set->key_string_offset),
-      &descriptor_set_handle));
+  const loom_text_low_asm_descriptor_set_t* descriptor_set_handle =
+      loom_low_repr_lookup_descriptor_set(
+          &environment_.low_repr,
+          loom_low_descriptor_set_string(descriptor_set,
+                                         descriptor_set->key_string_offset));
+  IREE_ASSERT(descriptor_set_handle != nullptr,
+              "harness descriptor provider must be registered");
   bool found = false;
   loom_type_t type = loom_type_none();
   IREE_RETURN_IF_ERROR(environment_.vtable->resolve_register_type(

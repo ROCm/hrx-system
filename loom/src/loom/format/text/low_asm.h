@@ -193,12 +193,6 @@ typedef struct loom_text_low_asm_statement_t {
 // lossless-spelling availability checks. Semantic validation belongs in the
 // verifier and descriptor-backed describe implementation, not in the printer.
 
-// Resolves an `asm<...>` descriptor-set key to an environment-owned handle.
-// Returns OK with NULL when no descriptor set matches.
-typedef iree_status_t (*loom_text_low_asm_lookup_descriptor_set_fn_t)(
-    const loom_text_low_asm_environment_state_t* state, iree_string_view_t key,
-    const loom_text_low_asm_descriptor_set_t** out_descriptor_set);
-
 // Resolves a mnemonic within a descriptor set to a packet descriptor. Returns
 // OK with |out_packet->descriptor| NULL when no packet matches.
 typedef iree_status_t (*loom_text_low_asm_lookup_packet_fn_t)(
@@ -299,8 +293,6 @@ typedef iree_status_t (*loom_text_low_asm_describe_register_type_fn_t)(
     bool* out_found);
 
 typedef struct loom_text_low_asm_vtable_t {
-  // Resolves an `asm<...>` descriptor-set key to an environment-owned handle.
-  loom_text_low_asm_lookup_descriptor_set_fn_t lookup_descriptor_set;
   // Resolves a mnemonic within a descriptor-set handle to a packet descriptor.
   loom_text_low_asm_lookup_packet_fn_t lookup_packet;
   // Optional target-owned explanation for unknown packet names.
@@ -348,7 +340,7 @@ typedef struct loom_text_low_asm_environment_t {
 static inline bool loom_text_low_asm_environment_is_configured(
     const loom_text_low_asm_environment_t* environment) {
   return environment && environment->vtable && environment->state &&
-         environment->vtable->lookup_descriptor_set &&
+         environment->low_repr.vtable && environment->low_repr.state &&
          environment->vtable->lookup_packet &&
          environment->vtable->resolve_register_type &&
          environment->vtable->infer_result_type &&
@@ -363,7 +355,7 @@ static inline bool loom_text_low_asm_environment_is_configured(
 static inline bool loom_text_low_asm_environment_supports_printing(
     const loom_text_low_asm_environment_t* environment) {
   return environment && environment->vtable && environment->state &&
-         environment->vtable->lookup_descriptor_set &&
+         environment->low_repr.vtable && environment->low_repr.state &&
          environment->vtable->result_type_annotation_required &&
          environment->vtable->immediate_descriptor &&
          environment->vtable->describe_operation &&
