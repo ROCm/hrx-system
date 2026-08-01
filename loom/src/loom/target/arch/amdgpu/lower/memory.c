@@ -2043,12 +2043,13 @@ static bool loom_amdgpu_memory_dynamic_term_can_flat_address(
       term->byte_shift == LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE) {
     return false;
   }
-  if (term->stride_value_count != 0) {
-    return false;
-  }
   if (term->byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE &&
       term->byte_shift >= 32) {
     return false;
+  }
+  if (term->stride_value_count != 0) {
+    return loom_low_source_memory_dynamic_term_fits_unsigned_bit_count(term,
+                                                                       32);
   }
   return term->byte_facts.range_hi / term->byte_stride <= UINT32_MAX;
 }
@@ -2092,11 +2093,12 @@ static bool loom_amdgpu_memory_dynamic_term_can_emit_flat_address(
   if (term->byte_stride <= 0 || term->byte_stride > UINT32_MAX) {
     return false;
   }
-  if (term->stride_value_count != 0) {
+  if (term->byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE &&
+      term->byte_shift >= 32) {
     return false;
   }
-  return term->byte_shift == LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE ||
-         term->byte_shift < 32;
+  return term->stride_value_count == 0 ||
+         loom_low_source_memory_dynamic_term_fits_unsigned_bit_count(term, 32);
 }
 
 static bool loom_amdgpu_memory_access_dynamic_terms_can_emit_flat_address(

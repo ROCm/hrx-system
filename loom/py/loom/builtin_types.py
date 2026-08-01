@@ -148,6 +148,7 @@ buffer_type = TypeDef(
     name="buffer",
     doc="Opaque untyped storage identity used as the root for typed views.",
     ir_kind="buffer",
+    fact_domain="loom_buffer_fact_domain",
 )
 
 # ============================================================================

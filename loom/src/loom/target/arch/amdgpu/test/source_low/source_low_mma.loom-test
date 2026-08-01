@@ -435,7 +435,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
   %init_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %out_view = resource<hal_binding> {index = 3, source_type = hal.buffer, extent = 1024} : reg<amdgpu.sgpr x2>
   %56 = storage {byte_alignment = 16, byte_length = 512} : low.storage<workgroup>
-  %58 = storage {byte_alignment = 16, byte_length = 512} : low.storage<workgroup>
+  %57 = storage {byte_alignment = 16, byte_length = 512} : low.storage<workgroup>
   %60 = v_lshlrev_b32_src0_inline %tid, 4
   %lhs_loaded = global_load_b128_saddr %60, %lhs_buffer_view
   %rhs_loaded = global_load_b128_saddr %60, %rhs_buffer_view

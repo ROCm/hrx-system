@@ -73,7 +73,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(2, 1, 1
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 16} : reg<amdgpu.sgpr x2>
   %23 = storage {byte_alignment = 4, byte_length = 8} : low.storage<private>
-  %25 = storage {byte_alignment = 8, byte_length = 16} : low.storage<private>
+  %24 = storage {byte_alignment = 8, byte_length = 16} : low.storage<private>
   %27 = v_mov_b32 0
   %lhs = global_load_b32_saddr %27, %input_view
   scratch_store_b32_vaddr %27, %lhs

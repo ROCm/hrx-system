@@ -715,6 +715,7 @@ typedef enum loom_amdgpu_select_condition_kind_e {
   LOOM_AMDGPU_SELECT_CONDITION_KIND_SCC = 1,
   LOOM_AMDGPU_SELECT_CONDITION_KIND_SCALAR_MASK = 2,
   LOOM_AMDGPU_SELECT_CONDITION_KIND_VECTOR_MASK = 3,
+  LOOM_AMDGPU_SELECT_CONDITION_KIND_SGPR_BOOL = 4,
 } loom_amdgpu_select_condition_kind_t;
 
 typedef enum loom_amdgpu_select_payload_kind_e {
@@ -736,6 +737,8 @@ typedef struct loom_amdgpu_vector_select_plan_t {
   loom_amdgpu_select_condition_kind_t condition_kind;
   // Descriptor row selected for SCC-controlled scalar selects.
   loom_low_lower_resolved_descriptor_t scc_descriptor;
+  // Descriptor row rematerializing SCC from an SGPR boolean condition.
+  loom_low_lower_resolved_descriptor_t sgpr_bool_compare_descriptor;
   // Descriptor rows selected for scalar-mask v_cndmask_b32 lane selects.
   loom_amdgpu_cndmask_b32_descriptors_t cndmask_descriptors;
   // Descriptor row selected to read EXEC for i1 mask selection.

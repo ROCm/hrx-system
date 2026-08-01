@@ -376,10 +376,10 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(16, 16,
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 512} : reg<amdgpu.sgpr x2>
+  %25 = storage {byte_alignment = 2, byte_length = 512} : low.storage<workgroup>
   %row = v_and_b32_lit %packed_tid, 1023
-  %26 = v_lshrrev_b32_src0_inline %packed_tid, 10
-  %column = v_and_b32_lit %26, 1023
-  %28 = storage {byte_alignment = 2, byte_length = 512} : low.storage<workgroup>
+  %27 = v_lshrrev_b32_src0_inline %packed_tid, 10
+  %column = v_and_b32_lit %27, 1023
   %30 = v_lshl_add_u32_shift_imm %row, %column, 4
   %31 = v_lshlrev_b32_src0_inline %30, 1
   %loaded = global_load_d16_b16_saddr %31, %input_view

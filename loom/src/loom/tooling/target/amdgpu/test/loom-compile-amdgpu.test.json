@@ -26,6 +26,30 @@
       ]
     },
     {
+      "name": "compiles runtime-selected HAL binding descriptors",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/amdgpu_unused_kernargs.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx1100",
+          "--root=@selected_buffer",
+          "--output={tmp}/selected_buffer.hal",
+          "--emit-target-artifact={tmp}/selected_buffer.hsaco"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/selected_buffer.hal",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/selected_buffer.hsaco",
+          "non_empty": true
+        }
+      ]
+    },
+    {
       "name": "compiles parameterized gfx1250 matrix kernel",
       "run": {
         "tool": "loom-compile",

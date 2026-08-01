@@ -17,6 +17,7 @@ loom_cc_library(
   SRCS
     "control_uniformity.c"
   DEPS
+    ::scc
     iree::base
     iree::base::internal::arena
     loom::ir
@@ -25,6 +26,25 @@ loom_cc_library(
     loom::util::cfg_graph
     loom::util::fact_table
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    control_uniformity_test
+  SRCS
+    "control_uniformity_test.cc"
+  DEPS
+    ::control_uniformity
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::format::text::parser
+    loom::ir
+    loom::ops::cfg
+    loom::ops::func
+    loom::ops::scalar
+    loom::ops::test
+    loom::testing::module_ptr
 )
 
 loom_cc_library(

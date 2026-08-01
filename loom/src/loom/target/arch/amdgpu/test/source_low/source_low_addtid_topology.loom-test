@@ -120,10 +120,10 @@ kernel.def target(@target) @multidim_workgroup_memory_workitem_xy_b32() {
 // ----
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(8, 8, 1) workgroup_count(1, 1, 1) @multidim_workgroup_memory_workitem_xy_b32() asm {
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
+  %19 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %column = v_and_b32_lit %packed_tid, 1023
-  %20 = v_lshrrev_b32_src0_inline %packed_tid, 10
-  %row = v_and_b32_lit %20, 1023
-  %22 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
+  %21 = v_lshrrev_b32_src0_inline %packed_tid, 10
+  %row = v_and_b32_lit %21, 1023
   %one = v_mov_b32 1
   %25 = v_lshl_add_u32_shift_imm %row, %column, 3
   %26 = v_lshlrev_b32_src0_inline %25, 2

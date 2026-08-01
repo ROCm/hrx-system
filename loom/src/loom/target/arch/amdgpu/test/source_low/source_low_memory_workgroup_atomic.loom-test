@@ -50,11 +50,11 @@ kernel.def target(@target) @lds_atomic_scalar_loop_index_i32() {
 
 // ----
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_scalar_loop_index_i32() asm {
+  %15 = storage {byte_alignment = 4, byte_length = 32} : low.storage<workgroup>
   %zero_index = s_mov_b32 0
   %eight = s_mov_b32 8
   %one_index = s_mov_b32 1
-  %18 = storage {byte_alignment = 4, byte_length = 32} : low.storage<workgroup>
-  %scratch_view = storage_address %18 : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %scratch_view = storage_address %15 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   low.br ^_bb1(%zero_index: reg<amdgpu.sgpr>)
 ^_bb1(%i: reg<amdgpu.sgpr>):
   %21 = s_cmp_lt_i32 %i, %eight
@@ -348,8 +348,8 @@ kernel.def target(@target) @lds_atomic_second_alloca_i32() {
 // ----
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @lds_atomic_second_alloca_i32() asm {
   %12 = storage {byte_alignment = 16, byte_length = 64} : low.storage<workgroup>
-  %14 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
-  %second_view = storage_address %14 : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %13 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
+  %second_view = storage_address %13 : low.storage<workgroup> -> reg<amdgpu.vgpr>
   %17 = v_mov_b32 1
   %18 = v_mov_b32 0
   low.op<amdgpu.ds_write_b32>(%18, %17) {offset = 0} memory_access([0, 3, 5, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
