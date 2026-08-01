@@ -292,7 +292,6 @@ static iree_status_t loom_parse_format_optional_group(
         present = peek.kind == LOOM_TOKEN_SYMBOL;
       } else if (first_inner &&
                  (first_inner->kind == LOOM_FORMAT_KIND_KEY_REF ||
-                  first_inner->kind == LOOM_FORMAT_KIND_DESCRIPTOR_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_SCOPED_ENUM_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_STABLE_KEY_REF ||
                   first_inner->kind == LOOM_FORMAT_KIND_TEMPLATE_PARAM ||
@@ -429,44 +428,6 @@ static iree_status_t loom_parse_format_key_ref(
   return loom_parse_format_add_field_span(
       parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE, element->field_index,
       key_ref_start_token);
-}
-
-// Parses a descriptor key reference whose row ordinal is resolved later after
-// target binding selects the descriptor set: <target.descriptor>.
-static iree_status_t loom_parse_format_descriptor_ref(
-    loom_parser_t* parser, const loom_format_element_t* element,
-    loom_parsed_op_t* parsed) {
-  loom_token_t descriptor_ref_start_token =
-      loom_tokenizer_peek(&parser->tokenizer);
-  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LANGLE)) {
-    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
-    return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'<'"));
-  }
-  loom_token_t key_token = loom_tokenizer_peek(&parser->tokenizer);
-  if (key_token.kind != LOOM_TOKEN_OP_NAME &&
-      key_token.kind != LOOM_TOKEN_BARE_IDENT) {
-    return loom_parser_emit_unexpected_token(parser, key_token,
-                                             IREE_SV("descriptor key"));
-  }
-  key_token = loom_tokenizer_next(&parser->tokenizer);
-  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RANGLE)) {
-    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
-    return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'>'"));
-  }
-  loom_string_id_t key_id = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_module_intern_string(parser->module, key_token.text, &key_id));
-  IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
-      parsed, &parser->parser_arena, element->field_index,
-      loom_attr_string(key_id)));
-  IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
-      parsed, &parser->parser_arena, element->data, loom_attr_i64(-1)));
-  IREE_RETURN_IF_ERROR(loom_parse_format_add_field_span(
-      parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE, element->field_index,
-      descriptor_ref_start_token));
-  return loom_parse_format_add_field_span(
-      parser, parsed, LOOM_LOCATION_FIELD_ATTRIBUTE, element->data,
-      descriptor_ref_start_token);
 }
 
 // Parses a stable case key directly into the active representation contract's
@@ -1120,12 +1081,6 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
                                                        &key, &key_token));
         IREE_RETURN_IF_ERROR(loom_parse_format_bind_function_low_repr(
             parser, vtable, element->field_index, key, key_token));
-        break;
-      }
-
-      case LOOM_FORMAT_KIND_DESCRIPTOR_REF: {
-        IREE_RETURN_IF_ERROR(
-            loom_parse_format_descriptor_ref(parser, element, parsed));
         break;
       }
 

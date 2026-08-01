@@ -16,7 +16,6 @@ from loom.assembly import (
     BlockArgs,
     BlockRef,
     Clause,
-    DescriptorRef,
     Flags,
     FormatElement,
     FuncArgs,
@@ -317,27 +316,6 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                 case KeyRef(field=name):
                     kind, index = resolve_field(name)
                     elements.append(("LOOM_FORMAT_KIND_KEY_REF", index, "0"))
-
-                case DescriptorRef(key=key_name, ordinal=ordinal_name):
-                    key_kind, key_index = resolve_field(key_name)
-                    ordinal_kind, ordinal_index = resolve_field(ordinal_name)
-                    key_attr = op.attr(key_name)
-                    ordinal_attr = op.attr(ordinal_name)
-                    if key_kind != FieldKind.ATTR:
-                        raise ValueError(f"Op '{op.name}': DescriptorRef key field '{key_name}' is not an attr field")
-                    if key_attr is None or key_attr.attr_type != "string":
-                        raise ValueError(f"Op '{op.name}': DescriptorRef key field '{key_name}' must be a string attr")
-                    if ordinal_kind != FieldKind.ATTR:
-                        raise ValueError(f"Op '{op.name}': DescriptorRef ordinal field '{ordinal_name}' is not an attr field")
-                    if ordinal_attr is None or ordinal_attr.attr_type != "i64":
-                        raise ValueError(f"Op '{op.name}': DescriptorRef ordinal field '{ordinal_name}' must be an i64 attr")
-                    elements.append(
-                        (
-                            "LOOM_FORMAT_KIND_DESCRIPTOR_REF",
-                            key_index,
-                            str(ordinal_index),
-                        )
-                    )
 
                 case ScopedEnumRef(field=name):
                     kind, index = resolve_field(name)

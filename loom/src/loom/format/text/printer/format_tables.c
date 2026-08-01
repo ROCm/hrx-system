@@ -28,7 +28,6 @@ static bool loom_print_format_element_covers_attr(
       return element->field_index == attr_index;
     case LOOM_FORMAT_KIND_TEMPLATE_PARAM_FLAGS:
       return element->field_index == attr_index;
-    case LOOM_FORMAT_KIND_DESCRIPTOR_REF:
     case LOOM_FORMAT_KIND_STABLE_KEY_REF:
       return element->field_index == attr_index || element->data == attr_index;
     case LOOM_FORMAT_KIND_INDEX_LIST:

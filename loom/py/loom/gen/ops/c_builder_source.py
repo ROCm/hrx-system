@@ -682,12 +682,6 @@ def _generate_builder_implementation(
                 lines.append("  }")
             else:
                 lines.append(f"  loom_op_attrs(*out_op)[{idx}] = {constructor};")
-        elif param["kind"] == "descriptor_ref":
-            idx = param["attr_index"]
-            ordinal_idx = param["ordinal_attr_index"]
-            name = param["name"]
-            lines.append(f"  loom_op_attrs(*out_op)[{idx}] = loom_attr_string({name});")
-            lines.append(f"  loom_op_attrs(*out_op)[{ordinal_idx}] = loom_attr_i64(-1);")
         elif param["kind"] == "stable_key_ref":
             idx = param["attr_index"]
             stable_id_idx = param["stable_id_attr_index"]

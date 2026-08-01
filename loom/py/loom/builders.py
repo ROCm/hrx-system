@@ -195,16 +195,6 @@ class OpCallable:
                 case BuilderParamKind.ATTR:
                     if value is not None:
                         attributes[param.name] = value
-                case BuilderParamKind.DESCRIPTOR_REF:
-                    if value is not None:
-                        attributes[param.name] = value
-                        if param.ordinal_field is not None:
-                            attributes[param.ordinal_field] = -1
-                        else:
-                            raise ValueError(
-                                f"descriptor ref builder parameter '{param.name}' "
-                                "has no ordinal field"
-                            )
                 case BuilderParamKind.STABLE_KEY_REF:
                     if value is not None:
                         attributes[param.name] = value

@@ -84,7 +84,6 @@ __all__ = [
     # Angle-bracket elements.
     "Flags",
     "KeyRef",
-    "DescriptorRef",
     "ScopedEnumRef",
     "StableKeyRef",
     "TemplateParam",
@@ -681,8 +680,8 @@ class KeyRef:
     "amdgpu.rdna3_5.core".
 
     This is the untyped textual form for a required key that only needs its
-    canonical spelling in IR. DescriptorRef and StableKeyRef add derived
-    numeric identities for domains that require them.
+    canonical spelling in IR. StableKeyRef adds a derived numeric identity for
+    domains that require one.
 
     The field names a string attribute storing the key.
 
@@ -694,24 +693,6 @@ class KeyRef:
     """
 
     field: str
-
-
-@dataclass(frozen=True, slots=True)
-class DescriptorRef:
-    """Descriptor key reference resolved to a dense row ordinal by targets.
-
-    Prints/parses: <target.descriptor> glued to the op name.
-
-    The ``key`` field names a string attribute used for text and diagnostics.
-    The ``ordinal`` field names an i64 attribute storing the descriptor-set
-    local row ordinal when the builder already has a selected descriptor set.
-    Text parsing has no target context, so parsed descriptor refs use the
-    unresolved ordinal sentinel and target binding resolves the key spelling at
-    that boundary.
-    """
-
-    key: str
-    ordinal: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -735,7 +716,7 @@ class StableKeyRef:
     Prints/parses: <target.key> glued to the op name.
 
     Use this only for non-descriptor symbolic domains that are still keyed by
-    stable string identity. Descriptor-backed low packets use DescriptorRef and
+    stable string identity. Descriptor-backed Low packets use ScopedEnumRef and
     resolve through the active descriptor set instead.
     """
 
@@ -872,7 +853,6 @@ type FormatElement = (
     | Glue
     | Flags
     | KeyRef
-    | DescriptorRef
     | ScopedEnumRef
     | StableKeyRef
     | TemplateParam

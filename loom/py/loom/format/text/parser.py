@@ -30,7 +30,6 @@ from loom.assembly import (
     BindingList,
     BlockArgs,
     Clause,
-    DescriptorRef,
     Flags,
     FormatElement,
     FuncArgs,
@@ -1450,8 +1449,6 @@ class Parser:
                 return name == attr_name
             case TemplateParamFlags(param=param_name, flags=flags_name):
                 return param_name == attr_name or flags_name == attr_name
-            case DescriptorRef(key=key, ordinal=ordinal):
-                return key == attr_name or ordinal == attr_name
             case ScopedEnumRef(field=name):
                 return name == attr_name
             case StableKeyRef(key=key, stable_id=stable_id):
@@ -2432,16 +2429,6 @@ class Parser:
                     tok.expect(TokenKind.RANGLE)
                     parsed.attributes[name] = key_tok.text
 
-                case DescriptorRef(key=key, ordinal=ordinal):
-                    tok.expect(TokenKind.LANGLE)
-                    if tok.at(TokenKind.OP_NAME) or tok.at(TokenKind.BARE_IDENT):
-                        key_tok = tok.next()
-                    else:
-                        key_tok = tok.expect(TokenKind.OP_NAME)
-                    tok.expect(TokenKind.RANGLE)
-                    parsed.attributes[key] = key_tok.text
-                    parsed.attributes[ordinal] = -1
-
                 case ScopedEnumRef(field=name):
                     tok.expect(TokenKind.LANGLE)
                     if tok.at(TokenKind.OP_NAME) or tok.at(TokenKind.BARE_IDENT):
@@ -2528,7 +2515,6 @@ class Parser:
                 return tok.at(TokenKind.SYMBOL)
             case (
                 KeyRef()
-                | DescriptorRef()
                 | ScopedEnumRef()
                 | StableKeyRef()
                 | TemplateParam()

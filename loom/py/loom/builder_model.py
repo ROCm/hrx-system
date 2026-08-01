@@ -25,7 +25,6 @@ from loom.assembly import (
     BlockArgs,
     BlockRef,
     Clause,
-    DescriptorRef,
     Flags,
     FormatElement,
     FuncArgs,
@@ -76,7 +75,6 @@ class BuilderParamKind(Enum):
 
     ATTR = auto()
     BLOCK_ARGS = auto()
-    DESCRIPTOR_REF = auto()
     STABLE_KEY_REF = auto()
     FLAGS = auto()
     FUNC_ARGS = auto()
@@ -107,7 +105,6 @@ class BuilderParam:
     region_field: str | None = None
     region_optional: bool = False
     stable_id_field: str | None = None
-    ordinal_field: str | None = None
     static_field: str | None = None
 
     @property
@@ -315,35 +312,9 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
         )
 
     def append_symbolic_ref_param(
-        element: DescriptorRef | ScopedEnumRef | StableKeyRef,
+        element: ScopedEnumRef | StableKeyRef,
     ) -> None:
         match element:
-            case DescriptorRef(key=name, ordinal=ordinal):
-                attr_def = op.attr(name)
-                ordinal_attr = op.attr(ordinal)
-                if attr_def is None or attr_def.attr_type != "string":
-                    raise ValueError(
-                        f"Op '{op.name}': DescriptorRef key field "
-                        f"'{name}' must be a string attr"
-                    )
-                if ordinal_attr is None or ordinal_attr.attr_type != "i64":
-                    raise ValueError(
-                        f"Op '{op.name}': DescriptorRef ordinal field "
-                        f"'{ordinal}' must be an i64 attr"
-                    )
-                params.append(
-                    BuilderParam(
-                        name=name,
-                        kind=BuilderParamKind.DESCRIPTOR_REF,
-                        type_hint=attr_type_hint(attr_def),
-                        attr_def=attr_def,
-                        ordinal_field=ordinal,
-                        doc=attr_def.doc,
-                    )
-                )
-                covered_attrs.add(name)
-                covered_attrs.add(ordinal)
-
             case ScopedEnumRef(field=name):
                 attr_def = op.attr(name)
                 if attr_def is None or attr_def.attr_type != "scoped_enum":
@@ -584,7 +555,7 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                     )
                     covered_attrs.add(name)
 
-                case DescriptorRef() | ScopedEnumRef() | StableKeyRef():
+                case ScopedEnumRef() | StableKeyRef():
                     append_symbolic_ref_param(element)
 
                 case PredicateList(field=name):

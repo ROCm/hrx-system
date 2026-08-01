@@ -577,15 +577,14 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
             ctx, vtable, element->field_index, attr));
         break;
       }
-      case LOOM_FORMAT_KIND_DESCRIPTOR_REF:
       case LOOM_FORMAT_KIND_STABLE_KEY_REF: {
-        // Symbolic key reference in angle brackets, glued to the op name:
-        // low.op<amdgpu.v_add_u32>. The field_index references the diagnostic
-        // key spelling and data references the hidden numeric identity.
+        // Stable-key reference in angle brackets, glued to the op name. The
+        // field_index references the spelling and data references its derived
+        // numeric identity.
         if (element->field_index >= op->attribute_count) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
-              "format DESCRIPTOR_REF field_index %u out of range (op has %u "
+              "format STABLE_KEY_REF field_index %u out of range (op has %u "
               "attributes)",
               element->field_index, op->attribute_count);
         }

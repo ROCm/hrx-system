@@ -2798,7 +2798,6 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
         BlockArgs,
         BlockRef,
         Clause,
-        DescriptorRef,
         EncodingOf,
         Flags,
         FuncArgs,
@@ -2844,9 +2843,6 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
             case TemplateParamFlags(param=param, flags=flags):
                 fields.add(param)
                 fields.add(flags)
-            case DescriptorRef(key=key, ordinal=ordinal):
-                fields.add(key)
-                fields.add(ordinal)
             case StableKeyRef(key=key, stable_id=stable_id):
                 fields.add(key)
                 fields.add(stable_id)
