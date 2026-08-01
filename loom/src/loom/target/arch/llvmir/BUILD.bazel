@@ -144,7 +144,13 @@ loom_check_test_suite(
         "//loom/src/loom/test/corpus/source_low:numeric_minmax.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_reduce.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_scalar_i32.loom-test",
+        "//loom/src/loom/test/corpus/source_low:packed_bitfield.loom-test",
+        "//loom/src/loom/test/corpus/source_low:packed_bitpack.loom-test",
+        "//loom/src/loom/test/corpus/source_low:packed_bitunpack.loom-test",
+        "//loom/src/loom/test/corpus/source_low:packed_dot_integer.loom-test",
         "//loom/src/loom/test/corpus/source_low:sync_barrier.loom-test",
+        "//loom/src/loom/test/corpus/source_low:vector_bitcast.loom-test",
+        "//loom/src/loom/test/corpus/source_low:vector_mask_select.loom-test",
     ],
     test_name_prefix_to_strip = "test/source_low/",
 )

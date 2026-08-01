@@ -242,3 +242,45 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i8x2_to_
   %unpacked = from_elements.v4i8 %57, %62, %68, %72
   return %unpacked
 }
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+kernel.def target(@target) @uniform_global_i32_to_u8x4_bitunpack_store() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%values: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %values_noalias, %output_noalias = buffer.assume.noalias %values, %output : buffer, buffer
+  %values_view = buffer.view %values_noalias[%base] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi32, #dense>
+  %packed = vector.load %values_view[%index] : view<1xi32, #dense> -> vector<1xi32>
+  %unpacked = vector.bitunpacku<8> %packed : vector<1xi32> -> vector<4xi32>
+  vector.store %unpacked, %output_view[%index] : vector<4xi32>, view<4xi32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_global_i32_to_u8x4_bitunpack_store() asm {
+  %values_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
+  %37 = load.i32 %values_view, 0
+  %38 = const.i32 255
+  %39 = and.i32 %37, %38
+  %40 = const.i32 8
+  %41 = lshr.i32 %37, %40
+  %42 = and.i32 %41, %38
+  %43 = const.i32 16
+  %44 = lshr.i32 %37, %43
+  %45 = and.i32 %44, %38
+  %46 = const.i32 24
+  %47 = lshr.i32 %37, %46
+  %48 = and.i32 %47, %38
+  %unpacked = from_elements.v4i32 %39, %42, %45, %48
+  store.v4i32 %unpacked, %output_view, 0
+  return
+}
