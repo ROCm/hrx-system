@@ -102,3 +102,8 @@ class ScfBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> list[ValueRef]: ...
+    def fence(
+        self,
+        *,
+        location_id: int | None = ...,
+    ) -> None: ...
