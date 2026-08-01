@@ -270,17 +270,15 @@ static bool loom_check_template_sync_declaration_line_info(
   return true;
 }
 
-static iree_status_t loom_check_template_sync_collect_target_overlay(
-    const loom_check_case_t* target_case, iree_string_view_t key,
-    loom_check_template_sync_target_overlay_t* out_overlay) {
-  *out_overlay = (loom_check_template_sync_target_overlay_t){0};
-  if (target_case == NULL) {
-    return iree_ok_status();
-  }
+static loom_check_template_sync_target_overlay_t
+loom_check_template_sync_collect_declaration_overlay(
+    const loom_check_case_t* test_case, iree_string_view_t key) {
+  loom_check_template_sync_target_overlay_t overlay = {0};
+  if (test_case == NULL) return overlay;
 
   iree_host_size_t offset = 0;
   iree_string_view_t remaining =
-      loom_check_template_sync_trim_trailing_blank_lines(target_case->input);
+      loom_check_template_sync_trim_trailing_blank_lines(test_case->input);
   while (!iree_string_view_is_empty(remaining)) {
     iree_string_view_t before = remaining;
     iree_string_view_t line = loom_check_template_sync_consume_line(&remaining);
@@ -288,33 +286,52 @@ static iree_status_t loom_check_template_sync_collect_target_overlay(
     iree_host_size_t symbol_position = IREE_STRING_VIEW_NPOS;
     if (loom_check_template_sync_declaration_line_info(line, key, &op_end,
                                                        &symbol_position)) {
-      out_overlay->declaration_prelude =
+      overlay.declaration_prelude =
           loom_check_template_sync_trim_trailing_blank_lines(
-              iree_string_view_substr(target_case->input, 0, offset));
-      out_overlay->declaration_prefix =
+              iree_string_view_substr(test_case->input, 0, offset));
+      overlay.declaration_prefix =
           iree_string_view_substr(line, op_end, symbol_position - op_end);
-      return iree_ok_status();
+      return overlay;
     }
     offset += before.size - remaining.size;
   }
-  return iree_ok_status();
+  return overlay;
 }
 
-static iree_status_t loom_check_template_sync_collect_default_target_overlay(
-    const loom_check_template_sync_case_t* target_cases,
-    iree_host_size_t target_case_count,
-    loom_check_template_sync_target_overlay_t* out_overlay) {
-  *out_overlay = (loom_check_template_sync_target_overlay_t){0};
-  for (iree_host_size_t i = 0; i < target_case_count; ++i) {
-    loom_check_template_sync_target_overlay_t candidate = {0};
-    IREE_RETURN_IF_ERROR(loom_check_template_sync_collect_target_overlay(
-        target_cases[i].test_case, target_cases[i].key, &candidate));
-    if (loom_check_template_sync_target_overlay_has_content(&candidate)) {
-      *out_overlay = candidate;
-      return iree_ok_status();
-    }
+static iree_string_view_t
+loom_check_template_sync_strip_materialized_template_prelude(
+    iree_string_view_t target_prelude, iree_string_view_t template_prelude) {
+  // A synchronized case is emitted as the target-owned prelude followed by
+  // the authoritative template input. Strip that exact template suffix before
+  // preserving the target overlay. Repeating the operation also repairs files
+  // produced by the former non-idempotent updater.
+  target_prelude =
+      loom_check_template_sync_trim_trailing_blank_lines(target_prelude);
+  template_prelude =
+      loom_check_template_sync_trim_trailing_blank_lines(template_prelude);
+  while (!iree_string_view_is_empty(template_prelude) &&
+         iree_string_view_ends_with(target_prelude, template_prelude)) {
+    target_prelude =
+        iree_string_view_remove_suffix(target_prelude, template_prelude.size);
+    target_prelude =
+        loom_check_template_sync_trim_trailing_blank_lines(target_prelude);
   }
-  return iree_ok_status();
+  return target_prelude;
+}
+
+static loom_check_template_sync_target_overlay_t
+loom_check_template_sync_collect_target_overlay(
+    const loom_check_case_t* target_case,
+    const loom_check_case_t* template_case, iree_string_view_t key) {
+  loom_check_template_sync_target_overlay_t target_overlay =
+      loom_check_template_sync_collect_declaration_overlay(target_case, key);
+  const loom_check_template_sync_target_overlay_t template_overlay =
+      loom_check_template_sync_collect_declaration_overlay(template_case, key);
+  target_overlay.declaration_prelude =
+      loom_check_template_sync_strip_materialized_template_prelude(
+          target_overlay.declaration_prelude,
+          template_overlay.declaration_prelude);
+  return target_overlay;
 }
 
 static iree_status_t loom_check_template_sync_source_line_number(
@@ -454,6 +471,28 @@ loom_check_template_sync_find_case(const loom_check_template_sync_case_t* cases,
     }
   }
   return NULL;
+}
+
+static loom_check_template_sync_target_overlay_t
+loom_check_template_sync_collect_default_target_overlay(
+    const loom_check_template_sync_case_t* target_cases,
+    iree_host_size_t target_case_count,
+    const loom_check_template_sync_case_t* template_cases,
+    iree_host_size_t template_case_count) {
+  for (iree_host_size_t i = 0; i < target_case_count; ++i) {
+    const loom_check_template_sync_case_t* template_record =
+        loom_check_template_sync_find_case(template_cases, template_case_count,
+                                           target_cases[i].key);
+    const loom_check_template_sync_target_overlay_t candidate =
+        loom_check_template_sync_collect_target_overlay(
+            target_cases[i].test_case,
+            template_record ? template_record->test_case : NULL,
+            target_cases[i].key);
+    if (loom_check_template_sync_target_overlay_has_content(&candidate)) {
+      return candidate;
+    }
+  }
+  return (loom_check_template_sync_target_overlay_t){0};
 }
 
 static iree_status_t loom_check_template_sync_append_source_range(
@@ -631,8 +670,8 @@ static iree_status_t loom_check_template_sync_append_input_with_annotations(
       target_source, target_case, arena, &anchors, &anchor_count));
   loom_check_template_sync_target_overlay_t overlay = {0};
   if (target_case) {
-    IREE_RETURN_IF_ERROR(loom_check_template_sync_collect_target_overlay(
-        target_case, key, &overlay));
+    overlay = loom_check_template_sync_collect_target_overlay(
+        target_case, template_case, key);
   }
   if (!loom_check_template_sync_target_overlay_has_content(&overlay) &&
       default_overlay) {
@@ -745,9 +784,9 @@ iree_status_t loom_check_template_sync_build_source(
       target_file, target_filename, context, block_pool, arena, host_allocator,
       /*allow_empty_cases=*/true, /*reject_case_run_directives=*/true,
       &target_cases, &target_case_count));
-  loom_check_template_sync_target_overlay_t default_overlay = {0};
-  IREE_RETURN_IF_ERROR(loom_check_template_sync_collect_default_target_overlay(
-      target_cases, target_case_count, &default_overlay));
+  const loom_check_template_sync_target_overlay_t default_overlay =
+      loom_check_template_sync_collect_default_target_overlay(
+          target_cases, target_case_count, template_cases, template_case_count);
 
   iree_host_size_t preamble_end = target_source.size;
   if (target_file->case_count > 0) {
