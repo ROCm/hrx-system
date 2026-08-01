@@ -130,5 +130,16 @@ loom_check_test_suite(
         "test/source_low/source_low.loom-test",
         "test/source_low/source_low_diagnostics.loom-test",
     ],
+    data = [
+        "//loom/src/loom/test/corpus/source_low:index_addressing.loom-test",
+        "//loom/src/loom/test/corpus/source_low:lookup_table.loom-test",
+        "//loom/src/loom/test/corpus/source_low:memory_global.loom-test",
+        "//loom/src/loom/test/corpus/source_low:memory_global_atomic.loom-test",
+        "//loom/src/loom/test/corpus/source_low:memory_workgroup_atomic.loom-test",
+        "//loom/src/loom/test/corpus/source_low:memory_workgroup_b128.loom-test",
+        "//loom/src/loom/test/corpus/source_low:memory_workgroup_indexed.loom-test",
+        "//loom/src/loom/test/corpus/source_low:memory_workgroup_packed16.loom-test",
+        "//loom/src/loom/test/corpus/source_low:sync_barrier.loom-test",
+    ],
     test_name_prefix_to_strip = "test/source_low/",
 )

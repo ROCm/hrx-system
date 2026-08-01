@@ -23,6 +23,121 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @global_s
 
 // ====
 
+// XFAIL: LLVMIR has no 7-lane vector descriptor family.
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @global_f32x7_roundtrip(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<7xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<7xf32, #dense>
+  %loaded = vector.load %input_view[0] : view<7xf32, #dense> -> vector<7xf32>
+  vector.store %loaded, %output_view[0] : vector<7xf32>, view<7xf32, #dense>
+  func.return
+}
+
+// ====
+
+// XFAIL: LLVMIR has no 64-lane vector descriptor family.
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @global_f32x64_roundtrip(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %loaded = vector.load %input_view[0] : view<64xf32, #dense> -> vector<64xf32>
+  vector.store %loaded, %output_view[0] : vector<64xf32>, view<64xf32, #dense>
+  func.return
+}
+
+// ====
+
+// XFAIL: LLVMIR has no 64-lane vector descriptor family.
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @global_f32x64_add_roundtrip(%lhs: buffer, %rhs: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs[%zero] : buffer -> view<64xf32, #dense>
+  %rhs_view = buffer.view %rhs[%zero] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %lhs_loaded = vector.load %lhs_view[0] : view<64xf32, #dense> -> vector<64xf32>
+  %rhs_loaded = vector.load %rhs_view[0] : view<64xf32, #dense> -> vector<64xf32>
+  %sum = vector.addf %lhs_loaded, %rhs_loaded : vector<64xf32>
+  vector.store %sum, %output_view[0] : vector<64xf32>, view<64xf32, #dense>
+  func.return
+}
+
+// ====
+
+// XFAIL: LLVMIR has no 14-lane vector descriptor family.
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @global_bf16x14_roundtrip(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<14xbf16, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<14xbf16, #dense>
+  %loaded = vector.load %input_view[0] : view<14xbf16, #dense> -> vector<14xbf16>
+  vector.store %loaded, %output_view[0] : vector<14xbf16>, view<14xbf16, #dense>
+  func.return
+}
+
+// ====
+
+// XFAIL: LLVMIR has no 64-lane vector descriptor family.
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @global_bf16x64_roundtrip(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xbf16, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xbf16, #dense>
+  %loaded = vector.load %input_view[0] : view<64xbf16, #dense> -> vector<64xbf16>
+  vector.store %loaded, %output_view[0] : vector<64xbf16>, view<64xbf16, #dense>
+  func.return
+}
+
+// ====
+
+// XFAIL: LLVMIR has no 7-lane vector descriptor family.
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @global_f16x7_roundtrip(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<7xf16, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<7xf16, #dense>
+  %loaded = vector.load %input_view[0] : view<7xf16, #dense> -> vector<7xf16>
+  vector.store %loaded, %output_view[0] : vector<7xf16>, view<7xf16, #dense>
+  func.return
+}
+
+// ====
+
+// XFAIL: LLVMIR has no 7-lane vector descriptor family.
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @global_bf16x7_roundtrip(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<7xbf16, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<7xbf16, #dense>
+  %loaded = vector.load %input_view[0] : view<7xbf16, #dense> -> vector<7xbf16>
+  vector.store %loaded, %output_view[0] : vector<7xbf16>, view<7xbf16, #dense>
+  func.return
+}
+
+// ====
+
 llvmir.target<object> @target {
   triple = "loom-direct64-unknown-none",
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
@@ -301,6 +416,24 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @descript
   %base = zext.i32.i64 %base_i32
   %loaded = load.indexed.i32 %input_view, %base, 8, 1
   return %loaded
+}
+
+// ====
+
+// XFAIL: LLVMIR does not provide view.subview lowering.
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @descriptor_dynamic_projected_base_static_extent_load_i32(%input: buffer, %base_i32: i32) -> (i32) {
+  %base0 = index.cast %base_i32 : i32 to offset
+  %base = index.assume %base0 [range(%base0, 0, 4092), mul(%base0, 4)] : offset
+  %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
+  %input_view = buffer.view %input_descriptor[%base] : buffer -> view<8xi32, #dense>
+  %input_subview = view.subview %input_view[1] : view<8xi32, #dense> -> view<4xi32, #dense>
+  %input_refined = view.refine %input_subview : view<4xi32, #dense> -> view<4xi32, #dense>
+  %loaded = view.load %input_refined[2] : view<4xi32, #dense> -> i32
+  func.return %loaded : i32
 }
 
 // ====
@@ -1767,6 +1900,46 @@ llvmir.target<object> @target {
   triple = "loom-direct64-unknown-none",
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
+kernel.def target(@target) @selected_i32_row_shift_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%idx: buffer, %output: buffer, %value: f32, %element_count_i32: i32, %condition_i32: i32) {
+  %base = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %shift = index.constant 2 : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 2147483647)] : index
+  %idx_view = buffer.view %idx[%base] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<[%element_count]xf32, #dense>
+  %row_i32 = view.load %idx_view[0] : view<1xi32, #dense> -> i32
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 1073741823)] : index
+  %raw = index.shli %row, %shift : index
+  %condition0 = index.cast %condition_i32 : i32 to index
+  %condition = index.assume %condition0 [range(%condition0, 1, 1)] : index
+  %selected_condition = index.cmp ne, %condition, %zero : index
+  %selected = scf.select %selected_condition, %raw, %zero : index
+  %element = index.assume %selected [range(%selected, 0, 1073741823), lt(%selected, %element_count)] : index
+  view.store %value, %output_view[%element] : f32, view<[%element_count]xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @selected_i32_row_shift_store(%value: reg<llvmir.f32>, %element_count_i32: reg<llvmir.i32>, %condition_i32: reg<llvmir.i32>) asm {
+  %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
+  %row_i32 = load.i32 %idx_view, 0
+  %row = sext.i32.i64 %row_i32
+  store.indexed.f32 %value, %output_view, %row, 0, 16
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
 kernel.def target(@target) @loaded_i32_row_stride_f32_to_f16_store() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -1925,6 +2098,52 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) work
   %row = sext.i32.i64 %row_i32
   %element = mul.i64 %row, %stride
   %half = load.indexed.f16 %input_view, %element, 0, 2
+  %loaded = fpext.f16.f32 %half
+  store.f32 %loaded, %output_view, 0
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+kernel.def target(@target) @wide_intermediate_narrowed_f16_index_madd_load() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %row_i32: i32, %element_count_i32: i32) {
+  %base = index.constant 0 : offset
+  %start = index.constant 0 : index
+  %row_stride = index.constant 65536 : index
+  %lane = kernel.workitem.id<x> : index
+  %row0 = index.cast %row_i32 : i32 to index
+  %row = index.assume %row0 [range(%row0, 0, 65536)] : index
+  %element_count0 = index.cast %element_count_i32 : i32 to index
+  %element_count = index.assume %element_count0 [range(%element_count0, 1, 1073741824)] : index
+  %raw_index = index.madd %row, %row_stride, %lane : index
+  %index = index.assume %raw_index [range(%raw_index, 0, 1073741823), lt(%raw_index, %element_count)] : index
+  %input_view = buffer.view %input[%base] : buffer -> view<[%element_count]xf16, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32, #dense>
+  %half = view.load %input_view[%index] : view<[%element_count]xf16, #dense> -> f16
+  %loaded = scalar.extf %half : f16 to f32
+  view.store %loaded, %output_view[%start] : f32, view<1xf32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @wide_intermediate_narrowed_f16_index_madd_load(%row_i32: reg<llvmir.i32>, %element_count_i32: reg<llvmir.i32>) asm {
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
+  %row_stride = const.i64 65536
+  %lane = kernel.workitem_id.x
+  %row = sext.i32.i64 %row_i32
+  %28 = mul.i64 %row, %row_stride
+  %index = add.i64 %28, %lane
+  %30 = const.i64 1
+  %31 = shl.i64 %index, %30
+  %half = load.indexed.f16 %input_view, %31, 0, 1
   %loaded = fpext.f16.f32 %half
   store.f32 %loaded, %output_view, 0
   return
