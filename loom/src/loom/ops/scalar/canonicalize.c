@@ -1037,28 +1037,26 @@ static iree_status_t loom_scalar_unsigned_minmax_canonicalize(
     return loom_scalar_replace_single_result_with_value(op, rewriter, lhs);
   }
 
-  int64_t maximum = 0;
-  if (!loom_scalar_unsigned_integer_maximum(
-          loom_scalar_single_result_type(rewriter, op), &maximum)) {
-    return iree_ok_status();
-  }
+  const loom_type_t type = loom_scalar_single_result_type(rewriter, op);
 
   int64_t lhs_value = 0;
   if (loom_scalar_query_exact_i64(rewriter, lhs, &lhs_value)) {
-    if (lhs_value == (is_minimum ? 0 : maximum)) {
-      return loom_scalar_replace_single_result_with_value(op, rewriter, lhs);
-    }
-    if (lhs_value == (is_minimum ? maximum : 0)) {
-      return loom_scalar_replace_single_result_with_value(op, rewriter, rhs);
+    if (lhs_value == 0)
+      return loom_scalar_replace_single_result_with_value(
+          op, rewriter, is_minimum ? lhs : rhs);
+    if (loom_scalar_integer_value_is_all_ones(type, lhs_value)) {
+      return loom_scalar_replace_single_result_with_value(
+          op, rewriter, is_minimum ? rhs : lhs);
     }
   }
   int64_t rhs_value = 0;
   if (loom_scalar_query_exact_i64(rewriter, rhs, &rhs_value)) {
-    if (rhs_value == (is_minimum ? 0 : maximum)) {
-      return loom_scalar_replace_single_result_with_value(op, rewriter, rhs);
-    }
-    if (rhs_value == (is_minimum ? maximum : 0)) {
-      return loom_scalar_replace_single_result_with_value(op, rewriter, lhs);
+    if (rhs_value == 0)
+      return loom_scalar_replace_single_result_with_value(
+          op, rewriter, is_minimum ? rhs : lhs);
+    if (loom_scalar_integer_value_is_all_ones(type, rhs_value)) {
+      return loom_scalar_replace_single_result_with_value(
+          op, rewriter, is_minimum ? lhs : rhs);
     }
   }
   return iree_ok_status();

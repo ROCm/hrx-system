@@ -1629,7 +1629,7 @@ iree_status_t loom_scalar_bitcast_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_CONSTANT: Materialize a compile-time integer or floating-point scalar value. Logical coordinate and byte-offset constants use index.constant.
+// LOOM_OP_SCALAR_CONSTANT: Materialize a compile-time integer or floating-point scalar value. Fixed-width integer literals use their signed value domain; unsigned operations interpret the resulting bit pattern. Logical coordinate and byte-offset constants use index.constant.
 // %c42 = scalar.constant 42 : i32
 LOOM_DEFINE_ISA(loom_scalar_constant_isa, LOOM_OP_SCALAR_CONSTANT)
 LOOM_DEFINE_RESULT(loom_scalar_constant_result, 0)

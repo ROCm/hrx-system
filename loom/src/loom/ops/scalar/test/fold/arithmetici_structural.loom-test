@@ -312,17 +312,36 @@ func.def @signed_minmax_extremes(%x: i32) -> (i32, i32, i32, i32, i32, i32) {
 
 func.def @unsigned_minmax_extremes(%x: i32) -> (i32, i32, i32, i32) {
   %zero = scalar.constant 0 : i32
-  %umax = scalar.constant 4294967295 : i32
+  %all_ones = scalar.constant -1 : i32
   %min_absorb = scalar.minui %x, %zero : i32
-  %min_identity = scalar.minui %x, %umax : i32
+  %min_identity = scalar.minui %x, %all_ones : i32
   %max_identity = scalar.maxui %x, %zero : i32
-  %max_absorb = scalar.maxui %x, %umax : i32
+  %max_absorb = scalar.maxui %x, %all_ones : i32
   func.return %min_absorb, %min_identity, %max_identity, %max_absorb : i32, i32, i32, i32
 }
 
 // ----
 func.def @unsigned_minmax_extremes(%x: i32) -> (i32, i32, i32, i32) {
   %zero = scalar.constant 0 : i32
-  %umax = scalar.constant 4294967295 : i32
-  func.return %zero, %x, %x, %umax : i32, i32, i32, i32
+  %all_ones = scalar.constant -1 : i32
+  func.return %zero, %x, %x, %all_ones : i32, i32, i32, i32
+}
+
+// ====
+
+func.def @unsigned_i64_minmax_extremes(%x: i64) -> (i64, i64, i64, i64) {
+  %zero = scalar.constant 0 : i64
+  %all_ones = scalar.constant -1 : i64
+  %min_absorb = scalar.minui %x, %zero : i64
+  %min_identity = scalar.minui %x, %all_ones : i64
+  %max_identity = scalar.maxui %x, %zero : i64
+  %max_absorb = scalar.maxui %x, %all_ones : i64
+  func.return %min_absorb, %min_identity, %max_identity, %max_absorb : i64, i64, i64, i64
+}
+
+// ----
+func.def @unsigned_i64_minmax_extremes(%x: i64) -> (i64, i64, i64, i64) {
+  %zero = scalar.constant 0 : i64
+  %all_ones = scalar.constant -1 : i64
+  func.return %zero, %x, %x, %all_ones : i64, i64, i64, i64
 }

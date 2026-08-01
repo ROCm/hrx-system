@@ -21,6 +21,7 @@ from loom.dsl import (
     PURE,
     SCALAR,
     AttrDef,
+    AttrMatchesElementType,
     ElementWidthGreaterThan,
     ElementWidthLessThan,
     Op,
@@ -183,9 +184,15 @@ scalar_constant = Op(
     "scalar.constant",
     group=scalar_ops,
     phase=OpPhase.EXECUTABLE,
-    doc=("Materialize a compile-time integer or floating-point scalar value. Logical coordinate and byte-offset constants use index.constant."),
+    doc=(
+        "Materialize a compile-time integer or floating-point scalar value. "
+        "Fixed-width integer literals use their signed value domain; unsigned "
+        "operations interpret the resulting bit pattern. Logical coordinate "
+        "and byte-offset constants use index.constant."
+    ),
     results=[Result("result", SCALAR)],
     attrs=[AttrDef("value", "any", doc="The constant value.")],
+    constraints=[AttrMatchesElementType("value", "result")],
     traits=[PURE, CONSTANT_LIKE],
     facts="loom_scalar_constant_facts",
     verify="loom_scalar_constant_verify",

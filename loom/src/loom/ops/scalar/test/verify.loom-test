@@ -46,6 +46,57 @@ func.def @boolean_constant_value_range() -> (i1) {
 
 // ====
 
+// Integer constant literals must fit the signed domain of their result type.
+func.def @i8_constant_value_range() {
+  // ERROR@+1: STRUCTURE/014 "value" "-129" "element type domain"
+  %lo = scalar.constant -129 : i8
+  // ERROR@+1: STRUCTURE/014 "value" "128" "element type domain"
+  %hi = scalar.constant 128 : i8
+  func.return
+}
+
+// ====
+
+func.def @i16_constant_value_range() {
+  // ERROR@+1: STRUCTURE/014 "value" "-32769" "element type domain"
+  %lo = scalar.constant -32769 : i16
+  // ERROR@+1: STRUCTURE/014 "value" "32768" "element type domain"
+  %hi = scalar.constant 32768 : i16
+  func.return
+}
+
+// ====
+
+func.def @i32_constant_value_range() {
+  // ERROR@+1: STRUCTURE/014 "value" "-2147483649" "element type domain"
+  %lo = scalar.constant -2147483649 : i32
+  // ERROR@+1: STRUCTURE/014 "value" "2147483648" "element type domain"
+  %hi = scalar.constant 2147483648 : i32
+  func.return
+}
+
+// ====
+
+// Every signed boundary and both accepted i1 spellings compose in ordinary
+// verified source IR.
+func.def @valid_integer_constant_boundaries() {
+  %false_bool = scalar.constant false : i1
+  %true_bool = scalar.constant true : i1
+  %false_i64 = scalar.constant 0 : i1
+  %true_i64 = scalar.constant 1 : i1
+  %i8_min = scalar.constant -128 : i8
+  %i8_max = scalar.constant 127 : i8
+  %i16_min = scalar.constant -32768 : i16
+  %i16_max = scalar.constant 32767 : i16
+  %i32_min = scalar.constant -2147483648 : i32
+  %i32_max = scalar.constant 2147483647 : i32
+  %i64_min = scalar.constant -9223372036854775808 : i64
+  %i64_max = scalar.constant 9223372036854775807 : i64
+  func.return
+}
+
+// ====
+
 // Logical coordinate constants must be authored with index.constant so that
 // address-domain values are structurally unambiguous.
 func.def @index_constant_requires_index_dialect() -> (index) {
