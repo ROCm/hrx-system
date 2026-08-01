@@ -727,8 +727,8 @@ static iree_status_t loom_parse_format_bind_function_low_repr(
   parser->low_repr = (loom_text_low_repr_context_t){
       .contract_key = key,
   };
-  if (!parser->low_asm_environment.vtable ||
-      !parser->low_asm_environment.low_repr.vtable) {
+  if (!loom_text_low_asm_environment_is_configured(
+          &parser->low_asm_environment)) {
     return loom_parser_emit_low_asm_error(
         parser, key_token,
         IREE_SV("Low representation environment is not configured"));

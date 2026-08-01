@@ -34,10 +34,9 @@ typedef struct loom_text_low_asm_descriptor_handle_t
 
 // Active target-low representation contract for contextual types and regions.
 typedef struct loom_text_low_repr_context_t {
-  // Canonical representation-contract key, or empty when derived from a
-  // target.
+  // Canonical representation-contract key selected by the enclosing wrapper.
   iree_string_view_t contract_key;
-  // Descriptor-set handle resolved from |contract_key| or a target.
+  // Descriptor-set handle resolved once from |contract_key|.
   const loom_text_low_asm_descriptor_set_t* descriptor_set;
 } loom_text_low_repr_context_t;
 
@@ -48,7 +47,7 @@ typedef struct loom_text_low_asm_packet_descriptor_t {
   const loom_text_low_asm_form_t* form;
   // Opaque low descriptor handle owned by the environment implementation.
   const loom_text_low_asm_descriptor_handle_t* descriptor;
-  // Stable canonical descriptor key used only at presentation boundaries.
+  // Stable canonical descriptor key used only in source diagnostics.
   iree_string_view_t descriptor_key;
   // Surface mnemonic emitted or parsed for this asm packet.
   iree_string_view_t mnemonic;
@@ -293,9 +292,12 @@ typedef iree_status_t (*loom_text_low_asm_describe_register_type_fn_t)(
     bool* out_found);
 
 typedef struct loom_text_low_asm_vtable_t {
+  // All callbacks are required except diagnose_unknown_packet. Environment
+  // presence is checked once when entering a Low function; packet parsing and
+  // printing then call this contract directly.
   // Resolves a mnemonic within a descriptor-set handle to a packet descriptor.
   loom_text_low_asm_lookup_packet_fn_t lookup_packet;
-  // Optional target-owned explanation for unknown packet names.
+  // Optional target-owned explanation for unknown mnemonics.
   loom_text_low_asm_diagnose_unknown_packet_fn_t diagnose_unknown_packet;
   // Infers a result type when the asm packet omits explicit type annotations.
   loom_text_low_asm_infer_result_type_fn_t infer_result_type;

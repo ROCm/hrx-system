@@ -1216,8 +1216,8 @@ static iree_status_t loom_low_descriptor_text_asm_describe_packet(
   // Compact target assembly has no spelling for compiler-owned packet
   // metadata. Preserve such packets in canonical low.op form, but only when
   // every register type belongs to the active descriptor set. Register type
-  // spellings omit the descriptor-set key, so admitting a cross-set canonical
-  // packet inside asm<...> would not round-trip.
+  // spellings omit the representation-contract key, so admitting a cross-set
+  // canonical packet inside a Low assembly region would not round-trip.
   if (!is_const && !loom_attr_is_absent(loom_low_op_memory_access(op))) {
     bool has_register_type = false;
     const loom_value_id_t* results = loom_op_const_results(op);

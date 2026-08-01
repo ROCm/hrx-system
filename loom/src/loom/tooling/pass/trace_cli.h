@@ -38,8 +38,6 @@ typedef struct loom_tooling_pass_trace_open_options_t {
   iree_string_view_t tool_name;
   // Input identity included in trace metadata.
   iree_string_view_t input_path;
-  // Descriptor-set key selected for low asm region printing.
-  iree_string_view_t low_asm_descriptor_set_key;
   // Active outputs that cannot share stdout with dump output.
   const loom_tooling_pass_trace_stdout_conflict_t* stdout_conflicts;
   // Number of entries in stdout_conflicts.

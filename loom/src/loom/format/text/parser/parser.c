@@ -985,19 +985,10 @@ iree_status_t loom_parse_region_with_syntax(
       IREE_RETURN_IF_ERROR(loom_parse_keyword(parser, LOOM_KW_DO));
       return loom_parse_braced_region(parser, region_descriptor, out_region);
     }
-    case LOOM_REGION_SYNTAX_LOW_ASM: {
-      return loom_parse_low_asm_prefixed_region(parser, region_descriptor,
-                                                out_region);
-    }
     case LOOM_REGION_SYNTAX_LOW_ASM_OPTIONAL: {
       if (loom_tokenizer_at_keyword(&parser->tokenizer, IREE_SV("asm"))) {
-        if (parser->low_asm_region_depth == 0 &&
-            !iree_string_view_is_empty(parser->low_repr.contract_key)) {
-          return loom_parse_low_asm_marked_region(parser, region_descriptor,
-                                                  out_region);
-        }
-        return loom_parse_low_asm_prefixed_region(parser, region_descriptor,
-                                                  out_region);
+        return loom_parse_low_asm_marked_region(parser, region_descriptor,
+                                                out_region);
       }
       if (parser->low_asm_region_depth != 0) {
         return loom_parse_low_asm_inherited_region(parser, region_descriptor,
@@ -1138,8 +1129,6 @@ iree_status_t loom_text_parse(iree_string_view_t source,
           },
       .diagnostic_sink =
           options ? options->diagnostic_sink : (loom_diagnostic_sink_t){0},
-      .low_asm_environment = options ? options->low_asm_environment
-                                     : (loom_text_low_asm_environment_t){0},
       .max_errors = options ? options->max_errors : 0,
       .scope = &root_scope,
       .definition_scope =
@@ -1147,6 +1136,7 @@ iree_status_t loom_text_parse(iree_string_view_t source,
               .pop_at = UINT16_MAX,
           },
   };
+  if (options) parser.low_asm_environment = options->low_asm_environment;
   if (parser.max_errors == 0) {
     parser.max_errors = 20;
   }

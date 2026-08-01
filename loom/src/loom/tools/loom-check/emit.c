@@ -1410,7 +1410,6 @@ static iree_status_t loom_check_emit_write_low_packet_json(
 
 static void loom_check_emit_initialize_source_low_print_options(
     const loom_low_descriptor_registry_t* descriptor_registry,
-    iree_string_view_t descriptor_set_key,
     loom_text_low_asm_environment_t* low_asm_environment,
     loom_text_print_options_t* print_options) {
   loom_low_descriptor_text_asm_environment_initialize(descriptor_registry,
@@ -1418,24 +1417,17 @@ static void loom_check_emit_initialize_source_low_print_options(
   *print_options = (loom_text_print_options_t){
       .flags = LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM,
       .low_asm_environment = *low_asm_environment,
-      .low_asm_descriptor_set_key = descriptor_set_key,
   };
 }
 
 static iree_status_t loom_check_emit_write_source_low_artifacts(
     const loom_module_t* module,
     const loom_low_descriptor_registry_t* descriptor_registry,
-    iree_string_view_t descriptor_set_key, iree_string_builder_t* output) {
-  if (iree_string_view_is_empty(descriptor_set_key)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "source-low low output requires a selected descriptor-set key");
-  }
+    iree_string_builder_t* output) {
   loom_text_low_asm_environment_t low_asm_environment = {0};
   loom_text_print_options_t print_options = {0};
   loom_check_emit_initialize_source_low_print_options(
-      descriptor_registry, descriptor_set_key, &low_asm_environment,
-      &print_options);
+      descriptor_registry, &low_asm_environment, &print_options);
   bool has_artifact = false;
   const loom_block_t* block = loom_region_const_entry_block(module->body);
   const loom_op_t* op = NULL;
@@ -1461,52 +1453,13 @@ static bool loom_check_emit_is_low_function_op(const loom_op_t* op) {
   return loom_low_func_def_isa(op) || loom_low_kernel_def_isa(op);
 }
 
-static iree_status_t loom_check_emit_select_single_low_descriptor_set_key(
-    const loom_module_t* module,
-    const loom_low_descriptor_registry_t* descriptor_registry,
-    iree_diagnostic_emitter_t emitter,
-    iree_string_view_t* out_descriptor_set_key, bool* out_found) {
-  *out_descriptor_set_key = iree_string_view_empty();
-  *out_found = false;
-
-  iree_arena_allocator_t fact_arena;
-  iree_arena_initialize(module->arena.block_pool, &fact_arena);
-  loom_symbol_fact_table_t symbol_facts = {0};
-  loom_symbol_fact_table_initialize(&symbol_facts, &fact_arena);
-  iree_status_t status = iree_ok_status();
+static bool loom_check_emit_has_low_function(const loom_module_t* module) {
   const loom_block_t* block = loom_region_const_entry_block(module->body);
   const loom_op_t* op = NULL;
   loom_block_for_each_op(block, op) {
-    if (!loom_check_emit_is_low_function_op(op)) {
-      continue;
-    }
-    loom_low_resolved_target_t target = {0};
-    status = loom_low_resolve_function_target(
-        module, &symbol_facts, op, /*effective_target_facts=*/NULL,
-        descriptor_registry, emitter, &target);
-    if (!iree_status_is_ok(status)) {
-      break;
-    }
-    if (target.descriptor_set == NULL) {
-      continue;
-    }
-    if (iree_string_view_is_empty(*out_descriptor_set_key)) {
-      *out_descriptor_set_key = target.descriptor_set_key;
-      *out_found = true;
-      continue;
-    }
-    if (!iree_string_view_equal(*out_descriptor_set_key,
-                                target.descriptor_set_key)) {
-      status = iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "source-low output=low requires all lowered funcs to use the same "
-          "target-low descriptor set");
-      break;
-    }
+    if (loom_check_emit_is_low_function_op(op)) return true;
   }
-
-  iree_arena_deinitialize(&fact_arena);
-  return status;
+  return false;
 }
 
 static iree_string_view_t loom_check_emit_diagnostic_source_low_pipeline(
@@ -1744,16 +1697,7 @@ static iree_status_t loom_check_emit_write_source_low_text(
   loom_target_entry_diagnostic_emitter_t pass_emitter = {0};
   loom_target_entry_diagnostic_emitter_initialize(
       module, &entry_options, LOOM_EMITTER_PASS, &pass_emitter);
-  iree_string_view_t selected_descriptor_set_key = iree_string_view_empty();
-  bool has_low_artifacts = false;
-  iree_status_t status = loom_check_emit_select_single_low_descriptor_set_key(
-      module, &low_registry->registry, loom_target_entry_emitter(&pass_emitter),
-      &selected_descriptor_set_key, &has_low_artifacts);
-  IREE_RETURN_IF_ERROR(status);
-  if (loom_check_diagnostic_collector_has_error(diagnostic_collector)) {
-    return iree_ok_status();
-  }
-  if (!has_low_artifacts) {
+  if (!loom_check_emit_has_low_function(module)) {
     const loom_diagnostic_param_t params[] = {
         loom_param_string(IREE_SV("source-to-low")),
     };
@@ -1768,17 +1712,15 @@ static iree_status_t loom_check_emit_write_source_low_text(
 
   if (request->source_low_output == LOOM_CHECK_EMIT_SOURCE_LOW_OUTPUT_LOW) {
     iree_status_t status = loom_check_emit_write_source_low_artifacts(
-        module, &low_registry->registry, selected_descriptor_set_key,
-        &result->actual_output);
+        module, &low_registry->registry, &result->actual_output);
     if (iree_status_is_ok(status)) result->has_actual_output = true;
     return status;
   }
   loom_text_low_asm_environment_t low_asm_environment = {0};
   loom_text_print_options_t print_options = {0};
   loom_check_emit_initialize_source_low_print_options(
-      &low_registry->registry, selected_descriptor_set_key,
-      &low_asm_environment, &print_options);
-  status = loom_text_print_module_to_builder_with_options(
+      &low_registry->registry, &low_asm_environment, &print_options);
+  iree_status_t status = loom_text_print_module_to_builder_with_options(
       module, &result->actual_output, &print_options);
   if (iree_status_is_ok(status)) result->has_actual_output = true;
   return status;

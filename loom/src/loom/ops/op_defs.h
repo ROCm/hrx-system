@@ -276,13 +276,11 @@ typedef enum loom_region_syntax_e {
   LOOM_REGION_SYNTAX_DEFAULT = 0,
   // Test-only alternate region syntax: do { block+ }.
   LOOM_REGION_SYNTAX_TEST_DO = 1,
-  // Descriptor-backed target-low assembly syntax: asm<descriptor.set> { ... }.
-  LOOM_REGION_SYNTAX_LOW_ASM = 2,
   // Canonical braced region by default, with optional target-low asm syntax.
-  LOOM_REGION_SYNTAX_LOW_ASM_OPTIONAL = 3,
+  LOOM_REGION_SYNTAX_LOW_ASM_OPTIONAL = 2,
   // Pass pipeline syntax. Currently canonical braced form; the friendly
   // parser/printer selects the same in-memory pass.* operations.
-  LOOM_REGION_SYNTAX_PIPELINE = 4,
+  LOOM_REGION_SYNTAX_PIPELINE = 3,
 } loom_region_syntax_t;
 
 #define LOOM_FORMAT_REGION_TABLE_DATA(keys_attr_index, default_region_index) \

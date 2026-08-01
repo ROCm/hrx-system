@@ -66,9 +66,6 @@ typedef struct loomc_module_resolved_serialize_options_t {
 
   // Text presentation policy for textual output.
   loomc_module_text_presentation_t text_presentation;
-
-  // Requested target-low descriptor-set key for low assembly text.
-  loomc_string_view_t low_asm_descriptor_set_key;
 } loomc_module_resolved_serialize_options_t;
 
 typedef struct loomc_module_resolved_deserialize_options_t {
@@ -172,11 +169,6 @@ static loomc_status_t loomc_module_resolve_serialize_options(
     }
     LOOMC_RETURN_IF_ERROR(
         loomc_module_validate_string_view(options->identifier));
-    if (LOOMC_MODULE_SERIALIZE_OPTIONS_HAS_FIELD(options,
-                                                 low_asm_descriptor_set_key)) {
-      LOOMC_RETURN_IF_ERROR(loomc_module_validate_string_view(
-          options->low_asm_descriptor_set_key));
-    }
   }
 
   loomc_source_format_t format =
@@ -213,23 +205,9 @@ static loomc_status_t loomc_module_resolve_serialize_options(
           "module serialize text_presentation is not supported");
   }
 
-  loomc_string_view_t low_asm_descriptor_set_key = loomc_string_view_empty();
-  if (LOOMC_MODULE_SERIALIZE_OPTIONS_HAS_FIELD(options,
-                                               low_asm_descriptor_set_key)) {
-    low_asm_descriptor_set_key = options->low_asm_descriptor_set_key;
-  }
-  if (text_presentation == LOOMC_MODULE_TEXT_PRESENTATION_GENERIC &&
-      !loomc_string_view_is_empty(low_asm_descriptor_set_key)) {
-    return loomc_make_status(
-        LOOMC_STATUS_INVALID_ARGUMENT,
-        "module serialize low_asm_descriptor_set_key requires low-asm text "
-        "presentation");
-  }
-
   out_options->format = format;
   out_options->identifier = identifier;
   out_options->text_presentation = text_presentation;
-  out_options->low_asm_descriptor_set_key = low_asm_descriptor_set_key;
   return loomc_ok_status();
 }
 
@@ -348,10 +326,6 @@ static loomc_status_t loomc_module_text_print_options(
     return loomc_ok_status();
   }
   out_options->flags |= LOOM_TEXT_PRINT_PREFER_LOW_ASM;
-  if (!loomc_string_view_is_empty(options->low_asm_descriptor_set_key)) {
-    out_options->low_asm_descriptor_set_key =
-        iree_string_view_from_loomc(options->low_asm_descriptor_set_key);
-  }
   if (options->text_presentation == LOOMC_MODULE_TEXT_PRESENTATION_LOW_ASM) {
     out_options->flags |= LOOM_TEXT_PRINT_REQUIRE_LOW_ASM;
   }

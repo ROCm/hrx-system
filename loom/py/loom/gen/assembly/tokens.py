@@ -97,7 +97,6 @@ KEYWORD_MAP: dict[str, str] = {
 REGION_SYNTAX_MAP: dict[str, str] = {
     "": "LOOM_REGION_SYNTAX_DEFAULT",
     "test.do": "LOOM_REGION_SYNTAX_TEST_DO",
-    "low.asm": "LOOM_REGION_SYNTAX_LOW_ASM",
     "low.asm.optional": "LOOM_REGION_SYNTAX_LOW_ASM_OPTIONAL",
     "pipeline": "LOOM_REGION_SYNTAX_PIPELINE",
 }

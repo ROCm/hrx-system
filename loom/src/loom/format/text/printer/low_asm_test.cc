@@ -78,15 +78,15 @@ class LowAsmPrinterTest : public ::testing::Test {
   }
 
   std::string PrintModule(
-      loom_module_t* module, iree_string_view_t descriptor_set_key,
-      loom_text_print_flags_t flags = LOOM_TEXT_PRINT_DEFAULT) {
+      loom_module_t* module,
+      loom_text_print_flags_t flags = LOOM_TEXT_PRINT_DEFAULT |
+                                      LOOM_TEXT_PRINT_PREFER_LOW_ASM) {
     loom_text_low_asm_environment_t environment = {};
     loom_low_descriptor_text_asm_environment_initialize(
         &low_descriptor_registry_, &environment);
     loom_text_print_options_t options = {
         /*.flags=*/flags,
         /*.low_asm_environment=*/environment,
-        /*.low_asm_descriptor_set_key=*/descriptor_set_key,
     };
     iree_string_builder_t builder;
     iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -103,8 +103,7 @@ class LowAsmPrinterTest : public ::testing::Test {
   }
 
   iree_status_t PrintModuleStatus(
-      loom_module_t* module, iree_string_view_t descriptor_set_key,
-      bool configure_environment,
+      loom_module_t* module, bool configure_environment,
       loom_text_print_flags_t flags = LOOM_TEXT_PRINT_DEFAULT) {
     loom_text_low_asm_environment_t environment = {};
     if (configure_environment) {
@@ -114,7 +113,6 @@ class LowAsmPrinterTest : public ::testing::Test {
     loom_text_print_options_t options = {
         /*.flags=*/flags,
         /*.low_asm_environment=*/environment,
-        /*.low_asm_descriptor_set_key=*/descriptor_set_key,
     };
     iree_string_builder_t builder;
     iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -134,7 +132,8 @@ class LowAsmPrinterTest : public ::testing::Test {
 
 TEST_F(LowAsmPrinterTest, PrintsDescriptorBackedPacketRegion) {
   const char* source =
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @packet() -> "
+      "(reg<test.i32>) asm {\n"
       "  %c0 = test.const.i32 7\n"
       "  %sum = test.add.i32 %c0, %c0\n"
       "  %spv = OpIAdd %sum, %c0\n"
@@ -143,13 +142,14 @@ TEST_F(LowAsmPrinterTest, PrintsDescriptorBackedPacketRegion) {
       "}\n";
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
-  EXPECT_EQ(PrintModule(module, IREE_SV("test.low.core")), source);
+  EXPECT_EQ(PrintModule(module), source);
   loom_module_free(module);
 }
 
 TEST_F(LowAsmPrinterTest, PrintsCanonicalHintAmongTargetPackets) {
   const char* source =
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @hint() -> "
+      "(reg<test.i32>) asm {\n"
       "  %c0 = test.const.i32 7\n"
       "  low.schedule.fence\n"
       "  %sum = test.add.i32 %c0, %c0\n"
@@ -157,13 +157,14 @@ TEST_F(LowAsmPrinterTest, PrintsCanonicalHintAmongTargetPackets) {
       "}\n";
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
-  EXPECT_EQ(PrintModule(module, IREE_SV("test.low.core")), source);
+  EXPECT_EQ(PrintModule(module), source);
   loom_module_free(module);
 }
 
 TEST_F(LowAsmPrinterTest, PrintsExplicitAmbiguousResultType) {
   const char* source =
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @ambiguous() -> "
+      "(reg<test.i64>, reg<test.i32>) asm {\n"
       "  %c0 = test.const.i32 7\n"
       "  %amb = test.ambiguous : reg<test.i64>\n"
       "  %tied = test.tied.any %c0\n"
@@ -171,13 +172,14 @@ TEST_F(LowAsmPrinterTest, PrintsExplicitAmbiguousResultType) {
       "}\n";
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
-  EXPECT_EQ(PrintModule(module, IREE_SV("test.low.core")), source);
+  EXPECT_EQ(PrintModule(module), source);
   loom_module_free(module);
 }
 
 TEST_F(LowAsmPrinterTest, PrintsStructuralIntrinsics) {
   const char* source =
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @structural() -> "
+      "(reg<test.i32>) asm {\n"
       "  %state = resource<vm_state> {index = 0, source_type = i64} : "
       "reg<test.i64>\n"
       "  %arg0 = live_in<test.arg0> : reg<test.i32>\n"
@@ -195,7 +197,7 @@ TEST_F(LowAsmPrinterTest, PrintsStructuralIntrinsics) {
       "}\n";
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
-  EXPECT_EQ(PrintModule(module, IREE_SV("test.low.core")), source);
+  EXPECT_EQ(PrintModule(module), source);
   loom_module_free(module);
 }
 
@@ -216,7 +218,7 @@ TEST_F(LowAsmPrinterTest, PrintsCanonicalStructuralCall) {
       "}\n";
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
-  EXPECT_EQ(PrintModule(module, IREE_SV("test.low.core")), source);
+  EXPECT_EQ(PrintModule(module), source);
   loom_module_free(module);
 }
 
@@ -237,10 +239,9 @@ TEST_F(LowAsmPrinterTest, NestedRegionsInheritRepresentationContract) {
       "}\n";
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
-  EXPECT_EQ(
-      PrintModule(module, IREE_SV("test.low.core"),
-                  LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM),
-      source);
+  EXPECT_EQ(PrintModule(module, LOOM_TEXT_PRINT_DEFAULT |
+                                    LOOM_TEXT_PRINT_REQUIRE_LOW_ASM),
+            source);
   loom_module_free(module);
 }
 
@@ -255,7 +256,7 @@ TEST_F(LowAsmPrinterTest, FunctionRepresentationContractSelectsDescriptorSet) {
       "}\n";
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
-  EXPECT_EQ(PrintModule(module, IREE_SV("test.low.core")), source);
+  EXPECT_EQ(PrintModule(module), source);
   loom_module_free(module);
 }
 
@@ -269,7 +270,7 @@ TEST_F(LowAsmPrinterTest,
       "}\n";
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
-  EXPECT_EQ(PrintModule(module, IREE_SV("test.low.core")), source);
+  EXPECT_EQ(PrintModule(module), source);
   loom_module_free(module);
 }
 
@@ -290,22 +291,23 @@ TEST_F(LowAsmPrinterTest, PrintsMixedFunctionRepresentationContracts) {
       "}\n";
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
-  EXPECT_EQ(
-      PrintModule(module, iree_string_view_empty(),
-                  LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_PREFER_LOW_ASM),
-      source);
+  EXPECT_EQ(PrintModule(module, LOOM_TEXT_PRINT_DEFAULT |
+                                    LOOM_TEXT_PRINT_PREFER_LOW_ASM),
+            source);
   loom_module_free(module);
 }
 
 TEST_F(LowAsmPrinterTest, RejectsMissingPrintEnvironment) {
   loom_module_t* module = ParseOk(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @empty() asm {\n"
       "  return\n"
       "}\n");
   ASSERT_NE(module, nullptr);
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
-                        PrintModuleStatus(module, IREE_SV("test.low.core"),
-                                          /*configure_environment=*/false));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      PrintModuleStatus(
+          module, /*configure_environment=*/false,
+          LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM));
   loom_module_free(module);
 }
 
@@ -322,12 +324,12 @@ TEST_F(LowAsmPrinterTest, RequiredOptionalLowAsmRejectsCanonicalFallback) {
       "}\n";
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
-  EXPECT_EQ(PrintModule(module, IREE_SV("test.low.core")), source);
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
-                        PrintModuleStatus(module, IREE_SV("test.low.core"),
-                                          /*configure_environment=*/true,
-                                          LOOM_TEXT_PRINT_DEFAULT |
-                                              LOOM_TEXT_PRINT_REQUIRE_LOW_ASM));
+  EXPECT_EQ(PrintModule(module), source);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      PrintModuleStatus(
+          module, /*configure_environment=*/true,
+          LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM));
   loom_module_free(module);
 }
 
@@ -345,10 +347,9 @@ TEST_F(LowAsmPrinterTest, RequiredLowAsmUsesFunctionRepresentationContract) {
       "}\n";
   loom_module_t* module = ParseOk(source);
   ASSERT_NE(module, nullptr);
-  EXPECT_EQ(
-      PrintModule(module, IREE_SV("test.low.alt"),
-                  LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM),
-      source);
+  EXPECT_EQ(PrintModule(module, LOOM_TEXT_PRINT_DEFAULT |
+                                    LOOM_TEXT_PRINT_REQUIRE_LOW_ASM),
+            source);
   loom_module_free(module);
 }
 

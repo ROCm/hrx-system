@@ -191,7 +191,8 @@ static void ExpectDescriptorOrdinal(
 
 TEST_F(LowAsmParserTest, BuildsCanonicalLowOps) {
   loom_module_t* module = ParseOk(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @packet() -> "
+      "(reg<test.i32>) asm {\n"
       "  %c0 = test.const.i32 7\n"
       "  %sum = test.add.i32 %c0, %c0\n"
       "  %spv = OpIAdd %sum, %c0\n"
@@ -202,10 +203,10 @@ TEST_F(LowAsmParserTest, BuildsCanonicalLowOps) {
 
   loom_block_t* module_block = loom_module_block(module);
   ASSERT_EQ(module_block->op_count, 1u);
-  loom_op_t* region_op = loom_block_op(module_block, 0);
-  ASSERT_TRUE(loom_test_low_asm_region_isa(region_op));
+  loom_op_t* function_op = loom_block_op(module_block, 0);
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
 
-  loom_region_t* region = loom_test_low_asm_region_body(region_op);
+  loom_region_t* region = loom_low_func_def_body(function_op);
   ASSERT_NE(region, nullptr);
   loom_block_t* entry = GetEntryBlock(region);
   ASSERT_NE(entry, nullptr);
@@ -271,7 +272,8 @@ TEST_F(LowAsmParserTest, BuildsCanonicalLowOps) {
 
 TEST_F(LowAsmParserTest, BuildsCanonicalHintAmongTargetPackets) {
   loom_module_t* module = ParseOk(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @hint() -> "
+      "(reg<test.i32>) asm {\n"
       "  %c0 = test.const.i32 7\n"
       "  low.schedule.fence\n"
       "  %sum = test.add.i32 %c0, %c0\n"
@@ -281,10 +283,10 @@ TEST_F(LowAsmParserTest, BuildsCanonicalHintAmongTargetPackets) {
 
   loom_block_t* module_block = loom_module_block(module);
   ASSERT_EQ(module_block->op_count, 1u);
-  loom_op_t* region_op = loom_block_op(module_block, 0);
-  ASSERT_TRUE(loom_test_low_asm_region_isa(region_op));
+  loom_op_t* function_op = loom_block_op(module_block, 0);
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
 
-  loom_region_t* region = loom_test_low_asm_region_body(region_op);
+  loom_region_t* region = loom_low_func_def_body(function_op);
   ASSERT_NE(region, nullptr);
   loom_block_t* entry = GetEntryBlock(region);
   ASSERT_NE(entry, nullptr);
@@ -299,7 +301,8 @@ TEST_F(LowAsmParserTest, BuildsCanonicalHintAmongTargetPackets) {
 
 TEST_F(LowAsmParserTest, SelectsDescriptorSet) {
   loom_module_t* module = ParseOk(
-      "test.low_asm_region asm<test.low.alt> {\n"
+      "low.func.def target<test.low.alt> @negate() -> "
+      "(reg<test.i32>) asm {\n"
       "  %c0 = test.alt.const.i32 5\n"
       "  %neg = test.alt.neg.i32 %c0\n"
       "  return %neg\n"
@@ -308,10 +311,10 @@ TEST_F(LowAsmParserTest, SelectsDescriptorSet) {
 
   loom_block_t* module_block = loom_module_block(module);
   ASSERT_EQ(module_block->op_count, 1u);
-  loom_op_t* region_op = loom_block_op(module_block, 0);
-  ASSERT_TRUE(loom_test_low_asm_region_isa(region_op));
+  loom_op_t* function_op = loom_block_op(module_block, 0);
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
 
-  loom_region_t* region = loom_test_low_asm_region_body(region_op);
+  loom_region_t* region = loom_low_func_def_body(function_op);
   ASSERT_NE(region, nullptr);
   loom_block_t* entry = GetEntryBlock(region);
   ASSERT_NE(entry, nullptr);
@@ -432,7 +435,8 @@ TEST_F(LowAsmParserTest, RejectsUnavailableFunctionRepresentationContract) {
 
 TEST_F(LowAsmParserTest, BuildsStructuralCopy) {
   loom_module_t* module = ParseOk(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @copy() -> "
+      "(reg<test.i32>) asm {\n"
       "  %c0 = test.const.i32 7\n"
       "  %copy = copy %c0 : reg<test.i32> -> reg<test.i32>\n"
       "  return %copy\n"
@@ -441,8 +445,9 @@ TEST_F(LowAsmParserTest, BuildsStructuralCopy) {
 
   loom_block_t* module_block = loom_module_block(module);
   ASSERT_EQ(module_block->op_count, 1u);
-  loom_region_t* region =
-      loom_test_low_asm_region_body(loom_block_op(module_block, 0));
+  loom_op_t* function_op = loom_block_op(module_block, 0);
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
+  loom_region_t* region = loom_low_func_def_body(function_op);
   loom_block_t* entry = GetEntryBlock(region);
   ASSERT_NE(entry, nullptr);
   ASSERT_EQ(entry->op_count, 3u);
@@ -463,7 +468,7 @@ TEST_F(LowAsmParserTest, BuildsStructuralCopy) {
 
 TEST_F(LowAsmParserTest, RejectsAmbiguousInferredResultType) {
   const auto& diagnostics = ParseExpectErrors(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @ambiguous() asm {\n"
       "  %amb = test.ambiguous\n"
       "}\n");
   const CapturedDiagnostic* diagnostic = FindDiagnostic(
@@ -477,7 +482,8 @@ TEST_F(LowAsmParserTest, RejectsAmbiguousInferredResultType) {
 
 TEST_F(LowAsmParserTest, AcceptsExplicitAmbiguousResultType) {
   loom_module_t* module = ParseOk(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @ambiguous() -> "
+      "(reg<test.i64>) asm {\n"
       "  %amb = test.ambiguous : reg<test.i64>\n"
       "  return %amb\n"
       "}\n");
@@ -485,8 +491,9 @@ TEST_F(LowAsmParserTest, AcceptsExplicitAmbiguousResultType) {
 
   loom_block_t* module_block = loom_module_block(module);
   ASSERT_EQ(module_block->op_count, 1u);
-  loom_region_t* region =
-      loom_test_low_asm_region_body(loom_block_op(module_block, 0));
+  loom_op_t* function_op = loom_block_op(module_block, 0);
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
+  loom_region_t* region = loom_low_func_def_body(function_op);
   loom_block_t* entry = GetEntryBlock(region);
   ASSERT_NE(entry, nullptr);
   ASSERT_EQ(entry->op_count, 2u);
@@ -503,7 +510,7 @@ TEST_F(LowAsmParserTest, AcceptsExplicitAmbiguousResultType) {
 
 TEST_F(LowAsmParserTest, RejectsInvalidExplicitResultType) {
   const auto& diagnostics = ParseExpectErrors(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @invalid_type() asm {\n"
       "  %c0 = test.const.i32 7\n"
       "  %bad = test.add.i32 %c0, %c0 : reg<test.i64>\n"
       "}\n");
@@ -517,7 +524,8 @@ TEST_F(LowAsmParserTest, RejectsInvalidExplicitResultType) {
 
 TEST_F(LowAsmParserTest, InfersTiedResultTypeFromOperand) {
   loom_module_t* module = ParseOk(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @tied() -> "
+      "(reg<test.i32>) asm {\n"
       "  %c0 = test.const.i32 7\n"
       "  %tied = test.tied.any %c0\n"
       "  return %tied\n"
@@ -526,8 +534,9 @@ TEST_F(LowAsmParserTest, InfersTiedResultTypeFromOperand) {
 
   loom_block_t* module_block = loom_module_block(module);
   ASSERT_EQ(module_block->op_count, 1u);
-  loom_region_t* region =
-      loom_test_low_asm_region_body(loom_block_op(module_block, 0));
+  loom_op_t* function_op = loom_block_op(module_block, 0);
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
+  loom_region_t* region = loom_low_func_def_body(function_op);
   loom_block_t* entry = GetEntryBlock(region);
   ASSERT_NE(entry, nullptr);
   ASSERT_EQ(entry->op_count, 3u);
@@ -548,7 +557,7 @@ TEST_F(LowAsmParserTest, InfersTiedResultTypeFromOperand) {
 
 TEST_F(LowAsmParserTest, RejectsExplicitTiedResultMismatch) {
   const auto& diagnostics = ParseExpectErrors(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @tied_mismatch() asm {\n"
       "  %c0 = test.const.i32 7\n"
       "  %bad = test.tied.any %c0 : reg<test.i64>\n"
       "}\n");
@@ -560,10 +569,10 @@ TEST_F(LowAsmParserTest, RejectsExplicitTiedResultMismatch) {
   (void)diagnostics;
 }
 
-TEST_F(LowAsmParserTest, RequiresConfiguredEnvironment) {
+TEST_F(LowAsmParserTest, RequiresEnvironmentAtFunctionBoundary) {
   loom_module_t* module = nullptr;
   IREE_ASSERT_OK(
-      Parse("test.low_asm_region asm<test.low.core> {\n"
+      Parse("low.func.def target<test.low.core> @empty() asm {\n"
             "  return\n"
             "}\n",
             /*enable_low_asm=*/false, &module));
@@ -572,22 +581,12 @@ TEST_F(LowAsmParserTest, RequiresConfiguredEnvironment) {
   ExpectError(capture_.diagnostics[0],
               loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 34));
   EXPECT_EQ(GetStringParam(capture_.diagnostics[0], 0),
-            "low asm environment is not configured");
-}
-
-TEST_F(LowAsmParserTest, RejectsUnknownDescriptorSet) {
-  const auto& diagnostics = ParseExpectErrors(
-      "test.low_asm_region asm<test.low.missing> {\n"
-      "  return\n"
-      "}\n");
-  ExpectError(diagnostics[0],
-              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 34));
-  EXPECT_EQ(GetStringParam(diagnostics[0], 0), "unknown low descriptor set");
+            "Low representation environment is not configured");
 }
 
 TEST_F(LowAsmParserTest, RejectsUnknownMnemonic) {
   const auto& diagnostics = ParseExpectErrors(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @unknown_mnemonic() asm {\n"
       "  %c0 = test.const.i32 7\n"
       "  %bad = test.missing.i32 %c0\n"
       "}\n");
@@ -600,7 +599,7 @@ TEST_F(LowAsmParserTest, RejectsUnknownMnemonic) {
 
 TEST_F(LowAsmParserTest, RejectsResultCountMismatch) {
   const auto& diagnostics = ParseExpectErrors(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @result_count() asm {\n"
       "  %lhs, %rhs = test.const.i32 7\n"
       "}\n");
   ExpectError(diagnostics[0],
@@ -612,7 +611,7 @@ TEST_F(LowAsmParserTest, RejectsResultCountMismatch) {
 
 TEST_F(LowAsmParserTest, RejectsOperandCountMismatch) {
   const auto& diagnostics = ParseExpectErrors(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @operand_count() asm {\n"
       "  %c0 = test.const.i32 7\n"
       "  %sum = test.add.i32 %c0\n"
       "}\n");
@@ -627,7 +626,7 @@ TEST_F(LowAsmParserTest, RejectsOperandCountMismatch) {
 
 TEST_F(LowAsmParserTest, RejectsUnexpectedNamedImmediate) {
   const auto& diagnostics = ParseExpectErrors(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @named_immediate() asm {\n"
       "  %c0 = test.const.i32 7\n"
       "  %call = test.call.i32 %c0 {callee_ordinal = 4}\n"
       "}\n");
@@ -640,7 +639,8 @@ TEST_F(LowAsmParserTest, RejectsUnexpectedNamedImmediate) {
 
 TEST_F(LowAsmParserTest, BuildsControlFlowBlocks) {
   loom_module_t* module = ParseOk(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @control_flow() -> "
+      "(reg<test.i32>) asm {\n"
       "  %cond = test.const.i32 1\n"
       "  low.cond_br %cond, ^then, ^else : reg<test.i32>\n"
       "^then:\n"
@@ -654,8 +654,9 @@ TEST_F(LowAsmParserTest, BuildsControlFlowBlocks) {
 
   loom_block_t* module_block = loom_module_block(module);
   ASSERT_EQ(module_block->op_count, 1u);
-  loom_region_t* region =
-      loom_test_low_asm_region_body(loom_block_op(module_block, 0));
+  loom_op_t* function_op = loom_block_op(module_block, 0);
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
+  loom_region_t* region = loom_low_func_def_body(function_op);
   ASSERT_NE(region, nullptr);
   ASSERT_EQ(region->block_count, 4u);
 
@@ -686,7 +687,7 @@ TEST_F(LowAsmParserTest, BuildsControlFlowBlocks) {
 
 TEST_F(LowAsmParserTest, RejectsTrailingTokenAfterLocation) {
   const auto& diagnostics = ParseExpectErrors(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @trailing_token() asm {\n"
       "  %c0 = test.const.i32 7 loc(\"test.loom\":1:1) extra\n"
       "}\n");
   const CapturedDiagnostic* diagnostic = FindDiagnostic(
@@ -698,7 +699,8 @@ TEST_F(LowAsmParserTest, RejectsTrailingTokenAfterLocation) {
 
 TEST_F(LowAsmParserTest, RejectsExtraReturnTypeAnnotation) {
   const auto& diagnostics = ParseExpectErrors(
-      "test.low_asm_region asm<test.low.core> {\n"
+      "low.func.def target<test.low.core> @return_type() -> "
+      "(reg<test.i32>) asm {\n"
       "  %c0 = test.const.i32 7\n"
       "  return %c0 : reg<test.i32>, reg<test.i32>\n"
       "}\n");

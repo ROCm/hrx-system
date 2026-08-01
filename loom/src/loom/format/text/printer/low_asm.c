@@ -25,8 +25,6 @@ typedef enum loom_print_low_asm_prefix_e {
   LOOM_PRINT_LOW_ASM_PREFIX_NONE = 0,
   // Function body whose representation contract is carried by the function.
   LOOM_PRINT_LOW_ASM_PREFIX_MARKER = 1,
-  // Standalone region carrying its own representation-contract key.
-  LOOM_PRINT_LOW_ASM_PREFIX_CONTRACT = 2,
 } loom_print_low_asm_prefix_t;
 
 typedef struct loom_print_low_asm_preflight_failure_t {
@@ -44,45 +42,8 @@ typedef struct loom_print_low_asm_preflight_failure_t {
   uint16_t operand_count;
 } loom_print_low_asm_preflight_failure_t;
 
-static iree_status_t loom_print_low_asm_resolve_repr(
-    loom_print_context_t* ctx, loom_text_low_repr_context_t* out_low_repr) {
-  *out_low_repr = ctx->low_repr;
-  if (!loom_text_low_asm_environment_supports_printing(
-          &ctx->low_asm_environment)) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "low asm region printing requires a descriptor-backed print "
-        "environment");
-  }
-  if (iree_string_view_is_empty(out_low_repr->contract_key)) {
-    out_low_repr->contract_key = ctx->low_asm_descriptor_set_key;
-    out_low_repr->descriptor_set = NULL;
-  }
-  if (iree_string_view_is_empty(out_low_repr->contract_key)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "low asm region printing requires a representation-contract key");
-  }
-  if (out_low_repr->descriptor_set == NULL) {
-    out_low_repr->descriptor_set = loom_low_repr_lookup_descriptor_set(
-        &ctx->low_asm_environment.low_repr, out_low_repr->contract_key);
-  }
-  if (out_low_repr->descriptor_set == NULL) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND,
-                            "low representation contract '%.*s' was not found",
-                            (int)out_low_repr->contract_key.size,
-                            out_low_repr->contract_key.data);
-  }
-  return iree_ok_status();
-}
-
 bool loom_print_low_asm_is_requested(loom_print_context_t* ctx) {
-  if (!iree_string_view_is_empty(ctx->low_asm_descriptor_set_key)) {
-    return true;
-  }
-  return loom_text_low_asm_environment_supports_printing(
-             &ctx->low_asm_environment) &&
-         !iree_string_view_is_empty(ctx->low_repr.contract_key) &&
+  return ctx->low_repr.descriptor_set != NULL &&
          iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_PREFER_LOW_ASM |
                                           LOOM_TEXT_PRINT_REQUIRE_LOW_ASM);
 }
@@ -850,7 +811,7 @@ static iree_status_t loom_print_low_asm_prepare_region(
   (void)region_descriptor;
   *out_failure = (loom_print_low_asm_preflight_failure_t){0};
   *out_available = true;
-  IREE_RETURN_IF_ERROR(loom_print_low_asm_resolve_repr(ctx, out_low_repr));
+  *out_low_repr = ctx->low_repr;
 
   if (!iree_any_bit_set(ctx->flags, LOOM_TEXT_PRINT_SKIP_REGIONS)) {
     IREE_RETURN_IF_ERROR(loom_print_low_asm_region_preflight(
@@ -924,18 +885,6 @@ static iree_status_t loom_print_low_asm_region_with_repr(
     case LOOM_PRINT_LOW_ASM_PREFIX_MARKER:
       status = loom_print_emit_cstr(ctx, "asm", false);
       break;
-    case LOOM_PRINT_LOW_ASM_PREFIX_CONTRACT:
-      status = loom_print_emit_cstr(ctx, "asm", false);
-      if (iree_status_is_ok(status)) {
-        status = loom_print_emit_cstr(ctx, "<", true);
-      }
-      if (iree_status_is_ok(status)) {
-        status = loom_print_emit(ctx, low_repr.contract_key, true);
-      }
-      if (iree_status_is_ok(status)) {
-        status = loom_print_emit_cstr(ctx, ">", true);
-      }
-      break;
   }
   if (iree_status_is_ok(status)) {
     status = loom_print_space_if_needed(ctx);
@@ -968,32 +917,11 @@ static iree_status_t loom_print_low_asm_region_with_repr(
   return iree_ok_status();
 }
 
-iree_status_t loom_print_low_asm_region(
-    loom_print_context_t* ctx, const loom_region_t* region,
-    const loom_region_descriptor_t* region_descriptor,
-    bool entry_args_declared_by_parent) {
-  loom_text_low_repr_context_t low_repr = {0};
-  loom_print_low_asm_preflight_failure_t failure = {0};
-  bool available = false;
-  IREE_RETURN_IF_ERROR(loom_print_low_asm_prepare_region(
-      ctx, region, region_descriptor, entry_args_declared_by_parent, &low_repr,
-      &failure, &available));
-  if (!available) {
-    return loom_print_low_asm_make_unavailable_status(low_repr.contract_key,
-                                                      &failure);
-  }
-  return loom_print_low_asm_region_with_repr(
-      ctx, region, region_descriptor, entry_args_declared_by_parent, low_repr,
-      LOOM_PRINT_LOW_ASM_PREFIX_CONTRACT);
-}
-
 iree_status_t loom_print_low_asm_optional_region(
     loom_print_context_t* ctx, const loom_region_t* region,
     const loom_region_descriptor_t* region_descriptor,
     bool entry_args_declared_by_parent, bool* out_printed) {
   *out_printed = false;
-  const bool has_parent_repr =
-      !iree_string_view_is_empty(ctx->low_repr.contract_key);
   loom_text_low_repr_context_t low_repr = {0};
   loom_print_low_asm_preflight_failure_t failure = {0};
   bool available = false;
@@ -1008,11 +936,9 @@ iree_status_t loom_print_low_asm_optional_region(
     return iree_ok_status();
   }
   *out_printed = true;
-  loom_print_low_asm_prefix_t prefix = LOOM_PRINT_LOW_ASM_PREFIX_NONE;
-  if (ctx->low_asm_region_depth == 0) {
-    prefix = has_parent_repr ? LOOM_PRINT_LOW_ASM_PREFIX_MARKER
-                             : LOOM_PRINT_LOW_ASM_PREFIX_CONTRACT;
-  }
+  const loom_print_low_asm_prefix_t prefix =
+      ctx->low_asm_region_depth == 0 ? LOOM_PRINT_LOW_ASM_PREFIX_MARKER
+                                     : LOOM_PRINT_LOW_ASM_PREFIX_NONE;
   return loom_print_low_asm_region_with_repr(ctx, region, region_descriptor,
                                              entry_args_declared_by_parent,
                                              low_repr, prefix);

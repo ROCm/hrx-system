@@ -71,8 +71,6 @@ IREE_FLAG_NAMED(string, pass_reproducer, "pass-reproducer", "",
                 "failure.");
 IREE_FLAG_NAMED(string, diagnostic_format, "diagnostic-format", "text",
                 "Diagnostic output format. Use 'text' or 'json'.");
-IREE_FLAG_NAMED(string, low_asm_descriptor_set, "low-asm-descriptor-set", "",
-                "Descriptor-set key used when printing low asm regions.");
 
 typedef enum loom_opt_pass_report_mode_e {
   LOOM_OPT_PASS_REPORT_NONE = 0,
@@ -448,14 +446,6 @@ static iree_status_t loom_opt_append_reproducer_run_line(
         iree_string_builder_append_cstring(builder, " --config="));
     IREE_RETURN_IF_ERROR(
         loom_opt_append_shell_quoted(builder, config_assignments.values[i]));
-  }
-  iree_string_view_t low_asm_descriptor_set = iree_string_view_trim(
-      iree_make_cstring_view(FLAG_low_asm_descriptor_set));
-  if (!iree_string_view_is_empty(low_asm_descriptor_set)) {
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
-        builder, " --low-asm-descriptor-set="));
-    IREE_RETURN_IF_ERROR(
-        loom_opt_append_shell_quoted(builder, low_asm_descriptor_set));
   }
   iree_string_view_t pass_report =
       iree_string_view_trim(iree_make_cstring_view(FLAG_pass_report));
@@ -1006,8 +996,6 @@ static iree_status_t loom_opt_print_module(
 
   loom_text_print_options_t print_options = {
       .flags = LOOM_TEXT_PRINT_DEFAULT,
-      .low_asm_descriptor_set_key =
-          iree_make_cstring_view(FLAG_low_asm_descriptor_set),
   };
   loom_low_descriptor_text_asm_environment_initialize(
       &low_registry->registry, &print_options.low_asm_environment);
@@ -1388,8 +1376,6 @@ int main(int argc, char** argv) {
         &(loom_tooling_pass_trace_open_options_t){
             .tool_name = IREE_SV("loom-opt"),
             .input_path = filename,
-            .low_asm_descriptor_set_key =
-                iree_make_cstring_view(FLAG_low_asm_descriptor_set),
             .stdout_conflicts = stdout_conflicts,
             .stdout_conflict_count = IREE_ARRAYSIZE(stdout_conflicts),
         },

@@ -87,12 +87,6 @@ iree_status_t loom_parse_low_asm_packet_location(
     loom_token_t mnemonic_token, loom_parsed_op_t* parsed_spans,
     loom_location_id_t* out_location);
 
-// Parses the target-low asm prefixed region syntax:
-// `asm<descriptor-set> { packet... }`.
-iree_status_t loom_parse_low_asm_prefixed_region(
-    loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
-    loom_region_t** out_region);
-
 // Parses `asm { ... }` using the active function representation contract.
 iree_status_t loom_parse_low_asm_marked_region(
     loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,

@@ -13,18 +13,12 @@
 static loom_print_context_t loom_print_context_make(
     const loom_module_t* module, loom_output_stream_t* stream,
     const loom_text_print_options_t* options) {
-  loom_text_print_flags_t flags =
-      options ? options->flags : LOOM_TEXT_PRINT_DEFAULT;
-  return (loom_print_context_t){
-      .stream = stream,
-      .module = module,
-      .flags = flags,
-      .low_asm_environment = options ? options->low_asm_environment
-                                     : (loom_text_low_asm_environment_t){0},
-      .low_asm_descriptor_set_key = options
-                                        ? options->low_asm_descriptor_set_key
-                                        : iree_string_view_empty(),
-  };
+  loom_print_context_t context = {0};
+  context.stream = stream;
+  context.module = module;
+  context.flags = options ? options->flags : LOOM_TEXT_PRINT_DEFAULT;
+  if (options) context.low_asm_environment = options->low_asm_environment;
+  return context;
 }
 
 iree_status_t loom_text_print_module(const loom_module_t* module,

@@ -2345,27 +2345,6 @@ test_region_syntax = Op(
 )
 
 # ============================================================================
-# test.low_asm_region — descriptor-backed low asm parser surface
-# ============================================================================
-
-test_low_asm_region = Op(
-    "test.low_asm_region",
-    group=test_ops,
-    doc="Test op whose body uses descriptor-backed target-low assembly syntax while preserving ordinary region storage.",
-    regions=[
-        RegionDef(
-            "body",
-            doc="Body parsed through the target-low asm region syntax.",
-            single_block=True,
-        )
-    ],
-    format=[Region("body", syntax="low.asm")],
-    examples=[
-        "test.low_asm_region asm<test.low.core> {\n  return\n}",
-    ],
-)
-
-# ============================================================================
 # test.target — target-like symbol record
 # ============================================================================
 
@@ -2490,7 +2469,6 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_storage_min_alignment,
     test_fact_storage_space,
     test_region_syntax,
-    test_low_asm_region,
     test_clause_constant,
     test_clause_copy,
     test_typed_use,

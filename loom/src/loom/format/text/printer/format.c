@@ -138,8 +138,8 @@ static iree_status_t loom_print_bind_function_low_repr(
   ctx->low_repr = (loom_text_low_repr_context_t){
       .contract_key = ctx->module->strings.entries[attr.string_id],
   };
-  if (!ctx->low_asm_environment.vtable ||
-      !ctx->low_asm_environment.low_repr.vtable) {
+  if (!loom_text_low_asm_environment_supports_printing(
+          &ctx->low_asm_environment)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "printing a Low function requires a representation environment");

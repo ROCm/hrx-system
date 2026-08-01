@@ -56,10 +56,9 @@ typedef uint32_t loom_text_print_flags_t;
 typedef struct loom_text_print_options_t {
   // Flag bitset controlling layout and optional annotations.
   loom_text_print_flags_t flags;
-  // Optional environment used to print low asm region syntax.
+  // Representation codec and assembly interface for Low functions. Generic
+  // modules may omit it; printing a Low wrapper requires it.
   loom_text_low_asm_environment_t low_asm_environment;
-  // Descriptor-set key selected for low asm region syntax in this print.
-  iree_string_view_t low_asm_descriptor_set_key;
 } loom_text_print_options_t;
 
 // Prints a complete module to canonical text via the output stream.

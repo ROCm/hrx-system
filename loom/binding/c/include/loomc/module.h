@@ -327,15 +327,6 @@ typedef struct loomc_module_serialize_options_t {
 
   /// Presentation policy for textual `.loom` output.
   loomc_module_text_presentation_t text_presentation;
-
-  /// Fallback representation-contract key used by low assembly presentation.
-  ///
-  /// Function representation contracts take precedence. Non-empty supplies
-  /// the context for low assembly regions that have no enclosing function
-  /// contract and requests low assembly presentation for optional regions.
-  /// `LOOMC_MODULE_TEXT_PRESENTATION_GENERIC` rejects this field as
-  /// contradictory.
-  loomc_string_view_t low_asm_descriptor_set_key;
 } loomc_module_serialize_options_t;
 
 /// Module deserialization options.
