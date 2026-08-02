@@ -590,6 +590,18 @@ static inline bool loom_value_facts_as_exact_i64(loom_value_facts_t facts,
   return true;
 }
 
+// Returns the reservable maximum of a proven non-negative integer range.
+// INT64_MAX denotes an unbounded range and is not a reservable maximum.
+static inline bool loom_value_facts_as_non_negative_i64_maximum(
+    loom_value_facts_t facts, int64_t* out_maximum) {
+  if (loom_value_facts_is_float(facts) || facts.range_lo < 0 ||
+      facts.range_hi == INT64_MAX) {
+    return false;
+  }
+  *out_maximum = facts.range_hi;
+  return true;
+}
+
 static inline bool loom_value_facts_as_exact_bool(loom_value_facts_t facts,
                                                   bool* out_value) {
   int64_t value = 0;

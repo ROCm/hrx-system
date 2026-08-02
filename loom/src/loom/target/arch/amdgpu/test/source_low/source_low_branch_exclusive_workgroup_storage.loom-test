@@ -373,3 +373,59 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 ^done:
   return
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+// A dynamic logical extent with a finite maximum reserves one static slot. The
+// zero-length path cannot access the allocation.
+kernel.def target(@target) @bounded_dynamic_workgroup_storage() {
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  kernel.launch.config workgroups(%two, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%output: buffer) {
+  %workgroup = kernel.workgroup.id<x> : index
+  %zero = index.constant 0 : index
+  %zero_offset = index.constant 0 : offset
+  %capacity = index.constant 8192 : offset
+  %has_storage = index.cmp eq, %workgroup, %zero : index
+  %byte_length = scf.select %has_storage, %capacity, %zero_offset : offset
+  %scratch = buffer.alloca %byte_length {base_alignment = 16, memory_space = workgroup} : buffer
+  %output_view = buffer.view %output[%zero_offset] : buffer -> view<2xi32, #dense>
+  cfg.cond_br %has_storage, ^active, ^done
+^active:
+  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<1xi32, #dense>
+  %value = scalar.constant 7 : i32
+  view.store %value, %scratch_view[0] : i32, view<1xi32, #dense>
+  %loaded = view.load %scratch_view[0] : view<1xi32, #dense> -> i32
+  view.store %loaded, %output_view[%workgroup] : i32, view<2xi32, #dense>
+  cfg.br ^done
+^done:
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(2, 1, 1) @bounded_dynamic_workgroup_storage() asm {
+  %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 8} : reg<amdgpu.sgpr x2>
+  %16 = storage {byte_alignment = 16, byte_length = 8192} : low.storage<workgroup>
+  %zero = s_mov_b32 0
+  %has_storage = s_cmp_eq_i32 %workgroup, %zero
+  low.cond_br %has_storage, ^active, ^done : reg<amdgpu.scc>
+^active:
+  %21 = v_mov_b32 7
+  %22 = v_mov_b32 0
+  low.op<amdgpu.ds_write_b32>(%22, %21) {offset = 0} memory_access([0, 3, 9, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>)
+  %loaded = low.op<amdgpu.ds_read_b32>(%22) {offset = 0} memory_access([0, 3, 9, -1, 11, 0, 0, 0, 3, 0, 0, 4, 4]) : (reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr>
+  %26 = s_lshl_b32_rhs_inline %workgroup, 2
+  %27 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = s_add_u32 %27, %26
+  %31 = s_addc_u32 %28, %zero
+  %32 = concat(%30, %31) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b32_saddr %22, %loaded, %32
+  low.br ^done
+^done:
+  return
+}

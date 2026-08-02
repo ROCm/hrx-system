@@ -67,11 +67,17 @@ buffer_alloca = Op(
     doc=(
         "Create a fixed-frame scratch buffer root in workgroup or private memory. "
         "Each execution produces a distinct storage identity; identical allocas "
-        "must not be commoned. The byte length is a physical byte count, and "
-        "base_alignment is the minimum byte alignment of the root storage base."
+        "must not be commoned. The byte length is the requested physical byte "
+        "count for the execution. Targets requiring a static frame reserve its "
+        "proven finite non-negative maximum. base_alignment is the minimum byte "
+        "alignment of the root storage base."
     ),
     operands=[
-        Operand("byte_length", OFFSET, doc="Physical byte length of the scratch root."),
+        Operand(
+            "byte_length",
+            OFFSET,
+            doc="Requested physical byte length of the scratch root.",
+        ),
     ],
     results=[
         Result(

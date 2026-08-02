@@ -41,15 +41,6 @@ static bool loom_spirv_workgroup_i64_is_power_of_two(int64_t value) {
          iree_math_is_power_of_two_i64(value);
 }
 
-static bool loom_spirv_workgroup_exact_positive_i64(loom_value_facts_t facts,
-                                                    int64_t* out_value) {
-  *out_value = 0;
-  if (!loom_value_facts_as_exact_i64(facts, out_value) || *out_value <= 0) {
-    return false;
-  }
-  return true;
-}
-
 static iree_status_t loom_spirv_workgroup_emit_rejected(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     iree_string_view_t field_name, loom_type_t type,
@@ -131,10 +122,11 @@ static iree_status_t loom_spirv_select_workgroup_alloca(
   loom_spirv_workgroup_alloca_plan_t plan = {0};
   const loom_value_fact_table_t* fact_table =
       loom_low_lower_context_fact_table(context);
-  if (!loom_spirv_workgroup_exact_positive_i64(
+  if (!loom_value_facts_as_non_negative_i64_maximum(
           loom_value_fact_table_lookup(
               fact_table, loom_buffer_alloca_byte_length(source_op)),
           &plan.byte_length) ||
+      plan.byte_length <= 0 ||
       !loom_spirv_workgroup_i64_is_power_of_two(
           loom_buffer_alloca_base_alignment(source_op))) {
     return loom_spirv_workgroup_emit_rejected(

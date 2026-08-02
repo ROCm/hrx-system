@@ -37,7 +37,7 @@ static bool loom_amdgpu_select_buffer_alloca_plan_from_facts(
   }
   int64_t byte_length = 0;
   if (fact_table == NULL ||
-      !loom_amdgpu_value_facts_as_exact_non_negative_i64(
+      !loom_value_facts_as_non_negative_i64_maximum(
           loom_value_fact_table_lookup(
               fact_table, loom_buffer_alloca_byte_length(source_op)),
           &byte_length) ||
