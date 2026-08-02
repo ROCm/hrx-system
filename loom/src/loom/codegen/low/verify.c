@@ -258,8 +258,7 @@ static iree_status_t loom_low_verify_emit_packet_op_kind_mismatch(
       loom_param_string(expected_op_name),
   };
   return loom_low_verify_emit(function_state->state, op, LOOM_ERR_STRUCTURE_039,
-                              params,
-                              IREE_ARRAYSIZE(params), NULL, 0);
+                              params, IREE_ARRAYSIZE(params), NULL, 0);
 }
 static iree_status_t loom_low_verify_emit_missing_immediate(
     loom_low_function_verify_state_t* function_state, const loom_op_t* op,
