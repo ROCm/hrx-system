@@ -36,6 +36,7 @@ enum loom_amdgpu_loom_check_option_flag_bits_e {
   LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_SCHEDULE_STRATEGY = 1u << 0,
   LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_SCHEDULE_DIAGNOSTICS = 1u << 1,
   LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_WAIT_MODE = 1u << 2,
+  LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_ALLOCATION_DIAGNOSTICS = 1u << 3,
 };
 typedef uint8_t loom_amdgpu_loom_check_option_flags_t;
 
@@ -46,6 +47,8 @@ typedef struct loom_amdgpu_loom_check_emit_options_t {
   loom_low_schedule_strategy_t schedule_strategy;
   // Low scheduler diagnostic feedback requested by the RUN line.
   loom_low_schedule_diagnostic_flags_t schedule_diagnostic_flags;
+  // Low allocator diagnostic feedback requested by the RUN line.
+  loom_low_allocation_diagnostic_flags_t allocation_diagnostic_flags;
   // Wait-packet materialization mode for the emitted fragment.
   loom_amdgpu_loom_check_wait_mode_t wait_mode;
   // Parsed loom_amdgpu_loom_check_option_flag_bits_e bits.
@@ -128,6 +131,22 @@ static iree_status_t loom_amdgpu_loom_check_parse_key_value_option(
         &options->schedule_diagnostic_flags));
     options->option_flags |=
         LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_SCHEDULE_DIAGNOSTICS;
+    *out_matched = true;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(name, IREE_SV("allocation-diagnostics"))) {
+    if (iree_any_bit_set(
+            options->option_flags,
+            LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_ALLOCATION_DIAGNOSTICS)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "duplicate AMDGPU assembly option 'allocation-diagnostics'");
+    }
+    IREE_RETURN_IF_ERROR(loom_check_low_emit_parse_allocation_diagnostics(
+        value, IREE_SV("AMDGPU assembly"),
+        &options->allocation_diagnostic_flags));
+    options->option_flags |=
+        LOOM_AMDGPU_LOOM_CHECK_OPTION_FLAG_ALLOCATION_DIAGNOSTICS;
     *out_matched = true;
     return iree_ok_status();
   }
@@ -478,8 +497,9 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
   }
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
       request, options.function_symbol_name, options.schedule_strategy,
-      options.schedule_diagnostic_flags, options.allocation_budgets,
-      options.allocation_budget_count, options.allocation_fixed_value_specs,
+      options.schedule_diagnostic_flags, options.allocation_diagnostic_flags,
+      options.allocation_budgets, options.allocation_budget_count,
+      options.allocation_fixed_value_specs,
       options.allocation_fixed_value_spec_count, residency_model,
       schedule_pair_affinities, schedule_state_reads,
       selected_storage_lease_provider, &spill_free_options, &frame));

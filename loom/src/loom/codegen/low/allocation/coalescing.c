@@ -302,12 +302,14 @@ loom_low_allocation_coalescing_copy_relation_for_result_ordinal(
   return NULL;
 }
 
+// Returns whether the semantic SSA value itself has a direct use after
+// |consuming_op|. Tied-result successors are distinct SSA identities and are
+// intentionally not followed.
 static iree_status_t
-loom_low_allocation_coalescing_value_units_have_use_after_clobber(
+loom_low_allocation_coalescing_value_units_have_direct_use_after_clobber(
     const loom_low_allocation_coalescing_context_t* context,
-    const loom_op_t* consuming_op, uint32_t clobber_point,
-    loom_value_ordinal_t value_ordinal, uint32_t unit_offset,
-    uint32_t unit_count, bool* out_has_use) {
+    const loom_op_t* consuming_op, loom_value_ordinal_t value_ordinal,
+    uint32_t unit_offset, uint32_t unit_count, bool* out_has_use) {
   *out_has_use = false;
   const loom_value_id_t value_id =
       loom_low_placement_value_id(context->placement, value_ordinal);
@@ -364,6 +366,24 @@ loom_low_allocation_coalescing_value_units_have_use_after_clobber(
       return iree_ok_status();
     }
   }
+  return iree_ok_status();
+}
+
+// Returns whether the concrete units owned by |value_ordinal| have a use after
+// |consuming_op|. Tied results continue the same storage under a new SSA
+// identity and are followed transitively.
+static iree_status_t
+loom_low_allocation_coalescing_storage_units_have_use_after_clobber(
+    const loom_low_allocation_coalescing_context_t* context,
+    const loom_op_t* consuming_op, loom_value_ordinal_t value_ordinal,
+    uint32_t unit_offset, uint32_t unit_count, bool* out_has_use) {
+  IREE_RETURN_IF_ERROR(
+      loom_low_allocation_coalescing_value_units_have_direct_use_after_clobber(
+          context, consuming_op, value_ordinal, unit_offset, unit_count,
+          out_has_use));
+  if (*out_has_use) {
+    return iree_ok_status();
+  }
 
   // A tied result continues to own its operand's concrete units. Follow exact
   // unit mappings so a later use of the newer SSA value still preserves the
@@ -397,9 +417,9 @@ loom_low_allocation_coalescing_value_units_have_use_after_clobber(
         relation->result_unit_offset +
         (overlap_offset - relation->source_unit_offset);
     IREE_RETURN_IF_ERROR(
-        loom_low_allocation_coalescing_value_units_have_use_after_clobber(
-            context, consuming_op, clobber_point, relation->result_ordinal,
-            result_unit_offset, overlap_count, out_has_use));
+        loom_low_allocation_coalescing_storage_units_have_use_after_clobber(
+            context, consuming_op, relation->result_ordinal, result_unit_offset,
+            overlap_count, out_has_use));
     if (*out_has_use) {
       return iree_ok_status();
     }
@@ -446,10 +466,9 @@ loom_low_allocation_coalescing_copy_source_live_at_tied_definition(
           overlap_count, tied_result_interval->start_point)) {
     return iree_ok_status();
   }
-  return loom_low_allocation_coalescing_value_units_have_use_after_clobber(
-      context, tied_relation->op, tied_result_interval->start_point,
-      copy_relation->source_ordinal, source_unit_offset, overlap_count,
-      out_copy_source_live);
+  return loom_low_allocation_coalescing_storage_units_have_use_after_clobber(
+      context, tied_relation->op, copy_relation->source_ordinal,
+      source_unit_offset, overlap_count, out_copy_source_live);
 }
 
 static bool loom_low_allocation_coalescing_storage_alias_relation(
@@ -576,9 +595,9 @@ loom_low_allocation_coalescing_try_append_dead_exact_storage_alias(
           context, alias_ordinal, 0, alias_interval->unit_count,
           clobber_point)) {
     IREE_RETURN_IF_ERROR(
-        loom_low_allocation_coalescing_value_units_have_use_after_clobber(
-            context, anchor_op, clobber_point, alias_ordinal, 0,
-            alias_interval->unit_count, &has_use_after_clobber));
+        loom_low_allocation_coalescing_value_units_have_direct_use_after_clobber(
+            context, anchor_op, alias_ordinal, 0, alias_interval->unit_count,
+            &has_use_after_clobber));
   }
   if (!has_use_after_clobber) {
     loom_low_allocation_coalescing_try_append_unique_value_id(
