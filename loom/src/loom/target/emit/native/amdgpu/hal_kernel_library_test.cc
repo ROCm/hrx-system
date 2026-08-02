@@ -1609,7 +1609,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, RejectsRel32AddWithoutPcProvenance) {
       "low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx_target) "
       "workgroup_size(64, 1, 1) "
       "@loom_kernel() {\n"
-      "  %zero = low.op<amdgpu.s_mov_b32>() {imm32 = 0} : () -> "
+      "  %zero = low.const<amdgpu.s_mov_b32> {imm32 = 0} : "
       "reg<amdgpu.sgpr>\n"
       "  %address = low.op<amdgpu.s_add_u32.rhs_symbol_rel32_lo>(%zero) "
       "{symbol = @iree_feedback_config, byte_offset = 16} : "

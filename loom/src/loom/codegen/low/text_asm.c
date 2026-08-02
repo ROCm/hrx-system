@@ -202,11 +202,7 @@ static iree_status_t loom_low_descriptor_text_asm_make_packet(
   }
 
   const bool builds_as_const =
-      asm_form->operand_index_count == 0 &&
-      asm_form->result_operand_index_count == 1 &&
-      asm_form->immediate_count > 0 &&
-      !iree_all_bits_set(descriptor->flags,
-                         LOOM_LOW_DESCRIPTOR_FLAG_SIDE_EFFECTING);
+      descriptor->op_kind == LOOM_LOW_DESCRIPTOR_OP_KIND_CONST;
   *out_packet = (loom_text_low_asm_packet_descriptor_t){
       .descriptor_set =
           loom_low_descriptor_text_asm_descriptor_set_handle(descriptor_set),

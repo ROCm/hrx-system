@@ -577,6 +577,41 @@ TEST_F(LowAsmParserTest, AcceptsExplicitAmbiguousResultType) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmParserTest, DistinguishesZeroImmediateConstFromOperandlessOp) {
+  loom_module_t* module = ParseOk(
+      "low.func.def target<test.low.core> @zero_immediate() -> "
+      "(reg<test.i32>, reg<test.i64>) asm {\n"
+      "  %zero = test.const.zero.i32\n"
+      "  %value = test.ambiguous : reg<test.i64>\n"
+      "  return %zero, %value\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_block_t* module_block = loom_module_block(module);
+  ASSERT_EQ(module_block->op_count, 1u);
+  loom_op_t* function_op = loom_block_op(module_block, 0);
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
+  loom_region_t* region = loom_low_func_def_body(function_op);
+  loom_block_t* entry = GetEntryBlock(region);
+  ASSERT_NE(entry, nullptr);
+  ASSERT_EQ(entry->op_count, 3u);
+
+  loom_op_t* zero_op = loom_block_op(entry, 0);
+  ASSERT_TRUE(loom_low_const_isa(zero_op));
+  ExpectDescriptorOrdinal(loom_test_low_core_descriptor_set(),
+                          loom_low_const_descriptor(zero_op),
+                          IREE_SV("test.const.zero.i32"));
+  EXPECT_EQ(loom_low_const_attrs(zero_op).count, 0u);
+
+  loom_op_t* value_op = loom_block_op(entry, 1);
+  ASSERT_TRUE(loom_low_op_isa(value_op));
+  ExpectDescriptorOrdinal(loom_test_low_core_descriptor_set(),
+                          loom_low_op_descriptor(value_op),
+                          IREE_SV("test.ambiguous"));
+
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmParserTest, RejectsInvalidExplicitResultType) {
   const auto& diagnostics = ParseExpectErrors(
       "low.func.def target<test.low.core> @invalid_type() asm {\n"

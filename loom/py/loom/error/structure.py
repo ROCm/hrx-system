@@ -627,6 +627,28 @@ ERR_STRUCTURE_038 = ErrorDef(
     ),
 )
 
+# ERR_STRUCTURE_039: Low packet operation conflicts with descriptor form.
+ERR_STRUCTURE_039 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=39,
+    severity=Severity.ERROR,
+    summary="Low packet operation conflicts with descriptor form.",
+    message=(
+        "low function '{function_name}' packet '{packet_key}' uses "
+        "'{actual_op_name}', but its descriptor requires '{expected_op_name}'"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("packet_key", ParamKind.STRING),
+        ErrorParam("actual_op_name", ParamKind.STRING),
+        ErrorParam("expected_op_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Represent '{packet_key}' with '{expected_op_name}' or select a "
+        "descriptor whose canonical form is '{actual_op_name}'"
+    ),
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -665,4 +687,5 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_035,
     ERR_STRUCTURE_036,
     ERR_STRUCTURE_038,
+    ERR_STRUCTURE_039,
 )

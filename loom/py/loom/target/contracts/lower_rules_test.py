@@ -56,6 +56,7 @@ from loom.target.low_descriptors import EnumDomain, EnumValue, Immediate, Immedi
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_F32_DESCRIPTOR,
     TEST_LOW_ADD_I32_DESCRIPTOR,
+    TEST_LOW_AMBIGUOUS_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_FROM_ELEMENTS_V4I32_DESCRIPTOR,
@@ -873,6 +874,82 @@ def test_compile_lower_rule_set_compiles_const_immediate_emit() -> None:
     assert len(compiled.attr_copies) == 1
     assert compiled.attr_copies[0].kind == LowerAttrCopyKind.I64_LITERAL
     assert compiled.attr_copies[0].literal_i64 == 0
+
+
+def test_compile_lower_rule_set_keeps_operandless_op_emit() -> None:
+    table = ContractFragment(
+        name="test.operandless-op",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=scalar_conversion.scalar_constant,
+                descriptor=TEST_LOW_AMBIGUOUS_DESCRIPTOR,
+                guards=(Guard.value_type("result", Scalar("i32")),),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_AMBIGUOUS_DESCRIPTOR,
+                        results={"dst": ValueRef.result("result")},
+                    ),
+                ),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+    assert len(compiled.emits) == 1
+    assert compiled.emits[0].kind == LowerEmitKind.DESCRIPTOR_OP
+
+
+def test_contract_rejects_op_form_for_const_descriptor() -> None:
+    _expect_value_error(
+        lambda: ContractFragment(
+            name="test.op-form-for-const",
+            descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+            cases=[
+                DescriptorRule(
+                    source_op=scalar_conversion.scalar_constant,
+                    descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                    guards=(Guard.value_type("result", Scalar("i32")),),
+                    emit=(
+                        EmitDescriptorOp(
+                            descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
+                            results={"dst": ValueRef.result("result")},
+                            immediates={"i32_value": 0},
+                            form=DescriptorEmitForm.OP,
+                        ),
+                    ),
+                )
+            ],
+        ),
+        "scalar.constant: descriptor 'test.const.i32' uses low.const but the "
+        "contract requests a low.op emission form",
+    )
+
+
+def test_contract_rejects_const_form_for_op_descriptor() -> None:
+    _expect_value_error(
+        lambda: ContractFragment(
+            name="test.const-form-for-op",
+            descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+            cases=[
+                DescriptorRule(
+                    source_op=scalar_conversion.scalar_constant,
+                    descriptor=TEST_LOW_AMBIGUOUS_DESCRIPTOR,
+                    guards=(Guard.value_type("result", Scalar("i32")),),
+                    emit=(
+                        EmitDescriptorOp(
+                            descriptor=TEST_LOW_AMBIGUOUS_DESCRIPTOR,
+                            results={"dst": ValueRef.result("result")},
+                            form=DescriptorEmitForm.CONST,
+                        ),
+                    ),
+                )
+            ],
+        ),
+        "scalar.constant: descriptor 'test.ambiguous' uses low.op but the "
+        "contract requests low.const",
+    )
 
 
 def test_compile_lower_rule_set_compiles_consecutive_i64_attr_pack() -> None:

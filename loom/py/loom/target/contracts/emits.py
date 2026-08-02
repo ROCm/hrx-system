@@ -39,6 +39,7 @@ from loom.target.contracts.source_memory import (
 )
 from loom.target.low_descriptors import (
     Descriptor,
+    DescriptorOpKind,
     DescriptorSet,
     Operand,
     RegClassAltFlag,
@@ -136,6 +137,29 @@ class EmitDescriptorOp:
         defined_temporaries: set[str],
     ) -> tuple[str, ...]:
         _require_descriptor(descriptor_set, self.descriptor)
+        if (
+            self.form == DescriptorEmitForm.CONST
+            and self.descriptor.op_kind is not DescriptorOpKind.CONST
+        ):
+            raise ValueError(
+                f"{source_op.name}: descriptor '{self.descriptor.key}' uses "
+                "low.op but the contract requests low.const"
+            )
+        if (
+            self.form
+            in (
+                DescriptorEmitForm.OP,
+                DescriptorEmitForm.FIRST_LANE,
+                DescriptorEmitForm.PER_LANE,
+                DescriptorEmitForm.PER_LANE_SEQUENCE,
+                DescriptorEmitForm.ACCUMULATE_LANES,
+            )
+            and self.descriptor.op_kind is not DescriptorOpKind.OP
+        ):
+            raise ValueError(
+                f"{source_op.name}: descriptor '{self.descriptor.key}' uses "
+                "low.const but the contract requests a low.op emission form"
+            )
         operand_bindings = dict(self.operands) if self.operands is not None else {}
         result_bindings = dict(self.results) if self.results is not None else {}
         result_type_bindings = (

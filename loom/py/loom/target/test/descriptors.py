@@ -384,6 +384,18 @@ TEST_LOW_CONST_I32_DESCRIPTOR = Descriptor(
     instruction_classes=(InstructionClass.OTHER,),
 )
 
+TEST_LOW_CONST_ZERO_I32_DESCRIPTOR = Descriptor(
+    key="test.const.zero.i32",
+    mnemonic="test.const.zero.i32",
+    semantic_tag="integer.const.zero.i32",
+    operands=(_i32_result(),),
+    op_kind=DescriptorOpKind.CONST,
+    asm_forms=_asm(results=("dst",)),
+    schedule_class=_SCHEDULE_CONST,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    instruction_classes=(InstructionClass.OTHER,),
+)
+
 TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR = Descriptor(
     key="test.rematerialize.i32",
     mnemonic="test.rematerialize.i32",
@@ -1282,6 +1294,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
     ),
     descriptors=(
         TEST_LOW_CONST_I32_DESCRIPTOR,
+        TEST_LOW_CONST_ZERO_I32_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
         TEST_LOW_ADD_I32_DESCRIPTOR,
         TEST_LOW_CONVERGENT_I32_DESCRIPTOR,

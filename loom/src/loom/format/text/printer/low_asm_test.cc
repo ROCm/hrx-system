@@ -176,6 +176,20 @@ TEST_F(LowAsmPrinterTest, PrintsExplicitAmbiguousResultType) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmPrinterTest, PrintsZeroImmediateConstAndOperandlessOp) {
+  const char* source =
+      "low.func.def target<test.low.core> @zero_immediate() -> "
+      "(reg<test.i32>, reg<test.i64>) asm {\n"
+      "  %zero = test.const.zero.i32\n"
+      "  %value = test.ambiguous : reg<test.i64>\n"
+      "  return %zero, %value\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module), source);
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmPrinterTest, PrintsStructuralIntrinsics) {
   const char* source =
       "low.func.def target<test.low.core> @structural() -> "
