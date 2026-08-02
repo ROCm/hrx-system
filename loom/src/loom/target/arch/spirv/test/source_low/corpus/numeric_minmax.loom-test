@@ -248,7 +248,7 @@ func.def target(@target) @scf_select_vector_extract_i64(%values: vector<2xi64>, 
 
 // ====
 
-// XFAIL: SPIR-V Boolean selection is unsupported
+// XFAIL: SPIR-V ordinary vector value mapping is unsupported
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @scf_select_i1_mask_condition(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
@@ -260,7 +260,7 @@ func.def target(@target) @scf_select_i1_mask_condition(%values: vector<2xi32>, %
 
 // ====
 
-// XFAIL: SPIR-V Boolean selection is unsupported
+// XFAIL: SPIR-V ordinary vector value mapping is unsupported
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @scf_select_i1_false_condition(%values: vector<2xi32>, %limit: i32, %upper: i32, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
@@ -300,7 +300,7 @@ func.def target(@target) @scf_select_i1_true_false_constants(%values: vector<2xi
 
 // ====
 
-// XFAIL: SPIR-V Boolean scalar constants are unsupported
+// XFAIL: SPIR-V ordinary vector value mapping is unsupported
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @scf_select_i1_false_true_constants(%values: vector<2xi32>, %limit: i32, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
@@ -314,7 +314,7 @@ func.def target(@target) @scf_select_i1_false_true_constants(%values: vector<2xi
 
 // ====
 
-// XFAIL: SPIR-V Boolean scalar constants are unsupported
+// XFAIL: SPIR-V ordinary vector value mapping is unsupported
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @scf_select_i1_true_payload(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
@@ -327,7 +327,7 @@ func.def target(@target) @scf_select_i1_true_payload(%values: vector<2xi32>, %li
 
 // ====
 
-// XFAIL: SPIR-V Boolean scalar constants are unsupported
+// XFAIL: SPIR-V ordinary vector value mapping is unsupported
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @scf_select_i1_false_payload(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
@@ -340,7 +340,7 @@ func.def target(@target) @scf_select_i1_false_payload(%values: vector<2xi32>, %l
 
 // ====
 
-// XFAIL: SPIR-V Boolean scalar constants are unsupported
+// XFAIL: SPIR-V ordinary vector value mapping is unsupported
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @scf_select_i1_true_fallback(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
@@ -353,7 +353,7 @@ func.def target(@target) @scf_select_i1_true_fallback(%values: vector<2xi32>, %l
 
 // ====
 
-// XFAIL: SPIR-V Boolean scalar constants are unsupported
+// XFAIL: SPIR-V ordinary vector value mapping is unsupported
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @scf_select_i1_false_fallback(%values: vector<2xi32>, %limit: i32, %fallback_condition: i1, %true_value: f32, %false_value: f32) -> (f32) {
   %lane = vector.extract %values[0] : vector<2xi32> -> i32
@@ -418,7 +418,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
 
 // ====
 
-// XFAIL: SPIR-V index min/max lowering is unsupported
+// XFAIL: SPIR-V ordinary vector construction and memory lowering is unsupported
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 kernel.def target(@target) @index_minmax_vgpr_select() {
   %unit = index.constant 1 : index
@@ -440,7 +440,7 @@ kernel.def target(@target) @index_minmax_vgpr_select() {
 
 // ====
 
-// XFAIL: SPIR-V floating min/max reduction lowering is incomplete
+// XFAIL: SPIR-V f32 constants and vector memory alignment are unsupported
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @f32_reduce_minnum_maxnum(%input: buffer, %output: buffer) {
   %zero = index.constant 0 : offset
