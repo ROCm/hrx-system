@@ -247,11 +247,14 @@ loom_check_test_suite(
         "test/barrier.loom-test",
         "test/emit.loom-test",
         "test/index_conversion.loom-test",
+        "test/index_numeric.loom-test",
         "test/integer_boolean.loom-test",
         "test/source_structured_control.loom-test",
         "test/workgroup_storage.loom-test",
     ],
-    data = _SPIRV_TOOL_DATA,
+    data = _SPIRV_TOOL_DATA + [
+        "//loom/src/loom/test/corpus/source_low:numeric_index.loom-test",
+    ],
     env = _SPIRV_TOOL_ENV,
     test_name_prefix_to_strip = "test/",
 )

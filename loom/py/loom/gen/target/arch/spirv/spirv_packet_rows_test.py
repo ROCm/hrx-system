@@ -460,6 +460,18 @@ def test_generation_emits_integer_compare_and_select_rows() -> None:
     assert "LOOM_SPIRV_PACKET_FORM_SELECT" in tables
 
 
+def test_generation_emits_complete_index_numeric_primitives() -> None:
+    tables = generate_tables()
+
+    offset_multiply = _generated_row(tables, "spirv.op_imul.offset64")
+    assert "LOOM_SPIRV_OP_I_MUL" in offset_multiply
+    assert offset_multiply.count("LOOM_SPIRV_SCALAR_TYPE_U64") == 3
+
+    bit_count = _generated_row(tables, "spirv.op_bit_count.i32")
+    assert "LOOM_SPIRV_OP_BIT_COUNT" in bit_count
+    assert bit_count.count("LOOM_SPIRV_SCALAR_TYPE_S32") == 2
+
+
 def test_generation_emits_scalar_conversion_rows() -> None:
     tables = generate_tables()
 

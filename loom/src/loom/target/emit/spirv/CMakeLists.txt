@@ -285,10 +285,12 @@ loom_check_test_suite(
     "test/barrier.loom-test"
     "test/emit.loom-test"
     "test/index_conversion.loom-test"
+    "test/index_numeric.loom-test"
     "test/integer_boolean.loom-test"
     "test/source_structured_control.loom-test"
     "test/workgroup_storage.loom-test"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_index.loom-test"
     "iree::third_party::spirv_dis"
     "iree::third_party::spirv_val"
   ENV

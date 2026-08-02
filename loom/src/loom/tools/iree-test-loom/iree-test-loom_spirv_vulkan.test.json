@@ -59,6 +59,26 @@
       }
     },
     {
+      "name": "runs spirv vulkan index numeric truth tables",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/spirv_vulkan_integer_hal_actual.loom",
+          "--case=@index_numeric_truth_table_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          {
+            "regex": "\"case\":\"index_numeric_truth_table_case\".*(\"passed\":true|\"code\":\"requirement_not_satisfied\",\"provider_code\":\"feature_disabled\")"
+          }
+        ]
+      }
+    },
+    {
       "name": "runs spirv vulkan i8 truth tables when available",
       "run": {
         "tool": "iree-test-loom",

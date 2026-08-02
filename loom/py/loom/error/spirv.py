@@ -457,6 +457,33 @@ ERR_SPIRV_026 = ErrorDef(
     ),
 )
 
+# ERR_SPIRV_027: SPIR-V index numeric operand range is not proven.
+ERR_SPIRV_027 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=27,
+    severity=Severity.ERROR,
+    summary="SPIR-V index numeric operand range is not proven.",
+    message=(
+        "SPIR-V target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected '{op_name}' field '{field_name}' in "
+        "'@{function_name}': {value_type} value must be proven in "
+        "[{required_range_lo}, {required_range_hi}]; constraint "
+        "'{constraint_key}' is not satisfied"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("field_name", ParamKind.STRING),
+        ErrorParam("value_type", ParamKind.TYPE),
+        ErrorParam("required_range_lo", ParamKind.I64),
+        ErrorParam("required_range_hi", ParamKind.I64),
+        ErrorParam("constraint_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Establish the operand range at its producer or with an assumption "
+        "after the corresponding runtime guard"
+    ),
+)
+
 ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_001,
     ERR_SPIRV_002,
@@ -483,4 +510,5 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_024,
     ERR_SPIRV_025,
     ERR_SPIRV_026,
+    ERR_SPIRV_027,
 )

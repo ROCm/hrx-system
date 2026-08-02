@@ -11,7 +11,6 @@ from __future__ import annotations
 from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.buffer import defs as buffer
 from loom.dialect.index import ALL_INDEX_OPS
-from loom.dialect.index import defs as index
 from loom.dialect.kernel import ALL_KERNEL_OPS
 from loom.dialect.kernel import defs as kernel
 from loom.dialect.scalar import ALL_SCALAR_OPS
@@ -33,7 +32,10 @@ from loom.target.arch.spirv.builtins import (
     BuiltinDimension,
     BuiltinIndexQuery,
 )
-from loom.target.arch.spirv.contracts.index import SPIRV_INDEX_CONVERSION_RULES
+from loom.target.arch.spirv.contracts.index import (
+    SPIRV_INDEX_CONVERSION_RULES,
+    SPIRV_INDEX_NUMERIC_RULES,
+)
 from loom.target.arch.spirv.cooperative_matrix import (
     COOPERATIVE_MATRIX_CASES,
     CooperativeMatrixCase,
@@ -46,8 +48,6 @@ from loom.target.arch.spirv.scalar_alu import (
     FLOAT_SCALAR_ALU_TYPES,
     INTEGER_BITWISE_BINARY_OPERATIONS,
     INTEGER_SCALAR_ALU_TYPE_PAIRS,
-    OFFSET64_ALU_TYPE,
-    OFFSET64_COMPARE_PREDICATES,
     SCALAR_ALU_TYPES,
     SIGNED_INTEGER_BINARY_OPERATIONS,
     SIGNED_INTEGER_COMPARE_PREDICATES,
@@ -100,7 +100,6 @@ from loom.target.low_descriptors import Descriptor
 
 _I1 = Scalar("i1")
 _INDEX = Scalar("index")
-_OFFSET = Scalar("offset")
 
 
 def _descriptor(key: str) -> Descriptor:
@@ -214,33 +213,6 @@ def _binary_rule(
                 operands={
                     "lhs": ValueRef.operand("lhs"),
                     "rhs": ValueRef.operand("rhs"),
-                },
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
-def _ternary_rule(
-    source_op: Op,
-    type_pattern: TypePattern,
-    descriptor_key: str,
-) -> DescriptorRule:
-    descriptor = _descriptor(descriptor_key)
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=descriptor,
-        guards=(
-            *_typed_guards(("a", "b", "c", "result"), type_pattern),
-            *_feature_guards(descriptor),
-        ),
-        emit=(
-            _descriptor_emit(
-                descriptor=descriptor,
-                operands={
-                    "a": ValueRef.operand("a"),
-                    "b": ValueRef.operand("b"),
-                    "c": ValueRef.operand("c"),
                 },
                 results={"dst": ValueRef.result("result")},
             ),
@@ -493,20 +465,16 @@ def _unsigned_compare_rule(
     source_op: Op,
     predicate: IntegerComparePredicate,
     scalar_pair: IntegerAluTypePair,
-    type_pattern: TypePattern | None = None,
 ) -> DescriptorRule:
     descriptor = _descriptor(
         f"spirv.op_{predicate.descriptor_suffix}.{scalar_pair.unsigned.suffix}"
-    )
-    operand_type_pattern = (
-        Scalar(scalar_pair.source_type) if type_pattern is None else type_pattern
     )
     return DescriptorRule(
         source_op=source_op,
         descriptor=descriptor,
         guards=(
             Guard.enum_attr_equals("predicate", predicate.source_predicate),
-            *_typed_guards(("lhs", "rhs"), operand_type_pattern),
+            *_typed_guards(("lhs", "rhs"), Scalar(scalar_pair.source_type)),
             Guard.value_type("result", _I1),
             *_feature_guards(descriptor),
         ),
@@ -1136,33 +1104,6 @@ def _compare_rules() -> tuple[DescriptorRule, ...]:
         for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS
         for predicate in UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES
     )
-    rules.extend(
-        _compare_rule(
-            index.index_cmp,
-            predicate,
-            _INDEX,
-            f"spirv.op_{predicate.descriptor_suffix}.i32",
-        )
-        for predicate in SIGNED_INTEGER_COMPARE_PREDICATES
-    )
-    rules.extend(
-        _unsigned_compare_rule(
-            index.index_cmp,
-            predicate,
-            _INTEGER_ALU_TYPE_PAIR_BY_SOURCE_TYPE["i32"],
-            _INDEX,
-        )
-        for predicate in UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES
-    )
-    rules.extend(
-        _compare_rule(
-            index.index_cmp,
-            predicate,
-            _OFFSET,
-            f"spirv.op_{predicate.descriptor_suffix}.{OFFSET64_ALU_TYPE.suffix}",
-        )
-        for predicate in OFFSET64_COMPARE_PREDICATES
-    )
     return tuple(rules)
 
 
@@ -1172,8 +1113,6 @@ def _select_rules() -> tuple[DescriptorRule, ...]:
         for scalar in SCALAR_ALU_TYPES
     ]
     rules.append(_select_rule(_I1, "spirv.op_select.bool"))
-    rules.append(_select_rule(_INDEX, "spirv.op_select.i32"))
-    rules.append(_select_rule(_OFFSET, f"spirv.op_select.{OFFSET64_ALU_TYPE.suffix}"))
     return tuple(rules)
 
 
@@ -1194,6 +1133,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
     cases=(
         *_scalar_constant_rules(),
         *SPIRV_INDEX_CONVERSION_RULES,
+        *SPIRV_INDEX_NUMERIC_RULES,
         ValueAliasRule(
             source_op=buffer.buffer_assume_alignment,
             source=ValueRef.operand("buffers"),
@@ -1203,13 +1143,6 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *_builtin_index_rules(),
         *_conversion_rules(),
         *_scalar_binary_rules(),
-        _binary_rule(index.index_add, _INDEX, "spirv.op_iadd.i32"),
-        _binary_rule(index.index_sub, _INDEX, "spirv.op_isub.i32"),
-        _binary_rule(index.index_mul, _INDEX, "spirv.op_imul.i32"),
-        _binary_rule(index.index_shli, _INDEX, "spirv.op_shift_left_logical.i32"),
-        _ternary_rule(index.index_madd, _INDEX, "spirv.op_imul_add.i32"),
-        _binary_rule(index.index_add, _OFFSET, "spirv.op_iadd.offset64"),
-        _binary_rule(index.index_sub, _OFFSET, "spirv.op_isub.offset64"),
         *_compare_rules(),
         *_select_rules(),
         *_storage_buffer_rules(),

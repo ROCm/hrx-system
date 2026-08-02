@@ -63,7 +63,6 @@ func.def target(@target) @vector_f32_clampf_ordered(%input: vector<2xf32>, %lowe
 
 // ====
 
-// XFAIL: SPIR-V index min/max lowering is unsupported
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (index) {
   %lhs = index.assume %lhs0 [range(%lhs0, 0, 1024)] : index
@@ -72,6 +71,16 @@ func.def target(@target) @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (inde
   %max = index.max %lhs, %rhs : index
   %sum = index.add %min, %max : index
   func.return %sum : index
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @index_minmax_sgpr(%lhs: reg<spirv.id>, %rhs: reg<spirv.id>) -> (reg<spirv.id>) asm {
+  %11 = OpSLessThan %lhs, %rhs
+  %min = OpSelect %11, %lhs, %rhs
+  %13 = OpSGreaterThan %lhs, %rhs
+  %max = OpSelect %13, %lhs, %rhs
+  %sum = OpIAdd %min, %max
+  return %sum
 }
 
 // ====

@@ -1106,6 +1106,22 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
                 _offset64_operand("rhs"),
             ),
         ),
+        _binary_same_type_descriptor(
+            key="spirv.op_imul.offset64",
+            mnemonic="OpIMul.offset64",
+            semantic_tag="spirv.op_imul.offset64",
+            operands=(
+                _offset64_result(),
+                _offset64_operand("lhs"),
+                _offset64_operand("rhs"),
+            ),
+        ),
+        _unary_typed_descriptor(
+            key="spirv.op_bit_count.i32",
+            mnemonic="OpBitCount",
+            semantic_tag="spirv.op_bit_count.i32",
+            operands=(_id_result(), _id_operand("input")),
+        ),
         *_address_conversion_descriptors(),
         *_builtin_index_descriptors(),
         *_compare_descriptors(),

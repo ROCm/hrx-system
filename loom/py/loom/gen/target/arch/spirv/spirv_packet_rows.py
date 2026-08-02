@@ -576,8 +576,33 @@ def _coordinate_binary_rows() -> list[_PacketRow]:
             operand_types=(offset64_value, offset64_value),
             result_count=1,
         ),
+        _PacketRow(
+            "spirv.op_imul.offset64",
+            opcode="LOOM_SPIRV_OP_I_MUL",
+            form="LOOM_SPIRV_PACKET_FORM_BINARY_SAME_TYPE",
+            result_type=offset64_value,
+            operand_types=(offset64_value, offset64_value),
+            result_count=1,
+        ),
     ]
     return rows
+
+
+def _coordinate_unary_rows() -> list[_PacketRow]:
+    i32_value = _value_type(
+        "LOOM_SPIRV_VALUE_CLASS_SCALAR",
+        "LOOM_SPIRV_SCALAR_TYPE_S32",
+    )
+    return [
+        _PacketRow(
+            "spirv.op_bit_count.i32",
+            opcode="LOOM_SPIRV_OP_BIT_COUNT",
+            form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
+            result_type=i32_value,
+            operand_types=(i32_value,),
+            result_count=1,
+        ),
+    ]
 
 
 def _mul_add_rows() -> list[_PacketRow]:
@@ -708,6 +733,7 @@ def _packet_rows() -> tuple[_PacketRow, ...]:
         *_conversion_rows(),
         *_builtin_index_rows(),
         *_coordinate_binary_rows(),
+        *_coordinate_unary_rows(),
         *_mul_add_rows(),
         *_integer_compare_rows(),
         *_select_rows(),
