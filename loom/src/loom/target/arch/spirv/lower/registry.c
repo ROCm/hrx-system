@@ -369,6 +369,13 @@ static iree_status_t loom_spirv_emit_op(void* user_data,
   return loom_spirv_lower_workgroup_op(context, source_op, plan);
 }
 
+static void loom_spirv_mark_plan_storage_demands(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, loom_low_lower_plan_t plan) {
+  (void)user_data;
+  loom_spirv_mark_workgroup_plan_storage_demands(context, source_op, plan);
+}
+
 static const loom_low_lower_policy_t kSpirvLowLowerPolicy = {
     .name = IREE_SVL("spirv-logical-lower"),
     .error_catalog = &loom_spirv_error_catalog,
@@ -391,6 +398,11 @@ static const loom_low_lower_policy_t kSpirvLowLowerPolicy = {
             .user_data = NULL,
         },
     .preselect_op = {.fn = loom_spirv_preselect_op, .user_data = NULL},
+    .mark_plan_storage_demands =
+        {
+            .fn = loom_spirv_mark_plan_storage_demands,
+            .user_data = NULL,
+        },
     .emit_op = {.fn = loom_spirv_emit_op, .user_data = NULL},
 };
 

@@ -31,6 +31,7 @@ loom_check_test_suite(
     "memory_workgroup_b128.loom-test"
     "memory_workgroup_indexed.loom-test"
     "memory_workgroup_packed16.loom-test"
+    "memory_workgroup_scalar_addressing.loom-test"
     "ml_attention.loom-test"
     "ml_contraction.loom-test"
     "numeric_conversion.loom-test"

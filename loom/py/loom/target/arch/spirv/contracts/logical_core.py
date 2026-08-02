@@ -25,7 +25,7 @@ from loom.dialect.vector import defs as vector
 from loom.dialect.view import ALL_VIEW_OPS
 from loom.dialect.view import defs as view
 from loom.dsl import Op
-from loom.error.spirv import ERR_SPIRV_028
+from loom.error.spirv import ERR_SPIRV_028, ERR_SPIRV_029
 from loom.error.target import ERR_TARGET_050
 from loom.target.arch.spirv.builtins import (
     BUILTIN_DIMENSIONS,
@@ -592,6 +592,20 @@ def _storage_subview_rule(scalar: StorageBufferScalar) -> ValueElideRule:
     )
 
 
+def _workgroup_subview_rule(scalar: StorageBufferScalar) -> ValueAliasRule:
+    view_type = View(scalar.source_type)
+    return ValueAliasRule(
+        source_op=view.view_subview,
+        source=ValueRef.operand("source"),
+        result=ValueRef.result("result"),
+        guards=(
+            Guard.value_type("source", view_type),
+            Guard.value_type("result", view_type),
+            Guard.value_memory_space("result", _WORKGROUP_MEMORY_SPACES),
+        ),
+    )
+
+
 def _storage_buffer_alignment_diagnostic(
     required_alignment: int,
 ) -> GuardDiagnostic:
@@ -685,17 +699,55 @@ def _workgroup_source_memory(
 ) -> SourceMemoryConstraint:
     return SourceMemoryConstraint(
         operation=operation,
-        root_kind=SourceMemoryRootKind.ANY,
+        root_kind=SourceMemoryRootKind.ALLOCA,
         memory_spaces=_WORKGROUP_MEMORY_SPACES,
         element_byte_count=scalar.byte_width,
         vector_lane_count=1,
         vector_lane_byte_stride=scalar.byte_width,
-        static_byte_offset_minimum=-(2**63),
+        static_byte_offset_minimum=0,
         static_byte_offset_maximum=(2**63) - 1,
         minimum_alignment=scalar.byte_width,
         dynamic_term_count=None,
         dynamic_index_source=SourceMemoryDynamicIndexSource.NONE,
         diagnostic=_storage_buffer_alignment_diagnostic(scalar.byte_width),
+    )
+
+
+def _workgroup_address_diagnostic(
+    scalar: StorageBufferScalar,
+) -> GuardDiagnostic:
+    return GuardDiagnostic(
+        ref=target_diagnostic(
+            ERR_SPIRV_029,
+            u32_param("element_byte_count", scalar.byte_width),
+            i64_param("required_range_lo", 0),
+            i64_param("required_range_hi", (2**31) - 1),
+            string_param(
+                "constraint_key",
+                "source_memory.workgroup_element_index_non_negative_s32",
+            ),
+        )
+    )
+
+
+def _workgroup_address_materializer(
+    scalar: StorageBufferScalar,
+) -> SourceMemoryAddressMaterializer:
+    return SourceMemoryAddressMaterializer(
+        const_coordinate=_descriptor("spirv.op_constant.i32"),
+        add_coordinate=_descriptor("spirv.op_iadd.i32"),
+        mul_coordinate=_descriptor("spirv.op_imul.i32"),
+        shl_coordinate=_descriptor("spirv.op_shift_left_logical.i32"),
+        address=_descriptor(
+            f"spirv.op_access_chain.workgroup.{scalar.suffix}.element_index"
+        ),
+        base=SourceMemoryAddressBase.BASE_VIEW,
+        coordinate_type=SourceMemoryAddressCoordinateType.INDEX,
+        coordinate_unit_byte_count=scalar.byte_width,
+        coordinate_minimum=0,
+        coordinate_maximum=(2**31) - 1,
+        const_coordinate_immediate="i32_value",
+        diagnostic=_workgroup_address_diagnostic(scalar),
     )
 
 
@@ -890,14 +942,6 @@ def _cooperative_matrix_rules() -> tuple[DescriptorRule, ...]:
     return tuple(rules)
 
 
-def _base_element_index_guards() -> tuple[Guard, ...]:
-    return (
-        Guard.operand_segment_count("indices", 0),
-        Guard.i64_array_count("static_indices", 1),
-        Guard.i64_array_element_range("static_indices", 0, 0, 0),
-    )
-
-
 def _view_load_rule(scalar: StorageBufferScalar) -> DescriptorRule:
     scalar_type = Scalar(scalar.source_type)
     view_type = View(scalar.source_type)
@@ -962,24 +1006,26 @@ def _view_load_workgroup_rule(scalar: StorageBufferScalar) -> DescriptorRule:
     scalar_type = Scalar(scalar.source_type)
     view_type = View(scalar.source_type)
     descriptor = _descriptor(f"spirv.op_load.workgroup.{scalar.suffix}")
+    address_materializer = _workgroup_address_materializer(scalar)
     return DescriptorRule(
         source_op=view.view_load,
         descriptor=descriptor,
         guards=(
-            *_base_element_index_guards(),
             Guard.value_type("view", view_type),
             Guard.value_type("result", scalar_type),
+            *_source_memory_address_feature_guards(address_materializer),
             *_feature_guards(descriptor),
         ),
         emit=(
             _descriptor_emit(
                 descriptor=descriptor,
-                operands={"ptr": ValueRef.operand("view")},
+                operands={"ptr": ValueRef.source_memory_address()},
                 results={"dst": ValueRef.result("result")},
                 source_memory=_workgroup_source_memory(
                     SourceMemoryOperation.LOAD,
                     scalar,
                 ),
+                source_memory_address_materializer=address_materializer,
             ),
         ),
     )
@@ -989,26 +1035,28 @@ def _view_store_workgroup_rule(scalar: StorageBufferScalar) -> DescriptorRule:
     scalar_type = Scalar(scalar.source_type)
     view_type = View(scalar.source_type)
     descriptor = _descriptor(f"spirv.op_store.workgroup.{scalar.suffix}")
+    address_materializer = _workgroup_address_materializer(scalar)
     return DescriptorRule(
         source_op=view.view_store,
         descriptor=descriptor,
         guards=(
-            *_base_element_index_guards(),
             Guard.value_type("view", view_type),
             Guard.value_type("value", scalar_type),
+            *_source_memory_address_feature_guards(address_materializer),
             *_feature_guards(descriptor),
         ),
         emit=(
             _descriptor_emit(
                 descriptor=descriptor,
                 operands={
-                    "ptr": ValueRef.operand("view"),
+                    "ptr": ValueRef.source_memory_address(),
                     "value": ValueRef.operand("value"),
                 },
                 source_memory=_workgroup_source_memory(
                     SourceMemoryOperation.STORE,
                     scalar,
                 ),
+                source_memory_address_materializer=address_materializer,
             ),
         ),
     )
@@ -1028,6 +1076,7 @@ def _storage_buffer_rules() -> tuple[ContractCase, ...]:
     for scalar in SOURCE_STORAGE_BUFFER_SCALARS:
         rules.append(_buffer_view_rule(scalar))
         rules.append(_storage_subview_rule(scalar))
+        rules.append(_workgroup_subview_rule(scalar))
         rules.append(_view_load_rule(scalar))
         rules.append(_view_store_rule(scalar))
         rules.append(_view_load_workgroup_rule(scalar))

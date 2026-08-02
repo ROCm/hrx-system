@@ -509,6 +509,33 @@ ERR_SPIRV_028 = ErrorDef(
     ),
 )
 
+# ERR_SPIRV_029: SPIR-V Workgroup element address is not proven.
+ERR_SPIRV_029 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=29,
+    severity=Severity.ERROR,
+    summary="SPIR-V Workgroup element address is not proven.",
+    message=(
+        "SPIR-V target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected '{op_name}' in '@{function_name}': the "
+        "complete root-relative byte address must be exactly divisible by "
+        "the {element_byte_count}-byte element size and its element index "
+        "must be proven in [{required_range_lo}, {required_range_hi}]; "
+        "constraint '{constraint_key}' is not satisfied"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("element_byte_count", ParamKind.U32),
+        ErrorParam("required_range_lo", ParamKind.I64),
+        ErrorParam("required_range_hi", ParamKind.I64),
+        ErrorParam("constraint_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Establish aligned, non-negative element addressing at the view or "
+        "index producer and prove the complete address range"
+    ),
+)
+
 ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_001,
     ERR_SPIRV_002,
@@ -537,4 +564,5 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_026,
     ERR_SPIRV_027,
     ERR_SPIRV_028,
+    ERR_SPIRV_029,
 )

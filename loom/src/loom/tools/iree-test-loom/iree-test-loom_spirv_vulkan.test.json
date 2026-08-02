@@ -59,6 +59,25 @@
       }
     },
     {
+      "name": "runs spirv vulkan workgroup addressing matrix",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/spirv_vulkan_hal_actual.loom",
+          "--case=@workgroup_addressing_i32_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"workgroup_addressing_i32_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
       "name": "runs spirv vulkan i32 and Boolean truth tables",
       "run": {
         "tool": "iree-test-loom",

@@ -437,6 +437,7 @@ loom_check_test_suite(
     "test/source_low/baseline.loom-test"
     "test/source_low/corpus/index_addressing.loom-test"
     "test/source_low/corpus/memory_scalar_addressing.loom-test"
+    "test/source_low/corpus/memory_workgroup_scalar_addressing.loom-test"
     "test/source_low/corpus/numeric_conversion.loom-test"
     "test/source_low/corpus/numeric_index.loom-test"
     "test/source_low/corpus/numeric_index_conversion.loom-test"
@@ -453,6 +454,7 @@ loom_check_test_suite(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/index_addressing.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_scalar_addressing.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/memory_workgroup_scalar_addressing.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_conversion.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_index.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_index_conversion.loom-test"
