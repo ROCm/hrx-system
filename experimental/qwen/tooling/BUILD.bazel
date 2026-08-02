@@ -32,6 +32,28 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "route_trace_file",
+    srcs = ["route_trace_file.c"],
+    hdrs = ["route_trace_file.h"],
+    deps = [
+        "//experimental/qwen/runtime:model_shape",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/io:parameter_index",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "route_trace_file_test",
+    srcs = ["route_trace_file_test.cc"],
+    deps = [
+        ":route_trace_file",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "layer_data",
     srcs = ["layer_data.c"],
     hdrs = ["layer_data.h"],
