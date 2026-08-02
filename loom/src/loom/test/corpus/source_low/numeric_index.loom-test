@@ -1,0 +1,75 @@
+// RUN: roundtrip
+
+func.def @index_arithmetic(%lhs0: index, %rhs0: index, %stride: offset) -> (index, index, index, index, index, index, index, index, offset) {
+  %lhs, %rhs = index.assume %lhs0, %rhs0 [range(%lhs0, 0, 2147483647), range(%rhs0, 1, 1024)] : index, index
+  %add = index.add %lhs, %rhs : index
+  %sub = index.sub %lhs, %rhs : index
+  %mul = index.mul %lhs, %rhs : index
+  %div = index.div %lhs, %rhs : index
+  %rem = index.rem %lhs, %rhs : index
+  %min = index.min %lhs, %rhs : index
+  %max = index.max %lhs, %rhs : index
+  %madd = index.madd %lhs, %rhs, %sub : index
+  %scaled = index.scale %lhs, %stride : index, offset -> offset
+  func.return %add, %sub, %mul, %div, %rem, %min, %max, %madd, %scaled : index, index, index, index, index, index, index, index, offset
+}
+
+// ====
+
+func.def @offset_arithmetic(%lhs: offset, %rhs: offset) -> (offset, offset) {
+  %add = index.add %lhs, %rhs : offset
+  %sub = index.sub %lhs, %rhs : offset
+  func.return %add, %sub : offset, offset
+}
+
+// ====
+
+func.def @index_bitwise(%input: index, %other: index, %amount0: index) -> (index, index, index, index, index, index, index, index, index, index, index) {
+  %amount = index.assume %amount0 [range(%amount0, 1, 31)] : index
+  %and = index.andi %input, %other : index
+  %or = index.ori %input, %other : index
+  %xor = index.xori %input, %other : index
+  %shl = index.shli %input, %amount : index
+  %shrs = index.shrsi %input, %amount : index
+  %shru = index.shrui %input, %amount : index
+  %rotl = index.rotli %input, %amount : index
+  %rotr = index.rotri %input, %amount : index
+  %clz = index.ctlzi %input : index
+  %ctz = index.cttzi %input : index
+  %pop = index.ctpopi %input : index
+  func.return %and, %or, %xor, %shl, %shrs, %shru, %rotl, %rotr, %clz, %ctz, %pop : index, index, index, index, index, index, index, index, index, index, index
+}
+
+// ====
+
+func.def @index_compare_select(%lhs: index, %rhs: index) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, index) {
+  %eq = index.cmp eq, %lhs, %rhs : index
+  %ne = index.cmp ne, %lhs, %rhs : index
+  %slt = index.cmp slt, %lhs, %rhs : index
+  %sle = index.cmp sle, %lhs, %rhs : index
+  %sgt = index.cmp sgt, %lhs, %rhs : index
+  %sge = index.cmp sge, %lhs, %rhs : index
+  %ult = index.cmp ult, %lhs, %rhs : index
+  %ule = index.cmp ule, %lhs, %rhs : index
+  %ugt = index.cmp ugt, %lhs, %rhs : index
+  %uge = index.cmp uge, %lhs, %rhs : index
+  %selected = scf.select %ult, %lhs, %rhs : index
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, index
+}
+
+// ====
+
+func.def @offset_compare_select(%lhs: offset, %rhs: offset) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, offset) {
+  %eq = index.cmp eq, %lhs, %rhs : offset
+  %ne = index.cmp ne, %lhs, %rhs : offset
+  %slt = index.cmp slt, %lhs, %rhs : offset
+  %sle = index.cmp sle, %lhs, %rhs : offset
+  %sgt = index.cmp sgt, %lhs, %rhs : offset
+  %sge = index.cmp sge, %lhs, %rhs : offset
+  %ult = index.cmp ult, %lhs, %rhs : offset
+  %ule = index.cmp ule, %lhs, %rhs : offset
+  %ugt = index.cmp ugt, %lhs, %rhs : offset
+  %uge = index.cmp uge, %lhs, %rhs : offset
+  %selected = scf.select %ult, %lhs, %rhs : offset
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, offset
+}

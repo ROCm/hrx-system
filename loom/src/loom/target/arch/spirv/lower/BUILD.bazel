@@ -46,6 +46,7 @@ loom_cc_library(
         "//loom/src/loom/target:registers",
         "//loom/src/loom/target/arch/spirv:abi",
         "//loom/src/loom/target/arch/spirv:cooperative_properties",
+        "//loom/src/loom/target/arch/spirv:error_defs",
         "//loom/src/loom/target/arch/spirv:facts",
         "//loom/src/loom/target/arch/spirv:registers",
         "//loom/src/loom/target/arch/spirv:scalar_types",

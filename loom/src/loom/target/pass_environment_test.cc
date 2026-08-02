@@ -6,6 +6,8 @@
 
 #include "loom/target/pass_environment.h"
 
+#include <cstring>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -124,6 +126,7 @@ TEST_F(TargetPassFactsTest, RefinedVersionSuppliesEffectiveFactsDirectly) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
   loom_pass_t pass = {};
+  pass.instance_arena = &arena;
   pass.arena = &arena;
   pass.function_version = &function_version.base;
   bool resolved = false;
@@ -140,10 +143,13 @@ TEST_F(TargetPassFactsTest, UnrefinedFunctionProjectsAuthoredFacts) {
   ModulePtr module = ParseModule();
   const loom_func_like_t function =
       FindFunction(module.get(), IREE_SV("authored"));
-  iree_arena_allocator_t arena;
-  iree_arena_initialize(&block_pool_, &arena);
+  iree_arena_allocator_t instance_arena;
+  iree_arena_initialize(&block_pool_, &instance_arena);
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&block_pool_, &scratch_arena);
   loom_pass_t pass = {};
-  pass.arena = &arena;
+  pass.instance_arena = &instance_arena;
+  pass.arena = &scratch_arena;
   bool resolved = false;
   const loom_target_facts_t* resolved_facts = nullptr;
   IREE_ASSERT_OK(loom_target_pass_resolve_function_facts(
@@ -155,17 +161,54 @@ TEST_F(TargetPassFactsTest, UnrefinedFunctionProjectsAuthoredFacts) {
   const loom_target_bundle_t* bundle = loom_target_facts_bundle(resolved_facts);
   ASSERT_NE(bundle, nullptr);
   EXPECT_EQ(bundle->snapshot->index_bitwidth, 64u);
-  iree_arena_deinitialize(&arena);
+  iree_arena_deinitialize(&scratch_arena);
+  iree_arena_deinitialize(&instance_arena);
+}
+
+TEST_F(TargetPassFactsTest, ProjectedFactsSurviveScratchArenaReset) {
+  ModulePtr module = ParseModule();
+  const loom_func_like_t function =
+      FindFunction(module.get(), IREE_SV("authored"));
+  iree_arena_allocator_t instance_arena;
+  iree_arena_initialize(&block_pool_, &instance_arena);
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&block_pool_, &scratch_arena);
+  loom_pass_t pass = {};
+  pass.instance_arena = &instance_arena;
+  pass.arena = &scratch_arena;
+
+  bool resolved = false;
+  const loom_target_facts_t* resolved_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_pass_resolve_function_facts(
+      &pass, module.get(), function, &resolved, &resolved_facts));
+  ASSERT_TRUE(resolved);
+  ASSERT_NE(resolved_facts, nullptr);
+
+  iree_arena_reset(&scratch_arena);
+  void* worklist_storage = nullptr;
+  IREE_ASSERT_OK(iree_arena_allocate_array(&scratch_arena, 128, sizeof(void*),
+                                           &worklist_storage));
+  std::memset(worklist_storage, 0, 128 * sizeof(void*));
+
+  const loom_target_bundle_t* bundle = loom_target_facts_bundle(resolved_facts);
+  ASSERT_NE(bundle, nullptr);
+  ASSERT_NE(bundle->snapshot, nullptr);
+  EXPECT_EQ(bundle->snapshot->index_bitwidth, 64u);
+  iree_arena_deinitialize(&scratch_arena);
+  iree_arena_deinitialize(&instance_arena);
 }
 
 TEST_F(TargetPassFactsTest, TargetlessFunctionHasNoEffectiveFacts) {
   ModulePtr module = ParseModule();
   const loom_func_like_t function =
       FindFunction(module.get(), IREE_SV("targetless"));
-  iree_arena_allocator_t arena;
-  iree_arena_initialize(&block_pool_, &arena);
+  iree_arena_allocator_t instance_arena;
+  iree_arena_initialize(&block_pool_, &instance_arena);
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&block_pool_, &scratch_arena);
   loom_pass_t pass = {};
-  pass.arena = &arena;
+  pass.instance_arena = &instance_arena;
+  pass.arena = &scratch_arena;
   bool resolved = false;
   const loom_target_facts_t* resolved_facts = nullptr;
   IREE_ASSERT_OK(loom_target_pass_resolve_function_facts(
@@ -173,7 +216,8 @@ TEST_F(TargetPassFactsTest, TargetlessFunctionHasNoEffectiveFacts) {
 
   EXPECT_FALSE(resolved);
   EXPECT_EQ(resolved_facts, nullptr);
-  iree_arena_deinitialize(&arena);
+  iree_arena_deinitialize(&scratch_arena);
+  iree_arena_deinitialize(&instance_arena);
 }
 
 }  // namespace

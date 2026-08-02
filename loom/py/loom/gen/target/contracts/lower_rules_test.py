@@ -15,6 +15,7 @@ from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.gen.target.contracts.lower_rule_rows import (
     attr_copy_row,
+    descriptor_ref_keys,
     diagnostic_param_row,
     guard_row,
     source_memory_row,
@@ -47,21 +48,29 @@ from loom.target.contracts import (
     LowerValueRef,
     RecipeRule,
     Scalar,
+    SourceMemoryAddressBase,
+    SourceMemoryAddressCoordinateType,
+    SourceMemoryAddressLayout,
+    SourceMemoryAddressMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
+    SourceMemoryRootKind,
     SourceOpProject,
     SourceValueKind,
     ValueProject,
     ValueRef,
     Vector,
+    View,
 )
 from loom.target.contracts.diagnostics import DiagnosticParamKind
 from loom.target.low_descriptors import Immediate, ImmediateKind
 from loom.target.test.descriptors import (
     TEST_LOW_ADD_F32_DESCRIPTOR,
+    TEST_LOW_ADD_I32_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
+    TEST_LOW_MUL_I32_DESCRIPTOR,
 )
 
 _TEST_PUBLIC_HEADER = "loom/target/test/contracts/generated.h"
@@ -170,6 +179,17 @@ def test_validate_c_table_shape_rejects_oversized_type_payload() -> None:
     _expect_value_error(
         lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
         "lower-rule set 'test.low.generated_c_shape' type-pattern 0 static lanes exceeds int64_t",
+    )
+
+
+def test_validate_c_table_shape_rejects_oversized_view_dimension() -> None:
+    table = _compiled_lower_rule_set(
+        type_patterns=(LowerTypePattern(View("i32", dims=(2**63, 4))),),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "lower-rule set 'test.low.generated_c_shape' type-pattern 0 static dim 0 exceeds int64_t",
     )
 
 
@@ -531,6 +551,19 @@ def test_guard_row_emits_portable_signed_i64_bounds() -> None:
     assert ".maximum_i64 = INT64_C(2147483647)" in fields
 
 
+def test_guard_row_emits_value_memory_space_mask() -> None:
+    fields = guard_row(
+        {},
+        LowerGuard(
+            kind=GuardKind.VALUE_MEMORY_SPACE,
+            memory_spaces=("unknown", "global", "descriptor"),
+        ),
+    )
+
+    assert ".value_ref_index = 0" in fields
+    assert (".u64 = LOOM_LOW_LOWER_MEMORY_SPACE_UNKNOWN | LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL | LOOM_LOW_LOWER_MEMORY_SPACE_DESCRIPTOR") in fields
+
+
 def test_attr_copy_row_emits_portable_signed_i64_literal() -> None:
     fields = attr_copy_row(
         LowerAttrCopy(
@@ -593,6 +626,30 @@ def test_generate_lower_rule_set_emits_static_element_count_type_pattern() -> No
     assert ".value_ref_index = 0," in guard_text
     assert ".other_value_ref_index = 1," in guard_text
     assert ".attr_index = 0," in guard_text
+
+
+def test_generate_lower_rule_set_emits_exact_view_shape_type_pattern() -> None:
+    table = ContractFragment(
+        name="test.low.view_shape",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        public_header=_TEST_PUBLIC_HEADER,
+        cases=[
+            RecipeRule(
+                source_op=vector.vector_load,
+                guards=(Guard.value_type("view", View("i32", dims=(4, 8))),),
+            )
+        ],
+    )
+
+    generated = generate_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    type_pattern_start = generated.source.index("LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM1")
+    type_pattern_end = generated.source.index("},", type_pattern_start)
+    type_pattern_text = generated.source[type_pattern_start:type_pattern_end]
+    assert ".type_kind = LOOM_TYPE_VIEW," in type_pattern_text
+    assert ".rank = 2," in type_pattern_text
+    assert ".static_dim0 = 4," in type_pattern_text
+    assert ".static_dim1 = 8," in type_pattern_text
 
 
 def test_generate_lower_rule_set_emits_source_instance_flags_projection() -> None:
@@ -781,6 +838,28 @@ def test_source_memory_row_emits_dynamic_byte_stride_any_flag() -> None:
     assert ".dynamic_byte_stride = " not in "\n".join(fields)
 
 
+def test_source_memory_row_emits_compact_address_layout() -> None:
+    row = LowerSourceMemory(
+        constraint=SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            address_layout=SourceMemoryAddressLayout.COMPACT_ROW_MAJOR,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+        ),
+        diagnostic_index=3,
+        dynamic_offset_diagnostic_index=4,
+        address_layout_diagnostic_index=5,
+    )
+
+    fields = source_memory_row({}, row)
+
+    assert (".address_layout = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR") in fields
+    assert ".address_layout_diagnostic_index = 5" in fields
+
+
 def test_source_memory_row_emits_preserve_source_index_flag() -> None:
     row = LowerSourceMemory(
         constraint=SourceMemoryConstraint(
@@ -877,3 +956,62 @@ def test_source_memory_row_emits_dynamic_stride_values_flag() -> None:
     fields = source_memory_row({}, row)
 
     assert (".flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_BYTE_STRIDE_ANY | LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_DYNAMIC_STRIDE_VALUES") in fields
+
+
+def test_source_memory_row_emits_complete_address_materializer() -> None:
+    materializer = SourceMemoryAddressMaterializer(
+        const_coordinate=TEST_LOW_CONST_I32_DESCRIPTOR,
+        add_coordinate=TEST_LOW_ADD_I32_DESCRIPTOR,
+        mul_coordinate=TEST_LOW_MUL_I32_DESCRIPTOR,
+        shl_coordinate=None,
+        address=TEST_LOW_ADD_I32_DESCRIPTOR,
+        base=SourceMemoryAddressBase.BASE_VIEW,
+        coordinate_type=SourceMemoryAddressCoordinateType.INDEX,
+        coordinate_unit_byte_count=4,
+        coordinate_minimum=0,
+        coordinate_maximum=(2**31) - 1,
+        const_coordinate_immediate="i32_value",
+    )
+    row = LowerSourceMemory(
+        constraint=SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            root_kind=SourceMemoryRootKind.ALLOCA,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset_minimum=0,
+            static_byte_offset_maximum=(2**31) - 1,
+            dynamic_term_count=None,
+        ),
+        diagnostic_index=3,
+        dynamic_offset_diagnostic_index=4,
+        address_diagnostic_index=5,
+        address_materializer=materializer,
+    )
+    descriptor_refs = {
+        TEST_LOW_CONST_I32_DESCRIPTOR.key: 0,
+        TEST_LOW_ADD_I32_DESCRIPTOR.key: 1,
+        TEST_LOW_MUL_I32_DESCRIPTOR.key: 2,
+    }
+
+    fields = source_memory_row(descriptor_refs, row)
+
+    assert ".address_diagnostic_index = 5" in fields
+    assert ".root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ALLOCA" in fields
+    assert (".address_base_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW") in fields
+    assert (".address_coordinate_type = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_INDEX") in fields
+    assert ".address_coordinate_unit_byte_count = 4" in fields
+    assert ".address_coordinate_minimum = INT64_C(0)" in fields
+    assert ".address_coordinate_maximum = INT64_C(2147483647)" in fields
+    assert ".address_const_coordinate_descriptor_ref = 0" in fields
+    assert '.address_const_coordinate_immediate = IREE_SVL("i32_value")' in fields
+    assert ".address_add_coordinate_descriptor_ref = 1" in fields
+    assert ".address_shl_coordinate_descriptor_ref = 65535" in fields
+    assert ".address_index_to_coordinate_input_descriptor_ref = 65535" in fields
+    assert ".address_index_to_coordinate_descriptor_ref = 65535" in fields
+    assert ".address_descriptor_ref = 1" in fields
+
+    table = _compiled_lower_rule_set(source_memories=(row,))
+    keys = descriptor_ref_keys(table, _c_shape_contract())
+    assert set(keys) == set(descriptor_refs)

@@ -109,7 +109,22 @@ index_cast = cast_op(
     phase=OpPhase.EXECUTABLE,
     from_constraint=SCALAR,
     to_constraint=SCALAR,
-    doc=("Explicit conversion at an address boundary. At least one side must be index or offset; pure integer width changes use scalar.extsi, scalar.extui, or scalar.trunci."),
+    doc=(
+        "Explicit integer conversion at an address boundary. Index uses a "
+        "signed target-selected carrier and offset uses an independently "
+        "selected unsigned carrier. Entering either address domain maps i1 "
+        "false and true to 0 and 1. Entering index interprets other "
+        "fixed-width payloads as signed. Entering offset zero-extends the raw "
+        "bits of narrower fixed-width payloads; an i64 payload must already "
+        "be nonnegative because offset's source fact domain is [0, INT64_MAX]. A "
+        "target requiring a narrower address carrier accepts only values proven "
+        "representable in that carrier. Leaving an address domain follows its "
+        "signedness and preserves the low destination-width bits when "
+        "narrowing, including casts to i1. Conversion between index and offset "
+        "requires the numeric value to be representable in the destination "
+        "domain. Pure fixed-width integer changes use scalar.extsi, "
+        "scalar.extui, or scalar.trunci."
+    ),
     canonicalize="loom_index_cast_canonicalize",
     facts="loom_index_cast_facts",
     traits=[DISTRIBUTION_TRANSFER],

@@ -480,13 +480,14 @@ TEST_F(LowContractQuerySourceMemoryTest,
       /*.flags=*/0,
       /*.operation_kind=*/LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
       /*.root_kind=*/LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_BLOCK_ARGUMENT,
-      /*.memory_space_mask=*/LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_UNKNOWN |
-          LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_GENERIC |
-          LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_GLOBAL |
-          LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_WORKGROUP |
-          LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_PRIVATE |
-          LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_CONSTANT |
-          LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_DESCRIPTOR,
+      /*.address_layout=*/LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY,
+      /*.memory_space_mask=*/LOOM_LOW_LOWER_MEMORY_SPACE_UNKNOWN |
+          LOOM_LOW_LOWER_MEMORY_SPACE_GENERIC |
+          LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL |
+          LOOM_LOW_LOWER_MEMORY_SPACE_WORKGROUP |
+          LOOM_LOW_LOWER_MEMORY_SPACE_PRIVATE |
+          LOOM_LOW_LOWER_MEMORY_SPACE_CONSTANT |
+          LOOM_LOW_LOWER_MEMORY_SPACE_DESCRIPTOR,
       /*.element_byte_count=*/4,
       /*.vector_lane_count=*/1,
       /*.vector_lane_byte_stride=*/4,
@@ -501,6 +502,7 @@ TEST_F(LowContractQuerySourceMemoryTest,
       /*.dynamic_byte_stride=*/4,
       /*.dynamic_offset_unsigned_bit_count=*/0,
       /*.dynamic_offset_diagnostic_index=*/0,
+      /*.address_layout_diagnostic_index=*/0,
       /*.cache_policy_build_flags=*/0,
       /*.diagnostic_index=*/0,
   };

@@ -29,12 +29,17 @@ from loom.target.contracts import (
     DirectDescriptorCase,
     EmitDescriptorOp,
     Guard,
+    GuardDiagnostic,
     GuardKind,
     LowerAttrCopyKind,
     LowerEmitKind,
     OrdinalValueAliasRule,
     RecipeRule,
     Scalar,
+    SourceMemoryAddressBase,
+    SourceMemoryAddressCoordinateType,
+    SourceMemoryAddressLayout,
+    SourceMemoryAddressMaterializer,
     SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
@@ -61,7 +66,9 @@ from loom.target.test.descriptors import (
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_FROM_ELEMENTS_V4I32_DESCRIPTOR,
     TEST_LOW_LOAD_INDEX_V4I32_DESCRIPTOR,
+    TEST_LOW_LOAD_V4I32_DESCRIPTOR,
     TEST_LOW_MUL_I32_DESCRIPTOR,
+    TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
 )
 
 
@@ -156,6 +163,54 @@ def _source_index_rule(
                 emit=tuple(emits),
             )
         ],
+    )
+
+
+def _source_memory_address_rule(
+    *,
+    materializer: SourceMemoryAddressMaterializer | None,
+) -> ContractFragment:
+    return ContractFragment(
+        name="test.source-memory-address",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            DescriptorRule(
+                source_op=vector.vector_load,
+                descriptor=TEST_LOW_LOAD_V4I32_DESCRIPTOR,
+                guards=(Guard.value_type("result", Vector("i32", lanes=4)),),
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=TEST_LOW_LOAD_V4I32_DESCRIPTOR,
+                        operands={"address": ValueRef.source_memory_address()},
+                        results={"dst": ValueRef.result("result")},
+                        source_memory=SourceMemoryConstraint(
+                            operation=SourceMemoryOperation.LOAD,
+                            memory_spaces=("global",),
+                            element_byte_count=4,
+                            vector_lane_count=4,
+                            vector_lane_byte_stride=4,
+                            static_byte_offset_minimum=0,
+                            static_byte_offset_maximum=(2**31) - 1,
+                            dynamic_term_count=None,
+                            dynamic_term_count_minimum=0,
+                        ),
+                        source_memory_address_materializer=materializer,
+                    ),
+                ),
+            )
+        ],
+    )
+
+
+def _i32_source_memory_address_materializer() -> SourceMemoryAddressMaterializer:
+    return SourceMemoryAddressMaterializer(
+        const_coordinate=TEST_LOW_CONST_I32_DESCRIPTOR,
+        add_coordinate=TEST_LOW_ADD_I32_DESCRIPTOR,
+        mul_coordinate=TEST_LOW_MUL_I32_DESCRIPTOR,
+        index_to_coordinate_input=TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
+        index_to_coordinate=TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
+        address=TEST_LOW_ADD_I32_DESCRIPTOR,
+        const_coordinate_immediate="i32_value",
     )
 
 
@@ -695,6 +750,188 @@ def test_source_memory_constraint_rejects_dynamic_view_base_preservation() -> No
             preserve_source_index=True,
         ),
         "source-index preservation requires zero dynamic view-base terms",
+    )
+
+
+def test_source_memory_constraint_rejects_unknown_address_layout() -> None:
+    _expect_value_error(
+        lambda: SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            address_layout="compact",
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+        ),
+        "source memory address layout must be a SourceMemoryAddressLayout",
+    )
+
+
+def test_source_memory_constraint_rejects_unused_address_layout_diagnostic() -> None:
+    diagnostic = GuardDiagnostic(
+        subject_role="value",
+        subject_name="view",
+        constraint_key="layout.compact_row_major",
+    )
+    _expect_value_error(
+        lambda: SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            address_layout=SourceMemoryAddressLayout.ANY,
+            address_layout_diagnostic=diagnostic,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+        ),
+        "unconstrained source memory cannot have an address-layout diagnostic",
+    )
+
+
+def test_compile_lower_rule_set_compiles_complete_source_memory_address() -> None:
+    materializer = _i32_source_memory_address_materializer()
+
+    compiled = compile_lower_rule_set(
+        _source_memory_address_rule(materializer=materializer),
+        dialect_ops={"vector": ALL_VECTOR_OPS},
+    )
+
+    emit = compiled.emits[0]
+    value_refs = compiled.value_refs[
+        emit.operand_ref_start : emit.operand_ref_start + emit.operand_ref_count
+    ]
+    assert tuple(value_ref.kind for value_ref in value_refs) == (
+        SourceValueKind.SOURCE_MEMORY_ADDRESS,
+    )
+    source_memory = compiled.source_memories[emit.source_memory_ordinal - 1]
+    assert source_memory.address_materializer is materializer
+
+
+def test_complete_address_compiles_element_coordinate_policy() -> None:
+    materializer = replace(
+        _i32_source_memory_address_materializer(),
+        base=SourceMemoryAddressBase.BASE_VIEW,
+        coordinate_type=SourceMemoryAddressCoordinateType.INDEX,
+        coordinate_unit_byte_count=4,
+        coordinate_minimum=0,
+        coordinate_maximum=(2**31) - 1,
+        index_to_coordinate_input=None,
+        index_to_coordinate=None,
+    )
+
+    compiled = compile_lower_rule_set(
+        _source_memory_address_rule(materializer=materializer),
+        dialect_ops={"vector": ALL_VECTOR_OPS},
+    )
+
+    source_memory = compiled.source_memories[0]
+    assert source_memory.address_materializer is materializer
+    assert materializer.base == SourceMemoryAddressBase.BASE_VIEW
+    assert materializer.coordinate_type == SourceMemoryAddressCoordinateType.INDEX
+    assert materializer.coordinate_unit_byte_count == 4
+    assert materializer.coordinate_minimum == 0
+    assert materializer.coordinate_maximum == (2**31) - 1
+
+
+def test_complete_address_rejects_invalid_coordinate_policy() -> None:
+    materializer = _i32_source_memory_address_materializer()
+
+    _expect_value_error(
+        lambda: replace(materializer, coordinate_unit_byte_count=0),
+        "coordinate unit byte count must fit in a positive u32",
+    )
+    _expect_value_error(
+        lambda: replace(
+            materializer,
+            coordinate_minimum=1,
+            coordinate_maximum=0,
+        ),
+        "coordinate range is empty",
+    )
+    _expect_value_error(
+        lambda: replace(materializer, coordinate_unit_byte_count=4),
+        "offset-coordinate source-memory addresses use byte units",
+    )
+    _expect_value_error(
+        lambda: replace(
+            materializer,
+            coordinate_type=SourceMemoryAddressCoordinateType.INDEX,
+            index_to_coordinate=None,
+        ),
+        "index-coordinate source-memory addresses use the mapped index carrier",
+    )
+    _expect_value_error(
+        lambda: replace(
+            materializer,
+            index_to_coordinate_input=None,
+            index_to_coordinate=None,
+        ),
+        "offset-coordinate source-memory addresses need an index conversion",
+    )
+
+
+def test_compile_lower_rule_set_requires_complete_address_materializer() -> None:
+    _expect_value_error(
+        lambda: compile_lower_rule_set(
+            _source_memory_address_rule(materializer=None),
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        ),
+        "operand 'address' needs a source-memory address materializer",
+    )
+
+
+def test_complete_address_rejects_non_unary_index_conversion() -> None:
+    materializer = replace(
+        _i32_source_memory_address_materializer(),
+        index_to_coordinate=TEST_LOW_ADD_I32_DESCRIPTOR,
+    )
+
+    _expect_value_error(
+        lambda: compile_lower_rule_set(
+            _source_memory_address_rule(materializer=materializer),
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        ),
+        "source-memory address-coordinate index conversion descriptor "
+        "'test.add.i32' "
+        "must declare exactly 1 packet inputs",
+    )
+
+
+def test_complete_address_rejects_mixed_arithmetic_carriers() -> None:
+    materializer = replace(
+        _i32_source_memory_address_materializer(),
+        add_coordinate=TEST_LOW_ADD_F32_DESCRIPTOR,
+    )
+
+    _expect_value_error(
+        lambda: compile_lower_rule_set(
+            _source_memory_address_rule(materializer=materializer),
+            dialect_ops={"vector": ALL_VECTOR_OPS},
+        ),
+        "source-memory address-coordinate add descriptor 'test.add.f32' "
+        "result does not use the materializer carrier",
+    )
+
+
+def test_source_memory_address_value_rejects_source_field() -> None:
+    _expect_value_error(
+        lambda: ValueRef(
+            kind=SourceValueKind.SOURCE_MEMORY_ADDRESS,
+            field="view",
+        ).validate(vector.vector_load, "test value"),
+        "source-memory address must not name a source field",
+    )
+
+
+def test_source_memory_address_value_rejects_element() -> None:
+    _expect_value_error(
+        lambda: ValueRef(
+            kind=SourceValueKind.SOURCE_MEMORY_ADDRESS,
+            field="",
+            element=1,
+        ).validate(vector.vector_load, "test value"),
+        "source-memory address must not select an element",
     )
 
 
@@ -1328,6 +1565,35 @@ def test_compile_lower_rule_set_compiles_storage_element_format_guard() -> None:
     assert compiled.guards[0].kind == GuardKind.VALUE_STORAGE_ELEMENT_FORMAT
     assert compiled.guards[0].value_ref_index == 0
     assert compiled.guards[0].u64_c_expression == "LOOM_VALUE_FACT_NUMERIC_FORMAT_U8"
+
+
+def test_compile_lower_rule_set_compiles_value_memory_space_guard() -> None:
+    table = ContractFragment(
+        name="test.value-memory-space",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            RecipeRule(
+                source_op=vector.vector_fragment_load,
+                guards=(
+                    Guard.value_memory_space(
+                        "view",
+                        ("unknown", "generic", "global", "descriptor"),
+                    ),
+                ),
+            )
+        ],
+    )
+
+    compiled = compile_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    assert compiled.guards[0].kind == GuardKind.VALUE_MEMORY_SPACE
+    assert compiled.guards[0].value_ref_index == 0
+    assert compiled.guards[0].memory_spaces == (
+        "unknown",
+        "generic",
+        "global",
+        "descriptor",
+    )
 
 
 def test_compile_lower_rule_set_compiles_packed_integer_storage_guards() -> None:

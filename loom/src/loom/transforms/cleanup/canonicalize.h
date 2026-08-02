@@ -28,9 +28,13 @@ typedef struct loom_canonicalizer_options_t {
   // Maximum number of fixed-point iterations. Zero selects the default.
   uint32_t max_iterations;
 
+  // Optional immutable target facts used by target-sensitive fact inference.
+  const loom_target_facts_t* target_facts;
+
   // Optional seed facts cloned into the driver-owned fact table before the
   // initial function analysis. Extension payloads are re-interned, so the seed
-  // table may come from a different fact context.
+  // table may come from a different fact context. The target scope is supplied
+  // independently by target_facts.
   const loom_value_fact_table_t* seed_facts;
 } loom_canonicalizer_options_t;
 

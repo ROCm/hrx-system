@@ -64,6 +64,8 @@ from loom.target.contracts.rules import (
 )
 from loom.target.contracts.source import ValueRef
 from loom.target.contracts.source_memory import (
+    SourceMemoryAddressLayout,
+    SourceMemoryAddressMaterializer,
     SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
 )
@@ -190,7 +192,10 @@ class LowerSourceMemory:
     constraint: SourceMemoryConstraint
     diagnostic_index: int
     dynamic_offset_diagnostic_index: int
+    address_layout_diagnostic_index: int = 0xFFFF
+    address_diagnostic_index: int = 0xFFFF
     byte_offset_materializer: SourceMemoryByteOffsetMaterializer | None = None
+    address_materializer: SourceMemoryAddressMaterializer | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +211,7 @@ class LowerGuard:
     attr_kind: str | None = None
     u64: int = 0
     u64_c_expression: str | None = None
+    memory_spaces: tuple[str, ...] = ()
     descriptor: Descriptor | None = None
     register_class_id: int = 0
     minimum_i64: int = 0
@@ -771,6 +777,7 @@ class _LowerRuleSetCompiler:
             GuardKind.VALUE_I64_RANGE_GE,
             GuardKind.VALUE_FLOAT_EQUALS,
             GuardKind.VALUE_STORAGE_ELEMENT_FORMAT,
+            GuardKind.VALUE_MEMORY_SPACE,
             GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
             GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
             GuardKind.VALUE_STATIC_ELEMENT_COUNT_EQ,
@@ -1171,6 +1178,26 @@ class _LowerRuleSetCompiler:
                 )
             )
             return
+        if guard.kind == GuardKind.VALUE_MEMORY_SPACE:
+            self._guards.append(
+                LowerGuard(
+                    kind=guard.kind,
+                    value_ref_index=value_ref_index,
+                    diagnostic_index=self._append_diagnostic_ref(
+                        source_op,
+                        _guard_diagnostic(
+                            guard,
+                            _named_constraint_diagnostic(
+                                "value_fact",
+                                guard.field,
+                                "memory_space",
+                            ),
+                        ),
+                    ),
+                    memory_spaces=guard.memory_spaces,
+                )
+            )
+            return
         if guard.kind in (
             GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
             GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
@@ -1391,6 +1418,7 @@ class _LowerRuleSetCompiler:
                 source_op,
                 emit.source_memory,
                 emit.source_memory_byte_offset_materializer,
+                emit.source_memory_address_materializer,
             )
 
         self._emits.append(
@@ -1419,6 +1447,7 @@ class _LowerRuleSetCompiler:
         source_op: Op,
         constraint: SourceMemoryConstraint,
         byte_offset_materializer: SourceMemoryByteOffsetMaterializer | None,
+        address_materializer: SourceMemoryAddressMaterializer | None,
     ) -> int:
         row = LowerSourceMemory(
             constraint,
@@ -1430,7 +1459,23 @@ class _LowerRuleSetCompiler:
                 source_op,
                 _source_memory_dynamic_offset_diagnostic(constraint),
             ),
+            address_layout_diagnostic_index=(
+                0xFFFF
+                if constraint.address_layout == SourceMemoryAddressLayout.ANY
+                else self._append_diagnostic_ref(
+                    source_op,
+                    _source_memory_address_layout_diagnostic(constraint),
+                )
+            ),
+            address_diagnostic_index=self._append_diagnostic_ref(
+                source_op,
+                _source_memory_address_diagnostic(
+                    constraint,
+                    address_materializer,
+                ),
+            ),
             byte_offset_materializer=byte_offset_materializer,
+            address_materializer=address_materializer,
         )
         for index, existing in enumerate(self._source_memories):
             if existing == row:
@@ -1979,9 +2024,9 @@ def _lower_value_ref(
     return LowerValueRef(
         kind=value_ref.kind,
         index=_source_value_index(source_op, value_ref, temporary_ordinals),
-        element_index=value_ref.element
-        if value_ref.kind == SourceValueKind.OPERAND
-        else 0,
+        element_index=(
+            value_ref.element if value_ref.kind == SourceValueKind.OPERAND else 0
+        ),
         materializer_index=materializer_index,
     )
 
@@ -2006,6 +2051,8 @@ def _source_value_index(
     if value_ref.kind == SourceValueKind.SOURCE_MEMORY_DYNAMIC_TERM:
         return value_ref.element
     if value_ref.kind == SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET:
+        return 0
+    if value_ref.kind == SourceValueKind.SOURCE_MEMORY_ADDRESS:
         return 0
     raise ValueError(f"source value field '{value_ref.field}' is not declared")
 
@@ -2281,6 +2328,31 @@ def _source_memory_dynamic_offset_diagnostic(
             raise ValueError(
                 "source-memory dynamic-offset diagnostic is missing an error ref"
             )
+        return ref
+    return _source_memory_diagnostic(constraint)
+
+
+def _source_memory_address_layout_diagnostic(
+    constraint: SourceMemoryConstraint,
+) -> DiagnosticRef:
+    if constraint.address_layout_diagnostic is not None:
+        ref = constraint.address_layout_diagnostic.ref
+        if ref is None:
+            raise ValueError(
+                "source-memory address-layout diagnostic is missing an error ref"
+            )
+        return ref
+    return _source_memory_diagnostic(constraint)
+
+
+def _source_memory_address_diagnostic(
+    constraint: SourceMemoryConstraint,
+    materializer: SourceMemoryAddressMaterializer | None,
+) -> DiagnosticRef:
+    if materializer is not None and materializer.diagnostic is not None:
+        ref = materializer.diagnostic.ref
+        if ref is None:
+            raise ValueError("source-memory address diagnostic is missing an error ref")
         return ref
     return _source_memory_diagnostic(constraint)
 

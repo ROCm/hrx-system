@@ -203,6 +203,18 @@ class SourceMemoryPlanTest : public ::testing::Test {
     return loom_encoding_layout_dense_result(op);
   }
 
+  loom_value_id_t BuildStridedLayout(int64_t row_stride,
+                                     int64_t column_stride) {
+    const int64_t static_strides[] = {row_stride, column_stride};
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(loom_encoding_layout_strided_build(
+        &builder_, /*strides=*/nullptr, /*strides_count=*/0, static_strides,
+        IREE_ARRAYSIZE(static_strides),
+        loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT),
+        LOOM_LOCATION_UNKNOWN, &op));
+    return loom_encoding_layout_strided_result(op);
+  }
+
   loom_type_t ViewType1D(loom_scalar_type_t element_type, int64_t extent,
                          loom_value_id_t layout) {
     loom_type_t type = loom_type_shaped_1d(LOOM_TYPE_VIEW, element_type,
@@ -345,6 +357,8 @@ TEST_F(SourceMemoryPlanTest, StaticDenseLoadIncludesViewBase) {
   EXPECT_EQ(plan.base_view_value_id, loom_buffer_view_result(view_op));
   EXPECT_EQ(plan.root_value_id, buffer);
   EXPECT_EQ(plan.memory_space, LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
+  EXPECT_EQ(plan.address_layout,
+            LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR);
   EXPECT_EQ(plan.element_byte_count, 4u);
   EXPECT_EQ(plan.vector_lane_count, 4u);
   EXPECT_EQ(plan.vector_lane_byte_stride, 4);
@@ -356,6 +370,39 @@ TEST_F(SourceMemoryPlanTest, StaticDenseLoadIncludesViewBase) {
   EXPECT_EQ(plan.minimum_alignment, 1u);
   EXPECT_EQ(plan.dynamic_term_count, 0u);
   EXPECT_EQ(plan.dynamic_view_base_term_count, 0u);
+}
+
+TEST_F(SourceMemoryPlanTest, StaticStridedLayoutClassifiesCompactness) {
+  loom_value_id_t buffer = DefineBufferArg();
+  loom_value_id_t base_offset =
+      loom_index_constant_result(BuildOffsetConstant(0));
+  const int64_t row_strides[] = {16, 32};
+  const loom_low_source_memory_address_layout_t expected_layouts[] = {
+      LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR,
+      LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_UNPROVEN,
+  };
+  loom_op_t* load_ops[IREE_ARRAYSIZE(row_strides)] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(row_strides); ++i) {
+    loom_value_id_t layout = BuildStridedLayout(row_strides[i], 1);
+    loom_op_t* view_op = nullptr;
+    IREE_ASSERT_OK(loom_buffer_view_build(&builder_, buffer, base_offset,
+                                          ViewType2D(8, 16, layout),
+                                          LOOM_LOCATION_UNKNOWN, &view_op));
+    const int64_t static_indices[] = {0, 0};
+    IREE_ASSERT_OK(loom_vector_load_build(
+        &builder_, 0, loom_buffer_view_result(view_op), nullptr, 0,
+        static_indices, IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(1),
+        LOOM_LOCATION_UNKNOWN, &load_ops[i]));
+  }
+
+  loom_value_fact_table_t facts = {0};
+  ComputeFacts(&facts);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(row_strides); ++i) {
+    loom_low_source_memory_access_plan_t plan = {};
+    loom_low_source_memory_access_diagnostic_t diagnostic = {0};
+    ASSERT_TRUE(BuildPlan(&facts, load_ops[i], &plan, &diagnostic));
+    EXPECT_EQ(plan.address_layout, expected_layouts[i]);
+  }
 }
 
 TEST_F(SourceMemoryPlanTest, ViewMemoryOperationKindUsesInterfaceShape) {
@@ -587,6 +634,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadTracksViewBaseBoundary) {
   EXPECT_EQ(plan.static_byte_offset, 28);
   EXPECT_EQ(plan.static_view_base_byte_offset, 16);
   EXPECT_EQ(plan.dynamic_view_base_value_id, loom_index_add_result(base_op));
+  EXPECT_EQ(plan.dynamic_view_base_value_static_byte_offset, 16);
   ASSERT_EQ(plan.dynamic_term_count, 1u);
   EXPECT_EQ(plan.dynamic_view_base_term_count, 1u);
   EXPECT_EQ(plan.dynamic_terms[0].index, base);
@@ -630,6 +678,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsScaledViewBase) {
   ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
   EXPECT_EQ(plan.dynamic_view_base_value_id,
             loom_index_scale_result(byte_offset_op));
+  EXPECT_EQ(plan.dynamic_view_base_value_static_byte_offset, 0);
   ASSERT_EQ(plan.dynamic_term_count, 1u);
   EXPECT_EQ(plan.dynamic_view_base_term_count, 1u);
   EXPECT_EQ(plan.dynamic_terms[0].index, element);
@@ -681,6 +730,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadTracksMaterializedI32ViewBase) {
   EXPECT_EQ(plan.static_view_base_byte_offset, 0);
   EXPECT_EQ(plan.dynamic_view_base_value_id,
             loom_index_cast_result(base_cast_op));
+  EXPECT_EQ(plan.dynamic_view_base_value_static_byte_offset, 0);
   ASSERT_EQ(plan.dynamic_term_count, 1u);
   EXPECT_EQ(plan.dynamic_view_base_term_count, 1u);
   EXPECT_EQ(plan.dynamic_terms[0].index, loom_view_load_result(base_load_op));

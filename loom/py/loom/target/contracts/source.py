@@ -63,6 +63,14 @@ class ValueRef:
             field="",
         )
 
+    @classmethod
+    def source_memory_address(cls) -> Self:
+        """Returns the complete address selected by source-memory analysis."""
+        return cls(
+            kind=SourceValueKind.SOURCE_MEMORY_ADDRESS,
+            field="",
+        )
+
     def validate(
         self,
         source_op: Op,
@@ -124,6 +132,18 @@ class ValueRef:
                 raise ValueError(
                     f"{source_op.name}: {subject} source-memory byte offset must "
                     "not select an element"
+                )
+            return
+        if self.kind == SourceValueKind.SOURCE_MEMORY_ADDRESS:
+            if self.field:
+                raise ValueError(
+                    f"{source_op.name}: {subject} source-memory address must not "
+                    "name a source field"
+                )
+            if self.element != 0:
+                raise ValueError(
+                    f"{source_op.name}: {subject} source-memory address must not "
+                    "select an element"
                 )
             return
         if not self.field:

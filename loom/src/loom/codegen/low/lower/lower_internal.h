@@ -88,6 +88,9 @@ typedef struct loom_low_lower_selected_plan_t {
   const loom_low_lower_rule_t* rule;
   // Resolved emit rows for |rule|, or NULL for target-owned callbacks.
   const loom_low_lower_resolved_emit_t* resolved_emits;
+  // Canonical source-memory plan retained from rule selection, or NULL when
+  // the selected rule does not consume source memory.
+  const loom_low_source_memory_access_plan_t* source_memory_access;
   // Target-owned plan selected during planning, or empty for table rules.
   loom_low_lower_plan_t plan;
 } loom_low_lower_selected_plan_t;

@@ -71,6 +71,13 @@ typedef enum loom_low_source_memory_vector_offset_kind_e {
   LOOM_LOW_SOURCE_MEMORY_VECTOR_OFFSET_OTHER = 2,
 } loom_low_source_memory_vector_offset_kind_t;
 
+typedef enum loom_low_source_memory_address_layout_e {
+  // The source layout is not proven to match a target-independent class.
+  LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_UNPROVEN = 0,
+  // Consecutive columns and rows use compact row-major element strides.
+  LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR = 1,
+} loom_low_source_memory_address_layout_t;
+
 typedef uint32_t loom_low_source_memory_access_rejection_flags_t;
 
 #define LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_UNSUPPORTED_OP \
@@ -160,6 +167,8 @@ typedef struct loom_low_source_memory_access_plan_t {
   loom_value_id_t base_view_value_id;
   // Target-independent memory space selected from source view facts.
   loom_value_fact_memory_space_t memory_space;
+  // Proven target-independent address-layout classification.
+  loom_low_source_memory_address_layout_t address_layout;
   // Source SSA value that represents the storage root.
   loom_value_id_t root_value_id;
   // Minimum provable byte alignment of the storage root base address.
@@ -179,8 +188,13 @@ typedef struct loom_low_source_memory_access_plan_t {
   // Static byte offset contributed by the source view base.
   int64_t static_view_base_byte_offset;
   // Source SSA value that materializes the dynamic view-base byte offset, or
-  // invalid when the view base is fully static.
+  // invalid when the view base is fully static. The value may also carry the
+  // static contribution recorded below.
   loom_value_id_t dynamic_view_base_value_id;
+  // Static byte contribution already present in
+  // |dynamic_view_base_value_id|. Zero when that value is a recovered dynamic
+  // term instead of the authored complete view-base expression.
+  int64_t dynamic_view_base_value_static_byte_offset;
   // Minimum provable byte alignment of the final accessed address.
   uint32_t minimum_alignment;
   // Dynamic address terms. The first |dynamic_view_base_term_count| entries

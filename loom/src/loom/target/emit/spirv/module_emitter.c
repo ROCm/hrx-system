@@ -491,7 +491,7 @@ static iree_status_t loom_spirv_emit_binary_same_type_packet(
       state, packet, result_id, operands[0].type_id, row->result_type);
 }
 
-static iree_status_t loom_spirv_emit_unary_convert_packet(
+static iree_status_t loom_spirv_emit_unary_typed_packet(
     loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   loom_spirv_module_value_ref_t operands[1] = {0};
@@ -915,8 +915,8 @@ static iree_status_t loom_spirv_emit_descriptor_packet(
       return loom_spirv_emit_boolean_constant_packet(state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_BINARY_SAME_TYPE:
       return loom_spirv_emit_binary_same_type_packet(state, packet, row);
-    case LOOM_SPIRV_PACKET_FORM_UNARY_CONVERT:
-      return loom_spirv_emit_unary_convert_packet(state, packet, row);
+    case LOOM_SPIRV_PACKET_FORM_UNARY_TYPED:
+      return loom_spirv_emit_unary_typed_packet(state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_LOAD_BUILTIN:
       return loom_spirv_emit_load_builtin_packet(state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_INTEGER_MUL_ADD:

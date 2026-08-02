@@ -63,6 +63,8 @@ typedef struct loom_math_legalize_target_state_t {
   bool resolved;
   // True when the function has effective target facts.
   bool available;
+  // Effective target facts for the function, or NULL when targetless.
+  const loom_target_facts_t* facts;
   // Contract-set key selected for this function, or a synthetic key.
   iree_string_view_t contract_set_key;
   // Target bundle selected for this function, if any.
@@ -383,6 +385,7 @@ static iree_status_t loom_math_legalize_resolve_policy(
   }
 
   state->target.available = true;
+  state->target.facts = target_facts;
   const loom_target_bundle_storage_t* storage = &target_facts->storage;
   state->target.contract_set_key = storage->config.contract_set_key;
   state->target.target_bundle_name = storage->bundle.name;
@@ -629,11 +632,13 @@ iree_status_t loom_math_legalize_run(loom_pass_t* pass, loom_module_t* module,
       .policy_registry = policy_registry,
       .compile_report = compile_report,
   };
+  IREE_RETURN_IF_ERROR(loom_math_legalize_resolve_policy(&state));
   loom_greedy_rewrite_driver_t driver;
   loom_greedy_rewrite_driver_initialize(module, pass->arena, pass->value_facts,
                                         &driver);
   loom_greedy_rewrite_options_t rewrite_options = {
       .max_iterations = options ? options->max_iterations : 0,
+      .target_facts = state.target.facts,
   };
   loom_greedy_rewrite_callbacks_t callbacks = {
       .user_data = &state,

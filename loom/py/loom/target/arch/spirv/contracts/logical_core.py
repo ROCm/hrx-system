@@ -11,7 +11,6 @@ from __future__ import annotations
 from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.buffer import defs as buffer
 from loom.dialect.index import ALL_INDEX_OPS
-from loom.dialect.index import defs as index
 from loom.dialect.kernel import ALL_KERNEL_OPS
 from loom.dialect.kernel import defs as kernel
 from loom.dialect.scalar import ALL_SCALAR_OPS
@@ -26,12 +25,17 @@ from loom.dialect.vector import defs as vector
 from loom.dialect.view import ALL_VIEW_OPS
 from loom.dialect.view import defs as view
 from loom.dsl import Op
+from loom.error.spirv import ERR_SPIRV_028, ERR_SPIRV_029
 from loom.error.target import ERR_TARGET_050
 from loom.target.arch.spirv.builtins import (
     BUILTIN_DIMENSIONS,
     BUILTIN_INDEX_QUERIES,
     BuiltinDimension,
     BuiltinIndexQuery,
+)
+from loom.target.arch.spirv.contracts.index import (
+    SPIRV_INDEX_CONVERSION_RULES,
+    SPIRV_INDEX_NUMERIC_RULES,
 )
 from loom.target.arch.spirv.cooperative_matrix import (
     COOPERATIVE_MATRIX_CASES,
@@ -45,8 +49,6 @@ from loom.target.arch.spirv.scalar_alu import (
     FLOAT_SCALAR_ALU_TYPES,
     INTEGER_BITWISE_BINARY_OPERATIONS,
     INTEGER_SCALAR_ALU_TYPE_PAIRS,
-    OFFSET64_ALU_TYPE,
-    OFFSET64_COMPARE_PREDICATES,
     SCALAR_ALU_TYPES,
     SIGNED_INTEGER_BINARY_OPERATIONS,
     SIGNED_INTEGER_COMPARE_PREDICATES,
@@ -71,6 +73,7 @@ from loom.target.arch.spirv.scalar_memory import (
 )
 from loom.target.contracts import (
     AttrProject,
+    ContractCase,
     ContractFragment,
     DescriptorEmitForm,
     DescriptorMatrixRule,
@@ -80,17 +83,24 @@ from loom.target.contracts import (
     GuardDiagnostic,
     ResultTypeBinding,
     Scalar,
+    SourceMemoryAddressBase,
+    SourceMemoryAddressCoordinateType,
+    SourceMemoryAddressLayout,
+    SourceMemoryAddressMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
     SourceMemoryRootKind,
     TypePattern,
     ValueAliasRule,
+    ValueElideRule,
     ValueRef,
     Vector,
     View,
     descriptor_by_key,
+    i64_param,
     source_memory_minimum_alignment_param,
+    string_param,
     target_diagnostic,
     u32_param,
     value_type_param,
@@ -98,9 +108,7 @@ from loom.target.contracts import (
 from loom.target.low_descriptors import Descriptor
 
 _I1 = Scalar("i1")
-_I32 = Scalar("i32")
 _INDEX = Scalar("index")
-_OFFSET = Scalar("offset")
 
 
 def _descriptor(key: str) -> Descriptor:
@@ -130,6 +138,7 @@ def _descriptor_emit(
     result_types: dict[str, ResultTypeBinding] | None = None,
     immediates: dict[str, AttrProject] | None = None,
     source_memory: SourceMemoryConstraint | None = None,
+    source_memory_address_materializer: SourceMemoryAddressMaterializer | None = None,
 ) -> EmitDescriptorOp:
     return EmitDescriptorOp(
         descriptor=descriptor,
@@ -139,47 +148,7 @@ def _descriptor_emit(
         immediates={} if immediates is None else immediates,
         form=DescriptorEmitForm.OP,
         source_memory=source_memory,
-    )
-
-
-def _i32_index_constant_rule() -> DescriptorRule:
-    descriptor = _descriptor("spirv.op_constant.i32")
-    return DescriptorRule(
-        source_op=index.index_constant,
-        descriptor=descriptor,
-        guards=(
-            Guard.attr_kind("value", "i64"),
-            Guard.value_type("result", _INDEX),
-            Guard.i64_range("value", -(2**31), (2**31) - 1),
-        ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                results={"dst": ValueRef.result("result")},
-                immediates={"i32_value": AttrProject.direct("value")},
-                form=DescriptorEmitForm.CONST,
-            ),
-        ),
-    )
-
-
-def _offset_constant_rule() -> DescriptorRule:
-    descriptor = _descriptor("spirv.op_constant.offset64")
-    return DescriptorRule(
-        source_op=index.index_constant,
-        descriptor=descriptor,
-        guards=(
-            Guard.attr_kind("value", "i64"),
-            Guard.value_type("result", _OFFSET),
-        ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                results={"dst": ValueRef.result("result")},
-                immediates={"offset64_value": AttrProject.direct("value")},
-                form=DescriptorEmitForm.CONST,
-            ),
-        ),
+        source_memory_address_materializer=source_memory_address_materializer,
     )
 
 
@@ -262,33 +231,6 @@ def _binary_rule(
     )
 
 
-def _ternary_rule(
-    source_op: Op,
-    type_pattern: TypePattern,
-    descriptor_key: str,
-) -> DescriptorRule:
-    descriptor = _descriptor(descriptor_key)
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=descriptor,
-        guards=(
-            *_typed_guards(("a", "b", "c", "result"), type_pattern),
-            *_feature_guards(descriptor),
-        ),
-        emit=(
-            _descriptor_emit(
-                descriptor=descriptor,
-                operands={
-                    "a": ValueRef.operand("a"),
-                    "b": ValueRef.operand("b"),
-                    "c": ValueRef.operand("c"),
-                },
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
 def _conversion_rule(row: ScalarConversion) -> DescriptorRule:
     descriptor = _descriptor(row.key)
     return DescriptorRule(
@@ -297,26 +239,6 @@ def _conversion_rule(row: ScalarConversion) -> DescriptorRule:
         guards=(
             Guard.value_type("input", Scalar(row.source_type.source_type)),
             Guard.value_type("result", Scalar(row.result_type.source_type)),
-            *_feature_guards(descriptor),
-        ),
-        emit=(
-            _descriptor_emit(
-                descriptor=descriptor,
-                operands={"input": ValueRef.operand("input")},
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
-def _index_cast_to_offset_rule() -> DescriptorRule:
-    descriptor = _descriptor("spirv.op_uconvert.i32.offset64")
-    return DescriptorRule(
-        source_op=index.index_cast,
-        descriptor=descriptor,
-        guards=(
-            Guard.value_type("input", _INDEX),
-            Guard.value_type("result", _OFFSET),
             *_feature_guards(descriptor),
         ),
         emit=(
@@ -554,20 +476,16 @@ def _unsigned_compare_rule(
     source_op: Op,
     predicate: IntegerComparePredicate,
     scalar_pair: IntegerAluTypePair,
-    type_pattern: TypePattern | None = None,
 ) -> DescriptorRule:
     descriptor = _descriptor(
         f"spirv.op_{predicate.descriptor_suffix}.{scalar_pair.unsigned.suffix}"
-    )
-    operand_type_pattern = (
-        Scalar(scalar_pair.source_type) if type_pattern is None else type_pattern
     )
     return DescriptorRule(
         source_op=source_op,
         descriptor=descriptor,
         guards=(
             Guard.enum_attr_equals("predicate", predicate.source_predicate),
-            *_typed_guards(("lhs", "rhs"), operand_type_pattern),
+            *_typed_guards(("lhs", "rhs"), Scalar(scalar_pair.source_type)),
             Guard.value_type("result", _I1),
             *_feature_guards(descriptor),
         ),
@@ -644,14 +562,11 @@ def _buffer_view_rule(
     scalar: StorageBufferScalar,
     *,
     require_storage_element_format: bool = False,
-) -> DescriptorRule:
+) -> ValueElideRule:
     view_type = View(scalar.source_type)
-    descriptor = _descriptor(
-        f"spirv.op_ptr_access_chain.storage_buffer.{scalar.suffix}.byte_offset"
-    )
-    return DescriptorRule(
+    return ValueElideRule(
         source_op=buffer.buffer_view,
-        descriptor=descriptor,
+        values=(ValueRef.result("result"),),
         guards=(
             Guard.value_type("result", view_type),
             *(
@@ -659,23 +574,37 @@ def _buffer_view_rule(
                 if require_storage_element_format
                 else ()
             ),
-            *_feature_guards(descriptor),
-        ),
-        emit=(
-            _descriptor_emit(
-                descriptor=descriptor,
-                operands={
-                    "base": ValueRef.operand("buffer"),
-                    "byte_offset": ValueRef.operand("byte_offset"),
-                },
-                results={"ptr": ValueRef.result("result")},
-            ),
         ),
     )
 
 
 _STORAGE_BUFFER_MEMORY_SPACES = ("unknown", "generic", "global", "descriptor")
 _WORKGROUP_MEMORY_SPACES = ("workgroup",)
+
+
+def _storage_subview_rule(scalar: StorageBufferScalar) -> ValueElideRule:
+    return ValueElideRule(
+        source_op=view.view_subview,
+        values=(ValueRef.result("result"),),
+        guards=(
+            Guard.value_type("result", View(scalar.source_type)),
+            Guard.value_memory_space("result", _STORAGE_BUFFER_MEMORY_SPACES),
+        ),
+    )
+
+
+def _workgroup_subview_rule(scalar: StorageBufferScalar) -> ValueAliasRule:
+    view_type = View(scalar.source_type)
+    return ValueAliasRule(
+        source_op=view.view_subview,
+        source=ValueRef.operand("source"),
+        result=ValueRef.result("result"),
+        guards=(
+            Guard.value_type("source", view_type),
+            Guard.value_type("result", view_type),
+            Guard.value_memory_space("result", _WORKGROUP_MEMORY_SPACES),
+        ),
+    )
 
 
 def _storage_buffer_alignment_diagnostic(
@@ -691,6 +620,60 @@ def _storage_buffer_alignment_diagnostic(
     )
 
 
+def _storage_buffer_address_diagnostic() -> GuardDiagnostic:
+    return GuardDiagnostic(
+        ref=target_diagnostic(
+            ERR_SPIRV_028,
+            i64_param("required_range_lo", 0),
+            i64_param("required_range_hi", (2**31) - 1),
+            string_param(
+                "constraint_key",
+                "source_memory.address_index_non_negative_s32",
+            ),
+        )
+    )
+
+
+def _storage_buffer_address_materializer(
+    scalar: StorageBufferScalar,
+) -> SourceMemoryAddressMaterializer:
+    return SourceMemoryAddressMaterializer(
+        const_coordinate=_descriptor("spirv.op_constant.offset64"),
+        add_coordinate=_descriptor("spirv.op_iadd.offset64"),
+        mul_coordinate=_descriptor("spirv.op_imul.offset64"),
+        shl_coordinate=None,
+        index_to_coordinate_input=_descriptor("spirv.op_bitcast.i32.u32"),
+        index_to_coordinate=_descriptor("spirv.op_uconvert.u32.offset64"),
+        address=_descriptor(
+            f"spirv.op_ptr_access_chain.storage_buffer.{scalar.suffix}.byte_offset"
+        ),
+        base=SourceMemoryAddressBase.ROOT,
+        coordinate_type=SourceMemoryAddressCoordinateType.OFFSET,
+        const_coordinate_immediate="offset64_value",
+        diagnostic=_storage_buffer_address_diagnostic(),
+    )
+
+
+def _source_memory_address_feature_guards(
+    materializer: SourceMemoryAddressMaterializer,
+) -> tuple[Guard, ...]:
+    descriptors = (
+        materializer.const_coordinate,
+        materializer.add_coordinate,
+        materializer.mul_coordinate,
+        materializer.shl_coordinate,
+        materializer.index_to_coordinate_input,
+        materializer.index_to_coordinate,
+        materializer.address,
+    )
+    return tuple(
+        guard
+        for descriptor in descriptors
+        if descriptor is not None
+        for guard in _feature_guards(descriptor)
+    )
+
+
 def _storage_buffer_source_memory(
     operation: SourceMemoryOperation,
     scalar: StorageBufferScalar,
@@ -702,7 +685,7 @@ def _storage_buffer_source_memory(
         element_byte_count=scalar.byte_width,
         vector_lane_count=1,
         vector_lane_byte_stride=scalar.byte_width,
-        static_byte_offset_minimum=-(2**63),
+        static_byte_offset_minimum=0,
         static_byte_offset_maximum=(2**63) - 1,
         minimum_alignment=scalar.byte_width,
         dynamic_term_count=None,
@@ -717,17 +700,55 @@ def _workgroup_source_memory(
 ) -> SourceMemoryConstraint:
     return SourceMemoryConstraint(
         operation=operation,
-        root_kind=SourceMemoryRootKind.ANY,
+        root_kind=SourceMemoryRootKind.ALLOCA,
         memory_spaces=_WORKGROUP_MEMORY_SPACES,
         element_byte_count=scalar.byte_width,
         vector_lane_count=1,
         vector_lane_byte_stride=scalar.byte_width,
-        static_byte_offset_minimum=-(2**63),
+        static_byte_offset_minimum=0,
         static_byte_offset_maximum=(2**63) - 1,
         minimum_alignment=scalar.byte_width,
         dynamic_term_count=None,
         dynamic_index_source=SourceMemoryDynamicIndexSource.NONE,
         diagnostic=_storage_buffer_alignment_diagnostic(scalar.byte_width),
+    )
+
+
+def _workgroup_address_diagnostic(
+    scalar: StorageBufferScalar,
+) -> GuardDiagnostic:
+    return GuardDiagnostic(
+        ref=target_diagnostic(
+            ERR_SPIRV_029,
+            u32_param("element_byte_count", scalar.byte_width),
+            i64_param("required_range_lo", 0),
+            i64_param("required_range_hi", (2**31) - 1),
+            string_param(
+                "constraint_key",
+                "source_memory.workgroup_element_index_non_negative_s32",
+            ),
+        )
+    )
+
+
+def _workgroup_address_materializer(
+    scalar: StorageBufferScalar,
+) -> SourceMemoryAddressMaterializer:
+    return SourceMemoryAddressMaterializer(
+        const_coordinate=_descriptor("spirv.op_constant.i32"),
+        add_coordinate=_descriptor("spirv.op_iadd.i32"),
+        mul_coordinate=_descriptor("spirv.op_imul.i32"),
+        shl_coordinate=_descriptor("spirv.op_shift_left_logical.i32"),
+        address=_descriptor(
+            f"spirv.op_access_chain.workgroup.{scalar.suffix}.element_index"
+        ),
+        base=SourceMemoryAddressBase.BASE_VIEW,
+        coordinate_type=SourceMemoryAddressCoordinateType.INDEX,
+        coordinate_unit_byte_count=scalar.byte_width,
+        coordinate_minimum=0,
+        coordinate_maximum=(2**31) - 1,
+        const_coordinate_immediate="i32_value",
+        diagnostic=_workgroup_address_diagnostic(scalar),
     )
 
 
@@ -741,15 +762,17 @@ def _cooperative_matrix_memory(
     return SourceMemoryConstraint(
         operation=operation,
         root_kind=SourceMemoryRootKind.ANY,
+        address_layout=SourceMemoryAddressLayout.COMPACT_ROW_MAJOR,
         memory_spaces=_STORAGE_BUFFER_MEMORY_SPACES,
         element_byte_count=element_byte_width,
         vector_lane_count=lane_count,
         vector_lane_byte_stride=element_byte_width,
-        static_byte_offset_minimum=-(2**63),
+        static_byte_offset_minimum=0,
         static_byte_offset_maximum=(2**63) - 1,
         minimum_alignment=minimum_alignment,
         dynamic_term_count=None,
         dynamic_index_source=SourceMemoryDynamicIndexSource.NONE,
+        address_layout_diagnostic=_cooperative_matrix_compact_tile_diagnostic(),
         diagnostic=_storage_buffer_alignment_diagnostic(minimum_alignment),
     )
 
@@ -760,6 +783,30 @@ def _cooperative_matrix_zero_indices_guards() -> tuple[Guard, ...]:
         Guard.i64_array_count("static_indices", 2),
         Guard.i64_array_element_range("static_indices", 0, 0, 0),
         Guard.i64_array_element_range("static_indices", 1, 0, 0),
+    )
+
+
+def _cooperative_matrix_compact_tile_diagnostic() -> GuardDiagnostic:
+    return GuardDiagnostic(
+        subject_role="value",
+        subject_name="view",
+        constraint_key="cooperative_matrix.compact_storage_tile",
+    )
+
+
+def _cooperative_matrix_view_guard(
+    scalar: StorageBufferScalar,
+    *,
+    rows: int,
+    columns: int,
+) -> Guard:
+    # Cooperative matrix packets encode a compact row stride. Exact dimensions
+    # constrain the tile footprint while the source-memory row separately
+    # requires a proven compact row-major layout.
+    return Guard.value_type(
+        "view",
+        View(scalar.source_type, dims=(rows, columns)),
+        diagnostic=_cooperative_matrix_compact_tile_diagnostic(),
     )
 
 
@@ -791,22 +838,28 @@ def _cooperative_matrix_load_rule(
             layout="row_major",
         )
     )
+    address_materializer = _storage_buffer_address_materializer(scalar)
     return DescriptorRule(
         source_op=vector.vector_fragment_load,
         descriptor=descriptor,
         guards=(
             Guard.enum_attr_equals("role", role),
-            Guard.value_type("view", View(scalar.source_type)),
+            _cooperative_matrix_view_guard(
+                scalar,
+                rows=rows,
+                columns=columns,
+            ),
             *_storage_element_format_guards("view", scalar),
             Guard.value_type("result", Vector(result_element, lanes=result_lanes)),
             *_cooperative_matrix_shape_guards(rows=rows, columns=columns),
             *_cooperative_matrix_zero_indices_guards(),
+            *_source_memory_address_feature_guards(address_materializer),
             *_feature_guards(descriptor),
         ),
         emit=(
             _descriptor_emit(
                 descriptor=descriptor,
-                operands={"ptr": ValueRef.operand("view")},
+                operands={"ptr": ValueRef.source_memory_address()},
                 results={"dst": ValueRef.result("result")},
                 source_memory=_cooperative_matrix_memory(
                     SourceMemoryOperation.LOAD,
@@ -814,6 +867,7 @@ def _cooperative_matrix_load_rule(
                     lane_count=result_lanes,
                     minimum_alignment=16,
                 ),
+                source_memory_address_materializer=address_materializer,
             ),
         ),
     )
@@ -835,23 +889,29 @@ def _cooperative_matrix_store_rule(
             layout="row_major",
         )
     )
+    address_materializer = _storage_buffer_address_materializer(scalar)
     return DescriptorRule(
         source_op=vector.vector_fragment_store,
         descriptor=descriptor,
         guards=(
             Guard.enum_attr_equals("role", "result"),
-            Guard.value_type("view", View(scalar.source_type)),
+            _cooperative_matrix_view_guard(
+                scalar,
+                rows=rows,
+                columns=columns,
+            ),
             *_storage_element_format_guards("view", scalar),
             Guard.value_type("value", Vector(value_element, lanes=value_lanes)),
             *_cooperative_matrix_shape_guards(rows=rows, columns=columns),
             *_cooperative_matrix_zero_indices_guards(),
+            *_source_memory_address_feature_guards(address_materializer),
             *_feature_guards(descriptor),
         ),
         emit=(
             _descriptor_emit(
                 descriptor=descriptor,
                 operands={
-                    "ptr": ValueRef.operand("view"),
+                    "ptr": ValueRef.source_memory_address(),
                     "value": ValueRef.operand("value"),
                 },
                 source_memory=_cooperative_matrix_memory(
@@ -860,6 +920,7 @@ def _cooperative_matrix_store_rule(
                     lane_count=value_lanes,
                     minimum_alignment=16,
                 ),
+                source_memory_address_materializer=address_materializer,
             ),
         ),
     )
@@ -916,36 +977,30 @@ def _cooperative_matrix_rules() -> tuple[DescriptorRule, ...]:
     return tuple(rules)
 
 
-def _base_element_index_guards() -> tuple[Guard, ...]:
-    return (
-        Guard.operand_segment_count("indices", 0),
-        Guard.i64_array_count("static_indices", 1),
-        Guard.i64_array_element_range("static_indices", 0, 0, 0),
-    )
-
-
 def _view_load_rule(scalar: StorageBufferScalar) -> DescriptorRule:
     scalar_type = Scalar(scalar.source_type)
     view_type = View(scalar.source_type)
     descriptor = _descriptor(f"spirv.op_load.storage_buffer.{scalar.suffix}")
+    address_materializer = _storage_buffer_address_materializer(scalar)
     return DescriptorRule(
         source_op=view.view_load,
         descriptor=descriptor,
         guards=(
-            *_base_element_index_guards(),
             Guard.value_type("view", view_type),
             Guard.value_type("result", scalar_type),
+            *_source_memory_address_feature_guards(address_materializer),
             *_feature_guards(descriptor),
         ),
         emit=(
             _descriptor_emit(
                 descriptor=descriptor,
-                operands={"ptr": ValueRef.operand("view")},
+                operands={"ptr": ValueRef.source_memory_address()},
                 results={"dst": ValueRef.result("result")},
                 source_memory=_storage_buffer_source_memory(
                     SourceMemoryOperation.LOAD,
                     scalar,
                 ),
+                source_memory_address_materializer=address_materializer,
             ),
         ),
     )
@@ -955,26 +1010,28 @@ def _view_store_rule(scalar: StorageBufferScalar) -> DescriptorRule:
     scalar_type = Scalar(scalar.source_type)
     view_type = View(scalar.source_type)
     descriptor = _descriptor(f"spirv.op_store.storage_buffer.{scalar.suffix}")
+    address_materializer = _storage_buffer_address_materializer(scalar)
     return DescriptorRule(
         source_op=view.view_store,
         descriptor=descriptor,
         guards=(
-            *_base_element_index_guards(),
             Guard.value_type("view", view_type),
             Guard.value_type("value", scalar_type),
+            *_source_memory_address_feature_guards(address_materializer),
             *_feature_guards(descriptor),
         ),
         emit=(
             _descriptor_emit(
                 descriptor=descriptor,
                 operands={
-                    "ptr": ValueRef.operand("view"),
+                    "ptr": ValueRef.source_memory_address(),
                     "value": ValueRef.operand("value"),
                 },
                 source_memory=_storage_buffer_source_memory(
                     SourceMemoryOperation.STORE,
                     scalar,
                 ),
+                source_memory_address_materializer=address_materializer,
             ),
         ),
     )
@@ -984,24 +1041,26 @@ def _view_load_workgroup_rule(scalar: StorageBufferScalar) -> DescriptorRule:
     scalar_type = Scalar(scalar.source_type)
     view_type = View(scalar.source_type)
     descriptor = _descriptor(f"spirv.op_load.workgroup.{scalar.suffix}")
+    address_materializer = _workgroup_address_materializer(scalar)
     return DescriptorRule(
         source_op=view.view_load,
         descriptor=descriptor,
         guards=(
-            *_base_element_index_guards(),
             Guard.value_type("view", view_type),
             Guard.value_type("result", scalar_type),
+            *_source_memory_address_feature_guards(address_materializer),
             *_feature_guards(descriptor),
         ),
         emit=(
             _descriptor_emit(
                 descriptor=descriptor,
-                operands={"ptr": ValueRef.operand("view")},
+                operands={"ptr": ValueRef.source_memory_address()},
                 results={"dst": ValueRef.result("result")},
                 source_memory=_workgroup_source_memory(
                     SourceMemoryOperation.LOAD,
                     scalar,
                 ),
+                source_memory_address_materializer=address_materializer,
             ),
         ),
     )
@@ -1011,33 +1070,35 @@ def _view_store_workgroup_rule(scalar: StorageBufferScalar) -> DescriptorRule:
     scalar_type = Scalar(scalar.source_type)
     view_type = View(scalar.source_type)
     descriptor = _descriptor(f"spirv.op_store.workgroup.{scalar.suffix}")
+    address_materializer = _workgroup_address_materializer(scalar)
     return DescriptorRule(
         source_op=view.view_store,
         descriptor=descriptor,
         guards=(
-            *_base_element_index_guards(),
             Guard.value_type("view", view_type),
             Guard.value_type("value", scalar_type),
+            *_source_memory_address_feature_guards(address_materializer),
             *_feature_guards(descriptor),
         ),
         emit=(
             _descriptor_emit(
                 descriptor=descriptor,
                 operands={
-                    "ptr": ValueRef.operand("view"),
+                    "ptr": ValueRef.source_memory_address(),
                     "value": ValueRef.operand("value"),
                 },
                 source_memory=_workgroup_source_memory(
                     SourceMemoryOperation.STORE,
                     scalar,
                 ),
+                source_memory_address_materializer=address_materializer,
             ),
         ),
     )
 
 
-def _storage_buffer_rules() -> tuple[DescriptorRule, ...]:
-    rules: list[DescriptorRule] = []
+def _storage_buffer_rules() -> tuple[ContractCase, ...]:
+    rules: list[ContractCase] = []
     for scalar in STORAGE_BUFFER_SCALARS:
         if scalar.source_rule_enabled or scalar.numeric_format_c_expression is None:
             continue
@@ -1049,6 +1110,8 @@ def _storage_buffer_rules() -> tuple[DescriptorRule, ...]:
         )
     for scalar in SOURCE_STORAGE_BUFFER_SCALARS:
         rules.append(_buffer_view_rule(scalar))
+        rules.append(_storage_subview_rule(scalar))
+        rules.append(_workgroup_subview_rule(scalar))
         rules.append(_view_load_rule(scalar))
         rules.append(_view_store_rule(scalar))
         rules.append(_view_load_workgroup_rule(scalar))
@@ -1197,33 +1260,6 @@ def _compare_rules() -> tuple[DescriptorRule, ...]:
         for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS
         for predicate in UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES
     )
-    rules.extend(
-        _compare_rule(
-            index.index_cmp,
-            predicate,
-            _INDEX,
-            f"spirv.op_{predicate.descriptor_suffix}.i32",
-        )
-        for predicate in SIGNED_INTEGER_COMPARE_PREDICATES
-    )
-    rules.extend(
-        _unsigned_compare_rule(
-            index.index_cmp,
-            predicate,
-            _INTEGER_ALU_TYPE_PAIR_BY_SOURCE_TYPE["i32"],
-            _INDEX,
-        )
-        for predicate in UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES
-    )
-    rules.extend(
-        _compare_rule(
-            index.index_cmp,
-            predicate,
-            _OFFSET,
-            f"spirv.op_{predicate.descriptor_suffix}.{OFFSET64_ALU_TYPE.suffix}",
-        )
-        for predicate in OFFSET64_COMPARE_PREDICATES
-    )
     return tuple(rules)
 
 
@@ -1233,8 +1269,6 @@ def _select_rules() -> tuple[DescriptorRule, ...]:
         for scalar in SCALAR_ALU_TYPES
     ]
     rules.append(_select_rule(_I1, "spirv.op_select.bool"))
-    rules.append(_select_rule(_INDEX, "spirv.op_select.i32"))
-    rules.append(_select_rule(_OFFSET, f"spirv.op_select.{OFFSET64_ALU_TYPE.suffix}"))
     return tuple(rules)
 
 
@@ -1254,14 +1288,8 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
     public_header="loom/target/arch/spirv/contracts/logical_core.h",
     cases=(
         *_scalar_constant_rules(),
-        _i32_index_constant_rule(),
-        _offset_constant_rule(),
-        ValueAliasRule(
-            source_op=index.index_assume,
-            source=ValueRef.operand("values"),
-            result=ValueRef.result("results"),
-            guards=(Guard.operand_segment_count("values", 1),),
-        ),
+        *SPIRV_INDEX_CONVERSION_RULES,
+        *SPIRV_INDEX_NUMERIC_RULES,
         ValueAliasRule(
             source_op=buffer.buffer_assume_alignment,
             source=ValueRef.operand("buffers"),
@@ -1270,15 +1298,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         ),
         *_builtin_index_rules(),
         *_conversion_rules(),
-        _index_cast_to_offset_rule(),
         *_scalar_binary_rules(),
-        _binary_rule(index.index_add, _INDEX, "spirv.op_iadd.i32"),
-        _binary_rule(index.index_sub, _INDEX, "spirv.op_isub.i32"),
-        _binary_rule(index.index_mul, _INDEX, "spirv.op_imul.i32"),
-        _binary_rule(index.index_shli, _INDEX, "spirv.op_shift_left_logical.i32"),
-        _ternary_rule(index.index_madd, _INDEX, "spirv.op_imul_add.i32"),
-        _binary_rule(index.index_add, _OFFSET, "spirv.op_iadd.offset64"),
-        _binary_rule(index.index_sub, _OFFSET, "spirv.op_isub.offset64"),
         *_compare_rules(),
         *_select_rules(),
         *_storage_buffer_rules(),

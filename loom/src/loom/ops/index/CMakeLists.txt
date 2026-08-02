@@ -16,6 +16,7 @@ loom_generated_cc_library(
     loom::py::loom::gen::ops::c_tables_index_generator
   SRCS
     "canonicalize.c"
+    "carrier.c"
     "compare.c"
     "facts.c"
     "verify.c"
@@ -26,6 +27,7 @@ loom_generated_cc_library(
     "builders.c"
     "tables.c"
   HDRS
+    "carrier.h"
     "compare.h"
     "ops.h"
   ARGS
@@ -39,6 +41,7 @@ loom_generated_cc_library(
     loom::ops::op_defs
     loom::ops::scalar
     loom::rewrite::rewriter
+    loom::target::capability_facts
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

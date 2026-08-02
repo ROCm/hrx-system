@@ -352,6 +352,68 @@ def _ternary_same_type_descriptor(
     )
 
 
+def _unary_typed_descriptor(
+    *,
+    key: str,
+    mnemonic: str,
+    semantic_tag: str,
+    operands: tuple[Operand, Operand],
+    feature_bits: int = 0,
+) -> Descriptor:
+    return Descriptor(
+        key=key,
+        mnemonic=mnemonic,
+        semantic_tag=semantic_tag,
+        operands=operands,
+        feature_mask_words=(feature_bits,) if feature_bits else (),
+        asm_forms=_asm(results=("dst",), operands=("input",)),
+        schedule_class=_SCHEDULE_ALU,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _address_conversion_descriptors() -> tuple[Descriptor, ...]:
+    descriptors: list[Descriptor] = []
+    for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS:
+        scalar = (
+            scalar_pair.signed if scalar_pair.bit_width == 64 else scalar_pair.unsigned
+        )
+        suffix = scalar.suffix
+        feature_bits = scalar_pair.signed.feature_bits
+        if scalar_pair.bit_width == 64:
+            to_offset_opcode = "bitcast"
+            to_offset_mnemonic = "OpBitcast"
+        else:
+            to_offset_opcode = "uconvert"
+            to_offset_mnemonic = "OpUConvert"
+        descriptors.append(
+            _unary_typed_descriptor(
+                key=f"spirv.op_{to_offset_opcode}.{suffix}.offset64",
+                mnemonic=f"{to_offset_mnemonic}.{suffix}.offset64",
+                semantic_tag=f"spirv.op_{to_offset_opcode}.{suffix}.offset64",
+                operands=(_offset64_result(), _id_operand("input")),
+                feature_bits=feature_bits,
+            )
+        )
+
+        if scalar_pair.bit_width == 64:
+            from_offset_opcode = "bitcast"
+            from_offset_mnemonic = "OpBitcast"
+        else:
+            from_offset_opcode = "uconvert"
+            from_offset_mnemonic = "OpUConvert"
+        descriptors.append(
+            _unary_typed_descriptor(
+                key=f"spirv.op_{from_offset_opcode}.offset64.{suffix}",
+                mnemonic=f"{from_offset_mnemonic}.offset64.{suffix}",
+                semantic_tag=f"spirv.op_{from_offset_opcode}.offset64.{suffix}",
+                operands=(_id_result(), _offset64_operand("input")),
+                feature_bits=feature_bits,
+            )
+        )
+    return tuple(descriptors)
+
+
 def _storage_buffer_effect(
     kind: EffectKind,
     scalar: StorageBufferScalar,
@@ -1044,15 +1106,23 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
                 _offset64_operand("rhs"),
             ),
         ),
-        Descriptor(
-            key="spirv.op_uconvert.i32.offset64",
-            mnemonic="OpUConvert.i32.offset64",
-            semantic_tag="spirv.op_uconvert.i32.offset64",
-            operands=(_offset64_result(), _id_operand("input")),
-            asm_forms=_asm(results=("dst",), operands=("input",)),
-            schedule_class=_SCHEDULE_ALU,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        _binary_same_type_descriptor(
+            key="spirv.op_imul.offset64",
+            mnemonic="OpIMul.offset64",
+            semantic_tag="spirv.op_imul.offset64",
+            operands=(
+                _offset64_result(),
+                _offset64_operand("lhs"),
+                _offset64_operand("rhs"),
+            ),
         ),
+        _unary_typed_descriptor(
+            key="spirv.op_bit_count.i32",
+            mnemonic="OpBitCount",
+            semantic_tag="spirv.op_bit_count.i32",
+            operands=(_id_result(), _id_operand("input")),
+        ),
+        *_address_conversion_descriptors(),
         *_builtin_index_descriptors(),
         *_compare_descriptors(),
         *_select_descriptors(),

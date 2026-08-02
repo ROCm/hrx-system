@@ -68,6 +68,7 @@ iree_py_test(
     "../../tools/pytest_style_runner.py"
   SRCS
     "attrs_test.py"
+    "convert_arith_test.py"
     "importer_test.py"
     "locations_test.py"
     "model_test.py"
@@ -76,6 +77,7 @@ iree_py_test(
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.importers.mlir.attrs_test"
+    "loom.importers.mlir.convert_arith_test"
     "loom.importers.mlir.importer_test"
     "loom.importers.mlir.locations_test"
     "loom.importers.mlir.model_test"

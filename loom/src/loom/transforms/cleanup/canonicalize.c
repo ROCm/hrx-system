@@ -13,6 +13,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
+#include "loom/ops/index/compare.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
@@ -28,6 +29,7 @@
 #include "loom/rewrite/greedy.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/rewrite/type_propagation.h"
+#include "loom/target/pass_environment.h"
 #include "loom/util/walk.h"
 
 static iree_status_t loom_canonicalize_replace_single_result_with_value(
@@ -461,6 +463,21 @@ static iree_status_t loom_canonicalize_try_symbolic_integer_cmp(
   *out_changed = false;
   if (!loom_index_cmp_isa(op) && !loom_scalar_cmpi_isa(op)) {
     return iree_ok_status();
+  }
+  if (loom_index_cmp_isa(op)) {
+    loom_value_id_t lhs = loom_index_cmp_lhs(op);
+    loom_value_id_t rhs = loom_index_cmp_rhs(op);
+    loom_type_t operand_type = loom_module_value_type(rewriter->module, lhs);
+    if (!loom_type_is_scalar(operand_type)) return iree_ok_status();
+    loom_value_facts_t lhs_facts = loom_rewriter_value_facts(rewriter, lhs);
+    loom_value_facts_t rhs_facts = loom_rewriter_value_facts(rewriter, rhs);
+    const loom_fact_context_t* fact_context =
+        rewriter->fact_table ? &rewriter->fact_table->context : NULL;
+    if (!loom_index_cmp_facts_fit_target_carrier(
+            fact_context, loom_type_element_type(operand_type),
+            loom_index_cmp_predicate(op), &lhs_facts, &rhs_facts)) {
+      return iree_ok_status();
+    }
   }
 
   loom_condition_integer_relation_t relation_storage[1];
@@ -1831,6 +1848,7 @@ iree_status_t loom_canonicalizer_run_region(
                                 : LOOM_CANONICALIZER_DEFAULT_MAX_ITERATIONS;
   loom_greedy_rewrite_options_t rewrite_options = {
       .max_iterations = max_iterations,
+      .target_facts = options ? options->target_facts : NULL,
       .seed_facts = options ? options->seed_facts : NULL,
       .materialize_constant = loom_constant_build,
   };
@@ -1896,10 +1914,7 @@ iree_status_t loom_canonicalizer_run_function(
         loom_value_table_capacity(&canonicalizer->module->values));
     if (iree_status_is_ok(status)) {
       loom_type_registry_configure_fact_context(&seed_facts.context);
-      if (options && options->seed_facts) {
-        seed_facts.context.target_facts =
-            options->seed_facts->context.target_facts;
-      }
+      seed_facts.context.target_facts = options ? options->target_facts : NULL;
     }
     if (iree_status_is_ok(status) && options && options->seed_facts) {
       status = loom_value_fact_table_clone_defined_facts(
@@ -1940,14 +1955,24 @@ iree_status_t loom_canonicalizer_run_function(
 
 iree_status_t loom_canonicalize_run(loom_pass_t* pass, loom_module_t* module,
                                     loom_func_like_t function) {
+  loom_canonicalizer_options_t run_options = {0};
+  if (pass->state) {
+    run_options = *(const loom_canonicalizer_options_t*)pass->state;
+  }
+  bool target_resolved = false;
+  IREE_RETURN_IF_ERROR(loom_target_pass_resolve_function_facts(
+      pass, module, function, &target_resolved, &run_options.target_facts));
+  if (!target_resolved) {
+    run_options.target_facts = NULL;
+  }
+
   loom_canonicalizer_t canonicalizer;
   IREE_RETURN_IF_ERROR(loom_canonicalizer_initialize(
       module, pass->arena, pass->value_facts, &canonicalizer));
 
   loom_canonicalizer_result_t result;
   iree_status_t status = loom_canonicalizer_run_function(
-      &canonicalizer, function,
-      (const loom_canonicalizer_options_t*)pass->state, &result);
+      &canonicalizer, function, &run_options, &result);
   if (iree_status_is_ok(status)) {
     if (result.changed) {
       loom_pass_mark_changed(pass);

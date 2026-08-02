@@ -73,3 +73,97 @@ check.case @ordered_dispatch_aba_case {
 }
 
 check.benchmark<@ordered_dispatch_aba_case>
+
+kernel.def target(@target) @scalar_addressing_i32() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %base: offset, %element: index, %mixed_row: index, %column: index, %stride_row: index, %columns: index, %subview_element: index) {
+  %zero = index.constant 0 : offset
+  %static_base = index.constant 8 : offset
+  %subview_base = index.constant 40 : offset
+  %base_bias = index.constant 4 : offset
+  %base_aligned = index.assume %base [range(%base, 0, 124), mul(%base, 4)] : offset
+  %biased_base = index.add %base_aligned, %base_bias : offset
+  %element_bounded = index.assume %element [range(%element, 0, 15)] : index
+  %mixed_row_bounded = index.assume %mixed_row [range(%mixed_row, 0, 3)] : index
+  %column_bounded = index.assume %column [range(%column, 0, 7)] : index
+  %stride_row_bounded = index.assume %stride_row [range(%stride_row, 0, 3)] : index
+  %columns_bounded = index.assume %columns [range(%columns, 1, 8)] : index
+  %stride_column_bounded = index.assume %column_bounded [lt(%column_bounded, %columns_bounded)] : index
+  %subview_element_bounded = index.assume %subview_element [range(%subview_element, 0, 3)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %static_view = buffer.view %input_aligned[%static_base] : buffer -> view<2x4xi32, #dense>
+  %dynamic_base_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4xi32, #dense>
+  %dynamic_index_view = buffer.view %input_aligned[%zero] : buffer -> view<16xi32, #dense>
+  %mixed_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4x8xi32, #dense>
+  %dynamic_stride_view = buffer.view %input_aligned[%zero] : buffer -> view<4x[%columns_bounded]xi32, #dense>
+  %subview_source = buffer.view %input_aligned[%subview_base] : buffer -> view<8xi32, #dense>
+  %subview = view.subview %subview_source[1] : view<8xi32, #dense> -> view<4xi32, #dense>
+  %materialized_base_view = buffer.view %input_aligned[%biased_base] : buffer -> view<8xi32, #dense>
+  %output_view = buffer.view %output_aligned[%zero] : buffer -> view<7xi32, #dense>
+  %static_value = view.load %static_view[1, 2] : view<2x4xi32, #dense> -> i32
+  %dynamic_base_value = view.load %dynamic_base_view[2] : view<4xi32, #dense> -> i32
+  %dynamic_index_value = view.load %dynamic_index_view[%element_bounded] : view<16xi32, #dense> -> i32
+  %mixed_value = view.load %mixed_view[%mixed_row_bounded, %column_bounded] : view<4x8xi32, #dense> -> i32
+  %dynamic_stride_value = view.load %dynamic_stride_view[%stride_row_bounded, %stride_column_bounded] : view<4x[%columns_bounded]xi32, #dense> -> i32
+  %subview_value = view.load %subview[%subview_element_bounded] : view<4xi32, #dense> -> i32
+  %materialized_base_value = view.load %materialized_base_view[6] : view<8xi32, #dense> -> i32
+  view.store %static_value, %output_view[0] : i32, view<7xi32, #dense>
+  view.store %dynamic_base_value, %output_view[1] : i32, view<7xi32, #dense>
+  view.store %dynamic_index_value, %output_view[2] : i32, view<7xi32, #dense>
+  view.store %mixed_value, %output_view[3] : i32, view<7xi32, #dense>
+  view.store %dynamic_stride_value, %output_view[4] : i32, view<7xi32, #dense>
+  view.store %subview_value, %output_view[5] : i32, view<7xi32, #dense>
+  view.store %materialized_base_value, %output_view[6] : i32, view<7xi32, #dense>
+  kernel.return
+}
+
+check.case @scalar_addressing_i32_case {
+  %input = check.generate.iota offset(100) step(1) : tensor<32xi32>
+  %output = check.generate.fill value(-1) : tensor<7xi32>
+  %base = check.literal value(28) : offset
+  %element = check.literal value(10) : index
+  %mixed_row = check.literal value(0) : index
+  %column = check.literal value(4) : index
+  %stride_row = check.literal value(1) : index
+  %columns = check.literal value(8) : index
+  %subview_element = check.literal value(2) : index
+  func.call @scalar_addressing_i32(%input, %output, %base, %element, %mixed_row, %column, %stride_row, %columns, %subview_element) : (tensor<32xi32>, tensor<7xi32>, offset, index, index, index, index, index, index)
+  %expected = check.generate.iota offset(108) step(1) : tensor<7xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<7xi32>
+  check.return
+}
+
+kernel.def target(@target) @workgroup_addressing_i32() {
+  %unit = index.constant 1 : index
+  %four = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%four, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 4 : offset
+  %scratch_byte_length = index.constant 32 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%zero] : buffer -> view<4xi32, #dense>
+  %output_view = buffer.view %output_aligned[%zero] : buffer -> view<4xi32, #dense>
+  %scratch = buffer.alloca %scratch_byte_length {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<6xi32, #dense>
+  %scratch_subview = view.subview %scratch_view[1] : view<6xi32, #dense> -> view<4xi32, #dense>
+  %input_value = view.load %input_view[%lane] : view<4xi32, #dense> -> i32
+  view.store %input_value, %scratch_subview[%lane] : i32, view<4xi32, #dense>
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  %workgroup_value = view.load %scratch_subview[%lane] : view<4xi32, #dense> -> i32
+  view.store %workgroup_value, %output_view[%lane] : i32, view<4xi32, #dense>
+  kernel.return
+}
+
+check.case @workgroup_addressing_i32_case {
+  %input = check.generate.iota offset(10) step(3) : tensor<4xi32>
+  %output = check.generate.fill value(-1) : tensor<4xi32>
+  func.call @workgroup_addressing_i32(%input, %output) : (tensor<4xi32>, tensor<4xi32>)
+  %expected = check.generate.iota offset(10) step(3) : tensor<4xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<4xi32>
+  check.return
+}

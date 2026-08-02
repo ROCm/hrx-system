@@ -152,7 +152,7 @@ kernel.def target(@target) @index_shli_global_b32() {
 
 // ====
 
-// XFAIL: SPIR-V index scaling lowering is unsupported
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
 spirv.target<vulkan1_3> @target
 kernel.def target(@target) @index_scale_byte_offset_global_b32() {
   %unit = index.constant 1 : index
@@ -227,7 +227,7 @@ kernel.def target(@target) @index_edge_loop_dynamic_lower_bound_global_b32() {
 
 // ====
 
-// XFAIL: SPIR-V index bitwise and shift lowering is unsupported
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
 spirv.target<vulkan1_3> @target
 kernel.def target(@target) @index_div_rem_power_of_two_global_b32() {
   %unit = index.constant 1 : index
@@ -248,7 +248,7 @@ kernel.def target(@target) @index_div_rem_power_of_two_global_b32() {
 
 // ====
 
-// XFAIL: SPIR-V index division and remainder lowering is unsupported
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
 spirv.target<vulkan1_3> @target
 kernel.def target(@target) @index_div_rem_magic_mul_global_b32() {
   %unit = index.constant 1 : index
@@ -269,7 +269,7 @@ kernel.def target(@target) @index_div_rem_magic_mul_global_b32() {
 
 // ====
 
-// XFAIL: SPIR-V index division and remainder lowering is unsupported
+// XFAIL: SPIR-V ordinary vector memory lowering is unsupported
 spirv.target<vulkan1_3> @target
 kernel.def target(@target) @index_div_rem_magic_add_global_b32() {
   %unit = index.constant 1 : index

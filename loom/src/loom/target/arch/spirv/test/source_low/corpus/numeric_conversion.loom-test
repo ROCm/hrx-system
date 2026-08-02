@@ -603,7 +603,7 @@ func.def target(@target) @scalar_f16_dequant_pair(%q0: i32, %q1: i32, %scale: f1
 
 // ====
 
-// XFAIL: SPIR-V indexed scalar memory lowering is unsupported
+// XFAIL: Source memory alignment facts do not prove the SPIR-V requirement
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 kernel.def target(@target) @scalar_sitofp_i8_load_store() {
   %count = index.constant 1 : index
@@ -1015,7 +1015,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
 
 // ====
 
-// XFAIL: SPIR-V indexed scalar memory lowering is unsupported
+// XFAIL: Source memory alignment facts do not prove the SPIR-V requirement
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 kernel.def target(@target) @scalar_bitcast_direct_i32_arg_f32_store() {
   %c1 = index.constant 1 : index
@@ -1033,7 +1033,7 @@ kernel.def target(@target) @scalar_bitcast_direct_i32_arg_f32_store() {
 
 // ====
 
-// XFAIL: SPIR-V indexed scalar memory lowering is unsupported
+// XFAIL: Source memory alignment facts do not prove the SPIR-V requirement
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 kernel.def target(@target) @scalar_bitcast_lane_byte_decode_select_tree_store() {
   %unit = index.constant 1 : index

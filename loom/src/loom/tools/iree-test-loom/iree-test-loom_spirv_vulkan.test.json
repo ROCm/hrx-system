@@ -40,6 +40,44 @@
       }
     },
     {
+      "name": "runs spirv vulkan scalar addressing matrix",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/spirv_vulkan_hal_actual.loom",
+          "--case=@scalar_addressing_i32_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"scalar_addressing_i32_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan workgroup addressing matrix",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/spirv_vulkan_hal_actual.loom",
+          "--case=@workgroup_addressing_i32_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"workgroup_addressing_i32_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
       "name": "runs spirv vulkan i32 and Boolean truth tables",
       "run": {
         "tool": "iree-test-loom",
@@ -55,6 +93,26 @@
           "\"format\":\"loom.test.v0\"",
           "\"case\":\"integer_i32_truth_table_case\"",
           "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan index numeric truth tables",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/spirv_vulkan_integer_hal_actual.loom",
+          "--case=@index_numeric_truth_table_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          {
+            "regex": "\"case\":\"index_numeric_truth_table_case\".*(\"passed\":true|\"code\":\"requirement_not_satisfied\",\"provider_code\":\"feature_disabled\")"
+          }
         ]
       }
     },

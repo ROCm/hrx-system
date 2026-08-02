@@ -16,11 +16,13 @@ loom_generated_cc_library(
     name = "index",
     srcs = [
         "canonicalize.c",
+        "carrier.c",
         "compare.c",
         "facts.c",
         "verify.c",
     ],
     hdrs = [
+        "carrier.h",
         "compare.h",
         "ops.h",
     ],
@@ -42,6 +44,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:capability_facts",
         "//runtime/src/iree/base/internal",
     ],
 )

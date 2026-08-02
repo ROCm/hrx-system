@@ -447,7 +447,7 @@ static loom_value_facts_t loom_condition_edge_value_facts(
 }
 
 static bool loom_condition_fact_set_proves_index_cmp(
-    const loom_value_fact_table_t* fact_table,
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_condition_fact_set_t* edge_facts, const loom_op_t* defining_op,
     bool* out_condition) {
   const loom_value_id_t lhs = loom_index_cmp_lhs(defining_op);
@@ -461,9 +461,13 @@ static bool loom_condition_fact_set_proves_index_cmp(
       loom_condition_edge_value_facts(fact_table, edge_facts, lhs);
   const loom_value_facts_t rhs_facts =
       loom_condition_edge_value_facts(fact_table, edge_facts, rhs);
-  return loom_index_cmp_result_from_facts(loom_index_cmp_predicate(defining_op),
-                                          &lhs_facts, &rhs_facts,
-                                          out_condition);
+  loom_type_t operand_type = loom_module_value_type(module, lhs);
+  if (!loom_type_is_scalar(operand_type)) return false;
+  return loom_index_cmp_result_from_facts(
+      fact_table ? &fact_table->context : NULL,
+      loom_type_element_type(operand_type),
+      loom_index_cmp_predicate(defining_op), &lhs_facts, &rhs_facts,
+      out_condition);
 }
 
 static bool loom_condition_fact_set_proves_scalar_cmpi(
@@ -595,7 +599,7 @@ static bool loom_condition_fact_set_proves_condition_impl(
   switch (defining_op->kind) {
     case LOOM_OP_INDEX_CMP:
       return loom_condition_fact_set_proves_index_cmp(
-          fact_table, edge_facts, defining_op, out_condition);
+          module, fact_table, edge_facts, defining_op, out_condition);
     case LOOM_OP_SCALAR_CMPI:
       return loom_condition_fact_set_proves_scalar_cmpi(
           fact_table, edge_facts, defining_op, out_condition);

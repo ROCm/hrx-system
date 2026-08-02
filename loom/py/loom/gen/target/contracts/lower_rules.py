@@ -713,11 +713,13 @@ def _validate_c_table_shape(
 
 
 def _validate_type_pattern_c_shape(subject: str, type_pattern: TypePattern) -> None:
-    if type_pattern.kind != "vector":
+    if type_pattern.kind not in {"vector", "view"}:
         return
     _require_u8(len(type_pattern.dims), f"{subject} rank")
     for index, dim in enumerate(type_pattern.dims):
         _require_i64(dim, f"{subject} static dim {index}")
+    if type_pattern.kind == "view":
+        return
     if type_pattern.lanes is not None:
         _require_i64(type_pattern.lanes, f"{subject} static lanes")
     if isinstance(type_pattern.minimum_lanes, int):

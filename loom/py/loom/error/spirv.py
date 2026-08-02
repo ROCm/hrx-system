@@ -8,6 +8,14 @@
 
 from loom.errors import ErrorDef, ErrorDomain, ErrorParam, ParamKind, Severity
 
+_TARGET_CONTEXT_PARAMS = (
+    ErrorParam("target_key", ParamKind.STRING),
+    ErrorParam("export_name", ParamKind.STRING),
+    ErrorParam("config_key", ParamKind.STRING),
+    ErrorParam("function_name", ParamKind.STRING),
+    ErrorParam("op_name", ParamKind.STRING),
+)
+
 # ERR_SPIRV_001: SPIR-V ABI value type metadata is malformed.
 ERR_SPIRV_001 = ErrorDef(
     domain=ErrorDomain.SPIRV,
@@ -422,6 +430,112 @@ ERR_SPIRV_025 = ErrorDef(
     ),
 )
 
+# ERR_SPIRV_026: SPIR-V address conversion range is not proven.
+ERR_SPIRV_026 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=26,
+    severity=Severity.ERROR,
+    summary="SPIR-V address conversion range is not proven.",
+    message=(
+        "SPIR-V target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected '{op_name}' in '@{function_name}': "
+        "conversion from {source_type} to {result_type} requires the source "
+        "value to be proven in [{required_range_lo}, {required_range_hi}]; "
+        "constraint '{constraint_key}' is not satisfied"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("source_type", ParamKind.TYPE),
+        ErrorParam("result_type", ParamKind.TYPE),
+        ErrorParam("required_range_lo", ParamKind.I64),
+        ErrorParam("required_range_hi", ParamKind.I64),
+        ErrorParam("constraint_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Establish the value range at its producer or with an assumption "
+        "after the corresponding runtime guard"
+    ),
+)
+
+# ERR_SPIRV_027: SPIR-V index numeric operand range is not proven.
+ERR_SPIRV_027 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=27,
+    severity=Severity.ERROR,
+    summary="SPIR-V index numeric operand range is not proven.",
+    message=(
+        "SPIR-V target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected '{op_name}' field '{field_name}' in "
+        "'@{function_name}': {value_type} value must be proven in "
+        "[{required_range_lo}, {required_range_hi}]; constraint "
+        "'{constraint_key}' is not satisfied"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("field_name", ParamKind.STRING),
+        ErrorParam("value_type", ParamKind.TYPE),
+        ErrorParam("required_range_lo", ParamKind.I64),
+        ErrorParam("required_range_hi", ParamKind.I64),
+        ErrorParam("constraint_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Establish the operand range at its producer or with an assumption "
+        "after the corresponding runtime guard"
+    ),
+)
+
+# ERR_SPIRV_028: SPIR-V source-memory address index range is not proven.
+ERR_SPIRV_028 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=28,
+    severity=Severity.ERROR,
+    summary="SPIR-V source-memory address index range is not proven.",
+    message=(
+        "SPIR-V target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected '{op_name}' in '@{function_name}': every "
+        "index contributing to the source-memory address must be proven in "
+        "[{required_range_lo}, {required_range_hi}]; constraint "
+        "'{constraint_key}' is not satisfied"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("required_range_lo", ParamKind.I64),
+        ErrorParam("required_range_hi", ParamKind.I64),
+        ErrorParam("constraint_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Establish the index range at its producer or with an assumption "
+        "after the corresponding runtime guard"
+    ),
+)
+
+# ERR_SPIRV_029: SPIR-V Workgroup element address is not proven.
+ERR_SPIRV_029 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=29,
+    severity=Severity.ERROR,
+    summary="SPIR-V Workgroup element address is not proven.",
+    message=(
+        "SPIR-V target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected '{op_name}' in '@{function_name}': the "
+        "complete root-relative byte address must be exactly divisible by "
+        "the {element_byte_count}-byte element size and its element index "
+        "must be proven in [{required_range_lo}, {required_range_hi}]; "
+        "constraint '{constraint_key}' is not satisfied"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("element_byte_count", ParamKind.U32),
+        ErrorParam("required_range_lo", ParamKind.I64),
+        ErrorParam("required_range_hi", ParamKind.I64),
+        ErrorParam("constraint_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Establish aligned, non-negative element addressing at the view or "
+        "index producer and prove the complete address range"
+    ),
+)
+
 ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_001,
     ERR_SPIRV_002,
@@ -447,4 +561,8 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_023,
     ERR_SPIRV_024,
     ERR_SPIRV_025,
+    ERR_SPIRV_026,
+    ERR_SPIRV_027,
+    ERR_SPIRV_028,
+    ERR_SPIRV_029,
 )

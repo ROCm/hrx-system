@@ -69,8 +69,9 @@ loom_target_pass_capability_function_versions(
 //
 // A concrete target-refined function version supplies its facts directly from
 // the pass frame. An unrefined function projects its authored target contract
-// into |pass->arena|. Returns OK with |out_resolved| false when |function| has
-// no target contract.
+// into |pass->instance_arena| so the facts survive resets of the current run's
+// scratch arena. Returns OK with |out_resolved| false when |function| has no
+// target contract.
 iree_status_t loom_target_pass_resolve_function_facts(
     const loom_pass_t* pass, const loom_module_t* module,
     loom_func_like_t function, bool* out_resolved,
