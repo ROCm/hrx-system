@@ -88,6 +88,9 @@ int main(int argc, char** argv) {
       return 0;
     }
   }
+  IREE_TRACE_APP_ENTER();
+  IREE_TRACE_ZONE_BEGIN(z0);
+
   loom_tooling_cli_set_default_help_filter();
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 
@@ -168,5 +171,8 @@ int main(int argc, char** argv) {
     loom_context_deinitialize(&context);
   }
   iree_arena_block_pool_deinitialize(&block_pool);
+
+  IREE_TRACE_ZONE_END(z0);
+  IREE_TRACE_APP_EXIT(exit_code);
   return exit_code;
 }
