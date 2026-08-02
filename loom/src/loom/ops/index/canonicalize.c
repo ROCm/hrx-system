@@ -10,6 +10,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/capability_facts.h"
 
 //===----------------------------------------------------------------------===//
 // Utilities
@@ -273,8 +274,23 @@ static iree_status_t loom_index_replace_single_result_with_scaled_madd_op(
                                                        scale_value, addend);
 }
 
-static bool loom_index_shift_amount_is_valid(loom_type_t type, int64_t amount) {
-  int32_t bitwidth = loom_scalar_type_bitwidth(loom_type_element_type(type));
+static int32_t loom_index_rewriter_target_bitwidth(
+    const loom_rewriter_t* rewriter) {
+  const loom_fact_context_t* context =
+      rewriter->fact_table ? &rewriter->fact_table->context : NULL;
+  uint64_t target_bitwidth = 0;
+  if (!loom_target_fact_context_query_u64(context, IREE_SV("target"),
+                                          IREE_SV("index_bitwidth"),
+                                          &target_bitwidth) ||
+      target_bitwidth > INT32_MAX) {
+    return 0;
+  }
+  return (int32_t)target_bitwidth;
+}
+
+static bool loom_index_shift_amount_is_valid(const loom_rewriter_t* rewriter,
+                                             int64_t amount) {
+  int32_t bitwidth = loom_index_rewriter_target_bitwidth(rewriter);
   return amount >= 0 && bitwidth > 0 && amount < bitwidth;
 }
 
@@ -332,10 +348,7 @@ static bool loom_index_match_scaled_value_with_exact_positive_factor(
     if (!loom_index_query_exact_i64(rewriter, amount_value, &amount)) {
       return false;
     }
-    loom_type_t result_type =
-        loom_module_value_type(rewriter->module, loom_index_shli_result(op));
-    if (!loom_index_shift_amount_is_valid(result_type, amount) ||
-        amount >= 63) {
+    if (!loom_index_shift_amount_is_valid(rewriter, amount) || amount >= 63) {
       return false;
     }
     out_scaled_value->value = loom_index_shli_lhs(op);
@@ -562,10 +575,10 @@ static bool loom_index_scaled_radix_terms_are_complementary(
   return true;
 }
 
-static bool loom_index_integer_value_is_all_ones(loom_type_t type,
-                                                 int64_t value) {
+static bool loom_index_integer_value_is_all_ones(
+    const loom_rewriter_t* rewriter, int64_t value) {
   if (value == -1) return true;
-  int32_t bitwidth = loom_scalar_type_bitwidth(loom_type_element_type(type));
+  int32_t bitwidth = loom_index_rewriter_target_bitwidth(rewriter);
   if (bitwidth <= 0 || bitwidth >= 63) return false;
   return value == (((int64_t)1 << bitwidth) - 1);
 }
@@ -849,7 +862,7 @@ iree_status_t loom_index_mul_canonicalize(loom_op_t* op,
                                                                &scaled) &&
       scaled.factor > 1 && iree_math_is_power_of_two_i64(scaled.factor)) {
     int64_t amount = iree_math_floor_log2_u64(scaled.factor);
-    if (loom_index_shift_amount_is_valid(result_type, amount)) {
+    if (loom_index_shift_amount_is_valid(rewriter, amount)) {
       return loom_index_replace_single_result_with_binary_constant_op(
           op, rewriter, LOOM_OP_INDEX_SHLI, scaled.value, amount,
           LOOM_VALUE_ID_INVALID);
@@ -1100,12 +1113,12 @@ iree_status_t loom_index_andi_canonicalize(loom_op_t* op,
   }
   int64_t lhs_value = 0;
   if (loom_index_query_exact_i64(rewriter, lhs, &lhs_value) &&
-      loom_index_integer_value_is_all_ones(result_type, lhs_value)) {
+      loom_index_integer_value_is_all_ones(rewriter, lhs_value)) {
     return loom_index_replace_single_result_with_value(op, rewriter, rhs);
   }
   int64_t rhs_value = 0;
   if (loom_index_query_exact_i64(rewriter, rhs, &rhs_value) &&
-      loom_index_integer_value_is_all_ones(result_type, rhs_value)) {
+      loom_index_integer_value_is_all_ones(rewriter, rhs_value)) {
     return loom_index_replace_single_result_with_value(op, rewriter, lhs);
   }
   return iree_ok_status();
@@ -1124,16 +1137,14 @@ iree_status_t loom_index_ori_canonicalize(loom_op_t* op,
   if (loom_index_value_facts_are_exact_i64(rewriter, rhs, 0)) {
     return loom_index_replace_single_result_with_value(op, rewriter, lhs);
   }
-  loom_type_t result_type =
-      loom_module_value_type(rewriter->module, loom_index_ori_result(op));
   int64_t lhs_value = 0;
   if (loom_index_query_exact_i64(rewriter, lhs, &lhs_value) &&
-      loom_index_integer_value_is_all_ones(result_type, lhs_value)) {
+      loom_index_integer_value_is_all_ones(rewriter, lhs_value)) {
     return loom_index_replace_single_result_with_value(op, rewriter, lhs);
   }
   int64_t rhs_value = 0;
   if (loom_index_query_exact_i64(rewriter, rhs, &rhs_value) &&
-      loom_index_integer_value_is_all_ones(result_type, rhs_value)) {
+      loom_index_integer_value_is_all_ones(rewriter, rhs_value)) {
     return loom_index_replace_single_result_with_value(op, rewriter, rhs);
   }
   return iree_ok_status();
@@ -1198,7 +1209,7 @@ static iree_status_t loom_index_shift_canonicalize(loom_op_t* op,
     if (amount == 0) {
       return loom_index_replace_single_result_with_value(op, rewriter, lhs);
     }
-    if (loom_index_shift_amount_is_valid(result_type, amount) &&
+    if (loom_index_shift_amount_is_valid(rewriter, amount) &&
         loom_index_value_facts_are_exact_i64(rewriter, lhs, 0)) {
       return loom_index_replace_single_result_with_index_constant(
           op, rewriter, result_type, 0);
@@ -1216,7 +1227,7 @@ static iree_status_t loom_index_shift_canonicalize(loom_op_t* op,
   }
   int64_t combined_amount = 0;
   if (!iree_checked_add_i64(inner_amount, amount, &combined_amount) ||
-      !loom_index_shift_amount_is_valid(result_type, combined_amount)) {
+      !loom_index_shift_amount_is_valid(rewriter, combined_amount)) {
     return iree_ok_status();
   }
 
@@ -1280,13 +1291,10 @@ iree_status_t loom_index_rotri_canonicalize(loom_op_t* op,
     return loom_index_replace_single_result_with_value(op, rewriter, lhs);
   }
 
-  loom_type_t result_type =
-      loom_module_value_type(rewriter->module, loom_index_rotri_result(op));
-  if (!loom_index_shift_amount_is_valid(result_type, amount)) {
+  if (!loom_index_shift_amount_is_valid(rewriter, amount)) {
     return iree_ok_status();
   }
-  int32_t bitwidth =
-      loom_scalar_type_bitwidth(loom_type_element_type(result_type));
+  int32_t bitwidth = loom_index_rewriter_target_bitwidth(rewriter);
   int64_t left_amount = bitwidth - amount;
 
   loom_builder_set_before(&rewriter->builder, op);

@@ -39,6 +39,7 @@ loom_generated_cc_library(
     loom::ops::op_defs
     loom::ops::scalar
     loom::rewrite::rewriter
+    loom::target::capability_facts
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

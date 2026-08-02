@@ -585,6 +585,7 @@ TEST_F(CanonicalizeTest, DriverAcceptsSeedFacts) {
   loom_canonicalizer_result_t result;
   loom_canonicalizer_options_t options = {
       /*.max_iterations=*/{},
+      /*.target_facts=*/NULL,
       /*.seed_facts=*/&seed_facts,
   };
   IREE_ASSERT_OK(loom_canonicalizer_run_function(&canonicalizer, func_like_,
@@ -609,7 +610,7 @@ TEST_F(CanonicalizeTest, DriverAcceptsSeedFacts) {
   iree_arena_deinitialize(&seed_arena);
 }
 
-TEST_F(CanonicalizeTest, DriverPreservesSeedTargetFactsAcrossSideRegions) {
+TEST_F(CanonicalizeTest, DriverPreservesExplicitTargetFactsAcrossSideRegions) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
 
   loom_builder_t module_builder;
@@ -658,8 +659,6 @@ TEST_F(CanonicalizeTest, DriverPreservesSeedTargetFactsAcrossSideRegions) {
   loom_value_fact_table_t seed_facts;
   IREE_ASSERT_OK(loom_value_fact_table_initialize(
       &seed_facts, &seed_arena, loom_value_table_capacity(&module_->values)));
-  seed_facts.context.target_facts = &target_facts;
-
   iree_arena_allocator_t pass_arena;
   iree_arena_initialize(&block_pool_, &pass_arena);
   loom_pass_value_fact_owner_t value_facts = {};
@@ -670,6 +669,7 @@ TEST_F(CanonicalizeTest, DriverPreservesSeedTargetFactsAcrossSideRegions) {
   loom_canonicalizer_result_t result;
   loom_canonicalizer_options_t options = {
       /*.max_iterations=*/{},
+      /*.target_facts=*/&target_facts,
       /*.seed_facts=*/&seed_facts,
   };
   IREE_ASSERT_OK(loom_canonicalizer_run_function(&canonicalizer, split_func,
@@ -733,6 +733,7 @@ TEST_F(CanonicalizeTest, RegionDriverAcceptsSeedFacts) {
   loom_canonicalizer_result_t result;
   loom_canonicalizer_options_t options = {
       /*.max_iterations=*/{},
+      /*.target_facts=*/NULL,
       /*.seed_facts=*/&seed_facts,
   };
   IREE_ASSERT_OK(loom_canonicalizer_run_region(

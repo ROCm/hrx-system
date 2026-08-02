@@ -416,15 +416,17 @@ func.def @mul_identities(%x: index) -> (index, index) {
 
 // ====
 
-func.def @mul_power_of_two_becomes_shift(%x: index) -> (index) {
+// A power-of-two multiply remains width-neutral until target facts prove that
+// its shift amount is in range.
+func.def @mul_power_of_two_waits_for_target_width(%x: index) -> (index) {
   %c8 = index.constant 8 : index
   %scaled = index.mul %x, %c8 : index
   func.return %scaled : index
 }
 // ----
-func.def @mul_power_of_two_becomes_shift(%x: index) -> (index) {
-  %4 = index.constant 3 : index
-  %scaled = index.shli %x, %4 : index
+func.def @mul_power_of_two_waits_for_target_width(%x: index) -> (index) {
+  %c8 = index.constant 8 : index
+  %scaled = index.mul %x, %c8 : index
   func.return %scaled : index
 }
 
@@ -462,16 +464,19 @@ func.def @add_mul_canonicalizes_to_madd(%i: index, %j: index) -> (index) {
 
 // ====
 
-func.def @add_shift_canonicalizes_to_madd(%i: index, %j: index) -> (index) {
+// A shift-derived scale remains explicit until the target width establishes
+// that the source shift is valid.
+func.def @add_shift_waits_for_target_width(%i: index, %j: index) -> (index) {
   %shift = index.constant 2 : index
   %scaled = index.shli %i, %shift : index
   %r = index.add %scaled, %j : index
   func.return %r : index
 }
 // ----
-func.def @add_shift_canonicalizes_to_madd(%i: index, %j: index) -> (index) {
-  %6 = index.constant 4 : index
-  %r = index.madd %i, %6, %j : index
+func.def @add_shift_waits_for_target_width(%i: index, %j: index) -> (index) {
+  %shift = index.constant 2 : index
+  %scaled = index.shli %i, %shift : index
+  %r = index.add %scaled, %j : index
   func.return %r : index
 }
 
@@ -533,8 +538,8 @@ func.def @add_scaled_div_rem_reconstruction(%lane: index) -> (index) {
 // ----
 func.def @add_scaled_div_rem_reconstruction(%lane: index) -> (index) {
   %bounded = index.assume %lane [range(%lane, 0, 1024)] : index
-  %12 = index.constant 3 : index
-  %linear = index.shli %bounded, %12 : index
+  %c8 = index.constant 8 : index
+  %linear = index.mul %bounded, %c8 : index
   func.return %linear : index
 }
 
@@ -558,8 +563,8 @@ func.def @add_scaled_shift_mask_reconstruction(%lane: index) -> (index) {
 // ----
 func.def @add_scaled_shift_mask_reconstruction(%lane: index) -> (index) {
   %bounded = index.assume %lane [range(%lane, 0, 1024)] : index
-  %13 = index.constant 3 : index
-  %linear = index.shli %bounded, %13 : index
+  %c8 = index.constant 8 : index
+  %linear = index.mul %bounded, %c8 : index
   func.return %linear : index
 }
 
@@ -584,8 +589,8 @@ func.def @madd_scaled_shift_mask_reconstruction_with_assumes(%lane: index) -> (i
 // ----
 func.def @madd_scaled_shift_mask_reconstruction_with_assumes(%lane: index) -> (index) {
   %bounded = index.assume %lane [range(%lane, 0, 1024)] : index
-  %14 = index.constant 3 : index
-  %linear = index.shli %bounded, %14 : index
+  %c8 = index.constant 8 : index
+  %linear = index.mul %bounded, %c8 : index
   func.return %linear : index
 }
 
@@ -607,11 +612,11 @@ func.def @add_scaled_div_rem_maybe_negative_preserved(%lane: index) -> (index) {
 // ----
 func.def @add_scaled_div_rem_maybe_negative_preserved(%lane: index) -> (index) {
   %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
   %c16 = index.constant 16 : index
   %quotient = index.div %lane, %c2 : index
   %remainder = index.rem %lane, %c2 : index
-  %11 = index.constant 3 : index
-  %remainder_scaled = index.shli %remainder, %11 : index
+  %remainder_scaled = index.mul %remainder, %c8 : index
   %linear = index.madd %quotient, %c16, %remainder_scaled : index
   func.return %linear : index
 }
@@ -631,8 +636,8 @@ func.def @div_scaled_coordinate(%i: index) -> (index) {
 // ----
 func.def @div_scaled_coordinate(%i: index) -> (index) {
   %i2 = index.assume %i [range(%i, 0, 1024)] : index
-  %8 = index.constant 3 : index
-  %q = index.shli %i2, %8 : index
+  %c8 = index.constant 8 : index
+  %q = index.mul %i2, %c8 : index
   func.return %q : index
 }
 
@@ -650,9 +655,9 @@ func.def @div_scaled_unknown_range_is_preserved(%i: index) -> (index) {
 
 // ----
 func.def @div_scaled_unknown_range_is_preserved(%i: index) -> (index) {
+  %c64 = index.constant 64 : index
   %c8 = index.constant 8 : index
-  %6 = index.constant 6 : index
-  %scaled = index.shli %i, %6 : index
+  %scaled = index.mul %i, %c64 : index
   %q = index.div %scaled, %c8 : index
   func.return %q : index
 }
@@ -963,8 +968,8 @@ func.def @bitwise_facts(%x: index) -> (i64, i64, i1, i64, i64) {
 
 // ====
 
-// Bit counts use index's 64-bit value width.
-func.def @bit_count_facts() -> (index, index, index) {
+// Bit counts remain symbolic when no target has established index width.
+func.def @bit_count_facts_require_target_width() -> (index, index, index) {
   %one = index.constant 1 : index
   %zero = index.constant 0 : index
   %ones = index.constant -1 : index
@@ -974,17 +979,20 @@ func.def @bit_count_facts() -> (index, index, index) {
   func.return %clz, %ctz, %pop : index, index, index
 }
 // ----
-func.def @bit_count_facts() -> (index, index, index) {
-  %clz = index.constant 63 : index
-  %ctz = index.constant 64 : index
-  %pop = index.constant 64 : index
+func.def @bit_count_facts_require_target_width() -> (index, index, index) {
+  %one = index.constant 1 : index
+  %zero = index.constant 0 : index
+  %ones = index.constant -1 : index
+  %clz = index.ctlzi %one : index
+  %ctz = index.cttzi %zero : index
+  %pop = index.ctpopi %ones : index
   func.return %clz, %ctz, %pop : index, index, index
 }
 
 // ====
 
-// Exact bitwise and rotate facts fold to index constants.
-func.def @bitwise_exact_folds() -> (index, index, index, index) {
+// Width-independent bitwise facts fold while rotate remains target-sensitive.
+func.def @bitwise_exact_folds_preserve_target_rotate() -> (index, index, index, index) {
   %a = index.constant 255 : index
   %b = index.constant 15 : index
   %v = index.constant 1 : index
@@ -996,11 +1004,13 @@ func.def @bitwise_exact_folds() -> (index, index, index, index) {
   func.return %and, %or, %xor, %rot : index, index, index, index
 }
 // ----
-func.def @bitwise_exact_folds() -> (index, index, index, index) {
+func.def @bitwise_exact_folds_preserve_target_rotate() -> (index, index, index, index) {
+  %v = index.constant 1 : index
+  %amount = index.constant 8 : index
   %and = index.constant 15 : index
   %or = index.constant 255 : index
   %xor = index.constant 240 : index
-  %rot = index.constant 256 : index
+  %rot = index.rotli %v, %amount : index
   func.return %and, %or, %xor, %rot : index, index, index, index
 }
 
@@ -1057,7 +1067,7 @@ func.def @xori_cancels_duplicate_exact_constants(%x: index) -> (index) {
 
 // ====
 
-func.def @shift_identities_and_reassociation(%x: index) -> (index, index, index, index, index, index) {
+func.def @shift_identities_without_target_reassociation(%x: index) -> (index, index, index, index, index, index) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %two = index.constant 2 : index
@@ -1072,12 +1082,14 @@ func.def @shift_identities_and_reassociation(%x: index) -> (index, index, index,
   func.return %shl_zero_amount, %shrsi_zero_amount, %shrui_zero_amount, %shl_zero_value, %reassoc_shl, %reassoc_shr : index, index, index, index, index, index
 }
 // ----
-func.def @shift_identities_and_reassociation(%x: index) -> (index, index, index, index, index, index) {
+func.def @shift_identities_without_target_reassociation(%x: index) -> (index, index, index, index, index, index) {
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
   %shl_zero_value = index.constant 0 : index
-  %20 = index.constant 3 : index
-  %reassoc_shl = index.shli %x, %20 : index
-  %18 = index.constant 3 : index
-  %reassoc_shr = index.shrui %x, %18 : index
+  %inner_shl = index.shli %x, %one : index
+  %reassoc_shl = index.shli %inner_shl, %two : index
+  %inner_shr = index.shrui %x, %one : index
+  %reassoc_shr = index.shrui %inner_shr, %two : index
   func.return %x, %x, %x, %shl_zero_value, %reassoc_shl, %reassoc_shr : index, index, index, index, index, index
 }
 
@@ -1097,7 +1109,7 @@ func.def @shrsi_non_negative_becomes_shrui(%x: index, %amount: index) -> (index)
 
 // ====
 
-func.def @rotate_identities_and_direction(%x: index) -> (index, index, index) {
+func.def @rotate_identities_without_target_direction_change(%x: index) -> (index, index, index) {
   %zero = index.constant 0 : index
   %eight = index.constant 8 : index
   %rotl_zero = index.rotli %x, %zero : index
@@ -1106,9 +1118,9 @@ func.def @rotate_identities_and_direction(%x: index) -> (index, index, index) {
   func.return %rotl_zero, %rotr_zero, %rotr : index, index, index
 }
 // ----
-func.def @rotate_identities_and_direction(%x: index) -> (index, index, index) {
-  %9 = index.constant 56 : index
-  %rotr = index.rotli %x, %9 : index
+func.def @rotate_identities_without_target_direction_change(%x: index) -> (index, index, index) {
+  %eight = index.constant 8 : index
+  %rotr = index.rotri %x, %eight : index
   func.return %x, %x, %rotr : index, index, index
 }
 
@@ -1306,4 +1318,60 @@ func.def @select_identities(%x: index, %y: index) -> (index, index) {
 // ----
 func.def @select_identities(%x: index, %y: index) -> (index, index) {
   func.return %y, %x : index, index
+}
+
+// ====
+
+// Target-scoped canonicalization uses the effective index width for bit
+// counts, rotates, power-of-two scales, and shift reassociation.
+test.target<quirky> @target32
+test.target<low_core> @target64
+func.def target(@target32) @target_width_32(%x: index) -> (index, index, index, index) {
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %eight = index.constant 8 : index
+  %count = index.ctlzi %one : index
+  %rotate = index.rotri %x, %eight : index
+  %multiply = index.mul %x, %eight : index
+  %inner_shift = index.shli %x, %one : index
+  %outer_shift = index.shli %inner_shift, %two : index
+  func.return %count, %rotate, %multiply, %outer_shift : index, index, index, index
+}
+func.def target(@target64) @target_width_64(%x: index) -> (index, index, index, index) {
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %eight = index.constant 8 : index
+  %count = index.ctlzi %one : index
+  %rotate = index.rotri %x, %eight : index
+  %multiply = index.mul %x, %eight : index
+  %inner_shift = index.shli %x, %one : index
+  %outer_shift = index.shli %inner_shift, %two : index
+  func.return %count, %rotate, %multiply, %outer_shift : index, index, index, index
+}
+
+// ----
+test.target<quirky> @target32
+
+test.target<low_core> @target64
+
+func.def target(@target32) @target_width_32(%x: index) -> (index, index, index, index) {
+  %count = index.constant 31 : index
+  %30 = index.constant 24 : index
+  %rotate = index.rotli %x, %30 : index
+  %28 = index.constant 3 : index
+  %multiply = index.shli %x, %28 : index
+  %26 = index.constant 3 : index
+  %outer_shift = index.shli %x, %26 : index
+  func.return %count, %rotate, %multiply, %outer_shift : index, index, index, index
+}
+
+func.def target(@target64) @target_width_64(%x: index) -> (index, index, index, index) {
+  %count = index.constant 63 : index
+  %37 = index.constant 56 : index
+  %rotate = index.rotli %x, %37 : index
+  %35 = index.constant 3 : index
+  %multiply = index.shli %x, %35 : index
+  %33 = index.constant 3 : index
+  %outer_shift = index.shli %x, %33 : index
+  func.return %count, %rotate, %multiply, %outer_shift : index, index, index, index
 }

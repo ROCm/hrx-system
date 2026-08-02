@@ -1579,6 +1579,7 @@ static iree_status_t loom_low_target_legalize_function(
   };
   const loom_greedy_rewrite_options_t rewrite_options = {
       .max_iterations = pass_state->max_iterations,
+      .target_facts = selection->target_facts,
       .seed_facts = seed_facts,
   };
   const loom_greedy_rewrite_callbacks_t rewrite_callbacks = {

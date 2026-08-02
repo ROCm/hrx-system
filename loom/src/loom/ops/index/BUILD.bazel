@@ -42,6 +42,7 @@ loom_generated_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:capability_facts",
         "//runtime/src/iree/base/internal",
     ],
 )

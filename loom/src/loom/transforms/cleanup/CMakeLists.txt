@@ -38,6 +38,7 @@ loom_cc_library(
     loom::rewrite::greedy
     loom::rewrite::rewriter
     loom::rewrite::type_propagation
+    loom::target::pass_environment
     loom::util::fact_table
     loom::util::walk
   PUBLIC

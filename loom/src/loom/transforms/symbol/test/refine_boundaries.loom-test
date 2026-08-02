@@ -78,8 +78,8 @@ func.def public @public_extent_identity(%n: index) -> (index) {
 func.def public @calls_public() -> (index) {
   %n = index.constant 32 : index
   %result = func.call pure @public_extent_identity(%n) : (index) -> (index)
-  %13 = index.constant 1 : index
-  %scaled = index.shli %result, %13 : index
+  %two = index.constant 2 : index
+  %scaled = index.mul %result, %two : index
   func.return %scaled : index
 }
 

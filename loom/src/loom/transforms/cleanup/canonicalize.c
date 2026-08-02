@@ -28,6 +28,7 @@
 #include "loom/rewrite/greedy.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/rewrite/type_propagation.h"
+#include "loom/target/pass_environment.h"
 #include "loom/util/walk.h"
 
 static iree_status_t loom_canonicalize_replace_single_result_with_value(
@@ -1831,6 +1832,7 @@ iree_status_t loom_canonicalizer_run_region(
                                 : LOOM_CANONICALIZER_DEFAULT_MAX_ITERATIONS;
   loom_greedy_rewrite_options_t rewrite_options = {
       .max_iterations = max_iterations,
+      .target_facts = options ? options->target_facts : NULL,
       .seed_facts = options ? options->seed_facts : NULL,
       .materialize_constant = loom_constant_build,
   };
@@ -1896,10 +1898,7 @@ iree_status_t loom_canonicalizer_run_function(
         loom_value_table_capacity(&canonicalizer->module->values));
     if (iree_status_is_ok(status)) {
       loom_type_registry_configure_fact_context(&seed_facts.context);
-      if (options && options->seed_facts) {
-        seed_facts.context.target_facts =
-            options->seed_facts->context.target_facts;
-      }
+      seed_facts.context.target_facts = options ? options->target_facts : NULL;
     }
     if (iree_status_is_ok(status) && options && options->seed_facts) {
       status = loom_value_fact_table_clone_defined_facts(
@@ -1940,14 +1939,24 @@ iree_status_t loom_canonicalizer_run_function(
 
 iree_status_t loom_canonicalize_run(loom_pass_t* pass, loom_module_t* module,
                                     loom_func_like_t function) {
+  loom_canonicalizer_options_t run_options = {0};
+  if (pass->state) {
+    run_options = *(const loom_canonicalizer_options_t*)pass->state;
+  }
+  bool target_resolved = false;
+  IREE_RETURN_IF_ERROR(loom_target_pass_resolve_function_facts(
+      pass, module, function, &target_resolved, &run_options.target_facts));
+  if (!target_resolved) {
+    run_options.target_facts = NULL;
+  }
+
   loom_canonicalizer_t canonicalizer;
   IREE_RETURN_IF_ERROR(loom_canonicalizer_initialize(
       module, pass->arena, pass->value_facts, &canonicalizer));
 
   loom_canonicalizer_result_t result;
   iree_status_t status = loom_canonicalizer_run_function(
-      &canonicalizer, function,
-      (const loom_canonicalizer_options_t*)pass->state, &result);
+      &canonicalizer, function, &run_options, &result);
   if (iree_status_is_ok(status)) {
     if (result.changed) {
       loom_pass_mark_changed(pass);
