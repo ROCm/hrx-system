@@ -102,5 +102,11 @@ static const loom_check_provider_set_t kLoomCheckProviderSet = {
 };
 
 int main(int argc, char** argv) {
-  return loom_check_provider_main(argc, argv, &kLoomCheckProviderSet);
+  IREE_TRACE_APP_ENTER();
+  IREE_TRACE_ZONE_BEGIN(z0);
+  const int exit_code =
+      loom_check_provider_main(argc, argv, &kLoomCheckProviderSet);
+  IREE_TRACE_ZONE_END(z0);
+  IREE_TRACE_APP_EXIT(exit_code);
+  return exit_code;
 }

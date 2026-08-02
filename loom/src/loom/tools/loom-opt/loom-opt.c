@@ -1219,6 +1219,9 @@ int main(int argc, char** argv) {
       return 0;
     }
   }
+  IREE_TRACE_APP_ENTER();
+  IREE_TRACE_ZONE_BEGIN(z0);
+
   loom_tooling_cli_set_default_help_filter();
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
 
@@ -1460,5 +1463,9 @@ int main(int argc, char** argv) {
   loom_run_module_deinitialize(&run_module);
   iree_io_file_contents_free(contents);
   loom_run_session_deinitialize(&run_session);
-  return had_error ? 1 : 0;
+
+  const int exit_code = had_error ? 1 : 0;
+  IREE_TRACE_ZONE_END(z0);
+  IREE_TRACE_APP_EXIT(exit_code);
+  return exit_code;
 }
