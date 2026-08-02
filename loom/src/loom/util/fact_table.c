@@ -2244,14 +2244,49 @@ static int64_t loom_value_fact_loop_iv_base_divisor(loom_value_facts_t facts) {
   return facts.range_lo >= 0 ? facts.range_lo : -facts.range_lo;
 }
 
+static bool loom_value_fact_counted_loop_trip_count(int64_t lower,
+                                                    int64_t upper, int64_t step,
+                                                    uint64_t* out_count) {
+  if (step <= 0) return false;
+  if (lower >= upper) {
+    *out_count = 0;
+    return true;
+  }
+  int64_t span = 0;
+  if (!iree_checked_sub_i64(upper, lower, &span)) return false;
+  *out_count = ((uint64_t)span + (uint64_t)step - 1) / (uint64_t)step;
+  return true;
+}
+
 static bool loom_value_fact_counted_loop_last_reachable_iv(
     loom_value_facts_t lower_bound, loom_value_facts_t upper_bound,
     loom_value_facts_t step, int64_t* out_hi) {
-  if (!loom_value_facts_is_exact(lower_bound) ||
-      !loom_value_facts_is_exact(step) || step.range_lo <= 0 ||
+  if (!loom_value_facts_is_exact(step) || step.range_lo <= 0 ||
       lower_bound.range_lo >= upper_bound.range_hi) {
     return false;
   }
+
+  if (loom_value_facts_is_exact(upper_bound)) {
+    uint64_t lower_min_trip_count = 0;
+    uint64_t lower_max_trip_count = 0;
+    if (loom_value_fact_counted_loop_trip_count(
+            lower_bound.range_lo, upper_bound.range_lo, step.range_lo,
+            &lower_min_trip_count) &&
+        loom_value_fact_counted_loop_trip_count(
+            lower_bound.range_hi, upper_bound.range_hi, step.range_hi,
+            &lower_max_trip_count) &&
+        lower_min_trip_count == lower_max_trip_count &&
+        lower_max_trip_count > 0 && lower_max_trip_count <= INT64_MAX) {
+      int64_t stepped_offset = 0;
+      if (iree_checked_mul_i64((int64_t)(lower_max_trip_count - 1),
+                               step.range_lo, &stepped_offset) &&
+          iree_checked_add_i64(lower_bound.range_hi, stepped_offset, out_hi)) {
+        return true;
+      }
+    }
+  }
+
+  if (!loom_value_facts_is_exact(lower_bound)) return false;
 
   int64_t last_possible_offset = 0;
   if (!iree_checked_sub_i64(upper_bound.range_hi, lower_bound.range_lo,

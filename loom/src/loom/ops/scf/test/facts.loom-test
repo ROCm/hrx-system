@@ -497,3 +497,41 @@ func.def @lookup_facts_prune_by_divisor(%variant: index) -> (i64, i64) {
   %fact_hi = scalar.constant 30 : i64
   func.return %fact_lo, %fact_hi : i64, i64
 }
+
+// ====
+
+// Strip-mining the same loop by four leaves exactly four base iterations for
+// every lane. Equal endpoint trip counts therefore constrain the base IV to
+// 1660 rather than the interval-only upper bound of 2044.
+func.def @for_iv_ranged_lower_constant_trip_count(%lane0: index) -> (i64, i64, i64) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %four = index.constant 4 : index
+  %lane_channel = index.mul %lane, %four : index
+  %limit = index.constant 2048 : index
+  %step = index.constant 512 : index
+  %zero = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %channel = [%lane_channel to %limit step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+    %fact_lo = test.fact_range_lo %channel : index -> i64
+    %fact_hi = test.fact_range_hi %channel : index -> i64
+    %fact_div = test.fact_divisor %channel : index -> i64
+    scf.yield %fact_lo, %fact_hi, %fact_div : i64, i64, i64
+  }
+  func.return %iv_lo, %iv_hi, %iv_div : i64, i64, i64
+}
+
+// ----
+func.def @for_iv_ranged_lower_constant_trip_count(%lane0: index) -> (i64, i64, i64) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %four = index.constant 4 : index
+  %lane_channel = index.mul %lane, %four : index
+  %limit = index.constant 2048 : index
+  %step = index.constant 512 : index
+  %zero = scalar.constant 0 : i64
+  %iv_lo, %iv_hi, %iv_div = scf.for %channel = [%lane_channel to %limit step %step](%carry_lo = %zero : i64, %carry_hi = %zero : i64, %carry_div = %zero : i64) -> (i64, i64, i64) {
+    %fact_lo = scalar.constant 0 : i64
+    %fact_hi = scalar.constant 1660 : i64
+    %fact_div = scalar.constant 4 : i64
+    scf.yield %fact_lo, %fact_hi, %fact_div : i64, i64, i64
+  }
+  func.return %iv_lo, %iv_hi, %iv_div : i64, i64, i64
+}
