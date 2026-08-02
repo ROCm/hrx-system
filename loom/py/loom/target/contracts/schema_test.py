@@ -26,6 +26,7 @@ from loom.target.contracts import (
     ValueElideRule,
     ValueRef,
     Vector,
+    View,
     contract_fragment_public_header,
     descriptor_by_semantic_tag,
 )
@@ -77,6 +78,23 @@ def test_vector_static_element_range_requires_ordered_bounds() -> None:
         match="vector static element range minimum exceeds maximum",
     ):
         Vector("i32", minimum_static_elements=8, maximum_static_elements=4)
+
+
+def test_view_type_pattern_accepts_exact_dimensions() -> None:
+    pattern = View("f16", dims=(16, 32))
+
+    assert pattern.kind == "view"
+    assert pattern.dims == (16, 32)
+
+
+def test_view_type_pattern_rejects_unrepresentable_dimensions() -> None:
+    with pytest.raises(
+        ValueError,
+        match="generated view type patterns support at most two dims",
+    ):
+        View("f16", dims=(2, 4, 8))
+    with pytest.raises(ValueError, match="view static dims must be non-negative"):
+        View("f16", dims=(16, -1))
 
 
 def test_alias_rule_validates_source_and_result() -> None:

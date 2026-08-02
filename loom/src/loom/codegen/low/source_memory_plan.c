@@ -1331,6 +1331,39 @@ static loom_type_t loom_low_source_memory_access_payload_vector_type(
   return loom_low_source_memory_element_vector_type(view_type);
 }
 
+static loom_low_source_memory_address_layout_t
+loom_low_source_memory_classify_address_layout(
+    const loom_vector_memory_access_t* vector_access) {
+  if (vector_access->layout_kind == LOOM_VECTOR_MEMORY_LAYOUT_DENSE) {
+    return LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR;
+  }
+  if (vector_access->layout_kind != LOOM_VECTOR_MEMORY_LAYOUT_STRIDED) {
+    return LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_UNPROVEN;
+  }
+
+  int64_t expected_stride = 1;
+  for (int16_t axis = (int16_t)vector_access->view_rank - 1; axis >= 0;
+       --axis) {
+    int64_t actual_stride = 0;
+    if (!loom_vector_memory_access_static_axis_stride(
+            vector_access, (uint8_t)axis, &actual_stride) ||
+        actual_stride != expected_stride) {
+      return LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_UNPROVEN;
+    }
+    if (axis != 0) {
+      if (loom_type_dim_is_dynamic_at(vector_access->view_type,
+                                      (uint8_t)axis) ||
+          !iree_checked_mul_i64(expected_stride,
+                                loom_type_dim_static_size_at(
+                                    vector_access->view_type, (uint8_t)axis),
+                                &expected_stride)) {
+        return LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_UNPROVEN;
+      }
+    }
+  }
+  return LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR;
+}
+
 static bool loom_low_source_memory_access_plan_from_components(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,
@@ -1372,6 +1405,8 @@ static bool loom_low_source_memory_access_plan_from_components(
           LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_LAYOUT;
       return false;
   }
+  out_plan->address_layout =
+      loom_low_source_memory_classify_address_layout(&vector_access);
   if (vector_access.static_element_byte_count <= 0 ||
       vector_access.static_element_byte_count > UINT32_MAX) {
     out_diagnostic->rejection_bits |=

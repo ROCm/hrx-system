@@ -154,6 +154,19 @@ static bool loom_low_lower_rule_source_memory_root_matches(
   }
 }
 
+static bool loom_low_lower_rule_source_memory_address_layout_matches(
+    const loom_low_lower_source_memory_t* source_memory,
+    const loom_low_source_memory_access_plan_t* access) {
+  switch (source_memory->address_layout) {
+    case LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY:
+      return true;
+    case LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR:
+      return access->address_layout ==
+             LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR;
+  }
+  return false;
+}
+
 static bool loom_low_lower_rule_source_memory_dynamic_offset_matches(
     const loom_low_lower_source_memory_t* source_memory,
     const loom_low_source_memory_access_plan_t* access) {
@@ -339,6 +352,13 @@ bool loom_low_lower_rule_source_memory_matches(
            source_memory->dynamic_view_base_term_count) ||
       !loom_low_lower_rule_source_memory_dynamic_terms_match(source_memory,
                                                              access)) {
+    return false;
+  }
+  if (!loom_low_lower_rule_source_memory_address_layout_matches(source_memory,
+                                                                access)) {
+    if (out_diagnostic_index != NULL) {
+      *out_diagnostic_index = source_memory->address_layout_diagnostic_index;
+    }
     return false;
   }
   if (!loom_low_lower_rule_source_memory_dynamic_offset_matches(source_memory,

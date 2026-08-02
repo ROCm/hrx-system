@@ -29,6 +29,7 @@ from loom.target.contracts import (
     DirectDescriptorCase,
     EmitDescriptorOp,
     Guard,
+    GuardDiagnostic,
     GuardKind,
     LowerAttrCopyKind,
     LowerEmitKind,
@@ -37,6 +38,7 @@ from loom.target.contracts import (
     Scalar,
     SourceMemoryAddressBase,
     SourceMemoryAddressCoordinateType,
+    SourceMemoryAddressLayout,
     SourceMemoryAddressMaterializer,
     SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
@@ -748,6 +750,42 @@ def test_source_memory_constraint_rejects_dynamic_view_base_preservation() -> No
             preserve_source_index=True,
         ),
         "source-index preservation requires zero dynamic view-base terms",
+    )
+
+
+def test_source_memory_constraint_rejects_unknown_address_layout() -> None:
+    _expect_value_error(
+        lambda: SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            address_layout="compact",
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+        ),
+        "source memory address layout must be a SourceMemoryAddressLayout",
+    )
+
+
+def test_source_memory_constraint_rejects_unused_address_layout_diagnostic() -> None:
+    diagnostic = GuardDiagnostic(
+        subject_role="value",
+        subject_name="view",
+        constraint_key="layout.compact_row_major",
+    )
+    _expect_value_error(
+        lambda: SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            address_layout=SourceMemoryAddressLayout.ANY,
+            address_layout_diagnostic=diagnostic,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+        ),
+        "unconstrained source memory cannot have an address-layout diagnostic",
     )
 
 

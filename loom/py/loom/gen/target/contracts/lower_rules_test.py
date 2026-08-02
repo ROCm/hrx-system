@@ -50,6 +50,7 @@ from loom.target.contracts import (
     Scalar,
     SourceMemoryAddressBase,
     SourceMemoryAddressCoordinateType,
+    SourceMemoryAddressLayout,
     SourceMemoryAddressMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
@@ -60,6 +61,7 @@ from loom.target.contracts import (
     ValueProject,
     ValueRef,
     Vector,
+    View,
 )
 from loom.target.contracts.diagnostics import DiagnosticParamKind
 from loom.target.low_descriptors import Immediate, ImmediateKind
@@ -177,6 +179,17 @@ def test_validate_c_table_shape_rejects_oversized_type_payload() -> None:
     _expect_value_error(
         lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
         "lower-rule set 'test.low.generated_c_shape' type-pattern 0 static lanes exceeds int64_t",
+    )
+
+
+def test_validate_c_table_shape_rejects_oversized_view_dimension() -> None:
+    table = _compiled_lower_rule_set(
+        type_patterns=(LowerTypePattern(View("i32", dims=(2**63, 4))),),
+    )
+
+    _expect_value_error(
+        lambda: _validate_c_table_shape(table, _c_shape_contract(), ()),
+        "lower-rule set 'test.low.generated_c_shape' type-pattern 0 static dim 0 exceeds int64_t",
     )
 
 
@@ -615,6 +628,30 @@ def test_generate_lower_rule_set_emits_static_element_count_type_pattern() -> No
     assert ".attr_index = 0," in guard_text
 
 
+def test_generate_lower_rule_set_emits_exact_view_shape_type_pattern() -> None:
+    table = ContractFragment(
+        name="test.low.view_shape",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        public_header=_TEST_PUBLIC_HEADER,
+        cases=[
+            RecipeRule(
+                source_op=vector.vector_load,
+                guards=(Guard.value_type("view", View("i32", dims=(4, 8))),),
+            )
+        ],
+    )
+
+    generated = generate_lower_rule_set(table, dialect_ops={"vector": ALL_VECTOR_OPS})
+
+    type_pattern_start = generated.source.index("LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM1")
+    type_pattern_end = generated.source.index("},", type_pattern_start)
+    type_pattern_text = generated.source[type_pattern_start:type_pattern_end]
+    assert ".type_kind = LOOM_TYPE_VIEW," in type_pattern_text
+    assert ".rank = 2," in type_pattern_text
+    assert ".static_dim0 = 4," in type_pattern_text
+    assert ".static_dim1 = 8," in type_pattern_text
+
+
 def test_generate_lower_rule_set_emits_source_instance_flags_projection() -> None:
     descriptor, descriptor_set = _add_f32_flags_descriptor_set()
     table = ContractFragment(
@@ -799,6 +836,28 @@ def test_source_memory_row_emits_dynamic_byte_stride_any_flag() -> None:
     assert ".dynamic_term_count = 1" in fields
     assert ".dynamic_view_base_term_count = 0" in fields
     assert ".dynamic_byte_stride = " not in "\n".join(fields)
+
+
+def test_source_memory_row_emits_compact_address_layout() -> None:
+    row = LowerSourceMemory(
+        constraint=SourceMemoryConstraint(
+            operation=SourceMemoryOperation.LOAD,
+            address_layout=SourceMemoryAddressLayout.COMPACT_ROW_MAJOR,
+            memory_spaces=("global",),
+            element_byte_count=4,
+            vector_lane_count=1,
+            vector_lane_byte_stride=4,
+            static_byte_offset=0,
+        ),
+        diagnostic_index=3,
+        dynamic_offset_diagnostic_index=4,
+        address_layout_diagnostic_index=5,
+    )
+
+    fields = source_memory_row({}, row)
+
+    assert (".address_layout = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR") in fields
+    assert ".address_layout_diagnostic_index = 5" in fields
 
 
 def test_source_memory_row_emits_preserve_source_index_flag() -> None:

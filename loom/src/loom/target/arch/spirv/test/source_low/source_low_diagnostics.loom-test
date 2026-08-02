@@ -108,6 +108,70 @@ func.def target(@target) @storage_buffer_i32_requires_known_root_alignment(%inpu
 
 // ====
 
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2318}
+
+func.def target(@target) @cooperative_matrix_rejects_noncompact_storage_tile(%input: buffer, %byte_offset: offset) -> (vector<16xf16>) {
+  %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 16)] : offset
+  %m = index.constant 16 : index
+  %k = index.constant 16 : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<32x16xf16, #dense>
+  // ERROR@+1: TARGET/003 {subject_role="value", subject_name="view", constraint_key="cooperative_matrix.compact_storage_tile"}
+  %fragment = vector.fragment.load<lhs> %input_view[0, 0] shape [%m, %k] : view<32x16xf16, #dense> -> vector<16xf16>
+  func.return %fragment : vector<16xf16>
+}
+
+// ====
+
+spirv.target<vulkan1_3> @hal_target_compact_matrix {abi = hal_kernel, contract_feature_bits = 2318}
+
+kernel.def target(@hal_target_compact_matrix) @cooperative_matrix_accepts_explicit_compact_layout() {
+  %unit = index.constant 1 : index
+  %subgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%subgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %byte_offset: offset) {
+  %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 16)] : offset
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %layout = encoding.layout.strided [16, 1] : encoding<layout>
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32, %layout>
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<16x16xf32, %layout>
+  %fragment = vector.fragment.load<init> %input_view[0, 0] shape [%m, %n] : view<16x16xf32, %layout> -> vector<8xf32>
+  vector.fragment.store<result> %fragment, %output_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, %layout>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core>(@hal_target_compact_matrix) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @cooperative_matrix_accepts_explicit_compact_layout(%byte_offset_aligned: reg<spirv.offset64>) asm {
+  %input_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %17 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input_aligned, %byte_offset_aligned
+  %fragment = OpCooperativeMatrixLoadKHR.init.f16.16x16x16.f32.subgroup.row_major %17
+  %19 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_aligned, %byte_offset_aligned
+  OpCooperativeMatrixStoreKHR.result.f16.16x16x16.f32.subgroup.row_major %19, %fragment
+  return
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2318}
+
+func.def target(@target) @cooperative_matrix_rejects_padded_storage_layout(%input: buffer, %byte_offset: offset) -> (vector<16xf16>) {
+  %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 16)] : offset
+  %m = index.constant 16 : index
+  %k = index.constant 16 : index
+  %layout = encoding.layout.strided [32, 1] : encoding<layout>
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<16x16xf16, %layout>
+  // ERROR@+1: TARGET/003 {subject_role="value", subject_name="view", constraint_key="cooperative_matrix.compact_storage_tile"}
+  %fragment = vector.fragment.load<lhs> %input_view[0, 0] shape [%m, %k] : view<16x16xf16, %layout> -> vector<16xf16>
+  func.return %fragment : vector<16xf16>
+}
+
+// ====
+
 spirv.target<vulkan1_3> @target
 
 func.def target(@target) @storage_buffer_i32_rejects_misaligned_static_offset(%input: buffer) -> (i32) {

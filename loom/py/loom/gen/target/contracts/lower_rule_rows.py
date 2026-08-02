@@ -177,6 +177,12 @@ def source_memory_row(
     )
     _append_field(
         fields,
+        "address_layout",
+        lower_rule_spelling.SOURCE_MEMORY_ADDRESS_LAYOUT_C_NAMES[constraint.address_layout],
+        default="LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY",
+    )
+    _append_field(
+        fields,
         "memory_space_mask",
         lower_rule_spelling.memory_space_mask(constraint.memory_spaces),
         always=True,
@@ -249,6 +255,12 @@ def source_memory_row(
         fields,
         "dynamic_offset_diagnostic_index",
         lower_rule_spelling.diagnostic_index(row.dynamic_offset_diagnostic_index),
+        always=True,
+    )
+    _append_field(
+        fields,
+        "address_layout_diagnostic_index",
+        lower_rule_spelling.diagnostic_index(row.address_layout_diagnostic_index),
         always=True,
     )
     _append_field(
@@ -898,20 +910,20 @@ def type_pattern_row(type_pattern: TypePattern) -> list[str]:
         f".type_kind = {lower_rule_spelling.type_kind_c_name(type_pattern)}",
         f".element_type_mask = {lower_rule_spelling.scalar_type_mask_c_expr(type_pattern.elements)}",
     ]
-    if type_pattern.kind == "vector":
-        if type_pattern.dims:
-            row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_RANK"
-            row.extend(
-                [
-                    f".rank = {len(type_pattern.dims)}",
-                    f".static_dim0 = {lower_rule_spelling.c_expression(type_pattern.dims[0])}",
-                ]
-            )
-            row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM0"
-            if len(type_pattern.dims) >= 2:
-                row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM1"
-                row.append(f".static_dim1 = {lower_rule_spelling.c_expression(type_pattern.dims[1])}")
-        elif type_pattern.lanes is not None:
+    if type_pattern.dims:
+        row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_RANK"
+        row.extend(
+            [
+                f".rank = {len(type_pattern.dims)}",
+                f".static_dim0 = {lower_rule_spelling.c_expression(type_pattern.dims[0])}",
+            ]
+        )
+        row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM0"
+        if len(type_pattern.dims) >= 2:
+            row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM1"
+            row.append(f".static_dim1 = {lower_rule_spelling.c_expression(type_pattern.dims[1])}")
+    elif type_pattern.kind == "vector":
+        if type_pattern.lanes is not None:
             row.append(".rank = 1")
             row[0] += " | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_RANK | LOOM_LOW_LOWER_TYPE_PATTERN_FLAG_STATIC_DIM0"
             row.append(f".static_dim0 = {lower_rule_spelling.c_expression(type_pattern.lanes)}")

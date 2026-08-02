@@ -85,6 +85,7 @@ from loom.target.contracts import (
     Scalar,
     SourceMemoryAddressBase,
     SourceMemoryAddressCoordinateType,
+    SourceMemoryAddressLayout,
     SourceMemoryAddressMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
@@ -761,6 +762,7 @@ def _cooperative_matrix_memory(
     return SourceMemoryConstraint(
         operation=operation,
         root_kind=SourceMemoryRootKind.ANY,
+        address_layout=SourceMemoryAddressLayout.COMPACT_ROW_MAJOR,
         memory_spaces=_STORAGE_BUFFER_MEMORY_SPACES,
         element_byte_count=element_byte_width,
         vector_lane_count=lane_count,
@@ -770,6 +772,7 @@ def _cooperative_matrix_memory(
         minimum_alignment=minimum_alignment,
         dynamic_term_count=None,
         dynamic_index_source=SourceMemoryDynamicIndexSource.NONE,
+        address_layout_diagnostic=_cooperative_matrix_compact_tile_diagnostic(),
         diagnostic=_storage_buffer_alignment_diagnostic(minimum_alignment),
     )
 
@@ -780,6 +783,30 @@ def _cooperative_matrix_zero_indices_guards() -> tuple[Guard, ...]:
         Guard.i64_array_count("static_indices", 2),
         Guard.i64_array_element_range("static_indices", 0, 0, 0),
         Guard.i64_array_element_range("static_indices", 1, 0, 0),
+    )
+
+
+def _cooperative_matrix_compact_tile_diagnostic() -> GuardDiagnostic:
+    return GuardDiagnostic(
+        subject_role="value",
+        subject_name="view",
+        constraint_key="cooperative_matrix.compact_storage_tile",
+    )
+
+
+def _cooperative_matrix_view_guard(
+    scalar: StorageBufferScalar,
+    *,
+    rows: int,
+    columns: int,
+) -> Guard:
+    # Cooperative matrix packets encode a compact row stride. Exact dimensions
+    # constrain the tile footprint while the source-memory row separately
+    # requires a proven compact row-major layout.
+    return Guard.value_type(
+        "view",
+        View(scalar.source_type, dims=(rows, columns)),
+        diagnostic=_cooperative_matrix_compact_tile_diagnostic(),
     )
 
 
@@ -817,7 +844,11 @@ def _cooperative_matrix_load_rule(
         descriptor=descriptor,
         guards=(
             Guard.enum_attr_equals("role", role),
-            Guard.value_type("view", View(scalar.source_type)),
+            _cooperative_matrix_view_guard(
+                scalar,
+                rows=rows,
+                columns=columns,
+            ),
             *_storage_element_format_guards("view", scalar),
             Guard.value_type("result", Vector(result_element, lanes=result_lanes)),
             *_cooperative_matrix_shape_guards(rows=rows, columns=columns),
@@ -864,7 +895,11 @@ def _cooperative_matrix_store_rule(
         descriptor=descriptor,
         guards=(
             Guard.enum_attr_equals("role", "result"),
-            Guard.value_type("view", View(scalar.source_type)),
+            _cooperative_matrix_view_guard(
+                scalar,
+                rows=rows,
+                columns=columns,
+            ),
             *_storage_element_format_guards("view", scalar),
             Guard.value_type("value", Vector(value_element, lanes=value_lanes)),
             *_cooperative_matrix_shape_guards(rows=rows, columns=columns),

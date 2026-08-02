@@ -64,6 +64,7 @@ from loom.target.contracts.rules import (
 )
 from loom.target.contracts.source import ValueRef
 from loom.target.contracts.source_memory import (
+    SourceMemoryAddressLayout,
     SourceMemoryAddressMaterializer,
     SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
@@ -191,6 +192,7 @@ class LowerSourceMemory:
     constraint: SourceMemoryConstraint
     diagnostic_index: int
     dynamic_offset_diagnostic_index: int
+    address_layout_diagnostic_index: int = 0xFFFF
     address_diagnostic_index: int = 0xFFFF
     byte_offset_materializer: SourceMemoryByteOffsetMaterializer | None = None
     address_materializer: SourceMemoryAddressMaterializer | None = None
@@ -1457,6 +1459,14 @@ class _LowerRuleSetCompiler:
                 source_op,
                 _source_memory_dynamic_offset_diagnostic(constraint),
             ),
+            address_layout_diagnostic_index=(
+                0xFFFF
+                if constraint.address_layout == SourceMemoryAddressLayout.ANY
+                else self._append_diagnostic_ref(
+                    source_op,
+                    _source_memory_address_layout_diagnostic(constraint),
+                )
+            ),
             address_diagnostic_index=self._append_diagnostic_ref(
                 source_op,
                 _source_memory_address_diagnostic(
@@ -2317,6 +2327,19 @@ def _source_memory_dynamic_offset_diagnostic(
         if ref is None:
             raise ValueError(
                 "source-memory dynamic-offset diagnostic is missing an error ref"
+            )
+        return ref
+    return _source_memory_diagnostic(constraint)
+
+
+def _source_memory_address_layout_diagnostic(
+    constraint: SourceMemoryConstraint,
+) -> DiagnosticRef:
+    if constraint.address_layout_diagnostic is not None:
+        ref = constraint.address_layout_diagnostic.ref
+        if ref is None:
+            raise ValueError(
+                "source-memory address-layout diagnostic is missing an error ref"
             )
         return ref
     return _source_memory_diagnostic(constraint)

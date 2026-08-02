@@ -480,6 +480,7 @@ TEST_F(LowContractQuerySourceMemoryTest,
       /*.flags=*/0,
       /*.operation_kind=*/LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
       /*.root_kind=*/LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_BLOCK_ARGUMENT,
+      /*.address_layout=*/LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY,
       /*.memory_space_mask=*/LOOM_LOW_LOWER_MEMORY_SPACE_UNKNOWN |
           LOOM_LOW_LOWER_MEMORY_SPACE_GENERIC |
           LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL |
@@ -501,6 +502,7 @@ TEST_F(LowContractQuerySourceMemoryTest,
       /*.dynamic_byte_stride=*/4,
       /*.dynamic_offset_unsigned_bit_count=*/0,
       /*.dynamic_offset_diagnostic_index=*/0,
+      /*.address_layout_diagnostic_index=*/0,
       /*.cache_policy_build_flags=*/0,
       /*.diagnostic_index=*/0,
   };

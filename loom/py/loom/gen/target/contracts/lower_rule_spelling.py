@@ -26,6 +26,7 @@ from loom.target.contracts import (
     LowerEmitKind,
     SourceMemoryAddressBase,
     SourceMemoryAddressCoordinateType,
+    SourceMemoryAddressLayout,
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
     SourceMemoryRootKind,
@@ -180,6 +181,11 @@ SOURCE_MEMORY_ROOT_KIND_C_NAMES = {
     SourceMemoryRootKind.ANY: "LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ANY",
     SourceMemoryRootKind.BLOCK_ARGUMENT: "LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_BLOCK_ARGUMENT",
     SourceMemoryRootKind.ALLOCA: "LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ALLOCA",
+}
+
+SOURCE_MEMORY_ADDRESS_LAYOUT_C_NAMES = {
+    SourceMemoryAddressLayout.ANY: "LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY",
+    SourceMemoryAddressLayout.COMPACT_ROW_MAJOR: "LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR",
 }
 
 SOURCE_MEMORY_ADDRESS_BASE_C_NAMES = {

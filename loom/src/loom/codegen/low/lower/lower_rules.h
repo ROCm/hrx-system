@@ -390,6 +390,13 @@ typedef enum loom_low_lower_source_memory_root_kind_e {
   LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ALLOCA = 2,
 } loom_low_lower_source_memory_root_kind_t;
 
+typedef enum loom_low_lower_source_memory_address_layout_e {
+  // The source-memory row accepts any proven or unproven address layout.
+  LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY = 0,
+  // The source-memory row requires a proven compact row-major layout.
+  LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR = 1,
+} loom_low_lower_source_memory_address_layout_t;
+
 typedef enum loom_low_lower_source_memory_address_base_e {
   // Complete addresses use the source-memory storage root.
   LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_ROOT = 0,
@@ -451,6 +458,8 @@ typedef struct loom_low_lower_source_memory_t {
   loom_low_source_memory_operation_kind_t operation_kind;
   // Source provenance required for the root memory value.
   loom_low_lower_source_memory_root_kind_t root_kind;
+  // Target-independent address-layout classification required by this row.
+  loom_low_lower_source_memory_address_layout_t address_layout;
   // Accepted target-independent source memory spaces.
   loom_low_lower_memory_space_mask_t memory_space_mask;
   // Required byte count of one addressed view element.
@@ -479,6 +488,8 @@ typedef struct loom_low_lower_source_memory_t {
   uint8_t dynamic_offset_unsigned_bit_count;
   // Diagnostic emitted when the dynamic byte offset width check rejects.
   uint16_t dynamic_offset_diagnostic_index;
+  // Diagnostic emitted when the address-layout classification rejects.
+  uint16_t address_layout_diagnostic_index;
   // Required source cache-policy build flags.
   uint32_t cache_policy_build_flags;
   // Diagnostic table row emitted when this source-memory row rejects.

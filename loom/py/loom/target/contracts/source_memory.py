@@ -55,6 +55,14 @@ class SourceMemoryRootKind(Enum):
 
 
 @unique
+class SourceMemoryAddressLayout(Enum):
+    """Address-layout classification required by a source-memory row."""
+
+    ANY = "any"
+    COMPACT_ROW_MAJOR = "compact_row_major"
+
+
+@unique
 class SourceMemoryAddressBase(Enum):
     """Source-memory value used as the base of a complete target address."""
 
@@ -155,6 +163,7 @@ class SourceMemoryConstraint:
 
     operation: SourceMemoryOperation
     root_kind: SourceMemoryRootKind
+    address_layout: SourceMemoryAddressLayout
     memory_spaces: tuple[str, ...]
     element_byte_count: int
     vector_lane_count: int
@@ -173,6 +182,7 @@ class SourceMemoryConstraint:
     preserve_source_index: bool = False
     dynamic_offset_unsigned_bit_count: int = 0
     dynamic_offset_diagnostic: GuardDiagnostic | None = None
+    address_layout_diagnostic: GuardDiagnostic | None = None
     cache_policy_build_flags: int = 0
     diagnostic: GuardDiagnostic | None = None
 
@@ -181,6 +191,7 @@ class SourceMemoryConstraint:
         *,
         operation: SourceMemoryOperation,
         root_kind: SourceMemoryRootKind = SourceMemoryRootKind.ANY,
+        address_layout: SourceMemoryAddressLayout = SourceMemoryAddressLayout.ANY,
         memory_spaces: Sequence[str],
         element_byte_count: int,
         vector_lane_count: int,
@@ -200,11 +211,13 @@ class SourceMemoryConstraint:
         preserve_source_index: bool = False,
         dynamic_offset_unsigned_bit_count: int = 0,
         dynamic_offset_diagnostic: GuardDiagnostic | None = None,
+        address_layout_diagnostic: GuardDiagnostic | None = None,
         cache_policy_build_flags: int = 0,
         diagnostic: GuardDiagnostic | None = None,
     ) -> None:
         object.__setattr__(self, "operation", operation)
         object.__setattr__(self, "root_kind", root_kind)
+        object.__setattr__(self, "address_layout", address_layout)
         object.__setattr__(self, "memory_spaces", tuple(memory_spaces))
         object.__setattr__(self, "element_byte_count", element_byte_count)
         object.__setattr__(self, "vector_lane_count", vector_lane_count)
@@ -246,6 +259,11 @@ class SourceMemoryConstraint:
             "dynamic_offset_diagnostic",
             dynamic_offset_diagnostic,
         )
+        object.__setattr__(
+            self,
+            "address_layout_diagnostic",
+            address_layout_diagnostic,
+        )
         object.__setattr__(self, "cache_policy_build_flags", cache_policy_build_flags)
         object.__setattr__(self, "diagnostic", diagnostic)
         self._validate_shape()
@@ -253,6 +271,17 @@ class SourceMemoryConstraint:
     def _validate_shape(self) -> None:
         if not isinstance(self.root_kind, SourceMemoryRootKind):
             raise ValueError("source memory root kind must be a SourceMemoryRootKind")
+        if not isinstance(self.address_layout, SourceMemoryAddressLayout):
+            raise ValueError(
+                "source memory address layout must be a SourceMemoryAddressLayout"
+            )
+        if (
+            self.address_layout == SourceMemoryAddressLayout.ANY
+            and self.address_layout_diagnostic is not None
+        ):
+            raise ValueError(
+                "unconstrained source memory cannot have an address-layout diagnostic"
+            )
         if not self.memory_spaces:
             raise ValueError("source memory constraint needs a memory space")
         for memory_space in self.memory_spaces:
