@@ -314,25 +314,27 @@ check.case public @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4_differential_cas
   check.return
 }
 
-// The production hidden width crosses two complete 1024-element scratch
-// stripes. This independently locks the stripe reuse and row-byte addressing.
+// Fourteen distinct production-width rows cross two complete 1024-element
+// scratch stripes. Comparing every packed byte with the unfused path locks
+// both stripe reuse and row-byte addressing across independent workgroups.
 check.case public @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4_multistripe_case {
-  %token_count = check.literal value(1) : index
+  %token_count = check.literal value(14) : index
   %hidden_size = check.literal value(2048) : index
-  %input = check.generate.fill value(2.0) : tensor<2048xf32>
+  %input_seed = check.param.seed base(0x514d4f4550524550) count(1) : i64
+  %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<14x2048xf32>
   %weight = check.generate.iota offset(-1.0) step(0.0009765625) : tensor<2048xf32>
-  %normalized = check.generate.fill value(0.0) : tensor<2048xf32>
-  %expected = check.generate.fill value(0) : tensor<2304xi8>
-  %actual = check.generate.fill value(1) : tensor<2304xi8>
-  %dual_normalized = check.generate.fill value(1.0) : tensor<2048xf32>
-  %dual_q8 = check.generate.fill value(1) : tensor<2304xi8>
-  func.call @qwen3_moe_rmsnorm_f32(%token_count, %input, %weight, %normalized) : (index, tensor<2048xf32>, tensor<2048xf32>, tensor<2048xf32>)
-  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %hidden_size, %normalized, %expected) : (index, index, tensor<2048xf32>, tensor<2304xi8>)
-  func.call @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4(%token_count, %input, %weight, %actual) : (index, tensor<2048xf32>, tensor<2048xf32>, tensor<2304xi8>)
-  func.call @qwen3_moe_rmsnorm_f32_quantize_q8_1_x4(%token_count, %input, %weight, %dual_normalized, %dual_q8) : (index, tensor<2048xf32>, tensor<2048xf32>, tensor<2048xf32>, tensor<2304xi8>)
-  check.expect.equal actual(%actual) expected(%expected) : tensor<2304xi8>
-  check.expect.close actual(%dual_normalized) expected(%normalized) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
-  check.expect.equal actual(%dual_q8) expected(%expected) : tensor<2304xi8>
+  %normalized = check.generate.fill value(0.0) : tensor<14x2048xf32>
+  %expected = check.generate.fill value(0) : tensor<14x2304xi8>
+  %actual = check.generate.fill value(1) : tensor<14x2304xi8>
+  %dual_normalized = check.generate.fill value(1.0) : tensor<14x2048xf32>
+  %dual_q8 = check.generate.fill value(1) : tensor<14x2304xi8>
+  func.call @qwen3_moe_rmsnorm_f32(%token_count, %input, %weight, %normalized) : (index, tensor<14x2048xf32>, tensor<2048xf32>, tensor<14x2048xf32>)
+  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %hidden_size, %normalized, %expected) : (index, index, tensor<14x2048xf32>, tensor<14x2304xi8>)
+  func.call @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4(%token_count, %input, %weight, %actual) : (index, tensor<14x2048xf32>, tensor<2048xf32>, tensor<14x2304xi8>)
+  func.call @qwen3_moe_rmsnorm_f32_quantize_q8_1_x4(%token_count, %input, %weight, %dual_normalized, %dual_q8) : (index, tensor<14x2048xf32>, tensor<2048xf32>, tensor<14x2048xf32>, tensor<14x2304xi8>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<14x2304xi8>
+  check.expect.close actual(%dual_normalized) expected(%normalized) atol(0.0) rtol(0.0) nan(same) : tensor<14x2048xf32>
+  check.expect.equal actual(%dual_q8) expected(%expected) : tensor<14x2304xi8>
   check.return
 }
 
