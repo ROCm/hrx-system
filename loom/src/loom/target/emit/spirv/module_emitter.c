@@ -449,8 +449,7 @@ static iree_status_t loom_spirv_emit_integer_constant_packet(
 }
 
 static iree_status_t loom_spirv_emit_boolean_constant_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   uint32_t type_id = 0;
   IREE_RETURN_IF_ERROR(loom_spirv_emit_type_id_for_value_type(
