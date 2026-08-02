@@ -104,6 +104,9 @@ from loom.target.contracts.rules import (
 )
 from loom.target.contracts.source import ValueRef
 from loom.target.contracts.source_memory import (
+    SourceMemoryAddressBase,
+    SourceMemoryAddressCoordinateType,
+    SourceMemoryAddressMaterializer,
     SourceMemoryByteOffsetMaterializer,
     SourceMemoryConstraint,
     SourceMemoryDynamicIndexSource,
@@ -187,6 +190,9 @@ __all__ = [
     "RecipeRule",
     "Scalar",
     "SelectDescriptorCase",
+    "SourceMemoryAddressMaterializer",
+    "SourceMemoryAddressBase",
+    "SourceMemoryAddressCoordinateType",
     "SourceMemoryByteOffsetMaterializer",
     "SourceMemoryProject",
     "SourceMemoryProjectKind",

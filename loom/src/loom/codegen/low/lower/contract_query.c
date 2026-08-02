@@ -8,6 +8,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/symbolic_expr.h"
+#include "loom/codegen/low/lower/lower_rule_source_memory.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ops/vector/ops.h"
@@ -297,8 +298,13 @@ static iree_status_t loom_low_lower_query_target_contract_index(
       return iree_ok_status();
     }
     if (selection.has_source_op_span &&
-        (failed_rule_set == NULL || selection.matched_guard_count >
-                                        failed_selection.matched_guard_count)) {
+        (failed_rule_set == NULL ||
+         (selection.source_memory_compatible &&
+          !failed_selection.source_memory_compatible) ||
+         (selection.source_memory_compatible ==
+              failed_selection.source_memory_compatible &&
+          selection.matched_guard_count >
+              failed_selection.matched_guard_count))) {
       failed_rule_set = rule_set;
       failed_selection = selection;
       failed_binding_index = contract_case->binding_index;
@@ -360,6 +366,10 @@ iree_status_t loom_low_lower_query_target_contract(
   const loom_target_bundle_t* bundle =
       loom_target_contract_query_environment_bundle(environment);
 
+  loom_low_source_memory_access_plan_t source_memory_access;
+  loom_low_lower_rule_source_memory_state_t source_memory_state;
+  loom_low_lower_rule_source_memory_state_initialize(
+      source_op, &source_memory_access, &source_memory_state);
   const loom_low_lower_rule_match_context_t match_context = {
       .module = environment->module,
       .function = environment->function,
@@ -371,6 +381,7 @@ iree_status_t loom_low_lower_query_target_contract(
       .descriptor_ref = options->descriptor_ref,
       .fact_table = environment->fact_table,
       .view_regions = environment->view_regions,
+      .source_memory_state = &source_memory_state,
       .symbolic_expr_context = expression_context_ptr,
       .flags = LOOM_LOW_LOWER_RULE_MATCH_FLAG_CONTRACT_ONLY,
   };

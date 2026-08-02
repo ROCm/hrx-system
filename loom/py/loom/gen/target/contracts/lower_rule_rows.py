@@ -57,6 +57,7 @@ _GUARD_VALUE_REF_KINDS = frozenset(
         GuardKind.VALUE_I64_RANGE_GE,
         GuardKind.VALUE_FLOAT_EQUALS,
         GuardKind.VALUE_STORAGE_ELEMENT_FORMAT,
+        GuardKind.VALUE_MEMORY_SPACE,
         GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
         GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
         GuardKind.VALUE_NO_USES,
@@ -177,7 +178,7 @@ def source_memory_row(
     _append_field(
         fields,
         "memory_space_mask",
-        lower_rule_spelling.source_memory_space_mask(constraint.memory_spaces),
+        lower_rule_spelling.memory_space_mask(constraint.memory_spaces),
         always=True,
     )
     _append_field(
@@ -261,6 +262,12 @@ def source_memory_row(
         lower_rule_spelling.diagnostic_index(row.diagnostic_index),
         always=True,
     )
+    _append_field(
+        fields,
+        "address_diagnostic_index",
+        lower_rule_spelling.diagnostic_index(row.address_diagnostic_index),
+        always=True,
+    )
     if row.byte_offset_materializer is not None:
         materializer = row.byte_offset_materializer
         _append_field(
@@ -297,6 +304,96 @@ def source_memory_row(
             always=True,
             default="0xFFFF",
         )
+    if row.address_materializer is not None:
+        materializer = row.address_materializer
+        _append_field(
+            fields,
+            "address_base_kind",
+            lower_rule_spelling.SOURCE_MEMORY_ADDRESS_BASE_C_NAMES[materializer.base],
+            always=True,
+        )
+        _append_field(
+            fields,
+            "address_coordinate_type",
+            lower_rule_spelling.SOURCE_MEMORY_ADDRESS_COORDINATE_TYPE_C_NAMES[materializer.coordinate_type],
+            always=True,
+        )
+        _append_field(
+            fields,
+            "address_coordinate_unit_byte_count",
+            materializer.coordinate_unit_byte_count,
+            always=True,
+        )
+        _append_field(
+            fields,
+            "address_coordinate_minimum",
+            _c_i64_literal(materializer.coordinate_minimum),
+            always=True,
+        )
+        _append_field(
+            fields,
+            "address_coordinate_maximum",
+            _c_i64_literal(materializer.coordinate_maximum),
+            always=True,
+        )
+        _append_field(
+            fields,
+            "address_const_coordinate_descriptor_ref",
+            _descriptor_ref_index(descriptor_refs, materializer.const_coordinate),
+            always=True,
+            default="0xFFFF",
+        )
+        _append_field(
+            fields,
+            "address_const_coordinate_immediate",
+            f'IREE_SVL("{_c_string_literal(materializer.const_coordinate_immediate)}")',
+            always=True,
+        )
+        _append_field(
+            fields,
+            "address_add_coordinate_descriptor_ref",
+            _descriptor_ref_index(descriptor_refs, materializer.add_coordinate),
+            always=True,
+            default="0xFFFF",
+        )
+        _append_field(
+            fields,
+            "address_mul_coordinate_descriptor_ref",
+            _descriptor_ref_index(descriptor_refs, materializer.mul_coordinate),
+            always=True,
+            default="0xFFFF",
+        )
+        _append_field(
+            fields,
+            "address_shl_coordinate_descriptor_ref",
+            _descriptor_ref_index(descriptor_refs, materializer.shl_coordinate),
+            always=True,
+            default="0xFFFF",
+        )
+        _append_field(
+            fields,
+            "address_index_to_coordinate_input_descriptor_ref",
+            _descriptor_ref_index(
+                descriptor_refs,
+                materializer.index_to_coordinate_input,
+            ),
+            always=True,
+            default="0xFFFF",
+        )
+        _append_field(
+            fields,
+            "address_index_to_coordinate_descriptor_ref",
+            _descriptor_ref_index(descriptor_refs, materializer.index_to_coordinate),
+            always=True,
+            default="0xFFFF",
+        )
+        _append_field(
+            fields,
+            "address_descriptor_ref",
+            _descriptor_ref_index(descriptor_refs, materializer.address),
+            always=True,
+            default="0xFFFF",
+        )
     return fields
 
 
@@ -304,19 +401,33 @@ def descriptor_ref_keys(table: CompiledLowerRuleSet, source_contract: ContractFr
     used_keys = {row.descriptor.key for row in table.guards if row.kind == GuardKind.DESCRIPTOR_AVAILABLE and row.descriptor is not None}
     used_keys.update(row.descriptor.key for row in table.emits)
     for row in table.source_memories:
-        if row.byte_offset_materializer is None:
-            continue
-        materializer = row.byte_offset_materializer
-        used_keys.update(
-            descriptor.key
-            for descriptor in (
-                materializer.const_i64,
-                materializer.add_i64,
-                materializer.mul_i64,
-                materializer.shl_i64,
+        if row.byte_offset_materializer is not None:
+            materializer = row.byte_offset_materializer
+            used_keys.update(
+                descriptor.key
+                for descriptor in (
+                    materializer.const_i64,
+                    materializer.add_i64,
+                    materializer.mul_i64,
+                    materializer.shl_i64,
+                )
+                if descriptor is not None
             )
-            if descriptor is not None
-        )
+        if row.address_materializer is not None:
+            materializer = row.address_materializer
+            used_keys.update(
+                descriptor.key
+                for descriptor in (
+                    materializer.const_coordinate,
+                    materializer.add_coordinate,
+                    materializer.mul_coordinate,
+                    materializer.shl_coordinate,
+                    materializer.index_to_coordinate_input,
+                    materializer.index_to_coordinate,
+                    materializer.address,
+                )
+                if descriptor is not None
+            )
     return tuple(descriptor.key for descriptor in source_contract.descriptor_set.descriptors if descriptor.key in used_keys)
 
 
@@ -407,6 +518,13 @@ def guard_row(descriptor_refs: Mapping[str, int], row: LowerGuard) -> list[str]:
         if row.u64_c_expression is None:
             raise ValueError("storage element-format guard is missing expression")
         _append_field(fields, "u64", row.u64_c_expression, always=True)
+    if row.kind == GuardKind.VALUE_MEMORY_SPACE:
+        _append_field(
+            fields,
+            "u64",
+            lower_rule_spelling.memory_space_mask(row.memory_spaces),
+            always=True,
+        )
     if row.kind == GuardKind.DESCRIPTOR_AVAILABLE:
         _append_field(
             fields,

@@ -165,8 +165,8 @@ kernel.def target(@hal_target_scalar_payloads) @spirv_hal_direct_scalar_payload_
 // ----
 low.kernel.def target<spirv.logical.core>(@hal_target_scalar_payloads) abi_layout({spirv_arg_value_types = [21, 0]}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @spirv_hal_direct_scalar_payload_abi(%i8: reg<spirv.id>, %byte_offset_aligned: reg<spirv.offset64>) asm {
   %output_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %output_view = OpPtrAccessChain.storage_buffer.i8.byte_offset %output_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.i8 %output_view, %i8
+  %10 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.i8 %10, %i8
   return
 }
 
@@ -228,8 +228,8 @@ func.def target(@target) @spirv_offset_addressing(%base: buffer, %row: offset) -
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [23]}) @spirv_offset_addressing(%base_aligned: reg<spirv.ptr.storage_buffer>, %row_aligned: reg<spirv.offset64>) -> (reg<spirv.id>) asm {
   %column = OpConstant.offset64 4
   %byte_offset = OpIAdd.offset64 %row_aligned, %column
-  %view = OpPtrAccessChain.storage_buffer.i32.byte_offset %base_aligned, %byte_offset
-  %loaded = OpLoad.storage_buffer.i32 %view
+  %14 = OpPtrAccessChain.storage_buffer.i32.byte_offset %base_aligned, %byte_offset
+  %loaded = OpLoad.storage_buffer.i32 %14
   return %loaded
 }
 
@@ -275,10 +275,10 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 2, 1) w
   %byte_index = OpShiftLeftLogical %linear, %29
   %31 = OpBitcast.i32.u32 %byte_index
   %byte_offset_aligned = OpUConvert.u32.offset64 %31
-  %input_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %byte_offset_aligned
-  %loaded = OpLoad.storage_buffer.i32 %input_view
-  %output_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.i32 %output_view, %loaded
+  %33 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %byte_offset_aligned
+  %loaded = OpLoad.storage_buffer.i32 %33
+  %35 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.i32 %35, %loaded
   return
 }
 
@@ -300,11 +300,11 @@ func.def target(@target) @spirv_storage_buffer_i32_roundtrip(%input: buffer, %ou
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [23]}) @spirv_storage_buffer_i32_roundtrip(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %byte_offset_aligned: reg<spirv.offset64>) -> (reg<spirv.id>) asm {
-  %input_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %byte_offset_aligned
-  %loaded = OpLoad.storage_buffer.i32 %input_view
+  %15 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %byte_offset_aligned
+  %loaded = OpLoad.storage_buffer.i32 %15
   %incremented = OpIAdd %loaded, %loaded
-  %output_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.i32 %output_view, %incremented
+  %18 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.i32 %18, %incremented
   return %loaded
 }
 
@@ -331,11 +331,11 @@ kernel.def target(@hal_target) @spirv_hal_resource_storage_buffer_i32() {
 low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @spirv_hal_resource_storage_buffer_i32(%byte_offset_aligned: reg<spirv.offset64>) asm {
   %input_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %input_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %byte_offset_aligned
-  %loaded = OpLoad.storage_buffer.i32 %input_view
+  %14 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %byte_offset_aligned
+  %loaded = OpLoad.storage_buffer.i32 %14
   %incremented = OpIAdd %loaded, %loaded
-  %output_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.i32 %output_view, %incremented
+  %17 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.i32 %17, %incremented
   return
 }
 
@@ -368,11 +368,11 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) w
   %output_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %inside = OpULessThan.offset64 %byte_offset_aligned, %limit
   low.scf.if %inside {
-    %input_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %byte_offset_aligned
-    %loaded = OpLoad.storage_buffer.i32 %input_view
+    %19 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %byte_offset_aligned
+    %loaded = OpLoad.storage_buffer.i32 %19
     %incremented = OpIAdd %loaded, %loaded
-    %output_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %byte_offset_aligned
-    OpStore.storage_buffer.i32 %output_view, %incremented
+    %22 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %byte_offset_aligned
+    OpStore.storage_buffer.i32 %22, %incremented
   }
   return
 }
@@ -403,14 +403,14 @@ kernel.def target(@hal_target) @spirv_hal_resource_storage_buffer_f32() {
 low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @spirv_hal_resource_storage_buffer_f32(%byte_offset_aligned: reg<spirv.offset64>) asm {
   %input_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %input_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %input_aligned, %byte_offset_aligned
-  %loaded = OpLoad.storage_buffer.f32 %input_view
+  %17 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input_aligned, %byte_offset_aligned
+  %loaded = OpLoad.storage_buffer.f32 %17
   %sum = OpFAdd.f32 %loaded, %loaded
   %product = OpFMul.f32 %sum, %loaded
   %quotient = OpFDiv.f32 %product, %loaded
   %remainder = OpFRem.f32 %quotient, %loaded
-  %output_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.f32 %output_view, %remainder
+  %23 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.f32 %23, %remainder
   return
 }
 
@@ -439,13 +439,13 @@ kernel.def target(@hal_target) @spirv_hal_resource_storage_buffer_i64() {
 low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @spirv_hal_resource_storage_buffer_i64(%byte_offset_aligned: reg<spirv.offset64>) asm {
   %input_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %input_view = OpPtrAccessChain.storage_buffer.i64.byte_offset %input_aligned, %byte_offset_aligned
-  %loaded = OpLoad.storage_buffer.i64 %input_view
+  %16 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input_aligned, %byte_offset_aligned
+  %loaded = OpLoad.storage_buffer.i64 %16
   %sum = OpIAdd.i64 %loaded, %loaded
   %larger = OpSGreaterThan.i64 %sum, %loaded
   %selected = OpSelect.i64 %larger, %sum, %loaded
-  %output_view = OpPtrAccessChain.storage_buffer.i64.byte_offset %output_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.i64 %output_view, %selected
+  %21 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.i64 %21, %selected
   return
 }
 
@@ -507,30 +507,30 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) w
   %output_bf16_aligned = resource<hal_binding> {index = 7, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %input_f64_aligned = resource<hal_binding> {index = 8, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output_f64_aligned = resource<hal_binding> {index = 9, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %input_i8_view = OpPtrAccessChain.storage_buffer.i8.byte_offset %input_i8_aligned, %byte_offset_aligned
-  %loaded_i8 = OpLoad.storage_buffer.i8 %input_i8_view
+  %53 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input_i8_aligned, %byte_offset_aligned
+  %loaded_i8 = OpLoad.storage_buffer.i8 %53
   %sum_i8 = OpIAdd.i8 %loaded_i8, %loaded_i8
-  %output_i8_view = OpPtrAccessChain.storage_buffer.i8.byte_offset %output_i8_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.i8 %output_i8_view, %sum_i8
-  %input_i16_view = OpPtrAccessChain.storage_buffer.i16.byte_offset %input_i16_aligned, %byte_offset_aligned
-  %loaded_i16 = OpLoad.storage_buffer.i16 %input_i16_view
+  %56 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output_i8_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.i8 %56, %sum_i8
+  %57 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input_i16_aligned, %byte_offset_aligned
+  %loaded_i16 = OpLoad.storage_buffer.i16 %57
   %sum_i16 = OpIAdd.i16 %loaded_i16, %loaded_i16
-  %output_i16_view = OpPtrAccessChain.storage_buffer.i16.byte_offset %output_i16_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.i16 %output_i16_view, %sum_i16
-  %input_f16_view = OpPtrAccessChain.storage_buffer.f16.byte_offset %input_f16_aligned, %byte_offset_aligned
-  %loaded_f16 = OpLoad.storage_buffer.f16 %input_f16_view
+  %60 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output_i16_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.i16 %60, %sum_i16
+  %61 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input_f16_aligned, %byte_offset_aligned
+  %loaded_f16 = OpLoad.storage_buffer.f16 %61
   %sum_f16 = OpFAdd.f16 %loaded_f16, %loaded_f16
-  %output_f16_view = OpPtrAccessChain.storage_buffer.f16.byte_offset %output_f16_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.f16 %output_f16_view, %sum_f16
-  %input_bf16_view = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input_bf16_aligned, %byte_offset_aligned
-  %loaded_bf16 = OpLoad.storage_buffer.bf16 %input_bf16_view
-  %output_bf16_view = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output_bf16_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.bf16 %output_bf16_view, %loaded_bf16
-  %input_f64_view = OpPtrAccessChain.storage_buffer.f64.byte_offset %input_f64_aligned, %byte_offset_aligned
-  %loaded_f64 = OpLoad.storage_buffer.f64 %input_f64_view
+  %64 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output_f16_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.f16 %64, %sum_f16
+  %65 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %input_bf16_aligned, %byte_offset_aligned
+  %loaded_bf16 = OpLoad.storage_buffer.bf16 %65
+  %67 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %output_bf16_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.bf16 %67, %loaded_bf16
+  %68 = OpPtrAccessChain.storage_buffer.f64.byte_offset %input_f64_aligned, %byte_offset_aligned
+  %loaded_f64 = OpLoad.storage_buffer.f64 %68
   %sum_f64 = OpFAdd.f64 %loaded_f64, %loaded_f64
-  %output_f64_view = OpPtrAccessChain.storage_buffer.f64.byte_offset %output_f64_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.f64 %output_f64_view, %sum_f64
+  %71 = OpPtrAccessChain.storage_buffer.f64.byte_offset %output_f64_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.f64 %71, %sum_f64
   return
 }
 
@@ -613,46 +613,46 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) w
   %output_fptosi_i16_aligned = resource<hal_binding> {index = 11, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %input_i32_bits_aligned = resource<hal_binding> {index = 12, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output_bitcast_f32_aligned = resource<hal_binding> {index = 13, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %input_i8_view = OpPtrAccessChain.storage_buffer.i8.byte_offset %input_i8_aligned, %byte_offset_aligned
-  %loaded_i8 = OpLoad.storage_buffer.i8 %input_i8_view
+  %74 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input_i8_aligned, %byte_offset_aligned
+  %loaded_i8 = OpLoad.storage_buffer.i8 %74
   %extended_i32 = OpSConvert.i8.i32 %loaded_i8
-  %output_ext_i32_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_ext_i32_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.i32 %output_ext_i32_view, %extended_i32
+  %77 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_ext_i32_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.i32 %77, %extended_i32
   %78 = OpBitcast.i8.u8 %loaded_i8
   %79 = OpUConvert.u8.u32 %78
   %extended_unsigned_i32 = OpBitcast.u32.i32 %79
-  %output_extui_i32_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_extui_i32_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.i32 %output_extui_i32_view, %extended_unsigned_i32
+  %81 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_extui_i32_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.i32 %81, %extended_unsigned_i32
   %converted_f32 = OpConvertSToF.i8.f32 %loaded_i8
-  %output_sitofp_f32_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_sitofp_f32_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.f32 %output_sitofp_f32_view, %converted_f32
+  %83 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_sitofp_f32_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.f32 %83, %converted_f32
   %84 = OpBitcast.i32.u32 %extended_unsigned_i32
   %converted_unsigned_f32 = OpConvertUToF.u32.f32 %84
-  %output_uitofp_f32_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_uitofp_f32_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.f32 %output_uitofp_f32_view, %converted_unsigned_f32
-  %input_i64_view = OpPtrAccessChain.storage_buffer.i64.byte_offset %input_i64_aligned, %byte_offset_aligned
-  %loaded_i64 = OpLoad.storage_buffer.i64 %input_i64_view
+  %86 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_uitofp_f32_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.f32 %86, %converted_unsigned_f32
+  %87 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input_i64_aligned, %byte_offset_aligned
+  %loaded_i64 = OpLoad.storage_buffer.i64 %87
   %truncated_i32 = OpSConvert.i64.i32 %loaded_i64
-  %output_trunc_i32_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_trunc_i32_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.i32 %output_trunc_i32_view, %truncated_i32
-  %input_f16_view = OpPtrAccessChain.storage_buffer.f16.byte_offset %input_f16_aligned, %byte_offset_aligned
-  %loaded_f16 = OpLoad.storage_buffer.f16 %input_f16_view
+  %90 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_trunc_i32_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.i32 %90, %truncated_i32
+  %91 = OpPtrAccessChain.storage_buffer.f16.byte_offset %input_f16_aligned, %byte_offset_aligned
+  %loaded_f16 = OpLoad.storage_buffer.f16 %91
   %extended_f32 = OpFConvert.f16.f32 %loaded_f16
-  %output_extf_f32_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_extf_f32_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.f32 %output_extf_f32_view, %extended_f32
-  %input_f32_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %input_f32_aligned, %byte_offset_aligned
-  %loaded_f32 = OpLoad.storage_buffer.f32 %input_f32_view
+  %94 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_extf_f32_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.f32 %94, %extended_f32
+  %95 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input_f32_aligned, %byte_offset_aligned
+  %loaded_f32 = OpLoad.storage_buffer.f32 %95
   %truncated_f16 = OpFConvert.f32.f16 %loaded_f32
-  %output_fptrunc_f16_view = OpPtrAccessChain.storage_buffer.f16.byte_offset %output_fptrunc_f16_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.f16 %output_fptrunc_f16_view, %truncated_f16
+  %98 = OpPtrAccessChain.storage_buffer.f16.byte_offset %output_fptrunc_f16_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.f16 %98, %truncated_f16
   %converted_i16 = OpConvertFToS.f32.i16 %loaded_f32
-  %output_fptosi_i16_view = OpPtrAccessChain.storage_buffer.i16.byte_offset %output_fptosi_i16_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.i16 %output_fptosi_i16_view, %converted_i16
-  %input_i32_bits_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_i32_bits_aligned, %byte_offset_aligned
-  %loaded_i32_bits = OpLoad.storage_buffer.i32 %input_i32_bits_view
+  %100 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output_fptosi_i16_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.i16 %100, %converted_i16
+  %101 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_i32_bits_aligned, %byte_offset_aligned
+  %loaded_i32_bits = OpLoad.storage_buffer.i32 %101
   %bitcast_f32 = OpBitcast.i32.f32 %loaded_i32_bits
-  %output_bitcast_f32_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_bitcast_f32_aligned, %byte_offset_aligned
-  OpStore.storage_buffer.f32 %output_bitcast_f32_view, %bitcast_f32
+  %104 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_bitcast_f32_aligned, %byte_offset_aligned
+  OpStore.storage_buffer.f32 %104, %bitcast_f32
   return
 }
 
@@ -691,15 +691,15 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_f16) workgroup_size(3
   %rhs_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %init_aligned = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %out_aligned = resource<hal_binding> {index = 3, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %lhs_view = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs_aligned, %byte_offset_aligned
-  %rhs_view = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs_aligned, %byte_offset_aligned
-  %init_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %init_aligned, %byte_offset_aligned
-  %out_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %out_aligned, %byte_offset_aligned
-  %lhs = OpCooperativeMatrixLoadKHR.lhs.f16.16x16x16.f32.subgroup.row_major %lhs_view
-  %rhs = OpCooperativeMatrixLoadKHR.rhs.f16.16x16x16.f32.subgroup.row_major %rhs_view
-  %init = OpCooperativeMatrixLoadKHR.init.f16.16x16x16.f32.subgroup.row_major %init_view
+  %28 = OpPtrAccessChain.storage_buffer.f16.byte_offset %lhs_aligned, %byte_offset_aligned
+  %lhs = OpCooperativeMatrixLoadKHR.lhs.f16.16x16x16.f32.subgroup.row_major %28
+  %30 = OpPtrAccessChain.storage_buffer.f16.byte_offset %rhs_aligned, %byte_offset_aligned
+  %rhs = OpCooperativeMatrixLoadKHR.rhs.f16.16x16x16.f32.subgroup.row_major %30
+  %32 = OpPtrAccessChain.storage_buffer.f32.byte_offset %init_aligned, %byte_offset_aligned
+  %init = OpCooperativeMatrixLoadKHR.init.f16.16x16x16.f32.subgroup.row_major %32
   %result = OpCooperativeMatrixMulAddKHR.f16.16x16x16.f32.subgroup %lhs, %rhs, %init
-  OpCooperativeMatrixStoreKHR.result.f16.16x16x16.f32.subgroup.row_major %out_view, %result
+  %35 = OpPtrAccessChain.storage_buffer.f32.byte_offset %out_aligned, %byte_offset_aligned
+  OpCooperativeMatrixStoreKHR.result.f16.16x16x16.f32.subgroup.row_major %35, %result
   return
 }
 
@@ -738,15 +738,15 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_bf16) workgroup_size(
   %rhs_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %init_aligned = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %out_aligned = resource<hal_binding> {index = 3, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %lhs_view = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs_aligned, %byte_offset_aligned
-  %rhs_view = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs_aligned, %byte_offset_aligned
-  %init_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %init_aligned, %byte_offset_aligned
-  %out_view = OpPtrAccessChain.storage_buffer.f32.byte_offset %out_aligned, %byte_offset_aligned
-  %lhs = OpCooperativeMatrixLoadKHR.lhs.bf16.16x16x16.f32.subgroup.row_major %lhs_view
-  %rhs = OpCooperativeMatrixLoadKHR.rhs.bf16.16x16x16.f32.subgroup.row_major %rhs_view
-  %init = OpCooperativeMatrixLoadKHR.init.bf16.16x16x16.f32.subgroup.row_major %init_view
+  %28 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %lhs_aligned, %byte_offset_aligned
+  %lhs = OpCooperativeMatrixLoadKHR.lhs.bf16.16x16x16.f32.subgroup.row_major %28
+  %30 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %rhs_aligned, %byte_offset_aligned
+  %rhs = OpCooperativeMatrixLoadKHR.rhs.bf16.16x16x16.f32.subgroup.row_major %30
+  %32 = OpPtrAccessChain.storage_buffer.f32.byte_offset %init_aligned, %byte_offset_aligned
+  %init = OpCooperativeMatrixLoadKHR.init.bf16.16x16x16.f32.subgroup.row_major %32
   %result = OpCooperativeMatrixMulAddKHR.bf16.16x16x16.f32.subgroup %lhs, %rhs, %init
-  OpCooperativeMatrixStoreKHR.result.bf16.16x16x16.f32.subgroup.row_major %out_view, %result
+  %35 = OpPtrAccessChain.storage_buffer.f32.byte_offset %out_aligned, %byte_offset_aligned
+  OpCooperativeMatrixStoreKHR.result.bf16.16x16x16.f32.subgroup.row_major %35, %result
   return
 }
 
@@ -788,14 +788,14 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_u8) workgroup_size(32
   %rhs_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %init_aligned = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %out_aligned = resource<hal_binding> {index = 3, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %lhs_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %lhs_aligned, %byte_offset_aligned
-  %rhs_view = OpPtrAccessChain.storage_buffer.u8.byte_offset %rhs_aligned, %byte_offset_aligned
-  %init_view = OpPtrAccessChain.storage_buffer.u32.byte_offset %init_aligned, %byte_offset_aligned
-  %out_view = OpPtrAccessChain.storage_buffer.u32.byte_offset %out_aligned, %byte_offset_aligned
-  %lhs = OpCooperativeMatrixLoadKHR.lhs.u8.16x16x32.u32.subgroup.row_major %lhs_view
-  %rhs = OpCooperativeMatrixLoadKHR.rhs.u8.16x16x32.u32.subgroup.row_major %rhs_view
-  %init = OpCooperativeMatrixLoadKHR.init.u8.16x16x32.u32.subgroup.row_major %init_view
+  %31 = OpPtrAccessChain.storage_buffer.u8.byte_offset %lhs_aligned, %byte_offset_aligned
+  %lhs = OpCooperativeMatrixLoadKHR.lhs.u8.16x16x32.u32.subgroup.row_major %31
+  %33 = OpPtrAccessChain.storage_buffer.u8.byte_offset %rhs_aligned, %byte_offset_aligned
+  %rhs = OpCooperativeMatrixLoadKHR.rhs.u8.16x16x32.u32.subgroup.row_major %33
+  %35 = OpPtrAccessChain.storage_buffer.u32.byte_offset %init_aligned, %byte_offset_aligned
+  %init = OpCooperativeMatrixLoadKHR.init.u8.16x16x32.u32.subgroup.row_major %35
   %result = OpCooperativeMatrixMulAddKHR.u8.16x16x32.u32.subgroup %lhs, %rhs, %init
-  OpCooperativeMatrixStoreKHR.result.u8.16x16x32.u32.subgroup.row_major %out_view, %result
+  %38 = OpPtrAccessChain.storage_buffer.u32.byte_offset %out_aligned, %byte_offset_aligned
+  OpCooperativeMatrixStoreKHR.result.u8.16x16x32.u32.subgroup.row_major %38, %result
   return
 }

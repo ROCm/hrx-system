@@ -24,6 +24,8 @@ from loom.target.contracts import (
     GuardKind,
     LowerAttrCopyKind,
     LowerEmitKind,
+    SourceMemoryAddressBase,
+    SourceMemoryAddressCoordinateType,
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
     SourceMemoryRootKind,
@@ -55,6 +57,7 @@ VALUE_REF_KIND_C_NAMES = {
     SourceValueKind.TEMPORARY: "LOOM_LOW_LOWER_VALUE_REF_TEMPORARY",
     SourceValueKind.SOURCE_MEMORY_DYNAMIC_TERM: "LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_TERM",
     SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET: "LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET",
+    SourceValueKind.SOURCE_MEMORY_ADDRESS: "LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_ADDRESS",
 }
 
 ATTR_KIND_C_NAMES = {
@@ -104,6 +107,7 @@ GUARD_KIND_C_NAMES = {
     GuardKind.INSTANCE_FLAGS_HAS_ALL: "LOOM_LOW_LOWER_GUARD_INSTANCE_FLAGS_HAS_ALL",
     GuardKind.VECTOR_EXTRACT_SHAPE: "LOOM_LOW_LOWER_GUARD_VECTOR_EXTRACT_SHAPE",
     GuardKind.VALUE_STATIC_ELEMENT_COUNT_EQ: "LOOM_LOW_LOWER_GUARD_VALUE_STATIC_ELEMENT_COUNT_EQ",
+    GuardKind.VALUE_MEMORY_SPACE: "LOOM_LOW_LOWER_GUARD_VALUE_MEMORY_SPACE",
 }
 
 ATTR_COPY_KIND_C_NAMES = {
@@ -175,17 +179,28 @@ SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_C_NAMES = {
 SOURCE_MEMORY_ROOT_KIND_C_NAMES = {
     SourceMemoryRootKind.ANY: "LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ANY",
     SourceMemoryRootKind.BLOCK_ARGUMENT: "LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_BLOCK_ARGUMENT",
+    SourceMemoryRootKind.ALLOCA: "LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ALLOCA",
 }
 
-SOURCE_MEMORY_SPACE_C_NAMES = {
-    "unknown": "LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_UNKNOWN",
-    "global": "LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_GLOBAL",
-    "workgroup": "LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_WORKGROUP",
-    "private": "LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_PRIVATE",
-    "constant": "LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_CONSTANT",
-    "host": "LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_HOST",
-    "descriptor": "LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_DESCRIPTOR",
-    "generic": "LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_GENERIC",
+SOURCE_MEMORY_ADDRESS_BASE_C_NAMES = {
+    SourceMemoryAddressBase.ROOT: "LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_ROOT",
+    SourceMemoryAddressBase.BASE_VIEW: "LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW",
+}
+
+SOURCE_MEMORY_ADDRESS_COORDINATE_TYPE_C_NAMES = {
+    SourceMemoryAddressCoordinateType.OFFSET: "LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_OFFSET",
+    SourceMemoryAddressCoordinateType.INDEX: "LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_INDEX",
+}
+
+MEMORY_SPACE_C_NAMES = {
+    "unknown": "LOOM_LOW_LOWER_MEMORY_SPACE_UNKNOWN",
+    "global": "LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL",
+    "workgroup": "LOOM_LOW_LOWER_MEMORY_SPACE_WORKGROUP",
+    "private": "LOOM_LOW_LOWER_MEMORY_SPACE_PRIVATE",
+    "constant": "LOOM_LOW_LOWER_MEMORY_SPACE_CONSTANT",
+    "host": "LOOM_LOW_LOWER_MEMORY_SPACE_HOST",
+    "descriptor": "LOOM_LOW_LOWER_MEMORY_SPACE_DESCRIPTOR",
+    "generic": "LOOM_LOW_LOWER_MEMORY_SPACE_GENERIC",
 }
 
 DIAGNOSTIC_PARAM_KIND_C_NAMES = {
@@ -261,12 +276,12 @@ def diagnostic_index(index: int) -> str:
     return str(index)
 
 
-def source_memory_space_mask(memory_spaces: tuple[str, ...]) -> str:
+def memory_space_mask(memory_spaces: tuple[str, ...]) -> str:
     c_names: list[str] = []
     for memory_space in memory_spaces:
-        c_name = SOURCE_MEMORY_SPACE_C_NAMES.get(memory_space)
+        c_name = MEMORY_SPACE_C_NAMES.get(memory_space)
         if c_name is None:
-            raise ValueError(f"unknown source memory space '{memory_space}'")
+            raise ValueError(f"unknown memory space '{memory_space}'")
         c_names.append(c_name)
     return " | ".join(c_names)
 

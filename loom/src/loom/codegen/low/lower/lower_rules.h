@@ -27,6 +27,8 @@ extern "C" {
 
 typedef struct loom_low_lower_rule_match_context_t
     loom_low_lower_rule_match_context_t;
+typedef struct loom_low_lower_rule_source_memory_state_t
+    loom_low_lower_rule_source_memory_state_t;
 typedef struct loom_symbolic_expr_context_t loom_symbolic_expr_context_t;
 
 typedef uint16_t loom_low_lower_descriptor_ref_t;
@@ -94,6 +96,8 @@ typedef enum loom_low_lower_value_ref_kind_e {
   LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_TERM = 4,
   // Dynamic byte offset materialized from all selected source-memory terms.
   LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET = 5,
+  // Complete target address materialized from one source-memory plan.
+  LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_ADDRESS = 6,
 } loom_low_lower_value_ref_kind_t;
 
 // Returns true when the materializer can produce a low value for the source
@@ -185,6 +189,9 @@ struct loom_low_lower_rule_match_context_t {
   const loom_value_fact_table_t* fact_table;
   // Optional precomputed view summaries used by source-memory guard rows.
   const loom_view_region_table_t* view_regions;
+  // Caller-owned state retaining the canonical source-memory plan for the
+  // source op being matched. Required for rule sets with source-memory rows.
+  loom_low_lower_rule_source_memory_state_t* source_memory_state;
   // Optional symbolic proof context used as a cold fallback for fact-backed
   // guard rows whose scalar intervals are inconclusive.
   loom_symbolic_expr_context_t* symbolic_expr_context;
@@ -372,38 +379,53 @@ typedef struct loom_low_lower_diagnostic_t {
 
 #define LOOM_LOW_LOWER_DIAGNOSTIC_NONE UINT16_MAX
 
-typedef uint16_t loom_low_lower_source_memory_space_mask_t;
+typedef uint16_t loom_low_lower_memory_space_mask_t;
 
 typedef enum loom_low_lower_source_memory_root_kind_e {
   // Root memory value may have any source provenance.
   LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ANY = 0,
   // Root memory value must be a source function block argument.
   LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_BLOCK_ARGUMENT = 1,
+  // Root memory value must be produced by buffer.alloca.
+  LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ALLOCA = 2,
 } loom_low_lower_source_memory_root_kind_t;
 
-#define LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_UNKNOWN \
-  ((loom_low_lower_source_memory_space_mask_t)1u   \
+typedef enum loom_low_lower_source_memory_address_base_e {
+  // Complete addresses use the source-memory storage root.
+  LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_ROOT = 0,
+  // Complete addresses use the planner-owned materialized base view.
+  LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW = 1,
+} loom_low_lower_source_memory_address_base_t;
+
+typedef enum loom_low_lower_source_memory_address_coordinate_e {
+  // Address coordinates use the semantic offset carrier.
+  LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_OFFSET = 0,
+  // Address coordinates use the semantic index carrier.
+  LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_INDEX = 1,
+} loom_low_lower_source_memory_address_coordinate_t;
+
+#define LOOM_LOW_LOWER_MEMORY_SPACE_UNKNOWN \
+  ((loom_low_lower_memory_space_mask_t)1u   \
    << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN)
-#define LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_GLOBAL \
-  ((loom_low_lower_source_memory_space_mask_t)1u  \
+#define LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL \
+  ((loom_low_lower_memory_space_mask_t)1u  \
    << LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL)
-#define LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_WORKGROUP \
-  ((loom_low_lower_source_memory_space_mask_t)1u     \
+#define LOOM_LOW_LOWER_MEMORY_SPACE_WORKGROUP \
+  ((loom_low_lower_memory_space_mask_t)1u     \
    << LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP)
-#define LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_PRIVATE \
-  ((loom_low_lower_source_memory_space_mask_t)1u   \
+#define LOOM_LOW_LOWER_MEMORY_SPACE_PRIVATE \
+  ((loom_low_lower_memory_space_mask_t)1u   \
    << LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE)
-#define LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_CONSTANT \
-  ((loom_low_lower_source_memory_space_mask_t)1u    \
+#define LOOM_LOW_LOWER_MEMORY_SPACE_CONSTANT \
+  ((loom_low_lower_memory_space_mask_t)1u    \
    << LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT)
-#define LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_HOST  \
-  ((loom_low_lower_source_memory_space_mask_t)1u \
-   << LOOM_VALUE_FACT_MEMORY_SPACE_HOST)
-#define LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_DESCRIPTOR \
-  ((loom_low_lower_source_memory_space_mask_t)1u      \
+#define LOOM_LOW_LOWER_MEMORY_SPACE_HOST \
+  ((loom_low_lower_memory_space_mask_t)1u << LOOM_VALUE_FACT_MEMORY_SPACE_HOST)
+#define LOOM_LOW_LOWER_MEMORY_SPACE_DESCRIPTOR \
+  ((loom_low_lower_memory_space_mask_t)1u      \
    << LOOM_VALUE_FACT_MEMORY_SPACE_DESCRIPTOR)
-#define LOOM_LOW_LOWER_SOURCE_MEMORY_SPACE_GENERIC \
-  ((loom_low_lower_source_memory_space_mask_t)1u   \
+#define LOOM_LOW_LOWER_MEMORY_SPACE_GENERIC \
+  ((loom_low_lower_memory_space_mask_t)1u   \
    << LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC)
 
 #define LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_TERM_COUNT_ANY UINT8_MAX
@@ -430,7 +452,7 @@ typedef struct loom_low_lower_source_memory_t {
   // Source provenance required for the root memory value.
   loom_low_lower_source_memory_root_kind_t root_kind;
   // Accepted target-independent source memory spaces.
-  loom_low_lower_source_memory_space_mask_t memory_space_mask;
+  loom_low_lower_memory_space_mask_t memory_space_mask;
   // Required byte count of one addressed view element.
   uint32_t element_byte_count;
   // Required static number of vector lanes addressed by the operation.
@@ -461,6 +483,8 @@ typedef struct loom_low_lower_source_memory_t {
   uint32_t cache_policy_build_flags;
   // Diagnostic table row emitted when this source-memory row rejects.
   uint16_t diagnostic_index;
+  // Diagnostic table row emitted when complete address materialization rejects.
+  uint16_t address_diagnostic_index;
   // Descriptor ref used to materialize i64 constants for dynamic byte offsets.
   loom_low_lower_descriptor_ref_t byte_offset_const_i64_descriptor_ref;
   // Immediate field populated when materializing an i64 constant.
@@ -471,6 +495,33 @@ typedef struct loom_low_lower_source_memory_t {
   loom_low_lower_descriptor_ref_t byte_offset_mul_i64_descriptor_ref;
   // Descriptor ref used to materialize i64 shifts for dynamic byte offsets.
   loom_low_lower_descriptor_ref_t byte_offset_shl_i64_descriptor_ref;
+  // Source-memory value used as the complete-address base.
+  loom_low_lower_source_memory_address_base_t address_base_kind;
+  // Semantic source type carried by materialized address coordinates.
+  loom_low_lower_source_memory_address_coordinate_t address_coordinate_type;
+  // Number of bytes represented by one materialized address coordinate unit.
+  uint32_t address_coordinate_unit_byte_count;
+  // Minimum accepted complete address coordinate.
+  int64_t address_coordinate_minimum;
+  // Maximum accepted complete address coordinate.
+  int64_t address_coordinate_maximum;
+  // Descriptor ref used to materialize a complete address coordinate constant.
+  loom_low_lower_descriptor_ref_t address_const_coordinate_descriptor_ref;
+  // Immediate field populated for a complete address coordinate constant.
+  iree_string_view_t address_const_coordinate_immediate;
+  // Descriptor ref used to add complete address coordinate values.
+  loom_low_lower_descriptor_ref_t address_add_coordinate_descriptor_ref;
+  // Descriptor ref used to multiply complete address coordinate values.
+  loom_low_lower_descriptor_ref_t address_mul_coordinate_descriptor_ref;
+  // Descriptor ref used to shift complete address coordinate values.
+  loom_low_lower_descriptor_ref_t address_shl_coordinate_descriptor_ref;
+  // Descriptor ref used to normalize an index before converting its carrier.
+  loom_low_lower_descriptor_ref_t
+      address_index_to_coordinate_input_descriptor_ref;
+  // Descriptor ref used to convert a semantic index to the coordinate carrier.
+  loom_low_lower_descriptor_ref_t address_index_to_coordinate_descriptor_ref;
+  // Descriptor ref used to materialize the final target address.
+  loom_low_lower_descriptor_ref_t address_descriptor_ref;
 } loom_low_lower_source_memory_t;
 
 typedef enum loom_low_lower_guard_kind_e {
@@ -551,6 +602,8 @@ typedef enum loom_low_lower_guard_kind_e {
   LOOM_LOW_LOWER_GUARD_VECTOR_EXTRACT_SHAPE = 30,
   // Source value refs must have equal static shaped element counts.
   LOOM_LOW_LOWER_GUARD_VALUE_STATIC_ELEMENT_COUNT_EQ = 31,
+  // Source buffer/view reference facts must name a space present in u64.
+  LOOM_LOW_LOWER_GUARD_VALUE_MEMORY_SPACE = 32,
 } loom_low_lower_guard_kind_t;
 
 typedef struct loom_low_lower_guard_t {
@@ -572,7 +625,8 @@ typedef struct loom_low_lower_guard_t {
   loom_attr_kind_t attr_kind;
   // Required enum value, divisor adjustment, expected count, element index,
   // bit-count limit, register unit count, exact f64 bit pattern, flag mask,
-  // storage element format, storage unit cap, or storage payload multiple.
+  // storage element format, memory-space mask, storage unit cap, or storage
+  // payload multiple.
   uint64_t u64;
   // Descriptor-set register-class ID used by LOW_VALUE_REGISTER_CLASS guards.
   uint16_t register_class_id;
@@ -814,7 +868,21 @@ typedef struct loom_low_lower_rule_selection_t {
   uint16_t diagnostic_index;
   // Number of guards matched by the best failed rule candidate.
   uint16_t matched_guard_count;
+  // True when a descriptor guard rejected a rule whose source-memory
+  // constraints matched the source access.
+  bool source_memory_compatible;
+  // True when the selected rule consumes the canonical source-memory plan.
+  bool uses_source_memory_access;
 } loom_low_lower_rule_selection_t;
+
+// Initializes a rule match context backed by a mutable lowering context.
+// |source_memory_state| retains the canonical source-memory plan across every
+// candidate rule inspected for one source op.
+void loom_low_lower_rule_match_context_initialize_from_lowering(
+    loom_low_lower_context_t* context,
+    const loom_view_region_table_t* view_regions,
+    loom_low_lower_rule_source_memory_state_t* source_memory_state,
+    loom_low_lower_rule_match_context_t* out_match_context);
 
 // Selects the exact lowering rule for |source_op| without emitting user
 // diagnostics. Callers that compose rule tables with custom target callbacks
@@ -898,15 +966,8 @@ loom_low_lower_descriptor_ref_t loom_low_lower_rule_first_descriptor_ref(
 iree_status_t loom_low_lower_rule_set_emit_selection_failure(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    loom_low_lower_rule_selection_t selection);
-
-// Selects the exact lowering rule for |source_op| and emits a user diagnostic
-// when no rule accepts it. The selected rule is trusted generated data and must
-// be executed unchanged by loom_low_lower_rule_set_emit_rule.
-iree_status_t loom_low_lower_rule_set_select_op(
-    loom_low_lower_context_t* context,
-    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    const loom_low_lower_rule_t** out_rule);
+    loom_low_lower_rule_selection_t selection,
+    loom_low_lower_rule_source_memory_state_t* source_memory_state);
 
 // Resolves descriptor-backed emit rows for |rule| after selection. The returned
 // rows are arena-owned by |context| and remain valid for the current lowering
@@ -922,7 +983,8 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_rule_t* rule,
-    const loom_low_lower_resolved_emit_t* resolved_emits);
+    const loom_low_lower_resolved_emit_t* resolved_emits,
+    const loom_low_source_memory_access_plan_t* source_memory_access);
 
 #ifdef __cplusplus
 }  // extern "C"

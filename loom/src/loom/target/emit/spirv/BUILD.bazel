@@ -249,10 +249,12 @@ loom_check_test_suite(
         "test/index_conversion.loom-test",
         "test/index_numeric.loom-test",
         "test/integer_boolean.loom-test",
+        "test/memory_scalar_addressing.loom-test",
         "test/source_structured_control.loom-test",
         "test/workgroup_storage.loom-test",
     ],
     data = _SPIRV_TOOL_DATA + [
+        "//loom/src/loom/test/corpus/source_low:memory_scalar_addressing.loom-test",
         "//loom/src/loom/test/corpus/source_low:numeric_index.loom-test",
     ],
     env = _SPIRV_TOOL_ENV,

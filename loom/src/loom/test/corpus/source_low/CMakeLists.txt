@@ -26,6 +26,7 @@ loom_check_test_suite(
     "memory_global_atomic.loom-test"
     "memory_global_atomic_ordering.loom-test"
     "memory_prefetch.loom-test"
+    "memory_scalar_addressing.loom-test"
     "memory_workgroup_atomic.loom-test"
     "memory_workgroup_b128.loom-test"
     "memory_workgroup_indexed.loom-test"

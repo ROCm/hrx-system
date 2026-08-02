@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, unique
 from typing import Self
@@ -27,6 +28,7 @@ from loom.target.contracts.diagnostics import (
     string_param,
     target_diagnostic,
 )
+from loom.target.contracts.memory_spaces import MEMORY_SPACE_NAMES
 from loom.target.contracts.patterns import TypePattern
 from loom.target.contracts.source import (
     _require_attr,
@@ -73,6 +75,7 @@ class GuardKind(Enum):
     INSTANCE_FLAGS_HAS_ALL = "instance_flags_has_all"
     VECTOR_EXTRACT_SHAPE = "vector_extract_shape"
     VALUE_STATIC_ELEMENT_COUNT_EQ = "value_static_element_count_eq"
+    VALUE_MEMORY_SPACE = "value_memory_space"
 
 
 _LOW_VALUE_GUARD_KINDS = (
@@ -133,6 +136,7 @@ class Guard:
     descriptor: Descriptor | None = None
     register_class: str | None = None
     materializer: str | None = None
+    memory_spaces: tuple[str, ...] = ()
     diagnostic: GuardDiagnostic | None = None
 
     @classmethod
@@ -502,6 +506,21 @@ class Guard:
         )
 
     @classmethod
+    def value_memory_space(
+        cls,
+        field: str,
+        memory_spaces: Sequence[str],
+        *,
+        diagnostic: GuardDiagnostic | None = None,
+    ) -> Self:
+        return cls(
+            kind=GuardKind.VALUE_MEMORY_SPACE,
+            field=field,
+            memory_spaces=tuple(memory_spaces),
+            diagnostic=diagnostic,
+        )
+
+    @classmethod
     def value_packed_integer_payload_from_lanes(
         cls,
         lane_field: str,
@@ -617,6 +636,20 @@ class Guard:
             raise ValueError(f"{self.kind.value} register class must be non-empty")
         if self.materializer is not None and not self.materializer:
             raise ValueError(f"{self.kind.value} materializer must be non-empty")
+        if self.kind == GuardKind.VALUE_MEMORY_SPACE:
+            if not self.memory_spaces:
+                raise ValueError(f"{self.kind.value} guard needs a memory space")
+            seen_memory_spaces: set[str] = set()
+            for memory_space in self.memory_spaces:
+                if memory_space not in MEMORY_SPACE_NAMES:
+                    raise ValueError(f"unknown value memory space '{memory_space}'")
+                if memory_space in seen_memory_spaces:
+                    raise ValueError(
+                        f"{self.kind.value} guard repeats memory space '{memory_space}'"
+                    )
+                seen_memory_spaces.add(memory_space)
+        elif self.memory_spaces:
+            raise ValueError(f"{self.kind.value} guard cannot carry a memory-space set")
         if self.kind == GuardKind.VALUE_FLOAT_EQUALS and self.f64_value is None:
             raise ValueError(f"{self.kind.value} guard needs an f64 value")
         if (
@@ -704,6 +737,7 @@ class Guard:
             GuardKind.VALUE_I64_RANGE_GE,
             GuardKind.VALUE_FLOAT_EQUALS,
             GuardKind.VALUE_STORAGE_ELEMENT_FORMAT,
+            GuardKind.VALUE_MEMORY_SPACE,
             GuardKind.VALUE_PACKED_INTEGER_PAYLOAD_FROM_LANES,
             GuardKind.VALUE_PACKED_INTEGER_LANES_FROM_PAYLOAD,
             GuardKind.VALUE_STATIC_ELEMENT_COUNT_EQ,

@@ -587,6 +587,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadTracksViewBaseBoundary) {
   EXPECT_EQ(plan.static_byte_offset, 28);
   EXPECT_EQ(plan.static_view_base_byte_offset, 16);
   EXPECT_EQ(plan.dynamic_view_base_value_id, loom_index_add_result(base_op));
+  EXPECT_EQ(plan.dynamic_view_base_value_static_byte_offset, 16);
   ASSERT_EQ(plan.dynamic_term_count, 1u);
   EXPECT_EQ(plan.dynamic_view_base_term_count, 1u);
   EXPECT_EQ(plan.dynamic_terms[0].index, base);
@@ -630,6 +631,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadFactorsScaledViewBase) {
   ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic));
   EXPECT_EQ(plan.dynamic_view_base_value_id,
             loom_index_scale_result(byte_offset_op));
+  EXPECT_EQ(plan.dynamic_view_base_value_static_byte_offset, 0);
   ASSERT_EQ(plan.dynamic_term_count, 1u);
   EXPECT_EQ(plan.dynamic_view_base_term_count, 1u);
   EXPECT_EQ(plan.dynamic_terms[0].index, element);
@@ -681,6 +683,7 @@ TEST_F(SourceMemoryPlanTest, DynamicDenseLoadTracksMaterializedI32ViewBase) {
   EXPECT_EQ(plan.static_view_base_byte_offset, 0);
   EXPECT_EQ(plan.dynamic_view_base_value_id,
             loom_index_cast_result(base_cast_op));
+  EXPECT_EQ(plan.dynamic_view_base_value_static_byte_offset, 0);
   ASSERT_EQ(plan.dynamic_term_count, 1u);
   EXPECT_EQ(plan.dynamic_view_base_term_count, 1u);
   EXPECT_EQ(plan.dynamic_terms[0].index, loom_view_load_result(base_load_op));

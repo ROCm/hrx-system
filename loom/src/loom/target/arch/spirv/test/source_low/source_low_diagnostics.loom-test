@@ -82,13 +82,14 @@ func.def target(@target) @unsupported_source_type(%value: f8E4M3) {
 spirv.target<vulkan1_3> @target
 
 func.def target(@target) @storage_buffer_f16_requires_target_features(%input: buffer, %output: buffer, %byte_offset: offset) {
+  %byte_offset_aligned = index.assume %byte_offset [mul(%byte_offset, 2)] : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 2} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 2} : buffer
+  %input_view = buffer.view %input_aligned[%byte_offset_aligned] : buffer -> view<1xf16, #dense>
   // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_ptr_access_chain.storage_buffer.f16.byte_offset", constraint_key="descriptor_available"}
-  %input_view = buffer.view %input[%byte_offset] : buffer -> view<1xf16, #dense>
-  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_load.storage_buffer.f16", constraint_key="descriptor_available"}
   %loaded = view.load %input_view[0] : view<1xf16, #dense> -> f16
+  %output_view = buffer.view %output_aligned[%byte_offset_aligned] : buffer -> view<1xf16, #dense>
   // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_ptr_access_chain.storage_buffer.f16.byte_offset", constraint_key="descriptor_available"}
-  %output_view = buffer.view %output[%byte_offset] : buffer -> view<1xf16, #dense>
-  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_store.storage_buffer.f16", constraint_key="descriptor_available"}
   view.store %loaded, %output_view[0] : f16, view<1xf16, #dense>
   func.return
 }
@@ -122,12 +123,13 @@ func.def target(@target) @storage_buffer_i32_rejects_misaligned_static_offset(%i
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @storage_buffer_i32_rejects_nonzero_static_load_index(%input: buffer) -> (i32) {
+func.def target(@target) @storage_buffer_i32_rejects_wide_index(%input: buffer, %element0: index) -> (i32) {
   %zero = index.constant 0 : offset
+  %element = index.assume %element0 [range(%element0, 0, 2147483648)] : index
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%zero] : buffer -> view<2xi32, #dense>
-  // ERROR@+1: TARGET/006 {subject_role="i64_array", subject_name="static_indices", element="0", constraint_key="element_range", minimum="0", maximum="0"}
-  %loaded = view.load %input_view[1] : view<2xi32, #dense> -> i32
+  %input_view = buffer.view %input_aligned[%zero] : buffer -> view<2147483649xi32, #dense>
+  // ERROR@+1: SPIRV/028 {required_range_lo="0", required_range_hi="2147483647", constraint_key="source_memory.address_index_non_negative_s32"}
+  %loaded = view.load %input_view[%element] : view<2147483649xi32, #dense> -> i32
   func.return %loaded : i32
 }
 
@@ -135,13 +137,15 @@ func.def target(@target) @storage_buffer_i32_rejects_nonzero_static_load_index(%
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @storage_buffer_i32_rejects_nonzero_static_store_index(%output: buffer, %value: i32) {
-  %zero = index.constant 0 : offset
-  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %output_view = buffer.view %output_aligned[%zero] : buffer -> view<2xi32, #dense>
-  // ERROR@+1: TARGET/006 {subject_role="i64_array", subject_name="static_indices", element="0", constraint_key="element_range", minimum="0", maximum="0"}
-  view.store %value, %output_view[1] : i32, view<2xi32, #dense>
-  func.return
+func.def target(@target) @storage_buffer_i32_rejects_wide_dynamic_stride(%input: buffer, %columns0: index, %row0: index) -> (i32) {
+  %zero_offset = index.constant 0 : offset
+  %columns = index.assume %columns0 [range(%columns0, 1, 2147483648)] : index
+  %row = index.assume %row0 [range(%row0, 0, 3)] : index
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %input_view = buffer.view %input_aligned[%zero_offset] : buffer -> view<4x[%columns]xi32, #dense>
+  // ERROR@+1: SPIRV/028 {required_range_lo="0", required_range_hi="2147483647", constraint_key="source_memory.address_index_non_negative_s32"}
+  %loaded = view.load %input_view[%row, 0] : view<4x[%columns]xi32, #dense> -> i32
+  func.return %loaded : i32
 }
 
 // ====
@@ -170,6 +174,21 @@ func.def target(@target) @workgroup_i32_rejects_nonzero_static_store_index(%valu
   // ERROR@+1: TARGET/006 {subject_role="i64_array", subject_name="static_indices", element="0", constraint_key="element_range", minimum="0", maximum="0"}
   view.store %value, %scratch_view[1] : i32, view<2xi32, #dense>
   func.return
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @workgroup_i32_rejects_subview_projection() -> (i32) {
+  %zero = index.constant 0 : offset
+  %bytes = index.constant 8 : offset
+  %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<2xi32, #dense>
+  // ERROR@+1: TARGET/003 {subject_role="value_fact", subject_name="result", constraint_key="memory_space"}
+  %scratch_subview = view.subview %scratch_view[1] : view<2xi32, #dense> -> view<1xi32, #dense>
+  %loaded = view.load %scratch_subview[0] : view<1xi32, #dense> -> i32
+  func.return %loaded : i32
 }
 
 // ====

@@ -484,6 +484,31 @@ ERR_SPIRV_027 = ErrorDef(
     ),
 )
 
+# ERR_SPIRV_028: SPIR-V source-memory address index range is not proven.
+ERR_SPIRV_028 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=28,
+    severity=Severity.ERROR,
+    summary="SPIR-V source-memory address index range is not proven.",
+    message=(
+        "SPIR-V target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected '{op_name}' in '@{function_name}': every "
+        "index contributing to the source-memory address must be proven in "
+        "[{required_range_lo}, {required_range_hi}]; constraint "
+        "'{constraint_key}' is not satisfied"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("required_range_lo", ParamKind.I64),
+        ErrorParam("required_range_hi", ParamKind.I64),
+        ErrorParam("constraint_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Establish the index range at its producer or with an assumption "
+        "after the corresponding runtime guard"
+    ),
+)
+
 ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_001,
     ERR_SPIRV_002,
@@ -511,4 +536,5 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_025,
     ERR_SPIRV_026,
     ERR_SPIRV_027,
+    ERR_SPIRV_028,
 )

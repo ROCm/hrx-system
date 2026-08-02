@@ -1056,6 +1056,8 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
   if (dynamic_view_base_count != 0 &&
       view_region->begin_value_id != LOOM_VALUE_ID_INVALID) {
     plan->dynamic_view_base_value_id = view_region->begin_value_id;
+    plan->dynamic_view_base_value_static_byte_offset =
+        plan->static_view_base_byte_offset;
   } else if (dynamic_view_base_count == 1 &&
              plan->dynamic_terms[dynamic_view_base_begin].byte_stride == 1) {
     plan->dynamic_view_base_value_id =

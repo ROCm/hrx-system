@@ -25,6 +25,7 @@ iree_py_library(
         "kinds.py",
         "lower_rules.py",
         "materializers.py",
+        "memory_spaces.py",
         "patterns.py",
         "rules.py",
         "source.py",

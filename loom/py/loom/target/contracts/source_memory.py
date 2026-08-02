@@ -14,20 +14,8 @@ from enum import Enum, unique
 
 from loom.dsl import MemoryAccessInterface, Op
 from loom.target.contracts.guards import GuardDiagnostic
+from loom.target.contracts.memory_spaces import MEMORY_SPACE_NAMES
 from loom.target.low_descriptors import Descriptor
-
-_MEMORY_SPACE_NAMES = frozenset(
-    (
-        "unknown",
-        "global",
-        "workgroup",
-        "private",
-        "constant",
-        "host",
-        "descriptor",
-        "generic",
-    )
-)
 
 _I64_MIN = -(2**63)
 _I64_MAX = 2**63 - 1
@@ -63,6 +51,23 @@ class SourceMemoryRootKind(Enum):
 
     ANY = "any"
     BLOCK_ARGUMENT = "block_argument"
+    ALLOCA = "alloca"
+
+
+@unique
+class SourceMemoryAddressBase(Enum):
+    """Source-memory value used as the base of a complete target address."""
+
+    ROOT = "root"
+    BASE_VIEW = "base_view"
+
+
+@unique
+class SourceMemoryAddressCoordinateType(Enum):
+    """Semantic source type carried by a materialized address coordinate."""
+
+    OFFSET = "offset"
+    INDEX = "index"
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +79,74 @@ class SourceMemoryByteOffsetMaterializer:
     mul_i64: Descriptor
     shl_i64: Descriptor | None
     const_i64_immediate: str = "value"
+
+
+@dataclass(frozen=True, slots=True)
+class SourceMemoryAddressMaterializer:
+    """Low descriptors and policies for one complete source-memory address."""
+
+    const_coordinate: Descriptor
+    add_coordinate: Descriptor
+    mul_coordinate: Descriptor
+    address: Descriptor
+    base: SourceMemoryAddressBase = SourceMemoryAddressBase.ROOT
+    coordinate_type: SourceMemoryAddressCoordinateType = (
+        SourceMemoryAddressCoordinateType.OFFSET
+    )
+    coordinate_unit_byte_count: int = 1
+    coordinate_minimum: int = _I64_MIN
+    coordinate_maximum: int = _I64_MAX
+    shl_coordinate: Descriptor | None = None
+    index_to_coordinate_input: Descriptor | None = None
+    index_to_coordinate: Descriptor | None = None
+    const_coordinate_immediate: str = "value"
+    diagnostic: GuardDiagnostic | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.base, SourceMemoryAddressBase):
+            raise ValueError(
+                "source-memory address base must be a SourceMemoryAddressBase"
+            )
+        if not isinstance(
+            self.coordinate_type,
+            SourceMemoryAddressCoordinateType,
+        ):
+            raise ValueError(
+                "source-memory address coordinate type must be a "
+                "SourceMemoryAddressCoordinateType"
+            )
+        if not 0 < self.coordinate_unit_byte_count <= _U32_MAX:
+            raise ValueError(
+                "source-memory address coordinate unit byte count must fit in a "
+                "positive u32"
+            )
+        if not _I64_MIN <= self.coordinate_minimum <= _I64_MAX:
+            raise ValueError("source-memory address minimum coordinate must fit in i64")
+        if not _I64_MIN <= self.coordinate_maximum <= _I64_MAX:
+            raise ValueError("source-memory address maximum coordinate must fit in i64")
+        if self.coordinate_minimum > self.coordinate_maximum:
+            raise ValueError("source-memory address coordinate range is empty")
+        if (
+            self.coordinate_type == SourceMemoryAddressCoordinateType.OFFSET
+            and self.coordinate_unit_byte_count != 1
+        ):
+            raise ValueError("offset-coordinate source-memory addresses use byte units")
+        if self.coordinate_type == SourceMemoryAddressCoordinateType.INDEX and (
+            self.index_to_coordinate_input is not None
+            or self.index_to_coordinate is not None
+        ):
+            raise ValueError(
+                "index-coordinate source-memory addresses use the mapped index "
+                "carrier directly"
+            )
+        if (
+            self.coordinate_type == SourceMemoryAddressCoordinateType.OFFSET
+            and self.index_to_coordinate is None
+        ):
+            raise ValueError(
+                "offset-coordinate source-memory addresses need an index "
+                "conversion descriptor"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,7 +256,7 @@ class SourceMemoryConstraint:
         if not self.memory_spaces:
             raise ValueError("source memory constraint needs a memory space")
         for memory_space in self.memory_spaces:
-            if memory_space not in _MEMORY_SPACE_NAMES:
+            if memory_space not in MEMORY_SPACE_NAMES:
                 raise ValueError(f"unknown source memory space '{memory_space}'")
         if not 0 < self.element_byte_count <= _U32_MAX:
             raise ValueError(

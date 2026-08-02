@@ -142,6 +142,19 @@ def test_elide_rule_validates_guards() -> None:
     assert table.cases[0].source_op == vector.vector_extract
 
 
+def test_value_memory_space_guard_requires_known_unique_spaces() -> None:
+    guard = Guard.value_memory_space("result", ("global", "descriptor"))
+
+    assert guard.memory_spaces == ("global", "descriptor")
+
+    with pytest.raises(ValueError, match="needs a memory space"):
+        Guard.value_memory_space("result", ())
+    with pytest.raises(ValueError, match="unknown value memory space 'device'"):
+        Guard.value_memory_space("result", ("device",))
+    with pytest.raises(ValueError, match="repeats memory space 'global'"):
+        Guard.value_memory_space("result", ("global", "global"))
+
+
 def test_recipe_rule_validates_guards() -> None:
     table = ContractFragment(
         name="test.recipe",
