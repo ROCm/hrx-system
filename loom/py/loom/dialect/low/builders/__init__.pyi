@@ -21,7 +21,8 @@ class LowBuilder(DialectBuilder):
         purity: str | None = ...,
         allocation: str | None = ...,
         schedule: str | None = ...,
-        target: str,
+        descriptor_set: str,
+        target: str | None = ...,
         abi: str | None = ...,
         abi_attrs: Mapping[str, Any] | None = ...,
         abi_layout: Mapping[str, Any] | None = ...,
@@ -43,7 +44,8 @@ class LowBuilder(DialectBuilder):
         retain: str | None = ...,
         allocation: str | None = ...,
         schedule: str | None = ...,
-        target: str,
+        descriptor_set: str,
+        target: str | None = ...,
         abi_layout: Mapping[str, Any] | None = ...,
         export_symbol: str | None = ...,
         export_linkage: str | None = ...,
@@ -73,7 +75,8 @@ class LowBuilder(DialectBuilder):
         schedule: str | None = ...,
         import_kind: str | None = ...,
         code_symbol: str | None = ...,
-        target: str,
+        descriptor_set: str,
+        target: str | None = ...,
         abi: str | None = ...,
         abi_attrs: Mapping[str, Any] | None = ...,
         abi_layout: Mapping[str, Any] | None = ...,
@@ -109,7 +112,7 @@ class LowBuilder(DialectBuilder):
     def op(
         self,
         *,
-        opcode: str,
+        descriptor: str,
         operands: list[ValueRef] = ...,
         attrs: Mapping[str, Any] | None = ...,
         memory_access: list[int] | None = ...,
@@ -122,7 +125,7 @@ class LowBuilder(DialectBuilder):
     def const(
         self,
         *,
-        opcode: str,
+        descriptor: str,
         attrs: Mapping[str, Any] | None = ...,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
@@ -302,3 +305,8 @@ class LowBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> list[ValueRef]: ...
+    def fence(
+        self,
+        *,
+        location_id: int | None = ...,
+    ) -> None: ...

@@ -86,6 +86,7 @@ loom_cc_library(
     iree::base::internal::unicode
     loom::error::diagnostic
     loom::error::error_defs
+    loom::format::low_repr
     loom::ir
     loom::ops::op_defs
     loom::verify
@@ -125,11 +126,13 @@ loom_cc_test(
     iree::io::stream
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::codegen::low::repr
     loom::codegen::low::text_asm
     loom::error::diagnostic
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
+    loom::ops::op_defs
     loom::target::low_descriptor_registry_core_test
     loom::test::corpus::text::golden_text_corpus
     loom::testing::context
@@ -148,6 +151,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     iree::io::stream
+    loom::format::low_repr
     loom::ir
     loom::ops::op_defs
   PUBLIC
@@ -182,8 +186,10 @@ loom_cc_fuzz(
     iree::base
     iree::base::internal::arena
     iree::io::stream
+    loom::codegen::low::repr
     loom::error::diagnostic
     loom::ir
+    loom::target::low_descriptor_registry_core_test
     loom::testing::context
     loom::testing::gen
 )

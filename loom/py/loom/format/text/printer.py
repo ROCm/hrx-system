@@ -40,7 +40,6 @@ from loom.assembly import (
     BindingList,
     BlockArgs,
     Clause,
-    DescriptorRef,
     Flags,
     FormatElement,
     FuncArgs,
@@ -57,6 +56,7 @@ from loom.assembly import (
     ResultType,
     ResultTypeList,
     Scope,
+    ScopedEnumRef,
     StableKeyRef,
     SymbolRef,
     TemplateParam,
@@ -1552,10 +1552,9 @@ class Printer:
                     if value:
                         stream.emit(f"<{value}>", glue=True)
 
-                case DescriptorRef(key=key, ordinal=ordinal):
-                    covered_attrs.add(key)
-                    covered_attrs.add(ordinal)
-                    value = fields.attr(key)
+                case ScopedEnumRef(field=name):
+                    covered_attrs.add(name)
+                    value = fields.attr(name)
                     if value:
                         stream.emit(f"<{value}>", glue=True)
 

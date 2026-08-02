@@ -556,7 +556,11 @@ void loom_verify_successor_targets(loom_verify_state_t* state,
 static bool loom_verify_attr_kind_matches_descriptor(
     loom_attribute_t attr, const loom_attr_descriptor_t* descriptor) {
   if (descriptor->attr_kind == LOOM_ATTR_ANY) {
-    return attr.kind > LOOM_ATTR_ABSENT && attr.kind < LOOM_ATTR_ANY;
+    // Scoped enums require an explicit field descriptor so text and bytecode
+    // can resolve their stable key through the enclosing representation
+    // contract. A context-free ANY field cannot carry that contract.
+    return attr.kind > LOOM_ATTR_ABSENT && attr.kind < LOOM_ATTR_ANY &&
+           attr.kind != LOOM_ATTR_SCOPED_ENUM;
   }
   return attr.kind == descriptor->attr_kind;
 }

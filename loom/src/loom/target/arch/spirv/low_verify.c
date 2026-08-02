@@ -802,10 +802,13 @@ static iree_status_t loom_spirv_low_verify_resource(
 
 static iree_status_t loom_spirv_low_emit_missing_packet_row(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
+  const iree_string_view_t descriptor_key =
+      loom_low_descriptor_packet_diagnostic_key(state->target->descriptor_set,
+                                                packet);
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
-      loom_param_string(packet->key),
+      loom_param_string(descriptor_key),
   };
   return loom_spirv_low_emit(context, packet->op, LOOM_ERR_SPIRV_012, params,
                              IREE_ARRAYSIZE(params));
@@ -813,13 +816,16 @@ static iree_status_t loom_spirv_low_emit_missing_packet_row(
 
 static iree_status_t loom_spirv_low_emit_packet_type_mismatch(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
-    iree_string_view_t field_kind, uint32_t field_index,
-    loom_value_id_t value_id, loom_spirv_value_type_t expected_value_type,
+    const loom_low_descriptor_packet_t* packet, iree_string_view_t field_kind,
+    uint32_t field_index, loom_value_id_t value_id,
+    loom_spirv_value_type_t expected_value_type,
     loom_spirv_value_type_t actual_value_type) {
+  const iree_string_view_t descriptor_key =
+      loom_low_descriptor_packet_diagnostic_key(state->target->descriptor_set,
+                                                packet);
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
-      loom_param_string(packet->key),
+      loom_param_string(descriptor_key),
       loom_param_string(field_kind),
       loom_param_u32(field_index),
       loom_param_string(
@@ -835,7 +841,7 @@ static iree_status_t loom_spirv_low_emit_packet_type_mismatch(
 
 static iree_status_t loom_spirv_low_verify_packet_operands(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   const loom_value_id_t* operands = loom_op_const_operands(packet->op);
   for (uint8_t i = 0; i < row->operand_count; ++i) {
@@ -855,7 +861,7 @@ static iree_status_t loom_spirv_low_verify_packet_operands(
 
 static iree_status_t loom_spirv_low_define_packet_results(
     loom_spirv_low_verify_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   if (row->result_count == 0) {
     return iree_ok_status();
@@ -867,15 +873,9 @@ static iree_status_t loom_spirv_low_define_packet_results(
 
 static iree_status_t loom_spirv_low_verify_packet(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
-  if (packet->descriptor == NULL) {
-    return iree_ok_status();
-  }
-  const uint32_t descriptor_ordinal =
-      loom_low_descriptor_set_descriptor_ordinal(state->target->descriptor_set,
-                                                 packet->descriptor);
+    const loom_low_descriptor_packet_t* packet) {
   const loom_spirv_packet_row_t* row =
-      loom_spirv_packet_row_for_descriptor_ordinal(descriptor_ordinal);
+      loom_spirv_packet_row_for_descriptor_ordinal(packet->descriptor_ordinal);
   if (row == NULL || row->form == LOOM_SPIRV_PACKET_FORM_UNSUPPORTED) {
     return loom_spirv_low_emit_missing_packet_row(context, state, packet);
   }
@@ -1387,7 +1387,7 @@ static iree_status_t loom_spirv_low_begin_function(
 static iree_status_t loom_spirv_low_verify_op(
     const loom_low_verify_provider_t* provider,
     loom_low_verify_context_t* context, void* provider_state,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   (void)provider;
   loom_spirv_low_verify_state_t* state =
       (loom_spirv_low_verify_state_t*)provider_state;

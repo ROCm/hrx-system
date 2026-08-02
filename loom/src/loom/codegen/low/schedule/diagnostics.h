@@ -15,10 +15,6 @@
 extern "C" {
 #endif
 
-iree_status_t loom_low_schedule_emit_missing_descriptor(
-    loom_low_schedule_build_state_t* state, const loom_op_t* op,
-    iree_string_view_t opcode);
-
 iree_status_t loom_low_schedule_emit_dependency_cycle(
     loom_low_schedule_build_state_t* state,
     const loom_low_schedule_failure_t* failure);

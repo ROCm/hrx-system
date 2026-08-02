@@ -593,16 +593,6 @@ static iree_status_t loom_low_verify_qualified_key_attr(
                                             key, expected);
 }
 
-static iree_status_t loom_low_verify_descriptor_key(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter, loom_string_id_t opcode_id,
-    uint16_t attr_index) {
-  return loom_low_verify_qualified_key_attr(
-      module, op, emitter, opcode_id, attr_index, IREE_SV("opcode"),
-      IREE_SV("a namespace-qualified descriptor key with non-empty identifier "
-              "segments"));
-}
-
 static bool loom_low_is_power_of_two_i64(int64_t value) {
   return value > 0 && (((uint64_t)value & ((uint64_t)value - 1)) == 0);
 }
@@ -804,18 +794,6 @@ static iree_status_t loom_low_verify_stable_id_attr(
   };
   return loom_low_emit(emitter, op, LOOM_ERR_STRUCTURE_014, params,
                        IREE_ARRAYSIZE(params));
-}
-
-static iree_status_t loom_low_verify_descriptor_ordinal(
-    const loom_op_t* op, iree_diagnostic_emitter_t emitter,
-    int64_t descriptor_ordinal, uint16_t descriptor_ordinal_attr_index) {
-  if (descriptor_ordinal == -1 ||
-      (descriptor_ordinal >= 0 && (uint64_t)descriptor_ordinal <= UINT32_MAX)) {
-    return iree_ok_status();
-  }
-  return loom_low_emit_attr_value_error(
-      op, descriptor_ordinal_attr_index, IREE_SV("descriptor_ordinal"),
-      descriptor_ordinal, IREE_SV("-1 or a non-negative uint32"), emitter);
 }
 
 static iree_status_t loom_low_verify_same_register_unit_count(
@@ -1484,28 +1462,6 @@ static iree_status_t loom_low_verify_func_call_context(
   return loom_low_emit_related(emitter, call_op, LOOM_ERR_TARGET_040, params,
                                IREE_ARRAYSIZE(params), related,
                                IREE_ARRAYSIZE(related));
-}
-
-iree_status_t loom_low_op_verify(const loom_module_t* module,
-                                 const loom_op_t* op,
-                                 iree_diagnostic_emitter_t emitter) {
-  IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_key(
-      module, op, emitter, loom_low_op_opcode(op),
-      loom_low_op_opcode_ATTR_INDEX));
-  return loom_low_verify_descriptor_ordinal(
-      op, emitter, loom_low_op_descriptor_ordinal(op),
-      loom_low_op_descriptor_ordinal_ATTR_INDEX);
-}
-
-iree_status_t loom_low_const_verify(const loom_module_t* module,
-                                    const loom_op_t* op,
-                                    iree_diagnostic_emitter_t emitter) {
-  IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_key(
-      module, op, emitter, loom_low_const_opcode(op),
-      loom_low_const_opcode_ATTR_INDEX));
-  return loom_low_verify_descriptor_ordinal(
-      op, emitter, loom_low_const_descriptor_ordinal(op),
-      loom_low_const_descriptor_ordinal_ATTR_INDEX);
 }
 
 iree_status_t loom_low_copy_verify(const loom_module_t* module,

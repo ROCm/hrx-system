@@ -201,7 +201,9 @@ iree_status_t loom_ir_remap_encoding_id(loom_ir_remap_t* remap,
                                         uint16_t source_encoding_id,
                                         uint16_t* out_target_encoding_id);
 
-// Remaps one attribute payload into the target module.
+// Remaps one attribute payload into the target module. Representation-scoped
+// identity ordinals are copied verbatim and require the caller to preserve the
+// enclosing representation contract.
 iree_status_t loom_ir_remap_attribute(loom_ir_remap_t* remap,
                                       loom_attribute_t source_attr,
                                       loom_attribute_t* out_target_attr);

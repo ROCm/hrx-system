@@ -234,21 +234,21 @@ enum loom_format_kind_e {
   // field_index = successor index whose target block is printed or parsed.
   LOOM_FORMAT_KIND_SUCCESSOR_REF = 27,
 
-  // Descriptor key reference in angle brackets: <amdgpu.v_add_u32>. The
-  // field_index references the diagnostic string attribute and data references
-  // the descriptor-set-local ordinal attribute. Text parsing stores -1 because
-  // descriptor refs are resolved after target binding selects a descriptor set.
-  LOOM_FORMAT_KIND_DESCRIPTOR_REF = 28,
+  // Representation-scoped enum in angle brackets: <amdgpu.v_add_u32>. The
+  // field_index references one SCOPED_ENUM attribute. Text parsing resolves the
+  // stable spelling to a dense ordinal in the enclosing function contract.
+  LOOM_FORMAT_KIND_SCOPED_ENUM_REF = 28,
 
   // Stable symbolic key reference in angle brackets: <source.key>. The
   // field_index references the diagnostic string attribute and data references
   // the derived i64 stable-key attribute. This is for non-descriptor symbolic
-  // domains; descriptor-backed packets use LOOM_FORMAT_KIND_DESCRIPTOR_REF.
+  // domains; descriptor-backed packets use LOOM_FORMAT_KIND_SCOPED_ENUM_REF.
   LOOM_FORMAT_KIND_STABLE_KEY_REF = 29,
 
   // Variadic operand references with adjacent type annotations:
   // %a: type, %b: type.
   LOOM_FORMAT_KIND_OPERAND_TYPED_REFS = 30,
+
 };
 typedef uint8_t loom_format_kind_t;
 
@@ -276,13 +276,11 @@ typedef enum loom_region_syntax_e {
   LOOM_REGION_SYNTAX_DEFAULT = 0,
   // Test-only alternate region syntax: do { block+ }.
   LOOM_REGION_SYNTAX_TEST_DO = 1,
-  // Descriptor-backed target-low assembly syntax: asm<descriptor.set> { ... }.
-  LOOM_REGION_SYNTAX_LOW_ASM = 2,
   // Canonical braced region by default, with optional target-low asm syntax.
-  LOOM_REGION_SYNTAX_LOW_ASM_OPTIONAL = 3,
+  LOOM_REGION_SYNTAX_LOW_ASM_OPTIONAL = 2,
   // Pass pipeline syntax. Currently canonical braced form; the friendly
   // parser/printer selects the same in-memory pass.* operations.
-  LOOM_REGION_SYNTAX_PIPELINE = 4,
+  LOOM_REGION_SYNTAX_PIPELINE = 3,
 } loom_region_syntax_t;
 
 #define LOOM_FORMAT_REGION_TABLE_DATA(keys_attr_index, default_region_index) \
@@ -1766,6 +1764,13 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
   enum { func_name##_ATTR_INDEX = (index) };                         \
   static inline enum_type func_name(const loom_op_t* op) {           \
     return (enum_type)loom_attr_as_enum(loom_op_attrs(op)[(index)]); \
+  }
+
+// Defines a function that reads a representation-scoped enum by index.
+#define LOOM_DEFINE_ATTR_SCOPED_ENUM(func_name, index)           \
+  enum { func_name##_ATTR_INDEX = (index) };                     \
+  static inline uint32_t func_name(const loom_op_t* op) {        \
+    return loom_attr_as_scoped_enum(loom_op_attrs(op)[(index)]); \
   }
 
 // Defines a function that reads a symbol attribute by index.

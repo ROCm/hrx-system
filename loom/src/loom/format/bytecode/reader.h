@@ -18,6 +18,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/error/diagnostic.h"
 #include "loom/format/bytecode/format.h"
+#include "loom/format/low_repr.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 
@@ -37,6 +38,9 @@ typedef struct loom_bytecode_read_options_t {
   // Maximum verifier errors to emit when verify_module is set. Zero means
   // unlimited, matching loom_verify_options_t.
   uint32_t verify_max_errors;
+
+  // Stable-key codec required when materializing Low function bodies.
+  loom_low_repr_environment_t low_repr_environment;
 } loom_bytecode_read_options_t;
 
 // Summary of one decoded module's lightweight metadata.

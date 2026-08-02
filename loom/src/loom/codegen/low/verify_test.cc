@@ -217,54 +217,5 @@ low.func.def target<test.low.core> @uses_workgroup_storage() {
   EXPECT_EQ(emission.u64_params[1], 64u);
 }
 
-TEST_F(LowVerifyTest, RejectsDescriptorOrdinalKeyMismatch) {
-  ModulePtr module = ParseModule(R"(
-test.target<low_core> @target
-low.func.def target<test.low.core>(@target) @ordinal_key_mismatch(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
-  %sum = low.op<test.add.i32>(%lhs, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
-  low.return %sum : reg<test.i32>
-}
-)");
-  loom_op_t* packet_op = nullptr;
-  loom_block_t* module_block = loom_region_entry_block(module->body);
-  loom_op_t* module_op = nullptr;
-  loom_block_for_each_op(module_block, module_op) {
-    if (!loom_low_func_def_isa(module_op)) {
-      continue;
-    }
-    loom_block_t* body_block =
-        loom_region_entry_block(loom_low_func_def_body(module_op));
-    loom_op_t* body_op = nullptr;
-    loom_block_for_each_op(body_block, body_op) {
-      if (loom_low_op_isa(body_op)) {
-        packet_op = body_op;
-      }
-    }
-  }
-  ASSERT_NE(packet_op, nullptr);
-
-  loom_op_attrs(packet_op)[loom_low_op_descriptor_ordinal_ATTR_INDEX] =
-      loom_attr_i64(0);
-
-  DiagnosticEmissionCapture capture;
-  loom_low_verify_result_t result = {};
-  VerifyModule(module.get(), &capture, &result);
-  EXPECT_EQ(result.error_count, 1u);
-  ASSERT_EQ(capture.emissions.size(), 1u);
-
-  const CapturedDiagnosticEmission& emission = capture.emissions[0];
-  EXPECT_EQ(emission.error, LOOM_ERR_STRUCTURE_037);
-  ASSERT_EQ(emission.string_params.size(), 4u);
-  EXPECT_EQ(emission.string_params[0], "ordinal_key_mismatch");
-  EXPECT_EQ(emission.string_params[1], "test.add.i32");
-  EXPECT_EQ(emission.string_params[2], "test.const.i32");
-  EXPECT_EQ(emission.string_params[3], "test.low.core");
-  ASSERT_EQ(emission.u32_params.size(), 1u);
-  EXPECT_EQ(emission.u32_params[0], 0u);
-  ASSERT_EQ(emission.field_refs.size(), 5u);
-  EXPECT_EQ(emission.field_refs[1].kind, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE);
-  EXPECT_EQ(emission.field_refs[1].index, loom_low_op_opcode_ATTR_INDEX);
-}
-
 }  // namespace
 }  // namespace loom

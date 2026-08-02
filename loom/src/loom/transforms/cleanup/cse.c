@@ -210,24 +210,20 @@ static loom_cse_low_state_t loom_cse_low_descriptor_state(
   return state;
 }
 
-static iree_status_t loom_cse_resolve_low_packet_state(
-    const loom_module_t* module, const loom_low_resolved_target_t* target,
-    const loom_op_t* op, loom_cse_low_state_t* out_state) {
-  *out_state = (loom_cse_low_state_t){0};
+static loom_cse_low_state_t loom_cse_low_packet_state(
+    const loom_low_resolved_target_t* target, const loom_op_t* op) {
   if (!target || !target->descriptor_set) {
-    return iree_ok_status();
+    return (loom_cse_low_state_t){0};
   }
 
-  loom_low_resolved_descriptor_packet_t packet = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_resolve_descriptor_packet(module, target, op, &packet));
-  if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE || !packet.descriptor) {
-    return iree_ok_status();
+  loom_low_descriptor_packet_t packet = {0};
+  loom_low_descriptor_packet_initialize(target->descriptor_set, op, &packet);
+  if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
+    return (loom_cse_low_state_t){0};
   }
 
-  *out_state =
-      loom_cse_low_descriptor_state(target->descriptor_set, packet.descriptor);
-  return iree_ok_status();
+  return loom_cse_low_descriptor_state(target->descriptor_set,
+                                       packet.descriptor);
 }
 
 //===----------------------------------------------------------------------===//
@@ -821,10 +817,8 @@ iree_status_t loom_cse_run(loom_pass_t* pass, loom_module_t* module,
       }
 
       loom_trait_flags_t traits = loom_op_effective_traits(module, op);
-      loom_cse_low_state_t low_state = {0};
-      status = loom_cse_resolve_low_packet_state(module, low_target_ptr, op,
-                                                 &low_state);
-      if (!iree_status_is_ok(status)) break;
+      const loom_cse_low_state_t low_state =
+          loom_cse_low_packet_state(low_target_ptr, op);
       const uint64_t state_write_bits = low_state.writes;
       if (state_write_bits != 0) {
         loom_cse_scope_invalidate_state_dependencies(frame->scope,

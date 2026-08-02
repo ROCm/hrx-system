@@ -18,7 +18,6 @@ from loom.assembly import (
     BlockArgs,
     BlockRef,
     Clause,
-    DescriptorRef,
     Flags,
     FormatElement,
     FuncArgs,
@@ -35,6 +34,7 @@ from loom.assembly import (
     ResultType,
     ResultTypeList,
     Scope,
+    ScopedEnumRef,
     StableKeyRef,
     SymbolRef,
     TemplateParam,
@@ -573,22 +573,8 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                 case KeyRef(field=name):
                     append_attr_param(name)
 
-                case DescriptorRef(key=name, ordinal=ordinal):
-                    attr_def = op.attr(name)
-                    if attr_def is None:
-                        continue
-                    params.append(
-                        {
-                            "name": name,
-                            "kind": "descriptor_ref",
-                            "c_type": _c_attr_param_type(op, attr_def, shared_enums),
-                            "attr_type": attr_def.attr_type,
-                            "attr_index": c_queries.resolve_attr_index(op, name, "builder"),
-                            "ordinal_attr_index": c_queries.resolve_attr_index(op, ordinal, "builder"),
-                        }
-                    )
-                    covered_attrs.add(name)
-                    covered_attrs.add(ordinal)
+                case ScopedEnumRef(field=name):
+                    raise ValueError(f"Op '{op.name}': scoped enum field '{name}' requires a domain-aware handwritten C builder")
 
                 case StableKeyRef(key=name, stable_id=stable_id):
                     attr_def = op.attr(name)
@@ -703,7 +689,7 @@ def build_c_param_list(op: Op, params: list[dict[str, object]], layout: FieldLay
                 c_params.append(f"{opt}{param['c_type']} {param['name']}")
                 if param["attr_type"] == "i64_array":
                     c_params.append(f"iree_host_size_t {param['name']}_count")
-            case "descriptor_ref" | "stable_key_ref":
+            case "stable_key_ref":
                 c_params.append(f"{param['c_type']} {param['name']}")
             case "symbol":
                 c_params.append(f"{opt}loom_symbol_ref_t {param['name']}")

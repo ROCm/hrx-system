@@ -697,24 +697,11 @@ iree_status_t loom_text_print_type(loom_type_t type,
 iree_status_t loom_text_print_type_with_options(
     loom_type_t type, const loom_module_t* module, loom_output_stream_t* stream,
     const loom_text_print_options_t* options) {
-  loom_print_context_t ctx = {
-      .stream = stream,
-      .module = module,
-      .flags = options ? options->flags : LOOM_TEXT_PRINT_DEFAULT,
-      .low_asm_environment = options ? options->low_asm_environment
-                                     : (loom_text_low_asm_environment_t){0},
-      .low_asm_descriptor_set_key = options
-                                        ? options->low_asm_descriptor_set_key
-                                        : iree_string_view_empty(),
-  };
-  if (!iree_string_view_is_empty(ctx.low_asm_descriptor_set_key) &&
-      ctx.low_asm_environment.vtable &&
-      ctx.low_asm_environment.vtable->lookup_descriptor_set) {
-    ctx.low_repr.contract_key = ctx.low_asm_descriptor_set_key;
-    IREE_RETURN_IF_ERROR(ctx.low_asm_environment.vtable->lookup_descriptor_set(
-        ctx.low_asm_environment.state, ctx.low_asm_descriptor_set_key,
-        &ctx.low_repr.descriptor_set));
-  }
+  loom_print_context_t ctx = {0};
+  ctx.stream = stream;
+  ctx.module = module;
+  ctx.flags = options ? options->flags : LOOM_TEXT_PRINT_DEFAULT;
+  if (options) ctx.low_asm_environment = options->low_asm_environment;
   return loom_text_print_type_impl(type, module, stream, &ctx);
 }
 

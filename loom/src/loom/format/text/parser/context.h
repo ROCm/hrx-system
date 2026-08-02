@@ -54,7 +54,7 @@ typedef struct loom_parser_t {
   loom_symbol_map_t symbol_lookup;
   loom_diagnostic_sink_t diagnostic_sink;
 
-  // Parse-time environment for low.asm regions.
+  // Representation codec and assembly interface for Low functions.
   loom_text_low_asm_environment_t low_asm_environment;
 
   // Representation context used for parsing target-low types and regions.

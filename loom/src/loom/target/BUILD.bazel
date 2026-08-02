@@ -598,8 +598,10 @@ loom_cc_test(
     srcs = ["function_contract_test.cc"],
     deps = [
         ":function_contract",
+        ":low_descriptor_registry_core_test",
         ":types",
         "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",

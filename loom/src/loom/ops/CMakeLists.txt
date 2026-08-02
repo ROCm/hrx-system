@@ -98,6 +98,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::analysis::symbol_facts
+    loom::codegen::low::text_asm
     loom::format::text::parser
     loom::ir
     loom::ops::func
@@ -105,6 +106,7 @@ loom_cc_test(
     loom::ops::kernel
     loom::ops::low
     loom::ops::test
+    loom::target::low_descriptor_registry_core_test
     loom::target::types
     loom::testing::module_ptr
 )

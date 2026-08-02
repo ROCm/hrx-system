@@ -217,18 +217,17 @@ static iree_status_t loom_spirv_emit_reserve_value_ref(
 }
 
 static iree_status_t loom_spirv_emit_prepare_packet_result(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet, uint32_t type_id,
-    loom_spirv_value_type_t value_type, uint32_t* out_result_id) {
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
+    uint32_t type_id, loom_spirv_value_type_t value_type,
+    uint32_t* out_result_id) {
   return loom_spirv_emit_reserve_value_ref(state,
                                            loom_op_const_results(packet->op)[0],
                                            type_id, value_type, out_result_id);
 }
 
 static iree_status_t loom_spirv_emit_define_packet_result(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet, uint32_t id,
-    uint32_t type_id, loom_spirv_value_type_t value_type) {
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
+    uint32_t id, uint32_t type_id, loom_spirv_value_type_t value_type) {
   const loom_spirv_module_value_ref_t value_ref = {
       .id = id, .type_id = type_id, .value_type = value_type};
   return loom_spirv_emit_define_value(
@@ -336,7 +335,7 @@ static iree_status_t loom_spirv_emit_builtin_variable(
 }
 
 static loom_named_attr_slice_t loom_spirv_emit_packet_attrs(
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   switch (packet->kind) {
     case LOOM_LOW_DESCRIPTOR_PACKET_CONST:
       return loom_low_const_attrs(packet->op);
@@ -349,8 +348,7 @@ static loom_named_attr_slice_t loom_spirv_emit_packet_attrs(
 }
 
 static const loom_low_immediate_t* loom_spirv_emit_descriptor_immediate(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     uint8_t descriptor_immediate_index) {
   if (descriptor_immediate_index >= packet->descriptor->immediate_count) {
     return NULL;
@@ -373,8 +371,7 @@ static iree_string_view_t loom_spirv_emit_immediate_name(
 }
 
 static iree_status_t loom_spirv_emit_lookup_i64_immediate(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row, int64_t* out_value) {
   const loom_low_immediate_t* immediate =
       loom_spirv_emit_descriptor_immediate(state, packet, row->immediate_index);
@@ -404,7 +401,7 @@ static iree_status_t loom_spirv_emit_lookup_i64_immediate(
 }
 
 static void loom_spirv_emit_validate_packet_shape(
-    const loom_op_t* op, const loom_low_resolved_descriptor_packet_t* packet,
+    const loom_op_t* op, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   (void)packet;
   IREE_ASSERT_EQ(op->result_count, row->result_count);
@@ -412,8 +409,7 @@ static void loom_spirv_emit_validate_packet_shape(
 }
 
 static iree_status_t loom_spirv_emit_load_packet_operands(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row,
     loom_spirv_module_value_ref_t* out_operands) {
   const loom_value_id_t* operand_values = loom_op_const_operands(packet->op);
@@ -427,8 +423,7 @@ static iree_status_t loom_spirv_emit_load_packet_operands(
 }
 
 static iree_status_t loom_spirv_emit_integer_constant_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   int64_t value = 0;
   IREE_RETURN_IF_ERROR(
@@ -454,8 +449,7 @@ static iree_status_t loom_spirv_emit_integer_constant_packet(
 }
 
 static iree_status_t loom_spirv_emit_binary_same_type_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   loom_spirv_module_value_ref_t operands[2] = {0};
   IREE_RETURN_IF_ERROR(
@@ -478,8 +472,7 @@ static iree_status_t loom_spirv_emit_binary_same_type_packet(
 }
 
 static iree_status_t loom_spirv_emit_unary_convert_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   loom_spirv_module_value_ref_t operands[1] = {0};
   IREE_RETURN_IF_ERROR(
@@ -503,8 +496,7 @@ static iree_status_t loom_spirv_emit_unary_convert_packet(
 }
 
 static iree_status_t loom_spirv_emit_load_builtin_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   uint32_t variable_id = 0;
   IREE_RETURN_IF_ERROR(
@@ -562,8 +554,7 @@ static iree_status_t loom_spirv_emit_load_builtin_packet(
 }
 
 static iree_status_t loom_spirv_emit_integer_mul_add_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   loom_spirv_module_value_ref_t operands[3] = {0};
   IREE_RETURN_IF_ERROR(
@@ -592,8 +583,7 @@ static iree_status_t loom_spirv_emit_integer_mul_add_packet(
 }
 
 static iree_status_t loom_spirv_emit_compare_same_type_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   loom_spirv_module_value_ref_t operands[2] = {0};
   IREE_RETURN_IF_ERROR(
@@ -619,8 +609,7 @@ static iree_status_t loom_spirv_emit_compare_same_type_packet(
 }
 
 static iree_status_t loom_spirv_emit_select_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   loom_spirv_module_value_ref_t operands[3] = {0};
   IREE_RETURN_IF_ERROR(
@@ -669,8 +658,7 @@ static iree_status_t loom_spirv_emit_typed_physical_storage_buffer_pointer(
 }
 
 static iree_status_t loom_spirv_emit_ptr_access_chain_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   loom_spirv_module_value_ref_t operands[2] = {0};
   IREE_RETURN_IF_ERROR(
@@ -698,8 +686,7 @@ static iree_status_t loom_spirv_emit_ptr_access_chain_packet(
 }
 
 static iree_status_t loom_spirv_emit_access_chain_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   loom_spirv_module_value_ref_t operands[2] = {0};
   IREE_RETURN_IF_ERROR(
@@ -724,8 +711,7 @@ static iree_status_t loom_spirv_emit_access_chain_packet(
 }
 
 static iree_status_t loom_spirv_emit_load_aligned_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   loom_spirv_module_value_ref_t operands[1] = {0};
   IREE_RETURN_IF_ERROR(
@@ -749,8 +735,7 @@ static iree_status_t loom_spirv_emit_load_aligned_packet(
 }
 
 static iree_status_t loom_spirv_emit_store_aligned_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   loom_spirv_module_value_ref_t operands[2] = {0};
   IREE_RETURN_IF_ERROR(
@@ -776,8 +761,7 @@ static iree_status_t loom_spirv_emit_cooperative_matrix_layout_operands(
 }
 
 static iree_status_t loom_spirv_emit_cooperative_matrix_load_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   loom_spirv_module_value_ref_t operands[1] = {0};
   IREE_RETURN_IF_ERROR(
@@ -809,8 +793,7 @@ static iree_status_t loom_spirv_emit_cooperative_matrix_load_packet(
 }
 
 static iree_status_t loom_spirv_emit_cooperative_matrix_store_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   loom_spirv_module_value_ref_t operands[2] = {0};
   IREE_RETURN_IF_ERROR(
@@ -833,8 +816,7 @@ static iree_status_t loom_spirv_emit_cooperative_matrix_store_packet(
 }
 
 static iree_status_t loom_spirv_emit_cooperative_matrix_mul_add_packet(
-    loom_spirv_emit_state_t* state,
-    const loom_low_resolved_descriptor_packet_t* packet,
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   loom_spirv_module_value_ref_t operands[3] = {0};
   IREE_RETURN_IF_ERROR(
@@ -891,7 +873,7 @@ static iree_status_t loom_spirv_emit_copy(loom_spirv_emit_state_t* state,
 
 static iree_status_t loom_spirv_emit_descriptor_packet(
     loom_spirv_emit_state_t* state, const loom_op_t* op,
-    const loom_low_resolved_descriptor_packet_t* packet) {
+    const loom_low_descriptor_packet_t* packet) {
   for (uint16_t i = 0; i < packet->descriptor->feature_mask_word_count; ++i) {
     const uint32_t feature_mask_row =
         packet->descriptor->feature_mask_word_start + i;
@@ -902,11 +884,8 @@ static iree_status_t loom_spirv_emit_descriptor_packet(
         state->builder, (loom_spirv_feature_bits_t)feature_bits);
   }
 
-  const uint32_t descriptor_ordinal =
-      loom_low_descriptor_set_descriptor_ordinal(state->target->descriptor_set,
-                                                 packet->descriptor);
   const loom_spirv_packet_row_t* row =
-      loom_spirv_packet_row_for_descriptor_ordinal(descriptor_ordinal);
+      loom_spirv_packet_row_for_descriptor_ordinal(packet->descriptor_ordinal);
   IREE_ASSERT(row != NULL);
   loom_spirv_emit_validate_packet_shape(op, packet, row);
   switch (row->form) {
@@ -1414,14 +1393,13 @@ static iree_status_t loom_spirv_emit_low_op(loom_spirv_emit_state_t* state,
     return loom_spirv_emit_copy(state, op);
   }
 
-  loom_low_resolved_descriptor_packet_t packet = {0};
-  IREE_RETURN_IF_ERROR(loom_low_resolve_descriptor_packet(
-      state->module, state->target, op, &packet));
+  loom_low_descriptor_packet_t packet = {0};
+  loom_low_descriptor_packet_initialize(state->target->descriptor_set, op,
+                                        &packet);
   if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     IREE_CHECK_UNREACHABLE("verified SPIR-V structural op");
     return iree_ok_status();
   }
-  IREE_ASSERT(packet.descriptor != NULL);
   return loom_spirv_emit_descriptor_packet(state, op, &packet);
 }
 

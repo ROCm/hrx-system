@@ -2806,7 +2806,7 @@ iree_status_t loom_vector_extf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_FPTRUNC: Lanewise floating-point precision truncation. Source and result shapes match exactly; only the floating-point element type narrows.
+// LOOM_OP_VECTOR_FPTRUNC: Lanewise floating-point precision truncation using round-to-nearest, ties-to-even. Source and result shapes match exactly; only the floating-point element type narrows. Special values follow the destination format: f8E4M3 saturates finite overflow and infinities to its signed maximum finite value while preserving NaNs; IEEE formats preserve infinities and NaNs.
 // vector.fptrunc
 LOOM_DEFINE_ISA(loom_vector_fptrunc_isa, LOOM_OP_VECTOR_FPTRUNC)
 LOOM_DEFINE_OPERAND(loom_vector_fptrunc_input, 0)

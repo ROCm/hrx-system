@@ -16,7 +16,6 @@ from loom.assembly import (
     BlockArgs,
     BlockRef,
     Clause,
-    DescriptorRef,
     Flags,
     FormatElement,
     FuncArgs,
@@ -33,6 +32,7 @@ from loom.assembly import (
     ResultType,
     ResultTypeList,
     Scope,
+    ScopedEnumRef,
     StableKeyRef,
     SymbolRef,
     TemplateParam,
@@ -317,24 +317,18 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                     kind, index = resolve_field(name)
                     elements.append(("LOOM_FORMAT_KIND_KEY_REF", index, "0"))
 
-                case DescriptorRef(key=key_name, ordinal=ordinal_name):
-                    key_kind, key_index = resolve_field(key_name)
-                    ordinal_kind, ordinal_index = resolve_field(ordinal_name)
-                    key_attr = op.attr(key_name)
-                    ordinal_attr = op.attr(ordinal_name)
-                    if key_kind != FieldKind.ATTR:
-                        raise ValueError(f"Op '{op.name}': DescriptorRef key field '{key_name}' is not an attr field")
-                    if key_attr is None or key_attr.attr_type != "string":
-                        raise ValueError(f"Op '{op.name}': DescriptorRef key field '{key_name}' must be a string attr")
-                    if ordinal_kind != FieldKind.ATTR:
-                        raise ValueError(f"Op '{op.name}': DescriptorRef ordinal field '{ordinal_name}' is not an attr field")
-                    if ordinal_attr is None or ordinal_attr.attr_type != "i64":
-                        raise ValueError(f"Op '{op.name}': DescriptorRef ordinal field '{ordinal_name}' must be an i64 attr")
+                case ScopedEnumRef(field=name):
+                    kind, index = resolve_field(name)
+                    attr = op.attr(name)
+                    if kind != FieldKind.ATTR:
+                        raise ValueError(f"Op '{op.name}': ScopedEnumRef field '{name}' is not an attr field")
+                    if attr is None or attr.attr_type != "scoped_enum":
+                        raise ValueError(f"Op '{op.name}': ScopedEnumRef field '{name}' must be a scoped_enum attr")
                     elements.append(
                         (
-                            "LOOM_FORMAT_KIND_DESCRIPTOR_REF",
-                            key_index,
-                            str(ordinal_index),
+                            "LOOM_FORMAT_KIND_SCOPED_ENUM_REF",
+                            index,
+                            "0",
                         )
                     )
 

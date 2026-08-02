@@ -17,6 +17,8 @@ loom_cc_binary(
     name = "loom-link",
     srcs = ["loom-link.c"],
     deps = [
+        "//loom/src/loom/codegen/low:repr",
+        "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/format/bytecode:reader",
         "//loom/src/loom/format/bytecode:writer",
@@ -26,6 +28,7 @@ loom_cc_binary(
         "//loom/src/loom/link:linker",
         "//loom/src/loom/link:module_index",
         "//loom/src/loom/link:planner",
+        "//loom/src/loom/target:provider",
         "//loom/src/loom/target/configured:provider",
         "//loom/src/loom/tooling/cli:help",
         "//loom/src/loom/tooling/config",

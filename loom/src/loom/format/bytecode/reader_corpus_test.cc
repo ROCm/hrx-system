@@ -18,6 +18,7 @@
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/repr.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
 #include "loom/format/bytecode/reader.h"
@@ -26,6 +27,7 @@
 #include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/op_defs.h"
 #include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/test/corpus/text/golden_text_corpus.h"
 #include "loom/testing/context.h"
@@ -33,12 +35,75 @@
 namespace loom {
 namespace {
 
+struct ScopedEnumPacket {
+  // Canonical packet operation carrying the scoped identity.
+  loom_op_t* op = nullptr;
+  // Scoped-enum attribute storing the contract-local ordinal.
+  loom_attribute_t* descriptor_attr = nullptr;
+};
+
 static iree_status_t CaptureDiagnostic(void* user_data,
                                        const loom_diagnostic_t* diagnostic) {
   auto* error_ids = static_cast<std::vector<std::string>*>(user_data);
   error_ids->push_back(diagnostic->error->error_id);
   return loom_diagnostic_stderr_sink(nullptr, diagnostic);
 }
+
+// A deliberately reordered view of the descriptor used by the stable-key
+// test below. The opaque set token and ordinal have no relationship to the
+// generated core-test tables: only the stable contract and descriptor keys are
+// shared across the two codec environments.
+static const uint8_t kReorderedDescriptorSetToken = 0;
+static constexpr uint32_t kReorderedAddI32Ordinal = 73;
+
+static const loom_low_repr_descriptor_set_t* ReorderedLookupDescriptorSet(
+    const loom_low_repr_environment_state_t* state, iree_string_view_t key) {
+  (void)state;
+  if (!iree_string_view_equal(key, IREE_SV("test.low.core"))) return nullptr;
+  return reinterpret_cast<const loom_low_repr_descriptor_set_t*>(
+      &kReorderedDescriptorSetToken);
+}
+
+static bool ReorderedResolveDescriptor(
+    const loom_low_repr_environment_state_t* state,
+    const loom_low_repr_descriptor_set_t* descriptor_set,
+    iree_string_view_t key, loom_low_repr_descriptor_value_t* out_value) {
+  (void)state;
+  if (descriptor_set != reinterpret_cast<const loom_low_repr_descriptor_set_t*>(
+                            &kReorderedDescriptorSetToken) ||
+      !iree_string_view_equal(key, IREE_SV("test.add.i32"))) {
+    return false;
+  }
+  *out_value = {
+      /*.ordinal=*/kReorderedAddI32Ordinal,
+      /*.effective_traits=*/LOOM_TRAIT_PURE,
+  };
+  return true;
+}
+
+static iree_string_view_t ReorderedDescriptorKey(
+    const loom_low_repr_environment_state_t* state,
+    const loom_low_repr_descriptor_set_t* descriptor_set, uint32_t ordinal) {
+  (void)state;
+  if (descriptor_set != reinterpret_cast<const loom_low_repr_descriptor_set_t*>(
+                            &kReorderedDescriptorSetToken) ||
+      ordinal != kReorderedAddI32Ordinal) {
+    return iree_string_view_empty();
+  }
+  return IREE_SV("test.add.i32");
+}
+
+static const loom_low_repr_environment_vtable_t kReorderedEnvironmentVtable = {
+    /*.lookup_descriptor_set=*/ReorderedLookupDescriptorSet,
+    /*.resolve_descriptor=*/ReorderedResolveDescriptor,
+    /*.descriptor_key=*/ReorderedDescriptorKey,
+};
+
+static const loom_low_repr_environment_t kReorderedEnvironment = {
+    /*.vtable=*/&kReorderedEnvironmentVtable,
+    // This codec has no state beyond its function table.
+    /*.state=*/nullptr,
+};
 
 class ReaderCorpusTest : public ::testing::Test {
  protected:
@@ -51,6 +116,8 @@ class ReaderCorpusTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_testing_context_register_all_dialects(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     loom_target_core_test_low_descriptor_registry_initialize(&low_registry_);
+    loom_low_repr_environment_initialize(&low_registry_.registry,
+                                         &low_repr_environment_);
   }
 
   void TearDown() override {
@@ -91,15 +158,42 @@ class ReaderCorpusTest : public ::testing::Test {
     return printed;
   }
 
-  iree_status_t WriteModule(const loom_module_t* module,
-                            std::vector<uint8_t>* out_bytes) {
+  ScopedEnumPacket FindScopedEnumPacket(loom_module_t* module) {
+    loom_op_t* module_op = nullptr;
+    loom_block_for_each_op(loom_module_block(module), module_op) {
+      loom_func_like_t function = loom_func_like_cast(module, module_op);
+      if (!loom_func_like_isa(function)) continue;
+      loom_region_t* body = loom_func_like_body(function);
+      if (!body || body->block_count == 0) continue;
+      loom_op_t* body_op = nullptr;
+      loom_block_for_each_op(loom_region_entry_block(body), body_op) {
+        loom_attribute_t* attrs = loom_op_attrs(body_op);
+        for (uint8_t i = 0; i < body_op->attribute_count; ++i) {
+          if (attrs[i].kind == LOOM_ATTR_SCOPED_ENUM) {
+            ScopedEnumPacket packet;
+            packet.op = body_op;
+            packet.descriptor_attr = &attrs[i];
+            return packet;
+          }
+        }
+      }
+    }
+    return {};
+  }
+
+  iree_status_t WriteModule(
+      const loom_module_t* module,
+      const loom_low_repr_environment_t& low_repr_environment,
+      std::vector<uint8_t>* out_bytes) {
     iree_io_stream_t* stream = nullptr;
     IREE_RETURN_IF_ERROR(iree_io_vec_stream_create(
         IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE |
             IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_RESIZABLE,
         4096, iree_allocator_system(), &stream));
+    loom_bytecode_write_options_t options = {};
+    options.low_repr_environment = low_repr_environment;
     iree_status_t status =
-        loom_bytecode_write_module(module, stream, NULL, &block_pool_);
+        loom_bytecode_write_module(module, stream, &options, &block_pool_);
 
     if (iree_status_is_ok(status)) {
       iree_io_stream_pos_t length = iree_io_stream_length(stream);
@@ -114,9 +208,10 @@ class ReaderCorpusTest : public ::testing::Test {
     return status;
   }
 
-  loom_bytecode_read_result_t ReadModule(const std::vector<uint8_t>& bytes,
-                                         loom_module_t** out_module,
-                                         std::vector<std::string>* error_ids) {
+  loom_bytecode_read_result_t ReadModule(
+      const std::vector<uint8_t>& bytes,
+      const loom_low_repr_environment_t& low_repr_environment,
+      loom_module_t** out_module, std::vector<std::string>* error_ids) {
     loom_bytecode_read_options_t options = {
         /*.diagnostic_sink=*/
         {
@@ -128,6 +223,7 @@ class ReaderCorpusTest : public ::testing::Test {
         // programs, so this test isolates bytecode reader/writer canonicality.
         /*.verify_module=*/false,
         /*.verify_max_errors=*/20,
+        /*.low_repr_environment=*/low_repr_environment,
     };
     loom_bytecode_read_result_t result = {0};
     IREE_EXPECT_OK(loom_bytecode_read_module(
@@ -140,6 +236,7 @@ class ReaderCorpusTest : public ::testing::Test {
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   loom_target_low_descriptor_registry_t low_registry_;
+  loom_low_repr_environment_t low_repr_environment_;
 };
 
 TEST_F(ReaderCorpusTest, CorpusIsNotEmpty) {
@@ -159,7 +256,8 @@ TEST_F(ReaderCorpusTest, TextCorpusBytecodeRoundTripsCanonically) {
     loom_module_t* module = Parse(source, filename);
     if (!module) continue;
     std::vector<uint8_t> first;
-    iree_status_t write_status = WriteModule(module, &first);
+    iree_status_t write_status =
+        WriteModule(module, low_repr_environment_, &first);
     if (!iree_status_is_ok(write_status)) {
       IREE_EXPECT_OK(write_status);
       loom_module_free(module);
@@ -172,7 +270,7 @@ TEST_F(ReaderCorpusTest, TextCorpusBytecodeRoundTripsCanonically) {
     loom_module_t* read_module = nullptr;
     std::vector<std::string> error_ids;
     loom_bytecode_read_result_t result =
-        ReadModule(first, &read_module, &error_ids);
+        ReadModule(first, low_repr_environment_, &read_module, &error_ids);
     EXPECT_EQ(result.error_count, 0u)
         << (error_ids.empty() ? "" : error_ids.front());
     EXPECT_TRUE(error_ids.empty())
@@ -182,12 +280,78 @@ TEST_F(ReaderCorpusTest, TextCorpusBytecodeRoundTripsCanonically) {
     EXPECT_EQ(source_text, Print(read_module));
 
     std::vector<uint8_t> second;
-    IREE_EXPECT_OK(WriteModule(read_module, &second));
+    IREE_EXPECT_OK(WriteModule(read_module, low_repr_environment_, &second));
     loom_module_free(read_module);
 
     EXPECT_EQ(first, second);
   }
   EXPECT_GT(supported_count, 0u);
+}
+
+TEST_F(ReaderCorpusTest, DescriptorRowOrderIsNotSerialized) {
+  static constexpr char kSource[] = R"(
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @add(
+    %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) {
+  %sum = low.op<test.add.i32>(%lhs, %rhs) :
+      (reg<test.i32>, reg<test.i32>) -> reg<test.i32>
+  low.return %sum : reg<test.i32>
+}
+)";
+
+  loom_module_t* module =
+      Parse(iree_make_cstring_view(kSource), IREE_SV("row_order.loom"));
+  ASSERT_NE(module, nullptr);
+  ScopedEnumPacket original_packet = FindScopedEnumPacket(module);
+  ASSERT_NE(original_packet.op, nullptr);
+  ASSERT_NE(original_packet.descriptor_attr, nullptr);
+  const uint32_t original_ordinal =
+      loom_attr_as_scoped_enum(*original_packet.descriptor_attr);
+  EXPECT_EQ(original_packet.op->traits, LOOM_TRAIT_PURE);
+  const std::string original_text = Print(module);
+  std::vector<uint8_t> first;
+  IREE_ASSERT_OK(WriteModule(module, low_repr_environment_, &first));
+  loom_module_free(module);
+
+  loom_module_t* reordered_module = nullptr;
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadModule(first, kReorderedEnvironment, &reordered_module, &error_ids);
+  ASSERT_EQ(result.error_count, 0u)
+      << (error_ids.empty() ? "" : error_ids.front());
+  ASSERT_TRUE(error_ids.empty())
+      << (error_ids.empty() ? "" : error_ids.front());
+  ASSERT_NE(reordered_module, nullptr);
+  ScopedEnumPacket reordered_packet = FindScopedEnumPacket(reordered_module);
+  ASSERT_NE(reordered_packet.op, nullptr);
+  ASSERT_NE(reordered_packet.descriptor_attr, nullptr);
+  EXPECT_EQ(loom_attr_as_scoped_enum(*reordered_packet.descriptor_attr),
+            kReorderedAddI32Ordinal);
+  EXPECT_EQ(reordered_packet.op->traits, LOOM_TRAIT_PURE);
+
+  std::vector<uint8_t> second;
+  IREE_ASSERT_OK(WriteModule(reordered_module, kReorderedEnvironment, &second));
+  EXPECT_EQ(second, first);
+  loom_module_free(reordered_module);
+
+  loom_module_t* restored_module = nullptr;
+  error_ids.clear();
+  result =
+      ReadModule(second, low_repr_environment_, &restored_module, &error_ids);
+  ASSERT_EQ(result.error_count, 0u)
+      << (error_ids.empty() ? "" : error_ids.front());
+  ASSERT_TRUE(error_ids.empty())
+      << (error_ids.empty() ? "" : error_ids.front());
+  ASSERT_NE(restored_module, nullptr);
+  ScopedEnumPacket restored_packet = FindScopedEnumPacket(restored_module);
+  ASSERT_NE(restored_packet.op, nullptr);
+  ASSERT_NE(restored_packet.descriptor_attr, nullptr);
+  EXPECT_EQ(loom_attr_as_scoped_enum(*restored_packet.descriptor_attr),
+            original_ordinal);
+  EXPECT_EQ(restored_packet.op->traits, LOOM_TRAIT_PURE);
+  EXPECT_EQ(Print(restored_module), original_text);
+  loom_module_free(restored_module);
 }
 
 }  // namespace

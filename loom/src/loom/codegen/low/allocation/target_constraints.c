@@ -79,16 +79,6 @@ static iree_string_view_t loom_low_allocation_target_constraints_reg_class_name(
                                         reg_class->name_string_offset);
 }
 
-static iree_string_view_t
-loom_low_allocation_target_constraints_string_or_empty(
-    const loom_module_t* module, loom_string_id_t string_id) {
-  if (string_id == LOOM_STRING_ID_INVALID ||
-      string_id >= module->strings.count) {
-    return iree_string_view_empty();
-  }
-  return module->strings.entries[string_id];
-}
-
 static iree_status_t loom_low_allocation_target_constraints_emit(
     loom_low_allocation_target_constraints_t* constraints, const loom_op_t* op,
     const loom_error_def_t* error, const loom_diagnostic_param_t* params,
@@ -260,27 +250,9 @@ loom_low_allocation_target_constraints_defining_result_operand(
     IREE_ASSERT_LT(result_index, defining_op->result_count);
     return NULL;
   }
-  uint32_t descriptor_ordinal = LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
-  const int64_t packet_descriptor_ordinal =
-      loom_low_op_descriptor_ordinal(defining_op);
-  if (packet_descriptor_ordinal >= 0) {
-    if ((uint64_t)packet_descriptor_ordinal >=
-        constraints->target->descriptor_set->descriptor_count) {
-      return NULL;
-    }
-    descriptor_ordinal = (uint32_t)packet_descriptor_ordinal;
-  } else {
-    const iree_string_view_t descriptor_key =
-        loom_low_allocation_target_constraints_string_or_empty(
-            module, loom_low_op_opcode(defining_op));
-    descriptor_ordinal = loom_low_descriptor_set_lookup_descriptor(
-        constraints->target->descriptor_set, descriptor_key);
-  }
-  if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
-    return NULL;
-  }
   const loom_low_descriptor_t* descriptor =
-      &constraints->target->descriptor_set->descriptors[descriptor_ordinal];
+      &constraints->target->descriptor_set
+           ->descriptors[loom_low_op_descriptor(defining_op)];
   if (result_index >= descriptor->result_count) {
     return NULL;
   }

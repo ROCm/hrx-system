@@ -509,6 +509,18 @@ static iree_status_t loom_callable_outline_validate_range(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "cannot outline module-scope operations");
   }
+  for (loom_op_t* parent = first_op->parent_op; parent;
+       parent = parent->parent_op) {
+    loom_func_like_t function = loom_func_like_cast(rewriter->module, parent);
+    if (!loom_func_like_isa(function)) continue;
+    if (loom_func_like_repr_contract(function) != LOOM_STRING_ID_INVALID) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "cannot outline operations from a representation-bound function "
+          "into a generic func.def");
+    }
+    break;
+  }
 
   loom_callable_outline_range_state_t state = {
       .module = rewriter->module,

@@ -204,7 +204,7 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
     if (descriptor == nullptr) {
       return false;
     }
-    return loom_low_op_descriptor_ordinal(op) ==
+    return loom_low_op_descriptor(op) ==
            loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                       descriptor);
   }
@@ -247,7 +247,7 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
     ASSERT_TRUE(loom_low_op_isa(op));
     const loom_low_descriptor_t* descriptor = DescriptorForRef(descriptor_ref);
     ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(loom_low_op_descriptor_ordinal(op),
+    EXPECT_EQ(loom_low_op_descriptor(op),
               loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                          descriptor));
   }
@@ -257,7 +257,7 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
     ASSERT_TRUE(loom_low_const_isa(op));
     const loom_low_descriptor_t* descriptor = DescriptorForRef(descriptor_ref);
     ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(loom_low_const_descriptor_ordinal(op),
+    EXPECT_EQ(loom_low_const_descriptor(op),
               loom_low_descriptor_set_descriptor_ordinal(descriptor_set_,
                                                          descriptor));
   }
@@ -279,10 +279,9 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
       uint32_t value) {
     loom_type_t result_type =
         loom_low_register_type(descriptor_set_->stable_id, register_class, 1);
-    const loom_low_descriptor_t* descriptor = nullptr;
-    loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
-    IREE_CHECK_OK(loom_amdgpu_lookup_descriptor_ref(
-        &builder_, descriptor_set_, descriptor_ref, &descriptor, &opcode_id));
+    const loom_low_descriptor_t* descriptor =
+        loom_amdgpu_lookup_descriptor_ref(descriptor_set_, descriptor_ref);
+    IREE_ASSERT(descriptor != nullptr);
     loom_string_id_t imm32_id = LOOM_STRING_ID_INVALID;
     IREE_CHECK_OK(
         loom_builder_intern_string(&builder_, IREE_SV("imm32"), &imm32_id));
@@ -293,7 +292,7 @@ class AmdgpuSanitizerRaceReportTest : public ::testing::Test {
     };
     loom_op_t* const_op = nullptr;
     IREE_CHECK_OK(loom_low_build_resolved_descriptor_const(
-        &builder_, descriptor_set_, descriptor, opcode_id,
+        &builder_, descriptor_set_, descriptor,
         loom_make_named_attr_slice(&imm32_attr, 1), result_type,
         LOOM_LOCATION_UNKNOWN, &const_op));
     return loom_low_const_result(const_op);

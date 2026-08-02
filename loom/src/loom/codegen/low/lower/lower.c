@@ -1148,8 +1148,7 @@ static iree_status_t loom_low_lower_record_descriptor_matrix_plan(
     IREE_ASSERT_UNREACHABLE("descriptor-matrix legal query has no descriptor");
     IREE_BUILTIN_UNREACHABLE();
   }
-  IREE_RETURN_IF_ERROR(loom_low_lower_resolve_descriptor_row(
-      context, query_result->selected_descriptor, &plan_data->descriptor));
+  plan_data->descriptor.descriptor = query_result->selected_descriptor;
   IREE_RETURN_IF_ERROR(loom_low_lower_descriptor_matrix_request_from_source(
       context, source_op, matrix_rule, &plan_data->contract_request));
   plan_data->attrs = loom_named_attr_slice_empty();

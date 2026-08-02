@@ -205,9 +205,15 @@ typedef enum loom_attr_kind_e {
   // executable data payloads. Large externally stored resources should use the
   // bytecode resource table once materialized instead of this inline form.
   LOOM_ATTR_BYTES = 12,
-  // Descriptor wildcard for format/parser/verification metadata. This is not a
-  // concrete payload kind in loom_attribute_t values.
-  LOOM_ATTR_ANY = 13,
+  // Dense case ordinal interpreted in the enclosing representation contract.
+  // Text and bytecode use the stable case key and resolve it while constructing
+  // canonical IR; the ordinal itself is never a stable serialized identity.
+  LOOM_ATTR_SCOPED_ENUM = 13,
+  // Descriptor wildcard for context-free format/parser/verification metadata.
+  // This excludes representation-scoped enums, which require an explicit
+  // descriptor to bind their enclosing contract, and is not a concrete payload
+  // kind in loom_attribute_t values.
+  LOOM_ATTR_ANY = 14,
   LOOM_ATTR_COUNT_,
 } loom_attr_kind_t;
 
@@ -237,6 +243,7 @@ typedef struct loom_attribute_t {
     int64_t* i64_array;
     loom_type_id_t type_id;
     uint32_t encoding_id;
+    uint32_t scoped_enum;
     loom_predicate_t* predicate_list;
     const loom_named_attr_t* dict_entries;
     const uint8_t* bytes;
@@ -294,6 +301,13 @@ static inline loom_attribute_t loom_attr_bool(bool value) {
 static inline loom_attribute_t loom_attr_enum(uint8_t case_index) {
   loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_ENUM);
   attr.raw = case_index;
+  return attr;
+}
+
+// Constructs a representation-contract-scoped enum attribute.
+static inline loom_attribute_t loom_attr_scoped_enum(uint32_t case_ordinal) {
+  loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_SCOPED_ENUM);
+  attr.scoped_enum = case_ordinal;
   return attr;
 }
 
@@ -471,6 +485,11 @@ static inline bool loom_attr_as_bool(loom_attribute_t attr) {
 // Returns the enum case index of an ENUM attribute.
 static inline uint8_t loom_attr_as_enum(loom_attribute_t attr) {
   return (uint8_t)attr.raw;
+}
+
+// Returns the dense case ordinal of a SCOPED_ENUM attribute.
+static inline uint32_t loom_attr_as_scoped_enum(loom_attribute_t attr) {
+  return attr.scoped_enum;
 }
 
 // Returns the symbol reference of a SYMBOL attribute. Absent optional symbol

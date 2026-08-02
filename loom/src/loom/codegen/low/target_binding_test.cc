@@ -9,6 +9,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/text_asm.h"
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/parser.h"
 #include "loom/ir/context.h"
@@ -81,6 +82,8 @@ class LowTargetBindingTest : public ::testing::Test {
     loom_module_t* module = nullptr;
     loom_text_parse_options_t options = {};
     options.max_errors = 20;
+    loom_low_descriptor_text_asm_environment_initialize(
+        &registry_, &options.low_asm_environment);
     IREE_CHECK_OK(loom_text_parse(iree_make_cstring_view(source),
                                   IREE_SV("target_binding_test.loom"),
                                   &context_, &block_pool_, &options, &module));

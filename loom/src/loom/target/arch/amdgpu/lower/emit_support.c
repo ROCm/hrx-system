@@ -758,8 +758,7 @@ iree_status_t loom_amdgpu_resolve_descriptor_ref_if_present(
   const loom_low_descriptor_t* descriptor =
       loom_low_descriptor_set_descriptor_at(descriptor_set, descriptor_ordinal);
   IREE_ASSERT(descriptor != NULL);
-  IREE_RETURN_IF_ERROR(loom_low_lower_resolve_descriptor_row(
-      context, descriptor, out_descriptor));
+  out_descriptor->descriptor = descriptor;
   *out_present = true;
   return iree_ok_status();
 }
@@ -953,9 +952,9 @@ iree_status_t loom_amdgpu_resolve_explicit_packet_row_plan(
   IREE_ASSERT(immediate_count == 0 || immediates != NULL);
   *out_plan = (loom_amdgpu_explicit_packet_plan_t){0};
 
-  loom_low_lower_resolved_descriptor_t resolved_descriptor = {0};
-  IREE_RETURN_IF_ERROR(loom_low_lower_resolve_descriptor_row(
-      context, descriptor, &resolved_descriptor));
+  loom_low_lower_resolved_descriptor_t resolved_descriptor = {
+      .descriptor = descriptor,
+  };
 
   return loom_amdgpu_populate_explicit_packet_plan(
       context, &resolved_descriptor, immediates, immediate_count, out_plan);
@@ -1177,17 +1176,12 @@ bool loom_amdgpu_low_value_defines_vgpr_low16(loom_low_lower_context_t* context,
   if (low_op == NULL || !loom_low_op_isa(low_op)) {
     return false;
   }
-  const int64_t descriptor_ordinal = loom_low_op_descriptor_ordinal(low_op);
-  if (descriptor_ordinal < 0 || (uint64_t)descriptor_ordinal > UINT32_MAX) {
-    return false;
-  }
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
   const loom_low_descriptor_t* descriptor =
-      loom_low_descriptor_set_descriptor_at(descriptor_set,
-                                            (uint32_t)descriptor_ordinal);
+      &descriptor_set->descriptors[loom_low_op_descriptor(low_op)];
   const uint16_t result_index = loom_value_def_index(low_value);
-  if (descriptor == NULL || result_index >= descriptor->result_count) {
+  if (result_index >= descriptor->result_count) {
     return false;
   }
   const uint32_t operand_index = descriptor->operand_start + result_index;

@@ -13,6 +13,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
 #include "loom/error/error_defs.h"
 #include "loom/error/json_sink.h"
@@ -22,6 +23,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/util/stream.h"
 
@@ -116,6 +118,7 @@ class VerifyTest : public ::testing::Test {
     RegisterTestDialect(&context_);
     RegisterLowDialect(&context_);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
+    loom_target_core_test_low_descriptor_registry_initialize(&low_registry_);
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("verify_test"),
                                         &block_pool_, NULL,
                                         iree_allocator_system(), &module_));
@@ -200,6 +203,8 @@ class VerifyTest : public ::testing::Test {
     loom_text_parse_options_t parse_options = {};
     parse_options.diagnostic_sink = parse_capture.sink();
     parse_options.max_errors = 20;
+    loom_low_descriptor_text_asm_environment_initialize(
+        &low_registry_.registry, &parse_options.low_asm_environment);
     loom_module_t* parsed_module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(
         iree_make_cstring_view(source), iree_make_cstring_view(filename),
@@ -314,6 +319,7 @@ class VerifyTest : public ::testing::Test {
 
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
+  loom_target_low_descriptor_registry_t low_registry_ = {};
   loom_module_t* module_ = nullptr;
   loom_builder_t builder_;
   DiagnosticCollector collector_;
@@ -581,6 +587,27 @@ TEST_F(VerifyTest, ValidAddiPasses) {
   TerminateFunc();
   auto result = Verify();
   EXPECT_EQ(result.error_count, 0u);
+}
+
+TEST_F(VerifyTest, ScopedEnumsRequireExplicitAttributeDescriptors) {
+  loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  EnterTestFunc(nullptr, 0, nullptr);
+
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_scoped_enum(0),
+                                          i32_type, LOOM_LOCATION_UNKNOWN,
+                                          &op));
+
+  TerminateFunc();
+  DiagnosticCapture capture;
+  auto result = VerifyStructured(&capture);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry =
+      FindDiagnostic(capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 5));
+  ASSERT_NE(entry, nullptr) << "Expected TYPE/005 attribute-kind diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "value");
+  ExpectU32Param(*entry, 1, LOOM_ATTR_SCOPED_ENUM);
+  ExpectU32Param(*entry, 2, LOOM_ATTR_ANY);
 }
 
 TEST_F(VerifyTest, RejectsPredicateArityMismatch) {

@@ -98,13 +98,11 @@ static iree_status_t loom_amdgpu_sanitizer_access_build_descriptor_op(
     iree_host_size_t result_count, loom_location_id_t location,
     loom_op_t** out_op) {
   *out_op = NULL;
-  const loom_low_descriptor_t* descriptor = NULL;
-  loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_descriptor_ref(
-      builder, descriptor_set, descriptor_ref, &descriptor, &opcode_id));
+  const loom_low_descriptor_t* descriptor =
+      loom_amdgpu_lookup_descriptor_ref(descriptor_set, descriptor_ref);
   return loom_low_build_resolved_descriptor_op(
-      builder, descriptor_set, descriptor, opcode_id, operands, operand_count,
-      attrs, result_types, result_count,
+      builder, descriptor_set, descriptor, operands, operand_count, attrs,
+      result_types, result_count,
       /*tied_results=*/NULL, /*tied_result_count=*/0, location, out_op);
 }
 
@@ -114,17 +112,15 @@ static iree_status_t loom_amdgpu_sanitizer_access_build_const_u32(
     loom_type_t result_type, loom_location_id_t location,
     loom_value_id_t* out_value) {
   *out_value = LOOM_VALUE_ID_INVALID;
-  const loom_low_descriptor_t* descriptor = NULL;
-  loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_descriptor_ref(
-      builder, descriptor_set, descriptor_ref, &descriptor, &opcode_id));
+  const loom_low_descriptor_t* descriptor =
+      loom_amdgpu_lookup_descriptor_ref(descriptor_set, descriptor_ref);
 
   loom_named_attr_t imm32_attr = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_sanitizer_access_build_u32_attr(
       builder, IREE_SV("imm32"), value, &imm32_attr));
   loom_op_t* const_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_const(
-      builder, descriptor_set, descriptor, opcode_id,
+      builder, descriptor_set, descriptor,
       loom_make_named_attr_slice(&imm32_attr, 1), result_type, location,
       &const_op));
   *out_value = loom_low_const_result(const_op);
@@ -470,18 +466,14 @@ static iree_status_t loom_amdgpu_sanitizer_access_build_shadow_config_values(
                                             },
                                             location, &values.address));
 
-  const loom_low_descriptor_t* descriptor = NULL;
-  loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_descriptor_ref(
-      builder, descriptor_set,
-      LOOM_AMDGPU_DESCRIPTOR_REF_S_LOAD_DWORDX2_OFFSET_ONLY, &descriptor,
-      &opcode_id));
+  const loom_low_descriptor_t* descriptor = loom_amdgpu_lookup_descriptor_ref(
+      descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_S_LOAD_DWORDX2_OFFSET_ONLY);
   loom_named_attr_t offset_attr = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_system_memory_build_offset_attr(
       builder, LOOM_AMDGPU_ASAN_CONFIG_SHADOW_BASE_OFFSET, &offset_attr));
   loom_op_t* load_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
-      builder, descriptor_set, descriptor, opcode_id, &values.address,
+      builder, descriptor_set, descriptor, &values.address,
       /*operand_count=*/1, loom_make_named_attr_slice(&offset_attr, 1),
       &sgpr_x2_type, /*result_count=*/1, /*tied_results=*/NULL,
       /*tied_result_count=*/0, location, &load_op));
@@ -584,11 +576,8 @@ static iree_status_t loom_amdgpu_sanitizer_access_build_shadow_load_u8(
   IREE_RETURN_IF_ERROR(loom_low_build_register_type(
       descriptor_set, LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, &vgpr_type));
 
-  const loom_low_descriptor_t* descriptor = NULL;
-  loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_descriptor_ref(
-      builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_FLAT_LOAD_U8,
-      &descriptor, &opcode_id));
+  const loom_low_descriptor_t* descriptor = loom_amdgpu_lookup_descriptor_ref(
+      descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_FLAT_LOAD_U8);
   const loom_low_asm_form_t* asm_form =
       loom_amdgpu_sanitizer_access_canonical_asm_form(descriptor_set,
                                                       descriptor);
@@ -611,7 +600,7 @@ static iree_status_t loom_amdgpu_sanitizer_access_build_shadow_load_u8(
   }
   loom_op_t* load_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
-      builder, descriptor_set, descriptor, opcode_id, operands, operand_count,
+      builder, descriptor_set, descriptor, operands, operand_count,
       loom_make_named_attr_slice(attrs, attr_count), &vgpr_type,
       /*result_count=*/1, /*tied_results=*/NULL, /*tied_result_count=*/0,
       location, &load_op));
@@ -634,11 +623,8 @@ static iree_status_t loom_amdgpu_sanitizer_access_build_shadow_load_u64(
   IREE_RETURN_IF_ERROR(loom_low_build_register_type(
       descriptor_set, LOOM_AMDGPU_REG_CLASS_ID_VGPR, 2, &vgpr_x2_type));
 
-  const loom_low_descriptor_t* descriptor = NULL;
-  loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_descriptor_ref(
-      builder, descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_FLAT_LOAD_U64,
-      &descriptor, &opcode_id));
+  const loom_low_descriptor_t* descriptor = loom_amdgpu_lookup_descriptor_ref(
+      descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_FLAT_LOAD_U64);
   const loom_low_asm_form_t* asm_form =
       loom_amdgpu_sanitizer_access_canonical_asm_form(descriptor_set,
                                                       descriptor);
@@ -661,7 +647,7 @@ static iree_status_t loom_amdgpu_sanitizer_access_build_shadow_load_u64(
   }
   loom_op_t* load_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
-      builder, descriptor_set, descriptor, opcode_id, operands, operand_count,
+      builder, descriptor_set, descriptor, operands, operand_count,
       loom_make_named_attr_slice(attrs, attr_count), &vgpr_x2_type,
       /*result_count=*/1, /*tied_results=*/NULL, /*tied_result_count=*/0,
       location, &load_op));

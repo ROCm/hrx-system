@@ -335,6 +335,10 @@ typedef struct loom_bytecode_numbering_t {
   iree_arena_allocator_t* arena;
   // File-level location mode controlling operation location references.
   loom_bytecode_location_mode_t location_mode;
+  // Stable-key codec supplied by the embedding compiler.
+  loom_low_repr_environment_t low_repr_environment;
+  // Representation contract selected once for the function being numbered.
+  const loom_low_repr_descriptor_set_t* active_low_descriptor_set;
 
   // Writer string ID to string view table for the STRINGS section.
   iree_string_view_t* string_entries;
@@ -906,6 +910,8 @@ typedef struct loom_bytecode_value_numbering_t {
   iree_host_size_t capacity;
   // Next value number to assign.
   uint32_t next_number;
+  // Representation contract selected once for the containing function body.
+  const loom_low_repr_descriptor_set_t* low_descriptor_set;
 } loom_bytecode_value_numbering_t;
 
 static void loom_bytecode_value_numbering_initialize(
@@ -1076,6 +1082,61 @@ static iree_status_t loom_bytecode_get_enum_ordinal(
   return iree_ok_status();
 }
 
+static iree_status_t loom_bytecode_resolve_function_low_descriptor_set(
+    const loom_bytecode_numbering_t* numbering, loom_func_like_t func_like,
+    const loom_low_repr_descriptor_set_t** out_descriptor_set) {
+  *out_descriptor_set = NULL;
+  if (func_like.vtable->repr_contract_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return iree_ok_status();
+  }
+  const loom_string_id_t descriptor_set_key_id =
+      loom_func_like_repr_contract(func_like);
+  if (descriptor_set_key_id == LOOM_STRING_ID_INVALID) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "function representation contract is required");
+  }
+  if (descriptor_set_key_id >= numbering->module->strings.count) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "function representation contract string ID is out of range");
+  }
+  if (!numbering->low_repr_environment.vtable) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "serializing Low functions requires a representation codec");
+  }
+  const iree_string_view_t descriptor_set_key =
+      numbering->module->strings.entries[descriptor_set_key_id];
+  *out_descriptor_set = loom_low_repr_lookup_descriptor_set(
+      &numbering->low_repr_environment, descriptor_set_key);
+  if (!*out_descriptor_set) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "function representation contract '%.*s' is not available",
+        (int)descriptor_set_key.size, descriptor_set_key.data);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_number_scoped_enum(
+    loom_bytecode_numbering_t* numbering, loom_attribute_t attr) {
+  if (!numbering->active_low_descriptor_set) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "scoped enum attribute is outside a representation contract");
+  }
+  const iree_string_view_t key = loom_low_repr_descriptor_key(
+      &numbering->low_repr_environment, numbering->active_low_descriptor_set,
+      loom_attr_as_scoped_enum(attr));
+  if (iree_string_view_is_empty(key)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "scoped enum ordinal is outside the active representation contract");
+  }
+  uint32_t unused_id = 0;
+  return loom_bytecode_numbering_intern_string_view(numbering, key, &unused_id);
+}
+
 static iree_status_t loom_bytecode_number_attr_value(
     loom_bytecode_numbering_t* numbering, loom_attribute_t attr,
     const loom_attr_descriptor_t* descriptor) {
@@ -1090,6 +1151,8 @@ static iree_status_t loom_bytecode_number_attr_value(
     case LOOM_ATTR_ENUM: {
       break;
     }
+    case LOOM_ATTR_SCOPED_ENUM:
+      return loom_bytecode_number_scoped_enum(numbering, attr);
     case LOOM_ATTR_SYMBOL: {
       loom_symbol_ref_t ref = attr.symbol;
       if (loom_symbol_ref_is_valid(ref) &&
@@ -2008,13 +2071,15 @@ static iree_status_t loom_bytecode_write_attr_value(
     loom_attribute_t attr, const loom_attr_descriptor_t* descriptor) {
   switch (attr.kind) {
     case LOOM_ATTR_I64: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, 0));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_u8(writer, LOOM_BYTECODE_ATTR_I64));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_page_writer_write_svarint(writer, attr.i64));
       break;
     }
     case LOOM_ATTR_F64: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, 1));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_u8(writer, LOOM_BYTECODE_ATTR_F64));
       uint8_t bytes[8];
       memcpy(bytes, &attr.f64, 8);
       IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write(writer, bytes, 8));
@@ -2024,13 +2089,15 @@ static iree_status_t loom_bytecode_write_attr_value(
       uint32_t string_writer_id = 0;
       IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
           numbering, attr.string_id, &string_writer_id));
-      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, 2));
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
+          writer, LOOM_BYTECODE_ATTR_STRING));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_page_writer_write_uvarint(writer, string_writer_id));
       break;
     }
     case LOOM_ATTR_BOOL: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, 3));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_u8(writer, LOOM_BYTECODE_ATTR_BOOL));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_page_writer_write_u8(writer, attr.raw ? 1 : 0));
       break;
@@ -2039,12 +2106,14 @@ static iree_status_t loom_bytecode_write_attr_value(
       uint8_t ordinal = 0;
       IREE_RETURN_IF_ERROR(
           loom_bytecode_get_enum_ordinal(attr, descriptor, &ordinal));
-      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, 4));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_u8(writer, LOOM_BYTECODE_ATTR_ENUM));
       IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, ordinal));
       break;
     }
     case LOOM_ATTR_I64_ARRAY: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, 5));
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
+          writer, LOOM_BYTECODE_ATTR_I64_ARRAY));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_page_writer_write_uvarint(writer, attr.count));
       for (uint16_t i = 0; i < attr.count; ++i) {
@@ -2055,7 +2124,8 @@ static iree_status_t loom_bytecode_write_attr_value(
     }
     case LOOM_ATTR_BYTES: {
       iree_const_byte_span_t bytes = loom_attr_as_bytes(attr);
-      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, 11));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_u8(writer, LOOM_BYTECODE_ATTR_BYTES));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_page_writer_write_uvarint(writer, bytes.data_length));
       IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write(writer, bytes.data,
@@ -2072,7 +2142,8 @@ static iree_status_t loom_bytecode_write_attr_value(
         IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
             numbering, target->name_id, &string_writer_id));
       }
-      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, 6));
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
+          writer, LOOM_BYTECODE_ATTR_SYMBOL));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_page_writer_write_uvarint(writer, string_writer_id));
       break;
@@ -2088,13 +2159,15 @@ static iree_status_t loom_bytecode_write_attr_value(
       uint32_t type_writer_id = 0;
       IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_type(
           numbering, type, &type_writer_id));
-      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, 7));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_u8(writer, LOOM_BYTECODE_ATTR_TYPE));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_page_writer_write_uvarint(writer, type_writer_id));
       break;
     }
     case LOOM_ATTR_PREDICATE_LIST: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, 8));
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
+          writer, LOOM_BYTECODE_ATTR_PREDICATE_LIST));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_page_writer_write_uvarint(writer, attr.count));
       for (uint16_t i = 0; i < attr.count; ++i) {
@@ -2143,7 +2216,8 @@ static iree_status_t loom_bytecode_write_attr_value(
       break;
     }
     case LOOM_ATTR_DICT: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, 9));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_u8(writer, LOOM_BYTECODE_ATTR_DICT));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_page_writer_write_uvarint(writer, attr.count));
       // Dict attrs are stored canonically at IR construction time; emit that
@@ -2161,7 +2235,8 @@ static iree_status_t loom_bytecode_write_attr_value(
       break;
     }
     case LOOM_ATTR_ENCODING: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, 10));
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
+          writer, LOOM_BYTECODE_ATTR_ENCODING));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_page_writer_write_uvarint(writer, attr.encoding_id));
       break;
@@ -2173,18 +2248,50 @@ static iree_status_t loom_bytecode_write_attr_value(
   return iree_ok_status();
 }
 
+static iree_status_t loom_bytecode_write_scoped_enum(
+    loom_bytecode_page_writer_t* writer, loom_bytecode_numbering_t* numbering,
+    const loom_bytecode_value_numbering_t* value_numbering,
+    loom_attribute_t attr) {
+  if (attr.kind != LOOM_ATTR_SCOPED_ENUM) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "scoped enum field has attribute kind %u",
+                            (unsigned)attr.kind);
+  }
+  if (!value_numbering || !value_numbering->low_descriptor_set) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "scoped enum attribute is outside a representation contract");
+  }
+  const iree_string_view_t key = loom_low_repr_descriptor_key(
+      &numbering->low_repr_environment, value_numbering->low_descriptor_set,
+      loom_attr_as_scoped_enum(attr));
+  if (iree_string_view_is_empty(key)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "scoped enum ordinal is outside the active representation contract");
+  }
+  uint32_t string_writer_id = 0;
+  IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_string_view(
+      numbering, key, &string_writer_id));
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
+      writer, LOOM_BYTECODE_ATTR_SCOPED_ENUM));
+  return loom_bytecode_page_writer_write_uvarint(writer, string_writer_id);
+}
+
 static iree_status_t loom_bytecode_emit_attr_value(
     iree_string_builder_t* builder, loom_bytecode_numbering_t* numbering,
     const loom_bytecode_value_numbering_t* value_numbering,
     loom_attribute_t attr, const loom_attr_descriptor_t* descriptor) {
   switch (attr.kind) {
     case LOOM_ATTR_I64: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, 0));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_I64));
       IREE_RETURN_IF_ERROR(loom_bytecode_emit_svarint(builder, attr.i64));
       break;
     }
     case LOOM_ATTR_F64: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, 1));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_F64));
       uint64_t bits = 0;
       memcpy(&bits, &attr.f64, sizeof(bits));
       IREE_RETURN_IF_ERROR(loom_bytecode_emit_u64_le(builder, bits));
@@ -2194,13 +2301,15 @@ static iree_status_t loom_bytecode_emit_attr_value(
       uint32_t string_writer_id = 0;
       IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
           numbering, attr.string_id, &string_writer_id));
-      IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, 2));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_STRING));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_emit_uvarint(builder, string_writer_id));
       break;
     }
     case LOOM_ATTR_BOOL: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, 3));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_BOOL));
       IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, attr.raw ? 1 : 0));
       break;
     }
@@ -2208,12 +2317,14 @@ static iree_status_t loom_bytecode_emit_attr_value(
       uint8_t ordinal = 0;
       IREE_RETURN_IF_ERROR(
           loom_bytecode_get_enum_ordinal(attr, descriptor, &ordinal));
-      IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, 4));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_ENUM));
       IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, ordinal));
       break;
     }
     case LOOM_ATTR_I64_ARRAY: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, 5));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_I64_ARRAY));
       IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, attr.count));
       for (uint16_t i = 0; i < attr.count; ++i) {
         IREE_RETURN_IF_ERROR(
@@ -2223,7 +2334,8 @@ static iree_status_t loom_bytecode_emit_attr_value(
     }
     case LOOM_ATTR_BYTES: {
       iree_const_byte_span_t bytes = loom_attr_as_bytes(attr);
-      IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, 11));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_BYTES));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_emit_uvarint(builder, bytes.data_length));
       if (bytes.data_length > 0) {
@@ -2243,7 +2355,8 @@ static iree_status_t loom_bytecode_emit_attr_value(
         IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
             numbering, target->name_id, &string_writer_id));
       }
-      IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, 6));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_SYMBOL));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_emit_uvarint(builder, string_writer_id));
       break;
@@ -2259,12 +2372,14 @@ static iree_status_t loom_bytecode_emit_attr_value(
       uint32_t type_writer_id = 0;
       IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_type(
           numbering, type, &type_writer_id));
-      IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, 7));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_TYPE));
       IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, type_writer_id));
       break;
     }
     case LOOM_ATTR_PREDICATE_LIST: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, 8));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_PREDICATE_LIST));
       IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, attr.count));
       for (uint16_t i = 0; i < attr.count; ++i) {
         const loom_predicate_t* predicate = &attr.predicate_list[i];
@@ -2311,7 +2426,8 @@ static iree_status_t loom_bytecode_emit_attr_value(
       break;
     }
     case LOOM_ATTR_DICT: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, 9));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_DICT));
       IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, attr.count));
       for (uint16_t i = 0; i < attr.count; ++i) {
         const loom_named_attr_t* entry = &attr.dict_entries[i];
@@ -2326,7 +2442,8 @@ static iree_status_t loom_bytecode_emit_attr_value(
       break;
     }
     case LOOM_ATTR_ENCODING: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, 10));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_ENCODING));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_emit_uvarint(builder, attr.encoding_id));
       break;
@@ -2507,8 +2624,13 @@ static iree_status_t loom_bytecode_write_operation(
         loom_bytecode_page_writer_write_uvarint(writer, key_writer_id));
     // Value.
     const loom_attr_descriptor_t* descriptor = &vtable->attr_descriptors[i];
-    IREE_RETURN_IF_ERROR(loom_bytecode_write_attr_value(
-        writer, numbering, value_numbering, attrs[i], descriptor));
+    if (descriptor->attr_kind == LOOM_ATTR_SCOPED_ENUM) {
+      IREE_RETURN_IF_ERROR(loom_bytecode_write_scoped_enum(
+          writer, numbering, value_numbering, attrs[i]));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_bytecode_write_attr_value(
+          writer, numbering, value_numbering, attrs[i], descriptor));
+    }
   }
 
   // Regions.
@@ -2618,6 +2740,7 @@ static iree_status_t loom_bytecode_write_ir_section(
 
     uint8_t first_region_index = LOOM_REGION_INDEX_NONE;
     uint8_t root_region_count = 0;
+    const loom_low_repr_descriptor_set_t* low_descriptor_set = NULL;
     if (is_function_like) {
       loom_func_like_t func_like =
           loom_func_like_cast(module, symbol->defining_op);
@@ -2643,8 +2766,13 @@ static iree_status_t loom_bytecode_write_ir_section(
             func_like.op->kind);
       }
 
+      IREE_RETURN_IF_ERROR(loom_bytecode_resolve_function_low_descriptor_set(
+          numbering, func_like, &low_descriptor_set));
+
       // Intern function signature and regions (matching Python walk order).
+      numbering->active_low_descriptor_set = low_descriptor_set;
       IREE_RETURN_IF_ERROR(loom_bytecode_number_function(numbering, func_like));
+      numbering->active_low_descriptor_set = NULL;
     } else if (is_record && symbol->defining_op->region_count == 1) {
       root_region_count = loom_bytecode_count_root_regions(symbol->defining_op);
       if (root_region_count == 0) {
@@ -2669,6 +2797,7 @@ static iree_status_t loom_bytecode_write_ir_section(
     loom_bytecode_value_numbering_t value_numbering;
     loom_bytecode_value_numbering_initialize(&value_numbering, module,
                                              numbering->arena);
+    value_numbering.low_descriptor_set = low_descriptor_set;
     IREE_RETURN_IF_ERROR(loom_bytecode_value_numbering_ensure_capacity(
         &value_numbering, body_counts.value_count));
 
@@ -3818,6 +3947,8 @@ iree_status_t loom_bytecode_write_module(
   iree_status_t status =
       loom_bytecode_numbering_initialize(&numbering, module, &arena);
   numbering.location_mode = location_mode;
+  numbering.low_repr_environment = options ? options->low_repr_environment
+                                           : (loom_low_repr_environment_t){0};
 
   // Pass 1: Number module metadata. Function signatures and bodies are numbered
   // during IR section writing.

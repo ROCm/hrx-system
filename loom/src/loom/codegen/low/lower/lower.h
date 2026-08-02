@@ -839,8 +839,6 @@ typedef struct loom_low_lower_result_t {
 typedef struct loom_low_lower_resolved_descriptor_t {
   // Descriptor row selected from the active descriptor set.
   const loom_low_descriptor_t* descriptor;
-  // Module string ID for the selected descriptor key.
-  loom_string_id_t opcode_id;
 } loom_low_lower_resolved_descriptor_t;
 
 // Lowers one func.def-like source function into a target-low function in place.
@@ -1232,15 +1230,6 @@ iree_status_t loom_low_lower_elide_value(loom_low_lower_context_t* context,
 iree_status_t loom_low_lower_make_register_type(
     loom_low_lower_context_t* context, uint16_t reg_class_id,
     uint32_t unit_count, loom_type_t* out_type);
-
-// Resolves a descriptor row from the selected descriptor set.
-//
-// This is for selectors that already walked a descriptor-set table and selected
-// a concrete row. It interns the row's opcode string into the low module
-// without repeating the stable-ID lookup.
-iree_status_t loom_low_lower_resolve_descriptor_row(
-    loom_low_lower_context_t* context, const loom_low_descriptor_t* descriptor,
-    loom_low_lower_resolved_descriptor_t* out_descriptor);
 
 // Emits a descriptor-backed low.op from a descriptor row resolved during
 // selection.

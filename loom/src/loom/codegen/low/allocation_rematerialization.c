@@ -129,9 +129,9 @@ static iree_status_t loom_low_allocation_try_rematerialize_value(
     return iree_ok_status();
   }
 
-  loom_low_resolved_descriptor_packet_t packet = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_resolve_descriptor_packet(module, target, defining_op, &packet));
+  loom_low_descriptor_packet_t packet = {0};
+  loom_low_descriptor_packet_initialize(target->descriptor_set, defining_op,
+                                        &packet);
   if (!loom_low_descriptor_packet_kind_may_rematerialize(packet.kind) ||
       !loom_low_descriptor_result_can_rematerialize(
           target->descriptor_set, packet.descriptor, result_index)) {

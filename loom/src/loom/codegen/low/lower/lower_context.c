@@ -812,30 +812,6 @@ iree_status_t loom_low_lower_make_register_type(
                                       unit_count, out_type);
 }
 
-iree_status_t loom_low_lower_resolve_descriptor_row(
-    loom_low_lower_context_t* context, const loom_low_descriptor_t* descriptor,
-    loom_low_lower_resolved_descriptor_t* out_descriptor) {
-  *out_descriptor = (loom_low_lower_resolved_descriptor_t){
-      .descriptor = NULL,
-      .opcode_id = LOOM_STRING_ID_INVALID,
-  };
-  IREE_ASSERT_NE(loom_low_descriptor_set_descriptor_ordinal(
-                     context->descriptor_set, descriptor),
-                 LOOM_LOW_DESCRIPTOR_ORDINAL_NONE);
-
-  iree_string_view_t key = loom_low_descriptor_set_string(
-      context->descriptor_set, descriptor->key_string_offset);
-  IREE_ASSERT_FALSE(iree_string_view_is_empty(key));
-  loom_string_id_t opcode_id = LOOM_STRING_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_module_intern_string(context->module, key, &opcode_id));
-  *out_descriptor = (loom_low_lower_resolved_descriptor_t){
-      .descriptor = descriptor,
-      .opcode_id = opcode_id,
-  };
-  return iree_ok_status();
-}
-
 iree_status_t loom_low_lower_emit_resolved_descriptor_op(
     loom_low_lower_context_t* context,
     const loom_low_lower_resolved_descriptor_t* descriptor,
@@ -846,8 +822,8 @@ iree_status_t loom_low_lower_emit_resolved_descriptor_op(
     loom_op_t** out_op) {
   return loom_low_build_resolved_descriptor_op(
       &context->builder, context->descriptor_set, descriptor->descriptor,
-      descriptor->opcode_id, operands, operand_count, attrs, result_types,
-      result_count, tied_results, tied_result_count, location, out_op);
+      operands, operand_count, attrs, result_types, result_count, tied_results,
+      tied_result_count, location, out_op);
 }
 
 iree_status_t loom_low_lower_emit_resolved_descriptor_const(
@@ -856,8 +832,8 @@ iree_status_t loom_low_lower_emit_resolved_descriptor_const(
     loom_named_attr_slice_t attrs, loom_type_t result_type,
     loom_location_id_t location, loom_op_t** out_op) {
   return loom_low_build_resolved_descriptor_const(
-      &context->builder, context->descriptor_set, descriptor->descriptor,
-      descriptor->opcode_id, attrs, result_type, location, out_op);
+      &context->builder, context->descriptor_set, descriptor->descriptor, attrs,
+      result_type, location, out_op);
 }
 
 iree_status_t loom_low_lower_record_memory_access_summary(

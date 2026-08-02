@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/codegen/low/repr.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/error/diagnostic.h"
 #include "loom/format/bytecode/format.h"
@@ -159,6 +160,9 @@ static iree_status_t loom_run_module_read_bytecode(
       .verify_module = false,
       .verify_max_errors = options->max_errors,
   };
+  loom_low_repr_environment_initialize(
+      &session->low_descriptor_registry.registry,
+      &read_options.low_repr_environment);
   loom_bytecode_read_result_t read_result = {0};
   IREE_RETURN_IF_ERROR(loom_bytecode_read_module(
       bytecode, options->filename, &session->context, &session->block_pool,

@@ -843,6 +843,7 @@ static iree_status_t loom_ir_remap_attribute_impl(
     case LOOM_ATTR_F64:
     case LOOM_ATTR_BOOL:
     case LOOM_ATTR_ENUM:
+    case LOOM_ATTR_SCOPED_ENUM:
       return iree_ok_status();
 
     case LOOM_ATTR_STRING:

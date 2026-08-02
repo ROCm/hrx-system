@@ -662,6 +662,11 @@ static iree_status_t loom_link_merge_func_contract(
           .field_name = IREE_SV("target"),
       },
       {
+          .source_attr_index = source_func.vtable->repr_contract_attr_index,
+          .target_attr_index = target_func.vtable->repr_contract_attr_index,
+          .field_name = IREE_SV("repr_contract"),
+      },
+      {
           .source_attr_index = source_func.vtable->abi_attr_index,
           .target_attr_index = target_func.vtable->abi_attr_index,
           .field_name = IREE_SV("abi"),

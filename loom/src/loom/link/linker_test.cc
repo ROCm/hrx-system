@@ -13,14 +13,15 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/text_asm.h"
 #include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
-#include "loom/ops/config/ops.h"
-#include "loom/ops/func/ops.h"
-#include "loom/ops/target/ops.h"
+#include "loom/ops/op_registry.h"
 #include "loom/ops/test/ops.h"
+#include "loom/target/test/alt_descriptors.h"
+#include "loom/target/test/descriptors.h"
 #include "loom/verify/verify.h"
 
 namespace loom {
@@ -37,15 +38,13 @@ class LinkerTest : public ::testing::Test {
     iree_arena_block_pool_initialize(32 * 1024, iree_allocator_system(),
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
-    RegisterDialect(LOOM_DIALECT_CONFIG, loom_config_dialect_vtables,
-                    loom_config_dialect_op_semantics);
-    RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables,
-                    loom_func_dialect_op_semantics);
-    RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables,
-                    loom_target_dialect_op_semantics);
+    IREE_ASSERT_OK(loom_op_registry_register_all_dialects(&context_));
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables,
                     loom_test_dialect_op_semantics);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
+    low_registry_.descriptor_set_providers = low_descriptor_set_providers_;
+    low_registry_.descriptor_set_provider_count =
+        IREE_ARRAYSIZE(low_descriptor_set_providers_);
   }
 
   void TearDown() override {
@@ -80,6 +79,8 @@ class LinkerTest : public ::testing::Test {
         /*.diagnostic_sink=*/{},
         /*.max_errors=*/20,
     };
+    loom_low_descriptor_text_asm_environment_initialize(
+        &low_registry_, &parse_options.low_asm_environment);
     IREE_EXPECT_OK(loom_text_parse(source, filename, &context_, &block_pool_,
                                    &parse_options, &module));
     EXPECT_NE(module, nullptr);
@@ -96,6 +97,8 @@ class LinkerTest : public ::testing::Test {
         /*.diagnostic_sink=*/{},
         /*.max_errors=*/20,
     };
+    loom_low_descriptor_text_asm_environment_initialize(
+        &low_registry_, &parse_options.low_asm_environment);
     IREE_EXPECT_OK(loom_text_parse(source, filename, &context_, &block_pool_,
                                    &parse_options, &module));
     EXPECT_NE(module, nullptr);
@@ -166,6 +169,16 @@ class LinkerTest : public ::testing::Test {
 
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_ = {};
+
+  // Synthetic representation contracts accepted by Low parser fixtures.
+  loom_low_descriptor_set_provider_t low_descriptor_set_providers_[2] = {
+      loom_test_low_core_descriptor_set,
+      loom_test_low_alt_descriptor_set,
+  };
+
+  // Descriptor registry projected into the text parser environment.
+  loom_low_descriptor_registry_t low_registry_ = {};
+
   std::vector<loom_module_t*> modules_;
 };
 
@@ -506,6 +519,22 @@ test.target<low_core> @def_target
 
 func.def target(@def_target) @identity(%x: i32) -> (i32) {
   func.return %x : i32
+}
+)"));
+
+  loom_module_t* linked = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        LinkStatus({harness, corpus}, &linked));
+  EXPECT_EQ(linked, nullptr);
+}
+
+TEST_F(LinkerTest, RejectsDeclarationDefinitionRepresentationConflict) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+low.func.decl target<test.low.core> @identity()
+)"));
+  loom_module_t* corpus = Parse(IREE_SV(R"(
+low.func.def target<test.low.alt> @identity() {
+  low.return
 }
 )"));
 

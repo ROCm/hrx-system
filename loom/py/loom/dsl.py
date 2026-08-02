@@ -98,6 +98,7 @@ __all__ = [
     "ATTR_TYPE_STRING",
     "ATTR_TYPE_BOOL",
     "ATTR_TYPE_ENUM",
+    "ATTR_TYPE_SCOPED_ENUM",
     "ATTR_TYPE_TYPE",
     "ATTR_TYPE_I64_ARRAY",
     "ATTR_TYPE_BYTES",
@@ -492,6 +493,7 @@ ATTR_TYPE_F64 = "f64"
 ATTR_TYPE_STRING = "string"
 ATTR_TYPE_BOOL = "bool"
 ATTR_TYPE_ENUM = "enum"
+ATTR_TYPE_SCOPED_ENUM = "scoped_enum"
 ATTR_TYPE_TYPE = "type"
 ATTR_TYPE_I64_ARRAY = "i64_array"
 ATTR_TYPE_BYTES = "bytes"
@@ -509,6 +511,7 @@ _VALID_ATTR_TYPES = frozenset(
         ATTR_TYPE_STRING,
         ATTR_TYPE_BOOL,
         ATTR_TYPE_ENUM,
+        ATTR_TYPE_SCOPED_ENUM,
         ATTR_TYPE_TYPE,
         ATTR_TYPE_I64_ARRAY,
         ATTR_TYPE_BYTES,
@@ -632,7 +635,9 @@ class AttrDef:
           positional in the format spec).
     attr_type: The kind of attribute value. Must be one of the
         ATTR_TYPE_* constants: "i64", "f64", "string", "bool",
-        "enum", "type", "i64_array", "bytes", "encoding", "any".
+        "enum", "scoped_enum", "type", "i64_array", "bytes", "encoding",
+        "any". Scoped enums use a stable key at format boundaries and a dense
+        ordinal interpreted by the enclosing representation contract in C IR.
     doc: Human-readable description.
     default: Default value (None = required, not optional).
     enum_def: For enum attrs, the EnumDef describing valid values.
@@ -674,6 +679,16 @@ class AttrDef:
             raise ValueError(
                 f"AttrDef '{self.name}': open_enum requires attr_type='enum'"
             )
+        if self.attr_type == ATTR_TYPE_SCOPED_ENUM:
+            if self.optional:
+                raise ValueError(
+                    f"AttrDef '{self.name}': scoped_enum attributes are required"
+                )
+            if self.default is not None:
+                raise ValueError(
+                    f"AttrDef '{self.name}': scoped_enum attributes cannot "
+                    "have defaults"
+                )
         if self.symbol_ref is not None and self.attr_type != ATTR_TYPE_SYMBOL:
             raise ValueError(
                 f"AttrDef '{self.name}': symbol_ref requires attr_type='symbol'"
@@ -2783,7 +2798,6 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
         BlockArgs,
         BlockRef,
         Clause,
-        DescriptorRef,
         EncodingOf,
         Flags,
         FuncArgs,
@@ -2801,6 +2815,7 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
         ResultTypeList,
         ScalarOf,
         Scope,
+        ScopedEnumRef,
         ShapeOf,
         StableKeyRef,
         SymbolRef,
@@ -2821,15 +2836,13 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
                 | SymbolRef(field=f)
                 | Flags(field=f)
                 | KeyRef(field=f)
+                | ScopedEnumRef(field=f)
                 | TemplateParam(field=f)
             ):
                 fields.add(f)
             case TemplateParamFlags(param=param, flags=flags):
                 fields.add(param)
                 fields.add(flags)
-            case DescriptorRef(key=key, ordinal=ordinal):
-                fields.add(key)
-                fields.add(ordinal)
             case StableKeyRef(key=key, stable_id=stable_id):
                 fields.add(key)
                 fields.add(stable_id)
@@ -2942,6 +2955,42 @@ def _validate_format_fields(
             f"Op '{op_name}': format references undeclared fields: "
             f"{sorted(unknown)}. Declared: {sorted(declared)}"
         )
+
+
+def _validate_scoped_enum_fields(
+    op_name: str,
+    format_elements: tuple[FormatElement, ...],
+    attrs: tuple[AttrDef, ...],
+) -> None:
+    """Validates required representation-scoped enum syntax."""
+    from loom.assembly import ScopedEnumRef
+
+    scoped_attrs = [attr for attr in attrs if attr.attr_type == ATTR_TYPE_SCOPED_ENUM]
+    if len(scoped_attrs) > 1:
+        raise ValueError(
+            f"Op '{op_name}': at most one scoped_enum attr may define its "
+            "representation-scoped identity"
+        )
+    direct_refs = [
+        element.field
+        for element in format_elements
+        if isinstance(element, ScopedEnumRef)
+    ]
+    attrs_by_name = {attr.name: attr for attr in attrs}
+    for field in direct_refs:
+        attr = attrs_by_name.get(field)
+        if attr is None or attr.attr_type != ATTR_TYPE_SCOPED_ENUM:
+            raise ValueError(
+                f"Op '{op_name}': ScopedEnumRef field '{field}' must name a "
+                "scoped_enum attr"
+            )
+    for attr in scoped_attrs:
+        ref_count = direct_refs.count(attr.name)
+        if ref_count != 1:
+            raise ValueError(
+                f"Op '{op_name}': scoped_enum attr '{attr.name}' requires "
+                "exactly one top-level ScopedEnumRef"
+            )
 
 
 def _validate_legacy_formats(
@@ -3819,6 +3868,7 @@ class Op:
     type_transfer: str = ""  # C function name for semantic type transfer, or "".
     verify: str = ""  # C function name for op-specific verification, or "".
     builder_name: str | None = None  # Python builder method override, or None.
+    generate_c_builder: bool = True  # False when construction requires domain context.
     phase: OpPhase | None = None
     contracts: tuple[ContractFamily, ...] = ()
     category: OpCategory | None = None
@@ -3853,6 +3903,7 @@ class Op:
         type_transfer: str = "",
         verify: str = "",
         builder_name: str | None = None,
+        generate_c_builder: bool = True,
         phase: OpPhase | None = None,
         contracts: list[ContractFamily] | tuple[ContractFamily, ...] = (),
         category: OpCategory | None = None,
@@ -3891,6 +3942,7 @@ class Op:
         object.__setattr__(self, "type_transfer", type_transfer)
         object.__setattr__(self, "verify", verify)
         object.__setattr__(self, "builder_name", builder_name)
+        object.__setattr__(self, "generate_c_builder", generate_c_builder)
         object.__setattr__(self, "phase", phase)
         object.__setattr__(self, "contracts", tuple(contracts))
         if (
@@ -3983,6 +4035,7 @@ class Op:
         _validate_trait_field_contracts(
             name, frozen_operands, frozen_results, tuple(traits)
         )
+        _validate_scoped_enum_fields(name, frozen_format, frozen_attrs)
         # Validate that format elements reference declared fields.
         if frozen_format:
             _validate_format_fields(

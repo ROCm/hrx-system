@@ -104,29 +104,28 @@ enum {
   LOOM_OP_TEST_FACT_STORAGE_MIN_ALIGNMENT = LOOM_OP_KIND(LOOM_DIALECT_TEST, 81),
   LOOM_OP_TEST_FACT_STORAGE_SPACE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 82),
   LOOM_OP_TEST_REGION_SYNTAX = LOOM_OP_KIND(LOOM_DIALECT_TEST, 83),
-  LOOM_OP_TEST_LOW_ASM_REGION = LOOM_OP_KIND(LOOM_DIALECT_TEST, 84),
-  LOOM_OP_TEST_CLAUSE_CONSTANT = LOOM_OP_KIND(LOOM_DIALECT_TEST, 85),
-  LOOM_OP_TEST_CLAUSE_COPY = LOOM_OP_KIND(LOOM_DIALECT_TEST, 86),
-  LOOM_OP_TEST_TYPED_USE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 87),
-  LOOM_OP_TEST_SHAPE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 88),
-  LOOM_OP_TEST_TARGET = LOOM_OP_KIND(LOOM_DIALECT_TEST, 89),
-  LOOM_OP_TEST_RESOURCE_ALLOC = LOOM_OP_KIND(LOOM_DIALECT_TEST, 90),
-  LOOM_OP_TEST_RESOURCE_BORROW = LOOM_OP_KIND(LOOM_DIALECT_TEST, 91),
-  LOOM_OP_TEST_RESOURCE_BORROW_REF = LOOM_OP_KIND(LOOM_DIALECT_TEST, 92),
-  LOOM_OP_TEST_RESOURCE_CONSUME = LOOM_OP_KIND(LOOM_DIALECT_TEST, 93),
-  LOOM_OP_TEST_RESOURCE_RETAIN = LOOM_OP_KIND(LOOM_DIALECT_TEST, 94),
-  LOOM_OP_TEST_RESOURCE_RELEASE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 95),
-  LOOM_OP_TEST_RESOURCE_DISCARD = LOOM_OP_KIND(LOOM_DIALECT_TEST, 96),
-  LOOM_OP_TEST_RESOURCE_ESCAPE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 97),
-  LOOM_OP_TEST_RESOURCE_ALIAS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 98),
-  LOOM_OP_TEST_RESOURCE_BORROWED = LOOM_OP_KIND(LOOM_DIALECT_TEST, 99),
-  LOOM_OP_TEST_SEGMENTED = LOOM_OP_KIND(LOOM_DIALECT_TEST, 100),
-  LOOM_OP_TEST_TEMPLATE_PARAM_SYMBOL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 101),
-  LOOM_OP_TEST_TEMPLATE_PARAM_SYMBOL_FLAGS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 102),
-  LOOM_OP_TEST_FACT_FINITE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 103),
-  LOOM_OP_TEST_FACT_NOT_SUBNORMAL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 104),
-  LOOM_OP_TEST_FACT_CLUSTER_UNIFORM = LOOM_OP_KIND(LOOM_DIALECT_TEST, 105),
-  LOOM_OP_TEST_COUNT_ = 106,
+  LOOM_OP_TEST_CLAUSE_CONSTANT = LOOM_OP_KIND(LOOM_DIALECT_TEST, 84),
+  LOOM_OP_TEST_CLAUSE_COPY = LOOM_OP_KIND(LOOM_DIALECT_TEST, 85),
+  LOOM_OP_TEST_TYPED_USE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 86),
+  LOOM_OP_TEST_SHAPE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 87),
+  LOOM_OP_TEST_TARGET = LOOM_OP_KIND(LOOM_DIALECT_TEST, 88),
+  LOOM_OP_TEST_RESOURCE_ALLOC = LOOM_OP_KIND(LOOM_DIALECT_TEST, 89),
+  LOOM_OP_TEST_RESOURCE_BORROW = LOOM_OP_KIND(LOOM_DIALECT_TEST, 90),
+  LOOM_OP_TEST_RESOURCE_BORROW_REF = LOOM_OP_KIND(LOOM_DIALECT_TEST, 91),
+  LOOM_OP_TEST_RESOURCE_CONSUME = LOOM_OP_KIND(LOOM_DIALECT_TEST, 92),
+  LOOM_OP_TEST_RESOURCE_RETAIN = LOOM_OP_KIND(LOOM_DIALECT_TEST, 93),
+  LOOM_OP_TEST_RESOURCE_RELEASE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 94),
+  LOOM_OP_TEST_RESOURCE_DISCARD = LOOM_OP_KIND(LOOM_DIALECT_TEST, 95),
+  LOOM_OP_TEST_RESOURCE_ESCAPE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 96),
+  LOOM_OP_TEST_RESOURCE_ALIAS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 97),
+  LOOM_OP_TEST_RESOURCE_BORROWED = LOOM_OP_KIND(LOOM_DIALECT_TEST, 98),
+  LOOM_OP_TEST_SEGMENTED = LOOM_OP_KIND(LOOM_DIALECT_TEST, 99),
+  LOOM_OP_TEST_TEMPLATE_PARAM_SYMBOL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 100),
+  LOOM_OP_TEST_TEMPLATE_PARAM_SYMBOL_FLAGS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 101),
+  LOOM_OP_TEST_FACT_FINITE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 102),
+  LOOM_OP_TEST_FACT_NOT_SUBNORMAL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 103),
+  LOOM_OP_TEST_FACT_CLUSTER_UNIFORM = LOOM_OP_KIND(LOOM_DIALECT_TEST, 104),
+  LOOM_OP_TEST_COUNT_ = 105,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -1152,7 +1151,7 @@ iree_status_t loom_test_fact_encoding_layout_stride_hi_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_TEST_FACT_ENCODING_MATRIX_FIELD: Exposes an encoded-operand storage-schema summary field as an i64 constant. Supported fields are element_format, payload_packing, scale_topology, scale_format, secondary_scale_format, affine, rounding, codebook, sparsity, sparsity_group_elements, sparsity_group_nonzero_elements, payload_registers, payload_elements, scale_group_elements, scale_operands, zero_scale_fallback, and static_spec.
+// LOOM_OP_TEST_FACT_ENCODING_MATRIX_FIELD: Exposes an encoded-operand storage-schema summary field as an i64 constant. Supported fields are element_format, payload_packing, scale_topology, scale_format, secondary_scale_format, affine, rounding, codebook, sparsity, sparsity_group_elements, sparsity_group_nonzero_elements, payload_registers, payload_elements, scale_group_elements, scale_group_rank, scale_group_dim0 through scale_group_dim3, scale_operands, zero_scale_fallback, and static_spec.
 // %format = test.fact_encoding_matrix_field %schema["element_format"] : encoding<schema> -> i64
 LOOM_DEFINE_ISA(loom_test_fact_encoding_matrix_field_isa, LOOM_OP_TEST_FACT_ENCODING_MATRIX_FIELD)
 LOOM_DEFINE_OPERAND(loom_test_fact_encoding_matrix_field_value, 0)
@@ -1586,17 +1585,6 @@ iree_status_t loom_test_fact_storage_space_facts(
 LOOM_DEFINE_ISA(loom_test_region_syntax_isa, LOOM_OP_TEST_REGION_SYNTAX)
 LOOM_DEFINE_REGION(loom_test_region_syntax_body, 0)
 iree_status_t loom_test_region_syntax_build(
-    loom_builder_t* builder,
-    loom_location_id_t location,
-    loom_op_t** out_op);
-
-// LOOM_OP_TEST_LOW_ASM_REGION: Test op whose body uses descriptor-backed target-low assembly syntax while preserving ordinary region storage.
-// test.low_asm_region asm<test.low.core> {
-//   return
-// }
-LOOM_DEFINE_ISA(loom_test_low_asm_region_isa, LOOM_OP_TEST_LOW_ASM_REGION)
-LOOM_DEFINE_REGION(loom_test_low_asm_region_body, 0)
-iree_status_t loom_test_low_asm_region_build(
     loom_builder_t* builder,
     loom_location_id_t location,
     loom_op_t** out_op);

@@ -76,16 +76,9 @@ static iree_status_t loom_low_schedule_resolve_descriptor(
     return iree_ok_status();
   }
 
-  loom_low_resolved_descriptor_packet_t packet = {0};
-  IREE_RETURN_IF_ERROR(loom_low_resolve_descriptor_packet(
-      state->module, &state->target, op, &packet));
-  if (packet.descriptor == NULL) {
-    IREE_RETURN_IF_ERROR(
-        loom_low_schedule_emit_missing_descriptor(state, op, packet.key));
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "low schedule descriptor '%.*s' is not available",
-                            (int)packet.key.size, packet.key.data);
-  }
+  loom_low_descriptor_packet_t packet = {0};
+  loom_low_descriptor_packet_initialize(state->target.descriptor_set, op,
+                                        &packet);
 
   node->descriptor = packet.descriptor;
   if (iree_any_bit_set(packet.descriptor->flags,

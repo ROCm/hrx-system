@@ -82,6 +82,7 @@ loom_cc_library(
     iree::io::stream
     loom::analysis::kernel_launch_config
     loom::codegen::low::pipeline::pass_environment
+    loom::codegen::low::repr
     loom::codegen::low::target_binding
     loom::codegen::low::text_asm
     loom::error::diagnostic

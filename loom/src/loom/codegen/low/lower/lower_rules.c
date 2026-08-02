@@ -347,8 +347,8 @@ static iree_status_t loom_low_lower_rule_resolve_materializer_descriptor(
   IREE_ASSERT(descriptor != NULL,
               "generated source-memory byte-offset materializer references a "
               "missing descriptor");
-  return loom_low_lower_resolve_descriptor_row(context, descriptor,
-                                               out_descriptor);
+  out_descriptor->descriptor = descriptor;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_low_lower_rule_emit_i64_const(
@@ -2435,8 +2435,7 @@ iree_status_t loom_low_lower_rule_set_resolve_emit_program(
         &match_context, rule_set, emit->descriptor_ref, &descriptor));
     IREE_ASSERT(descriptor != NULL,
                 "generated target-low rule references a missing descriptor");
-    IREE_RETURN_IF_ERROR(loom_low_lower_resolve_descriptor_row(
-        context, descriptor, &resolved_emits[i].descriptor));
+    resolved_emits[i].descriptor.descriptor = descriptor;
   }
   *out_resolved_emits = resolved_emits;
   return iree_ok_status();

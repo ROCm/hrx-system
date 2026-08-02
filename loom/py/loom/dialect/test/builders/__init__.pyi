@@ -857,12 +857,6 @@ class TestBuilder(DialectBuilder):
         body: Region | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
-    def low_asm_region(
-        self,
-        *,
-        body: Region | None = ...,
-        location_id: int | None = ...,
-    ) -> None: ...
     def clause_constant(
         self,
         *,

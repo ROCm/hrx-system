@@ -17,11 +17,13 @@
 
 #include "iree/base/internal/arena.h"
 #include "iree/io/vec_stream.h"
+#include "loom/codegen/low/repr.h"
 #include "loom/error/diagnostic.h"
 #include "loom/format/bytecode/reader.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/testing/context.h"
 #include "loom/testing/gen.h"
 
@@ -30,6 +32,7 @@
 //===----------------------------------------------------------------------===//
 
 static loom_context_t g_context;
+static loom_target_low_descriptor_registry_t g_low_registry;
 static bool g_context_initialized = false;
 
 static void fuzz_ignore_status_or_trap(iree_status_t status) {
@@ -51,6 +54,7 @@ static void fuzz_ensure_context(void) {
   fuzz_ignore_status_or_trap(
       loom_testing_context_register_all_dialects(&g_context));
   fuzz_ignore_status_or_trap(loom_context_finalize(&g_context));
+  loom_target_core_test_low_descriptor_registry_initialize(&g_low_registry);
   g_context_initialized = true;
 }
 
@@ -74,8 +78,11 @@ static std::vector<uint8_t> fuzz_write_module(
           IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_RESIZABLE,
       4096, iree_allocator_system(), &stream));
 
+  loom_bytecode_write_options_t options = {};
+  loom_low_repr_environment_initialize(&g_low_registry.registry,
+                                       &options.low_repr_environment);
   fuzz_ignore_status_or_trap(
-      loom_bytecode_write_module(module, stream, NULL, block_pool));
+      loom_bytecode_write_module(module, stream, &options, block_pool));
 
   iree_io_stream_pos_t stream_length = iree_io_stream_length(stream);
   std::vector<uint8_t> bytes((size_t)stream_length);
@@ -89,7 +96,7 @@ static std::vector<uint8_t> fuzz_write_module(
 
 static loom_bytecode_read_options_t fuzz_read_options(
     uint8_t control_byte, uint32_t* diagnostic_count) {
-  return loom_bytecode_read_options_t{
+  loom_bytecode_read_options_t options = {
       /*.diagnostic_sink=*/
       {
           /*.fn=*/fuzz_capture_diagnostic,
@@ -98,6 +105,9 @@ static loom_bytecode_read_options_t fuzz_read_options(
       /*.verify_module=*/(control_byte & 1) != 0,
       /*.verify_max_errors=*/16,
   };
+  loom_low_repr_environment_initialize(&g_low_registry.registry,
+                                       &options.low_repr_environment);
+  return options;
 }
 
 static void fuzz_read_arbitrary_bytecode(const uint8_t* data, size_t size,

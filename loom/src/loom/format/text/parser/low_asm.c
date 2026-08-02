@@ -92,6 +92,30 @@ iree_status_t loom_parser_emit_low_asm_error(loom_parser_t* parser,
                           IREE_ARRAYSIZE(params), token);
 }
 
+iree_status_t loom_parser_try_emit_unknown_low_packet_diagnostic(
+    loom_parser_t* parser,
+    const loom_text_low_asm_descriptor_set_t* descriptor_set,
+    loom_token_t name_token, bool* out_emitted) {
+  *out_emitted = false;
+  if (parser->low_asm_environment.vtable->diagnose_unknown_packet == NULL) {
+    return iree_ok_status();
+  }
+  loom_text_low_asm_diagnostic_t diagnostic = {0};
+  IREE_RETURN_IF_ERROR(
+      parser->low_asm_environment.vtable->diagnose_unknown_packet(
+          parser->low_asm_environment.state, descriptor_set, name_token.text,
+          &diagnostic));
+  if (diagnostic.param_count > IREE_ARRAYSIZE(diagnostic.params)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "Low packet diagnostic parameter capacity exceeded");
+  }
+  if (diagnostic.error == NULL) return iree_ok_status();
+  *out_emitted = true;
+  return loom_parser_emit(parser, diagnostic.error, diagnostic.params,
+                          diagnostic.param_count, name_token);
+}
+
 iree_status_t loom_parser_emit_low_asm_result_count_mismatch(
     loom_parser_t* parser, loom_token_t mnemonic_token, uint32_t expected_count,
     uint32_t actual_count) {
@@ -114,56 +138,6 @@ iree_status_t loom_parser_emit_low_asm_operand_count_mismatch(
   };
   return loom_parser_emit(parser, LOOM_ERR_PARSE_010, params,
                           IREE_ARRAYSIZE(params), mnemonic_token);
-}
-
-static iree_status_t loom_parse_low_asm_descriptor_set_key(
-    loom_parser_t* parser, loom_token_t* out_key_token) {
-  if (!loom_tokenizer_try_consume_keyword(&parser->tokenizer, IREE_SV("asm"))) {
-    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
-    return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'asm'"));
-  }
-  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_LANGLE, NULL);
-
-  loom_token_t key_token = loom_tokenizer_peek(&parser->tokenizer);
-  if (key_token.kind != LOOM_TOKEN_STRING &&
-      key_token.kind != LOOM_TOKEN_BARE_IDENT &&
-      key_token.kind != LOOM_TOKEN_OP_NAME) {
-    return loom_parser_emit_unexpected_token(parser, key_token,
-                                             IREE_SV("low descriptor set key"));
-  }
-  *out_key_token = loom_tokenizer_next(&parser->tokenizer);
-  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RANGLE, NULL);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_parse_low_asm_descriptor_set(
-    loom_parser_t* parser, loom_text_low_repr_context_t* out_low_repr) {
-  *out_low_repr = (loom_text_low_repr_context_t){0};
-
-  uint32_t errors_before = parser->error_count;
-  loom_token_t key_token = loom_token_none();
-  IREE_RETURN_IF_ERROR(
-      loom_parse_low_asm_descriptor_set_key(parser, &key_token));
-  if (parser->error_count > errors_before) {
-    return iree_ok_status();
-  }
-  out_low_repr->contract_key = key_token.text;
-
-  if (!loom_text_low_asm_environment_is_configured(
-          &parser->low_asm_environment)) {
-    return loom_parser_emit_low_asm_error(
-        parser, key_token, IREE_SV("low asm environment is not configured"));
-  }
-
-  IREE_RETURN_IF_ERROR(
-      parser->low_asm_environment.vtable->lookup_descriptor_set(
-          parser->low_asm_environment.state, key_token.text,
-          &out_low_repr->descriptor_set));
-  if (out_low_repr->descriptor_set == NULL) {
-    return loom_parser_emit_low_asm_error(
-        parser, key_token, IREE_SV("unknown low descriptor set"));
-  }
-  return iree_ok_status();
 }
 
 static iree_status_t loom_parse_low_asm_result_types(
@@ -646,22 +620,10 @@ static iree_status_t loom_parse_low_asm_instruction(
       parser->low_asm_environment.state, descriptor_set, mnemonic_token.text,
       &packet));
   if (packet.descriptor == NULL) {
-    if (parser->low_asm_environment.vtable->diagnose_unknown_mnemonic != NULL) {
-      loom_text_low_asm_diagnostic_t diagnostic = {0};
-      IREE_RETURN_IF_ERROR(
-          parser->low_asm_environment.vtable->diagnose_unknown_mnemonic(
-              parser->low_asm_environment.state, descriptor_set,
-              mnemonic_token.text, &diagnostic));
-      if (diagnostic.param_count > IREE_ARRAYSIZE(diagnostic.params)) {
-        return iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "low asm unknown-mnemonic diagnostic parameter capacity exceeded");
-      }
-      if (diagnostic.error != NULL) {
-        return loom_parser_emit(parser, diagnostic.error, diagnostic.params,
-                                diagnostic.param_count, mnemonic_token);
-      }
-    }
+    bool diagnostic_emitted = false;
+    IREE_RETURN_IF_ERROR(loom_parser_try_emit_unknown_low_packet_diagnostic(
+        parser, descriptor_set, mnemonic_token, &diagnostic_emitted));
+    if (diagnostic_emitted) return iree_ok_status();
     return loom_parser_emit_low_asm_error(parser, mnemonic_token,
                                           IREE_SV("unknown low asm mnemonic"));
   }
@@ -950,21 +912,6 @@ static iree_status_t loom_parse_low_asm_braced_region(
   parser->low_repr = previous_low_repr;
   parser->low_asm_region_depth = previous_depth;
   return status;
-}
-
-iree_status_t loom_parse_low_asm_prefixed_region(
-    loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
-    loom_region_t** out_region) {
-  uint32_t errors_before = parser->error_count;
-
-  loom_text_low_repr_context_t low_repr = {0};
-  IREE_RETURN_IF_ERROR(loom_parse_low_asm_descriptor_set(parser, &low_repr));
-  if (parser->error_count > errors_before) {
-    return iree_ok_status();
-  }
-
-  return loom_parse_low_asm_braced_region(parser, region_descriptor, low_repr,
-                                          out_region);
 }
 
 iree_status_t loom_parse_low_asm_marked_region(

@@ -106,6 +106,7 @@ loom_cc_library(
     srcs = ["session.c"],
     hdrs = ["session.h"],
     deps = [
+        "//loom/src/loom/codegen/low:repr",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/format/bytecode:format",

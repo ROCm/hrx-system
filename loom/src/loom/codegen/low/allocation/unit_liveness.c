@@ -303,7 +303,7 @@ loom_low_allocation_unit_liveness_note_early_clobber_operand_uses(
 static iree_status_t
 loom_low_allocation_unit_liveness_note_descriptor_unit_uses(
     loom_low_allocation_unit_liveness_t* unit_liveness,
-    const loom_module_t* module, const loom_low_resolved_target_t* target,
+    const loom_low_resolved_target_t* target,
     const loom_local_value_domain_t* value_domain,
     const loom_liveness_analysis_t* liveness, const loom_op_t* op,
     uint32_t point) {
@@ -316,10 +316,9 @@ loom_low_allocation_unit_liveness_note_descriptor_unit_uses(
         "low allocation descriptor operation point exceeds u32 range");
   }
   const uint32_t clobber_point = point + 1u;
-  loom_low_resolved_descriptor_packet_t packet = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_low_resolve_descriptor_packet(module, target, op, &packet));
-  if (packet.descriptor == NULL) {
+  loom_low_descriptor_packet_t packet = {0};
+  loom_low_descriptor_packet_initialize(target->descriptor_set, op, &packet);
+  if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     return iree_ok_status();
   }
 
@@ -480,7 +479,7 @@ static iree_status_t loom_low_allocation_unit_liveness_note_operation_unit_uses(
     }
   }
   return loom_low_allocation_unit_liveness_note_descriptor_unit_uses(
-      unit_liveness, module, target, value_domain, liveness, op,
+      unit_liveness, target, value_domain, liveness, op,
       operation_point->start_point);
 }
 

@@ -17,6 +17,7 @@
 
 #include "iree/base/api.h"
 #include "loom/error/error_defs.h"
+#include "loom/format/low_repr.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/op_defs.h"
 
@@ -26,18 +27,16 @@ extern "C" {
 
 typedef struct loom_text_low_asm_environment_state_t
     loom_text_low_asm_environment_state_t;
-typedef struct loom_text_low_asm_descriptor_set_t
-    loom_text_low_asm_descriptor_set_t;
+typedef loom_low_repr_descriptor_set_t loom_text_low_asm_descriptor_set_t;
 typedef struct loom_text_low_asm_form_t loom_text_low_asm_form_t;
 typedef struct loom_text_low_asm_descriptor_handle_t
     loom_text_low_asm_descriptor_handle_t;
 
 // Active target-low representation contract for contextual types and regions.
 typedef struct loom_text_low_repr_context_t {
-  // Canonical representation-contract key, or empty when derived from a
-  // target.
+  // Canonical representation-contract key selected by the enclosing wrapper.
   iree_string_view_t contract_key;
-  // Descriptor-set handle resolved from |contract_key| or a target.
+  // Descriptor-set handle resolved once from |contract_key|.
   const loom_text_low_asm_descriptor_set_t* descriptor_set;
 } loom_text_low_repr_context_t;
 
@@ -48,8 +47,8 @@ typedef struct loom_text_low_asm_packet_descriptor_t {
   const loom_text_low_asm_form_t* form;
   // Opaque low descriptor handle owned by the environment implementation.
   const loom_text_low_asm_descriptor_handle_t* descriptor;
-  // Stable canonical opcode key to store on the emitted low operation.
-  iree_string_view_t opcode_key;
+  // Stable canonical descriptor key used only in source diagnostics.
+  iree_string_view_t descriptor_key;
   // Surface mnemonic emitted or parsed for this asm packet.
   iree_string_view_t mnemonic;
   // Number of SSA results produced by this asm packet.
@@ -193,12 +192,6 @@ typedef struct loom_text_low_asm_statement_t {
 // lossless-spelling availability checks. Semantic validation belongs in the
 // verifier and descriptor-backed describe implementation, not in the printer.
 
-// Resolves an `asm<...>` descriptor-set key to an environment-owned handle.
-// Returns OK with NULL when no descriptor set matches.
-typedef iree_status_t (*loom_text_low_asm_lookup_descriptor_set_fn_t)(
-    const loom_text_low_asm_environment_state_t* state, iree_string_view_t key,
-    const loom_text_low_asm_descriptor_set_t** out_descriptor_set);
-
 // Resolves a mnemonic within a descriptor set to a packet descriptor. Returns
 // OK with |out_packet->descriptor| NULL when no packet matches.
 typedef iree_status_t (*loom_text_low_asm_lookup_packet_fn_t)(
@@ -207,13 +200,13 @@ typedef iree_status_t (*loom_text_low_asm_lookup_packet_fn_t)(
     iree_string_view_t mnemonic,
     loom_text_low_asm_packet_descriptor_t* out_packet);
 
-// Attempts to explain an otherwise unknown mnemonic with a target-owned
-// structured diagnostic. Returns OK with |out_diagnostic->error| NULL when no
-// diagnostic matches.
-typedef iree_status_t (*loom_text_low_asm_diagnose_unknown_mnemonic_fn_t)(
+// Attempts to explain an otherwise unknown stable descriptor key or compact
+// assembly mnemonic with a target-owned structured diagnostic. Returns OK with
+// |out_diagnostic->error| NULL when no diagnostic matches.
+typedef iree_status_t (*loom_text_low_asm_diagnose_unknown_packet_fn_t)(
     const loom_text_low_asm_environment_state_t* state,
     const loom_text_low_asm_descriptor_set_t* descriptor_set,
-    iree_string_view_t mnemonic,
+    iree_string_view_t packet_name,
     loom_text_low_asm_diagnostic_t* out_diagnostic);
 
 typedef iree_status_t (*loom_text_low_asm_infer_result_type_fn_t)(
@@ -299,12 +292,13 @@ typedef iree_status_t (*loom_text_low_asm_describe_register_type_fn_t)(
     bool* out_found);
 
 typedef struct loom_text_low_asm_vtable_t {
-  // Resolves an `asm<...>` descriptor-set key to an environment-owned handle.
-  loom_text_low_asm_lookup_descriptor_set_fn_t lookup_descriptor_set;
+  // All callbacks are required except diagnose_unknown_packet. Environment
+  // presence is checked once when entering a Low function; packet parsing and
+  // printing then call this contract directly.
   // Resolves a mnemonic within a descriptor-set handle to a packet descriptor.
   loom_text_low_asm_lookup_packet_fn_t lookup_packet;
   // Optional target-owned explanation for unknown mnemonics.
-  loom_text_low_asm_diagnose_unknown_mnemonic_fn_t diagnose_unknown_mnemonic;
+  loom_text_low_asm_diagnose_unknown_packet_fn_t diagnose_unknown_packet;
   // Infers a result type when the asm packet omits explicit type annotations.
   loom_text_low_asm_infer_result_type_fn_t infer_result_type;
   // Validates an explicit asm result type annotation against the descriptor.
@@ -337,6 +331,8 @@ typedef struct loom_text_low_asm_vtable_t {
 } loom_text_low_asm_vtable_t;
 
 typedef struct loom_text_low_asm_environment_t {
+  // Stable-key codec for canonical Low representation values.
+  loom_low_repr_environment_t low_repr;
   // Function table implementing low asm lookup, type inference, and builders.
   const loom_text_low_asm_vtable_t* vtable;
   // Environment-owned state passed to every vtable callback.
@@ -346,7 +342,7 @@ typedef struct loom_text_low_asm_environment_t {
 static inline bool loom_text_low_asm_environment_is_configured(
     const loom_text_low_asm_environment_t* environment) {
   return environment && environment->vtable && environment->state &&
-         environment->vtable->lookup_descriptor_set &&
+         environment->low_repr.vtable && environment->low_repr.state &&
          environment->vtable->lookup_packet &&
          environment->vtable->resolve_register_type &&
          environment->vtable->infer_result_type &&
@@ -361,7 +357,7 @@ static inline bool loom_text_low_asm_environment_is_configured(
 static inline bool loom_text_low_asm_environment_supports_printing(
     const loom_text_low_asm_environment_t* environment) {
   return environment && environment->vtable && environment->state &&
-         environment->vtable->lookup_descriptor_set &&
+         environment->low_repr.vtable && environment->low_repr.state &&
          environment->vtable->result_type_annotation_required &&
          environment->vtable->immediate_descriptor &&
          environment->vtable->describe_operation &&

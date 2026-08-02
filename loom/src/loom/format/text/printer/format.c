@@ -120,7 +120,7 @@ static bool loom_print_attr_is_optional(const loom_op_vtable_t* vtable,
                           LOOM_ATTR_OPTIONAL);
 }
 
-static iree_status_t loom_print_update_low_repr_context(
+static iree_status_t loom_print_bind_function_low_repr(
     loom_print_context_t* ctx, const loom_op_vtable_t* vtable,
     uint16_t attr_index, loom_attribute_t attr) {
   if (!vtable->func_like ||
@@ -138,13 +138,21 @@ static iree_status_t loom_print_update_low_repr_context(
   ctx->low_repr = (loom_text_low_repr_context_t){
       .contract_key = ctx->module->strings.entries[attr.string_id],
   };
-  if (!ctx->low_asm_environment.vtable ||
-      !ctx->low_asm_environment.vtable->lookup_descriptor_set) {
-    return iree_ok_status();
+  if (!loom_text_low_asm_environment_supports_printing(
+          &ctx->low_asm_environment)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "printing a Low function requires a representation environment");
   }
-  return ctx->low_asm_environment.vtable->lookup_descriptor_set(
-      ctx->low_asm_environment.state, ctx->low_repr.contract_key,
-      &ctx->low_repr.descriptor_set);
+  ctx->low_repr.descriptor_set = loom_low_repr_lookup_descriptor_set(
+      &ctx->low_asm_environment.low_repr, ctx->low_repr.contract_key);
+  if (!ctx->low_repr.descriptor_set) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "Low representation contract '%.*s' was not found",
+                            (int)ctx->low_repr.contract_key.size,
+                            ctx->low_repr.contract_key.data);
+  }
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -565,19 +573,18 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
               loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index),
               key_ref_start, ctx->stream->offset);
         }
-        IREE_RETURN_IF_ERROR(loom_print_update_low_repr_context(
+        IREE_RETURN_IF_ERROR(loom_print_bind_function_low_repr(
             ctx, vtable, element->field_index, attr));
         break;
       }
-      case LOOM_FORMAT_KIND_DESCRIPTOR_REF:
       case LOOM_FORMAT_KIND_STABLE_KEY_REF: {
-        // Symbolic key reference in angle brackets, glued to the op name:
-        // low.op<amdgpu.v_add_u32>. The field_index references the diagnostic
-        // key spelling and data references the hidden numeric identity.
+        // Stable-key reference in angle brackets, glued to the op name. The
+        // field_index references the spelling and data references its derived
+        // numeric identity.
         if (element->field_index >= op->attribute_count) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
-              "format DESCRIPTOR_REF field_index %u out of range (op has %u "
+              "format STABLE_KEY_REF field_index %u out of range (op has %u "
               "attributes)",
               element->field_index, op->attribute_count);
         }
@@ -606,6 +613,55 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
               ctx, loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->data),
               ref_start, ctx->stream->offset);
         }
+        break;
+      }
+      case LOOM_FORMAT_KIND_SCOPED_ENUM_REF: {
+        // Stable spelling of a representation-scoped enum, glued to the op
+        // name: low.op<amdgpu.v_add_u32>.
+        if (element->field_index >= op->attribute_count) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "format SCOPED_ENUM_REF field_index %u out of range (op has %u "
+              "attributes)",
+              element->field_index, op->attribute_count);
+        }
+        loom_attribute_t attr = loom_op_attrs(op)[element->field_index];
+        if (attr.kind != LOOM_ATTR_SCOPED_ENUM) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "format SCOPED_ENUM_REF field %u is not a scoped enum",
+              element->field_index);
+        }
+        if (!ctx->low_repr.descriptor_set) {
+          return iree_make_status(
+              IREE_STATUS_FAILED_PRECONDITION,
+              "printing a scoped descriptor requires an enclosing Low "
+              "representation contract");
+        }
+        if (!ctx->low_asm_environment.low_repr.vtable) {
+          return iree_make_status(
+              IREE_STATUS_FAILED_PRECONDITION,
+              "printing a scoped descriptor requires a Low representation "
+              "environment");
+        }
+        iree_string_view_t key = loom_low_repr_descriptor_key(
+            &ctx->low_asm_environment.low_repr, ctx->low_repr.descriptor_set,
+            loom_attr_as_scoped_enum(attr));
+        if (iree_string_view_is_empty(key)) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "scoped enum ordinal is outside the active Low representation "
+              "contract");
+        }
+        iree_host_size_t ref_start = ctx->stream->offset;
+        IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "<", true));
+        IREE_RETURN_IF_ERROR(loom_print_emit(ctx, key, true));
+        IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ">", true));
+        loom_print_did_write(ctx);
+        loom_print_report_field(
+            ctx,
+            loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index),
+            ref_start, ctx->stream->offset);
         break;
       }
       case LOOM_FORMAT_KIND_TEMPLATE_PARAM: {
