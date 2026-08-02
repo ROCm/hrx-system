@@ -106,8 +106,9 @@ iree_status_t loom_target_pass_resolve_function_facts(
     return iree_ok_status();
   }
 
+  IREE_ASSERT(pass->instance_arena != NULL);
   loom_symbol_fact_table_t fact_table = {0};
-  loom_symbol_fact_table_initialize(&fact_table, pass->arena);
+  loom_symbol_fact_table_initialize(&fact_table, pass->instance_arena);
   const loom_symbol_facts_base_t* base_facts = NULL;
   IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup(&fact_table, module,
                                                      symbol_id, &base_facts));
@@ -120,8 +121,8 @@ iree_status_t loom_target_pass_resolve_function_facts(
 
   bool contract_valid = false;
   IREE_RETURN_IF_ERROR(loom_target_function_contract_resolve_facts(
-      module, &fact_table, func_facts, pass->diagnostic_emitter, pass->arena,
-      &contract_valid, out_facts));
+      module, &fact_table, func_facts, pass->diagnostic_emitter,
+      pass->instance_arena, &contract_valid, out_facts));
   if (!contract_valid) {
     return iree_ok_status();
   }
