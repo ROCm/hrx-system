@@ -16,6 +16,45 @@ package(
 )
 
 loom_link_module(
+    name = "route_trace_linked",
+    srcs = ["route_trace.loom"],
+)
+
+iree_executable_test(
+    name = "route_trace_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :route_trace_linked)",
+        "--benchmark=@qwen3_moe_route_trace_capture_prefill_plan",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = [":route_trace_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "route_trace_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :route_trace_linked)",
+        "--case=@qwen3_moe_route_trace_capture_sequence_case",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":route_trace_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+loom_link_module(
     name = "token_embedding_bringup_workaround_linked",
     srcs = ["token_embedding_bringup_workaround.loom"],
 )
@@ -634,6 +673,18 @@ loom_link_module(
 )
 
 loom_link_module(
+    name = "route_trace_runtime_module",
+    srcs = [
+        "route_trace.loom",
+        "runtime_exports.loom",
+    ],
+    mode = "selective",
+    output = "qwen3_moe_route_trace.loom",
+    roots = ["@qwen3_moe_route_trace_capture"],
+    strip_check = True,
+)
+
+loom_link_module(
     name = "routed_down_f16_runtime_module",
     srcs = ["runtime_exports.loom"],
     libraries = [
@@ -707,6 +758,7 @@ iree_c_embed_data(
         ":flash_attention_prefill_f32_f16_runtime_module",
         ":greedy_argmax_partials_bringup_workaround_runtime_module",
         ":quantize_q8_1_x4_bringup_workaround_runtime_module",
+        ":route_trace_runtime_module",
         ":routed_down_f16_runtime_module",
         ":routed_down_next_rmsnorm_f32_runtime_module",
         ":routed_down_q4_q8_runtime_module",

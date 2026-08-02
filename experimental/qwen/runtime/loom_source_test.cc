@@ -114,6 +114,11 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
           "qwen3_moe_router_top8_f32",
       },
       {
+          QWEN_LOOM_SOURCE_ROUTE_TRACE,
+          "qwen3_moe_route_trace.loom",
+          "qwen3_moe_route_trace_capture",
+      },
+      {
           QWEN_LOOM_SOURCE_EXPERT_TABLE_PARTITION_FUSED,
           "qwen3_moe_expert_table_partition_fused.loom",
           "qwen3_moe_build_expert_table_partition_prefill_512",
@@ -492,6 +497,28 @@ TEST(QwenLoomSourceTest, EmbedsDynamicGreedyContinuationPosition) {
                              "%bounded_context_increment : index"),
             std::string::npos);
   EXPECT_EQ(source_text.find("%bounded_next_context_base = index.assume"),
+            std::string::npos);
+}
+
+TEST(QwenLoomSourceTest, EmbedsPositionDynamicRouteTrace) {
+  qwen_loom_source_module_t source_module;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(IREE_SV(QWEN_LOOM_SOURCE_ROUTE_TRACE),
+                                         &source_module));
+
+  std::string source_text(
+      reinterpret_cast<const char*>(source_module.source_contents.data),
+      source_module.source_contents.data_length);
+  EXPECT_NE(source_text.find("%context_base_raw = "
+                             "view.load %control_view"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("%logical_token_base = index.add %context_base, "
+                             "%bounded_source_token_offset : index"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("%logical_token0 = index.add "
+                             "%logical_token_base, %token : index"),
+            std::string::npos);
+  EXPECT_EQ(source_text.find("config.get"), std::string::npos);
+  EXPECT_EQ(source_text.find("qwen3_moe_route_trace_inspect"),
             std::string::npos);
 }
 

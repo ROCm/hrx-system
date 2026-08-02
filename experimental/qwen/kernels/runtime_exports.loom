@@ -37,6 +37,8 @@ func.decl target(@qwen3_moe_router_fused_gfx11_wave64) export("qwen3_moe_router_
 
 func.decl target(@qwen3_moe_router_gfx11_wave64) export("qwen3_moe_router_top8_f32") @qwen3_moe_router_top8_f32(%token_count: index, %route_id_stride: index, %logits: buffer, %route_ids: buffer, %route_weights: buffer)
 
+func.decl target(@qwen3_moe_routed_quantized_gfx11_wave32) export("qwen3_moe_route_trace_capture") @qwen3_moe_route_trace_capture(%token_count: index, %source_token_offset: index, %layer_ordinal: index, %context_capacity: index, %route_ids: buffer, %route_weights: buffer, %control: buffer, %trace_ids: buffer, %trace_weights: buffer)
+
 func.decl target(@qwen3_moe_expert_table_partition_gfx11_wave32) export("qwen3_moe_build_expert_table_partition_prefill_512") @qwen3_moe_build_expert_table_partition_prefill_512(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %route_ids: buffer, %expert_table: buffer, %partition_table: buffer, %completion_counter: buffer)
 
 func.decl target(@qwen3_moe_gfx11_wave32) export("qwen3_moe_build_expert_partition_table") @qwen3_moe_build_expert_partition_table(%token_count: index, %route_count: index, %expert_count: index, %expert_table: buffer, %partition_table: buffer)
