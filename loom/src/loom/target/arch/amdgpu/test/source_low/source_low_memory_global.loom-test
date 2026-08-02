@@ -1993,7 +1993,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
-kernel.def target(@target) @f32x4_dynamic_view_base_flat() {
+kernel.def target(@target) @f32x4_dynamic_view_base_large_static_offset() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -2017,26 +2017,21 @@ kernel.def target(@target) @f32x4_dynamic_view_base_flat() {
 }
 
 // ----
-low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(256, 1, 1) workgroup_count(1, 1, 1) @f32x4_dynamic_view_base_flat(%input_base: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(256, 1, 1) workgroup_count(1, 1, 1) @f32x4_dynamic_view_base_large_static_offset(%input_base: reg<amdgpu.sgpr>) asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4096} : reg<amdgpu.sgpr x2>
-  %31 = s_mov_b32 24576
-  %32 = s_mov_b32 0
+  %31 = v_lshlrev_b32_src0_inline %lane, 4
+  %32 = s_mov_b32 20496
+  %33 = s_add_u32 %input_base, %32
   %34 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %35 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %38 = s_add_u32 %34, %31
-  %39 = s_addc_u32 %35, %32
-  %47 = s_add_u32 %38, %input_base
-  %48 = s_addc_u32 %39, %32
-  %50 = v_lshlrev_b32_src0_inline %lane, 4
-  %51 = v_lshrrev_b32_src0_inline %lane, 28
-  %54, %55 = v_add_co_u32 %47, %50
-  %56 = v_mov_b32_copy %48
-  %57, %58 = v_add_co_ci_u32 %56, %51, %55
-  %59 = concat(%54, %57) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %loaded = global_load_b128_vaddr %59
-  global_store_b128_saddr %50, %loaded, %output_view
+  %36 = s_mov_b32 0
+  %37 = s_add_u32 %34, %33
+  %38 = s_addc_u32 %35, %36
+  %39 = concat(%37, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %loaded = global_load_b128_saddr %31, %39 {offset = 4080}
+  global_store_b128_saddr %31, %loaded, %output_view
   return
 }
 

@@ -1414,7 +1414,7 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(1, 1, 1) work
 llvmir.target<object> @target {
   triple = "amdgcn-amd-amdhsa"
 }
-kernel.def target(@target) @f32x4_dynamic_view_base_flat() {
+kernel.def target(@target) @f32x4_dynamic_view_base_large_static_offset() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
@@ -1438,7 +1438,7 @@ kernel.def target(@target) @f32x4_dynamic_view_base_flat() {
 }
 
 // ----
-low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(256, 1, 1) workgroup_count(1, 1, 1) @f32x4_dynamic_view_base_flat(%offset_i32: reg<llvmir.i32>) asm {
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(256, 1, 1) workgroup_count(1, 1, 1) @f32x4_dynamic_view_base_large_static_offset(%offset_i32: reg<llvmir.i32>) asm {
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
   %input_base = zext.i32.i64 %offset_i32

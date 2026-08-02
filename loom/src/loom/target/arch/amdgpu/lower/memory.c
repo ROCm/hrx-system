@@ -1414,8 +1414,7 @@ static bool loom_amdgpu_memory_access_split_global_saddr_static_offset(
   const int64_t signed_max = offset_info->unsigned_max > INT64_MAX
                                  ? INT64_MAX
                                  : (int64_t)offset_info->unsigned_max;
-  if (static_byte_offset < offset_info->signed_min ||
-      static_byte_offset > signed_max) {
+  if (static_byte_offset < offset_info->signed_min) {
     diagnostic->rejection_bits |=
         LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_DESCRIPTOR_OFFSET_RANGE |
         LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_GLOBAL_FALLBACK_OFFSET_RANGE;
@@ -1427,8 +1426,33 @@ static bool loom_amdgpu_memory_access_split_global_saddr_static_offset(
         LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_DYNAMIC_OFFSET_RANGE;
     return false;
   }
-  access->immediate_offset = static_byte_offset;
-  access->scalar_byte_offset = 0;
+  if (static_byte_offset <= signed_max) {
+    access->immediate_offset = static_byte_offset;
+    access->scalar_byte_offset = 0;
+    access->scalar_base_byte_offset = 0;
+    access->scalar_offset_placement =
+        LOOM_AMDGPU_MEMORY_SCALAR_OFFSET_PLACEMENT_SOFFSET;
+    return true;
+  }
+
+  uint64_t immediate_offset = (uint64_t)signed_max;
+  if (access->payload_register_count == 4) {
+    immediate_offset &= ~UINT64_C(15);
+  }
+  const uint64_t scalar_byte_offset =
+      (uint64_t)static_byte_offset - immediate_offset;
+  access->immediate_offset = (int64_t)immediate_offset;
+  if (scalar_byte_offset <= UINT32_MAX) {
+    access->scalar_byte_offset = (uint32_t)scalar_byte_offset;
+    access->scalar_base_byte_offset = 0;
+    access->scalar_offset_placement =
+        LOOM_AMDGPU_MEMORY_SCALAR_OFFSET_PLACEMENT_SOFFSET;
+  } else {
+    access->scalar_byte_offset = 0;
+    access->scalar_base_byte_offset = scalar_byte_offset;
+    access->scalar_offset_placement =
+        LOOM_AMDGPU_MEMORY_SCALAR_OFFSET_PLACEMENT_BASE;
+  }
   return true;
 }
 
