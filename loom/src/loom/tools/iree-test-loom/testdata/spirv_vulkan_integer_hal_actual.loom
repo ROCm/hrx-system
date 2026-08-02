@@ -1,0 +1,536 @@
+spirv.target<vulkan1_3> @target {abi = hal_kernel}
+
+kernel.def target(@target) @integer_i32_truth_table() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %value_output: buffer, %comparison_output: buffer, %boolean_output: buffer) {
+  %offset0 = index.constant 0 : offset
+  %offset4 = index.constant 4 : offset
+  %offset8 = index.constant 8 : offset
+  %offset12 = index.constant 12 : offset
+  %offset16 = index.constant 16 : offset
+  %offset20 = index.constant 20 : offset
+  %offset24 = index.constant 24 : offset
+  %offset28 = index.constant 28 : offset
+  %offset32 = index.constant 32 : offset
+  %offset36 = index.constant 36 : offset
+  %offset40 = index.constant 40 : offset
+  %offset44 = index.constant 44 : offset
+  %offset48 = index.constant 48 : offset
+  %offset52 = index.constant 52 : offset
+  %offset56 = index.constant 56 : offset
+  %offset60 = index.constant 60 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %value_output_aligned = buffer.assume.alignment %value_output {minimum_alignment = 4} : buffer
+  %comparison_output_aligned = buffer.assume.alignment %comparison_output {minimum_alignment = 4} : buffer
+  %boolean_output_aligned = buffer.assume.alignment %boolean_output {minimum_alignment = 4} : buffer
+  %input_lhs_view = buffer.view %input_aligned[%offset0] : buffer -> view<1xi32, #dense>
+  %input_rhs_view = buffer.view %input_aligned[%offset4] : buffer -> view<1xi32, #dense>
+  %value_output0_view = buffer.view %value_output_aligned[%offset0] : buffer -> view<1xi32, #dense>
+  %value_output1_view = buffer.view %value_output_aligned[%offset4] : buffer -> view<1xi32, #dense>
+  %value_output2_view = buffer.view %value_output_aligned[%offset8] : buffer -> view<1xi32, #dense>
+  %value_output3_view = buffer.view %value_output_aligned[%offset12] : buffer -> view<1xi32, #dense>
+  %value_output4_view = buffer.view %value_output_aligned[%offset16] : buffer -> view<1xi32, #dense>
+  %value_output5_view = buffer.view %value_output_aligned[%offset20] : buffer -> view<1xi32, #dense>
+  %value_output6_view = buffer.view %value_output_aligned[%offset24] : buffer -> view<1xi32, #dense>
+  %value_output7_view = buffer.view %value_output_aligned[%offset28] : buffer -> view<1xi32, #dense>
+  %comparison_output0_view = buffer.view %comparison_output_aligned[%offset0] : buffer -> view<1xi32, #dense>
+  %comparison_output1_view = buffer.view %comparison_output_aligned[%offset4] : buffer -> view<1xi32, #dense>
+  %comparison_output2_view = buffer.view %comparison_output_aligned[%offset8] : buffer -> view<1xi32, #dense>
+  %comparison_output3_view = buffer.view %comparison_output_aligned[%offset12] : buffer -> view<1xi32, #dense>
+  %comparison_output4_view = buffer.view %comparison_output_aligned[%offset16] : buffer -> view<1xi32, #dense>
+  %comparison_output5_view = buffer.view %comparison_output_aligned[%offset20] : buffer -> view<1xi32, #dense>
+  %comparison_output6_view = buffer.view %comparison_output_aligned[%offset24] : buffer -> view<1xi32, #dense>
+  %comparison_output7_view = buffer.view %comparison_output_aligned[%offset28] : buffer -> view<1xi32, #dense>
+  %comparison_output8_view = buffer.view %comparison_output_aligned[%offset32] : buffer -> view<1xi32, #dense>
+  %comparison_output9_view = buffer.view %comparison_output_aligned[%offset36] : buffer -> view<1xi32, #dense>
+  %boolean_output0_view = buffer.view %boolean_output_aligned[%offset0] : buffer -> view<1xi32, #dense>
+  %boolean_output1_view = buffer.view %boolean_output_aligned[%offset4] : buffer -> view<1xi32, #dense>
+  %boolean_output2_view = buffer.view %boolean_output_aligned[%offset8] : buffer -> view<1xi32, #dense>
+  %boolean_output3_view = buffer.view %boolean_output_aligned[%offset12] : buffer -> view<1xi32, #dense>
+  %boolean_output4_view = buffer.view %boolean_output_aligned[%offset16] : buffer -> view<1xi32, #dense>
+  %boolean_output5_view = buffer.view %boolean_output_aligned[%offset20] : buffer -> view<1xi32, #dense>
+  %boolean_output6_view = buffer.view %boolean_output_aligned[%offset24] : buffer -> view<1xi32, #dense>
+  %boolean_output7_view = buffer.view %boolean_output_aligned[%offset28] : buffer -> view<1xi32, #dense>
+  %boolean_output8_view = buffer.view %boolean_output_aligned[%offset32] : buffer -> view<1xi32, #dense>
+  %boolean_output9_view = buffer.view %boolean_output_aligned[%offset36] : buffer -> view<1xi32, #dense>
+  %boolean_output10_view = buffer.view %boolean_output_aligned[%offset40] : buffer -> view<1xi32, #dense>
+  %boolean_output11_view = buffer.view %boolean_output_aligned[%offset44] : buffer -> view<1xi32, #dense>
+  %boolean_output12_view = buffer.view %boolean_output_aligned[%offset48] : buffer -> view<1xi32, #dense>
+  %boolean_output13_view = buffer.view %boolean_output_aligned[%offset52] : buffer -> view<1xi32, #dense>
+  %boolean_output14_view = buffer.view %boolean_output_aligned[%offset56] : buffer -> view<1xi32, #dense>
+  %boolean_output15_view = buffer.view %boolean_output_aligned[%offset60] : buffer -> view<1xi32, #dense>
+
+  %lhs = view.load %input_lhs_view[0] : view<1xi32, #dense> -> i32
+  %rhs = view.load %input_rhs_view[0] : view<1xi32, #dense> -> i32
+  %minus_eight = scalar.constant -8 : i32
+  %minus_six = scalar.constant -6 : i32
+  %minus_one = scalar.constant -1 : i32
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %three = scalar.constant 3 : i32
+  %eight = scalar.constant 8 : i32
+  %bitwise_and = scalar.andi %minus_six, %minus_one : i32
+  %shift_right_arithmetic = scalar.shrsi %minus_eight, %one : i32
+  %bitwise_xor = scalar.xori %minus_one, %one : i32
+  %equal = scalar.cmpi eq, %lhs, %rhs : i32
+  %selected = scf.select %equal, %eight, %zero : i32
+  %bitwise_or = scalar.ori %zero, %two : i32
+  %shift_right_logical = scalar.shrui %eight, %one : i32
+  %shift_left = scalar.shli %three, %one : i32
+  view.store %minus_eight, %value_output0_view[0] : i32, view<1xi32, #dense>
+  view.store %bitwise_and, %value_output1_view[0] : i32, view<1xi32, #dense>
+  view.store %shift_right_arithmetic, %value_output2_view[0] : i32, view<1xi32, #dense>
+  view.store %bitwise_xor, %value_output3_view[0] : i32, view<1xi32, #dense>
+  view.store %selected, %value_output4_view[0] : i32, view<1xi32, #dense>
+  view.store %bitwise_or, %value_output5_view[0] : i32, view<1xi32, #dense>
+  view.store %shift_right_logical, %value_output6_view[0] : i32, view<1xi32, #dense>
+  view.store %shift_left, %value_output7_view[0] : i32, view<1xi32, #dense>
+
+  %not_equal = scalar.cmpi ne, %lhs, %rhs : i32
+  %signed_less = scalar.cmpi slt, %lhs, %rhs : i32
+  %signed_less_equal = scalar.cmpi sle, %lhs, %rhs : i32
+  %signed_greater = scalar.cmpi sgt, %lhs, %rhs : i32
+  %signed_greater_equal = scalar.cmpi sge, %lhs, %rhs : i32
+  %unsigned_less = scalar.cmpi ult, %lhs, %rhs : i32
+  %unsigned_less_equal = scalar.cmpi ule, %lhs, %rhs : i32
+  %unsigned_greater = scalar.cmpi ugt, %lhs, %rhs : i32
+  %unsigned_greater_equal = scalar.cmpi uge, %lhs, %rhs : i32
+  %equal_i32 = scf.select %equal, %one, %zero : i32
+  %not_equal_i32 = scf.select %not_equal, %one, %zero : i32
+  %signed_greater_i32 = scf.select %signed_greater, %one, %zero : i32
+  %signed_less_i32 = scf.select %signed_less, %one, %zero : i32
+  %signed_greater_equal_i32 = scf.select %signed_greater_equal, %one, %zero : i32
+  %signed_less_equal_i32 = scf.select %signed_less_equal, %one, %zero : i32
+  %unsigned_less_i32 = scf.select %unsigned_less, %one, %zero : i32
+  %unsigned_greater_i32 = scf.select %unsigned_greater, %one, %zero : i32
+  %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %one, %zero : i32
+  %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %one, %zero : i32
+  view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #dense>
+  view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_less_i32, %comparison_output3_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_greater_equal_i32, %comparison_output4_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_less_equal_i32, %comparison_output5_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_less_i32, %comparison_output6_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_greater_i32, %comparison_output7_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_less_equal_i32, %comparison_output8_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_greater_equal_i32, %comparison_output9_view[0] : i32, view<1xi32, #dense>
+
+  %constant_false = scalar.constant false : i1
+  %constant_true = scalar.constant true : i1
+  %and_false_false = scalar.andi %equal, %equal : i1
+  %and_true_true = scalar.andi %not_equal, %not_equal : i1
+  %and_false_true = scalar.andi %equal, %not_equal : i1
+  %or_false_true = scalar.ori %equal, %not_equal : i1
+  %and_true_false = scalar.andi %not_equal, %equal : i1
+  %or_true_false = scalar.ori %not_equal, %equal : i1
+  %or_false_false = scalar.ori %equal, %equal : i1
+  %or_true_true = scalar.ori %not_equal, %not_equal : i1
+  %xor_false_false = scalar.xori %equal, %equal : i1
+  %xor_false_true = scalar.xori %equal, %not_equal : i1
+  %xor_true_true = scalar.xori %not_equal, %not_equal : i1
+  %xor_true_false = scalar.xori %not_equal, %equal : i1
+  %select_false = scf.select %equal, %not_equal, %equal : i1
+  %select_true = scf.select %not_equal, %not_equal, %equal : i1
+  %constant_false_i32 = scf.select %constant_false, %one, %zero : i32
+  %constant_true_i32 = scf.select %constant_true, %one, %zero : i32
+  %and_false_false_i32 = scf.select %and_false_false, %one, %zero : i32
+  %and_true_true_i32 = scf.select %and_true_true, %one, %zero : i32
+  %and_false_true_i32 = scf.select %and_false_true, %one, %zero : i32
+  %or_false_true_i32 = scf.select %or_false_true, %one, %zero : i32
+  %and_true_false_i32 = scf.select %and_true_false, %one, %zero : i32
+  %or_true_false_i32 = scf.select %or_true_false, %one, %zero : i32
+  %or_false_false_i32 = scf.select %or_false_false, %one, %zero : i32
+  %or_true_true_i32 = scf.select %or_true_true, %one, %zero : i32
+  %xor_false_false_i32 = scf.select %xor_false_false, %one, %zero : i32
+  %xor_false_true_i32 = scf.select %xor_false_true, %one, %zero : i32
+  %xor_true_true_i32 = scf.select %xor_true_true, %one, %zero : i32
+  %xor_true_false_i32 = scf.select %xor_true_false, %one, %zero : i32
+  %select_false_i32 = scf.select %select_false, %one, %zero : i32
+  %select_true_i32 = scf.select %select_true, %one, %zero : i32
+  view.store %constant_false_i32, %boolean_output0_view[0] : i32, view<1xi32, #dense>
+  view.store %constant_true_i32, %boolean_output1_view[0] : i32, view<1xi32, #dense>
+  view.store %and_false_false_i32, %boolean_output2_view[0] : i32, view<1xi32, #dense>
+  view.store %and_true_true_i32, %boolean_output3_view[0] : i32, view<1xi32, #dense>
+  view.store %and_false_true_i32, %boolean_output4_view[0] : i32, view<1xi32, #dense>
+  view.store %or_false_true_i32, %boolean_output5_view[0] : i32, view<1xi32, #dense>
+  view.store %and_true_false_i32, %boolean_output6_view[0] : i32, view<1xi32, #dense>
+  view.store %or_true_false_i32, %boolean_output7_view[0] : i32, view<1xi32, #dense>
+  view.store %or_false_false_i32, %boolean_output8_view[0] : i32, view<1xi32, #dense>
+  view.store %or_true_true_i32, %boolean_output9_view[0] : i32, view<1xi32, #dense>
+  view.store %xor_false_false_i32, %boolean_output10_view[0] : i32, view<1xi32, #dense>
+  view.store %xor_false_true_i32, %boolean_output11_view[0] : i32, view<1xi32, #dense>
+  view.store %xor_true_true_i32, %boolean_output12_view[0] : i32, view<1xi32, #dense>
+  view.store %xor_true_false_i32, %boolean_output13_view[0] : i32, view<1xi32, #dense>
+  view.store %select_false_i32, %boolean_output14_view[0] : i32, view<1xi32, #dense>
+  view.store %select_true_i32, %boolean_output15_view[0] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+check.case @integer_i32_truth_table_case {
+  %input = check.generate.iota offset(-8) step(14) : tensor<2xi32>
+  %value_output = check.generate.fill value(99) : tensor<8xi32>
+  %comparison_output = check.generate.fill value(99) : tensor<10xi32>
+  %boolean_output = check.generate.fill value(99) : tensor<16xi32>
+  func.call @integer_i32_truth_table(%input, %value_output, %comparison_output, %boolean_output) : (tensor<2xi32>, tensor<8xi32>, tensor<10xi32>, tensor<16xi32>)
+  %expected_values = check.generate.iota offset(-8) step(2) : tensor<8xi32>
+  %expected_comparisons = check.generate.iota offset(0) step(1) period(2) : tensor<10xi32>
+  %expected_booleans = check.generate.iota offset(0) step(1) period(2) : tensor<16xi32>
+  check.expect.equal actual(%value_output) expected(%expected_values) : tensor<8xi32>
+  check.expect.equal actual(%comparison_output) expected(%expected_comparisons) : tensor<10xi32>
+  check.expect.equal actual(%boolean_output) expected(%expected_booleans) : tensor<16xi32>
+  check.return
+}
+
+kernel.def target(@target) @integer_i8_truth_table() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %value_output: buffer, %comparison_output: buffer) {
+  %offset0 = index.constant 0 : offset
+  %offset1 = index.constant 1 : offset
+  %offset2 = index.constant 2 : offset
+  %offset3 = index.constant 3 : offset
+  %offset4 = index.constant 4 : offset
+  %offset5 = index.constant 5 : offset
+  %offset6 = index.constant 6 : offset
+  %offset7 = index.constant 7 : offset
+  %offset8 = index.constant 8 : offset
+  %offset12 = index.constant 12 : offset
+  %offset16 = index.constant 16 : offset
+  %offset20 = index.constant 20 : offset
+  %offset24 = index.constant 24 : offset
+  %offset28 = index.constant 28 : offset
+  %offset32 = index.constant 32 : offset
+  %offset36 = index.constant 36 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 1} : buffer
+  %value_output_aligned = buffer.assume.alignment %value_output {minimum_alignment = 1} : buffer
+  %comparison_output_aligned = buffer.assume.alignment %comparison_output {minimum_alignment = 4} : buffer
+  %input_lhs_view = buffer.view %input_aligned[%offset0] : buffer -> view<1xi8, #dense>
+  %input_rhs_view = buffer.view %input_aligned[%offset1] : buffer -> view<1xi8, #dense>
+  %value_output0_view = buffer.view %value_output_aligned[%offset0] : buffer -> view<1xi8, #dense>
+  %value_output1_view = buffer.view %value_output_aligned[%offset1] : buffer -> view<1xi8, #dense>
+  %value_output2_view = buffer.view %value_output_aligned[%offset2] : buffer -> view<1xi8, #dense>
+  %value_output3_view = buffer.view %value_output_aligned[%offset3] : buffer -> view<1xi8, #dense>
+  %value_output4_view = buffer.view %value_output_aligned[%offset4] : buffer -> view<1xi8, #dense>
+  %value_output5_view = buffer.view %value_output_aligned[%offset5] : buffer -> view<1xi8, #dense>
+  %value_output6_view = buffer.view %value_output_aligned[%offset6] : buffer -> view<1xi8, #dense>
+  %value_output7_view = buffer.view %value_output_aligned[%offset7] : buffer -> view<1xi8, #dense>
+  %comparison_output0_view = buffer.view %comparison_output_aligned[%offset0] : buffer -> view<1xi32, #dense>
+  %comparison_output1_view = buffer.view %comparison_output_aligned[%offset4] : buffer -> view<1xi32, #dense>
+  %comparison_output2_view = buffer.view %comparison_output_aligned[%offset8] : buffer -> view<1xi32, #dense>
+  %comparison_output3_view = buffer.view %comparison_output_aligned[%offset12] : buffer -> view<1xi32, #dense>
+  %comparison_output4_view = buffer.view %comparison_output_aligned[%offset16] : buffer -> view<1xi32, #dense>
+  %comparison_output5_view = buffer.view %comparison_output_aligned[%offset20] : buffer -> view<1xi32, #dense>
+  %comparison_output6_view = buffer.view %comparison_output_aligned[%offset24] : buffer -> view<1xi32, #dense>
+  %comparison_output7_view = buffer.view %comparison_output_aligned[%offset28] : buffer -> view<1xi32, #dense>
+  %comparison_output8_view = buffer.view %comparison_output_aligned[%offset32] : buffer -> view<1xi32, #dense>
+  %comparison_output9_view = buffer.view %comparison_output_aligned[%offset36] : buffer -> view<1xi32, #dense>
+
+  %lhs = view.load %input_lhs_view[0] : view<1xi8, #dense> -> i8
+  %rhs = view.load %input_rhs_view[0] : view<1xi8, #dense> -> i8
+  %minus_eight = scalar.constant -8 : i8
+  %minus_six = scalar.constant -6 : i8
+  %minus_one = scalar.constant -1 : i8
+  %zero = scalar.constant 0 : i8
+  %one = scalar.constant 1 : i8
+  %two = scalar.constant 2 : i8
+  %three = scalar.constant 3 : i8
+  %eight = scalar.constant 8 : i8
+  %zero_i32 = scalar.constant 0 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %bitwise_and = scalar.andi %minus_six, %minus_one : i8
+  %shift_right_arithmetic = scalar.shrsi %minus_eight, %one : i8
+  %bitwise_xor = scalar.xori %minus_one, %one : i8
+  %equal = scalar.cmpi eq, %lhs, %rhs : i8
+  %selected = scf.select %equal, %eight, %zero : i8
+  %bitwise_or = scalar.ori %zero, %two : i8
+  %shift_right_logical = scalar.shrui %eight, %one : i8
+  %shift_left = scalar.shli %three, %one : i8
+  view.store %minus_eight, %value_output0_view[0] : i8, view<1xi8, #dense>
+  view.store %bitwise_and, %value_output1_view[0] : i8, view<1xi8, #dense>
+  view.store %shift_right_arithmetic, %value_output2_view[0] : i8, view<1xi8, #dense>
+  view.store %bitwise_xor, %value_output3_view[0] : i8, view<1xi8, #dense>
+  view.store %selected, %value_output4_view[0] : i8, view<1xi8, #dense>
+  view.store %bitwise_or, %value_output5_view[0] : i8, view<1xi8, #dense>
+  view.store %shift_right_logical, %value_output6_view[0] : i8, view<1xi8, #dense>
+  view.store %shift_left, %value_output7_view[0] : i8, view<1xi8, #dense>
+
+  %not_equal = scalar.cmpi ne, %lhs, %rhs : i8
+  %signed_less = scalar.cmpi slt, %lhs, %rhs : i8
+  %signed_less_equal = scalar.cmpi sle, %lhs, %rhs : i8
+  %signed_greater = scalar.cmpi sgt, %lhs, %rhs : i8
+  %signed_greater_equal = scalar.cmpi sge, %lhs, %rhs : i8
+  %unsigned_less = scalar.cmpi ult, %lhs, %rhs : i8
+  %unsigned_less_equal = scalar.cmpi ule, %lhs, %rhs : i8
+  %unsigned_greater = scalar.cmpi ugt, %lhs, %rhs : i8
+  %unsigned_greater_equal = scalar.cmpi uge, %lhs, %rhs : i8
+  %equal_i32 = scf.select %equal, %one_i32, %zero_i32 : i32
+  %not_equal_i32 = scf.select %not_equal, %one_i32, %zero_i32 : i32
+  %signed_greater_i32 = scf.select %signed_greater, %one_i32, %zero_i32 : i32
+  %signed_less_i32 = scf.select %signed_less, %one_i32, %zero_i32 : i32
+  %signed_greater_equal_i32 = scf.select %signed_greater_equal, %one_i32, %zero_i32 : i32
+  %signed_less_equal_i32 = scf.select %signed_less_equal, %one_i32, %zero_i32 : i32
+  %unsigned_less_i32 = scf.select %unsigned_less, %one_i32, %zero_i32 : i32
+  %unsigned_greater_i32 = scf.select %unsigned_greater, %one_i32, %zero_i32 : i32
+  %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %one_i32, %zero_i32 : i32
+  %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %one_i32, %zero_i32 : i32
+  view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #dense>
+  view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_less_i32, %comparison_output3_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_greater_equal_i32, %comparison_output4_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_less_equal_i32, %comparison_output5_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_less_i32, %comparison_output6_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_greater_i32, %comparison_output7_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_less_equal_i32, %comparison_output8_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_greater_equal_i32, %comparison_output9_view[0] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+check.case @integer_i8_truth_table_case {
+  check.requires<hal.vulkan.feature> {feature = "shader_int8"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_8bit_access"}
+  %input = check.generate.iota offset(-8) step(14) : tensor<2xi8>
+  %value_output = check.generate.fill value(99) : tensor<8xi8>
+  %comparison_output = check.generate.fill value(99) : tensor<10xi32>
+  func.call @integer_i8_truth_table(%input, %value_output, %comparison_output) : (tensor<2xi8>, tensor<8xi8>, tensor<10xi32>)
+  %expected_values = check.generate.iota offset(-8) step(2) : tensor<8xi8>
+  %expected_comparisons = check.generate.iota offset(0) step(1) period(2) : tensor<10xi32>
+  check.expect.equal actual(%value_output) expected(%expected_values) : tensor<8xi8>
+  check.expect.equal actual(%comparison_output) expected(%expected_comparisons) : tensor<10xi32>
+  check.return
+}
+
+kernel.def target(@target) @integer_i16_truth_table() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %value_output: buffer, %comparison_output: buffer) {
+  %offset0 = index.constant 0 : offset
+  %offset2 = index.constant 2 : offset
+  %offset4 = index.constant 4 : offset
+  %offset6 = index.constant 6 : offset
+  %offset8 = index.constant 8 : offset
+  %offset10 = index.constant 10 : offset
+  %offset12 = index.constant 12 : offset
+  %offset14 = index.constant 14 : offset
+  %offset16 = index.constant 16 : offset
+  %offset20 = index.constant 20 : offset
+  %offset24 = index.constant 24 : offset
+  %offset28 = index.constant 28 : offset
+  %offset32 = index.constant 32 : offset
+  %offset36 = index.constant 36 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 2} : buffer
+  %value_output_aligned = buffer.assume.alignment %value_output {minimum_alignment = 2} : buffer
+  %comparison_output_aligned = buffer.assume.alignment %comparison_output {minimum_alignment = 4} : buffer
+  %input_lhs_view = buffer.view %input_aligned[%offset0] : buffer -> view<1xi16, #dense>
+  %input_rhs_view = buffer.view %input_aligned[%offset2] : buffer -> view<1xi16, #dense>
+  %value_output0_view = buffer.view %value_output_aligned[%offset0] : buffer -> view<1xi16, #dense>
+  %value_output1_view = buffer.view %value_output_aligned[%offset2] : buffer -> view<1xi16, #dense>
+  %value_output2_view = buffer.view %value_output_aligned[%offset4] : buffer -> view<1xi16, #dense>
+  %value_output3_view = buffer.view %value_output_aligned[%offset6] : buffer -> view<1xi16, #dense>
+  %value_output4_view = buffer.view %value_output_aligned[%offset8] : buffer -> view<1xi16, #dense>
+  %value_output5_view = buffer.view %value_output_aligned[%offset10] : buffer -> view<1xi16, #dense>
+  %value_output6_view = buffer.view %value_output_aligned[%offset12] : buffer -> view<1xi16, #dense>
+  %value_output7_view = buffer.view %value_output_aligned[%offset14] : buffer -> view<1xi16, #dense>
+  %comparison_output0_view = buffer.view %comparison_output_aligned[%offset0] : buffer -> view<1xi32, #dense>
+  %comparison_output1_view = buffer.view %comparison_output_aligned[%offset4] : buffer -> view<1xi32, #dense>
+  %comparison_output2_view = buffer.view %comparison_output_aligned[%offset8] : buffer -> view<1xi32, #dense>
+  %comparison_output3_view = buffer.view %comparison_output_aligned[%offset12] : buffer -> view<1xi32, #dense>
+  %comparison_output4_view = buffer.view %comparison_output_aligned[%offset16] : buffer -> view<1xi32, #dense>
+  %comparison_output5_view = buffer.view %comparison_output_aligned[%offset20] : buffer -> view<1xi32, #dense>
+  %comparison_output6_view = buffer.view %comparison_output_aligned[%offset24] : buffer -> view<1xi32, #dense>
+  %comparison_output7_view = buffer.view %comparison_output_aligned[%offset28] : buffer -> view<1xi32, #dense>
+  %comparison_output8_view = buffer.view %comparison_output_aligned[%offset32] : buffer -> view<1xi32, #dense>
+  %comparison_output9_view = buffer.view %comparison_output_aligned[%offset36] : buffer -> view<1xi32, #dense>
+
+  %lhs = view.load %input_lhs_view[0] : view<1xi16, #dense> -> i16
+  %rhs = view.load %input_rhs_view[0] : view<1xi16, #dense> -> i16
+  %minus_eight = scalar.constant -8 : i16
+  %minus_six = scalar.constant -6 : i16
+  %minus_one = scalar.constant -1 : i16
+  %zero = scalar.constant 0 : i16
+  %one = scalar.constant 1 : i16
+  %two = scalar.constant 2 : i16
+  %three = scalar.constant 3 : i16
+  %eight = scalar.constant 8 : i16
+  %zero_i32 = scalar.constant 0 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %bitwise_and = scalar.andi %minus_six, %minus_one : i16
+  %shift_right_arithmetic = scalar.shrsi %minus_eight, %one : i16
+  %bitwise_xor = scalar.xori %minus_one, %one : i16
+  %equal = scalar.cmpi eq, %lhs, %rhs : i16
+  %selected = scf.select %equal, %eight, %zero : i16
+  %bitwise_or = scalar.ori %zero, %two : i16
+  %shift_right_logical = scalar.shrui %eight, %one : i16
+  %shift_left = scalar.shli %three, %one : i16
+  view.store %minus_eight, %value_output0_view[0] : i16, view<1xi16, #dense>
+  view.store %bitwise_and, %value_output1_view[0] : i16, view<1xi16, #dense>
+  view.store %shift_right_arithmetic, %value_output2_view[0] : i16, view<1xi16, #dense>
+  view.store %bitwise_xor, %value_output3_view[0] : i16, view<1xi16, #dense>
+  view.store %selected, %value_output4_view[0] : i16, view<1xi16, #dense>
+  view.store %bitwise_or, %value_output5_view[0] : i16, view<1xi16, #dense>
+  view.store %shift_right_logical, %value_output6_view[0] : i16, view<1xi16, #dense>
+  view.store %shift_left, %value_output7_view[0] : i16, view<1xi16, #dense>
+
+  %not_equal = scalar.cmpi ne, %lhs, %rhs : i16
+  %signed_less = scalar.cmpi slt, %lhs, %rhs : i16
+  %signed_less_equal = scalar.cmpi sle, %lhs, %rhs : i16
+  %signed_greater = scalar.cmpi sgt, %lhs, %rhs : i16
+  %signed_greater_equal = scalar.cmpi sge, %lhs, %rhs : i16
+  %unsigned_less = scalar.cmpi ult, %lhs, %rhs : i16
+  %unsigned_less_equal = scalar.cmpi ule, %lhs, %rhs : i16
+  %unsigned_greater = scalar.cmpi ugt, %lhs, %rhs : i16
+  %unsigned_greater_equal = scalar.cmpi uge, %lhs, %rhs : i16
+  %equal_i32 = scf.select %equal, %one_i32, %zero_i32 : i32
+  %not_equal_i32 = scf.select %not_equal, %one_i32, %zero_i32 : i32
+  %signed_greater_i32 = scf.select %signed_greater, %one_i32, %zero_i32 : i32
+  %signed_less_i32 = scf.select %signed_less, %one_i32, %zero_i32 : i32
+  %signed_greater_equal_i32 = scf.select %signed_greater_equal, %one_i32, %zero_i32 : i32
+  %signed_less_equal_i32 = scf.select %signed_less_equal, %one_i32, %zero_i32 : i32
+  %unsigned_less_i32 = scf.select %unsigned_less, %one_i32, %zero_i32 : i32
+  %unsigned_greater_i32 = scf.select %unsigned_greater, %one_i32, %zero_i32 : i32
+  %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %one_i32, %zero_i32 : i32
+  %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %one_i32, %zero_i32 : i32
+  view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #dense>
+  view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_less_i32, %comparison_output3_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_greater_equal_i32, %comparison_output4_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_less_equal_i32, %comparison_output5_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_less_i32, %comparison_output6_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_greater_i32, %comparison_output7_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_less_equal_i32, %comparison_output8_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_greater_equal_i32, %comparison_output9_view[0] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+check.case @integer_i16_truth_table_case {
+  check.requires<hal.vulkan.feature> {feature = "shader_int16"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
+  %input = check.generate.iota offset(-8) step(14) : tensor<2xi16>
+  %value_output = check.generate.fill value(99) : tensor<8xi16>
+  %comparison_output = check.generate.fill value(99) : tensor<10xi32>
+  func.call @integer_i16_truth_table(%input, %value_output, %comparison_output) : (tensor<2xi16>, tensor<8xi16>, tensor<10xi32>)
+  %expected_values = check.generate.iota offset(-8) step(2) : tensor<8xi16>
+  %expected_comparisons = check.generate.iota offset(0) step(1) period(2) : tensor<10xi32>
+  check.expect.equal actual(%value_output) expected(%expected_values) : tensor<8xi16>
+  check.expect.equal actual(%comparison_output) expected(%expected_comparisons) : tensor<10xi32>
+  check.return
+}
+
+kernel.def target(@target) @integer_i64_truth_table() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %value_output: buffer, %comparison_output: buffer) {
+  %offset0 = index.constant 0 : offset
+  %offset4 = index.constant 4 : offset
+  %offset8 = index.constant 8 : offset
+  %offset12 = index.constant 12 : offset
+  %offset16 = index.constant 16 : offset
+  %offset20 = index.constant 20 : offset
+  %offset24 = index.constant 24 : offset
+  %offset28 = index.constant 28 : offset
+  %offset32 = index.constant 32 : offset
+  %offset36 = index.constant 36 : offset
+  %offset40 = index.constant 40 : offset
+  %offset48 = index.constant 48 : offset
+  %offset56 = index.constant 56 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 8} : buffer
+  %value_output_aligned = buffer.assume.alignment %value_output {minimum_alignment = 8} : buffer
+  %comparison_output_aligned = buffer.assume.alignment %comparison_output {minimum_alignment = 4} : buffer
+  %input_lhs_view = buffer.view %input_aligned[%offset0] : buffer -> view<1xi64, #dense>
+  %input_rhs_view = buffer.view %input_aligned[%offset8] : buffer -> view<1xi64, #dense>
+  %value_output0_view = buffer.view %value_output_aligned[%offset0] : buffer -> view<1xi64, #dense>
+  %value_output1_view = buffer.view %value_output_aligned[%offset8] : buffer -> view<1xi64, #dense>
+  %value_output2_view = buffer.view %value_output_aligned[%offset16] : buffer -> view<1xi64, #dense>
+  %value_output3_view = buffer.view %value_output_aligned[%offset24] : buffer -> view<1xi64, #dense>
+  %value_output4_view = buffer.view %value_output_aligned[%offset32] : buffer -> view<1xi64, #dense>
+  %value_output5_view = buffer.view %value_output_aligned[%offset40] : buffer -> view<1xi64, #dense>
+  %value_output6_view = buffer.view %value_output_aligned[%offset48] : buffer -> view<1xi64, #dense>
+  %value_output7_view = buffer.view %value_output_aligned[%offset56] : buffer -> view<1xi64, #dense>
+  %comparison_output0_view = buffer.view %comparison_output_aligned[%offset0] : buffer -> view<1xi32, #dense>
+  %comparison_output1_view = buffer.view %comparison_output_aligned[%offset4] : buffer -> view<1xi32, #dense>
+  %comparison_output2_view = buffer.view %comparison_output_aligned[%offset8] : buffer -> view<1xi32, #dense>
+  %comparison_output3_view = buffer.view %comparison_output_aligned[%offset12] : buffer -> view<1xi32, #dense>
+  %comparison_output4_view = buffer.view %comparison_output_aligned[%offset16] : buffer -> view<1xi32, #dense>
+  %comparison_output5_view = buffer.view %comparison_output_aligned[%offset20] : buffer -> view<1xi32, #dense>
+  %comparison_output6_view = buffer.view %comparison_output_aligned[%offset24] : buffer -> view<1xi32, #dense>
+  %comparison_output7_view = buffer.view %comparison_output_aligned[%offset28] : buffer -> view<1xi32, #dense>
+  %comparison_output8_view = buffer.view %comparison_output_aligned[%offset32] : buffer -> view<1xi32, #dense>
+  %comparison_output9_view = buffer.view %comparison_output_aligned[%offset36] : buffer -> view<1xi32, #dense>
+
+  %lhs = view.load %input_lhs_view[0] : view<1xi64, #dense> -> i64
+  %rhs = view.load %input_rhs_view[0] : view<1xi64, #dense> -> i64
+  %minus_eight = scalar.constant -8 : i64
+  %minus_six = scalar.constant -6 : i64
+  %minus_one = scalar.constant -1 : i64
+  %zero = scalar.constant 0 : i64
+  %one = scalar.constant 1 : i64
+  %two = scalar.constant 2 : i64
+  %three = scalar.constant 3 : i64
+  %eight = scalar.constant 8 : i64
+  %zero_i32 = scalar.constant 0 : i32
+  %one_i32 = scalar.constant 1 : i32
+  %bitwise_and = scalar.andi %minus_six, %minus_one : i64
+  %shift_right_arithmetic = scalar.shrsi %minus_eight, %one : i64
+  %bitwise_xor = scalar.xori %minus_one, %one : i64
+  %equal = scalar.cmpi eq, %lhs, %rhs : i64
+  %selected = scf.select %equal, %eight, %zero : i64
+  %bitwise_or = scalar.ori %zero, %two : i64
+  %shift_right_logical = scalar.shrui %eight, %one : i64
+  %shift_left = scalar.shli %three, %one : i64
+  view.store %minus_eight, %value_output0_view[0] : i64, view<1xi64, #dense>
+  view.store %bitwise_and, %value_output1_view[0] : i64, view<1xi64, #dense>
+  view.store %shift_right_arithmetic, %value_output2_view[0] : i64, view<1xi64, #dense>
+  view.store %bitwise_xor, %value_output3_view[0] : i64, view<1xi64, #dense>
+  view.store %selected, %value_output4_view[0] : i64, view<1xi64, #dense>
+  view.store %bitwise_or, %value_output5_view[0] : i64, view<1xi64, #dense>
+  view.store %shift_right_logical, %value_output6_view[0] : i64, view<1xi64, #dense>
+  view.store %shift_left, %value_output7_view[0] : i64, view<1xi64, #dense>
+
+  %not_equal = scalar.cmpi ne, %lhs, %rhs : i64
+  %signed_less = scalar.cmpi slt, %lhs, %rhs : i64
+  %signed_less_equal = scalar.cmpi sle, %lhs, %rhs : i64
+  %signed_greater = scalar.cmpi sgt, %lhs, %rhs : i64
+  %signed_greater_equal = scalar.cmpi sge, %lhs, %rhs : i64
+  %unsigned_less = scalar.cmpi ult, %lhs, %rhs : i64
+  %unsigned_less_equal = scalar.cmpi ule, %lhs, %rhs : i64
+  %unsigned_greater = scalar.cmpi ugt, %lhs, %rhs : i64
+  %unsigned_greater_equal = scalar.cmpi uge, %lhs, %rhs : i64
+  %equal_i32 = scf.select %equal, %one_i32, %zero_i32 : i32
+  %not_equal_i32 = scf.select %not_equal, %one_i32, %zero_i32 : i32
+  %signed_greater_i32 = scf.select %signed_greater, %one_i32, %zero_i32 : i32
+  %signed_less_i32 = scf.select %signed_less, %one_i32, %zero_i32 : i32
+  %signed_greater_equal_i32 = scf.select %signed_greater_equal, %one_i32, %zero_i32 : i32
+  %signed_less_equal_i32 = scf.select %signed_less_equal, %one_i32, %zero_i32 : i32
+  %unsigned_less_i32 = scf.select %unsigned_less, %one_i32, %zero_i32 : i32
+  %unsigned_greater_i32 = scf.select %unsigned_greater, %one_i32, %zero_i32 : i32
+  %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %one_i32, %zero_i32 : i32
+  %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %one_i32, %zero_i32 : i32
+  view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #dense>
+  view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_less_i32, %comparison_output3_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_greater_equal_i32, %comparison_output4_view[0] : i32, view<1xi32, #dense>
+  view.store %signed_less_equal_i32, %comparison_output5_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_less_i32, %comparison_output6_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_greater_i32, %comparison_output7_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_less_equal_i32, %comparison_output8_view[0] : i32, view<1xi32, #dense>
+  view.store %unsigned_greater_equal_i32, %comparison_output9_view[0] : i32, view<1xi32, #dense>
+  kernel.return
+}
+
+check.case @integer_i64_truth_table_case {
+  check.requires<hal.vulkan.feature> {feature = "shader_int64"}
+  %input = check.generate.iota offset(-8) step(14) : tensor<2xi64>
+  %value_output = check.generate.fill value(99) : tensor<8xi64>
+  %comparison_output = check.generate.fill value(99) : tensor<10xi32>
+  func.call @integer_i64_truth_table(%input, %value_output, %comparison_output) : (tensor<2xi64>, tensor<8xi64>, tensor<10xi32>)
+  %expected_values = check.generate.iota offset(-8) step(2) : tensor<8xi64>
+  %expected_comparisons = check.generate.iota offset(0) step(1) period(2) : tensor<10xi32>
+  check.expect.equal actual(%value_output) expected(%expected_values) : tensor<8xi64>
+  check.expect.equal actual(%comparison_output) expected(%expected_comparisons) : tensor<10xi32>
+  check.return
+}

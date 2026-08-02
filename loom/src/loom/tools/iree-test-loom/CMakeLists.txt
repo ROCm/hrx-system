@@ -105,6 +105,7 @@ iree_execution_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_coop_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_coop_u8_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_integer_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_quantized_hal_actual.loom"
   SANITIZER_SUPPRESSIONS
     lsan
