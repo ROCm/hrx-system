@@ -140,57 +140,60 @@ kernel.def target(@qwen3_moe_attention_qkv_gfx11_wave32) @qwen3_moe_attention_qk
   kernel.return
 }
 
-// Distinct Q/K/V byte patterns make binding-domain mistakes observable. Equal
-// synthetic output widths let the two Q4_K references share the existing
-// config-specialized direct provider while still crossing every domain edge.
+// Distinct token rows and Q/K/V byte patterns make row ownership and
+// binding-domain mistakes observable. Equal synthetic output widths let the
+// two Q4_K references share the config-specialized direct provider while still
+// crossing every domain edge.
 check.case public @qwen3_moe_attention_qkv_q6_differential_case {
-  %token_count = check.literal value(2) : index
+  %token_count = check.literal value(14) : index
   %hidden_size = check.literal value(512) : index
   %output_size = check.literal value(65) : index
-  %input = check.generate.fill value(0.00390625) : tensor<2x512xf32>
-  %q8_input = check.generate.fill value(0) : tensor<2x576xi8>
+  %input_seed = check.param.seed base(0x514d4f45514b5636) count(1) : i64
+  %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<14x512xf32>
+  %q8_input = check.generate.fill value(0) : tensor<14x576xi8>
   %query_weight = check.generate.fill value(34) : tensor<65x2x144xi8>
   %key_weight = check.generate.fill value(35) : tensor<65x2x144xi8>
   %value_weight = check.generate.fill value(-86) : tensor<65x2x210xi8>
-  %expected_query = check.generate.fill value(0.0) : tensor<2x65xf32>
-  %expected_key = check.generate.fill value(0.0) : tensor<2x65xf32>
-  %expected_value = check.generate.fill value(0.0) : tensor<2x65xf32>
-  %actual_query = check.generate.fill value(1.0) : tensor<2x65xf32>
-  %actual_key = check.generate.fill value(1.0) : tensor<2x65xf32>
-  %actual_value = check.generate.fill value(1.0) : tensor<2x65xf32>
-  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %hidden_size, %input, %q8_input) : (index, index, tensor<2x512xf32>, tensor<2x576xi8>)
-  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %query_weight, %expected_query) : (index, tensor<2x576xi8>, tensor<65x2x144xi8>, tensor<2x65xf32>)
-  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %key_weight, %expected_key) : (index, tensor<2x576xi8>, tensor<65x2x144xi8>, tensor<2x65xf32>)
-  func.call @ggml_linear_q6k_q8_1_x4(%token_count, %hidden_size, %output_size, %q8_input, %value_weight, %expected_value) : (index, index, index, tensor<2x576xi8>, tensor<65x2x210xi8>, tensor<2x65xf32>)
-  func.call @qwen3_moe_attention_qkv_quantized(%token_count, %q8_input, %query_weight, %key_weight, %value_weight, %actual_query, %actual_key, %actual_value) : (index, tensor<2x576xi8>, tensor<65x2x144xi8>, tensor<65x2x144xi8>, tensor<65x2x210xi8>, tensor<2x65xf32>, tensor<2x65xf32>, tensor<2x65xf32>)
-  check.expect.close actual(%actual_query) expected(%expected_query) atol(0.25) rtol(0.01) nan(same) : tensor<2x65xf32>
-  check.expect.close actual(%actual_key) expected(%expected_key) atol(0.25) rtol(0.01) nan(same) : tensor<2x65xf32>
-  check.expect.close actual(%actual_value) expected(%expected_value) atol(0.25) rtol(0.01) nan(same) : tensor<2x65xf32>
+  %expected_query = check.generate.fill value(0.0) : tensor<14x65xf32>
+  %expected_key = check.generate.fill value(0.0) : tensor<14x65xf32>
+  %expected_value = check.generate.fill value(0.0) : tensor<14x65xf32>
+  %actual_query = check.generate.fill value(1.0) : tensor<14x65xf32>
+  %actual_key = check.generate.fill value(1.0) : tensor<14x65xf32>
+  %actual_value = check.generate.fill value(1.0) : tensor<14x65xf32>
+  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %hidden_size, %input, %q8_input) : (index, index, tensor<14x512xf32>, tensor<14x576xi8>)
+  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %query_weight, %expected_query) : (index, tensor<14x576xi8>, tensor<65x2x144xi8>, tensor<14x65xf32>)
+  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %key_weight, %expected_key) : (index, tensor<14x576xi8>, tensor<65x2x144xi8>, tensor<14x65xf32>)
+  func.call @ggml_linear_q6k_q8_1_x4(%token_count, %hidden_size, %output_size, %q8_input, %value_weight, %expected_value) : (index, index, index, tensor<14x576xi8>, tensor<65x2x210xi8>, tensor<14x65xf32>)
+  func.call @qwen3_moe_attention_qkv_quantized(%token_count, %q8_input, %query_weight, %key_weight, %value_weight, %actual_query, %actual_key, %actual_value) : (index, tensor<14x576xi8>, tensor<65x2x144xi8>, tensor<65x2x144xi8>, tensor<65x2x210xi8>, tensor<14x65xf32>, tensor<14x65xf32>, tensor<14x65xf32>)
+  check.expect.close actual(%actual_query) expected(%expected_query) atol(0.25) rtol(0.01) nan(same) : tensor<14x65xf32>
+  check.expect.close actual(%actual_key) expected(%expected_key) atol(0.25) rtol(0.01) nan(same) : tensor<14x65xf32>
+  check.expect.close actual(%actual_value) expected(%expected_value) atol(0.25) rtol(0.01) nan(same) : tensor<14x65xf32>
   check.return
 }
 
 check.case public @qwen3_moe_attention_qkv_q4_differential_case {
-  %token_count = check.literal value(2) : index
+  %token_count = check.literal value(14) : index
   %hidden_size = check.literal value(512) : index
-  %input = check.generate.fill value(0.00390625) : tensor<2x512xf32>
-  %q8_input = check.generate.fill value(0) : tensor<2x576xi8>
+  %input_seed = check.param.seed base(0x514d4f45514b5634) count(1) : i64
+  %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<14x512xf32>
+  %q8_input = check.generate.fill value(0) : tensor<14x576xi8>
   %query_weight = check.generate.fill value(34) : tensor<65x2x144xi8>
   %key_weight = check.generate.fill value(35) : tensor<65x2x144xi8>
   %value_weight = check.generate.fill value(36) : tensor<65x2x144xi8>
-  %expected_query = check.generate.fill value(0.0) : tensor<2x65xf32>
-  %expected_key = check.generate.fill value(0.0) : tensor<2x65xf32>
-  %expected_value = check.generate.fill value(0.0) : tensor<2x65xf32>
-  %actual_query = check.generate.fill value(1.0) : tensor<2x65xf32>
-  %actual_key = check.generate.fill value(1.0) : tensor<2x65xf32>
-  %actual_value = check.generate.fill value(1.0) : tensor<2x65xf32>
-  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %hidden_size, %input, %q8_input) : (index, index, tensor<2x512xf32>, tensor<2x576xi8>)
-  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %query_weight, %expected_query) : (index, tensor<2x576xi8>, tensor<65x2x144xi8>, tensor<2x65xf32>)
-  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %key_weight, %expected_key) : (index, tensor<2x576xi8>, tensor<65x2x144xi8>, tensor<2x65xf32>)
-  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %value_weight, %expected_value) : (index, tensor<2x576xi8>, tensor<65x2x144xi8>, tensor<2x65xf32>)
-  func.call @qwen3_moe_attention_qkv_quantized(%token_count, %q8_input, %query_weight, %key_weight, %value_weight, %actual_query, %actual_key, %actual_value) : (index, tensor<2x576xi8>, tensor<65x2x144xi8>, tensor<65x2x144xi8>, tensor<65x2x144xi8>, tensor<2x65xf32>, tensor<2x65xf32>, tensor<2x65xf32>)
-  check.expect.close actual(%actual_query) expected(%expected_query) atol(0.25) rtol(0.01) nan(same) : tensor<2x65xf32>
-  check.expect.close actual(%actual_key) expected(%expected_key) atol(0.25) rtol(0.01) nan(same) : tensor<2x65xf32>
-  check.expect.close actual(%actual_value) expected(%expected_value) atol(0.25) rtol(0.01) nan(same) : tensor<2x65xf32>
+  %expected_query = check.generate.fill value(0.0) : tensor<14x65xf32>
+  %expected_key = check.generate.fill value(0.0) : tensor<14x65xf32>
+  %expected_value = check.generate.fill value(0.0) : tensor<14x65xf32>
+  %actual_query = check.generate.fill value(1.0) : tensor<14x65xf32>
+  %actual_key = check.generate.fill value(1.0) : tensor<14x65xf32>
+  %actual_value = check.generate.fill value(1.0) : tensor<14x65xf32>
+  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %hidden_size, %input, %q8_input) : (index, index, tensor<14x512xf32>, tensor<14x576xi8>)
+  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %query_weight, %expected_query) : (index, tensor<14x576xi8>, tensor<65x2x144xi8>, tensor<14x65xf32>)
+  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %key_weight, %expected_key) : (index, tensor<14x576xi8>, tensor<65x2x144xi8>, tensor<14x65xf32>)
+  func.call @qwen3_moe_dense_linear_q4k_q8_1_x4(%token_count, %q8_input, %value_weight, %expected_value) : (index, tensor<14x576xi8>, tensor<65x2x144xi8>, tensor<14x65xf32>)
+  func.call @qwen3_moe_attention_qkv_quantized(%token_count, %q8_input, %query_weight, %key_weight, %value_weight, %actual_query, %actual_key, %actual_value) : (index, tensor<14x576xi8>, tensor<65x2x144xi8>, tensor<65x2x144xi8>, tensor<65x2x144xi8>, tensor<14x65xf32>, tensor<14x65xf32>, tensor<14x65xf32>)
+  check.expect.close actual(%actual_query) expected(%expected_query) atol(0.25) rtol(0.01) nan(same) : tensor<14x65xf32>
+  check.expect.close actual(%actual_key) expected(%expected_key) atol(0.25) rtol(0.01) nan(same) : tensor<14x65xf32>
+  check.expect.close actual(%actual_value) expected(%expected_value) atol(0.25) rtol(0.01) nan(same) : tensor<14x65xf32>
   check.return
 }
 
