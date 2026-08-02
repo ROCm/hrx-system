@@ -117,3 +117,33 @@ func.def target(@target) @storage_buffer_i32_rejects_misaligned_static_offset(%i
   %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
   func.return %loaded : i32
 }
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @int8_operation_requires_target_feature(%lhs: i8, %rhs: i8) -> (i8) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_bitwise_and.i8", constraint_key="descriptor_available"}
+  %result = scalar.andi %lhs, %rhs : i8
+  func.return %result : i8
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @int16_operation_requires_target_feature(%lhs: i16, %rhs: i16) -> (i16) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_bitwise_and.i16", constraint_key="descriptor_available"}
+  %result = scalar.andi %lhs, %rhs : i16
+  func.return %result : i16
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 2}
+
+func.def target(@target) @int64_operation_requires_target_feature(%lhs: i64, %rhs: i64) -> (i64) {
+  // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="spirv.op_bitwise_and.i64", constraint_key="descriptor_available"}
+  %result = scalar.andi %lhs, %rhs : i64
+  func.return %result : i64
+}

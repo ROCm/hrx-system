@@ -108,7 +108,6 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
 
 // ====
 
-// XFAIL: SPIR-V scalar integer bitwise and shift lowering is unsupported
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @scf_select_q6_nibble_i8(%code: i32, %use_high: i32) -> (i8) {
   %zero = scalar.constant 0 : i32
@@ -124,9 +123,23 @@ func.def target(@target) @scf_select_q6_nibble_i8(%code: i32, %use_high: i32) ->
   func.return %selected : i8
 }
 
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [21]}) @scf_select_q6_nibble_i8(%code: reg<spirv.id>, %use_high: reg<spirv.id>) -> (reg<spirv.id>) asm {
+  %zero = OpConstant.i32 0
+  %four = OpConstant.i32 4
+  %mask = OpConstant.i32 15
+  %high_shifted = OpShiftRightLogical %code, %four
+  %low_i32 = OpBitwiseAnd %code, %mask
+  %high_i32 = OpBitwiseAnd %high_shifted, %mask
+  %low = OpSConvert.i32.i8 %low_i32
+  %high = OpSConvert.i32.i8 %high_i32
+  %cond = OpINotEqual %use_high, %zero
+  %selected = OpSelect.i8 %cond, %high, %low
+  return %selected
+}
+
 // ====
 
-// XFAIL: SPIR-V scalar integer bitwise and shift lowering is unsupported
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @scf_select_scale_piece_i16(%packed: i32, %use_high: i32) -> (i16) {
   %zero = scalar.constant 0 : i32
@@ -137,6 +150,18 @@ func.def target(@target) @scf_select_scale_piece_i16(%packed: i32, %use_high: i3
   %cond = scalar.cmpi ne, %use_high, %zero : i32
   %selected = scf.select %cond, %high, %low : i16
   func.return %selected : i16
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [22]}) @scf_select_scale_piece_i16(%packed: reg<spirv.id>, %use_high: reg<spirv.id>) -> (reg<spirv.id>) asm {
+  %zero = OpConstant.i32 0
+  %sixteen = OpConstant.i32 16
+  %low = OpSConvert.i32.i16 %packed
+  %high_shifted = OpShiftRightLogical %packed, %sixteen
+  %high = OpSConvert.i32.i16 %high_shifted
+  %cond = OpINotEqual %use_high, %zero
+  %selected = OpSelect.i16 %cond, %high, %low
+  return %selected
 }
 
 // ====
@@ -360,7 +385,6 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
 
 // ====
 
-// XFAIL: SPIR-V Boolean selection is unsupported
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @scf_select_i1_scc_condition(%lhs: i32, %rhs: i32, %alt: i32, %true_value: f32, %false_value: f32) -> (f32) {
   %zero = scalar.constant 0 : i32
@@ -370,6 +394,17 @@ func.def target(@target) @scf_select_i1_scc_condition(%lhs: i32, %rhs: i32, %alt
   %selected_condition = scf.select %condition, %lhs_nonzero, %alt_nonzero : i1
   %result = scf.select %selected_condition, %true_value, %false_value : f32
   func.return %result : f32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23, 18, 18], spirv_result_value_types = [18]}) @scf_select_i1_scc_condition(%lhs: reg<spirv.id>, %rhs: reg<spirv.id>, %alt: reg<spirv.id>, %true_value: reg<spirv.id>, %false_value: reg<spirv.id>) -> (reg<spirv.id>) asm {
+  %zero = OpConstant.i32 0
+  %condition = OpSLessThan %lhs, %rhs
+  %lhs_nonzero = OpINotEqual %lhs, %zero
+  %alt_nonzero = OpINotEqual %alt, %zero
+  %selected_condition = OpSelect.bool %condition, %lhs_nonzero, %alt_nonzero
+  %result = OpSelect.f32 %selected_condition, %true_value, %false_value
+  return %result
 }
 
 // ====

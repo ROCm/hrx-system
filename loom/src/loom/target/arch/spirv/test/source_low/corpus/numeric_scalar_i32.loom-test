@@ -1,7 +1,6 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test
 // RUN: emit source-low output=low control-flow=structured-low
 
-// XFAIL: SPIR-V scalar integer bitwise and shift lowering is unsupported
 spirv.target<vulkan1_3> @target
 func.def target(@target) @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: i32) -> (i32) {
   %add = scalar.addi %lhs, %rhs : i32
@@ -14,6 +13,18 @@ func.def target(@target) @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: 
   %ashr = scalar.shrsi %shl, %shift : i32
   %lshr = scalar.shrui %ashr, %shift : i32
   func.return %lshr : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23], spirv_result_value_types = [23]}) @scalar_i32_uniform_sgpr(%lhs: reg<spirv.id>, %rhs: reg<spirv.id>, %shift: reg<spirv.id>) -> (reg<spirv.id>) asm {
+  %product = OpIMul %lhs, %rhs
+  %and = OpBitwiseAnd %product, %lhs
+  %or = OpBitwiseOr %and, %rhs
+  %xor = OpBitwiseXor %or, %lhs
+  %shl = OpShiftLeftLogical %xor, %shift
+  %ashr = OpShiftRightArithmetic %shl, %shift
+  %lshr = OpShiftRightLogical %ashr, %shift
+  return %lshr
 }
 
 // ====
@@ -44,7 +55,6 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
 
 // ====
 
-// XFAIL: SPIR-V Boolean scalar constants are unsupported
 spirv.target<vulkan1_3> @target
 func.def target(@target) @scalar_i1_constants_scc() -> (i1, i1) {
   %true = scalar.constant true : i1
@@ -52,9 +62,15 @@ func.def target(@target) @scalar_i1_constants_scc() -> (i1, i1) {
   func.return %true, %false : i1, i1
 }
 
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [1, 1]}) @scalar_i1_constants_scc() -> (reg<spirv.id>, reg<spirv.id>) asm {
+  %true = OpConstantTrue.bool
+  %false = OpConstantFalse.bool
+  return %true, %false
+}
+
 // ====
 
-// XFAIL: SPIR-V Boolean logical lowering is unsupported
 spirv.target<vulkan1_3> @target
 func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
   %zero = scalar.constant 0 : i32
@@ -64,4 +80,15 @@ func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
   %either_nonzero = scalar.ori %lhs_nonzero, %rhs_nonzero : i1
   %one_nonzero = scalar.xori %both_nonzero, %either_nonzero : i1
   func.return %one_nonzero : i1
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [1]}) @scalar_i1_bitwise_scc(%lhs: reg<spirv.id>, %rhs: reg<spirv.id>) -> (reg<spirv.id>) asm {
+  %zero = OpConstant.i32 0
+  %lhs_nonzero = OpINotEqual %lhs, %zero
+  %rhs_nonzero = OpINotEqual %rhs, %zero
+  %both_nonzero = OpLogicalAnd.bool %lhs_nonzero, %rhs_nonzero
+  %either_nonzero = OpLogicalOr.bool %lhs_nonzero, %rhs_nonzero
+  %one_nonzero = OpLogicalNotEqual.bool %both_nonzero, %either_nonzero
+  return %one_nonzero
 }

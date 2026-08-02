@@ -1,13 +1,20 @@
 // TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_scalar_i64.loom-test
 // RUN: emit source-low output=low control-flow=structured-low
 
-// XFAIL: SPIR-V scalar integer bitwise lowering is unsupported
 spirv.target<vulkan1_3> @target
 func.def target(@target) @scalar_i64_bitwise_sgpr(%lhs: i64, %rhs: i64) -> (i64, i64, i64) {
   %and = scalar.andi %lhs, %rhs : i64
   %or = scalar.ori %and, %lhs : i64
   %xor = scalar.xori %or, %rhs : i64
   func.return %and, %or, %xor : i64, i64, i64
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [24, 24], spirv_result_value_types = [24, 24, 24]}) @scalar_i64_bitwise_sgpr(%lhs: reg<spirv.id>, %rhs: reg<spirv.id>) -> (reg<spirv.id>, reg<spirv.id>, reg<spirv.id>) asm {
+  %and = OpBitwiseAnd.i64 %lhs, %rhs
+  %or = OpBitwiseOr.i64 %and, %lhs
+  %xor = OpBitwiseXor.i64 %or, %rhs
+  return %and, %or, %xor
 }
 
 // ====
@@ -120,13 +127,22 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
 
 // ====
 
-// XFAIL: SPIR-V i64 scalar constants are unsupported
 spirv.target<vulkan1_3> @target
 func.def target(@target) @scalar_i64_compare_constant_select(%lhs: i64, %true_value: f32, %false_value: f32) -> (f32) {
   %limit = scalar.constant 4294967296 : i64
   %cmp = scalar.cmpi ult, %lhs, %limit : i64
   %result = scf.select %cmp, %true_value, %false_value : f32
   func.return %result : f32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [24, 18, 18], spirv_result_value_types = [18]}) @scalar_i64_compare_constant_select(%lhs: reg<spirv.id>, %true_value: reg<spirv.id>, %false_value: reg<spirv.id>) -> (reg<spirv.id>) asm {
+  %limit = OpConstant.i64 4294967296
+  %12 = OpBitcast.i64.u64 %lhs
+  %13 = OpBitcast.i64.u64 %limit
+  %cmp = OpULessThan.u64 %12, %13
+  %result = OpSelect.f32 %cmp, %true_value, %false_value
+  return %result
 }
 
 // ====
