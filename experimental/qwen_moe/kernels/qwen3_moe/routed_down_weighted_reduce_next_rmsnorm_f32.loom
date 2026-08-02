@@ -1,9 +1,10 @@
 // Fused grouped-prefill routed residual reduction and next-layer RMSNorm.
 //
-// One wave32 workgroup owns one complete 2048-channel token row. Each
-// workitem retains eight adjacent FP32 residual results across the workgroup
-// RMS reduction, then publishes both the updated hidden state and the
-// learned-weight normalized input consumed by the next layer.
+// One 256-workitem workgroup, comprising eight wave32 subgroups, owns one
+// complete 2048-channel token row. Each workitem retains eight adjacent FP32
+// residual results across the workgroup RMS reduction, then publishes both
+// the updated hidden state and the learned-weight normalized input consumed
+// by the next layer.
 amdgpu.target<gfx11-generic> @qwen3_moe_routed_down_next_norm_gfx11_wave32 {subgroup_size = 32}
 
 kernel.def target(@qwen3_moe_routed_down_next_norm_gfx11_wave32) @qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32(%token_count: index) {
