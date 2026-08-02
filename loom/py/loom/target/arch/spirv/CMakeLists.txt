@@ -73,6 +73,7 @@ iree_py_library(
     loom::py::loom::target::arch::spirv::features
     loom::py::loom::target::arch::spirv::ordinary_vector
     loom::py::loom::target::arch::spirv::ordinary_vector_integer
+    loom::py::loom::target::arch::spirv::ordinary_vector_integer_conversion
     loom::py::loom::target::arch::spirv::scalar_alu
     loom::py::loom::target::arch::spirv::scalar_constant
     loom::py::loom::target::arch::spirv::scalar_conversion
@@ -98,6 +99,7 @@ iree_py_test(
     loom::py::loom::target::arch::spirv::descriptors
     loom::py::loom::target::arch::spirv::ordinary_vector
     loom::py::loom::target::arch::spirv::ordinary_vector_integer
+    loom::py::loom::target::arch::spirv::ordinary_vector_integer_conversion
     loom::py::loom::target::arch::spirv::scalar_alu
     loom::py::loom::target::arch::spirv::scalar_constant
     loom::py::loom::target::arch::spirv::scalar_conversion
@@ -200,6 +202,42 @@ iree_py_test(
     loom::py::loom::target::arch::spirv::features
     loom::py::loom::target::arch::spirv::ordinary_vector
     loom::py::loom::target::arch::spirv::ordinary_vector_integer
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
+)
+
+iree_py_library(
+  NAME
+    ordinary_vector_integer_conversion
+  SRCS
+    "__init__.py"
+    "ordinary_vector_integer_conversion.py"
+  DEPS
+    loom::py::loom::target::arch::spirv::ordinary_vector
+    loom::py::loom::target::arch::spirv::ordinary_vector_integer
+    loom::py::loom::target::arch::spirv::scalar_alu
+    loom::py::loom::target::arch::spirv::scalar_conversion
+)
+
+iree_py_test(
+  NAME
+    ordinary_vector_integer_conversion_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
+  SRCS
+    "ordinary_vector_integer_conversion_test.py"
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.spirv.ordinary_vector_integer_conversion_test"
+  DEPS
+    loom::py::loom::target::arch::spirv::ordinary_vector
+    loom::py::loom::target::arch::spirv::ordinary_vector_integer
+    loom::py::loom::target::arch::spirv::ordinary_vector_integer_conversion
+    loom::py::loom::target::arch::spirv::scalar_conversion
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"

@@ -26,11 +26,15 @@ from loom.target.arch.spirv.ordinary_vector import (
     ORDINARY_VECTOR_INSTRUCTIONS,
     ORDINARY_VECTOR_TYPES,
     OrdinaryVectorComponentKind,
+    OrdinaryVectorInstruction,
     OrdinaryVectorInstructionType,
     OrdinaryVectorType,
 )
 from loom.target.arch.spirv.ordinary_vector_integer import (
     ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
+)
+from loom.target.arch.spirv.ordinary_vector_integer_conversion import (
+    ORDINARY_VECTOR_INTEGER_CONVERSION_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.scalar_alu import (
     BOOLEAN_BINARY_OPERATIONS,
@@ -623,16 +627,17 @@ def _expected_ordinary_vector_value(
     return f"{{.value_class = {component_type.vector_value_class}, .scalar_type = {component_type.scalar_enum}, .vector = {{.lane_count = {vector_type.lane_count}}}}}"
 
 
-def test_generation_emits_complete_ordinary_vector_integer_matrix() -> None:
-    instruction_keys = {instruction.key for instruction in ORDINARY_VECTOR_INTEGER_INSTRUCTIONS}
+def _assert_generated_ordinary_vector_instructions(
+    instructions: tuple[OrdinaryVectorInstruction, ...],
+) -> None:
+    instruction_keys = {instruction.key for instruction in instructions}
     packet_rows_by_key = {row.descriptor_key: row for row in _packet_rows() if row.descriptor_key in instruction_keys}
     descriptors_by_key = {descriptor.key: descriptor for descriptor in SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors if descriptor.key in instruction_keys}
 
-    assert len(instruction_keys) == 309
     assert packet_rows_by_key.keys() == instruction_keys
     assert descriptors_by_key.keys() == instruction_keys
 
-    for instruction in ORDINARY_VECTOR_INTEGER_INSTRUCTIONS:
+    for instruction in instructions:
         assert isinstance(instruction.result_type, OrdinaryVectorType)
         assert all(isinstance(operand_type, OrdinaryVectorType) for operand_type in instruction.operand_types)
 
@@ -650,6 +655,16 @@ def test_generation_emits_complete_ordinary_vector_integer_matrix() -> None:
         assert descriptor.feature_mask_words == ((instruction.feature_bits,) if instruction.feature_bits else ())
         assert descriptor.immediates == ()
         assert tuple(operand.reg_alts[0].reg_class for operand in descriptor.operands) == ("spirv.id",) * (len(instruction.operand_types) + 1)
+
+
+def test_generation_emits_complete_ordinary_vector_integer_matrix() -> None:
+    assert len(ORDINARY_VECTOR_INTEGER_INSTRUCTIONS) == 309
+    _assert_generated_ordinary_vector_instructions(ORDINARY_VECTOR_INTEGER_INSTRUCTIONS)
+
+
+def test_generation_emits_complete_ordinary_vector_integer_conversions() -> None:
+    assert len(ORDINARY_VECTOR_INTEGER_CONVERSION_INSTRUCTIONS) == 54
+    _assert_generated_ordinary_vector_instructions(ORDINARY_VECTOR_INTEGER_CONVERSION_INSTRUCTIONS)
 
 
 def test_generation_compacts_only_repeated_four_operand_types() -> None:
