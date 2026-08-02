@@ -916,6 +916,14 @@ def _cooperative_matrix_rules() -> tuple[DescriptorRule, ...]:
     return tuple(rules)
 
 
+def _base_element_index_guards() -> tuple[Guard, ...]:
+    return (
+        Guard.operand_segment_count("indices", 0),
+        Guard.i64_array_count("static_indices", 1),
+        Guard.i64_array_element_range("static_indices", 0, 0, 0),
+    )
+
+
 def _view_load_rule(scalar: StorageBufferScalar) -> DescriptorRule:
     scalar_type = Scalar(scalar.source_type)
     view_type = View(scalar.source_type)
@@ -924,7 +932,7 @@ def _view_load_rule(scalar: StorageBufferScalar) -> DescriptorRule:
         source_op=view.view_load,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 0),
+            *_base_element_index_guards(),
             Guard.value_type("view", view_type),
             Guard.value_type("result", scalar_type),
             *_feature_guards(descriptor),
@@ -951,7 +959,7 @@ def _view_store_rule(scalar: StorageBufferScalar) -> DescriptorRule:
         source_op=view.view_store,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 0),
+            *_base_element_index_guards(),
             Guard.value_type("view", view_type),
             Guard.value_type("value", scalar_type),
             *_feature_guards(descriptor),
@@ -980,7 +988,7 @@ def _view_load_workgroup_rule(scalar: StorageBufferScalar) -> DescriptorRule:
         source_op=view.view_load,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 0),
+            *_base_element_index_guards(),
             Guard.value_type("view", view_type),
             Guard.value_type("result", scalar_type),
             *_feature_guards(descriptor),
@@ -1007,7 +1015,7 @@ def _view_store_workgroup_rule(scalar: StorageBufferScalar) -> DescriptorRule:
         source_op=view.view_store,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 0),
+            *_base_element_index_guards(),
             Guard.value_type("view", view_type),
             Guard.value_type("value", scalar_type),
             *_feature_guards(descriptor),
