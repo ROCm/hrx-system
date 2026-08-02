@@ -201,3 +201,33 @@ func.def target(@target) @int64_operation_requires_target_feature(%lhs: i64, %rh
   %result = scalar.andi %lhs, %rhs : i64
   func.return %result : i64
 }
+
+// ====
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 4}
+
+func.def target(@target) @i64_to_index_requires_s32_proof(%input: i64) -> (index) {
+  // ERROR@+1: SPIRV/026 {source_type="i64", result_type="index", required_range_lo="-2147483648", required_range_hi="2147483647", constraint_key="index_cast.s32_exact"}
+  %result = index.cast %input : i64 to index
+  func.return %result : index
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @index_to_offset_requires_non_negative_proof(%input: index) -> (offset) {
+  // ERROR@+1: SPIRV/026 {source_type="index", result_type="offset", required_range_lo="0", required_range_hi="2147483647", constraint_key="index_cast.offset_non_negative"}
+  %result = index.cast %input : index to offset
+  func.return %result : offset
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @offset_to_index_requires_s32_proof(%input: offset) -> (index) {
+  // ERROR@+1: SPIRV/026 {source_type="offset", result_type="index", required_range_lo="0", required_range_hi="2147483647", constraint_key="index_cast.s32_exact"}
+  %result = index.cast %input : offset to index
+  func.return %result : index
+}

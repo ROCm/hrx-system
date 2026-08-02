@@ -273,7 +273,8 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 2, 1) w
   %linear = OpIAdd %sum, %global_z
   %29 = OpConstant.i32 2
   %byte_index = OpShiftLeftLogical %linear, %29
-  %byte_offset_aligned = OpUConvert.i32.offset64 %byte_index
+  %31 = OpBitcast.i32.u32 %byte_index
+  %byte_offset_aligned = OpUConvert.u32.offset64 %31
   %input_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %byte_offset_aligned
   %loaded = OpLoad.storage_buffer.i32 %input_view
   %output_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %byte_offset_aligned

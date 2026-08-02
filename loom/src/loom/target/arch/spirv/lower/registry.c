@@ -6,13 +6,13 @@
 
 #include <string.h>
 
-#include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
 #include "loom/target/arch/spirv/abi.h"
 #include "loom/target/arch/spirv/contracts/logical_core.h"
 #include "loom/target/arch/spirv/contracts/logical_core_lower_rules.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
+#include "loom/target/arch/spirv/error_catalog.h"
 #include "loom/target/arch/spirv/lower/lower.h"
 #include "loom/target/arch/spirv/lower/matrix.h"
 #include "loom/target/arch/spirv/lower/workgroup.h"
@@ -371,7 +371,7 @@ static iree_status_t loom_spirv_emit_op(void* user_data,
 
 static const loom_low_lower_policy_t kSpirvLowLowerPolicy = {
     .name = IREE_SVL("spirv-logical-lower"),
-    .error_catalog = &loom_error_catalog_core,
+    .error_catalog = &loom_spirv_error_catalog,
     .map_type = {.fn = loom_spirv_map_type, .user_data = NULL},
     .map_value = {.fn = loom_spirv_map_value, .user_data = NULL},
     .map_argument = {.fn = loom_spirv_map_argument, .user_data = NULL},

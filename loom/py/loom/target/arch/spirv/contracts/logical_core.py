@@ -33,6 +33,7 @@ from loom.target.arch.spirv.builtins import (
     BuiltinDimension,
     BuiltinIndexQuery,
 )
+from loom.target.arch.spirv.contracts.index import SPIRV_INDEX_CONVERSION_RULES
 from loom.target.arch.spirv.cooperative_matrix import (
     COOPERATIVE_MATRIX_CASES,
     CooperativeMatrixCase,
@@ -98,7 +99,6 @@ from loom.target.contracts import (
 from loom.target.low_descriptors import Descriptor
 
 _I1 = Scalar("i1")
-_I32 = Scalar("i32")
 _INDEX = Scalar("index")
 _OFFSET = Scalar("offset")
 
@@ -139,47 +139,6 @@ def _descriptor_emit(
         immediates={} if immediates is None else immediates,
         form=DescriptorEmitForm.OP,
         source_memory=source_memory,
-    )
-
-
-def _i32_index_constant_rule() -> DescriptorRule:
-    descriptor = _descriptor("spirv.op_constant.i32")
-    return DescriptorRule(
-        source_op=index.index_constant,
-        descriptor=descriptor,
-        guards=(
-            Guard.attr_kind("value", "i64"),
-            Guard.value_type("result", _INDEX),
-            Guard.i64_range("value", -(2**31), (2**31) - 1),
-        ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                results={"dst": ValueRef.result("result")},
-                immediates={"i32_value": AttrProject.direct("value")},
-                form=DescriptorEmitForm.CONST,
-            ),
-        ),
-    )
-
-
-def _offset_constant_rule() -> DescriptorRule:
-    descriptor = _descriptor("spirv.op_constant.offset64")
-    return DescriptorRule(
-        source_op=index.index_constant,
-        descriptor=descriptor,
-        guards=(
-            Guard.attr_kind("value", "i64"),
-            Guard.value_type("result", _OFFSET),
-        ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                results={"dst": ValueRef.result("result")},
-                immediates={"offset64_value": AttrProject.direct("value")},
-                form=DescriptorEmitForm.CONST,
-            ),
-        ),
     )
 
 
@@ -297,26 +256,6 @@ def _conversion_rule(row: ScalarConversion) -> DescriptorRule:
         guards=(
             Guard.value_type("input", Scalar(row.source_type.source_type)),
             Guard.value_type("result", Scalar(row.result_type.source_type)),
-            *_feature_guards(descriptor),
-        ),
-        emit=(
-            _descriptor_emit(
-                descriptor=descriptor,
-                operands={"input": ValueRef.operand("input")},
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
-def _index_cast_to_offset_rule() -> DescriptorRule:
-    descriptor = _descriptor("spirv.op_uconvert.i32.offset64")
-    return DescriptorRule(
-        source_op=index.index_cast,
-        descriptor=descriptor,
-        guards=(
-            Guard.value_type("input", _INDEX),
-            Guard.value_type("result", _OFFSET),
             *_feature_guards(descriptor),
         ),
         emit=(
@@ -1254,14 +1193,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
     public_header="loom/target/arch/spirv/contracts/logical_core.h",
     cases=(
         *_scalar_constant_rules(),
-        _i32_index_constant_rule(),
-        _offset_constant_rule(),
-        ValueAliasRule(
-            source_op=index.index_assume,
-            source=ValueRef.operand("values"),
-            result=ValueRef.result("results"),
-            guards=(Guard.operand_segment_count("values", 1),),
-        ),
+        *SPIRV_INDEX_CONVERSION_RULES,
         ValueAliasRule(
             source_op=buffer.buffer_assume_alignment,
             source=ValueRef.operand("buffers"),
@@ -1270,7 +1202,6 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         ),
         *_builtin_index_rules(),
         *_conversion_rules(),
-        _index_cast_to_offset_rule(),
         *_scalar_binary_rules(),
         _binary_rule(index.index_add, _INDEX, "spirv.op_iadd.i32"),
         _binary_rule(index.index_sub, _INDEX, "spirv.op_isub.i32"),

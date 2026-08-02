@@ -488,7 +488,7 @@ def _conversion_row(row: ScalarConversion) -> _PacketRow:
     return _PacketRow(
         row.key,
         opcode=row.opcode,
-        form="LOOM_SPIRV_PACKET_FORM_UNARY_CONVERT",
+        form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
         result_type=_alu_scalar_value(row.result_type),
         operand_types=(_alu_scalar_value(row.source_type),),
         result_count=1,
@@ -499,7 +499,7 @@ def _integer_value_view_row(row: IntegerValueViewConversion) -> _PacketRow:
     return _PacketRow(
         row.key,
         opcode="LOOM_SPIRV_OP_BITCAST",
-        form="LOOM_SPIRV_PACKET_FORM_UNARY_CONVERT",
+        form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
         result_type=_alu_scalar_value(row.result_type),
         operand_types=(_alu_scalar_value(row.source_type),),
         result_count=1,
@@ -509,21 +509,32 @@ def _integer_value_view_row(row: IntegerValueViewConversion) -> _PacketRow:
 def _conversion_rows() -> list[_PacketRow]:
     rows = [_conversion_row(row) for row in LOW_SCALAR_CONVERSIONS]
     rows.extend(_integer_value_view_row(row) for row in INTEGER_VALUE_VIEW_CONVERSIONS)
-    rows.append(
-        _PacketRow(
-            "spirv.op_uconvert.i32.offset64",
-            opcode="LOOM_SPIRV_OP_U_CONVERT",
-            form="LOOM_SPIRV_PACKET_FORM_UNARY_CONVERT",
-            result_type=_offset64_value(),
-            operand_types=(
-                _value_type(
-                    "LOOM_SPIRV_VALUE_CLASS_SCALAR",
-                    "LOOM_SPIRV_SCALAR_TYPE_S32",
-                ),
-            ),
-            result_count=1,
+    for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS:
+        scalar = scalar_pair.signed if scalar_pair.bit_width == 64 else scalar_pair.unsigned
+        suffix = scalar.suffix
+        opcode = "LOOM_SPIRV_OP_BITCAST" if scalar_pair.bit_width == 64 else "LOOM_SPIRV_OP_U_CONVERT"
+        descriptor_opcode = "bitcast" if scalar_pair.bit_width == 64 else "uconvert"
+        scalar_value = _alu_scalar_value(scalar)
+        rows.append(
+            _PacketRow(
+                f"spirv.op_{descriptor_opcode}.{suffix}.offset64",
+                opcode=opcode,
+                form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
+                result_type=_offset64_value(),
+                operand_types=(scalar_value,),
+                result_count=1,
+            )
         )
-    )
+        rows.append(
+            _PacketRow(
+                f"spirv.op_{descriptor_opcode}.offset64.{suffix}",
+                opcode=opcode,
+                form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
+                result_type=scalar_value,
+                operand_types=(_offset64_value(),),
+                result_count=1,
+            )
+        )
     return rows
 
 

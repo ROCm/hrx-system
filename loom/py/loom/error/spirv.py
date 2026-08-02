@@ -8,6 +8,14 @@
 
 from loom.errors import ErrorDef, ErrorDomain, ErrorParam, ParamKind, Severity
 
+_TARGET_CONTEXT_PARAMS = (
+    ErrorParam("target_key", ParamKind.STRING),
+    ErrorParam("export_name", ParamKind.STRING),
+    ErrorParam("config_key", ParamKind.STRING),
+    ErrorParam("function_name", ParamKind.STRING),
+    ErrorParam("op_name", ParamKind.STRING),
+)
+
 # ERR_SPIRV_001: SPIR-V ABI value type metadata is malformed.
 ERR_SPIRV_001 = ErrorDef(
     domain=ErrorDomain.SPIRV,
@@ -422,6 +430,33 @@ ERR_SPIRV_025 = ErrorDef(
     ),
 )
 
+# ERR_SPIRV_026: SPIR-V address conversion range is not proven.
+ERR_SPIRV_026 = ErrorDef(
+    domain=ErrorDomain.SPIRV,
+    code=26,
+    severity=Severity.ERROR,
+    summary="SPIR-V address conversion range is not proven.",
+    message=(
+        "SPIR-V target '{target_key}' export '{export_name}' config "
+        "'{config_key}' rejected '{op_name}' in '@{function_name}': "
+        "conversion from {source_type} to {result_type} requires the source "
+        "value to be proven in [{required_range_lo}, {required_range_hi}]; "
+        "constraint '{constraint_key}' is not satisfied"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("source_type", ParamKind.TYPE),
+        ErrorParam("result_type", ParamKind.TYPE),
+        ErrorParam("required_range_lo", ParamKind.I64),
+        ErrorParam("required_range_hi", ParamKind.I64),
+        ErrorParam("constraint_key", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Establish the value range at its producer or with an assumption "
+        "after the corresponding runtime guard"
+    ),
+)
+
 ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_001,
     ERR_SPIRV_002,
@@ -447,4 +482,5 @@ ALL_SPIRV_ERRORS: tuple[ErrorDef, ...] = (
     ERR_SPIRV_023,
     ERR_SPIRV_024,
     ERR_SPIRV_025,
+    ERR_SPIRV_026,
 )

@@ -475,15 +475,27 @@ def test_generation_emits_scalar_conversion_rows() -> None:
     assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_F_CONVERT_F16_F32" in tables
     assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_F_CONVERT_F32_F16" in tables
     assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_BITCAST_I32_F32" in tables
-    assert "LOOM_SPIRV_PACKET_FORM_UNARY_CONVERT" in tables
+    assert "LOOM_SPIRV_PACKET_FORM_UNARY_TYPED" in tables
 
 
-def test_generation_emits_index_to_offset_and_builtin_rows() -> None:
+def test_generation_emits_complete_address_conversion_rows() -> None:
     tables = generate_tables()
 
-    assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_UCONVERT_I32_OFFSET64" in tables
-    assert "LOOM_SPIRV_VALUE_CLASS_OFFSET64" in tables
-    assert "LOOM_SPIRV_OP_U_CONVERT" in tables
+    for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS:
+        scalar = scalar_pair.signed if scalar_pair.bit_width == 64 else scalar_pair.unsigned
+        operation = "bitcast" if scalar_pair.bit_width == 64 else "uconvert"
+        opcode = "LOOM_SPIRV_OP_BITCAST" if scalar_pair.bit_width == 64 else "LOOM_SPIRV_OP_U_CONVERT"
+        expected_feature_mask = (scalar.feature_bits,) if scalar.feature_bits else ()
+        for descriptor_key in (
+            f"spirv.op_{operation}.{scalar.suffix}.offset64",
+            f"spirv.op_{operation}.offset64.{scalar.suffix}",
+        ):
+            row = _generated_row(tables, descriptor_key)
+            assert opcode in row
+            assert "LOOM_SPIRV_PACKET_FORM_UNARY_TYPED" in row
+            assert scalar.scalar_enum in row
+            assert "LOOM_SPIRV_VALUE_CLASS_OFFSET64" in row
+            assert _descriptor(descriptor_key).feature_mask_words == expected_feature_mask
 
     for query in BUILTIN_INDEX_QUERIES:
         for dimension in BUILTIN_DIMENSIONS:

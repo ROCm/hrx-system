@@ -268,6 +268,12 @@ def convert_unary(op: SourceOp, context: MlirConversionContext) -> bool:
 def convert_index_cast(op: SourceOp, context: MlirConversionContext) -> bool:
     if not context.require_top_level(op, "index.cast"):
         return True
+    if op.op_name == "arith.index_castui":
+        context.record_blocked(
+            op.text,
+            "arith.index_castui cannot map to signed Loom index.cast semantics",
+        )
+        return True
     mapped = context.mapped(op.operand())
     if mapped is None:
         context.record_blocked(

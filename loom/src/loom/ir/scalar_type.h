@@ -25,8 +25,9 @@ enum loom_scalar_type_e {
   // Signed target-width integer for loop bounds, dimension sizes, and general
   // indexing arithmetic. Arithmetic follows signed semantics.
   LOOM_SCALAR_TYPE_INDEX = 0,
-  // Unsigned target-width integer for buffer byte offsets and addressing.
-  // Arithmetic follows unsigned semantics. Same bitwidth as index.
+  // Unsigned target-selected-width integer for buffer byte offsets and
+  // addressing. Arithmetic follows unsigned semantics. Its target carrier may
+  // be wider than the index carrier.
   LOOM_SCALAR_TYPE_OFFSET = 1,
   // 1-bit integer. Boolean results (comparisons, predicates).
   LOOM_SCALAR_TYPE_I1 = 2,

@@ -475,7 +475,8 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 2, 1) @
   %linear = OpIAdd %sum, %global_z
   %shift = OpConstant.i32 2
   %byte_index = OpShiftLeftLogical %linear, %shift
-  %byte_offset = OpUConvert.i32.offset64 %byte_index
+  %unsigned_byte_index = OpBitcast.i32.u32 %byte_index
+  %byte_offset = OpUConvert.u32.offset64 %unsigned_byte_index
   %input_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %byte_offset
   %loaded = OpLoad.storage_buffer.i32 %input_view
   %output_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %byte_offset
@@ -504,6 +505,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 2, 1) @
                OpName %linear "linear"
                OpName %shift "shift"
                OpName %byte_index "byte_index"
+               OpName %unsigned_byte_index "unsigned_byte_index"
                OpName %byte_offset "byte_offset"
                OpName %input_view "input_view"
                OpName %loaded "loaded"
@@ -575,12 +577,13 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 2, 1) @
         %sum = OpIAdd %int %workgroup_x %local_y
      %linear = OpIAdd %int %sum %global_z
  %byte_index = OpShiftLeftLogical %int %linear %shift
-%byte_offset = OpUConvert %ulong %byte_index
-         %50 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
- %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %50 %byte_offset
+%unsigned_byte_index = OpBitcast %uint %byte_index
+%byte_offset = OpUConvert %ulong %unsigned_byte_index
+         %51 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %input
+ %input_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %51 %byte_offset
      %loaded = OpLoad %int %input_view Aligned 4
-         %53 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
-%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %53 %byte_offset
+         %54 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %output
+%output_view = OpPtrAccessChain %_ptr_PhysicalStorageBuffer_int %54 %byte_offset
                OpStore %output_view %loaded Aligned 4
                OpReturn
                OpFunctionEnd
