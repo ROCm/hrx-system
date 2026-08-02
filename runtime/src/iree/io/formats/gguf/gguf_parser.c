@@ -65,10 +65,30 @@ enum ggml_type_e {
   GGML_TYPE_Q5_K = 13,
   GGML_TYPE_Q6_K = 14,
   GGML_TYPE_Q8_K = 15,
-  GGML_TYPE_I8 = 16,
-  GGML_TYPE_I16 = 17,
-  GGML_TYPE_I32 = 18,
-  GGML_TYPE_COUNT,
+  GGML_TYPE_IQ2_XXS = 16,
+  GGML_TYPE_IQ2_XS = 17,
+  GGML_TYPE_IQ3_XXS = 18,
+  GGML_TYPE_IQ1_S = 19,
+  GGML_TYPE_IQ4_NL = 20,
+  GGML_TYPE_IQ3_S = 21,
+  GGML_TYPE_IQ2_S = 22,
+  GGML_TYPE_IQ4_XS = 23,
+  GGML_TYPE_I8 = 24,
+  GGML_TYPE_I16 = 25,
+  GGML_TYPE_I32 = 26,
+  GGML_TYPE_I64 = 27,
+  GGML_TYPE_F64 = 28,
+  GGML_TYPE_IQ1_M = 29,
+  GGML_TYPE_BF16 = 30,
+  // Types 31-33 were removed from the GGUF file format.
+  GGML_TYPE_TQ1_0 = 34,
+  GGML_TYPE_TQ2_0 = 35,
+  // Types 36-38 were removed from the GGUF file format.
+  GGML_TYPE_MXFP4 = 39,
+  GGML_TYPE_NVFP4 = 40,
+  GGML_TYPE_Q1_0 = 41,
+  GGML_TYPE_Q2_0 = 42,
+  GGML_TYPE_COUNT = 43,
 };
 typedef uint32_t ggml_type_t;
 
@@ -196,12 +216,27 @@ static const ggml_type_traits_t ggml_type_traits[GGML_TYPE_COUNT] = {
             .blck_size = 1,
             .type_size = sizeof(int32_t),
         },
+    [GGML_TYPE_I64] =
+        {
+            .blck_size = 1,
+            .type_size = sizeof(int64_t),
+        },
     [GGML_TYPE_F32] =
         {
             .blck_size = 1,
             .type_size = sizeof(float),
         },
     [GGML_TYPE_F16] =
+        {
+            .blck_size = 1,
+            .type_size = sizeof(uint16_t),
+        },
+    [GGML_TYPE_F64] =
+        {
+            .blck_size = 1,
+            .type_size = sizeof(double),
+        },
+    [GGML_TYPE_BF16] =
         {
             .blck_size = 1,
             .type_size = sizeof(uint16_t),
@@ -413,18 +448,39 @@ typedef struct iree_io_gguf_parser_t {
 static iree_status_t iree_io_gguf_calculate_storage_size(
     const gguf_tensor_info_t* tensor_info, uint64_t* out_storage_size) {
   *out_storage_size = 0;
-  uint64_t element_count = 1;
-  for (uint32_t i = 0; i < tensor_info->n_dimensions; ++i) {
-    element_count *= tensor_info->dimensions[i];
-  }
-  if (tensor_info->type < 0 || tensor_info->type >= GGML_TYPE_COUNT) {
+  if (tensor_info->type >= GGML_TYPE_COUNT) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "GGML tensor type %d not supported",
                             (int)tensor_info->type);
   }
   const ggml_type_traits_t type_traits = ggml_type_traits[tensor_info->type];
-  *out_storage_size =
-      (element_count * type_traits.type_size) / type_traits.blck_size;
+  if (type_traits.blck_size == 0 || type_traits.type_size == 0) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "GGML tensor type %d not supported",
+                            (int)tensor_info->type);
+  }
+
+  uint64_t element_count = 1;
+  for (uint32_t i = 0; i < tensor_info->n_dimensions; ++i) {
+    if (!iree_checked_mul_u64(element_count, tensor_info->dimensions[i],
+                              &element_count)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "GGML tensor element count overflow");
+    }
+  }
+  if (element_count % (uint64_t)type_traits.blck_size != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "GGML tensor element count %" PRIu64
+                            " is not divisible by type %d block size %d",
+                            element_count, (int)tensor_info->type,
+                            type_traits.blck_size);
+  }
+  const uint64_t block_count = element_count / (uint64_t)type_traits.blck_size;
+  if (!iree_checked_mul_u64(block_count, (uint64_t)type_traits.type_size,
+                            out_storage_size)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "GGML tensor storage size overflow");
+  }
   return iree_ok_status();
 }
 
