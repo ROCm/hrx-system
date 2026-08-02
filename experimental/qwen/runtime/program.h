@@ -7,7 +7,7 @@
 #ifndef EXPERIMENTAL_QWEN_RUNTIME_PROGRAM_H_
 #define EXPERIMENTAL_QWEN_RUNTIME_PROGRAM_H_
 
-#include "experimental/qwen/runtime/model.h"
+#include "experimental/qwen/runtime/request.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 
@@ -22,9 +22,6 @@ extern "C" {
 // The caller externally synchronizes issue operations on the same program;
 // callers requiring concurrent issues create another program object.
 typedef struct qwen_program_t qwen_program_t;
-
-// Forward declaration of request state consumed by a program issue.
-typedef struct qwen_request_t qwen_request_t;
 
 // Mathematical scope recorded into a program.
 typedef enum qwen_program_kind_e {
@@ -56,6 +53,8 @@ typedef struct qwen_program_options_t {
   iree_host_size_t token_capacity;
   // Request K/V storage capacity compatible with this program.
   iree_host_size_t context_capacity;
+  // Optional request storage behavior addressed by the recorded program.
+  qwen_request_flags_t request_flags;
   // HAL command-buffer mode used for recording and profiling.
   iree_hal_command_buffer_mode_t command_buffer_mode;
 } qwen_program_options_t;
@@ -91,6 +90,9 @@ IREE_API_EXPORT void qwen_program_retain(qwen_program_t* program);
 IREE_API_EXPORT void qwen_program_release(qwen_program_t* program);
 
 // Issues |program| against compatible |request| state.
+//
+// Model identity, storage capacities, and optional request flags must exactly
+// match the values used to prepare the program.
 //
 // The issue waits for model residency, request readiness, and every caller
 // semaphore. It queue-allocates transient storage, initializes any
