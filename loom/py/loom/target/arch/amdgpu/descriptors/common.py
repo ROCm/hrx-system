@@ -78,6 +78,7 @@ from loom.target.low_descriptors import (
     DescriptorAsmSurface,
     DescriptorCategory,
     DescriptorFlag,
+    DescriptorOpKind,
     DescriptorSet,
     Effect,
     EffectFlag,
@@ -1672,6 +1673,7 @@ def _s_mov_b32_contract_overlay() -> AmdgpuDescriptorOverlay:
         semantic_tag="integer.const.u32",
         schedule_class=_SCHEDULE_SALU,
         operands=(AmdgpuOperandOverlay("SDST", _sgpr_result()),),
+        op_kind=DescriptorOpKind.CONST,
         asm_forms=_asm(results=("dst",), immediates=("imm32",)),
         immediates=(_U32_IMMEDIATE,),
         constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
@@ -1692,6 +1694,7 @@ def _manual_scalar_descriptors(
             mnemonic="s_mov_b32",
             semantic_tag="integer.const.u32",
             operands=(_sgpr_result(),),
+            op_kind=DescriptorOpKind.CONST,
             immediates=(_U32_IMMEDIATE,),
             asm_forms=_asm(results=("dst",), immediates=("imm32",)),
             schedule_class=_SCHEDULE_SALU,
@@ -1705,6 +1708,7 @@ def _manual_scalar_descriptors(
             mnemonic="s_mov_b32",
             semantic_tag="predicate.vcc.const.u32",
             operands=(_vcc_result("mask"),),
+            op_kind=DescriptorOpKind.CONST,
             immediates=(_LITERAL_U32_IMMEDIATE,),
             encoding_field_values=(
                 EncodingFieldValue(
@@ -1793,6 +1797,7 @@ def _manual_scalar_descriptors(
             mnemonic="s_mov_b32",
             semantic_tag="special.m0.const.u32",
             operands=(_m0_result(),),
+            op_kind=DescriptorOpKind.CONST,
             immediates=(_U32_IMMEDIATE,),
             encoding_field_values=(
                 EncodingFieldValue(
@@ -3070,6 +3075,7 @@ __all__ = (
     "DescriptorAsmSurface",
     "DescriptorCategory",
     "DescriptorFlag",
+    "DescriptorOpKind",
     "DescriptorSet",
     "Effect",
     "EffectFlag",

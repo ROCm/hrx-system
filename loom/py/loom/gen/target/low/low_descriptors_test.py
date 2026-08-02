@@ -1254,6 +1254,7 @@ def test_generate_test_low_core_descriptor_set() -> None:
     assert '"test.low"' in generated.source
     assert '"test.spv.op_iadd.i32"' in generated.source
     assert '"OpIAdd"' in generated.source
+    assert ".op_kind = LOOM_LOW_DESCRIPTOR_OP_KIND_CONST," in generated.source
     assert (".instruction_class_flags = LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_ALU") in generated.source
 
 
@@ -1381,6 +1382,89 @@ def test_generator_rejects_asm_form_result_with_operand_role() -> None:
     with pytest.raises(
         ValueError,
         match=re.escape("descriptor 'test.add.i32' asm form 'test.add.i32' result field 'lhs' names a non-result operand"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_generator_rejects_low_const_with_no_result() -> None:
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        operands=(),
+        asm_forms=(AsmForm(),),
+        constraints=(),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' uses low.const but declares 0 results instead of exactly one"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_generator_rejects_low_const_with_packet_operand() -> None:
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        operands=(
+            TEST_LOW_CONST_I32_DESCRIPTOR.operands[0],
+            TEST_LOW_ADD_I32_DESCRIPTOR.operands[1],
+        ),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' uses low.const but declares packet operands"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_generator_accepts_low_const_with_implicit_schedule_state() -> None:
+    result = TEST_LOW_CONST_I32_DESCRIPTOR.operands[0]
+    schedule_state = replace(
+        result,
+        field_name="exec_in",
+        role=OperandRole.IMPLICIT,
+        flags=(
+            OperandFlag.IMPLICIT,
+            OperandFlag.STATE_READ,
+            OperandFlag.SCHEDULE_ONLY_STATE,
+        ),
+    )
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        operands=(result, schedule_state),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    generate_descriptor_set(descriptor_set)
+
+
+def test_generator_rejects_effectful_low_const() -> None:
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        constraints=(),
+        effects=(Effect(EffectKind.CONVERGENT),),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' uses low.const but declares effects"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_generator_rejects_low_const_asm_operand() -> None:
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        asm_forms=(AsmForm(results=("dst",), operands=("dst",)),),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.const.i32' low.const asm form 'test.const.i32' must expose exactly one result and no operands"),
     ):
         generate_descriptor_set(descriptor_set)
 

@@ -232,6 +232,34 @@ static iree_string_view_t loom_low_verify_string_or_empty(
   return module->strings.entries[string_id];
 }
 
+static iree_string_view_t loom_low_verify_descriptor_op_name(
+    loom_low_descriptor_op_kind_t op_kind) {
+  switch (op_kind) {
+    case LOOM_LOW_DESCRIPTOR_OP_KIND_OP:
+      return IREE_SV("low.op");
+    case LOOM_LOW_DESCRIPTOR_OP_KIND_CONST:
+      return IREE_SV("low.const");
+  }
+  IREE_ASSERT_UNREACHABLE("invalid descriptor operation kind");
+  IREE_BUILTIN_UNREACHABLE();
+}
+
+static iree_status_t loom_low_verify_emit_packet_op_kind_mismatch(
+    loom_low_function_verify_state_t* function_state, const loom_op_t* op,
+    iree_string_view_t descriptor_key, uint16_t descriptor_attr_index,
+    iree_string_view_t actual_op_name, iree_string_view_t expected_op_name) {
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(function_state->function_name),
+      loom_param_with_field_ref(
+          loom_param_string(descriptor_key),
+          loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE,
+                                    descriptor_attr_index)),
+      loom_param_string(actual_op_name),
+      loom_param_string(expected_op_name),
+  };
+  return loom_low_verify_emit(function_state->state, op, LOOM_ERR_STRUCTURE_039,
+                              params, IREE_ARRAYSIZE(params), NULL, 0);
+}
 static iree_status_t loom_low_verify_emit_missing_immediate(
     loom_low_function_verify_state_t* function_state, const loom_op_t* op,
     iree_string_view_t descriptor_key, uint16_t descriptor_attr_index,
@@ -1620,6 +1648,16 @@ static iree_status_t loom_low_verify_packet(
   const uint16_t descriptor_attr_index =
       loom_low_descriptor_packet_attribute_index(packet);
   const loom_low_descriptor_t* descriptor = packet->descriptor;
+  const iree_string_view_t actual_op_name =
+      loom_op_name(function_state->state->module, op);
+  const iree_string_view_t expected_op_name =
+      loom_low_verify_descriptor_op_name(descriptor->op_kind);
+  if (!iree_string_view_equal(actual_op_name, expected_op_name)) {
+    IREE_RETURN_IF_ERROR(loom_low_verify_emit_packet_op_kind_mismatch(
+        function_state, op, descriptor_key, descriptor_attr_index,
+        actual_op_name, expected_op_name));
+    return loom_low_verify_define_full_register_results(function_state, op);
+  }
   if (descriptor->result_count > descriptor->operand_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low descriptor '%.*s' has %" PRIu16

@@ -59,6 +59,54 @@ llvmir.target<object> @target {
   triple = "loom-direct64-unknown-none",
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
+func.def target(@target) @i32_bitfield_extractu_full_width_alias(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %loaded = vector.load %input_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %bits = vector.bitfield.extractu %loaded {offset = 0, width = 32} : vector<1xi32> -> vector<1xi32>
+  vector.store %bits, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_bitfield_extractu_full_width_alias(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
+  %bits = load.i32 %input_view, 0
+  store.i32 %bits, %output_view, 0
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32_bitfield_extracts_top_aligned(%input: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %loaded = vector.load %input_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %nibble = vector.bitfield.extracts %loaded {offset = 28, width = 4} : vector<1xi32> -> vector<1xi32>
+  vector.store %nibble, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_bitfield_extracts_top_aligned(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
+  %14 = load.i32 %input_view, 0
+  %15 = const.i32 28
+  %nibble = ashr.i32 %14, %15
+  store.i32 %nibble, %output_view, 0
+  return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
 func.def target(@target) @i32_bitfield_insert(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
   %zero = index.constant 0 : offset
   %field_view = buffer.view %field_buffer[%zero] : buffer -> view<1xi32, #dense>
@@ -84,6 +132,56 @@ low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_bitf
   %inserted = or.i32 %34, %32
   store.i32 %inserted, %output_view, 0
   return
+}
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32_bitfield_insert_offset0(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %field_view = buffer.view %field_buffer[%zero] : buffer -> view<1xi32, #dense>
+  %base_view = buffer.view %base_buffer[%zero] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %field = vector.load %field_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %base = vector.load %base_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %inserted = vector.bitfield.insert %field into %base {offset = 0, width = 4} : vector<1xi32>, vector<1xi32>
+  vector.store %inserted, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  func.return
+}
+
+// ----
+low.func.def target<llvmir.generic.core>(@target) abi(object_function) @i32_bitfield_insert_offset0(%field_view: reg<llvmir.ptr>, %base_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>) asm {
+  %25 = load.i32 %field_view, 0
+  %26 = load.i32 %base_view, 0
+  %27 = const.i32 15
+  %28 = and.i32 %25, %27
+  %29 = const.i32 -16
+  %30 = and.i32 %26, %29
+  %inserted = or.i32 %30, %28
+  store.i32 %inserted, %output_view, 0
+  return
+}
+
+// ====
+
+// XFAIL: LLVMIR full-width vector bitfield insert legalization is unsupported
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @i32_bitfield_insert_full_width_alias(%field_buffer: buffer, %base_buffer: buffer, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %field_view = buffer.view %field_buffer[%zero] : buffer -> view<1xi32, #dense>
+  %base_view = buffer.view %base_buffer[%zero] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %field = vector.load %field_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %base = vector.load %base_view[0] : view<1xi32, #dense> -> vector<1xi32>
+  %inserted = vector.bitfield.insert %field into %base {offset = 0, width = 32} : vector<1xi32>, vector<1xi32>
+  vector.store %inserted, %output_view[0] : vector<1xi32>, view<1xi32, #dense>
+  func.return
 }
 
 // ====

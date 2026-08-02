@@ -16,6 +16,7 @@ from loom.dialect.kernel import ALL_KERNEL_OPS
 from loom.dialect.kernel import defs as kernel
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
+from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.scf import ALL_SCF_OPS
@@ -38,8 +39,11 @@ from loom.target.arch.spirv.cooperative_matrix import (
 )
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
 from loom.target.arch.spirv.scalar_alu import (
+    BOOLEAN_BINARY_OPERATIONS,
+    BOOLEAN_CONSTANTS,
     FLOAT_BINARY_OPERATIONS,
     FLOAT_SCALAR_ALU_TYPES,
+    INTEGER_BITWISE_BINARY_OPERATIONS,
     INTEGER_SCALAR_ALU_TYPE_PAIRS,
     OFFSET64_ALU_TYPE,
     OFFSET64_COMPARE_PREDICATES,
@@ -49,6 +53,7 @@ from loom.target.arch.spirv.scalar_alu import (
     SIGNED_INTEGER_SCALAR_ALU_TYPES,
     UNSIGNED_INTEGER_BINARY_OPERATIONS,
     UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES,
+    BooleanConstant,
     IntegerAluTypePair,
     IntegerComparePredicate,
     ScalarAluType,
@@ -178,24 +183,56 @@ def _offset_constant_rule() -> DescriptorRule:
     )
 
 
-def _i32_constant_rule(source_op: Op) -> DescriptorRule:
-    descriptor = _descriptor("spirv.op_constant.i32")
+def _integer_constant_rule(scalar_pair: IntegerAluTypePair) -> DescriptorRule:
+    scalar = scalar_pair.signed
+    descriptor = _descriptor(f"spirv.op_constant.{scalar.suffix}")
+    immediate_name = f"{scalar_pair.source_type}_value"
     return DescriptorRule(
-        source_op=source_op,
+        source_op=scalar_conversion.scalar_constant,
         descriptor=descriptor,
         guards=(
             Guard.attr_kind("value", "i64"),
-            Guard.value_type("result", _I32),
-            Guard.i64_range("value", -(2**31), (2**31) - 1),
+            Guard.value_type("result", Scalar(scalar_pair.source_type)),
+            Guard.i64_range(
+                "value",
+                scalar_pair.signed_minimum,
+                scalar_pair.signed_maximum,
+            ),
         ),
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
                 results={"dst": ValueRef.result("result")},
-                immediates={"i32_value": AttrProject.direct("value")},
+                immediates={immediate_name: AttrProject.direct("value")},
                 form=DescriptorEmitForm.CONST,
             ),
         ),
+    )
+
+
+def _boolean_constant_rule(row: BooleanConstant) -> DescriptorRule:
+    descriptor = _descriptor(f"spirv.op_constant_{row.descriptor_suffix}.bool")
+    return DescriptorRule(
+        source_op=scalar_conversion.scalar_constant,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("result", _I1),
+            Guard.value_i64_range("result", row.value, row.value),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.CONST,
+            ),
+        ),
+    )
+
+
+def _scalar_constant_rules() -> tuple[DescriptorRule, ...]:
+    return tuple(_boolean_constant_rule(row) for row in BOOLEAN_CONSTANTS) + tuple(
+        _integer_constant_rule(scalar_pair)
+        for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS
     )
 
 
@@ -879,6 +916,14 @@ def _cooperative_matrix_rules() -> tuple[DescriptorRule, ...]:
     return tuple(rules)
 
 
+def _base_element_index_guards() -> tuple[Guard, ...]:
+    return (
+        Guard.operand_segment_count("indices", 0),
+        Guard.i64_array_count("static_indices", 1),
+        Guard.i64_array_element_range("static_indices", 0, 0, 0),
+    )
+
+
 def _view_load_rule(scalar: StorageBufferScalar) -> DescriptorRule:
     scalar_type = Scalar(scalar.source_type)
     view_type = View(scalar.source_type)
@@ -887,7 +932,7 @@ def _view_load_rule(scalar: StorageBufferScalar) -> DescriptorRule:
         source_op=view.view_load,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 0),
+            *_base_element_index_guards(),
             Guard.value_type("view", view_type),
             Guard.value_type("result", scalar_type),
             *_feature_guards(descriptor),
@@ -914,7 +959,7 @@ def _view_store_rule(scalar: StorageBufferScalar) -> DescriptorRule:
         source_op=view.view_store,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 0),
+            *_base_element_index_guards(),
             Guard.value_type("view", view_type),
             Guard.value_type("value", scalar_type),
             *_feature_guards(descriptor),
@@ -943,7 +988,7 @@ def _view_load_workgroup_rule(scalar: StorageBufferScalar) -> DescriptorRule:
         source_op=view.view_load,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 0),
+            *_base_element_index_guards(),
             Guard.value_type("view", view_type),
             Guard.value_type("result", scalar_type),
             *_feature_guards(descriptor),
@@ -970,7 +1015,7 @@ def _view_store_workgroup_rule(scalar: StorageBufferScalar) -> DescriptorRule:
         source_op=view.view_store,
         descriptor=descriptor,
         guards=(
-            Guard.operand_segment_count("indices", 0),
+            *_base_element_index_guards(),
             Guard.value_type("view", view_type),
             Guard.value_type("value", scalar_type),
             *_feature_guards(descriptor),
@@ -1042,6 +1087,15 @@ _INTEGER_BINARY_SOURCE_OPS = {
     "remsi": scalar_arithmetic.scalar_remsi,
 }
 
+_BITWISE_BINARY_SOURCE_OPS = {
+    "andi": scalar_bitwise.scalar_andi,
+    "ori": scalar_bitwise.scalar_ori,
+    "xori": scalar_bitwise.scalar_xori,
+    "shli": scalar_bitwise.scalar_shli,
+    "shrsi": scalar_bitwise.scalar_shrsi,
+    "shrui": scalar_bitwise.scalar_shrui,
+}
+
 _FLOAT_BINARY_SOURCE_OPS = {
     "addf": scalar_arithmetic.scalar_addf,
     "subf": scalar_arithmetic.scalar_subf,
@@ -1092,6 +1146,11 @@ def _scalar_binary_rules() -> tuple[DescriptorRule, ...]:
         for operation in SIGNED_INTEGER_BINARY_OPERATIONS
     ]
     rules.extend(
+        _scalar_binary_rule(scalar, operation, _BITWISE_BINARY_SOURCE_OPS)
+        for scalar in SIGNED_INTEGER_SCALAR_ALU_TYPES
+        for operation in INTEGER_BITWISE_BINARY_OPERATIONS
+    )
+    rules.extend(
         _unsigned_binary_rule(scalar_pair, operation)
         for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS
         for operation in UNSIGNED_INTEGER_BINARY_OPERATIONS
@@ -1100,6 +1159,14 @@ def _scalar_binary_rules() -> tuple[DescriptorRule, ...]:
         _scalar_binary_rule(scalar, operation, _FLOAT_BINARY_SOURCE_OPS)
         for scalar in FLOAT_SCALAR_ALU_TYPES
         for operation in FLOAT_BINARY_OPERATIONS
+    )
+    rules.extend(
+        _binary_rule(
+            _BITWISE_BINARY_SOURCE_OPS[operation.source_op_key],
+            _I1,
+            f"spirv.op_{operation.descriptor_suffix}.bool",
+        )
+        for operation in BOOLEAN_BINARY_OPERATIONS
     )
     return tuple(rules)
 
@@ -1165,6 +1232,7 @@ def _select_rules() -> tuple[DescriptorRule, ...]:
         _select_rule(_scalar_type_pattern(scalar), f"spirv.op_select.{scalar.suffix}")
         for scalar in SCALAR_ALU_TYPES
     ]
+    rules.append(_select_rule(_I1, "spirv.op_select.bool"))
     rules.append(_select_rule(_INDEX, "spirv.op_select.i32"))
     rules.append(_select_rule(_OFFSET, f"spirv.op_select.{OFFSET64_ALU_TYPE.suffix}"))
     return tuple(rules)
@@ -1185,7 +1253,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
     descriptor_set=SPIRV_LOGICAL_CORE_DESCRIPTOR_SET,
     public_header="loom/target/arch/spirv/contracts/logical_core.h",
     cases=(
-        _i32_constant_rule(scalar_conversion.scalar_constant),
+        *_scalar_constant_rules(),
         _i32_index_constant_rule(),
         _offset_constant_rule(),
         ValueAliasRule(

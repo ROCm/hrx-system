@@ -448,6 +448,26 @@ static iree_status_t loom_spirv_emit_integer_constant_packet(
                                               row->result_type);
 }
 
+static iree_status_t loom_spirv_emit_boolean_constant_packet(
+    loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
+    const loom_spirv_packet_row_t* row) {
+  uint32_t type_id = 0;
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_type_id_for_value_type(
+      state->type_context, row->result_type, &type_id));
+  uint32_t result_id = 0;
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_prepare_packet_result(
+      state, packet, type_id, row->result_type, &result_id));
+  const uint32_t operands[] = {
+      type_id,
+      result_id,
+  };
+  IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
+      loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_DECLARATION),
+      row->opcode, operands, IREE_ARRAYSIZE(operands)));
+  return loom_spirv_emit_define_packet_result(state, packet, result_id, type_id,
+                                              row->result_type);
+}
+
 static iree_status_t loom_spirv_emit_binary_same_type_packet(
     loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
@@ -891,6 +911,8 @@ static iree_status_t loom_spirv_emit_descriptor_packet(
   switch (row->form) {
     case LOOM_SPIRV_PACKET_FORM_INTEGER_CONSTANT:
       return loom_spirv_emit_integer_constant_packet(state, packet, row);
+    case LOOM_SPIRV_PACKET_FORM_BOOLEAN_CONSTANT:
+      return loom_spirv_emit_boolean_constant_packet(state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_BINARY_SAME_TYPE:
       return loom_spirv_emit_binary_same_type_packet(state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_UNARY_CONVERT:

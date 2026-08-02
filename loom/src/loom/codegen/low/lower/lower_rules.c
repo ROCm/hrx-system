@@ -1559,6 +1559,10 @@ static bool loom_low_lower_source_memory_matches(
        access.minimum_alignment < source_memory->minimum_alignment) ||
       access.cache_policy.build_flags !=
           source_memory->cache_policy_build_flags ||
+      (iree_any_bit_set(
+           source_memory->flags,
+           LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_PRESERVE_SOURCE_INDEX) &&
+       access.source_index_static_offset_extracted) ||
       (source_memory->dynamic_view_base_term_count !=
            LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_VIEW_BASE_TERM_COUNT_ANY &&
        access.dynamic_view_base_term_count !=

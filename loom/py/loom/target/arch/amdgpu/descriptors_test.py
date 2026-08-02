@@ -22,6 +22,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _ADDRESS_OFFSET_DWORD_STRIDE64_ENCODING_ID,
     _AMDGPU_CDNA3_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_CDNA4_CORE_DESCRIPTOR_SET_BASE,
+    _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS,
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
     _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
     _AMDGPU_GFX9_4_GENERIC_MATRIX_TIMINGS,
@@ -97,6 +98,7 @@ from loom.target.arch.amdgpu.descriptors import (
     AmdgpuAtomicOperationKind,
     AmdgpuAtomicValueKind,
     AmdgpuMemoryAddressForm,
+    _amdgpu_contract_descriptor_from_overlay,
     _amdgpu_core_descriptor_set,
     _amdgpu_core_descriptor_set_bases,
     _amdgpu_core_descriptor_set_intersection,
@@ -198,6 +200,13 @@ from loom.target.low_descriptors import (
     StorageLeaseFlag,
     StorageLeaseKind,
 )
+
+
+def test_contract_descriptor_projection_preserves_operation_kind() -> None:
+    for overlay_builder in _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS.values():
+        overlay = overlay_builder()
+        descriptor = _amdgpu_contract_descriptor_from_overlay(overlay)
+        assert descriptor.op_kind is overlay.op_kind
 
 
 def test_generic_descriptor_contracts_are_member_intersections() -> None:

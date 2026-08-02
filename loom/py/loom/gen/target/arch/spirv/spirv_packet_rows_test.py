@@ -6,10 +6,98 @@
 
 from __future__ import annotations
 
-from loom.gen.target.arch.spirv.spirv_packet_rows import _descriptor_ref_constant_name, generate_tables
+import re
+from dataclasses import replace
+
+import pytest
+
+from loom.gen.target.arch.spirv.spirv_packet_rows import (
+    _PACKETLESS_DESCRIPTOR_KEYS,
+    _descriptor_ref_constant_name,
+    _packet_rows,
+    _PacketRow,
+    _validate_rows,
+    generate_tables,
+)
 from loom.target.arch.spirv.builtins import BUILTIN_DIMENSIONS, BUILTIN_INDEX_QUERIES
 from loom.target.arch.spirv.cooperative_matrix import cooperative_matrix_descriptor_key
+from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
+from loom.target.arch.spirv.scalar_alu import (
+    BOOLEAN_BINARY_OPERATIONS,
+    BOOLEAN_CONSTANTS,
+    INTEGER_BITWISE_BINARY_OPERATIONS,
+    INTEGER_SCALAR_ALU_TYPE_PAIRS,
+    SIGNED_INTEGER_COMPARE_PREDICATES,
+    UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES,
+)
 from loom.target.arch.spirv.scalar_memory import STORAGE_BUFFER_SCALARS
+from loom.target.low_descriptors import Descriptor
+
+
+def _expect_row_validation_error(rows: tuple[_PacketRow, ...], expected_message: str) -> None:
+    with pytest.raises(ValueError, match=re.escape(expected_message)):
+        _validate_rows(rows)
+
+
+def _row_index(rows: tuple[_PacketRow, ...], descriptor_key: str) -> int:
+    for index, row in enumerate(rows):
+        if row.descriptor_key == descriptor_key:
+            return index
+    raise AssertionError(f"missing packet-row fixture '{descriptor_key}'")
+
+
+def test_validation_rejects_duplicate_packet_descriptor_keys() -> None:
+    rows = _packet_rows()
+    i32_constant_index = _row_index(rows, "spirv.op_constant.i32")
+
+    _expect_row_validation_error(
+        (*rows, rows[i32_constant_index]),
+        "SPIR-V packet descriptor keys must be unique: spirv.op_constant.i32",
+    )
+
+
+def test_validation_rejects_packet_rows_without_descriptors() -> None:
+    rows = _packet_rows()
+    rows_with_unknown_descriptor = (
+        replace(rows[0], descriptor_key="spirv.op_missing.test"),
+        *rows[1:],
+    )
+
+    _expect_row_validation_error(
+        rows_with_unknown_descriptor,
+        "SPIR-V packet rows reference missing descriptors: spirv.op_missing.test",
+    )
+
+
+def test_validation_rejects_descriptors_without_packet_rows() -> None:
+    rows = _packet_rows()
+    i32_constant_index = _row_index(rows, "spirv.op_constant.i32")
+    rows_without_i32_constant = (
+        *rows[:i32_constant_index],
+        *rows[i32_constant_index + 1 :],
+    )
+
+    _expect_row_validation_error(
+        rows_without_i32_constant,
+        "SPIR-V descriptors are missing packet rows: spirv.op_constant.i32",
+    )
+
+
+def test_validation_preserves_the_deliberate_packetless_descriptor() -> None:
+    assert _PACKETLESS_DESCRIPTOR_KEYS == frozenset({"spirv.op_variable.function.ptr"})
+    rows = _packet_rows()
+    rows_with_packetless_descriptor = (
+        replace(
+            rows[0],
+            descriptor_key="spirv.op_variable.function.ptr",
+        ),
+        *rows[1:],
+    )
+
+    _expect_row_validation_error(
+        rows_with_packetless_descriptor,
+        "SPIR-V packetless descriptors must not have packet rows: spirv.op_variable.function.ptr",
+    )
 
 
 def _generated_row(tables: str, descriptor_key: str) -> str:
@@ -17,6 +105,13 @@ def _generated_row(tables: str, descriptor_key: str) -> str:
     start = tables.index(marker)
     end = tables.index("\n        },", start)
     return tables[start:end]
+
+
+def _descriptor(descriptor_key: str) -> Descriptor:
+    for descriptor in SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors:
+        if descriptor.key == descriptor_key:
+            return descriptor
+    raise AssertionError(f"missing descriptor fixture '{descriptor_key}'")
 
 
 def _cooperative_matrix_descriptor(
@@ -199,6 +294,154 @@ def test_generation_emits_coordinate_arithmetic_packet_rows() -> None:
     assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_SHIFT_LEFT_LOGICAL_I32" in tables
     assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_ISUB_OFFSET64" in tables
     assert "LOOM_SPIRV_PACKET_FORM_INTEGER_MUL_ADD" in tables
+
+
+def test_generation_emits_complete_integer_boolean_packet_matrix() -> None:
+    tables = generate_tables()
+    assert tuple(
+        (
+            row.source_type,
+            row.bit_width,
+            row.signed.suffix,
+            row.signed.scalar_enum,
+            row.signed.feature_atoms,
+            row.unsigned.suffix,
+            row.unsigned.scalar_enum,
+            row.unsigned.feature_atoms,
+        )
+        for row in INTEGER_SCALAR_ALU_TYPE_PAIRS
+    ) == (
+        ("i8", 8, "i8", "LOOM_SPIRV_SCALAR_TYPE_S8", ("int8",), "u8", "LOOM_SPIRV_SCALAR_TYPE_U8", ("int8",)),
+        ("i16", 16, "i16", "LOOM_SPIRV_SCALAR_TYPE_S16", ("int16",), "u16", "LOOM_SPIRV_SCALAR_TYPE_U16", ("int16",)),
+        ("i32", 32, "i32", "LOOM_SPIRV_SCALAR_TYPE_S32", (), "u32", "LOOM_SPIRV_SCALAR_TYPE_U32", ()),
+        ("i64", 64, "i64", "LOOM_SPIRV_SCALAR_TYPE_S64", ("int64",), "u64", "LOOM_SPIRV_SCALAR_TYPE_U64", ("int64",)),
+    )
+    assert tuple(
+        (
+            row.source_op_key,
+            row.descriptor_suffix,
+            row.mnemonic,
+            row.opcode,
+        )
+        for row in INTEGER_BITWISE_BINARY_OPERATIONS
+    ) == (
+        ("andi", "bitwise_and", "OpBitwiseAnd", "LOOM_SPIRV_OP_BITWISE_AND"),
+        ("ori", "bitwise_or", "OpBitwiseOr", "LOOM_SPIRV_OP_BITWISE_OR"),
+        ("xori", "bitwise_xor", "OpBitwiseXor", "LOOM_SPIRV_OP_BITWISE_XOR"),
+        ("shli", "shift_left_logical", "OpShiftLeftLogical", "LOOM_SPIRV_OP_SHIFT_LEFT_LOGICAL"),
+        ("shrsi", "shift_right_arithmetic", "OpShiftRightArithmetic", "LOOM_SPIRV_OP_SHIFT_RIGHT_ARITHMETIC"),
+        ("shrui", "shift_right_logical", "OpShiftRightLogical", "LOOM_SPIRV_OP_SHIFT_RIGHT_LOGICAL"),
+    )
+    assert tuple(
+        (
+            row.source_op_key,
+            row.descriptor_suffix,
+            row.mnemonic,
+            row.opcode,
+        )
+        for row in BOOLEAN_BINARY_OPERATIONS
+    ) == (
+        ("andi", "logical_and", "OpLogicalAnd", "LOOM_SPIRV_OP_LOGICAL_AND"),
+        ("ori", "logical_or", "OpLogicalOr", "LOOM_SPIRV_OP_LOGICAL_OR"),
+        ("xori", "logical_not_equal", "OpLogicalNotEqual", "LOOM_SPIRV_OP_LOGICAL_NOT_EQUAL"),
+    )
+    assert tuple((row.value, row.descriptor_suffix, row.mnemonic, row.opcode) for row in BOOLEAN_CONSTANTS) == (
+        (0, "false", "OpConstantFalse", "LOOM_SPIRV_OP_CONSTANT_FALSE"),
+        (1, "true", "OpConstantTrue", "LOOM_SPIRV_OP_CONSTANT_TRUE"),
+    )
+
+    for constant in BOOLEAN_CONSTANTS:
+        descriptor_key = f"spirv.op_constant_{constant.descriptor_suffix}.bool"
+        row = _generated_row(
+            tables,
+            descriptor_key,
+        )
+        assert constant.opcode in row
+        assert "LOOM_SPIRV_PACKET_FORM_BOOLEAN_CONSTANT" in row
+        assert "LOOM_SPIRV_VALUE_CLASS_BOOL" in row
+        descriptor = _descriptor(descriptor_key)
+        assert descriptor.mnemonic == f"{constant.mnemonic}.bool"
+        assert descriptor.feature_mask_words == ()
+
+    for operation in BOOLEAN_BINARY_OPERATIONS:
+        descriptor_key = f"spirv.op_{operation.descriptor_suffix}.bool"
+        row = _generated_row(
+            tables,
+            descriptor_key,
+        )
+        assert operation.opcode in row
+        assert row.count("LOOM_SPIRV_VALUE_CLASS_BOOL") == 3
+        descriptor = _descriptor(descriptor_key)
+        assert descriptor.mnemonic == f"{operation.mnemonic}.bool"
+        assert descriptor.feature_mask_words == ()
+
+    for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS:
+        signed = scalar_pair.signed
+        expected_feature_mask = (signed.feature_bits,) if signed.feature_bits else ()
+        constant_descriptor_key = f"spirv.op_constant.{signed.suffix}"
+        constant_row = _generated_row(
+            tables,
+            constant_descriptor_key,
+        )
+        assert signed.scalar_enum in constant_row
+        assert f".literal_word_count = {scalar_pair.literal_word_count}" in constant_row
+        constant_descriptor = _descriptor(constant_descriptor_key)
+        assert constant_descriptor.mnemonic == f"OpConstant.{signed.suffix}"
+        assert constant_descriptor.feature_mask_words == expected_feature_mask
+        assert len(constant_descriptor.immediates) == 1
+        constant_immediate = constant_descriptor.immediates[0]
+        assert constant_immediate.field_name == f"{scalar_pair.source_type}_value"
+        assert constant_immediate.bit_width == scalar_pair.bit_width
+        assert constant_immediate.signed_min == scalar_pair.signed_minimum
+        assert constant_immediate.unsigned_max == scalar_pair.signed_maximum
+
+        for operation in INTEGER_BITWISE_BINARY_OPERATIONS:
+            descriptor_key = f"spirv.op_{operation.descriptor_suffix}.{signed.suffix}"
+            operation_row = _generated_row(
+                tables,
+                descriptor_key,
+            )
+            assert operation.opcode in operation_row
+            assert operation_row.count(signed.scalar_enum) == 3
+            descriptor = _descriptor(descriptor_key)
+            expected_mnemonic = operation.mnemonic if signed.suffix == "i32" else f"{operation.mnemonic}.{signed.suffix}"
+            assert descriptor.mnemonic == expected_mnemonic
+            assert descriptor.feature_mask_words == expected_feature_mask
+
+        for predicate in SIGNED_INTEGER_COMPARE_PREDICATES:
+            descriptor_key = f"spirv.op_{predicate.descriptor_suffix}.{signed.suffix}"
+            compare_row = _generated_row(
+                tables,
+                descriptor_key,
+            )
+            assert predicate.opcode in compare_row
+            assert compare_row.count(signed.scalar_enum) == 2
+            descriptor = _descriptor(descriptor_key)
+            assert descriptor.feature_mask_words == expected_feature_mask
+
+        for predicate in UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES:
+            descriptor_key = f"spirv.op_{predicate.descriptor_suffix}.{scalar_pair.unsigned.suffix}"
+            compare_row = _generated_row(
+                tables,
+                descriptor_key,
+            )
+            assert predicate.opcode in compare_row
+            assert compare_row.count(scalar_pair.unsigned.scalar_enum) == 2
+            descriptor = _descriptor(descriptor_key)
+            assert descriptor.feature_mask_words == expected_feature_mask
+
+        select_descriptor_key = f"spirv.op_select.{signed.suffix}"
+        select_row = _generated_row(
+            tables,
+            select_descriptor_key,
+        )
+        assert select_row.count(signed.scalar_enum) == 3
+        select_descriptor = _descriptor(select_descriptor_key)
+        assert select_descriptor.feature_mask_words == expected_feature_mask
+
+    bool_select_row = _generated_row(tables, "spirv.op_select.bool")
+    assert bool_select_row.count("LOOM_SPIRV_VALUE_CLASS_BOOL") == 4
+    assert _descriptor("spirv.op_select.bool").feature_mask_words == ()
 
 
 def test_generation_emits_integer_compare_and_select_rows() -> None:

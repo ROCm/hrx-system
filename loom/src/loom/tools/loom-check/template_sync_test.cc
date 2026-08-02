@@ -345,6 +345,106 @@ TEST_F(TemplateSyncTest, AppliesDefaultOverlayToNewTargetCases) {
   EXPECT_NE(result.find("old target evidence\n"), std::string::npos);
 }
 
+TEST_F(TemplateSyncTest, PreservesMaterializedTemplatePreludeOnce) {
+  const char* target_source =
+      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
+      "// RUN: emit source-low output=low\n"
+      "\n"
+      "func.decl @target()\n"
+      "func.decl @shared()\n"
+      "func.def target(@target) @entry() {\n"
+      "}\n";
+  const char* template_source =
+      "// RUN: roundtrip\n"
+      "\n"
+      "func.decl @shared()\n"
+      "func.def @entry() {\n"
+      "}\n";
+
+  std::string result;
+  bool changed = true;
+  IREE_ASSERT_OK(Build(target_source, template_source, &result, &changed));
+
+  EXPECT_FALSE(changed);
+  EXPECT_EQ(result, target_source);
+}
+
+TEST_F(TemplateSyncTest, RepairsRepeatedMaterializedTemplatePrelude) {
+  const char* target_source =
+      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
+      "// RUN: emit source-low output=low\n"
+      "\n"
+      "func.decl @target()\n"
+      "func.decl @shared()\n"
+      "func.decl @shared()\n"
+      "func.decl @shared()\n"
+      "func.def target(@target) @entry() {\n"
+      "}\n";
+  const char* expected_source =
+      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
+      "// RUN: emit source-low output=low\n"
+      "\n"
+      "func.decl @target()\n"
+      "func.decl @shared()\n"
+      "func.def target(@target) @entry() {\n"
+      "}\n";
+  const char* template_source =
+      "// RUN: roundtrip\n"
+      "\n"
+      "func.decl @shared()\n"
+      "func.def @entry() {\n"
+      "}\n";
+
+  std::string result;
+  bool changed = false;
+  IREE_ASSERT_OK(Build(target_source, template_source, &result, &changed));
+
+  EXPECT_TRUE(changed);
+  EXPECT_EQ(result, expected_source);
+}
+
+TEST_F(TemplateSyncTest, KeepsDistinctTargetPreludeForNewCases) {
+  const char* target_source =
+      "// TEMPLATE: loom/src/loom/test/corpus/source_low/example.loom-test\n"
+      "// RUN: emit source-low output=low\n"
+      "\n"
+      "func.decl @target()\n"
+      "func.decl @target_helper()\n"
+      "func.decl @shared()\n"
+      "func.def target(@target) @alpha() {\n"
+      "}\n";
+  const char* template_source =
+      "// RUN: roundtrip\n"
+      "\n"
+      "func.decl @shared()\n"
+      "func.def @alpha() {\n"
+      "}\n"
+      "\n"
+      "// ====\n"
+      "\n"
+      "func.decl @shared()\n"
+      "func.def @beta() {\n"
+      "}\n";
+
+  std::string first_result;
+  bool first_changed = false;
+  IREE_ASSERT_OK(
+      Build(target_source, template_source, &first_result, &first_changed));
+  EXPECT_TRUE(first_changed);
+  EXPECT_NE(first_result.find("func.decl @target()\n"
+                              "func.decl @target_helper()\n"
+                              "func.decl @shared()\n"
+                              "func.def target(@target) @beta()"),
+            std::string::npos);
+
+  std::string second_result;
+  bool second_changed = true;
+  IREE_ASSERT_OK(Build(first_result.c_str(), template_source, &second_result,
+                       &second_changed));
+  EXPECT_FALSE(second_changed);
+  EXPECT_EQ(second_result, first_result);
+}
+
 TEST_F(TemplateSyncTest, PreservesAnnotationLineOccurrence) {
   const char* target_source =
       "// TEMPLATE: loom/src/loom/test/corpus/vector/arithmetic.loom-test\n"

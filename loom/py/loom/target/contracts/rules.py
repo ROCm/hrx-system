@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from loom.dsl import FACT_IDENTITY, Op
+from loom.dsl import FACT_IDENTITY, MemoryAccessInterface, Op
 from loom.target.contracts.descriptors import _require_descriptor
 from loom.target.contracts.emits import DescriptorEmitForm, EmitDescriptorOp
 from loom.target.contracts.guards import Guard
@@ -69,7 +69,45 @@ class DescriptorRule:
                 defined_temporaries,
             )
             defined_temporaries.update(produced_temporaries)
+        self._validate_source_memory_index_preservation()
         self._validate_per_lane_sequence()
+
+    def _validate_source_memory_index_preservation(self) -> None:
+        source_memories = tuple(
+            emit.source_memory for emit in self.emit if emit.source_memory is not None
+        )
+        if not source_memories:
+            return
+        memory_access = next(
+            (
+                interface
+                for interface in self.source_op.interfaces
+                if isinstance(interface, MemoryAccessInterface)
+            ),
+            None,
+        )
+        if memory_access is None or memory_access.indices is None:
+            return
+        source_index_used = any(
+            value_ref.kind == SourceValueKind.OPERAND
+            and value_ref.field == memory_access.indices
+            for emit in self.emit
+            for value_ref in emit.operands.values()
+        )
+        preserved_source_memory_count = sum(
+            source_memory.preserve_source_index for source_memory in source_memories
+        )
+        if source_index_used and preserved_source_memory_count != len(source_memories):
+            raise ValueError(
+                f"{self.source_op.name}: source-memory rules that consume the "
+                f"original '{memory_access.indices}' operand must preserve the "
+                "source index"
+            )
+        if preserved_source_memory_count != 0 and not source_index_used:
+            raise ValueError(
+                f"{self.source_op.name}: source-index preservation requires the "
+                f"original '{memory_access.indices}' operand"
+            )
 
     def _validate_per_lane_sequence(self) -> None:
         sequence_emit_count = sum(

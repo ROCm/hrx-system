@@ -215,6 +215,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->descriptors[0].immediate_count = 1;
   tables->descriptors[0].schedule_class_id = 0;
   tables->descriptors[0].flags = LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE;
+  tables->descriptors[0].op_kind = LOOM_LOW_DESCRIPTOR_OP_KIND_CONST;
   tables->descriptors[0].canonical_asm_form_ordinal =
       LOOM_LOW_ASM_FORM_ORDINAL_NONE;
 
@@ -1487,6 +1488,62 @@ TEST(LowDescriptorsTest, RejectsIncompleteDescriptorReferences) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, RejectsInvalidDescriptorOperationKind) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[0].op_kind = static_cast<loom_low_descriptor_op_kind_t>(2);
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsConstDescriptorWithoutOneResult) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[0].result_count = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsConstDescriptorPacketOperands) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[0].operand_count = 2;
+  tables.operands[1].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
+  tables.operands[1].source_value_index = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsConstDescriptorImplicitOperands) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[0].operand_count = 2;
+  tables.operands[1].role = LOOM_LOW_OPERAND_ROLE_IMPLICIT;
+  tables.operands[1].source_value_index = LOOM_LOW_ID_NONE;
+  tables.operands[1].flags = LOOM_LOW_OPERAND_FLAG_IMPLICIT |
+                             LOOM_LOW_OPERAND_FLAG_STATE_READ |
+                             LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE;
+  tables.set.descriptor_count = 1;
+  tables.descriptor_refs[0] = tables.descriptor_refs[1];
+  tables.set.descriptor_ref_count = 1;
+
+  IREE_EXPECT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsEffectfulConstDescriptor) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.effects[0].kind = LOOM_LOW_EFFECT_KIND_CONVERGENT;
+  tables.descriptors[0].effect_count = 1;
+  tables.set.effect_count = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, AcceptsAsmFormsAndLookup) {
   TestTables tables;
   InitializeTestTables(&tables);
@@ -1514,6 +1571,17 @@ TEST(LowDescriptorsTest, AcceptsAsmFormsAndLookup) {
   asm_form_ordinal =
       loom_low_descriptor_set_lookup_asm_form(&tables.set, IREE_SV("missing"));
   EXPECT_EQ(asm_form_ordinal, LOOM_LOW_ASM_FORM_ORDINAL_NONE);
+}
+
+TEST(LowDescriptorsTest, RejectsConstAsmFormWithOperands) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  AddAsmForms(&tables);
+  tables.asm_forms[1].operand_index_start = 1;
+  tables.asm_forms[1].operand_index_count = 1;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
 }
 
 TEST(LowDescriptorsTest, AcceptsAsmFormNativeAssemblyMnemonic) {

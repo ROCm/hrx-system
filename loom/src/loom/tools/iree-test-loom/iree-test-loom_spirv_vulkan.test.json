@@ -40,6 +40,85 @@
       }
     },
     {
+      "name": "runs spirv vulkan i32 and Boolean truth tables",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/spirv_vulkan_integer_hal_actual.loom",
+          "--case=@integer_i32_truth_table_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"integer_i32_truth_table_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan i8 truth tables when available",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/spirv_vulkan_integer_hal_actual.loom",
+          "--case=@integer_i8_truth_table_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          {
+            "regex": "\"case\":\"integer_i8_truth_table_case\".*(\"passed\":true|\"code\":\"requirement_not_satisfied\",\"provider_code\":\"feature_disabled\")"
+          }
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan i16 truth tables when available",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/spirv_vulkan_integer_hal_actual.loom",
+          "--case=@integer_i16_truth_table_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          {
+            "regex": "\"case\":\"integer_i16_truth_table_case\".*(\"passed\":true|\"code\":\"requirement_not_satisfied\",\"provider_code\":\"feature_disabled\")"
+          }
+        ]
+      }
+    },
+    {
+      "name": "runs spirv vulkan i64 truth tables when available",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/spirv_vulkan_integer_hal_actual.loom",
+          "--case=@integer_i64_truth_table_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          {
+            "regex": "\"case\":\"integer_i64_truth_table_case\".*(\"passed\":true|\"code\":\"requirement_not_satisfied\",\"provider_code\":\"feature_disabled\")"
+          }
+        ]
+      }
+    },
+    {
       "name": "runs spirv vulkan cooperative f16 case",
       "run": {
         "tool": "iree-test-loom",

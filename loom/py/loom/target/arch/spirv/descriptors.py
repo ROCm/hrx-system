@@ -20,8 +20,11 @@ from loom.target.arch.spirv.cooperative_matrix import (
     cooperative_matrix_descriptor_key,
 )
 from loom.target.arch.spirv.scalar_alu import (
+    BOOLEAN_BINARY_OPERATIONS,
+    BOOLEAN_CONSTANTS,
     FLOAT_BINARY_OPERATIONS,
     FLOAT_SCALAR_ALU_TYPES,
+    INTEGER_BITWISE_BINARY_OPERATIONS,
     INTEGER_SCALAR_ALU_TYPE_PAIRS,
     OFFSET64_ALU_TYPE,
     OFFSET64_COMPARE_PREDICATES,
@@ -31,6 +34,8 @@ from loom.target.arch.spirv.scalar_alu import (
     SIGNED_INTEGER_SCALAR_ALU_TYPES,
     UNSIGNED_INTEGER_BINARY_OPERATIONS,
     UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES,
+    BooleanConstant,
+    IntegerAluTypePair,
     IntegerComparePredicate,
     ScalarAluType,
     ScalarBinaryOperation,
@@ -50,6 +55,7 @@ from loom.target.low_descriptors import (
     AsmImmediate,
     Descriptor,
     DescriptorFlag,
+    DescriptorOpKind,
     DescriptorSet,
     Effect,
     EffectFlag,
@@ -95,14 +101,6 @@ _OFFSET64_ALT = (RegClassAlt(_REG_OFFSET64),)
 _PTR_FUNCTION_ALT = (RegClassAlt(_REG_PTR_FUNCTION),)
 _PTR_STORAGE_BUFFER_ALT = (RegClassAlt(_REG_PTR_STORAGE_BUFFER),)
 
-_I32_VALUE_IMMEDIATE = Immediate(
-    "i32_value",
-    ImmediateKind.SIGNED,
-    bit_width=32,
-    signed_min=-(2**31),
-    unsigned_max=(2**31) - 1,
-)
-
 _OFFSET64_VALUE_IMMEDIATE = Immediate(
     "offset64_value",
     ImmediateKind.SIGNED,
@@ -110,6 +108,16 @@ _OFFSET64_VALUE_IMMEDIATE = Immediate(
     signed_min=-(2**63),
     unsigned_max=(2**63) - 1,
 )
+
+
+def _integer_constant_immediate(scalar_pair: IntegerAluTypePair) -> Immediate:
+    return Immediate(
+        f"{scalar_pair.source_type}_value",
+        ImmediateKind.SIGNED,
+        bit_width=scalar_pair.bit_width,
+        signed_min=scalar_pair.signed_minimum,
+        unsigned_max=scalar_pair.signed_maximum,
+    )
 
 
 def _asm(
@@ -720,12 +728,59 @@ def _scalar_binary_descriptor(
     )
 
 
+def _integer_constant_descriptor(scalar_pair: IntegerAluTypePair) -> Descriptor:
+    scalar = scalar_pair.signed
+    key = f"spirv.op_constant.{scalar.suffix}"
+    immediate = _integer_constant_immediate(scalar_pair)
+    return Descriptor(
+        key=key,
+        mnemonic=f"OpConstant.{scalar.suffix}",
+        semantic_tag=key,
+        operands=(_id_result(),),
+        op_kind=DescriptorOpKind.CONST,
+        immediates=(immediate,),
+        feature_mask_words=(scalar.feature_bits,) if scalar.feature_bits else (),
+        asm_forms=_asm(results=("dst",), immediates=(immediate.field_name,)),
+        schedule_class=_SCHEDULE_ALU,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _boolean_constant_descriptor(row: BooleanConstant) -> Descriptor:
+    key = f"spirv.op_constant_{row.descriptor_suffix}.bool"
+    return Descriptor(
+        key=key,
+        mnemonic=f"{row.mnemonic}.bool",
+        semantic_tag=key,
+        operands=(_id_result(),),
+        op_kind=DescriptorOpKind.CONST,
+        asm_forms=_asm(results=("dst",)),
+        schedule_class=_SCHEDULE_ALU,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _boolean_binary_descriptor(operation: ScalarBinaryOperation) -> Descriptor:
+    key = f"spirv.op_{operation.descriptor_suffix}.bool"
+    return _binary_same_type_descriptor(
+        key=key,
+        mnemonic=f"{operation.mnemonic}.bool",
+        semantic_tag=key,
+        operands=(_id_result(), _id_operand("lhs"), _id_operand("rhs")),
+    )
+
+
 def _scalar_binary_descriptors() -> tuple[Descriptor, ...]:
     descriptors = [
         _scalar_binary_descriptor(scalar, operation)
         for scalar in SIGNED_INTEGER_SCALAR_ALU_TYPES
         for operation in SIGNED_INTEGER_BINARY_OPERATIONS
     ]
+    descriptors.extend(
+        _scalar_binary_descriptor(scalar, operation)
+        for scalar in SIGNED_INTEGER_SCALAR_ALU_TYPES
+        for operation in INTEGER_BITWISE_BINARY_OPERATIONS
+    )
     descriptors.extend(
         _scalar_binary_descriptor(scalar_pair.unsigned, operation)
         for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS
@@ -735,6 +790,9 @@ def _scalar_binary_descriptors() -> tuple[Descriptor, ...]:
         _scalar_binary_descriptor(scalar, operation)
         for scalar in FLOAT_SCALAR_ALU_TYPES
         for operation in FLOAT_BINARY_OPERATIONS
+    )
+    descriptors.extend(
+        _boolean_binary_descriptor(operation) for operation in BOOLEAN_BINARY_OPERATIONS
     )
     return tuple(descriptors)
 
@@ -802,6 +860,18 @@ def _select_descriptors() -> tuple[Descriptor, ...]:
         )
         for scalar in SCALAR_ALU_TYPES
     ]
+    descriptors.append(
+        _select_descriptor(
+            key="spirv.op_select.bool",
+            mnemonic="OpSelect.bool",
+            operands=(
+                _id_result(),
+                _id_operand("condition"),
+                _id_operand("true_value"),
+                _id_operand("false_value"),
+            ),
+        )
+    )
     descriptors.append(
         _select_descriptor(
             key="spirv.op_select.offset64",
@@ -925,21 +995,17 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
         ),
     ),
     descriptors=(
-        Descriptor(
-            key="spirv.op_constant.i32",
-            mnemonic="OpConstant.i32",
-            semantic_tag="spirv.op_constant.i32",
-            operands=(_id_result(),),
-            immediates=(_I32_VALUE_IMMEDIATE,),
-            asm_forms=_asm(results=("dst",), immediates=("i32_value",)),
-            schedule_class=_SCHEDULE_ALU,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        *(_boolean_constant_descriptor(row) for row in BOOLEAN_CONSTANTS),
+        *(
+            _integer_constant_descriptor(scalar_pair)
+            for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS
         ),
         Descriptor(
             key="spirv.op_constant.offset64",
             mnemonic="OpConstant.offset64",
             semantic_tag="spirv.op_constant.offset64",
             operands=(_offset64_result(),),
+            op_kind=DescriptorOpKind.CONST,
             immediates=(_OFFSET64_VALUE_IMMEDIATE,),
             asm_forms=_asm(results=("dst",), immediates=("offset64_value",)),
             schedule_class=_SCHEDULE_ALU,
@@ -984,15 +1050,6 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
             semantic_tag="spirv.op_uconvert.i32.offset64",
             operands=(_offset64_result(), _id_operand("input")),
             asm_forms=_asm(results=("dst",), operands=("input",)),
-            schedule_class=_SCHEDULE_ALU,
-            flags=(DescriptorFlag.DEAD_REMOVABLE,),
-        ),
-        Descriptor(
-            key="spirv.op_shift_left_logical.i32",
-            mnemonic="OpShiftLeftLogical",
-            semantic_tag="spirv.op_shift_left_logical.i32",
-            operands=(_id_result(), _id_operand("lhs"), _id_operand("rhs")),
-            asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
             schedule_class=_SCHEDULE_ALU,
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
         ),

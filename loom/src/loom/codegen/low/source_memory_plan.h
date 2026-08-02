@@ -192,6 +192,10 @@ typedef struct loom_low_source_memory_access_plan_t {
   // Number of leading dynamic address terms contributed by the source view
   // base.
   uint8_t dynamic_view_base_term_count;
+  // Whether canonicalization moved a nonzero byte contribution from a source
+  // dynamic index into |static_byte_offset|. Original source index operands
+  // cannot be combined with the canonical static offset when this is true.
+  bool source_index_static_offset_extracted;
   // Optional source expressions equivalent to contiguous canonical term
   // ranges. These preserve reusable SSA provenance without changing the
   // canonical address representation used for analysis.

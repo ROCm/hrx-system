@@ -10,3 +10,15 @@ func.def target(@target) @workgroup_barrier() {
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   func.return
 }
+
+// ====
+
+// XFAIL: LLVMIR does not provide subgroup-scope barrier lowering.
+llvmir.target<object> @target {
+  triple = "loom-direct64-unknown-none",
+  data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
+}
+func.def target(@target) @subgroup_shared_memory_barrier() {
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
+  func.return
+}

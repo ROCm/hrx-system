@@ -46,7 +46,8 @@ def _loom_check_wrapper_content(ctx):
         "set -euo pipefail\n" +
         "RUNFILES=\"${{RUNFILES_DIR:-$0.runfiles}}\"\n" +
         "cd \"${{RUNFILES}}/{workspace}\"\n" +
-        "exec \"${{PWD}}/{runner}\" \"$@\" \"{fixture}\"\n"
+        "exec \"${{PWD}}/{runner}\" \"$@\" " +
+        "\"--template-root=${{PWD}}\" \"{fixture}\"\n"
     ).format(
         workspace = ctx.workspace_name,
         runner = ctx.executable.runner.short_path,
@@ -132,7 +133,8 @@ def loom_check_test(
       src: Source .loom-test file containing the test cases.
       size: Test size (default: "small").
       tags: Additional tags to apply to the test.
-      data: Additional runfiles made available to loom-check.
+      data: Additional runfiles made available to loom-check, including every
+          corpus source named by a TEMPLATE directive.
       env: Additional test environment variables.
       runner: loom-check compatible runner binary.
       **kwargs: Additional attributes passed to sh_test.

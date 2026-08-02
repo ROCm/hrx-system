@@ -1,0 +1,558 @@
+// RUN: emit spirv-dis input=source-low validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 33254}
+
+func.def target(@target) @integer_boolean_matrix(%flag: i1, %i8_input: i8, %i16_input: i16, %i32_input: i32, %i64_input: i64) -> (i1, i1, i8, i16, i32, i64) {
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %bool_and = scalar.andi %flag, %true : i1
+  %bool_or = scalar.ori %bool_and, %false : i1
+  %bool_xor = scalar.xori %true, %false : i1
+  %bool_select = scf.select %flag, %bool_xor, %bool_or : i1
+
+  %i8_min = scalar.constant -128 : i8
+  %i8_rhs = scalar.constant 3 : i8
+  %i8_shift = scalar.constant 1 : i8
+  %i8_and = scalar.andi %i8_input, %i8_rhs : i8
+  %i8_or = scalar.ori %i8_input, %i8_rhs : i8
+  %i8_xor = scalar.xori %i8_input, %i8_min : i8
+  %i8_shl = scalar.shli %i8_input, %i8_shift : i8
+  %i8_ashr = scalar.shrsi %i8_input, %i8_shift : i8
+  %i8_lshr = scalar.shrui %i8_input, %i8_shift : i8
+  %i8_bits0 = scalar.xori %i8_and, %i8_or : i8
+  %i8_bits1 = scalar.xori %i8_xor, %i8_shl : i8
+  %i8_bits2 = scalar.xori %i8_ashr, %i8_lshr : i8
+  %i8_bits3 = scalar.xori %i8_bits0, %i8_bits1 : i8
+  %i8_bits = scalar.xori %i8_bits3, %i8_bits2 : i8
+  %i8_eq = scalar.cmpi eq, %i8_input, %i8_rhs : i8
+  %i8_ne = scalar.cmpi ne, %i8_input, %i8_rhs : i8
+  %i8_slt = scalar.cmpi slt, %i8_input, %i8_rhs : i8
+  %i8_sle = scalar.cmpi sle, %i8_input, %i8_rhs : i8
+  %i8_sgt = scalar.cmpi sgt, %i8_input, %i8_rhs : i8
+  %i8_sge = scalar.cmpi sge, %i8_input, %i8_rhs : i8
+  %i8_ult = scalar.cmpi ult, %i8_input, %i8_rhs : i8
+  %i8_ule = scalar.cmpi ule, %i8_input, %i8_rhs : i8
+  %i8_ugt = scalar.cmpi ugt, %i8_input, %i8_rhs : i8
+  %i8_uge = scalar.cmpi uge, %i8_input, %i8_rhs : i8
+  %i8_cmp0 = scalar.andi %i8_eq, %i8_ne : i1
+  %i8_cmp1 = scalar.ori %i8_slt, %i8_sle : i1
+  %i8_cmp2 = scalar.xori %i8_sgt, %i8_sge : i1
+  %i8_cmp3 = scalar.andi %i8_ult, %i8_ule : i1
+  %i8_cmp4 = scalar.ori %i8_ugt, %i8_uge : i1
+  %i8_cmp5 = scalar.xori %i8_cmp0, %i8_cmp1 : i1
+  %i8_cmp6 = scalar.ori %i8_cmp2, %i8_cmp3 : i1
+  %i8_cmp7 = scalar.xori %i8_cmp5, %i8_cmp6 : i1
+  %i8_condition = scalar.ori %i8_cmp7, %i8_cmp4 : i1
+  %i8_select = scf.select %i8_condition, %i8_bits, %i8_min : i8
+
+  %i16_min = scalar.constant -32768 : i16
+  %i16_rhs = scalar.constant 3 : i16
+  %i16_shift = scalar.constant 1 : i16
+  %i16_and = scalar.andi %i16_input, %i16_rhs : i16
+  %i16_or = scalar.ori %i16_input, %i16_rhs : i16
+  %i16_xor = scalar.xori %i16_input, %i16_min : i16
+  %i16_shl = scalar.shli %i16_input, %i16_shift : i16
+  %i16_ashr = scalar.shrsi %i16_input, %i16_shift : i16
+  %i16_lshr = scalar.shrui %i16_input, %i16_shift : i16
+  %i16_bits0 = scalar.xori %i16_and, %i16_or : i16
+  %i16_bits1 = scalar.xori %i16_xor, %i16_shl : i16
+  %i16_bits2 = scalar.xori %i16_ashr, %i16_lshr : i16
+  %i16_bits3 = scalar.xori %i16_bits0, %i16_bits1 : i16
+  %i16_bits = scalar.xori %i16_bits3, %i16_bits2 : i16
+  %i16_eq = scalar.cmpi eq, %i16_input, %i16_rhs : i16
+  %i16_ne = scalar.cmpi ne, %i16_input, %i16_rhs : i16
+  %i16_slt = scalar.cmpi slt, %i16_input, %i16_rhs : i16
+  %i16_sle = scalar.cmpi sle, %i16_input, %i16_rhs : i16
+  %i16_sgt = scalar.cmpi sgt, %i16_input, %i16_rhs : i16
+  %i16_sge = scalar.cmpi sge, %i16_input, %i16_rhs : i16
+  %i16_ult = scalar.cmpi ult, %i16_input, %i16_rhs : i16
+  %i16_ule = scalar.cmpi ule, %i16_input, %i16_rhs : i16
+  %i16_ugt = scalar.cmpi ugt, %i16_input, %i16_rhs : i16
+  %i16_uge = scalar.cmpi uge, %i16_input, %i16_rhs : i16
+  %i16_cmp0 = scalar.andi %i16_eq, %i16_ne : i1
+  %i16_cmp1 = scalar.ori %i16_slt, %i16_sle : i1
+  %i16_cmp2 = scalar.xori %i16_sgt, %i16_sge : i1
+  %i16_cmp3 = scalar.andi %i16_ult, %i16_ule : i1
+  %i16_cmp4 = scalar.ori %i16_ugt, %i16_uge : i1
+  %i16_cmp5 = scalar.xori %i16_cmp0, %i16_cmp1 : i1
+  %i16_cmp6 = scalar.ori %i16_cmp2, %i16_cmp3 : i1
+  %i16_cmp7 = scalar.xori %i16_cmp5, %i16_cmp6 : i1
+  %i16_condition = scalar.ori %i16_cmp7, %i16_cmp4 : i1
+  %i16_select = scf.select %i16_condition, %i16_bits, %i16_min : i16
+
+  %i32_min = scalar.constant -2147483648 : i32
+  %i32_rhs = scalar.constant 3 : i32
+  %i32_shift = scalar.constant 1 : i32
+  %i32_and = scalar.andi %i32_input, %i32_rhs : i32
+  %i32_or = scalar.ori %i32_input, %i32_rhs : i32
+  %i32_xor = scalar.xori %i32_input, %i32_min : i32
+  %i32_shl = scalar.shli %i32_input, %i32_shift : i32
+  %i32_ashr = scalar.shrsi %i32_input, %i32_shift : i32
+  %i32_lshr = scalar.shrui %i32_input, %i32_shift : i32
+  %i32_bits0 = scalar.xori %i32_and, %i32_or : i32
+  %i32_bits1 = scalar.xori %i32_xor, %i32_shl : i32
+  %i32_bits2 = scalar.xori %i32_ashr, %i32_lshr : i32
+  %i32_bits3 = scalar.xori %i32_bits0, %i32_bits1 : i32
+  %i32_bits = scalar.xori %i32_bits3, %i32_bits2 : i32
+  %i32_eq = scalar.cmpi eq, %i32_input, %i32_rhs : i32
+  %i32_ne = scalar.cmpi ne, %i32_input, %i32_rhs : i32
+  %i32_slt = scalar.cmpi slt, %i32_input, %i32_rhs : i32
+  %i32_sle = scalar.cmpi sle, %i32_input, %i32_rhs : i32
+  %i32_sgt = scalar.cmpi sgt, %i32_input, %i32_rhs : i32
+  %i32_sge = scalar.cmpi sge, %i32_input, %i32_rhs : i32
+  %i32_ult = scalar.cmpi ult, %i32_input, %i32_rhs : i32
+  %i32_ule = scalar.cmpi ule, %i32_input, %i32_rhs : i32
+  %i32_ugt = scalar.cmpi ugt, %i32_input, %i32_rhs : i32
+  %i32_uge = scalar.cmpi uge, %i32_input, %i32_rhs : i32
+  %i32_cmp0 = scalar.andi %i32_eq, %i32_ne : i1
+  %i32_cmp1 = scalar.ori %i32_slt, %i32_sle : i1
+  %i32_cmp2 = scalar.xori %i32_sgt, %i32_sge : i1
+  %i32_cmp3 = scalar.andi %i32_ult, %i32_ule : i1
+  %i32_cmp4 = scalar.ori %i32_ugt, %i32_uge : i1
+  %i32_cmp5 = scalar.xori %i32_cmp0, %i32_cmp1 : i1
+  %i32_cmp6 = scalar.ori %i32_cmp2, %i32_cmp3 : i1
+  %i32_cmp7 = scalar.xori %i32_cmp5, %i32_cmp6 : i1
+  %i32_condition = scalar.ori %i32_cmp7, %i32_cmp4 : i1
+  %i32_select = scf.select %i32_condition, %i32_bits, %i32_min : i32
+
+  %i64_min = scalar.constant -9223372036854775808 : i64
+  %i64_rhs = scalar.constant 3 : i64
+  %i64_shift = scalar.constant 1 : i64
+  %i64_and = scalar.andi %i64_input, %i64_rhs : i64
+  %i64_or = scalar.ori %i64_input, %i64_rhs : i64
+  %i64_xor = scalar.xori %i64_input, %i64_min : i64
+  %i64_shl = scalar.shli %i64_input, %i64_shift : i64
+  %i64_ashr = scalar.shrsi %i64_input, %i64_shift : i64
+  %i64_lshr = scalar.shrui %i64_input, %i64_shift : i64
+  %i64_bits0 = scalar.xori %i64_and, %i64_or : i64
+  %i64_bits1 = scalar.xori %i64_xor, %i64_shl : i64
+  %i64_bits2 = scalar.xori %i64_ashr, %i64_lshr : i64
+  %i64_bits3 = scalar.xori %i64_bits0, %i64_bits1 : i64
+  %i64_bits = scalar.xori %i64_bits3, %i64_bits2 : i64
+  %i64_eq = scalar.cmpi eq, %i64_input, %i64_rhs : i64
+  %i64_ne = scalar.cmpi ne, %i64_input, %i64_rhs : i64
+  %i64_slt = scalar.cmpi slt, %i64_input, %i64_rhs : i64
+  %i64_sle = scalar.cmpi sle, %i64_input, %i64_rhs : i64
+  %i64_sgt = scalar.cmpi sgt, %i64_input, %i64_rhs : i64
+  %i64_sge = scalar.cmpi sge, %i64_input, %i64_rhs : i64
+  %i64_ult = scalar.cmpi ult, %i64_input, %i64_rhs : i64
+  %i64_ule = scalar.cmpi ule, %i64_input, %i64_rhs : i64
+  %i64_ugt = scalar.cmpi ugt, %i64_input, %i64_rhs : i64
+  %i64_uge = scalar.cmpi uge, %i64_input, %i64_rhs : i64
+  %i64_cmp0 = scalar.andi %i64_eq, %i64_ne : i1
+  %i64_cmp1 = scalar.ori %i64_slt, %i64_sle : i1
+  %i64_cmp2 = scalar.xori %i64_sgt, %i64_sge : i1
+  %i64_cmp3 = scalar.andi %i64_ult, %i64_ule : i1
+  %i64_cmp4 = scalar.ori %i64_ugt, %i64_uge : i1
+  %i64_cmp5 = scalar.xori %i64_cmp0, %i64_cmp1 : i1
+  %i64_cmp6 = scalar.ori %i64_cmp2, %i64_cmp3 : i1
+  %i64_cmp7 = scalar.xori %i64_cmp5, %i64_cmp6 : i1
+  %i64_condition = scalar.ori %i64_cmp7, %i64_cmp4 : i1
+  %i64_select = scf.select %i64_condition, %i64_bits, %i64_min : i64
+  func.return %false, %bool_select, %i8_select, %i16_select, %i32_select, %i64_select : i1, i1, i8, i16, i32, i64
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Int8
+               OpCapability Int16
+               OpCapability StorageBuffer8BitAccess
+               OpCapability StorageBuffer16BitAccess
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_8bit_storage"
+               OpExtension "SPV_KHR_16bit_storage"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %integer_boolean_matrix "integer_boolean_matrix"
+               OpExecutionMode %integer_boolean_matrix LocalSize 1 1 1
+               OpName %integer_boolean_matrix "integer_boolean_matrix"
+               OpName %flag "flag"
+               OpName %i8_input "i8_input"
+               OpName %i16_input "i16_input"
+               OpName %i32_input "i32_input"
+               OpName %i64_input "i64_input"
+               OpName %false "false"
+               OpName %bool_xor "bool_xor"
+               OpName %bool_select "bool_select"
+               OpName %i8_min "i8_min"
+               OpName %i8_rhs "i8_rhs"
+               OpName %i8_shift "i8_shift"
+               OpName %i8_and "i8_and"
+               OpName %i8_or "i8_or"
+               OpName %i8_xor "i8_xor"
+               OpName %i8_shl "i8_shl"
+               OpName %i8_ashr "i8_ashr"
+               OpName %i8_lshr "i8_lshr"
+               OpName %i8_bits0 "i8_bits0"
+               OpName %i8_bits1 "i8_bits1"
+               OpName %i8_bits2 "i8_bits2"
+               OpName %i8_bits3 "i8_bits3"
+               OpName %i8_bits "i8_bits"
+               OpName %i8_eq "i8_eq"
+               OpName %i8_ne "i8_ne"
+               OpName %i8_slt "i8_slt"
+               OpName %i8_sle "i8_sle"
+               OpName %i8_sgt "i8_sgt"
+               OpName %i8_sge "i8_sge"
+               OpName %i8_ult "i8_ult"
+               OpName %i8_ule "i8_ule"
+               OpName %i8_ugt "i8_ugt"
+               OpName %i8_uge "i8_uge"
+               OpName %i8_cmp0 "i8_cmp0"
+               OpName %i8_cmp1 "i8_cmp1"
+               OpName %i8_cmp2 "i8_cmp2"
+               OpName %i8_cmp3 "i8_cmp3"
+               OpName %i8_cmp4 "i8_cmp4"
+               OpName %i8_cmp5 "i8_cmp5"
+               OpName %i8_cmp6 "i8_cmp6"
+               OpName %i8_cmp7 "i8_cmp7"
+               OpName %i8_condition "i8_condition"
+               OpName %i8_select "i8_select"
+               OpName %i16_min "i16_min"
+               OpName %i16_rhs "i16_rhs"
+               OpName %i16_shift "i16_shift"
+               OpName %i16_and "i16_and"
+               OpName %i16_or "i16_or"
+               OpName %i16_xor "i16_xor"
+               OpName %i16_shl "i16_shl"
+               OpName %i16_ashr "i16_ashr"
+               OpName %i16_lshr "i16_lshr"
+               OpName %i16_bits0 "i16_bits0"
+               OpName %i16_bits1 "i16_bits1"
+               OpName %i16_bits2 "i16_bits2"
+               OpName %i16_bits3 "i16_bits3"
+               OpName %i16_bits "i16_bits"
+               OpName %i16_eq "i16_eq"
+               OpName %i16_ne "i16_ne"
+               OpName %i16_slt "i16_slt"
+               OpName %i16_sle "i16_sle"
+               OpName %i16_sgt "i16_sgt"
+               OpName %i16_sge "i16_sge"
+               OpName %i16_ult "i16_ult"
+               OpName %i16_ule "i16_ule"
+               OpName %i16_ugt "i16_ugt"
+               OpName %i16_uge "i16_uge"
+               OpName %i16_cmp0 "i16_cmp0"
+               OpName %i16_cmp1 "i16_cmp1"
+               OpName %i16_cmp2 "i16_cmp2"
+               OpName %i16_cmp3 "i16_cmp3"
+               OpName %i16_cmp4 "i16_cmp4"
+               OpName %i16_cmp5 "i16_cmp5"
+               OpName %i16_cmp6 "i16_cmp6"
+               OpName %i16_cmp7 "i16_cmp7"
+               OpName %i16_condition "i16_condition"
+               OpName %i16_select "i16_select"
+               OpName %i32_min "i32_min"
+               OpName %i32_rhs "i32_rhs"
+               OpName %i32_shift "i32_shift"
+               OpName %i32_and "i32_and"
+               OpName %i32_or "i32_or"
+               OpName %i32_xor "i32_xor"
+               OpName %i32_shl "i32_shl"
+               OpName %i32_ashr "i32_ashr"
+               OpName %i32_lshr "i32_lshr"
+               OpName %i32_bits0 "i32_bits0"
+               OpName %i32_bits1 "i32_bits1"
+               OpName %i32_bits2 "i32_bits2"
+               OpName %i32_bits3 "i32_bits3"
+               OpName %i32_bits "i32_bits"
+               OpName %i32_eq "i32_eq"
+               OpName %i32_ne "i32_ne"
+               OpName %i32_slt "i32_slt"
+               OpName %i32_sle "i32_sle"
+               OpName %i32_sgt "i32_sgt"
+               OpName %i32_sge "i32_sge"
+               OpName %i32_ult "i32_ult"
+               OpName %i32_ule "i32_ule"
+               OpName %i32_ugt "i32_ugt"
+               OpName %i32_uge "i32_uge"
+               OpName %i32_cmp0 "i32_cmp0"
+               OpName %i32_cmp1 "i32_cmp1"
+               OpName %i32_cmp2 "i32_cmp2"
+               OpName %i32_cmp3 "i32_cmp3"
+               OpName %i32_cmp4 "i32_cmp4"
+               OpName %i32_cmp5 "i32_cmp5"
+               OpName %i32_cmp6 "i32_cmp6"
+               OpName %i32_cmp7 "i32_cmp7"
+               OpName %i32_condition "i32_condition"
+               OpName %i32_select "i32_select"
+               OpName %i64_min "i64_min"
+               OpName %i64_rhs "i64_rhs"
+               OpName %i64_shift "i64_shift"
+               OpName %i64_and "i64_and"
+               OpName %i64_or "i64_or"
+               OpName %i64_xor "i64_xor"
+               OpName %i64_shl "i64_shl"
+               OpName %i64_ashr "i64_ashr"
+               OpName %i64_lshr "i64_lshr"
+               OpName %i64_bits0 "i64_bits0"
+               OpName %i64_bits1 "i64_bits1"
+               OpName %i64_bits2 "i64_bits2"
+               OpName %i64_bits3 "i64_bits3"
+               OpName %i64_bits "i64_bits"
+               OpName %i64_eq "i64_eq"
+               OpName %i64_ne "i64_ne"
+               OpName %i64_slt "i64_slt"
+               OpName %i64_sle "i64_sle"
+               OpName %i64_sgt "i64_sgt"
+               OpName %i64_sge "i64_sge"
+               OpName %i64_ult "i64_ult"
+               OpName %i64_ule "i64_ule"
+               OpName %i64_ugt "i64_ugt"
+               OpName %i64_uge "i64_uge"
+               OpName %i64_cmp0 "i64_cmp0"
+               OpName %i64_cmp1 "i64_cmp1"
+               OpName %i64_cmp2 "i64_cmp2"
+               OpName %i64_cmp3 "i64_cmp3"
+               OpName %i64_cmp4 "i64_cmp4"
+               OpName %i64_cmp5 "i64_cmp5"
+               OpName %i64_cmp6 "i64_cmp6"
+               OpName %i64_cmp7 "i64_cmp7"
+               OpName %i64_condition "i64_condition"
+               OpName %i64_select "i64_select"
+               OpMemberDecorate %_struct_6 0 Offset 0
+               OpDecorate %_struct_6 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpMemberDecorate %_struct_11 0 Offset 0
+               OpDecorate %_struct_11 Block
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 1
+               OpMemberDecorate %_struct_16 0 Offset 0
+               OpDecorate %_struct_16 Block
+               OpDecorate %14 DescriptorSet 0
+               OpDecorate %14 Binding 2
+               OpDecorate %19 DescriptorSet 0
+               OpDecorate %19 Binding 3
+               OpMemberDecorate %_struct_22 0 Offset 0
+               OpDecorate %_struct_22 Block
+               OpDecorate %20 DescriptorSet 0
+               OpDecorate %20 Binding 4
+               OpDecorate %25 DescriptorSet 0
+               OpDecorate %25 Binding 5
+               OpDecorate %26 DescriptorSet 0
+               OpDecorate %26 Binding 6
+               OpDecorate %27 DescriptorSet 0
+               OpDecorate %27 Binding 7
+               OpDecorate %28 DescriptorSet 0
+               OpDecorate %28 Binding 8
+               OpDecorate %29 DescriptorSet 0
+               OpDecorate %29 Binding 9
+               OpDecorate %30 DescriptorSet 0
+               OpDecorate %30 Binding 10
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+       %bool = OpTypeBool
+  %_struct_6 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_6 = OpTypePointer StorageBuffer %_struct_6
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %4 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+       %char = OpTypeInt 8 1
+ %_struct_11 = OpTypeStruct %char
+%_ptr_StorageBuffer__struct_11 = OpTypePointer StorageBuffer %_struct_11
+%_ptr_StorageBuffer_char = OpTypePointer StorageBuffer %char
+          %9 = OpVariable %_ptr_StorageBuffer__struct_11 StorageBuffer
+      %short = OpTypeInt 16 1
+ %_struct_16 = OpTypeStruct %short
+%_ptr_StorageBuffer__struct_16 = OpTypePointer StorageBuffer %_struct_16
+%_ptr_StorageBuffer_short = OpTypePointer StorageBuffer %short
+         %14 = OpVariable %_ptr_StorageBuffer__struct_16 StorageBuffer
+         %19 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+       %long = OpTypeInt 64 1
+ %_struct_22 = OpTypeStruct %long
+%_ptr_StorageBuffer__struct_22 = OpTypePointer StorageBuffer %_struct_22
+%_ptr_StorageBuffer_long = OpTypePointer StorageBuffer %long
+         %20 = OpVariable %_ptr_StorageBuffer__struct_22 StorageBuffer
+         %25 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+         %26 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+         %27 = OpVariable %_ptr_StorageBuffer__struct_11 StorageBuffer
+         %28 = OpVariable %_ptr_StorageBuffer__struct_16 StorageBuffer
+         %29 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+         %30 = OpVariable %_ptr_StorageBuffer__struct_22 StorageBuffer
+       %void = OpTypeVoid
+         %32 = OpTypeFunction %void
+      %false = OpConstantFalse %bool
+   %bool_xor = OpConstantTrue %bool
+     %i8_min = OpConstant %char -128
+     %i8_rhs = OpConstant %char 3
+   %i8_shift = OpConstant %char 1
+      %uchar = OpTypeInt 8 0
+    %i16_min = OpConstant %short -32768
+    %i16_rhs = OpConstant %short 3
+  %i16_shift = OpConstant %short 1
+     %ushort = OpTypeInt 16 0
+    %i32_min = OpConstant %int -2147483648
+    %i32_rhs = OpConstant %int 3
+  %i32_shift = OpConstant %int 1
+       %uint = OpTypeInt 32 0
+    %i64_min = OpConstant %long -9223372036854775808
+    %i64_rhs = OpConstant %long 3
+  %i64_shift = OpConstant %long 1
+      %ulong = OpTypeInt 64 0
+      %int_1 = OpConstant %int 1
+%integer_boolean_matrix = OpFunction %void None %32
+         %33 = OpLabel
+         %34 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+         %35 = OpLoad %int %34 Aligned 4
+       %flag = OpINotEqual %bool %35 %int_0
+         %37 = OpAccessChain %_ptr_StorageBuffer_char %9 %int_0
+   %i8_input = OpLoad %char %37 Aligned 1
+         %39 = OpAccessChain %_ptr_StorageBuffer_short %14 %int_0
+  %i16_input = OpLoad %short %39 Aligned 2
+         %41 = OpAccessChain %_ptr_StorageBuffer_int %19 %int_0
+  %i32_input = OpLoad %int %41 Aligned 4
+         %43 = OpAccessChain %_ptr_StorageBuffer_long %20 %int_0
+  %i64_input = OpLoad %long %43 Aligned 8
+%bool_select = OpSelect %bool %flag %bool_xor %flag
+     %i8_and = OpBitwiseAnd %char %i8_input %i8_rhs
+      %i8_or = OpBitwiseOr %char %i8_input %i8_rhs
+     %i8_xor = OpBitwiseXor %char %i8_input %i8_min
+     %i8_shl = OpShiftLeftLogical %char %i8_input %i8_shift
+    %i8_ashr = OpShiftRightArithmetic %char %i8_input %i8_shift
+    %i8_lshr = OpShiftRightLogical %char %i8_input %i8_shift
+   %i8_bits0 = OpBitwiseXor %char %i8_and %i8_or
+   %i8_bits1 = OpBitwiseXor %char %i8_xor %i8_shl
+   %i8_bits2 = OpBitwiseXor %char %i8_ashr %i8_lshr
+   %i8_bits3 = OpBitwiseXor %char %i8_bits0 %i8_bits1
+    %i8_bits = OpBitwiseXor %char %i8_bits3 %i8_bits2
+      %i8_eq = OpIEqual %bool %i8_input %i8_rhs
+      %i8_ne = OpINotEqual %bool %i8_input %i8_rhs
+     %i8_slt = OpSLessThan %bool %i8_input %i8_rhs
+     %i8_sle = OpSLessThanEqual %bool %i8_input %i8_rhs
+     %i8_sgt = OpSGreaterThan %bool %i8_input %i8_rhs
+     %i8_sge = OpSGreaterThanEqual %bool %i8_input %i8_rhs
+         %69 = OpBitcast %uchar %i8_input
+         %70 = OpBitcast %uchar %i8_rhs
+     %i8_ult = OpULessThan %bool %69 %70
+     %i8_ule = OpULessThanEqual %bool %69 %70
+     %i8_ugt = OpUGreaterThan %bool %69 %70
+     %i8_uge = OpUGreaterThanEqual %bool %69 %70
+    %i8_cmp0 = OpLogicalAnd %bool %i8_eq %i8_ne
+    %i8_cmp1 = OpLogicalOr %bool %i8_slt %i8_sle
+    %i8_cmp2 = OpLogicalNotEqual %bool %i8_sgt %i8_sge
+    %i8_cmp3 = OpLogicalAnd %bool %i8_ult %i8_ule
+    %i8_cmp4 = OpLogicalOr %bool %i8_ugt %i8_uge
+    %i8_cmp5 = OpLogicalNotEqual %bool %i8_cmp0 %i8_cmp1
+    %i8_cmp6 = OpLogicalOr %bool %i8_cmp2 %i8_cmp3
+    %i8_cmp7 = OpLogicalNotEqual %bool %i8_cmp5 %i8_cmp6
+%i8_condition = OpLogicalOr %bool %i8_cmp7 %i8_cmp4
+  %i8_select = OpSelect %char %i8_condition %i8_bits %i8_min
+    %i16_and = OpBitwiseAnd %short %i16_input %i16_rhs
+     %i16_or = OpBitwiseOr %short %i16_input %i16_rhs
+    %i16_xor = OpBitwiseXor %short %i16_input %i16_min
+    %i16_shl = OpShiftLeftLogical %short %i16_input %i16_shift
+   %i16_ashr = OpShiftRightArithmetic %short %i16_input %i16_shift
+   %i16_lshr = OpShiftRightLogical %short %i16_input %i16_shift
+  %i16_bits0 = OpBitwiseXor %short %i16_and %i16_or
+  %i16_bits1 = OpBitwiseXor %short %i16_xor %i16_shl
+  %i16_bits2 = OpBitwiseXor %short %i16_ashr %i16_lshr
+  %i16_bits3 = OpBitwiseXor %short %i16_bits0 %i16_bits1
+   %i16_bits = OpBitwiseXor %short %i16_bits3 %i16_bits2
+     %i16_eq = OpIEqual %bool %i16_input %i16_rhs
+     %i16_ne = OpINotEqual %bool %i16_input %i16_rhs
+    %i16_slt = OpSLessThan %bool %i16_input %i16_rhs
+    %i16_sle = OpSLessThanEqual %bool %i16_input %i16_rhs
+    %i16_sgt = OpSGreaterThan %bool %i16_input %i16_rhs
+    %i16_sge = OpSGreaterThanEqual %bool %i16_input %i16_rhs
+        %106 = OpBitcast %ushort %i16_input
+        %107 = OpBitcast %ushort %i16_rhs
+    %i16_ult = OpULessThan %bool %106 %107
+    %i16_ule = OpULessThanEqual %bool %106 %107
+    %i16_ugt = OpUGreaterThan %bool %106 %107
+    %i16_uge = OpUGreaterThanEqual %bool %106 %107
+   %i16_cmp0 = OpLogicalAnd %bool %i16_eq %i16_ne
+   %i16_cmp1 = OpLogicalOr %bool %i16_slt %i16_sle
+   %i16_cmp2 = OpLogicalNotEqual %bool %i16_sgt %i16_sge
+   %i16_cmp3 = OpLogicalAnd %bool %i16_ult %i16_ule
+   %i16_cmp4 = OpLogicalOr %bool %i16_ugt %i16_uge
+   %i16_cmp5 = OpLogicalNotEqual %bool %i16_cmp0 %i16_cmp1
+   %i16_cmp6 = OpLogicalOr %bool %i16_cmp2 %i16_cmp3
+   %i16_cmp7 = OpLogicalNotEqual %bool %i16_cmp5 %i16_cmp6
+%i16_condition = OpLogicalOr %bool %i16_cmp7 %i16_cmp4
+ %i16_select = OpSelect %short %i16_condition %i16_bits %i16_min
+    %i32_and = OpBitwiseAnd %int %i32_input %i32_rhs
+     %i32_or = OpBitwiseOr %int %i32_input %i32_rhs
+    %i32_xor = OpBitwiseXor %int %i32_input %i32_min
+    %i32_shl = OpShiftLeftLogical %int %i32_input %i32_shift
+   %i32_ashr = OpShiftRightArithmetic %int %i32_input %i32_shift
+   %i32_lshr = OpShiftRightLogical %int %i32_input %i32_shift
+  %i32_bits0 = OpBitwiseXor %int %i32_and %i32_or
+  %i32_bits1 = OpBitwiseXor %int %i32_xor %i32_shl
+  %i32_bits2 = OpBitwiseXor %int %i32_ashr %i32_lshr
+  %i32_bits3 = OpBitwiseXor %int %i32_bits0 %i32_bits1
+   %i32_bits = OpBitwiseXor %int %i32_bits3 %i32_bits2
+     %i32_eq = OpIEqual %bool %i32_input %i32_rhs
+     %i32_ne = OpINotEqual %bool %i32_input %i32_rhs
+    %i32_slt = OpSLessThan %bool %i32_input %i32_rhs
+    %i32_sle = OpSLessThanEqual %bool %i32_input %i32_rhs
+    %i32_sgt = OpSGreaterThan %bool %i32_input %i32_rhs
+    %i32_sge = OpSGreaterThanEqual %bool %i32_input %i32_rhs
+        %143 = OpBitcast %uint %i32_input
+        %144 = OpBitcast %uint %i32_rhs
+    %i32_ult = OpULessThan %bool %143 %144
+    %i32_ule = OpULessThanEqual %bool %143 %144
+    %i32_ugt = OpUGreaterThan %bool %143 %144
+    %i32_uge = OpUGreaterThanEqual %bool %143 %144
+   %i32_cmp0 = OpLogicalAnd %bool %i32_eq %i32_ne
+   %i32_cmp1 = OpLogicalOr %bool %i32_slt %i32_sle
+   %i32_cmp2 = OpLogicalNotEqual %bool %i32_sgt %i32_sge
+   %i32_cmp3 = OpLogicalAnd %bool %i32_ult %i32_ule
+   %i32_cmp4 = OpLogicalOr %bool %i32_ugt %i32_uge
+   %i32_cmp5 = OpLogicalNotEqual %bool %i32_cmp0 %i32_cmp1
+   %i32_cmp6 = OpLogicalOr %bool %i32_cmp2 %i32_cmp3
+   %i32_cmp7 = OpLogicalNotEqual %bool %i32_cmp5 %i32_cmp6
+%i32_condition = OpLogicalOr %bool %i32_cmp7 %i32_cmp4
+ %i32_select = OpSelect %int %i32_condition %i32_bits %i32_min
+    %i64_and = OpBitwiseAnd %long %i64_input %i64_rhs
+     %i64_or = OpBitwiseOr %long %i64_input %i64_rhs
+    %i64_xor = OpBitwiseXor %long %i64_input %i64_min
+    %i64_shl = OpShiftLeftLogical %long %i64_input %i64_shift
+   %i64_ashr = OpShiftRightArithmetic %long %i64_input %i64_shift
+   %i64_lshr = OpShiftRightLogical %long %i64_input %i64_shift
+  %i64_bits0 = OpBitwiseXor %long %i64_and %i64_or
+  %i64_bits1 = OpBitwiseXor %long %i64_xor %i64_shl
+  %i64_bits2 = OpBitwiseXor %long %i64_ashr %i64_lshr
+  %i64_bits3 = OpBitwiseXor %long %i64_bits0 %i64_bits1
+   %i64_bits = OpBitwiseXor %long %i64_bits3 %i64_bits2
+     %i64_eq = OpIEqual %bool %i64_input %i64_rhs
+     %i64_ne = OpINotEqual %bool %i64_input %i64_rhs
+    %i64_slt = OpSLessThan %bool %i64_input %i64_rhs
+    %i64_sle = OpSLessThanEqual %bool %i64_input %i64_rhs
+    %i64_sgt = OpSGreaterThan %bool %i64_input %i64_rhs
+    %i64_sge = OpSGreaterThanEqual %bool %i64_input %i64_rhs
+        %180 = OpBitcast %ulong %i64_input
+        %181 = OpBitcast %ulong %i64_rhs
+    %i64_ult = OpULessThan %bool %180 %181
+    %i64_ule = OpULessThanEqual %bool %180 %181
+    %i64_ugt = OpUGreaterThan %bool %180 %181
+    %i64_uge = OpUGreaterThanEqual %bool %180 %181
+   %i64_cmp0 = OpLogicalAnd %bool %i64_eq %i64_ne
+   %i64_cmp1 = OpLogicalOr %bool %i64_slt %i64_sle
+   %i64_cmp2 = OpLogicalNotEqual %bool %i64_sgt %i64_sge
+   %i64_cmp3 = OpLogicalAnd %bool %i64_ult %i64_ule
+   %i64_cmp4 = OpLogicalOr %bool %i64_ugt %i64_uge
+   %i64_cmp5 = OpLogicalNotEqual %bool %i64_cmp0 %i64_cmp1
+   %i64_cmp6 = OpLogicalOr %bool %i64_cmp2 %i64_cmp3
+   %i64_cmp7 = OpLogicalNotEqual %bool %i64_cmp5 %i64_cmp6
+%i64_condition = OpLogicalOr %bool %i64_cmp7 %i64_cmp4
+ %i64_select = OpSelect %long %i64_condition %i64_bits %i64_min
+        %197 = OpSelect %int %false %int_1 %int_0
+        %198 = OpAccessChain %_ptr_StorageBuffer_int %25 %int_0
+               OpStore %198 %197 Aligned 4
+        %199 = OpSelect %int %bool_select %int_1 %int_0
+        %200 = OpAccessChain %_ptr_StorageBuffer_int %26 %int_0
+               OpStore %200 %199 Aligned 4
+        %201 = OpAccessChain %_ptr_StorageBuffer_char %27 %int_0
+               OpStore %201 %i8_select Aligned 1
+        %202 = OpAccessChain %_ptr_StorageBuffer_short %28 %int_0
+               OpStore %202 %i16_select Aligned 2
+        %203 = OpAccessChain %_ptr_StorageBuffer_int %29 %int_0
+               OpStore %203 %i32_select Aligned 4
+        %204 = OpAccessChain %_ptr_StorageBuffer_long %30 %int_0
+               OpStore %204 %i64_select Aligned 8
+               OpReturn
+               OpFunctionEnd

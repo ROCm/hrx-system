@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 30u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 31u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -790,6 +790,13 @@ static inline uint16_t loom_low_schedule_class_schedule_distance_cycles(
              : schedule_class->latency_cycles;
 }
 
+typedef enum loom_low_descriptor_op_kind_e {
+  // Descriptor packets use the general low.op representation.
+  LOOM_LOW_DESCRIPTOR_OP_KIND_OP = 0,
+  // Descriptor packets use the operandless, single-result low.const form.
+  LOOM_LOW_DESCRIPTOR_OP_KIND_CONST = 1,
+} loom_low_descriptor_op_kind_t;
+
 typedef struct loom_low_descriptor_t {
   // String-table offset for the stable descriptor key.
   loom_bstring_table_offset_t key_string_offset;
@@ -844,6 +851,8 @@ typedef struct loom_low_descriptor_t {
   uint16_t schedule_class_id;
   // Descriptor flags used by verifier, scheduler, and optimizer.
   loom_low_descriptor_flags_t flags;
+  // Canonical low IR operation used to represent this descriptor packet.
+  loom_low_descriptor_op_kind_t op_kind;
   // Generated target-neutral semantic instruction classes.
   loom_low_instruction_class_flags_t instruction_class_flags;
   // Unique canonical asm form ordinal for descriptor-driven text emission, or

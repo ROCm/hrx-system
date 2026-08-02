@@ -562,21 +562,6 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_inl
 // ====
 
 amdgpu.target<gfx11-generic> @target
-func.def target(@target) @f32_inline_rounded_literal(%input: f32) -> (f32) {
-  %scale = scalar.constant 0.15915494 : f32
-  %result = scalar.mulf %input, %scale : f32
-  func.return %result : f32
-}
-
-// ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_inline_rounded_literal(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %result = v_mul_f32_src0_inline %input, 1042479491
-  return %result
-}
-
-// ====
-
-amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_uniform_scalar_fma(%a_buffer: buffer, %b_buffer: buffer, %c_buffer: buffer) -> (f32) {
   %base = index.constant 0 : offset
   %a_global = buffer.assume.memory_space<global> %a_buffer : buffer

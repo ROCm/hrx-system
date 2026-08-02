@@ -117,25 +117,7 @@ iree_status_t loom_scalar_constant_verify(const loom_module_t* module,
     return iree_diagnostic_emit(emitter, &emission);
   }
 
-  loom_attribute_t value = loom_scalar_constant_value(op);
-  loom_attr_kind_t expected_kind = LOOM_ATTR_ANY;
-  if (loom_attr_matches_scalar_type(value, result_scalar_type,
-                                    &expected_kind)) {
-    return iree_ok_status();
-  }
-
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(IREE_SV("value")),
-      loom_param_u32(value.kind),
-      loom_param_u32(expected_kind),
-  };
-  loom_diagnostic_emission_t emission = {
-      .op = op,
-      .error = LOOM_ERR_TYPE_005,
-      .params = params,
-      .param_count = IREE_ARRAYSIZE(params),
-  };
-  return iree_diagnostic_emit(emitter, &emission);
+  return iree_ok_status();
 }
 
 iree_status_t loom_scalar_assume_verify(const loom_module_t* module,

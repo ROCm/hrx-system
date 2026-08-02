@@ -265,6 +265,7 @@ def _source_memory_constraint(
         )
         if dynamic
         else 0,
+        preserve_source_index=preserve_source_index,
         diagnostic=_SOURCE_MEMORY_DIAGNOSTIC,
     )
 
@@ -306,8 +307,10 @@ def _vector_load_rule(
             operands["index"] = ValueRef.source_memory_dynamic_byte_offset()
         elif dynamic_byte_stride_factor != 1:
             operands["index"] = ValueRef.temporary("factored_index")
-        else:
+        elif preserve_source_index:
             operands["index"] = ValueRef.operand("indices")
+        else:
+            operands["index"] = ValueRef.source_memory_dynamic_term()
     source_memory = _source_memory_constraint(
         SourceMemoryOperation.LOAD,
         lanes=lanes,
@@ -383,8 +386,10 @@ def _vector_store_rule(
             operands["index"] = ValueRef.source_memory_dynamic_byte_offset()
         elif dynamic_byte_stride_factor != 1:
             operands["index"] = ValueRef.temporary("factored_index")
-        else:
+        elif preserve_source_index:
             operands["index"] = ValueRef.operand("indices")
+        else:
+            operands["index"] = ValueRef.source_memory_dynamic_term()
     source_memory = _source_memory_constraint(
         SourceMemoryOperation.STORE,
         lanes=lanes,

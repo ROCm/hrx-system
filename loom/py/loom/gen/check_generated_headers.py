@@ -13,7 +13,7 @@ from pathlib import Path
 
 import bootstrap  # type: ignore[import-not-found]
 
-REPO_ROOT = bootstrap.ensure_runtime_py_on_path(Path(__file__))
+REPO_ROOT = bootstrap.ensure_repository_packages_on_path(Path(__file__))
 
 from loom.gen.support.generated_file import GENERATED_FILE_MARKER  # noqa: E402
 
