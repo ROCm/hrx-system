@@ -623,6 +623,93 @@ func.def @add_scaled_div_rem_maybe_negative_preserved(%lane: index) -> (index) {
 
 // ====
 
+// Subtracting the floor-aligned multiple from a non-negative coordinate is its
+// remainder instead of an independent-operand subtraction.
+func.def @sub_floor_multiple_is_remainder(%n: index) -> (index) {
+  %bounded = index.assume %n [range(%n, 0, 32768)] : index
+  %c64 = index.constant 64 : index
+  %quotient = index.div %bounded, %c64 : index
+  %aligned = index.mul %quotient, %c64 : index
+  %tail = index.sub %bounded, %aligned : index
+  func.return %tail : index
+}
+// ----
+func.def @sub_floor_multiple_is_remainder(%n: index) -> (index) {
+  %bounded = index.assume %n [range(%n, 0, 32768)] : index
+  %8 = index.constant 63 : index
+  %tail = index.andi %bounded, %8 : index
+  func.return %tail : index
+}
+
+// ====
+
+// The same floor multiple may already be in strength-reduced shift form when
+// subtraction canonicalizes.
+func.def @sub_shifted_floor_multiple_is_remainder(%n: index) -> (index) {
+  %bounded = index.assume %n [range(%n, 0, 32768)] : index
+  %c6 = index.constant 6 : index
+  %quotient = index.shrui %bounded, %c6 : index
+  %aligned = index.shli %quotient, %c6 : index
+  %tail = index.sub %bounded, %aligned : index
+  func.return %tail : index
+}
+// ----
+func.def @sub_shifted_floor_multiple_is_remainder(%n: index) -> (index) {
+  %bounded = index.assume %n [range(%n, 0, 32768)] : index
+  %9 = index.constant 63 : index
+  %tail = index.andi %bounded, %9 : index
+  func.return %tail : index
+}
+
+// ====
+
+// The normalized remainder carries the exact tail range consumed by dynamic
+// allocations and vector memory-footprint verification.
+func.def @rem_tail_has_exact_facts(%n: index) -> (i64, i64) {
+  %bounded = index.assume %n [range(%n, 0, 32768)] : index
+  %c64 = index.constant 64 : index
+  %tail = index.rem %bounded, %c64 : index
+  %tail_lo = test.fact_range_lo %tail : index -> i64
+  %tail_hi = test.fact_range_hi %tail : index -> i64
+  func.return %tail_lo, %tail_hi : i64, i64
+}
+// ----
+func.def @rem_tail_has_exact_facts(%n: index) -> (i64, i64) {
+  %tail_lo = scalar.constant 0 : i64
+  %tail_hi = scalar.constant 63 : i64
+  func.return %tail_lo, %tail_hi : i64, i64
+}
+
+// ====
+
+// Relational assumptions refine subtraction even when independent operand
+// intervals overlap. This preserves loop-body facts such as iv < upper.
+func.def @sub_relational_assume_facts(%upper: index, %iv: index) -> (i64, i64, i64, i64, i64) {
+  %bounded_upper = index.assume %upper [range(%upper, 1, 32768)] : index
+  %strict_iv = index.assume %iv [range(%iv, 0, 32767), lt(%iv, %bounded_upper)] : index
+  %positive = index.sub %bounded_upper, %strict_iv : index
+  %negative = index.sub %strict_iv, %bounded_upper : index
+  %not_after = index.assume %iv [range(%iv, 0, 32768), le(%iv, %bounded_upper)] : index
+  %nonnegative = index.sub %bounded_upper, %not_after : index
+  %positive_lo = test.fact_range_lo %positive : index -> i64
+  %positive_hi = test.fact_range_hi %positive : index -> i64
+  %negative_lo = test.fact_range_lo %negative : index -> i64
+  %negative_hi = test.fact_range_hi %negative : index -> i64
+  %nonnegative_lo = test.fact_range_lo %nonnegative : index -> i64
+  func.return %positive_lo, %positive_hi, %negative_lo, %negative_hi, %nonnegative_lo : i64, i64, i64, i64, i64
+}
+// ----
+func.def @sub_relational_assume_facts(%upper: index, %iv: index) -> (i64, i64, i64, i64, i64) {
+  %positive_lo = scalar.constant 1 : i64
+  %positive_hi = scalar.constant 32768 : i64
+  %negative_lo = scalar.constant -32768 : i64
+  %negative_hi = scalar.constant -1 : i64
+  %nonnegative_lo = scalar.constant 0 : i64
+  func.return %positive_lo, %positive_hi, %negative_lo, %negative_hi, %nonnegative_lo : i64, i64, i64, i64, i64
+}
+
+// ====
+
 // Dividing a scaled non-negative coordinate by an exact positive divisor keeps
 // the address expression scaled when the scale divides evenly.
 func.def @div_scaled_coordinate(%i: index) -> (index) {

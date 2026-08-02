@@ -173,6 +173,12 @@ static iree_status_t loom_index_replace_single_result_with_binary_op(
                                                 &replacement_op));
       break;
     }
+    case LOOM_OP_INDEX_REM: {
+      IREE_RETURN_IF_ERROR(loom_index_rem_build(&rewriter->builder, lhs, rhs,
+                                                result_type, op->location,
+                                                &replacement_op));
+      break;
+    }
     case LOOM_OP_INDEX_ANDI: {
       IREE_RETURN_IF_ERROR(loom_index_andi_build(&rewriter->builder, lhs, rhs,
                                                  result_type, op->location,
@@ -465,7 +471,19 @@ static bool loom_index_match_scaled_term(loom_rewriter_t* rewriter,
   *out_scale_value = LOOM_VALUE_ID_INVALID;
 
   loom_op_t* term_def = loom_index_defining_op(rewriter, term);
-  if (!term_def || !loom_index_mul_isa(term_def)) return true;
+  if (!term_def) return true;
+
+  if (loom_index_shli_isa(term_def)) {
+    int64_t scale = 0;
+    if (!loom_index_exact_shift_radix(rewriter, loom_index_shli_rhs(term_def),
+                                      &scale)) {
+      return false;
+    }
+    *out_value = loom_index_shli_lhs(term_def);
+    *out_scale = scale;
+    return true;
+  }
+  if (!loom_index_mul_isa(term_def)) return true;
 
   loom_value_id_t lhs = loom_index_mul_lhs(term_def);
   loom_value_id_t rhs = loom_index_mul_rhs(term_def);
@@ -634,6 +652,27 @@ static iree_status_t loom_index_try_fold_scaled_radix_reconstruction(
   IREE_RETURN_IF_ERROR(loom_index_replace_single_result_with_scaled_value(
       op, rewriter, quotient->source, remainder->scale,
       remainder->scale_value));
+  *out_folded = true;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_index_try_fold_floor_multiple_subtraction(
+    loom_op_t* op, loom_rewriter_t* rewriter, loom_value_id_t lhs,
+    loom_value_id_t rhs, bool* out_folded) {
+  *out_folded = false;
+  loom_index_scaled_radix_term_t rhs_term;
+  if (!loom_index_match_scaled_radix_term(rewriter, rhs, &rhs_term) ||
+      rhs_term.kind != LOOM_INDEX_RADIX_TERM_QUOTIENT ||
+      rhs_term.scale != rhs_term.radix ||
+      loom_index_strip_identity_assume(rewriter, lhs) !=
+          loom_index_strip_identity_assume(rewriter, rhs_term.source) ||
+      !loom_index_value_facts_are_non_negative(rewriter, rhs_term.source)) {
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(loom_index_replace_single_result_with_binary_constant_op(
+      op, rewriter, LOOM_OP_INDEX_REM, rhs_term.source, rhs_term.radix,
+      rhs_term.scale_value));
   *out_folded = true;
   return iree_ok_status();
 }
@@ -844,6 +883,15 @@ iree_status_t loom_index_sub_canonicalize(loom_op_t* op,
     return loom_index_replace_single_result_with_index_constant(op, rewriter,
                                                                 result_type, 0);
   }
+
+  loom_type_t result_type =
+      loom_module_value_type(rewriter->module, loom_index_sub_result(op));
+  if (!loom_index_type_is_index(result_type)) return iree_ok_status();
+
+  bool folded_floor_multiple = false;
+  IREE_RETURN_IF_ERROR(loom_index_try_fold_floor_multiple_subtraction(
+      op, rewriter, lhs, rhs, &folded_floor_multiple));
+  if (folded_floor_multiple) return iree_ok_status();
   return iree_ok_status();
 }
 
