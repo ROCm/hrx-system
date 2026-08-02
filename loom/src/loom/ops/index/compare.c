@@ -6,6 +6,7 @@
 
 #include "loom/ops/index/compare.h"
 
+#include "loom/ops/index/carrier.h"
 #include "loom/ops/index/ops.h"
 
 bool loom_index_cmp_same_value_result(uint8_t predicate, bool* out_result) {
@@ -33,6 +34,42 @@ static bool loom_index_cmp_facts_are_non_overlapping(
     const loom_value_facts_t* lhs_facts, const loom_value_facts_t* rhs_facts) {
   return lhs_facts->range_hi < rhs_facts->range_lo ||
          rhs_facts->range_hi < lhs_facts->range_lo;
+}
+
+bool loom_index_cmp_facts_fit_target_carrier(
+    const loom_fact_context_t* context, loom_scalar_type_t operand_scalar_type,
+    uint8_t predicate, const loom_value_facts_t* lhs_facts,
+    const loom_value_facts_t* rhs_facts) {
+  switch ((loom_index_cmp_predicate_t)predicate) {
+    case LOOM_INDEX_CMP_PREDICATE_EQ:
+    case LOOM_INDEX_CMP_PREDICATE_NE:
+      return (loom_index_value_facts_fit_signed_target_carrier(
+                  context, operand_scalar_type, *lhs_facts) &&
+              loom_index_value_facts_fit_signed_target_carrier(
+                  context, operand_scalar_type, *rhs_facts)) ||
+             (loom_index_value_facts_fit_unsigned_target_carrier(
+                  context, operand_scalar_type, *lhs_facts) &&
+              loom_index_value_facts_fit_unsigned_target_carrier(
+                  context, operand_scalar_type, *rhs_facts));
+    case LOOM_INDEX_CMP_PREDICATE_SLT:
+    case LOOM_INDEX_CMP_PREDICATE_SLE:
+    case LOOM_INDEX_CMP_PREDICATE_SGT:
+    case LOOM_INDEX_CMP_PREDICATE_SGE:
+      return loom_index_value_facts_fit_signed_target_carrier(
+                 context, operand_scalar_type, *lhs_facts) &&
+             loom_index_value_facts_fit_signed_target_carrier(
+                 context, operand_scalar_type, *rhs_facts);
+    case LOOM_INDEX_CMP_PREDICATE_ULT:
+    case LOOM_INDEX_CMP_PREDICATE_ULE:
+    case LOOM_INDEX_CMP_PREDICATE_UGT:
+    case LOOM_INDEX_CMP_PREDICATE_UGE:
+      return loom_index_value_facts_fit_unsigned_target_carrier(
+                 context, operand_scalar_type, *lhs_facts) &&
+             loom_index_value_facts_fit_unsigned_target_carrier(
+                 context, operand_scalar_type, *rhs_facts);
+    default:
+      return false;
+  }
 }
 
 static bool loom_index_signed_cmp_facts_result(
@@ -137,10 +174,16 @@ static bool loom_index_unsigned_cmp_facts_result(
   }
 }
 
-bool loom_index_cmp_result_from_facts(uint8_t predicate,
+bool loom_index_cmp_result_from_facts(const loom_fact_context_t* context,
+                                      loom_scalar_type_t operand_scalar_type,
+                                      uint8_t predicate,
                                       const loom_value_facts_t* lhs_facts,
                                       const loom_value_facts_t* rhs_facts,
                                       bool* out_result) {
+  if (!loom_index_cmp_facts_fit_target_carrier(
+          context, operand_scalar_type, predicate, lhs_facts, rhs_facts)) {
+    return false;
+  }
   return loom_index_signed_cmp_facts_result(predicate, lhs_facts, rhs_facts,
                                             out_result) ||
          loom_index_unsigned_cmp_facts_result(predicate, lhs_facts, rhs_facts,

@@ -13,6 +13,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
+#include "loom/ops/index/compare.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
@@ -462,6 +463,21 @@ static iree_status_t loom_canonicalize_try_symbolic_integer_cmp(
   *out_changed = false;
   if (!loom_index_cmp_isa(op) && !loom_scalar_cmpi_isa(op)) {
     return iree_ok_status();
+  }
+  if (loom_index_cmp_isa(op)) {
+    loom_value_id_t lhs = loom_index_cmp_lhs(op);
+    loom_value_id_t rhs = loom_index_cmp_rhs(op);
+    loom_type_t operand_type = loom_module_value_type(rewriter->module, lhs);
+    if (!loom_type_is_scalar(operand_type)) return iree_ok_status();
+    loom_value_facts_t lhs_facts = loom_rewriter_value_facts(rewriter, lhs);
+    loom_value_facts_t rhs_facts = loom_rewriter_value_facts(rewriter, rhs);
+    const loom_fact_context_t* fact_context =
+        rewriter->fact_table ? &rewriter->fact_table->context : NULL;
+    if (!loom_index_cmp_facts_fit_target_carrier(
+            fact_context, loom_type_element_type(operand_type),
+            loom_index_cmp_predicate(op), &lhs_facts, &rhs_facts)) {
+      return iree_ok_status();
+    }
   }
 
   loom_condition_integer_relation_t relation_storage[1];

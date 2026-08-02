@@ -16,11 +16,13 @@ loom_generated_cc_library(
     name = "index",
     srcs = [
         "canonicalize.c",
+        "carrier.c",
         "compare.c",
         "facts.c",
         "verify.c",
     ],
     hdrs = [
+        "carrier.h",
         "compare.h",
         "ops.h",
     ],

@@ -6,11 +6,11 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/ir/module.h"
+#include "loom/ops/index/carrier.h"
 #include "loom/ops/index/compare.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/rewrite/rewriter.h"
-#include "loom/target/capability_facts.h"
 
 //===----------------------------------------------------------------------===//
 // Utilities
@@ -50,6 +50,17 @@ static bool loom_index_values_are_same_or_same_exact_i64(
          lhs_value == rhs_value;
 }
 
+static const loom_fact_context_t* loom_index_rewriter_fact_context(
+    const loom_rewriter_t* rewriter) {
+  return rewriter->fact_table ? &rewriter->fact_table->context : NULL;
+}
+
+static int32_t loom_index_rewriter_target_bitwidth(
+    const loom_rewriter_t* rewriter) {
+  return loom_index_target_carrier_bitwidth(
+      loom_index_rewriter_fact_context(rewriter), LOOM_SCALAR_TYPE_INDEX);
+}
+
 static bool loom_index_value_facts_are_non_negative(loom_rewriter_t* rewriter,
                                                     loom_value_id_t value) {
   return loom_value_facts_is_non_negative(
@@ -60,6 +71,16 @@ static bool loom_index_value_facts_are_positive(loom_rewriter_t* rewriter,
                                                 loom_value_id_t value) {
   return loom_value_facts_is_positive(
       loom_rewriter_value_facts(rewriter, value));
+}
+
+static bool loom_index_value_facts_are_non_negative_in_signed_target_carrier(
+    loom_rewriter_t* rewriter, loom_value_id_t value) {
+  loom_value_facts_t facts = loom_rewriter_value_facts(rewriter, value);
+  loom_type_t type = loom_module_value_type(rewriter->module, value);
+  return loom_type_is_scalar(type) && loom_value_facts_is_non_negative(facts) &&
+         loom_index_value_facts_fit_signed_target_carrier(
+             loom_index_rewriter_fact_context(rewriter),
+             loom_type_element_type(type), facts);
 }
 
 static loom_op_t* loom_index_defining_op(loom_rewriter_t* rewriter,
@@ -272,20 +293,6 @@ static iree_status_t loom_index_replace_single_result_with_scaled_madd_op(
       op, rewriter, factor_value, factor, &scale_value));
   return loom_index_replace_single_result_with_madd_op(op, rewriter, value,
                                                        scale_value, addend);
-}
-
-static int32_t loom_index_rewriter_target_bitwidth(
-    const loom_rewriter_t* rewriter) {
-  const loom_fact_context_t* context =
-      rewriter->fact_table ? &rewriter->fact_table->context : NULL;
-  uint64_t target_bitwidth = 0;
-  if (!loom_target_fact_context_query_u64(context, IREE_SV("target"),
-                                          IREE_SV("index_bitwidth"),
-                                          &target_bitwidth) ||
-      target_bitwidth > INT32_MAX) {
-    return 0;
-  }
-  return (int32_t)target_bitwidth;
 }
 
 static bool loom_index_shift_amount_is_valid(const loom_rewriter_t* rewriter,
@@ -970,13 +977,13 @@ iree_status_t loom_index_rem_canonicalize(loom_op_t* op,
   if (loom_index_query_exact_i64(rewriter, rhs, &divisor) && divisor > 0) {
     loom_value_facts_t lhs_facts = loom_rewriter_value_facts(rewriter, lhs);
     if (!loom_value_facts_is_float(lhs_facts) &&
-        loom_value_facts_is_non_negative(lhs_facts) &&
+        loom_index_value_facts_are_non_negative(rewriter, lhs) &&
         loom_value_facts_divisible_by(lhs_facts, divisor)) {
       return loom_index_replace_single_result_with_index_constant(
           op, rewriter, result_type, 0);
     }
     if (!loom_value_facts_is_float(lhs_facts) &&
-        loom_value_facts_is_non_negative(lhs_facts) &&
+        loom_index_value_facts_are_non_negative(rewriter, lhs) &&
         lhs_facts.range_hi < divisor) {
       return loom_index_replace_single_result_with_value(op, rewriter, lhs);
     }
@@ -991,7 +998,7 @@ iree_status_t loom_index_rem_canonicalize(loom_op_t* op,
           loom_rewriter_value_facts(rewriter, offset_value);
       int64_t residual_range_hi = 0;
       if (!loom_value_facts_is_float(value_facts) &&
-          loom_value_facts_is_non_negative(value_facts) &&
+          loom_index_value_facts_are_non_negative(rewriter, offset_value) &&
           iree_checked_add_i64(value_facts.range_hi, residual_offset,
                                &residual_range_hi) &&
           residual_range_hi < divisor) {
@@ -1028,9 +1035,12 @@ static iree_status_t loom_index_minmax_canonicalize(
 
   loom_value_facts_t lhs_facts = loom_rewriter_value_facts(rewriter, lhs);
   loom_value_facts_t rhs_facts = loom_rewriter_value_facts(rewriter, rhs);
+  loom_scalar_type_t operand_scalar_type =
+      loom_type_element_type(loom_module_value_type(rewriter->module, lhs));
   bool lhs_le_rhs = false;
-  if (!loom_index_cmp_result_from_facts(LOOM_INDEX_CMP_PREDICATE_SLE,
-                                        &lhs_facts, &rhs_facts, &lhs_le_rhs)) {
+  if (!loom_index_cmp_result_from_facts(
+          loom_index_rewriter_fact_context(rewriter), operand_scalar_type,
+          LOOM_INDEX_CMP_PREDICATE_SLE, &lhs_facts, &rhs_facts, &lhs_le_rhs)) {
     return iree_ok_status();
   }
 
@@ -1254,7 +1264,8 @@ iree_status_t loom_index_shrsi_canonicalize(loom_op_t* op,
   if (loom_index_value_facts_are_exact_i64(rewriter, rhs, 0)) {
     return loom_index_replace_single_result_with_value(op, rewriter, lhs);
   }
-  if (loom_index_value_facts_are_non_negative(rewriter, lhs)) {
+  if (loom_index_value_facts_are_non_negative_in_signed_target_carrier(rewriter,
+                                                                       lhs)) {
     return loom_index_replace_single_result_with_binary_op(
         op, rewriter, LOOM_OP_INDEX_SHRUI, lhs, rhs);
   }
@@ -1328,9 +1339,12 @@ iree_status_t loom_index_cmp_canonicalize(loom_op_t* op,
   bool result = false;
   loom_value_facts_t lhs_facts = loom_rewriter_value_facts(rewriter, lhs);
   loom_value_facts_t rhs_facts = loom_rewriter_value_facts(rewriter, rhs);
+  loom_scalar_type_t operand_scalar_type =
+      loom_type_element_type(loom_module_value_type(rewriter->module, lhs));
   if ((lhs == rhs && loom_index_cmp_same_value_result(predicate, &result)) ||
-      loom_index_cmp_result_from_facts(predicate, &lhs_facts, &rhs_facts,
-                                       &result)) {
+      loom_index_cmp_result_from_facts(
+          loom_index_rewriter_fact_context(rewriter), operand_scalar_type,
+          predicate, &lhs_facts, &rhs_facts, &result)) {
     return loom_index_replace_single_result_with_i1_constant(op, rewriter,
                                                              result);
   }

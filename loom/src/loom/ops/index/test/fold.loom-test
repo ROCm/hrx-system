@@ -1375,3 +1375,143 @@ func.def target(@target64) @target_width_64(%x: index) -> (index, index, index, 
   %outer_shift = index.shli %x, %33 : index
   func.return %count, %rotate, %multiply, %outer_shift : index, index, index, index
 }
+
+// ====
+
+// Source facts can retain the full U32 coordinate envelope even when the
+// selected target carries index in signed 32-bit values. Signed comparison,
+// min/max, and arithmetic-shift rewrites must wait until those facts fit the
+// selected carrier. Unsigned comparison and division retain the full-U32 view;
+// the same mathematical facts fit every signed operation on a 64-bit target.
+test.target<quirky> @target32
+test.target<low_core> @target64
+func.def target(@target32) @target_carrier_range_proofs_32(%x: index, %y: index) -> (i1, i1, index, index, index, i64, i64) {
+  %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
+  %low = index.assume %y [range(%y, 0, 15)] : index
+  %eight = index.constant 8 : index
+  %one = index.constant 1 : index
+  %comparison = index.cmp slt, %high, %low : index
+  %unsigned_comparison = index.cmp ugt, %high, %low : index
+  %minimum = index.min %high, %low : index
+  %quotient = index.div %high, %eight : index
+  %shifted = index.shrsi %high, %one : index
+  %minimum_lo = test.fact_range_lo %minimum : index -> i64
+  %minimum_hi = test.fact_range_hi %minimum : index -> i64
+  func.return %comparison, %unsigned_comparison, %minimum, %quotient, %shifted, %minimum_lo, %minimum_hi : i1, i1, index, index, index, i64, i64
+}
+func.def target(@target64) @target_carrier_range_proofs_64(%x: index, %y: index) -> (i1, i1, index, index, index, i64, i64) {
+  %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
+  %low = index.assume %y [range(%y, 0, 15)] : index
+  %eight = index.constant 8 : index
+  %one = index.constant 1 : index
+  %comparison = index.cmp slt, %high, %low : index
+  %unsigned_comparison = index.cmp ugt, %high, %low : index
+  %minimum = index.min %high, %low : index
+  %quotient = index.div %high, %eight : index
+  %shifted = index.shrsi %high, %one : index
+  %minimum_lo = test.fact_range_lo %minimum : index -> i64
+  %minimum_hi = test.fact_range_hi %minimum : index -> i64
+  func.return %comparison, %unsigned_comparison, %minimum, %quotient, %shifted, %minimum_lo, %minimum_hi : i1, i1, index, index, index, i64, i64
+}
+
+// ----
+test.target<quirky> @target32
+
+test.target<low_core> @target64
+
+func.def target(@target32) @target_carrier_range_proofs_32(%x: index, %y: index) -> (i1, i1, index, index, index, i64, i64) {
+  %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
+  %low = index.assume %y [range(%y, 0, 15)] : index
+  %one = index.constant 1 : index
+  %comparison = index.cmp slt, %high, %low : index
+  %unsigned_comparison = scalar.constant true : i1
+  %minimum = index.min %high, %low : index
+  %42 = index.constant 3 : index
+  %quotient = index.shrui %high, %42 : index
+  %shifted = index.shrsi %high, %one : index
+  %minimum_lo = scalar.constant -2147483648 : i64
+  %minimum_hi = scalar.constant 2147483647 : i64
+  func.return %comparison, %unsigned_comparison, %minimum, %quotient, %shifted, %minimum_lo, %minimum_hi : i1, i1, index, index, index, i64, i64
+}
+
+func.def target(@target64) @target_carrier_range_proofs_64(%x: index, %y: index) -> (i1, i1, index, index, index, i64, i64) {
+  %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
+  %low = index.assume %y [range(%y, 0, 15)] : index
+  %one = index.constant 1 : index
+  %comparison = scalar.constant false : i1
+  %unsigned_comparison = scalar.constant true : i1
+  %48 = index.constant 3 : index
+  %quotient = index.shrui %high, %48 : index
+  %shifted = index.shrui %high, %one : index
+  %minimum_lo = scalar.constant 0 : i64
+  %minimum_hi = scalar.constant 15 : i64
+  func.return %comparison, %unsigned_comparison, %low, %quotient, %shifted, %minimum_lo, %minimum_hi : i1, i1, index, index, index, i64, i64
+}
+
+// ====
+
+// Equality needs a common carrier view: -1 and UINT32_MAX are distinct in the
+// source fact envelope but alias the same 32-bit payload. Symbolic signed
+// relations likewise remain target-width constrained when direct interval
+// facts are inconclusive.
+test.target<quirky> @target32
+test.target<low_core> @target64
+func.def target(@target32) @target_carrier_equality_32() -> (i1) {
+  %negative_one = index.constant -1 : index
+  %unsigned_max = index.constant 4294967295 : index
+  %comparison = index.cmp eq, %negative_one, %unsigned_max : index
+  func.return %comparison : i1
+}
+func.def target(@target64) @target_carrier_equality_64() -> (i1) {
+  %negative_one = index.constant -1 : index
+  %unsigned_max = index.constant 4294967295 : index
+  %comparison = index.cmp eq, %negative_one, %unsigned_max : index
+  func.return %comparison : i1
+}
+func.def target(@target32) @target_carrier_symbolic_compare_32(%x: index) -> (i1) {
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %lhs = index.add %x, %one : index
+  %rhs = index.add %x, %two : index
+  %comparison = index.cmp slt, %lhs, %rhs : index
+  func.return %comparison : i1
+}
+func.def target(@target64) @target_carrier_symbolic_compare_64(%x: index) -> (i1) {
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %lhs = index.add %x, %one : index
+  %rhs = index.add %x, %two : index
+  %comparison = index.cmp slt, %lhs, %rhs : index
+  func.return %comparison : i1
+}
+
+// ----
+test.target<quirky> @target32
+
+test.target<low_core> @target64
+
+func.def target(@target32) @target_carrier_equality_32() -> (i1) {
+  %negative_one = index.constant -1 : index
+  %unsigned_max = index.constant 4294967295 : index
+  %comparison = index.cmp eq, %negative_one, %unsigned_max : index
+  func.return %comparison : i1
+}
+
+func.def target(@target64) @target_carrier_equality_64() -> (i1) {
+  %comparison = scalar.constant false : i1
+  func.return %comparison : i1
+}
+
+func.def target(@target32) @target_carrier_symbolic_compare_32(%x: index) -> (i1) {
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %lhs = index.add %x, %one : index
+  %rhs = index.add %x, %two : index
+  %comparison = index.cmp slt, %lhs, %rhs : index
+  func.return %comparison : i1
+}
+
+func.def target(@target64) @target_carrier_symbolic_compare_64(%x: index) -> (i1) {
+  %comparison = scalar.constant true : i1
+  func.return %comparison : i1
+}

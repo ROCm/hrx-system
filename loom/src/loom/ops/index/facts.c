@@ -12,20 +12,9 @@
 #include "loom/ir/attribute.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
+#include "loom/ops/index/carrier.h"
 #include "loom/ops/index/compare.h"
 #include "loom/ops/index/ops.h"
-#include "loom/target/capability_facts.h"
-
-static int32_t loom_index_target_bitwidth(const loom_fact_context_t* context) {
-  uint64_t target_bitwidth = 0;
-  if (!loom_target_fact_context_query_u64(context, IREE_SV("target"),
-                                          IREE_SV("index_bitwidth"),
-                                          &target_bitwidth) ||
-      target_bitwidth > INT32_MAX) {
-    return 0;
-  }
-  return (int32_t)target_bitwidth;
-}
 
 #define LOOM_INDEX_BINARY_FACTS(name, transfer_fn)                       \
   iree_status_t name(loom_fact_context_t* context,                       \
@@ -197,8 +186,46 @@ iree_status_t loom_index_rem_facts(loom_fact_context_t* context,
   return iree_ok_status();
 }
 
-LOOM_INDEX_BINARY_FACTS(loom_index_min_facts, loom_value_facts_minsi)
-LOOM_INDEX_BINARY_FACTS(loom_index_max_facts, loom_value_facts_maxsi)
+typedef void (*loom_index_minmax_transfer_fn_t)(const loom_value_facts_t* lhs,
+                                                const loom_value_facts_t* rhs,
+                                                loom_value_facts_t* out_facts);
+
+static iree_status_t loom_index_minmax_facts(
+    loom_fact_context_t* context, const loom_value_facts_t* operand_facts,
+    loom_index_minmax_transfer_fn_t transfer_fn,
+    loom_value_facts_t* result_facts) {
+  if (loom_index_value_facts_fit_signed_target_carrier(
+          context, LOOM_SCALAR_TYPE_INDEX, operand_facts[0]) &&
+      loom_index_value_facts_fit_signed_target_carrier(
+          context, LOOM_SCALAR_TYPE_INDEX, operand_facts[1])) {
+    transfer_fn(&operand_facts[0], &operand_facts[1], &result_facts[0]);
+    return iree_ok_status();
+  }
+
+  result_facts[0] = loom_value_facts_make_signed_bit_count_range(
+      loom_index_target_carrier_bitwidth(context, LOOM_SCALAR_TYPE_INDEX));
+  loom_value_facts_propagate_binary_distribution(
+      operand_facts[0], operand_facts[1], &result_facts[0]);
+  return iree_ok_status();
+}
+
+iree_status_t loom_index_min_facts(loom_fact_context_t* context,
+                                   const loom_module_t* module,
+                                   const loom_op_t* op,
+                                   const loom_value_facts_t* operand_facts,
+                                   loom_value_facts_t* result_facts) {
+  return loom_index_minmax_facts(context, operand_facts, loom_value_facts_minsi,
+                                 result_facts);
+}
+
+iree_status_t loom_index_max_facts(loom_fact_context_t* context,
+                                   const loom_module_t* module,
+                                   const loom_op_t* op,
+                                   const loom_value_facts_t* operand_facts,
+                                   loom_value_facts_t* result_facts) {
+  return loom_index_minmax_facts(context, operand_facts, loom_value_facts_maxsi,
+                                 result_facts);
+}
 
 iree_status_t loom_index_madd_facts(loom_fact_context_t* context,
                                     const loom_module_t* module,
@@ -222,7 +249,8 @@ static iree_status_t loom_index_rotate_facts(
     bool rotate_left, loom_value_facts_t* result_facts) {
   int64_t value = 0;
   int64_t amount = 0;
-  int32_t bitwidth = loom_index_target_bitwidth(context);
+  int32_t bitwidth =
+      loom_index_target_carrier_bitwidth(context, LOOM_SCALAR_TYPE_INDEX);
   if (!loom_value_facts_as_exact_i64(operand_facts[0], &value) ||
       !loom_value_facts_as_exact_i64(operand_facts[1], &amount) ||
       bitwidth <= 0 || bitwidth > 64 || amount < 0 || amount >= bitwidth) {
@@ -265,27 +293,28 @@ iree_status_t loom_index_rotri_facts(loom_fact_context_t* context,
                                  /*rotate_left=*/false, result_facts);
 }
 
-#define LOOM_INDEX_BIT_COUNT_FACTS(name, fn)                              \
-  iree_status_t name(loom_fact_context_t* context,                        \
-                     const loom_module_t* module, const loom_op_t* op,    \
-                     const loom_value_facts_t* operand_facts,             \
-                     loom_value_facts_t* result_facts) {                  \
-    int64_t value = 0;                                                    \
-    int32_t bitwidth = loom_index_target_bitwidth(context);               \
-    if (bitwidth == 0) {                                                  \
-      result_facts[0] = loom_value_facts_make(                            \
-          0, loom_scalar_type_bitwidth(LOOM_SCALAR_TYPE_INDEX), 1);       \
-    } else if (bitwidth > 64) {                                           \
-      result_facts[0] = loom_value_facts_unknown();                       \
-    } else if (loom_value_facts_as_exact_i64(operand_facts[0], &value)) { \
-      result_facts[0] =                                                   \
-          loom_value_facts_exact_i64(fn((uint64_t)value, bitwidth));      \
-    } else {                                                              \
-      result_facts[0] = loom_value_facts_make(0, bitwidth, 1);            \
-    }                                                                     \
-    loom_value_facts_propagate_unary_distribution(operand_facts[0],       \
-                                                  &result_facts[0]);      \
-    return iree_ok_status();                                              \
+#define LOOM_INDEX_BIT_COUNT_FACTS(name, fn)                                 \
+  iree_status_t name(loom_fact_context_t* context,                           \
+                     const loom_module_t* module, const loom_op_t* op,       \
+                     const loom_value_facts_t* operand_facts,                \
+                     loom_value_facts_t* result_facts) {                     \
+    int64_t value = 0;                                                       \
+    int32_t bitwidth =                                                       \
+        loom_index_target_carrier_bitwidth(context, LOOM_SCALAR_TYPE_INDEX); \
+    if (bitwidth == 0) {                                                     \
+      result_facts[0] = loom_value_facts_make(                               \
+          0, loom_scalar_type_bitwidth(LOOM_SCALAR_TYPE_INDEX), 1);          \
+    } else if (bitwidth < 0) {                                               \
+      result_facts[0] = loom_value_facts_unknown();                          \
+    } else if (loom_value_facts_as_exact_i64(operand_facts[0], &value)) {    \
+      result_facts[0] =                                                      \
+          loom_value_facts_exact_i64(fn((uint64_t)value, bitwidth));         \
+    } else {                                                                 \
+      result_facts[0] = loom_value_facts_make(0, bitwidth, 1);               \
+    }                                                                        \
+    loom_value_facts_propagate_unary_distribution(operand_facts[0],          \
+                                                  &result_facts[0]);         \
+    return iree_ok_status();                                                 \
   }
 
 LOOM_INDEX_BIT_COUNT_FACTS(loom_index_ctlzi_facts,
@@ -314,10 +343,14 @@ iree_status_t loom_index_cmp_facts(loom_fact_context_t* context,
   if (op->operand_count >= 2 && op->attribute_count >= 1) {
     bool result = false;
     uint8_t predicate = loom_index_cmp_predicate(op);
+    loom_scalar_type_t operand_scalar_type = LOOM_SCALAR_TYPE_COUNT_;
     if ((loom_index_cmp_lhs(op) == loom_index_cmp_rhs(op) &&
          loom_index_cmp_same_value_result(predicate, &result)) ||
-        loom_index_cmp_result_from_facts(predicate, &operand_facts[0],
-                                         &operand_facts[1], &result)) {
+        (loom_index_cast_scalar_type(module, loom_index_cmp_lhs(op),
+                                     &operand_scalar_type) &&
+         loom_index_cmp_result_from_facts(context, operand_scalar_type,
+                                          predicate, &operand_facts[0],
+                                          &operand_facts[1], &result))) {
       result_facts[0] = loom_value_facts_exact_i64(result ? 1 : 0);
       return iree_ok_status();
     }
