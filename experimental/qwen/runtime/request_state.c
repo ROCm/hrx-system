@@ -57,7 +57,7 @@ static iree_status_t qwen_request_storage_append(
 
 iree_status_t qwen_request_storage_layout_calculate(
     iree_host_size_t token_capacity, iree_host_size_t context_capacity,
-    qwen_request_storage_layout_t* out_layout) {
+    qwen_request_flags_t flags, qwen_request_storage_layout_t* out_layout) {
   IREE_ASSERT_ARGUMENT(out_layout);
   memset(out_layout, 0, sizeof(*out_layout));
   if (token_capacity > context_capacity) {
@@ -65,6 +65,13 @@ iree_status_t qwen_request_storage_layout_calculate(
                             "Qwen token capacity %" PRIhsz
                             " exceeds request context capacity %" PRIhsz,
                             token_capacity, context_capacity);
+  }
+  const qwen_request_flags_t allowed_flags = QWEN_REQUEST_FLAG_ROUTE_TRACE;
+  if (iree_any_bit_set(flags, ~allowed_flags)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen request storage flags 0x%08" PRIx32
+                            " contain unsupported bits",
+                            flags);
   }
 
   iree_device_size_t hidden_state_byte_length = 0;
@@ -128,6 +135,31 @@ iree_status_t qwen_request_storage_layout_calculate(
   IREE_RETURN_IF_ERROR(qwen_request_storage_append(
       mask_byte_length, /*FlashAttention vector alignment=*/16, &cursor,
       &out_layout->attention_mask));
+
+  if (iree_any_bit_set(flags, QWEN_REQUEST_FLAG_ROUTE_TRACE)) {
+    iree_device_size_t element_count = 0;
+    iree_device_size_t plane_byte_length = 0;
+    if (!iree_device_size_checked_mul((iree_device_size_t)context_capacity,
+                                      QWEN_MODEL_LAYER_COUNT, &element_count) ||
+        !iree_device_size_checked_mul(element_count, QWEN_MODEL_ROUTE_COUNT,
+                                      &element_count) ||
+        !iree_device_size_checked_mul(element_count, sizeof(uint32_t),
+                                      &plane_byte_length)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "Qwen route-trace storage byte length overflows");
+    }
+    out_layout->route_trace.element_count = element_count;
+    IREE_RETURN_IF_ERROR(
+        qwen_request_storage_append(plane_byte_length, _Alignof(int32_t),
+                                    &cursor, &out_layout->route_trace.ids));
+    IREE_RETURN_IF_ERROR(
+        qwen_request_storage_append(plane_byte_length, _Alignof(float), &cursor,
+                                    &out_layout->route_trace.weights));
+    out_layout->route_trace.payload = (qwen_request_span_t){
+        .offset = out_layout->route_trace.ids.offset,
+        .length = cursor - out_layout->route_trace.ids.offset,
+    };
+  }
   out_layout->dispatch_state_byte_length = cursor;
 
   iree_device_size_t all_layer_cache_byte_length = 0;

@@ -9,6 +9,7 @@
 #include "experimental/qwen/runtime/model_shape.h"
 #include "experimental/qwen/runtime/request_state.h"
 #include "iree/base/internal/atomics.h"
+#include "iree/hal/buffer_transfer.h"
 
 typedef struct qwen_request_semaphore_list_storage_t {
   // Materialized semaphore pointer array.
@@ -48,6 +49,8 @@ struct qwen_request_t {
   iree_host_size_t token_capacity;
   // Maximum K/V rows retained by each layer.
   iree_host_size_t context_capacity;
+  // Optional storage behavior selected when the request was created.
+  qwen_request_flags_t flags;
   // Active token rows published by the latest successful reset.
   iree_host_size_t active_token_count;
   // Logical position of the first active token.
@@ -123,6 +126,7 @@ void qwen_request_options_initialize(qwen_request_options_t* out_options) {
       .next = NULL,
       .token_capacity = 1,
       .context_capacity = 1,
+      .flags = QWEN_REQUEST_FLAG_NONE,
   };
 }
 
@@ -148,7 +152,8 @@ iree_status_t qwen_request_create(
 
   qwen_request_storage_layout_t storage_layout;
   IREE_RETURN_IF_ERROR(qwen_request_storage_layout_calculate(
-      options->token_capacity, options->context_capacity, &storage_layout));
+      options->token_capacity, options->context_capacity, options->flags,
+      &storage_layout));
 
   qwen_request_t* request = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*request),
@@ -160,6 +165,7 @@ iree_status_t qwen_request_create(
   qwen_model_retain(model);
   request->token_capacity = options->token_capacity;
   request->context_capacity = options->context_capacity;
+  request->flags = options->flags;
   request->storage_layout = storage_layout;
 
   iree_hal_device_t* device = qwen_model_device(model);
@@ -195,8 +201,10 @@ iree_status_t qwen_request_create(
   }
 
   qwen_request_semaphore_list_storage_t alloca_signal_storage;
+  qwen_request_semaphore_list_storage_t trace_ids_signal_storage;
   qwen_request_semaphore_list_storage_t ready_signal_storage;
   memset(&alloca_signal_storage, 0, sizeof(alloca_signal_storage));
+  memset(&trace_ids_signal_storage, 0, sizeof(trace_ids_signal_storage));
   memset(&ready_signal_storage, 0, sizeof(ready_signal_storage));
   if (iree_status_is_ok(status)) {
     status = qwen_request_semaphore_list_prepend(
@@ -205,9 +213,19 @@ iree_status_t qwen_request_create(
         &alloca_signal_storage);
   }
   if (iree_status_is_ok(status)) {
+    if (iree_any_bit_set(request->flags, QWEN_REQUEST_FLAG_ROUTE_TRACE)) {
+      status = qwen_request_semaphore_list_prepend(
+          request->timeline_semaphore, /*payload_value=*/2,
+          iree_hal_semaphore_list_empty(), host_allocator,
+          &trace_ids_signal_storage);
+    }
+  }
+  const uint64_t ready_timeline_value =
+      iree_any_bit_set(request->flags, QWEN_REQUEST_FLAG_ROUTE_TRACE) ? 3 : 2;
+  if (iree_status_is_ok(status)) {
     status = qwen_request_semaphore_list_prepend(
-        request->timeline_semaphore, /*payload_value=*/2, signal_semaphore_list,
-        host_allocator, &ready_signal_storage);
+        request->timeline_semaphore, ready_timeline_value,
+        signal_semaphore_list, host_allocator, &ready_signal_storage);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_buffer_params_t storage_params = {
@@ -224,24 +242,43 @@ iree_status_t qwen_request_create(
         IREE_HAL_ALLOCA_FLAG_INDETERMINATE_LIFETIME, &request->storage_buffer);
   }
   if (iree_status_is_ok(status)) {
+    if (iree_any_bit_set(request->flags, QWEN_REQUEST_FLAG_ROUTE_TRACE)) {
+      const uint32_t unwritten_route_pattern = UINT32_MAX;
+      status = iree_hal_device_queue_fill(
+          device, queue_affinity, alloca_signal_storage.list,
+          trace_ids_signal_storage.list, request->storage_buffer,
+          storage_layout.route_trace.ids.offset,
+          storage_layout.route_trace.ids.length, &unwritten_route_pattern,
+          sizeof(unwritten_route_pattern), IREE_HAL_FILL_FLAG_NONE);
+    }
+  }
+  if (iree_status_is_ok(status)) {
     const uint32_t zero_pattern = 0;
-    const iree_device_size_t cache_offset = storage_layout.key_cache.offset;
-    const iree_device_size_t cache_length = storage_layout.value_cache.offset +
-                                            storage_layout.value_cache.length -
-                                            cache_offset;
+    const bool route_trace_enabled =
+        iree_any_bit_set(request->flags, QWEN_REQUEST_FLAG_ROUTE_TRACE);
+    const iree_device_size_t zero_offset =
+        route_trace_enabled ? storage_layout.route_trace.weights.offset
+                            : storage_layout.key_cache.offset;
+    const iree_device_size_t zero_length = storage_layout.value_cache.offset +
+                                           storage_layout.value_cache.length -
+                                           zero_offset;
+    const iree_hal_semaphore_list_t zero_wait_list =
+        route_trace_enabled ? trace_ids_signal_storage.list
+                            : alloca_signal_storage.list;
     status = iree_hal_device_queue_fill(
-        device, queue_affinity, alloca_signal_storage.list,
-        ready_signal_storage.list, request->storage_buffer, cache_offset,
-        cache_length, &zero_pattern, sizeof(zero_pattern),
-        IREE_HAL_FILL_FLAG_NONE);
+        device, queue_affinity, zero_wait_list, ready_signal_storage.list,
+        request->storage_buffer, zero_offset, zero_length, &zero_pattern,
+        sizeof(zero_pattern), IREE_HAL_FILL_FLAG_NONE);
   }
   qwen_request_semaphore_list_storage_deinitialize(&ready_signal_storage,
+                                                   host_allocator);
+  qwen_request_semaphore_list_storage_deinitialize(&trace_ids_signal_storage,
                                                    host_allocator);
   qwen_request_semaphore_list_storage_deinitialize(&alloca_signal_storage,
                                                    host_allocator);
 
   if (iree_status_is_ok(status)) {
-    request->timeline_value = 2;
+    request->timeline_value = ready_timeline_value;
     *out_request = request;
   } else {
     qwen_request_destroy(request);
@@ -463,6 +500,37 @@ iree_status_t qwen_request_read_selected_token(
   return iree_ok_status();
 }
 
+iree_status_t qwen_request_read_route_trace(qwen_request_t* request,
+                                            iree_byte_span_t target_data) {
+  if (!request) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen request is required");
+  }
+  const qwen_request_span_t payload =
+      request->storage_layout.route_trace.payload;
+  if (!iree_any_bit_set(request->flags, QWEN_REQUEST_FLAG_ROUTE_TRACE)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "Qwen request route tracing is disabled");
+  }
+  if (target_data.data_length != payload.length) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen route-trace output has %" PRIhsz
+                            " bytes; expected %" PRIu64,
+                            target_data.data_length, (uint64_t)payload.length);
+  }
+  if (target_data.data_length != 0 && !target_data.data) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Qwen route-trace output data is required");
+  }
+  IREE_RETURN_IF_ERROR(qwen_request_require_result(
+      request, QWEN_REQUEST_RESULT_KIND_SELECTED_TOKEN,
+      IREE_SV("selected-token")));
+  return iree_hal_device_transfer_d2h(
+      qwen_model_device(request->model), request->storage_buffer,
+      payload.offset, target_data.data, payload.length,
+      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout());
+}
+
 iree_host_size_t qwen_request_token_capacity(const qwen_request_t* request) {
   return request ? request->token_capacity : 0;
 }
@@ -474,6 +542,11 @@ iree_host_size_t qwen_request_context_capacity(const qwen_request_t* request) {
 iree_device_size_t qwen_request_persistent_byte_length(
     const qwen_request_t* request) {
   return request ? request->storage_layout.persistent_byte_length : 0;
+}
+
+iree_device_size_t qwen_request_route_trace_byte_length(
+    const qwen_request_t* request) {
+  return request ? request->storage_layout.route_trace.payload.length : 0;
 }
 
 qwen_model_t* qwen_request_model(const qwen_request_t* request) {
@@ -515,6 +588,10 @@ iree_host_size_t qwen_request_active_token_count(
 
 iree_host_size_t qwen_request_context_base(const qwen_request_t* request) {
   return request ? request->context_base : 0;
+}
+
+qwen_request_flags_t qwen_request_flags(const qwen_request_t* request) {
+  return request ? request->flags : QWEN_REQUEST_FLAG_NONE;
 }
 
 void qwen_request_commit_hidden_state_signal(qwen_request_t* request,

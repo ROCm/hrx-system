@@ -2479,7 +2479,8 @@ static iree_status_t qwen_program_record_hidden_state_copy(
 static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
   qwen_request_storage_layout_t request_layout;
   IREE_RETURN_IF_ERROR(qwen_request_storage_layout_calculate(
-      program->token_capacity, program->context_capacity, &request_layout));
+      program->token_capacity, program->context_capacity,
+      QWEN_REQUEST_FLAG_NONE, &request_layout));
 
   iree_status_t status = iree_hal_command_buffer_begin(program->command_buffer);
   if (iree_status_is_ok(status)) {
@@ -2502,7 +2503,8 @@ static iree_status_t qwen_program_record_layer(qwen_program_t* program) {
 static iree_status_t qwen_program_record_full_model(qwen_program_t* program) {
   qwen_request_storage_layout_t request_layout;
   IREE_RETURN_IF_ERROR(qwen_request_storage_layout_calculate(
-      program->token_capacity, program->context_capacity, &request_layout));
+      program->token_capacity, program->context_capacity,
+      QWEN_REQUEST_FLAG_NONE, &request_layout));
 
   iree_status_t status = iree_hal_command_buffer_begin(program->command_buffer);
   if (iree_status_is_ok(status)) {
@@ -2578,7 +2580,8 @@ static iree_status_t qwen_program_validate_options(
   }
   qwen_request_storage_layout_t request_layout;
   IREE_RETURN_IF_ERROR(qwen_request_storage_layout_calculate(
-      options->token_capacity, options->context_capacity, &request_layout));
+      options->token_capacity, options->context_capacity,
+      QWEN_REQUEST_FLAG_NONE, &request_layout));
   if (options->context_count < options->token_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Qwen program context count %" PRIhsz

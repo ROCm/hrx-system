@@ -21,6 +21,18 @@ typedef struct qwen_request_span_t {
   iree_device_size_t length;
 } qwen_request_span_t;
 
+// Device-resident route trace planes within request storage.
+typedef struct qwen_request_route_trace_layout_t {
+  // Token/layer/route-major I32 expert IDs.
+  qwen_request_span_t ids;
+  // Token/layer/route-major F32 normalized router weights.
+  qwen_request_span_t weights;
+  // Exact element count in each plane.
+  iree_device_size_t element_count;
+  // Contiguous payload containing IDs followed by weights.
+  qwen_request_span_t payload;
+} qwen_request_route_trace_layout_t;
+
 // Compact device control record uploaded before each physical issue.
 typedef struct qwen_request_control_t {
   // Zero-based logical position and direct no-ring cache row for token zero.
@@ -65,6 +77,8 @@ typedef struct qwen_request_storage_layout_t {
   qwen_request_span_t value_cache_indices;
   // Device-derived F16 causal mask over token by context-capacity rows.
   qwen_request_span_t attention_mask;
+  // Optional ordered router decisions for every logical context row.
+  qwen_request_route_trace_layout_t route_trace;
   // All layer-local F16 key caches.
   qwen_request_span_t key_cache;
   // All layer-local F16 value caches.
@@ -87,7 +101,7 @@ iree_status_t qwen_request_active_shape_validate(
 // Calculates the fixed request storage layout.
 iree_status_t qwen_request_storage_layout_calculate(
     iree_host_size_t token_capacity, iree_host_size_t context_capacity,
-    qwen_request_storage_layout_t* out_layout);
+    qwen_request_flags_t flags, qwen_request_storage_layout_t* out_layout);
 
 // Returns the model retained by |request|.
 qwen_model_t* qwen_request_model(const qwen_request_t* request);
@@ -119,6 +133,9 @@ iree_host_size_t qwen_request_active_token_count(const qwen_request_t* request);
 
 // Returns the context base published by the latest successful reset.
 iree_host_size_t qwen_request_context_base(const qwen_request_t* request);
+
+// Returns optional storage behavior selected when |request| was created.
+qwen_request_flags_t qwen_request_flags(const qwen_request_t* request);
 
 // Commits a successfully submitted layer result to the request timeline.
 //

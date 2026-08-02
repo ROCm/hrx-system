@@ -42,7 +42,8 @@ TEST(QwenRequestShapeTest, RejectsContextOverflow) {
 TEST(QwenRequestStorageTest, PacksPrefill512WithoutOverlap) {
   qwen_request_storage_layout_t layout;
   IREE_ASSERT_OK(qwen_request_storage_layout_calculate(
-      /*token_capacity=*/512, /*context_capacity=*/512, &layout));
+      /*token_capacity=*/512, /*context_capacity=*/512, QWEN_REQUEST_FLAG_NONE,
+      &layout));
 
   EXPECT_EQ(layout.hidden_state.offset, 0u);
   EXPECT_EQ(layout.hidden_state.length, 4u * 1024u * 1024u);
@@ -64,6 +65,10 @@ TEST(QwenRequestStorageTest, PacksPrefill512WithoutOverlap) {
       layout.attention_mask.offset,
       layout.value_cache_indices.offset + layout.value_cache_indices.length);
   EXPECT_EQ(layout.attention_mask.length, 512u * 512u * 2u);
+  EXPECT_EQ(layout.route_trace.element_count, 0u);
+  EXPECT_EQ(layout.route_trace.ids.length, 0u);
+  EXPECT_EQ(layout.route_trace.weights.length, 0u);
+  EXPECT_EQ(layout.route_trace.payload.length, 0u);
   EXPECT_EQ(layout.dispatch_state_byte_length,
             layout.attention_mask.offset + layout.attention_mask.length);
   EXPECT_GE(layout.key_cache.offset, layout.dispatch_state_byte_length);
@@ -76,18 +81,56 @@ TEST(QwenRequestStorageTest, PacksPrefill512WithoutOverlap) {
   EXPECT_EQ(layout.value_cache.length, layout.key_cache.length);
 }
 
+TEST(QwenRequestStorageTest, PacksOptInRouteTraceWithoutOverlap) {
+  constexpr iree_host_size_t kContextCapacity = 513;
+  constexpr iree_device_size_t kElementCount =
+      kContextCapacity * QWEN_MODEL_LAYER_COUNT * QWEN_MODEL_ROUTE_COUNT;
+  constexpr iree_device_size_t kPlaneByteLength =
+      kElementCount * sizeof(uint32_t);
+
+  qwen_request_storage_layout_t layout;
+  IREE_ASSERT_OK(qwen_request_storage_layout_calculate(
+      /*token_capacity=*/512, kContextCapacity, QWEN_REQUEST_FLAG_ROUTE_TRACE,
+      &layout));
+
+  EXPECT_EQ(layout.route_trace.element_count, kElementCount);
+  EXPECT_GE(layout.route_trace.ids.offset,
+            layout.attention_mask.offset + layout.attention_mask.length);
+  EXPECT_EQ(layout.route_trace.ids.length, kPlaneByteLength);
+  EXPECT_GE(layout.route_trace.weights.offset,
+            layout.route_trace.ids.offset + layout.route_trace.ids.length);
+  EXPECT_EQ(layout.route_trace.weights.length, kPlaneByteLength);
+  EXPECT_EQ(layout.route_trace.payload.offset, layout.route_trace.ids.offset);
+  EXPECT_EQ(layout.route_trace.payload.length, 2u * kPlaneByteLength);
+  EXPECT_EQ(
+      layout.dispatch_state_byte_length,
+      layout.route_trace.weights.offset + layout.route_trace.weights.length);
+  EXPECT_GE(layout.key_cache.offset, layout.dispatch_state_byte_length);
+  EXPECT_EQ(layout.persistent_byte_length,
+            layout.value_cache.offset + layout.value_cache.length);
+}
+
+TEST(QwenRequestStorageTest, RejectsUnknownFlags) {
+  qwen_request_storage_layout_t layout;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        qwen_request_storage_layout_calculate(
+                            /*token_capacity=*/1, /*context_capacity=*/1,
+                            (qwen_request_flags_t)(1u << 31), &layout));
+}
+
 TEST(QwenRequestStorageTest, RejectsTokenCapacityBeyondContextCapacity) {
   qwen_request_storage_layout_t layout;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      qwen_request_storage_layout_calculate(
-          /*token_capacity=*/512, /*context_capacity=*/128, &layout));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        qwen_request_storage_layout_calculate(
+                            /*token_capacity=*/512, /*context_capacity=*/128,
+                            QWEN_REQUEST_FLAG_NONE, &layout));
 }
 
 TEST(QwenRequestStorageTest, AlignsDecodeMaskForVectorLoads) {
   qwen_request_storage_layout_t layout;
   IREE_ASSERT_OK(qwen_request_storage_layout_calculate(
-      /*token_capacity=*/1, /*context_capacity=*/512, &layout));
+      /*token_capacity=*/1, /*context_capacity=*/512, QWEN_REQUEST_FLAG_NONE,
+      &layout));
 
   EXPECT_EQ(layout.attention_mask.offset % 16, 0u);
   EXPECT_EQ(layout.attention_mask.length, 1u * 512u * 2u);
@@ -96,7 +139,8 @@ TEST(QwenRequestStorageTest, AlignsDecodeMaskForVectorLoads) {
 TEST(QwenRequestStorageTest, ReservesPackedActiveMaskPrefixes) {
   qwen_request_storage_layout_t layout;
   IREE_ASSERT_OK(qwen_request_storage_layout_calculate(
-      /*token_capacity=*/512, /*context_capacity=*/513, &layout));
+      /*token_capacity=*/512, /*context_capacity=*/513, QWEN_REQUEST_FLAG_NONE,
+      &layout));
 
   EXPECT_EQ(layout.attention_mask.length, 512u * 513u * 2u);
   EXPECT_LE(512u * 512u * 2u, layout.attention_mask.length);

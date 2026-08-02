@@ -26,6 +26,15 @@ extern "C" {
 // distinct request objects.
 typedef struct qwen_request_t qwen_request_t;
 
+// Bitfield selecting optional request storage and behavior.
+typedef uint32_t qwen_request_flags_t;
+enum qwen_request_flag_bits_e {
+  // No optional request behavior.
+  QWEN_REQUEST_FLAG_NONE = 0u,
+  // Allocate device-local ordered route IDs and weights for every context row.
+  QWEN_REQUEST_FLAG_ROUTE_TRACE = 1u << 0,
+};
+
 // Options controlling request-local persistent storage.
 typedef struct qwen_request_options_t {
   // Size of this structure in bytes.
@@ -36,6 +45,8 @@ typedef struct qwen_request_options_t {
   iree_host_size_t token_capacity;
   // Maximum number of K/V rows retained by each layer.
   iree_host_size_t context_capacity;
+  // Optional persistent request behavior.
+  qwen_request_flags_t flags;
 } qwen_request_options_t;
 
 // Initializes |out_options| with conservative request defaults.
@@ -47,7 +58,8 @@ IREE_API_EXPORT void qwen_request_options_initialize(
 // The request retains |model|. Device-local storage uses an
 // indeterminate-lifetime queue allocation. K/V storage is initialized to zero
 // so a masked capacity-class suffix is safe to read before its rows are
-// populated. The caller signals are published only after allocation and cache
+// populated. When route tracing is enabled, IDs are initialized to -1 and
+// weights to zero. The caller signals are published only after allocation and
 // initialization are complete.
 IREE_API_EXPORT iree_status_t qwen_request_create(
     qwen_model_t* model, const qwen_request_options_t* options,
@@ -105,6 +117,19 @@ IREE_API_EXPORT iree_status_t qwen_request_read_hidden_state(
 IREE_API_EXPORT iree_status_t qwen_request_read_selected_token(
     qwen_request_t* request, iree_tokenizer_token_id_t* out_token_id);
 
+// Copies the complete device-resident route trace into |target_data|.
+//
+// The caller must first observe the signal from the final program issue. The
+// request must have been created with QWEN_REQUEST_FLAG_ROUTE_TRACE and
+// |target_data| must have the exact byte length returned by
+// qwen_request_route_trace_byte_length. The synchronous device-to-host transfer
+// is intended once after generation and never participates in token progress.
+// The payload contains the complete token/layer/route I32 ID plane followed by
+// the same-shape F32 normalized-weight plane. Unwritten IDs are -1 and their
+// weights are zero.
+IREE_API_EXPORT iree_status_t qwen_request_read_route_trace(
+    qwen_request_t* request, iree_byte_span_t target_data);
+
 // Returns the maximum physical token rows owned by |request|.
 IREE_API_EXPORT iree_host_size_t
 qwen_request_token_capacity(const qwen_request_t* request);
@@ -116,6 +141,10 @@ qwen_request_context_capacity(const qwen_request_t* request);
 // Returns the total persistent request storage in bytes.
 IREE_API_EXPORT iree_device_size_t
 qwen_request_persistent_byte_length(const qwen_request_t* request);
+
+// Returns the exact route-trace payload byte length, or zero when disabled.
+IREE_API_EXPORT iree_device_size_t
+qwen_request_route_trace_byte_length(const qwen_request_t* request);
 
 #ifdef __cplusplus
 }  // extern "C"
