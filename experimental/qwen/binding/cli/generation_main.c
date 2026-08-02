@@ -13,6 +13,7 @@
 #include "experimental/qwen/runtime/model_shape.h"
 #include "experimental/qwen/runtime/program.h"
 #include "experimental/qwen/runtime/request.h"
+#include "experimental/qwen/tooling/route_trace_file.h"
 #include "experimental/qwen/tooling/runtime.h"
 #include "iree/base/api.h"
 #include "iree/base/string_builder.h"
@@ -43,6 +44,8 @@ IREE_FLAG(bool, print_token_ids, false,
           "Print each generated token ID to stderr.");
 IREE_FLAG(bool, qwen_print_timings, false,
           "Print parseable startup and generation timing statistics.");
+IREE_FLAG(string, route_trace, "",
+          "Write one final Qwen route-trace artifact to this path.");
 
 static const char* const qwen_generation_cli_usage =
     "Generates Qwen text from one system/user chat turn with greedy "
@@ -287,6 +290,70 @@ static iree_status_t qwen_generation_cli_finalize_text(
   return qwen_generation_cli_write_text(text_buffer, text_length);
 }
 
+static iree_status_t qwen_generation_cli_export_route_trace(
+    iree_string_view_t path, qwen_request_t* request,
+    iree_io_parameter_index_t* parameter_index, qwen_model_t* model,
+    iree_host_size_t prompt_token_count, iree_host_size_t generated_token_count,
+    iree_allocator_t host_allocator) {
+  const iree_device_size_t payload_byte_length =
+      qwen_request_route_trace_byte_length(request);
+  if (payload_byte_length == 0 || payload_byte_length > SIZE_MAX) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "enabled route trace has invalid byte length %" PRIu64,
+        payload_byte_length);
+  }
+
+  void* payload_storage = NULL;
+  iree_status_t status = iree_allocator_malloc(
+      host_allocator, (iree_host_size_t)payload_byte_length, &payload_storage);
+  if (iree_status_is_ok(status)) {
+    status = qwen_request_read_route_trace(
+        request, iree_make_byte_span(payload_storage, payload_byte_length));
+  }
+
+  uint64_t parameter_layout_fingerprint = 0;
+  if (iree_status_is_ok(status)) {
+    status = qwen_route_trace_parameter_layout_fingerprint(
+        parameter_index, &parameter_layout_fingerprint);
+  }
+
+  iree_byte_span_t file_data = iree_byte_span_empty();
+  if (iree_status_is_ok(status)) {
+    const qwen_model_statistics_t model_statistics =
+        qwen_model_statistics(model);
+    const qwen_route_trace_file_metadata_t metadata = {
+        .model = QWEN_ROUTE_TRACE_MODEL_QWEN3_30B_A3B,
+        .context_capacity = qwen_request_context_capacity(request),
+        .captured_token_count = prompt_token_count + generated_token_count - 1,
+        .prompt_token_count = prompt_token_count,
+        .generated_token_count = generated_token_count,
+        .parameter_count = iree_io_parameter_index_count(parameter_index),
+        .parameter_layout_fingerprint = parameter_layout_fingerprint,
+        .encoded_parameter_bytes = model_statistics.encoded_parameter_bytes,
+    };
+    status = qwen_route_trace_file_build(
+        &metadata,
+        iree_make_const_byte_span(payload_storage, payload_byte_length),
+        host_allocator, &file_data);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_io_file_contents_write(
+        path, iree_const_cast_byte_span(file_data), host_allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    fprintf(stderr,
+            "Qwen route trace: path=%.*s bytes=%" PRIhsz
+            " captured_tokens=%" PRIhsz "\n",
+            (int)path.size, path.data, file_data.data_length,
+            prompt_token_count + generated_token_count - 1);
+  }
+
+  iree_allocator_free(host_allocator, file_data.data);
+  iree_allocator_free(host_allocator, payload_storage);
+  return status;
+}
+
 static iree_host_size_t qwen_generation_cli_decode_context_class(
     iree_host_size_t context_base) {
   return (context_base / QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE + 1) *
@@ -295,7 +362,7 @@ static iree_host_size_t qwen_generation_cli_decode_context_class(
 
 static void qwen_generation_cli_initialize_decode_program_options(
     iree_host_size_t context_class, iree_host_size_t token_capacity,
-    iree_host_size_t context_capacity,
+    iree_host_size_t context_capacity, qwen_request_flags_t request_flags,
     iree_hal_command_buffer_mode_t command_buffer_mode,
     qwen_program_options_t* out_options) {
   qwen_program_options_initialize(out_options);
@@ -304,18 +371,20 @@ static void qwen_generation_cli_initialize_decode_program_options(
   out_options->context_count = context_class;
   out_options->token_capacity = token_capacity;
   out_options->context_capacity = context_capacity;
+  out_options->request_flags = request_flags;
   out_options->command_buffer_mode = command_buffer_mode;
 }
 
 static iree_status_t qwen_generation_cli_prepare_decode_program(
     qwen_model_t* model, iree_host_size_t context_class,
     iree_host_size_t token_capacity, iree_host_size_t context_capacity,
+    qwen_request_flags_t request_flags,
     iree_hal_command_buffer_mode_t command_buffer_mode,
     iree_allocator_t host_allocator, qwen_program_t** out_program) {
   qwen_program_options_t program_options;
   qwen_generation_cli_initialize_decode_program_options(
-      context_class, token_capacity, context_capacity, command_buffer_mode,
-      &program_options);
+      context_class, token_capacity, context_capacity, request_flags,
+      command_buffer_mode, &program_options);
   return qwen_program_prepare(model, &program_options, host_allocator,
                               out_program);
 }
@@ -374,6 +443,9 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
       FLAG_max_tokens > 0 ? (iree_host_size_t)FLAG_max_tokens : 0;
   const iree_host_size_t context_capacity =
       FLAG_context_length > 0 ? (iree_host_size_t)FLAG_context_length : 0;
+  const qwen_request_flags_t request_flags = FLAG_route_trace[0] != '\0'
+                                                 ? QWEN_REQUEST_FLAG_ROUTE_TRACE
+                                                 : QWEN_REQUEST_FLAG_NONE;
   if (iree_status_is_ok(status) &&
       (prompt_token_count > context_capacity ||
        max_tokens - 1 > context_capacity - prompt_token_count)) {
@@ -469,6 +541,7 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
     program_options[0].context_count = prompt_token_count;
     program_options[0].token_capacity = prompt_token_count;
     program_options[0].context_capacity = context_capacity;
+    program_options[0].request_flags = request_flags;
     program_options[0].command_buffer_mode =
         runtime_context.command_buffer_mode;
 
@@ -480,7 +553,7 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
       initial_decode_class_ordinal =
           context_class / QWEN_GENERATION_DECODE_CONTEXT_CLASS_SIZE - 1;
       qwen_generation_cli_initialize_decode_program_options(
-          context_class, prompt_token_count, context_capacity,
+          context_class, prompt_token_count, context_capacity, request_flags,
           runtime_context.command_buffer_mode, &program_options[1]);
       program_count = 2;
     }
@@ -509,6 +582,7 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
     qwen_request_options_initialize(&request_options);
     request_options.token_capacity = prompt_token_count;
     request_options.context_capacity = context_capacity;
+    request_options.flags = request_flags;
     status =
         qwen_request_create(model, &request_options,
                             qwen_generation_cli_timepoint_list(&model_ready),
@@ -598,7 +672,7 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
     if (!decode_programs[class_ordinal]) {
       status = qwen_generation_cli_prepare_decode_program(
           model, context_class, prompt_token_count, context_capacity,
-          runtime_context.command_buffer_mode, host_allocator,
+          request_flags, runtime_context.command_buffer_mode, host_allocator,
           &decode_programs[class_ordinal]);
     }
     if (!iree_status_is_ok(status)) break;
@@ -629,6 +703,12 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
   if (profiling) {
     status =
         iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
+  }
+  if (iree_status_is_ok(status) && FLAG_route_trace[0] != '\0') {
+    status = qwen_generation_cli_export_route_trace(
+        iree_make_cstring_view(FLAG_route_trace), request,
+        runtime_context.parameter_index, model, prompt_token_count,
+        generated_token_count, host_allocator);
   }
   qwen_request_release(request);
   qwen_generation_cli_release_decode_programs(decode_programs);
