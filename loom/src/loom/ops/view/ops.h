@@ -240,7 +240,7 @@ iree_status_t loom_view_atomic_rmw_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VIEW_ATOMIC_CMPXCHG: Atomically compare one scalar view element with an expected value, write a replacement value when they match, and return the old observed value. Success is derived by comparing old == expected.
+// LOOM_OP_VIEW_ATOMIC_CMPXCHG: Atomically compare the bits of one scalar view element with an expected payload, write a replacement payload when they match, and return the old observed payload. Comparison is bitwise for every accepted element type.
 // %old = view.atomic.cmpxchg %expected, %replacement, %view[%row, %col] {success_ordering = acq_rel, failure_ordering = acquire, scope = workgroup} : i32, view<[%M]x[%N]xi32, %layout> -> i32
 LOOM_DEFINE_ISA(loom_view_atomic_cmpxchg_isa, LOOM_OP_VIEW_ATOMIC_CMPXCHG)
 LOOM_DEFINE_OPERAND(loom_view_atomic_cmpxchg_expected, 0)

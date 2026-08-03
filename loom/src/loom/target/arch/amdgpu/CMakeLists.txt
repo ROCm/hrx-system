@@ -265,11 +265,13 @@ loom_cc_library(
     loom::analysis::symbolic_expr
     loom::codegen::low::descriptors
     loom::ir
+    loom::ops::atomic
     loom::ops::index
     loom::ops::kernel
     loom::ops::scalar
     loom::ops::scf
     loom::ops::vector
+    loom::ops::view
     loom::rewrite::rewriter
     loom::target::arch::amdgpu::lower
     loom::target::arch::amdgpu::lower::kinds
@@ -278,6 +280,7 @@ loom_cc_library(
     loom::target::arch::amdgpu::target_info_defs
     loom::target::legalization
     loom::transforms::vector::to_scalar
+    loom::transforms::view::target_legalization
   PUBLIC
 )
 endif()

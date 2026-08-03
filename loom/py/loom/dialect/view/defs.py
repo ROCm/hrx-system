@@ -34,7 +34,7 @@ from loom.dsl import (
     Dialect,
     EnumCase,
     EnumDef,
-    HasIndexOrNonI1IntegerScalar,
+    HasBitwiseScalar,
     MemoryAccessInterface,
     Op,
     Operand,
@@ -422,7 +422,10 @@ view_atomic_cmpxchg = Op(
     name="view.atomic.cmpxchg",
     group=view_ops,
     doc=(
-        "Atomically compare one scalar view element with an expected value, write a replacement value when they match, and return the old observed value. Success is derived by comparing old == expected."
+        "Atomically compare the bits of one scalar view element with an "
+        "expected payload, write a replacement payload when they match, and "
+        "return the old observed payload. Comparison is bitwise for every "
+        "accepted element type."
     ),
     operands=[
         Operand("expected", SCALAR, doc="Scalar value compared against memory."),
@@ -433,7 +436,7 @@ view_atomic_cmpxchg = Op(
     results=[Result("old", SCALAR, doc="Old memory value observed by the atomic operation.")],
     attrs=_atomic_cmpxchg_memory_attrs(),
     constraints=[
-        HasIndexOrNonI1IntegerScalar("expected"),
+        HasBitwiseScalar("expected"),
         SameElementType("expected", "replacement", "view", "old"),
         SameType("expected", "replacement", "old"),
     ],

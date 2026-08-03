@@ -23,6 +23,7 @@ const char* loom_type_constraint_name(loom_type_constraint_t constraint) {
       [LOOM_TYPE_CONSTRAINT_TENSOR] = "tensor",
       [LOOM_TYPE_CONSTRAINT_INTEGER] = "integer",
       [LOOM_TYPE_CONSTRAINT_FLOAT] = "float",
+      [LOOM_TYPE_CONSTRAINT_BITWISE_SCALAR] = "non-i1 bitwise scalar",
       [LOOM_TYPE_CONSTRAINT_SCALAR] = "scalar",
       [LOOM_TYPE_CONSTRAINT_INDEX] = "index",
       [LOOM_TYPE_CONSTRAINT_OFFSET] = "offset",
@@ -46,6 +47,7 @@ const char* loom_type_constraint_name(loom_type_constraint_t constraint) {
           "index or non-i1 integer element type",
       [LOOM_TYPE_CONSTRAINT_INTEGER_ELEMENT] = "integer_element",
       [LOOM_TYPE_CONSTRAINT_FLOAT_ELEMENT] = "float_element",
+      [LOOM_TYPE_CONSTRAINT_BITWISE_ELEMENT] = "non-i1 bitwise element type",
       [LOOM_TYPE_CONSTRAINT_I1_ELEMENT] = "i1_element",
       [LOOM_TYPE_CONSTRAINT_I8_ELEMENT] = "i8 element type",
       [LOOM_TYPE_CONSTRAINT_I32_ELEMENT] = "i32 element type",
@@ -109,6 +111,14 @@ bool loom_type_satisfies_constraint(loom_type_t type,
     case LOOM_TYPE_CONSTRAINT_FLOAT:
       return loom_type_is_scalar(type) &&
              loom_scalar_type_is_float(loom_type_element_type(type));
+    case LOOM_TYPE_CONSTRAINT_BITWISE_SCALAR: {
+      if (!loom_type_is_scalar(type)) return false;
+      const loom_scalar_type_t scalar_type = loom_type_element_type(type);
+      return scalar_type == LOOM_SCALAR_TYPE_INDEX ||
+             (scalar_type != LOOM_SCALAR_TYPE_I1 &&
+              (loom_scalar_type_is_integer(scalar_type) ||
+               loom_scalar_type_is_float(scalar_type)));
+    }
     case LOOM_TYPE_CONSTRAINT_INDEX_OR_NON_I1_INTEGER_SCALAR: {
       if (!loom_type_is_scalar(type)) return false;
       loom_scalar_type_t scalar_type = loom_type_element_type(type);
@@ -149,6 +159,14 @@ bool loom_type_satisfies_constraint(loom_type_t type,
     case LOOM_TYPE_CONSTRAINT_FLOAT_ELEMENT:
       return loom_type_is_shaped(type) &&
              loom_scalar_type_is_float(loom_type_element_type(type));
+    case LOOM_TYPE_CONSTRAINT_BITWISE_ELEMENT: {
+      if (!loom_type_is_shaped(type)) return false;
+      const loom_scalar_type_t element_type = loom_type_element_type(type);
+      return element_type == LOOM_SCALAR_TYPE_INDEX ||
+             (element_type != LOOM_SCALAR_TYPE_I1 &&
+              (loom_scalar_type_is_integer(element_type) ||
+               loom_scalar_type_is_float(element_type)));
+    }
     case LOOM_TYPE_CONSTRAINT_INDEX_OR_NON_I1_INTEGER_ELEMENT: {
       if (!loom_type_is_shaped(type)) return false;
       loom_scalar_type_t element_type = loom_type_element_type(type);

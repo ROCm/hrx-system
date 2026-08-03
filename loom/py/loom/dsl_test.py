@@ -92,6 +92,8 @@ from loom.dsl import (
     HasAllStaticRankOneVector,
     HasAllStaticVector,
     HasAncestor,
+    HasBitwiseElement,
+    HasBitwiseScalar,
     HasF16OrBf16Element,
     HasF32Element,
     HasFloatElement,
@@ -686,6 +688,23 @@ class TestConstraints:
         assert not HasIndexOrNonI1IntegerElement("x").check(
             {"x": FakeValue(vector_type(F32))}
         )[0]
+
+    def test_bitwise_constraints_accept_integer_and_float_payloads(self) -> None:
+        class FakeValue:
+            def __init__(self, value_type: object):
+                self.type = value_type
+
+        def vector_type(element_type: ScalarType) -> ShapedType:
+            return ShapedType(TypeKind.VECTOR, element_type, (StaticDim(4),))
+
+        assert HasBitwiseScalar("x").check({"x": FakeValue(ir.INDEX)})[0]
+        assert HasBitwiseScalar("x").check({"x": FakeValue(I32)})[0]
+        assert HasBitwiseScalar("x").check({"x": FakeValue(F32)})[0]
+        assert not HasBitwiseScalar("x").check({"x": FakeValue(ir.I1)})[0]
+        assert not HasBitwiseScalar("x").check({"x": FakeValue(ir.OFFSET)})[0]
+        assert HasBitwiseElement("x").check({"x": FakeValue(vector_type(I8))})[0]
+        assert HasBitwiseElement("x").check({"x": FakeValue(vector_type(F32))})[0]
+        assert not HasBitwiseElement("x").check({"x": FakeValue(vector_type(ir.I1))})[0]
 
     def test_vector_shape_constraints_validate_vector_shape(self) -> None:
         class FakeValue:

@@ -347,7 +347,7 @@ def _amdgpu_atomic_candidate_from_overlay(
             address_form=address_form,
             operation_kind=AmdgpuAtomicOperationKind.CMPXCHG,
             atomic_kind=AmdgpuAtomicKind.NONE,
-            value_kind=AmdgpuAtomicValueKind.I32,
+            value_kind=AmdgpuAtomicValueKind.B32,
             descriptor_key=overlay.descriptor_key,
         )
     if semantic_parts == ("compare_exchange", "b64"):
@@ -356,7 +356,7 @@ def _amdgpu_atomic_candidate_from_overlay(
             address_form=address_form,
             operation_kind=AmdgpuAtomicOperationKind.CMPXCHG,
             atomic_kind=AmdgpuAtomicKind.NONE,
-            value_kind=AmdgpuAtomicValueKind.I64,
+            value_kind=AmdgpuAtomicValueKind.B64,
             descriptor_key=overlay.descriptor_key,
         )
 

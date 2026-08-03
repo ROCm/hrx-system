@@ -34,3 +34,20 @@ loom_cc_library(
         "//runtime/src/iree/base/internal",
     ],
 )
+
+loom_cc_library(
+    name = "target_legalization",
+    srcs = ["target_legalization.c"],
+    hdrs = ["target_legalization.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:atomic",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:legalization",
+        "//runtime/src/iree/base",
+    ],
+)

@@ -18,6 +18,7 @@ exports_files([
     "fragment_repack_bf16.loom",
     "fp8_encode.loom",
     "fp8_finite_storage_decode.loom",
+    "global_atomic_add_f32.loom",
     "gfx11_wmma_families.loom",
     "gfx9_4_mfma_families.loom",
     "loop_carried_lane_liveness.loom",
@@ -118,6 +119,19 @@ iree_execution_test_suite(
         "mxfp4_decode_bf16.loom",
     ],
     manifests = ["numeric_conversion.test.json"],
+    tags = _AMDGPU_EXECUTION_TEST_TAGS,
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    tools = {
+        "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
+    },
+)
+
+iree_execution_test_suite(
+    name = "global_atomic_add_f32_execution_test",
+    data = [
+        "global_atomic_add_f32.loom",
+    ],
+    manifests = ["global_atomic_add_f32.test.json"],
     tags = _AMDGPU_EXECUTION_TEST_TAGS,
     target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
     tools = {

@@ -321,7 +321,7 @@ def _global_atomic_cmpswap_overlay(
     )
 
 
-_GLOBAL_ATOMIC_DEFAULT_ROWS = (
+_GLOBAL_ATOMIC_BASE_ROWS = (
     _atomic_row("add_u32", "GLOBAL_ATOMIC_ADD_U32", "add.u32", "FMT_NUM_U32"),
     _atomic_row("sub_u32", "GLOBAL_ATOMIC_SUB_U32", "sub.u32", "FMT_NUM_U32"),
     _atomic_row("min_i32", "GLOBAL_ATOMIC_MIN_I32", "min.i32", "FMT_NUM_I32"),
@@ -338,7 +338,9 @@ _GLOBAL_ATOMIC_DEFAULT_ROWS = (
         "FMT_NUM_B32",
         has_no_return_form=False,
     ),
-    _atomic_row("add_f32", "GLOBAL_ATOMIC_ADD_F32", "add.f32", "FMT_NUM_F32"),
+)
+
+_GLOBAL_ATOMIC_TAIL_ROWS = (
     _atomic_row(
         "add_u64",
         "GLOBAL_ATOMIC_ADD_X2",
@@ -359,6 +361,29 @@ _GLOBAL_ATOMIC_DEFAULT_ROWS = (
     ),
     _atomic_row("min_f32", "GLOBAL_ATOMIC_MIN_F32", "minnum.f32", "FMT_NUM_F32"),
     _atomic_row("max_f32", "GLOBAL_ATOMIC_MAX_F32", "maxnum.f32", "FMT_NUM_F32"),
+)
+
+_GLOBAL_ATOMIC_GFX11_ROWS = (
+    *_GLOBAL_ATOMIC_BASE_ROWS,
+    *_GLOBAL_ATOMIC_TAIL_ROWS,
+)
+
+_GLOBAL_ATOMIC_GFX12_ROWS = (
+    *_GLOBAL_ATOMIC_BASE_ROWS,
+    _atomic_row("add_f32", "GLOBAL_ATOMIC_ADD_F32", "add.f32", "FMT_NUM_F32"),
+    *_GLOBAL_ATOMIC_TAIL_ROWS,
+    _atomic_row(
+        "pk_add_f16",
+        "GLOBAL_ATOMIC_PK_ADD_F16",
+        "add.pk2.f16",
+        "FMT_NUM_PK2_F16",
+    ),
+    _atomic_row(
+        "pk_add_bf16",
+        "GLOBAL_ATOMIC_PK_ADD_BF16",
+        "add.pk2.bf16",
+        "FMT_NUM_PK2_BF16",
+    ),
 )
 
 _GLOBAL_ATOMIC_GFX940_ROWS = (
@@ -388,6 +413,7 @@ _GLOBAL_ATOMIC_GFX940_ROWS = (
 
 def _global_atomic_overlays(
     *,
+    rows: tuple[_AtomicRow, ...],
     encoding_name: str,
     address_field_name: str,
     data_field_name: str,
@@ -400,31 +426,11 @@ def _global_atomic_overlays(
     saddr_off: AmdgpuFixedEncodingValue | None,
     address_units: int,
     descriptor_key_suffix: str = "",
-    include_packed_half_add: bool = False,
     implicit_m0: bool = False,
-    rows: tuple[_AtomicRow, ...] = _GLOBAL_ATOMIC_DEFAULT_ROWS,
     cmpswap_mnemonic_suffix: str = "b64",
 ) -> tuple[AmdgpuDescriptorOverlay, ...]:
-    effective_rows = list(rows)
-    if include_packed_half_add:
-        effective_rows.extend(
-            (
-                _atomic_row(
-                    "pk_add_f16",
-                    "GLOBAL_ATOMIC_PK_ADD_F16",
-                    "add.pk2.f16",
-                    "FMT_NUM_PK2_F16",
-                ),
-                _atomic_row(
-                    "pk_add_bf16",
-                    "GLOBAL_ATOMIC_PK_ADD_BF16",
-                    "add.pk2.bf16",
-                    "FMT_NUM_PK2_BF16",
-                ),
-            )
-        )
     overlays: list[AmdgpuDescriptorOverlay] = []
-    for row in effective_rows:
+    for row in rows:
         if row.has_no_return_form:
             overlays.append(
                 _global_atomic_overlay(
@@ -531,7 +537,7 @@ def _global_atomic_overlays(
     return tuple(overlays)
 
 
-_FLAT_ATOMIC_GFX11_ROWS = (
+_FLAT_ATOMIC_BASE_ROWS = (
     _atomic_row("add_u32", "FLAT_ATOMIC_ADD_U32", "add.u32", "FMT_NUM_U32"),
     _atomic_row("sub_u32", "FLAT_ATOMIC_SUB_U32", "sub.u32", "FMT_NUM_U32"),
     _atomic_row("min_i32", "FLAT_ATOMIC_MIN_I32", "min.i32", "FMT_NUM_I32"),
@@ -548,7 +554,9 @@ _FLAT_ATOMIC_GFX11_ROWS = (
         "FMT_NUM_B32",
         has_no_return_form=False,
     ),
-    _atomic_row("add_f32", "FLAT_ATOMIC_ADD_F32", "add.f32", "FMT_NUM_F32"),
+)
+
+_FLAT_ATOMIC_TAIL_ROWS = (
     _atomic_row(
         "add_u64",
         "FLAT_ATOMIC_ADD_X2",
@@ -561,8 +569,15 @@ _FLAT_ATOMIC_GFX11_ROWS = (
     _atomic_row("max_f32", "FLAT_ATOMIC_MAX_F32", "maxnum.f32", "FMT_NUM_F32"),
 )
 
+_FLAT_ATOMIC_GFX11_ROWS = (
+    *_FLAT_ATOMIC_BASE_ROWS,
+    *_FLAT_ATOMIC_TAIL_ROWS,
+)
+
 _FLAT_ATOMIC_GFX12_ROWS = (
-    *_FLAT_ATOMIC_GFX11_ROWS[:-2],
+    *_FLAT_ATOMIC_BASE_ROWS,
+    _atomic_row("add_f32", "FLAT_ATOMIC_ADD_F32", "add.f32", "FMT_NUM_F32"),
+    *_FLAT_ATOMIC_TAIL_ROWS[:-2],
     _atomic_row(
         "pk_add_f16",
         "FLAT_ATOMIC_PK_ADD_F16",
@@ -1209,6 +1224,7 @@ def _buffer_atomic_cmpswap_overlay(
 
 def _buffer_atomic_overlays(
     *,
+    rows: tuple[_AtomicRow, ...],
     encoding_name: str,
     resource_field_name: str,
     offset_field_name: str,
@@ -1217,64 +1233,17 @@ def _buffer_atomic_overlays(
     return_field_value: int,
     cache_fields: tuple[tuple[str, int], ...],
     cache_immediate_field_names: tuple[str, ...] = (),
-    include_packed_half_add: bool = False,
 ) -> tuple[AmdgpuDescriptorOverlay, ...]:
-    rows = [
-        ("add_u32", "BUFFER_ATOMIC_ADD_U32", "add.u32", "FMT_NUM_U32", True),
-        ("sub_u32", "BUFFER_ATOMIC_SUB_U32", "sub.u32", "FMT_NUM_U32", True),
-        ("min_i32", "BUFFER_ATOMIC_MIN_I32", "min.i32", "FMT_NUM_I32", True),
-        ("max_i32", "BUFFER_ATOMIC_MAX_I32", "max.i32", "FMT_NUM_I32", True),
-        ("min_u32", "BUFFER_ATOMIC_MIN_U32", "min.u32", "FMT_NUM_U32", True),
-        ("max_u32", "BUFFER_ATOMIC_MAX_U32", "max.u32", "FMT_NUM_U32", True),
-        ("and_b32", "BUFFER_ATOMIC_AND_B32", "and.b32", "FMT_NUM_B32", True),
-        ("or_b32", "BUFFER_ATOMIC_OR_B32", "or.b32", "FMT_NUM_B32", True),
-        ("xor_b32", "BUFFER_ATOMIC_XOR_B32", "xor.b32", "FMT_NUM_B32", True),
-        (
-            "swap_b32",
-            "BUFFER_ATOMIC_SWAP_B32",
-            "exchange.b32",
-            "FMT_NUM_B32",
-            False,
-        ),
-        ("add_f32", "BUFFER_ATOMIC_ADD_F32", "add.f32", "FMT_NUM_F32", True),
-        ("min_f32", "BUFFER_ATOMIC_MIN_F32", "minnum.f32", "FMT_NUM_F32", True),
-        ("max_f32", "BUFFER_ATOMIC_MAX_F32", "maxnum.f32", "FMT_NUM_F32", True),
-    ]
-    if include_packed_half_add:
-        rows.extend(
-            (
-                (
-                    "pk_add_f16",
-                    "BUFFER_ATOMIC_PK_ADD_F16",
-                    "add.pk2.f16",
-                    "FMT_NUM_PK2_F16",
-                    True,
-                ),
-                (
-                    "pk_add_bf16",
-                    "BUFFER_ATOMIC_PK_ADD_BF16",
-                    "add.pk2.bf16",
-                    "FMT_NUM_PK2_BF16",
-                    True,
-                ),
-            )
-        )
     overlays: list[AmdgpuDescriptorOverlay] = []
-    for (
-        mnemonic_suffix,
-        instruction_name,
-        semantic_suffix,
-        data_format_name,
-        has_no_return_form,
-    ) in rows:
-        if has_no_return_form:
+    for row in rows:
+        if row.has_no_return_form:
             overlays.append(
                 _buffer_atomic_overlay(
-                    descriptor_key=f"amdgpu.buffer_atomic_{mnemonic_suffix}",
-                    instruction_name=instruction_name,
-                    mnemonic=f"buffer_atomic_{mnemonic_suffix}",
-                    semantic_tag=f"memory.global.atomic.{semantic_suffix}",
-                    data_format_name=data_format_name,
+                    descriptor_key=f"amdgpu.buffer_atomic_{row.descriptor_suffix}",
+                    instruction_name=row.instruction_name,
+                    mnemonic=f"buffer_atomic_{row.mnemonic_suffix}",
+                    semantic_tag=f"memory.global.atomic.{row.semantic_suffix}",
+                    data_format_name=row.memory_data_format_name,
                     returns_old_value=False,
                     encoding_name=encoding_name,
                     resource_field_name=resource_field_name,
@@ -1288,11 +1257,11 @@ def _buffer_atomic_overlays(
             )
         overlays.append(
             _buffer_atomic_overlay(
-                descriptor_key=f"amdgpu.buffer_atomic_{mnemonic_suffix}_rtn",
-                instruction_name=instruction_name,
-                mnemonic=f"buffer_atomic_{mnemonic_suffix}",
-                semantic_tag=f"memory.global.atomic.{semantic_suffix}.return",
-                data_format_name=data_format_name,
+                descriptor_key=(f"amdgpu.buffer_atomic_{row.descriptor_suffix}_rtn"),
+                instruction_name=row.instruction_name,
+                mnemonic=f"buffer_atomic_{row.mnemonic_suffix}",
+                semantic_tag=(f"memory.global.atomic.{row.semantic_suffix}.return"),
+                data_format_name=row.memory_data_format_name,
                 returns_old_value=True,
                 encoding_name=encoding_name,
                 resource_field_name=resource_field_name,
@@ -1319,11 +1288,62 @@ def _buffer_atomic_overlays(
     return tuple(overlays)
 
 
+_BUFFER_ATOMIC_BASE_ROWS = (
+    _atomic_row("add_u32", "BUFFER_ATOMIC_ADD_U32", "add.u32", "FMT_NUM_U32"),
+    _atomic_row("sub_u32", "BUFFER_ATOMIC_SUB_U32", "sub.u32", "FMT_NUM_U32"),
+    _atomic_row("min_i32", "BUFFER_ATOMIC_MIN_I32", "min.i32", "FMT_NUM_I32"),
+    _atomic_row("max_i32", "BUFFER_ATOMIC_MAX_I32", "max.i32", "FMT_NUM_I32"),
+    _atomic_row("min_u32", "BUFFER_ATOMIC_MIN_U32", "min.u32", "FMT_NUM_U32"),
+    _atomic_row("max_u32", "BUFFER_ATOMIC_MAX_U32", "max.u32", "FMT_NUM_U32"),
+    _atomic_row("and_b32", "BUFFER_ATOMIC_AND_B32", "and.b32", "FMT_NUM_B32"),
+    _atomic_row("or_b32", "BUFFER_ATOMIC_OR_B32", "or.b32", "FMT_NUM_B32"),
+    _atomic_row("xor_b32", "BUFFER_ATOMIC_XOR_B32", "xor.b32", "FMT_NUM_B32"),
+    _atomic_row(
+        "swap_b32",
+        "BUFFER_ATOMIC_SWAP_B32",
+        "exchange.b32",
+        "FMT_NUM_B32",
+        has_no_return_form=False,
+    ),
+)
+
+_BUFFER_ATOMIC_TAIL_ROWS = (
+    _atomic_row("min_f32", "BUFFER_ATOMIC_MIN_F32", "minnum.f32", "FMT_NUM_F32"),
+    _atomic_row("max_f32", "BUFFER_ATOMIC_MAX_F32", "maxnum.f32", "FMT_NUM_F32"),
+)
+
+_BUFFER_ATOMIC_GFX11_ROWS = (
+    *_BUFFER_ATOMIC_BASE_ROWS,
+    *_BUFFER_ATOMIC_TAIL_ROWS,
+)
+
+_BUFFER_ATOMIC_GFX12_ROWS = (
+    *_BUFFER_ATOMIC_BASE_ROWS,
+    _atomic_row("add_f32", "BUFFER_ATOMIC_ADD_F32", "add.f32", "FMT_NUM_F32"),
+    *_BUFFER_ATOMIC_TAIL_ROWS,
+    _atomic_row(
+        "pk_add_f16",
+        "BUFFER_ATOMIC_PK_ADD_F16",
+        "add.pk2.f16",
+        "FMT_NUM_PK2_F16",
+    ),
+    _atomic_row(
+        "pk_add_bf16",
+        "BUFFER_ATOMIC_PK_ADD_BF16",
+        "add.pk2.bf16",
+        "FMT_NUM_PK2_BF16",
+    ),
+)
+
+
 __all__ = (
+    "_BUFFER_ATOMIC_GFX11_ROWS",
+    "_BUFFER_ATOMIC_GFX12_ROWS",
     "_FLAT_ATOMIC_GFX11_ROWS",
     "_FLAT_ATOMIC_GFX12_ROWS",
     "_FLAT_ATOMIC_GFX950_ROWS",
-    "_GLOBAL_ATOMIC_DEFAULT_ROWS",
+    "_GLOBAL_ATOMIC_GFX11_ROWS",
+    "_GLOBAL_ATOMIC_GFX12_ROWS",
     "_GLOBAL_ATOMIC_GFX940_ROWS",
     "_buffer_atomic_cmpswap_overlay",
     "_buffer_atomic_overlay",

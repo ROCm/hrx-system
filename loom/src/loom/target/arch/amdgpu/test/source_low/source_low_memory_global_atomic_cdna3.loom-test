@@ -140,7 +140,7 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(1, 1, 1) workgr
   %21 = concat(%19, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %22 = v_mov_b32 9
   %24 = concat(%22, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %25 = concat(%21, %24) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %25 = concat(%24, %21) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
   %old = global_atomic_cmpswap_x2_rtn_saddr %17, %25, %view, %18
   return
 }

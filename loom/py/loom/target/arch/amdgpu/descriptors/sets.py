@@ -1168,6 +1168,7 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             include_d16_hi_loads=True,
         ),
         *_buffer_atomic_overlays(
+            rows=_BUFFER_ATOMIC_GFX11_ROWS,
             encoding_name="ENC_MUBUF",
             resource_field_name="SRSRC",
             offset_field_name="OFFSET",
@@ -1284,6 +1285,7 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             cache_fields=_GFX9_11_VECTOR_CACHE_FIELDS,
         ),
         *_global_atomic_overlays(
+            rows=_GLOBAL_ATOMIC_GFX11_ROWS,
             encoding_name="ENC_FLAT_GLOBAL",
             address_field_name="ADDR",
             data_field_name="DATA",
@@ -1637,6 +1639,7 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             fixed_soffset_native_spelling="null",
         ),
         *_buffer_atomic_overlays(
+            rows=_BUFFER_ATOMIC_GFX12_ROWS,
             encoding_name="ENC_VBUFFER",
             resource_field_name="RSRC",
             offset_field_name="IOFFSET",
@@ -1645,7 +1648,6 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             return_field_value=_GFX12_TH_ATOMIC_RETURN_VALUE,
             cache_fields=_GFX12_VECTOR_CACHE_FIELDS,
             cache_immediate_field_names=_GFX12_ATOMIC_CACHE_IMMEDIATE_FIELDS,
-            include_packed_half_add=True,
         ),
         *_global_memory_overlays(
             instruction_suffixes=_BYTE_MEMORY_INSTRUCTION_SUFFIXES,
@@ -1751,6 +1753,7 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             cache_fields=_GFX12_VECTOR_CACHE_FIELDS,
         ),
         *_global_atomic_overlays(
+            rows=_GLOBAL_ATOMIC_GFX12_ROWS,
             encoding_name="ENC_VGLOBAL",
             address_field_name="VADDR",
             data_field_name="VSRC",
@@ -1763,7 +1766,6 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             saddr_off=None,
             address_units=1,
             descriptor_key_suffix="_saddr",
-            include_packed_half_add=True,
         ),
         _flat_load_u8_overlay(
             mnemonic="flat_load_u8",
