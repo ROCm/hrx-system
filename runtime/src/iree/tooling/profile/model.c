@@ -563,6 +563,76 @@ double iree_profile_model_clock_fit_tick_frequency_hz(
   return ns_per_tick > 0.0 ? 1000000000.0 / ns_per_tick : 0.0;
 }
 
+bool iree_profile_model_device_try_resolve_duration_scale(
+    const iree_profile_model_device_t* device,
+    iree_profile_model_duration_scale_t* out_scale) {
+  memset(out_scale, 0, sizeof(*out_scale));
+  if (!device) return false;
+
+  if (iree_all_bits_set(device->metadata_flags,
+                        IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY) &&
+      device->timestamp_frequency_hz != 0) {
+    out_scale->source =
+        IREE_PROFILE_MODEL_DURATION_SCALE_SOURCE_DEVICE_METADATA;
+    out_scale->device_tick_span = device->timestamp_frequency_hz;
+    out_scale->time_span_ns = 1000000000ull;
+    return true;
+  }
+
+  iree_profile_model_clock_fit_t clock_fit;
+  if (!iree_profile_model_device_try_fit_clock_exact(
+          device, IREE_PROFILE_MODEL_CLOCK_TIME_DOMAIN_HOST_CPU_TIMESTAMP_NS,
+          &clock_fit)) {
+    return false;
+  }
+  out_scale->source =
+      IREE_PROFILE_MODEL_DURATION_SCALE_SOURCE_CLOCK_CORRELATION;
+  out_scale->device_tick_span = clock_fit.device_tick_span;
+  out_scale->time_span_ns = clock_fit.time_span_ns;
+  return true;
+}
+
+bool iree_profile_model_duration_scale_ticks_to_ns(
+    const iree_profile_model_duration_scale_t* scale,
+    uint64_t device_tick_count, int64_t* out_duration_ns) {
+  *out_duration_ns = 0;
+  if (!scale || scale->device_tick_span == 0) return false;
+  uint64_t duration_ns = 0;
+  if (!iree_math_round_mul_div_u64(device_tick_count, scale->time_span_ns,
+                                   scale->device_tick_span, &duration_ns) ||
+      duration_ns > INT64_MAX) {
+    return false;
+  }
+  *out_duration_ns = (int64_t)duration_ns;
+  return true;
+}
+
+double iree_profile_model_duration_scale_ns_per_tick(
+    const iree_profile_model_duration_scale_t* scale) {
+  if (!scale || scale->device_tick_span == 0) return 0.0;
+  return (double)scale->time_span_ns / (double)scale->device_tick_span;
+}
+
+double iree_profile_model_duration_scale_tick_frequency_hz(
+    const iree_profile_model_duration_scale_t* scale) {
+  const double ns_per_tick =
+      iree_profile_model_duration_scale_ns_per_tick(scale);
+  return ns_per_tick > 0.0 ? 1000000000.0 / ns_per_tick : 0.0;
+}
+
+const char* iree_profile_model_duration_scale_source_name(
+    iree_profile_model_duration_scale_source_t source) {
+  switch (source) {
+    case IREE_PROFILE_MODEL_DURATION_SCALE_SOURCE_DEVICE_METADATA:
+      return "device_metadata";
+    case IREE_PROFILE_MODEL_DURATION_SCALE_SOURCE_CLOCK_CORRELATION:
+      return "clock_correlation";
+    case IREE_PROFILE_MODEL_DURATION_SCALE_SOURCE_NONE:
+    default:
+      return "none";
+  }
+}
+
 bool iree_profile_model_device_try_fit_clock(
     const iree_profile_model_device_t* device, double* out_ns_per_tick,
     double* out_tick_frequency_hz) {
@@ -931,6 +1001,64 @@ static iree_status_t iree_profile_model_append_metric_descriptor(
   return iree_ok_status();
 }
 
+static iree_status_t iree_profile_model_process_device_records(
+    iree_profile_model_t* model, const iree_hal_profile_file_record_t* record) {
+  iree_profile_typed_record_iterator_t iterator;
+  iree_profile_typed_record_iterator_initialize(
+      record, IREE_HAL_PROFILE_DEVICE_RECORD_MIN_LENGTH, &iterator);
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status)) {
+    iree_profile_typed_record_t typed_record;
+    bool has_record = false;
+    status = iree_profile_typed_record_iterator_next(&iterator, &typed_record,
+                                                     &has_record);
+    if (!iree_status_is_ok(status) || !has_record) break;
+
+    iree_hal_profile_device_record_t record_value =
+        iree_hal_profile_device_record_default();
+    memcpy(&record_value, typed_record.contents.data,
+           iree_min(typed_record.contents.data_length, sizeof(record_value)));
+    const bool has_timestamp_frequency = iree_all_bits_set(
+        record_value.flags, IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY);
+    if (has_timestamp_frequency &&
+        typed_record.record_length < sizeof(record_value)) {
+      status = iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "profile device record advertises timestamp frequency without "
+          "carrying the field");
+    } else if (has_timestamp_frequency &&
+               record_value.timestamp_frequency_hz == 0) {
+      status = iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "profile device record advertises a zero timestamp frequency");
+    }
+
+    iree_profile_model_device_t* device = NULL;
+    if (iree_status_is_ok(status)) {
+      status = iree_profile_model_ensure_device(
+          model, record_value.physical_device_ordinal, &device);
+    }
+    if (iree_status_is_ok(status) && has_timestamp_frequency &&
+        iree_all_bits_set(device->metadata_flags,
+                          IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY) &&
+        device->timestamp_frequency_hz != record_value.timestamp_frequency_hz) {
+      status = iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "profile device %u reports conflicting timestamp frequencies: "
+          "%" PRIu64 " and %" PRIu64,
+          record_value.physical_device_ordinal, device->timestamp_frequency_hz,
+          record_value.timestamp_frequency_hz);
+    }
+    if (iree_status_is_ok(status)) {
+      device->metadata_flags |= record_value.flags;
+      if (has_timestamp_frequency) {
+        device->timestamp_frequency_hz = record_value.timestamp_frequency_hz;
+      }
+    }
+  }
+  return status;
+}
+
 static iree_status_t iree_profile_model_process_queue_records(
     iree_profile_model_t* model, const iree_hal_profile_file_record_t* record) {
   iree_profile_typed_record_iterator_t iterator;
@@ -1178,6 +1306,8 @@ iree_status_t iree_profile_model_process_metadata_record(
     return iree_ok_status();
   }
   const iree_profile_model_chunk_route_t routes[] = {
+      {IREE_HAL_PROFILE_CONTENT_TYPE_DEVICES,
+       iree_profile_model_process_device_records},
       {IREE_HAL_PROFILE_CONTENT_TYPE_QUEUES,
        iree_profile_model_process_queue_records},
       {IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLES,

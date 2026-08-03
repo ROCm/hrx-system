@@ -524,6 +524,13 @@ TEST_F(LocalProfileRecorderTest, RejectsUnsupportedDataFamily) {
       Create(IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS));
 }
 
+TEST_F(LocalProfileRecorderTest, RejectsAdvertisedZeroTimestampFrequency) {
+  device_record_.flags |= IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY;
+  device_record_.timestamp_frequency_hz = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Create(IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS));
+}
+
 TEST_F(LocalProfileRecorderTest, ProducerFamilyAppendsDispatchEvents) {
   recorder_options_.producer_data_families =
       IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS;

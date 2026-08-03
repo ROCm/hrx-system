@@ -98,7 +98,7 @@ class IreeProfileCliTest(unittest.TestCase):
     def _create_profile(self, directory, *fixture_flags):
         profile_path = os.path.join(directory, "smoke.ireeprof")
         _run_checked(
-            [self.fixture_generator, *fixture_flags, profile_path],
+            [self.fixture_generator, *fixture_flags, f"--output={profile_path}"],
         )
         return profile_path
 
@@ -219,9 +219,83 @@ class IreeProfileCliTest(unittest.TestCase):
             host_dispatch_event["duration_time_domain"], "iree_host_duration_ns"
         )
 
+    def test_unaligned_clock_retains_device_durations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            profile_path = self._create_profile(directory, "--unaligned_device_clock")
+            summary_rows = self._profile_jsonl(profile_path, "summary")
+            dispatch_rows = self._profile_jsonl(
+                profile_path, "dispatch", "--dispatch_events"
+            )
+            queue_rows = self._profile_jsonl(profile_path, "queue")
+            explain_rows = self._profile_jsonl(profile_path, "explain")
+            memory_rows = self._profile_jsonl(profile_path, "memory")
+            statistics_rows = self._profile_jsonl(profile_path, "statistics")
+
+            output_path = os.path.join(directory, "unaligned.ireeperf.jsonl")
+            _run_checked(
+                [
+                    self.iree_profile,
+                    "--format=ireeperf-jsonl",
+                    f"--output={output_path}",
+                    "export",
+                    profile_path,
+                ]
+            )
+            with open(output_path, "r", encoding="utf-8") as file:
+                export_rows = [json.loads(line) for line in file if line.strip()]
+
+        device_summary = _find_row(summary_rows, "device_summary")
+        self.assertFalse(device_summary["clock_fit_available"])
+        self.assertTrue(device_summary["duration_scale_available"])
+        self.assertEqual(device_summary["duration_scale_source"], "device_metadata")
+        self.assertGreater(device_summary["total_dispatch_ns"], 0)
+
+        dispatch_event = _find_row(dispatch_rows, "dispatch_event")
+        self.assertFalse(dispatch_event["clock_fit_available"])
+        self.assertTrue(dispatch_event["duration_scale_available"])
+        self.assertEqual(dispatch_event["duration_scale_source"], "device_metadata")
+        self.assertGreater(dispatch_event["duration_ns"], 0)
+
+        queue_event = _find_row(queue_rows, "queue_device_event")
+        self.assertFalse(queue_event["clock_fit_available"])
+        self.assertTrue(queue_event["duration_scale_available"])
+        self.assertGreater(queue_event["duration_ns"], 0)
+
+        explain_device = _find_row(explain_rows, "explain_device")
+        self.assertFalse(explain_device["clock_fit_available"])
+        self.assertTrue(explain_device["duration_scale_available"])
+        self.assertGreater(explain_device["active_dispatch_ns"], 0)
+
+        memory_allocation = next(
+            row
+            for row in memory_rows
+            if row.get("type") == "memory_allocation"
+            and row["device_lifetime_available"]
+        )
+        self.assertTrue(memory_allocation["device_lifetime_time_ns_available"])
+        self.assertEqual(
+            memory_allocation["device_lifetime_duration_scale_source"],
+            "device_metadata",
+        )
+
+        statistics_row = next(
+            row
+            for row in statistics_rows
+            if row.get("type") == "statistics_row"
+            and row.get("row_type") == "dispatch_function"
+        )
+        self.assertGreater(statistics_row["total_duration_ns"], 0)
+
+        exported_device = _find_row(export_rows, "device")
+        self.assertTrue(exported_device["timestamp_frequency_hz_present"])
+        exported_dispatch = _find_row(export_rows, "dispatch_event")
+        self.assertFalse(exported_dispatch["derived_time_available"])
+        self.assertTrue(exported_dispatch["duration_scale_available"])
+        self.assertGreater(exported_dispatch["duration_ns"], 0)
+
     def test_explain_uses_host_dispatch_spans_without_device_dispatches(self):
         with tempfile.TemporaryDirectory() as directory:
-            profile_path = self._create_profile(directory, "--omit-dispatch-events")
+            profile_path = self._create_profile(directory, "--omit_dispatch_events")
             rows = self._profile_jsonl(profile_path, "explain")
 
         summary = _find_row(rows, "explain_summary")

@@ -42,6 +42,10 @@ typedef struct iree_hal_profile_statistics_function_t {
 typedef struct iree_hal_profile_statistics_device_t {
   // Session-local physical device ordinal.
   uint32_t physical_device_ordinal;
+  // Device metadata flags observed for this physical device.
+  iree_hal_profile_device_flags_t metadata_flags;
+  // Authoritative device timestamp rate advertised by device metadata.
+  uint64_t timestamp_frequency_hz;
   // Number of clock-correlation samples seen for this device.
   uint64_t clock_sample_count;
   // Number of clock samples that report invalid device event tick alignment.
@@ -466,6 +470,13 @@ static bool iree_hal_profile_statistics_scale_device_ticks_to_ns(
     const iree_hal_profile_statistics_device_t* device, uint64_t duration_ticks,
     uint64_t* out_duration_ns) {
   *out_duration_ns = 0;
+  if (device &&
+      iree_all_bits_set(device->metadata_flags,
+                        IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY)) {
+    return iree_math_round_mul_div_u64(duration_ticks, UINT64_C(1000000000),
+                                       device->timestamp_frequency_hz,
+                                       out_duration_ns);
+  }
   if (!device || device->clock_sample_count < 2) return false;
   if (device->invalid_clock_alignment_sample_count != 0) return false;
 
@@ -632,6 +643,86 @@ static iree_status_t iree_hal_profile_statistics_for_each_fixed_record(
          offset += record_size) {
       status = record_callback(sink, metadata, iovecs[i].data + offset);
     }
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_profile_statistics_process_device_iovec(
+    iree_hal_profile_statistics_sink_t* sink, iree_const_byte_span_t iovec) {
+  iree_status_t status = iree_ok_status();
+  iree_host_size_t offset = 0;
+  while (iree_status_is_ok(status) && offset < iovec.data_length) {
+    const iree_host_size_t remaining_length = iovec.data_length - offset;
+    if (remaining_length < IREE_HAL_PROFILE_DEVICE_RECORD_MIN_LENGTH) {
+      return iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "profile statistics device chunk has a partial record");
+    }
+
+    iree_hal_profile_device_record_t record =
+        iree_hal_profile_device_record_default();
+    uint32_t record_length = 0;
+    memcpy(&record_length, iovec.data + offset, sizeof(record_length));
+    if (record_length < IREE_HAL_PROFILE_DEVICE_RECORD_MIN_LENGTH ||
+        record_length > remaining_length) {
+      return iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "profile statistics device record length is invalid");
+    }
+    memcpy(&record, iovec.data + offset,
+           iree_min((iree_host_size_t)record_length, sizeof(record)));
+
+    const bool has_timestamp_frequency = iree_all_bits_set(
+        record.flags, IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY);
+    if (has_timestamp_frequency && record_length < sizeof(record)) {
+      return iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "profile statistics device record advertises timestamp frequency "
+          "without carrying the field");
+    }
+    if (has_timestamp_frequency && record.timestamp_frequency_hz == 0) {
+      return iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "profile statistics device record advertises a zero timestamp "
+          "frequency");
+    }
+
+    iree_hal_profile_statistics_device_t* device = NULL;
+    status = iree_hal_profile_statistics_sink_ensure_device(
+        sink, record.physical_device_ordinal, &device);
+    if (iree_status_is_ok(status) && has_timestamp_frequency &&
+        iree_all_bits_set(device->metadata_flags,
+                          IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY) &&
+        device->timestamp_frequency_hz != record.timestamp_frequency_hz) {
+      status = iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "profile statistics device %u reports conflicting timestamp "
+          "frequencies: %" PRIu64 " and %" PRIu64,
+          record.physical_device_ordinal, device->timestamp_frequency_hz,
+          record.timestamp_frequency_hz);
+    }
+    if (iree_status_is_ok(status)) {
+      device->metadata_flags |= record.flags;
+      if (has_timestamp_frequency) {
+        device->timestamp_frequency_hz = record.timestamp_frequency_hz;
+      }
+    }
+    offset += record_length;
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_profile_statistics_process_device_records(
+    iree_hal_profile_statistics_sink_t* sink, iree_host_size_t iovec_count,
+    const iree_const_byte_span_t* iovecs) {
+  if (iovec_count > 0 && !iovecs) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "profile statistics device iovecs are required");
+  }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < iovec_count;
+       ++i) {
+    status = iree_hal_profile_statistics_process_device_iovec(sink, iovecs[i]);
   }
   return status;
 }
@@ -1384,7 +1475,12 @@ static iree_status_t iree_hal_profile_statistics_sink_write(
   IREE_RETURN_IF_ERROR(
       iree_hal_profile_statistics_sink_add_dropped_records(sink, metadata));
   if (iree_string_view_equal(metadata->content_type,
-                             IREE_HAL_PROFILE_CONTENT_TYPE_DISPATCH_EVENTS)) {
+                             IREE_HAL_PROFILE_CONTENT_TYPE_DEVICES)) {
+    return iree_hal_profile_statistics_process_device_records(sink, iovec_count,
+                                                              iovecs);
+  } else if (iree_string_view_equal(
+                 metadata->content_type,
+                 IREE_HAL_PROFILE_CONTENT_TYPE_DISPATCH_EVENTS)) {
     return iree_hal_profile_statistics_for_each_fixed_record(
         sink, metadata, iovec_count, iovecs,
         sizeof(iree_hal_profile_dispatch_event_t),

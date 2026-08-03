@@ -956,6 +956,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_write_profile_devices(
     records[i].physical_device_ordinal =
         (uint32_t)physical_device->device_ordinal;
     records[i].queue_count = (uint32_t)physical_device->host_queue_count;
+    records[i].flags |= IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY;
+    records[i].timestamp_frequency_hz = physical_device->timestamp_frequency_hz;
     if (physical_device->has_physical_device_uuid) {
       records[i].flags |= IREE_HAL_PROFILE_DEVICE_FLAG_PHYSICAL_DEVICE_UUID;
       memcpy(records[i].physical_device_uuid,
