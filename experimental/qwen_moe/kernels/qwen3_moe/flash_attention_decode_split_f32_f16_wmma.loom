@@ -706,9 +706,7 @@ func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(20)
   %key_value_block_count_i32 = index.cast %key_value_block_count : index to i32
   %last_block_ordinal_i32 = scalar.subi %key_value_block_count_i32, %one_i32 : i32
   %negative_key_value_block_count_i32 = scalar.subi %zero_i32, %key_value_block_count_i32 : i32
-  %old_counter_f32 = scalar.sitofp %old_counter : i32 to f32
-  %last_block_ordinal_f32 = scalar.sitofp %last_block_ordinal_i32 : i32 to f32
-  %is_last_partition = scalar.cmpf oeq, %old_counter_f32, %last_block_ordinal_f32 : f32
+  %is_last_partition = scalar.cmpi eq, %old_counter, %last_block_ordinal_i32 : i32
   scf.if %is_last_partition {
     func.call inline @qwen3_moe_flash_attention_decode_split_reduce_completed_direct_f32(%bounded_key_value_token_count, %partial_max_noalias, %partial_sum_noalias, %partial_output_noalias, %output_noalias) : (index, buffer, buffer, buffer, buffer)
     // Do not expose the reset until every final output store completes.
@@ -756,9 +754,7 @@ func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(10)
   %key_value_block_count_i32 = index.cast %key_value_block_count : index to i32
   %last_block_ordinal_i32 = scalar.subi %key_value_block_count_i32, %one_i32 : i32
   %negative_key_value_block_count_i32 = scalar.subi %zero_i32, %key_value_block_count_i32 : i32
-  %old_counter_f32 = scalar.sitofp %old_counter : i32 to f32
-  %last_block_ordinal_f32 = scalar.sitofp %last_block_ordinal_i32 : i32 to f32
-  %is_last_partition = scalar.cmpf oeq, %old_counter_f32, %last_block_ordinal_f32 : f32
+  %is_last_partition = scalar.cmpi eq, %old_counter, %last_block_ordinal_i32 : i32
   scf.if %is_last_partition {
     func.call inline @qwen3_moe_flash_attention_decode_split_reduce_completed_cooperative_f32(%bounded_key_value_token_count, %partial_max_noalias, %partial_sum_noalias, %partial_output_noalias, %output_noalias) : (index, buffer, buffer, buffer, buffer)
     // Do not expose the reset until every final output store completes.
