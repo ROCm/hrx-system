@@ -672,14 +672,9 @@ kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8(%token_count: in
   %group_size_i32 = index.cast %onetwentyeight : index to i32
   %last_arrival_i32 = scalar.subi %group_size_i32, %one_i32 : i32
   %negative_group_size_i32 = scalar.subi %zero_i32, %group_size_i32 : i32
-  // Temporary, non-sanctioned lowering workaround: AMDGPU scalar.cmpi cannot
-  // consume the divergent reduction result. Both values are in [0, 127], so
-  // their F32 representations and equality comparison remain exact.
-  %old_counter_f32 = scalar.sitofp %old_counter : i32 to f32
-  %last_arrival_f32 = scalar.sitofp %last_arrival_i32 : i32 to f32
-  %is_last_arrival = scalar.cmpf oeq, %old_counter_f32, %last_arrival_f32 : f32
+  %is_last_arrival = scalar.cmpi eq, %old_counter, %last_arrival_i32 : i32
   scf.if %is_last_arrival {
-    func.apply<ggml.quantize_q8_1_x4.group_body>(%row_count, %bounded_output_size, %counter_index, %output_noalias, %next_q8_output_noalias) : (index, index, index, buffer, buffer)
+    func.apply<ggml.quantize_q8_1_x4.group_body>(%bounded_completion_counter_count, %counter_index, %output_noalias, %next_q8_output_noalias) : (index, index, buffer, buffer)
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
     scf.if %is_arrival_lane {
       view.atomic.reduce<addi> %negative_group_size_i32, %completion_counters_view[%counter_index] {ordering = release, scope = device} : i32, view<[%bounded_completion_counter_count]xi32, #dense>
