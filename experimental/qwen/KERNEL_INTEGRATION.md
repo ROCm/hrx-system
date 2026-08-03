@@ -326,7 +326,10 @@ iree-bazel-run //experimental/qwen/binding/cli:qwen-prefill-cli -- \
 ```
 
 The benchmark executable owns the same model, request, and reusable program
-objects independently of the CLI:
+objects independently of the CLI. It consumes the leading
+`--prefill_token_count` values from the 512-token fixture, prepares only that
+shape, and requires its selected-token oracle explicitly. This keeps a
+shape-filtered optimization run from compiling unrelated prefill programs:
 
 ```sh
 iree-bazel-run \
@@ -334,9 +337,16 @@ iree-bazel-run \
   --device=amdgpu://0 \
   --parameters=/path/to/Qwen3-30B-A3B-Q4_K_M.gguf \
   --tokens=/path/to/prefill_512_i32.bin \
+  --prefill_token_count=512 \
+  --expected_prefill_token=264 \
   --expected_decode_token=<oracle-token> \
   --benchmark_filter='Qwen/FullModel/(Prefill/512|Decode/513)'
 ```
+
+Use the same command with counts such as 32 or 128 and their matching external
+prefill oracle to produce resident `Prefill/32` or `Prefill/128` rows. When an
+expected decode token is supplied, the runner appends the validated prefill
+selection and registers the corresponding `Decode/<prefill-count + 1>` row.
 
 Model files and token fixtures are intentionally not repository inputs. The
 authored kernel cases use bounded synthetic packed data, so individual kernels
