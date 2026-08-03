@@ -12,19 +12,23 @@
 #include "loom/codegen/low/descriptors.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
+#include "loom/ops/atomic.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
+#include "loom/ops/view/ops.h"
 #include "loom/target/arch/amdgpu/lower/kinds.h"
 #include "loom/target/arch/amdgpu/lower/matrix_fragment_memory_plan.h"
+#include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/narrow_float/vector_conversion.h"
 #include "loom/target/arch/amdgpu/matrix/contract.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
 #include "loom/transforms/vector/to_scalar.h"
+#include "loom/transforms/view/target_legalization.h"
 
 static bool loom_amdgpu_legalizer_descriptor_set_is_amdgpu(
     const loom_low_descriptor_set_t* descriptor_set) {
@@ -96,6 +100,60 @@ static iree_status_t loom_amdgpu_legalize_vector_decode(
     };
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_legalize_atomic_addf(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  if (!loom_amdgpu_legalizer_descriptor_set_is_amdgpu(
+          context->descriptor_set)) {
+    return iree_ok_status();
+  }
+
+  const loom_memory_access_t access =
+      loom_memory_access_cast(context->module, op);
+  if (loom_attr_as_enum(loom_memory_access_atomic_kind(access)) !=
+      LOOM_ATOMIC_KIND_ADDF) {
+    return iree_ok_status();
+  }
+  const loom_type_t value_type =
+      loom_module_value_type(context->module, loom_memory_access_value(access));
+  if (!loom_type_equal(value_type, loom_type_scalar(LOOM_SCALAR_TYPE_F32))) {
+    return iree_ok_status();
+  }
+
+  loom_value_fact_view_reference_t view_reference = {0};
+  if (!loom_value_facts_query_view_reference(
+          &context->fact_table->context,
+          loom_value_fact_table_lookup(context->fact_table,
+                                       loom_memory_access_view(access)),
+          &view_reference)) {
+    return iree_ok_status();
+  }
+  const loom_amdgpu_atomic_operation_kind_t operation_kind =
+      loom_view_atomic_reduce_isa(op) ? LOOM_AMDGPU_ATOMIC_OPERATION_REDUCE
+                                      : LOOM_AMDGPU_ATOMIC_OPERATION_RMW;
+  if (loom_amdgpu_atomic_has_descriptor_candidate(
+          context->descriptor_set, view_reference.memory_space, operation_kind,
+          LOOM_ATOMIC_KIND_ADDF, value_type)) {
+    *out_result = (loom_target_legalizer_result_t){
+        .action = LOOM_TARGET_LEGALIZER_ACTION_DEFER,
+    };
+    return iree_ok_status();
+  }
+  if (!loom_amdgpu_atomic_has_descriptor_candidate(
+          context->descriptor_set, view_reference.memory_space,
+          LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG, LOOM_ATOMIC_KIND_ADDF,
+          value_type)) {
+    return iree_ok_status();
+  }
+  return loom_view_target_legalize_atomic_addf_reference(context, op,
+                                                         out_result);
 }
 
 static bool loom_amdgpu_match_value_type_is_supported(loom_type_t type) {
@@ -1591,6 +1649,14 @@ static iree_status_t loom_amdgpu_legalize_oversized_vector_reduce(
 }
 
 static const loom_target_legalizer_entry_t kAmdgpuLegalizerEntries[] = {
+    {
+        .root_kind = LOOM_OP_VIEW_ATOMIC_REDUCE,
+        .legalize = loom_amdgpu_legalize_atomic_addf,
+    },
+    {
+        .root_kind = LOOM_OP_VIEW_ATOMIC_RMW,
+        .legalize = loom_amdgpu_legalize_atomic_addf,
+    },
     {
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
         .root_kind = LOOM_OP_VECTOR_FRAGMENT_STORE,

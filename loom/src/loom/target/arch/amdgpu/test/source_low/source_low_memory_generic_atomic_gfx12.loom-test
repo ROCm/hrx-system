@@ -50,7 +50,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @generic_atomic_
   %14 = concat(%12, %13) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %15 = v_mov_b32 7
   %16 = v_mov_b32 9
-  %17 = concat(%15, %16) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %17 = concat(%16, %15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %old_cmpxchg = flat_atomic_cmpswap_b32_rtn %14, %17 {scope = 2}
   return
 }

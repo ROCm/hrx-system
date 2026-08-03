@@ -145,7 +145,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
   s_waitcnt_vscnt {vscnt = 0}
   %16 = v_mov_b32 7
   %17 = v_mov_b32 9
-  %18 = concat(%16, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %18 = concat(%17, %16) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %19 = buffer_atomic_cmpswap_b32_rtn %18, %28, %13, %14
   s_waitcnt {vmcnt = 0}
   buffer_gl1_inv

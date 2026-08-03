@@ -243,6 +243,23 @@ iree_execution_test_suite(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_execution_test_suite(
+  NAME
+    global_atomic_add_f32_execution_test
+  MANIFESTS
+    "global_atomic_add_f32.test.json"
+  TOOLS
+    "iree-test-loom=loom::tools::iree-test-loom"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/global_atomic_add_f32.loom"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU)
 iree_execution_test_suite(
   NAME

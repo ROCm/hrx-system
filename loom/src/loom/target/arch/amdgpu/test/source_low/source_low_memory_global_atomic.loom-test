@@ -113,20 +113,64 @@ kernel.def target(@target) @global_atomic_add_f32() {
 // ----
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @global_atomic_add_f32() asm {
   %view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
-  %one = v_mov_b32 1065353216
-  %11 = v_mov_b32 0
-  %12 = s_mov_b32 0
-  %19 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %20 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %21 = s_mov_b32 65535
-  %22 = s_and_b32 %20, %21
-  %23 = concat(%19, %22) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %24 = s_mov_b32 256
-  %25 = s_mov_b32 822173696
-  %26 = concat(%23, %24, %25) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  buffer_atomic_add_f32 %one, %26, %11, %12
-  %17 = v_mov_b32 1065353216
-  %old = buffer_atomic_add_f32_rtn %17, %26, %11, %12
+  %36 = v_mov_b32 0
+  low.br ^_bb6
+^_bb1(%31: reg<amdgpu.vgpr>):
+  %37 = v_add_f32_src0_inline %31, 1065353216
+  %39 = s_mov_b32 0
+  %63 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %64 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %65 = s_mov_b32 65535
+  %66 = s_and_b32 %64, %65
+  %67 = concat(%63, %66) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %68 = s_mov_b32 256
+  %69 = s_mov_b32 822173696
+  %70 = concat(%67, %68, %69) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %41 = v_mov_b32_copy %31
+  %42 = v_mov_b32_copy %37
+  %43 = concat(%42, %41) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %44 = buffer_atomic_cmpswap_b32_rtn %43, %70, %36, %39
+  %45 = slice %44[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %46 = v_cmp_ne_i32 %45, %31
+  %48, %49 = s_and_saveexec_b64 %46
+  low.cond_br %49, ^_bb2, ^_bb7 : reg<amdgpu.scc>
+^_bb2:
+  low.br ^_bb1(%45: reg<amdgpu.vgpr>)
+^_bb3:
+  low.br ^_bb8
+^_bb4(%32: reg<amdgpu.vgpr>):
+  %50 = v_add_f32_src0_inline %32, 1065353216
+  %51 = v_mov_b32 0
+  %52 = s_mov_b32 0
+  %71 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %72 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %73 = s_mov_b32 65535
+  %74 = s_and_b32 %72, %73
+  %75 = concat(%71, %74) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %76 = s_mov_b32 256
+  %77 = s_mov_b32 822173696
+  %78 = concat(%75, %76, %77) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %54 = v_mov_b32_copy %32
+  %55 = v_mov_b32_copy %50
+  %56 = concat(%55, %54) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %57 = buffer_atomic_cmpswap_b32_rtn %56, %78, %51, %52
+  %58 = slice %57[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %59 = v_cmp_ne_i32 %58, %32
+  %61, %62 = s_and_saveexec_b64 %59
+  low.cond_br %62, ^_bb5, ^_bb9 : reg<amdgpu.scc>
+^_bb5:
+  low.br ^_bb4(%58: reg<amdgpu.vgpr>)
+^_bb6:
+  %47 = s_mov_b64_exec_read
+  low.br ^_bb1(%36: reg<amdgpu.vgpr>)
+^_bb7:
+  s_mov_b64_exec %47
+  low.br ^_bb3
+^_bb8:
+  %60 = s_mov_b64_exec_read
+  low.br ^_bb4(%36: reg<amdgpu.vgpr>)
+^_bb9:
+  s_mov_b64_exec %60
   return
 }
 
@@ -384,7 +428,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
   %28 = concat(%25, %26, %27) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
   %16 = v_mov_b32 7
   %17 = v_mov_b32 9
-  %18 = concat(%16, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %18 = concat(%17, %16) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %19 = buffer_atomic_cmpswap_b32_rtn %18, %28, %13, %14
   return
 }
@@ -414,7 +458,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
   %20 = concat(%18, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   %21 = v_mov_b32 9
   %23 = concat(%21, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %24 = concat(%20, %23) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %24 = concat(%23, %20) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
   %old = global_atomic_cmpswap_b64_rtn_saddr %17, %24, %view
   return
 }

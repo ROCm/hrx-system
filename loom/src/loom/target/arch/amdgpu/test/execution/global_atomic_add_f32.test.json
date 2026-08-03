@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "executes device-global FP32 atomic add cases",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/global_atomic_add_f32.loom",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case_count\":3",
+            "\"sample_count\":3",
+            "\"failed_sample_count\":0",
+            "\"skipped_case_count\":0",
+            "\"planning_issue_count\":0"
+          ]
+        }
+      }
+    }
+  ]
+}

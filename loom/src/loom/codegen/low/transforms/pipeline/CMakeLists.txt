@@ -64,6 +64,7 @@ loom_cc_library(
     loom::target::reporting::report
     loom::transforms::scalar::target_legalization
     loom::transforms::vector::target_legalization
+    loom::transforms::view::target_legalization
     loom::util::walk
   PUBLIC
 )

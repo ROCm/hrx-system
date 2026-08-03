@@ -65,6 +65,7 @@ loom_cc_library(
         "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/transforms/scalar:target_legalization",
         "//loom/src/loom/transforms/vector:target_legalization",
+        "//loom/src/loom/transforms/view:target_legalization",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
