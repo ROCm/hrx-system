@@ -198,18 +198,10 @@ func.def inline @ggml_q6k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, 
   func.return %result : f32
 }
 
-// Dense raw-layout baseline. A 256-thread workgroup carries eight independent
-// wave32 output rows so decode launches enough waves without duplicating Q6_K
-// decoding within a row.
-kernel.def @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
-  %eight = index.constant 8 : index
-  %seven = index.constant 7 : index
-  %one = index.constant 1 : index
-  %workgroup_size = index.constant 256 : index
-  %padded_output_size = index.add %output_size, %seven : index
-  %output_tiles = index.div %padded_output_size, %eight : index
-  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%workgroup_size, %one, %one) : index
-} launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+// Contracts one output channel for the calling Q6_K projection kernel. The
+// caller owns publication so the same canonical contraction can feed either a
+// dense logits tensor or an endpoint reduction.
+func.template<ggml.linear_q6k_q8_1_x4.body> device @ggml_linear_q6k_q8_1_x4_body(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer) -> (f32, index, index, i1, index, index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
@@ -223,8 +215,6 @@ kernel.def @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %ou
   %twohundredten = index.constant 210 : index
   %twofiftysix = index.constant 256 : index
   %onehundredfortyfour = index.constant 144 : index
-  %zero_i32 = scalar.constant 0 : i32
-  %zero_offset = index.constant 0 : offset
   %token, %launch_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
   %channel_base = index.mul %channel_tile, %eight : index
@@ -238,15 +228,35 @@ kernel.def @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %ou
   %q8_row_byte_count = index.mul %q8_group_count, %onehundredfortyfour : index
   %q8_row_byte_index = index.mul %token, %q8_row_byte_count : index
   %q8_row_byte_base = index.cast %q8_row_byte_index : index to offset
-  %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
   %lane_acc = scf.if %valid_channel -> (f32) {
-    %value = func.call @ggml_q6k_q8_1_x4_row_lane(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
+    %value = func.call @ggml_q6k_q8_1_x4_row_lane(%bounded_input_size, %weight, %weight_row_byte_base, %q8_input, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
     scf.yield %value : f32
   } else {
     %zero_f32 = scalar.constant 0.0 : f32
     scf.yield %zero_f32 : f32
   }
   %dot = kernel.subgroup.reduce<addf> %lane_acc : f32
+  func.return %dot, %token, %channel, %valid_channel, %launch_token_count, %bounded_output_size : f32, index, index, i1, index, index
+}
+
+// Dense raw-layout baseline. A 256-thread workgroup carries eight independent
+// wave32 output rows so decode launches enough waves without duplicating Q6_K
+// decoding within a row.
+kernel.def @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
+  %eight = index.constant 8 : index
+  %seven = index.constant 7 : index
+  %one = index.constant 1 : index
+  %workgroup_size = index.constant 256 : index
+  %padded_output_size = index.add %output_size, %seven : index
+  %output_tiles = index.div %padded_output_size, %eight : index
+  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%workgroup_size, %one, %one) : index
+} launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+  %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
+  %dot, %token, %channel, %valid_channel, %launch_token_count, %bounded_output_size = func.apply<ggml.linear_q6k_q8_1_x4.body>(%token_count, %input_size, %output_size, %q8_noalias, %weight_noalias) : (index, index, index, buffer, buffer) -> (f32, index, index, i1, index, index)
+  %zero = index.constant 0 : index
+  %zero_i32 = scalar.constant 0 : i32
+  %zero_offset = index.constant 0 : offset
+  %lane = kernel.subgroup.lane.id : index
   %lane_i32 = index.cast %lane : index to i32
   %is_lane_zero = scalar.cmpi eq, %lane_i32, %zero_i32 : i32
   %writes_output = scalar.andi %valid_channel, %is_lane_zero : i1
