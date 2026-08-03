@@ -76,9 +76,8 @@ kernel.def @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) {
   %workgroup_count = index.div %element_count, %elements_per_group : index
   kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer) {
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
-  %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), mul(%input_size, 128)] : index
   %group = kernel.workgroup.id<x> : index
+  %group_count = kernel.workgroup.count<x> : index
   %lane = kernel.workitem.id<x> : index
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -95,7 +94,7 @@ kernel.def @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) {
   %one_f32 = scalar.constant 1.0 : f32
   %one_twenty_seven = scalar.constant 127.0 : f32
   %zero_offset = index.constant 0 : offset
-  %element_count = index.mul %bounded_token_count, %bounded_input_size : index
+  %launched_element_count = index.mul %group_count, %onetwentyeight : index
   %block_in_group0 = index.div %lane, %eight : index
   %block_in_group = index.assume %block_in_group0 [range(%block_in_group0, 0, 3)] : index
   %word_in_block0 = index.rem %lane, %eight : index
@@ -107,8 +106,8 @@ kernel.def @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) {
   %input_block_base = index.add %group_element_base, %block_element_add : index
   %input_index = index.add %input_block_base, %word_element_add : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_view = buffer.view %input_noalias[%zero_offset] : buffer -> view<[%element_count]xf32, #dense>
-  %input_values = vector.load %input_view[%input_index] : view<[%element_count]xf32, #dense> -> vector<4xf32>
+  %input_view = buffer.view %input_noalias[%zero_offset] : buffer -> view<[%launched_element_count]xf32, #dense>
+  %input_values = vector.load %input_view[%input_index] : view<[%launched_element_count]xf32, #dense> -> vector<4xf32>
   %absolute_values = vector.absf %input_values : vector<4xf32>
   %thread_max = vector.reduce<maxnumf> %absolute_values, %zero_f32 : vector<4xf32>, f32
   %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
