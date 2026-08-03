@@ -330,9 +330,11 @@ static iree_status_t QwenBenchmarkEnvironmentInitialize(
       decode_is_enabled
           ? qwen_program_decode_context_class(environment->prefill_token_count)
           : 0;
+  const iree_host_size_t prefill_context_capacity =
+      iree_host_align(environment->prefill_token_count,
+                      QWEN_PROGRAM_ATTENTION_CONTEXT_ALIGNMENT);
   const iree_host_size_t request_context_capacity =
-      decode_is_enabled ? decode_context_class
-                        : environment->prefill_token_count;
+      decode_is_enabled ? decode_context_class : prefill_context_capacity;
 
   // Host-side program preparation overlaps the asynchronous model gather.
   if (iree_status_is_ok(status)) {

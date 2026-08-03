@@ -18,8 +18,6 @@
 
 #define QWEN_PROGRAM_BINDING_COUNT 6
 #define QWEN_PROGRAM_INITIAL_SEMAPHORE_CAPACITY 8
-#define QWEN_PROGRAM_FLASH_ATTENTION_KEY_TILE_TOKEN_COUNT 64
-
 typedef enum qwen_program_binding_slot_e {
   // Complete resident model parameter allocation.
   QWEN_PROGRAM_BINDING_MODEL = 0,
@@ -182,6 +180,8 @@ struct qwen_program_t {
   iree_host_size_t token_count;
   // Exact visible K/V rows for fixed programs, or decode class upper bound.
   iree_host_size_t context_count;
+  // Physical K/V rows consumed by attention after masked tile padding.
+  iree_host_size_t attention_context_count;
   // Compatible request token-storage capacity.
   iree_host_size_t token_capacity;
   // Compatible request K/V storage capacity.
@@ -824,7 +824,7 @@ static qwen_program_attention_schedule_t qwen_program_select_attention_schedule(
   if (kind == QWEN_PROGRAM_KIND_DECODE) {
     return QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT;
   }
-  return context_count < QWEN_PROGRAM_FLASH_ATTENTION_KEY_TILE_TOKEN_COUNT
+  return context_count < QWEN_PROGRAM_ATTENTION_CONTEXT_ALIGNMENT
              ? QWEN_PROGRAM_ATTENTION_SCHEDULE_PURE_TAIL_ROW_BY_ROW_BRINGUP_WORKAROUND
              : QWEN_PROGRAM_ATTENTION_SCHEDULE_GENERAL;
 }
@@ -899,18 +899,20 @@ static iree_status_t qwen_program_prepare_layer_executables(
   const int64_t route_count = QWEN_MODEL_ROUTE_COUNT;
   const int64_t expert_count = QWEN_MODEL_EXPERT_COUNT;
   const int64_t context_count = (int64_t)program->context_count;
+  const int64_t attention_context_count =
+      (int64_t)program->attention_context_count;
   const int64_t token_workload[] = {token_count};
   const int64_t attention_metadata_workload[] = {
       token_count,
-      context_count,
+      attention_context_count,
   };
   const int64_t attention_postprocess_workload[] = {
       token_count,
-      context_count,
+      attention_context_count,
   };
   const int64_t flash_attention_workload[] = {
       token_count,
-      context_count,
+      attention_context_count,
   };
   const int64_t pure_tail_row_attention_workload[] = {
       1,
@@ -1620,7 +1622,7 @@ static iree_status_t qwen_program_record_attention_metadata(
     const qwen_request_storage_layout_t* request_layout) {
   const uint32_t constants[] = {
       (uint32_t)program->token_count,
-      (uint32_t)program->context_count,
+      (uint32_t)program->attention_context_count,
   };
   const iree_hal_buffer_ref_t bindings[] = {
       qwen_program_request_ref(request_layout->control),
@@ -1743,7 +1745,8 @@ static iree_status_t qwen_program_record_attention(
   const bool records_attention_prepare = !input_was_published_by_previous_layer;
 
   const uint32_t token_count = (uint32_t)program->token_count;
-  const uint32_t context_count = (uint32_t)program->context_count;
+  const uint32_t attention_context_count =
+      (uint32_t)program->attention_context_count;
   const iree_device_size_t layer_cache_offset =
       cache_window_layer_index * request_layout->layer_cache_byte_length;
   iree_status_t status = iree_ok_status();
@@ -1790,7 +1793,7 @@ static iree_status_t qwen_program_record_attention(
           QWEN_PROGRAM_ATTENTION_POSTPROCESS_SCHEDULE_FUSED_QKV) {
     const uint32_t attention_qkv_constants[] = {
         token_count,
-        context_count,
+        attention_context_count,
     };
     const iree_hal_buffer_ref_t attention_qkv_bindings[] = {
         qwen_program_transient_ref(transient->projection_input_scratch),
@@ -1868,7 +1871,7 @@ static iree_status_t qwen_program_record_attention(
 
   const uint32_t attention_postprocess_constants[] = {
       token_count,
-      context_count,
+      attention_context_count,
   };
   const iree_hal_buffer_ref_t attention_postprocess_bindings[] = {
       qwen_program_request_ref(request_layout->positions),
@@ -1915,7 +1918,7 @@ static iree_status_t qwen_program_record_attention(
       program->attention_schedule == QWEN_PROGRAM_ATTENTION_SCHEDULE_GENERAL) {
     const uint32_t flash_attention_constants[] = {
         token_count,
-        context_count,
+        attention_context_count,
     };
     const iree_hal_buffer_ref_t flash_attention_bindings[] = {
         qwen_program_transient_ref(transient->rotated_query),
@@ -1937,7 +1940,7 @@ static iree_status_t qwen_program_record_attention(
       program->attention_schedule ==
           QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT) {
     const uint32_t flash_attention_constants[] = {
-        context_count,
+        attention_context_count,
     };
     const iree_hal_buffer_ref_t flash_attention_bindings[] = {
         qwen_program_transient_ref(transient->rotated_query),
@@ -2623,7 +2626,9 @@ static iree_status_t qwen_program_record_full_model(qwen_program_t* program) {
 }
 
 static iree_status_t qwen_program_validate_options(
-    qwen_model_t* model, const qwen_program_options_t* options) {
+    qwen_model_t* model, const qwen_program_options_t* options,
+    qwen_program_attention_schedule_t* out_attention_schedule,
+    iree_host_size_t* out_attention_context_count) {
   if (!model || !options) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen model and program options are required");
@@ -2690,6 +2695,26 @@ static iree_status_t qwen_program_validate_options(
         QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE,
         QWEN_PROGRAM_DECODE_CONTEXT_LIMIT);
   }
+  const qwen_program_attention_schedule_t attention_schedule =
+      qwen_program_select_attention_schedule(options->kind,
+                                             options->context_count);
+  iree_host_size_t attention_context_count = options->context_count;
+  // General attention consumes native 64-row K/V blocks. Metadata masks the
+  // backed suffix while request shape and every non-attention stage retain the
+  // exact logical context count.
+  if (attention_schedule == QWEN_PROGRAM_ATTENTION_SCHEDULE_GENERAL &&
+      !iree_host_size_checked_align(attention_context_count,
+                                    QWEN_PROGRAM_ATTENTION_CONTEXT_ALIGNMENT,
+                                    &attention_context_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen attention context alignment overflows");
+  }
+  if (attention_context_count > options->context_capacity) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "Qwen attention context count %" PRIhsz
+                            " exceeds request context capacity %" PRIhsz,
+                            attention_context_count, options->context_capacity);
+  }
   const iree_hal_command_buffer_mode_t allowed_mode =
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA |
       IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA;
@@ -2701,13 +2726,18 @@ static iree_status_t qwen_program_validate_options(
   }
   if (qwen_program_kind_is_full_model(options->kind)) {
     qwen_full_program_layout_t layout;
-    return qwen_full_program_layout_calculate(
+    IREE_RETURN_IF_ERROR(qwen_full_program_layout_calculate(
         options->token_count, options->context_count,
         qwen_program_full_layout_flags(options->kind, options->token_count),
-        &layout);
+        &layout));
+  } else {
+    qwen_layer_program_layout_t layout;
+    IREE_RETURN_IF_ERROR(
+        qwen_layer_program_layout_calculate(options->token_count, &layout));
   }
-  qwen_layer_program_layout_t layout;
-  return qwen_layer_program_layout_calculate(options->token_count, &layout);
+  *out_attention_schedule = attention_schedule;
+  *out_attention_context_count = attention_context_count;
+  return iree_ok_status();
 }
 
 void qwen_program_options_initialize(qwen_program_options_t* out_options) {
@@ -2738,7 +2768,10 @@ static iree_status_t qwen_program_prepare_describe(
     qwen_program_prepare_batch_t* prepare_batch, qwen_program_t** out_program) {
   IREE_ASSERT_ARGUMENT(out_program);
   *out_program = NULL;
-  IREE_RETURN_IF_ERROR(qwen_program_validate_options(model, options));
+  qwen_program_attention_schedule_t attention_schedule;
+  iree_host_size_t attention_context_count;
+  IREE_RETURN_IF_ERROR(qwen_program_validate_options(
+      model, options, &attention_schedule, &attention_context_count));
 
   qwen_program_t* program = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*program),
@@ -2757,6 +2790,7 @@ static iree_status_t qwen_program_prepare_describe(
                                    : 1;
   program->token_count = options->token_count;
   program->context_count = options->context_count;
+  program->attention_context_count = attention_context_count;
   program->token_capacity = options->token_capacity;
   program->context_capacity = options->context_capacity;
   program->request_flags = options->request_flags;
@@ -2766,8 +2800,7 @@ static iree_status_t qwen_program_prepare_describe(
   program->qkv_schedule = options->kind == QWEN_PROGRAM_KIND_DECODE
                               ? QWEN_PROGRAM_QKV_SCHEDULE_QUANTIZED_ROWS
                               : QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA;
-  program->attention_schedule = qwen_program_select_attention_schedule(
-      options->kind, options->context_count);
+  program->attention_schedule = attention_schedule;
   program->attention_postprocess_schedule =
       qwen_program_select_attention_postprocess_schedule(options->kind);
   program->attention_output_schedule =

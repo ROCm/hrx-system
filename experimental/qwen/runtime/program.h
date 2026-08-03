@@ -35,8 +35,12 @@ typedef enum qwen_program_kind_e {
   QWEN_PROGRAM_KIND_DECODE = 3,
 } qwen_program_kind_t;
 
+// Physical K/V row alignment required by general attention programs.
+#define QWEN_PROGRAM_ATTENTION_CONTEXT_ALIGNMENT 64
+
 // Number of active context positions covered by one reusable decode program.
-#define QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE 64
+#define QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE \
+  QWEN_PROGRAM_ATTENTION_CONTEXT_ALIGNMENT
 
 // Maximum context supported by the cooperative decode-attention adapter.
 #define QWEN_PROGRAM_DECODE_CONTEXT_LIMIT 2048
@@ -61,7 +65,8 @@ typedef struct qwen_program_options_t {
   iree_host_size_t context_count;
   // Request token-storage capacity compatible with this program.
   iree_host_size_t token_capacity;
-  // Request K/V storage capacity compatible with this program.
+  // Request K/V storage capacity compatible with this program. General
+  // attention requires capacity through the next attention-context alignment.
   iree_host_size_t context_capacity;
   // Optional request storage behavior addressed by the recorded program.
   qwen_request_flags_t request_flags;

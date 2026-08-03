@@ -97,6 +97,8 @@ static iree_status_t qwen_layer_cli_run(void) {
   }
   const iree_host_size_t layer_index = (iree_host_size_t)FLAG_layer;
   const iree_host_size_t token_count = (iree_host_size_t)FLAG_token_count;
+  const iree_host_size_t context_capacity =
+      iree_host_align(token_count, QWEN_PROGRAM_ATTENTION_CONTEXT_ALIGNMENT);
 
   qwen_tooling_layer_data_t layer_data;
   status = qwen_tooling_layer_data_initialize(
@@ -152,7 +154,7 @@ static iree_status_t qwen_layer_cli_run(void) {
     program_options.token_count = token_count;
     program_options.context_count = token_count;
     program_options.token_capacity = token_count;
-    program_options.context_capacity = token_count;
+    program_options.context_capacity = context_capacity;
     program_options.command_buffer_mode = runtime_context.command_buffer_mode;
     status =
         qwen_program_prepare(model, &program_options, host_allocator, &program);
@@ -167,7 +169,7 @@ static iree_status_t qwen_layer_cli_run(void) {
     qwen_request_options_t request_options;
     qwen_request_options_initialize(&request_options);
     request_options.token_capacity = token_count;
-    request_options.context_capacity = token_count;
+    request_options.context_capacity = context_capacity;
     status = qwen_request_create(
         model, &request_options, qwen_cli_timepoint_list(&model_ready),
         qwen_cli_timepoint_list(&request_ready), host_allocator, &request);
