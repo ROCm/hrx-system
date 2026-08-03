@@ -410,9 +410,9 @@ typedef struct iree_hal_queue_family_spec_t {
   uint32_t queue_count;
   // Number of priority levels in the family.
   uint32_t priority_count;
-  // Valid timestamp bit count.
+  // Number of low bits defined in a tick captured on this family's queues.
   uint32_t timestamp_valid_bits;
-  // Timestamp frequency in ticks per second.
+  // Ticks per second of the timestamp domain this family's queues capture in.
   uint64_t timestamp_frequency_hz;
   // Nonzero physical-device set serviced by queues in this family.
   iree_hal_physical_device_affinity_t physical_device_affinity;
@@ -555,7 +555,8 @@ typedef uint32_t iree_hal_device_timing_spec_flags_t;
 typedef enum iree_hal_device_timing_spec_flag_bits_e {
   // No timing or profiling capabilities are present.
   IREE_HAL_DEVICE_TIMING_SPEC_FLAG_NONE = 0u,
-  // Device timestamps are available.
+  // The timestamp_valid_bits and timestamp_frequency_hz facts below are
+  // populated for the primary device timestamp domain.
   IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS = 1u << 0,
   // Host/device clock correlation is available.
   IREE_HAL_DEVICE_TIMING_SPEC_FLAG_HOST_CORRELATION = 1u << 1,
@@ -571,9 +572,11 @@ typedef enum iree_hal_device_timing_spec_flag_bits_e {
 
 // Stable timing and profiling capability facts.
 typedef struct iree_hal_device_timing_spec_t {
-  // Valid timestamp bit count for the primary device timestamp domain.
+  // Number of low bits defined in a primary device timestamp domain tick.
+  // Meaningful only when IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS.
   uint32_t timestamp_valid_bits;
-  // Timestamp frequency in ticks per second.
+  // Primary device timestamp domain rate in ticks per second. Meaningful only
+  // when IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS.
   uint64_t timestamp_frequency_hz;
   // Stable timing and profiling capability flags.
   iree_hal_device_timing_spec_flags_t flags;

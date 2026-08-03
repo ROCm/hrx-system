@@ -221,6 +221,9 @@ typedef struct iree_hal_amdgpu_physical_device_t {
   uint32_t maximum_waves_per_compute_unit;
   // Maximum group segment byte length used for dispatch and sanitizer sizing.
   uint32_t group_segment_max_size;
+  // Device-side timestamp tick rate in hz, from
+  // HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY. Always nonzero.
+  uint64_t timestamp_frequency_hz;
   // HDP flush register descriptor reported by HSA for this GPU agent.
   hsa_amd_hdp_flush_t hdp_flush;
   // Host memory pools for the CPU agent nearest to |device_agent|.

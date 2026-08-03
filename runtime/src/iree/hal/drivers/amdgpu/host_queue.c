@@ -25,6 +25,7 @@
 #include "iree/hal/drivers/amdgpu/host_queue_profile.h"
 #include "iree/hal/drivers/amdgpu/host_queue_profile_events.h"
 #include "iree/hal/drivers/amdgpu/host_queue_submission.h"
+#include "iree/hal/drivers/amdgpu/host_queue_timestamp.h"
 #include "iree/hal/drivers/amdgpu/host_queue_waits.h"
 #include "iree/hal/drivers/amdgpu/semaphore.h"
 #include "iree/hal/drivers/amdgpu/transient_buffer.h"
@@ -1501,7 +1502,8 @@ static iree_status_t iree_hal_amdgpu_host_queue_dealloca(
 }
 
 // Queue fill entry point. Resolves waits under submission_mutex and captures a
-// pending operation only when waits or submission capacity require deferral.
+// pending operation when waits, an unstaged target or submission capacity
+// require deferral.
 static iree_status_t iree_hal_amdgpu_host_queue_fill(
     iree_hal_amdgpu_virtual_queue_t* base_queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -1536,6 +1538,54 @@ static iree_status_t iree_hal_amdgpu_host_queue_fill(
           queue, &wait_semaphore_list, &signal_semaphore_list, target_buffer,
           target_offset, length, pattern_bits, pattern_length, flags,
           &submission.deferred_op);
+      iree_hal_amdgpu_host_queue_op_submission_defer_for_capacity(&submission);
+    }
+  }
+  return iree_hal_amdgpu_host_queue_op_submission_end(&submission, status);
+}
+
+// Queue timestamp entry point. Resolves waits under submission_mutex and
+// captures a pending operation when waits, target staging, or submission
+// capacity require deferral.
+static iree_status_t iree_hal_amdgpu_host_queue_timestamp(
+    iree_hal_amdgpu_virtual_queue_t* base_queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags) {
+  iree_hal_amdgpu_host_queue_t* queue =
+      (iree_hal_amdgpu_host_queue_t*)base_queue;
+
+  // Reject unsupported flags synchronously at enqueue, before the
+  // immediate/deferred split, so the error is deterministic regardless of
+  // wait-list state (mirrors the up-front flag validation in queue_execute).
+  if (IREE_UNLIKELY(flags != IREE_HAL_TIMESTAMP_FLAG_NONE)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported timestamp flags: 0x%" PRIx64, flags);
+  }
+
+  iree_hal_amdgpu_host_queue_op_submission_t submission;
+  iree_hal_amdgpu_host_queue_op_submission_begin(queue, wait_semaphore_list,
+                                                 &submission);
+  bool needs_staging = false;
+  iree_status_t status = iree_hal_amdgpu_host_queue_validate_buffer_state(
+      iree_hal_amdgpu_host_queue_buffer_state(target_buffer),
+      wait_semaphore_list, &needs_staging);
+  if (iree_status_is_ok(status) &&
+      (submission.resolution.needs_deferral || needs_staging)) {
+    status = iree_hal_amdgpu_host_queue_defer_timestamp(
+        queue, &wait_semaphore_list, &signal_semaphore_list, target_buffer,
+        target_offset, flags, &submission.deferred_op);
+  } else if (iree_status_is_ok(status)) {
+    status = iree_hal_amdgpu_host_queue_submit_timestamp(
+        queue, &submission.resolution, signal_semaphore_list, target_buffer,
+        target_offset, flags,
+        IREE_HAL_AMDGPU_HOST_QUEUE_SUBMISSION_FLAG_RETAIN_RESOURCES,
+        &submission.ready);
+    if (iree_status_is_ok(status) && !submission.ready) {
+      status = iree_hal_amdgpu_host_queue_defer_timestamp(
+          queue, &wait_semaphore_list, &signal_semaphore_list, target_buffer,
+          target_offset, flags, &submission.deferred_op);
       iree_hal_amdgpu_host_queue_op_submission_defer_for_capacity(&submission);
     }
   }
@@ -1874,5 +1924,6 @@ static const iree_hal_amdgpu_virtual_queue_vtable_t
         .host_call = iree_hal_amdgpu_host_queue_host_call,
         .dispatch = iree_hal_amdgpu_host_queue_dispatch,
         .execute = iree_hal_amdgpu_host_queue_execute,
+        .timestamp = iree_hal_amdgpu_host_queue_timestamp,
         .flush = iree_hal_amdgpu_host_queue_flush,
 };

@@ -452,7 +452,9 @@ typedef struct iree_hal_amdgpu_host_queue_t {
   // AMD vendor-packet capabilities selected from the GPU ISA.
   iree_hal_amdgpu_vendor_packet_capability_flags_t vendor_packet_capabilities;
 
-  // Queue-local PM4 timestamp strategy selected from the GPU ISA.
+  // Queue-local PM4 timestamp strategy initialized from the owning physical
+  // device's ISA selection. Submission reads it under submission_mutex and
+  // profiling enable reads it unlocked, so writes must precede both.
   iree_hal_amdgpu_pm4_timestamp_strategy_t pm4_timestamp_strategy;
 
   // One-bit logical queue affinity identifying this queue in HAL buffer

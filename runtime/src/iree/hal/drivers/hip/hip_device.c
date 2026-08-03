@@ -3057,6 +3057,16 @@ static iree_status_t iree_hal_hip_device_queue_execute(
   return status;
 }
 
+static iree_status_t iree_hal_hip_device_queue_timestamp(
+    iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_hal_timestamp_flags_t flags) {
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "HIP device-side timestamps not implemented");
+}
+
 static iree_status_t iree_hal_hip_device_queue_flush(
     iree_hal_device_t* base_device, iree_hal_queue_affinity_t queue_affinity) {
   return iree_ok_status();
@@ -3131,6 +3141,7 @@ static const iree_hal_device_vtable_t iree_hal_hip_device_vtable = {
     .queue_host_call = iree_hal_device_queue_emulated_host_call,
     .queue_dispatch = iree_hal_device_queue_emulated_dispatch,
     .queue_execute = iree_hal_hip_device_queue_execute,
+    .queue_timestamp = iree_hal_hip_device_queue_timestamp,
     .queue_flush = iree_hal_hip_device_queue_flush,
     .profiling_begin = iree_hal_hip_device_profiling_begin,
     .profiling_flush = iree_hal_hip_device_profiling_flush,

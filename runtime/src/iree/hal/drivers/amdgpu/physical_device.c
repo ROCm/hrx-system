@@ -380,6 +380,24 @@ static iree_status_t iree_hal_amdgpu_physical_device_initialize_identity(
   IREE_RETURN_IF_ERROR(iree_hsa_agent_get_info(
       IREE_LIBHSA(libhsa), host_agent, HSA_AGENT_INFO_NODE, &host_numa_node));
   out_physical_device->host_numa_node = host_numa_node;
+
+  // Per-agent wallclock rate: the domain the agent's PM4 timestamp packets and
+  // its shader-visible steady counter both sample, distinct from the
+  // system-scope HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY. A zero rate would poison
+  // every duration the device spec documents, so it fails device creation.
+  uint64_t timestamp_frequency_hz = 0;
+  IREE_RETURN_IF_ERROR(iree_hsa_agent_get_info(
+      IREE_LIBHSA(libhsa), device_agent,
+      (hsa_agent_info_t)HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY,
+      &timestamp_frequency_hz));
+  if (timestamp_frequency_hz == 0) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "HSA reported a zero timestamp frequency for device agent ordinal "
+        "%" PRIhsz,
+        device_ordinal);
+  }
+  out_physical_device->timestamp_frequency_hz = timestamp_frequency_hz;
   return iree_ok_status();
 }
 
