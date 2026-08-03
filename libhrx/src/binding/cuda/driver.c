@@ -3433,7 +3433,7 @@ CUDAAPI CUresult cuGraphAddMemcpyNode(CUgraphNode* phGraphNode, CUgraph hGraph,
 
   // Add memcpy node to graph.
   iree_hal_streaming_graph_node_t* node = NULL;
-  iree_status_t status = iree_hal_streaming_graph_add_memcpy_node(
+  iree_status_t status = iree_hal_streaming_graph_add_copy_ptr_node(
       graph, deps, numDependencies, dst, src, size, &node);
   if (!iree_status_is_ok(status)) {
     iree_status_ignore(status);
@@ -3469,7 +3469,7 @@ CUDAAPI CUresult cuGraphAddMemsetNode(CUgraphNode* phGraphNode, CUgraph hGraph,
 
   // Add memset node to graph.
   iree_hal_streaming_graph_node_t* node = NULL;
-  iree_status_t status = iree_hal_streaming_graph_add_memset_node(
+  iree_status_t status = iree_hal_streaming_graph_add_fill_ptr_node(
       graph, deps, numDependencies, (iree_hal_streaming_deviceptr_t)params->dst,
       params->value, params->elementSize, params->width * params->height,
       &node);

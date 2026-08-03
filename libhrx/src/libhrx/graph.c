@@ -432,9 +432,9 @@ hrx_status_t hrx_graph_add_fill_buffer_node(
   return status;
 }
 
-hrx_status_t hrx_graph_add_memcpy_node(
+hrx_status_t hrx_graph_add_copy_ptr_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    const hrx_graph_memcpy_node_attrs_t* attrs, hrx_graph_node_t* out_node) {
+    const hrx_graph_copy_ptr_node_attrs_t* attrs, hrx_graph_node_t* out_node) {
   IREE_ASSERT_ARGUMENT(graph);
   IREE_ASSERT_ARGUMENT(attrs);
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -460,9 +460,9 @@ hrx_status_t hrx_graph_add_memcpy_node(
   return status;
 }
 
-hrx_status_t hrx_graph_add_memset_node(
+hrx_status_t hrx_graph_add_fill_ptr_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    const hrx_graph_memset_node_attrs_t* attrs, hrx_graph_node_t* out_node) {
+    const hrx_graph_fill_ptr_node_attrs_t* attrs, hrx_graph_node_t* out_node) {
   IREE_ASSERT_ARGUMENT(graph);
   IREE_ASSERT_ARGUMENT(attrs);
   IREE_TRACE_ZONE_BEGIN(z0);

@@ -1312,7 +1312,7 @@ iree_status_t iree_hal_streaming_memory_memset(
     }
     iree_hal_streaming_graph_node_t* node = NULL;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_graph_add_memset_node(
+        z0, iree_hal_streaming_graph_add_fill_ptr_node(
                 stream->capture_graph, stream->capture_dependencies,
                 stream->capture_dependency_count, dst, pattern_value,
                 pattern_length, length / pattern_length, &node));
@@ -1411,7 +1411,7 @@ iree_status_t iree_hal_streaming_memory_memcpy(
     // Add memcpy node to the graph instead of recording to command buffer.
     iree_hal_streaming_graph_node_t* node = NULL;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_graph_add_memcpy_node(
+        z0, iree_hal_streaming_graph_add_copy_ptr_node(
                 stream->capture_graph, stream->capture_dependencies,
                 stream->capture_dependency_count, dst, src, size, &node));
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -1579,7 +1579,7 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
 
     iree_hal_streaming_graph_node_t* copy_node = NULL;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
+        z0, iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
                 stream->capture_graph, stream->capture_dependencies,
                 stream->capture_dependency_count, callback_node, dst,
                 staging->device_ptr, size, &copy_node));
@@ -1716,7 +1716,7 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
 
     iree_hal_streaming_graph_node_t* copy_node = NULL;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_graph_add_memcpy_node(
+        z0, iree_hal_streaming_graph_add_copy_ptr_node(
                 stream->capture_graph, stream->capture_dependencies,
                 stream->capture_dependency_count, staging->device_ptr, src,
                 size, &copy_node));
