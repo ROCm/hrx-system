@@ -868,35 +868,19 @@ static bool loom_low_source_memory_access_scaled_index_from_value(
   return true;
 }
 
-static bool loom_low_source_memory_access_scaled_dynamic_index(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_value_id_t dynamic_index, int64_t byte_stride,
-    int64_t static_byte_offset, loom_value_id_t* out_scaled_index,
-    int64_t* out_index_multiplier, int64_t* out_index_offset,
-    int64_t* out_byte_stride, int64_t* out_static_byte_offset,
-    loom_value_facts_t* out_expression_facts) {
-  *out_scaled_index = dynamic_index;
-  *out_index_multiplier = 1;
-  *out_index_offset = 0;
+static bool loom_low_source_memory_access_apply_scaled_index(
+    const loom_low_source_memory_scaled_index_t* scaled_index,
+    int64_t byte_stride, int64_t static_byte_offset, int64_t* out_byte_stride,
+    int64_t* out_static_byte_offset) {
   *out_byte_stride = byte_stride;
   *out_static_byte_offset = static_byte_offset;
-  *out_expression_facts =
-      loom_value_fact_table_lookup(fact_table, dynamic_index);
-
-  loom_low_source_memory_scaled_index_t scaled_index = {0};
-  if (!loom_low_source_memory_access_scaled_index_from_value(
-          module, fact_table, dynamic_index, &scaled_index) ||
-      (scaled_index.index == dynamic_index && scaled_index.multiplier == 1 &&
-       scaled_index.offset == 0)) {
-    return false;
-  }
 
   int64_t scaled_byte_stride = 0;
   int64_t static_offset_delta = 0;
   int64_t new_static_byte_offset = 0;
-  if (!iree_checked_mul_i64(byte_stride, scaled_index.multiplier,
+  if (!iree_checked_mul_i64(byte_stride, scaled_index->multiplier,
                             &scaled_byte_stride) ||
-      !iree_checked_mul_i64(byte_stride, scaled_index.offset,
+      !iree_checked_mul_i64(byte_stride, scaled_index->offset,
                             &static_offset_delta) ||
       !iree_checked_add_i64(static_byte_offset, static_offset_delta,
                             &new_static_byte_offset)) {
@@ -907,12 +891,8 @@ static bool loom_low_source_memory_access_scaled_dynamic_index(
   if (static_byte_offset >= 0 && new_static_byte_offset < 0) {
     return false;
   }
-  *out_scaled_index = scaled_index.index;
-  *out_index_multiplier = scaled_index.multiplier;
-  *out_index_offset = scaled_index.offset;
   *out_byte_stride = scaled_byte_stride;
   *out_static_byte_offset = new_static_byte_offset;
-  *out_expression_facts = scaled_index.expression_facts;
   return true;
 }
 
@@ -1500,12 +1480,29 @@ static bool loom_low_source_memory_access_plan_from_components(
     // affine expression. This retains any reusable dynamic prefix while
     // keeping the final canonical terms independent of source spelling.
     const int64_t unscaled_static_byte_offset = static_byte_offset;
-    if (loom_low_source_memory_access_scaled_dynamic_index(
-            module, fact_table, dynamic_index, byte_stride, static_byte_offset,
-            &dynamic_index, &dynamic_index_multiplier, &dynamic_index_offset,
-            &byte_stride, &static_byte_offset, &expression_facts) &&
-        static_byte_offset != unscaled_static_byte_offset) {
-      out_plan->source_index_static_offset_extracted = true;
+    loom_low_source_memory_scaled_index_t scaled_index = {0};
+    const bool has_scaled_index =
+        loom_low_source_memory_access_scaled_index_from_value(
+            module, fact_table, dynamic_index, &scaled_index) &&
+        (scaled_index.index != dynamic_index || scaled_index.multiplier != 1 ||
+         scaled_index.offset != 0);
+    // A coordinate suffix cannot become a static byte offset when its axis
+    // stride contains a dynamic extent: the suffix is multiplied by that
+    // extent and remains part of the dynamic address. A multiplier-only
+    // decomposition remains safe because every dynamic stride value stays on
+    // the term.
+    if (has_scaled_index &&
+        (scaled_index.offset == 0 || stride_value_count == 0) &&
+        loom_low_source_memory_access_apply_scaled_index(
+            &scaled_index, byte_stride, static_byte_offset, &byte_stride,
+            &static_byte_offset)) {
+      dynamic_index = scaled_index.index;
+      dynamic_index_multiplier = scaled_index.multiplier;
+      dynamic_index_offset = scaled_index.offset;
+      expression_facts = scaled_index.expression_facts;
+      if (static_byte_offset != unscaled_static_byte_offset) {
+        out_plan->source_index_static_offset_extracted = true;
+      }
     }
 
     loom_low_source_memory_affine_index_term_t
@@ -1517,6 +1514,7 @@ static bool loom_low_source_memory_access_plan_from_components(
             module, fact_table, dynamic_index, affine_terms, &affine_term_count,
             &affine_index_offset) &&
         affine_term_count > 1 &&
+        (affine_index_offset == 0 || stride_value_count == 0) &&
         loom_low_source_memory_access_can_extract_static_index_offset(
             affine_index_offset);
     int64_t affine_static_byte_offset = static_byte_offset;
