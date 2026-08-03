@@ -420,6 +420,10 @@ typedef enum loom_type_constraint_e {
   LOOM_TYPE_CONSTRAINT_ENCODING_TRANSFORM,
   // Function-local byte storage handle.
   LOOM_TYPE_CONSTRAINT_STORAGE,
+  // Scalar index, non-i1 integer, or floating-point bitwise payload.
+  LOOM_TYPE_CONSTRAINT_BITWISE_SCALAR,
+  // Shaped type with index, non-i1 integer, or floating-point element type.
+  LOOM_TYPE_CONSTRAINT_BITWISE_ELEMENT,
   LOOM_TYPE_CONSTRAINT_COUNT_,
 } loom_type_constraint_t;
 

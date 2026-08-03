@@ -11,6 +11,7 @@
 #include "iree/base/api.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/ir/context.h"
+#include "loom/ir/scalar_type.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amdgpu/lower/candidates/atomic_candidates.h"
@@ -525,6 +526,14 @@ static bool loom_amdgpu_atomic_orderings_supported(
 static bool loom_amdgpu_atomic_value_kind_matches(
     loom_type_t value_type, loom_amdgpu_atomic_value_kind_t value_kind) {
   switch (value_kind) {
+    case LOOM_AMDGPU_ATOMIC_VALUE_KIND_B32:
+      return loom_type_is_scalar(value_type) &&
+             loom_scalar_type_bitwidth(loom_type_element_type(value_type)) ==
+                 32;
+    case LOOM_AMDGPU_ATOMIC_VALUE_KIND_B64:
+      return loom_type_is_scalar(value_type) &&
+             loom_scalar_type_bitwidth(loom_type_element_type(value_type)) ==
+                 64;
     case LOOM_AMDGPU_ATOMIC_VALUE_KIND_I32:
       return loom_amdgpu_type_is_i32(value_type);
     case LOOM_AMDGPU_ATOMIC_VALUE_KIND_F32:
@@ -547,9 +556,21 @@ static bool loom_amdgpu_atomic_value_kind_matches(
   return false;
 }
 
-static uint32_t loom_amdgpu_atomic_scalar_value_register_count(
+static uint32_t loom_amdgpu_atomic_value_register_count(
     loom_type_t value_type) {
-  return loom_amdgpu_type_is_i64(value_type) ? 2 : 1;
+  const int32_t element_bit_count =
+      loom_scalar_type_bitwidth(loom_type_element_type(value_type));
+  IREE_ASSERT_GT(element_bit_count, 0);
+  uint32_t payload_bit_count = (uint32_t)element_bit_count;
+  if (loom_type_is_vector(value_type)) {
+    IREE_ASSERT_EQ(loom_type_rank(value_type), 1);
+    IREE_ASSERT(!loom_type_dim_is_dynamic_at(value_type, 0));
+    payload_bit_count *= (uint32_t)loom_type_dim_static_size_at(value_type, 0);
+  } else {
+    IREE_ASSERT(loom_type_is_scalar(value_type));
+  }
+  IREE_ASSERT(payload_bit_count == 32 || payload_bit_count == 64);
+  return payload_bit_count / 32;
 }
 
 static bool loom_amdgpu_atomic_scalar_source_shape(
@@ -558,6 +579,17 @@ static bool loom_amdgpu_atomic_scalar_source_shape(
   return source->element_byte_count == element_byte_count &&
          source->vector_lane_count == 1 &&
          source->vector_lane_byte_stride == (int64_t)element_byte_count;
+}
+
+static bool loom_amdgpu_atomic_bitwise_scalar_source_shape(
+    const loom_low_source_memory_access_plan_t* source,
+    loom_type_t value_type) {
+  if (!loom_type_is_scalar(value_type)) return false;
+  const int32_t bit_count =
+      loom_scalar_type_bitwidth(loom_type_element_type(value_type));
+  return (bit_count == 32 || bit_count == 64) &&
+         loom_amdgpu_atomic_scalar_source_shape(source,
+                                                (uint32_t)bit_count / 8);
 }
 
 static bool loom_amdgpu_atomic_packed_half_value_type(loom_type_t value_type) {
@@ -585,6 +617,9 @@ static bool loom_amdgpu_atomic_source_shape_supported(
     const loom_amdgpu_atomic_source_t* atomic_source,
     const loom_low_source_memory_access_plan_t* source,
     loom_type_t value_type) {
+  if (atomic_source->operation_kind == LOOM_AMDGPU_ATOMIC_OPERATION_CMPXCHG) {
+    return loom_amdgpu_atomic_bitwise_scalar_source_shape(source, value_type);
+  }
   return ((loom_amdgpu_type_is_i32(value_type) ||
            loom_amdgpu_type_is_f32(value_type)) &&
           loom_amdgpu_atomic_scalar_source_shape(source, 4)) ||
@@ -602,6 +637,9 @@ static bool loom_amdgpu_atomic_value_can_feed_vgpr(
   }
   const loom_type_t value_type = loom_module_value_type(module, value_id);
   switch (value_kind) {
+    case LOOM_AMDGPU_ATOMIC_VALUE_KIND_B32:
+    case LOOM_AMDGPU_ATOMIC_VALUE_KIND_B64:
+      return loom_amdgpu_atomic_value_kind_matches(value_type, value_kind);
     case LOOM_AMDGPU_ATOMIC_VALUE_KIND_I32:
       return loom_amdgpu_type_is_i32(value_type);
     case LOOM_AMDGPU_ATOMIC_VALUE_KIND_F32:
@@ -1548,13 +1586,14 @@ static iree_status_t loom_amdgpu_lookup_atomic_value_as_vgpr(
   loom_type_t low_type = loom_module_value_type(module, low_value);
   const bool is_vgpr = loom_amdgpu_low_type_is_register_class_count(
       context, low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR,
-      loom_amdgpu_atomic_scalar_value_register_count(source_type));
+      loom_amdgpu_atomic_value_register_count(source_type));
   if (is_vgpr) {
     *out_low_value = low_value;
     return iree_ok_status();
   }
-  IREE_ASSERT_UNREACHABLE("selected AMDGPU atomic VGPR update value");
-  IREE_BUILTIN_UNREACHABLE();
+  return loom_amdgpu_copy_atomic_value_to_fresh_vgpr(
+      context, source_op, low_value,
+      loom_amdgpu_atomic_value_register_count(source_type), out_low_value);
 }
 
 static iree_status_t loom_amdgpu_materialize_atomic_value_as_fresh_vgpr(
@@ -1593,8 +1632,7 @@ static iree_status_t loom_amdgpu_materialize_atomic_value_as_fresh_vgpr(
       loom_low_lower_context_module(context), source_value);
   return loom_amdgpu_copy_atomic_value_to_fresh_vgpr(
       context, source_op, low_value,
-      loom_amdgpu_atomic_scalar_value_register_count(source_type),
-      out_low_value);
+      loom_amdgpu_atomic_value_register_count(source_type), out_low_value);
 }
 
 static iree_status_t loom_amdgpu_lookup_atomic_cmpxchg_values_as_vgpr(

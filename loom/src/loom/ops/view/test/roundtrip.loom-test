@@ -91,7 +91,8 @@ func.def @scalar_view_atomics(%buffer: buffer, %offset: offset, %row: index, %co
   %oldi = view.atomic.rmw<xchgi> %ivalue, %iview[0, %col] {ordering = acq_rel, scope = system} : i32, view<8x16xi32, %layout> -> i32
   %oldf = view.atomic.rmw<addf> %fvalue, %fview[%row, %col] {ordering = seq_cst, scope = device} : f32, view<8x16xf32, %layout> -> f32
   %cmp = view.atomic.cmpxchg %ivalue, %ivalue, %iview[%row, %col] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<8x16xi32, %layout> -> i32
-  test.use %oldi, %oldf, %cmp : i32, f32, i32
+  %cmpf = view.atomic.cmpxchg %fvalue, %fvalue, %fview[%row, %col] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : f32, view<8x16xf32, %layout> -> f32
+  test.use %oldi, %oldf, %cmp, %cmpf : i32, f32, i32, f32
   func.return
 }
 

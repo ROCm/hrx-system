@@ -85,6 +85,7 @@ from loom.dsl import (
     EnumDef,
     HasAllStaticRankOneVector,
     HasAllStaticVector,
+    HasBitwiseElement,
     HasF16OrBf16Element,
     HasF32Element,
     HasFloatElement,
@@ -2309,9 +2310,10 @@ vector_atomic_cmpxchg = Op(
     group=vector_ops,
     doc=(
         "Atomic compare-exchange at per-lane signed element offsets. Each "
-        "lane compares origin + offsets[lane] with expected[lane], writes "
+        "lane compares the bits at origin + offsets[lane] with "
+        "expected[lane], writes "
         "replacement[lane] on success, and returns the old memory value. "
-        "Success lanes are derived by comparing old == expected."
+        "Comparison is bitwise for every accepted element type."
     ),
     operands=[
         Operand("expected", VECTOR, doc="Expected memory value for each lane."),
@@ -2323,7 +2325,7 @@ vector_atomic_cmpxchg = Op(
     results=[Result("old", VECTOR, doc="Old memory values read by the atomic operations.")],
     attrs=_atomic_cmpxchg_memory_attrs(),
     constraints=[
-        HasIndexOrNonI1IntegerElement("expected"),
+        HasBitwiseElement("expected"),
         HasIndexOrNonI1IntegerElement("offsets"),
         SameElementType("expected", "replacement", "view", "old"),
         SameShape("offsets", "expected", "replacement", "old"),

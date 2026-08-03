@@ -618,6 +618,7 @@ func.def @atomic_memory(%buffer: buffer, %offset: offset, %row: index, %col: ind
   %oldi = vector.atomic.rmw<xchgi> %iv, %iview[%row, %col][%offsets] {ordering = acq_rel, scope = system} : vector<4xi32>, view<[%m]x[%n]xi32, %layout>, vector<4xindex>
   %masked = vector.atomic.rmw.mask<addf> %fv, %fview[%row, %col][%i32_offsets], %mask, %oldf {ordering = seq_cst, scope = device} : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xi32>, vector<4xi1>, vector<4xf32>
   %cmp = vector.atomic.cmpxchg %iv, %iv, %iview[%row, %col][%offsets] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<4xi32>, view<[%m]x[%n]xi32, %layout>, vector<4xindex> -> vector<4xi32>
-  test.use %oldi, %masked, %cmp : vector<4xi32>, vector<4xf32>, vector<4xi32>
+  %cmpf = vector.atomic.cmpxchg %fv, %fv, %fview[%row, %col][%offsets] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xindex> -> vector<4xf32>
+  test.use %oldi, %masked, %cmp, %cmpf : vector<4xi32>, vector<4xf32>, vector<4xi32>, vector<4xf32>
   func.return
 }

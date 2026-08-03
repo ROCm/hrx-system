@@ -326,6 +326,37 @@ TEST(TypeConstraint, IndexOrNonI1IntegerFamiliesAreExplicit) {
       scalar_i32, LOOM_TYPE_CONSTRAINT_INDEX_OR_NON_I1_INTEGER_ELEMENT));
 }
 
+TEST(TypeConstraint, BitwiseFamiliesAcceptIntegerAndFloatPayloads) {
+  loom_type_t scalar_index = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_type_t scalar_offset = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  loom_type_t scalar_i1 = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
+  loom_type_t scalar_i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_type_t scalar_f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
+  loom_type_t vector_i1 = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I1, loom_dim_pack_static(4), 0);
+  loom_type_t vector_i8 = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I8, loom_dim_pack_static(4), 0);
+  loom_type_t vector_f32 = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(4), 0);
+
+  EXPECT_TRUE(loom_type_satisfies_constraint(
+      scalar_index, LOOM_TYPE_CONSTRAINT_BITWISE_SCALAR));
+  EXPECT_TRUE(loom_type_satisfies_constraint(
+      scalar_i32, LOOM_TYPE_CONSTRAINT_BITWISE_SCALAR));
+  EXPECT_TRUE(loom_type_satisfies_constraint(
+      scalar_f32, LOOM_TYPE_CONSTRAINT_BITWISE_SCALAR));
+  EXPECT_FALSE(loom_type_satisfies_constraint(
+      scalar_i1, LOOM_TYPE_CONSTRAINT_BITWISE_SCALAR));
+  EXPECT_FALSE(loom_type_satisfies_constraint(
+      scalar_offset, LOOM_TYPE_CONSTRAINT_BITWISE_SCALAR));
+  EXPECT_TRUE(loom_type_satisfies_constraint(
+      vector_i8, LOOM_TYPE_CONSTRAINT_BITWISE_ELEMENT));
+  EXPECT_TRUE(loom_type_satisfies_constraint(
+      vector_f32, LOOM_TYPE_CONSTRAINT_BITWISE_ELEMENT));
+  EXPECT_FALSE(loom_type_satisfies_constraint(
+      vector_i1, LOOM_TYPE_CONSTRAINT_BITWISE_ELEMENT));
+}
+
 TEST(TypeConstraint, VectorShapeFamiliesRequireVectorTypes) {
   loom_type_t vector_1d = loom_type_shaped_1d(
       LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(4), 0);

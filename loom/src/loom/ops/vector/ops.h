@@ -1302,7 +1302,7 @@ iree_status_t loom_vector_atomic_rmw_mask_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VECTOR_ATOMIC_CMPXCHG: Atomic compare-exchange at per-lane signed element offsets. Each lane compares origin + offsets[lane] with expected[lane], writes replacement[lane] on success, and returns the old memory value. Success lanes are derived by comparing old == expected.
+// LOOM_OP_VECTOR_ATOMIC_CMPXCHG: Atomic compare-exchange at per-lane signed element offsets. Each lane compares the bits at origin + offsets[lane] with expected[lane], writes replacement[lane] on success, and returns the old memory value. Comparison is bitwise for every accepted element type.
 // %old = vector.atomic.cmpxchg %expected, %replacement, %view[%row, %col][%offsets] {success_ordering = acq_rel, failure_ordering = acquire, scope = workgroup} : vector<4xi32>, view<[%m]x[%n]xi32, %layout>, vector<4xindex> -> vector<4xi32>
 LOOM_DEFINE_ISA(loom_vector_atomic_cmpxchg_isa, LOOM_OP_VECTOR_ATOMIC_CMPXCHG)
 LOOM_DEFINE_OPERAND(loom_vector_atomic_cmpxchg_expected, 0)

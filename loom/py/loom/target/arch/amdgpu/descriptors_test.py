@@ -2210,6 +2210,7 @@ def test_atomic_descriptor_candidates_are_derived_from_overlay_metadata() -> Non
     assert flat_cmpxchg.memory_space == AmdgpuAtomicMemorySpace.GENERIC
     assert flat_cmpxchg.operation_kind == AmdgpuAtomicOperationKind.CMPXCHG
     assert flat_cmpxchg.atomic_kind == AmdgpuAtomicKind.NONE
+    assert flat_cmpxchg.value_kind == AmdgpuAtomicValueKind.B32
 
 
 def test_atomic_descriptor_candidates_model_packed_half_rows() -> None:
