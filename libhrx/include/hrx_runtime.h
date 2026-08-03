@@ -1065,6 +1065,23 @@ typedef struct hrx_graph_memset_node_attrs_t {
   size_t count;
 } hrx_graph_memset_node_attrs_t;
 
+// Native handle-based buffer copy. Source and destination lengths must be
+// equal and nonzero. The ranges are retained by the instantiated graph through
+// the underlying command buffer resources.
+typedef struct hrx_graph_copy_buffer_node_attrs_t {
+  hrx_buffer_ref_t src;
+  hrx_buffer_ref_t dst;
+} hrx_graph_copy_buffer_node_attrs_t;
+
+// Native handle-based buffer fill. |pattern_size| must be 1, 2, or 4 and the
+// destination offset and length must be integral multiples of it. Pattern
+// bytes are copied into the graph node during recording.
+typedef struct hrx_graph_fill_buffer_node_attrs_t {
+  hrx_buffer_ref_t dst;
+  uint32_t pattern;
+  size_t pattern_size;
+} hrx_graph_fill_buffer_node_attrs_t;
+
 typedef struct hrx_graph_host_call_node_attrs_t {
   hrx_host_call_fn_t fn;
   void* user_data;
@@ -1088,6 +1105,14 @@ HRX_API hrx_status_t hrx_graph_add_memcpy_node(
 HRX_API hrx_status_t hrx_graph_add_memset_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
     const hrx_graph_memset_node_attrs_t* attrs, hrx_graph_node_t* out_node);
+HRX_API hrx_status_t hrx_graph_add_copy_buffer_node(
+    hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
+    const hrx_graph_copy_buffer_node_attrs_t* attrs,
+    hrx_graph_node_t* out_node);
+HRX_API hrx_status_t hrx_graph_add_fill_buffer_node(
+    hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
+    const hrx_graph_fill_buffer_node_attrs_t* attrs,
+    hrx_graph_node_t* out_node);
 HRX_API hrx_status_t hrx_graph_add_host_call_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
     const hrx_graph_host_call_node_attrs_t* attrs, hrx_graph_node_t* out_node);

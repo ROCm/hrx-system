@@ -143,6 +143,8 @@ _hrx_graph_add_empty_node
 _hrx_graph_add_kernel_node
 _hrx_graph_add_memcpy_node
 _hrx_graph_add_memset_node
+_hrx_graph_add_copy_buffer_node
+_hrx_graph_add_fill_buffer_node
 _hrx_graph_add_host_call_node
 _hrx_graph_add_dependencies
 _hrx_graph_size
