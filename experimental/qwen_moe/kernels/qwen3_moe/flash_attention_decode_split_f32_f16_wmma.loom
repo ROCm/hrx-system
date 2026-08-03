@@ -11,11 +11,11 @@ config.decl @qwen3_moe.attention.query_head_count : %value: index where [range(%
 
 config.decl @qwen3_moe.attention.key_value_head_count : %value: index where [range(%value, 1, 64)]
 
-// Produces one online-softmax partial for each 64-row KV block. Both the
-// fused short-context export and the two-dispatch long-context export inline
-// this body, keeping their different binding contracts honest without
-// duplicating the attention algorithm.
-func.template<qwen3_moe.attention.decode_split.produce_partials> device @qwen3_moe_flash_attention_decode_split_produce_partials_body_f32_f16_wmma(%key_value_token_count: index, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer) {
+// Computes one active online-softmax partial for a 64-row KV block. Both the
+// fused short-context export and the two-dispatch long-context export reach
+// this body through the block-classifying producer below, keeping their
+// different binding contracts honest without duplicating the attention math.
+func.template<qwen3_moe.attention.decode_split.produce_partials.active> device @qwen3_moe_flash_attention_decode_split_produce_active_partials_body_f32_f16_wmma(%key_value_token_count: index, %query: buffer, %key: buffer, %value: buffer, %lane_mask: f32, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer) {
   %bounded_key_value_token_count = index.assume %key_value_token_count [range(%key_value_token_count, 1, 32768)] : index
   %query_head_count0 = config.get @qwen3_moe.attention.query_head_count : index
   %key_value_head_count0 = config.get @qwen3_moe.attention.key_value_head_count : index
@@ -97,25 +97,22 @@ func.template<qwen3_moe.attention.decode_split.produce_partials> device @qwen3_m
   %lane_is_zero = index.cmp eq, %lane, %zero : index
   %query_transposed_layout = encoding.layout.strided [1, 136] : encoding<layout>
   %probability_transposed_layout = encoding.layout.strided [1, 24] : encoding<layout>
-  %query_noalias, %key_noalias, %value_noalias, %mask_noalias, %partial_max_noalias, %partial_sum_noalias, %partial_output_noalias = buffer.assume.noalias %query, %key, %value, %mask, %partial_max, %partial_sum, %partial_output : buffer, buffer, buffer, buffer, buffer, buffer, buffer
+  %query_noalias, %key_noalias, %value_noalias, %partial_max_noalias, %partial_sum_noalias, %partial_output_noalias = buffer.assume.noalias %query, %key, %value, %partial_max, %partial_sum, %partial_output : buffer, buffer, buffer, buffer, buffer, buffer
   %query_global = buffer.assume.memory_space<global> %query_noalias : buffer
   %key_global = buffer.assume.memory_space<global> %key_noalias : buffer
   %value_global = buffer.assume.memory_space<global> %value_noalias : buffer
-  %mask_global = buffer.assume.memory_space<global> %mask_noalias : buffer
   %partial_max_global = buffer.assume.memory_space<global> %partial_max_noalias : buffer
   %partial_sum_global = buffer.assume.memory_space<global> %partial_sum_noalias : buffer
   %partial_output_global = buffer.assume.memory_space<global> %partial_output_noalias : buffer
   %query_aligned = buffer.assume.alignment %query_global {minimum_alignment = 16} : buffer
   %key_aligned = buffer.assume.alignment %key_global {minimum_alignment = 16} : buffer
   %value_aligned = buffer.assume.alignment %value_global {minimum_alignment = 16} : buffer
-  %mask_aligned = buffer.assume.alignment %mask_global {minimum_alignment = 16} : buffer
   %partial_max_aligned = buffer.assume.alignment %partial_max_global {minimum_alignment = 16} : buffer
   %partial_sum_aligned = buffer.assume.alignment %partial_sum_global {minimum_alignment = 16} : buffer
   %partial_output_aligned = buffer.assume.alignment %partial_output_global {minimum_alignment = 16} : buffer
   %query_view = buffer.view %query_aligned[%zero_offset] : buffer -> view<[%query_head_count]x128xf32, #dense>
   %key_view = buffer.view %key_aligned[%zero_offset] : buffer -> view<[%bounded_key_value_token_count]x[%key_value_width]xf16, #dense>
   %value_view = buffer.view %value_aligned[%zero_offset] : buffer -> view<[%bounded_key_value_token_count]x[%key_value_width]xf16, #dense>
-  %mask_view = buffer.view %mask_aligned[%zero_offset] : buffer -> view<[%bounded_key_value_token_count]xf16, #dense>
   %partial_max_view = buffer.view %partial_max_aligned[%zero_offset] : buffer -> view<[%key_value_head_count]x[%key_value_block_count]x16xf32, #dense>
   %partial_sum_view = buffer.view %partial_sum_aligned[%zero_offset] : buffer -> view<[%key_value_head_count]x[%key_value_block_count]x16xf32, #dense>
   %partial_output_view = buffer.view %partial_output_aligned[%zero_offset] : buffer -> view<[%key_value_head_count]x[%key_value_block_count]x16x128xf16, #dense>
@@ -203,40 +200,32 @@ func.template<qwen3_moe.attention.decode_split.produce_partials> device @qwen3_m
   %score_valid2 = scalar.andi %query_head_valid2, %key_valid : i1
   %score_valid3 = scalar.andi %query_head_valid3, %key_valid : i1
   %masked_score0 = scf.if %score_valid0 -> (f32) {
-    %mask_f16 = view.load %mask_view[%key_token] : view<[%bounded_key_value_token_count]xf16, #dense> -> f16
-    %mask_f32 = scalar.extf %mask_f16 : f16 to f32
-    %score = scalar.addf<reassoc|nnan|ninf|nsz> %raw_score0, %mask_f32 : f32
+    %score = scalar.addf<reassoc|nnan|nsz> %raw_score0, %lane_mask : f32
     scf.yield %score : f32
   } else {
     scf.yield %negative_large : f32
   }
   %masked_score1 = scf.if %score_valid1 -> (f32) {
-    %mask_f16 = view.load %mask_view[%key_token] : view<[%bounded_key_value_token_count]xf16, #dense> -> f16
-    %mask_f32 = scalar.extf %mask_f16 : f16 to f32
-    %score = scalar.addf<reassoc|nnan|ninf|nsz> %raw_score1, %mask_f32 : f32
+    %score = scalar.addf<reassoc|nnan|nsz> %raw_score1, %lane_mask : f32
     scf.yield %score : f32
   } else {
     scf.yield %negative_large : f32
   }
   %masked_score2 = scf.if %score_valid2 -> (f32) {
-    %mask_f16 = view.load %mask_view[%key_token] : view<[%bounded_key_value_token_count]xf16, #dense> -> f16
-    %mask_f32 = scalar.extf %mask_f16 : f16 to f32
-    %score = scalar.addf<reassoc|nnan|ninf|nsz> %raw_score2, %mask_f32 : f32
+    %score = scalar.addf<reassoc|nnan|nsz> %raw_score2, %lane_mask : f32
     scf.yield %score : f32
   } else {
     scf.yield %negative_large : f32
   }
   %masked_score3 = scf.if %score_valid3 -> (f32) {
-    %mask_f16 = view.load %mask_view[%key_token] : view<[%bounded_key_value_token_count]xf16, #dense> -> f16
-    %mask_f32 = scalar.extf %mask_f16 : f16 to f32
-    %score = scalar.addf<reassoc|nnan|ninf|nsz> %raw_score3, %mask_f32 : f32
+    %score = scalar.addf<reassoc|nnan|nsz> %raw_score3, %lane_mask : f32
     scf.yield %score : f32
   } else {
     scf.yield %negative_large : f32
   }
   %masked_scores = vector.from_elements %masked_score0, %masked_score1, %masked_score2, %masked_score3 : vector<4xf32>
   %block_max = kernel.subgroup.reduce<maxnumf> %masked_scores : vector<4xf32>
-  %score_delta = vector.subf<reassoc|nnan|ninf|nsz> %masked_scores, %block_max : vector<4xf32>
+  %score_delta = vector.subf<reassoc|nnan|nsz> %masked_scores, %block_max : vector<4xf32>
   %raw_probability = vector.expf<afn> %score_delta : vector<4xf32>
   %probability = vector.select %query_valid, %raw_probability, %zero_f32x4 : vector<4xf32>
   %block_sum = kernel.subgroup.reduce<addf> %probability : vector<4xf32>
@@ -346,6 +335,123 @@ func.template<qwen3_moe.attention.decode_split.produce_partials> device @qwen3_m
       %sum = vector.extract %block_sum[3] : vector<4xf32> -> f32
       view.store %maximum, %partial_max_view[%key_value_head, %block_ordinal, %query_row3] : f32, view<[%key_value_head_count]x[%key_value_block_count]x16xf32, #dense>
       view.store %sum, %partial_sum_view[%key_value_head, %block_ordinal, %query_row3] : f32, view<[%key_value_head_count]x[%key_value_block_count]x16xf32, #dense>
+    }
+  }
+  func.return
+}
+
+// Fully masked splits publish the online-softmax identity without running QK
+// or P*V. Valid additive masks contain finite F16 values or negative infinity,
+// and every finite F16 value is greater than -1e30. Comparing after extension
+// therefore distinguishes active rows from masked rows exactly.
+func.template<qwen3_moe.attention.decode_split.produce_partials> device @qwen3_moe_flash_attention_decode_split_produce_partials_body_f32_f16_wmma(%key_value_token_count: index, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer) {
+  %bounded_key_value_token_count = index.assume %key_value_token_count [range(%key_value_token_count, 1, 32768)] : index
+  %query_head_count0 = config.get @qwen3_moe.attention.query_head_count : index
+  %key_value_head_count0 = config.get @qwen3_moe.attention.key_value_head_count : index
+  %query_head_count = index.assume %query_head_count0 [range(%query_head_count0, 1, 64)] : index
+  %key_value_head_count = index.assume %key_value_head_count0 [range(%key_value_head_count0, 1, 64)] : index
+  %workgroup_x0 = kernel.workgroup.id<x> : index
+  %workgroup_y0 = kernel.workgroup.id<y> : index
+  %workgroup_x = index.assume %workgroup_x0 [range(%workgroup_x0, 0, 511)] : index
+  %workgroup_y = index.assume %workgroup_y0 [range(%workgroup_y0, 0, 63)] : index
+  %subgroup0 = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 3)] : index
+  %lane = kernel.subgroup.lane.id : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %thirtytwo = index.constant 32 : index
+  %sixtyfour = index.constant 64 : index
+  %sixtythree = index.constant 63 : index
+  %zero_offset = index.constant 0 : offset
+  %zero_f32 = scalar.constant 0.0 : f32
+  %negative_large = scalar.constant -1e+30 : f32
+  %zero_f16x4 = vector.constant 0.0 : vector<4xf16>
+  %padded_key_value_token_count = index.add %bounded_key_value_token_count, %sixtythree : index
+  %key_value_block_count0 = index.div %padded_key_value_token_count, %sixtyfour : index
+  %key_value_block_count = index.assume %key_value_block_count0 [range(%key_value_block_count0, 1, 512)] : index
+  %block_ordinal = index.add %workgroup_x, %zero : index
+  %key_origin = index.mul %block_ordinal, %sixtyfour : index
+  %key_token = index.add %key_origin, %lane : index
+  %key_valid = index.cmp ult, %key_token, %bounded_key_value_token_count : index
+  %mask_global = buffer.assume.memory_space<global> %mask : buffer
+  %mask_aligned = buffer.assume.alignment %mask_global {minimum_alignment = 16} : buffer
+  %mask_view = buffer.view %mask_aligned[%zero_offset] : buffer -> view<[%bounded_key_value_token_count]xf16, #dense>
+  %lane_mask = scf.if %key_valid -> (f32) {
+    %mask_f16 = view.load %mask_view[%key_token] : view<[%bounded_key_value_token_count]xf16, #dense> -> f16
+    %mask_f32 = scalar.extf %mask_f16 : f16 to f32
+    scf.yield %mask_f32 : f32
+  } else {
+    scf.yield %negative_large : f32
+  }
+  %block_mask_maximum = kernel.workgroup.reduce<maxnumf> %lane_mask : f32
+  %block_has_attention = scalar.cmpf ogt, %block_mask_maximum, %negative_large : f32
+  scf.if %block_has_attention {
+    func.call inline @qwen3_moe_flash_attention_decode_split_produce_active_partials_body_f32_f16_wmma(%bounded_key_value_token_count, %query, %key, %value, %lane_mask, %partial_max, %partial_sum, %partial_output) : (index, buffer, buffer, buffer, f32, buffer, buffer, buffer)
+  } else {
+    %query_heads_per_key_value_head0 = index.div %query_head_count, %key_value_head_count : index
+    %query_heads_per_key_value_head = index.assume %query_heads_per_key_value_head0 [range(%query_heads_per_key_value_head0, 1, 16)] : index
+    %key_value_head = index.add %workgroup_y, %zero : index
+    %query_head_base = index.mul %key_value_head, %query_heads_per_key_value_head : index
+    %subgroup_query_row = index.mul %subgroup, %four : index
+    %query_row0 = index.add %subgroup_query_row, %zero : index
+    %query_row1 = index.add %subgroup_query_row, %one : index
+    %query_row2 = index.add %subgroup_query_row, %two : index
+    %query_row3 = index.add %subgroup_query_row, %three : index
+    %query_head0 = index.add %query_head_base, %query_row0 : index
+    %query_head1 = index.add %query_head_base, %query_row1 : index
+    %query_head2 = index.add %query_head_base, %query_row2 : index
+    %query_head3 = index.add %query_head_base, %query_row3 : index
+    %query_head_valid0 = index.cmp ult, %query_head0, %query_head_count : index
+    %query_head_valid1 = index.cmp ult, %query_head1, %query_head_count : index
+    %query_head_valid2 = index.cmp ult, %query_head2, %query_head_count : index
+    %query_head_valid3 = index.cmp ult, %query_head3, %query_head_count : index
+    %lane_output_channel = index.mul %lane, %four : index
+    %lane_has_output = index.cmp ult, %lane, %thirtytwo : index
+    %lane_is_zero = index.cmp eq, %lane, %zero : index
+    %partial_max_noalias, %partial_sum_noalias, %partial_output_noalias = buffer.assume.noalias %partial_max, %partial_sum, %partial_output : buffer, buffer, buffer
+    %partial_max_global = buffer.assume.memory_space<global> %partial_max_noalias : buffer
+    %partial_sum_global = buffer.assume.memory_space<global> %partial_sum_noalias : buffer
+    %partial_output_global = buffer.assume.memory_space<global> %partial_output_noalias : buffer
+    %partial_max_aligned = buffer.assume.alignment %partial_max_global {minimum_alignment = 16} : buffer
+    %partial_sum_aligned = buffer.assume.alignment %partial_sum_global {minimum_alignment = 16} : buffer
+    %partial_output_aligned = buffer.assume.alignment %partial_output_global {minimum_alignment = 16} : buffer
+    %partial_max_view = buffer.view %partial_max_aligned[%zero_offset] : buffer -> view<[%key_value_head_count]x[%key_value_block_count]x16xf32, #dense>
+    %partial_sum_view = buffer.view %partial_sum_aligned[%zero_offset] : buffer -> view<[%key_value_head_count]x[%key_value_block_count]x16xf32, #dense>
+    %partial_output_view = buffer.view %partial_output_aligned[%zero_offset] : buffer -> view<[%key_value_head_count]x[%key_value_block_count]x16x128xf16, #dense>
+    scf.if %lane_has_output {
+      scf.if %query_head_valid0 {
+        vector.store %zero_f16x4, %partial_output_view[%key_value_head, %block_ordinal, %query_row0, %lane_output_channel] : vector<4xf16>, view<[%key_value_head_count]x[%key_value_block_count]x16x128xf16, #dense>
+      }
+      scf.if %query_head_valid1 {
+        vector.store %zero_f16x4, %partial_output_view[%key_value_head, %block_ordinal, %query_row1, %lane_output_channel] : vector<4xf16>, view<[%key_value_head_count]x[%key_value_block_count]x16x128xf16, #dense>
+      }
+      scf.if %query_head_valid2 {
+        vector.store %zero_f16x4, %partial_output_view[%key_value_head, %block_ordinal, %query_row2, %lane_output_channel] : vector<4xf16>, view<[%key_value_head_count]x[%key_value_block_count]x16x128xf16, #dense>
+      }
+      scf.if %query_head_valid3 {
+        vector.store %zero_f16x4, %partial_output_view[%key_value_head, %block_ordinal, %query_row3, %lane_output_channel] : vector<4xf16>, view<[%key_value_head_count]x[%key_value_block_count]x16x128xf16, #dense>
+      }
+    }
+    scf.if %lane_is_zero {
+      scf.if %query_head_valid0 {
+        view.store %negative_large, %partial_max_view[%key_value_head, %block_ordinal, %query_row0] : f32, view<[%key_value_head_count]x[%key_value_block_count]x16xf32, #dense>
+        view.store %zero_f32, %partial_sum_view[%key_value_head, %block_ordinal, %query_row0] : f32, view<[%key_value_head_count]x[%key_value_block_count]x16xf32, #dense>
+      }
+      scf.if %query_head_valid1 {
+        view.store %negative_large, %partial_max_view[%key_value_head, %block_ordinal, %query_row1] : f32, view<[%key_value_head_count]x[%key_value_block_count]x16xf32, #dense>
+        view.store %zero_f32, %partial_sum_view[%key_value_head, %block_ordinal, %query_row1] : f32, view<[%key_value_head_count]x[%key_value_block_count]x16xf32, #dense>
+      }
+      scf.if %query_head_valid2 {
+        view.store %negative_large, %partial_max_view[%key_value_head, %block_ordinal, %query_row2] : f32, view<[%key_value_head_count]x[%key_value_block_count]x16xf32, #dense>
+        view.store %zero_f32, %partial_sum_view[%key_value_head, %block_ordinal, %query_row2] : f32, view<[%key_value_head_count]x[%key_value_block_count]x16xf32, #dense>
+      }
+      scf.if %query_head_valid3 {
+        view.store %negative_large, %partial_max_view[%key_value_head, %block_ordinal, %query_row3] : f32, view<[%key_value_head_count]x[%key_value_block_count]x16xf32, #dense>
+        view.store %zero_f32, %partial_sum_view[%key_value_head, %block_ordinal, %query_row3] : f32, view<[%key_value_head_count]x[%key_value_block_count]x16xf32, #dense>
+      }
     }
   }
   func.return
@@ -818,6 +924,27 @@ check.case public @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_case {
   check.return
 }
 
+// Only KV row zero participates. The finite F32 iota step overflows to F16
+// negative infinity at every later row, leaving blocks one through three
+// entirely masked. Each empty split must publish the online-softmax identity
+// instead of evaluating -inf - -inf and contaminating the final reduction.
+check.case public @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_masked_blocks_case {
+  %key_value_token_count = check.literal value(256) : index
+  %query = check.generate.fill value(1.0) : tensor<32x128xf32>
+  %key = check.generate.fill value(1.0) : tensor<256x4x128xf16>
+  %value = check.generate.fill value(2.0) : tensor<256x4x128xf16>
+  %mask = check.generate.iota offset(0.0) step(-1e+30) : tensor<256xf16>
+  %partial_max = check.generate.fill value(-1.0) : tensor<4x4x16xf32>
+  %partial_sum = check.generate.fill value(-1.0) : tensor<4x4x16xf32>
+  %partial_output = check.generate.fill value(-1.0) : tensor<4x4x16x128xf16>
+  %completion_counter = check.generate.fill value(0) : tensor<4xi32>
+  %output = check.generate.fill value(-1.0) : tensor<32x128xf32>
+  %expected = check.generate.fill value(2.0) : tensor<32x128xf32>
+  func.call @qwen3_moe_flash_attention_decode_split_f32_f16_wmma(%key_value_token_count, %query, %key, %value, %mask, %partial_max, %partial_sum, %partial_output, %completion_counter, %output) : (index, tensor<32x128xf32>, tensor<256x4x128xf16>, tensor<256x4x128xf16>, tensor<256xf16>, tensor<4x4x16xf32>, tensor<4x4x16xf32>, tensor<4x4x16x128xf16>, tensor<4xi32>, tensor<32x128xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.001) rtol(0.001) nan(same) : tensor<32x128xf32>
+  check.return
+}
+
 // The production Decode-513 shape combines eight full blocks with a one-row
 // tail and selects the cooperative fused reducer. Constant nonzero V keeps the
 // expected result exact while all four KV heads, 32 GQA heads, completion
@@ -931,6 +1058,8 @@ check.benchmark<@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_benchmark_c
 check.benchmark<@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_benchmark_case> @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_decode_128 {key_value_token_count = 128}
 
 check.benchmark<@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_benchmark_case> @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_decode_256 {key_value_token_count = 256}
+
+check.benchmark<@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_masked_blocks_case> @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_decode_256_masked_blocks
 
 check.benchmark<@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_benchmark_case> @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_decode_512 {key_value_token_count = 512}
 
