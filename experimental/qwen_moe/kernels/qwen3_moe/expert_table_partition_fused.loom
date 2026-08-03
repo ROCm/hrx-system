@@ -101,13 +101,7 @@ kernel.def target(@qwen3_moe_expert_table_partition_gfx11_wave32) @qwen3_moe_bui
   %expert_count_i32 = index.cast %launch_expert_count : index to i32
   %last_expert_i32 = scalar.subi %expert_count_i32, %one_i32 : i32
   %negative_expert_count_i32 = scalar.subi %zero_i32, %expert_count_i32 : i32
-  // AMDGPU cannot currently lower scalar.cmpi for the reduced VGPR value.
-  // Equality through F32 is exact over this schedule's [0, 127] counter
-  // domain. This is a non-sanctioned compiler workaround, not the intended
-  // integer comparison contract.
-  %old_counter_f32 = scalar.sitofp %old_counter : i32 to f32
-  %last_expert_f32 = scalar.sitofp %last_expert_i32 : i32 to f32
-  %is_last_expert = scalar.cmpf oeq, %old_counter_f32, %last_expert_f32 : f32
+  %is_last_expert = scalar.cmpi eq, %old_counter, %last_expert_i32 : i32
   scf.if %is_last_expert {
     %rounded_assignment_count = index.add %assignment_count, %thirtyone : index
     %assignment_partition_count = index.div %rounded_assignment_count, %thirtytwo : index

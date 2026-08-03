@@ -91,13 +91,7 @@ kernel.def target(@qwen3_moe_router_fused_gfx11_wave64) @qwen3_moe_router_projec
   %expert_tile_count_i32 = index.cast %expert_tile_count : index to i32
   %last_expert_tile_i32 = scalar.subi %expert_tile_count_i32, %one_i32 : i32
   %negative_expert_tile_count_i32 = scalar.subi %zero_i32, %expert_tile_count_i32 : i32
-  // AMDGPU cannot currently lower scalar.cmpi for the reduced VGPR value.
-  // Equality through F32 is exact over this schedule's bounded [0, 127]
-  // counter domain. This is a non-sanctioned compiler workaround, not the
-  // intended integer comparison contract.
-  %old_counter_f32 = scalar.sitofp %old_counter : i32 to f32
-  %last_expert_tile_f32 = scalar.sitofp %last_expert_tile_i32 : i32 to f32
-  %is_last_projection = scalar.cmpf oeq, %old_counter_f32, %last_expert_tile_f32 : f32
+  %is_last_projection = scalar.cmpi eq, %old_counter, %last_expert_tile_i32 : i32
   scf.if %is_last_projection {
     func.apply<qwen3_moe.router.top8.row>(%publishes_row, %token, %bounded_token_count, %bounded_route_id_stride, %logits_noalias, %route_ids_noalias, %route_weights_noalias) : (i1, index, index, index, buffer, buffer, buffer)
     // The counter cannot become reusable until all route stores complete.

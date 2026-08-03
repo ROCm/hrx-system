@@ -263,12 +263,7 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_dense_li
   %output_tile_count_i32 = index.cast %output_tile_count : index to i32
   %last_output_tile_i32 = scalar.subi %output_tile_count_i32, %one_i32 : i32
   %negative_output_tile_count_i32 = scalar.subi %zero_i32, %output_tile_count_i32 : i32
-  // Temporary, non-sanctioned lowering workaround: AMDGPU scalar.cmpi cannot
-  // consume the divergent reduction result. Both values are in [0, 255], so
-  // their F32 representations and equality comparison remain exact.
-  %old_counter_f32 = scalar.sitofp %old_counter : i32 to f32
-  %last_output_tile_f32 = scalar.sitofp %last_output_tile_i32 : i32 to f32
-  %is_last_output_tile = scalar.cmpf oeq, %old_counter_f32, %last_output_tile_f32 : f32
+  %is_last_output_tile = scalar.cmpi eq, %old_counter, %last_output_tile_i32 : i32
   scf.if %is_last_output_tile {
     %publish_normalized = scalar.constant true : i1
     func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>(%publish_normalized, %bounded_token_count, %token, %output_noalias, %norm_weight_noalias, %normalized_output_noalias, %next_q8_output_noalias) : (i1, index, index, buffer, buffer, buffer, buffer)
