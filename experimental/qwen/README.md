@@ -129,10 +129,12 @@ The three direct feed-forward forks
 decode ABIs and device bodies while making this model's exact one-token,
 eight-route dimensions structural. The gate/up variant publishes its F32
 SwiGLU rows and packed Q8_1 x4 groups together; the routed-down variants
-publish the following layer's normalized Q8_1 x4 row. They exist only because
-workload facts and nested device-template requirements do not yet cross every
-source-to-low boundary. Delete all three when those compiler boundaries are
-repaired; they are not model-generated kernel variants.
+publish the following layer's normalized Q8_1 x4 row through the shared
+`qwen3_moe.routed_down.next_q8_completion` device template. Only exact
+workload facts remain local to these adapters; nested device-template
+selection is canonical again. Delete all three when workload specialization
+crosses the source-to-low boundary; they are not model-generated kernel
+variants.
 
 `kernels/vocabulary_q6k_partial_argmax.loom` owns only the model endpoint. It
 applies the canonical `ggml.linear_q6k_q8_1_x4.body` contraction and reduces
