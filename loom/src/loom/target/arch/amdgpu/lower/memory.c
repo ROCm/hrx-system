@@ -2053,18 +2053,13 @@ static bool loom_amdgpu_memory_dynamic_term_can_flat_address(
       (term->byte_shift == 0 ||
        term->byte_shift == LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE)) {
     const loom_type_t index_type = loom_module_value_type(module, term->index);
-    if (loom_type_is_scalar(index_type) &&
-        loom_type_element_type(index_type) == LOOM_SCALAR_TYPE_OFFSET) {
+    if (loom_amdgpu_type_is_address_scalar(index_type)) {
       return true;
     }
   }
   if (loom_value_facts_is_float(term->byte_facts) ||
       term->byte_facts.range_lo < 0 || term->byte_stride <= 0 ||
       term->byte_stride > UINT32_MAX) {
-    return false;
-  }
-  if (term->byte_stride != 1 &&
-      term->byte_shift == LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE) {
     return false;
   }
   if (term->byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE &&
