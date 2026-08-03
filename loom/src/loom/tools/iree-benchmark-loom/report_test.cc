@@ -647,7 +647,6 @@ TEST(BenchmarkReportTest, WritesArtifactManifestSidecarPath) {
 
   iree_benchmark_loom_hal_actual_provider_t provider = {};
   provider.context = &context;
-  provider.sample_compilation = IREE_SV("once");
   provider.execution.candidate_initialized = true;
   provider.execution.candidate.compiled = true;
   provider.execution.candidate.artifact.sidecars = &sidecar;
@@ -703,7 +702,7 @@ TEST(BenchmarkReportTest, WritesManifestFileIdentityErrors) {
   IREE_ASSERT_OK(iree_benchmark_loom_write_artifact_bundle_manifest(
       &bundle, &run, &hal_context, IREE_SV("source text"),
       IREE_SV("[\"iree-benchmark-loom\"]"), /*dry_run=*/false,
-      IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE, iree_allocator_system()));
+      iree_allocator_system()));
 
   std::string manifest_path(bundle.manifest_path.data,
                             bundle.manifest_path.size);

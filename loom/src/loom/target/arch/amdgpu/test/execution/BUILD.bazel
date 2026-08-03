@@ -26,22 +26,31 @@ exports_files([
 
 _BEHAVIOR_QUALIFICATION_CASES = [
     {
+        "config_args": [],
         "name": "fragment_repack_bf16",
         "source": "fragment_repack_bf16.loom",
     },
     {
+        "config_args": [
+            "--config=finite_storage_decode.row_capacity=65",
+            "--config=finite_storage_decode.input_capacity=4608",
+            "--config=finite_storage_decode.output_capacity=16",
+        ],
         "name": "fp8_finite_storage_decode",
         "source": "fp8_finite_storage_decode.loom",
     },
     {
+        "config_args": [],
         "name": "gfx11_wmma_families",
         "source": "gfx11_wmma_families.loom",
     },
     {
+        "config_args": [],
         "name": "gfx9_4_mfma_families",
         "source": "gfx9_4_mfma_families.loom",
     },
     {
+        "config_args": [],
         "name": "loop_carried_lane_liveness",
         "source": "loop_carried_lane_liveness.loom",
     },
@@ -68,7 +77,7 @@ _AMDGPU_EXECUTION_TEST_TAGS = [
         args = [
             "$(location %s)" % _case["source"],
             "--dry-run",
-        ],
+        ] + _case["config_args"],
         data = [
             _case["source"],
         ],
@@ -86,14 +95,13 @@ _AMDGPU_EXECUTION_TEST_TAGS = [
             "$(location %s)" % _case["source"],
             "--device=amdgpu",
             "--measure=dispatch_complete",
-            "--sample-compilation=per_sample",
             "--iterations=1",
             "--warmup-iterations=0",
             "--batch-size=1",
             "--min-time-ms=0",
             "--max-batches=1",
             "--input-ring-count=1",
-        ],
+        ] + _case["config_args"],
         data = [
             _case["source"],
         ],

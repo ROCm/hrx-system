@@ -175,8 +175,6 @@ typedef struct iree_benchmark_loom_benchmark_result_t {
   bool executed;
   // True when no measured or warmup sample failed expectations.
   bool passed;
-  // Sample compilation label for this benchmark result.
-  iree_string_view_t sample_compilation;
   // True when |sample_ordinal| identifies the measured sample.
   bool has_sample_ordinal;
   // Concrete case sample ordinal measured by dispatch_complete.
@@ -211,8 +209,6 @@ typedef struct iree_benchmark_loom_hal_actual_provider_t {
   iree_benchmark_loom_hal_context_t* context;
   // Shared HAL actual provider owning compilation and dispatch state.
   loom_run_hal_testbench_actual_provider_t execution;
-  // Sample compilation label for rows emitted from this provider.
-  iree_string_view_t sample_compilation;
   // Optional suffix appended to debug/full artifact leaves.
   iree_string_view_t artifact_path_suffix;
   // Structured diagnostics emitted while compiling this candidate.
@@ -261,8 +257,6 @@ typedef struct iree_benchmark_loom_dispatch_comparison_candidate_t {
   const loom_module_t* module;
   // Deduplicated physical work item index used for setup.
   iree_host_size_t work_item_index;
-  // Sample compilation label for this prepared candidate.
-  iree_string_view_t sample_compilation;
   // First benchmark-local sample ordinal included in the comparison window.
   iree_host_size_t begin_sample;
   // One-past-end benchmark-local sample ordinal included in the comparison

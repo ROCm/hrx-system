@@ -25,8 +25,6 @@ typedef struct iree_benchmark_loom_snapshot_state_t {
   bool summary_seen;
   // True when the run stopped after planning.
   bool dry_run;
-  // Requested sample-compilation mode for this run.
-  iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode;
   // Sanitizer checks and reporting mode used for compiler-backed work.
   loom_sanitizer_options_t sanitizer;
   // Owned storage backing |run_id|.
@@ -176,7 +174,6 @@ static iree_status_t iree_benchmark_loom_snapshot_append_run(
     const iree_benchmark_loom_run_event_t* event) {
   state->run_seen = true;
   state->dry_run = event->dry_run;
-  state->sample_compilation_mode = event->sample_compilation_mode;
   state->sanitizer = event->sanitizer;
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_snapshot_copy_string(
       state, event->run->run_id, &state->run_id_storage, &state->run_id));
@@ -222,7 +219,6 @@ static iree_status_t iree_benchmark_loom_snapshot_append_summary(
   state->summary.correctness_failed_sample_count =
       event->correctness_failed_sample_count;
   state->dry_run = event->dry_run;
-  state->sample_compilation_mode = event->sample_compilation_mode;
   state->summary.artifact_bundle_enabled =
       event->artifact_bundle != NULL && event->artifact_bundle->enabled;
   state->summary.fixture_read_count =
@@ -291,8 +287,6 @@ static iree_status_t iree_benchmark_loom_snapshot_append_sample(
       event->work_item_index, &object));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_snapshot_write_benchmark_fields(
       event->benchmark_plan, event->case_plan, &object));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
-      &object, IREE_SV("sample_compilation"), event->sample_compilation));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
       &object, IREE_SV("benchmark_sample_index"),
       event->benchmark_sample_ordinal));
@@ -329,9 +323,6 @@ static iree_status_t iree_benchmark_loom_snapshot_append_work_item(
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("state"),
       iree_benchmark_loom_snapshot_result_state(event->benchmark_result)));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
-      &object, IREE_SV("sample_compilation"),
-      event->benchmark_result->sample_compilation));
   if (event->benchmark_result->has_sample_ordinal) {
     IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_sample_fields_json(
         event->module, event->case_plan,
@@ -362,9 +353,6 @@ static iree_status_t iree_benchmark_loom_snapshot_append_benchmark(
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("state"),
       iree_benchmark_loom_snapshot_result_state(event->benchmark_result)));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
-      &object, IREE_SV("sample_compilation"),
-      event->benchmark_result->sample_compilation));
   if (event->benchmark_result->has_sample_ordinal) {
     IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
         &object, IREE_SV("sample_index"),
@@ -450,8 +438,6 @@ static iree_status_t iree_benchmark_loom_snapshot_append_planned_work_item(
       selection->benchmark_plan, selection->case_plan, &object));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("measure"), selection->policy.measure));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
-      &object, IREE_SV("sample_compilation"), work_item->sample_compilation));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_snapshot_write_sample_range_fields(
       event->module, selection->case_plan, work_item->begin_benchmark_sample,
       work_item->end_benchmark_sample, work_item->has_case_sample_ordinal,
@@ -482,9 +468,6 @@ static iree_status_t iree_benchmark_loom_snapshot_append_planned_benchmark(
       &object, IREE_SV("state"), IREE_SV("planned")));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &object, IREE_SV("measure"), selection->policy.measure));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field_if_nonempty(
-      &object, IREE_SV("sample_compilation"),
-      logical_sample->sample_compilation));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_snapshot_write_sample_range_fields(
       event->module, selection->case_plan,
       logical_sample->begin_benchmark_sample,
@@ -687,7 +670,6 @@ iree_status_t iree_benchmark_loom_snapshot_sink_initialize(
       iree_allocator_malloc(allocator, sizeof(*state), (void**)&state));
   memset(state, 0, sizeof(*state));
   state->host_allocator = allocator;
-  state->sample_compilation_mode = IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE;
   iree_string_builder_initialize(allocator, &state->device_json);
   loom_json_value_list_t* value_lists[] = {
       &state->benchmarks, &state->work_items,  &state->failed_samples,
@@ -772,10 +754,6 @@ static iree_status_t iree_benchmark_loom_snapshot_append_run_json(
       object, IREE_SV("output_format"), IREE_SV("snapshot")));
   IREE_RETURN_IF_ERROR(loom_json_object_write_bool_field(
       object, IREE_SV("dry_run"), state->dry_run));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-      object, IREE_SV("sample_compilation"),
-      iree_benchmark_loom_sample_compilation_mode_name(
-          state->sample_compilation_mode)));
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(object, IREE_SV("sanitizer")));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_sanitizer_options_json(

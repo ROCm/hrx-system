@@ -42,8 +42,8 @@ static iree_status_t iree_benchmark_loom_run_dispatch_sample_work_item(
           benchmark_plan, case_plan, policy, options->benchmark_options,
           options->hal_context, &compile_context->hal_sequence,
           &compile_context->benchmark_materializer,
-          work_item->sample_compilation, work_item->begin_benchmark_sample,
-          options->host_allocator, &benchmark_result);
+          work_item->begin_benchmark_sample, options->host_allocator,
+          &benchmark_result);
       if (iree_status_is_ok(status)) {
         status = iree_benchmark_loom_emit_work_item_result_aliases(
             options->run, options->module_plan, work_plan, work_item,

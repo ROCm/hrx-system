@@ -314,7 +314,6 @@ iree_status_t iree_benchmark_loom_run_file(
     if (iree_status_is_ok(status)) {
       status = iree_benchmark_loom_event_sink_emit_run(
           event_sink, &run_identity, benchmark_options->dry_run,
-          benchmark_options->sample_compilation_mode,
           &benchmark_options->sanitizer);
     }
   }
@@ -437,7 +436,7 @@ iree_status_t iree_benchmark_loom_run_file(
         }
         status = iree_benchmark_loom_event_sink_emit_plan(
             event_sink, &run_identity, module_plan.module, &selections[i],
-            benchmark_options, benchmark_options->sample_compilation_mode);
+            benchmark_options);
         if (iree_status_is_ok(status) && benchmark_options->dry_run) {
           status = iree_benchmark_loom_event_sink_emit_device(
               event_sink, &run_identity, &hal_context);
@@ -476,7 +475,7 @@ iree_status_t iree_benchmark_loom_run_file(
           &work_plan.selected_benchmarks[selection_index];
       status = iree_benchmark_loom_event_sink_emit_plan(
           event_sink, &run_identity, module_plan.module, selection,
-          benchmark_options, benchmark_options->sample_compilation_mode);
+          benchmark_options);
       if (iree_status_is_ok(status) && benchmark_options->dry_run &&
           selection->policy.measure_kind ==
               IREE_BENCHMARK_LOOM_MEASURE_DISPATCH_COMPLETE) {
@@ -527,7 +526,7 @@ iree_status_t iree_benchmark_loom_run_file(
         planned_benchmark_count, selected_benchmark_count, logical_sample_count,
         work_item_count, failure_count, failed_benchmark_count,
         correctness_sample_count, correctness_failed_sample_count,
-        benchmark_options->dry_run, benchmark_options->sample_compilation_mode);
+        benchmark_options->dry_run);
   }
   if (iree_status_is_ok(status) && output_sink_initialized) {
     status = iree_benchmark_loom_output_sink_flush(&output_sink,
@@ -536,8 +535,7 @@ iree_status_t iree_benchmark_loom_run_file(
   if (iree_status_is_ok(status)) {
     status = iree_benchmark_loom_write_artifact_bundle_manifest(
         &artifact_bundle, &run_identity, &hal_context, source,
-        options->command_line_json, benchmark_options->dry_run,
-        benchmark_options->sample_compilation_mode, allocator);
+        options->command_line_json, benchmark_options->dry_run, allocator);
   }
   if (iree_status_is_ok(status) && failure_count != 0) {
     exit_code = 1;

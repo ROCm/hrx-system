@@ -59,7 +59,6 @@ _ENVELOPE_CONTEXT_FIELDS = (
     "benchmark",
     "sample_id",
     "sample_index",
-    "sample_compilation",
 )
 
 

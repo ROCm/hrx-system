@@ -127,8 +127,8 @@ iree_status_t iree_benchmark_loom_run_case_correctness_range(
     const loom_testbench_benchmark_plan_t* benchmark_plan,
     iree_host_size_t case_index,
     const loom_testbench_case_execution_options_t* execution_options,
-    iree_string_view_t sample_compilation, iree_host_size_t begin_sample,
-    iree_host_size_t end_sample, iree_arena_allocator_t* arena,
+    iree_host_size_t begin_sample, iree_host_size_t end_sample,
+    iree_arena_allocator_t* arena,
     const iree_benchmark_loom_event_sink_t* event_sink,
     iree_host_size_t* out_sample_count,
     iree_host_size_t* out_failed_sample_count) {
@@ -156,7 +156,7 @@ iree_status_t iree_benchmark_loom_run_case_correctness_range(
     if (iree_status_is_ok(status)) {
       status = iree_benchmark_loom_event_sink_emit_sample(
           event_sink, run, candidate, IREE_BENCHMARK_LOOM_INDEX_INVALID,
-          module_plan->module, benchmark_plan, case_plan, sample_compilation,
+          module_plan->module, benchmark_plan, case_plan,
           benchmark_sample_ordinal, case_sample_ordinal, &sample_result);
     }
     if (iree_status_is_ok(status)) {
@@ -214,8 +214,7 @@ static iree_status_t iree_benchmark_loom_emit_work_item_sample_aliases(
     IREE_RETURN_IF_ERROR(iree_benchmark_loom_event_sink_emit_sample(
         event_sink, run, &selection->identity, work_item->work_item_index,
         module_plan->module, selection->benchmark_plan, selection->case_plan,
-        logical_sample->sample_compilation, benchmark_sample_ordinal,
-        case_sample_ordinal, sample_result));
+        benchmark_sample_ordinal, case_sample_ordinal, sample_result));
   }
   return iree_ok_status();
 }

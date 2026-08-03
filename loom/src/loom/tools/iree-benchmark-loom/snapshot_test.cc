@@ -112,8 +112,7 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
   sanitizer.reporting_mode = LOOM_SANITIZER_REPORTING_MODE_REPORT_ONLY;
 
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
-      &event_sink, &run, /*dry_run=*/false,
-      IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE, &sanitizer));
+      &event_sink, &run, /*dry_run=*/false, &sanitizer));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_benchmark_result(
       &event_sink, &run, &candidate0, /*work_item_index=*/7, &module,
       &benchmark_plan, &case_plan, &policy, &result,
@@ -131,7 +130,7 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
       /*logical_sample_count=*/2, /*work_item_count=*/1,
       /*failure_count=*/0, /*failed_benchmark_count=*/0,
       /*correctness_sample_count=*/1, /*correctness_failed_sample_count=*/0,
-      /*dry_run=*/false, IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE));
+      /*dry_run=*/false));
 
   iree_string_builder_t output;
   iree_string_builder_initialize(allocator, &output);
@@ -241,8 +240,7 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedProfileSummary) {
   result.hal_benchmark.profile.requested = true;
 
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
-      &event_sink, &run, /*dry_run=*/false,
-      IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE, &kNoSanitizer));
+      &event_sink, &run, /*dry_run=*/false, &kNoSanitizer));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_benchmark_result(
       &event_sink, &run, &candidate, /*work_item_index=*/0, &module,
       &benchmark_plan, &case_plan, &policy, &result,
@@ -255,7 +253,7 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedProfileSummary) {
       /*logical_sample_count=*/1, /*work_item_count=*/1,
       /*failure_count=*/0, /*failed_benchmark_count=*/0,
       /*correctness_sample_count=*/1, /*correctness_failed_sample_count=*/0,
-      /*dry_run=*/false, IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE));
+      /*dry_run=*/false));
 
   iree_string_builder_t output;
   iree_string_builder_initialize(allocator, &output);
@@ -326,8 +324,7 @@ TEST(BenchmarkSnapshotSinkTest, IncludesHalTimingCountsAndWarnings) {
   result.data_cache.dispatches_per_batch = 6;
 
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
-      &event_sink, &run, /*dry_run=*/false,
-      IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE, &kNoSanitizer));
+      &event_sink, &run, /*dry_run=*/false, &kNoSanitizer));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_benchmark_result(
       &event_sink, &run, &candidate, /*work_item_index=*/0, &module,
       &benchmark_plan, &case_plan, &policy, &result,
@@ -340,7 +337,7 @@ TEST(BenchmarkSnapshotSinkTest, IncludesHalTimingCountsAndWarnings) {
       /*logical_sample_count=*/1, /*work_item_count=*/1,
       /*failure_count=*/0, /*failed_benchmark_count=*/0,
       /*correctness_sample_count=*/1, /*correctness_failed_sample_count=*/0,
-      /*dry_run=*/false, IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE));
+      /*dry_run=*/false));
 
   iree_string_builder_t output;
   iree_string_builder_initialize(allocator, &output);
@@ -469,8 +466,7 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedCompileReport) {
   result.compile_report_capture = &capture;
 
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
-      &event_sink, &run, /*dry_run=*/false,
-      IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE, &kNoSanitizer));
+      &event_sink, &run, /*dry_run=*/false, &kNoSanitizer));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_benchmark_result(
       &event_sink, &run, &candidate, /*work_item_index=*/0, &module,
       &benchmark_plan, &case_plan, &policy, &result,
@@ -483,7 +479,7 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedCompileReport) {
       /*logical_sample_count=*/1, /*work_item_count=*/1,
       /*failure_count=*/0, /*failed_benchmark_count=*/0,
       /*correctness_sample_count=*/1, /*correctness_failed_sample_count=*/0,
-      /*dry_run=*/false, IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE));
+      /*dry_run=*/false));
 
   iree_string_builder_t output;
   iree_string_builder_initialize(allocator, &output);
@@ -552,8 +548,7 @@ TEST(BenchmarkSnapshotSinkTest, IncludesFailurePayloadsOnFailure) {
   result.diagnostic_json = IREE_SV("{\"message\":\"bad op\"}");
 
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
-      &event_sink, &run, /*dry_run=*/false,
-      IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE, &kNoSanitizer));
+      &event_sink, &run, /*dry_run=*/false, &kNoSanitizer));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_failure(
       &event_sink, &run, IREE_SV("parse"), IREE_SV("diagnostics"),
       IREE_SV("input module has parse errors"), /*diagnostics=*/NULL));
@@ -569,7 +564,7 @@ TEST(BenchmarkSnapshotSinkTest, IncludesFailurePayloadsOnFailure) {
       /*logical_sample_count=*/1, /*work_item_count=*/1,
       /*failure_count=*/1, /*failed_benchmark_count=*/1,
       /*correctness_sample_count=*/0, /*correctness_failed_sample_count=*/0,
-      /*dry_run=*/false, IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE));
+      /*dry_run=*/false));
 
   iree_string_builder_t output;
   iree_string_builder_initialize(allocator, &output);
@@ -638,21 +633,18 @@ TEST(BenchmarkSnapshotSinkTest, DryRunReportsPlannedWorkAliases) {
   logical_samples[0].end_benchmark_sample = 1;
   logical_samples[0].has_case_sample_ordinal = true;
   logical_samples[0].case_sample_ordinal = 0;
-  logical_samples[0].sample_compilation = IREE_SV("once");
   logical_samples[0].work_item_index = 7;
   logical_samples[1].selection_index = 1;
   logical_samples[1].begin_benchmark_sample = 0;
   logical_samples[1].end_benchmark_sample = 1;
   logical_samples[1].has_case_sample_ordinal = true;
   logical_samples[1].case_sample_ordinal = 0;
-  logical_samples[1].sample_compilation = IREE_SV("once");
   logical_samples[1].work_item_index = 7;
   iree_benchmark_loom_work_item_t work_item = {};
   work_item.kind = IREE_BENCHMARK_LOOM_WORK_ITEM_DISPATCH_SAMPLE;
   work_item.work_item_index = 7;
   work_item.representative_selection_index = 0;
   work_item.hal_compile_item_index = 0;
-  work_item.sample_compilation = IREE_SV("once");
   work_item.begin_benchmark_sample = 0;
   work_item.end_benchmark_sample = 1;
   work_item.has_case_sample_ordinal = true;
@@ -668,8 +660,7 @@ TEST(BenchmarkSnapshotSinkTest, DryRunReportsPlannedWorkAliases) {
   iree_benchmark_loom_artifact_bundle_t bundle = {};
 
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
-      &event_sink, &run, /*dry_run=*/true,
-      IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE, &kNoSanitizer));
+      &event_sink, &run, /*dry_run=*/true, &kNoSanitizer));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_work_plan(
       &event_sink, &run, &module, &work_plan));
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_summary(
@@ -678,7 +669,7 @@ TEST(BenchmarkSnapshotSinkTest, DryRunReportsPlannedWorkAliases) {
       /*logical_sample_count=*/2, /*work_item_count=*/1,
       /*failure_count=*/0, /*failed_benchmark_count=*/0,
       /*correctness_sample_count=*/0, /*correctness_failed_sample_count=*/0,
-      /*dry_run=*/true, IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE));
+      /*dry_run=*/true));
 
   iree_string_builder_t output;
   iree_string_builder_initialize(allocator, &output);

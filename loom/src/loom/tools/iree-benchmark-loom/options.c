@@ -106,12 +106,6 @@ IREE_FLAG_NAMED(
     "Directory receiving raw IREE HAL profile bundles from final profiled "
     "batches. Setting this implies --profile-final-batch=true unless that flag "
     "was explicitly set false.");
-IREE_FLAG_NAMED(string, sample_compilation, "sample-compilation", "once",
-                "Sample compilation mode for dispatch_complete benchmarks. "
-                "Use 'once' to compile once and pass parameter values at "
-                "dispatch time, 'per_sample' to compile each selected sample "
-                "with concrete parameter facts, or 'both' to emit both result "
-                "sets.");
 IREE_FLAG_NAMED(
     int64_t, input_ring_min_bytes, "input-ring-min-bytes",
     IREE_BENCHMARK_LOOM_DEFAULT_INPUT_RING_MIN_BYTES,
@@ -196,8 +190,6 @@ void iree_benchmark_loom_options_initialize(
   out_options->measure = IREE_SV("case_end_to_end");
   out_options->compile_report = IREE_SV("summary");
   out_options->artifact_manifest = IREE_SV("none");
-  out_options->sample_compilation_mode =
-      IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE;
   out_options->input_ring_min_bytes =
       IREE_BENCHMARK_LOOM_DEFAULT_INPUT_RING_MIN_BYTES;
   out_options->interleave_mode = IREE_BENCHMARK_LOOM_INTERLEAVE_NONE;
@@ -301,9 +293,6 @@ iree_status_t iree_benchmark_loom_options_from_flags(
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_parse_artifact_bundle_policy(
       iree_make_cstring_view(FLAG_artifact_bundle_policy),
       &out_options->artifact_bundle_policy));
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_parse_sample_compilation_mode(
-      iree_make_cstring_view(FLAG_sample_compilation),
-      &out_options->sample_compilation_mode));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_positive_i32_to_host_size(
       "max-samples-per-case", FLAG_max_samples_per_case,
       &out_options->max_samples_per_case));
@@ -377,13 +366,6 @@ iree_status_t iree_benchmark_loom_options_from_flags(
         IREE_STATUS_INVALID_ARGUMENT,
         "--compare selects benchmark/case pairs directly and cannot be "
         "combined with --case");
-  }
-  if (compare_requested && out_options->sample_compilation_mode ==
-                               IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_BOTH) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "--compare requires one sample-compilation mode; use "
-        "--sample-compilation=once or --sample-compilation=per_sample");
   }
   if (iree_string_view_equal(
           iree_string_view_trim(out_options->file_output_dir), IREE_SV("-"))) {
@@ -467,55 +449,6 @@ iree_status_t iree_benchmark_loom_parse_artifact_bundle_policy(
       "--artifact-bundle-policy must be one of minimal, debug, full, or none; "
       "got '%.*s'",
       (int)value.size, value.data);
-}
-
-iree_status_t iree_benchmark_loom_parse_sample_compilation_mode(
-    iree_string_view_t value,
-    iree_benchmark_loom_sample_compilation_mode_t* out_mode) {
-  value = iree_string_view_trim(value);
-  if (iree_string_view_equal(value, IREE_SV("once"))) {
-    *out_mode = IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE;
-    return iree_ok_status();
-  }
-  if (iree_string_view_equal(value, IREE_SV("per_sample"))) {
-    *out_mode = IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_PER_SAMPLE;
-    return iree_ok_status();
-  }
-  if (iree_string_view_equal(value, IREE_SV("both"))) {
-    *out_mode = IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_BOTH;
-    return iree_ok_status();
-  }
-  return iree_make_status(
-      IREE_STATUS_INVALID_ARGUMENT,
-      "--sample-compilation must be one of once, per_sample, or both; got "
-      "'%.*s'",
-      (int)value.size, value.data);
-}
-
-iree_string_view_t iree_benchmark_loom_sample_compilation_mode_name(
-    iree_benchmark_loom_sample_compilation_mode_t mode) {
-  switch (mode) {
-    case IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE:
-      return IREE_SV("once");
-    case IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_PER_SAMPLE:
-      return IREE_SV("per_sample");
-    case IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_BOTH:
-      return IREE_SV("both");
-    default:
-      return IREE_SV("unknown");
-  }
-}
-
-bool iree_benchmark_loom_sample_compilation_runs_once(
-    iree_benchmark_loom_sample_compilation_mode_t mode) {
-  return mode == IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE ||
-         mode == IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_BOTH;
-}
-
-bool iree_benchmark_loom_sample_compilation_runs_per_sample(
-    iree_benchmark_loom_sample_compilation_mode_t mode) {
-  return mode == IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_PER_SAMPLE ||
-         mode == IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_BOTH;
 }
 
 iree_status_t iree_benchmark_loom_parse_interleave_mode(

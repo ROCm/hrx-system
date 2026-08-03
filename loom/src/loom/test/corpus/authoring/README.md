@@ -533,10 +533,10 @@ when debugging launch geometry or store lowering.
 ## MLP Down-Projection Residual
 
 `mlp_down_projection_residual_bf16.loom` keeps one down-projection kernel with a
-residual add and a named `rows` parameter. The parameter drives the case tensor
-shapes, the scalar kernel argument, dynamic buffer views, and dispatch geometry,
-so one authored source covers both a two-row decode-shaped sample and the full
-projection.
+residual add and a named `rows` parameter. The runtime parameter drives the case
+tensor shapes, scalar kernel argument, and dynamic buffer views. A separately
+bound row-capacity config controls reusable launch geometry, and the kernel
+relates the runtime row count to that capacity with `index.assume`.
 
 The anonymous `check.benchmark<@mlp_down_projection_residual_case>` sweeps all
 case samples and receives generated benchmark names. The named benchmark rows
@@ -548,9 +548,9 @@ check.benchmark<@mlp_down_projection_residual_case> @mlp_down_projection_residua
 ```
 
 The case uses deterministic iota inputs and zero projection weights for a
-residual-preservation oracle. The AMDGPU dispatch test runs this file with
-per-sample compilation so each selected row count becomes a compile-time fact
-before launch geometry and memory legality are finalized.
+residual-preservation oracle. The AMDGPU dispatch test explicitly binds the row
+capacity through `--config`, exactly as an embedding application does. Selected
+sample values remain runtime inputs and do not alter the executable.
 
 ## Authoring Rules
 
@@ -572,13 +572,15 @@ symbol when target lowering reaches it. `hot` and `cold` are separate
 temperature hints for cost models or profile feedback; they are not substitutes
 for authored inline policy.
 
-Facts are source facts, not global flags. Put reusable facts at the boundary
-that owns them: `config.decl` and function/kernel signatures for shape choices,
-`kernel.launch.config` for launch topology, kernel ABI buffer arguments for
-global memory space, and checked samples for benchmark-specific values. Local
-assumes are for facts discovered inside the body, such as guarded row IDs,
-clamped values, or dynamic alignment proof. They should not reassert config
-declarations, launch dimensions, or kernel buffer memory space.
+Facts belong at the boundary that owns them. Compile-time choices are declared
+with `config.decl` and materialized by the application or test driver. Runtime
+workload values stay in function and kernel signatures even when a particular
+configuration constrains them. Use `index.assume` to relate a runtime value to a
+configured capacity or to record facts established by guards, clamping, or
+dynamic alignment. Exact shape choices should be read from config directly;
+checked samples only supply runtime values and expected results. Launch topology
+belongs in `kernel.launch.config`, and kernel ABI buffers already carry global
+memory-space facts.
 
 Use `index` for logical coordinates, extents, and tensor/view indices. Use
 `offset` for byte offsets and byte strides. Views should carry real extents

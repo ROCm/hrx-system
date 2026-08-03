@@ -94,8 +94,6 @@ static iree_status_t iree_benchmark_loom_write_profile_artifact_identity_json(
     IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
         object, IREE_SV("work_item_index"), work_item_index));
   }
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_sample_compilation_field_json(
-      benchmark_result->sample_compilation, object));
   if (benchmark_result->has_sample_ordinal) {
     IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_sample_fields_json(
         module, case_plan, benchmark_result->sample_ordinal, object));
@@ -789,8 +787,6 @@ iree_status_t iree_benchmark_loom_append_profile_row(
     IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
         &object, IREE_SV("work_item_index"), work_item_index));
   }
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_sample_compilation_field_json(
-      benchmark_result->sample_compilation, &object));
   if (benchmark_result->has_sample_ordinal) {
     IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_sample_fields_json(
         module, case_plan, benchmark_result->sample_ordinal, &object));
