@@ -64,27 +64,6 @@ command-buffer preparation work.
 
 ## Temporary bring-up workarounds
 
-`kernels/flash_attention_bringup_workaround.py` is an explicitly
-non-sanctioned unblocker, not a Loom kernel generator or an alternate authoring
-path. It patches exact text in the selectively linked FlashAttention module for
-two preserved upstream defects: insufficient relational facts for bounded
-subtraction and a tail allocation that violates `buffer.alloca`'s fixed-frame
-contract. The patch rejects any source drift instead of trying to understand or
-regenerate Loom.
-
-Nothing else should depend on this tool or copy its mechanism. Delete the tool,
-its test, and the linked-module interception as soon as the unmodified
-upstream module compiles. Until then, performance results must identify the
-workaround's 23,808-byte LDS frame rather than treating that resource shape as
-the intended zero-tail kernel.
-
-`kernels/router_projection_f32_bringup_workaround.loom` is a separate,
-one-function fork for a counted-loop footprint-analysis defect. It changes only
-the four-row router's exclusive channel bound and carries only the target and
-config declarations required to verify that function. Delete it when the
-compiler can prove the original stepped loop. It is not a new production kernel
-variant and must not accumulate unrelated router work.
-
 `kernels/router_top8_f32_bringup_workaround.loom` makes the owned model's
 compact route-ID rows structural while the generic authored kernel omits its
 required `route_count <= route_id_stride` relation. The Qwen program fixes both
@@ -155,17 +134,14 @@ workload facts and nested device-template requirements do not yet cross every
 source-to-low boundary. Delete all three when those compiler boundaries are
 repaired; they are not model-generated kernel variants.
 
-`kernels/linear_q6k_q8_1_x4_bringup_workaround.loom` is the vocabulary
-projection's one-row specialization. It retains the raw Q6_K by Q8_1 x4
-contraction while exposing the guarded output-channel bound needed by address
-planning. Its fixed vocabulary and hidden dimensions are model facts, not a
-general vocabulary-kernel authoring mechanism. The endpoint export reduces each
-workgroup's eight finite logits to one deterministic maximum pair; the compact
-argmax bring-up kernel finalizes those 18,992 pairs with lowest-token tie
-breaking. The finalizer publishes the winner into the existing device-local
-request token slot and separately into mapped host-visible observation
-storage. Decode consumes the device token through the request timeline; it
-does not read and reupload the observation copy.
+`kernels/vocabulary_q6k_partial_argmax.loom` owns only the model endpoint. It
+applies the canonical `ggml.linear_q6k_q8_1_x4.body` contraction and reduces
+each workgroup's eight finite logits to one deterministic maximum pair. The
+compact argmax kernel finalizes those 18,992 pairs with lowest-token tie
+breaking, publishing the winner into both the device-local request token slot
+and mapped host-visible observation storage. Decode consumes the device token
+through the request timeline; it does not read and reupload the observation
+copy.
 
 The working full-model programs now record all 48 layers, embedding, final
 normalization, partial vocabulary projection, and compact greedy finalization

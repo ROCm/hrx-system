@@ -15,11 +15,11 @@ The distinction between the two experimental subtrees is important:
   exports, selectively links only the functions it issues, embeds the linked
   source, specializes it against a live HAL device, records the model schedule,
   and gathers unmodified GGUF payloads into resident storage.
-- `experimental/qwen/kernels/*_bringup_workaround.loom` and
-  `flash_attention_bringup_workaround.py` are transient diagnostic artifacts.
-  They expose compiler facts or missing corpus endpoints that blocked the
-  vertical slice. They are not alternate canonical kernels or a supported Loom
-  generation mechanism.
+- `experimental/qwen/kernels/*_bringup_workaround.loom` files are transient
+  diagnostic artifacts. They expose compiler facts or missing corpus endpoints
+  that block the vertical slice. They are not alternate canonical kernels or a
+  supported Loom generation mechanism. Source-rewriting patchers are not part
+  of the integration path.
 
 ## Start here
 
@@ -137,7 +137,7 @@ cuts in order:
 | ---: | --- | --- | --- |
 | 1 | `qwen3_moe_attention_qkv_postprocess_fused_decode` | `qwen3_moe/attention_qkv_postprocess_fused.loom`, using `qwen3_moe/attention_qkv_quantized.loom` and `qwen3_moe/attention_postprocess_f32_f16.loom` | None |
 | 2 | `qwen3_moe_flash_attention_decode_split_f32_f16_wmma` | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` | `flash_attention_decode_split_bringup_workaround.loom` specializes a 64-row capacity class while request metadata masks its zero-initialized inactive suffix |
-| 3 | `ggml_quantize_q8_1_x4_f32` for the attention result | `ggml/quantize_q8_1_x4.loom` | `quantize_q8_1_x4_bringup_workaround.loom` |
+| 3 | `ggml_quantize_q8_1_x4_f32` for the attention result | `ggml/quantize_q8_1_x4.loom` | None |
 | 4 | `qwen3_moe_dense_linear_q4k_q8_1_x4_next_q8`, including output residual and feed-forward RMSNorm/Q8_1 x4 publication | `qwen3_moe/dense_linear_quantized_f16_wmma.loom` and `qwen3_moe/attention_prepare_quantized.loom` | None |
 | 5 | `qwen3_moe_router_projection_top8_fused_decode_f32` | `qwen3_moe/router_projection_top8_fused_f32.loom`, using `qwen3_moe/router_projection_f32.loom` and `qwen3_moe/router_top8_f32.loom` | `router_projection_top8_fused_bringup_workaround.loom` |
 | 6 | `qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8` | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` and `ggml/quantize_q8_1_x4.loom` | `routed_gate_up_next_q8_bringup_workaround.loom` |
@@ -155,15 +155,14 @@ these canonical families:
 - `qwen3_moe_attention_postprocess_f32_f16` from
   `qwen3_moe/attention_postprocess_f32_f16.loom`;
 - `qwen3_moe_flash_attention_f32_f16_wmma` from
-  `qwen3_moe/flash_attention_f32_f16_wmma.loom`; the current runtime applies
-  `flash_attention_bringup_workaround.py`, which is not a porting source. The
-  canonical pure-tail multirow path currently corrupts nonleading query rows;
-  contexts below one 64-token key tile temporarily record the proven one-row
-  specialization once per query row;
+  `qwen3_moe/flash_attention_f32_f16_wmma.loom`, linked directly without source
+  rewriting. The canonical pure-tail multirow path currently corrupts
+  nonleading query rows; contexts below one 64-token key tile temporarily
+  record the proven one-row specialization once per query row;
 - `qwen3_moe_router_projection_f32_four_row_wave32` and
   `qwen3_moe_router_top8_f32` from their correspondingly named canonical
-  files; the current runtime uses the correspondingly named Qwen workaround
-  forks only to carry missing compiler facts; and
+  files; the projection is linked directly, while the top-8 adapter still
+  carries its missing generic route-stride relation; and
 - `qwen3_moe_build_expert_table_partition_prefill_512` from
   `qwen3_moe/expert_table_partition_fused.loom` for the exact headline shape.
 
@@ -270,7 +269,7 @@ verifies that the static size agrees with the loaded executable's function
 metadata, and then leaves static workgroup-size ownership with the executable.
 Recorded dispatches carry only the evaluated workgroup count.
 
-## What the bring-up workarounds prove
+## What the remaining bring-up workarounds prove
 
 The workaround files are valuable compiler reproducers because each has a
 small, named missing fact. They should be compared with the canonical source,
@@ -278,26 +277,17 @@ not copied wholesale into a second kernel corpus.
 
 | Workaround | Canonical source or missing provider | Exact pressure exposed |
 | --- | --- | --- |
-| `router_projection_f32_bringup_workaround.loom` | `qwen3_moe/router_projection_f32.loom` | Counted-loop propagation does not retain the four-element packet bound through all vector loads. The fork narrows an equivalent exclusive bound and carries it to those loads. |
 | `router_top8_f32_bringup_workaround.loom` | `qwen3_moe/router_top8_f32.loom` | The generic kernel lacks `route_count <= route_id_stride`, while this model has compact `8 == 8` rows. Workload-evaluated decode/prefill workgroup choice also does not reach source-to-low compilation, so the fork pins the wide 256-thread geometry. |
 | `router_projection_top8_fused_bringup_workaround.loom` | `qwen3_moe/router_projection_top8_fused_f32.loom` and `qwen3_moe/router_top8_f32.loom` | The shared generic top-8 helper has the same missing route-count/physical-stride relation. The one-function fork retains the canonical projection and last-arrival schedule, then passes the configured route count as the physical stride for this model's exact compact `8 == 8` rows. |
 | `expert_table_bringup_workaround.loom` | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` | AMDGPU division/remainder lowering needs the exact route-count divisor. The JIT workload already knows eight, but that value does not reach target lowering, so the fork makes eight structural. |
-| `quantize_q8_1_x4_bringup_workaround.loom` | `ggml/quantize_q8_1_x4.loom` | Launch and loop facts do not prove the four-element `vector.load` footprint. The fork adds the equivalent packet-end relation. |
-| `routed_gate_up_next_q8_bringup_workaround.loom` | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` and `ggml/quantize_q8_1_x4.loom` | Exact one-token, eight-route, 128-expert, and 768-channel workload facts do not reach scalar footprint analysis. Nested device-template requirements also prevent factoring the completion epilogue, and divergent integer comparison lowering cannot consume its workgroup reduction. The fork makes only model dimensions structural, delegates the contraction and physical-group pack to canonical bodies, and uses an exact-range floating-point comparison until those compiler gaps close. |
+| `routed_gate_up_next_q8_bringup_workaround.loom` | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` and `ggml/quantize_q8_1_x4.loom` | Exact one-token, eight-route, 128-expert, and 768-channel workload facts do not reach scalar footprint analysis. The fork makes only model dimensions structural and delegates the contraction and physical-group pack to canonical bodies. |
 | `routed_down_q4_next_q8_bringup_workaround.loom` | `qwen3_moe/routed_down_q4k.loom` | Exact decode dimensions do not reach source-to-low, so the eight-iteration route loop cannot be unrolled. The one-function fork delegates contraction and residual arithmetic to the canonical body, then retains the canonical last-arrival next-row publication. |
 | `routed_down_q6_next_q8_bringup_workaround.loom` | `qwen3_moe/routed_down_q6k.loom` | The same source-to-low specialization gap blocks the storage-selected Q6_K direct route. The one-function fork delegates the contraction while making only the model dimensions structural and retaining next-row publication. |
-| `linear_q6k_q8_1_x4_bringup_workaround.loom` | `ggml/linear_q6k_q8_1_x4.loom` | A guarded tail store loses its channel bound during address planning. The one-row fork uses a safe masked weight channel and narrows generic maxima to hidden width 2048 and vocabulary size 151936. Its endpoint export shares that contraction and publishes one deterministic maximum pair per eight logits. |
 | `flash_attention_decode_split_bringup_workaround.loom` | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` | Exact context workloads do not reach reducer-template selection, launch topology, dynamic view bounds, or address-width analysis. The adapter carries the exact runtime value as temporary config, applies the canonical producer, and directly selects the canonical cooperative reducer without copying either body. |
-| `flash_attention_bringup_workaround.py` | `qwen3_moe/flash_attention_f32_f16_wmma.loom` | Bounded subtraction facts are lost in full-tile and tail paths, and a dynamic zero-or-capacity workgroup allocation violates the fixed-frame contract. The exact-text patch expresses tails as remainders, introduces the path-local lower bound, and reserves the full 8192-byte tail stage inside the resulting 23808-byte LDS frame. |
 | Runtime pure-tail row-by-row recording | `qwen3_moe/flash_attention_f32_f16_wmma.loom` | The canonical multirow specialization corrupts nonleading query rows when the context consists entirely of a key-tile tail. The same canonical kernel specialized for one query row is exact, so the command buffer temporarily records that specialization once per prompt row without introducing another Loom source. |
 | `token_embedding_bringup_workaround.loom` | No corpus provider yet | Fixed Q4_K GGUF row decoding into the 2048-wide F32 hidden layout. This is endpoint glue, not an assumption repair. |
 | `attention_metadata_bringup_workaround.loom` | No corpus provider yet | Direct no-ring K/V indices, positions, and dense causal-mask construction from one context-base word. This is request-policy glue, not an assumption repair. |
 | `greedy_argmax_bringup_workaround.loom` | No corpus provider yet | Compact finalization over 18992 finite F32/I32 maximum pairs with lowest-token tie breaking. This is endpoint glue, not an assumption repair. |
-
-The Python FlashAttention patch is especially unsuitable for reuse. It is a
-fail-on-drift source interception around two known compiler/source defects, not
-a kernel generator. Its useful content is the exact before/after fact pattern
-and the fixed-frame requirement.
 
 ## Building and inspecting
 

@@ -89,8 +89,8 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
           "qwen3_moe_dense_linear_q6k_f16_wmma",
       },
       {
-          QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4_BRINGUP_WORKAROUND,
-          "qwen_quantize_q8_1_x4_bringup_workaround.loom",
+          QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4,
+          "qwen3_moe_quantize_q8_1_x4.loom",
           "ggml_quantize_q8_1_x4_f32",
       },
       {
@@ -186,21 +186,21 @@ TEST(QwenLoomSourceTest, RejectsUnknownPath) {
   EXPECT_THAT(status, StatusIs(iree::StatusCode::kNotFound));
 }
 
-TEST(QwenLoomSourceTest, EmbedsBoundedVocabularyWorkaroundSources) {
+TEST(QwenLoomSourceTest, EmbedsCanonicalVocabularyEndpointSources) {
   qwen_loom_source_module_t quantize_source;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
-      IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4_BRINGUP_WORKAROUND),
-      &quantize_source));
+      IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4), &quantize_source));
   std::string quantize_text(
       reinterpret_cast<const char*>(quantize_source.source_contents.data),
       quantize_source.source_contents.data_length);
-  EXPECT_NE(quantize_text.find(
-                "%input_packet_end = index.sub %element_count, %three : index"),
-            std::string::npos);
   EXPECT_NE(
-      quantize_text.find("%input_index = index.assume %input_index0 "
-                         "[lt(%input_index0, %input_packet_end)] : index"),
+      quantize_text.find("%group_count = kernel.workgroup.count<x> : index"),
       std::string::npos);
+  EXPECT_NE(
+      quantize_text.find("%launched_element_count = index.mul %group_count, "
+                         "%onetwentyeight : index"),
+      std::string::npos);
+  EXPECT_EQ(quantize_text.find("%input_packet_end"), std::string::npos);
 
   qwen_loom_source_module_t projection_source;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
@@ -208,19 +208,9 @@ TEST(QwenLoomSourceTest, EmbedsBoundedVocabularyWorkaroundSources) {
   std::string projection_text(
       reinterpret_cast<const char*>(projection_source.source_contents.data),
       projection_source.source_contents.data_length);
-  EXPECT_NE(
-      projection_text.find(
-          "%bounded_input_size = index.assume %input_size "
-          "[range(%input_size, 256, 2048), mul(%input_size, 256)] : index"),
-      std::string::npos);
-  EXPECT_NE(projection_text.find(
-                "%safe_channel0 = scf.select %valid_channel, %channel, "
-                "%zero : index"),
+  EXPECT_NE(projection_text.find("func.apply<ggml.linear_q6k_q8_1_x4.body>"),
             std::string::npos);
-  EXPECT_NE(
-      projection_text.find("%bounded_token_count = index.assume %token_count "
-                           "[range(%token_count, 1, 1)] : index"),
-      std::string::npos);
+  EXPECT_EQ(projection_text.find("%safe_channel"), std::string::npos);
   EXPECT_NE(
       projection_text.find("%partial_count = index.assume %partial_count0 "
                            "[range(%partial_count0, 1, 18992)] : index"),
@@ -288,7 +278,7 @@ TEST(QwenLoomSourceTest, EmbedsDirectDownFixedModelWorkarounds) {
   }
 }
 
-TEST(QwenLoomSourceTest, EmbedsWorkaroundFlashAttentionSource) {
+TEST(QwenLoomSourceTest, EmbedsCanonicalFlashAttentionSource) {
   qwen_loom_source_module_t source_module;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
       IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_PREFILL_F32_F16),
@@ -300,39 +290,26 @@ TEST(QwenLoomSourceTest, EmbedsWorkaroundFlashAttentionSource) {
   std::string source_text(
       reinterpret_cast<const char*>(source_module.source_contents.data),
       source_module.source_contents.data_length);
-  EXPECT_NE(
-      source_text.find("%tail_key_value_token_count = index.rem "
-                       "%bounded_key_value_token_count, %sixtyfour : index"),
-      std::string::npos);
-  EXPECT_NE(source_text.find(
-                "%full_tile_key_value_token_count = index.assume "
-                "%bounded_key_value_token_count "
-                "[range(%bounded_key_value_token_count, 64, 32768)] : index"),
+  EXPECT_NE(source_text.find("%tail_key_value_token_count = index.sub "
+                             "%bounded_key_value_token_count, "
+                             "%full_key_value_token_count : index"),
             std::string::npos);
   EXPECT_NE(
       source_text.find("%last_full_key_tile_start = index.sub "
-                       "%full_tile_key_value_token_count, %fifteen : index"),
-      std::string::npos);
-  EXPECT_NE(
-      source_text.find("%tail_key_count = scf.select %is_first_tail_tile, "
-                       "%first_tail_key_count, %second_tail_key_count : index"),
+                       "%bounded_key_value_token_count, %fifteen : index"),
       std::string::npos);
   EXPECT_NE(
       source_text.find("%tail_key_value_stage = buffer.alloca "
-                       "%tail_key_value_stage_capacity "
+                       "%tail_key_value_stage_bytes "
                        "{base_alignment = 16, memory_space = workgroup} : "
                        "buffer"),
       std::string::npos);
   EXPECT_EQ(source_text.find("%tail_key_value_stage = buffer.alloca "
-                             "%tail_key_value_stage_bytes"),
-            std::string::npos);
-  size_t subtraction_position = source_text.find("index.sub");
-  ASSERT_NE(subtraction_position, std::string::npos);
-  EXPECT_EQ(source_text.find("index.sub", subtraction_position + 1),
+                             "%tail_key_value_stage_capacity"),
             std::string::npos);
 }
 
-TEST(QwenLoomSourceTest, EmbedsWorkaroundRouterProjectionSource) {
+TEST(QwenLoomSourceTest, EmbedsCanonicalRouterProjectionSource) {
   qwen_loom_source_module_t source_module;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
       IREE_SV(QWEN_LOOM_SOURCE_ROUTER_PROJECTION_F32), &source_module));
@@ -344,18 +321,10 @@ TEST(QwenLoomSourceTest, EmbedsWorkaroundRouterProjectionSource) {
                 "export(\"qwen3_moe_router_projection_f32_four_row_wave32\") "
                 "@qwen3_moe_router_projection_f32_four_row_wave32"),
             std::string::npos);
-  EXPECT_NE(source_text.find(
-                "%vector_channel_end = index.sub %hidden_size, %three : index"),
-            std::string::npos);
-  EXPECT_NE(source_text.find("[%lane_channel to %vector_channel_end step "
+  EXPECT_NE(source_text.find("[%lane_channel to %hidden_size step "
                              "%onetwentyeight]"),
             std::string::npos);
-  EXPECT_NE(source_text.find("%vector_channel = index.assume %channel "
-                             "[lt(%channel, %vector_channel_end)] : index"),
-            std::string::npos);
-  EXPECT_EQ(
-      source_text.find("[%lane_channel to %hidden_size step %onetwentyeight]"),
-      std::string::npos);
+  EXPECT_EQ(source_text.find("%vector_channel_end"), std::string::npos);
 }
 
 TEST(QwenLoomSourceTest, EmbedsWorkaroundRouterTop8Source) {

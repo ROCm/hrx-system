@@ -36,12 +36,11 @@ Create a matched bug bead and local reproducer packet, select any bounded
 workaround explicitly, and record which milestone claim the workaround cannot
 authorize.
 
-The Python patch named `flash_attention_bringup_workaround.py` is temporary,
-non-sanctioned bring-up machinery. It is not a Loom source generator, a kernel
-authoring API, or reusable infrastructure. It may patch only exact upstream
-source fragments for preserved defects, must fail on any source drift, and is
-deleted in full when those upstream fixes land. Never generalize it into
-templating, parameterization, module generation, or a second authoring path.
+Python or other source-rewriting patchers are not sanctioned Loom integration
+machinery. Runtime modules selectively link the canonical authored sources;
+compiler failures are fixed at their owning boundary or isolated in a minimal
+Loom function fork. Do not generate, rewrite, or intercept linked Loom source
+as a workaround.
 
 Any Loom file named `*_bringup_workaround.loom` is likewise a temporary,
 minimal function fork rather than a new kernel variant. It carries only the

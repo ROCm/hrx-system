@@ -1082,7 +1082,7 @@ static iree_status_t qwen_program_prepare_layer_executables(
       program->attention_output_schedule ==
           QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8) {
     status = qwen_program_prepare_batch_append(
-        batch, IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4_BRINGUP_WORKAROUND),
+        batch, IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4),
         IREE_SV("ggml_quantize_q8_1_x4_f32"),
         /*config_binding_count=*/0, /*config_bindings=*/NULL,
         IREE_ARRAYSIZE(attention_output_quantize_workload),
