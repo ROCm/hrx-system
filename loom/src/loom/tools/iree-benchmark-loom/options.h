@@ -22,15 +22,6 @@ extern "C" {
 
 typedef struct loom_tooling_config_set_t loom_tooling_config_set_t;
 
-typedef enum iree_benchmark_loom_sample_compilation_mode_e {
-  // Compile once and pass each sample's parameter values dynamically.
-  IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_ONCE = 0,
-  // Compile a separate candidate for each concrete selected sample.
-  IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_PER_SAMPLE = 1,
-  // Run both once and per-sample compilation modes.
-  IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_BOTH = 2,
-} iree_benchmark_loom_sample_compilation_mode_t;
-
 typedef enum iree_benchmark_loom_artifact_bundle_policy_e {
   // Artifact bundling is disabled.
   IREE_BENCHMARK_LOOM_ARTIFACT_BUNDLE_POLICY_NONE = 0,
@@ -120,8 +111,6 @@ typedef struct iree_benchmark_loom_options_t {
   iree_string_view_list_t profile_counters;
   // Explicit directory receiving raw HAL profile artifacts.
   iree_string_view_t profile_artifacts_dir;
-  // Sample compilation mode for dispatch-complete benchmarks.
-  iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode;
   // Minimum total byte size for generated dispatch input rings.
   int64_t input_ring_min_bytes;
   // Exact dispatch input ring count, or zero for byte-size based selection.
@@ -199,23 +188,6 @@ iree_status_t iree_benchmark_loom_parse_output_format(
 iree_status_t iree_benchmark_loom_parse_artifact_bundle_policy(
     iree_string_view_t value,
     iree_benchmark_loom_artifact_bundle_policy_t* out_policy);
-
-// Parses a sample-compilation mode flag value.
-iree_status_t iree_benchmark_loom_parse_sample_compilation_mode(
-    iree_string_view_t value,
-    iree_benchmark_loom_sample_compilation_mode_t* out_mode);
-
-// Returns the stable JSON spelling for a sample-compilation mode.
-iree_string_view_t iree_benchmark_loom_sample_compilation_mode_name(
-    iree_benchmark_loom_sample_compilation_mode_t mode);
-
-// Returns true when |mode| includes the compile-once pass.
-bool iree_benchmark_loom_sample_compilation_runs_once(
-    iree_benchmark_loom_sample_compilation_mode_t mode);
-
-// Returns true when |mode| includes the per-sample compilation pass.
-bool iree_benchmark_loom_sample_compilation_runs_per_sample(
-    iree_benchmark_loom_sample_compilation_mode_t mode);
 
 // Parses a comparison interleave mode flag value.
 iree_status_t iree_benchmark_loom_parse_interleave_mode(

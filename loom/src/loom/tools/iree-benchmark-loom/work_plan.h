@@ -34,12 +34,6 @@ typedef struct iree_benchmark_loom_hal_compile_item_t {
   iree_host_size_t compile_item_index;
   // Representative selected benchmark ordinal used for compilation.
   iree_host_size_t representative_selection_index;
-  // Sample-compilation label used for this compiled candidate.
-  iree_string_view_t sample_compilation;
-  // True when |case_sample_ordinal| is a compile-time case sample fact.
-  bool has_case_sample_ordinal;
-  // Case-local sample ordinal specialized into this compiled candidate.
-  iree_host_size_t case_sample_ordinal;
 } iree_benchmark_loom_hal_compile_item_t;
 
 typedef struct iree_benchmark_loom_logical_sample_t {
@@ -53,8 +47,6 @@ typedef struct iree_benchmark_loom_logical_sample_t {
   bool has_case_sample_ordinal;
   // Case-local sample ordinal measured by the physical work item.
   iree_host_size_t case_sample_ordinal;
-  // Sample-compilation label used for this logical sample.
-  iree_string_view_t sample_compilation;
   // Deduplicated physical work item index satisfying this logical sample.
   iree_host_size_t work_item_index;
 } iree_benchmark_loom_logical_sample_t;
@@ -68,8 +60,6 @@ typedef struct iree_benchmark_loom_work_item_t {
   iree_host_size_t representative_selection_index;
   // HAL compile item index, or INDEX_INVALID when the case has no actual call.
   iree_host_size_t hal_compile_item_index;
-  // Sample-compilation label used for this physical work item.
-  iree_string_view_t sample_compilation;
   // First benchmark-local sample ordinal covered by this work item.
   iree_host_size_t begin_benchmark_sample;
   // One-past-end benchmark-local sample ordinal covered by this work item.

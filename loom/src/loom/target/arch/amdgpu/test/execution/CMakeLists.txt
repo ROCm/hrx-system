@@ -32,6 +32,9 @@ iree_native_test(
   ARGS
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/fp8_finite_storage_decode.loom}}"
     "--dry-run"
+    "--config=finite_storage_decode.row_capacity=65"
+    "--config=finite_storage_decode.input_capacity=4608"
+    "--config=finite_storage_decode.output_capacity=16"
   SRC
     loom::tools::iree-benchmark-loom
   DATA
@@ -97,7 +100,6 @@ iree_native_test(
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/fragment_repack_bf16.loom}}"
     "--device=amdgpu"
     "--measure=dispatch_complete"
-    "--sample-compilation=per_sample"
     "--iterations=1"
     "--warmup-iterations=0"
     "--batch-size=1"
@@ -124,13 +126,15 @@ iree_native_test(
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/fp8_finite_storage_decode.loom}}"
     "--device=amdgpu"
     "--measure=dispatch_complete"
-    "--sample-compilation=per_sample"
     "--iterations=1"
     "--warmup-iterations=0"
     "--batch-size=1"
     "--min-time-ms=0"
     "--max-batches=1"
     "--input-ring-count=1"
+    "--config=finite_storage_decode.row_capacity=65"
+    "--config=finite_storage_decode.input_capacity=4608"
+    "--config=finite_storage_decode.output_capacity=16"
   SRC
     loom::tools::iree-benchmark-loom
   DATA
@@ -151,7 +155,6 @@ iree_native_test(
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/gfx11_wmma_families.loom}}"
     "--device=amdgpu"
     "--measure=dispatch_complete"
-    "--sample-compilation=per_sample"
     "--iterations=1"
     "--warmup-iterations=0"
     "--batch-size=1"
@@ -178,7 +181,6 @@ iree_native_test(
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/gfx9_4_mfma_families.loom}}"
     "--device=amdgpu"
     "--measure=dispatch_complete"
-    "--sample-compilation=per_sample"
     "--iterations=1"
     "--warmup-iterations=0"
     "--batch-size=1"
@@ -205,7 +207,6 @@ iree_native_test(
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/loop_carried_lane_liveness.loom}}"
     "--device=amdgpu"
     "--measure=dispatch_complete"
-    "--sample-compilation=per_sample"
     "--iterations=1"
     "--warmup-iterations=0"
     "--batch-size=1"

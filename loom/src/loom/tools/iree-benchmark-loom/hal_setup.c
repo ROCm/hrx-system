@@ -48,9 +48,7 @@ static iree_status_t iree_benchmark_loom_initialize_sequence_compile_context(
         options->hal_context, options->session, options->filename,
         options->source, options->benchmark_options->pipeline,
         options->benchmark_options->sanitizer, options->module_plan->module,
-        case_plan, compile_item->sample_compilation,
-        compile_item->case_sample_ordinal,
-        compile_item->has_case_sample_ordinal, options->compile_report_options,
+        case_plan, options->compile_report_options,
         options->artifact_manifest_options, &context->hal_sequence);
   }
   if (iree_status_is_ok(status)) {
@@ -138,10 +136,9 @@ static iree_status_t iree_benchmark_loom_initialize_single_compile_context(
         options->hal_context, options->session, options->filename,
         options->source, options->benchmark_options->pipeline,
         options->benchmark_options->sanitizer, options->module_plan->module,
-        actual_invocation, compile_item->sample_compilation,
-        iree_string_view_empty(), case_plan, compile_item->case_sample_ordinal,
-        compile_item->has_case_sample_ordinal, options->compile_report_options,
-        options->artifact_manifest_options, &context->hal_provider);
+        actual_invocation, iree_string_view_empty(),
+        options->compile_report_options, options->artifact_manifest_options,
+        &context->hal_provider);
   }
   if (iree_status_is_ok(status)) {
     context->hal_provider_initialized = true;
@@ -264,7 +261,6 @@ iree_status_t iree_benchmark_loom_prepare_hal_work_item(
   if (compile_context->skipped) {
     iree_benchmark_loom_benchmark_result_t benchmark_result = {
         .state = IREE_SV("skipped"),
-        .sample_compilation = work_item->sample_compilation,
     };
     return iree_benchmark_loom_emit_work_item_result_aliases(
         options->run, options->module_plan, work_plan, work_item,
@@ -325,7 +321,6 @@ iree_status_t iree_benchmark_loom_prepare_hal_work_item(
     iree_benchmark_loom_benchmark_result_t benchmark_result = {
         .executed = false,
         .passed = false,
-        .sample_compilation = work_item->sample_compilation,
         .samples_per_iteration = correctness_sample_count,
         .failed_sample_count = correctness_failed_sample_count,
     };

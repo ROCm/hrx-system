@@ -472,8 +472,7 @@ static iree_status_t iree_benchmark_loom_append_profile_artifact_path(
     const iree_benchmark_loom_run_identity_t* run,
     const iree_benchmark_loom_candidate_identity_t* candidate,
     iree_hal_device_profiling_data_families_t profile_data_families,
-    iree_string_view_t sample_compilation, iree_host_size_t sample_ordinal,
-    iree_string_builder_t* artifact_path) {
+    iree_host_size_t sample_ordinal, iree_string_builder_t* artifact_path) {
   const iree_host_size_t initial_size = iree_string_builder_size(artifact_path);
   IREE_RETURN_IF_ERROR(
       iree_benchmark_loom_append_effective_profile_artifacts_dir(
@@ -491,12 +490,6 @@ static iree_status_t iree_benchmark_loom_append_profile_artifact_path(
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(artifact_path, "_"));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
       artifact_path, candidate->candidate_id));
-  if (!iree_string_view_is_empty(sample_compilation)) {
-    IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_cstring(artifact_path, "_"));
-    IREE_RETURN_IF_ERROR(
-        iree_string_builder_append_string(artifact_path, sample_compilation));
-  }
   return iree_string_builder_append_format(
       artifact_path, "_sample%" PRIhsz ".irpf", sample_ordinal);
 }
@@ -517,7 +510,6 @@ iree_status_t iree_benchmark_loom_run_hal_benchmark_sample(
       iree_benchmark_loom_case_sample_from_benchmark_sample(
           benchmark_plan, case_plan, benchmark_sample_ordinal);
   memset(out_result, 0, sizeof(*out_result));
-  out_result->sample_compilation = provider->sample_compilation;
   out_result->has_sample_ordinal = true;
   out_result->sample_ordinal = case_sample_ordinal;
   out_result->samples_per_iteration = 1;
@@ -552,8 +544,7 @@ iree_status_t iree_benchmark_loom_run_hal_benchmark_sample(
     iree_string_builder_initialize(allocator, &profile_artifact_path);
     status = iree_benchmark_loom_append_profile_artifact_path(
         run, candidate, policy->hal_options.profile_data_families,
-        provider->sample_compilation, case_sample_ordinal,
-        &profile_artifact_path);
+        case_sample_ordinal, &profile_artifact_path);
     if (iree_status_is_ok(status) &&
         iree_string_builder_size(&profile_artifact_path) != 0) {
       status = iree_benchmark_loom_create_parent_directory(
@@ -603,14 +594,12 @@ iree_status_t iree_benchmark_loom_run_hal_sequence_benchmark_sample(
     iree_benchmark_loom_hal_context_t* hal_context,
     iree_benchmark_loom_hal_actual_sequence_t* sequence,
     const loom_testbench_value_materializer_options_t* materializer_options,
-    iree_string_view_t sample_compilation,
     iree_host_size_t benchmark_sample_ordinal, iree_allocator_t allocator,
     iree_benchmark_loom_benchmark_result_t* out_result) {
   const iree_host_size_t case_sample_ordinal =
       iree_benchmark_loom_case_sample_from_benchmark_sample(
           benchmark_plan, case_plan, benchmark_sample_ordinal);
   memset(out_result, 0, sizeof(*out_result));
-  out_result->sample_compilation = sample_compilation;
   out_result->has_sample_ordinal = true;
   out_result->sample_ordinal = case_sample_ordinal;
   out_result->samples_per_iteration = 1;
@@ -638,7 +627,7 @@ iree_status_t iree_benchmark_loom_run_hal_sequence_benchmark_sample(
     iree_string_builder_initialize(allocator, &profile_artifact_path);
     status = iree_benchmark_loom_append_profile_artifact_path(
         run, candidate, policy->hal_options.profile_data_families,
-        sample_compilation, case_sample_ordinal, &profile_artifact_path);
+        case_sample_ordinal, &profile_artifact_path);
     if (iree_status_is_ok(status) &&
         iree_string_builder_size(&profile_artifact_path) != 0) {
       status = iree_benchmark_loom_create_parent_directory(

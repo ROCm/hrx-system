@@ -213,13 +213,6 @@ iree_benchmark_loom_initialize_dispatch_comparison_candidates(
   const iree_benchmark_loom_options_t* benchmark_options =
       options->benchmark_options;
   const iree_host_size_t selection_count = work_plan->selected_benchmark_count;
-  if (benchmark_options->sample_compilation_mode ==
-      IREE_BENCHMARK_LOOM_SAMPLE_COMPILATION_BOTH) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "interleaved comparisons require one sample-compilation mode; use "
-        "--sample-compilation=once or --sample-compilation=per_sample");
-  }
   if (benchmark_options->interleave_mode ==
           IREE_BENCHMARK_LOOM_INTERLEAVE_ABABA &&
       selection_count != 2) {
@@ -270,7 +263,6 @@ iree_benchmark_loom_initialize_dispatch_comparison_candidates(
     candidates[i].selection = selection;
     candidates[i].module = options->module_plan->module;
     candidates[i].work_item_index = logical_sample->work_item_index;
-    candidates[i].sample_compilation = logical_sample->sample_compilation;
     candidates[i].begin_sample = logical_sample->begin_benchmark_sample;
     candidates[i].end_sample = logical_sample->end_benchmark_sample;
     const iree_host_size_t sample_capacity =
@@ -357,8 +349,8 @@ static iree_status_t iree_benchmark_loom_run_comparison_window(
         candidate->selection->benchmark_plan, candidate->selection->case_plan,
         &measurement_policy, options->benchmark_options, options->hal_context,
         &compile_context->hal_sequence,
-        &compile_context->benchmark_materializer, candidate->sample_compilation,
-        candidate->begin_sample, options->host_allocator, &benchmark_result);
+        &compile_context->benchmark_materializer, candidate->begin_sample,
+        options->host_allocator, &benchmark_result);
   } else {
     status = iree_benchmark_loom_run_hal_benchmark_sample(
         options->run, &candidate->selection->identity, options->module_plan,

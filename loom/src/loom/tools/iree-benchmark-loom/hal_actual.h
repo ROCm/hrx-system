@@ -29,10 +29,7 @@ iree_status_t iree_benchmark_loom_hal_actual_provider_initialize(
     iree_string_view_t pipeline, loom_sanitizer_options_t sanitizer,
     const loom_module_t* test_module,
     const loom_testbench_invocation_plan_t* actual_invocation,
-    iree_string_view_t sample_compilation,
     iree_string_view_t artifact_path_suffix,
-    const loom_testbench_case_plan_t* case_plan,
-    iree_host_size_t sample_constant_ordinal, bool has_sample_constant_ordinal,
     const loom_run_compile_report_capture_options_t* compile_report_options,
     const loom_run_candidate_artifact_manifest_options_t*
         artifact_manifest_options,
@@ -49,8 +46,6 @@ iree_status_t iree_benchmark_loom_hal_actual_sequence_initialize(
     iree_string_view_t pipeline, loom_sanitizer_options_t sanitizer,
     const loom_module_t* test_module,
     const loom_testbench_case_plan_t* case_plan,
-    iree_string_view_t sample_compilation,
-    iree_host_size_t sample_constant_ordinal, bool has_sample_constant_ordinal,
     const loom_run_compile_report_capture_options_t* compile_report_options,
     const loom_run_candidate_artifact_manifest_options_t*
         artifact_manifest_options,

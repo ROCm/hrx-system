@@ -97,7 +97,6 @@ python dev.py bazel run \
   loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom \
   --device=amdgpu \
   --measure=dispatch_complete \
-  --sample-compilation=per_sample \
   --iterations=1 \
   --warmup-iterations=0 \
   --batch-size=1 \
@@ -108,8 +107,8 @@ python dev.py bazel run \
 
 The authoring pattern to notice is that correctness policy and benchmark rows
 live beside the source. `func.apply` requests an implementation contract,
-`func.template` providers satisfy those contracts, and per-case parameters can
-become compile-time facts before lowering.
+`func.template` providers satisfy those contracts, and explicit config bindings
+select compile-time choices while case parameters remain runtime values.
 
 The authoring README includes the direct quantized AMDGPU flow for
 `loom-compile` HSACO emission, artifact manifests, compile reports, IR dumps,

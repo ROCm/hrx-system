@@ -75,10 +75,6 @@ iree_status_t iree_benchmark_loom_write_candidate_identity_json(
     const iree_benchmark_loom_candidate_identity_t* candidate,
     loom_json_object_writer_t* object);
 
-// Writes a sample-compilation field when |sample_compilation| is non-empty.
-iree_status_t iree_benchmark_loom_write_sample_compilation_field_json(
-    iree_string_view_t sample_compilation, loom_json_object_writer_t* object);
-
 // Writes sanitizer compiler/runtime policy as a compact JSON object.
 iree_status_t iree_benchmark_loom_write_sanitizer_options_json(
     const loom_sanitizer_options_t* sanitizer, loom_output_stream_t* stream);
@@ -203,7 +199,6 @@ iree_status_t iree_benchmark_loom_append_sample_row(
     iree_host_size_t work_item_index, const loom_module_t* module,
     const loom_testbench_benchmark_plan_t* benchmark_plan,
     const loom_testbench_case_plan_t* case_plan,
-    iree_string_view_t sample_compilation,
     iree_host_size_t benchmark_sample_ordinal,
     iree_host_size_t case_sample_ordinal,
     const loom_testbench_case_sample_result_t* sample_result,
@@ -212,7 +207,6 @@ iree_status_t iree_benchmark_loom_append_sample_row(
 // Appends the initial run row.
 iree_status_t iree_benchmark_loom_append_run_row(
     const iree_benchmark_loom_run_identity_t* run, bool dry_run,
-    iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode,
     const loom_sanitizer_options_t* sanitizer, iree_string_builder_t* output);
 
 // Appends the selected HAL device row once per run.
@@ -230,9 +224,8 @@ iree_status_t iree_benchmark_loom_append_plan_row(
     const loom_testbench_benchmark_plan_t* benchmark_plan,
     const loom_testbench_case_plan_t* case_plan,
     const iree_benchmark_loom_benchmark_policy_t* policy,
-    const iree_benchmark_loom_options_t* options,
-    iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode,
-    iree_allocator_t allocator, iree_string_builder_t* plan_output);
+    const iree_benchmark_loom_options_t* options, iree_allocator_t allocator,
+    iree_string_builder_t* plan_output);
 
 // Writes target, listing, and HAL executable artifacts for a candidate.
 iree_status_t iree_benchmark_loom_write_compiled_artifacts(
@@ -312,7 +305,6 @@ iree_status_t iree_benchmark_loom_append_summary_row(
     iree_host_size_t failure_count, iree_host_size_t failed_benchmark_count,
     iree_host_size_t correctness_sample_count,
     iree_host_size_t correctness_failed_sample_count, bool dry_run,
-    iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode,
     iree_string_builder_t* output);
 
 #ifdef __cplusplus

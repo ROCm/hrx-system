@@ -7,7 +7,8 @@
         "tool": "iree-test-loom",
         "args": [
           "{srcdir}/fp8_encode.loom",
-          "--device=amdgpu"
+          "--device=amdgpu",
+          "--config=fp8_encode.row_capacity=257"
         ]
       },
       "stdout": {

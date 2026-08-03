@@ -48,6 +48,9 @@ iree_executable_test(
     args = [
         "$(location indexed_row_gather_f32.loom)",
         "--dry-run",
+        "--config=indexed_row_gather_f32.row_capacity=5",
+        "--config=indexed_row_gather_f32.column_capacity=4",
+        "--config=indexed_row_gather_f32.source_row_capacity=2",
     ],
     data = [
         "indexed_row_gather_f32.loom",
@@ -62,6 +65,7 @@ iree_executable_test(
     args = [
         "$(location memset_i8.loom)",
         "--dry-run",
+        "--config=memset_i8.element_capacity=1009",
     ],
     data = [
         "memset_i8.loom",
@@ -76,6 +80,7 @@ iree_executable_test(
     args = [
         "$(location mlp_down_projection_residual_bf16.loom)",
         "--dry-run",
+        "--config=mlp_down_projection_residual_bf16.row_capacity=3584",
     ],
     data = [
         "mlp_down_projection_residual_bf16.loom",
@@ -115,9 +120,11 @@ iree_executable_test(
     src = "//loom/src/loom/tools/iree-benchmark-loom",
     args = [
         "$(location indexed_row_gather_f32.loom)",
+        "--config=indexed_row_gather_f32.row_capacity=5",
+        "--config=indexed_row_gather_f32.column_capacity=4",
+        "--config=indexed_row_gather_f32.source_row_capacity=2",
         "--device=amdgpu",
         "--measure=dispatch_complete",
-        "--sample-compilation=per_sample",
         "--iterations=1",
         "--warmup-iterations=0",
         "--batch-size=1",
@@ -142,9 +149,9 @@ iree_executable_test(
     src = "//loom/src/loom/tools/iree-benchmark-loom",
     args = [
         "$(location memset_i8.loom)",
+        "--config=memset_i8.element_capacity=1009",
         "--device=amdgpu",
         "--measure=dispatch_complete",
-        "--sample-compilation=per_sample",
         "--iterations=1",
         "--warmup-iterations=0",
         "--batch-size=1",
@@ -169,9 +176,9 @@ iree_executable_test(
     src = "//loom/src/loom/tools/iree-benchmark-loom",
     args = [
         "$(location mlp_down_projection_residual_bf16.loom)",
+        "--config=mlp_down_projection_residual_bf16.row_capacity=3584",
         "--device=amdgpu",
         "--measure=dispatch_complete",
-        "--sample-compilation=per_sample",
         "--iterations=1",
         "--warmup-iterations=0",
         "--batch-size=1",

@@ -26,9 +26,7 @@ iree_status_t iree_benchmark_loom_write_artifact_bundle_manifest(
     const iree_benchmark_loom_run_identity_t* run,
     const iree_benchmark_loom_hal_context_t* hal_context,
     iree_string_view_t source, iree_string_view_t command_line_json,
-    bool dry_run,
-    iree_benchmark_loom_sample_compilation_mode_t sample_compilation_mode,
-    iree_allocator_t allocator);
+    bool dry_run, iree_allocator_t allocator);
 
 #ifdef __cplusplus
 }  // extern "C"

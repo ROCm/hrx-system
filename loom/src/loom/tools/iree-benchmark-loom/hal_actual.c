@@ -18,17 +18,13 @@ iree_status_t iree_benchmark_loom_hal_actual_provider_initialize(
     iree_string_view_t pipeline, loom_sanitizer_options_t sanitizer,
     const loom_module_t* test_module,
     const loom_testbench_invocation_plan_t* actual_invocation,
-    iree_string_view_t sample_compilation,
     iree_string_view_t artifact_path_suffix,
-    const loom_testbench_case_plan_t* case_plan,
-    iree_host_size_t sample_constant_ordinal, bool has_sample_constant_ordinal,
     const loom_run_compile_report_capture_options_t* compile_report_options,
     const loom_run_candidate_artifact_manifest_options_t*
         artifact_manifest_options,
     iree_benchmark_loom_hal_actual_provider_t* out_provider) {
   *out_provider = (iree_benchmark_loom_hal_actual_provider_t){
       .context = context,
-      .sample_compilation = sample_compilation,
       .artifact_path_suffix = artifact_path_suffix,
   };
   iree_allocator_t host_allocator = context->execution.host_allocator;
@@ -64,9 +60,6 @@ iree_status_t iree_benchmark_loom_hal_actual_provider_initialize(
         .config_set = context->config_set,
         .test_module = test_module,
         .actual_invocation = actual_invocation,
-        .case_plan = case_plan,
-        .sample_constant_ordinal = sample_constant_ordinal,
-        .has_sample_constant_ordinal = has_sample_constant_ordinal,
         .diagnostic_sink =
             (loom_diagnostic_sink_t){
                 .fn = iree_benchmark_loom_diagnostic_capture_sink,
@@ -117,8 +110,6 @@ iree_status_t iree_benchmark_loom_hal_actual_sequence_initialize(
     iree_string_view_t pipeline, loom_sanitizer_options_t sanitizer,
     const loom_module_t* test_module,
     const loom_testbench_case_plan_t* case_plan,
-    iree_string_view_t sample_compilation,
-    iree_host_size_t sample_constant_ordinal, bool has_sample_constant_ordinal,
     const loom_run_compile_report_capture_options_t* compile_report_options,
     const loom_run_candidate_artifact_manifest_options_t*
         artifact_manifest_options,
@@ -167,10 +158,8 @@ iree_status_t iree_benchmark_loom_hal_actual_sequence_initialize(
     if (iree_status_is_ok(status)) {
       status = iree_benchmark_loom_hal_actual_provider_initialize(
           context, session, filename, source, pipeline, sanitizer, test_module,
-          invocation, sample_compilation, artifact_path_suffix, case_plan,
-          sample_constant_ordinal, has_sample_constant_ordinal,
-          compile_report_options, artifact_manifest_options,
-          &out_sequence->providers[provider_index]);
+          invocation, artifact_path_suffix, compile_report_options,
+          artifact_manifest_options, &out_sequence->providers[provider_index]);
     }
     if (iree_status_is_ok(status)) {
       out_sequence->provider_count = ++provider_index;
@@ -231,12 +220,6 @@ void iree_benchmark_loom_benchmark_result_set_compile_rejection(
   out_result->diagnostic_remark_count = provider->diagnostics.remark_count;
   out_result->diagnostic_json =
       iree_benchmark_loom_diagnostic_capture_json(&provider->diagnostics);
-  out_result->sample_compilation = provider->sample_compilation;
-  if (provider->execution.has_sample_constant_ordinal) {
-    out_result->has_sample_ordinal = true;
-    out_result->sample_ordinal = provider->execution.sample_constant_ordinal;
-    out_result->samples_per_iteration = 1;
-  }
   if (provider->execution.compile_report_available) {
     out_result->compile_report_capture = &provider->compile_report_capture;
   }
