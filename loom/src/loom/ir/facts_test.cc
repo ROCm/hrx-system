@@ -403,6 +403,24 @@ TEST(FactsFitBitCount, UnsignedRange) {
       loom_value_facts_fit_unsigned_bit_count(loom_value_facts_unknown(), 32));
 }
 
+TEST(FactsMaximum, NonNegativeFiniteRange) {
+  int64_t maximum = -1;
+  EXPECT_TRUE(loom_value_facts_as_non_negative_i64_maximum(
+      loom_value_facts_make(0, 8192, 1), &maximum));
+  EXPECT_EQ(maximum, 8192);
+  EXPECT_TRUE(loom_value_facts_as_non_negative_i64_maximum(
+      loom_value_facts_exact_i64(0), &maximum));
+  EXPECT_EQ(maximum, 0);
+}
+
+TEST(FactsMaximum, RejectsNegativeOrUnboundedRange) {
+  int64_t maximum = -1;
+  EXPECT_FALSE(loom_value_facts_as_non_negative_i64_maximum(
+      loom_value_facts_make(-1, 8192, 1), &maximum));
+  EXPECT_FALSE(loom_value_facts_as_non_negative_i64_maximum(
+      loom_value_facts_make(0, INT64_MAX, 1), &maximum));
+}
+
 //===----------------------------------------------------------------------===//
 // Equality
 //===----------------------------------------------------------------------===//

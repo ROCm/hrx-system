@@ -217,30 +217,8 @@ static iree_status_t loom_check_emit_parse_low_allocation_option(
                             "duplicate %.*s option 'diagnostics'",
                             (int)target_name.size, target_name.data);
   }
-  if (iree_string_view_equal(value, IREE_SV("none"))) {
-    request->low_allocation_diagnostic_flags = 0;
-  } else if (iree_string_view_equal(value, IREE_SV("predicted-spills"))) {
-    request->low_allocation_diagnostic_flags =
-        LOOM_LOW_ALLOCATION_DIAGNOSTIC_PREDICTED_SPILLS;
-  } else if (iree_string_view_equal(value, IREE_SV("copy-decisions"))) {
-    request->low_allocation_diagnostic_flags =
-        LOOM_LOW_ALLOCATION_DIAGNOSTIC_COPY_DECISIONS;
-  } else if (iree_string_view_equal(value, IREE_SV("placement-decisions"))) {
-    request->low_allocation_diagnostic_flags =
-        LOOM_LOW_ALLOCATION_DIAGNOSTIC_PLACEMENT_DECISIONS;
-  } else if (iree_string_view_equal(value, IREE_SV("all"))) {
-    request->low_allocation_diagnostic_flags =
-        LOOM_LOW_ALLOCATION_DIAGNOSTIC_PREDICTED_SPILLS |
-        LOOM_LOW_ALLOCATION_DIAGNOSTIC_COPY_DECISIONS |
-        LOOM_LOW_ALLOCATION_DIAGNOSTIC_PLACEMENT_DECISIONS;
-  } else {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "%.*s option 'diagnostics' expected 'none' or "
-        "'predicted-spills', 'copy-decisions', 'placement-decisions', or "
-        "'all', got '%.*s'",
-        (int)target_name.size, target_name.data, (int)value.size, value.data);
-  }
+  IREE_RETURN_IF_ERROR(loom_check_low_emit_parse_allocation_diagnostics(
+      value, target_name, &request->low_allocation_diagnostic_flags));
   request->has_low_allocation_diagnostics_option = true;
   return iree_ok_status();
 }

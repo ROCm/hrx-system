@@ -2439,6 +2439,14 @@ static iree_status_t loom_scf_unroll_build_exact_scheduled_main_upper(
 
   const uint32_t main_iteration_count =
       (trip_count->count / unroll_factor) * unroll_factor;
+  // Preserve independent upper-bound facts when all ranged-lower iterations
+  // are tiled; lower + main_span carries weaker facts for the same loop.
+  if (main_iteration_count == trip_count->count &&
+      trip_count->lower_kind == LOOM_SCF_UNROLL_LOWER_BOUND_DYNAMIC) {
+    *out_main_upper = loom_scf_for_upper_bound(op);
+    return iree_ok_status();
+  }
+
   int64_t main_span = 0;
   if (!iree_checked_mul_i64((int64_t)main_iteration_count, trip_count->step,
                             &main_span)) {

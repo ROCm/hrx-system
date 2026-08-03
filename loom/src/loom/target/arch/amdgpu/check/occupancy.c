@@ -204,7 +204,8 @@ static iree_status_t loom_amdgpu_occupancy_check_emit_provider_execute(
       request, options.function_symbol_name, &residency_model));
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
       request, options.function_symbol_name, options.schedule_strategy,
-      /*schedule_diagnostic_flags=*/0, options.allocation_budgets,
+      /*schedule_diagnostic_flags=*/0,
+      /*allocation_diagnostic_flags=*/0, options.allocation_budgets,
       options.allocation_budget_count, options.allocation_fixed_value_specs,
       options.allocation_fixed_value_spec_count, residency_model,
       loom_low_schedule_pair_affinity_list_empty(),

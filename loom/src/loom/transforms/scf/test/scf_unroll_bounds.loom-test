@@ -59,3 +59,57 @@ func.def @dynamic_interleaved_tile_indices_remain_in_bounds(%payload: buffer, %b
 ^_bb6:
   func.return
 }
+
+// ====
+
+// A ranged lane-derived lower bound has the same exact trip count at both
+// endpoints. Strip-mining must preserve enough information to prove all four
+// cloned vector origins, including the final packet at channel 2044.
+func.def @ranged_lower_full_span_vector_origins(%payload: buffer, %base: offset, %lane0: index) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %four = index.constant 4 : index
+  %channel_start = index.mul %lane, %four : index
+  %channel_end = index.constant 2048 : index
+  %channel_step = index.constant 128 : index
+  %view = buffer.view %payload[%base] : buffer -> view<2048xf32, #dense>
+  scf.for %channel = [%channel_start to %channel_end step %channel_step] unroll(%four) schedule(interleaved) {
+    %values = vector.load %view[%channel] : view<2048xf32, #dense> -> vector<4xf32>
+    test.use %values : vector<4xf32>
+  }
+  func.return
+}
+
+// ----
+func.def @ranged_lower_full_span_vector_origins(%payload: buffer, %base: offset, %lane0: index) {
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %four = index.constant 4 : index
+  %channel_start = index.mul %lane, %four : index
+  %channel_end = index.constant 2048 : index
+  %channel_step = index.constant 128 : index
+  %view = buffer.view %payload[%base] : buffer -> view<2048xf32, #dense>
+  %11 = index.constant 512 : index
+  cfg.br ^_bb1(%channel_start: index)
+^_bb1(%23: index):
+  %25 = index.cmp slt, %23, %channel_end : index
+  cfg.cond_br %25, ^_bb2, ^_bb3
+^_bb2:
+  %channel = index.assume %23 [range(%23, 0, 1660), mul(%23, 4), ge(%23, %channel_start)] : index
+  %13 = index.constant 128 : index
+  %channel_128 = index.add %channel, %13 : index
+  %15 = index.constant 256 : index
+  %channel_256 = index.add %channel, %15 : index
+  %17 = index.constant 384 : index
+  %channel_384 = index.add %channel, %17 : index
+  %values = vector.load %view[%channel] : view<2048xf32, #dense> -> vector<4xf32>
+  test.use %values : vector<4xf32>
+  %values_1 = vector.load %view[%channel_128] : view<2048xf32, #dense> -> vector<4xf32>
+  test.use %values_1 : vector<4xf32>
+  %values_2 = vector.load %view[%channel_256] : view<2048xf32, #dense> -> vector<4xf32>
+  test.use %values_2 : vector<4xf32>
+  %values_3 = vector.load %view[%channel_384] : view<2048xf32, #dense> -> vector<4xf32>
+  test.use %values_3 : vector<4xf32>
+  %26 = index.add %channel, %11 : index
+  cfg.br ^_bb1(%26: index)
+^_bb3:
+  func.return
+}

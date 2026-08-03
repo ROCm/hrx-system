@@ -49,6 +49,11 @@ iree_status_t loom_check_low_emit_parse_schedule_diagnostics(
     iree_string_view_t value, iree_string_view_t option_scope,
     loom_low_schedule_diagnostic_flags_t* out_flags);
 
+// Parses a shared low emit allocation-diagnostics value.
+iree_status_t loom_check_low_emit_parse_allocation_diagnostics(
+    iree_string_view_t value, iree_string_view_t option_scope,
+    loom_low_allocation_diagnostic_flags_t* out_flags);
+
 // Parses one <register-class>=<units> allocation budget token.
 iree_status_t loom_check_low_emit_parse_allocation_budget(
     iree_string_view_t token, iree_string_view_t option_scope,
@@ -96,6 +101,7 @@ iree_status_t loom_check_low_emit_packetize_function(
     iree_string_view_t function_symbol_name,
     loom_low_schedule_strategy_t schedule_strategy,
     loom_low_schedule_diagnostic_flags_t schedule_diagnostic_flags,
+    loom_low_allocation_diagnostic_flags_t allocation_diagnostic_flags,
     const loom_low_allocation_budget_t* allocation_budgets,
     iree_host_size_t allocation_budget_count,
     const loom_check_low_emit_fixed_value_spec_t* allocation_fixed_specs,
