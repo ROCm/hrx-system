@@ -1162,39 +1162,10 @@ TEST_F(HostQueueCommandBufferTest, HostcallAddressIsBakedIntoPm4Dispatches) {
 }
 
 TEST_F(HostQueueCommandBufferTest,
-       AutoCommandBufferModeUsesAqlWithoutUploadRing) {
+       AutoCommandBufferModeSelectsPm4WhenAvailable) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   options.command_buffer_mode = IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_AUTO;
-  options.preallocate_pools = 0;
-
-  TestLogicalDevice test_device;
-  IREE_ASSERT_OK(
-      test_device.Initialize(&options, &libhsa_, &topology_, host_allocator_));
-
-  Ref<iree_hal_command_buffer_t> command_buffer;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_DISPATCH, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/0, command_buffer.out()));
-  EXPECT_TRUE(iree_hal_amdgpu_aql_command_buffer_isa(command_buffer));
-  EXPECT_FALSE(iree_hal_amdgpu_pm4_command_buffer_isa(command_buffer));
-
-  Ref<iree_hal_command_buffer_t> transfer_command_buffer;
-  IREE_ASSERT_OK(iree_hal_command_buffer_create(
-      test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
-      /*binding_capacity=*/0, transfer_command_buffer.out()));
-  EXPECT_TRUE(iree_hal_amdgpu_aql_command_buffer_isa(transfer_command_buffer));
-  EXPECT_FALSE(iree_hal_amdgpu_pm4_command_buffer_isa(transfer_command_buffer));
-}
-
-TEST_F(HostQueueCommandBufferTest,
-       AutoCommandBufferModeUsesPm4WhenFullySupported) {
-  iree_hal_amdgpu_logical_device_options_t options;
-  iree_hal_amdgpu_logical_device_options_initialize(&options);
-  options.command_buffer_mode = IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_AUTO;
-  options.host_queues.upload_capacity = 64 * 1024;
   options.preallocate_pools = 0;
 
   TestLogicalDevice test_device;
@@ -1216,6 +1187,14 @@ TEST_F(HostQueueCommandBufferTest,
             iree_hal_amdgpu_pm4_command_buffer_isa(command_buffer));
   EXPECT_NE(pm4_supported,
             iree_hal_amdgpu_aql_command_buffer_isa(command_buffer));
+
+  Ref<iree_hal_command_buffer_t> transfer_command_buffer;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      test_device.base_device(), IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, IREE_HAL_QUEUE_AFFINITY_ANY,
+      /*binding_capacity=*/0, transfer_command_buffer.out()));
+  EXPECT_TRUE(iree_hal_amdgpu_aql_command_buffer_isa(transfer_command_buffer));
+  EXPECT_FALSE(iree_hal_amdgpu_pm4_command_buffer_isa(transfer_command_buffer));
 }
 
 TEST_F(HostQueueCommandBufferTest,
@@ -1223,7 +1202,6 @@ TEST_F(HostQueueCommandBufferTest,
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   options.command_buffer_mode = IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_AUTO;
-  options.host_queues.upload_capacity = 64 * 1024;
   options.preallocate_pools = 0;
 
   TestLogicalDevice test_device;
@@ -1377,11 +1355,11 @@ TEST_F(HostQueueCommandBufferTest,
   iree_hal_command_buffer_release(command_buffer);
 }
 
-TEST_F(HostQueueCommandBufferTest, Pm4MixedDynamicDispatchUsesGpuFixup) {
+TEST_F(HostQueueCommandBufferTest,
+       AutoMixedDynamicDispatchUsesDefaultUploadRing) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
-  options.command_buffer_mode = IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4;
-  options.host_queues.upload_capacity = 64 * 1024;
+  options.command_buffer_mode = IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_AUTO;
   options.preallocate_pools = 0;
 
   TestLogicalDevice test_device;
@@ -1499,11 +1477,10 @@ TEST_F(HostQueueCommandBufferTest, Pm4MixedDynamicDispatchUsesGpuFixup) {
   iree_hal_executable_release(executable);
 }
 
-TEST_F(HostQueueCommandBufferTest, Pm4DynamicDispatchUsesBindingTableSlots) {
+TEST_F(HostQueueCommandBufferTest, Pm4DynamicDispatchUsesDefaultUploadRing) {
   iree_hal_amdgpu_logical_device_options_t options;
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   options.command_buffer_mode = IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4;
-  options.host_queues.upload_capacity = 64 * 1024;
   options.preallocate_pools = 0;
 
   TestLogicalDevice test_device;

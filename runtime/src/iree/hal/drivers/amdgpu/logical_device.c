@@ -160,6 +160,10 @@ iree_hal_amdgpu_logical_device_query_device_memory_capacity(
 // much memory).
 #define IREE_HAL_AMDGPU_LOGICAL_DEVICE_MIN_LARGE_HOST_BLOCK_SIZE (64 * 1024)
 
+// Per-queue device-visible control upload ring capacity in bytes provisioned
+// when PM4 command buffers may require dynamic binding-table fixups.
+#define IREE_HAL_AMDGPU_LOGICAL_DEVICE_PM4_UPLOAD_CAPACITY_DEFAULT (64 * 1024)
+
 IREE_API_EXPORT void iree_hal_amdgpu_logical_device_options_initialize(
     iree_hal_amdgpu_logical_device_options_t* out_options) {
   IREE_ASSERT_ARGUMENT(out_options);
@@ -2010,6 +2014,18 @@ iree_status_t iree_hal_amdgpu_logical_device_create(
   iree_hal_amdgpu_logical_device_options_t resolved_options = *options;
   iree_hal_amdgpu_logical_device_options_apply_create_params(&resolved_options,
                                                              create_params);
+  // PM4 and automatic modes promise reusable dispatch command buffers,
+  // including dynamic binding-table fixups. Provision their queue-control
+  // storage here so a valid recording cannot fail only when first submitted.
+  // Applications requiring AQL without this storage select AQL mode directly.
+  if ((resolved_options.command_buffer_mode ==
+           IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_PM4 ||
+       resolved_options.command_buffer_mode ==
+           IREE_HAL_AMDGPU_COMMAND_BUFFER_MODE_AUTO) &&
+      resolved_options.host_queues.upload_capacity == 0) {
+    resolved_options.host_queues.upload_capacity =
+        IREE_HAL_AMDGPU_LOGICAL_DEVICE_PM4_UPLOAD_CAPACITY_DEFAULT;
+  }
 
   // Verify the topology is valid for a logical device.
   // This may have already been performed by the caller but doing it here
