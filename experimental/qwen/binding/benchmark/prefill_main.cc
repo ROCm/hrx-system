@@ -23,7 +23,6 @@
 
 #define QWEN_PREFILL_TOKEN_COUNT 512
 #define QWEN_PREFILL_EXPECTED_TOKEN 264
-#define QWEN_FIRST_DECODE_CONTEXT_COUNT (QWEN_PREFILL_TOKEN_COUNT + 1)
 
 IREE_FLAG(string, tokens, "",
           "Raw prefill token IDs: exactly 512 little-endian I32 values.");
@@ -295,9 +294,12 @@ static iree_status_t QwenBenchmarkEnvironmentInitialize(
 
   const bool decode_is_enabled =
       FLAG_expected_decode_token != IREE_TOKENIZER_TOKEN_ID_INVALID;
+  const iree_host_size_t decode_context_class =
+      decode_is_enabled
+          ? qwen_program_decode_context_class(QWEN_PREFILL_TOKEN_COUNT)
+          : 0;
   const iree_host_size_t request_context_capacity =
-      decode_is_enabled ? QWEN_FIRST_DECODE_CONTEXT_COUNT
-                        : QWEN_PREFILL_TOKEN_COUNT;
+      decode_is_enabled ? decode_context_class : QWEN_PREFILL_TOKEN_COUNT;
 
   // Host-side program preparation overlaps the asynchronous model gather.
   if (iree_status_is_ok(status)) {
@@ -321,7 +323,7 @@ static iree_status_t QwenBenchmarkEnvironmentInitialize(
     program_options.kind = QWEN_PROGRAM_KIND_DECODE;
     program_options.layer_index = 0;
     program_options.token_count = 1;
-    program_options.context_count = QWEN_FIRST_DECODE_CONTEXT_COUNT;
+    program_options.context_count = decode_context_class;
     program_options.token_capacity = QWEN_PREFILL_TOKEN_COUNT;
     program_options.context_capacity = request_context_capacity;
     program_options.command_buffer_mode =

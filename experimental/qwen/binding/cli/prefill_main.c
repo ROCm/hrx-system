@@ -23,7 +23,6 @@
 #define QWEN_PREFILL_TOKEN_COUNT 512
 #define QWEN_PREFILL_TOKEN_BYTE_LENGTH \
   (QWEN_PREFILL_TOKEN_COUNT * sizeof(iree_tokenizer_token_id_t))
-#define QWEN_FIRST_DECODE_CONTEXT_COUNT (QWEN_PREFILL_TOKEN_COUNT + 1)
 
 IREE_FLAG(string, tokens, "",
           "Raw token IDs: exactly 512 little-endian I32 values.");
@@ -140,9 +139,12 @@ static iree_status_t qwen_prefill_cli_run(void) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "--expected_decode_token requires --decode_one");
   }
+  const iree_host_size_t decode_context_class =
+      FLAG_decode_one
+          ? qwen_program_decode_context_class(QWEN_PREFILL_TOKEN_COUNT)
+          : 0;
   const iree_host_size_t request_context_capacity =
-      FLAG_decode_one ? QWEN_FIRST_DECODE_CONTEXT_COUNT
-                      : QWEN_PREFILL_TOKEN_COUNT;
+      FLAG_decode_one ? decode_context_class : QWEN_PREFILL_TOKEN_COUNT;
 
   iree_tokenizer_token_id_t token_ids[QWEN_PREFILL_TOKEN_COUNT];
   iree_io_file_contents_t* token_contents = NULL;
@@ -210,7 +212,7 @@ static iree_status_t qwen_prefill_cli_run(void) {
     qwen_program_options_initialize(&program_options);
     program_options.kind = QWEN_PROGRAM_KIND_DECODE;
     program_options.token_count = 1;
-    program_options.context_count = QWEN_FIRST_DECODE_CONTEXT_COUNT;
+    program_options.context_count = decode_context_class;
     program_options.token_capacity = QWEN_PREFILL_TOKEN_COUNT;
     program_options.context_capacity = request_context_capacity;
     program_options.command_buffer_mode = runtime_context.command_buffer_mode;

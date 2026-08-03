@@ -35,6 +35,16 @@ typedef enum qwen_program_kind_e {
   QWEN_PROGRAM_KIND_DECODE = 3,
 } qwen_program_kind_t;
 
+// Number of active context positions covered by one reusable decode program.
+#define QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE 64
+
+// Maximum context supported by the cooperative decode-attention adapter.
+#define QWEN_PROGRAM_DECODE_CONTEXT_LIMIT 2048
+
+// Number of reusable decode program classes spanning the supported context.
+#define QWEN_PROGRAM_DECODE_CONTEXT_CLASS_COUNT \
+  (QWEN_PROGRAM_DECODE_CONTEXT_LIMIT / QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE)
+
 // Options controlling program specialization and command recording.
 typedef struct qwen_program_options_t {
   // Size of this structure in bytes.
@@ -62,6 +72,10 @@ typedef struct qwen_program_options_t {
 // Initializes |out_options| with conservative layer-program defaults.
 IREE_API_EXPORT void qwen_program_options_initialize(
     qwen_program_options_t* out_options);
+
+// Returns the decode class upper bound containing |context_base|.
+IREE_API_EXPORT iree_host_size_t
+qwen_program_decode_context_class(iree_host_size_t context_base);
 
 // Prepares a reusable program against |model|.
 //

@@ -20,8 +20,6 @@
 #define QWEN_PROGRAM_INITIAL_SEMAPHORE_CAPACITY 8
 #define QWEN_PROGRAM_QKV_WMMA_MIN_TOKEN_COUNT 128
 #define QWEN_PROGRAM_FLASH_ATTENTION_KEY_TILE_TOKEN_COUNT 64
-#define QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE 64
-#define QWEN_PROGRAM_DECODE_CONTEXT_LIMIT 2048
 
 typedef enum qwen_program_binding_slot_e {
   // Complete resident model parameter allocation.
@@ -2737,6 +2735,12 @@ void qwen_program_options_initialize(qwen_program_options_t* out_options) {
       .request_flags = QWEN_REQUEST_FLAG_NONE,
       .command_buffer_mode = IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
   };
+}
+
+iree_host_size_t qwen_program_decode_context_class(
+    iree_host_size_t context_base) {
+  return (context_base / QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE + 1) *
+         QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE;
 }
 
 static iree_status_t qwen_program_prepare_describe(
