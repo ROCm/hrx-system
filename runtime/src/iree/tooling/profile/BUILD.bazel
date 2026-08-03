@@ -305,6 +305,7 @@ iree_runtime_cc_binary(
     srcs = ["test_fixture_generator.c"],
     deps = [
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/utils:profile_file",
         "//runtime/src/iree/io:file_handle",

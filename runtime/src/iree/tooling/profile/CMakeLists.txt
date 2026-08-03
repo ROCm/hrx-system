@@ -352,6 +352,7 @@ iree_cc_binary(
     "test_fixture_generator.c"
   DEPS
     iree::base
+    iree::base::tooling::flags
     iree::hal
     iree::hal::utils::profile_file
     iree::io::file_handle

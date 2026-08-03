@@ -98,7 +98,7 @@ class IreeProfileCliTest(unittest.TestCase):
     def _create_profile(self, directory, *fixture_flags):
         profile_path = os.path.join(directory, "smoke.ireeprof")
         _run_checked(
-            [self.fixture_generator, *fixture_flags, profile_path],
+            [self.fixture_generator, *fixture_flags, f"--output={profile_path}"],
         )
         return profile_path
 
@@ -221,7 +221,7 @@ class IreeProfileCliTest(unittest.TestCase):
 
     def test_unaligned_clock_retains_device_durations(self):
         with tempfile.TemporaryDirectory() as directory:
-            profile_path = self._create_profile(directory, "--unaligned-device-clock")
+            profile_path = self._create_profile(directory, "--unaligned_device_clock")
             summary_rows = self._profile_jsonl(profile_path, "summary")
             dispatch_rows = self._profile_jsonl(
                 profile_path, "dispatch", "--dispatch_events"
@@ -295,7 +295,7 @@ class IreeProfileCliTest(unittest.TestCase):
 
     def test_explain_uses_host_dispatch_spans_without_device_dispatches(self):
         with tempfile.TemporaryDirectory() as directory:
-            profile_path = self._create_profile(directory, "--omit-dispatch-events")
+            profile_path = self._create_profile(directory, "--omit_dispatch_events")
             rows = self._profile_jsonl(profile_path, "explain")
 
         summary = _find_row(rows, "explain_summary")

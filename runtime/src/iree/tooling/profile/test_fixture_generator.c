@@ -6,12 +6,23 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "iree/base/api.h"
+#include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
 #include "iree/hal/utils/profile_file.h"
 #include "iree/io/file_handle.h"
+
+IREE_FLAG(string, output, "", "Output .ireeprof file path.");
+IREE_FLAG(bool, omit_dispatch_events, false,
+          "Omits device dispatch events from the generated profile.");
+IREE_FLAG(bool, unaligned_device_clock, false,
+          "Marks device clock samples as unaligned with the host clock.");
+
+static const char kUsage[] =
+    "Generates deterministic profile fixtures for iree-profile tests.\n"
+    "\n"
+    "$ test_fixture_generator --output=smoke.ireeprof [options]\n";
 
 static const uint64_t kSmokeSessionId = 1;
 static const uint32_t kSmokePhysicalDevice = 0;
@@ -511,26 +522,23 @@ static iree_status_t write_smoke_profile(iree_string_view_t path,
 }
 
 int main(int argc, char** argv) {
-  bool include_dispatch_events = true;
-  bool unaligned_device_clock = false;
-  int output_path_argument = 1;
-  if (argc == 3 && strcmp(argv[1], "--omit-dispatch-events") == 0) {
-    include_dispatch_events = false;
-    output_path_argument = 2;
-  } else if (argc == 3 && strcmp(argv[1], "--unaligned-device-clock") == 0) {
-    unaligned_device_clock = true;
-    output_path_argument = 2;
-  } else if (argc != 2) {
-    fprintf(stderr,
-            "usage: %s [--omit-dispatch-events|--unaligned-device-clock] "
-            "OUTPUT.ireeprof\n",
-            argv[0]);
-    return EXIT_FAILURE;
+  iree_flags_set_usage("test_fixture_generator", kUsage);
+  iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
+
+  iree_status_t status = iree_ok_status();
+  if (argc != 1) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "expected no positional arguments");
+  } else if (!FLAG_output[0]) {
+    status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "--output is required");
   }
 
-  iree_status_t status =
-      write_smoke_profile(iree_make_cstring_view(argv[output_path_argument]),
-                          include_dispatch_events, unaligned_device_clock);
+  if (iree_status_is_ok(status)) {
+    status = write_smoke_profile(iree_make_cstring_view(FLAG_output),
+                                 !FLAG_omit_dispatch_events,
+                                 FLAG_unaligned_device_clock);
+  }
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);
