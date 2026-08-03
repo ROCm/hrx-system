@@ -115,6 +115,18 @@ hrx_cc_shared_library(
 )
 
 hrx_cc_test(
+    name = "graph_buffer_test",
+    srcs = ["graph_buffer_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "pool_test",
     srcs = ["pool_test.cc"],
     deps = [

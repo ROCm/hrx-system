@@ -15148,7 +15148,7 @@ static hipError_t iree_hip_graph_add_staged_peer_memcpy_node(
     }
 
     iree_hal_streaming_graph_node_t* copy_node = NULL;
-    status = iree_hal_streaming_graph_add_memcpy_node_from_refs(
+    status = iree_hal_streaming_graph_add_copy_buffer_node(
         stream_graph, deps, numDependencies, staging_ref, src_ref, size,
         &copy_node);
     if (!iree_status_is_ok(status)) {
@@ -15227,7 +15227,7 @@ static hipError_t iree_hip_graph_add_staged_peer_memcpy_node(
     callback_node->attrs.host.user_data_size = sizeof(*callback_data);
 
     iree_hal_streaming_graph_node_t* copy_node = NULL;
-    status = iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
+    status = iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
         stream_graph, deps, numDependencies, callback_node,
         (iree_hal_streaming_deviceptr_t)dst, staging->device_ptr, size,
         &copy_node);
@@ -15634,7 +15634,7 @@ HIPAPI hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode,
     callback_node->attrs.host.user_data_size = sizeof(*callback_data);
 
     iree_hal_streaming_graph_node_t* node = NULL;
-    status = iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
+    status = iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
         stream_graph, deps, numDependencies, callback_node,
         (iree_hal_streaming_deviceptr_t)dst, staging->device_ptr, size, &node);
     if (!iree_status_is_ok(status)) {
@@ -15757,7 +15757,7 @@ HIPAPI hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode,
     }
 
     iree_hal_streaming_graph_node_t* copy_node = NULL;
-    status = iree_hal_streaming_graph_add_memcpy_node_from_refs(
+    status = iree_hal_streaming_graph_add_copy_buffer_node(
         stream_graph, deps, numDependencies, dst_ref, src_ref, size,
         &copy_node);
     if (!iree_status_is_ok(status)) {
@@ -15811,7 +15811,7 @@ HIPAPI hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode,
   }
 
   iree_hal_streaming_graph_node_t* node = NULL;
-  status = iree_hal_streaming_graph_add_memcpy_node_from_refs(
+  status = iree_hal_streaming_graph_add_copy_buffer_node(
       stream_graph, deps, numDependencies, dst_ref, src_ref, size, &node);
   if (!iree_status_is_ok(status)) {
     iree_status_ignore(status);
@@ -15940,7 +15940,7 @@ HIPAPI hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode,
       HIP_RETURN_ERROR(peer_result);
     }
 
-    iree_status_t status = iree_hal_streaming_graph_add_memcpy_node(
+    iree_status_t status = iree_hal_streaming_graph_add_copy_ptr_node(
         stream_graph, deps, numDependencies,
         (iree_hal_streaming_deviceptr_t)dst,
         (iree_hal_streaming_deviceptr_t)src, count, &node);
@@ -15988,7 +15988,7 @@ HIPAPI hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode,
 
     HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
         z0,
-        iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
+        iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
             stream_graph, deps, numDependencies, callback_node,
             (iree_hal_streaming_deviceptr_t)dst, staging->device_ptr, count,
             &node),
@@ -16008,7 +16008,7 @@ HIPAPI hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode,
     iree_hal_streaming_graph_node_t* copy_node = NULL;
     HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
         z0,
-        iree_hal_streaming_graph_add_memcpy_node(
+        iree_hal_streaming_graph_add_copy_ptr_node(
             stream_graph, deps, numDependencies, staging->device_ptr,
             (iree_hal_streaming_deviceptr_t)src, count, &copy_node),
         hipErrorInvalidValue);
@@ -16201,7 +16201,7 @@ HIPAPI hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode,
 
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
       z0,
-      iree_hal_streaming_graph_add_memset_node(
+      iree_hal_streaming_graph_add_fill_ptr_node(
           stream_graph, deps, numDependencies,
           (iree_hal_streaming_deviceptr_t)params->dst, params->value,
           params->elementSize, memset_count, &node),

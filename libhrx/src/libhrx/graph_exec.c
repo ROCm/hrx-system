@@ -243,6 +243,11 @@ static iree_status_t hrx_graph_record_partition(
             &node->attrs.memcpy;
         status = iree_hal_command_buffer_copy_buffer(
             command_buffer, attrs->src_ref, attrs->dst_ref, attrs->flags);
+        if (iree_status_is_ok(status)) {
+          void* resources[] = {attrs->src_ref.buffer, attrs->dst_ref.buffer};
+          status = iree_hal_resource_set_insert(
+              exec->resource_set, IREE_ARRAYSIZE(resources), resources);
+        }
         break;
       }
       case HRX_GRAPH_NODE_TYPE_INTERNAL_MEMSET: {
@@ -251,6 +256,10 @@ static iree_status_t hrx_graph_record_partition(
         status = iree_hal_command_buffer_fill_buffer(
             command_buffer, attrs->dst_ref, &attrs->pattern,
             attrs->pattern_size, attrs->flags);
+        if (iree_status_is_ok(status)) {
+          status = iree_hal_resource_set_insert(exec->resource_set, 1,
+                                                &attrs->dst_ref.buffer);
+        }
         break;
       }
       default: {

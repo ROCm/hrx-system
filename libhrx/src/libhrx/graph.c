@@ -288,13 +288,156 @@ hrx_status_t hrx_graph_add_kernel_node(
   return hrx_status_from_iree(status);
 }
 
-hrx_status_t hrx_graph_add_memcpy_node(
+static hrx_status_t hrx_graph_validate_buffer_ref(hrx_graph_t graph,
+                                                  hrx_buffer_ref_t ref,
+                                                  const char* name) {
+  if (!ref.buffer) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, name);
+  }
+  if (ref.buffer->device != graph->device) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "graph buffer belongs to another device");
+  }
+  if (ref.length == 0 || ref.offset > ref.buffer->size ||
+      ref.length > ref.buffer->size - ref.offset) {
+    return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                           "graph buffer reference is out of range");
+  }
+  return hrx_ok_status();
+}
+
+static hrx_status_t hrx_graph_add_copy_buffer_node_internal(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    const hrx_graph_memcpy_node_attrs_t* attrs, hrx_graph_node_t* out_node) {
+    hrx_buffer_ref_t src, hrx_buffer_ref_t dst, hrx_graph_node_t* out_node) {
+  hrx_graph_node_s* node = NULL;
+  iree_status_t allocation_status = hrx_graph_allocate_node(
+      graph->arena_allocator, dep_count, 0, &node, NULL);
+  if (!iree_status_is_ok(allocation_status)) {
+    return hrx_status_from_iree(allocation_status);
+  }
+
+  node->type = HRX_GRAPH_NODE_TYPE_INTERNAL_MEMCPY;
+  node->dependency_count = dep_count;
+  if (dep_count > 0) {
+    memcpy(node->dependencies, deps, dep_count * sizeof(*deps));
+  }
+
+  hrx_graph_memcpy_node_attrs_internal_t* m = &node->attrs.memcpy;
+  m->dst_ref = (iree_hal_buffer_ref_t){
+      .buffer = dst.buffer->hal_buffer,
+      .offset = (iree_device_size_t)dst.offset,
+      .length = (iree_device_size_t)dst.length,
+  };
+  m->src_ref = (iree_hal_buffer_ref_t){
+      .buffer = src.buffer->hal_buffer,
+      .offset = (iree_device_size_t)src.offset,
+      .length = (iree_device_size_t)src.length,
+  };
+  m->size = src.length;
+  m->flags = 0;
+
+  iree_status_t status = hrx_graph_add_node_internal(graph, node);
+  if (iree_status_is_ok(status) && out_node) {
+    *out_node = node;
+  }
+  return hrx_status_from_iree(status);
+}
+
+static hrx_status_t hrx_graph_add_fill_buffer_node_internal(
+    hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
+    hrx_buffer_ref_t dst, uint32_t pattern, size_t pattern_size,
+    hrx_graph_node_t* out_node) {
+  hrx_graph_node_s* node = NULL;
+  iree_status_t allocation_status = hrx_graph_allocate_node(
+      graph->arena_allocator, dep_count, 0, &node, NULL);
+  if (!iree_status_is_ok(allocation_status)) {
+    return hrx_status_from_iree(allocation_status);
+  }
+
+  node->type = HRX_GRAPH_NODE_TYPE_INTERNAL_MEMSET;
+  node->dependency_count = dep_count;
+  if (dep_count > 0) {
+    memcpy(node->dependencies, deps, dep_count * sizeof(*deps));
+  }
+
+  hrx_graph_memset_node_attrs_internal_t* m = &node->attrs.memset;
+  m->dst_ref = (iree_hal_buffer_ref_t){
+      .buffer = dst.buffer->hal_buffer,
+      .offset = (iree_device_size_t)dst.offset,
+      .length = (iree_device_size_t)dst.length,
+  };
+  m->pattern = pattern;
+  m->pattern_size = (uint8_t)pattern_size;
+  m->count = dst.length;
+  m->flags = 0;
+
+  iree_status_t status = hrx_graph_add_node_internal(graph, node);
+  if (iree_status_is_ok(status) && out_node) {
+    *out_node = node;
+  }
+  return hrx_status_from_iree(status);
+}
+
+hrx_status_t hrx_graph_add_copy_buffer_node(
+    hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
+    const hrx_graph_copy_buffer_node_attrs_t* attrs,
+    hrx_graph_node_t* out_node) {
   IREE_ASSERT_ARGUMENT(graph);
   IREE_ASSERT_ARGUMENT(attrs);
   IREE_TRACE_ZONE_BEGIN(z0);
+  hrx_status_t status = hrx_graph_validate_buffer_ref(
+      graph, attrs->src, "copy source buffer is NULL");
+  if (hrx_status_is_ok(status)) {
+    status = hrx_graph_validate_buffer_ref(graph, attrs->dst,
+                                           "copy destination buffer is NULL");
+  }
+  if (hrx_status_is_ok(status) && attrs->src.length != attrs->dst.length) {
+    status = hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                             "copy source and destination lengths differ");
+  }
+  if (hrx_status_is_ok(status)) {
+    status = hrx_graph_add_copy_buffer_node_internal(
+        graph, deps, dep_count, attrs->src, attrs->dst, out_node);
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
 
+hrx_status_t hrx_graph_add_fill_buffer_node(
+    hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
+    const hrx_graph_fill_buffer_node_attrs_t* attrs,
+    hrx_graph_node_t* out_node) {
+  IREE_ASSERT_ARGUMENT(graph);
+  IREE_ASSERT_ARGUMENT(attrs);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  hrx_status_t status = hrx_graph_validate_buffer_ref(
+      graph, attrs->dst, "fill destination buffer is NULL");
+  if (hrx_status_is_ok(status) && attrs->pattern_size != 1 &&
+      attrs->pattern_size != 2 && attrs->pattern_size != 4) {
+    status = hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                             "fill pattern size must be 1, 2, or 4");
+  }
+  if (hrx_status_is_ok(status) &&
+      (attrs->dst.offset % attrs->pattern_size != 0 ||
+       attrs->dst.length % attrs->pattern_size != 0)) {
+    status = hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                             "fill range is not aligned to its pattern size");
+  }
+  if (hrx_status_is_ok(status)) {
+    status = hrx_graph_add_fill_buffer_node_internal(
+        graph, deps, dep_count, attrs->dst, attrs->pattern, attrs->pattern_size,
+        out_node);
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+hrx_status_t hrx_graph_add_copy_ptr_node(
+    hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
+    const hrx_graph_copy_ptr_node_attrs_t* attrs, hrx_graph_node_t* out_node) {
+  IREE_ASSERT_ARGUMENT(graph);
+  IREE_ASSERT_ARGUMENT(attrs);
+  IREE_TRACE_ZONE_BEGIN(z0);
   hrx_buffer_t dst_buf = NULL;
   size_t dst_offset = 0;
   HRX_RETURN_AND_END_ZONE(
@@ -307,82 +450,37 @@ hrx_status_t hrx_graph_add_memcpy_node(
       z0, hrx_buffer_table_find(&graph->device->buffer_table,
                                 (uint64_t)(uintptr_t)attrs->src, &src_buf,
                                 &src_offset, NULL));
-
-  hrx_graph_node_s* node = NULL;
-  HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
-      z0, hrx_graph_allocate_node(graph->arena_allocator, dep_count, 0, &node,
-                                  NULL));
-
-  node->type = HRX_GRAPH_NODE_TYPE_INTERNAL_MEMCPY;
-  node->dependency_count = dep_count;
-  if (dep_count > 0) {
-    memcpy(node->dependencies, deps, dep_count * sizeof(*deps));
-  }
-
-  hrx_graph_memcpy_node_attrs_internal_t* m = &node->attrs.memcpy;
-  m->dst_ref = (iree_hal_buffer_ref_t){
-      .buffer = dst_buf->hal_buffer,
-      .offset = (iree_device_size_t)dst_offset,
-      .length = (iree_device_size_t)attrs->size,
+  const hrx_graph_copy_buffer_node_attrs_t native_attrs = {
+      .src = {src_buf, src_offset, attrs->size},
+      .dst = {dst_buf, dst_offset, attrs->size},
   };
-  m->src_ref = (iree_hal_buffer_ref_t){
-      .buffer = src_buf->hal_buffer,
-      .offset = (iree_device_size_t)src_offset,
-      .length = (iree_device_size_t)attrs->size,
-  };
-  m->size = attrs->size;
-  m->flags = 0;
-
-  iree_status_t status = hrx_graph_add_node_internal(graph, node);
-  if (iree_status_is_ok(status) && out_node) {
-    *out_node = node;
-  }
+  hrx_status_t status = hrx_graph_add_copy_buffer_node(graph, deps, dep_count,
+                                                       &native_attrs, out_node);
   IREE_TRACE_ZONE_END(z0);
-  return hrx_status_from_iree(status);
+  return status;
 }
 
-hrx_status_t hrx_graph_add_memset_node(
+hrx_status_t hrx_graph_add_fill_ptr_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    const hrx_graph_memset_node_attrs_t* attrs, hrx_graph_node_t* out_node) {
+    const hrx_graph_fill_ptr_node_attrs_t* attrs, hrx_graph_node_t* out_node) {
   IREE_ASSERT_ARGUMENT(graph);
   IREE_ASSERT_ARGUMENT(attrs);
   IREE_TRACE_ZONE_BEGIN(z0);
-
   hrx_buffer_t dst_buf = NULL;
   size_t dst_offset = 0;
   HRX_RETURN_AND_END_ZONE(
       z0, hrx_buffer_table_find(&graph->device->buffer_table,
                                 (uint64_t)(uintptr_t)attrs->dst, &dst_buf,
                                 &dst_offset, NULL));
-
-  hrx_graph_node_s* node = NULL;
-  HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
-      z0, hrx_graph_allocate_node(graph->arena_allocator, dep_count, 0, &node,
-                                  NULL));
-
-  node->type = HRX_GRAPH_NODE_TYPE_INTERNAL_MEMSET;
-  node->dependency_count = dep_count;
-  if (dep_count > 0) {
-    memcpy(node->dependencies, deps, dep_count * sizeof(*deps));
-  }
-
-  hrx_graph_memset_node_attrs_internal_t* m = &node->attrs.memset;
-  m->dst_ref = (iree_hal_buffer_ref_t){
-      .buffer = dst_buf->hal_buffer,
-      .offset = (iree_device_size_t)dst_offset,
-      .length = (iree_device_size_t)attrs->count,
+  const hrx_graph_fill_buffer_node_attrs_t native_attrs = {
+      .dst = {dst_buf, dst_offset, attrs->count},
+      .pattern = attrs->value,
+      .pattern_size = 1,
   };
-  m->pattern = attrs->value;
-  m->pattern_size = 1;
-  m->count = attrs->count;
-  m->flags = 0;
-
-  iree_status_t status = hrx_graph_add_node_internal(graph, node);
-  if (iree_status_is_ok(status) && out_node) {
-    *out_node = node;
-  }
+  hrx_status_t status = hrx_graph_add_fill_buffer_node(graph, deps, dep_count,
+                                                       &native_attrs, out_node);
   IREE_TRACE_ZONE_END(z0);
-  return hrx_status_from_iree(status);
+  return status;
 }
 
 hrx_status_t hrx_graph_add_host_call_node(

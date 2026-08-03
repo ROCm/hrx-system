@@ -1950,21 +1950,21 @@ iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
     iree_hal_streaming_graph_node_t* node, iree_hal_streaming_symbol_t* symbol,
     const iree_hal_streaming_dispatch_params_t* params);
 
-iree_status_t iree_hal_streaming_graph_add_memcpy_node(
+iree_status_t iree_hal_streaming_graph_add_copy_ptr_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, iree_hal_streaming_deviceptr_t dst,
     iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
     iree_hal_streaming_graph_node_t** out_node);
 
-iree_status_t iree_hal_streaming_graph_add_memcpy_node_from_refs(
+iree_status_t iree_hal_streaming_graph_add_copy_buffer_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, iree_hal_streaming_buffer_ref_t dst_ref,
     iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
     iree_hal_streaming_graph_node_t** out_node);
 
-iree_status_t iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
+iree_status_t iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count,
@@ -1972,7 +1972,7 @@ iree_status_t iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
     iree_hal_streaming_deviceptr_t dst, iree_hal_streaming_deviceptr_t src,
     iree_device_size_t size, iree_hal_streaming_graph_node_t** out_node);
 
-iree_status_t iree_hal_streaming_graph_add_memset_node(
+iree_status_t iree_hal_streaming_graph_add_fill_ptr_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, iree_hal_streaming_deviceptr_t dst,

@@ -1467,7 +1467,7 @@ iree_status_t iree_hal_streaming_graph_set_kernel_node_params(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_streaming_graph_add_memcpy_node_resolved(
+static iree_status_t iree_hal_streaming_graph_add_copy_buffer_node_resolved(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, iree_hal_streaming_buffer_ref_t dst_ref,
@@ -1525,7 +1525,7 @@ static iree_status_t iree_hal_streaming_graph_add_memcpy_node_resolved(
   return status;
 }
 
-iree_status_t iree_hal_streaming_graph_add_memcpy_node(
+iree_status_t iree_hal_streaming_graph_add_copy_ptr_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, iree_hal_streaming_deviceptr_t dst,
@@ -1562,14 +1562,14 @@ iree_status_t iree_hal_streaming_graph_add_memcpy_node(
         "resolving `src` buffer ref %p", (void*)src);
   }
 
-  iree_status_t status = iree_hal_streaming_graph_add_memcpy_node_resolved(
+  iree_status_t status = iree_hal_streaming_graph_add_copy_buffer_node_resolved(
       graph, dependencies, dependency_count, dst_ref, src_ref, (void*)dst,
       (const void*)src, size, out_node);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
-iree_status_t iree_hal_streaming_graph_add_memcpy_node_from_refs(
+iree_status_t iree_hal_streaming_graph_add_copy_buffer_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, iree_hal_streaming_buffer_ref_t dst_ref,
@@ -1580,14 +1580,14 @@ iree_status_t iree_hal_streaming_graph_add_memcpy_node_from_refs(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_streaming_graph_validate_dependencies(graph, dependencies,
                                                          dependency_count));
-  iree_status_t status = iree_hal_streaming_graph_add_memcpy_node_resolved(
+  iree_status_t status = iree_hal_streaming_graph_add_copy_buffer_node_resolved(
       graph, dependencies, dependency_count, dst_ref, src_ref, NULL, NULL, size,
       out_node);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
-iree_status_t iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
+iree_status_t iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count,
@@ -1596,7 +1596,7 @@ iree_status_t iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
     iree_device_size_t size, iree_hal_streaming_graph_node_t** out_node) {
   IREE_ASSERT_ARGUMENT(graph);
   if (!extra_dependency) {
-    return iree_hal_streaming_graph_add_memcpy_node(
+    return iree_hal_streaming_graph_add_copy_ptr_node(
         graph, dependencies, dependency_count, dst, src, size, out_node);
   }
   if (dependency_count > 0 && !dependencies) {
@@ -1605,7 +1605,7 @@ iree_status_t iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
   }
   for (iree_host_size_t i = 0; i < dependency_count; ++i) {
     if (dependencies[i] == extra_dependency) {
-      return iree_hal_streaming_graph_add_memcpy_node(
+      return iree_hal_streaming_graph_add_copy_ptr_node(
           graph, dependencies, dependency_count, dst, src, size, out_node);
     }
   }
@@ -1617,8 +1617,8 @@ iree_status_t iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
                             "graph dependency count overflow");
   }
   if (dependency_count == 0) {
-    return iree_hal_streaming_graph_add_memcpy_node(graph, &extra_dependency, 1,
-                                                    dst, src, size, out_node);
+    return iree_hal_streaming_graph_add_copy_ptr_node(
+        graph, &extra_dependency, 1, dst, src, size, out_node);
   }
   iree_host_size_t dependency_list_size = 0;
   if (IREE_UNLIKELY(!iree_host_size_checked_mul(
@@ -1635,13 +1635,13 @@ iree_status_t iree_hal_streaming_graph_add_memcpy_node_with_extra_dependency(
          dependency_count * sizeof(*dependencies));
   merged_dependencies[dependency_count] = extra_dependency;
 
-  iree_status_t status = iree_hal_streaming_graph_add_memcpy_node(
+  iree_status_t status = iree_hal_streaming_graph_add_copy_ptr_node(
       graph, merged_dependencies, total_count, dst, src, size, out_node);
   iree_allocator_free(graph->host_allocator, merged_dependencies);
   return status;
 }
 
-iree_status_t iree_hal_streaming_graph_add_memset_node(
+iree_status_t iree_hal_streaming_graph_add_fill_ptr_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, iree_hal_streaming_deviceptr_t dst,
