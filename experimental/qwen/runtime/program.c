@@ -41,13 +41,10 @@ typedef enum qwen_program_qkv_schedule_e {
 } qwen_program_qkv_schedule_t;
 
 typedef enum qwen_program_attention_schedule_e {
-  // Temporary row-by-row use of the general kernel while its pure-tail
-  // multirow path corrupts nonleading query rows.
-  QWEN_PROGRAM_ATTENTION_SCHEDULE_PURE_TAIL_ROW_BY_ROW_BRINGUP_WORKAROUND = 0,
   // General grouped-query attention used by prefill and layer programs.
-  QWEN_PROGRAM_ATTENTION_SCHEDULE_GENERAL = 1,
+  QWEN_PROGRAM_ATTENTION_SCHEDULE_GENERAL = 0,
   // One-token split-K attention with fused last-arrival reduction.
-  QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT = 2,
+  QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT = 1,
 } qwen_program_attention_schedule_t;
 
 typedef enum qwen_program_attention_postprocess_schedule_e {
@@ -820,12 +817,9 @@ static iree_status_t qwen_program_prepare_decode_flash_attention(
 }
 
 static qwen_program_attention_schedule_t qwen_program_select_attention_schedule(
-    qwen_program_kind_t kind, iree_host_size_t context_count) {
-  if (kind == QWEN_PROGRAM_KIND_DECODE) {
-    return QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT;
-  }
-  return context_count < QWEN_PROGRAM_ATTENTION_CONTEXT_ALIGNMENT
-             ? QWEN_PROGRAM_ATTENTION_SCHEDULE_PURE_TAIL_ROW_BY_ROW_BRINGUP_WORKAROUND
+    qwen_program_kind_t kind) {
+  return kind == QWEN_PROGRAM_KIND_DECODE
+             ? QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT
              : QWEN_PROGRAM_ATTENTION_SCHEDULE_GENERAL;
 }
 
@@ -898,7 +892,6 @@ static iree_status_t qwen_program_prepare_layer_executables(
   const int64_t route_stride = QWEN_MODEL_ROUTE_COUNT;
   const int64_t route_count = QWEN_MODEL_ROUTE_COUNT;
   const int64_t expert_count = QWEN_MODEL_EXPERT_COUNT;
-  const int64_t context_count = (int64_t)program->context_count;
   const int64_t attention_context_count =
       (int64_t)program->attention_context_count;
   const int64_t token_workload[] = {token_count};
@@ -913,10 +906,6 @@ static iree_status_t qwen_program_prepare_layer_executables(
   const int64_t flash_attention_workload[] = {
       token_count,
       attention_context_count,
-  };
-  const int64_t pure_tail_row_attention_workload[] = {
-      1,
-      context_count,
   };
   const int64_t attention_output_quantize_workload[] = {
       token_count,
@@ -1027,18 +1016,6 @@ static iree_status_t qwen_program_prepare_layer_executables(
         IREE_ARRAYSIZE(attention_postprocess_workload),
         attention_postprocess_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_POSTPROCESS]);
-  }
-  if (iree_status_is_ok(status) &&
-      program->attention_schedule ==
-          QWEN_PROGRAM_ATTENTION_SCHEDULE_PURE_TAIL_ROW_BY_ROW_BRINGUP_WORKAROUND) {
-    status = qwen_program_prepare_batch_append(
-        batch, IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_PREFILL_F32_F16),
-        IREE_SV("qwen3_moe_flash_attention_f32_f16_wmma"),
-        IREE_ARRAYSIZE(qwen_flash_attention_config_bindings),
-        qwen_flash_attention_config_bindings,
-        IREE_ARRAYSIZE(pure_tail_row_attention_workload),
-        pure_tail_row_attention_workload,
-        &program->executables[QWEN_PROGRAM_EXECUTABLE_FLASH_ATTENTION]);
   }
   if (iree_status_is_ok(status) &&
       program->attention_schedule == QWEN_PROGRAM_ATTENTION_SCHEDULE_GENERAL) {
@@ -1658,60 +1635,6 @@ static iree_status_t qwen_program_record_token_embedding(
   return qwen_program_record_dispatch_barrier(program);
 }
 
-// Temporarily records one canonical attention dispatch per query row for a
-// context that consists entirely of the key-tile tail. This is a non-sanctioned
-// bring-up schedule, not an alternate kernel: the general kernel's multirow
-// pure-tail path corrupts nonleading rows while its one-row specialization is
-// exact. Delete this schedule when the canonical multirow path passes the real
-// short-prompt differential. Attention metadata packs active mask rows densely,
-// so reserved request capacity is intentionally absent from the row stride.
-static iree_status_t
-qwen_program_record_pure_tail_attention_row_by_row_bringup_workaround(
-    qwen_program_t* program, iree_device_size_t layer_cache_offset,
-    const qwen_request_storage_layout_t* request_layout,
-    const qwen_layer_program_layout_t* transient) {
-  const uint32_t context_count = (uint32_t)program->context_count;
-  const iree_device_size_t query_row_byte_length =
-      QWEN_MODEL_QUERY_HEAD_COUNT * QWEN_MODEL_HEAD_SIZE * sizeof(float);
-  const iree_device_size_t mask_row_byte_length =
-      context_count * sizeof(uint16_t);
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t query_row = 0;
-       iree_status_is_ok(status) && query_row < program->token_count;
-       ++query_row) {
-    const uint32_t constants[] = {
-        1,
-        context_count,
-    };
-    const iree_hal_buffer_ref_t bindings[] = {
-        iree_hal_make_indirect_buffer_ref(
-            QWEN_PROGRAM_BINDING_TRANSIENT,
-            transient->rotated_query.offset + query_row * query_row_byte_length,
-            query_row_byte_length),
-        iree_hal_make_indirect_buffer_ref(
-            QWEN_PROGRAM_BINDING_KEY_CACHE, layer_cache_offset,
-            request_layout->layer_cache_byte_length),
-        iree_hal_make_indirect_buffer_ref(
-            QWEN_PROGRAM_BINDING_VALUE_CACHE, layer_cache_offset,
-            request_layout->layer_cache_byte_length),
-        iree_hal_make_indirect_buffer_ref(
-            QWEN_PROGRAM_BINDING_REQUEST_STATE,
-            request_layout->attention_mask.offset +
-                query_row * mask_row_byte_length,
-            mask_row_byte_length),
-        iree_hal_make_indirect_buffer_ref(QWEN_PROGRAM_BINDING_TRANSIENT,
-                                          transient->attention_output.offset +
-                                              query_row * query_row_byte_length,
-                                          query_row_byte_length),
-    };
-    status = qwen_program_record_dispatch(
-        program, QWEN_PROGRAM_EXECUTABLE_FLASH_ATTENTION,
-        IREE_ARRAYSIZE(constants), constants, IREE_ARRAYSIZE(bindings),
-        bindings);
-  }
-  return status;
-}
-
 static iree_status_t qwen_program_record_attention(
     qwen_program_t* program, iree_host_size_t layer_index,
     iree_host_size_t cache_window_layer_index,
@@ -1907,13 +1830,6 @@ static iree_status_t qwen_program_record_attention(
     status = qwen_program_record_dispatch_barrier(program);
   }
 
-  if (iree_status_is_ok(status) &&
-      program->attention_schedule ==
-          QWEN_PROGRAM_ATTENTION_SCHEDULE_PURE_TAIL_ROW_BY_ROW_BRINGUP_WORKAROUND) {
-    status =
-        qwen_program_record_pure_tail_attention_row_by_row_bringup_workaround(
-            program, layer_cache_offset, request_layout, transient);
-  }
   if (iree_status_is_ok(status) &&
       program->attention_schedule == QWEN_PROGRAM_ATTENTION_SCHEDULE_GENERAL) {
     const uint32_t flash_attention_constants[] = {
@@ -2696,8 +2612,7 @@ static iree_status_t qwen_program_validate_options(
         QWEN_PROGRAM_DECODE_CONTEXT_LIMIT);
   }
   const qwen_program_attention_schedule_t attention_schedule =
-      qwen_program_select_attention_schedule(options->kind,
-                                             options->context_count);
+      qwen_program_select_attention_schedule(options->kind);
   iree_host_size_t attention_context_count = options->context_count;
   // General attention consumes native 64-row K/V blocks. Metadata masks the
   // backed suffix while request shape and every non-attention stage retain the
