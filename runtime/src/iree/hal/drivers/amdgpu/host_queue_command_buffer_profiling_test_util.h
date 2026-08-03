@@ -314,6 +314,9 @@ static iree_status_t CommandBufferProfileSinkWrite(
                 records[i].record_length);
       EXPECT_NE(UINT32_MAX, records[i].physical_device_ordinal);
       EXPECT_GT(records[i].queue_count, 0u);
+      EXPECT_TRUE(iree_all_bits_set(
+          records[i].flags, IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY));
+      EXPECT_GT(records[i].timestamp_frequency_hz, 0u);
     }
     test_sink->device_records.insert(test_sink->device_records.end(), records,
                                      records + record_count);

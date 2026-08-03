@@ -543,6 +543,10 @@ TEST_F(HostQueueCommandBufferProfilingTest,
   for (const auto& device_record : sink.device_records) {
     EXPECT_LT(device_record.physical_device_ordinal, physical_device_count);
     EXPECT_EQ(queue_count_per_physical_device, device_record.queue_count);
+    EXPECT_EQ(
+        logical_device->physical_devices[device_record.physical_device_ordinal]
+            ->timestamp_frequency_hz,
+        device_record.timestamp_frequency_hz);
   }
   for (const auto& queue_record : sink.queue_records) {
     EXPECT_LT(queue_record.physical_device_ordinal, physical_device_count);

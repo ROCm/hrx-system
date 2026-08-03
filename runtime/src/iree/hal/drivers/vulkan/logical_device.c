@@ -1537,6 +1537,13 @@ static iree_status_t iree_hal_vulkan_logical_device_profiling_begin(
   device_record.physical_device_ordinal = physical_device_ordinal;
   device_record.queue_count =
       iree_hal_vulkan_logical_device_profile_count(device->queues.lane_count);
+  const iree_hal_device_timing_spec_t* timing =
+      iree_hal_device_spec_timing(device->device_spec);
+  if (iree_all_bits_set(timing->flags,
+                        IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS)) {
+    device_record.flags |= IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY;
+    device_record.timestamp_frequency_hz = timing->timestamp_frequency_hz;
+  }
   device_record.flags |= IREE_HAL_PROFILE_DEVICE_FLAG_PHYSICAL_DEVICE_UUID;
   memcpy(device_record.physical_device_uuid,
          device->physical_device.id_properties.deviceUUID,

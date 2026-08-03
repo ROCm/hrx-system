@@ -140,8 +140,10 @@ extern "C" {
 //
 // - device_tick:
 //   Raw physical-device timestamp ticks. The scale is producer/device-specific
-//   and must be fitted using clock-correlation records before conversion to
-//   nanoseconds or a host timeline.
+//   and is provided by the corresponding device metadata record when
+//   available. Clock-correlation records are required to place ticks on a host
+//   timeline but are not required to convert elapsed tick counts when an
+//   authoritative device timestamp frequency is present.
 //
 // - driver_host_cpu_timestamp_ns:
 //   Driver-provided CPU timestamp sampled with a device tick. The unit is
@@ -160,7 +162,16 @@ enum iree_hal_profile_device_flag_bits_t {
 
   // |physical_device_uuid| contains a stable physical device identifier.
   IREE_HAL_PROFILE_DEVICE_FLAG_PHYSICAL_DEVICE_UUID = 1u << 0,
+
+  // |timestamp_frequency_hz| contains the rate of the device tick domain used
+  // by event records associated with this physical device.
+  IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY = 1u << 1,
 };
+
+// Byte length of the original device metadata record prefix. New consumers
+// accept this prefix so profile bundles produced before optional timestamp
+// metadata was added remain readable.
+#define IREE_HAL_PROFILE_DEVICE_RECORD_MIN_LENGTH 32u
 
 // Session-level physical device description.
 //
@@ -180,6 +191,9 @@ typedef struct iree_hal_profile_device_record_t {
   // Stable physical device UUID when
   // IREE_HAL_PROFILE_DEVICE_FLAG_PHYSICAL_DEVICE_UUID is set.
   uint8_t physical_device_uuid[16];
+  // Device timestamp ticks per second when
+  // IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY is set.
+  uint64_t timestamp_frequency_hz;
 } iree_hal_profile_device_record_t;
 
 // Returns a default physical device record.
@@ -1945,7 +1959,9 @@ iree_hal_profile_executable_trace_record_default(void) {
   static_assert(offsetof(record_type, field) == (byte_offset), #record_type   \
                 "." #field " offset is part of the profile binary format")
 
-IREE_HAL_PROFILE_ASSERT_RECORD_LAYOUT(iree_hal_profile_device_record_t, 32);
+IREE_HAL_PROFILE_ASSERT_RECORD_LAYOUT(iree_hal_profile_device_record_t, 40);
+IREE_HAL_PROFILE_ASSERT_FIELD_OFFSET(iree_hal_profile_device_record_t,
+                                     timestamp_frequency_hz, 32);
 IREE_HAL_PROFILE_ASSERT_RECORD_LAYOUT(iree_hal_profile_queue_record_t, 24);
 IREE_HAL_PROFILE_ASSERT_RECORD_LAYOUT(iree_hal_profile_executable_record_t, 40);
 IREE_HAL_PROFILE_ASSERT_RECORD_LAYOUT(
