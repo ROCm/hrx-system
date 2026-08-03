@@ -18,7 +18,6 @@
 
 #define QWEN_PROGRAM_BINDING_COUNT 6
 #define QWEN_PROGRAM_INITIAL_SEMAPHORE_CAPACITY 8
-#define QWEN_PROGRAM_QKV_WMMA_MIN_TOKEN_COUNT 128
 #define QWEN_PROGRAM_FLASH_ATTENTION_KEY_TILE_TOKEN_COUNT 64
 
 typedef enum qwen_program_binding_slot_e {
@@ -818,16 +817,6 @@ static iree_status_t qwen_program_prepare_decode_flash_attention(
       IREE_ARRAYSIZE(config_bindings), config_bindings,
       IREE_ARRAYSIZE(workload), workload,
       &program->executables[QWEN_PROGRAM_EXECUTABLE_FLASH_ATTENTION]);
-}
-
-static qwen_program_qkv_schedule_t qwen_program_select_qkv_schedule(
-    iree_host_size_t token_count) {
-  // The tiled WMMA family amortizes its fixed launch shape by 128 tokens. The
-  // row-parallel Q8 family retains lower fixed cost for decode and small
-  // prefill.
-  return token_count >= QWEN_PROGRAM_QKV_WMMA_MIN_TOKEN_COUNT
-             ? QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA
-             : QWEN_PROGRAM_QKV_SCHEDULE_QUANTIZED_ROWS;
 }
 
 static qwen_program_attention_schedule_t qwen_program_select_attention_schedule(
@@ -2771,12 +2760,12 @@ static iree_status_t qwen_program_prepare_describe(
   program->token_capacity = options->token_capacity;
   program->context_capacity = options->context_capacity;
   program->request_flags = options->request_flags;
-  // Multirow execution is established on the F32/WMMA QKV path. The
-  // row-quantized QKV schedule remains confined to its proven decode role.
-  program->qkv_schedule =
-      options->kind == QWEN_PROGRAM_KIND_DECODE
-          ? qwen_program_select_qkv_schedule(options->token_count)
-          : QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA;
+  // Decode is validated to contain exactly one active token and uses the
+  // row-quantized QKV path. Every multirow layer and prefill program uses the
+  // F32/WMMA path.
+  program->qkv_schedule = options->kind == QWEN_PROGRAM_KIND_DECODE
+                              ? QWEN_PROGRAM_QKV_SCHEDULE_QUANTIZED_ROWS
+                              : QWEN_PROGRAM_QKV_SCHEDULE_F32_WMMA;
   program->attention_schedule = qwen_program_select_attention_schedule(
       options->kind, options->context_count);
   program->attention_postprocess_schedule =
