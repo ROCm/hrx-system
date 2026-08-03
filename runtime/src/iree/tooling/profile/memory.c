@@ -997,8 +997,10 @@ typedef struct iree_profile_memory_device_lifetime_t {
   uint64_t end_tick;
   // Device tick duration from alloca start through dealloca completion.
   uint64_t duration_ticks;
-  // True when |duration_ns| was scaled through a clock fit.
+  // True when |duration_ns| was converted through a duration scale.
   bool has_duration_ns;
+  // Provenance of the elapsed-duration scale.
+  iree_profile_model_duration_scale_source_t duration_scale_source;
   // Duration in nanoseconds when |has_duration_ns| is true.
   int64_t duration_ns;
 } iree_profile_memory_device_lifetime_t;
@@ -1235,13 +1237,14 @@ iree_profile_memory_resolve_device_lifetime(
   const iree_profile_model_device_t* device = iree_profile_model_find_device(
       queue_device_index ? queue_device_index->model : NULL,
       allocation->physical_device_ordinal);
-  iree_profile_model_clock_fit_t clock_fit;
-  if (device &&
-      iree_profile_model_device_try_fit_clock_exact(
-          device, IREE_PROFILE_MODEL_CLOCK_TIME_DOMAIN_HOST_CPU_TIMESTAMP_NS,
-          &clock_fit)) {
-    lifetime.has_duration_ns = iree_profile_model_clock_fit_scale_ticks_to_ns(
-        &clock_fit, lifetime.duration_ticks, &lifetime.duration_ns);
+  iree_profile_model_duration_scale_t duration_scale;
+  if (device && iree_profile_model_device_try_resolve_duration_scale(
+                    device, &duration_scale)) {
+    lifetime.has_duration_ns = iree_profile_model_duration_scale_ticks_to_ns(
+        &duration_scale, lifetime.duration_ticks, &lifetime.duration_ns);
+    if (lifetime.has_duration_ns) {
+      lifetime.duration_scale_source = duration_scale.source;
+    }
   }
   return lifetime;
 }
@@ -1505,7 +1508,10 @@ static void iree_profile_memory_print_text_allocations(
                   : 0,
               device_lifetime->duration_ticks);
       if (device_lifetime->has_duration_ns) {
-        fprintf(file, " duration_ns=%" PRId64, device_lifetime->duration_ns);
+        fprintf(file, " duration_ns=%" PRId64 " duration_scale=%s",
+                device_lifetime->duration_ns,
+                iree_profile_model_duration_scale_source_name(
+                    device_lifetime->duration_scale_source));
       }
       fputc('\n', file);
     }
@@ -1669,6 +1675,7 @@ static void iree_profile_memory_print_jsonl_allocations(
         ",\"device_lifetime_end_tick\":%" PRIu64
         ",\"device_lifetime_duration_ticks\":%" PRIu64
         ",\"device_lifetime_time_ns_available\":%s"
+        ",\"device_lifetime_duration_scale_source\":\"%s\""
         ",\"device_lifetime_duration_ns\":%" PRId64,
         allocation->physical_device_ordinal, allocation->allocation_id,
         allocation->pool_id, allocation->backing_id,
@@ -1689,6 +1696,8 @@ static void iree_profile_memory_print_jsonl_allocations(
         device_lifetime->start_tick, device_lifetime->end_tick,
         device_lifetime->duration_ticks,
         device_lifetime->has_duration_ns ? "true" : "false",
+        iree_profile_model_duration_scale_source_name(
+            device_lifetime->duration_scale_source),
         device_lifetime->has_duration_ns ? device_lifetime->duration_ns : 0);
     iree_profile_memory_fprint_balance_json_fields(
         file, "lifecycle", &allocation->lifecycle_balance);

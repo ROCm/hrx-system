@@ -208,10 +208,12 @@ typedef struct iree_profile_dispatch_event_row_t {
   const iree_hal_profile_dispatch_event_t* event;
   // Resolved executable/function key valid only for the callback duration.
   iree_string_view_t key;
-  // Device clock fit valid only when |has_clock_fit| is true.
-  const iree_profile_model_clock_fit_t* clock_fit;
-  // True when |clock_fit| can translate raw device ticks to nanoseconds.
+  // True when raw device ticks can be placed on the host timeline.
   bool has_clock_fit;
+  // Scale used to convert elapsed device ticks to nanoseconds.
+  iree_profile_model_duration_scale_t duration_scale;
+  // True when |duration_scale| is available.
+  bool has_duration_scale;
 } iree_profile_dispatch_event_row_t;
 
 typedef struct iree_profile_host_dispatch_event_row_t {
