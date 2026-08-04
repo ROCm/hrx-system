@@ -1,40 +1,11 @@
-// Temporary, non-sanctioned test adapter for fused decode attention
-// publication. Delete these static roots when HAL check samples carry literal
-// workload arguments into compilation. The runtime records one reusable
-// command buffer per 64-row capacity class; request metadata masks the inactive
-// suffix. This test models Decode-513 as the 576-row class without copying any
-// production device body.
+// Test-only differentials for fused decode-attention Q8 publication. The
+// production kernels remain the actual providers; this module contributes only
+// reference packing, masked metadata setup, and comparison cases.
 target.decl @qwen3_moe_decode_split_gfx11_wave64
 
-func.decl inline @qwen3_moe_flash_attention_decode_split_reduce_fused_cooperative_f32(%publish_q8: i1, %key_value_token_count: index, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer, %completion_counter: buffer, %output: buffer, %q8_output: buffer)
+func.decl target(@qwen3_moe_decode_split_gfx11_wave64) @qwen3_moe_flash_attention_decode_split_f32_f16_wmma(%key_value_token_count: index, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer, %completion_counter: buffer, %output: buffer)
 
-kernel.def target(@qwen3_moe_decode_split_gfx11_wave64) @qwen3_moe_flash_attention_decode_split_reference_576() {
-  %one = index.constant 1 : index
-  %four = index.constant 4 : index
-  %nine = index.constant 9 : index
-  %twofiftysix = index.constant 256 : index
-  kernel.launch.config workgroups(%nine, %four, %one) workgroup_size(%twofiftysix, %one, %one) : index
-} launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer, %completion_counter: buffer, %output: buffer) {
-  %key_value_capacity = index.constant 576 : index
-  %publish_q8 = scalar.constant false : i1
-  func.apply<qwen3_moe.attention.decode_split.produce_partials>(%key_value_capacity, %query, %key, %value, %mask, %partial_max, %partial_sum, %partial_output) : (index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
-  func.call inline @qwen3_moe_flash_attention_decode_split_reduce_fused_cooperative_f32(%publish_q8, %key_value_capacity, %partial_max, %partial_sum, %partial_output, %completion_counter, %output, %partial_output) : (i1, index, buffer, buffer, buffer, buffer, buffer, buffer)
-  kernel.return
-}
-
-kernel.def target(@qwen3_moe_decode_split_gfx11_wave64) @qwen3_moe_flash_attention_decode_split_next_q8_576() {
-  %one = index.constant 1 : index
-  %four = index.constant 4 : index
-  %nine = index.constant 9 : index
-  %twofiftysix = index.constant 256 : index
-  kernel.launch.config workgroups(%nine, %four, %one) workgroup_size(%twofiftysix, %one, %one) : index
-} launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer, %completion_counter: buffer, %output: buffer, %next_q8_output: buffer) {
-  %key_value_capacity = index.constant 576 : index
-  %publish_q8 = scalar.constant true : i1
-  func.apply<qwen3_moe.attention.decode_split.produce_partials>(%key_value_capacity, %query, %key, %value, %mask, %partial_max, %partial_sum, %partial_output) : (index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
-  func.call inline @qwen3_moe_flash_attention_decode_split_reduce_fused_cooperative_f32(%publish_q8, %key_value_capacity, %partial_max, %partial_sum, %partial_output, %completion_counter, %output, %next_q8_output) : (i1, index, buffer, buffer, buffer, buffer, buffer, buffer)
-  kernel.return
-}
+func.decl target(@qwen3_moe_decode_split_gfx11_wave64) @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_next_q8(%key_value_token_count: index, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer, %completion_counter: buffer, %output: buffer, %next_q8_output: buffer)
 
 // Publishes the canonical reference Q8_1 x4 layout for one 4096-element row.
 kernel.def @qwen3_moe_flash_attention_decode_split_quantize_reference_4096() {
@@ -90,6 +61,7 @@ kernel.def @qwen3_moe_flash_attention_decode_split_mask_513_of_576() {
 // tensors reuse both paths' partials and completion counters, making counter
 // reset and stale-publication failures observable.
 check.case public @qwen3_moe_flash_attention_decode_split_next_q8_capacity_576_differential_case {
+  %key_value_token_count = check.literal value(576) : index
   %query_seed = check.param.seed base(0x514d4f4551465138) count(1) : i64
   %key_seed = check.param.seed base(0x514d4f454b465138) count(1) : i64
   %value_seed0 = check.param.seed base(0x514d4f4556465130) count(1) : i64
@@ -116,12 +88,12 @@ check.case public @qwen3_moe_flash_attention_decode_split_next_q8_capacity_576_d
   %actual_q8_0 = check.generate.fill value(1) : tensor<4608xi8>
   %actual_q8_1 = check.generate.fill value(1) : tensor<4608xi8>
   func.call @qwen3_moe_flash_attention_decode_split_mask_513_of_576(%mask) : (tensor<576xf16>)
-  func.call @qwen3_moe_flash_attention_decode_split_reference_576(%query, %key, %value0, %mask, %reference_partial_max, %reference_partial_sum, %reference_partial_output, %reference_counter, %reference_output0) : (tensor<32x128xf32>, tensor<576x4x128xf16>, tensor<576x4x128xf16>, tensor<576xf16>, tensor<4x9x16xf32>, tensor<4x9x16xf32>, tensor<4x9x16x128xf16>, tensor<4xi32>, tensor<32x128xf32>)
+  func.call @qwen3_moe_flash_attention_decode_split_f32_f16_wmma(%key_value_token_count, %query, %key, %value0, %mask, %reference_partial_max, %reference_partial_sum, %reference_partial_output, %reference_counter, %reference_output0) : (index, tensor<32x128xf32>, tensor<576x4x128xf16>, tensor<576x4x128xf16>, tensor<576xf16>, tensor<4x9x16xf32>, tensor<4x9x16xf32>, tensor<4x9x16x128xf16>, tensor<4xi32>, tensor<32x128xf32>)
   func.call @qwen3_moe_flash_attention_decode_split_quantize_reference_4096(%reference_output0, %reference_q8_0) : (tensor<32x128xf32>, tensor<4608xi8>)
-  func.call @qwen3_moe_flash_attention_decode_split_next_q8_576(%query, %key, %value0, %mask, %actual_partial_max, %actual_partial_sum, %actual_partial_output, %actual_counter, %actual_output0, %actual_q8_0) : (tensor<32x128xf32>, tensor<576x4x128xf16>, tensor<576x4x128xf16>, tensor<576xf16>, tensor<4x9x16xf32>, tensor<4x9x16xf32>, tensor<4x9x16x128xf16>, tensor<4xi32>, tensor<32x128xf32>, tensor<4608xi8>)
-  func.call @qwen3_moe_flash_attention_decode_split_reference_576(%query, %key, %value1, %mask, %reference_partial_max, %reference_partial_sum, %reference_partial_output, %reference_counter, %reference_output1) : (tensor<32x128xf32>, tensor<576x4x128xf16>, tensor<576x4x128xf16>, tensor<576xf16>, tensor<4x9x16xf32>, tensor<4x9x16xf32>, tensor<4x9x16x128xf16>, tensor<4xi32>, tensor<32x128xf32>)
+  func.call @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_next_q8(%key_value_token_count, %query, %key, %value0, %mask, %actual_partial_max, %actual_partial_sum, %actual_partial_output, %actual_counter, %actual_output0, %actual_q8_0) : (index, tensor<32x128xf32>, tensor<576x4x128xf16>, tensor<576x4x128xf16>, tensor<576xf16>, tensor<4x9x16xf32>, tensor<4x9x16xf32>, tensor<4x9x16x128xf16>, tensor<4xi32>, tensor<32x128xf32>, tensor<4608xi8>)
+  func.call @qwen3_moe_flash_attention_decode_split_f32_f16_wmma(%key_value_token_count, %query, %key, %value1, %mask, %reference_partial_max, %reference_partial_sum, %reference_partial_output, %reference_counter, %reference_output1) : (index, tensor<32x128xf32>, tensor<576x4x128xf16>, tensor<576x4x128xf16>, tensor<576xf16>, tensor<4x9x16xf32>, tensor<4x9x16xf32>, tensor<4x9x16x128xf16>, tensor<4xi32>, tensor<32x128xf32>)
   func.call @qwen3_moe_flash_attention_decode_split_quantize_reference_4096(%reference_output1, %reference_q8_1) : (tensor<32x128xf32>, tensor<4608xi8>)
-  func.call @qwen3_moe_flash_attention_decode_split_next_q8_576(%query, %key, %value1, %mask, %actual_partial_max, %actual_partial_sum, %actual_partial_output, %actual_counter, %actual_output1, %actual_q8_1) : (tensor<32x128xf32>, tensor<576x4x128xf16>, tensor<576x4x128xf16>, tensor<576xf16>, tensor<4x9x16xf32>, tensor<4x9x16xf32>, tensor<4x9x16x128xf16>, tensor<4xi32>, tensor<32x128xf32>, tensor<4608xi8>)
+  func.call @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_next_q8(%key_value_token_count, %query, %key, %value1, %mask, %actual_partial_max, %actual_partial_sum, %actual_partial_output, %actual_counter, %actual_output1, %actual_q8_1) : (index, tensor<32x128xf32>, tensor<576x4x128xf16>, tensor<576x4x128xf16>, tensor<576xf16>, tensor<4x9x16xf32>, tensor<4x9x16xf32>, tensor<4x9x16x128xf16>, tensor<4xi32>, tensor<32x128xf32>, tensor<4608xi8>)
   check.expect.equal actual(%actual_output0) expected(%reference_output0) : tensor<32x128xf32>
   check.expect.equal actual(%actual_q8_0) expected(%reference_q8_0) : tensor<4608xi8>
   check.expect.equal actual(%actual_output1) expected(%reference_output1) : tensor<32x128xf32>

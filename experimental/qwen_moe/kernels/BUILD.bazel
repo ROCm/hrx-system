@@ -1783,6 +1783,7 @@ iree_executable_test(
         "$(location qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom)",
         "--case=@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_decode_513_case",
         "--config=qwen3_moe.attention.key_value_head_count=4",
+        "--config=qwen3_moe.attention.key_value_token_capacity=576",
         "--config=qwen3_moe.attention.query_head_count=32",
         "--device=amdgpu://0",
     ],
@@ -1800,7 +1801,7 @@ iree_executable_test(
 
 loom_link_module(
     name = "flash_attention_decode_split_f32_f16_wmma_next_q8_linked",
-    srcs = ["qwen3_moe/flash_attention_decode_split_next_q8_test_workaround.loom"],
+    srcs = ["qwen3_moe/flash_attention_decode_split_next_q8_test.loom"],
     libraries = [
         "qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom",
         "ggml/quantize_q8_1_x4.loom",
@@ -1814,6 +1815,7 @@ iree_executable_test(
         "$(location :flash_attention_decode_split_f32_f16_wmma_next_q8_linked)",
         "--case=@qwen3_moe_flash_attention_decode_split_next_q8_capacity_576_differential_case",
         "--config=qwen3_moe.attention.key_value_head_count=4",
+        "--config=qwen3_moe.attention.key_value_token_capacity=576",
         "--config=qwen3_moe.attention.query_head_count=32",
         "--device=amdgpu://0",
     ],
@@ -1859,6 +1861,7 @@ iree_executable_test(
         "$(location qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom)",
         "--case=@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_long_case",
         "--config=qwen3_moe.attention.key_value_head_count=4",
+        "--config=qwen3_moe.attention.key_value_token_capacity=2048",
         "--config=qwen3_moe.attention.query_head_count=32",
         "--device=amdgpu://0",
     ],
@@ -1881,6 +1884,7 @@ iree_executable_test(
         "$(location qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom)",
         "--case=@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_masked_blocks_case",
         "--config=qwen3_moe.attention.key_value_head_count=4",
+        "--config=qwen3_moe.attention.key_value_token_capacity=256",
         "--config=qwen3_moe.attention.query_head_count=32",
         "--device=amdgpu://0",
     ],
@@ -1902,6 +1906,7 @@ iree_executable_test(
     args = [
         "$(location qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom)",
         "--config=qwen3_moe.attention.key_value_head_count=4",
+        "--config=qwen3_moe.attention.key_value_token_capacity=2048",
         "--config=qwen3_moe.attention.query_head_count=32",
         "--dry-run",
         "--output-format=jsonl",
@@ -1917,6 +1922,7 @@ iree_executable_test(
         "$(location qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom)",
         "--case=@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_tail_case",
         "--config=qwen3_moe.attention.key_value_head_count=1",
+        "--config=qwen3_moe.attention.key_value_token_capacity=128",
         "--config=qwen3_moe.attention.query_head_count=1",
         "--device=amdgpu://0",
     ],
