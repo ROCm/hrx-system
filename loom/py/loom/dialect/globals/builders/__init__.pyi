@@ -36,7 +36,7 @@ class GlobalBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
-    def rodata(
+    def def_(
         self,
         *,
         symbol: str,

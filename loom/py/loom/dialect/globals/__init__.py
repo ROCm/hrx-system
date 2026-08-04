@@ -6,7 +6,7 @@
 
 """Global dialect: module-level state operations.
 
-Provides global.constant, global.variable, global.rodata, global.load, and
+Provides global.constant, global.variable, global.rodata.def, global.load, and
 global.store for managing immutable/mutable module-level state and named
 read-only artifact payloads.
 """

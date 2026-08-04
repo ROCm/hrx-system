@@ -1645,7 +1645,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
       0x00, 0x01, 0x01, 0x06, 0x01, 0x01, 0x00, 0x00,
   };
   static const char kSource[] =
-      "global.rodata @loom_sanitizer_sites = "
+      "global.rodata.def @loom_sanitizer_sites = "
       "bytes(\"00020302010100000001010601010000\"), align 16\n"
       "amdgpu.target<gfx1100> @gfx_target\n"
       "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "
