@@ -555,14 +555,6 @@ static const qwen_loom_config_binding_t qwen_gate_up_config_bindings[] = {
     },
 };
 
-static const qwen_loom_config_binding_t qwen_direct_gate_up_config_bindings[] =
-    {
-        {
-            .key = IREE_SVL("qwen3_moe.routed_gate_up.input_size"),
-            .value = IREE_SVL("2048"),
-        },
-};
-
 static const qwen_loom_config_binding_t qwen_routed_down_config_bindings[] = {
     {
         .key = IREE_SVL("qwen3_moe.routed_down.input_size"),
@@ -1072,6 +1064,11 @@ static iree_status_t qwen_program_prepare_layer_executables(
       qwen_router_projection_top8_config_bindings, token_count,
       &router_projection_top8_config_binding_list);
 
+  qwen_program_config_binding_list_t gate_up_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
+      qwen_gate_up_config_bindings, token_count, &gate_up_config_binding_list);
+
   iree_status_t status = qwen_program_prepare_batch_append(
       batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_METADATA),
       IREE_SV("qwen_attention_metadata_bringup_workaround"),
@@ -1302,9 +1299,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_build_expert_table"),
-        IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
-        qwen_gate_up_config_bindings, IREE_ARRAYSIZE(expert_table_workload),
-        expert_table_workload,
+        gate_up_config_binding_list.count, gate_up_config_binding_list.bindings,
+        IREE_ARRAYSIZE(expert_table_workload), expert_table_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_EXPERT_TABLE]);
   }
   if (iree_status_is_ok(status) &&
@@ -1313,9 +1309,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_build_expert_partition_table"),
-        IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
-        qwen_gate_up_config_bindings, IREE_ARRAYSIZE(partition_table_workload),
-        partition_table_workload,
+        gate_up_config_binding_list.count, gate_up_config_binding_list.bindings,
+        IREE_ARRAYSIZE(partition_table_workload), partition_table_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_PARTITION_TABLE]);
   }
   if (iree_status_is_ok(status) &&
@@ -1324,9 +1319,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma"),
-        IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
-        qwen_gate_up_config_bindings, IREE_ARRAYSIZE(token_workload),
-        token_workload, &program->executables[QWEN_PROGRAM_EXECUTABLE_GATE_UP]);
+        gate_up_config_binding_list.count, gate_up_config_binding_list.bindings,
+        IREE_ARRAYSIZE(token_workload), token_workload,
+        &program->executables[QWEN_PROGRAM_EXECUTABLE_GATE_UP]);
   }
   if (iree_status_is_ok(status) &&
       program->feed_forward_schedule ==
@@ -1334,8 +1329,7 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_Q8),
         IREE_SV("qwen3_moe_routed_gate_up_swiglu_q4k_q8"),
-        IREE_ARRAYSIZE(qwen_direct_gate_up_config_bindings),
-        qwen_direct_gate_up_config_bindings,
+        gate_up_config_binding_list.count, gate_up_config_binding_list.bindings,
         IREE_ARRAYSIZE(direct_gate_up_workload), direct_gate_up_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_GATE_UP_Q8_TO_F32]);
   }
@@ -1345,8 +1339,7 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_Q8),
         IREE_SV("qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8"),
-        IREE_ARRAYSIZE(qwen_direct_gate_up_config_bindings),
-        qwen_direct_gate_up_config_bindings,
+        gate_up_config_binding_list.count, gate_up_config_binding_list.bindings,
         IREE_ARRAYSIZE(direct_gate_up_workload), direct_gate_up_workload,
         &program
              ->executables[QWEN_PROGRAM_EXECUTABLE_GATE_UP_Q8_TO_F32_NEXT_Q8]);
@@ -1497,6 +1490,12 @@ static iree_status_t qwen_program_prepare_full_model_executables(
       qwen_router_top8_config_bindings, terminal_token_count,
       &terminal_router_top8_config_binding_list);
 
+  qwen_program_config_binding_list_t terminal_gate_up_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
+      qwen_gate_up_config_bindings, terminal_token_count,
+      &terminal_gate_up_config_binding_list);
+
   iree_status_t status = qwen_program_prepare_batch_append(
       batch, IREE_SV(QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K_BRINGUP_WORKAROUND),
       IREE_SV("qwen_token_embedding_q4k_bringup_workaround"),
@@ -1568,8 +1567,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_build_expert_table"),
-        IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
-        qwen_gate_up_config_bindings,
+        terminal_gate_up_config_binding_list.count,
+        terminal_gate_up_config_binding_list.bindings,
         IREE_ARRAYSIZE(terminal_expert_table_workload),
         terminal_expert_table_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_EXPERT_TABLE]);
@@ -1580,8 +1579,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_build_expert_partition_table"),
-        IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
-        qwen_gate_up_config_bindings,
+        terminal_gate_up_config_binding_list.count,
+        terminal_gate_up_config_binding_list.bindings,
         IREE_ARRAYSIZE(terminal_partition_table_workload),
         terminal_partition_table_workload,
         &program
@@ -1593,9 +1592,9 @@ static iree_status_t qwen_program_prepare_full_model_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16),
         IREE_SV("qwen3_moe_routed_gate_up_swiglu_q4k_f16_wmma"),
-        IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
-        qwen_gate_up_config_bindings, IREE_ARRAYSIZE(terminal_token_workload),
-        terminal_token_workload,
+        terminal_gate_up_config_binding_list.count,
+        terminal_gate_up_config_binding_list.bindings,
+        IREE_ARRAYSIZE(terminal_token_workload), terminal_token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_GATE_UP]);
   }
   if (iree_status_is_ok(status) &&

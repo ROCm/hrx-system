@@ -473,10 +473,7 @@ loom_link_module(
 
 loom_link_module(
     name = "routed_gate_up_f16_runtime_module",
-    srcs = [
-        "expert_table_bringup_workaround.loom",
-        "runtime_exports.loom",
-    ],
+    srcs = ["runtime_exports.loom"],
     libraries = [
         "//experimental/qwen_moe/kernels:routed_gate_up_swiglu_q4k_f16_wmma_linked",
     ],
@@ -504,10 +501,7 @@ loom_link_module(
 
 loom_link_module(
     name = "routed_gate_up_q8_runtime_module",
-    srcs = [
-        "routed_gate_up_next_q8_bringup_workaround.loom",
-        "runtime_exports.loom",
-    ],
+    srcs = ["runtime_exports.loom"],
     libraries = [
         "//experimental/qwen_moe/kernels:routed_gate_up_swiglu_q4k_linked",
     ],

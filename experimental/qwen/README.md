@@ -64,12 +64,6 @@ command-buffer preparation work.
 
 ## Temporary bring-up workarounds
 
-`kernels/expert_table_bringup_workaround.loom` makes Qwen's fixed route count
-of eight structural in expert-assignment enumeration. AMDGPU lowering requires
-an exact divisor, but the compile boundary currently loses the exact workload
-value already used during launch evaluation. This one-function fork is deleted
-when workload specialization reaches target lowering.
-
 `kernels/attention_metadata_bringup_workaround.loom` is a temporary
 one-function device-state producer while the Qwen kernel corpus has no
 canonical attention-metadata kernel. It derives positions, separate K/V cache
@@ -102,18 +96,15 @@ dispatch per prompt row per layer; prefill-512 and split-K decode retain their
 established schedules. Delete it when the canonical pure-tail multirow path
 passes the same differential.
 
-The three direct feed-forward forks
-`kernels/routed_gate_up_next_q8_bringup_workaround.loom`,
-`kernels/routed_down_q4_next_q8_bringup_workaround.loom`, and
+The two direct routed-down forks
+`kernels/routed_down_q4_next_q8_bringup_workaround.loom` and
 `kernels/routed_down_q6_f32_next_q8_bringup_workaround.loom` retain the canonical
 decode ABIs and device bodies while making this model's exact one-token,
-eight-route dimensions structural. The gate/up variant publishes both F32-only
-and F32-plus-Q8_1 x4 providers so the down-weight format selects only the data
-it consumes. The routed-down variants publish the following layer's normalized
-Q8_1 x4 row through the shared
+eight-route dimensions structural. They publish the following layer's
+normalized Q8_1 x4 row through the shared
 `qwen3_moe.routed_down.next_q8_completion` device template. Only exact
-workload facts remain local to these adapters; nested device-template
-selection is canonical again. Delete all three when workload specialization
+workload facts remain local to these adapters; nested device-template selection
+is canonical again. Delete both when workload specialization
 crosses the source-to-low boundary; they are not model-generated kernel
 variants.
 

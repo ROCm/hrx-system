@@ -229,25 +229,22 @@ TEST(QwenLoomSourceTest, EmbedsCanonicalVocabularyEndpointSources) {
             std::string::npos);
 }
 
-TEST(QwenLoomSourceTest, EmbedsDirectGateUpNextQ8FixedModelWorkaround) {
+TEST(QwenLoomSourceTest, EmbedsCapacityBoundDirectGateUpSource) {
   qwen_loom_source_module_t source_module;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
       IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_Q8), &source_module));
   std::string source_text(
       reinterpret_cast<const char*>(source_module.source_contents.data),
       source_module.source_contents.data_length);
-  EXPECT_NE(source_text.find("%bounded_token_count = index.assume %token_count "
-                             "[range(%token_count, 1, 1)] : index"),
+  EXPECT_NE(source_text.find("@qwen3_moe.workload.token_capacity"),
             std::string::npos);
-  EXPECT_NE(source_text.find("%bounded_route_count = index.assume %route_count "
-                             "[range(%route_count, 8, 8)] : index"),
+  EXPECT_NE(source_text.find("workgroups(%configured_output_size, "
+                             "%configured_route_count, %token_capacity)"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("le(%token_count, %token_capacity)"),
             std::string::npos);
   EXPECT_NE(
-      source_text.find("%bounded_route_stride = index.assume %route_stride "
-                       "[range(%route_stride, 8, 8)] : index"),
-      std::string::npos);
-  EXPECT_NE(
-      source_text.find("func.apply<qwen3_moe.routed_gate_up.q4k_q8.body>"),
+      source_text.find("body>(%valid_token, %body_token_count, %safe_token"),
       std::string::npos);
   EXPECT_NE(source_text.find("export(\"qwen3_moe_routed_gate_up_swiglu_"
                              "q4k_q8\")"),
@@ -518,7 +515,7 @@ TEST(QwenLoomSourceTest, EmbedsCanonicalFusedRouterSource) {
             std::string::npos);
 }
 
-TEST(QwenLoomSourceTest, EmbedsWorkaroundExpertTableSource) {
+TEST(QwenLoomSourceTest, EmbedsCanonicalExpertTableSource) {
   qwen_loom_source_module_t source_module;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
       IREE_SV(QWEN_LOOM_SOURCE_ROUTED_GATE_UP_F16), &source_module));
@@ -529,20 +526,31 @@ TEST(QwenLoomSourceTest, EmbedsWorkaroundExpertTableSource) {
   EXPECT_NE(source_text.find("export(\"qwen3_moe_build_expert_table\") "
                              "@qwen3_moe_build_expert_table"),
             std::string::npos);
+  EXPECT_NE(source_text.find("@qwen3_moe.routed_gate_up.expert_count"),
+            std::string::npos);
+  EXPECT_NE(
+      source_text.find("workgroups(%configured_expert_count, %one, %one)"),
+      std::string::npos);
+  EXPECT_NE(source_text.find("eq(%expert_count, "
+                             "%configured_expert_count0)"),
+            std::string::npos);
+  EXPECT_NE(
+      source_text.find("%assignment_count = index.mul %bounded_token_count, "
+                       "%bounded_route_count : index"),
+      std::string::npos);
+  EXPECT_NE(source_text.find("%token0 = index.div %assignment, "
+                             "%configured_route_count : index"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("%route0 = index.rem %assignment, "
+                             "%configured_route_count : index"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("@qwen3_moe.workload.token_capacity"),
+            std::string::npos);
   EXPECT_NE(source_text.find(
-                "%assignment_count = index.mul %bounded_token_count, %eight : "
-                "index"),
+                "%assignment_count = index.mul %token_capacity, %route_count"),
             std::string::npos);
-  EXPECT_NE(source_text.find("%token0 = index.div %assignment, %eight : index"),
+  EXPECT_NE(source_text.find("le(%token_count, %token_capacity)"),
             std::string::npos);
-  EXPECT_NE(source_text.find("%route0 = index.rem %assignment, %eight : index"),
-            std::string::npos);
-  EXPECT_EQ(
-      source_text.find("%token0 = index.div %assignment, %bounded_route_count"),
-      std::string::npos);
-  EXPECT_EQ(
-      source_text.find("%route0 = index.rem %assignment, %bounded_route_count"),
-      std::string::npos);
 }
 
 TEST(QwenLoomSourceTest, EmbedsDecodeSplitReusableCapacityWorkaround) {
