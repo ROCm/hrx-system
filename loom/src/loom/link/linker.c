@@ -18,6 +18,7 @@
 #include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/target/ops.h"
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/util/walk.h"
@@ -856,6 +857,15 @@ static iree_status_t loom_link_merge_symbol_contract(
     return loom_link_merge_config_contract(linker, link_source, source_module,
                                            source_op, arena, target_ref,
                                            target_op);
+  }
+  if (loom_target_decl_isa(source_op)) {
+    const loom_op_vtable_t* target_vtable =
+        loom_op_vtable(linker->target_module, target_op);
+    if (target_vtable &&
+        loom_symbol_definition_implements(target_vtable->symbol_def,
+                                          LOOM_SYMBOL_INTERFACE_TARGET)) {
+      return iree_ok_status();
+    }
   }
   return loom_link_incompatible_contract_status(linker, target_ref,
                                                 IREE_SV("declaration"));

@@ -226,7 +226,27 @@ target_generic = Op(
 )
 
 # ============================================================================
+# target.decl
+# ============================================================================
+
+target_decl = Op(
+    "target.decl",
+    group=target_ops,
+    doc=("Declares a target-record contract whose definition may be provided by linking. The declaration remains valid in partially specialized IR and a linked definition must satisfy its contract."),
+    traits=[SYMBOL_DEFINE],
+    symbol_def=SymbolDefinition(
+        field="symbol",
+        name="target",
+        interfaces=["target", "record"],
+        bytecode_kind="LOOM_SYMBOL_RECORD",
+    ),
+    attrs=[AttrDef("symbol", "symbol")],
+    format=[SymbolRef("symbol")],
+    examples=["target.decl @external_target"],
+)
+
+# ============================================================================
 # All ops
 # ============================================================================
 
-ALL_TARGET_OPS: tuple[Op, ...] = (target_generic,)
+ALL_TARGET_OPS: tuple[Op, ...] = (target_generic, target_decl)

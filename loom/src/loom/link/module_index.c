@@ -523,7 +523,9 @@ static loom_link_symbol_flags_t loom_link_bytecode_symbol_flags(
   }
   if (symbol->kind == LOOM_BYTECODE_SYMBOL_FUNC_DECL || is_import ||
       iree_string_view_equal(symbol->defining_op_name,
-                             IREE_SV("config.decl"))) {
+                             IREE_SV("config.decl")) ||
+      iree_string_view_equal(symbol->defining_op_name,
+                             IREE_SV("target.decl"))) {
     flags |= LOOM_LINK_SYMBOL_FLAG_DECLARATION;
   }
   if (symbol->has_body) {

@@ -21,6 +21,7 @@ loom_cc_library(
     loom::ir
     loom::ops::config
     loom::ops::op_defs
+    loom::ops::target
   PUBLIC
 )
 
@@ -41,6 +42,7 @@ loom_cc_library(
     loom::ops::config
     loom::ops::func
     loom::ops::op_defs
+    loom::ops::target
     loom::rewrite::materialize
     loom::rewrite::remap
     loom::util::walk
@@ -63,6 +65,7 @@ loom_cc_test(
     loom::format::text::printer
     loom::ir
     loom::ops::op_registry
+    loom::ops::target
     loom::ops::test
     loom::target::test::alt_descriptors
     loom::target::test::descriptors
@@ -105,6 +108,7 @@ loom_cc_test(
     loom::ops::check
     loom::ops::config
     loom::ops::func
+    loom::ops::target
     loom::ops::test
 )
 
@@ -145,6 +149,7 @@ loom_cc_test(
     loom::ops::check
     loom::ops::config
     loom::ops::func
+    loom::ops::target
     loom::ops::test
 )
 

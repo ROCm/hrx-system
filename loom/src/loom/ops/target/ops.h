@@ -21,7 +21,8 @@ extern "C" {
 
 enum {
   LOOM_OP_TARGET_GENERIC = LOOM_OP_KIND(LOOM_DIALECT_TARGET, 0),
-  LOOM_OP_TARGET_COUNT_ = 1,
+  LOOM_OP_TARGET_DECL = LOOM_OP_KIND(LOOM_DIALECT_TARGET, 1),
+  LOOM_OP_TARGET_COUNT_ = 2,
 };
 
 // Generic target-family row selected by target.generic.
@@ -138,6 +139,16 @@ iree_status_t loom_target_generic_build(
 iree_status_t loom_target_record_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_TARGET_DECL: Declares a target-record contract whose definition may be provided by linking. The declaration remains valid in partially specialized IR and a linked definition must satisfy its contract.
+// target.decl @external_target
+LOOM_DEFINE_ISA(loom_target_decl_isa, LOOM_OP_TARGET_DECL)
+LOOM_DEFINE_ATTR_SYMBOL(loom_target_decl_symbol, 0)
+iree_status_t loom_target_decl_build(
+    loom_builder_t* builder,
+    loom_symbol_ref_t symbol,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 
 // Returns the vtable array for the target dialect.
 const loom_op_vtable_t* const* loom_target_dialect_vtables(

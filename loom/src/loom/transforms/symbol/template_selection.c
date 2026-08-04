@@ -479,8 +479,7 @@ static iree_status_t loom_template_selection_lookup_target_facts(
   const loom_target_symbol_facts_t* target_facts =
       loom_target_symbol_facts_cast(base_facts);
   if (target_facts == NULL) {
-    IREE_ASSERT_UNREACHABLE("verified target ref has no indexed target facts");
-    IREE_BUILTIN_UNREACHABLE();
+    return iree_ok_status();
   }
   *out_target = target_facts->projection;
   return iree_ok_status();
@@ -520,21 +519,30 @@ static iree_status_t loom_template_selection_resolve_apply_target(
 
 static iree_status_t loom_template_selection_provider_applies_to_target(
     loom_template_selection_state_t* state,
-    const loom_target_facts_t* apply_target,
+    const loom_template_selection_apply_target_t* apply_target,
     const loom_func_provider_summary_t* provider, bool* out_applies) {
   *out_applies = false;
   if (!loom_symbol_ref_is_valid(provider->target_symbol)) {
     *out_applies = true;
     return iree_ok_status();
   }
-  if (apply_target == NULL) {
+  if (loom_symbol_ref_is_valid(apply_target->witness) &&
+      provider->target_symbol.module_id == apply_target->witness.module_id &&
+      provider->target_symbol.symbol_id == apply_target->witness.symbol_id) {
+    *out_applies = true;
+    return iree_ok_status();
+  }
+  if (apply_target->facts == NULL) {
     return iree_ok_status();
   }
   const loom_target_facts_t* target_requirement = NULL;
   IREE_RETURN_IF_ERROR(loom_template_selection_lookup_target_facts(
       state, provider->target_symbol, &target_requirement));
-  *out_applies =
-      loom_target_facts_satisfy_requirement(apply_target, target_requirement);
+  if (target_requirement == NULL) {
+    return iree_ok_status();
+  }
+  *out_applies = loom_target_facts_satisfy_requirement(apply_target->facts,
+                                                       target_requirement);
   return iree_ok_status();
 }
 
@@ -1179,7 +1187,8 @@ static iree_status_t loom_template_selection_mark_exact_priority(
     loom_template_selection_state_t* state,
     loom_symbol_liveness_contributor_context_t* context,
     const loom_op_t* apply_op, loom_func_provider_slice_t providers,
-    const loom_target_facts_t* apply_target, int64_t priority) {
+    const loom_template_selection_apply_target_t* apply_target,
+    int64_t priority) {
   for (iree_host_size_t i = 0; i < providers.count; ++i) {
     const loom_func_provider_summary_t* provider = &providers.providers[i];
     bool applies_to_target = false;
@@ -1206,7 +1215,7 @@ static iree_status_t loom_template_selection_mark_missing_fact_candidates(
     loom_template_selection_state_t* state,
     loom_symbol_liveness_contributor_context_t* context,
     const loom_op_t* apply_op, loom_func_provider_slice_t providers,
-    const loom_target_facts_t* apply_target, bool has_exact,
+    const loom_template_selection_apply_target_t* apply_target, bool has_exact,
     int64_t exact_priority) {
   for (iree_host_size_t i = 0; i < providers.count; ++i) {
     const loom_func_provider_summary_t* provider = &providers.providers[i];
@@ -1290,7 +1299,7 @@ static iree_status_t loom_template_selection_analyze_apply(
     }
     bool applies_to_target = false;
     IREE_RETURN_IF_ERROR(loom_template_selection_provider_applies_to_target(
-        state, apply_target.facts, provider, &applies_to_target));
+        state, &apply_target, provider, &applies_to_target));
     if (!applies_to_target) {
       continue;
     }
@@ -1355,7 +1364,7 @@ static iree_status_t loom_template_selection_analyze_apply(
     loom_template_selection_record_blocker(
         state, entry, LOOM_TEMPLATE_SELECTION_BLOCKER_MISSING_FACTS);
     IREE_RETURN_IF_ERROR(loom_template_selection_mark_missing_fact_candidates(
-        state, context, apply_op, providers, apply_target.facts, has_exact,
+        state, context, apply_op, providers, &apply_target, has_exact,
         best_exact_priority));
     return loom_template_selection_append_report_detail(
         state, context, entry, &apply_target, providers.count,
@@ -1367,7 +1376,7 @@ static iree_status_t loom_template_selection_analyze_apply(
     loom_template_selection_record_blocker(
         state, entry, LOOM_TEMPLATE_SELECTION_BLOCKER_AMBIGUOUS);
     IREE_RETURN_IF_ERROR(loom_template_selection_mark_exact_priority(
-        state, context, apply_op, providers, apply_target.facts,
+        state, context, apply_op, providers, &apply_target,
         best_exact_priority));
     return loom_template_selection_append_report_detail(
         state, context, entry, &apply_target, providers.count,

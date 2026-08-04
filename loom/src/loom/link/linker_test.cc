@@ -227,6 +227,28 @@ func.def @identity(%x: i32) -> (i32) {
   EXPECT_NE(text.find("func.def @identity"), std::string::npos);
 }
 
+TEST_F(LinkerTest, ConcreteTargetRecordSupersedesDeclaration) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+target.decl @gpu
+
+func.def target(@gpu) @entry() {
+  func.return
+}
+)"));
+  loom_module_t* corpus = Parse(IREE_SV(R"(
+test.target<low_core> @gpu
+)"));
+
+  Verify(harness);
+  loom_module_t* linked = Link({harness, corpus});
+  Verify(linked);
+
+  std::string text = Print(linked);
+  EXPECT_EQ(text.find("target.decl @gpu"), std::string::npos);
+  EXPECT_NE(text.find("test.target<low_core> @gpu"), std::string::npos);
+  EXPECT_NE(text.find("func.def target(@gpu) @entry"), std::string::npos);
+}
+
 TEST_F(LinkerTest, SelectiveRootMaterializesReachableSymbols) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 test.target<low_core> @test_target
