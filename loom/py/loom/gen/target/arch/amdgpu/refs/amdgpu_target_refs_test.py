@@ -216,6 +216,8 @@ def _valid_contract_descriptors() -> tuple[Descriptor, ...]:
         ),
         Immediate("byte_offset", ImmediateKind.UNSIGNED),
     )
+    flat_load_descriptors = tuple(_descriptor(descriptor_key, (AsmForm(operands=("addr",)),)) for descriptor_key in amdgpu_target_refs._FLAT_LOAD_DESCRIPTOR_KEYS)
+    flat_store_descriptors = tuple(_descriptor(descriptor_key, (AsmForm(operands=("addr", "value")),)) for descriptor_key in amdgpu_target_refs._FLAT_STORE_DESCRIPTOR_KEYS)
     return (
         _descriptor(
             "amdgpu.global_load_b32_saddr",
@@ -225,10 +227,8 @@ def _valid_contract_descriptors() -> tuple[Descriptor, ...]:
             "amdgpu.global_load_b64_saddr",
             (AsmForm(operands=("vaddr", "saddr", "m0")),),
         ),
-        _descriptor(
-            "amdgpu.flat_load_u8",
-            (AsmForm(operands=("addr",)),),
-        ),
+        *flat_load_descriptors,
+        *flat_store_descriptors,
         *_valid_spill_lowering_descriptors(),
         _descriptor(
             "amdgpu.s_add_u32.rhs_symbol_rel32_lo",
@@ -656,17 +656,31 @@ def test_lowering_descriptor_contracts_reject_missing_helper_descriptor() -> Non
 
 
 def test_lowering_descriptor_contracts_reject_bad_operand_count() -> None:
-    with _raises_value_error("amdgpu.flat_load_u8.*expected one of: 1, 2"):
-        amdgpu_target_refs._validate_lowering_descriptor_contracts(
-            _descriptor_set(
-                *_valid_contract_descriptors()[:2],
-                _descriptor(
-                    "amdgpu.flat_load_u8",
-                    (AsmForm(operands=("addr", "m0", "extra")),),
-                ),
-                *_valid_contract_descriptors()[3:],
-            )
+    descriptors = tuple(
+        _descriptor(
+            descriptor.key,
+            (AsmForm(operands=("addr", "m0", "extra")),),
         )
+        if descriptor.key == "amdgpu.flat_load_u8"
+        else descriptor
+        for descriptor in _valid_contract_descriptors()
+    )
+    with _raises_value_error("amdgpu.flat_load_u8.*expected one of: 1, 2"):
+        amdgpu_target_refs._validate_lowering_descriptor_contracts(_descriptor_set(*descriptors))
+
+
+def test_lowering_descriptor_contracts_reject_bad_flat_store_operand_count() -> None:
+    descriptors = tuple(
+        _descriptor(
+            descriptor.key,
+            (AsmForm(operands=("addr", "value", "m0", "extra")),),
+        )
+        if descriptor.key == "amdgpu.flat_store_b32"
+        else descriptor
+        for descriptor in _valid_contract_descriptors()
+    )
+    with _raises_value_error("amdgpu.flat_store_b32.*expected one of: 2, 3"):
+        amdgpu_target_refs._validate_lowering_descriptor_contracts(_descriptor_set(*descriptors))
 
 
 def test_spill_lowering_contracts_require_every_packet() -> None:

@@ -68,6 +68,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _SCHEDULE_VALU,
     _SCHEDULE_VMEM_LOAD,
     _SCHEDULE_VMEM_LOAD_LDS,
+    _SCHEDULE_VMEM_STORE,
     _SCHEDULE_WAIT_ALU,
     _SCHEDULE_WMMA,
     _SOURCE_INLINE_F32_ENCODING_ID,
@@ -2469,10 +2470,47 @@ def test_feedback_atomic64_descriptors_expand_source_atomic_candidates() -> None
     assert "amdgpu.global_atomic_cmpswap_b64_rtn_saddr" in keys
 
 
-def test_flat_load_descriptors_cover_execution_families() -> None:
+def test_flat_memory_descriptors_cover_execution_families() -> None:
+    cdna_load_mnemonics = (
+        "flat_load_ubyte",
+        "flat_load_sbyte",
+        "flat_load_ushort",
+        "flat_load_sshort",
+        "flat_load_dword",
+        "flat_load_dwordx2",
+        "flat_load_dwordx3",
+        "flat_load_dwordx4",
+    )
+    rdna_load_mnemonics = (
+        "flat_load_u8",
+        "flat_load_i8",
+        "flat_load_u16",
+        "flat_load_i16",
+        "flat_load_dword",
+        "flat_load_dwordx2",
+        "flat_load_dwordx3",
+        "flat_load_dwordx4",
+    )
+    cdna_store_mnemonics = (
+        "flat_store_byte",
+        "flat_store_short",
+        "flat_store_dword",
+        "flat_store_dwordx2",
+        "flat_store_dwordx3",
+        "flat_store_dwordx4",
+    )
+    rdna_store_mnemonics = (
+        "flat_store_b8",
+        "flat_store_b16",
+        "flat_store_b32",
+        "flat_store_b64",
+        "flat_store_b96",
+        "flat_store_b128",
+    )
     for (
         overlays,
-        u8_mnemonic,
+        load_mnemonics,
+        store_mnemonics,
         uses_flat_scratch,
         uses_m0,
         expected_saddr_fields,
@@ -2480,7 +2518,8 @@ def test_flat_load_descriptors_cover_execution_families() -> None:
     ) in (
         (
             _gfx940_core_overlays(),
-            "flat_load_ubyte",
+            cdna_load_mnemonics,
+            cdna_store_mnemonics,
             True,
             True,
             (),
@@ -2488,7 +2527,8 @@ def test_flat_load_descriptors_cover_execution_families() -> None:
         ),
         (
             _gfx950_core_overlays(),
-            "flat_load_ubyte",
+            cdna_load_mnemonics,
+            cdna_store_mnemonics,
             True,
             True,
             (),
@@ -2496,7 +2536,8 @@ def test_flat_load_descriptors_cover_execution_families() -> None:
         ),
         (
             _gfx11_core_overlays(),
-            "flat_load_u8",
+            rdna_load_mnemonics,
+            rdna_store_mnemonics,
             True,
             False,
             (("SADDR", _predefined("NULL", "OPR_SREG")),),
@@ -2504,7 +2545,8 @@ def test_flat_load_descriptors_cover_execution_families() -> None:
         ),
         (
             _gfx12_core_overlays(),
-            "flat_load_u8",
+            rdna_load_mnemonics,
+            rdna_store_mnemonics,
             False,
             False,
             (),
@@ -2512,7 +2554,8 @@ def test_flat_load_descriptors_cover_execution_families() -> None:
         ),
         (
             _gfx125x_core_overlays(),
-            "flat_load_u8",
+            rdna_load_mnemonics,
+            rdna_store_mnemonics,
             False,
             False,
             (),
@@ -2524,26 +2567,69 @@ def test_flat_load_descriptors_cover_execution_families() -> None:
             descriptor_key,
             width_bits,
             semantic_tag,
-            mnemonic,
             operand_units,
             implicit_data_format,
-        ) in (
+        ), mnemonic in zip(
             (
-                "amdgpu.flat_load_u8",
-                8,
-                "memory.generic.load.u8.zero_extend",
-                u8_mnemonic,
-                1,
-                "FMT_NUM_U8",
+                (
+                    "amdgpu.flat_load_u8",
+                    8,
+                    "memory.generic.load.u8.zero_extend",
+                    1,
+                    "FMT_NUM_U8",
+                ),
+                (
+                    "amdgpu.flat_load_i8",
+                    8,
+                    "memory.generic.load.i8.sign_extend",
+                    1,
+                    "FMT_NUM_I8",
+                ),
+                (
+                    "amdgpu.flat_load_u16",
+                    16,
+                    "memory.generic.load.u16.zero_extend",
+                    1,
+                    "FMT_NUM_U16",
+                ),
+                (
+                    "amdgpu.flat_load_i16",
+                    16,
+                    "memory.generic.load.i16.sign_extend",
+                    1,
+                    "FMT_NUM_I16",
+                ),
+                (
+                    "amdgpu.flat_load_b32",
+                    32,
+                    "memory.generic.load.u32",
+                    1,
+                    "FMT_NUM_B32",
+                ),
+                (
+                    "amdgpu.flat_load_b64",
+                    64,
+                    "memory.generic.load.u64",
+                    2,
+                    "FMT_NUM_B64",
+                ),
+                (
+                    "amdgpu.flat_load_b96",
+                    96,
+                    "memory.generic.load.u96",
+                    3,
+                    "FMT_NUM_B96",
+                ),
+                (
+                    "amdgpu.flat_load_b128",
+                    128,
+                    "memory.generic.load.u128",
+                    4,
+                    "FMT_NUM_B128",
+                ),
             ),
-            (
-                "amdgpu.flat_load_u64",
-                64,
-                "memory.generic.load.u64",
-                "flat_load_dwordx2",
-                2,
-                "FMT_NUM_B64",
-            ),
+            load_mnemonics,
+            strict=True,
         ):
             descriptor = descriptors[descriptor_key]
             _assert_memory_width_overlay(
@@ -2570,6 +2656,54 @@ def test_flat_load_descriptors_cover_execution_families() -> None:
                 tuple(immediate.field_name for immediate in asm_form.immediates)
                 == expected_asm_immediates
             )
+            assert (
+                tuple(immediate.name for immediate in asm_form.immediates)
+                == expected_asm_immediates
+            )
+            assert (
+                any(
+                    operand.operand_type == "OPR_FLAT_SCRATCH"
+                    for operand in descriptor.implicit_operands
+                )
+                == uses_flat_scratch
+            )
+            assert descriptor.fixed_encoding_fields == expected_saddr_fields
+            assert (
+                any(
+                    operand.operand_type == "OPR_SDST_M0"
+                    for operand in descriptor.implicit_operands
+                )
+                == uses_m0
+            )
+
+        for (width_bits, operand_units), mnemonic in zip(
+            ((8, 1), (16, 1), (32, 1), (64, 2), (96, 3), (128, 4)),
+            store_mnemonics,
+            strict=True,
+        ):
+            descriptor = descriptors[f"amdgpu.flat_store_b{width_bits}"]
+            _assert_memory_width_overlay(
+                descriptor,
+                width_bits=width_bits,
+                semantic_tag=f"memory.generic.store.u{width_bits}",
+                mnemonic=mnemonic,
+                operand_units=operand_units,
+                payload_field_name="value",
+                effect_kind=EffectKind.WRITE,
+                memory_space=MemorySpace.GENERIC,
+                implicit_data_format=f"FMT_NUM_B{width_bits}",
+                implicit_ignore_reason="modeled-by-generic-write-effect",
+            )
+            assert descriptor.schedule_class == _SCHEDULE_VMEM_STORE
+            assert descriptor.asm_forms is not None
+            assert len(descriptor.asm_forms) == 1
+            asm_form = descriptor.asm_forms[0]
+            assert asm_form.mnemonic == mnemonic
+            assert asm_form.results == ()
+            expected_asm_operands = (
+                ("addr", "value", "m0") if uses_m0 else ("addr", "value")
+            )
+            assert asm_form.operands == expected_asm_operands
             assert (
                 tuple(immediate.name for immediate in asm_form.immediates)
                 == expected_asm_immediates
