@@ -15,6 +15,16 @@
 // final block; inactive lanes never address a synthetic fourth block.
 target.decl @qwen3_moe_attention_prepare_gfx11_wave32
 
+config.decl @qwen3_moe.routed_down.input_size : %value: index where [range(%value, 256, 32768), mul(%value, 256)]
+
+config.decl @qwen3_moe.routed_down.route_count : %value: index where [range(%value, 1, 8)]
+
+config.decl @qwen3_moe.routed_down.expert_count : %value: index where [range(%value, 1, 512)]
+
+config.decl @qwen3_moe.routed_down.output_size : %value: index where [range(%value, 1, 4096)]
+
+config.decl @qwen3_moe.workload.token_capacity : %value: index where [range(%value, 1, 2048)]
+
 func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
 func.decl @qwen3_moe_q4k_q8_1_x4_paired_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32)
@@ -23,15 +33,15 @@ func.decl @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4(%token_count: index, %in
 
 // Shared Q4_K contraction and residual publication. Each lane consumes both
 // nibbles of a packed code load before the subgroup reduces the row.
-func.template<qwen3_moe.routed_down.q4k_q8_1_x4.body> device @qwen3_moe_routed_down_q4k_q8_1_x4_body(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %route_weights: buffer, %weight: buffer, %output: buffer) {
+func.template<qwen3_moe.routed_down.q4k_q8_1_x4.body> device @qwen3_moe_routed_down_q4k_q8_1_x4_body(%publish_output: i1, %token_count: index, %token: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %route_weights: buffer, %weight: buffer, %output: buffer) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %bounded_token, %body_token_count = index.assume %token, %bounded_token_count [lt(%token, %bounded_token_count)] : index, index
   %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
   %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
   %bounded_route_id_stride = index.assume %route_id_stride [range(%route_id_stride, 1, 512)] : index
   %bounded_expert_count = index.assume %expert_count [range(%expert_count, 1, 512)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
   %channel_tile = kernel.workgroup.id<x> : index
-  %token0 = kernel.workgroup.id<y> : index
   %subgroup0 = kernel.subgroup.id : index
   %lane = kernel.subgroup.lane.id : index
   %zero = index.constant 0 : index
@@ -44,41 +54,35 @@ func.template<qwen3_moe.routed_down.q4k_q8_1_x4.body> device @qwen3_moe_routed_d
   %zero_i32 = scalar.constant 0 : i32
   %zero_f32 = scalar.constant 0.0 : f32
   %zero_offset = index.constant 0 : offset
-  %token, %launch_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
   %channel_base = index.mul %channel_tile, %eight : index
   %channel = index.add %channel_base, %subgroup : index
   %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
   %lane_i32 = index.cast %lane : index to i32
   %is_lane_zero = scalar.cmpi eq, %lane_i32, %zero_i32 : i32
-  %route_id_element_count = index.mul %bounded_token_count, %bounded_route_id_stride : index
-  %route_weight_element_count = index.mul %bounded_token_count, %bounded_route_count : index
-  %output_element_count = index.mul %launch_token_count, %bounded_output_size : index
   %q4_block_count = index.div %bounded_input_size, %twofiftysix : index
   %weight_row_byte_count = index.mul %q4_block_count, %onehundredfortyfour : index
   %q8_group_count = index.div %bounded_input_size, %onetwentyeight : index
   %q8_row_byte_count = index.mul %q8_group_count, %onehundredfortyfour : index
   %q8_noalias, %route_id_noalias, %route_weight_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %route_ids, %route_weights, %weight, %output : buffer, buffer, buffer, buffer, buffer
-  %route_id_view = buffer.view %route_id_noalias[%zero_offset] : buffer -> view<[%route_id_element_count]xi32, #dense>
-  %route_weight_view = buffer.view %route_weight_noalias[%zero_offset] : buffer -> view<[%route_weight_element_count]xf32, #dense>
-  %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<[%output_element_count]xf32, #dense>
+  %route_id_view = buffer.view %route_id_noalias[%zero_offset] : buffer -> view<[%body_token_count]x[%bounded_route_id_stride]xi32, #dense>
+  %route_weight_view = buffer.view %route_weight_noalias[%zero_offset] : buffer -> view<[%body_token_count]x[%bounded_route_count]xf32, #dense>
+  %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<[%body_token_count]x[%bounded_output_size]xf32, #dense>
   %lane_has_route = index.cmp ult, %lane, %bounded_route_count : index
   %lane_within_route_stride = index.cmp ult, %lane, %bounded_route_id_stride : index
-  %loads_route_metadata = scalar.andi %lane_has_route, %lane_within_route_stride : i1
+  %loads_active_route = scalar.andi %publish_output, %lane_has_route : i1
+  %loads_route_metadata = scalar.andi %loads_active_route, %lane_within_route_stride : i1
   %lane_expert_i32, %lane_route_weight = scf.if %loads_route_metadata -> (i32, f32) {
     %route_lane0, %metadata_route_count = index.assume %lane, %bounded_route_count [lt(%lane, %bounded_route_count)] : index, index
     %route_lane, %metadata_route_id_stride = index.assume %route_lane0, %bounded_route_id_stride [lt(%route_lane0, %bounded_route_id_stride)] : index, index
-    %route_id_row_base = index.mul %token, %metadata_route_id_stride : index
-    %route_id_index = index.add %route_id_row_base, %route_lane : index
-    %route_weight_row_base = index.mul %token, %metadata_route_count : index
-    %route_weight_index = index.add %route_weight_row_base, %route_lane : index
-    %expert_i32 = view.load %route_id_view[%route_id_index] : view<[%route_id_element_count]xi32, #dense> -> i32
-    %route_weight = view.load %route_weight_view[%route_weight_index] : view<[%route_weight_element_count]xf32, #dense> -> f32
+    %expert_i32 = view.load %route_id_view[%bounded_token, %route_lane] : view<[%body_token_count]x[%bounded_route_id_stride]xi32, #dense> -> i32
+    %route_weight = view.load %route_weight_view[%bounded_token, %route_lane0] : view<[%body_token_count]x[%bounded_route_count]xf32, #dense> -> f32
     scf.yield %expert_i32, %route_weight : i32, f32
   } else {
     scf.yield %zero_i32, %zero_f32 : i32, f32
   }
-  %routed_lane_sum = scf.if %valid_channel -> (f32) {
+  %computes_channel = scalar.andi %publish_output, %valid_channel : i1
+  %routed_lane_sum = scf.if %computes_channel -> (f32) {
     %sum = scf.for %route = [%zero to %bounded_route_count step %one](%route_acc = %zero_f32 : f32) -> (f32) unroll {
       %route_i32 = index.cast %route : index to i32
       %expert_i32 = kernel.subgroup.broadcast %lane_expert_i32 from %route_i32 : i32, i32
@@ -89,7 +93,7 @@ func.template<qwen3_moe.routed_down.q4k_q8_1_x4.body> device @qwen3_moe_routed_d
       %expert_channel = index.add %expert_output_base, %channel : index
       %weight_row_byte_index = index.mul %expert_channel, %weight_row_byte_count : index
       %weight_row_byte_base = index.scale %weight_row_byte_index, %one_byte : index, offset -> offset
-      %q8_row_base0 = index.mul %token, %bounded_route_count : index
+      %q8_row_base0 = index.mul %bounded_token, %bounded_route_count : index
       %q8_row = index.add %q8_row_base0, %route : index
       %q8_row_byte_index = index.mul %q8_row, %q8_row_byte_count : index
       %q8_row_byte_base = index.scale %q8_row_byte_index, %one_byte : index, offset -> offset
@@ -104,44 +108,75 @@ func.template<qwen3_moe.routed_down.q4k_q8_1_x4.body> device @qwen3_moe_routed_d
     scf.yield %zero_f32 : f32
   }
   %routed_sum = kernel.subgroup.reduce<addf> %routed_lane_sum : f32
-  %writes_output = scalar.andi %valid_channel, %is_lane_zero : i1
+  %writes_active_channel = scalar.andi %publish_output, %valid_channel : i1
+  %writes_output = scalar.andi %writes_active_channel, %is_lane_zero : i1
   scf.if %writes_output {
-    %token_output_base = index.mul %token, %bounded_output_size : index
-    %output_index = index.add %token_output_base, %channel : index
-    %residual = view.load %output_view[%output_index] : view<[%output_element_count]xf32, #dense> -> f32
+    %bounded_channel, %body_output_size = index.assume %channel, %bounded_output_size [lt(%channel, %bounded_output_size)] : index, index
+    %residual = view.load %output_view[%bounded_token, %bounded_channel] : view<[%body_token_count]x[%bounded_output_size]xf32, #dense> -> f32
     %result = scalar.addf %residual, %routed_sum : f32
-    view.store %result, %output_view[%output_index] : f32, view<[%output_element_count]xf32, #dense>
+    view.store %result, %output_view[%bounded_token, %bounded_channel] : f32, view<[%body_token_count]x[%bounded_output_size]xf32, #dense>
   }
   func.return
 }
 
 kernel.def @qwen3_moe_routed_down_q4k_q8_1_x4(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index) {
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
+  %configured_output_size = config.get @qwen3_moe.routed_down.output_size : index
   %eight = index.constant 8 : index
   %seven = index.constant 7 : index
   %one = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
-  %padded_output_size = index.add %output_size, %seven : index
+  %padded_output_size = index.add %configured_output_size, %seven : index
   %output_tiles = index.div %padded_output_size, %eight : index
-  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%output_tiles, %token_capacity, %one) workgroup_size(%workgroup_size, %one, %one) : index
 } launch(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %route_weights: buffer, %weight: buffer, %output: buffer) {
-  func.apply<qwen3_moe.routed_down.q4k_q8_1_x4.body>(%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %q8_input, %route_ids, %route_weights, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
+  %configured_input_size0 = config.get @qwen3_moe.routed_down.input_size : index
+  %configured_route_count0 = config.get @qwen3_moe.routed_down.route_count : index
+  %configured_expert_count0 = config.get @qwen3_moe.routed_down.expert_count : index
+  %configured_output_size0 = config.get @qwen3_moe.routed_down.output_size : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
+  %bounded_input_size, %configured_input_size = index.assume %input_size, %configured_input_size0 [range(%input_size, 256, 32768), mul(%input_size, 256), eq(%input_size, %configured_input_size0)] : index, index
+  %bounded_route_count, %configured_route_count = index.assume %route_count, %configured_route_count0 [range(%route_count, 1, 8), eq(%route_count, %configured_route_count0)] : index, index
+  %bounded_route_id_stride = index.assume %route_id_stride [range(%route_id_stride, 1, 512)] : index
+  %bounded_expert_count, %configured_expert_count = index.assume %expert_count, %configured_expert_count0 [range(%expert_count, 1, 512), eq(%expert_count, %configured_expert_count0)] : index, index
+  %bounded_output_size, %configured_output_size = index.assume %output_size, %configured_output_size0 [range(%output_size, 1, 4096), eq(%output_size, %configured_output_size0)] : index, index
+  %token0 = kernel.workgroup.id<y> : index
+  %zero = index.constant 0 : index
+  %valid_token = index.cmp ult, %token0, %bounded_token_count : index
+  %safe_token0 = scf.select %valid_token, %token0, %zero : index
+  %safe_token, %body_token_count = index.assume %safe_token0, %bounded_token_count [lt(%safe_token0, %bounded_token_count)] : index, index
+  func.apply<qwen3_moe.routed_down.q4k_q8_1_x4.body>(%valid_token, %body_token_count, %safe_token, %configured_input_size, %configured_route_count, %bounded_route_id_stride, %configured_expert_count, %configured_output_size, %q8_input, %route_ids, %route_weights, %weight, %output) : (i1, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
 // Decode-only route that also publishes the normalized Q8_1 x4 row consumed by
 // the next projection boundary.
 kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_routed_down_q4k_q8_1_x4_next_q8(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index) {
+  %configured_output_size = config.get @qwen3_moe.routed_down.output_size : index
   %eight = index.constant 8 : index
   %seven = index.constant 7 : index
   %one = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
-  %padded_output_size = index.add %output_size, %seven : index
+  %padded_output_size = index.add %configured_output_size, %seven : index
   %output_tiles = index.div %padded_output_size, %eight : index
-  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%output_tiles, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
 } launch(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %route_weights: buffer, %weight: buffer, %output: buffer, %norm_weight: buffer, %completion_counter: buffer, %next_q8_output: buffer) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 1)] : index
+  %configured_input_size0 = config.get @qwen3_moe.routed_down.input_size : index
+  %configured_route_count0 = config.get @qwen3_moe.routed_down.route_count : index
+  %configured_expert_count0 = config.get @qwen3_moe.routed_down.expert_count : index
+  %configured_output_size0 = config.get @qwen3_moe.routed_down.output_size : index
+  %bounded_input_size, %configured_input_size = index.assume %input_size, %configured_input_size0 [range(%input_size, 256, 32768), mul(%input_size, 256), eq(%input_size, %configured_input_size0)] : index, index
+  %bounded_route_count, %configured_route_count = index.assume %route_count, %configured_route_count0 [range(%route_count, 1, 8), eq(%route_count, %configured_route_count0)] : index, index
+  %bounded_route_id_stride = index.assume %route_id_stride [range(%route_id_stride, 1, 512)] : index
+  %bounded_expert_count, %configured_expert_count = index.assume %expert_count, %configured_expert_count0 [range(%expert_count, 1, 512), eq(%expert_count, %configured_expert_count0)] : index, index
+  %bounded_output_size, %configured_output_size = index.assume %output_size, %configured_output_size0 [range(%output_size, 128, 4096), mul(%output_size, 128), eq(%output_size, %configured_output_size0)] : index, index
   %eight = index.constant 8 : index
-  func.apply<qwen3_moe.routed_down.q4k_q8_1_x4.body>(%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %q8_input, %route_ids, %route_weights, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
-  func.apply<qwen3_moe.routed_down.next_q8_completion>(%eight, %eight, %token_count, %output_size, %output, %norm_weight, %completion_counter, %next_q8_output) : (index, index, index, index, buffer, buffer, buffer, buffer)
+  %publishes_output = scalar.constant true : i1
+  %body_token = index.constant 0 : index
+  func.apply<qwen3_moe.routed_down.q4k_q8_1_x4.body>(%publishes_output, %bounded_token_count, %body_token, %configured_input_size, %configured_route_count, %bounded_route_id_stride, %configured_expert_count, %configured_output_size, %q8_input, %route_ids, %route_weights, %weight, %output) : (i1, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
+  func.apply<qwen3_moe.routed_down.next_q8_completion>(%eight, %eight, %bounded_token_count, %configured_output_size, %output, %norm_weight, %completion_counter, %next_q8_output) : (index, index, index, index, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
