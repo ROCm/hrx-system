@@ -75,8 +75,12 @@ static iree_status_t BarrierSpyExecutionBarrier(
 }
 
 static const iree_hal_command_buffer_vtable_t kBarrierSpyVtable = {
-    .destroy = BarrierSpyDestroy,
-    .execution_barrier = BarrierSpyExecutionBarrier,
+    /*.destroy=*/BarrierSpyDestroy,
+    /*.begin=*/nullptr,
+    /*.end=*/nullptr,
+    /*.begin_debug_group=*/nullptr,
+    /*.end_debug_group=*/nullptr,
+    /*.execution_barrier=*/BarrierSpyExecutionBarrier,
 };
 
 class GraphBarrierTest : public ::testing::Test {
