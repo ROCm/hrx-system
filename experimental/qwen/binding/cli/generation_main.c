@@ -36,6 +36,8 @@ IREE_FLAG(bool, print_token_ids, false,
           "Print each generated token ID to stderr.");
 IREE_FLAG(bool, qwen_print_timings, false,
           "Print parseable startup and generation timing statistics.");
+IREE_FLAG(bool, qwen_verbose, false,
+          "Print live lifecycle progress with elapsed process time.");
 IREE_FLAG(string, route_trace, "",
           "Write one final Qwen route-trace artifact to this path.");
 
@@ -87,6 +89,16 @@ typedef struct qwen_generation_cli_statistics_t {
 static double qwen_generation_cli_elapsed_ms(iree_time_t begin_ns,
                                              iree_time_t end_ns) {
   return (double)(end_ns - begin_ns) / 1000000.0;
+}
+
+static void qwen_generation_cli_print_progress(
+    const qwen_generation_cli_statistics_t* statistics, const char* stage,
+    iree_time_t stage_time_ns) {
+  if (!FLAG_qwen_verbose) return;
+  fprintf(stderr, "Qwen progress: stage=%s elapsed_ms=%.3f\n", stage,
+          qwen_generation_cli_elapsed_ms(statistics->process_start_ns,
+                                         stage_time_ns));
+  fflush(stderr);
 }
 
 static void qwen_generation_cli_print_statistics(
@@ -461,6 +473,8 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
   }
   if (iree_status_is_ok(status)) {
     statistics.prompt_ready_ns = iree_time_now();
+    qwen_generation_cli_print_progress(&statistics, "prompt-ready",
+                                       statistics.prompt_ready_ns);
   }
 
   qwen_tooling_runtime_context_t runtime_context;
@@ -487,6 +501,8 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
   }
   if (iree_status_is_ok(status)) {
     statistics.runtime_ready_ns = iree_time_now();
+    qwen_generation_cli_print_progress(&statistics, "runtime-ready",
+                                       statistics.runtime_ready_ns);
   }
 
   qwen_generation_cli_timepoint_t model_ready = {
@@ -514,6 +530,8 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
   }
   if (iree_status_is_ok(status)) {
     statistics.model_enqueued_ns = iree_time_now();
+    qwen_generation_cli_print_progress(&statistics, "model-enqueued",
+                                       statistics.model_enqueued_ns);
   }
 
   qwen_program_t* prefill_program = NULL;
@@ -556,6 +574,8 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
   }
   if (iree_status_is_ok(status)) {
     statistics.programs_ready_ns = iree_time_now();
+    qwen_generation_cli_print_progress(&statistics, "programs-ready",
+                                       statistics.programs_ready_ns);
   }
 
   qwen_generation_cli_timepoint_t request_ready = {
@@ -600,6 +620,20 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
   }
   if (iree_status_is_ok(status)) {
     statistics.prefill_submitted_ns = iree_time_now();
+    qwen_generation_cli_print_progress(&statistics, "prefill-submitted",
+                                       statistics.prefill_submitted_ns);
+  }
+  // All model and request work is already enqueued. Verbose observation of
+  // model readiness distinguishes residency from prefill execution without
+  // changing device-side dependency ordering.
+  if (iree_status_is_ok(status) && FLAG_qwen_verbose) {
+    status = iree_hal_semaphore_wait(model_ready.semaphore, model_ready.value,
+                                     iree_infinite_timeout(),
+                                     IREE_ASYNC_WAIT_FLAG_NONE);
+    if (iree_status_is_ok(status)) {
+      qwen_generation_cli_print_progress(&statistics, "model-ready",
+                                         iree_time_now());
+    }
   }
 
   iree_host_size_t generated_token_count = 0;
@@ -611,6 +645,8 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
         IREE_ASYNC_WAIT_FLAG_NONE);
     if (i == 0 && iree_status_is_ok(status)) {
       statistics.first_token_ready_ns = iree_time_now();
+      qwen_generation_cli_print_progress(&statistics, "first-token-ready",
+                                         statistics.first_token_ready_ns);
     }
     iree_tokenizer_token_id_t token_id = IREE_TOKENIZER_TOKEN_ID_INVALID;
     if (iree_status_is_ok(status)) {
@@ -626,6 +662,8 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
 
     if (i == 0) {
       statistics.first_token_observed_ns = iree_time_now();
+      qwen_generation_cli_print_progress(&statistics, "first-token-observed",
+                                         statistics.first_token_observed_ns);
     }
     ++generated_token_count;
     if (FLAG_print_token_ids) {
@@ -681,6 +719,8 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
             prompt_token_count,
             reached_end_of_sequence ? " through EOS" : " at the token limit");
     statistics.generation_complete_ns = iree_time_now();
+    qwen_generation_cli_print_progress(&statistics, "generation-complete",
+                                       statistics.generation_complete_ns);
     qwen_generation_cli_print_statistics(&statistics);
   }
 
