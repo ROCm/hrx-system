@@ -28,6 +28,7 @@
 #include "loom/tooling/testbench/requirements.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
+#include "loom/verify/verify.h"
 
 IREE_FLAG(string, case, "",
           "Optional check.case symbol to execute, such as '@smoke'. Empty "
@@ -150,6 +151,23 @@ static iree_status_t iree_test_loom_register_context(void* user_data,
   }
   return configuration->register_context.fn(
       configuration->register_context.user_data, context);
+}
+
+static iree_status_t iree_test_loom_verify_run_module(
+    loom_run_module_t* run_module) {
+  const loom_verify_options_t verify_options = {
+      .sink = {.fn = loom_diagnostic_stderr_sink},
+      .max_errors = 20,
+      .source_resolver = loom_run_module_source_resolver(run_module),
+  };
+  loom_verify_result_t verify_result = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_verify_module(run_module->module, &verify_options, &verify_result));
+  if (verify_result.error_count != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "input module failed verification");
+  }
+  return iree_ok_status();
 }
 
 static iree_string_view_t iree_test_loom_normalize_case_name(
@@ -710,6 +728,9 @@ int iree_test_loom_main(int argc, char** argv,
     parse_options.filename = filename;
     parse_options.source = source;
     status = loom_run_module_parse(&session, &parse_options, &run_module);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_test_loom_verify_run_module(&run_module);
   }
 
   if (iree_status_is_ok(status)) {

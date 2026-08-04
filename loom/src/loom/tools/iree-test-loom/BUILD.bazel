@@ -103,6 +103,7 @@ loom_cc_library(
         "//loom/src/loom/tooling/testbench:requirements",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
+        "//loom/src/loom/verify",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/base/tooling:flags",
