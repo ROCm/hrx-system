@@ -148,21 +148,54 @@ kernel.def target(@qwen3_moe_router_gfx11_wave64) @qwen3_moe_router_top8_f32(%to
   kernel.return
 }
 
+// Builds the deterministic route-ID oracle for two physical rows with eight
+// published IDs and eight untouched padding slots per row.
+kernel.def @qwen3_moe_router_top8_wide_stride_reference() {
+  %one = index.constant 1 : index
+  %thirtytwo = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%thirtytwo, %one, %one) : index
+} launch(%route_ids: buffer) {
+  %element = kernel.workitem.id<x> : index
+  %seven = index.constant 7 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %zero_offset = index.constant 0 : offset
+  %slot = index.rem %element, %sixteen : index
+  %publishes_id = index.cmp ult, %slot, %eight : index
+  %route_ids_view = buffer.view %route_ids[%zero_offset] : buffer -> view<32xi32, #dense>
+  scf.if %publishes_id {
+    %scaled_slot = index.mul %slot, %eight : index
+    %route_id_index = index.add %scaled_slot, %seven : index
+    %route_id = index.cast %route_id_index : index to i32
+    view.store %route_id, %route_ids_view[%element] : i32, view<32xi32, #dense>
+  }
+  kernel.return
+}
+
 // Period-eight logits place sixteen equal maxima in different lane-local
 // slots. Repeated selection must remove each winner and retain the lower-ID
 // half of that tie set. Two rows leave two inactive waves in the four-wave
-// production workgroup and exercise guarded tail publication.
+// production workgroup and exercise guarded tail publication. A second call
+// proves that a wider physical route-ID stride preserves its padding.
 check.case public @qwen3_moe_router_top8_f32_repeated_maxima_case {
   %token_count = check.literal value(2) : index
   %route_id_stride = check.literal value(8) : index
+  %wide_route_id_stride = check.literal value(16) : index
   %logits = check.generate.iota offset(0.0) step(1.0) period(8) : tensor<2x128xf32>
   %route_ids = check.generate.fill value(-1) : tensor<2x8xi32>
   %route_weights = check.generate.fill value(0.0) : tensor<2x8xf32>
+  %wide_route_ids = check.generate.fill value(-1) : tensor<2x16xi32>
+  %wide_route_weights = check.generate.fill value(0.0) : tensor<2x8xf32>
   %expected_ids = check.generate.iota offset(7) step(8) period(8) : tensor<2x8xi32>
+  %expected_wide_ids = check.generate.fill value(-1) : tensor<2x16xi32>
   %expected_weights = check.generate.fill value(0.125) : tensor<2x8xf32>
   func.call @qwen3_moe_router_top8_f32(%token_count, %route_id_stride, %logits, %route_ids, %route_weights) : (index, index, tensor<2x128xf32>, tensor<2x8xi32>, tensor<2x8xf32>)
+  func.call @qwen3_moe_router_top8_wide_stride_reference(%expected_wide_ids) : (tensor<2x16xi32>)
+  func.call @qwen3_moe_router_top8_f32(%token_count, %wide_route_id_stride, %logits, %wide_route_ids, %wide_route_weights) : (index, index, tensor<2x128xf32>, tensor<2x16xi32>, tensor<2x8xf32>)
   check.expect.equal actual(%route_ids) expected(%expected_ids) : tensor<2x8xi32>
   check.expect.close actual(%route_weights) expected(%expected_weights) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<2x8xf32>
+  check.expect.equal actual(%wide_route_ids) expected(%expected_wide_ids) : tensor<2x16xi32>
+  check.expect.close actual(%wide_route_weights) expected(%expected_weights) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(same) : tensor<2x8xf32>
   check.return
 }
 
