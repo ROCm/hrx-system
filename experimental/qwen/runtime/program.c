@@ -1418,8 +1418,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_F32),
         IREE_SV("qwen3_moe_routed_down_q6k_f32_wave64_next_q8"),
-        IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
-        qwen_attention_prepare_config_bindings,
+        direct_routed_down_config_binding_list.count,
+        direct_routed_down_config_binding_list.bindings,
         IREE_ARRAYSIZE(direct_routed_down_workload),
         direct_routed_down_workload,
         &program

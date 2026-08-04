@@ -570,10 +570,7 @@ loom_link_module(
 
 loom_link_module(
     name = "routed_down_q6_f32_runtime_module",
-    srcs = [
-        "routed_down_q6_f32_next_q8_bringup_workaround.loom",
-        "runtime_exports.loom",
-    ],
+    srcs = ["runtime_exports.loom"],
     libraries = [
         "//experimental/qwen_moe/kernels:routed_down_q6k_linked",
     ],

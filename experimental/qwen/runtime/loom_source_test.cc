@@ -274,13 +274,19 @@ TEST(QwenLoomSourceTest, EmbedsCanonicalQ4DirectDownSource) {
       std::string::npos);
 }
 
-TEST(QwenLoomSourceTest, EmbedsDirectF32Q6DownFixedModelWorkaround) {
+TEST(QwenLoomSourceTest, EmbedsCanonicalDirectF32Q6DownSource) {
   qwen_loom_source_module_t source_module;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
       IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_F32), &source_module));
   std::string source_text(
       reinterpret_cast<const char*>(source_module.source_contents.data),
       source_module.source_contents.data_length);
+  EXPECT_NE(source_text.find("@qwen3_moe.routed_down.output_size"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("workgroups(%output_tiles, %one, %one)"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("eq(%route_count, %configured_route_count0)"),
+            std::string::npos);
   EXPECT_NE(source_text.find("func.apply<qwen3_moe.routed_down.q6k_f32.body>"),
             std::string::npos);
   EXPECT_NE(
