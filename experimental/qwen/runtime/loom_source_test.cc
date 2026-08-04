@@ -212,6 +212,11 @@ TEST(QwenLoomSourceTest, EmbedsCanonicalVocabularyEndpointSources) {
       projection_source.source_contents.data_length);
   EXPECT_NE(projection_text.find("func.apply<ggml.linear_q6k_q8_1_x4.body>"),
             std::string::npos);
+  EXPECT_NE(projection_text.find("%publish_output = scalar.constant true"),
+            std::string::npos);
+  EXPECT_NE(
+      projection_text.find("body>(%publish_output, %token_count, %token0"),
+      std::string::npos);
   EXPECT_EQ(projection_text.find("%safe_channel"), std::string::npos);
   EXPECT_NE(
       projection_text.find("%partial_count = index.assume %partial_count0 "
@@ -341,6 +346,52 @@ TEST(QwenLoomSourceTest, EmbedsCapacityBoundQ8PackerSource) {
       std::string::npos);
   EXPECT_NE(source_text.find("func.apply<ggml.quantize_q8_1_x4.group_body>"
                              "(%valid_group"),
+            std::string::npos);
+}
+
+TEST(QwenLoomSourceTest, EmbedsCapacityBoundAttentionProjectionSources) {
+  qwen_loom_source_module_t qkv_source;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_QKV_QUANTIZED), &qkv_source));
+  std::string qkv_text(
+      reinterpret_cast<const char*>(qkv_source.source_contents.data),
+      qkv_source.source_contents.data_length);
+  EXPECT_NE(qkv_text.find("@qwen3_moe.workload.token_capacity"),
+            std::string::npos);
+  EXPECT_NE(qkv_text.find("workgroups(%output_tiles, %token_capacity, %one)"),
+            std::string::npos);
+  EXPECT_NE(
+      qkv_text.find("%safe_token = scf.select %valid_token, %token0, %zero"),
+      std::string::npos);
+
+  qwen_loom_source_module_t postprocess_source;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_POSTPROCESS_F32_F16),
+      &postprocess_source));
+  std::string postprocess_text(
+      reinterpret_cast<const char*>(postprocess_source.source_contents.data),
+      postprocess_source.source_contents.data_length);
+  EXPECT_NE(postprocess_text.find("@qwen3_moe.workload.token_capacity"),
+            std::string::npos);
+  EXPECT_NE(postprocess_text.find(
+                "workgroups(%head_domain_count, %token_capacity, %one)"),
+            std::string::npos);
+  EXPECT_NE(postprocess_text.find(
+                "%safe_token = scf.select %valid_token, %token0, %zero"),
+            std::string::npos);
+
+  qwen_loom_source_module_t dense_source;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16), &dense_source));
+  std::string dense_text(
+      reinterpret_cast<const char*>(dense_source.source_contents.data),
+      dense_source.source_contents.data_length);
+  EXPECT_NE(dense_text.find("@qwen3_moe.workload.token_capacity"),
+            std::string::npos);
+  EXPECT_NE(dense_text.find("%padded_token_count = index.add %token_capacity, "
+                            "%thirtyone"),
+            std::string::npos);
+  EXPECT_NE(dense_text.find("workgroups(%output_tiles, %token_capacity, %one)"),
             std::string::npos);
 }
 

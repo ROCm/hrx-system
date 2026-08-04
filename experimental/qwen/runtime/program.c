@@ -275,6 +275,16 @@ static void qwen_program_config_binding_list_append_index(
   };
 }
 
+static void qwen_program_config_binding_list_initialize_with_token_capacity(
+    iree_host_size_t static_binding_count,
+    const qwen_loom_config_binding_t* static_bindings, int64_t token_capacity,
+    qwen_program_config_binding_list_t* out_list) {
+  qwen_program_config_binding_list_initialize(static_binding_count,
+                                              static_bindings, out_list);
+  qwen_program_config_binding_list_append_index(
+      out_list, IREE_SV("qwen3_moe.workload.token_capacity"), token_capacity);
+}
+
 static const qwen_loom_config_binding_t
     qwen_attention_prepare_config_bindings[] = {
         {
@@ -971,13 +981,68 @@ static iree_status_t qwen_program_prepare_layer_executables(
   };
 
   qwen_program_config_binding_list_t attention_prepare_config_binding_list;
-  qwen_program_config_binding_list_initialize(
+  qwen_program_config_binding_list_initialize_with_token_capacity(
       IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
-      qwen_attention_prepare_config_bindings,
+      qwen_attention_prepare_config_bindings, token_count,
       &attention_prepare_config_binding_list);
-  qwen_program_config_binding_list_append_index(
-      &attention_prepare_config_binding_list,
-      IREE_SV("qwen3_moe.workload.token_capacity"), token_count);
+
+  qwen_program_config_binding_list_t attention_qkv_q6_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_attention_qkv_q6_config_bindings),
+      qwen_attention_qkv_q6_config_bindings, token_count,
+      &attention_qkv_q6_config_binding_list);
+
+  qwen_program_config_binding_list_t attention_qkv_q4_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_attention_qkv_q4_config_bindings),
+      qwen_attention_qkv_q4_config_bindings, token_count,
+      &attention_qkv_q4_config_binding_list);
+
+  qwen_program_config_binding_list_t
+      attention_qkv_postprocess_q6_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_attention_qkv_postprocess_q6_config_bindings),
+      qwen_attention_qkv_postprocess_q6_config_bindings, token_count,
+      &attention_qkv_postprocess_q6_config_binding_list);
+
+  qwen_program_config_binding_list_t
+      attention_qkv_postprocess_q4_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_attention_qkv_postprocess_q4_config_bindings),
+      qwen_attention_qkv_postprocess_q4_config_bindings, token_count,
+      &attention_qkv_postprocess_q4_config_binding_list);
+
+  qwen_program_config_binding_list_t attention_postprocess_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_attention_postprocess_config_bindings),
+      qwen_attention_postprocess_config_bindings, token_count,
+      &attention_postprocess_config_binding_list);
+
+  qwen_program_config_binding_list_t attention_query_wmma_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_attention_query_wmma_config_bindings),
+      qwen_attention_query_wmma_config_bindings, token_count,
+      &attention_query_wmma_config_binding_list);
+
+  qwen_program_config_binding_list_t
+      attention_key_value_wmma_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_attention_key_value_wmma_config_bindings),
+      qwen_attention_key_value_wmma_config_bindings, token_count,
+      &attention_key_value_wmma_config_binding_list);
+
+  qwen_program_config_binding_list_t attention_output_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_attention_output_config_bindings),
+      qwen_attention_output_config_bindings, token_count,
+      &attention_output_config_binding_list);
+
+  qwen_program_config_binding_list_t
+      attention_output_next_q8_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_attention_output_next_q8_config_bindings),
+      qwen_attention_output_next_q8_config_bindings, token_count,
+      &attention_output_next_q8_config_binding_list);
 
   qwen_program_config_binding_list_t
       attention_output_quantize_config_binding_list;
@@ -990,30 +1055,22 @@ static iree_status_t qwen_program_prepare_layer_executables(
       attention_output_quantize_group_capacity);
 
   qwen_program_config_binding_list_t router_projection_config_binding_list;
-  qwen_program_config_binding_list_initialize(
+  qwen_program_config_binding_list_initialize_with_token_capacity(
       IREE_ARRAYSIZE(qwen_router_projection_config_bindings),
-      qwen_router_projection_config_bindings,
+      qwen_router_projection_config_bindings, token_count,
       &router_projection_config_binding_list);
-  qwen_program_config_binding_list_append_index(
-      &router_projection_config_binding_list,
-      IREE_SV("qwen3_moe.workload.token_capacity"), token_count);
 
   qwen_program_config_binding_list_t router_top8_config_binding_list;
-  qwen_program_config_binding_list_initialize(
+  qwen_program_config_binding_list_initialize_with_token_capacity(
       IREE_ARRAYSIZE(qwen_router_top8_config_bindings),
-      qwen_router_top8_config_bindings, &router_top8_config_binding_list);
-  qwen_program_config_binding_list_append_index(
-      &router_top8_config_binding_list,
-      IREE_SV("qwen3_moe.workload.token_capacity"), token_count);
+      qwen_router_top8_config_bindings, token_count,
+      &router_top8_config_binding_list);
 
   qwen_program_config_binding_list_t router_projection_top8_config_binding_list;
-  qwen_program_config_binding_list_initialize(
+  qwen_program_config_binding_list_initialize_with_token_capacity(
       IREE_ARRAYSIZE(qwen_router_projection_top8_config_bindings),
-      qwen_router_projection_top8_config_bindings,
+      qwen_router_projection_top8_config_bindings, token_count,
       &router_projection_top8_config_binding_list);
-  qwen_program_config_binding_list_append_index(
-      &router_projection_top8_config_binding_list,
-      IREE_SV("qwen3_moe.workload.token_capacity"), token_count);
 
   iree_status_t status = qwen_program_prepare_batch_append(
       batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_METADATA),
@@ -1038,9 +1095,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_QKV_QUANTIZED),
         IREE_SV("qwen3_moe_attention_qkv_quantized"),
-        IREE_ARRAYSIZE(qwen_attention_qkv_q4_config_bindings),
-        qwen_attention_qkv_q4_config_bindings, IREE_ARRAYSIZE(token_workload),
-        token_workload,
+        attention_qkv_q4_config_binding_list.count,
+        attention_qkv_q4_config_binding_list.bindings,
+        IREE_ARRAYSIZE(token_workload), token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_QKV_Q4]);
   }
   if (iree_status_is_ok(status) &&
@@ -1050,9 +1107,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_QKV_QUANTIZED),
         IREE_SV("qwen3_moe_attention_qkv_quantized"),
-        IREE_ARRAYSIZE(qwen_attention_qkv_q6_config_bindings),
-        qwen_attention_qkv_q6_config_bindings, IREE_ARRAYSIZE(token_workload),
-        token_workload,
+        attention_qkv_q6_config_binding_list.count,
+        attention_qkv_q6_config_binding_list.bindings,
+        IREE_ARRAYSIZE(token_workload), token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_QKV_Q6]);
   }
   if (iree_status_is_ok(status) &&
@@ -1061,8 +1118,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_QKV_POSTPROCESS_FUSED),
         IREE_SV("qwen3_moe_attention_qkv_postprocess_fused_decode"),
-        IREE_ARRAYSIZE(qwen_attention_qkv_postprocess_q4_config_bindings),
-        qwen_attention_qkv_postprocess_q4_config_bindings,
+        attention_qkv_postprocess_q4_config_binding_list.count,
+        attention_qkv_postprocess_q4_config_binding_list.bindings,
         IREE_ARRAYSIZE(attention_postprocess_workload),
         attention_postprocess_workload,
         &program->executables
@@ -1074,8 +1131,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_QKV_POSTPROCESS_FUSED),
         IREE_SV("qwen3_moe_attention_qkv_postprocess_fused_decode"),
-        IREE_ARRAYSIZE(qwen_attention_qkv_postprocess_q6_config_bindings),
-        qwen_attention_qkv_postprocess_q6_config_bindings,
+        attention_qkv_postprocess_q6_config_binding_list.count,
+        attention_qkv_postprocess_q6_config_binding_list.bindings,
         IREE_ARRAYSIZE(attention_postprocess_workload),
         attention_postprocess_workload,
         &program->executables
@@ -1087,8 +1144,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_POSTPROCESS_F32_F16),
         IREE_SV("qwen3_moe_attention_postprocess_f32_f16"),
-        IREE_ARRAYSIZE(qwen_attention_postprocess_config_bindings),
-        qwen_attention_postprocess_config_bindings,
+        attention_postprocess_config_binding_list.count,
+        attention_postprocess_config_binding_list.bindings,
         IREE_ARRAYSIZE(attention_postprocess_workload),
         attention_postprocess_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_POSTPROCESS]);
@@ -1114,9 +1171,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
         IREE_SV("qwen3_moe_dense_linear_q4k_f16_wmma"),
-        IREE_ARRAYSIZE(qwen_attention_output_config_bindings),
-        qwen_attention_output_config_bindings, IREE_ARRAYSIZE(token_workload),
-        token_workload,
+        attention_output_config_binding_list.count,
+        attention_output_config_binding_list.bindings,
+        IREE_ARRAYSIZE(token_workload), token_workload,
         &program
              ->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT_F32_WMMA]);
   }
@@ -1143,9 +1200,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
         IREE_SV("qwen3_moe_dense_linear_q4k_q8_1_x4"),
-        IREE_ARRAYSIZE(qwen_attention_output_config_bindings),
-        qwen_attention_output_config_bindings, IREE_ARRAYSIZE(token_workload),
-        token_workload,
+        attention_output_config_binding_list.count,
+        attention_output_config_binding_list.bindings,
+        IREE_ARRAYSIZE(token_workload), token_workload,
         &program
              ->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT_Q4_DIRECT]);
   }
@@ -1157,8 +1214,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
         IREE_SV("qwen3_moe_dense_linear_q4k_q8_1_x4_next_q8"),
-        IREE_ARRAYSIZE(qwen_attention_output_next_q8_config_bindings),
-        qwen_attention_output_next_q8_config_bindings,
+        attention_output_next_q8_config_binding_list.count,
+        attention_output_next_q8_config_binding_list.bindings,
         IREE_ARRAYSIZE(token_workload), token_workload,
         &program->executables
              [QWEN_PROGRAM_EXECUTABLE_ATTENTION_OUTPUT_Q4_NEXT_Q8]);
@@ -1179,8 +1236,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
         IREE_SV("qwen3_moe_dense_linear_q4k_f16_wmma"),
-        IREE_ARRAYSIZE(qwen_attention_query_wmma_config_bindings),
-        qwen_attention_query_wmma_config_bindings,
+        attention_query_wmma_config_binding_list.count,
+        attention_query_wmma_config_binding_list.bindings,
         IREE_ARRAYSIZE(token_workload), token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_QUERY_Q4_WMMA]);
   }
@@ -1189,8 +1246,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
         IREE_SV("qwen3_moe_dense_linear_q4k_f16_wmma"),
-        IREE_ARRAYSIZE(qwen_attention_key_value_wmma_config_bindings),
-        qwen_attention_key_value_wmma_config_bindings,
+        attention_key_value_wmma_config_binding_list.count,
+        attention_key_value_wmma_config_binding_list.bindings,
         IREE_ARRAYSIZE(token_workload), token_workload,
         &program->executables
              [QWEN_PROGRAM_EXECUTABLE_ATTENTION_KEY_VALUE_Q4_WMMA]);
@@ -1200,8 +1257,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16),
         IREE_SV("qwen3_moe_dense_linear_q6k_f16_wmma"),
-        IREE_ARRAYSIZE(qwen_attention_key_value_wmma_config_bindings),
-        qwen_attention_key_value_wmma_config_bindings,
+        attention_key_value_wmma_config_binding_list.count,
+        attention_key_value_wmma_config_binding_list.bindings,
         IREE_ARRAYSIZE(token_workload), token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_VALUE_Q6_WMMA]);
   }
@@ -1422,32 +1479,23 @@ static iree_status_t qwen_program_prepare_full_model_executables(
 
   qwen_program_config_binding_list_t
       terminal_attention_prepare_config_binding_list;
-  qwen_program_config_binding_list_initialize(
+  qwen_program_config_binding_list_initialize_with_token_capacity(
       IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
-      qwen_attention_prepare_config_bindings,
+      qwen_attention_prepare_config_bindings, terminal_token_count,
       &terminal_attention_prepare_config_binding_list);
-  qwen_program_config_binding_list_append_index(
-      &terminal_attention_prepare_config_binding_list,
-      IREE_SV("qwen3_moe.workload.token_capacity"), terminal_token_count);
 
   qwen_program_config_binding_list_t
       terminal_router_projection_config_binding_list;
-  qwen_program_config_binding_list_initialize(
+  qwen_program_config_binding_list_initialize_with_token_capacity(
       IREE_ARRAYSIZE(qwen_router_projection_config_bindings),
-      qwen_router_projection_config_bindings,
+      qwen_router_projection_config_bindings, terminal_token_count,
       &terminal_router_projection_config_binding_list);
-  qwen_program_config_binding_list_append_index(
-      &terminal_router_projection_config_binding_list,
-      IREE_SV("qwen3_moe.workload.token_capacity"), terminal_token_count);
 
   qwen_program_config_binding_list_t terminal_router_top8_config_binding_list;
-  qwen_program_config_binding_list_initialize(
+  qwen_program_config_binding_list_initialize_with_token_capacity(
       IREE_ARRAYSIZE(qwen_router_top8_config_bindings),
-      qwen_router_top8_config_bindings,
+      qwen_router_top8_config_bindings, terminal_token_count,
       &terminal_router_top8_config_binding_list);
-  qwen_program_config_binding_list_append_index(
-      &terminal_router_top8_config_binding_list,
-      IREE_SV("qwen3_moe.workload.token_capacity"), terminal_token_count);
 
   iree_status_t status = qwen_program_prepare_batch_append(
       batch, IREE_SV(QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K_BRINGUP_WORKAROUND),

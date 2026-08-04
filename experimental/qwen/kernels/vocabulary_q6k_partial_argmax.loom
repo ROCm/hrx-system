@@ -25,7 +25,9 @@ kernel.def @ggml_linear_q6k_q8_1_x4_partial_argmax(%token_count: index, %input_s
   kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%workgroup_size, %one, %one) : index
 } launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %partial_logits: buffer, %partial_ids: buffer) {
   %q8_noalias, %weight_noalias, %partial_logits_noalias, %partial_ids_noalias = buffer.assume.noalias %q8_input, %weight, %partial_logits, %partial_ids : buffer, buffer, buffer, buffer
-  %dot, %token, %channel, %valid_channel, %launch_token_count, %output_bound = func.apply<ggml.linear_q6k_q8_1_x4.body>(%token_count, %input_size, %output_size, %q8_noalias, %weight_noalias) : (index, index, index, buffer, buffer) -> (f32, index, index, i1, index, index)
+  %publish_output = scalar.constant true : i1
+  %token0 = kernel.workgroup.id<y> : index
+  %dot, %token, %channel, %valid_channel, %launch_token_count, %output_bound = func.apply<ggml.linear_q6k_q8_1_x4.body>(%publish_output, %token_count, %token0, %input_size, %output_size, %q8_noalias, %weight_noalias) : (i1, index, index, index, index, buffer, buffer) -> (f32, index, index, i1, index, index)
   %zero = index.constant 0 : index
   %seven = index.constant 7 : index
   %eight = index.constant 8 : index
