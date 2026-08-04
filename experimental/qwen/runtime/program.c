@@ -575,6 +575,34 @@ static const qwen_loom_config_binding_t qwen_routed_down_config_bindings[] = {
 };
 
 static const qwen_loom_config_binding_t
+    qwen_direct_routed_down_config_bindings[] = {
+        {
+            .key = IREE_SVL("qwen3_moe.routed_down.input_size"),
+            .value = IREE_SVL("768"),
+        },
+        {
+            .key = IREE_SVL("qwen3_moe.routed_down.output_size"),
+            .value = IREE_SVL("2048"),
+        },
+        {
+            .key = IREE_SVL("qwen3_moe.routed_down.route_count"),
+            .value = IREE_SVL("8"),
+        },
+        {
+            .key = IREE_SVL("qwen3_moe.routed_down.expert_count"),
+            .value = IREE_SVL("128"),
+        },
+        {
+            .key = IREE_SVL("qwen3_moe.model.hidden_size"),
+            .value = IREE_SVL("2048"),
+        },
+        {
+            .key = IREE_SVL("qwen3_moe.model.rms_epsilon"),
+            .value = IREE_SVL("0.000001"),
+        },
+};
+
+static const qwen_loom_config_binding_t
     qwen_weighted_reduce_next_rmsnorm_config_bindings[] = {
         {
             .key = IREE_SVL("qwen3_moe.routed_down.output_size"),
@@ -1069,6 +1097,12 @@ static iree_status_t qwen_program_prepare_layer_executables(
       IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
       qwen_gate_up_config_bindings, token_count, &gate_up_config_binding_list);
 
+  qwen_program_config_binding_list_t direct_routed_down_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_direct_routed_down_config_bindings),
+      qwen_direct_routed_down_config_bindings, token_count,
+      &direct_routed_down_config_binding_list);
+
   iree_status_t status = qwen_program_prepare_batch_append(
       batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_METADATA),
       IREE_SV("qwen_attention_metadata_bringup_workaround"),
@@ -1372,8 +1406,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q4_Q8),
         IREE_SV("qwen3_moe_routed_down_q4k_q8_1_x4_next_q8"),
-        IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
-        qwen_attention_prepare_config_bindings,
+        direct_routed_down_config_binding_list.count,
+        direct_routed_down_config_binding_list.bindings,
         IREE_ARRAYSIZE(direct_routed_down_workload),
         direct_routed_down_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4_NEXT_Q8]);

@@ -253,36 +253,25 @@ TEST(QwenLoomSourceTest, EmbedsCapacityBoundDirectGateUpSource) {
             std::string::npos);
 }
 
-TEST(QwenLoomSourceTest, EmbedsDirectDownFixedModelWorkarounds) {
-  const char* module_paths[] = {
-      QWEN_LOOM_SOURCE_ROUTED_DOWN_Q4_Q8,
-      QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_F32,
-  };
-  for (const char* module_path : module_paths) {
-    SCOPED_TRACE(module_path);
-    qwen_loom_source_module_t source_module;
-    IREE_ASSERT_OK(qwen_loom_source_lookup(iree_make_cstring_view(module_path),
-                                           &source_module));
-    std::string source_text(
-        reinterpret_cast<const char*>(source_module.source_contents.data),
-        source_module.source_contents.data_length);
-    EXPECT_NE(
-        source_text.find("%bounded_token_count = index.assume %token_count "
-                         "[range(%token_count, 1, 1)] : index"),
-        std::string::npos);
-    EXPECT_NE(
-        source_text.find("%bounded_route_count = index.assume %route_count "
-                         "[range(%route_count, 8, 8)] : index"),
-        std::string::npos);
-    EXPECT_NE(
-        source_text.find("%bounded_output_size = index.assume %output_size "
-                         "[range(%output_size, 2048, 2048), "
-                         "mul(%output_size, 128)] : index"),
-        std::string::npos);
-    EXPECT_NE(
-        source_text.find("func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>"),
-        std::string::npos);
-  }
+TEST(QwenLoomSourceTest, EmbedsCanonicalQ4DirectDownSource) {
+  qwen_loom_source_module_t source_module;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q4_Q8), &source_module));
+  std::string source_text(
+      reinterpret_cast<const char*>(source_module.source_contents.data),
+      source_module.source_contents.data_length);
+  EXPECT_NE(source_text.find("@qwen3_moe.routed_down.output_size"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("workgroups(%output_tiles, %one, %one)"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("eq(%output_size, %configured_output_size0)"),
+            std::string::npos);
+  EXPECT_NE(
+      source_text.find("func.apply<qwen3_moe.routed_down.q4k_q8_1_x4.body>"),
+      std::string::npos);
+  EXPECT_NE(
+      source_text.find("func.apply<qwen3_moe.routed_down.next_q8_completion>"),
+      std::string::npos);
 }
 
 TEST(QwenLoomSourceTest, EmbedsDirectF32Q6DownFixedModelWorkaround) {

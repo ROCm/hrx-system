@@ -96,17 +96,15 @@ dispatch per prompt row per layer; prefill-512 and split-K decode retain their
 established schedules. Delete it when the canonical pure-tail multirow path
 passes the same differential.
 
-The two direct routed-down forks
-`kernels/routed_down_q4_next_q8_bringup_workaround.loom` and
-`kernels/routed_down_q6_f32_next_q8_bringup_workaround.loom` retain the canonical
-decode ABIs and device bodies while making this model's exact one-token,
-eight-route dimensions structural. They publish the following layer's
+The direct Q6_K routed-down fork
+`kernels/routed_down_q6_f32_next_q8_bringup_workaround.loom` retains the
+canonical decode ABI and device body while making this model's exact one-token,
+eight-route dimensions structural. It publishes the following layer's
 normalized Q8_1 x4 row through the shared
 `qwen3_moe.routed_down.next_q8_completion` device template. Only exact
-workload facts remain local to these adapters; nested device-template selection
-is canonical again. Delete both when workload specialization
-crosses the source-to-low boundary; they are not model-generated kernel
-variants.
+workload facts remain local to this adapter; nested device-template selection
+is canonical again. Delete it when workload specialization crosses the
+source-to-low boundary; it is not a model-generated kernel variant.
 
 `kernels/vocabulary_q6k_partial_argmax.loom` owns only the model endpoint. It
 applies the canonical `ggml.linear_q6k_q8_1_x4.body` contraction and reduces

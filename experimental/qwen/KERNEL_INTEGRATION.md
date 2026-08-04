@@ -126,7 +126,7 @@ envelope.
 | 2 | Grouped prefill Q4_K/Q6_K down and weighted residual: `qwen3_moe_routed_down_q4k_f16_wmma_grouped`, `qwen3_moe_routed_down_q6k_f16_wmma_grouped`, and `qwen3_moe_routed_down_weighted_reduce_f16_f32` | `qwen3_moe/routed_down_quantized_f16_wmma.loom`, with the raw-layout bodies in `qwen3_moe/routed_down_q4k.loom` and `qwen3_moe/routed_down_q6k.loom` | None |
 | 3 | Nonterminal prefill down reduction, residual, and next RMSNorm: `qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32` | `qwen3_moe/routed_down_weighted_reduce_next_rmsnorm_f32.loom` | None |
 | 4 | Direct decode gate/up and SwiGLU, with Q8_1 x4 publication only for Q4_K down layers: `qwen3_moe_routed_gate_up_swiglu_q4k_q8` and `qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8` | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` and `ggml/quantize_q8_1_x4.loom` | None |
-| 5 | Direct decode Q4_K/Q6_K down, route weighting, residual, and next RMSNorm/Q8_1 x4 publication: `qwen3_moe_routed_down_q4k_q8_1_x4_next_q8` and `qwen3_moe_routed_down_q6k_f32_wave64_next_q8` | `qwen3_moe/routed_down_q4k.loom` and `qwen3_moe/routed_down_q6k.loom` | `routed_down_q4_next_q8_bringup_workaround.loom` and `routed_down_q6_f32_next_q8_bringup_workaround.loom` |
+| 5 | Direct decode Q4_K/Q6_K down, route weighting, residual, and next RMSNorm/Q8_1 x4 publication: `qwen3_moe_routed_down_q4k_q8_1_x4_next_q8` and `qwen3_moe_routed_down_q6k_f32_wave64_next_q8` | `qwen3_moe/routed_down_q4k.loom` and `qwen3_moe/routed_down_q6k.loom` | Q6_K only: `routed_down_q6_f32_next_q8_bringup_workaround.loom`; Q4_K uses the canonical source directly |
 
 The exact full-model Decode-513 layer is seven dispatches. After one initial
 `qwen3_moe_attention_rmsnorm_quantize_q8_1_x4` producer from
@@ -140,7 +140,7 @@ cuts in order:
 | 3 | `qwen3_moe_dense_linear_q4k_q8_1_x4_next_q8`, including output residual and feed-forward RMSNorm/Q8_1 x4 publication | `qwen3_moe/dense_linear_quantized_f16_wmma.loom` and `qwen3_moe/attention_prepare_quantized.loom` | None |
 | 4 | `qwen3_moe_router_projection_top8_fused_decode_f32` | `qwen3_moe/router_projection_top8_fused_f32.loom`, using `qwen3_moe/router_projection_f32.loom` and `qwen3_moe/router_top8_f32.loom` | None |
 | 5 | Storage-selected `qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8` for Q4_K down or `qwen3_moe_routed_gate_up_swiglu_q4k_q8` for Q6_K down | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` and `ggml/quantize_q8_1_x4.loom` | None |
-| 6 | Storage-selected `qwen3_moe_routed_down_q4k_q8_1_x4_next_q8` or `qwen3_moe_routed_down_q6k_f32_wave64_next_q8` | `qwen3_moe/routed_down_q4k.loom` or `qwen3_moe/routed_down_q6k.loom` | Matching `routed_down_*_next_q8_bringup_workaround.loom` |
+| 6 | Storage-selected `qwen3_moe_routed_down_q4k_q8_1_x4_next_q8` or `qwen3_moe_routed_down_q6k_f32_wave64_next_q8` | `qwen3_moe/routed_down_q4k.loom` or `qwen3_moe/routed_down_q6k.loom` | Q6_K only: `routed_down_q6_f32_next_q8_bringup_workaround.loom`; Q4_K uses the canonical source directly |
 
 To reproduce the full Prefill-512 schedule after the routed-expert cuts, add
 these canonical families:
@@ -278,7 +278,6 @@ not copied wholesale into a second kernel corpus.
 
 | Workaround | Canonical source or missing provider | Exact pressure exposed |
 | --- | --- | --- |
-| `routed_down_q4_next_q8_bringup_workaround.loom` | `qwen3_moe/routed_down_q4k.loom` and `qwen3_moe/routed_down_next_q8.loom` | Exact decode dimensions do not reach source-to-low, so the eight-iteration route loop cannot be unrolled. The one-function fork makes only those dimensions structural, then delegates contraction, residual arithmetic, last-arrival synchronization, and next-row publication to canonical device templates. |
 | `routed_down_q6_f32_next_q8_bringup_workaround.loom` | `qwen3_moe/routed_down_q6k.loom` and `qwen3_moe/routed_down_next_q8.loom` | The same source-to-low specialization gap blocks the storage-selected direct-F32 Q6_K route. The one-function fork makes only the model dimensions structural and delegates both contraction and next-row completion to canonical device templates. |
 | `flash_attention_decode_split_bringup_workaround.loom` | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` | Exact context workloads do not reach reducer-template selection, launch topology, dynamic view bounds, or address-width analysis. The adapter carries the exact runtime value as temporary config, applies the canonical producer, and directly selects the canonical cooperative reducer without copying either body. |
 | Runtime pure-tail row-by-row recording | `qwen3_moe/flash_attention_f32_f16_wmma.loom` | The canonical multirow specialization corrupts nonleading query rows when the context consists entirely of a key-tile tail. The same canonical kernel specialized for one query row is exact, so the command buffer temporarily records that specialization once per prompt row without introducing another Loom source. |
