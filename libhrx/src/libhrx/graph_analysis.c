@@ -207,6 +207,7 @@ typedef struct hrx_uint32x2_t {
 
 static hrx_uint32x2_t hrx_graph_partition_with_streams(
     hrx_graph_sort_node_t* nodes, uint32_t node_count, uint32_t* node_index_map,
+    const hrx_graph_edge_t* additional_edges,
     hrx_graph_partition_t* partitions) {
   uint32_t partition_count = 0;
   uint32_t block_count = 0;
@@ -260,6 +261,12 @@ static hrx_uint32x2_t hrx_graph_partition_with_streams(
             break;
           }
         }
+        for (const hrx_graph_edge_t* edge = additional_edges;
+             deps_satisfied && edge != NULL; edge = edge->next) {
+          if (edge->to != nodes[i].node) continue;
+          const uint32_t dep_index = node_index_map[edge->from->node_index];
+          if (dep_index >= i) deps_satisfied = false;
+        }
         if (!deps_satisfied) break;
 
         const bool use_workstreams =
@@ -273,6 +280,17 @@ static hrx_uint32x2_t hrx_graph_partition_with_streams(
               node_index_map[nodes[i].node->dependencies[j]->node_index];
           if (dep_index >= recordable_start && dep_index < i) {
             uint8_t dep_stream = nodes[dep_index].stream_id;
+            connected_streams |= (1 << dep_stream);
+          }
+        }
+        uint32_t additional_dependency_count = 0;
+        for (const hrx_graph_edge_t* edge = additional_edges; edge != NULL;
+             edge = edge->next) {
+          if (edge->to != nodes[i].node) continue;
+          ++additional_dependency_count;
+          const uint32_t dep_index = node_index_map[edge->from->node_index];
+          if (dep_index >= recordable_start && dep_index < i) {
+            const uint8_t dep_stream = nodes[dep_index].stream_id;
             connected_streams |= (1 << dep_stream);
           }
         }
@@ -305,7 +323,8 @@ static hrx_uint32x2_t hrx_graph_partition_with_streams(
           const uint32_t dep_count =
               iree_math_count_ones_u32(connected_streams);
           const bool is_sync_point =
-              (nodes[i].node->dependency_count > HRX_GRAPH_MAX_FAN_OUT);
+              (nodes[i].node->dependency_count + additional_dependency_count >
+               HRX_GRAPH_MAX_FAN_OUT);
           if (!use_workstreams || dep_count > 1 || is_sync_point) {
             assigned_stream = 0;
             for (uint32_t k = recordable_start; k < i; ++k) {
@@ -383,7 +402,7 @@ iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
 
   const hrx_uint32x2_t partition_block_counts =
       hrx_graph_partition_with_streams(sorted_nodes, node_count, node_index_map,
-                                       partitions);
+                                       additional_edges, partitions);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, partition_block_counts.values[0]);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, partition_block_counts.values[1]);
 

@@ -77,6 +77,82 @@ TEST_F(GraphBufferTest, RecordsAndInstantiatesHandleBasedCopyAndFill) {
   hrx_graph_release(graph);
 }
 
+TEST_F(GraphBufferTest, DependentFillThenCopyProducesExpectedContents) {
+  hrx_graph_t graph = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph)));
+
+  const hrx_graph_fill_buffer_node_attrs_t fill_attrs = {
+      /*.dst=*/{source_, 0, 64},
+      /*.pattern=*/0xA5u,
+      /*.pattern_size=*/1,
+  };
+  hrx_graph_node_t fill_node = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
+      graph, nullptr, 0, &fill_attrs, &fill_node)));
+
+  const hrx_graph_copy_buffer_node_attrs_t copy_attrs = {
+      /*.src=*/{source_, 0, 64},
+      /*.dst=*/{destination_, 0, 64},
+  };
+  hrx_graph_node_t copy_node = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_copy_buffer_node(
+      graph, &fill_node, 1, &copy_attrs, &copy_node)));
+
+  hrx_graph_exec_t executable = nullptr;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_instantiate(graph, 0, &executable)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+
+  uint8_t contents[64] = {};
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h(
+      device_, destination_, 0, contents, sizeof(contents))));
+  for (uint8_t value : contents) EXPECT_EQ(value, 0xA5u);
+
+  hrx_graph_exec_release(executable);
+  hrx_graph_release(graph);
+}
+
+TEST_F(GraphBufferTest, AddedDependencyOrdersFillBeforeCopy) {
+  hrx_graph_t graph = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph)));
+
+  const hrx_graph_fill_buffer_node_attrs_t fill_attrs = {
+      /*.dst=*/{source_, 0, 64},
+      /*.pattern=*/0x3Cu,
+      /*.pattern_size=*/1,
+  };
+  hrx_graph_node_t fill_node = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
+      graph, nullptr, 0, &fill_attrs, &fill_node)));
+
+  const hrx_graph_copy_buffer_node_attrs_t copy_attrs = {
+      /*.src=*/{source_, 0, 64},
+      /*.dst=*/{destination_, 0, 64},
+  };
+  hrx_graph_node_t copy_node = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_copy_buffer_node(
+      graph, nullptr, 0, &copy_attrs, &copy_node)));
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_dependencies(graph, &fill_node, &copy_node, /*count=*/1)));
+
+  hrx_graph_exec_t executable = nullptr;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_instantiate(graph, 0, &executable)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+
+  uint8_t contents[64] = {};
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h(
+      device_, destination_, 0, contents, sizeof(contents))));
+  for (uint8_t value : contents) EXPECT_EQ(value, 0x3Cu);
+
+  hrx_graph_exec_release(executable);
+  hrx_graph_release(graph);
+}
+
 TEST_F(GraphBufferTest, RejectsInvalidHandleRangesAndPatterns) {
   hrx_graph_t graph = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph)));

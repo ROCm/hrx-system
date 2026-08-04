@@ -139,34 +139,76 @@ static iree_status_t hrx_graph_block_allocate(
 // Hazard tracking for command buffer recording
 //===----------------------------------------------------------------------===//
 
-typedef struct hrx_graph_node_index_set_t {
-  uint32_t values[8];
-  uint32_t count : 31;
-  uint32_t invalid : 1;
-} hrx_graph_node_index_set_t;
-
-static inline void hrx_graph_node_index_set_reset(
-    hrx_graph_node_index_set_t* set) {
-  set->count = 0;
-  set->invalid = 0;
+void hrx_graph_barrier_state_reset(hrx_graph_barrier_state_t* state) {
+  state->count = 0;
+  state->invalid = 0;
 }
 
-static bool hrx_graph_node_index_set_test_hazard(
-    const hrx_graph_node_index_set_t* set, uint32_t value) {
-  if (set->invalid) return true;
-  for (uint32_t i = 0; i < set->count; ++i) {
-    if (set->values[i] == value) return true;
+static bool hrx_graph_barrier_state_test_hazard(
+    const hrx_graph_barrier_state_t* state, uint32_t value) {
+  if (state->invalid) return true;
+  for (uint32_t i = 0; i < state->count; ++i) {
+    if (state->values[i] == value) return true;
   }
   return false;
 }
 
-static void hrx_graph_node_index_set_insert(hrx_graph_node_index_set_t* set,
-                                            uint32_t value) {
-  if (set->count >= IREE_ARRAYSIZE(set->values)) {
-    set->invalid = 1;
+static void hrx_graph_barrier_state_insert(hrx_graph_barrier_state_t* state,
+                                           uint32_t value) {
+  if (state->count >= IREE_ARRAYSIZE(state->values)) {
+    state->invalid = 1;
     return;
   }
-  set->values[set->count++] = value;
+  state->values[state->count++] = value;
+}
+
+iree_status_t hrx_graph_record_node_barrier(
+    hrx_graph_barrier_state_t* state, const hrx_graph_node_s* node,
+    const hrx_graph_edge_t* additional_edges, const uint32_t* node_index_map,
+    uint32_t sorted_index, iree_hal_command_buffer_t* command_buffer,
+    bool* out_did_barrier) {
+  IREE_ASSERT_ARGUMENT(state);
+  IREE_ASSERT_ARGUMENT(node);
+  IREE_ASSERT_ARGUMENT(node_index_map);
+  IREE_ASSERT_ARGUMENT(command_buffer);
+  IREE_ASSERT_ARGUMENT(out_did_barrier);
+  *out_did_barrier = false;
+
+  bool has_hazard = false;
+  for (uint32_t i = 0; i < node->dependency_count; ++i) {
+    const uint32_t dependency_sort_index =
+        node_index_map[node->dependencies[i]->node_index];
+    if (dependency_sort_index == UINT32_MAX) continue;
+    if (hrx_graph_barrier_state_test_hazard(state, dependency_sort_index)) {
+      has_hazard = true;
+      break;
+    }
+  }
+  for (const hrx_graph_edge_t* edge = additional_edges;
+       !has_hazard && edge != NULL; edge = edge->next) {
+    if (edge->to != node) continue;
+    const uint32_t dependency_sort_index =
+        node_index_map[edge->from->node_index];
+    if (dependency_sort_index == UINT32_MAX) continue;
+    has_hazard =
+        hrx_graph_barrier_state_test_hazard(state, dependency_sort_index);
+  }
+
+  if (has_hazard) {
+    const iree_hal_memory_barrier_t memory_barrier = {
+        .source_scope = IREE_HAL_MEMORY_ACCESS_ALL,
+        .target_scope = IREE_HAL_MEMORY_ACCESS_ALL,
+    };
+    IREE_RETURN_IF_ERROR(iree_hal_command_buffer_execution_barrier(
+        command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+        IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+        IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &memory_barrier, 0, NULL));
+    hrx_graph_barrier_state_reset(state);
+    *out_did_barrier = true;
+  }
+
+  hrx_graph_barrier_state_insert(state, sorted_index);
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -177,6 +219,7 @@ static iree_status_t hrx_graph_record_partition(
     hrx_graph_exec_s* exec, hrx_graph_sort_node_t* sorted_nodes,
     uint32_t node_start_index, uint32_t node_count,
     const uint32_t* node_index_map, uint8_t stream_id,
+    const hrx_graph_edge_t* additional_edges,
     iree_hal_command_buffer_t* command_buffer) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -191,32 +234,17 @@ static iree_status_t hrx_graph_record_partition(
                                                     label_color, location));
 
   iree_status_t status = iree_ok_status();
-  uint32_t in_stream_count = 0;
-  hrx_graph_node_index_set_t barrier_index_set;
-  hrx_graph_node_index_set_reset(&barrier_index_set);
+  hrx_graph_barrier_state_t barrier_state;
+  hrx_graph_barrier_state_reset(&barrier_state);
   for (uint32_t i = 0; iree_status_is_ok(status) && i < node_count; ++i) {
     hrx_graph_sort_node_t* sort_node = &sorted_nodes[node_start_index + i];
     if (sort_node->stream_id != stream_id) continue;
     hrx_graph_node_s* node = sort_node->node;
-    if (in_stream_count > 1) {
-      for (uint32_t j = 0; j < node->dependency_count; ++j) {
-        const uint32_t dependency_sort_index =
-            node_index_map[node->dependencies[j]->node_index];
-        const bool has_hazard = hrx_graph_node_index_set_test_hazard(
-            &barrier_index_set, dependency_sort_index);
-        if (has_hazard) {
-          IREE_RETURN_AND_END_ZONE_IF_ERROR(
-              z0, iree_hal_command_buffer_execution_barrier(
-                      command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-                      IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
-                      IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 0, NULL, 0, NULL));
-          hrx_graph_node_index_set_reset(&barrier_index_set);
-        }
-        hrx_graph_node_index_set_insert(&barrier_index_set,
-                                        sort_node->sorted_index);
-      }
-    }
-    ++in_stream_count;
+    bool did_barrier = false;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, hrx_graph_record_node_barrier(
+                &barrier_state, node, additional_edges, node_index_map,
+                sort_node->sorted_index, command_buffer, &did_barrier));
     switch (node->type) {
       case HRX_GRAPH_NODE_TYPE_INTERNAL_KERNEL: {
         const hrx_graph_kernel_node_attrs_internal_t* attrs =
@@ -411,7 +439,7 @@ iree_status_t hrx_graph_exec_instantiate_locked(
             z0, hrx_graph_record_partition(
                     exec, schedule.sorted_nodes, partition->start_index,
                     partition->count, schedule.node_index_map, s,
-                    ptrs.attrs->execute.command_buffer));
+                    additional_edges, ptrs.attrs->execute.command_buffer));
 
         if (wait_semaphore_count > 0) {
           for (uint16_t w = 0; w < wait_semaphore_count; w++) {
