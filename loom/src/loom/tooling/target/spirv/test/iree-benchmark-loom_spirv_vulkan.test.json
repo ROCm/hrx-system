@@ -177,6 +177,37 @@
           "\"failures\":{\"row_count\":0,\"failed_benchmark_count\":0}"
         ]
       }
+    },
+    {
+      "name": "runs explicit serial spirv vulkan dispatch benchmark",
+      "run": {
+        "tool": "iree-benchmark-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/launch_schedule_hal_actual.loom",
+          "--benchmark=@launch_schedule_serial",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false",
+          "--measure=dispatch_complete",
+          "--iterations=1",
+          "--warmup-iterations=0",
+          "--batch-size=1",
+          "--min-time-ms=0",
+          "--max-batches=1",
+          "--input-ring-count=1",
+          "--output-format=jsonl"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"row\":\"plan\"",
+          "\"benchmark\":\"launch_schedule_serial\"",
+          "\"case\":\"launch_schedule_serial_case\"",
+          "\"actual_invocation_count\":3",
+          "\"correctness\":{\"sample_count\":1,\"failed_sample_count\":0}",
+          "\"physical_dispatches_per_logical_operation\":3",
+          "\"failures\":{\"row_count\":0,\"failed_benchmark_count\":0}"
+        ]
+      }
     }
   ]
 }

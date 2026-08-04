@@ -25,6 +25,7 @@ extern "C" {
 #define LOOM_TESTBENCH_CASE_INDEX_INVALID IREE_HOST_SIZE_MAX
 #define LOOM_TESTBENCH_BENCHMARK_INDEX_INVALID IREE_HOST_SIZE_MAX
 #define LOOM_TESTBENCH_PARAMETER_SAMPLE_ORDINAL_ALL IREE_HOST_SIZE_MAX
+#define LOOM_TESTBENCH_EXECUTION_EPOCH_INVALID IREE_HOST_SIZE_MAX
 
 enum {
   // Default cap for the number of concrete samples executed per check.case.
@@ -256,6 +257,13 @@ typedef struct loom_testbench_invocation_plan_t {
   iree_string_view_t provider;
   // Provider-specific attributes for oracle invocations.
   loom_named_attr_slice_t attrs;
+  // Execution epoch for actual invocations, or INVALID for oracle invocations.
+  // Adjacent actual invocations in the same epoch may execute concurrently;
+  // increasing epochs require an execution and visibility edge.
+  iree_host_size_t execution_epoch;
+  // Number of enclosing kernel launch schedule operations. Direct check.case
+  // launches have depth zero.
+  iree_host_size_t launch_schedule_depth;
   // Borrowed SSA value IDs used as kernel launch workload inputs.
   const loom_value_id_t* workload_value_ids;
   // Number of entries in |workload_value_ids|.

@@ -13,6 +13,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/check/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/test/ops.h"
 
 namespace loom {
@@ -27,6 +28,7 @@ class TestbenchTest : public ::testing::Test {
 
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_CHECK, loom_check_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
   }
@@ -62,6 +64,78 @@ class TestbenchTest : public ::testing::Test {
   iree_arena_allocator_t plan_arena_;
   loom_context_t context_;
 };
+
+TEST_F(TestbenchTest, PlansKernelLaunchExecutionEpochs) {
+  loom_module_t* module = ParseModule(R"(
+kernel.decl @step() launch(%output: buffer)
+
+check.case @launch_schedule {
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @step[](%output) : [](tensor<1xi32>)
+  kernel.launch.concurrent {
+    kernel.launch @step[](%output) : [](tensor<1xi32>)
+    kernel.launch @step[](%output) : [](tensor<1xi32>)
+  }
+  kernel.launch.serial {
+    kernel.launch @step[](%output) : [](tensor<1xi32>)
+    kernel.launch @step[](%output) : [](tensor<1xi32>)
+  }
+  kernel.launch @step[](%output) : [](tensor<1xi32>)
+  check.return
+}
+)");
+  ASSERT_NE(module, nullptr);
+
+  loom_testbench_module_plan_t plan = {};
+  IREE_ASSERT_OK(
+      loom_testbench_plan_module(module, nullptr, &plan_arena_, &plan));
+
+  ASSERT_EQ(plan.case_count, 1u);
+  const loom_testbench_case_plan_t& case_plan = plan.cases[0];
+  ASSERT_EQ(case_plan.invocation_count, 6u);
+  ASSERT_EQ(case_plan.actual_invocation_count, 6u);
+  const iree_host_size_t expected_epochs[] = {0, 1, 1, 2, 3, 4};
+  const iree_host_size_t expected_depths[] = {0, 1, 1, 1, 1, 0};
+  for (iree_host_size_t i = 0; i < case_plan.invocation_count; ++i) {
+    EXPECT_EQ(case_plan.invocations[i].execution_epoch, expected_epochs[i]);
+    EXPECT_EQ(case_plan.invocations[i].launch_schedule_depth,
+              expected_depths[i]);
+  }
+  EXPECT_EQ(plan.issue_count, 0u);
+
+  loom_module_free(module);
+}
+
+TEST_F(TestbenchTest, PreservesNestedLaunchScheduleDepth) {
+  loom_module_t* module = ParseModule(R"(
+kernel.decl @step() launch(%output: buffer)
+
+check.case @nested_launch_schedule {
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch.serial {
+    kernel.launch.concurrent {
+      kernel.launch @step[](%output) : [](tensor<1xi32>)
+    }
+  }
+  check.return
+}
+)");
+  ASSERT_NE(module, nullptr);
+
+  loom_testbench_module_plan_t plan = {};
+  IREE_ASSERT_OK(
+      loom_testbench_plan_module(module, nullptr, &plan_arena_, &plan));
+
+  ASSERT_EQ(plan.case_count, 1u);
+  const loom_testbench_case_plan_t& case_plan = plan.cases[0];
+  ASSERT_EQ(case_plan.invocation_count, 1u);
+  EXPECT_EQ(case_plan.invocations[0].execution_epoch,
+            LOOM_TESTBENCH_EXECUTION_EPOCH_INVALID);
+  EXPECT_EQ(case_plan.invocations[0].launch_schedule_depth, 2u);
+  EXPECT_EQ(plan.issue_count, 0u);
+
+  loom_module_free(module);
+}
 
 TEST_F(TestbenchTest, DiscoversCasesAndBenchmarks) {
   loom_module_t* module = ParseModule(R"(

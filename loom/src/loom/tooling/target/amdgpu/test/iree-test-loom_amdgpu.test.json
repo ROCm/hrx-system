@@ -24,6 +24,46 @@
       }
     },
     {
+      "name": "runs explicit serial amdgpu dispatch epochs",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/launch_schedule_hal_actual.loom",
+          "--case=@launch_schedule_serial_case",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case\":\"launch_schedule_serial_case\"",
+            "\"passed\":true"
+          ]
+        }
+      }
+    },
+    {
+      "name": "runs concurrent amdgpu dispatch epoch",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/launch_schedule_hal_actual.loom",
+          "--case=@launch_schedule_concurrent_case",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case\":\"launch_schedule_concurrent_case\"",
+            "\"passed\":true"
+          ]
+        }
+      }
+    },
+    {
       "name": "runs amdgpu cases",
       "run": {
         "tool": "iree-test-loom",

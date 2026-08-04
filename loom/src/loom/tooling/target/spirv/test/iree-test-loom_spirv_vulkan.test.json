@@ -61,6 +61,44 @@
       }
     },
     {
+      "name": "runs explicit serial spirv vulkan dispatch epochs",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/launch_schedule_hal_actual.loom",
+          "--case=@launch_schedule_serial_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"launch_schedule_serial_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs concurrent spirv vulkan dispatch epoch",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/launch_schedule_hal_actual.loom",
+          "--case=@launch_schedule_concurrent_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"launch_schedule_concurrent_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
       "name": "runs spirv vulkan scalar addressing matrix",
       "run": {
         "tool": "iree-test-loom",

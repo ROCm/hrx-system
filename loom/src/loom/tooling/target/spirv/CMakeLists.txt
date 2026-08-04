@@ -185,6 +185,7 @@ iree_execution_test_suite(
     "iree-test-loom=loom::tools::iree-test-loom"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/dynamic_workgroup_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/launch_schedule_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_coop_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_coop_u8_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_hal_actual.loom"
@@ -211,6 +212,7 @@ iree_execution_test_suite(
   TOOLS
     "iree-benchmark-loom=loom::tools::iree-benchmark-loom"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/launch_schedule_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_coop_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_coop_u8_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_hal_actual.loom"

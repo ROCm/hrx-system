@@ -223,6 +223,8 @@ typedef struct iree_benchmark_loom_hal_sequence_input_ring_t {
   const loom_run_hal_invocation_plan_t** plan_ptrs;
   // Borrowed prepared candidates in sequence-step order.
   const loom_run_hal_prepared_candidate_t** candidates;
+  // Execution epochs in sequence-step order.
+  iree_host_size_t* execution_epochs;
   // Number of logical ring slots in |plans|.
   iree_host_size_t plan_ring_count;
   // Number of actual dispatch invocations per logical ring slot.
@@ -358,6 +360,11 @@ static iree_status_t iree_benchmark_loom_hal_sequence_input_ring_initialize(
                                          (void**)&out_ring->candidates);
   }
   if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(allocator, sequence->provider_count,
+                                         sizeof(*out_ring->execution_epochs),
+                                         (void**)&out_ring->execution_epochs);
+  }
+  if (iree_status_is_ok(status)) {
     memset(out_ring->plans, 0, plan_count * sizeof(*out_ring->plans));
     out_ring->plan_ring_count = ring_count;
     for (iree_host_size_t i = 0; i < sequence->provider_count; ++i) {
@@ -366,6 +373,8 @@ static iree_status_t iree_benchmark_loom_hal_sequence_input_ring_initialize(
       out_ring->plan_ptrs[i] = &out_ring->plans[i];
       out_ring->candidates[i] =
           &sequence->providers[i].execution.prepared_candidate;
+      out_ring->execution_epochs[i] =
+          sequence->providers[i].execution.actual_invocation->execution_epoch;
     }
     iree_host_size_t dispatches_per_batch = 0;
     if (!iree_host_size_checked_mul(policy->hal_options.timing.batch_size,
@@ -441,6 +450,7 @@ static iree_status_t iree_benchmark_loom_hal_sequence_input_ring_initialize(
     for (iree_host_size_t i = 0; i < plan_count; ++i) {
       loom_run_hal_invocation_plan_deinitialize(&out_ring->plans[i]);
     }
+    iree_allocator_free(out_ring->host_allocator, out_ring->execution_epochs);
     iree_allocator_free(out_ring->host_allocator, out_ring->candidates);
     iree_allocator_free(out_ring->host_allocator, out_ring->plan_ptrs);
     iree_allocator_free(out_ring->host_allocator, out_ring->plans);
@@ -460,6 +470,7 @@ static void iree_benchmark_loom_hal_sequence_input_ring_deinitialize(
   for (iree_host_size_t i = 0; i < plan_count; ++i) {
     loom_run_hal_invocation_plan_deinitialize(&ring->plans[i]);
   }
+  iree_allocator_free(ring->host_allocator, ring->execution_epochs);
   iree_allocator_free(ring->host_allocator, ring->candidates);
   iree_allocator_free(ring->host_allocator, ring->plan_ptrs);
   iree_allocator_free(ring->host_allocator, ring->plans);
@@ -645,9 +656,9 @@ iree_status_t iree_benchmark_loom_run_hal_sequence_benchmark_sample(
     if (iree_status_is_ok(status)) {
       status = loom_run_hal_benchmark_dispatch_sequence_plan_ring(
           &hal_context->execution.runtime, sequence->provider_count,
-          input_ring.candidates, input_ring.plan_ring_count,
-          input_ring.plan_ptrs, &hal_options, allocator,
-          &out_result->hal_benchmark);
+          input_ring.candidates, input_ring.execution_epochs,
+          input_ring.plan_ring_count, input_ring.plan_ptrs, &hal_options,
+          allocator, &out_result->hal_benchmark);
     }
     if (iree_status_is_ok(status)) {
       out_result->data_cache.command_buffer_ring_count =

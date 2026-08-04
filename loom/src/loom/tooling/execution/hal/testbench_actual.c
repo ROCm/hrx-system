@@ -238,6 +238,14 @@ iree_hal_buffer_params_t loom_run_hal_testbench_host_visible_buffer_params(
 static iree_status_t loom_run_hal_testbench_validate_actual_invocation(
     const loom_testbench_case_plan_t* case_plan,
     const loom_testbench_invocation_plan_t* invocation) {
+  if (invocation->launch_schedule_depth > 1) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "HAL actual invocations do not yet support nested kernel launch "
+        "schedules; actual invocation in `%.*s` has schedule depth %" PRIhsz,
+        (int)case_plan->name.size, case_plan->name.data,
+        invocation->launch_schedule_depth);
+  }
   if (invocation->result_count != 0) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
@@ -1163,6 +1171,7 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_span_initialize(
     out_span->steps[invocation_offset] =
         (loom_run_hal_dispatch_sequence_step_t){
             .candidate = &provider->prepared_candidate,
+            .execution_epoch = invocation->execution_epoch,
             .binding_lengths = step_binding_count == 0
                                    ? NULL
                                    : &out_span->binding_lengths[binding_offset],

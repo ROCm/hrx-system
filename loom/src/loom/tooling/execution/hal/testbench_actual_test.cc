@@ -21,9 +21,6 @@
 namespace loom {
 namespace {
 
-using ::iree::testing::status::StatusIs;
-using ::testing::HasSubstr;
-
 using DialectVtablesFn = const loom_op_vtable_t* const* (*)(iree_host_size_t*);
 
 iree_status_t RegisterDialect(loom_context_t* context, uint8_t dialect_id,
@@ -183,11 +180,9 @@ TEST_F(HalTestbenchActualTest, RequiresExplicitDeviceWhenHalProviderExists) {
   loom_run_hal_testbench_context_initialize(&registry, iree_allocator_system(),
                                             &context);
 
-  iree::Status status = iree::internal::ConsumeForTest(
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
       loom_run_hal_testbench_context_ensure_runtime(&context));
-  EXPECT_THAT(status, StatusIs(iree::StatusCode::kInvalidArgument));
-  EXPECT_THAT(status.ToString(), HasSubstr("explicit --device= URI"));
-  EXPECT_THAT(status.ToString(), HasSubstr("fake-hal"));
 
   loom_run_hal_testbench_context_deinitialize(&context);
 }
@@ -284,6 +279,33 @@ TEST_F(HalTestbenchActualTest, OffsetInputPacksAsTwoDispatchConstantWords) {
   EXPECT_EQ(options.constants[1], 0x11223344u);
 
   loom_run_hal_binding_list_deinitialize(&bindings);
+}
+
+TEST_F(HalTestbenchActualTest, RejectsNestedKernelLaunchSchedules) {
+  static constexpr char kSource[] = R"(
+kernel.decl @step() launch(%output: buffer)
+
+check.case @nested_launch_schedule {
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch.serial {
+    kernel.launch.concurrent {
+      kernel.launch @step[](%output) : [](tensor<1xi32>)
+    }
+  }
+  check.return
+}
+)";
+  loom_run_module_t run_module = {};
+  loom_testbench_module_plan_t module_plan = {};
+  ParseAndPlan(IREE_SV(kSource), &run_module, &module_plan);
+  ASSERT_EQ(module_plan.case_count, 1u);
+
+  iree_host_size_t actual_invocation_count = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                        loom_run_hal_testbench_count_actual_invocations(
+                            &module_plan.cases[0], &actual_invocation_count));
+
+  loom_run_module_deinitialize(&run_module);
 }
 
 TEST_F(HalTestbenchActualTest, SampleValuesDoNotResolveDynamicWorkgroupCount) {

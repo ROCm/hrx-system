@@ -147,6 +147,8 @@ typedef struct loom_run_hal_dispatch_sequence_t {
 typedef struct loom_run_hal_dispatch_sequence_step_t {
   // Prepared executable dispatched by this step.
   const loom_run_hal_prepared_candidate_t* candidate;
+  // Monotonic execution epoch. Adjacent steps in one epoch may overlap.
+  iree_host_size_t execution_epoch;
   // Function, launch geometry, and direct constants captured by this step.
   loom_run_hal_invocation_options_t options;
   // Borrowed binding byte lengths in HAL ABI order.
@@ -343,14 +345,15 @@ iree_status_t loom_run_hal_dispatch_batch_prepare_from_binding_ring(
 // is a flattened row-major array with |plan_ring_count * sequence_count|
 // entries, indexed as ring slot first and sequence step second. Each logical
 // batch slot i records every sequence step using ring slot
-// |(plan_ring_offset + i) % plan_ring_count|. Every physical dispatch is
-// separated from its successor by an execution and write-visibility edge,
-// including the boundary between logical batch slots. No barrier follows the
-// terminal dispatch.
+// |(plan_ring_offset + i) % plan_ring_count|. |execution_epochs| contains one
+// monotonic epoch ordinal per sequence step. Adjacent steps with different
+// epochs carry an execution and write-visibility edge; steps in one epoch may
+// overlap. Logical batch slots are always separated by an edge. No barrier
+// follows the terminal dispatch.
 iree_status_t loom_run_hal_dispatch_sequence_batch_prepare_from_plan_ring(
     const loom_run_hal_runtime_t* runtime, iree_host_size_t sequence_count,
     const loom_run_hal_prepared_candidate_t* const* candidates,
-    iree_host_size_t plan_ring_count,
+    const iree_host_size_t* execution_epochs, iree_host_size_t plan_ring_count,
     const loom_run_hal_invocation_plan_t* const* plans,
     iree_host_size_t plan_ring_offset,
     const loom_run_hal_dispatch_batch_options_t* batch_options,
@@ -360,9 +363,9 @@ iree_status_t loom_run_hal_dispatch_sequence_batch_prepare_from_plan_ring(
 //
 // |steps| contains |step_count| entries in source order. Dispatch constants,
 // geometry, and binding ranges are captured while buffer identities are
-// supplied through a binding table at execution. An execution and
-// dispatch-write visibility edge is recorded between each adjacent dispatch.
-// No barrier follows the terminal dispatch.
+// supplied through a binding table at execution. Adjacent steps with different
+// execution epochs carry an execution and dispatch-write visibility edge;
+// steps in one epoch may overlap. No barrier follows the terminal dispatch.
 iree_status_t loom_run_hal_dispatch_sequence_prepare(
     const loom_run_hal_runtime_t* runtime, iree_host_size_t step_count,
     const loom_run_hal_dispatch_sequence_step_t* steps,
