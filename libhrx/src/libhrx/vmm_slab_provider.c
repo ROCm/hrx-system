@@ -5,7 +5,10 @@
 
 #include <stdio.h>
 
+#include "iree/base/threading/mutex.h"
 #include "iree/hal/buffer.h"
+
+typedef struct hrx_vmm_slab_t hrx_vmm_slab_t;
 
 typedef struct hrx_vmm_slab_provider_t {
   // Base provider header for vtable dispatch and reference counting.
@@ -28,9 +31,16 @@ typedef struct hrx_vmm_slab_provider_t {
 
   // Cumulative number of slabs released through the VMM allocator interface.
   iree_atomic_int64_t total_released;
+
+  // Slabs whose native teardown failed and must retain their live handles.
+  // Protected by |mutex| and retried by provider trimming and destruction.
+  hrx_vmm_slab_t* failed_release_head;
+
+  // Serializes access to |failed_release_head|.
+  iree_slim_mutex_t mutex;
 } hrx_vmm_slab_provider_t;
 
-typedef struct hrx_vmm_slab_t {
+struct hrx_vmm_slab_t {
   // Virtual address reservation retained until the slab is released.
   iree_hal_buffer_t* virtual_buffer;
 
@@ -42,9 +52,18 @@ typedef struct hrx_vmm_slab_t {
 
   // True after the physical allocation has been mapped into the reservation.
   bool is_mapped;
-} hrx_vmm_slab_t;
+
+  // True after this slab has been returned to the owning HAL pool.
+  bool is_published;
+
+  // Next slab retained after a failed release attempt.
+  hrx_vmm_slab_t* next_failed_release;
+};
 
 static const iree_hal_slab_provider_vtable_t hrx_vmm_slab_provider_vtable;
+
+static iree_status_t hrx_vmm_slab_provider_retry_failed_releases(
+    hrx_vmm_slab_provider_t* provider);
 
 static hrx_vmm_slab_provider_t* hrx_vmm_slab_provider_cast(
     iree_hal_slab_provider_t* base_provider) {
@@ -59,6 +78,21 @@ static const hrx_vmm_slab_provider_t* hrx_vmm_slab_provider_const_cast(
 static void hrx_vmm_slab_provider_destroy(
     iree_hal_slab_provider_t* base_provider) {
   hrx_vmm_slab_provider_t* provider = hrx_vmm_slab_provider_cast(base_provider);
+  iree_status_t status = hrx_vmm_slab_provider_retry_failed_releases(provider);
+  if (!iree_status_is_ok(status)) {
+    iree_status_fprint(stderr, status);
+    iree_status_free(status);
+  }
+  iree_slim_mutex_lock(&provider->mutex);
+  const bool has_failed_releases = provider->failed_release_head != NULL;
+  iree_slim_mutex_unlock(&provider->mutex);
+  if (has_failed_releases) {
+    fprintf(stderr,
+            "VMM slab provider destroyed with live resources retained after "
+            "native teardown failure\n");
+    return;
+  }
+  iree_slim_mutex_deinitialize(&provider->mutex);
   iree_hal_allocator_release(provider->allocator);
   iree_allocator_free(provider->host_allocator, provider);
 }
@@ -99,7 +133,45 @@ static iree_status_t hrx_vmm_slab_provider_release_slab_state(
       status = iree_status_join(status, release_status);
     }
   }
-  iree_allocator_free(provider->host_allocator, slab);
+  if (!slab->is_mapped && !slab->physical_memory && !slab->virtual_buffer) {
+    iree_allocator_free(provider->host_allocator, slab);
+  }
+  return status;
+}
+
+static void hrx_vmm_slab_provider_retain_failed_release(
+    hrx_vmm_slab_provider_t* provider, hrx_vmm_slab_t* slab) {
+  iree_slim_mutex_lock(&provider->mutex);
+  slab->next_failed_release = provider->failed_release_head;
+  provider->failed_release_head = slab;
+  iree_slim_mutex_unlock(&provider->mutex);
+}
+
+static iree_status_t hrx_vmm_slab_provider_retry_failed_releases(
+    hrx_vmm_slab_provider_t* provider) {
+  iree_slim_mutex_lock(&provider->mutex);
+  hrx_vmm_slab_t* pending = provider->failed_release_head;
+  provider->failed_release_head = NULL;
+  iree_slim_mutex_unlock(&provider->mutex);
+
+  iree_status_t status = iree_ok_status();
+  while (pending) {
+    hrx_vmm_slab_t* slab = pending;
+    pending = slab->next_failed_release;
+    slab->next_failed_release = NULL;
+    const bool is_published = slab->is_published;
+    iree_status_t release_status =
+        hrx_vmm_slab_provider_release_slab_state(provider, slab);
+    if (iree_status_is_ok(release_status)) {
+      if (is_published) {
+        iree_atomic_fetch_add(&provider->total_released, 1,
+                              iree_memory_order_relaxed);
+      }
+    } else {
+      hrx_vmm_slab_provider_retain_failed_release(provider, slab);
+      status = iree_status_join(status, release_status);
+    }
+  }
   return status;
 }
 
@@ -165,13 +237,19 @@ static iree_status_t hrx_vmm_slab_provider_acquire_slab(
   }
 
   if (!iree_status_is_ok(status)) {
-    return iree_status_join(
-        status, hrx_vmm_slab_provider_release_slab_state(provider, slab));
+    iree_status_t release_status =
+        hrx_vmm_slab_provider_release_slab_state(provider, slab);
+    if (!iree_status_is_ok(release_status)) {
+      hrx_vmm_slab_provider_retain_failed_release(provider, slab);
+      status = iree_status_join(status, release_status);
+    }
+    return status;
   }
 
+  slab->is_published = true;
   out_slab->base_ptr =
       (uint8_t*)(uintptr_t)external_buffer.handle.device_allocation.ptr;
-  out_slab->length = min_length;
+  out_slab->length = allocation_size;
   out_slab->provider_handle = (uint64_t)(uintptr_t)slab;
   iree_atomic_fetch_add(&provider->total_acquired, 1,
                         iree_memory_order_relaxed);
@@ -182,12 +260,15 @@ static void hrx_vmm_slab_provider_release_slab(
     iree_hal_slab_provider_t* base_provider, const iree_hal_slab_t* slab) {
   if (!slab || !slab->provider_handle) return;
   hrx_vmm_slab_provider_t* provider = hrx_vmm_slab_provider_cast(base_provider);
-  iree_status_t status = hrx_vmm_slab_provider_release_slab_state(
-      provider, (hrx_vmm_slab_t*)(uintptr_t)slab->provider_handle);
+  hrx_vmm_slab_t* virtual_slab =
+      (hrx_vmm_slab_t*)(uintptr_t)slab->provider_handle;
+  iree_status_t status =
+      hrx_vmm_slab_provider_release_slab_state(provider, virtual_slab);
   if (iree_status_is_ok(status)) {
     iree_atomic_fetch_add(&provider->total_released, 1,
                           iree_memory_order_relaxed);
   } else {
+    hrx_vmm_slab_provider_retain_failed_release(provider, virtual_slab);
     iree_status_fprint(stderr, status);
     iree_status_free(status);
   }
@@ -261,8 +342,13 @@ static void hrx_vmm_slab_provider_prefault(
 static void hrx_vmm_slab_provider_trim(
     iree_hal_slab_provider_t* base_provider,
     iree_hal_slab_provider_trim_flags_t flags) {
-  (void)base_provider;
   (void)flags;
+  hrx_vmm_slab_provider_t* provider = hrx_vmm_slab_provider_cast(base_provider);
+  iree_status_t status = hrx_vmm_slab_provider_retry_failed_releases(provider);
+  if (!iree_status_is_ok(status)) {
+    iree_status_fprint(stderr, status);
+    iree_status_free(status);
+  }
 }
 
 static void hrx_vmm_slab_provider_query_stats(
@@ -337,7 +423,9 @@ iree_status_t hrx_vmm_slab_provider_create(
       .page_size = page_size,
       .total_acquired = IREE_ATOMIC_VAR_INIT(0),
       .total_released = IREE_ATOMIC_VAR_INIT(0),
+      .failed_release_head = NULL,
   };
+  iree_slim_mutex_initialize(&provider->mutex);
   iree_hal_slab_provider_initialize(&hrx_vmm_slab_provider_vtable,
                                     &provider->base);
   iree_hal_allocator_retain(provider->allocator);

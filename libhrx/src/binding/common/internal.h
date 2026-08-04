@@ -29,6 +29,8 @@ typedef struct iree_hal_streaming_context_module_entry_t
     iree_hal_streaming_context_module_entry_t;
 typedef struct iree_hal_streaming_context_symbol_map_t
     iree_hal_streaming_context_symbol_map_t;
+typedef struct iree_hal_streaming_deferred_device_free_t
+    iree_hal_streaming_deferred_device_free_t;
 typedef struct iree_hal_streaming_device_t iree_hal_streaming_device_t;
 typedef struct iree_hal_streaming_device_registry_t
     iree_hal_streaming_device_registry_t;
@@ -219,6 +221,13 @@ struct iree_hal_streaming_context_t {
 
   // Buffer mapping table (pyre unified implementation).
   hrx_buffer_table_t buffer_table;
+
+  // Stream-ordered frees available for dependency-aware reuse in this context.
+  // Protected by |pending_free_mutex|.
+  iree_hal_streaming_deferred_device_free_t* pending_free_head;
+
+  // Serializes access to |pending_free_head| and terminal free callbacks.
+  iree_slim_mutex_t pending_free_mutex;
 
   // Cached host-visible staging buffer for blocking pageable H2D transfers.
   // Guarded by |mutex| and released during context destruction.
@@ -1800,6 +1809,11 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
 // Synchronization: stream (requires |stream| to be idle).
 iree_status_t iree_hal_streaming_memory_release_completed_async_frees(
     iree_hal_streaming_stream_t* stream);
+
+// Releases every terminal stream-ordered free owned by |context|.
+// Synchronization: all context streams have reached terminal queue state.
+iree_status_t iree_hal_streaming_memory_release_terminal_async_frees(
+    iree_hal_streaming_context_t* context);
 
 // Releases completed stream-ordered frees retained by |pool|.
 // Synchronization: none (each free has reached its queued host callback).

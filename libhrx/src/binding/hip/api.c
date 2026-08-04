@@ -325,8 +325,8 @@ static void iree_hip_mem_pool_release(struct hipMemPool_st* pool) {
   iree_allocator_free(iree_allocator_system(), pool);
 }
 
-static hipError_t iree_hip_mem_pool_retain(hipMemPool_t pool,
-                                           struct hipMemPool_st** out_pool) {
+static hipError_t iree_hip_mem_pool_registry_lookup_retain(
+    hipMemPool_t pool, struct hipMemPool_st** out_pool) {
   if (out_pool) *out_pool = NULL;
   if (!pool) return hipErrorInvalidValue;
 
@@ -14410,7 +14410,9 @@ HIPAPI hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
 
 struct hipUserObject {
   // References held by the live-handle registry, graphs, and active API calls.
-  iree_atomic_ref_count_t handle_ref_count;
+  // This count protects the control block but is not its public reference
+  // count.
+  iree_atomic_int32_t handle_reference_count;
   // Next live user-object handle in the process registry.
   struct hipUserObject* next_live_object;
   // Protects reference count changes from user and graph-owner threads.
@@ -14445,12 +14447,11 @@ static void iree_hip_user_object_registry_lock(void) {
 }
 
 static void iree_hip_user_object_handle_release(hipUserObject_t user_object) {
-  if (!user_object ||
-      iree_atomic_ref_count_dec(&user_object->handle_ref_count) != 1) {
-    return;
+  if (user_object && iree_atomic_fetch_sub(&user_object->handle_reference_count,
+                                           1, iree_memory_order_acq_rel) == 1) {
+    iree_slim_mutex_deinitialize(&user_object->mutex);
+    iree_allocator_free(user_object->host_allocator, user_object);
   }
-  iree_slim_mutex_deinitialize(&user_object->mutex);
-  iree_allocator_free(user_object->host_allocator, user_object);
 }
 
 static void iree_hip_user_object_registry_insert(hipUserObject_t user_object) {
@@ -14460,8 +14461,8 @@ static void iree_hip_user_object_registry_insert(hipUserObject_t user_object) {
   iree_slim_mutex_unlock(&iree_hip_user_object_registry_mutex);
 }
 
-static bool iree_hip_user_object_registry_retain(hipUserObject_t object,
-                                                 hipUserObject_t* out_object) {
+static bool iree_hip_user_object_registry_lookup_retain(
+    hipUserObject_t object, hipUserObject_t* out_object) {
   if (out_object) *out_object = NULL;
   if (!object) return false;
 
@@ -14470,7 +14471,8 @@ static bool iree_hip_user_object_registry_retain(hipUserObject_t object,
   for (hipUserObject_t current = iree_hip_user_object_registry_head; current;
        current = current->next_live_object) {
     if (current == object) {
-      iree_atomic_ref_count_inc(&current->handle_ref_count);
+      iree_atomic_fetch_add(&current->handle_reference_count, 1,
+                            iree_memory_order_relaxed);
       if (out_object) *out_object = current;
       found = true;
       break;
@@ -14543,7 +14545,8 @@ static iree_status_t iree_hip_user_object_retain_graph_refs(void* object,
     status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED);
   } else {
     ++user_object->graph_association_count;
-    iree_atomic_ref_count_inc(&user_object->handle_ref_count);
+    iree_atomic_fetch_add(&user_object->handle_reference_count, 1,
+                          iree_memory_order_relaxed);
     if (!user_object->destructor_called) {
       user_object->ref_count += count;
     }
@@ -14561,7 +14564,8 @@ static hipError_t iree_hip_user_object_add_graph_association(
     result = hipErrorInvalidValue;
   } else {
     ++user_object->graph_association_count;
-    iree_atomic_ref_count_inc(&user_object->handle_ref_count);
+    iree_atomic_fetch_add(&user_object->handle_reference_count, 1,
+                          iree_memory_order_relaxed);
   }
   iree_slim_mutex_unlock(&user_object->mutex);
   return result;
@@ -14655,7 +14659,8 @@ HIPAPI hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr,
     HIP_RETURN_ERROR(hipErrorOutOfMemory);
   }
   iree_slim_mutex_initialize(&object->mutex);
-  iree_atomic_ref_count_init(&object->handle_ref_count);
+  iree_atomic_store(&object->handle_reference_count, 1,
+                    iree_memory_order_relaxed);
   object->next_live_object = NULL;
   object->ref_count = initialRefcount;
   object->graph_association_count = 0;
@@ -14674,7 +14679,7 @@ HIPAPI hipError_t hipUserObjectRelease(hipUserObject_t object,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   hipUserObject_t retained_object = NULL;
-  if (!iree_hip_user_object_registry_retain(object, &retained_object)) {
+  if (!iree_hip_user_object_registry_lookup_retain(object, &retained_object)) {
     return hipSuccess;
   }
   hipError_t result =
@@ -14692,7 +14697,7 @@ HIPAPI hipError_t hipUserObjectRetain(hipUserObject_t object,
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   hipUserObject_t retained_object = NULL;
-  if (!iree_hip_user_object_registry_retain(object, &retained_object)) {
+  if (!iree_hip_user_object_registry_lookup_retain(object, &retained_object)) {
     return hipSuccess;
   }
   hipError_t result =
@@ -14739,7 +14744,7 @@ HIPAPI hipError_t hipGraphRetainUserObject(hipGraph_t graph,
   }
 
   hipUserObject_t retained_object = NULL;
-  if (!iree_hip_user_object_registry_retain(object, &retained_object)) {
+  if (!iree_hip_user_object_registry_lookup_retain(object, &retained_object)) {
     return hipSuccess;
   }
   object = retained_object;
@@ -22120,7 +22125,8 @@ HIPAPI hipError_t hipMemPoolSetAttribute(hipMemPool_t pool,
   }
 
   struct hipMemPool_st* pool_handle = NULL;
-  hipError_t result = iree_hip_mem_pool_retain(pool, &pool_handle);
+  hipError_t result =
+      iree_hip_mem_pool_registry_lookup_retain(pool, &pool_handle);
   if (result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
@@ -22185,7 +22191,8 @@ HIPAPI hipError_t hipMemPoolGetAttribute(hipMemPool_t pool,
   }
 
   struct hipMemPool_st* pool_handle = NULL;
-  hipError_t result = iree_hip_mem_pool_retain(pool, &pool_handle);
+  hipError_t result =
+      iree_hip_mem_pool_registry_lookup_retain(pool, &pool_handle);
   if (result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
@@ -22250,7 +22257,8 @@ HIPAPI hipError_t hipMemPoolSetAccess(hipMemPool_t pool,
   }
 
   struct hipMemPool_st* pool_handle = NULL;
-  hipError_t result = iree_hip_mem_pool_retain(pool, &pool_handle);
+  hipError_t result =
+      iree_hip_mem_pool_registry_lookup_retain(pool, &pool_handle);
   if (result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
@@ -22305,7 +22313,8 @@ HIPAPI hipError_t hipMemPoolGetAccess(hipMemAccessFlags* flags,
   }
 
   struct hipMemPool_st* pool_handle = NULL;
-  hipError_t result = iree_hip_mem_pool_retain(pool, &pool_handle);
+  hipError_t result =
+      iree_hip_mem_pool_registry_lookup_retain(pool, &pool_handle);
   if (result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
@@ -22353,7 +22362,8 @@ HIPAPI hipError_t hipMemPoolTrimTo(hipMemPool_t pool, size_t minBytesToKeep) {
   }
 
   struct hipMemPool_st* pool_handle = NULL;
-  hipError_t result = iree_hip_mem_pool_retain(pool, &pool_handle);
+  hipError_t result =
+      iree_hip_mem_pool_registry_lookup_retain(pool, &pool_handle);
   if (result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
@@ -22482,7 +22492,8 @@ HIPAPI hipError_t hipDeviceSetMemPool(int device, hipMemPool_t pool) {
   }
 
   struct hipMemPool_st* pool_handle = NULL;
-  hipError_t result = iree_hip_mem_pool_retain(pool, &pool_handle);
+  hipError_t result =
+      iree_hip_mem_pool_registry_lookup_retain(pool, &pool_handle);
   if (result == hipSuccess &&
       (pool_handle->device_ordinal != device ||
        pool_handle->allocation_type != hipMemAllocationTypePinned)) {
@@ -22631,7 +22642,8 @@ HIPAPI hipError_t hipMemSetMemPool(hipMemLocation* location,
   }
 
   struct hipMemPool_st* pool_handle = NULL;
-  hipError_t result = iree_hip_mem_pool_retain(pool, &pool_handle);
+  hipError_t result =
+      iree_hip_mem_pool_registry_lookup_retain(pool, &pool_handle);
   if (result != hipSuccess) HIP_RETURN_ERROR(result);
   if (pool_handle->device_ordinal != location->id ||
       pool_handle->allocation_type != type) {
@@ -22783,7 +22795,8 @@ HIPAPI hipError_t hipMallocFromPoolAsync(void** ptr, size_t size,
   }
 
   struct hipMemPool_st* pool_handle = NULL;
-  hipError_t pool_result = iree_hip_mem_pool_retain(pool, &pool_handle);
+  hipError_t pool_result =
+      iree_hip_mem_pool_registry_lookup_retain(pool, &pool_handle);
   if (pool_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(pool_result);

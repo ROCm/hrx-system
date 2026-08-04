@@ -332,6 +332,10 @@ iree_hal_hip_allocator_query_buffer_compatibility(
     iree_hal_allocator_t* IREE_RESTRICT base_allocator,
     iree_hal_buffer_params_t* IREE_RESTRICT params,
     iree_device_size_t* IREE_RESTRICT allocation_size) {
+  if (iree_any_bit_set(params->type, IREE_HAL_MEMORY_TYPE_DEVICE_UNCACHED)) {
+    return IREE_HAL_BUFFER_COMPATIBILITY_NONE;
+  }
+
   iree_hal_hip_allocator_t* allocator =
       iree_hal_hip_allocator_cast(base_allocator);
 
