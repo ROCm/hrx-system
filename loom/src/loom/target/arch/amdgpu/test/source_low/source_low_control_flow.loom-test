@@ -2412,3 +2412,82 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@wave64_target) workgroup_size(
   s_mov_b64_exec %83
   low.br ^_bb5
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @uniform_vgpr_branch_address() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%control: buffer, %input: buffer, %output: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %seven = index.constant 7 : index
+  %three = index.constant 3 : index
+  %two = index.constant 2 : index
+  %twenty = index.constant 20 : index
+  %control_view = buffer.view %control[%base] : buffer -> view<1xi32, #dense>
+  %input_view = buffer.view %input[%base] : buffer -> view<32xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xi32, #dense>
+  %loaded = view.load %control_view[%zero] : view<1xi32, #dense> -> i32
+  %bounded = scalar.assume %loaded [range(%loaded, 0, 31)] : i32
+  %index_value = index.cast %bounded : i32 to index
+  %padded = index.add %index_value, %seven : index
+  %group = index.shrui %padded, %three : index
+  %element = index.shli %group, %two : index
+  cfg.br ^loop(%element: index)
+^loop(%carried: index):
+  %in_bounds = index.cmp ult, %carried, %twenty : index
+  cfg.cond_br %in_bounds, ^access, ^exit
+^access:
+  %active = index.assume %carried [range(%carried, 0, 19)] : index
+  %value = view.load %input_view[%active] : view<32xi32, #dense> -> i32
+  view.store %value, %output_view[%active] : i32, view<32xi32, #dense>
+  %next = index.add %active, %one : index
+  cfg.br ^loop(%next: index)
+^exit:
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_vgpr_branch_address() asm {
+  %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
+  %input_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 128} : reg<amdgpu.sgpr x2>
+  %one = s_mov_b32 1
+  %twenty = s_mov_b32 20
+  %32 = v_mov_b32 0
+  %index_value = global_load_b32_saddr %32, %control_view
+  %34 = v_mov_b32 7
+  %padded = v_add_u32 %index_value, %34
+  %group = v_lshrrev_b32_lit %padded, 3
+  %element = v_lshlrev_b32_lit %group, 2
+  %38 = v_readfirstlane_b32 %element
+  low.br ^loop(%38: reg<amdgpu.sgpr>)
+^loop(%active: reg<amdgpu.sgpr>):
+  %in_bounds = s_cmp_lt_u32 %active, %twenty
+  low.cond_br %in_bounds, ^access, ^exit : reg<amdgpu.scc>
+^access:
+  %40 = v_mov_b32 0
+  %41 = s_lshl_b32_rhs_inline %active, 2
+  %42 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %43 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = s_mov_b32 0
+  %45 = s_add_u32 %42, %41
+  %46 = s_addc_u32 %43, %44
+  %47 = concat(%45, %46) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_b32_saddr %40, %47
+  %50 = s_lshl_b32_rhs_inline %active, 2
+  %51 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %52 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %54 = s_add_u32 %51, %50
+  %55 = s_addc_u32 %52, %44
+  %56 = concat(%54, %55) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b32_saddr %40, %value, %56
+  %next = s_add_u32 %active, %one
+  low.br ^loop(%next: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
