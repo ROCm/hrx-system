@@ -3154,8 +3154,96 @@ def _flat_load_overlay(
     )
 
 
-def _flat_load_u8_overlay(
+_FLAT_LOAD_ROWS = (
+    (
+        "amdgpu.flat_load_u8",
+        "FLAT_LOAD_UBYTE",
+        8,
+        1,
+        "memory.generic.load.u8.zero_extend",
+        "FMT_NUM_U8",
+    ),
+    (
+        "amdgpu.flat_load_i8",
+        "FLAT_LOAD_SBYTE",
+        8,
+        1,
+        "memory.generic.load.i8.sign_extend",
+        "FMT_NUM_I8",
+    ),
+    (
+        "amdgpu.flat_load_u16",
+        "FLAT_LOAD_USHORT",
+        16,
+        1,
+        "memory.generic.load.u16.zero_extend",
+        "FMT_NUM_U16",
+    ),
+    (
+        "amdgpu.flat_load_i16",
+        "FLAT_LOAD_SSHORT",
+        16,
+        1,
+        "memory.generic.load.i16.sign_extend",
+        "FMT_NUM_I16",
+    ),
+    (
+        "amdgpu.flat_load_b32",
+        "FLAT_LOAD_DWORD",
+        32,
+        1,
+        "memory.generic.load.u32",
+        "FMT_NUM_B32",
+    ),
+    (
+        "amdgpu.flat_load_b64",
+        "FLAT_LOAD_DWORDX2",
+        64,
+        2,
+        "memory.generic.load.u64",
+        "FMT_NUM_B64",
+    ),
+    (
+        "amdgpu.flat_load_b96",
+        "FLAT_LOAD_DWORDX3",
+        96,
+        3,
+        "memory.generic.load.u96",
+        "FMT_NUM_B96",
+    ),
+    (
+        "amdgpu.flat_load_b128",
+        "FLAT_LOAD_DWORDX4",
+        128,
+        4,
+        "memory.generic.load.u128",
+        "FMT_NUM_B128",
+    ),
+)
+
+
+_FLAT_STORE_ROWS = (
+    ("amdgpu.flat_store_b8", "FLAT_STORE_BYTE", 8, 1, "FMT_NUM_B8"),
+    ("amdgpu.flat_store_b16", "FLAT_STORE_SHORT", 16, 1, "FMT_NUM_B16"),
+    ("amdgpu.flat_store_b32", "FLAT_STORE_DWORD", 32, 1, "FMT_NUM_B32"),
+    ("amdgpu.flat_store_b64", "FLAT_STORE_DWORDX2", 64, 2, "FMT_NUM_B64"),
+    ("amdgpu.flat_store_b96", "FLAT_STORE_DWORDX3", 96, 3, "FMT_NUM_B96"),
+    ("amdgpu.flat_store_b128", "FLAT_STORE_DWORDX4", 128, 4, "FMT_NUM_B128"),
+)
+
+_FLAT_LOAD_DESCRIPTOR_KEYS = tuple(
+    descriptor_key for descriptor_key, *_ in _FLAT_LOAD_ROWS
+)
+
+_FLAT_STORE_DESCRIPTOR_KEYS = tuple(
+    descriptor_key for descriptor_key, *_ in _FLAT_STORE_ROWS
+)
+
+
+def _flat_store_overlay(
     *,
+    descriptor_key: str,
+    instruction_name: str,
     mnemonic: str,
     encoding_name: str,
     address_field_name: str,
@@ -3163,68 +3251,151 @@ def _flat_load_u8_overlay(
     offset_field_name: str,
     offset_bit_width: int,
     offset_signed: bool,
+    width_bits: int,
+    units: int,
+    data_format_name: str,
     implicit_flat_scratch: bool,
-    implicit_m0: bool = False,
-    allow_accumulator_results: bool = False,
+    implicit_m0: bool,
+    allow_accumulator_operands: bool,
     fixed_saddr: AmdgpuFixedEncodingValue | None = None,
     cache_fields: tuple[tuple[str, int], ...] = (),
 ) -> AmdgpuDescriptorOverlay:
-    return _flat_load_overlay(
-        descriptor_key="amdgpu.flat_load_u8",
-        instruction_name="FLAT_LOAD_UBYTE",
+    value_operand = (
+        _vgpr_agpr_operand("value", units=units)
+        if allow_accumulator_operands
+        else _vgpr_operand("value", units=units)
+    )
+    implicit_operands: tuple[AmdgpuImplicitOperandOverlay, ...] = (
+        _ignore_generic_memory(
+            width_bits=width_bits,
+            data_format_name=data_format_name,
+            is_input=False,
+        ),
+    )
+    if implicit_flat_scratch:
+        implicit_operands += (_IGNORE_FLAT_SCRATCH_INPUT,)
+    if implicit_m0:
+        implicit_operands += (_implicit_m0_input(),)
+    fixed_encoding_fields: tuple[tuple[str, AmdgpuFixedEncodingValue], ...] = (
+        (("SADDR", fixed_saddr),) if fixed_saddr is not None else ()
+    )
+    offset_immediate = (
+        _signed_offset_immediate(offset_bit_width)
+        if offset_signed
+        else _offset_immediate(offset_bit_width)
+    )
+    asm_operands = ("addr", "value", "m0") if implicit_m0 else ("addr", "value")
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=descriptor_key,
+        instruction_name=instruction_name,
         mnemonic=mnemonic,
         encoding_name=encoding_name,
-        address_field_name=address_field_name,
-        data_field_name=data_field_name,
-        offset_field_name=offset_field_name,
-        offset_bit_width=offset_bit_width,
-        offset_signed=offset_signed,
-        width_bits=8,
-        units=1,
-        semantic_tag="memory.generic.load.u8.zero_extend",
-        data_format_name="FMT_NUM_U8",
-        implicit_flat_scratch=implicit_flat_scratch,
-        implicit_m0=implicit_m0,
-        allow_accumulator_results=allow_accumulator_results,
-        fixed_saddr=fixed_saddr,
-        cache_fields=cache_fields,
+        semantic_tag=f"memory.generic.store.u{width_bits}",
+        schedule_class=_SCHEDULE_VMEM_STORE,
+        operands=(
+            AmdgpuOperandOverlay(address_field_name, _vgpr_operand("addr", units=2)),
+            AmdgpuOperandOverlay(data_field_name, value_operand),
+        ),
+        implicit_operands=implicit_operands,
+        fixed_encoding_fields=fixed_encoding_fields,
+        immediate_fields=(offset_field_name, *_cache_field_names(cache_fields)),
+        immediates=(offset_immediate, *_cache_immediates(cache_fields)),
+        effects=(_generic_write_effect(width_bits),),
+        flags=(DescriptorFlag.SIDE_EFFECTING,),
+        asm_forms=_asm(
+            mnemonic=mnemonic,
+            operands=asm_operands,
+            immediates=_memory_asm_immediate_names(cache_fields),
+            named_immediates=True,
+        ),
     )
 
 
-def _flat_load_u64_overlay(
+def _flat_memory_overlays(
     *,
-    mnemonic: str,
+    load_mnemonics: tuple[str, ...],
+    store_mnemonics: tuple[str, ...],
     encoding_name: str,
     address_field_name: str,
-    data_field_name: str,
+    load_data_field_name: str,
+    store_data_field_name: str,
     offset_field_name: str,
     offset_bit_width: int,
     offset_signed: bool,
     implicit_flat_scratch: bool,
     implicit_m0: bool = False,
     allow_accumulator_results: bool = False,
+    allow_accumulator_operands: bool = False,
     fixed_saddr: AmdgpuFixedEncodingValue | None = None,
     cache_fields: tuple[tuple[str, int], ...] = (),
-) -> AmdgpuDescriptorOverlay:
-    return _flat_load_overlay(
-        descriptor_key="amdgpu.flat_load_u64",
-        instruction_name="FLAT_LOAD_DWORDX2",
-        mnemonic=mnemonic,
-        encoding_name=encoding_name,
-        address_field_name=address_field_name,
-        data_field_name=data_field_name,
-        offset_field_name=offset_field_name,
-        offset_bit_width=offset_bit_width,
-        offset_signed=offset_signed,
-        width_bits=64,
-        units=2,
-        semantic_tag="memory.generic.load.u64",
-        data_format_name="FMT_NUM_B64",
-        implicit_flat_scratch=implicit_flat_scratch,
-        implicit_m0=implicit_m0,
-        allow_accumulator_results=allow_accumulator_results,
-        fixed_saddr=fixed_saddr,
-        cache_fields=cache_fields,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return (
+        *(
+            _flat_load_overlay(
+                descriptor_key=descriptor_key,
+                instruction_name=instruction_name,
+                mnemonic=mnemonic,
+                encoding_name=encoding_name,
+                address_field_name=address_field_name,
+                data_field_name=load_data_field_name,
+                offset_field_name=offset_field_name,
+                offset_bit_width=offset_bit_width,
+                offset_signed=offset_signed,
+                width_bits=width_bits,
+                units=units,
+                semantic_tag=semantic_tag,
+                data_format_name=data_format_name,
+                implicit_flat_scratch=implicit_flat_scratch,
+                implicit_m0=implicit_m0,
+                allow_accumulator_results=allow_accumulator_results,
+                fixed_saddr=fixed_saddr,
+                cache_fields=cache_fields,
+            )
+            for (
+                descriptor_key,
+                instruction_name,
+                width_bits,
+                units,
+                semantic_tag,
+                data_format_name,
+            ), mnemonic in zip(
+                _FLAT_LOAD_ROWS,
+                load_mnemonics,
+                strict=True,
+            )
+        ),
+        *(
+            _flat_store_overlay(
+                descriptor_key=descriptor_key,
+                instruction_name=instruction_name,
+                mnemonic=mnemonic,
+                encoding_name=encoding_name,
+                address_field_name=address_field_name,
+                data_field_name=store_data_field_name,
+                offset_field_name=offset_field_name,
+                offset_bit_width=offset_bit_width,
+                offset_signed=offset_signed,
+                width_bits=width_bits,
+                units=units,
+                data_format_name=data_format_name,
+                implicit_flat_scratch=implicit_flat_scratch,
+                implicit_m0=implicit_m0,
+                allow_accumulator_operands=allow_accumulator_operands,
+                fixed_saddr=fixed_saddr,
+                cache_fields=cache_fields,
+            )
+            for (
+                descriptor_key,
+                instruction_name,
+                width_bits,
+                units,
+                data_format_name,
+            ), mnemonic in zip(
+                _FLAT_STORE_ROWS,
+                store_mnemonics,
+                strict=True,
+            )
+        ),
     )
 
 
@@ -4111,6 +4282,8 @@ __all__ = (
     "_BUFFER_LOAD_LDS_GFX950_VARIANTS",
     "_GLOBAL_LOAD_LDS_CDNA3_VARIANTS",
     "_GLOBAL_LOAD_LDS_GFX950_VARIANTS",
+    "_FLAT_LOAD_DESCRIPTOR_KEYS",
+    "_FLAT_STORE_DESCRIPTOR_KEYS",
     "_MEMORY_DWORD_VECTOR_WIDTHS",
     "_SMEM_DWORDX4_WIDTHS",
     "_buffer_b16_memory_overlays",
@@ -4153,9 +4326,8 @@ __all__ = (
     "_buffer_store_dword_vaddr_offset_overlay",
     "_buffer_store_off_zero_overlay",
     "_buffer_store_vaddr_offset_overlay",
+    "_flat_memory_overlays",
     "_flat_load_overlay",
-    "_flat_load_u8_overlay",
-    "_flat_load_u64_overlay",
     "_global_b16_memory_overlays",
     "_global_byte_memory_overlays",
     "_global_load_b16_d16_overlay",

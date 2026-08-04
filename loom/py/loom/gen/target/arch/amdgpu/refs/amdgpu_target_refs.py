@@ -32,6 +32,10 @@ from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     amdgpu_immediate_encoding_id_items,
     build_amdgpu_core_descriptor_set_from_specs,
 )
+from loom.target.arch.amdgpu.descriptors.memory import (  # noqa: E402
+    _FLAT_LOAD_DESCRIPTOR_KEYS,
+    _FLAT_STORE_DESCRIPTOR_KEYS,
+)
 from loom.target.arch.amdgpu.encoding import (  # noqa: E402
     AMDGPU_ENCODING_FIELD_IDS,
     AMDGPU_ENCODING_FORMAT_FLAT,
@@ -72,8 +76,6 @@ _SYSTEM_MEMORY_GLOBAL_LOAD_DESCRIPTOR_KEYS = (
     "amdgpu.global_load_b32_saddr",
     "amdgpu.global_load_b64_saddr",
 )
-
-_SANITIZER_ACCESS_FLAT_LOAD_DESCRIPTOR_KEYS = ("amdgpu.flat_load_u8",)
 
 _SPILL_LOWERING_SCRATCH_DESCRIPTOR_KEYS = (
     "amdgpu.scratch_load_b32_offset_only",
@@ -346,8 +348,10 @@ def _validate_rel32_descriptor_contract(
 def _validate_lowering_descriptor_contracts(descriptor_set: DescriptorSet) -> None:
     for descriptor_key in _SYSTEM_MEMORY_GLOBAL_LOAD_DESCRIPTOR_KEYS:
         _validate_canonical_asm_operand_count(descriptor_set, descriptor_key, (2, 3))
-    for descriptor_key in _SANITIZER_ACCESS_FLAT_LOAD_DESCRIPTOR_KEYS:
+    for descriptor_key in _FLAT_LOAD_DESCRIPTOR_KEYS:
         _validate_canonical_asm_operand_count(descriptor_set, descriptor_key, (1, 2))
+    for descriptor_key in _FLAT_STORE_DESCRIPTOR_KEYS:
+        _validate_canonical_asm_operand_count(descriptor_set, descriptor_key, (2, 3))
     _validate_spill_lowering_descriptor_contracts(descriptor_set)
     for descriptor_key in _REL32_DESCRIPTOR_KEYS:
         _validate_rel32_descriptor_contract(descriptor_set, descriptor_key)

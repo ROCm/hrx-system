@@ -55,6 +55,43 @@ _CDNA_DWORD_MEMORY_MNEMONIC_SUFFIXES = (
 _BYTE_MEMORY_INSTRUCTION_SUFFIXES = ("B32", "B64", "B96", "B128")
 _BYTE_MEMORY_MNEMONIC_SUFFIXES = ("b32", "b64", "b96", "b128")
 
+_CDNA_FLAT_LOAD_MNEMONICS = (
+    "flat_load_ubyte",
+    "flat_load_sbyte",
+    "flat_load_ushort",
+    "flat_load_sshort",
+    "flat_load_dword",
+    "flat_load_dwordx2",
+    "flat_load_dwordx3",
+    "flat_load_dwordx4",
+)
+_CDNA_FLAT_STORE_MNEMONICS = (
+    "flat_store_byte",
+    "flat_store_short",
+    "flat_store_dword",
+    "flat_store_dwordx2",
+    "flat_store_dwordx3",
+    "flat_store_dwordx4",
+)
+_RDNA_FLAT_LOAD_MNEMONICS = (
+    "flat_load_u8",
+    "flat_load_i8",
+    "flat_load_u16",
+    "flat_load_i16",
+    "flat_load_dword",
+    "flat_load_dwordx2",
+    "flat_load_dwordx3",
+    "flat_load_dwordx4",
+)
+_RDNA_FLAT_STORE_MNEMONICS = (
+    "flat_store_b8",
+    "flat_store_b16",
+    "flat_store_b32",
+    "flat_store_b64",
+    "flat_store_b96",
+    "flat_store_b128",
+)
+
 _RDNA4_VBUFFER_DWORD_WIDTH_OVERLAY_ROWS = (
     (_buffer_load_dword_overlay, _buffer_load_dword_vaddr_offset_overlay),
     (_buffer_load_64_overlay, _buffer_load_64_vaddr_offset_overlay),
@@ -792,30 +829,20 @@ def _cdna_core_overlays(
             descriptor_key_suffix="_saddr",
             implicit_m0=True,
         ),
-        _flat_load_u8_overlay(
-            mnemonic="flat_load_ubyte",
+        *_flat_memory_overlays(
+            load_mnemonics=_CDNA_FLAT_LOAD_MNEMONICS,
+            store_mnemonics=_CDNA_FLAT_STORE_MNEMONICS,
             encoding_name="ENC_FLAT",
             address_field_name="ADDR",
-            data_field_name="VDST",
+            load_data_field_name="VDST",
+            store_data_field_name="DATA",
             offset_field_name="OFFSET",
             offset_bit_width=12,
             offset_signed=False,
             implicit_flat_scratch=True,
             implicit_m0=True,
             allow_accumulator_results=True,
-            cache_fields=_GFX950_VECTOR_CACHE_FIELDS,
-        ),
-        _flat_load_u64_overlay(
-            mnemonic="flat_load_dwordx2",
-            encoding_name="ENC_FLAT",
-            address_field_name="ADDR",
-            data_field_name="VDST",
-            offset_field_name="OFFSET",
-            offset_bit_width=12,
-            offset_signed=False,
-            implicit_flat_scratch=True,
-            implicit_m0=True,
-            allow_accumulator_results=True,
+            allow_accumulator_operands=True,
             cache_fields=_GFX950_VECTOR_CACHE_FIELDS,
         ),
         *_flat_atomic_overlays(
@@ -1298,23 +1325,13 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             address_units=1,
             descriptor_key_suffix="_saddr",
         ),
-        _flat_load_u8_overlay(
-            mnemonic="flat_load_u8",
+        *_flat_memory_overlays(
+            load_mnemonics=_RDNA_FLAT_LOAD_MNEMONICS,
+            store_mnemonics=_RDNA_FLAT_STORE_MNEMONICS,
             encoding_name="ENC_FLAT",
             address_field_name="ADDR",
-            data_field_name="VDST",
-            offset_field_name="OFFSET",
-            offset_bit_width=13,
-            offset_signed=True,
-            implicit_flat_scratch=True,
-            fixed_saddr=_predefined("NULL", "OPR_SREG"),
-            cache_fields=_GFX9_11_VECTOR_CACHE_FIELDS,
-        ),
-        _flat_load_u64_overlay(
-            mnemonic="flat_load_dwordx2",
-            encoding_name="ENC_FLAT",
-            address_field_name="ADDR",
-            data_field_name="VDST",
+            load_data_field_name="VDST",
+            store_data_field_name="DATA",
             offset_field_name="OFFSET",
             offset_bit_width=13,
             offset_signed=True,
@@ -1767,22 +1784,13 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             address_units=1,
             descriptor_key_suffix="_saddr",
         ),
-        _flat_load_u8_overlay(
-            mnemonic="flat_load_u8",
+        *_flat_memory_overlays(
+            load_mnemonics=_RDNA_FLAT_LOAD_MNEMONICS,
+            store_mnemonics=_RDNA_FLAT_STORE_MNEMONICS,
             encoding_name="ENC_VFLAT",
             address_field_name="VADDR",
-            data_field_name="VDST",
-            offset_field_name="IOFFSET",
-            offset_bit_width=24,
-            offset_signed=True,
-            implicit_flat_scratch=False,
-            cache_fields=_GFX12_VECTOR_CACHE_FIELDS,
-        ),
-        _flat_load_u64_overlay(
-            mnemonic="flat_load_dwordx2",
-            encoding_name="ENC_VFLAT",
-            address_field_name="VADDR",
-            data_field_name="VDST",
+            load_data_field_name="VDST",
+            store_data_field_name="VSRC",
             offset_field_name="IOFFSET",
             offset_bit_width=24,
             offset_signed=True,
