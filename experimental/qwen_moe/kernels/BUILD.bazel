@@ -643,6 +643,8 @@ iree_executable_test(
     args = [
         "$(location :linear_q6k_f32_linked)",
         "--benchmark=@ggml_linear_q6k_f32_wave64_dense_v_decode",
+        "--config=ggml.linear_q6k_f32.output_capacity=512",
+        "--config=ggml.linear_q6k_f32.token_capacity=2048",
         "--dry-run",
         "--output-format=jsonl",
     ],
@@ -656,6 +658,8 @@ iree_executable_test(
     args = [
         "$(location :linear_q6k_f32_linked)",
         "--case=@ggml_linear_q6k_f32_differential_case",
+        "--config=ggml.linear_q6k_f32.output_capacity=12",
+        "--config=ggml.linear_q6k_f32.token_capacity=4",
         "--config=ggml.linear_q6k_q8_1_x4.output_capacity=9",
         "--config=ggml.linear_q6k_q8_1_x4.token_capacity=4",
         "--config=ggml.quantize_q8_1_x4.group_capacity=32",
