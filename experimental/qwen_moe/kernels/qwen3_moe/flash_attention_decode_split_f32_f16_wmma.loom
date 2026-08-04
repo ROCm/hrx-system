@@ -692,10 +692,10 @@ func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(20)
   %completion_counter_global = buffer.assume.memory_space<global> %completion_counter_noalias : buffer
   %completion_counter_aligned = buffer.assume.alignment %completion_counter_global {minimum_alignment = 16} : buffer
   %completion_counter_view = buffer.view %completion_counter_aligned[%zero_offset] : buffer -> view<[%key_value_head_count]xi32, #dense>
-  // Publish every partial before one workitem advances this KV head's
-  // completion sequence. The last arrival acquires all preceding releases.
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   %workitem_is_zero = index.cmp eq, %workitem, %zero : index
+  // Publish every producer's partial stores before the leader advances one
+  // workgroup arrival. The last arrival then acquires every partial.
+  kernel.barrier<global> {ordering = release, scope = workgroup}
   %local_old_counter = scf.if %workitem_is_zero -> (i32) {
     %old_counter = view.atomic.rmw<addi> %one_i32, %completion_counter_view[%key_value_head] {ordering = acq_rel, scope = device} : i32, view<[%key_value_head_count]xi32, #dense> -> i32
     scf.yield %old_counter : i32
@@ -708,9 +708,10 @@ func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(20)
   %negative_key_value_block_count_i32 = scalar.subi %zero_i32, %key_value_block_count_i32 : i32
   %is_last_partition = scalar.cmpi eq, %old_counter, %last_block_ordinal_i32 : i32
   scf.if %is_last_partition {
+    kernel.barrier<global> {ordering = acquire, scope = workgroup}
     func.call inline @qwen3_moe_flash_attention_decode_split_reduce_completed_direct_f32(%bounded_key_value_token_count, %partial_max_noalias, %partial_sum_noalias, %partial_output_noalias, %output_noalias) : (index, buffer, buffer, buffer, buffer)
     // Do not expose the reset until every final output store completes.
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<global> {ordering = release, scope = workgroup}
     scf.if %workitem_is_zero {
       view.atomic.reduce<addi> %negative_key_value_block_count_i32, %completion_counter_view[%key_value_head] {ordering = release, scope = device} : i32, view<[%key_value_head_count]xi32, #dense>
     }
@@ -740,10 +741,10 @@ func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(10)
   %completion_counter_global = buffer.assume.memory_space<global> %completion_counter_noalias : buffer
   %completion_counter_aligned = buffer.assume.alignment %completion_counter_global {minimum_alignment = 16} : buffer
   %completion_counter_view = buffer.view %completion_counter_aligned[%zero_offset] : buffer -> view<[%key_value_head_count]xi32, #dense>
-  // Publish every partial before one workitem advances this KV head's
-  // completion sequence. The last arrival acquires all preceding releases.
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   %workitem_is_zero = index.cmp eq, %workitem, %zero : index
+  // Publish every producer's partial stores before the leader advances one
+  // workgroup arrival. The last arrival then acquires every partial.
+  kernel.barrier<global> {ordering = release, scope = workgroup}
   %local_old_counter = scf.if %workitem_is_zero -> (i32) {
     %old_counter = view.atomic.rmw<addi> %one_i32, %completion_counter_view[%key_value_head] {ordering = acq_rel, scope = device} : i32, view<[%key_value_head_count]xi32, #dense> -> i32
     scf.yield %old_counter : i32
@@ -756,9 +757,10 @@ func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(10)
   %negative_key_value_block_count_i32 = scalar.subi %zero_i32, %key_value_block_count_i32 : i32
   %is_last_partition = scalar.cmpi eq, %old_counter, %last_block_ordinal_i32 : i32
   scf.if %is_last_partition {
+    kernel.barrier<global> {ordering = acquire, scope = workgroup}
     func.call inline @qwen3_moe_flash_attention_decode_split_reduce_completed_cooperative_f32(%bounded_key_value_token_count, %partial_max_noalias, %partial_sum_noalias, %partial_output_noalias, %output_noalias) : (index, buffer, buffer, buffer, buffer)
     // Do not expose the reset until every final output store completes.
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<global> {ordering = release, scope = workgroup}
     scf.if %workitem_is_zero {
       view.atomic.reduce<addi> %negative_key_value_block_count_i32, %completion_counter_view[%key_value_head] {ordering = release, scope = device} : i32, view<[%key_value_head_count]xi32, #dense>
     }

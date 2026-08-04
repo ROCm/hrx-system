@@ -62,9 +62,9 @@ kernel.def target(@qwen3_moe_attention_qkv_postprocess_gfx11_wave32) @qwen3_moe_
   %completion_counters_global = buffer.assume.memory_space<global> %completion_counters : buffer
   %completion_counters_aligned = buffer.assume.alignment %completion_counters_global {minimum_alignment = 16} : buffer
   %completion_counters_view = buffer.view %completion_counters_aligned[%zero_offset] : buffer -> view<[%completion_counter_count]xi32, #dense>
-  // All eight subgroup stores precede the workgroup's release. The last of
-  // sixteen arrivals acquires every raw projection row in this head.
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  // Publish every producer's projection stores before the leader advances one
+  // workgroup arrival. The last arrival then acquires the complete head.
+  kernel.barrier<global> {ordering = release, scope = workgroup}
   %local_old_counter = scf.if %is_arrival_workitem -> (i32) {
     %old_counter = view.atomic.rmw<addi> %one_i32, %completion_counters_view[%head_domain] {ordering = acq_rel, scope = device} : i32, view<[%completion_counter_count]xi32, #dense> -> i32
     scf.yield %old_counter : i32
@@ -77,9 +77,10 @@ kernel.def target(@qwen3_moe_attention_qkv_postprocess_gfx11_wave32) @qwen3_moe_
   %negative_head_tile_count_i32 = scalar.subi %zero_i32, %head_tile_count_i32 : i32
   %is_last_head_tile = scalar.cmpi eq, %old_counter, %last_head_tile_i32 : i32
   scf.if %is_last_head_tile {
+    kernel.barrier<global> {ordering = acquire, scope = workgroup}
     func.apply<qwen3_moe.attention.postprocess.head_body>(%bounded_token_count, %cache_row_count, %head_domain, %token, %positions, %key_cache_indices, %value_cache_indices, %query_output_raw, %key_output_raw, %value_output_raw, %query_norm_weight, %key_norm_weight, %inverse_frequencies, %query_output, %key_cache, %value_cache) : (index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
     // The counter becomes reusable only after all semantic output stores.
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<global> {ordering = release, scope = workgroup}
     scf.if %is_arrival_workitem {
       view.atomic.reduce<addi> %negative_head_tile_count_i32, %completion_counters_view[%head_domain] {ordering = release, scope = device} : i32, view<[%completion_counter_count]xi32, #dense>
     }
