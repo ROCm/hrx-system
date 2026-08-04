@@ -34,6 +34,16 @@ IreeClangTidyInfo = provider(
     },
 )
 
+IreeRecursionInfo = provider(
+    doc = "Cross-translation-unit recursion artifacts collected from C/C++ targets.",
+    fields = {
+        "local_reports": "depset of direct recursion summary clang-tidy reports.",
+        "local_summaries": "depset of direct per-translation-unit call-graph summaries.",
+        "reports": "depset of transitive recursion summary clang-tidy reports.",
+        "summaries": "depset of transitive per-translation-unit call-graph summaries.",
+    },
+)
+
 def _sanitize_path(path):
     result = path
     for old, new in [
@@ -103,6 +113,18 @@ def _clang_tidy_fixes_path(target_label, source):
         _sanitize_path(source.path),
     )
 
+def _recursion_report_path(target_label, source):
+    return "%s.%s.recursion_clang_tidy.txt" % (
+        iree_cc_sanitize_label(target_label),
+        _sanitize_path(source.path),
+    )
+
+def _recursion_summary_path(target_label, source):
+    return "%s.%s.recursion_summary.json" % (
+        iree_cc_sanitize_label(target_label),
+        _sanitize_path(source.path),
+    )
+
 def _run_clang_tidy_action(ctx, target, cc_toolchain, feature_configuration, source):
     compile_command = iree_cc_compile_command(
         ctx,
@@ -156,6 +178,51 @@ def _run_clang_tidy_action(ctx, target, cc_toolchain, feature_configuration, sou
         progress_message = "Running clang-tidy on %s" % source.short_path,
     )
     return report, fixes
+
+def _run_recursion_summary_action(ctx, target, cc_toolchain, feature_configuration, source):
+    compile_command = iree_cc_compile_command(
+        ctx,
+        target,
+        cc_toolchain,
+        feature_configuration,
+        source,
+    )
+    report = ctx.actions.declare_file(_recursion_report_path(target.label, source))
+    summary = ctx.actions.declare_file(_recursion_summary_path(target.label, source))
+    args = ctx.actions.args()
+    args.add("--clang-tidy", ctx.executable._clang_tidy)
+    args.add("--plugin", ctx.executable._plugin)
+    args.add("--source", source)
+    args.add("--output", report)
+    args.add("--config-file", ctx.file._config)
+    args.add("--checks=-*,iree-unbounded-recursion")
+    args.add("--recursion-summary", summary)
+    args.add("--suppress-recursion-diagnostics")
+    args.add("--")
+    args.add_all([
+        arg
+        for arg in compile_command.compile_args
+        if arg not in _CLANG_TIDY_UNSUPPORTED_COMPILE_ARGS
+    ])
+
+    compilation_context = target[CcInfo].compilation_context
+    inputs = depset(
+        direct = [source, ctx.file._config],
+        transitive = _compilation_input_depsets(compilation_context),
+    )
+    ctx.actions.run(
+        executable = ctx.executable._runner,
+        arguments = [args],
+        inputs = inputs,
+        outputs = [report, summary],
+        tools = [
+            ctx.executable._clang_tidy,
+            ctx.executable._plugin,
+        ],
+        mnemonic = "IreeRecursionSummary",
+        progress_message = "Extracting recursion call graph from %s" % source.short_path,
+    )
+    return report, summary
 
 def _collect_clang_tidy_aspect_impl(target, ctx):
     transitive_fixes = []
@@ -256,6 +323,93 @@ collect_clang_tidy_aspect = aspect(
     toolchains = use_cc_toolchain(),
 )
 
+def _collect_recursion_aspect_impl(target, ctx):
+    transitive_reports = []
+    transitive_summaries = []
+    for attr_name in [
+        "actual",
+        "deps",
+        "implementation_deps",
+    ]:
+        if not hasattr(ctx.rule.attr, attr_name):
+            continue
+        attr_value = getattr(ctx.rule.attr, attr_name)
+        if type(attr_value) == type([]):
+            deps = attr_value
+        elif attr_value:
+            deps = [attr_value]
+        else:
+            deps = []
+        for dep in deps:
+            if IreeRecursionInfo in dep:
+                transitive_reports.append(dep[IreeRecursionInfo].reports)
+                transitive_summaries.append(dep[IreeRecursionInfo].summaries)
+
+    local_reports = []
+    local_summaries = []
+    if CcInfo in target:
+        cc_toolchain = find_cc_toolchain(ctx)
+        feature_configuration = iree_cc_feature_configuration(ctx, cc_toolchain)
+        for source in iree_cc_source_files(ctx):
+            report, summary = _run_recursion_summary_action(
+                ctx,
+                target,
+                cc_toolchain,
+                feature_configuration,
+                source,
+            )
+            local_reports.append(report)
+            local_summaries.append(summary)
+
+    reports = depset(local_reports, transitive = transitive_reports)
+    summaries = depset(local_summaries, transitive = transitive_summaries)
+    return [
+        IreeRecursionInfo(
+            local_reports = depset(local_reports),
+            local_summaries = depset(local_summaries),
+            reports = reports,
+            summaries = summaries,
+        ),
+        OutputGroupInfo(
+            iree_recursion_reports = reports,
+            iree_recursion_summaries = summaries,
+        ),
+    ]
+
+collect_recursion_aspect = aspect(
+    implementation = _collect_recursion_aspect_impl,
+    attr_aspects = [
+        "actual",
+        "deps",
+        "implementation_deps",
+    ],
+    attrs = dict(CC_TOOLCHAIN_ATTRS, **{
+        "_clang_tidy": attr.label(
+            cfg = "exec",
+            default = Label("@iree_clang_tidy_llvm//:clang-tidy"),
+            executable = True,
+        ),
+        "_config": attr.label(
+            allow_single_file = True,
+            default = Label("//build_tools/clang_tidy:clang_tidy_config.yaml"),
+            doc = "Repository clang-tidy policy configuration.",
+        ),
+        "_plugin": attr.label(
+            cfg = "exec",
+            default = Label("//build_tools/clang_tidy:IREEClangTidyPlugin.so"),
+            executable = True,
+        ),
+        "_runner": attr.label(
+            cfg = "exec",
+            default = Label("//build_tools/clang_tidy:run_clang_tidy_action"),
+            executable = True,
+        ),
+    }),
+    fragments = ["cpp"],
+    required_providers = [CcInfo],
+    toolchains = use_cc_toolchain(),
+)
+
 def _iree_clang_tidy_impl(ctx):
     transitive_fixes = []
     transitive_local_fixes = []
@@ -309,6 +463,75 @@ def iree_clang_tidy(name, **kwargs):
     """
     target_compatible_with = kwargs.pop("target_compatible_with", [])
     _iree_clang_tidy_rule(
+        name = name,
+        target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH + target_compatible_with,
+        **kwargs
+    )
+
+def _iree_recursion_analysis_impl(ctx):
+    transitive_reports = []
+    transitive_summaries = []
+    for target in ctx.attr.targets:
+        if IreeRecursionInfo in target:
+            transitive_reports.append(target[IreeRecursionInfo].reports)
+            transitive_summaries.append(target[IreeRecursionInfo].summaries)
+    source_reports = depset(transitive = transitive_reports)
+    summaries = depset(transitive = transitive_summaries)
+    report = ctx.actions.declare_file(ctx.label.name + ".txt")
+    args = ctx.actions.args()
+    args.add("--output", report)
+    if ctx.attr.allow_diagnostics:
+        args.add("--allow-diagnostics")
+        args.add("--quiet")
+    args.add_all(summaries)
+    ctx.actions.run(
+        executable = ctx.executable._aggregator,
+        arguments = [args],
+        inputs = summaries,
+        outputs = [report],
+        mnemonic = "IreeRecursionAnalysis",
+        progress_message = "Checking cross-translation-unit recursion for %s" % ctx.label,
+    )
+    return [
+        DefaultInfo(files = depset([report])),
+        IreeRecursionInfo(
+            local_reports = depset(),
+            local_summaries = depset(),
+            reports = depset([report], transitive = [source_reports]),
+            summaries = summaries,
+        ),
+        OutputGroupInfo(
+            iree_recursion_reports = depset([report], transitive = [source_reports]),
+            iree_recursion_summaries = summaries,
+        ),
+    ]
+
+_iree_recursion_analysis_rule = rule(
+    implementation = _iree_recursion_analysis_impl,
+    attrs = {
+        "allow_diagnostics": attr.bool(
+            default = False,
+            doc = "When true, report recursive SCCs without failing the action.",
+        ),
+        "targets": attr.label_list(
+            aspects = [collect_recursion_aspect],
+            doc = "C/C++ targets to analyze for cross-translation-unit recursion.",
+            mandatory = True,
+            providers = [CcInfo],
+        ),
+        "_aggregator": attr.label(
+            cfg = "exec",
+            default = Label("//build_tools/clang_tidy:aggregate_recursion_summaries"),
+            executable = True,
+        ),
+    },
+    doc = "Extracts and checks a whole-target C/C++ call graph for recursion.",
+)
+
+def iree_recursion_analysis(name, **kwargs):
+    """Checks configured C/C++ targets for cross-translation-unit recursion."""
+    target_compatible_with = kwargs.pop("target_compatible_with", [])
+    _iree_recursion_analysis_rule(
         name = name,
         target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH + target_compatible_with,
         **kwargs

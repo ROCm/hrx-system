@@ -5,5 +5,5 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 ---
-Checks: '-*,iree-*'
+Checks: '-*,iree-*,-iree-unbounded-recursion'
 ...
