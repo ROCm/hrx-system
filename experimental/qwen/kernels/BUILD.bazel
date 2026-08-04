@@ -304,10 +304,7 @@ loom_link_module(
 
 loom_link_module(
     name = "flash_attention_decode_split_f32_f16_runtime_module",
-    srcs = [
-        "flash_attention_decode_split_bringup_workaround.loom",
-        "runtime_exports.loom",
-    ],
+    srcs = ["runtime_exports.loom"],
     libraries = [
         "//experimental/qwen_moe/kernels:qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom",
     ],

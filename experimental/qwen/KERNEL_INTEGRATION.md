@@ -136,7 +136,7 @@ cuts in order:
 | Layer order | Exported function | Canonical source | Executed adapter, if any |
 | ---: | --- | --- | --- |
 | 1 | `qwen3_moe_attention_qkv_postprocess_fused_decode` | `qwen3_moe/attention_qkv_postprocess_fused.loom`, using `qwen3_moe/attention_qkv_quantized.loom` and `qwen3_moe/attention_postprocess_f32_f16.loom` | None |
-| 2 | `qwen3_moe_flash_attention_decode_split_f32_f16_wmma_next_q8`, including the Q8_1 x4 attention result consumed by the output projection | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` | `flash_attention_decode_split_bringup_workaround.loom` specializes a 64-row capacity class while request metadata masks its zero-initialized inactive suffix |
+| 2 | `qwen3_moe_flash_attention_decode_split_f32_f16_wmma_next_q8`, including the Q8_1 x4 attention result consumed by the output projection | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom`; its linked capacity selects the 64-row launch and reducer class while request metadata masks the inactive suffix | None |
 | 3 | `qwen3_moe_dense_linear_q4k_q8_1_x4_next_q8`, including output residual and feed-forward RMSNorm/Q8_1 x4 publication | `qwen3_moe/dense_linear_quantized_f16_wmma.loom` and `qwen3_moe/attention_prepare_quantized.loom` | None |
 | 4 | `qwen3_moe_router_projection_top8_fused_decode_f32` | `qwen3_moe/router_projection_top8_fused_f32.loom`, using `qwen3_moe/router_projection_f32.loom` and `qwen3_moe/router_top8_f32.loom` | None |
 | 5 | Storage-selected `qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8` for Q4_K down or `qwen3_moe_routed_gate_up_swiglu_q4k_q8` for Q6_K down | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` and `ggml/quantize_q8_1_x4.loom` | None |
@@ -278,7 +278,6 @@ not copied wholesale into a second kernel corpus.
 
 | Workaround | Canonical source or missing provider | Exact pressure exposed |
 | --- | --- | --- |
-| `flash_attention_decode_split_bringup_workaround.loom` | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` | Exact context workloads do not reach reducer-template selection, launch topology, dynamic view bounds, or address-width analysis. The adapter carries the exact runtime value as temporary config, applies the canonical producer, and directly selects the canonical cooperative reducer without copying either body. |
 | Runtime pure-tail row-by-row recording | `qwen3_moe/flash_attention_f32_f16_wmma.loom` | The canonical multirow specialization corrupts nonleading query rows when the context consists entirely of a key-tile tail. The same canonical kernel specialized for one query row is exact, so the command buffer temporarily records that specialization once per prompt row without introducing another Loom source. |
 | `token_embedding_bringup_workaround.loom` | No corpus provider yet | Fixed Q4_K GGUF row decoding into the 2048-wide F32 hidden layout. This is endpoint glue, not an assumption repair. |
 | `attention_metadata_bringup_workaround.loom` | No corpus provider yet | Direct no-ring K/V indices, positions, and dense causal-mask construction from one context-base word. This is request-policy glue, not an assumption repair. |

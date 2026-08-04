@@ -548,7 +548,7 @@ TEST(QwenLoomSourceTest, EmbedsCanonicalExpertTableSource) {
             std::string::npos);
 }
 
-TEST(QwenLoomSourceTest, EmbedsDecodeSplitReusableCapacityWorkaround) {
+TEST(QwenLoomSourceTest, EmbedsCanonicalDecodeSplitCapacityContract) {
   qwen_loom_source_module_t source_module;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
       IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_DECODE_SPLIT_F32_F16),
@@ -558,22 +558,26 @@ TEST(QwenLoomSourceTest, EmbedsDecodeSplitReusableCapacityWorkaround) {
       reinterpret_cast<const char*>(source_module.source_contents.data),
       source_module.source_contents.data_length);
   EXPECT_NE(source_text.find("config.decl "
-                             "@qwen.decode.key_value_capacity"),
+                             "@qwen3_moe.attention."
+                             "key_value_token_capacity"),
             std::string::npos);
-  EXPECT_NE(source_text.find("eq(%key_value_capacity, "
-                             "%configured_key_value_capacity0)"),
+  EXPECT_NE(source_text.find("%key_value_block_count = index.div "
+                             "%key_value_token_capacity, %sixtyfour"),
             std::string::npos);
-  EXPECT_NE(source_text.find("range(%configured_key_value_capacity0, 64, "
-                             "2048), "
-                             "mul(%configured_key_value_capacity0, 64)"),
+  EXPECT_NE(source_text.find("le(%key_value_token_count_in_range, "
+                             "%key_value_token_capacity)"),
             std::string::npos);
-  EXPECT_NE(source_text.find("produce_partials>("
-                             "%configured_key_value_capacity, %query"),
+  EXPECT_NE(source_text.find("le(%key_value_token_capacity, "
+                             "%padded_key_value_token_count)"),
             std::string::npos);
-  EXPECT_NE(
-      source_text.find(
-          "func.apply<qwen3_moe.attention.decode_split.produce_partials>"),
-      std::string::npos);
+  EXPECT_NE(source_text.find(
+                "func.apply<qwen3_moe.attention.decode_split.produce_partials>("
+                "%bounded_key_value_token_count, %query"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("func.call inline "
+                             "@qwen3_moe_flash_attention_decode_split_"
+                             "reduce_fused_direct_f32"),
+            std::string::npos);
   EXPECT_NE(
       source_text.find("func.call inline "
                        "@qwen3_moe_flash_attention_decode_split_reduce_fused_"
@@ -583,7 +587,7 @@ TEST(QwenLoomSourceTest, EmbedsDecodeSplitReusableCapacityWorkaround) {
   EXPECT_EQ(source_text.find(
                 "func.apply<qwen3_moe.attention.decode_split.reduce_fused>"),
             std::string::npos);
-  EXPECT_EQ(source_text.find("@qwen.decode.key_value_token_count"),
+  EXPECT_EQ(source_text.find("@qwen.decode.key_value_capacity"),
             std::string::npos);
   EXPECT_EQ(source_text.find("%control_view"), std::string::npos);
   EXPECT_EQ(source_text.find("%active_key_value_token_count"),

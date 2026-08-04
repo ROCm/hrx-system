@@ -854,9 +854,9 @@ static iree_status_t qwen_program_prepare_batches_execute(
   return status;
 }
 
-// Prepares the temporary decode-attention adapter for one 64-row context class.
-// Active context is represented by the device-produced mask and therefore does
-// not participate in JIT identity.
+// Prepares decode attention for one reusable 64-row context class. Active
+// context is represented by the device-produced mask and therefore does not
+// participate in JIT identity.
 static iree_status_t qwen_program_prepare_decode_flash_attention(
     qwen_program_t* program, qwen_program_prepare_batch_t* batch) {
   qwen_program_config_binding_list_t config_bindings;
@@ -864,7 +864,7 @@ static iree_status_t qwen_program_prepare_decode_flash_attention(
       IREE_ARRAYSIZE(qwen_flash_attention_config_bindings),
       qwen_flash_attention_config_bindings, &config_bindings);
   qwen_program_config_binding_list_append_index(
-      &config_bindings, IREE_SV("qwen.decode.key_value_capacity"),
+      &config_bindings, IREE_SV("qwen3_moe.attention.key_value_token_capacity"),
       (int64_t)program->context_count);
   const int64_t workload[] = {(int64_t)program->context_count};
   return qwen_program_prepare_batch_append(
