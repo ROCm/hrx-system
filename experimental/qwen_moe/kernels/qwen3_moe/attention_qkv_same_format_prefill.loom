@@ -13,10 +13,13 @@ config.decl @qwen3_moe.attention.query_size : %value: index where [range(%value,
 
 config.decl @qwen3_moe.attention.key_value_size : %value: index where [range(%value, 1, 262144)]
 
+config.decl @qwen3_moe.workload.token_capacity : %value: index where [range(%value, 1, 2048)]
+
 // Runs every Q4_K Q/K/V tile in one launch over the aggregate physical rows.
 kernel.def target(@qwen3_moe_attention_qkv_same_format_prefill_gfx11_wave64) @qwen3_moe_attention_qkv_q4_prefill_512(%token_count: index) {
   %query_size = config.get @qwen3_moe.attention.query_size : index
   %key_value_size = config.get @qwen3_moe.attention.key_value_size : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %one = index.constant 1 : index
   %two = index.constant 2 : index
   %thirtyone = index.constant 31 : index
@@ -28,7 +31,7 @@ kernel.def target(@qwen3_moe_attention_qkv_same_format_prefill_gfx11_wave64) @qw
   %combined_output_size = index.add %query_size, %key_value_output_size : index
   %padded_output_size = index.add %combined_output_size, %sixtythree : index
   %output_tiles = index.div %padded_output_size, %sixtyfour : index
-  %padded_token_count = index.add %token_count, %thirtyone : index
+  %padded_token_count = index.add %token_capacity, %thirtyone : index
   %token_tiles = index.div %padded_token_count, %thirtytwo : index
   kernel.launch.config workgroups(%output_tiles, %token_tiles, %one) workgroup_size(%onetwentyeight, %one, %one) : index
 } launch(%token_count: index, %input: buffer, %combined_weight: buffer, %combined_output: buffer) {
@@ -50,6 +53,7 @@ kernel.def target(@qwen3_moe_attention_qkv_same_format_prefill_gfx11_wave64) @qw
 // records differ.
 kernel.def target(@qwen3_moe_attention_qkv_same_format_prefill_gfx11_wave64) @qwen3_moe_attention_query_q4_aggregate_prefill_512(%token_count: index) {
   %query_size = config.get @qwen3_moe.attention.query_size : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %one = index.constant 1 : index
   %thirtyone = index.constant 31 : index
   %thirtytwo = index.constant 32 : index
@@ -58,7 +62,7 @@ kernel.def target(@qwen3_moe_attention_qkv_same_format_prefill_gfx11_wave64) @qw
   %onetwentyeight = index.constant 128 : index
   %padded_output_size = index.add %query_size, %sixtythree : index
   %output_tiles = index.div %padded_output_size, %sixtyfour : index
-  %padded_token_count = index.add %token_count, %thirtyone : index
+  %padded_token_count = index.add %token_capacity, %thirtyone : index
   %token_tiles = index.div %padded_token_count, %thirtytwo : index
   kernel.launch.config workgroups(%output_tiles, %token_tiles, %one) workgroup_size(%onetwentyeight, %one, %one) : index
 } launch(%token_count: index, %input: buffer, %combined_weight: buffer, %combined_output: buffer) {
@@ -77,6 +81,7 @@ kernel.def target(@qwen3_moe_attention_qkv_same_format_prefill_gfx11_wave64) @qw
 
 kernel.def target(@qwen3_moe_attention_qkv_same_format_prefill_gfx11_wave64) @qwen3_moe_attention_key_q4_aggregate_prefill_512(%token_count: index) {
   %key_value_size = config.get @qwen3_moe.attention.key_value_size : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %one = index.constant 1 : index
   %thirtyone = index.constant 31 : index
   %thirtytwo = index.constant 32 : index
@@ -85,7 +90,7 @@ kernel.def target(@qwen3_moe_attention_qkv_same_format_prefill_gfx11_wave64) @qw
   %onetwentyeight = index.constant 128 : index
   %padded_output_size = index.add %key_value_size, %sixtythree : index
   %output_tiles = index.div %padded_output_size, %sixtyfour : index
-  %padded_token_count = index.add %token_count, %thirtyone : index
+  %padded_token_count = index.add %token_capacity, %thirtyone : index
   %token_tiles = index.div %padded_token_count, %thirtytwo : index
   kernel.launch.config workgroups(%output_tiles, %token_tiles, %one) workgroup_size(%onetwentyeight, %one, %one) : index
 } launch(%token_count: index, %input: buffer, %combined_weight: buffer, %combined_output: buffer) {
@@ -107,6 +112,7 @@ kernel.def target(@qwen3_moe_attention_qkv_same_format_prefill_gfx11_wave64) @qw
 
 kernel.def target(@qwen3_moe_attention_qkv_same_format_prefill_gfx11_wave64) @qwen3_moe_attention_value_q4_aggregate_prefill_512(%token_count: index) {
   %key_value_size = config.get @qwen3_moe.attention.key_value_size : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %one = index.constant 1 : index
   %thirtyone = index.constant 31 : index
   %thirtytwo = index.constant 32 : index
@@ -115,7 +121,7 @@ kernel.def target(@qwen3_moe_attention_qkv_same_format_prefill_gfx11_wave64) @qw
   %onetwentyeight = index.constant 128 : index
   %padded_output_size = index.add %key_value_size, %sixtythree : index
   %output_tiles = index.div %padded_output_size, %sixtyfour : index
-  %padded_token_count = index.add %token_count, %thirtyone : index
+  %padded_token_count = index.add %token_capacity, %thirtyone : index
   %token_tiles = index.div %padded_token_count, %thirtytwo : index
   kernel.launch.config workgroups(%output_tiles, %token_tiles, %one) workgroup_size(%onetwentyeight, %one, %one) : index
 } launch(%token_count: index, %input: buffer, %combined_weight: buffer, %combined_output: buffer) {
