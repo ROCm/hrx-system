@@ -529,7 +529,8 @@ kernel.def target(@qwen3_moe_attention_decode_gfx11_wave64) @qwen3_moe_flash_att
     %scaled_current_sum = vector.mulf<reassoc|nnan|ninf|nsz|contract> %wmma_tail_sum, %old_scale : vector<4xf32>
     %next_sum = vector.addf<reassoc|nnan|ninf|nsz> %scaled_current_sum, %probability : vector<4xf32>
     %next_output0, %next_output1, %next_output2, %next_output3 = scf.if %lane_has_output -> (vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) {
-      %value_channel = index.add %key_value_head_base, %lane_output_channel : index
+      %output_packet_channel = index.assume %lane_output_channel [range(%lane_output_channel, 0, 124), mul(%lane_output_channel, 4)] : index
+      %value_channel = index.add %key_value_head_base, %output_packet_channel : index
       %value_packet = vector.load %value_view[%single_tail_token, %value_channel] : view<[%bounded_key_value_token_count]x[%key_value_width]xf16, #dense> -> vector<4xf16>
       %old_scale_f16 = vector.fptrunc %old_scale : vector<4xf32> to vector<4xf16>
       %probability_f16 = vector.fptrunc %probability : vector<4xf32> to vector<4xf16>
@@ -572,6 +573,7 @@ kernel.def target(@qwen3_moe_attention_decode_gfx11_wave64) @qwen3_moe_flash_att
   // Normalize and publish the lane-owned packets. Query-tail rows never
   // participate in the output store.
   scf.if %lane_has_output {
+    %output_packet_channel = index.assume %lane_output_channel [range(%lane_output_channel, 0, 124), mul(%lane_output_channel, 4)] : index
     %sum0_scalar = vector.extract %final_sum[0] : vector<4xf32> -> f32
     %sum1_scalar = vector.extract %final_sum[1] : vector<4xf32> -> f32
     %sum2_scalar = vector.extract %final_sum[2] : vector<4xf32> -> f32
@@ -597,16 +599,16 @@ kernel.def target(@qwen3_moe_attention_decode_gfx11_wave64) @qwen3_moe_flash_att
     %normalized2 = vector.extf %normalized2_f16 : vector<4xf16> to vector<4xf32>
     %normalized3 = vector.extf %normalized3_f16 : vector<4xf16> to vector<4xf32>
     scf.if %query_valid0 {
-      vector.store %normalized0, %output_view[%query_head0, %lane_output_channel] : vector<4xf32>, view<[%query_head_count]x128xf32, #dense>
+      vector.store %normalized0, %output_view[%query_head0, %output_packet_channel] : vector<4xf32>, view<[%query_head_count]x128xf32, #dense>
     }
     scf.if %query_valid1 {
-      vector.store %normalized1, %output_view[%query_head1, %lane_output_channel] : vector<4xf32>, view<[%query_head_count]x128xf32, #dense>
+      vector.store %normalized1, %output_view[%query_head1, %output_packet_channel] : vector<4xf32>, view<[%query_head_count]x128xf32, #dense>
     }
     scf.if %query_valid2 {
-      vector.store %normalized2, %output_view[%query_head2, %lane_output_channel] : vector<4xf32>, view<[%query_head_count]x128xf32, #dense>
+      vector.store %normalized2, %output_view[%query_head2, %output_packet_channel] : vector<4xf32>, view<[%query_head_count]x128xf32, #dense>
     }
     scf.if %query_valid3 {
-      vector.store %normalized3, %output_view[%query_head3, %lane_output_channel] : vector<4xf32>, view<[%query_head_count]x128xf32, #dense>
+      vector.store %normalized3, %output_view[%query_head3, %output_packet_channel] : vector<4xf32>, view<[%query_head_count]x128xf32, #dense>
     }
   }
   kernel.return
