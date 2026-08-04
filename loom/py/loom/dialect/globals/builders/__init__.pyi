@@ -61,3 +61,9 @@ class GlobalBuilder(DialectBuilder):
         global_: str,
         location_id: int | None = ...,
     ) -> None: ...
+    def decl(
+        self,
+        *,
+        symbol: str,
+        location_id: int | None = ...,
+    ) -> None: ...

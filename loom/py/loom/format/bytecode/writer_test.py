@@ -39,6 +39,7 @@ from loom.dsl import (
     Op,
     Result,
     SymbolDefinition,
+    SymbolDefinitionFlag,
     SymbolReference,
 )
 from loom.format.bytecode.encoding import decode_varint
@@ -66,8 +67,10 @@ from loom.ir import (
     I64,
     INDEX,
     LOCATION_UNKNOWN,
+    SYMBOL_FLAG_DECLARATION,
     SYMBOL_FLAG_IMPORT,
     SYMBOL_FLAG_PUBLIC,
+    SYMBOL_FLAG_TEST_ONLY,
     Block,
     CanonicalAttrDict,
     DialectType,
@@ -1483,6 +1486,10 @@ class TestCrossFormatRoundTrip:
                 name="function",
                 interfaces=["func_like"],
                 bytecode_kind="LOOM_SYMBOL_FUNC_DECL",
+                flags=[
+                    SymbolDefinitionFlag.DECLARATION,
+                    SymbolDefinitionFlag.TEST_ONLY,
+                ],
             ),
             interfaces=[FuncLikeInterface(callee="callee", args_as_operands=True)],
             attrs=[
@@ -1521,6 +1528,8 @@ class TestCrossFormatRoundTrip:
 
         assert len(loaded.symbols) == 1
         symbol = loaded.symbols[0]
+        assert symbol.flags & SYMBOL_FLAG_DECLARATION
+        assert symbol.flags & SYMBOL_FLAG_TEST_ONLY
         assert symbol.op is not None
         assert symbol.op.attributes == {
             "callee": "entry",

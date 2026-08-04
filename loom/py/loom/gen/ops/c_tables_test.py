@@ -82,6 +82,8 @@ from loom.dsl import (
     SameType,
     Successor,
     SymbolDefinition,
+    SymbolDefinitionFlag,
+    SymbolValueContract,
     TargetFactSatisfaction,
     TargetLikeInterface,
     TotalBitCountEqual,
@@ -506,6 +508,99 @@ def test_generate_tables_omits_zero_default_symbol_definition_fields() -> None:
     assert ".interfaces = LOOM_SYMBOL_INTERFACE_RECORD," in tables_c
     assert ".bytecode_kind = LOOM_SYMBOL_NONE," not in tables_c
     assert ".fact_domain = NULL," not in tables_c
+
+
+def test_generate_tables_emits_generic_symbol_definition_flags() -> None:
+    op = Op(
+        "test.symbol",
+        group=Dialect("test"),
+        traits=[SYMBOL_DEFINE],
+        attrs=[AttrDef("name", ATTR_TYPE_SYMBOL)],
+        symbol_def=SymbolDefinition(
+            field="name",
+            name="test symbol",
+            interfaces=["record"],
+            flags=[
+                SymbolDefinitionFlag.DECLARATION,
+                SymbolDefinitionFlag.TEST_ONLY,
+            ],
+        ),
+    )
+
+    tables_c = generate_tables_c("test", 0x01, [op])
+
+    assert (".flags = LOOM_SYMBOL_DEFINITION_FLAG_DECLARATION | LOOM_SYMBOL_DEFINITION_FLAG_TEST_ONLY,") in tables_c
+
+
+def test_generate_tables_emits_symbol_value_contract_indices() -> None:
+    op = Op(
+        "test.value",
+        group=Dialect("test"),
+        traits=[SYMBOL_DEFINE],
+        attrs=[
+            AttrDef("name", ATTR_TYPE_SYMBOL),
+            AttrDef("value", "any"),
+            AttrDef("predicates", ATTR_TYPE_PREDICATE_LIST),
+        ],
+        results=[Result("type", ANY)],
+        symbol_def=SymbolDefinition(
+            field="name",
+            name="test value",
+            interfaces=["record"],
+            value_contract=SymbolValueContract(
+                result="type",
+                value="value",
+                predicates="predicates",
+            ),
+        ),
+    )
+
+    tables_c = generate_tables_c("test", 0x01, [op])
+
+    assert ".value_contract_result_index_plus_one = 1," in tables_c
+    assert ".value_contract_value_attr_index_plus_one = 2," in tables_c
+    assert ".value_contract_predicates_attr_index_plus_one = 3," in tables_c
+
+
+def test_generate_tables_rejects_variadic_symbol_value_contract_result() -> None:
+    op = Op(
+        "test.value",
+        group=Dialect("test"),
+        traits=[SYMBOL_DEFINE],
+        attrs=[AttrDef("name", ATTR_TYPE_SYMBOL)],
+        results=[Result("types", ANY, variadic=True)],
+        symbol_def=SymbolDefinition(
+            field="name",
+            name="test value",
+            interfaces=["record"],
+            value_contract=SymbolValueContract(result="types"),
+        ),
+    )
+
+    with _raises_value_error("value contract result 'types' must not be variadic"):
+        generate_tables_c("test", 0x01, [op])
+
+
+def test_generate_tables_rejects_non_predicate_value_contract_attr() -> None:
+    op = Op(
+        "test.value",
+        group=Dialect("test"),
+        traits=[SYMBOL_DEFINE],
+        attrs=[
+            AttrDef("name", ATTR_TYPE_SYMBOL),
+            AttrDef("predicates", ATTR_TYPE_I64),
+        ],
+        results=[Result("type", ANY)],
+        symbol_def=SymbolDefinition(
+            field="name",
+            name="test value",
+            interfaces=["record"],
+            value_contract=SymbolValueContract(result="type", predicates="predicates"),
+        ),
+    )
+
+    with _raises_value_error("predicates 'predicates' must name a predicate_list"):
+        generate_tables_c("test", 0x01, [op])
 
 
 def test_generate_sharded_tables_exports_vtables_and_keeps_dense_aggregator() -> None:

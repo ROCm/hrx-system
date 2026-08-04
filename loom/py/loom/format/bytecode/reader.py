@@ -47,9 +47,11 @@ from loom.ir import (
     BUFFER_TYPE,
     ENCODING_TYPE,
     NONE_TYPE,
+    SYMBOL_FLAG_DECLARATION,
     SYMBOL_FLAG_IMPORT,
     SYMBOL_FLAG_PUBLIC,
     SYMBOL_FLAG_RETAIN,
+    SYMBOL_FLAG_TEST_ONLY,
     Block,
     CanonicalAttrDict,
     DialectType,
@@ -115,7 +117,10 @@ _SYMBOL_SUPPORTED_FLAGS = (
     | SYMBOL_FLAG_IMPORT
     | _SYMBOL_FLAG_IMPORT_SYMBOL
     | SYMBOL_FLAG_RETAIN
+    | SYMBOL_FLAG_DECLARATION
+    | SYMBOL_FLAG_TEST_ONLY
 )
+_SYMBOL_DEFINITION_FLAGS = SYMBOL_FLAG_DECLARATION | SYMBOL_FLAG_TEST_ONLY
 
 
 class BytecodeError(Exception):
@@ -855,6 +860,7 @@ class BytecodeReader:
                         f"entry {op_table_index} but only {len(self._ops)} exist"
                     )
                 op_name = self._ops[op_table_index]
+                self._validate_symbol_definition_flags(flags, op_name)
                 op_comments, offset = self._read_comment_list(sym_data, offset)
 
                 cc_byte = sym_data[offset]
@@ -1020,6 +1026,7 @@ class BytecodeReader:
                         f"entry {op_table_index} but only {len(self._ops)} exist"
                     )
                 op_name = self._ops[op_table_index]
+                self._validate_symbol_definition_flags(flags, op_name)
                 op_comments, offset = self._read_comment_list(sym_data, offset)
 
                 result_count, offset = decode_varint(sym_data, offset)
@@ -1104,6 +1111,7 @@ class BytecodeReader:
                 f"entry {op_table_index} but only {len(self._ops)} exist"
             )
         op_name = self._ops[op_table_index]
+        self._validate_symbol_definition_flags(flags, op_name)
         op_comments, offset = self._read_comment_list(sym_data, offset)
 
         attr_count, offset = decode_varint(sym_data, offset)
@@ -1151,6 +1159,20 @@ class BytecodeReader:
         )
         module.add_symbol(symbol)
         return offset
+
+    def _validate_symbol_definition_flags(self, flags: int, op_name: str) -> None:
+        """Validate encoded roles against the defining op declaration."""
+
+        symbol_def = symbol_def_for_op(self._op_decls_by_name, op_name)
+        expected_flags = 0
+        if symbol_def.is_declaration:
+            expected_flags |= SYMBOL_FLAG_DECLARATION
+        if symbol_def.is_test_only:
+            expected_flags |= SYMBOL_FLAG_TEST_ONLY
+        if flags & _SYMBOL_DEFINITION_FLAGS != expected_flags:
+            raise BytecodeError(
+                "symbol definition flags do not match defining op contract"
+            )
 
     def _shared_func_metadata_attr_keys(self, op_name: str) -> frozenset[str]:
         """Return func-like attrs encoded by fixed symbol metadata fields."""

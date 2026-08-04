@@ -213,6 +213,22 @@ TEST_F(RemapTest, RemapsPredicateListsInsideDictAttributes) {
   EXPECT_EQ(target_predicates.predicate_list[0].args[1], 16);
 }
 
+TEST_F(RemapTest, CopiesByteAttributePayloadAcrossModules) {
+  const uint8_t source_bytes[] = {0x4C, 0x4F, 0x4F, 0x4D};
+  loom_ir_remap_t remap = InitializeRemap();
+  loom_attribute_t target_attr = {};
+
+  IREE_ASSERT_OK(loom_ir_remap_attribute(
+      &remap, loom_attr_bytes(source_bytes, sizeof(source_bytes)),
+      &target_attr));
+
+  ASSERT_EQ(target_attr.kind, LOOM_ATTR_BYTES);
+  EXPECT_EQ(target_attr.reserved_1, sizeof(source_bytes));
+  ASSERT_NE(target_attr.bytes, nullptr);
+  EXPECT_NE(target_attr.bytes, source_bytes);
+  EXPECT_EQ(memcmp(target_attr.bytes, source_bytes, sizeof(source_bytes)), 0);
+}
+
 TEST_F(RemapTest, RejectsMalformedPredicateListsWithoutReadingPastPayload) {
   loom_ir_remap_t remap = InitializeRemap();
   loom_predicate_t malformed = {

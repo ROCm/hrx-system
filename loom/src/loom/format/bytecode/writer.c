@@ -3381,6 +3381,12 @@ static iree_status_t loom_bytecode_write_symbols_section(
     if (iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_RETAIN)) {
       bytecode_flags |= LOOM_BYTECODE_SYMBOL_FLAG_RETAIN;
     }
+    if (loom_symbol_definition_is_declaration(symbol->definition)) {
+      bytecode_flags |= LOOM_BYTECODE_SYMBOL_FLAG_DECLARATION;
+    }
+    if (loom_symbol_definition_is_test_only(symbol->definition)) {
+      bytecode_flags |= LOOM_BYTECODE_SYMBOL_FLAG_TEST_ONLY;
+    }
     if (linkage.is_import) {
       bytecode_flags |= LOOM_BYTECODE_SYMBOL_FLAG_IMPORT;
       if (linkage.has_import_symbol) {

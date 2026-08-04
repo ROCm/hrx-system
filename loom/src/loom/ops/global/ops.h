@@ -24,7 +24,8 @@ enum {
   LOOM_OP_GLOBAL_RODATA = LOOM_OP_KIND(LOOM_DIALECT_GLOBAL, 2),
   LOOM_OP_GLOBAL_LOAD = LOOM_OP_KIND(LOOM_DIALECT_GLOBAL, 3),
   LOOM_OP_GLOBAL_STORE = LOOM_OP_KIND(LOOM_DIALECT_GLOBAL, 4),
-  LOOM_OP_GLOBAL_COUNT_ = 5,
+  LOOM_OP_GLOBAL_RODATA_DECL = LOOM_OP_KIND(LOOM_DIALECT_GLOBAL, 5),
+  LOOM_OP_GLOBAL_COUNT_ = 6,
 };
 
 // LOOM_OP_GLOBAL_CONSTANT: Immutable global value with an optional inline scalar initializer. Declaration-local dim/encoding names in the type annotation express structural constraints. Predicates constrain dynamic dimensions and are propagated to every load site as value facts. Non-scalar or computed initialization is modeled by global.store in initializer functions; resource-backed artifact payloads belong in global.rodata instead of overloading inline attrs.
@@ -125,6 +126,16 @@ iree_status_t loom_global_store_build(
 iree_status_t loom_global_store_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_GLOBAL_RODATA_DECL: Declare a read-only executable data symbol whose payload is supplied by artifact emission or linking. The declaration carries symbol identity without inventing placeholder contents.
+// global.rodata.decl @iree_asan_config
+LOOM_DEFINE_ISA(loom_global_rodata_decl_isa, LOOM_OP_GLOBAL_RODATA_DECL)
+LOOM_DEFINE_ATTR_SYMBOL(loom_global_rodata_decl_symbol, 0)
+iree_status_t loom_global_rodata_decl_build(
+    loom_builder_t* builder,
+    loom_symbol_ref_t symbol,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 
 // Returns the vtable array for the global dialect.
 const loom_op_vtable_t* const* loom_global_dialect_vtables(

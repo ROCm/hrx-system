@@ -40,6 +40,11 @@ global.rodata @empty_rodata = bytes("")
 
 // ====
 
+// Read-only artifact payload supplied by a later link input.
+global.rodata.decl @external_rodata
+
+// ====
+
 // Load from scalar global.
 global.constant @c_pi : f32
 

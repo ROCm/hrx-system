@@ -23,6 +23,7 @@ from loom.dsl import (
     Op,
     OpPhase,
     SymbolDefinition,
+    SymbolDefinitionFlag,
     TargetFactSatisfaction,
     TargetLikeInterface,
 )
@@ -239,6 +240,7 @@ target_decl = Op(
         name="target",
         interfaces=["target", "record"],
         bytecode_kind="LOOM_SYMBOL_RECORD",
+        flags=[SymbolDefinitionFlag.DECLARATION],
     ),
     attrs=[AttrDef("symbol", "symbol")],
     format=[SymbolRef("symbol")],

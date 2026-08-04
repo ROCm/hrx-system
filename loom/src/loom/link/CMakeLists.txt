@@ -19,9 +19,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::ir
-    loom::ops::config
     loom::ops::op_defs
-    loom::ops::target
   PUBLIC
 )
 
@@ -37,12 +35,11 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::analysis::symbol_dependencies
+    loom::analysis::symbol_value_constraints
     loom::ir
     loom::ir::symbol_map
-    loom::ops::config
     loom::ops::func
     loom::ops::op_defs
-    loom::ops::target
     loom::rewrite::materialize
     loom::rewrite::remap
     loom::util::walk

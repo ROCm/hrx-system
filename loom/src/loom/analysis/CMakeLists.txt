@@ -62,6 +62,31 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    symbol_value_constraints
+  HDRS
+    "symbol_value_constraints.h"
+  SRCS
+    "symbol_value_constraints.c"
+  DEPS
+    iree::base
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    symbol_value_constraints_test
+  SRCS
+    "symbol_value_constraints_test.cc"
+  DEPS
+    ::symbol_value_constraints
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+)
+
 loom_cc_test(
   NAME
     availability_test

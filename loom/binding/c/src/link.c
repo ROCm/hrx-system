@@ -28,7 +28,7 @@
 enum {
   LOOMC_LINK_KNOWN_FLAGS = LOOMC_LINK_FLAG_INCLUDE_EXPORTED_ROOTS |
                            LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS |
-                           LOOMC_LINK_FLAG_STRIP_CHECK_SYMBOLS,
+                           LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS,
 };
 
 struct loomc_linker_t {
@@ -645,10 +645,11 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
                                   LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS)
               ? LOOM_LINK_PLAN_UNRESOLVED_ALLOW
               : LOOM_LINK_PLAN_UNRESOLVED_ERROR,
-      .check_policy = loomc_link_any_flag_set(
-                          options->flags, LOOMC_LINK_FLAG_STRIP_CHECK_SYMBOLS)
-                          ? LOOM_LINK_PLAN_CHECK_STRIP
-                          : LOOM_LINK_PLAN_CHECK_KEEP,
+      .test_symbol_policy =
+          loomc_link_any_flag_set(options->flags,
+                                  LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS)
+              ? LOOM_LINK_PLAN_TEST_SYMBOL_STRIP
+              : LOOM_LINK_PLAN_TEST_SYMBOL_KEEP,
       .materialize_module = loomc_link_materialize_module_callback,
       .materialize_module_user_data = &cache,
   };

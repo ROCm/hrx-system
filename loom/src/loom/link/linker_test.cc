@@ -249,6 +249,23 @@ test.target<low_core> @gpu
   EXPECT_NE(text.find("func.def target(@gpu) @entry"), std::string::npos);
 }
 
+TEST_F(LinkerTest, ConcreteRodataSupersedesDeclaration) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+global.rodata.decl @metadata
+)"));
+  loom_module_t* corpus = Parse(IREE_SV(R"(
+global.rodata @metadata = bytes("4c4f4f4d"), align 4
+)"));
+
+  loom_module_t* linked = Link({harness, corpus});
+  Verify(linked);
+
+  std::string text = Print(linked);
+  EXPECT_EQ(text.find("global.rodata.decl @metadata"), std::string::npos);
+  EXPECT_NE(text.find("global.rodata @metadata = bytes(\"4c4f4f4d\")"),
+            std::string::npos);
+}
+
 TEST_F(LinkerTest, SelectiveRootMaterializesReachableSymbols) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 test.target<low_core> @test_target

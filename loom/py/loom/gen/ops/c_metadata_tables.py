@@ -14,6 +14,7 @@ from typing import Any
 from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_FLAGS,
+    ATTR_TYPE_PREDICATE_LIST,
     ContractFamily,
     EffectKind,
     EnumDef,
@@ -114,6 +115,7 @@ SYMBOL_INTERFACE_MAP: dict[str, str] = {
     "global": "LOOM_SYMBOL_INTERFACE_GLOBAL",
     "executable": "LOOM_SYMBOL_INTERFACE_EXECUTABLE",
     "record": "LOOM_SYMBOL_INTERFACE_RECORD",
+    "rodata": "LOOM_SYMBOL_INTERFACE_RODATA",
     "target": "LOOM_SYMBOL_INTERFACE_TARGET",
     "config": "LOOM_SYMBOL_INTERFACE_CONFIG",
 }
@@ -134,6 +136,26 @@ def _symbol_retain_attr_index(op: Op) -> int | None:
     if retain_attr.attr_type != ATTR_TYPE_ENUM:
         raise ValueError(f"Op {op.name!r}: symbol_def.retain {op.symbol_def.retain!r} must name an enum attr")
     return retain_attr_index
+
+
+def _symbol_value_contract_indices(
+    op: Op,
+) -> tuple[int, int | None, int | None] | None:
+    """Resolves a generated typed-value symbol contract."""
+
+    if op.symbol_def is None or op.symbol_def.value_contract is None:
+        return None
+    contract = op.symbol_def.value_contract
+    result_index = c_queries.resolve_result_index(op, contract.result, "symbol_def.value_contract")
+    if op.results[result_index].variadic:
+        raise ValueError(f"Op {op.name!r}: symbol value contract result {contract.result!r} must not be variadic")
+    value_attr_index = c_queries.resolve_attr_index(op, contract.value, "symbol_def.value_contract") if contract.value is not None else None
+    predicates_attr_index = c_queries.resolve_attr_index(op, contract.predicates, "symbol_def.value_contract") if contract.predicates is not None else None
+    if predicates_attr_index is not None:
+        attr_def = c_queries.non_flags_attrs(op)[predicates_attr_index]
+        if attr_def.attr_type != ATTR_TYPE_PREDICATE_LIST:
+            raise ValueError(f"Op {op.name!r}: symbol value contract predicates {contract.predicates!r} must name a predicate_list attr")
+    return result_index, value_attr_index, predicates_attr_index
 
 
 def _symbol_kind(op: Op) -> str:
@@ -478,6 +500,7 @@ def generate_tables_c(
         if op.symbol_def is not None:
             attr_index = c_queries.resolve_attr_index(op, op.symbol_def.field, "symbol_def")
             retain_attr_index = _symbol_retain_attr_index(op)
+            value_contract_indices = _symbol_value_contract_indices(op)
             flags = _symbol_interface_flags(op.symbol_def.interfaces)
             fact_domain = c_symbols.symbol_fact_domain_symbol(op)
             lines.append(f"static const loom_symbol_definition_descriptor_t {prefix}_symbol_def = {{")
@@ -486,6 +509,20 @@ def generate_tables_c(
                 lines.append(f"    .name_attr_index = {attr_index},")
             if retain_attr_index is not None:
                 lines.append(f"    .retain_attr_index_plus_one = {retain_attr_index + 1},")
+            definition_flags: list[str] = []
+            if op.symbol_def.is_declaration:
+                definition_flags.append("LOOM_SYMBOL_DEFINITION_FLAG_DECLARATION")
+            if op.symbol_def.is_test_only:
+                definition_flags.append("LOOM_SYMBOL_DEFINITION_FLAG_TEST_ONLY")
+            if definition_flags:
+                lines.append(f"    .flags = {' | '.join(definition_flags)},")
+            if value_contract_indices is not None:
+                result_index, value_attr_index, predicates_attr_index = value_contract_indices
+                lines.append(f"    .value_contract_result_index_plus_one = {result_index + 1},")
+                if value_attr_index is not None:
+                    lines.append(f"    .value_contract_value_attr_index_plus_one = {value_attr_index + 1},")
+                if predicates_attr_index is not None:
+                    lines.append(f"    .value_contract_predicates_attr_index_plus_one = {predicates_attr_index + 1},")
             if flags != "0":
                 lines.append(f"    .interfaces = {flags},")
             if op.symbol_def.bytecode_kind != "LOOM_SYMBOL_NONE":

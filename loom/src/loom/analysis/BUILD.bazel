@@ -58,6 +58,27 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "symbol_value_constraints",
+    srcs = ["symbol_value_constraints.c"],
+    hdrs = ["symbol_value_constraints.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "symbol_value_constraints_test",
+    srcs = ["symbol_value_constraints_test.cc"],
+    deps = [
+        ":symbol_value_constraints",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "availability_test",
     srcs = ["availability_test.cc"],

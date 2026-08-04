@@ -17,6 +17,7 @@ from loom.dialect.globals.defs import (
     global_load,
     global_ops,
     global_rodata,
+    global_rodata_decl,
     global_store,
     global_variable,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "global_constant",
     "global_variable",
     "global_rodata",
+    "global_rodata_decl",
     "global_load",
     "global_store",
     "ALL_GLOBAL_OPS",

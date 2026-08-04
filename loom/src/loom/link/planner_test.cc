@@ -389,7 +389,7 @@ func.def public @unused(%x: i32) -> (i32) {
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
       /*.include_exported_roots=*/{},
       /*.unresolved_policy=*/{},
-      /*.check_policy=*/{},
+      /*.test_symbol_policy=*/{},
       /*.strip_symbol=*/{},
       /*.strip_symbol_user_data=*/{},
       /*.materialize_module=*/MaterializeUsedBytecodeModule,
@@ -466,7 +466,7 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
       },
       /*.include_exported_roots=*/{},
       /*.unresolved_policy=*/{},
-      /*.check_policy=*/{},
+      /*.test_symbol_policy=*/{},
       /*.strip_symbol=*/{},
       /*.strip_symbol_user_data=*/{},
       /*.materialize_module=*/MaterializeUsedBytecodeModule,
@@ -918,7 +918,7 @@ func.def @helper(%x: i32) -> (i32) {
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
       /*.include_exported_roots=*/{},
       /*.unresolved_policy=*/{},
-      /*.check_policy=*/{},
+      /*.test_symbol_policy=*/{},
       /*.strip_symbol=*/StripNamedSymbol,
       /*.strip_symbol_user_data=*/&stripped_name,
   };
@@ -941,7 +941,7 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_FALSE(ContainsSymbol(plan.get(), helper));
 }
 
-TEST_F(LinkPlannerTest, CheckStripPolicyRemovesBytecodeCasesAndBenchmarks) {
+TEST_F(LinkPlannerTest, TestSymbolStripPolicyRemovesBytecodeSymbols) {
   loom_module_t* module = Parse(IREE_SV(R"(
 func.def public @kernel(%x: i32) -> (i32) {
   func.return %x : i32
@@ -978,7 +978,7 @@ check.benchmark<@kernel_case> @kernel_bench
       /*.root_symbols=*/{},
       /*.include_exported_roots=*/{},
       /*.unresolved_policy=*/{},
-      /*.check_policy=*/LOOM_LINK_PLAN_CHECK_STRIP,
+      /*.test_symbol_policy=*/LOOM_LINK_PLAN_TEST_SYMBOL_STRIP,
   };
   PlanPtr plan = BuildPlan(index.get(), &strip_options);
 
@@ -994,7 +994,7 @@ check.benchmark<@kernel_case> @kernel_bench
   EXPECT_FALSE(ContainsSymbol(plan.get(), benchmark));
 }
 
-TEST_F(LinkPlannerTest, KeepCheckPolicyPreservesCaseDependencies) {
+TEST_F(LinkPlannerTest, KeepTestSymbolPolicyPreservesDependencies) {
   loom_module_t* module = Parse(IREE_SV(R"(
 func.def public @kernel(%x: i32) -> (i32) {
   func.return %x : i32
@@ -1026,7 +1026,7 @@ check.case public @kernel_case {
   EXPECT_TRUE(ContainsSymbol(plan.get(), check_case));
 }
 
-TEST_F(LinkPlannerTest, CheckStripPolicyRejectsStrippedRoots) {
+TEST_F(LinkPlannerTest, TestSymbolStripPolicyRejectsStrippedRoots) {
   loom_module_t* module = Parse(IREE_SV(R"(
 check.case public @kernel_case {
   check.return
@@ -1042,7 +1042,7 @@ check.case public @kernel_case {
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
       /*.include_exported_roots=*/{},
       /*.unresolved_policy=*/{},
-      /*.check_policy=*/LOOM_LINK_PLAN_CHECK_STRIP,
+      /*.test_symbol_policy=*/LOOM_LINK_PLAN_TEST_SYMBOL_STRIP,
   };
 
   PlanPtr plan;

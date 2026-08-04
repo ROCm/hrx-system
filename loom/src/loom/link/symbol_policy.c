@@ -7,9 +7,7 @@
 #include "loom/link/symbol_policy.h"
 
 #include "loom/ir/context.h"
-#include "loom/ops/config/ops.h"
 #include "loom/ops/op_defs.h"
-#include "loom/ops/target/ops.h"
 
 static bool loom_link_symbol_has_visibility_attr(const loom_module_t* module,
                                                  const loom_symbol_t* symbol) {
@@ -33,9 +31,7 @@ static bool loom_link_symbol_has_visibility_attr(const loom_module_t* module,
 }
 
 bool loom_link_symbol_is_declaration(const loom_symbol_t* symbol) {
-  return symbol->kind == LOOM_SYMBOL_FUNC_DECL ||
-         (symbol->defining_op && (loom_config_decl_isa(symbol->defining_op) ||
-                                  loom_target_decl_isa(symbol->defining_op)));
+  return symbol && loom_symbol_definition_is_declaration(symbol->definition);
 }
 
 bool loom_link_symbol_is_concrete_definition(const loom_symbol_t* symbol) {

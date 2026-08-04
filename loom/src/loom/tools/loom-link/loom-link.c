@@ -62,7 +62,7 @@ IREE_FLAG_LIST_NAMED(
 IREE_FLAG_NAMED(bool, include_exported_roots, "include-exported-roots", false,
                 "In link/selective mode, add exported symbols as roots.");
 IREE_FLAG_NAMED(bool, strip_check, "strip-check", false,
-                "Strip check.case and check.benchmark symbols before output.");
+                "Strip test/benchmark-only symbols before output.");
 IREE_FLAG_NAMED(
     bool, require_resolved_config, "require-resolved-config", false,
     "Require all config.decl symbols to be materialized before output.");
@@ -724,13 +724,9 @@ static iree_status_t loom_link_cli_append_symbol_flags(
     IREE_RETURN_IF_ERROR(loom_link_cli_append_flag(builder, &needs_separator,
                                                    IREE_SV("config")));
   }
-  if (iree_any_bit_set(flags, LOOM_LINK_SYMBOL_FLAG_CHECK_CASE)) {
+  if (iree_any_bit_set(flags, LOOM_LINK_SYMBOL_FLAG_TEST_ONLY)) {
     IREE_RETURN_IF_ERROR(loom_link_cli_append_flag(builder, &needs_separator,
-                                                   IREE_SV("check.case")));
-  }
-  if (iree_any_bit_set(flags, LOOM_LINK_SYMBOL_FLAG_CHECK_BENCHMARK)) {
-    IREE_RETURN_IF_ERROR(loom_link_cli_append_flag(builder, &needs_separator,
-                                                   IREE_SV("check.benchmark")));
+                                                   IREE_SV("test-only")));
   }
   if (!needs_separator) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "-"));
@@ -1247,8 +1243,7 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "`--mode=link` or `--mode=selective` keeps explicit `--root=@symbol`\n"
       "values, optional `--include-exported-roots`, and reachable "
       "dependencies.\n"
-      "`--strip-check` removes `check.case` and `check.benchmark` records "
-      "from\n"
+      "`--strip-check` removes symbols marked as test/benchmark-only from\n"
       "runtime artifacts.\n"
       "\n"
       "### Provider debugging\n"
@@ -1287,7 +1282,7 @@ int main(int argc, char** argv) {
       "Link "
       "mode keeps explicit roots or exported roots and their reachable "
       "dependencies.\n"
-      "Use --strip-check to remove check.case and check.benchmark symbols from "
+      "Use --strip-check to remove symbols marked as test/benchmark-only from "
       "runtime artifacts.\n");
   for (int i = 1; i < argc; ++i) {
     if (loom_tooling_cli_is_agents_markdown_arg(argv[i])) {
@@ -1392,8 +1387,8 @@ int main(int argc, char** argv) {
       .mode = plan_mode,
       .root_symbols = roots,
       .include_exported_roots = FLAG_include_exported_roots,
-      .check_policy = FLAG_strip_check ? LOOM_LINK_PLAN_CHECK_STRIP
-                                       : LOOM_LINK_PLAN_CHECK_KEEP,
+      .test_symbol_policy = FLAG_strip_check ? LOOM_LINK_PLAN_TEST_SYMBOL_STRIP
+                                             : LOOM_LINK_PLAN_TEST_SYMBOL_KEEP,
       .materialize_module = loom_link_cli_plan_materialize_module,
       .materialize_module_user_data = &plan_materializer,
   };

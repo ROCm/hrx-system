@@ -20,6 +20,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     iree::base::internal::json
+    loom::analysis::symbol_value_constraints
     loom::format::text::parser
     loom::format::text::printer
     loom::ir

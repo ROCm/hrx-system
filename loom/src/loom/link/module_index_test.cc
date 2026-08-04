@@ -348,7 +348,7 @@ func.def public @exported(%x: i32) -> (i32) {
   EXPECT_TRUE(iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT));
 }
 
-TEST_F(ModuleIndexTest, IndexesCheckSymbolsForStripPolicy) {
+TEST_F(ModuleIndexTest, IndexesTestOnlySymbolRole) {
   loom_module_t* module = Parse(IREE_SV(R"(
 check.case public @kernel_case {
   check.return
@@ -358,13 +358,24 @@ check.benchmark<@kernel_case>
 check.benchmark<@kernel_case> @kernel_bench {}
 )"));
   ASSERT_NE(module, nullptr);
-  std::vector<uint8_t> bytes = WriteModule(module);
-
-  IndexPtr index = CreateIndex();
   loom_link_module_index_add_options_t options = {
       /*.provider_name=*/IREE_SV("checks"),
       /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
   };
+  IndexPtr materialized_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      materialized_index.get(), module, &options,
+      /*out_provider_ordinal=*/nullptr));
+  const loom_link_module_index_symbol_t* materialized_case =
+      loom_link_module_index_lookup_global(materialized_index.get(),
+                                           IREE_SV("kernel_case"));
+  ASSERT_NE(materialized_case, nullptr);
+  EXPECT_TRUE(iree_all_bits_set(materialized_case->flags,
+                                LOOM_LINK_SYMBOL_FLAG_TEST_ONLY));
+
+  std::vector<uint8_t> bytes = WriteModule(module);
+
+  IndexPtr index = CreateIndex();
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(), iree_make_const_byte_span(bytes.data(), bytes.size()),
       IREE_SV("checks.loombc"), /*read_options=*/nullptr, &options,
@@ -375,7 +386,7 @@ check.benchmark<@kernel_case> @kernel_bench {}
       loom_link_module_index_lookup_global(index.get(), IREE_SV("kernel_case"));
   ASSERT_NE(check_case, nullptr);
   EXPECT_TRUE(
-      iree_all_bits_set(check_case->flags, LOOM_LINK_SYMBOL_FLAG_CHECK_CASE));
+      iree_all_bits_set(check_case->flags, LOOM_LINK_SYMBOL_FLAG_TEST_ONLY));
   EXPECT_TRUE(
       iree_all_bits_set(check_case->flags, LOOM_LINK_SYMBOL_FLAG_HAS_BODY));
 
@@ -386,8 +397,8 @@ check.benchmark<@kernel_case> @kernel_bench {}
       loom_link_module_index_lookup_private(index.get(), indexed_module,
                                             IREE_SV("kernel_bench"));
   ASSERT_NE(benchmark, nullptr);
-  EXPECT_TRUE(iree_all_bits_set(benchmark->flags,
-                                LOOM_LINK_SYMBOL_FLAG_CHECK_BENCHMARK));
+  EXPECT_TRUE(
+      iree_all_bits_set(benchmark->flags, LOOM_LINK_SYMBOL_FLAG_TEST_ONLY));
 }
 
 TEST_F(ModuleIndexTest, IndexesTextProviderThroughMaterializedColdPath) {

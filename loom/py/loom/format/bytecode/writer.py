@@ -157,13 +157,15 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 17
+FORMAT_VERSION = 18
 PRODUCER = "loom-py"
 
 SYMBOL_FLAG_PUBLIC = 0x0001
 SYMBOL_FLAG_IMPORT = 0x0002
 SYMBOL_FLAG_IMPORT_SYMBOL = 0x0004
 SYMBOL_FLAG_RETAIN = 0x0008
+SYMBOL_FLAG_DECLARATION = 0x0010
+SYMBOL_FLAG_TEST_ONLY = 0x0020
 
 
 # ============================================================================
@@ -425,6 +427,17 @@ class BytecodeWriter:
                     if attr_name is not None:
                         keys.add(attr_name)
         return frozenset(keys)
+
+    def _symbol_definition_flags(self, op: Operation) -> int:
+        """Return bytecode roles declared by the symbol-defining op."""
+
+        symbol_def = symbol_def_for_op(self._op_decls_by_name, op.name)
+        flags = 0
+        if symbol_def.is_declaration:
+            flags |= SYMBOL_FLAG_DECLARATION
+        if symbol_def.is_test_only:
+            flags |= SYMBOL_FLAG_TEST_ONLY
+        return flags
 
     def _number_global_op(self, op: Operation) -> None:
         """Number all entities in a global symbol-defining op."""
@@ -1368,7 +1381,11 @@ class BytecodeWriter:
                 )
             buf.write_u8(symbol.kind.value)
             buf.write_u8(0 if (symbol.flags & SYMBOL_FLAG_PUBLIC) else 1)
-            bytecode_flags = symbol.flags
+            if symbol.op is None:
+                raise ValueError(f"symbol {symbol.name!r} has no defining op")
+            bytecode_flags = (
+                symbol.flags & ~(SYMBOL_FLAG_DECLARATION | SYMBOL_FLAG_TEST_ONLY)
+            ) | self._symbol_definition_flags(symbol.op)
             if symbol.source_symbol and symbol.source_symbol != symbol.name:
                 bytecode_flags |= SYMBOL_FLAG_IMPORT_SYMBOL
             buf.write_u16_le(bytecode_flags)

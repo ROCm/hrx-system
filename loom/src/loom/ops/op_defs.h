@@ -862,6 +862,17 @@ enum loom_symbol_interface_bits_e {
   LOOM_SYMBOL_INTERFACE_TARGET = 1u << 4,
   // Symbol names a compile/link-time configuration value.
   LOOM_SYMBOL_INTERFACE_CONFIG = 1u << 5,
+  // Symbol names a read-only executable data payload.
+  LOOM_SYMBOL_INTERFACE_RODATA = 1u << 6,
+};
+
+typedef uint16_t loom_symbol_definition_flags_t;
+
+enum loom_symbol_definition_flag_bits_e {
+  // Symbol op declares a contract that a provider definition may satisfy.
+  LOOM_SYMBOL_DEFINITION_FLAG_DECLARATION = 1u << 0,
+  // Symbol exists only for test or benchmark tooling.
+  LOOM_SYMBOL_DEFINITION_FLAG_TEST_ONLY = 1u << 1,
 };
 
 // Generated metadata for an op that defines a module symbol.
@@ -872,6 +883,14 @@ typedef struct loom_symbol_definition_descriptor_t {
   uint8_t name_attr_index;
   // Attribute index plus one for the optional retain marker, or 0 if absent.
   uint8_t retain_attr_index_plus_one;
+  // Definition roles such as declaration status.
+  loom_symbol_definition_flags_t flags;
+  // Result index plus one for a typed-value contract, or 0 if absent.
+  uint8_t value_contract_result_index_plus_one;
+  // Attribute index plus one for an exact contract value, or 0 if absent.
+  uint8_t value_contract_value_attr_index_plus_one;
+  // Attribute index plus one for contract predicates, or 0 if absent.
+  uint8_t value_contract_predicates_attr_index_plus_one;
   // Structural symbol interfaces implemented by this definition.
   loom_symbol_interface_flags_t interfaces;
   // Existing bytecode payload kind, or LOOM_SYMBOL_NONE if not serializable
@@ -880,6 +899,9 @@ typedef struct loom_symbol_definition_descriptor_t {
   // Optional domain that computes typed facts for symbols defined by this op.
   const loom_symbol_fact_domain_t* fact_domain;
 } loom_symbol_definition_descriptor_t;
+
+static_assert(sizeof(loom_symbol_definition_descriptor_t) == 32,
+              "loom_symbol_definition_descriptor_t must be 32 bytes");
 
 // Generated metadata for a symbol-reference attribute.
 typedef struct loom_symbol_reference_descriptor_t {
@@ -904,6 +926,53 @@ static inline bool loom_symbol_definition_implements(
     loom_symbol_interface_flags_t interfaces) {
   return descriptor && interfaces &&
          iree_any_bit_set(descriptor->interfaces, interfaces);
+}
+
+static inline bool loom_symbol_definition_satisfies(
+    const loom_symbol_definition_descriptor_t* descriptor,
+    loom_symbol_interface_flags_t required_interfaces) {
+  return descriptor &&
+         iree_all_bits_set(descriptor->interfaces, required_interfaces);
+}
+
+static inline bool loom_symbol_definition_is_declaration(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor &&
+         iree_any_bit_set(descriptor->flags,
+                          LOOM_SYMBOL_DEFINITION_FLAG_DECLARATION);
+}
+
+static inline bool loom_symbol_definition_is_test_only(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor && iree_any_bit_set(descriptor->flags,
+                                        LOOM_SYMBOL_DEFINITION_FLAG_TEST_ONLY);
+}
+
+static inline bool loom_symbol_definition_has_value_contract(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor && descriptor->value_contract_result_index_plus_one != 0;
+}
+
+static inline uint8_t loom_symbol_definition_value_contract_result_index(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor && descriptor->value_contract_result_index_plus_one
+             ? descriptor->value_contract_result_index_plus_one - 1
+             : LOOM_RESULT_INDEX_NONE;
+}
+
+static inline uint8_t loom_symbol_definition_value_contract_value_attr_index(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor && descriptor->value_contract_value_attr_index_plus_one
+             ? descriptor->value_contract_value_attr_index_plus_one - 1
+             : LOOM_ATTR_INDEX_NONE;
+}
+
+static inline uint8_t
+loom_symbol_definition_value_contract_predicates_attr_index(
+    const loom_symbol_definition_descriptor_t* descriptor) {
+  return descriptor && descriptor->value_contract_predicates_attr_index_plus_one
+             ? descriptor->value_contract_predicates_attr_index_plus_one - 1
+             : LOOM_ATTR_INDEX_NONE;
 }
 
 static inline bool loom_symbol_implements(

@@ -119,6 +119,8 @@ __all__ = [
     "SymbolRef",
     "SymbolName",
     "SYMBOL_FLAG_IMPORT",
+    "SYMBOL_FLAG_DECLARATION",
+    "SYMBOL_FLAG_TEST_ONLY",
     "SYMBOL_FLAG_PUBLIC",
     "SYMBOL_FLAG_RETAIN",
     # Tables.
@@ -1360,6 +1362,8 @@ class SymbolKind(IntEnum):
 SYMBOL_FLAG_PUBLIC = 1 << 0
 SYMBOL_FLAG_IMPORT = 1 << 1
 SYMBOL_FLAG_RETAIN = 1 << 3
+SYMBOL_FLAG_DECLARATION = 1 << 4
+SYMBOL_FLAG_TEST_ONLY = 1 << 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -1438,6 +1442,10 @@ def symbol_from_operation(operation: Operation, op_decl: Any | None = None) -> S
         symbol_flags |= SYMBOL_FLAG_PUBLIC
     if operation.attributes.get("retain") == "retain":
         symbol_flags |= SYMBOL_FLAG_RETAIN
+    if symbol_def.is_declaration:
+        symbol_flags |= SYMBOL_FLAG_DECLARATION
+    if symbol_def.is_test_only:
+        symbol_flags |= SYMBOL_FLAG_TEST_ONLY
 
     source_module = operation.attributes.get("import_module", "")
     if source_module:

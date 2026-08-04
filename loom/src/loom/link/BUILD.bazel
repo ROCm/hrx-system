@@ -19,8 +19,6 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/config",
-        "//loom/src/loom/ops/target",
         "//runtime/src/iree/base",
     ],
 )
@@ -32,12 +30,11 @@ loom_cc_library(
     deps = [
         ":symbol_policy",
         "//loom/src/loom/analysis:symbol_dependencies",
+        "//loom/src/loom/analysis:symbol_value_constraints",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:symbol_map",
         "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/config",
         "//loom/src/loom/ops/func",
-        "//loom/src/loom/ops/target",
         "//loom/src/loom/rewrite:materialize",
         "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/util:walk",

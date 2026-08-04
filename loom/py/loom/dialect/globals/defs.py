@@ -6,12 +6,13 @@
 
 """Global dialect op definitions.
 
-Four ops for module-level state:
+Six ops for module-level state:
 
 Top-level (module-level symbols):
-  global.constant  — Immutable global (weights, parameters, constants).
-  global.variable  — Mutable global (KV cache, running state).
-  global.rodata    — Read-only executable data payload.
+  global.constant     — Immutable global (weights, parameters, constants).
+  global.variable     — Mutable global (KV cache, running state).
+  global.rodata       — Read-only executable data payload.
+  global.rodata.decl  — Externally supplied read-only executable data.
 
 Body ops (inside function/template bodies):
   global.load      — Load value + dynamic dims/encoding from global.
@@ -47,6 +48,7 @@ from loom.dsl import (
     Operand,
     Result,
     SymbolDefinition,
+    SymbolDefinitionFlag,
     SymbolReference,
 )
 
@@ -184,7 +186,7 @@ global_rodata = Op(
     symbol_def=SymbolDefinition(
         field="symbol",
         name="rodata",
-        interfaces=["record"],
+        interfaces=["rodata", "record"],
         bytecode_kind="LOOM_SYMBOL_RECORD",
     ),
     attrs=[
@@ -202,6 +204,27 @@ global_rodata = Op(
     examples=[
         'global.rodata @loom_sanitizer_sites = bytes("4c53495401000000"), align 8',
     ],
+)
+
+# ============================================================================
+# global.rodata.decl — externally supplied read-only executable data
+# ============================================================================
+
+global_rodata_decl = Op(
+    "global.rodata.decl",
+    group=global_ops,
+    doc=("Declare a read-only executable data symbol whose payload is supplied by artifact emission or linking. The declaration carries symbol identity without inventing placeholder contents."),
+    traits=[SYMBOL_DEFINE],
+    symbol_def=SymbolDefinition(
+        field="symbol",
+        name="rodata",
+        interfaces=["rodata", "record"],
+        bytecode_kind="LOOM_SYMBOL_RECORD",
+        flags=[SymbolDefinitionFlag.DECLARATION],
+    ),
+    attrs=[AttrDef("symbol", "symbol")],
+    format=[SymbolRef("symbol")],
+    examples=["global.rodata.decl @iree_asan_config"],
 )
 
 # ============================================================================
@@ -286,4 +309,5 @@ ALL_GLOBAL_OPS: tuple[Op, ...] = (
     global_rodata,
     global_load,
     global_store,
+    global_rodata_decl,
 )
