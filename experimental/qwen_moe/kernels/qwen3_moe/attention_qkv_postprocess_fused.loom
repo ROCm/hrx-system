@@ -41,7 +41,9 @@ kernel.def target(@qwen3_moe_attention_qkv_postprocess_gfx11_wave32) @qwen3_moe_
   %output_tiles = index.div %padded_output_size, %eight : index
   kernel.launch.config workgroups(%output_tiles, %one, %one) workgroup_size(%twofiftysix, %one, %one) : index
 } launch(%token_count: index, %cache_row_count: index, %q8_input: buffer, %query_weight: buffer, %key_weight: buffer, %value_weight: buffer, %positions: buffer, %key_cache_indices: buffer, %value_cache_indices: buffer, %query_output_raw: buffer, %key_output_raw: buffer, %value_output_raw: buffer, %query_norm_weight: buffer, %key_norm_weight: buffer, %inverse_frequencies: buffer, %query_output: buffer, %key_cache: buffer, %value_cache: buffer, %completion_counters: buffer) {
-  func.apply<qwen3_moe.attention.qkv_quantized.body>(%token_count, %q8_input, %query_weight, %key_weight, %value_weight, %query_output_raw, %key_output_raw, %value_output_raw) : (index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  %publish_projection_output = scalar.constant true : i1
+  %projection_token = kernel.workgroup.id<y> : index
+  func.apply<qwen3_moe.attention.qkv_quantized.body>(%publish_projection_output, %token_count, %projection_token, %q8_input, %query_weight, %key_weight, %value_weight, %query_output_raw, %key_output_raw, %value_output_raw) : (i1, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   %query_size0 = config.get @qwen3_moe.attention.query_size : index
   %key_value_size0 = config.get @qwen3_moe.attention.key_value_size : index
   %head_size0 = config.get @qwen3_moe.attention.head_size : index
@@ -84,7 +86,8 @@ kernel.def target(@qwen3_moe_attention_qkv_postprocess_gfx11_wave32) @qwen3_moe_
   %is_last_head_tile = scalar.cmpi eq, %old_counter, %last_head_tile_i32 : i32
   scf.if %is_last_head_tile {
     kernel.barrier<global> {ordering = acquire, scope = workgroup}
-    func.apply<qwen3_moe.attention.postprocess.head_body>(%bounded_token_count, %cache_row_count, %head_domain, %token, %positions, %key_cache_indices, %value_cache_indices, %query_output_raw, %key_output_raw, %value_output_raw, %query_norm_weight, %key_norm_weight, %inverse_frequencies, %query_output, %key_cache, %value_cache) : (index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    %publish_postprocess_output = scalar.constant true : i1
+    func.apply<qwen3_moe.attention.postprocess.head_body>(%publish_postprocess_output, %bounded_token_count, %cache_row_count, %head_domain, %token, %positions, %key_cache_indices, %value_cache_indices, %query_output_raw, %key_output_raw, %value_output_raw, %query_norm_weight, %key_norm_weight, %inverse_frequencies, %query_output, %key_cache, %value_cache) : (i1, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
     // The counter becomes reusable only after all semantic output stores.
     kernel.barrier<global> {ordering = release, scope = workgroup}
     scf.if %is_arrival_workitem {

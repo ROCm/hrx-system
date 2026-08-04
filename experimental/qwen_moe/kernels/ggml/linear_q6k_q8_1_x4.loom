@@ -13,6 +13,10 @@
 // by dense and routed projections; prefill schedules can reuse the inline
 // packed-row primitive while staging weights across multiple activation rows.
 // The shared packer is linked beside this module.
+config.decl @ggml.linear_q6k_q8_1_x4.token_capacity : %value: index where [range(%value, 1, 2048)]
+
+config.decl @ggml.linear_q6k_q8_1_x4.output_capacity : %value: index where [range(%value, 1, 262144)]
+
 func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
 func.decl @ggml_q8_1_x4_word(%q8_input: buffer, %row_byte_base: offset, %q8_block: index, %word_in_block: index) -> (vector<4xi8>, f32)
@@ -203,12 +207,11 @@ func.def inline @ggml_q6k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, 
 // Contracts one output channel for the calling Q6_K projection kernel. The
 // caller owns publication so the same canonical contraction can feed either a
 // dense logits tensor or an endpoint reduction.
-func.template<ggml.linear_q6k_q8_1_x4.body> device @ggml_linear_q6k_q8_1_x4_body(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer) -> (f32, index, index, i1, index, index) {
+func.template<ggml.linear_q6k_q8_1_x4.body> device @ggml_linear_q6k_q8_1_x4_body(%publish_output: i1, %token_count: index, %token0: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer) -> (f32, index, index, i1, index, index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
   %channel_tile = kernel.workgroup.id<x> : index
-  %token0 = kernel.workgroup.id<y> : index
   %subgroup0 = kernel.subgroup.id : index
   %lane = kernel.subgroup.lane.id : index
   %zero = index.constant 0 : index
@@ -230,9 +233,15 @@ func.template<ggml.linear_q6k_q8_1_x4.body> device @ggml_linear_q6k_q8_1_x4_body
   %q8_row_byte_count = index.mul %q8_group_count, %onehundredfortyfour : index
   %q8_row_byte_index = index.mul %token, %q8_row_byte_count : index
   %q8_row_byte_base = index.cast %q8_row_byte_index : index to offset
-  %lane_acc = scf.if %valid_channel -> (f32) {
-    %value = func.call @ggml_q6k_q8_1_x4_row_lane(%bounded_input_size, %weight, %weight_row_byte_base, %q8_input, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
-    scf.yield %value : f32
+  %lane_acc = scf.if %publish_output -> (f32) {
+    %channel_acc = scf.if %valid_channel -> (f32) {
+      %value = func.call @ggml_q6k_q8_1_x4_row_lane(%bounded_input_size, %weight, %weight_row_byte_base, %q8_input, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
+      scf.yield %value : f32
+    } else {
+      %zero_f32 = scalar.constant 0.0 : f32
+      scf.yield %zero_f32 : f32
+    }
+    scf.yield %channel_acc : f32
   } else {
     %zero_f32 = scalar.constant 0.0 : f32
     scf.yield %zero_f32 : f32
@@ -245,29 +254,38 @@ func.template<ggml.linear_q6k_q8_1_x4.body> device @ggml_linear_q6k_q8_1_x4_body
 // wave32 output rows so decode launches enough waves without duplicating Q6_K
 // decoding within a row.
 kernel.def @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
+  %token_capacity = config.get @ggml.linear_q6k_q8_1_x4.token_capacity : index
+  %output_capacity = config.get @ggml.linear_q6k_q8_1_x4.output_capacity : index
   %eight = index.constant 8 : index
   %seven = index.constant 7 : index
   %one = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
-  %padded_output_size = index.add %output_size, %seven : index
+  %padded_output_size = index.add %output_capacity, %seven : index
   %output_tiles = index.div %padded_output_size, %eight : index
-  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%output_tiles, %token_capacity, %one) workgroup_size(%workgroup_size, %one, %one) : index
 } launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
   %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
-  %dot, %token, %channel, %valid_channel, %launch_token_count, %bounded_output_size = func.apply<ggml.linear_q6k_q8_1_x4.body>(%token_count, %input_size, %output_size, %q8_noalias, %weight_noalias) : (index, index, index, buffer, buffer) -> (f32, index, index, i1, index, index)
+  %token_capacity = config.get @ggml.linear_q6k_q8_1_x4.token_capacity : index
+  %output_capacity = config.get @ggml.linear_q6k_q8_1_x4.output_capacity : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144), le(%output_size, %output_capacity)] : index
   %zero = index.constant 0 : index
+  %token0 = kernel.workgroup.id<y> : index
+  %valid_token = index.cmp ult, %token0, %bounded_token_count : index
+  %safe_token = scf.select %valid_token, %token0, %zero : index
+  %dot, %token, %channel, %valid_channel, %launch_token_count, %output_bound = func.apply<ggml.linear_q6k_q8_1_x4.body>(%valid_token, %bounded_token_count, %safe_token, %input_size, %bounded_output_size, %q8_noalias, %weight_noalias) : (i1, index, index, index, index, buffer, buffer) -> (f32, index, index, i1, index, index)
   %zero_i32 = scalar.constant 0 : i32
   %zero_offset = index.constant 0 : offset
   %lane = kernel.subgroup.lane.id : index
   %lane_i32 = index.cast %lane : index to i32
   %is_lane_zero = scalar.cmpi eq, %lane_i32, %zero_i32 : i32
-  %writes_output = scalar.andi %valid_channel, %is_lane_zero : i1
-  scf.if %writes_output {
-    %output_element_count = index.mul %launch_token_count, %bounded_output_size : index
-    %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<[%output_element_count]xf32, #dense>
-    %token_output_base = index.mul %token, %bounded_output_size : index
-    %output_index = index.add %token_output_base, %channel : index
-    view.store %dot, %output_view[%output_index] : f32, view<[%output_element_count]xf32, #dense>
+  scf.if %valid_token {
+    scf.if %valid_channel {
+      scf.if %is_lane_zero {
+        %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%output_bound]xf32, #dense>
+        view.store %dot, %output_view[%token, %channel] : f32, view<[%launch_token_count]x[%output_bound]xf32, #dense>
+      }
+    }
   }
   kernel.return
 }
