@@ -690,18 +690,16 @@ kernel.def @qwen3_moe_build_expert_partition_table(%token_count: index, %route_c
 // Small-token body for routed Q4_K gate/up projections. One wave computes one
 // [token, route, output channel]. Callers own launch geometry and may append a
 // producer epilogue after the F32 SwiGLU value is visible.
-func.template<qwen3_moe.routed_gate_up.q4k_q8.body> device @qwen3_moe_routed_gate_up_swiglu_q4k_q8_body(%publish_output: i1, %token_count: index, %token: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+func.template<qwen3_moe.routed_gate_up.q4k_q8.body> device @qwen3_moe_routed_gate_up_swiglu_q4k_q8_body(%publish_output: i1, %token_count: index, %token: index, %route_count: index, %route: index, %route_stride: index, %expert_count: index, %output_size: index, %channel: index, %lane: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
   %input_size = config.get @qwen3_moe.routed_gate_up.input_size : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
   %bounded_route_count, %bounded_route_stride = index.assume %route_count, %route_stride [range(%route_count, 1, 8), range(%route_stride, 1, 128), le(%route_count, %route_stride)] : index, index
   %bounded_expert_count = index.assume %expert_count [range(%expert_count, 1, 128)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 4096)] : index
   %bounded_token, %body_token_count = index.assume %token, %bounded_token_count [lt(%token, %bounded_token_count)] : index, index
-  %channel0 = kernel.workgroup.id<x> : index
-  %route0 = kernel.workgroup.id<y> : index
-  %channel, %body_output_size = index.assume %channel0, %bounded_output_size [lt(%channel0, %bounded_output_size)] : index, index
-  %route, %body_route_count = index.assume %route0, %bounded_route_count [lt(%route0, %bounded_route_count)] : index, index
-  %lane = kernel.workitem.id<x> : index
+  %bounded_channel, %body_output_size = index.assume %channel, %bounded_output_size [lt(%channel, %bounded_output_size)] : index, index
+  %bounded_route, %body_route_count = index.assume %route, %bounded_route_count [lt(%route, %bounded_route_count)] : index, index
+  %bounded_lane = index.assume %lane [range(%lane, 0, 31)] : index
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %two = index.constant 2 : index
@@ -729,22 +727,22 @@ func.template<qwen3_moe.routed_gate_up.q4k_q8.body> device @qwen3_moe_routed_gat
   %q8_noalias, %route_ids_noalias, %gate_noalias, %up_noalias, %output_noalias = buffer.assume.noalias %q8_input, %route_ids, %gate_weight, %up_weight, %output : buffer, buffer, buffer, buffer, buffer
   %route_ids_view = buffer.view %route_ids_noalias[%zero_offset] : buffer -> view<[%bounded_token_count]x[%bounded_route_stride]xi32, #dense>
   %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<[%bounded_token_count]x[%bounded_route_count]x[%bounded_output_size]xf32, #dense>
-  %route_index, %route_row_stride = index.assume %route, %bounded_route_stride [lt(%route, %bounded_route_stride)] : index, index
+  %route_index, %route_row_stride = index.assume %bounded_route, %bounded_route_stride [lt(%bounded_route, %bounded_route_stride)] : index, index
   %expert_i32 = view.load %route_ids_view[%bounded_token, %route_index] : view<[%bounded_token_count]x[%bounded_route_stride]xi32, #dense> -> i32
   %expert0 = index.cast %expert_i32 : i32 to index
   %expert = index.assume %expert0 [range(%expert0, 0, 127)] : index
   %expert_byte_base = index.mul %expert, %weight_expert_bytes : index
-  %channel_byte_add = index.mul %channel, %weight_row_bytes : index
+  %channel_byte_add = index.mul %bounded_channel, %weight_row_bytes : index
   %row_byte_index = index.add %expert_byte_base, %channel_byte_add : index
   %row_byte_base = index.scale %row_byte_index, %one_byte : index, offset -> offset
   %q8_token_byte_index = index.mul %bounded_token, %q8_bytes_per_token : index
   %q8_token_byte_base = index.scale %q8_token_byte_index, %one_byte : index, offset -> offset
-  %q4_group_pair0 = index.div %lane, %two : index
+  %q4_group_pair0 = index.div %bounded_lane, %two : index
   %q4_group_pair1 = index.rem %q4_group_pair0, %four : index
   %q4_group_pair = index.assume %q4_group_pair1 [range(%q4_group_pair1, 0, 3)] : index
-  %q4_half0 = index.rem %lane, %two : index
+  %q4_half0 = index.rem %bounded_lane, %two : index
   %q4_half = index.assume %q4_half0 [range(%q4_half0, 0, 1)] : index
-  %lane_q4_block = index.div %lane, %eight : index
+  %lane_q4_block = index.div %bounded_lane, %eight : index
   %q8_group_in_block0 = index.div %q4_group_pair, %two : index
   %q8_group_in_block = index.assume %q8_group_in_block0 [range(%q8_group_in_block0, 0, 1)] : index
   %pair_in_q8_group0 = index.rem %q4_group_pair, %two : index
@@ -813,29 +811,34 @@ func.template<qwen3_moe.routed_gate_up.q4k_q8.body> device @qwen3_moe_routed_gat
   }
   %gate_dot = kernel.subgroup.reduce<addf> %gate_acc : f32
   %up_dot = kernel.subgroup.reduce<addf> %up_acc : f32
-  %lane_i32 = index.cast %lane : index to i32
+  %lane_i32 = index.cast %bounded_lane : index to i32
   %is_lane_zero = scalar.cmpi eq, %lane_i32, %zero_i32 : i32
   %writes_output = scalar.andi %publish_output, %is_lane_zero : i1
   scf.if %writes_output {
     %gate_silu = scalar.siluf %gate_dot : f32
     %result = scalar.mulf %gate_silu, %up_dot : f32
-    view.store %result, %output_view[%bounded_token, %route, %channel] : f32, view<[%bounded_token_count]x[%bounded_route_count]x[%bounded_output_size]xf32, #dense>
+    view.store %result, %output_view[%bounded_token, %bounded_route, %bounded_channel] : f32, view<[%bounded_token_count]x[%bounded_route_count]x[%bounded_output_size]xf32, #dense>
   }
   func.return
 }
 
-// Small-token schedule for routed Q4_K gate/up projections. One wave computes
-// one [token, route, output channel]. Eight lanes consume both nibbles of the
-// packed codes for one 256-element block, so each wave advances through K in
-// 1024-element stripes. Gate and up share each paired Q8_1 load before
-// independent raw-weight dot products and a fused SwiGLU epilogue.
+// Small-token schedule for routed Q4_K gate/up projections. Each workgroup
+// packs four independent channel waves for one [token, route] pair. Eight
+// lanes consume both nibbles of the packed codes for one 256-element block, so
+// each wave advances through K in 1024-element stripes. Gate and up share each
+// paired Q8_1 load before independent raw-weight dot products and a fused
+// SwiGLU epilogue.
 kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index) {
   %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %configured_route_count = config.get @qwen3_moe.routed_gate_up.route_count : index
   %configured_output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
   %unit = index.constant 1 : index
-  %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%configured_output_size, %configured_route_count, %token_capacity) workgroup_size(%workgroup_size, %unit, %unit) : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %workgroup_size = index.constant 128 : index
+  %padded_output_size = index.add %configured_output_size, %three : index
+  %channel_workgroup_count = index.div %padded_output_size, %four : index
+  kernel.launch.config workgroups(%channel_workgroup_count, %configured_route_count, %token_capacity) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
   %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %configured_route_count0 = config.get @qwen3_moe.routed_gate_up.route_count : index
@@ -847,11 +850,23 @@ kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_c
   %bounded_expert_count, %configured_expert_count = index.assume %expert_count, %configured_expert_count0 [range(%expert_count, 1, 128), eq(%expert_count, %configured_expert_count0)] : index, index
   %bounded_output_size, %configured_output_size = index.assume %output_size, %configured_output_size0 [range(%output_size, 1, 4096), eq(%output_size, %configured_output_size0)] : index, index
   %token0 = kernel.workgroup.id<z> : index
+  %channel_workgroup = kernel.workgroup.id<x> : index
+  %route0 = kernel.workgroup.id<y> : index
+  %subgroup = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
   %zero = index.constant 0 : index
+  %four = index.constant 4 : index
   %valid_token = index.cmp ult, %token0, %bounded_token_count : index
   %safe_token0 = scf.select %valid_token, %token0, %zero : index
   %safe_token, %body_token_count = index.assume %safe_token0, %bounded_token_count [lt(%safe_token0, %bounded_token_count)] : index, index
-  func.apply<qwen3_moe.routed_gate_up.q4k_q8.body>(%valid_token, %body_token_count, %safe_token, %bounded_route_count, %bounded_route_stride, %bounded_expert_count, %bounded_output_size, %q8_input, %route_ids, %gate_weight, %up_weight, %output) : (i1, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
+  %channel_base = index.mul %channel_workgroup, %four : index
+  %channel0 = index.add %channel_base, %subgroup : index
+  %valid_channel = index.cmp ult, %channel0, %bounded_output_size : index
+  %safe_channel0 = scf.select %valid_channel, %channel0, %zero : index
+  %safe_channel, %body_output_size = index.assume %safe_channel0, %bounded_output_size [lt(%safe_channel0, %bounded_output_size)] : index, index
+  %route, %body_route_count = index.assume %route0, %bounded_route_count [lt(%route0, %bounded_route_count)] : index, index
+  %publishes_output = scalar.andi %valid_token, %valid_channel : i1
+  func.apply<qwen3_moe.routed_gate_up.q4k_q8.body>(%publishes_output, %body_token_count, %safe_token, %body_route_count, %route, %bounded_route_stride, %bounded_expert_count, %body_output_size, %safe_channel, %lane, %q8_input, %route_ids, %gate_weight, %up_weight, %output) : (i1, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -877,12 +892,11 @@ kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8(%token_count: in
   %q8_input_noalias, %route_ids_noalias, %gate_weight_noalias, %up_weight_noalias, %output_noalias, %completion_counters_noalias, %next_q8_output_noalias = buffer.assume.noalias %q8_input, %route_ids, %gate_weight, %up_weight, %output, %completion_counters, %next_q8_output : buffer, buffer, buffer, buffer, buffer, buffer, buffer
   %publishes_swiglu = scalar.constant true : i1
   %body_token = index.constant 0 : index
-  func.apply<qwen3_moe.routed_gate_up.q4k_q8.body>(%publishes_swiglu, %bounded_token_count, %body_token, %bounded_route_count, %bounded_route_stride, %bounded_expert_count, %bounded_output_size, %q8_input_noalias, %route_ids_noalias, %gate_weight_noalias, %up_weight_noalias, %output_noalias) : (i1, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
-
   %channel = kernel.workgroup.id<x> : index
   %route = kernel.workgroup.id<y> : index
   %token = kernel.workgroup.id<z> : index
   %lane = kernel.workitem.id<x> : index
+  func.apply<qwen3_moe.routed_gate_up.q4k_q8.body>(%publishes_swiglu, %bounded_token_count, %body_token, %bounded_route_count, %route, %bounded_route_stride, %bounded_expert_count, %bounded_output_size, %channel, %lane, %q8_input_noalias, %route_ids_noalias, %gate_weight_noalias, %up_weight_noalias, %output_noalias) : (i1, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %onetwentyeight = index.constant 128 : index
