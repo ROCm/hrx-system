@@ -30,6 +30,9 @@ struct iree_dynamic_library_t {
   iree_atomic_ref_count_t ref_count;
   iree_allocator_t allocator;
 
+  // Flags controlling module lifetime.
+  iree_dynamic_library_flags_t flags;
+
   // Base module name used as an identifier. When loaded from a file this must
   // be the basename for dbghelp to be able to find symbols.
   // Owned and allocated as part of the struct upon creation.
@@ -163,8 +166,8 @@ static iree_status_t iree_dynamic_library_write_temp_file(
 // Allocates an iree_dynamic_library_t with the given allocator.
 static iree_status_t iree_dynamic_library_create(
     iree_string_view_t identifier, iree_string_view_t module_path,
-    HMODULE module, iree_allocator_t allocator,
-    iree_dynamic_library_t** out_library) {
+    HMODULE module, iree_dynamic_library_flags_t flags,
+    iree_allocator_t allocator, iree_dynamic_library_t** out_library) {
   *out_library = NULL;
 
   iree_host_size_t identifier_storage_size = 0;
@@ -189,6 +192,7 @@ static iree_status_t iree_dynamic_library_create(
   memset(library, 0, total_size);
   iree_atomic_ref_count_init(&library->ref_count);
   library->allocator = allocator;
+  library->flags = flags;
   library->module = module;
 
   library->identifier = (char*)library + identifier_offset;
@@ -236,7 +240,7 @@ iree_status_t iree_dynamic_library_load_from_files(
 
   iree_dynamic_library_t* library = NULL;
   iree_status_t status = iree_dynamic_library_create(
-      identifier, file_path, module, allocator, &library);
+      identifier, file_path, module, flags, allocator, &library);
 
   if (iree_status_is_ok(status)) {
     *out_library = library;
@@ -293,7 +297,8 @@ static void iree_dynamic_library_delete(iree_dynamic_library_t* library) {
 #else
   // Close the library first as it may be loaded from one of the temp files we
   // are about to delete.
-  if (library->module != NULL) {
+  if (library->module != NULL &&
+      !iree_any_bit_set(library->flags, IREE_DYNAMIC_LIBRARY_FLAG_NODELETE)) {
     FreeLibrary(library->module);
   }
 #endif  // IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_INSTRUMENTATION
