@@ -22,6 +22,8 @@ config.decl @qwen3_moe.router.expert_count : %value: index where [range(%value, 
 
 config.decl @qwen3_moe.router.route_count : %value: index where [range(%value, 1, 32)]
 
+config.decl @qwen3_moe.workload.token_capacity : %value: index where [range(%value, 1, 2048)]
+
 // Selects and normalizes one logical router row. The caller owns mapping a
 // subgroup to a safe physical row and tells the helper whether that row should
 // publish. Keeping row semantics independent of launch geometry lets fused
@@ -30,8 +32,8 @@ func.template<qwen3_moe.router.top8.row> device @qwen3_moe_router_top8_row_f32(%
   %expert_count0 = config.get @qwen3_moe.router.expert_count : index
   %route_count0 = config.get @qwen3_moe.router.route_count : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
-  %bounded_route_id_stride = index.assume %route_id_stride [range(%route_id_stride, 1, 512)] : index
-  %expert_count, %route_count = index.assume %expert_count0, %route_count0 [range(%expert_count0, 32, 512), mul(%expert_count0, 32), range(%route_count0, 1, 32), le(%route_count0, %expert_count0)] : index, index
+  %bounded_route_id_stride0 = index.assume %route_id_stride [range(%route_id_stride, 1, 512)] : index
+  %expert_count, %route_count, %bounded_route_id_stride = index.assume %expert_count0, %route_count0, %bounded_route_id_stride0 [range(%expert_count0, 32, 512), mul(%expert_count0, 32), range(%route_count0, 1, 32), le(%route_count0, %expert_count0), le(%route_count0, %bounded_route_id_stride0)] : index, index, index
   %safe_token, %launch_token_count = index.assume %token, %bounded_token_count [lt(%token, %bounded_token_count)] : index, index
   %lane = kernel.subgroup.lane.id : index
   %zero = index.constant 0 : index
@@ -115,26 +117,28 @@ func.template<qwen3_moe.router.top8.row> device @qwen3_moe_router_top8_row_f32(%
 }
 
 kernel.def target(@qwen3_moe_router_gfx11_wave64) @qwen3_moe_router_top8_f32(%token_count: index, %route_id_stride: index) {
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %one = index.constant 1 : index
   %three = index.constant 3 : index
   %four = index.constant 4 : index
   %wave_size = index.constant 64 : index
   %wide_workgroup_size = index.constant 256 : index
-  %uses_decode_geometry = index.cmp eq, %token_count, %one : index
+  %uses_decode_geometry = index.cmp eq, %token_capacity, %one : index
   %subgroup_count = scf.select %uses_decode_geometry, %one, %four : index
   %workgroup_size = scf.select %uses_decode_geometry, %wave_size, %wide_workgroup_size : index
-  %padded_token_count = index.add %token_count, %three : index
+  %padded_token_count = index.add %token_capacity, %three : index
   %wide_workgroup_count = index.div %padded_token_count, %four : index
-  %workgroup_count = scf.select %uses_decode_geometry, %token_count, %wide_workgroup_count : index
+  %workgroup_count = scf.select %uses_decode_geometry, %token_capacity, %wide_workgroup_count : index
   kernel.launch.config workgroups(%workgroup_count, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
 } launch(%token_count: index, %route_id_stride: index, %logits: buffer, %route_ids: buffer, %route_weights: buffer) {
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
   %token_workgroup = kernel.workgroup.id<x> : index
   %subgroup = kernel.subgroup.id : index
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %four = index.constant 4 : index
-  %uses_decode_geometry = index.cmp eq, %bounded_token_count, %one : index
+  %uses_decode_geometry = index.cmp eq, %token_capacity, %one : index
   %subgroup_count = scf.select %uses_decode_geometry, %one, %four : index
   %token_base = index.mul %token_workgroup, %subgroup_count : index
   %token0 = index.add %token_base, %subgroup : index
