@@ -64,6 +64,7 @@ iree_executable_test(
     args = [
         "$(location :token_embedding_bringup_workaround_linked)",
         "--benchmark=@qwen_token_embedding_q4k_prefill_512",
+        "--config=qwen3_moe.workload.token_capacity=512",
         "--dry-run",
         "--output-format=jsonl",
     ],
@@ -77,6 +78,7 @@ iree_executable_test(
     args = [
         "$(location :token_embedding_bringup_workaround_linked)",
         "--case=@qwen_token_embedding_q4k_row_access_case",
+        "--config=qwen3_moe.workload.token_capacity=3",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
@@ -202,6 +204,8 @@ iree_executable_test(
     args = [
         "$(location :attention_metadata_bringup_workaround_linked)",
         "--benchmark=@qwen_attention_metadata_prefill_512",
+        "--config=qwen.attention.metadata_context_capacity=512",
+        "--config=qwen3_moe.workload.token_capacity=512",
         "--dry-run",
         "--output-format=jsonl",
     ],
@@ -215,6 +219,8 @@ iree_executable_test(
     args = [
         "$(location :attention_metadata_bringup_workaround_linked)",
         "--case=@qwen_attention_metadata_causal_and_nonzero_base_case",
+        "--config=qwen.attention.metadata_context_capacity=5",
+        "--config=qwen3_moe.workload.token_capacity=1",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
@@ -368,6 +374,7 @@ iree_executable_test(
     args = [
         "$(location :vocabulary_partial_argmax_linked)",
         "--benchmark=@ggml_linear_q6k_q8_1_x4_partial_argmax_endpoint",
+        "--config=ggml.linear_q6k_q8_1_x4.output_capacity=151936",
         "--dry-run",
         "--output-format=jsonl",
     ],
@@ -381,6 +388,7 @@ iree_executable_test(
     args = [
         "$(location :vocabulary_partial_argmax_linked)",
         "--case=@ggml_linear_q6k_q8_1_x4_partial_argmax_tail_case",
+        "--config=ggml.linear_q6k_q8_1_x4.output_capacity=9",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
@@ -402,6 +410,7 @@ iree_executable_test(
     args = [
         "$(location :vocabulary_partial_argmax_linked)",
         "--case=@ggml_linear_q6k_q8_1_x4_partial_argmax_vocabulary_differential_case",
+        "--config=ggml.linear_q6k_q8_1_x4.output_capacity=151936",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
@@ -608,4 +617,23 @@ iree_c_embed_data(
     flatten = True,
     h_file_output = "runtime_modules.h",
     identifier = "qwen_loom_runtime_modules",
+)
+
+test_suite(
+    name = "tests",
+    tests = [
+        ":attention_metadata_bringup_workaround_hal_test",
+        ":attention_metadata_bringup_workaround_plan_test",
+        ":greedy_argmax_bringup_workaround_hal_test",
+        ":greedy_argmax_bringup_workaround_plan_test",
+        ":greedy_argmax_partials_bringup_workaround_hal_test",
+        ":greedy_argmax_partials_tie_bringup_workaround_hal_test",
+        ":route_trace_hal_test",
+        ":route_trace_plan_test",
+        ":token_embedding_bringup_workaround_hal_test",
+        ":token_embedding_bringup_workaround_plan_test",
+        ":vocabulary_partial_argmax_plan_test",
+        ":vocabulary_partial_argmax_tail_hal_test",
+        ":vocabulary_partial_argmax_vocabulary_hal_test",
+    ],
 )

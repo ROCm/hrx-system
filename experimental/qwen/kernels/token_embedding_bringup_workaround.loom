@@ -14,14 +14,18 @@
 //   Q4_K: [vocabulary row][8 blocks][144 bytes] -> [2048xf32]
 amdgpu.target<gfx11-generic> @qwen_token_embedding_gfx11_wave64 {subgroup_size = 64}
 
+config.decl @qwen3_moe.workload.token_capacity : %value: index where [range(%value, 1, 2048)]
+
 kernel.def target(@qwen_token_embedding_gfx11_wave64) export("qwen_token_embedding_q4k_bringup_workaround") @qwen_token_embedding_q4k_bringup_workaround(%token_count: index, %vocabulary_count: index) {
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %one = index.constant 1 : index
   %two = index.constant 2 : index
-  %workgroup_count = index.mul %token_count, %two : index
+  %workgroup_count = index.mul %token_capacity, %two : index
   %workgroup_size = index.constant 256 : index
   kernel.launch.config workgroups(%workgroup_count, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
 } launch(%token_count: index, %vocabulary_count: index, %token_ids: buffer, %weight: buffer, %output: buffer) {
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), eq(%token_count, %token_capacity)] : index
   %bounded_vocabulary_count = index.assume %vocabulary_count [range(%vocabulary_count, 1, 262144)] : index
   %workgroup = kernel.workgroup.id<x> : index
   %workitem = kernel.workitem.id<x> : index

@@ -1000,6 +1000,15 @@ static iree_status_t qwen_program_prepare_layer_executables(
       expert_count, QWEN_MODEL_HIDDEN_SIZE,
   };
 
+  qwen_program_config_binding_list_t attention_metadata_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      /*static_binding_count=*/0, /*static_bindings=*/NULL, token_count,
+      &attention_metadata_config_binding_list);
+  qwen_program_config_binding_list_append_index(
+      &attention_metadata_config_binding_list,
+      IREE_SV("qwen.attention.metadata_context_capacity"),
+      attention_context_count);
+
   qwen_program_config_binding_list_t attention_prepare_config_binding_list;
   qwen_program_config_binding_list_initialize_with_token_capacity(
       IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
@@ -1118,7 +1127,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
   iree_status_t status = qwen_program_prepare_batch_append(
       batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_METADATA),
       IREE_SV("qwen_attention_metadata_bringup_workaround"),
-      /*config_binding_count=*/0, /*config_bindings=*/NULL,
+      attention_metadata_config_binding_list.count,
+      attention_metadata_config_binding_list.bindings,
       IREE_ARRAYSIZE(attention_metadata_workload), attention_metadata_workload,
       &program->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_METADATA]);
   if (iree_status_is_ok(status) &&
@@ -1516,6 +1526,20 @@ static iree_status_t qwen_program_prepare_full_model_executables(
       (int64_t)program->context_capacity,
   };
 
+  qwen_program_config_binding_list_t token_embedding_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      /*static_binding_count=*/0, /*static_bindings=*/NULL,
+      (int64_t)program->token_count, &token_embedding_config_binding_list);
+
+  qwen_program_config_binding_list_t vocabulary_projection_config_binding_list;
+  qwen_program_config_binding_list_initialize(
+      /*static_binding_count=*/0, /*static_bindings=*/NULL,
+      &vocabulary_projection_config_binding_list);
+  qwen_program_config_binding_list_append_index(
+      &vocabulary_projection_config_binding_list,
+      IREE_SV("ggml.linear_q6k_q8_1_x4.output_capacity"),
+      QWEN_MODEL_VOCABULARY_SIZE);
+
   qwen_program_config_binding_list_t
       weighted_reduce_next_rmsnorm_config_binding_list;
   qwen_program_config_binding_list_initialize_with_token_capacity(
@@ -1559,7 +1583,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   iree_status_t status = qwen_program_prepare_batch_append(
       batch, IREE_SV(QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K_BRINGUP_WORKAROUND),
       IREE_SV("qwen_token_embedding_q4k_bringup_workaround"),
-      /*config_binding_count=*/0, /*config_bindings=*/NULL,
+      token_embedding_config_binding_list.count,
+      token_embedding_config_binding_list.bindings,
       IREE_ARRAYSIZE(embedding_workload), embedding_workload,
       &program->executables[QWEN_PROGRAM_EXECUTABLE_TOKEN_EMBEDDING]);
   if (iree_status_is_ok(status) &&
@@ -1696,7 +1721,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_VOCABULARY_PROJECTION_Q6),
         IREE_SV("ggml_linear_q6k_q8_1_x4_partial_argmax"),
-        /*config_binding_count=*/0, /*config_bindings=*/NULL,
+        vocabulary_projection_config_binding_list.count,
+        vocabulary_projection_config_binding_list.bindings,
         IREE_ARRAYSIZE(vocabulary_projection_workload),
         vocabulary_projection_workload,
         &program->executables

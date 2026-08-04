@@ -186,6 +186,37 @@ TEST(QwenLoomSourceTest, RejectsUnknownPath) {
   EXPECT_THAT(status, StatusIs(iree::StatusCode::kNotFound));
 }
 
+TEST(QwenLoomSourceTest, EmbedsConfiguredQwenLaunchCapacities) {
+  qwen_loom_source_module_t token_embedding_source;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K_BRINGUP_WORKAROUND),
+      &token_embedding_source));
+  std::string token_embedding_text(
+      reinterpret_cast<const char*>(
+          token_embedding_source.source_contents.data),
+      token_embedding_source.source_contents.data_length);
+  EXPECT_NE(token_embedding_text.find("@qwen3_moe.workload.token_capacity"),
+            std::string::npos);
+  EXPECT_NE(token_embedding_text.find(
+                "%workgroup_count = index.mul %token_capacity, %two"),
+            std::string::npos);
+
+  qwen_loom_source_module_t attention_metadata_source;
+  IREE_ASSERT_OK(
+      qwen_loom_source_lookup(IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_METADATA),
+                              &attention_metadata_source));
+  std::string attention_metadata_text(
+      reinterpret_cast<const char*>(
+          attention_metadata_source.source_contents.data),
+      attention_metadata_source.source_contents.data_length);
+  EXPECT_NE(
+      attention_metadata_text.find("@qwen.attention.metadata_context_capacity"),
+      std::string::npos);
+  EXPECT_NE(attention_metadata_text.find(
+                "workgroups(%key_workgroup_count, %token_capacity, %one)"),
+            std::string::npos);
+}
+
 TEST(QwenLoomSourceTest, EmbedsCanonicalVocabularyEndpointSources) {
   qwen_loom_source_module_t quantize_source;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
@@ -212,11 +243,15 @@ TEST(QwenLoomSourceTest, EmbedsCanonicalVocabularyEndpointSources) {
       projection_source.source_contents.data_length);
   EXPECT_NE(projection_text.find("func.apply<ggml.linear_q6k_q8_1_x4.body>"),
             std::string::npos);
+  EXPECT_NE(projection_text.find("@ggml.linear_q6k_q8_1_x4.output_capacity"),
+            std::string::npos);
+  EXPECT_NE(projection_text.find("workgroups(%output_tiles, %one, %one)"),
+            std::string::npos);
   EXPECT_NE(projection_text.find("%publish_output = scalar.constant true"),
             std::string::npos);
-  EXPECT_NE(
-      projection_text.find("body>(%publish_output, %token_count, %token0"),
-      std::string::npos);
+  EXPECT_NE(projection_text.find(
+                "body>(%publish_output, %bounded_token_count, %token0"),
+            std::string::npos);
   EXPECT_EQ(projection_text.find("%safe_channel"), std::string::npos);
   EXPECT_NE(
       projection_text.find("%partial_count = index.assume %partial_count0 "

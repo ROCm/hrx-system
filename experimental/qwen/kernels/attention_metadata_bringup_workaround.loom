@@ -12,16 +12,24 @@
 // provides the canonical producer.
 amdgpu.target<gfx11-generic> @qwen_attention_metadata_gfx11_wave64 {subgroup_size = 64}
 
+config.decl @qwen3_moe.workload.token_capacity : %value: index where [range(%value, 1, 2048)]
+
+config.decl @qwen.attention.metadata_context_capacity : %value: index where [range(%value, 1, 32768)]
+
 kernel.def target(@qwen_attention_metadata_gfx11_wave64) export("qwen_attention_metadata_bringup_workaround") @qwen_attention_metadata_bringup_workaround(%token_count: index, %context_capacity: index) {
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
+  %configured_context_capacity = config.get @qwen.attention.metadata_context_capacity : index
   %one = index.constant 1 : index
   %twofiftyfive = index.constant 255 : index
   %twofiftysix = index.constant 256 : index
-  %padded_context_capacity = index.add %context_capacity, %twofiftyfive : index
+  %padded_context_capacity = index.add %configured_context_capacity, %twofiftyfive : index
   %key_workgroup_count = index.div %padded_context_capacity, %twofiftysix : index
-  kernel.launch.config workgroups(%key_workgroup_count, %token_count, %one) workgroup_size(%twofiftysix, %one, %one) : index
+  kernel.launch.config workgroups(%key_workgroup_count, %token_capacity, %one) workgroup_size(%twofiftysix, %one, %one) : index
 } launch(%token_count: index, %context_capacity: index, %control: buffer, %positions: buffer, %key_cache_indices: buffer, %value_cache_indices: buffer, %attention_mask: buffer) {
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
-  %bounded_context_capacity = index.assume %context_capacity [range(%context_capacity, 1, 32768)] : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
+  %configured_context_capacity = config.get @qwen.attention.metadata_context_capacity : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), eq(%token_count, %token_capacity)] : index
+  %bounded_context_capacity = index.assume %context_capacity [range(%context_capacity, 1, 32768), le(%context_capacity, %configured_context_capacity)] : index
   %query0 = kernel.workgroup.id<y> : index
   %query, %launch_token_count = index.assume %query0, %bounded_token_count [lt(%query0, %bounded_token_count)] : index, index
   %key_workgroup = kernel.workgroup.id<x> : index
