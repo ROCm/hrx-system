@@ -273,14 +273,20 @@ TEST(QwenLoomSourceTest, EmbedsCapacityBoundDirectGateUpSource) {
       source_module.source_contents.data_length);
   EXPECT_NE(source_text.find("@qwen3_moe.workload.token_capacity"),
             std::string::npos);
-  EXPECT_NE(source_text.find("workgroups(%configured_output_size, "
+  EXPECT_NE(source_text.find("%channel_workgroup_count = index.div "
+                             "%padded_output_size, %four"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("workgroups(%channel_workgroup_count, "
                              "%configured_route_count, %token_capacity)"),
             std::string::npos);
   EXPECT_NE(source_text.find("le(%token_count, %token_capacity)"),
             std::string::npos);
-  EXPECT_NE(
-      source_text.find("body>(%valid_token, %body_token_count, %safe_token"),
-      std::string::npos);
+  EXPECT_NE(source_text.find("%publishes_output = scalar.andi %valid_token, "
+                             "%valid_channel : i1"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("body>(%publishes_output, %body_token_count, "
+                             "%safe_token"),
+            std::string::npos);
   EXPECT_NE(source_text.find("export(\"qwen3_moe_routed_gate_up_swiglu_"
                              "q4k_q8\")"),
             std::string::npos);
