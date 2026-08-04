@@ -31,8 +31,9 @@ func.decl @qwen3_moe_build_expert_table(%token_count: index, %route_count: index
 
 func.decl @qwen3_moe_routed_linear_q4k_f16_wmma(%token_count: index, %input: buffer, %expert_table: buffer, %weight: buffer, %output: buffer)
 
-// Shared raw-layout Q4_K row contraction primitive.
-func.decl @qwen3_moe_q4k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32)
+// Shared raw-layout Q4_K row contraction primitive. Each lane consumes both
+// nibbles of one packed-code load.
+func.decl @qwen3_moe_q4k_q8_1_x4_paired_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32)
 
 // Shared raw Q6_K decoder linked from the GGML physical-layout module.
 func.decl @ggml_q6k_f16_vector4(%weight: buffer, %weight_row_byte_base: offset, %q6_block: index, %q6_group: index, %packet: index) -> (vector<4xf16>)
@@ -180,7 +181,7 @@ func.template<qwen3_moe.dense.q4k_q8_1_x4.body> device @qwen3_moe_dense_linear_q
   %q8_row_byte_base = index.cast %q8_row_byte_index : index to offset
   %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
   %lane_sum = scf.if %valid_channel -> (f32) {
-    %sum = func.call @qwen3_moe_q4k_q8_1_x4_row_lane(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
+    %sum = func.call @qwen3_moe_q4k_q8_1_x4_paired_row_lane(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
     scf.yield %sum : f32
   } else {
     scf.yield %zero_f32 : f32
@@ -619,7 +620,7 @@ check.case public @qwen3_moe_dense_linear_q4k_q8_1_x4_differential_case {
   %input_size = check.literal value(512) : index
   %input = check.generate.fill value(0.00390625) : tensor<2x512xf32>
   %q8_input = check.generate.fill value(0) : tensor<2x576xi8>
-  %weight = check.generate.fill value(34) : tensor<65x2x144xi8>
+  %weight = check.generate.iota offset(-72) step(1) period(144) : tensor<65x2x144xi8>
   %expected = check.generate.fill value(0.0) : tensor<2x65xf32>
   %actual = check.generate.fill value(0.0) : tensor<2x65xf32>
   func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %q8_input) : (index, index, tensor<2x512xf32>, tensor<2x576xi8>)
