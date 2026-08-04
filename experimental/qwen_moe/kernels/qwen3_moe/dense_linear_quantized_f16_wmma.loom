@@ -250,9 +250,9 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_dense_li
   %completion_counter_global = buffer.assume.memory_space<global> %completion_counter_noalias : buffer
   %completion_counter_aligned = buffer.assume.alignment %completion_counter_global {minimum_alignment = 16} : buffer
   %completion_counter_view = buffer.view %completion_counter_aligned[%zero_offset] : buffer -> view<1xi32, #dense>
-  // Every residual store precedes its workgroup's release. The last arrival
-  // acquires all preceding releases before reading the complete hidden row.
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  // Publish every producer's residual stores before the leader advances one
+  // workgroup arrival. The last arrival then acquires the complete row.
+  kernel.barrier<global> {ordering = release, scope = workgroup}
   %local_old_counter = scf.if %is_arrival_workitem -> (i32) {
     %old_counter = view.atomic.rmw<addi> %one_i32, %completion_counter_view[%zero] {ordering = acq_rel, scope = device} : i32, view<1xi32, #dense> -> i32
     scf.yield %old_counter : i32
@@ -265,10 +265,11 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_dense_li
   %negative_output_tile_count_i32 = scalar.subi %zero_i32, %output_tile_count_i32 : i32
   %is_last_output_tile = scalar.cmpi eq, %old_counter, %last_output_tile_i32 : i32
   scf.if %is_last_output_tile {
+    kernel.barrier<global> {ordering = acquire, scope = workgroup}
     %publish_normalized = scalar.constant true : i1
     func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>(%publish_normalized, %bounded_token_count, %token, %output_noalias, %norm_weight_noalias, %normalized_output_noalias, %next_q8_output_noalias) : (i1, index, index, buffer, buffer, buffer, buffer)
     // Reset only after every normalized F32 and Q8 store completes.
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<global> {ordering = release, scope = workgroup}
     scf.if %is_arrival_workitem {
       view.atomic.reduce<addi> %negative_output_tile_count_i32, %completion_counter_view[%zero] {ordering = release, scope = device} : i32, view<1xi32, #dense>
     }
