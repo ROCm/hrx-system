@@ -4,14 +4,12 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/sanitizer:suppressions.bzl", "vulkan_suppressions")
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "iree_select",
     "loom_cc_binary",
     "loom_cc_library",
-    "loom_config_compatible_with",
 )
 
 package(
@@ -78,10 +76,6 @@ _IREE_TEST_LOOM_TARGET_DEPS = (
     _SPIRV_VULKAN_TARGET_DEPS
 )
 
-_SPIRV_VULKAN_HAL_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/execute:spirv_vulkan_hal",
-])
-
 loom_cc_library(
     name = "main",
     srcs = ["main.c"],
@@ -131,30 +125,6 @@ iree_execution_test_suite(
     ],
     manifests = ["iree-test-loom.test.json"],
     tags = ["hostonly"],
-    tools = {
-        "iree-test-loom": ":iree-test-loom",
-    },
-)
-
-iree_execution_test_suite(
-    name = "spirv_vulkan_execution_test",
-    data = [
-        "testdata/dynamic_workgroup_hal_actual.loom",
-        "testdata/spirv_vulkan_coop_hal_actual.loom",
-        "testdata/spirv_vulkan_coop_u8_hal_actual.loom",
-        "testdata/spirv_vulkan_hal_actual.loom",
-        "testdata/spirv_vulkan_integer_hal_actual.loom",
-        "testdata/spirv_vulkan_quantized_hal_actual.loom",
-    ],
-    manifests = ["iree-test-loom_spirv_vulkan.test.json"],
-    resource_group = "loom-vulkan-tests",
-    sanitizer_suppressions = vulkan_suppressions,
-    tags = [
-        "iree-run-requirement=runtime.resource.vulkan_device",
-        "requires-gpu-vulkan",
-        "runtime-resource=vulkan-device",
-    ],
-    target_compatible_with = _SPIRV_VULKAN_HAL_COMPATIBLE_WITH,
     tools = {
         "iree-test-loom": ":iree-test-loom",
     },

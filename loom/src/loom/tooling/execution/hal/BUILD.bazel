@@ -16,6 +16,10 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+exports_files([
+    "testdata/dynamic_workgroup_hal_actual.loom",
+])
+
 loom_cc_library(
     name = "artifact",
     srcs = ["artifact.c"],

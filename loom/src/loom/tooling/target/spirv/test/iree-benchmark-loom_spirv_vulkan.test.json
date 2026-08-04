@@ -6,7 +6,7 @@
       "run": {
         "tool": "iree-benchmark-loom",
         "args": [
-          "{srcdir}/../iree-test-loom/testdata/spirv_vulkan_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_hal_actual.loom",
           "--benchmark=@double_i32_at_byte_offset",
           "--device=vulkan",
           "--vulkan_validation_layers=false",
@@ -38,7 +38,7 @@
       "run": {
         "tool": "iree-benchmark-loom",
         "args": [
-          "{srcdir}/../iree-test-loom/testdata/spirv_vulkan_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_hal_actual.loom",
           "--benchmark=@double_i32_at_byte_offset",
           "--device=vulkan",
           "--vulkan_validation_layers=false",
@@ -65,7 +65,7 @@
       "run": {
         "tool": "iree-benchmark-loom",
         "args": [
-          "{srcdir}/../iree-test-loom/testdata/spirv_vulkan_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_hal_actual.loom",
           "--benchmark=@ordered_dispatch_aba",
           "--device=vulkan",
           "--vulkan_validation_layers=false",
@@ -96,7 +96,7 @@
       "run": {
         "tool": "iree-benchmark-loom",
         "args": [
-          "{srcdir}/../iree-test-loom/testdata/spirv_vulkan_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_hal_actual.loom",
           "--benchmark=@ordered_dispatch_aba",
           "--device=vulkan",
           "--vulkan_validation_layers=false",
@@ -123,7 +123,7 @@
       "run": {
         "tool": "iree-benchmark-loom",
         "args": [
-          "{srcdir}/../iree-test-loom/testdata/spirv_vulkan_coop_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_coop_hal_actual.loom",
           "--benchmark=@dense_projection_tiled_f16_128",
           "--device=vulkan",
           "--vulkan_validation_layers=false",
@@ -153,7 +153,7 @@
       "run": {
         "tool": "iree-benchmark-loom",
         "args": [
-          "{srcdir}/../iree-test-loom/testdata/spirv_vulkan_coop_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_coop_hal_actual.loom",
           "--compare=@narrow_score_tiled_f16_128x16_m1,@narrow_score_tiled_f16_128x16_m2",
           "--device=vulkan",
           "--vulkan_validation_layers=false",

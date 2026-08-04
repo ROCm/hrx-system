@@ -6,7 +6,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/../../../../tools/iree-test-loom/testdata/dynamic_workgroup_hal_actual.loom",
+          "{srcdir}/../../../execution/hal/testdata/dynamic_workgroup_hal_actual.loom",
           "--case=@dynamic_workgroup_hal_actual_case",
           "--device=amdgpu"
         ]
