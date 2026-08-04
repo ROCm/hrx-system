@@ -1097,6 +1097,12 @@ static iree_status_t qwen_program_prepare_layer_executables(
       IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
       qwen_gate_up_config_bindings, token_count, &gate_up_config_binding_list);
 
+  qwen_program_config_binding_list_t routed_down_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_routed_down_config_bindings),
+      qwen_routed_down_config_bindings, token_count,
+      &routed_down_config_binding_list);
+
   qwen_program_config_binding_list_t direct_routed_down_config_binding_list;
   qwen_program_config_binding_list_initialize_with_token_capacity(
       IREE_ARRAYSIZE(qwen_direct_routed_down_config_bindings),
@@ -1384,9 +1390,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         IREE_SV("qwen3_moe_routed_down_q4k_f16_wmma_grouped"),
-        IREE_ARRAYSIZE(qwen_routed_down_config_bindings),
-        qwen_routed_down_config_bindings, IREE_ARRAYSIZE(token_workload),
-        token_workload,
+        routed_down_config_binding_list.count,
+        routed_down_config_binding_list.bindings,
+        IREE_ARRAYSIZE(token_workload), token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q4]);
   }
   if (iree_status_is_ok(status) &&
@@ -1395,9 +1401,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         IREE_SV("qwen3_moe_routed_down_q6k_f16_wmma_grouped"),
-        IREE_ARRAYSIZE(qwen_routed_down_config_bindings),
-        qwen_routed_down_config_bindings, IREE_ARRAYSIZE(token_workload),
-        token_workload,
+        routed_down_config_binding_list.count,
+        routed_down_config_binding_list.bindings,
+        IREE_ARRAYSIZE(token_workload), token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_ROUTED_DOWN_Q6]);
   }
   if (iree_status_is_ok(status) &&
@@ -1431,9 +1437,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         IREE_SV("qwen3_moe_routed_down_weighted_reduce_f16_f32"),
-        IREE_ARRAYSIZE(qwen_routed_down_config_bindings),
-        qwen_routed_down_config_bindings, IREE_ARRAYSIZE(token_workload),
-        token_workload,
+        routed_down_config_binding_list.count,
+        routed_down_config_binding_list.bindings,
+        IREE_ARRAYSIZE(token_workload), token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_WEIGHTED_REDUCE]);
   }
   return status;
@@ -1529,6 +1535,12 @@ static iree_status_t qwen_program_prepare_full_model_executables(
       IREE_ARRAYSIZE(qwen_gate_up_config_bindings),
       qwen_gate_up_config_bindings, terminal_token_count,
       &terminal_gate_up_config_binding_list);
+
+  qwen_program_config_binding_list_t terminal_routed_down_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_routed_down_config_bindings),
+      qwen_routed_down_config_bindings, terminal_token_count,
+      &terminal_routed_down_config_binding_list);
 
   iree_status_t status = qwen_program_prepare_batch_append(
       batch, IREE_SV(QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K_BRINGUP_WORKAROUND),
@@ -1637,8 +1649,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         terminal_routed_down_function,
-        IREE_ARRAYSIZE(qwen_routed_down_config_bindings),
-        qwen_routed_down_config_bindings,
+        terminal_routed_down_config_binding_list.count,
+        terminal_routed_down_config_binding_list.bindings,
         IREE_ARRAYSIZE(terminal_token_workload), terminal_token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_ROUTED_DOWN]);
   }
@@ -1648,8 +1660,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_F16),
         IREE_SV("qwen3_moe_routed_down_weighted_reduce_f16_f32"),
-        IREE_ARRAYSIZE(qwen_routed_down_config_bindings),
-        qwen_routed_down_config_bindings,
+        terminal_routed_down_config_binding_list.count,
+        terminal_routed_down_config_binding_list.bindings,
         IREE_ARRAYSIZE(terminal_token_workload), terminal_token_workload,
         &program
              ->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_WEIGHTED_REDUCE]);
