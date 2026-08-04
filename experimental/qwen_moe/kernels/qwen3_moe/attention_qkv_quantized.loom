@@ -15,8 +15,9 @@ amdgpu.target<gfx11-generic> @qwen3_moe_attention_qkv_gfx11_wave32 {subgroup_siz
 // Selects Q4_K (0) or Q6_K (1) storage for the value projection.
 config.decl @qwen3_moe.attention.value_uses_q6 : %value: index where [range(%value, 0, 1)]
 
-// Q4_K row contraction provider linked from the dense quantized library.
-func.decl @qwen3_moe_q4k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32)
+// Paired-nibble Q4_K row contraction provider linked from the dense quantized
+// library.
+func.decl @qwen3_moe_q4k_q8_1_x4_paired_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32)
 
 // Q6_K row contraction provider linked from the GGML quantized library.
 func.decl @ggml_q6k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32)
@@ -82,13 +83,13 @@ func.template<qwen3_moe.attention.qkv_quantized.body> device @qwen3_moe_attentio
     %projection_sum = scf.if %is_query -> (f32) {
       %row_byte_index = index.mul %global_channel, %q4_row_byte_count : index
       %row_byte_base = index.cast %row_byte_index : index to offset
-      %sum = func.call @qwen3_moe_q4k_q8_1_x4_row_lane(%hidden_size, %query_weight_noalias, %row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
+      %sum = func.call @qwen3_moe_q4k_q8_1_x4_paired_row_lane(%hidden_size, %query_weight_noalias, %row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
       scf.yield %sum : f32
     } else {
       %key_or_value_sum = scf.if %is_key -> (f32) {
         %row_byte_index = index.mul %key_value_channel, %q4_row_byte_count : index
         %row_byte_base = index.cast %row_byte_index : index to offset
-        %sum = func.call @qwen3_moe_q4k_q8_1_x4_row_lane(%hidden_size, %key_weight_noalias, %row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
+        %sum = func.call @qwen3_moe_q4k_q8_1_x4_paired_row_lane(%hidden_size, %key_weight_noalias, %row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
         scf.yield %sum : f32
       } else {
         %value_sum = scf.if %value_uses_q6 -> (f32) {
@@ -99,7 +100,7 @@ func.template<qwen3_moe.attention.qkv_quantized.body> device @qwen3_moe_attentio
         } else {
           %row_byte_index = index.mul %key_value_channel, %q4_row_byte_count : index
           %row_byte_base = index.cast %row_byte_index : index to offset
-          %sum = func.call @qwen3_moe_q4k_q8_1_x4_row_lane(%hidden_size, %value_weight_noalias, %row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
+          %sum = func.call @qwen3_moe_q4k_q8_1_x4_paired_row_lane(%hidden_size, %value_weight_noalias, %row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
           scf.yield %sum : f32
         }
         scf.yield %value_sum : f32
