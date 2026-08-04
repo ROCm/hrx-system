@@ -14,6 +14,14 @@
 // fused and decomposed paths produce identical metadata and payload bytes.
 amdgpu.target<gfx11-generic> @qwen3_moe_routed_down_next_norm_q8_gfx11_wave32 {subgroup_size = 32}
 
+config.decl @qwen3_moe.model.hidden_size : %value: index where [range(%value, 128, 32768), mul(%value, 128)]
+
+config.decl @qwen3_moe.model.rms_epsilon : f32
+
+config.decl @qwen3_moe.routed_down.route_count : %value: index where [range(%value, 1, 8)]
+
+config.decl @qwen3_moe.routed_down.output_size : %value: index where [range(%value, 1, 4096)]
+
 func.decl @qwen3_moe_routed_down_weighted_reduce_f16_f32(%token_count: index, %route_weights: buffer, %routed_output: buffer, %hidden_state: buffer)
 func.decl @qwen3_moe_rmsnorm_f32(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
 func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %input: buffer, %output: buffer)

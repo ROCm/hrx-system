@@ -7,6 +7,12 @@
 // additional workgroup storage.
 amdgpu.target<gfx11-generic> @qwen3_moe_attention_qkv_same_format_prefill_gfx11_wave64 {subgroup_size = 64}
 
+config.decl @qwen3_moe.model.hidden_size : %value: index where [range(%value, 128, 32768), mul(%value, 128)]
+
+config.decl @qwen3_moe.attention.query_size : %value: index where [range(%value, 1, 262144)]
+
+config.decl @qwen3_moe.attention.key_value_size : %value: index where [range(%value, 1, 262144)]
+
 // Runs every Q4_K Q/K/V tile in one launch over the aggregate physical rows.
 kernel.def target(@qwen3_moe_attention_qkv_same_format_prefill_gfx11_wave64) @qwen3_moe_attention_qkv_q4_prefill_512(%token_count: index) {
   %query_size = config.get @qwen3_moe.attention.query_size : index

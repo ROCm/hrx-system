@@ -18,6 +18,10 @@
 // avoiding exponentials for experts that cannot contribute to the result.
 amdgpu.target<gfx11-generic> @qwen3_moe_router_gfx11_wave64 {subgroup_size = 64}
 
+config.decl @qwen3_moe.router.expert_count : %value: index where [range(%value, 32, 512), mul(%value, 32)]
+
+config.decl @qwen3_moe.router.route_count : %value: index where [range(%value, 1, 32)]
+
 // Selects and normalizes one logical router row. The caller owns mapping a
 // subgroup to a safe physical row and tells the helper whether that row should
 // publish. Keeping row semantics independent of launch geometry lets fused

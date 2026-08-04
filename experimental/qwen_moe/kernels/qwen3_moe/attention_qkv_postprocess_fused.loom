@@ -14,6 +14,12 @@
 // after semantic outputs are visible, preserving reusable command buffers.
 amdgpu.target<gfx11-generic> @qwen3_moe_attention_qkv_postprocess_gfx11_wave32 {subgroup_size = 32}
 
+config.decl @qwen3_moe.attention.head_size : %value: index where [range(%value, 4, 1024), mul(%value, 4)]
+
+config.decl @qwen3_moe.attention.query_size : %value: index where [range(%value, 1, 262144)]
+
+config.decl @qwen3_moe.attention.key_value_size : %value: index where [range(%value, 1, 262144)]
+
 // Reference entry points used by differential and benchmark cases.
 func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 

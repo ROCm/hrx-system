@@ -12,6 +12,8 @@ amdgpu.target<gfx11-generic> @qwen3_moe_gfx11_wave64 {subgroup_size = 64}
 
 amdgpu.target<gfx11-generic> @qwen3_moe_gfx11_wave32 {subgroup_size = 32}
 
+config.decl @qwen3_moe.routed_gate_up.input_size : %value: index where [range(%value, 512, 32768), mul(%value, 512)]
+
 // Top-k is a model hyperparameter and is specialized with the kernel. Keeping
 // it out of the dynamic workload lets address arithmetic and assignment decode
 // fold to the exact model contract.

@@ -17,6 +17,8 @@ amdgpu.target<gfx11-generic> @qwen3_moe_dense_gfx11_wave64 {subgroup_size = 64}
 
 amdgpu.target<gfx11-generic> @qwen3_moe_dense_gfx11_wave32 {subgroup_size = 32}
 
+target.decl @qwen3_moe_attention_prepare_gfx11_wave32
+
 config.decl @qwen3_moe.dense_quantized.input_size : %value: index where [range(%value, 256, 32768), mul(%value, 256)]
 
 config.decl @qwen3_moe.dense_quantized.output_size : %value: index where [range(%value, 1, 262144)]
@@ -42,6 +44,8 @@ func.decl @ggml_q6k_f16_vector4(%weight: buffer, %weight_row_byte_base: offset, 
 func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
 func.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer)
+
+func.decl @qwen3_moe_rmsnorm_f32_quantize_q8_1_x4(%token_count: index, %input: buffer, %rms_weight: buffer, %normalized_f32_output: buffer, %q8_1_x4_output: buffer)
 
 // Decodes the four adjacent Q4_K values owned by one load packet. One packed
 // header load supplies both half scales and all twelve six-bit group scales;

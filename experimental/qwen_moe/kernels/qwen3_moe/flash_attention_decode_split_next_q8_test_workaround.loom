@@ -4,6 +4,10 @@
 // command buffer per 64-row capacity class; request metadata masks the inactive
 // suffix. This test models Decode-513 as the 576-row class without copying any
 // production device body.
+target.decl @qwen3_moe_decode_split_gfx11_wave64
+
+func.decl inline @qwen3_moe_flash_attention_decode_split_reduce_fused_cooperative_f32(%publish_q8: i1, %key_value_token_count: index, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer, %completion_counter: buffer, %output: buffer, %q8_output: buffer)
+
 kernel.def target(@qwen3_moe_decode_split_gfx11_wave64) @qwen3_moe_flash_attention_decode_split_reference_576() {
   %one = index.constant 1 : index
   %four = index.constant 4 : index

@@ -15,6 +15,8 @@
 // The shared packer is linked beside this module.
 func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
+func.decl @ggml_q8_1_x4_word(%q8_input: buffer, %row_byte_base: offset, %q8_block: index, %word_in_block: index) -> (vector<4xi8>, f32)
+
 // Sign-extends four packed six-bit values without scalar lane extraction.
 // Each byte enters with bits [5:0] populated and leaves as signed i8.
 func.def inline @ggml_q6k_sign_extend_dot4(%code: vector<1xi32>) -> (vector<4xi8>) {

@@ -17,6 +17,10 @@
 // Scratch is fixed at 1152 bytes regardless of hidden size.
 amdgpu.target<gfx11-generic> @qwen3_moe_attention_prepare_gfx11_wave32 {subgroup_size = 32}
 
+config.decl @qwen3_moe.model.hidden_size : %value: index where [range(%value, 128, 32768), mul(%value, 128)]
+
+config.decl @qwen3_moe.model.rms_epsilon : f32
+
 // Shared Q8_1 x4 packer used by the standalone differential path.
 func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
