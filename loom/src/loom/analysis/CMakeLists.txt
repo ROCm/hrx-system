@@ -366,6 +366,8 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::format::text::parser
     loom::ir
+    loom::target::facts
+    loom::target::types
     loom::testing::context
     loom::testing::module_ptr
 )

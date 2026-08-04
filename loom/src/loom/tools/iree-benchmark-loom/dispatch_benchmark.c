@@ -81,18 +81,17 @@ static iree_status_t iree_benchmark_loom_hal_input_ring_count_for_sample(
 static iree_status_t iree_benchmark_loom_prepare_hal_invocation_plan_for_sample(
     const loom_testbench_module_plan_t* module_plan,
     const loom_testbench_case_plan_t* case_plan,
-    const iree_benchmark_loom_hal_actual_provider_t* provider,
+    iree_benchmark_loom_hal_actual_provider_t* provider,
     const loom_testbench_value_materializer_options_t* materializer_options,
     iree_host_size_t sample_ordinal, iree_allocator_t allocator,
     loom_run_hal_invocation_plan_t* out_plan) {
   loom_run_hal_invocation_options_t invocation_options = {0};
   loom_run_hal_binding_list_t bindings = {0};
   iree_status_t status =
-      loom_run_hal_testbench_create_invocation_inputs_for_sample(
+      loom_run_hal_testbench_materialize_invocation_for_sample(
           module_plan->module, materializer_options, case_plan,
-          provider->execution.actual_invocation, sample_ordinal,
-          &provider->execution.invocation_options, allocator,
-          &invocation_options, &bindings);
+          &provider->execution, sample_ordinal, allocator, &invocation_options,
+          &bindings);
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_invocation_plan_prepare_from_lists(
         &invocation_options, &bindings, /*expected_bindings=*/NULL,
@@ -107,7 +106,7 @@ static iree_status_t iree_benchmark_loom_hal_input_ring_initialize(
     const loom_testbench_case_plan_t* case_plan,
     const iree_benchmark_loom_benchmark_policy_t* policy,
     const iree_benchmark_loom_options_t* options,
-    const iree_benchmark_loom_hal_actual_provider_t* provider,
+    iree_benchmark_loom_hal_actual_provider_t* provider,
     const loom_testbench_value_materializer_options_t* materializer_options,
     iree_host_size_t sample_ordinal, iree_allocator_t allocator,
     iree_benchmark_loom_hal_input_ring_t* out_ring) {
@@ -267,7 +266,7 @@ static iree_host_size_t iree_benchmark_loom_hal_sequence_binding_count(
 static iree_status_t iree_benchmark_loom_prepare_hal_sequence_plans_for_sample(
     const loom_testbench_module_plan_t* module_plan,
     const loom_testbench_case_plan_t* case_plan,
-    const iree_benchmark_loom_hal_actual_sequence_t* sequence,
+    iree_benchmark_loom_hal_actual_sequence_t* sequence,
     const loom_testbench_value_materializer_options_t* materializer_options,
     iree_host_size_t sample_ordinal, iree_allocator_t allocator,
     loom_run_hal_invocation_plan_t* out_plans) {
@@ -280,13 +279,12 @@ static iree_status_t iree_benchmark_loom_prepare_hal_sequence_plans_for_sample(
   }
   for (iree_host_size_t i = 0;
        iree_status_is_ok(status) && i < sequence->provider_count; ++i) {
-    const loom_run_hal_testbench_actual_provider_t* provider =
+    loom_run_hal_testbench_actual_provider_t* provider =
         &sequence->providers[i].execution;
     loom_run_hal_invocation_options_t invocation_options = {0};
     loom_run_hal_binding_list_t bindings = {0};
-    status = loom_run_hal_testbench_create_invocation_inputs_from_table(
-        &table, provider->actual_invocation, &provider->invocation_options,
-        allocator, &invocation_options, &bindings);
+    status = loom_run_hal_testbench_materialize_invocation_from_table(
+        &table, provider, allocator, &invocation_options, &bindings);
     if (iree_status_is_ok(status)) {
       status = loom_run_hal_invocation_plan_prepare_from_lists(
           &invocation_options, &bindings, /*expected_bindings=*/NULL,
@@ -303,7 +301,7 @@ static iree_status_t iree_benchmark_loom_hal_sequence_input_ring_initialize(
     const loom_testbench_case_plan_t* case_plan,
     const iree_benchmark_loom_benchmark_policy_t* policy,
     const iree_benchmark_loom_options_t* options,
-    const iree_benchmark_loom_hal_actual_sequence_t* sequence,
+    iree_benchmark_loom_hal_actual_sequence_t* sequence,
     const loom_testbench_value_materializer_options_t* materializer_options,
     iree_host_size_t sample_ordinal, iree_allocator_t allocator,
     iree_benchmark_loom_hal_sequence_input_ring_t* out_ring) {

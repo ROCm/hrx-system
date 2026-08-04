@@ -256,6 +256,10 @@ typedef struct loom_testbench_invocation_plan_t {
   iree_string_view_t provider;
   // Provider-specific attributes for oracle invocations.
   loom_named_attr_slice_t attrs;
+  // Borrowed SSA value IDs used as kernel launch workload inputs.
+  const loom_value_id_t* workload_value_ids;
+  // Number of entries in |workload_value_ids|.
+  iree_host_size_t workload_count;
   // Borrowed SSA value IDs used as invocation inputs.
   const loom_value_id_t* input_value_ids;
   // Number of entries in |input_value_ids|.

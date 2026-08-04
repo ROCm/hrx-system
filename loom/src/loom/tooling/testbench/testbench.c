@@ -11,6 +11,7 @@
 
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 
 enum {
@@ -426,12 +427,41 @@ static bool loom_testbench_value_ids_are_in_range(
 
 static bool loom_testbench_is_actual_invocation_op(const loom_module_t* module,
                                                    const loom_op_t* op) {
+  if (loom_kernel_launch_isa(op)) return true;
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
   return vtable && vtable->call_like &&
          vtable->call_like->kind == LOOM_CALL_LIKE_KIND_SEMANTIC;
 }
 
-static bool loom_testbench_plan_actual_invocation(
+static bool loom_testbench_plan_kernel_launch_invocation(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_testbench_invocation_plan_t* out_invocation) {
+  if (!loom_kernel_launch_isa(op)) return false;
+
+  const loom_value_slice_t workloads = loom_kernel_launch_workloads(op);
+  const loom_value_slice_t arguments = loom_kernel_launch_arguments(op);
+  memset(out_invocation, 0, sizeof(*out_invocation));
+  out_invocation->kind = LOOM_TESTBENCH_INVOCATION_ACTUAL;
+  out_invocation->module = module;
+  out_invocation->op = op;
+  out_invocation->callee_ref = loom_kernel_launch_callee(op);
+  out_invocation->provider_id = LOOM_STRING_ID_INVALID;
+  out_invocation->provider = iree_string_view_empty();
+  out_invocation->attrs = loom_named_attr_slice_empty();
+  out_invocation->workload_value_ids = workloads.values;
+  out_invocation->workload_count = workloads.count;
+  out_invocation->input_value_ids = arguments.values;
+  out_invocation->input_count = arguments.count;
+  return loom_symbol_ref_is_valid(out_invocation->callee_ref) &&
+         loom_testbench_value_ids_are_in_range(
+             module, out_invocation->workload_value_ids,
+             out_invocation->workload_count) &&
+         loom_testbench_value_ids_are_in_range(module,
+                                               out_invocation->input_value_ids,
+                                               out_invocation->input_count);
+}
+
+static bool loom_testbench_plan_semantic_call_invocation(
     const loom_module_t* module, const loom_op_t* op,
     loom_testbench_invocation_plan_t* out_invocation) {
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
@@ -516,7 +546,12 @@ static bool loom_testbench_plan_invocation(
   if (loom_check_oracle_call_isa(op)) {
     return loom_testbench_plan_oracle_invocation(module, op, out_invocation);
   }
-  return loom_testbench_plan_actual_invocation(module, op, out_invocation);
+  if (loom_kernel_launch_isa(op)) {
+    return loom_testbench_plan_kernel_launch_invocation(module, op,
+                                                        out_invocation);
+  }
+  return loom_testbench_plan_semantic_call_invocation(module, op,
+                                                      out_invocation);
 }
 
 static bool loom_testbench_is_expectation_op(const loom_op_t* op) {

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/tooling/device_util.h"
+#include "loom/analysis/kernel_launch_config.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/error/diagnostic.h"
 #include "loom/ir/facts.h"
@@ -21,6 +22,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/special_values.h"
 #include "loom/ops/target/facts.h"
+#include "loom/target/function_version.h"
 #include "loom/tooling/compile/pipeline.h"
 #include "loom/tooling/config/config.h"
 #include "loom/tooling/execution/compile_report_capture.h"
@@ -47,6 +49,10 @@ struct loom_run_hal_testbench_actual_sequence_span_t {
   iree_host_size_t first_invocation_index;
   // Number of contiguous actual invocations in this span.
   iree_host_size_t invocation_count;
+  // Stable value-table payload addresses in flattened workload order.
+  const loom_testbench_value_t** workload_values;
+  // Number of entries in |workload_values|.
+  iree_host_size_t workload_count;
   // Stable value-table payload addresses in flattened invocation input order.
   const loom_testbench_value_t** input_values;
   // Number of entries in |input_values|.
@@ -319,8 +325,13 @@ void loom_run_hal_testbench_actual_provider_deinitialize(
         provider->context->host_allocator);
   }
   loom_compile_pipeline_result_deinitialize(&provider->pipeline_result);
+  loom_module_free(provider->launch_config_module);
   if (provider->compile_module_initialized) {
     loom_run_module_deinitialize(&provider->compile_module);
+  }
+  if (provider->context != NULL) {
+    iree_allocator_free(provider->context->host_allocator,
+                        provider->workload_arguments);
   }
   *provider = (loom_run_hal_testbench_actual_provider_t){0};
 }
@@ -388,19 +399,18 @@ static iree_status_t loom_run_hal_testbench_materialize_config_set(
       provider->report, provider->compile_module.module, provider->config_set);
 }
 
-static iree_status_t loom_run_hal_testbench_select_compile_root(
+static iree_status_t loom_run_hal_testbench_link_selected_root(
     loom_run_hal_testbench_actual_provider_t* provider,
-    iree_string_view_t entry_symbol) {
-  loom_run_module_t* compile_module = &provider->compile_module;
-  const loom_module_t* const source_modules[] = {compile_module->module};
+    const loom_module_t* source_module, iree_string_view_t entry_symbol,
+    loom_module_t** out_module) {
+  *out_module = NULL;
+  const loom_module_t* const source_modules[] = {source_module};
   iree_string_view_t module_name = iree_string_view_empty();
-  if (compile_module->module->name_id < compile_module->module->strings.count) {
-    module_name = compile_module->module->strings
-                      .entries[compile_module->module->name_id];
+  if (source_module->name_id < source_module->strings.count) {
+    module_name = source_module->strings.entries[source_module->name_id];
   }
   const iree_string_view_t root_symbols[] = {entry_symbol};
-  loom_module_t* linked_module = NULL;
-  IREE_RETURN_IF_ERROR(loom_link_materialized_modules(
+  return loom_link_materialized_modules(
       source_modules, IREE_ARRAYSIZE(source_modules),
       &(loom_link_options_t){
           .module_name = module_name,
@@ -411,10 +421,34 @@ static iree_status_t loom_run_hal_testbench_select_compile_root(
               },
       },
       loom_run_session_block_pool(provider->session),
-      provider->context->host_allocator, &linked_module));
+      provider->context->host_allocator, out_module);
+}
 
-  loom_module_free(compile_module->module);
-  compile_module->module = linked_module;
+static iree_status_t loom_run_hal_testbench_select_compile_root(
+    loom_run_hal_testbench_actual_provider_t* provider,
+    iree_string_view_t entry_symbol) {
+  const loom_module_t* source_module = provider->compile_module.module;
+  const bool retain_launch_config =
+      loom_kernel_launch_isa(provider->actual_invocation->op);
+  loom_module_t* launch_config_module = NULL;
+  iree_status_t status = iree_ok_status();
+  if (retain_launch_config) {
+    status = loom_run_hal_testbench_link_selected_root(
+        provider, source_module, entry_symbol, &launch_config_module);
+  }
+  loom_module_t* compile_module = NULL;
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_link_selected_root(
+        provider, source_module, entry_symbol, &compile_module);
+  }
+  if (!iree_status_is_ok(status)) {
+    loom_module_free(launch_config_module);
+    return status;
+  }
+
+  loom_module_free(provider->compile_module.module);
+  provider->compile_module.module = compile_module;
+  provider->launch_config_module = launch_config_module;
   return iree_ok_status();
 }
 
@@ -545,28 +579,40 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   IREE_RETURN_IF_ERROR(
       loom_run_hal_testbench_select_compile_root(provider, entry_symbol));
 
+  const bool is_explicit_launch =
+      loom_kernel_launch_isa(provider->actual_invocation->op);
+  if (is_explicit_launch && provider->actual_invocation->workload_count != 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_allocator_malloc_array(provider->context->host_allocator,
+                                    provider->actual_invocation->workload_count,
+                                    sizeof(*provider->workload_arguments),
+                                    (void**)&provider->workload_arguments));
+  }
+
   loom_func_like_t entry_func = {0};
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_resolve_compile_func(
       provider, entry_symbol, &entry_func));
   provider->invocation_options.function_name = entry_symbol;
-  loom_target_dispatch_workgroup_count_t workgroup_count = {0};
-  bool workgroup_count_resolved = false;
-  IREE_RETURN_IF_ERROR(
-      loom_run_hal_testbench_resolve_static_workgroup_count_from_facts(
-          provider->compile_module.module, entry_func, &workgroup_count,
-          &workgroup_count_resolved));
-  if (!workgroup_count_resolved) {
-    loom_run_hal_testbench_record_compile_rejection(
-        provider, IREE_SV("compile"), IREE_SV("unresolved_workgroup_count"),
-        IREE_SV("HAL actual invocation requires a statically resolved "
-                "workgroup count after config bindings are applied; bind "
-                "launch config values or evaluate dynamic launch inputs at "
-                "dispatch time"));
-    return iree_ok_status();
+  if (!is_explicit_launch) {
+    loom_target_dispatch_workgroup_count_t workgroup_count = {0};
+    bool workgroup_count_resolved = false;
+    IREE_RETURN_IF_ERROR(
+        loom_run_hal_testbench_resolve_static_workgroup_count_from_facts(
+            provider->compile_module.module, entry_func, &workgroup_count,
+            &workgroup_count_resolved));
+    if (!workgroup_count_resolved) {
+      loom_run_hal_testbench_record_compile_rejection(
+          provider, IREE_SV("compile"), IREE_SV("unresolved_workgroup_count"),
+          IREE_SV("HAL actual invocation requires a statically resolved "
+                  "workgroup count after config bindings are applied; bind "
+                  "launch config values or evaluate dynamic launch inputs at "
+                  "dispatch time"));
+      return iree_ok_status();
+    }
+    provider->invocation_options.workgroup_count[0] = workgroup_count.x;
+    provider->invocation_options.workgroup_count[1] = workgroup_count.y;
+    provider->invocation_options.workgroup_count[2] = workgroup_count.z;
   }
-  provider->invocation_options.workgroup_count[0] = workgroup_count.x;
-  provider->invocation_options.workgroup_count[1] = workgroup_count.y;
-  provider->invocation_options.workgroup_count[2] = workgroup_count.z;
 
   if (provider->target_environment == NULL) {
     return iree_make_status(
@@ -634,6 +680,18 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
         provider, IREE_SV("compile"), IREE_SV("pass_diagnostics"),
         iree_string_view_empty());
     return iree_ok_status();
+  }
+
+  if (is_explicit_launch) {
+    loom_func_like_t compiled_entry_func = {0};
+    IREE_RETURN_IF_ERROR(loom_run_hal_testbench_resolve_compile_func(
+        provider, entry_symbol, &compiled_entry_func));
+    const loom_target_function_version_t* function_version =
+        loom_target_function_version_list_find(
+            &provider->pipeline_result.function_versions, compiled_entry_func);
+    IREE_ASSERT(function_version != NULL);
+    IREE_ASSERT(function_version->effective_target_facts != NULL);
+    provider->effective_target_facts = function_version->effective_target_facts;
   }
 
   loom_run_candidate_compile_options_t compile_options = {0};
@@ -819,8 +877,48 @@ iree_status_t loom_run_hal_testbench_invocation_inputs_from_values(
   return status;
 }
 
+static iree_status_t loom_run_hal_testbench_evaluate_launch_config(
+    loom_run_hal_testbench_actual_provider_t* provider,
+    iree_host_size_t workload_count,
+    loom_run_hal_invocation_options_t* out_options) {
+  if (!loom_kernel_launch_isa(provider->actual_invocation->op)) {
+    IREE_ASSERT(workload_count == 0);
+    return iree_ok_status();
+  }
+  if (workload_count != provider->actual_invocation->workload_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "HAL kernel launch workload count mismatch");
+  }
+  IREE_ASSERT(provider->launch_config_module != NULL);
+  IREE_ASSERT(provider->effective_target_facts != NULL);
+
+  const loom_kernel_launch_config_options_t options = {
+      .function_symbol = provider->invocation_options.function_name,
+      .workload_arguments = provider->workload_arguments,
+      .workload_argument_count = workload_count,
+      .required_fields = LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT,
+      .effective_target_facts = provider->effective_target_facts,
+  };
+  loom_kernel_launch_config_t config = {0};
+  IREE_RETURN_IF_ERROR(loom_kernel_launch_config_evaluate(
+      provider->launch_config_module,
+      loom_run_session_block_pool(provider->session), &options, &config));
+  if (loom_kernel_launch_config_has_failure(config.failure)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "HAL launch configuration evaluation for '@%.*s' failed with code %u",
+        (int)options.function_symbol.size, options.function_symbol.data,
+        (unsigned)config.failure);
+  }
+  out_options->workgroup_count[0] = config.workgroup_count.x;
+  out_options->workgroup_count[1] = config.workgroup_count.y;
+  out_options->workgroup_count[2] = config.workgroup_count.z;
+  return iree_ok_status();
+}
+
 iree_status_t loom_run_hal_testbench_actual_invoke(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
+    iree_host_size_t workload_count, const loom_testbench_value_t* workloads,
     iree_host_size_t input_count, const loom_testbench_value_t* inputs,
     iree_host_size_t result_count, loom_testbench_value_t* out_results) {
   (void)out_results;
@@ -840,6 +938,10 @@ iree_status_t loom_run_hal_testbench_actual_invoke(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "HAL actual invocation input count mismatch");
   }
+  if (workload_count != invocation->workload_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "HAL actual invocation workload count mismatch");
+  }
   IREE_RETURN_IF_ERROR(
       loom_run_hal_testbench_actual_provider_compile(provider));
   if (provider->compile_rejected) {
@@ -848,6 +950,12 @@ iree_status_t loom_run_hal_testbench_actual_invoke(
 
   loom_run_hal_invocation_options_t invocation_options =
       provider->invocation_options;
+  for (iree_host_size_t i = 0; i < workload_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_testbench_value_as_i64(
+        &workloads[i], &provider->workload_arguments[i]));
+  }
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_evaluate_launch_config(
+      provider, workload_count, &invocation_options));
   loom_run_hal_binding_list_t bindings = {0};
   IREE_RETURN_IF_ERROR(loom_run_hal_binding_list_initialize_capacity(
       input_count, provider->context->host_allocator, &bindings));
@@ -906,6 +1014,7 @@ static void loom_run_hal_testbench_actual_sequence_span_deinitialize(
   iree_allocator_free(host_allocator, span->binding_table);
   iree_allocator_free(host_allocator, span->binding_values);
   iree_allocator_free(host_allocator, span->input_values);
+  iree_allocator_free(host_allocator, span->workload_values);
   *span = (loom_run_hal_testbench_actual_sequence_span_t){0};
 }
 
@@ -923,6 +1032,7 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_span_initialize(
       .sample_count = case_plan->sample_count,
   };
 
+  iree_host_size_t workload_count = 0;
   iree_host_size_t input_count = 0;
   iree_host_size_t binding_count = 0;
   for (iree_host_size_t invocation_offset = 0;
@@ -936,6 +1046,11 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_span_initialize(
     IREE_ASSERT(
         invocation ==
         &case_plan->invocations[first_invocation_index + invocation_offset]);
+    if (!iree_host_size_checked_add(workload_count, invocation->workload_count,
+                                    &workload_count)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "HAL actual sequence workload count overflowed");
+    }
     if (!iree_host_size_checked_add(input_count, invocation->input_count,
                                     &input_count)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -963,11 +1078,17 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_span_initialize(
           "HAL actual sequence binding count exceeds supported limits");
     }
   }
+  out_span->workload_count = workload_count;
   out_span->input_count = input_count;
   out_span->binding_count = binding_count;
 
   iree_status_t status = iree_ok_status();
-  if (input_count != 0) {
+  if (workload_count != 0) {
+    status = iree_allocator_malloc_array(host_allocator, workload_count,
+                                         sizeof(*out_span->workload_values),
+                                         (void**)&out_span->workload_values);
+  }
+  if (iree_status_is_ok(status) && input_count != 0) {
     status = iree_allocator_malloc_array(host_allocator, input_count,
                                          sizeof(*out_span->input_values),
                                          (void**)&out_span->input_values);
@@ -1002,6 +1123,10 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_span_initialize(
     loom_run_hal_testbench_actual_sequence_span_deinitialize(out_span,
                                                              host_allocator);
     return status;
+  }
+  if (workload_count != 0) {
+    memset(out_span->workload_values, 0,
+           workload_count * sizeof(*out_span->workload_values));
   }
   if (input_count != 0) {
     memset(out_span->input_values, 0,
@@ -1151,6 +1276,7 @@ static iree_host_size_t loom_run_hal_testbench_actual_sequence_invocation_index(
 
 static iree_status_t loom_run_hal_testbench_actual_sequence_invoke(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
+    iree_host_size_t workload_count, const loom_testbench_value_t* workloads,
     iree_host_size_t input_count, const loom_testbench_value_t* inputs,
     iree_host_size_t result_count, loom_testbench_value_t* out_results) {
   loom_run_hal_testbench_actual_sequence_execution_t* execution =
@@ -1162,18 +1288,27 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_invoke(
       execution->invocations[invocation_index].provider;
   IREE_ASSERT(provider != NULL);
   return loom_run_hal_testbench_actual_invoke(
-      provider, invocation, input_count, inputs, result_count, out_results);
+      provider, invocation, workload_count, workloads, input_count, inputs,
+      result_count, out_results);
 }
 
-static iree_status_t loom_run_hal_testbench_actual_sequence_resolve_inputs(
+static iree_status_t loom_run_hal_testbench_actual_sequence_resolve_values(
     loom_run_hal_testbench_actual_sequence_span_t* span,
     const loom_testbench_value_table_t* table) {
+  iree_host_size_t workload_offset = 0;
   iree_host_size_t input_offset = 0;
   iree_host_size_t binding_offset = 0;
   for (iree_host_size_t invocation_offset = 0;
        invocation_offset < span->invocation_count; ++invocation_offset) {
     const loom_testbench_invocation_plan_t* invocation =
         span->invocations[invocation_offset].provider->actual_invocation;
+    for (iree_host_size_t workload_index = 0;
+         workload_index < invocation->workload_count; ++workload_index) {
+      const loom_testbench_value_t* workload = NULL;
+      IREE_RETURN_IF_ERROR(loom_testbench_value_table_lookup_borrow(
+          table, invocation->workload_value_ids[workload_index], &workload));
+      span->workload_values[workload_offset++] = workload;
+    }
     for (iree_host_size_t input_index = 0;
          input_index < invocation->input_count; ++input_index) {
       const loom_testbench_value_t* input = NULL;
@@ -1187,6 +1322,7 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_resolve_inputs(
       }
     }
   }
+  IREE_ASSERT(workload_offset == span->workload_count);
   IREE_ASSERT(input_offset == span->input_count);
   IREE_ASSERT(binding_offset == span->binding_count);
   span->value_slots = table->slots;
@@ -1196,6 +1332,7 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_resolve_inputs(
 static iree_status_t loom_run_hal_testbench_actual_sequence_prepare_sample(
     loom_run_hal_testbench_actual_sequence_span_t* span,
     iree_host_size_t sample_ordinal) {
+  iree_host_size_t workload_offset = 0;
   iree_host_size_t input_offset = 0;
   iree_host_size_t binding_offset = 0;
   for (iree_host_size_t invocation_offset = 0;
@@ -1207,6 +1344,14 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_prepare_sample(
     step->options = provider->invocation_options;
     const loom_testbench_invocation_plan_t* invocation =
         provider->actual_invocation;
+    for (iree_host_size_t workload_index = 0;
+         workload_index < invocation->workload_count; ++workload_index) {
+      IREE_RETURN_IF_ERROR(loom_testbench_value_as_i64(
+          span->workload_values[workload_offset++],
+          &provider->workload_arguments[workload_index]));
+    }
+    IREE_RETURN_IF_ERROR(loom_run_hal_testbench_evaluate_launch_config(
+        provider, invocation->workload_count, &step->options));
     for (iree_host_size_t input_index = 0;
          input_index < invocation->input_count; ++input_index) {
       const loom_testbench_value_t* input = span->input_values[input_offset++];
@@ -1227,6 +1372,7 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_prepare_sample(
       }
     }
   }
+  IREE_ASSERT(workload_offset == span->workload_count);
   IREE_ASSERT(input_offset == span->input_count);
   IREE_ASSERT(binding_offset == span->binding_count);
   return loom_run_hal_dispatch_sequence_prepare(
@@ -1266,7 +1412,7 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_invoke_span(
 
   if (span->value_slots != table->slots) {
     IREE_RETURN_IF_ERROR(
-        loom_run_hal_testbench_actual_sequence_resolve_inputs(span, table));
+        loom_run_hal_testbench_actual_sequence_resolve_values(span, table));
   }
   if (!span->providers_prepared) {
     for (iree_host_size_t provider_index = 0;
@@ -1435,16 +1581,34 @@ loom_run_hal_testbench_actual_sequence_provider(
       sequence->execution);
 }
 
-iree_status_t loom_run_hal_testbench_create_invocation_inputs_from_table(
+iree_status_t loom_run_hal_testbench_materialize_invocation_from_table(
     const loom_testbench_value_table_t* table,
-    const loom_testbench_invocation_plan_t* invocation,
-    const loom_run_hal_invocation_options_t* base_options,
+    loom_run_hal_testbench_actual_provider_t* provider,
     iree_allocator_t allocator, loom_run_hal_invocation_options_t* out_options,
     loom_run_hal_binding_list_t* out_bindings) {
-  *out_options = *base_options;
+  const loom_testbench_invocation_plan_t* invocation =
+      provider->actual_invocation;
+  *out_options = provider->invocation_options;
   loom_run_hal_binding_list_initialize(out_bindings);
-  iree_status_t status = loom_run_hal_binding_list_initialize_capacity(
-      invocation->input_count, allocator, out_bindings);
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && i < invocation->workload_count; ++i) {
+    const loom_testbench_value_t* workload = NULL;
+    status = loom_testbench_value_table_lookup_borrow(
+        table, invocation->workload_value_ids[i], &workload);
+    if (iree_status_is_ok(status)) {
+      status = loom_testbench_value_as_i64(workload,
+                                           &provider->workload_arguments[i]);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_evaluate_launch_config(
+        provider, invocation->workload_count, out_options);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_binding_list_initialize_capacity(
+        invocation->input_count, allocator, out_bindings);
+  }
   for (iree_host_size_t i = 0;
        iree_status_is_ok(status) && i < invocation->input_count; ++i) {
     loom_testbench_value_t value = {0};
@@ -1464,14 +1628,13 @@ iree_status_t loom_run_hal_testbench_create_invocation_inputs_from_table(
   return status;
 }
 
-iree_status_t loom_run_hal_testbench_create_invocation_inputs_for_sample(
+iree_status_t loom_run_hal_testbench_materialize_invocation_for_sample(
     const loom_module_t* module,
     const loom_testbench_value_materializer_options_t* materializer_options,
     const loom_testbench_case_plan_t* case_plan,
-    const loom_testbench_invocation_plan_t* invocation,
-    iree_host_size_t sample_ordinal,
-    const loom_run_hal_invocation_options_t* base_options,
-    iree_allocator_t allocator, loom_run_hal_invocation_options_t* out_options,
+    loom_run_hal_testbench_actual_provider_t* provider,
+    iree_host_size_t sample_ordinal, iree_allocator_t allocator,
+    loom_run_hal_invocation_options_t* out_options,
     loom_run_hal_binding_list_t* out_bindings) {
   loom_testbench_value_table_t table = {0};
   iree_status_t status = loom_testbench_value_table_initialize(
@@ -1481,8 +1644,8 @@ iree_status_t loom_run_hal_testbench_create_invocation_inputs_for_sample(
         materializer_options, case_plan, sample_ordinal, &table);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_run_hal_testbench_create_invocation_inputs_from_table(
-        &table, invocation, base_options, allocator, out_options, out_bindings);
+    status = loom_run_hal_testbench_materialize_invocation_from_table(
+        &table, provider, allocator, out_options, out_bindings);
   }
   loom_testbench_value_table_deinitialize(&table);
   return status;
@@ -1492,17 +1655,15 @@ iree_status_t loom_run_hal_testbench_prepare_invocation_plan_for_sample(
     const loom_testbench_module_plan_t* module_plan,
     const loom_testbench_case_plan_t* case_plan,
     const loom_testbench_value_materializer_options_t* materializer_options,
-    const loom_testbench_invocation_plan_t* invocation,
-    const loom_run_hal_invocation_options_t* base_options,
+    loom_run_hal_testbench_actual_provider_t* provider,
     iree_host_size_t sample_ordinal, iree_allocator_t allocator,
     loom_run_hal_invocation_plan_t* out_plan) {
   loom_run_hal_invocation_options_t invocation_options = {0};
   loom_run_hal_binding_list_t bindings = {0};
   iree_status_t status =
-      loom_run_hal_testbench_create_invocation_inputs_for_sample(
-          module_plan->module, materializer_options, case_plan, invocation,
-          sample_ordinal, base_options, allocator, &invocation_options,
-          &bindings);
+      loom_run_hal_testbench_materialize_invocation_for_sample(
+          module_plan->module, materializer_options, case_plan, provider,
+          sample_ordinal, allocator, &invocation_options, &bindings);
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_invocation_plan_prepare_from_lists(
         &invocation_options, &bindings, /*expected_bindings=*/NULL,

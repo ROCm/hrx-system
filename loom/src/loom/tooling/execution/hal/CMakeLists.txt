@@ -100,6 +100,7 @@ loom_cc_library(
     iree::base
     iree::hal
     iree::tooling::device_util
+    loom::analysis::kernel_launch_config
     loom::analysis::symbol_facts
     loom::error::diagnostic
     loom::ir
@@ -111,6 +112,7 @@ loom_cc_library(
     loom::ops::special_values
     loom::ops::target
     loom::sanitizer::options
+    loom::target::function_version
     loom::target::provider
     loom::target::types
     loom::tooling::compile::pipeline

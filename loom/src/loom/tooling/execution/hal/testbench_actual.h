@@ -165,6 +165,12 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   loom_run_candidate_artifact_manifest_options_t artifact_manifest;
   // Parsed compile module owned by this provider.
   loom_run_module_t compile_module;
+  // Config-materialized source kernel retained for launch evaluation.
+  loom_module_t* launch_config_module;
+  // Exact target facts used to compile the selected function version.
+  const loom_target_facts_t* effective_target_facts;
+  // Reusable signed workload arguments used during launch evaluation.
+  int64_t* workload_arguments;
   // Backend-produced HAL executable candidate.
   loom_run_hal_candidate_t candidate;
   // Target selected before the compile pipeline runs.
@@ -285,6 +291,7 @@ loom_run_hal_testbench_actual_sequence_execution_provider(
 // Testbench invocation callback for HAL actual invocations.
 iree_status_t loom_run_hal_testbench_actual_invoke(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
+    iree_host_size_t workload_count, const loom_testbench_value_t* workloads,
     iree_host_size_t input_count, const loom_testbench_value_t* inputs,
     iree_host_size_t result_count, loom_testbench_value_t* out_results);
 
@@ -313,25 +320,23 @@ iree_status_t loom_run_hal_testbench_invocation_inputs_from_values(
     iree_host_size_t input_count, loom_run_hal_invocation_options_t* options,
     iree_allocator_t allocator, loom_run_hal_binding_list_t* out_bindings);
 
-// Extracts the selected actual invocation inputs from an already-materialized
-// case sample value table as HAL bindings/constants.
-iree_status_t loom_run_hal_testbench_create_invocation_inputs_from_table(
+// Materializes one actual invocation's launch geometry and HAL bindings from
+// an already-materialized case sample value table.
+iree_status_t loom_run_hal_testbench_materialize_invocation_from_table(
     const loom_testbench_value_table_t* table,
-    const loom_testbench_invocation_plan_t* invocation,
-    const loom_run_hal_invocation_options_t* base_options,
+    loom_run_hal_testbench_actual_provider_t* provider,
     iree_allocator_t allocator, loom_run_hal_invocation_options_t* out_options,
     loom_run_hal_binding_list_t* out_bindings);
 
-// Materializes one case sample and extracts the selected actual invocation
-// inputs as HAL bindings/constants.
-iree_status_t loom_run_hal_testbench_create_invocation_inputs_for_sample(
+// Materializes one case sample's actual invocation as launch geometry and HAL
+// bindings.
+iree_status_t loom_run_hal_testbench_materialize_invocation_for_sample(
     const loom_module_t* module,
     const loom_testbench_value_materializer_options_t* materializer_options,
     const loom_testbench_case_plan_t* case_plan,
-    const loom_testbench_invocation_plan_t* invocation,
-    iree_host_size_t sample_ordinal,
-    const loom_run_hal_invocation_options_t* base_options,
-    iree_allocator_t allocator, loom_run_hal_invocation_options_t* out_options,
+    loom_run_hal_testbench_actual_provider_t* provider,
+    iree_host_size_t sample_ordinal, iree_allocator_t allocator,
+    loom_run_hal_invocation_options_t* out_options,
     loom_run_hal_binding_list_t* out_bindings);
 
 // Prepares a reusable HAL invocation plan for one testbench sample.
@@ -339,8 +344,7 @@ iree_status_t loom_run_hal_testbench_prepare_invocation_plan_for_sample(
     const loom_testbench_module_plan_t* module_plan,
     const loom_testbench_case_plan_t* case_plan,
     const loom_testbench_value_materializer_options_t* materializer_options,
-    const loom_testbench_invocation_plan_t* invocation,
-    const loom_run_hal_invocation_options_t* base_options,
+    loom_run_hal_testbench_actual_provider_t* provider,
     iree_host_size_t sample_ordinal, iree_allocator_t allocator,
     loom_run_hal_invocation_plan_t* out_plan);
 

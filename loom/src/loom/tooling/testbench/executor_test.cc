@@ -81,11 +81,13 @@ class ExecutorTest : public ::testing::Test {
 
   static iree_status_t InvokeDelta(
       void* user_data, const loom_testbench_invocation_plan_t* invocation,
+      iree_host_size_t workload_count, const loom_testbench_value_t* workloads,
       iree_host_size_t input_count, const loom_testbench_value_t* inputs,
       iree_host_size_t result_count, loom_testbench_value_t* out_results) {
     (void)invocation;
+    (void)workloads;
     DeltaProviderState* state = static_cast<DeltaProviderState*>(user_data);
-    if (input_count != 1 || result_count != 1) {
+    if (workload_count != 0 || input_count != 1 || result_count != 1) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "delta provider expects one input and result");
     }

@@ -114,6 +114,11 @@ static iree_status_t loom_testbench_case_plan_walk_values(
        invocation_index < case_plan->invocation_count; ++invocation_index) {
     const loom_testbench_invocation_plan_t* invocation =
         &case_plan->invocations[invocation_index];
+    for (iree_host_size_t workload_index = 0;
+         workload_index < invocation->workload_count; ++workload_index) {
+      IREE_RETURN_IF_ERROR(loom_testbench_case_value_callback_invoke(
+          callback, invocation->workload_value_ids[workload_index]));
+    }
     for (iree_host_size_t input_index = 0;
          input_index < invocation->input_count; ++input_index) {
       IREE_RETURN_IF_ERROR(loom_testbench_case_value_callback_invoke(

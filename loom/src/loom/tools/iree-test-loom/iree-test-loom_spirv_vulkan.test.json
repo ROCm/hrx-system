@@ -2,6 +2,27 @@
   "version": 1,
   "cases": [
     {
+      "name": "runs dynamic spirv vulkan workgroup samples",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/testdata/dynamic_workgroup_hal_actual.loom",
+          "--case=@dynamic_workgroup_hal_actual_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"sample_count\":2",
+          "\"failed_sample_count\":0",
+          "\"case\":\"dynamic_workgroup_hal_actual_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
       "name": "runs spirv vulkan scalar case",
       "run": {
         "tool": "iree-test-loom",

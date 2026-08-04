@@ -138,6 +138,7 @@ iree_execution_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/amdgpu_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/amdgpu_unused_kernargs.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/generated_tensor_cases.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/dynamic_workgroup_hal_actual.loom"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "requires-gpu-amd"

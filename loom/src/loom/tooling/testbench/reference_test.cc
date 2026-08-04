@@ -239,7 +239,8 @@ TEST_F(ReferenceTest, ComputesF16MatmulWithF32Accumulator) {
       /*.module=*/module_,
   };
   IREE_ASSERT_OK(provider.provider.invoke(
-      provider.provider.user_data, &invocation, IREE_ARRAYSIZE(inputs), inputs,
+      provider.provider.user_data, &invocation, /*workload_count=*/0,
+      /*workloads=*/nullptr, IREE_ARRAYSIZE(inputs), inputs,
       IREE_ARRAYSIZE(results), results));
   ExpectF32BufferView(results[0], {2, 2}, {58.5f, 65.0f, 140.5f, 156.0f});
 
@@ -292,8 +293,9 @@ TEST_F(ReferenceTest, ComputesF16MatmulWithTransposedRhs) {
         /*.attrs=*/invocation_attrs,
     };
     IREE_ASSERT_OK(provider.provider.invoke(
-        provider.provider.user_data, &invocation, IREE_ARRAYSIZE(inputs),
-        inputs, IREE_ARRAYSIZE(results), results));
+        provider.provider.user_data, &invocation, /*workload_count=*/0,
+        /*workloads=*/nullptr, IREE_ARRAYSIZE(inputs), inputs,
+        IREE_ARRAYSIZE(results), results));
     ExpectF32BufferView(results[0], {2, 2}, {58.5f, 65.0f, 140.5f, 156.0f});
     loom_testbench_value_deinitialize(&results[0]);
   }
@@ -332,7 +334,8 @@ TEST_F(ReferenceTest, ComputesU8MatmulWithF32Accumulator) {
                               IREE_SV("f32")),
   };
   IREE_ASSERT_OK(provider.provider.invoke(
-      provider.provider.user_data, &invocation, IREE_ARRAYSIZE(inputs), inputs,
+      provider.provider.user_data, &invocation, /*workload_count=*/0,
+      /*workloads=*/nullptr, IREE_ARRAYSIZE(inputs), inputs,
       IREE_ARRAYSIZE(results), results));
   ExpectF32BufferView(results[0], {2, 2}, {1531.5f, 2043.0f, 1281.5f, 1542.0f});
 
@@ -376,7 +379,8 @@ TEST_F(ReferenceTest, ComputesTilePackedF16MatmulWithF32Accumulator) {
       /*.module=*/module_,
   };
   IREE_ASSERT_OK(provider.provider.invoke(
-      provider.provider.user_data, &invocation, IREE_ARRAYSIZE(inputs), inputs,
+      provider.provider.user_data, &invocation, /*workload_count=*/0,
+      /*workloads=*/nullptr, IREE_ARRAYSIZE(inputs), inputs,
       IREE_ARRAYSIZE(results), results));
   ExpectF32BufferView(results[0], {1, 1, 2, 2},
                       {186.5f, 201.0f, 283.5f, 306.0f});
@@ -421,7 +425,8 @@ TEST_F(ReferenceTest, ComputesTilePackedBF16MatmulWithF32Accumulator) {
       /*.module=*/module_,
   };
   IREE_ASSERT_OK(provider.provider.invoke(
-      provider.provider.user_data, &invocation, IREE_ARRAYSIZE(inputs), inputs,
+      provider.provider.user_data, &invocation, /*workload_count=*/0,
+      /*workloads=*/nullptr, IREE_ARRAYSIZE(inputs), inputs,
       IREE_ARRAYSIZE(results), results));
   ExpectF32BufferView(results[0], {1, 1, 2, 2}, {19.5f, 23.0f, 44.5f, 52.0f});
 
@@ -462,7 +467,8 @@ TEST_F(ReferenceTest, ComputesTilePackedU8MatmulWithI32Accumulator) {
                               IREE_SV("i32")),
   };
   IREE_ASSERT_OK(provider.provider.invoke(
-      provider.provider.user_data, &invocation, IREE_ARRAYSIZE(inputs), inputs,
+      provider.provider.user_data, &invocation, /*workload_count=*/0,
+      /*workloads=*/nullptr, IREE_ARRAYSIZE(inputs), inputs,
       IREE_ARRAYSIZE(results), results));
   ExpectS32BufferView(results[0], {1, 1, 2, 2}, {2062, 2586, 2082, 2606});
 
@@ -505,6 +511,7 @@ TEST_F(ReferenceTest, RejectsIntegerAccumulatorOverflow) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
       provider.provider.invoke(provider.provider.user_data, &invocation,
+                               /*workload_count=*/0, /*workloads=*/nullptr,
                                IREE_ARRAYSIZE(inputs), inputs,
                                IREE_ARRAYSIZE(results), results));
 

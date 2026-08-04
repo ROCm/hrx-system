@@ -2,6 +2,28 @@
   "version": 1,
   "cases": [
     {
+      "name": "runs dynamic amdgpu workgroup samples",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../../tools/iree-test-loom/testdata/dynamic_workgroup_hal_actual.loom",
+          "--case=@dynamic_workgroup_hal_actual_case",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case\":\"dynamic_workgroup_hal_actual_case\"",
+            "\"sample_count\":2",
+            "\"failed_sample_count\":0",
+            "\"passed\":true"
+          ]
+        }
+      }
+    },
+    {
       "name": "runs amdgpu cases",
       "run": {
         "tool": "iree-test-loom",

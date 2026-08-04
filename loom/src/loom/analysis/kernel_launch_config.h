@@ -91,6 +91,10 @@ typedef struct loom_kernel_launch_config_options_t {
   // Fields that must be present for evaluation to succeed.
   loom_kernel_launch_config_field_flags_t required_fields;
 
+  // Optional exact target facts selected for the compiled function version.
+  // When absent, authored target contracts are resolved from |module|.
+  const loom_target_facts_t* effective_target_facts;
+
   // Structured diagnostic emitter for target-contract diagnostics.
   iree_diagnostic_emitter_t diagnostic_emitter;
 } loom_kernel_launch_config_options_t;

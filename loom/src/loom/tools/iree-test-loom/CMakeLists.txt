@@ -103,6 +103,7 @@ iree_execution_test_suite(
   TOOLS
     "iree-test-loom=::iree-test-loom"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/dynamic_workgroup_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_coop_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_coop_u8_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_hal_actual.loom"

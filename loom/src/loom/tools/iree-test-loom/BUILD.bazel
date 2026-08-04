@@ -139,6 +139,7 @@ iree_execution_test_suite(
 iree_execution_test_suite(
     name = "spirv_vulkan_execution_test",
     data = [
+        "testdata/dynamic_workgroup_hal_actual.loom",
         "testdata/spirv_vulkan_coop_hal_actual.loom",
         "testdata/spirv_vulkan_coop_u8_hal_actual.loom",
         "testdata/spirv_vulkan_hal_actual.loom",
