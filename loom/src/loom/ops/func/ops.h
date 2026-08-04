@@ -135,6 +135,7 @@ iree_status_t loom_func_def_verify(
 // LOOM_OP_FUNC_DECL: External function declaration. Callable by name via func.call.
 // func.decl @extern_matmul(%a: tensor<[%M]xf32>, %b: tensor<[%K]xf32>) -> (tensor<[%M]xf32>)
 LOOM_DEFINE_ISA(loom_func_decl_isa, LOOM_OP_FUNC_DECL)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_func_decl_args, 0)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_func_decl_results, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_func_decl_callee, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_visibility, 1, loom_func_visibility_t)
@@ -252,6 +253,7 @@ iree_status_t loom_func_template_build(
 // LOOM_OP_FUNC_UKERNEL: Constraint-matched opaque implementation of an abstract op.
 // func.ukernel<tile.contract> device @vnni_q8_asm(%w: tensor<[%M]xi8>, %x: tensor<[%K]xf32>) -> (tensor<[%M]xf32>) where [mul(%M, 16)]
 LOOM_DEFINE_ISA(loom_func_ukernel_isa, LOOM_OP_FUNC_UKERNEL)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_func_ukernel_args, 0)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_func_ukernel_results, 0)
 LOOM_DEFINE_ATTR_STRING(loom_func_ukernel_implements, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_func_ukernel_callee, 1)

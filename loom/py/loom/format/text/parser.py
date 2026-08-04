@@ -1160,9 +1160,10 @@ class ParsedFields:
     Mirror of ResolvedFields: where ResolvedFields reads from an
     existing Operation, ParsedFields builds one.
 
-    func_arg_ids holds value IDs created by FuncArgs parsing. After
-    the format walk, they are either consumed as region entry-block
-    pre-args (body ops) or moved to operand_ids (declaration ops).
+    func_arg_ids holds the logical function ABI value IDs created by FuncArgs
+    parsing. Body ops consume them as region entry-block pre-args. Declaration
+    ops also record them in their declared operand field while retaining this
+    logical list for tied-result indexing.
 
     implicit_values holds parser-created region block args such as loop IVs.
     RegionFmt defines those names in the child scope when the region starts.
@@ -1734,13 +1735,6 @@ class Parser:
         self._reserved_result_ids = []
         parsed.operand_ids = self._canonical_operand_ids(op_decl, parsed)
         operand_segment_counts = self._operand_segment_counts(op_decl, parsed)
-
-        # After format walk: resolve func-arg semantics.
-        # For declaration-style ops (no body region), func args become operands.
-        # For definition-style ops (has body region), they were already consumed
-        # by the RegionFmt case as pre_arg_ids.
-        if parsed.func_arg_ids and not parsed.func_args_consumed and not parsed.regions:
-            parsed.operand_ids.extend(parsed.func_arg_ids)
 
         # 5. Assign real types to pre-allocated result values and
         # define them in scope.
@@ -2353,13 +2347,28 @@ class Parser:
 
                 case FuncArgs(field=name):
                     tok.expect(TokenKind.LPAREN)
+                    arg_ids: list[int] = []
                     if not tok.at(TokenKind.RPAREN):
                         _, _, vid = self._parse_func_arg()
-                        parsed.func_arg_ids.append(vid)
+                        arg_ids.append(vid)
                         while tok.try_consume(TokenKind.COMMA):
                             _, _, vid = self._parse_func_arg()
-                            parsed.func_arg_ids.append(vid)
+                            arg_ids.append(vid)
                     tok.expect(TokenKind.RPAREN)
+                    parsed.func_arg_ids.extend(arg_ids)
+                    field_desc = self._layout(op_decl).fields.get(name)
+                    if field_desc is not None:
+                        if (
+                            field_desc.kind != FieldKind.OPERAND
+                            or not field_desc.variadic
+                        ):
+                            raise ParseError(
+                                f"FuncArgs field '{name}' must be a variadic "
+                                "operand field",
+                                tok.peek().location,
+                                tok._filename,
+                            )
+                        parsed.operand_fields.setdefault(name, []).extend(arg_ids)
 
                 case PredicateList(field=name):
                     predicates = self._parse_predicate_list()

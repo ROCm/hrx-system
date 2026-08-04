@@ -451,3 +451,51 @@ func.def @async_empty_pipeline_marker() {
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   func.return
 }
+
+// ====
+
+kernel.decl @declared_kernel(%workload_count: index) launch(%abi_count: index, %output: buffer)
+
+func.def @launch_program(%count: index, %output: tensor<4xi32>) {
+  kernel.launch @declared_kernel[%count](%count, %output) : [index](index, tensor<4xi32>)
+  kernel.launch.serial {
+    kernel.launch @declared_kernel[%count](%count, %output) : [index](index, tensor<4xi32>)
+    kernel.launch.concurrent {
+      kernel.launch @declared_kernel[%count](%count, %output) : [index](index, tensor<4xi32>)
+      kernel.launch @declared_kernel[%count](%count, %output) : [index](index, tensor<4xi32>)
+    }
+  }
+  func.return
+}
+
+// ----
+kernel.decl @declared_kernel(%workload_count: index) launch(%abi_count: index, %output: buffer)
+
+func.def @launch_program(%count: index, %output: tensor<4xi32>) {
+  kernel.launch @declared_kernel[%count](%count, %output) : [index](index, tensor<4xi32>)
+  kernel.launch.serial {
+    kernel.launch @declared_kernel[%count](%count, %output) : [index](index, tensor<4xi32>)
+    kernel.launch.concurrent {
+      kernel.launch @declared_kernel[%count](%count, %output) : [index](index, tensor<4xi32>)
+      kernel.launch @declared_kernel[%count](%count, %output) : [index](index, tensor<4xi32>)
+    }
+  }
+  func.return
+}
+
+// ====
+
+kernel.decl @empty_launch_contract() launch()
+
+func.def @empty_launch_program() {
+  kernel.launch @empty_launch_contract[]() : []()
+  func.return
+}
+
+// ----
+kernel.decl @empty_launch_contract() launch()
+
+func.def @empty_launch_program() {
+  kernel.launch @empty_launch_contract[]() : []()
+  func.return
+}

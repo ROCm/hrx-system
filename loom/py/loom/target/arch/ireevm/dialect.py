@@ -213,7 +213,7 @@ ireevm_import_decl = Op(
         flags=[SymbolDefinitionFlag.DECLARATION],
     ),
     results=[Result("results", ANY, variadic=True)],
-    interfaces=[FuncLikeInterface(**_IMPORT_DECL_FUNC_LIKE, args_as_operands=True)],
+    interfaces=[FuncLikeInterface(**_IMPORT_DECL_FUNC_LIKE, args="args")],
     verify="loom_ireevm_import_decl_verify",
     format=[
         *_IMPORT_DECL_MODIFIER_FORMAT,

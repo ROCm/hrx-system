@@ -544,6 +544,7 @@ _VALID_SYMBOL_INTERFACES = frozenset(
         "rodata",
         "target",
         "config",
+        "kernel",
     }
 )
 
@@ -615,6 +616,33 @@ class SymbolValueContract:
 
 
 @dataclass(frozen=True, slots=True)
+class SymbolKernelContract:
+    """Declares where a kernel symbol stores its workload signature.
+
+    Definitions carry the signature as entry arguments of a configuration
+    region. Declarations carry it as one segmented operand field. Exactly one
+    representation is present on every symbol implementing the structural
+    kernel interface. The launch ABI remains the ordinary FuncLike signature.
+    """
+
+    workload_region: str | None = None
+    workload_operands: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.workload_region is None) == (self.workload_operands is None):
+            raise ValueError(
+                "SymbolKernelContract: exactly one of workload_region or "
+                "workload_operands must be present"
+            )
+        if self.workload_region == "":
+            raise ValueError("SymbolKernelContract: workload_region must be non-empty")
+        if self.workload_operands == "":
+            raise ValueError(
+                "SymbolKernelContract: workload_operands must be non-empty"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class SymbolDefinition:
     """Declares how an op defines a module symbol.
 
@@ -632,6 +660,7 @@ class SymbolDefinition:
         defining dialect.
     value_contract: Optional typed-value contract described by generated field
         indices.
+    kernel_contract: Optional kernel workload-signature storage contract.
     """
 
     field: str
@@ -642,6 +671,7 @@ class SymbolDefinition:
     retain: str | None = None
     flags: tuple[SymbolDefinitionFlag, ...] = ()
     value_contract: SymbolValueContract | None = None
+    kernel_contract: SymbolKernelContract | None = None
 
     def __init__(
         self,
@@ -654,6 +684,7 @@ class SymbolDefinition:
         retain: str | None = None,
         flags: list[SymbolDefinitionFlag] | tuple[SymbolDefinitionFlag, ...] = (),
         value_contract: SymbolValueContract | None = None,
+        kernel_contract: SymbolKernelContract | None = None,
     ) -> None:
         frozen_interfaces = tuple(interfaces)
         frozen_flags = tuple(flags)
@@ -680,6 +711,17 @@ class SymbolDefinition:
                     f"SymbolDefinition '{name}': invalid flag {flag!r}, "
                     "must be a SymbolDefinitionFlag"
                 )
+        implements_kernel = "kernel" in frozen_interfaces
+        if implements_kernel != (kernel_contract is not None):
+            raise ValueError(
+                f"SymbolDefinition '{name}': the kernel interface and "
+                "kernel_contract must be declared together"
+            )
+        if implements_kernel and "func_like" not in frozen_interfaces:
+            raise ValueError(
+                f"SymbolDefinition '{name}': the kernel interface requires "
+                "the func_like interface for its launch ABI"
+            )
         object.__setattr__(self, "field", field)
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "interfaces", frozen_interfaces)
@@ -688,6 +730,7 @@ class SymbolDefinition:
         object.__setattr__(self, "retain", retain)
         object.__setattr__(self, "flags", frozen_flags)
         object.__setattr__(self, "value_contract", value_contract)
+        object.__setattr__(self, "kernel_contract", kernel_contract)
 
     @property
     def is_declaration(self) -> bool:
@@ -3575,11 +3618,11 @@ class FuncLikeInterface(NamedTuple):
     # I64 attr for dispatch priority among competing implementations.
     # None for def/decl.
     priority: str | None = None
-    # When True, function arguments are stored as the op's operands
-    # rather than as block arguments of the body region. Used for
-    # ops that have a signature but no body (the parser stores parsed
-    # FUNC_ARGS as operands when no REGION follows).
-    args_as_operands: bool = False
+    # Variadic operand field storing signature arguments for bodyless
+    # declarations. None means arguments are entry block values in body. An
+    # operand-backed signature owns every op operand; kernel declarations may
+    # divide those definitions between this ABI field and their workload field.
+    args: str | None = None
 
 
 @unique
@@ -4112,6 +4155,69 @@ class Op:
                         f"Op '{name}': symbol_def retain '{symbol_def.retain}' "
                         "must be an enum attr"
                     )
+        func_like = next(
+            (
+                interface
+                for interface in interfaces
+                if isinstance(interface, FuncLikeInterface)
+            ),
+            None,
+        )
+        func_args_fields = _collect_func_args_fields(frozen_format)
+        if func_args_fields and func_like is None:
+            raise ValueError(
+                f"Op '{name}': FuncArgs format elements require a "
+                "FuncLikeInterface implementation"
+            )
+        kernel_contract = symbol_def.kernel_contract if symbol_def is not None else None
+        if func_like is not None and func_like.args is not None and func_args_fields:
+            expected_func_args_fields = {func_like.args}
+            if kernel_contract is not None and kernel_contract.workload_operands:
+                expected_func_args_fields.add(kernel_contract.workload_operands)
+            if func_args_fields != expected_func_args_fields:
+                raise ValueError(
+                    f"Op '{name}': FuncArgs format fields must match the "
+                    "declared function and kernel signature operands"
+                )
+        if kernel_contract is not None and func_like is None:
+            raise ValueError(
+                f"Op '{name}': a kernel contract requires a "
+                "FuncLikeInterface implementation"
+            )
+        if func_like is not None and (func_like.body is None) == (
+            func_like.args is None
+        ):
+            raise ValueError(
+                f"Op '{name}': FuncLikeInterface must declare exactly one "
+                "signature representation with body or args"
+            )
+        if kernel_contract is not None and func_like is not None:
+            if (
+                kernel_contract.workload_operands is not None
+                and kernel_contract.workload_operands == func_like.args
+            ):
+                raise ValueError(
+                    f"Op '{name}': kernel workload and launch ABI signatures "
+                    "must use distinct operand fields"
+                )
+            if (
+                kernel_contract.workload_region is not None
+                and kernel_contract.workload_region == func_like.body
+            ):
+                raise ValueError(
+                    f"Op '{name}': kernel workload and launch ABI signatures "
+                    "must use distinct regions"
+                )
+        if func_like is not None and func_like.args is not None:
+            signature_operand_names = {func_like.args}
+            if kernel_contract is not None and kernel_contract.workload_operands:
+                signature_operand_names.add(kernel_contract.workload_operands)
+            operand_names = {operand.name for operand in frozen_operands}
+            if signature_operand_names != operand_names:
+                raise ValueError(
+                    f"Op '{name}': operand-backed FuncLike signatures must "
+                    "own every operand field"
+                )
         if successor_selector is not None:
             if len(frozen_successors) < 2:
                 raise ValueError(

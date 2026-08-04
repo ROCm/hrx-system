@@ -16,6 +16,7 @@ from loom.assembly import (
     BlockRef,
     Clause,
     Flags,
+    FuncArgs,
     OperandDict,
     OptionalGroup,
     PredicateList,
@@ -83,6 +84,7 @@ from loom.dsl import (
     Successor,
     SymbolDefinition,
     SymbolDefinitionFlag,
+    SymbolKernelContract,
     SymbolValueContract,
     TargetFactSatisfaction,
     TargetLikeInterface,
@@ -530,6 +532,48 @@ def test_generate_tables_emits_generic_symbol_definition_flags() -> None:
     tables_c = generate_tables_c("test", 0x01, [op])
 
     assert (".flags = LOOM_SYMBOL_DEFINITION_FLAG_DECLARATION | LOOM_SYMBOL_DEFINITION_FLAG_TEST_ONLY,") in tables_c
+
+
+def test_generate_kernel_declaration_preserves_both_signatures() -> None:
+    op = Op(
+        "test.kernel_decl",
+        group=Dialect("test"),
+        traits=[SYMBOL_DEFINE],
+        operands=[
+            Operand("workloads", ANY, variadic=True),
+            Operand("args", ANY, variadic=True),
+        ],
+        attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+        symbol_def=SymbolDefinition(
+            field="callee",
+            name="kernel",
+            interfaces=["func_like", "kernel"],
+            kernel_contract=SymbolKernelContract(workload_operands="workloads"),
+        ),
+        interfaces=[FuncLikeInterface(callee="callee", args="args")],
+        format=[
+            SymbolRef("callee"),
+            FuncArgs("workloads"),
+            FuncArgs("args"),
+        ],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+
+    assert ".interfaces = LOOM_SYMBOL_INTERFACE_FUNC_LIKE | LOOM_SYMBOL_INTERFACE_KERNEL," in tables_c
+    assert ".kernel_workload_operand_field_index_plus_one = 1," in tables_c
+    assert ".args_operand_field_index = 1," in tables_c
+    assert ".args_operand_segment_count = 2," in tables_c
+    assert "const loom_type_t* workloads_types" in ops_h
+    assert "iree_host_size_t workloads_types_count" in ops_h
+    assert "const loom_type_t* args_types" in ops_h
+    assert "iree_host_size_t args_types_count" in ops_h
+    assert "operand_segment_counts[0] = (uint16_t)workloads_types_count;" in builders_c
+    assert "operand_segment_counts[1] = (uint16_t)args_types_count;" in builders_c
+    assert "loom_builder_define_value(builder, workloads_types[_i]" in builders_c
+    assert "loom_builder_define_value(builder, args_types[_i]" in builders_c
 
 
 def test_generate_tables_emits_symbol_value_contract_indices() -> None:
@@ -1301,6 +1345,7 @@ def test_generate_tables_emits_func_like_representation_contract() -> None:
     op = Op(
         "test.func",
         group=Dialect("test"),
+        operands=[Operand("args", ANY, variadic=True)],
         attrs=[
             AttrDef("callee", ATTR_TYPE_SYMBOL),
             AttrDef("representation", ATTR_TYPE_STRING, optional=True),
@@ -1309,6 +1354,7 @@ def test_generate_tables_emits_func_like_representation_contract() -> None:
             FuncLikeInterface(
                 callee="callee",
                 repr_contract="representation",
+                args="args",
             )
         ],
     )
@@ -1323,6 +1369,7 @@ def test_generate_tables_rejects_non_string_representation_contract() -> None:
     op = Op(
         "test.func",
         group=Dialect("test"),
+        operands=[Operand("args", ANY, variadic=True)],
         attrs=[
             AttrDef("callee", ATTR_TYPE_SYMBOL),
             AttrDef("representation", ATTR_TYPE_I64, optional=True),
@@ -1331,6 +1378,7 @@ def test_generate_tables_rejects_non_string_representation_contract() -> None:
             FuncLikeInterface(
                 callee="callee",
                 repr_contract="representation",
+                args="args",
             )
         ],
     )

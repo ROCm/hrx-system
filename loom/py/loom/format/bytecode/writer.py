@@ -22,7 +22,7 @@ import struct
 from collections.abc import Iterable, Mapping
 from typing import Any, ClassVar, cast
 
-from loom.fields import compute_layout
+from loom.fields import compute_layout, resolve_fields
 from loom.format.bytecode.encoding import ByteBuffer
 from loom.format.bytecode.op_decls import (
     attr_def_for_op,
@@ -157,7 +157,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 18
+FORMAT_VERSION = 19
 PRODUCER = "loom-py"
 
 SYMBOL_FLAG_PUBLIC = 0x0001
@@ -323,9 +323,10 @@ class BytecodeWriter:
         self._ctx.intern_op(op.name)
         self._ctx.intern_string(op.name)
 
-        # Arg names/types: entry block args for defs, operands for decls.
+        # Kernel workload and ordinary FuncLike signature names/types.
+        workload_arg_ids = self._kernel_workload_arg_ids(op)
         arg_ids = self._func_arg_ids(op)
-        for arg_id in arg_ids:
+        for arg_id in [*workload_arg_ids, *arg_ids]:
             value = module.values[arg_id]
             self._ctx.intern_string(value.name)
             self._number_type(value.type)
@@ -359,7 +360,7 @@ class BytecodeWriter:
     def _func_body_region_index(self, op: Operation) -> int | None:
         """Return op's FuncLike body region index, if it has one."""
         func_like = func_like_interface_for_op(self._op_decls_by_name, op.name)
-        if func_like is None or func_like.args_as_operands or func_like.body is None:
+        if func_like is None or func_like.body is None:
             return None
         op_decl = self._op_decls_by_name.get(op.name)
         if op_decl is None:
@@ -371,15 +372,42 @@ class BytecodeWriter:
 
     def _func_arg_ids(self, op: Operation) -> list[int]:
         """Return the logical FuncLike signature argument value ids."""
+        func_like = func_like_interface_for_op(self._op_decls_by_name, op.name)
+        op_decl = self._op_decls_by_name.get(op.name)
+        if func_like is not None and func_like.args is not None and op_decl is not None:
+            return resolve_fields(compute_layout(op_decl), op, self._module).value_ids(
+                func_like.args
+            )
         body_region_index = self._func_body_region_index(op)
         if body_region_index is None:
-            return list(op.operands)
+            return []
         if body_region_index >= len(op.regions):
             return []
         body = op.regions[body_region_index]
         if not body.blocks:
             return []
         return list(body.blocks[0].arg_ids)
+
+    def _kernel_workload_arg_ids(self, op: Operation) -> list[int]:
+        """Return a kernel symbol's logical workload signature value ids."""
+        op_decl = self._op_decls_by_name.get(op.name)
+        symbol_def = symbol_def_for_op(self._op_decls_by_name, op.name)
+        if op_decl is None or symbol_def is None or symbol_def.kernel_contract is None:
+            return []
+        contract = symbol_def.kernel_contract
+        layout = compute_layout(op_decl)
+        if contract.workload_operands is not None:
+            return resolve_fields(layout, op, self._module).value_ids(
+                contract.workload_operands
+            )
+        assert contract.workload_region is not None
+        region_index = layout.fields[contract.workload_region].index
+        if region_index >= len(op.regions):
+            return []
+        region = op.regions[region_index]
+        if not region.blocks:
+            return []
+        return list(region.blocks[0].arg_ids)
 
     def _root_region_write_order(self, op: Operation) -> list[int]:
         """Return root region indices in deterministic bytecode order.
@@ -1416,23 +1444,29 @@ class BytecodeWriter:
                 purity_byte = _purity_to_byte.get(op.attributes.get("purity", ""), 0)
                 buf.write_u8(purity_byte)
 
-                # Arg types: entry block args for defs, operands for decls.
-                if op.regions and op.regions[0].blocks:
-                    arg_ids = op.regions[0].blocks[0].arg_ids
-                else:
-                    arg_ids = op.operands
+                workload_arg_ids = self._kernel_workload_arg_ids(op)
+                arg_ids = self._func_arg_ids(op)
 
                 # Result types and tied results.
                 result_ids = op.results
                 tied_results = op.tied_results
                 signature_value_numbers = {
                     value_id: value_number
-                    for value_number, value_id in enumerate([*arg_ids, *result_ids])
+                    for value_number, value_id in enumerate(
+                        [*workload_arg_ids, *arg_ids, *result_ids]
+                    )
                 }
 
+                buf.write_varint(len(workload_arg_ids))
                 buf.write_varint(len(arg_ids))
                 buf.write_varint(len(result_ids))
 
+                for workload_arg_id in workload_arg_ids:
+                    self._write_value_def(
+                        buf,
+                        module.values[workload_arg_id],
+                        signature_value_numbers,
+                    )
                 for arg_id in arg_ids:
                     self._write_value_def(
                         buf, module.values[arg_id], signature_value_numbers

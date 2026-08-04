@@ -375,7 +375,7 @@ class IRBuilder:
                 )
             return operand_ids
 
-        if func_like.args_as_operands:
+        if func_like.args is not None:
             operand_ids.extend(func_arg_ids)
             return operand_ids
 

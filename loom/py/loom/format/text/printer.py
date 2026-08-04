@@ -1497,9 +1497,9 @@ class Printer:
                         self._format_block_args(fields, name, module), glue=True
                     )
 
-                case FuncArgs():
+                case FuncArgs(field=name):
                     assert isinstance(fields, ResolvedFields)
-                    arg_names, _arg_types, arg_value_ids = fields.func_args()
+                    arg_names, _arg_types, arg_value_ids = fields.func_args(name)
                     arg_strs: list[str] = []
                     for i, arg_value_id in enumerate(arg_value_ids):
                         type_str = self._print_value_type(arg_value_id, module)

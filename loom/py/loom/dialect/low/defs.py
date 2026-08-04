@@ -586,7 +586,7 @@ low_func_decl = Op(
         flags=[SymbolDefinitionFlag.DECLARATION],
     ),
     results=[Result("results", REGISTER, variadic=True)],
-    interfaces=[FuncLikeInterface(**_FUNC_LIKE_COMMON, args_as_operands=True)],
+    interfaces=[FuncLikeInterface(**_FUNC_LIKE_COMMON, args="args")],
     verify="loom_low_func_decl_verify",
     format=[
         *_FUNC_MODIFIER_FORMAT,

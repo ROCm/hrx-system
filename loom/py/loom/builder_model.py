@@ -102,6 +102,7 @@ class BuilderParam:
     attr_def: AttrDef | None = None
     binding_kind: str | None = None
     names_field: str | None = None
+    operand_field: str | None = None
     region_field: str | None = None
     region_optional: bool = False
     stable_id_field: str | None = None
@@ -528,12 +529,19 @@ def _extract_params(op: Op) -> list[BuilderParam]:  # noqa: C901
                     walk(inner)
 
                 case FuncArgs(field=name):
+                    field_desc = layout.fields.get(name)
                     params.append(
                         BuilderParam(
                             name=name,
                             kind=BuilderParamKind.FUNC_ARGS,
                             type_hint="list[ValueRef]",
                             required=False,
+                            operand_field=(
+                                name
+                                if field_desc is not None
+                                and field_desc.kind == FieldKind.OPERAND
+                                else None
+                            ),
                             doc=f"Function signature args: {name}",
                         )
                     )

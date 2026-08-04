@@ -578,6 +578,7 @@ iree_status_t loom_test_split_func_build(
 // LOOM_OP_TEST_DECL: Test function declaration with no body and signature arguments stored as op operands.
 // test.decl @identity(%input: f32) -> (%input as f32)
 LOOM_DEFINE_ISA(loom_test_decl_isa, LOOM_OP_TEST_DECL)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_test_decl_args, 0)
 LOOM_DEFINE_VARIADIC_RESULTS(loom_test_decl_results, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_test_decl_callee, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_test_decl_visibility, 1, loom_test_visibility_t)

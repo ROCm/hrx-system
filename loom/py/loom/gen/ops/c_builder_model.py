@@ -271,11 +271,11 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
 
     # Track the most recent BindingList for association with the next Region.
     _pending_binding: dict[str, Any] | None = None
-    # Track whether FuncArgs was seen (entry block args come from arg_types).
+    # Track whether a body-backed FuncArgs was seen.
     _pending_func_args: bool = False
     # Region fields whose explicit block args are not derivable from operands.
     explicit_block_args_by_region: dict[str, str] = {}
-    func_args_field_name = c_queries.func_args_field_name(op)
+    func_args_field_names = c_queries.func_args_field_names(op)
     func_like_body_region_name: str | None = None
     for interface in op.interfaces:
         if isinstance(interface, FuncLikeInterface):
@@ -484,9 +484,9 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                     binding = _pending_binding
                     _pending_binding = None
                     arg_source = region_def.arg_source if region_def else None
-                    func_args = _pending_func_args or arg_source == func_args_field_name or name == func_like_body_region_name
+                    func_args = _pending_func_args or arg_source in func_args_field_names or name == func_like_body_region_name
                     _pending_func_args = False
-                    if arg_source == func_args_field_name:
+                    if arg_source in func_args_field_names:
                         arg_source = None
                     params.append(
                         {
@@ -537,14 +537,19 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                 case Clause(elements=inner):
                     walk(inner)
 
-                case FuncArgs():
+                case FuncArgs(field=name):
+                    field_desc = layout.fields.get(name)
+                    operand_field = bool(field_desc is not None and field_desc.kind == FieldKind.OPERAND)
+                    param_name = "arg_types" if len(func_args_field_names) == 1 else f"{name}_types"
                     params.append(
                         {
-                            "name": "arg_types",
+                            "name": param_name,
                             "kind": "func_args",
+                            "field": name,
+                            "operand_field": operand_field,
                         }
                     )
-                    _pending_func_args = True
+                    _pending_func_args = not operand_field
 
                 case PredicateList(field=name):
                     attr_def = op.attr(name)

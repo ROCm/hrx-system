@@ -598,7 +598,10 @@ iree_status_t loom_parse_format_block_args(loom_parser_t* parser) {
 }
 
 iree_status_t loom_parse_format_func_args(loom_parser_t* parser,
+                                          const loom_op_vtable_t* vtable,
+                                          const loom_format_element_t* element,
                                           loom_parsed_op_t* parsed) {
+  uint16_t pending_arg_start = parser->pending_func_args.count;
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LPAREN)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'('"));
@@ -640,6 +643,27 @@ iree_status_t loom_parse_format_func_args(loom_parser_t* parser,
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RPAREN)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("')'"));
+  }
+  if (element->field_index != LOOM_OPERAND_INDEX_NONE) {
+    for (uint16_t i = pending_arg_start; i < parser->pending_func_args.count;
+         ++i) {
+      uint16_t operand_index = parsed->operand_count;
+      loom_value_id_t value_id = parser->pending_func_args.entries[i].value_id;
+      if (loom_op_vtable_has_segmented_operands(vtable)) {
+        IREE_RETURN_IF_ERROR(loom_parsed_op_add_segmented_operand(
+            parsed, &parser->parser_arena, element->field_index, value_id,
+            &operand_index));
+      } else {
+        IREE_RETURN_IF_ERROR(loom_parsed_op_add_operand(
+            parsed, &parser->parser_arena, value_id));
+      }
+      loom_token_t name_token = parser->pending_func_args.entries[i].name_token;
+      IREE_RETURN_IF_ERROR(loom_parsed_op_add_field_span(
+          parsed, &parser->parser_arena, LOOM_LOCATION_FIELD_OPERAND,
+          operand_index, name_token, name_token.line, name_token.end_column));
+    }
+    loom_parser_pending_block_args_truncate(&parser->pending_func_args,
+                                            pending_arg_start);
   }
   return iree_ok_status();
 }

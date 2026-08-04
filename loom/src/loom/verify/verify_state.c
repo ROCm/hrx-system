@@ -32,8 +32,9 @@ iree_status_t loom_verify_pending_diagnostic_status(
   }
   return loom_verify_take_diagnostic_status(state);
 }
-bool loom_verify_func_args_are_operands(const loom_op_vtable_t* vtable) {
-  return vtable->func_like != NULL && vtable->func_like->args_as_operands;
+bool loom_verify_func_args_use_operand_field(const loom_op_vtable_t* vtable) {
+  return vtable->func_like != NULL &&
+         vtable->func_like->args_operand_field_index != LOOM_OPERAND_INDEX_NONE;
 }
 
 // Returns true if this op has a function signature scope whose arguments are
@@ -43,28 +44,6 @@ bool loom_verify_has_func_signature_scope(const loom_op_vtable_t* vtable) {
          iree_any_bit_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE);
 }
 
-// Returns the argument IDs that form a func-like symbol's signature operand
-// domain. Bodyful functions read entry block args; bodyless declarations read
-// op operands.
-const loom_value_id_t* loom_verify_func_signature_arg_ids(
-    const loom_op_t* op, const loom_op_vtable_t* vtable,
-    uint16_t* out_arg_count) {
-  *out_arg_count = 0;
-  if (!vtable->func_like) return NULL;
-  if (vtable->func_like->args_as_operands) {
-    *out_arg_count = op->operand_count;
-    return loom_op_const_operands(op);
-  }
-  uint8_t body_index = vtable->func_like->body_region_index;
-  if (body_index == LOOM_REGION_INDEX_NONE || body_index >= op->region_count) {
-    return NULL;
-  }
-  loom_region_t* body = loom_op_regions(op)[body_index];
-  if (!body || body->block_count == 0) return NULL;
-  const loom_block_t* entry = loom_region_const_entry_block(body);
-  *out_arg_count = entry->arg_count;
-  return entry->arg_ids;
-}
 iree_status_t loom_verify_push_scope(loom_verify_state_t* state) {
   if (state->scope_depth >= LOOM_VERIFY_MAX_SCOPE_DEPTH) {
     return iree_make_status(

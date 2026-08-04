@@ -1152,8 +1152,12 @@ class ReaderTest : public ::testing::Test {
       SkipCommentList(bytes, &offset);
       offset += 1;  // calling_convention
       offset += 1;  // purity
+      uint64_t workload_arg_count = ReadUVarint(bytes, &offset);
       uint64_t arg_count = ReadUVarint(bytes, &offset);
       uint64_t result_count = ReadUVarint(bytes, &offset);
+      for (uint64_t arg = 0; arg < workload_arg_count; ++arg) {
+        ReadValueDefOffsets(bytes, &offset);
+      }
       for (uint64_t arg = 0; arg < arg_count; ++arg) {
         ReadValueDefOffsets(bytes, &offset);
       }

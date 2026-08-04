@@ -1641,12 +1641,13 @@ test_decl = Op(
     group=test_ops,
     doc="Test function declaration with no body and signature arguments stored as op operands.",
     traits=[SYMBOL_DEFINE],
+    operands=[Operand("args", ANY, variadic=True)],
     interfaces=[
         FuncLikeInterface(
             callee="callee",
             visibility="visibility",
             cc="cc",
-            args_as_operands=True,
+            args="args",
         )
     ],
     symbol_def=SymbolDefinition(

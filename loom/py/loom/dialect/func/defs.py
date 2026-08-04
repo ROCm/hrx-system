@@ -364,6 +364,7 @@ func_decl = Op(
     phase=OpPhase.EXECUTABLE,
     doc="External function declaration. Callable by name via func.call.",
     traits=[SYMBOL_DEFINE],
+    operands=[Operand("args", ANY, variadic=True)],
     attrs=list(_DECL_ATTRS),
     symbol_def=SymbolDefinition(
         field="callee",
@@ -375,7 +376,7 @@ func_decl = Op(
         flags=[SymbolDefinitionFlag.DECLARATION],
     ),
     results=[Result("results", ANY, variadic=True)],
-    interfaces=[FuncLikeInterface(**_FUNC_LIKE_DECL_CONTRACT, args_as_operands=True)],
+    interfaces=[FuncLikeInterface(**_FUNC_LIKE_DECL_CONTRACT, args="args")],
     verify="loom_func_decl_verify",
     format=[
         OptionalGroup([Attr("visibility")], anchor="visibility"),
@@ -460,6 +461,7 @@ func_ukernel = Op(
     group=func_ops,
     doc="Constraint-matched opaque implementation of an abstract op.",
     traits=[SYMBOL_DEFINE],
+    operands=[Operand("args", ANY, variadic=True)],
     attrs=[
         AttrDef("implements", "string"),
         *_MODIFIER_ATTRS,
@@ -481,7 +483,7 @@ func_ukernel = Op(
             **_FUNC_LIKE_PROVIDER,
             implements="implements",
             priority="priority",
-            args_as_operands=True,
+            args="args",
         )
     ],
     format=[

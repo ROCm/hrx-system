@@ -62,7 +62,7 @@
 //
 //   offset  size  field
 //   0       4     magic: "LOOM" (0x4C 0x4F 0x4F 0x4D)
-//   4       1     format_version (currently 18)
+//   4       1     format_version (currently 19)
 //   5       1     location_mode (see loom_bytecode_location_mode_t)
 //   6       2     module_count
 //   8       4     file_string_pool_length (bytes)
@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 18
+#define LOOM_BYTECODE_FORMAT_VERSION 19
 
 // File-level source-location mode stored in the file header.
 enum loom_bytecode_location_mode_e {
@@ -516,8 +516,18 @@ typedef enum loom_bytecode_section_kind_e {
 //       [comment_data: comment_length bytes]  bytes after the leading // marker
 //     [calling_convention: byte]
 //     [purity: byte]
+//     [kernel_workload_arg_count: varint]
+//                         Workload signature count for symbols implementing
+//                         the kernel interface; zero for ordinary functions.
 //     [arg_count: varint]
 //     [result_count: varint]
+//     For each kernel workload arg:
+//       [name_id: varint]       0 = no SSA name; otherwise STRINGS id.
+//       [type_index: varint]    (structural type from TYPES section)
+//       [dim_binding_count: varint]
+//       For each dynamic dim:
+//         [value_ref: signed_varint]  Signature-local value number.
+//       [encoding_binding: varint]    0 = no binding, N > 0 = value number N-1.
 //     For each arg:
 //       [name_id: varint]       0 = no SSA name; otherwise STRINGS id.
 //       [type_index: varint]    (structural type from TYPES section)

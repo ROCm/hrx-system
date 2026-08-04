@@ -450,7 +450,7 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
         break;
       }
       case LOOM_FORMAT_KIND_FUNC_ARGS: {
-        IREE_RETURN_IF_ERROR(loom_print_func_args(ctx, op, vtable));
+        IREE_RETURN_IF_ERROR(loom_print_func_args(ctx, op, vtable, element));
         break;
       }
       case LOOM_FORMAT_KIND_ATTR_DICT: {

@@ -21,36 +21,13 @@ static const loom_value_id_t* loom_print_func_arg_ids(
     const loom_op_t* op, const loom_op_vtable_t* vtable,
     uint16_t* out_arg_count) {
   *out_arg_count = 0;
-  if (vtable->func_like) {
-    if (vtable->func_like->args_as_operands) {
-      *out_arg_count = op->operand_count;
-      return loom_op_const_operands(op);
-    }
-    uint8_t body_index = vtable->func_like->body_region_index;
-    if (body_index == LOOM_REGION_INDEX_NONE ||
-        body_index >= op->region_count) {
-      return NULL;
-    }
-    loom_region_t* body = loom_op_regions(op)[body_index];
-    if (!body || body->block_count == 0) {
-      return NULL;
-    }
-    const loom_block_t* block = loom_region_const_entry_block(body);
-    *out_arg_count = block->arg_count;
-    return block->arg_ids;
-  }
-
-  loom_region_t** regions = loom_op_regions(op);
-  if (op->region_count > 0 && regions[0] && regions[0]->block_count > 0) {
-    const loom_block_t* block = loom_region_const_entry_block(regions[0]);
-    *out_arg_count = block->arg_count;
-    return block->arg_ids;
-  }
-  if (op->operand_count > 0) {
-    *out_arg_count = op->operand_count;
-    return loom_op_const_operands(op);
-  }
-  return NULL;
+  if (!vtable->func_like) return NULL;
+  return loom_func_like_arg_ids(
+      (loom_func_like_t){
+          .op = (loom_op_t*)op,
+          .vtable = vtable->func_like,
+      },
+      out_arg_count);
 }
 
 static const loom_value_id_t* loom_print_region_entry_arg_ids(
@@ -206,20 +183,29 @@ iree_status_t loom_print_block_args(loom_print_context_t* ctx,
 
 iree_status_t loom_print_func_args(loom_print_context_t* ctx,
                                    const loom_op_t* op,
-                                   const loom_op_vtable_t* vtable) {
+                                   const loom_op_vtable_t* vtable,
+                                   const loom_format_element_t* element) {
   uint16_t arg_count = 0;
-  const loom_value_id_t* arg_ids =
-      loom_print_func_arg_ids(op, vtable, &arg_count);
+  const loom_value_id_t* arg_ids = NULL;
+  if (element->field_index != LOOM_OPERAND_INDEX_NONE) {
+    loom_value_slice_t args =
+        loom_op_operand_field_span(vtable, op, element->field_index);
+    arg_ids = args.values;
+    arg_count = args.count;
+  } else {
+    arg_ids = loom_print_func_arg_ids(op, vtable, &arg_count);
+  }
   IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "(", true));
   for (uint16_t j = 0; j < arg_count; ++j) {
     if (j > 0) {
       IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ",", false));
     }
-    bool args_as_operands =
-        vtable->func_like && vtable->func_like->args_as_operands;
-    if (args_as_operands) {
+    if (element->field_index != LOOM_OPERAND_INDEX_NONE) {
+      uint16_t operand_index =
+          (uint16_t)(&arg_ids[j] - loom_op_const_operands(op));
       IREE_RETURN_IF_ERROR(loom_print_value_name_with_field(
-          ctx, arg_ids[j], loom_print_field_ref(LOOM_PRINT_FIELD_OPERAND, j)));
+          ctx, arg_ids[j],
+          loom_print_field_ref(LOOM_PRINT_FIELD_OPERAND, operand_index)));
     } else {
       IREE_RETURN_IF_ERROR(loom_print_value_name(ctx, arg_ids[j]));
     }

@@ -31,6 +31,7 @@ from loom.dsl import (
     ADDRESS,
     ANY,
     ANY_ENCODING,
+    ATTR_TYPE_SYMBOL,
     BUFFER,
     BY_REFERENCE,
     COMMUTATIVE,
@@ -61,6 +62,7 @@ from loom.dsl import (
     REGISTER,
     SAFE_TO_SPECULATE,
     STORAGE,
+    SYMBOL_DEFINE,
     TENSOR,
     TERMINATOR,
     TILE,
@@ -89,6 +91,7 @@ from loom.dsl import (
     EnumCase,
     EnumDef,
     FreshResult,
+    FuncLikeInterface,
     HasAllStaticRankOneVector,
     HasAllStaticVector,
     HasAncestor,
@@ -133,6 +136,8 @@ from loom.dsl import (
     SameShape,
     SameType,
     Successor,
+    SymbolDefinition,
+    SymbolKernelContract,
     TargetFactSatisfaction,
     TargetLikeInterface,
     TotalBitCountEqual,
@@ -2228,4 +2233,121 @@ class TestScopedEnumOp:
                 "test.packet",
                 attrs=[AttrDef("descriptor", "string")],
                 format=[ScopedEnumRef("descriptor")],
+            )
+
+
+class TestSymbolKernelContract:
+    def test_func_like_requires_one_signature_representation(self) -> None:
+        for func_like in (
+            FuncLikeInterface(callee="callee"),
+            FuncLikeInterface(callee="callee", body="body", args="args"),
+        ):
+            with _raises(ValueError, match="exactly one signature representation"):
+                Op(
+                    "test.function",
+                    traits=[SYMBOL_DEFINE],
+                    attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+                    symbol_def=SymbolDefinition(
+                        field="callee",
+                        name="function",
+                        interfaces=["func_like"],
+                    ),
+                    interfaces=[func_like],
+                )
+
+    def test_requires_exactly_one_workload_signature_storage(self) -> None:
+        with _raises(ValueError, match="exactly one"):
+            SymbolKernelContract()
+        with _raises(ValueError, match="exactly one"):
+            SymbolKernelContract(workload_region="config", workload_operands="args")
+
+    def test_kernel_interface_requires_contract(self) -> None:
+        with _raises(ValueError, match="must be declared together"):
+            SymbolDefinition(
+                field="callee",
+                name="kernel",
+                interfaces=["func_like", "kernel"],
+            )
+
+    def test_kernel_contract_requires_kernel_interface(self) -> None:
+        with _raises(ValueError, match="must be declared together"):
+            SymbolDefinition(
+                field="callee",
+                name="function",
+                interfaces=["func_like"],
+                kernel_contract=SymbolKernelContract(workload_region="config"),
+            )
+
+    def test_kernel_interface_requires_launch_abi(self) -> None:
+        with _raises(ValueError, match="requires the func_like interface"):
+            SymbolDefinition(
+                field="callee",
+                name="kernel",
+                interfaces=["kernel"],
+                kernel_contract=SymbolKernelContract(workload_region="config"),
+            )
+
+    def test_operand_backed_signature_owns_every_operand(self) -> None:
+        with _raises(ValueError, match="must own every operand field"):
+            Op(
+                "test.decl",
+                traits=[SYMBOL_DEFINE],
+                operands=[
+                    Operand("args", ANY, variadic=True),
+                    Operand("ordinary_use", ANY),
+                ],
+                attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="function",
+                    interfaces=["func_like"],
+                ),
+                interfaces=[FuncLikeInterface(callee="callee", args="args")],
+            )
+
+    def test_kernel_contract_requires_func_like_implementation(self) -> None:
+        with _raises(ValueError, match="requires a FuncLikeInterface"):
+            Op(
+                "test.kernel",
+                traits=[SYMBOL_DEFINE],
+                attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="kernel",
+                    interfaces=["func_like", "kernel"],
+                    kernel_contract=SymbolKernelContract(workload_region="config"),
+                ),
+                regions=[RegionDef("config")],
+            )
+
+    def test_kernel_signatures_require_distinct_operand_fields(self) -> None:
+        with _raises(ValueError, match="distinct operand fields"):
+            Op(
+                "test.kernel_decl",
+                traits=[SYMBOL_DEFINE],
+                operands=[Operand("args", ANY, variadic=True)],
+                attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="kernel",
+                    interfaces=["func_like", "kernel"],
+                    kernel_contract=SymbolKernelContract(workload_operands="args"),
+                ),
+                interfaces=[FuncLikeInterface(callee="callee", args="args")],
+            )
+
+    def test_kernel_signatures_require_distinct_regions(self) -> None:
+        with _raises(ValueError, match="distinct regions"):
+            Op(
+                "test.kernel",
+                traits=[SYMBOL_DEFINE],
+                attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="kernel",
+                    interfaces=["func_like", "kernel"],
+                    kernel_contract=SymbolKernelContract(workload_region="body"),
+                ),
+                interfaces=[FuncLikeInterface(callee="callee", body="body")],
+                regions=[RegionDef("body")],
             )

@@ -155,7 +155,7 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("body", "body_region_index", "region"),
             InterfaceFieldSpec("implements", "implements_attr_index", "attr"),
             InterfaceFieldSpec("priority", "priority_attr_index", "attr"),
-            InterfaceFieldSpec("args_as_operands", "args_as_operands", "bool"),
+            InterfaceFieldSpec("args", "args_operand_field_index", "operand"),
         ),
     ),
     InterfaceSpec(
@@ -591,6 +591,10 @@ def emit_interface_vtable(op: Op, spec: InterfaceSpec, lines: list[str]) -> None
     for field_spec in spec.fields:
         value_str = _resolve_interface_field(op, iface, field_spec, spec.name)
         lines.append(f"    .{field_spec.c_field} = {value_str},")
+    if isinstance(iface, FuncLikeInterface):
+        layout = compute_layout(op)
+        segment_count = len(op.operands) if iface.args is not None and layout.segmented_operands else 0
+        lines.append(f"    .args_operand_segment_count = {segment_count},")
     if isinstance(iface, LoopLikeInterface):
         layout = compute_layout(op)
         lines.append(f"    .operand_field_count = {len(op.operands)},")

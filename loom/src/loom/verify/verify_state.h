@@ -172,11 +172,8 @@ iree_string_view_t loom_verify_symbol_name(const loom_verify_state_t* state,
 iree_string_view_t loom_verify_symbol_definition_name(
     const loom_symbol_t* symbol);
 
-bool loom_verify_func_args_are_operands(const loom_op_vtable_t* vtable);
+bool loom_verify_func_args_use_operand_field(const loom_op_vtable_t* vtable);
 bool loom_verify_has_func_signature_scope(const loom_op_vtable_t* vtable);
-const loom_value_id_t* loom_verify_func_signature_arg_ids(
-    const loom_op_t* op, const loom_op_vtable_t* vtable,
-    uint16_t* out_arg_count);
 
 loom_type_t loom_verify_value_type(const loom_verify_state_t* state,
                                    loom_value_id_t value_id);

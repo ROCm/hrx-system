@@ -493,6 +493,38 @@ static iree_status_t loom_link_map_func_signature_values(
                                   source_result_count);
 }
 
+static iree_status_t loom_link_map_and_check_kernel_signature(
+    loom_ir_remap_t* remap, const loom_module_t* source_module,
+    const loom_op_t* source_op, const loom_module_t* target_module,
+    const loom_op_t* target_op, const loom_linker_t* linker,
+    loom_symbol_ref_t target_ref) {
+  loom_value_slice_t source_args =
+      loom_kernel_workload_arg_ids(source_module, source_op);
+  loom_value_slice_t target_args =
+      loom_kernel_workload_arg_ids(target_module, target_op);
+  if (source_args.count != target_args.count) {
+    return loom_link_signature_count_status(
+        linker, target_ref, IREE_SV("kernel workload args"), source_args.count,
+        target_args.count);
+  }
+  IREE_RETURN_IF_ERROR(loom_ir_remap_map_values(
+      remap, source_args.values, target_args.values, source_args.count));
+  for (uint16_t i = 0; i < source_args.count; ++i) {
+    loom_type_t source_type =
+        loom_module_value_type(source_module, source_args.values[i]);
+    loom_type_t remapped_type = {0};
+    IREE_RETURN_IF_ERROR(
+        loom_ir_remap_type(remap, source_type, &remapped_type));
+    loom_type_t target_type =
+        loom_module_value_type(target_module, target_args.values[i]);
+    if (!loom_type_equal(remapped_type, target_type)) {
+      return loom_link_signature_type_status(linker, target_ref,
+                                             IREE_SV("kernel workload arg"), i);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_link_check_func_signature_types(
     loom_ir_remap_t* remap, const loom_module_t* source_module,
     loom_func_like_t source_func, loom_func_like_t target_func,
@@ -640,6 +672,14 @@ static iree_status_t loom_link_merge_func_contract(
                                    .remap_symbol = symbol_callback,
                                },
                                &contract_remap));
+  const loom_symbol_definition_descriptor_t* source_definition =
+      loom_link_op_symbol_definition(source_module, source_op);
+  if (loom_symbol_definition_implements(source_definition,
+                                        LOOM_SYMBOL_INTERFACE_KERNEL)) {
+    IREE_RETURN_IF_ERROR(loom_link_map_and_check_kernel_signature(
+        &contract_remap, source_module, source_op, linker->target_module,
+        target_op, linker, target_ref));
+  }
   IREE_RETURN_IF_ERROR(loom_link_map_func_signature_values(
       &contract_remap, source_func, target_func, linker, target_ref));
   IREE_RETURN_IF_ERROR(loom_link_check_func_signature_types(
