@@ -668,10 +668,142 @@ func.template<qwen3_moe.attention.decode_split.reduce_completed.cooperative> dev
   func.return
 }
 
+// Packs the query heads owned by one completed KV head into GGML's Q8_1 x4
+// layout. Each 32-workitem cohort owns one contiguous 128-element query row;
+// the production 8:1 GQA ratio therefore fills all 256 workitems. Smaller or
+// larger valid ratios use the same phase loop without making barriers
+// conditional.
+func.template<qwen3_moe.attention.decode_split.pack_completed_q8> device @qwen3_moe_flash_attention_decode_pack_completed_key_value_head_q8_1_x4(%key_value_head: index, %output: buffer, %q8_output: buffer) {
+  %query_head_count0 = config.get @qwen3_moe.attention.query_head_count : index
+  %key_value_head_count0 = config.get @qwen3_moe.attention.key_value_head_count : index
+  %query_head_count = index.assume %query_head_count0 [range(%query_head_count0, 1, 64)] : index
+  %key_value_head_count = index.assume %key_value_head_count0 [range(%key_value_head_count0, 1, 64)] : index
+  %query_heads_per_key_value_head0 = index.div %query_head_count, %key_value_head_count : index
+  %query_heads_per_key_value_head = index.assume %query_heads_per_key_value_head0 [range(%query_heads_per_key_value_head0, 1, 16)] : index
+  %workitem0 = kernel.workitem.id<x> : index
+  %workitem = index.assume %workitem0 [range(%workitem0, 0, 255)] : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %seven = index.constant 7 : index
+  %eight = index.constant 8 : index
+  %thirtytwo = index.constant 32 : index
+  %group_bytes = index.constant 144 : index
+  %payload_byte_add = index.constant 16 : index
+  %scratch_d_byte_add = index.constant 1024 : offset
+  %scratch_bytes = index.constant 1152 : offset
+  %zero_offset = index.constant 0 : offset
+  %zero_f32 = scalar.constant 0.0 : f32
+  %one_f32 = scalar.constant 1.0 : f32
+  %one_twenty_seven = scalar.constant 127.0 : f32
+  %zero_f32x4 = vector.constant 0.0 : vector<4xf32>
+  %output_noalias, %q8_output_noalias = buffer.assume.noalias %output, %q8_output : buffer, buffer
+  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
+  %q8_output_global = buffer.assume.memory_space<global> %q8_output_noalias : buffer
+  %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
+  %q8_output_aligned = buffer.assume.alignment %q8_output_global {minimum_alignment = 16} : buffer
+  %output_view = buffer.view %output_aligned[%zero_offset] : buffer -> view<[%query_head_count]x128xf32, #dense>
+  %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %scratch_values = buffer.view %scratch[%zero_offset] : buffer -> view<256xf32, #dense>
+  %scratch_d = buffer.view %scratch[%scratch_d_byte_add] : buffer -> view<32xf32, #dense>
+  %group_in_phase = index.div %workitem, %thirtytwo : index
+  %lane_in_group0 = index.rem %workitem, %thirtytwo : index
+  %lane_in_group = index.assume %lane_in_group0 [range(%lane_in_group0, 0, 31)] : index
+  %block_in_group0 = index.div %lane_in_group, %eight : index
+  %block_in_group = index.assume %block_in_group0 [range(%block_in_group0, 0, 3)] : index
+  %word_in_block0 = index.rem %lane_in_group, %eight : index
+  %word_in_block = index.assume %word_in_block0 [range(%word_in_block0, 0, 7)] : index
+  %padded_phase_count = index.add %query_heads_per_key_value_head, %seven : index
+  %phase_count = index.div %padded_phase_count, %eight : index
+  scf.for %phase = [%zero to %phase_count step %one] unroll {
+    %phase_group_base = index.mul %phase, %eight : index
+    %group_in_key_value_head = index.add %phase_group_base, %group_in_phase : index
+    %valid_group = index.cmp ult, %group_in_key_value_head, %query_heads_per_key_value_head : index
+    %key_value_query_head_base = index.mul %key_value_head, %query_heads_per_key_value_head : index
+    %query_head0 = index.add %key_value_query_head_base, %group_in_key_value_head : index
+    %safe_query_head = scf.select %valid_group, %query_head0, %zero : index
+    %block_element_add = index.mul %block_in_group, %thirtytwo : index
+    %word_element_add = index.mul %word_in_block, %four : index
+    %input_channel0 = index.add %block_element_add, %word_element_add : index
+    %input_channel = index.assume %input_channel0 [range(%input_channel0, 0, 124)] : index
+    %input_values = scf.if %valid_group -> (vector<4xf32>) {
+      %values = vector.load %output_view[%safe_query_head, %input_channel] : view<[%query_head_count]x128xf32, #dense> -> vector<4xf32>
+      scf.yield %values : vector<4xf32>
+    } else {
+      scf.yield %zero_f32x4 : vector<4xf32>
+    }
+    %absolute_values = vector.absf %input_values : vector<4xf32>
+    %thread_max = vector.reduce<maxnumf> %absolute_values, %zero_f32 : vector<4xf32>, f32
+    view.store %thread_max, %scratch_values[%workitem] : f32, view<256xf32, #dense>
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    %is_cohort_leader = index.cmp eq, %word_in_block, %zero : index
+    %d_index0 = index.mul %group_in_phase, %four : index
+    %d_index1 = index.add %d_index0, %block_in_group : index
+    %d_index = index.assume %d_index1 [range(%d_index1, 0, 31)] : index
+    scf.if %is_cohort_leader {
+      %group_thread_base = index.mul %group_in_phase, %thirtytwo : index
+      %block_thread_add = index.mul %block_in_group, %eight : index
+      %cohort_base = index.add %group_thread_base, %block_thread_add : index
+      %cohort_maxima = vector.load %scratch_values[%cohort_base] : view<256xf32, #dense> -> vector<8xf32>
+      %amax = vector.reduce<maxnumf> %cohort_maxima, %zero_f32 : vector<8xf32>, f32
+      %d = scalar.divf %amax, %one_twenty_seven : f32
+      view.store %d, %scratch_d[%d_index] : f32, view<32xf32, #dense>
+    }
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    %d = view.load %scratch_d[%d_index] : view<32xf32, #dense> -> f32
+    %d_nonzero = scalar.cmpf one, %d, %zero_f32 : f32
+    %d_inverse = scf.if %d_nonzero -> (f32) {
+      %inverse = scalar.divf %one_f32, %d : f32
+      scf.yield %inverse : f32
+    } else {
+      scf.yield %zero_f32 : f32
+    }
+    %d_inverse_vector = vector.splat %d_inverse : vector<4xf32>
+    %scaled_values = vector.mulf %input_values, %d_inverse_vector : vector<4xf32>
+    %rounded_values = vector.roundf %scaled_values : vector<4xf32>
+    %quantized_values = vector.fptosi %rounded_values : vector<4xf32> to vector<4xi8>
+    %packed_word = vector.bitcast %quantized_values : vector<4xi8> to vector<1xi32>
+    %group_byte_index = index.mul %safe_query_head, %group_bytes : index
+    %group_byte_offset = index.cast %group_byte_index : index to offset
+    %payload_byte_index = index.add %group_byte_index, %payload_byte_add : index
+    %payload_byte_offset = index.cast %payload_byte_index : index to offset
+    %group_ds = buffer.view %q8_output_aligned[%group_byte_offset] : buffer -> view<8xf16, #dense>
+    %group_qs = buffer.view %q8_output_aligned[%payload_byte_offset] : buffer -> view<32xi32, #dense>
+    %block_word_add = index.mul %block_in_group, %eight : index
+    %packed_word_index0 = index.add %block_word_add, %word_in_block : index
+    %packed_word_index = index.assume %packed_word_index0 [range(%packed_word_index0, 0, 31)] : index
+    scf.if %valid_group {
+      vector.store %packed_word, %group_qs[%packed_word_index] : vector<1xi32>, view<32xi32, #dense>
+    }
+    %thread_sum = vector.reduce<addf> %rounded_values, %zero_f32 : vector<4xf32>, f32
+    view.store %thread_sum, %scratch_values[%workitem] : f32, view<256xf32, #dense>
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    scf.if %is_cohort_leader {
+      %group_thread_base = index.mul %group_in_phase, %thirtytwo : index
+      %block_thread_add = index.mul %block_in_group, %eight : index
+      %cohort_base = index.add %group_thread_base, %block_thread_add : index
+      %cohort_sums = vector.load %scratch_values[%cohort_base] : view<256xf32, #dense> -> vector<8xf32>
+      %quantized_sum = vector.reduce<addf> %cohort_sums, %zero_f32 : vector<8xf32>, f32
+      %s = scalar.mulf %quantized_sum, %d : f32
+      %d_f16 = scalar.fptrunc %d : f32 to f16
+      %s_f16 = scalar.fptrunc %s : f32 to f16
+      %ds_index = index.mul %block_in_group, %two : index
+      %s_index = index.add %ds_index, %one : index
+      scf.if %valid_group {
+        view.store %d_f16, %group_ds[%ds_index] : f16, view<8xf16, #dense>
+        view.store %s_f16, %group_ds[%s_index] : f16, view<8xf16, #dense>
+      }
+    }
+    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  }
+  func.return
+}
+
 // Completes bounded decode contexts inside the last arriving producer
 // workgroup. Four KV-head workgroups reduce their own query heads while all
 // other producers retire, erasing a second dispatch and its execution barrier.
-func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(20) @qwen3_moe_flash_attention_decode_split_reduce_fused_direct_f32(%key_value_token_count: index, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer, %completion_counter: buffer, %output: buffer) where [range(%key_value_token_count, 1, 256)] {
+func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(20) @qwen3_moe_flash_attention_decode_split_reduce_fused_direct_f32(%publish_q8: i1, %key_value_token_count: index, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer, %completion_counter: buffer, %output: buffer, %q8_output: buffer) where [range(%key_value_token_count, 1, 256)] {
   %bounded_key_value_token_count = index.assume %key_value_token_count [range(%key_value_token_count, 1, 256)] : index
   %key_value_head_count0 = config.get @qwen3_moe.attention.key_value_head_count : index
   %key_value_head_count = index.assume %key_value_head_count0 [range(%key_value_head_count0, 1, 64)] : index
@@ -710,7 +842,11 @@ func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(20)
   scf.if %is_last_partition {
     kernel.barrier<global> {ordering = acquire, scope = workgroup}
     func.call inline @qwen3_moe_flash_attention_decode_split_reduce_completed_direct_f32(%bounded_key_value_token_count, %partial_max_noalias, %partial_sum_noalias, %partial_output_noalias, %output_noalias) : (index, buffer, buffer, buffer, buffer)
-    // Do not expose the reset until every final output store completes.
+    scf.if %publish_q8 {
+      kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+      func.apply<qwen3_moe.attention.decode_split.pack_completed_q8>(%key_value_head, %output_noalias, %q8_output) : (index, buffer, buffer)
+    }
+    // Do not expose the reset until every final F32 and Q8 store completes.
     kernel.barrier<global> {ordering = release, scope = workgroup}
     scf.if %workitem_is_zero {
       view.atomic.reduce<addi> %negative_key_value_block_count_i32, %completion_counter_view[%key_value_head] {ordering = release, scope = device} : i32, view<[%key_value_head_count]xi32, #dense>
@@ -720,7 +856,7 @@ func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(20)
 }
 
 // Contexts without a proven short bound use the cooperative completion path.
-func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(10) @qwen3_moe_flash_attention_decode_split_reduce_fused_cooperative_f32(%key_value_token_count: index, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer, %completion_counter: buffer, %output: buffer) {
+func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(10) @qwen3_moe_flash_attention_decode_split_reduce_fused_cooperative_f32(%publish_q8: i1, %key_value_token_count: index, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer, %completion_counter: buffer, %output: buffer, %q8_output: buffer) {
   %bounded_key_value_token_count = index.assume %key_value_token_count [range(%key_value_token_count, 1, 2048)] : index
   %key_value_head_count0 = config.get @qwen3_moe.attention.key_value_head_count : index
   %key_value_head_count = index.assume %key_value_head_count0 [range(%key_value_head_count0, 1, 64)] : index
@@ -759,7 +895,11 @@ func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(10)
   scf.if %is_last_partition {
     kernel.barrier<global> {ordering = acquire, scope = workgroup}
     func.call inline @qwen3_moe_flash_attention_decode_split_reduce_completed_cooperative_f32(%bounded_key_value_token_count, %partial_max_noalias, %partial_sum_noalias, %partial_output_noalias, %output_noalias) : (index, buffer, buffer, buffer, buffer)
-    // Do not expose the reset until every final output store completes.
+    scf.if %publish_q8 {
+      kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+      func.apply<qwen3_moe.attention.decode_split.pack_completed_q8>(%key_value_head, %output_noalias, %q8_output) : (index, buffer, buffer)
+    }
+    // Do not expose the reset until every final F32 and Q8 store completes.
     kernel.barrier<global> {ordering = release, scope = workgroup}
     scf.if %workitem_is_zero {
       view.atomic.reduce<addi> %negative_key_value_block_count_i32, %completion_counter_view[%key_value_head] {ordering = release, scope = device} : i32, view<[%key_value_head_count]xi32, #dense>
@@ -779,8 +919,27 @@ kernel.def target(@qwen3_moe_decode_split_gfx11_wave64) @qwen3_moe_flash_attenti
   %key_value_block_count = index.div %padded_key_value_token_count, %sixtyfour : index
   kernel.launch.config workgroups(%key_value_block_count, %key_value_head_count, %one) workgroup_size(%twofiftysix, %one, %one) : index
 } launch(%key_value_token_count: index, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer, %completion_counter: buffer, %output: buffer) {
+  %publish_q8 = scalar.constant false : i1
   func.apply<qwen3_moe.attention.decode_split.produce_partials>(%key_value_token_count, %query, %key, %value, %mask, %partial_max, %partial_sum, %partial_output) : (index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
-  func.apply<qwen3_moe.attention.decode_split.reduce_fused>(%key_value_token_count, %partial_max, %partial_sum, %partial_output, %completion_counter, %output) : (index, buffer, buffer, buffer, buffer, buffer)
+  func.apply<qwen3_moe.attention.decode_split.reduce_fused>(%publish_q8, %key_value_token_count, %partial_max, %partial_sum, %partial_output, %completion_counter, %output, %partial_output) : (i1, index, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+// Short-context export that publishes the F32 attention result and the Q8_1
+// representation consumed by the following output projection.
+kernel.def target(@qwen3_moe_decode_split_gfx11_wave64) @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_next_q8(%key_value_token_count: index) {
+  %key_value_head_count = config.get @qwen3_moe.attention.key_value_head_count : index
+  %one = index.constant 1 : index
+  %sixtythree = index.constant 63 : index
+  %sixtyfour = index.constant 64 : index
+  %twofiftysix = index.constant 256 : index
+  %padded_key_value_token_count = index.add %key_value_token_count, %sixtythree : index
+  %key_value_block_count = index.div %padded_key_value_token_count, %sixtyfour : index
+  kernel.launch.config workgroups(%key_value_block_count, %key_value_head_count, %one) workgroup_size(%twofiftysix, %one, %one) : index
+} launch(%key_value_token_count: index, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer, %completion_counter: buffer, %output: buffer, %next_q8_output: buffer) {
+  %publish_q8 = scalar.constant true : i1
+  func.apply<qwen3_moe.attention.decode_split.produce_partials>(%key_value_token_count, %query, %key, %value, %mask, %partial_max, %partial_sum, %partial_output) : (index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  func.apply<qwen3_moe.attention.decode_split.reduce_fused>(%publish_q8, %key_value_token_count, %partial_max, %partial_sum, %partial_output, %completion_counter, %output, %next_q8_output) : (i1, index, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
