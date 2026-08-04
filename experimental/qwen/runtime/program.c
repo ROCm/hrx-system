@@ -939,6 +939,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
       token_count,
       QWEN_MODEL_QUERY_HEAD_COUNT * QWEN_MODEL_HEAD_SIZE,
   };
+  const int64_t attention_output_quantize_group_capacity =
+      token_count * (QWEN_MODEL_QUERY_HEAD_COUNT * QWEN_MODEL_HEAD_SIZE /
+                     QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT);
   const int64_t router_top8_workload[] = {
       token_count,
       route_stride,
@@ -966,6 +969,25 @@ static iree_status_t qwen_program_prepare_layer_executables(
       route_count,  route_stride,
       expert_count, QWEN_MODEL_HIDDEN_SIZE,
   };
+
+  qwen_program_config_binding_list_t attention_prepare_config_binding_list;
+  qwen_program_config_binding_list_initialize(
+      IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
+      qwen_attention_prepare_config_bindings,
+      &attention_prepare_config_binding_list);
+  qwen_program_config_binding_list_append_index(
+      &attention_prepare_config_binding_list,
+      IREE_SV("qwen3_moe.workload.token_capacity"), token_count);
+
+  qwen_program_config_binding_list_t
+      attention_output_quantize_config_binding_list;
+  qwen_program_config_binding_list_initialize(
+      /*static_binding_count=*/0, /*static_bindings=*/NULL,
+      &attention_output_quantize_config_binding_list);
+  qwen_program_config_binding_list_append_index(
+      &attention_output_quantize_config_binding_list,
+      IREE_SV("ggml.quantize_q8_1_x4.group_capacity"),
+      attention_output_quantize_group_capacity);
 
   qwen_program_config_binding_list_t router_projection_config_binding_list;
   qwen_program_config_binding_list_initialize(
@@ -1004,9 +1026,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
         IREE_SV("qwen3_moe_attention_rmsnorm_quantize_q8_1_x4"),
-        IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
-        qwen_attention_prepare_config_bindings, IREE_ARRAYSIZE(token_workload),
-        token_workload,
+        attention_prepare_config_binding_list.count,
+        attention_prepare_config_binding_list.bindings,
+        IREE_ARRAYSIZE(token_workload), token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_ATTENTION_PREPARE_Q8]);
   }
   if (iree_status_is_ok(status) &&
@@ -1106,7 +1128,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4),
         IREE_SV("ggml_quantize_q8_1_x4_f32"),
-        /*config_binding_count=*/0, /*config_bindings=*/NULL,
+        attention_output_quantize_config_binding_list.count,
+        attention_output_quantize_config_binding_list.bindings,
         IREE_ARRAYSIZE(attention_output_quantize_workload),
         attention_output_quantize_workload,
         &program->executables
@@ -1146,9 +1169,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
         IREE_SV("qwen3_moe_rmsnorm_f32"),
-        IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
-        qwen_attention_prepare_config_bindings, IREE_ARRAYSIZE(token_workload),
-        token_workload,
+        attention_prepare_config_binding_list.count,
+        attention_prepare_config_binding_list.bindings,
+        IREE_ARRAYSIZE(token_workload), token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_RMSNORM_F32]);
   }
   if (iree_status_is_ok(status) &&
@@ -1398,6 +1421,16 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   };
 
   qwen_program_config_binding_list_t
+      terminal_attention_prepare_config_binding_list;
+  qwen_program_config_binding_list_initialize(
+      IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
+      qwen_attention_prepare_config_bindings,
+      &terminal_attention_prepare_config_binding_list);
+  qwen_program_config_binding_list_append_index(
+      &terminal_attention_prepare_config_binding_list,
+      IREE_SV("qwen3_moe.workload.token_capacity"), terminal_token_count);
+
+  qwen_program_config_binding_list_t
       terminal_router_projection_config_binding_list;
   qwen_program_config_binding_list_initialize(
       IREE_ARRAYSIZE(qwen_router_projection_config_bindings),
@@ -1452,8 +1485,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
         IREE_SV("qwen3_moe_rmsnorm_f32"),
-        IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
-        qwen_attention_prepare_config_bindings,
+        terminal_attention_prepare_config_binding_list.count,
+        terminal_attention_prepare_config_binding_list.bindings,
         IREE_ARRAYSIZE(terminal_token_workload), terminal_token_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_TERMINAL_RMSNORM_F32]);
   }
@@ -1546,8 +1579,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED),
         IREE_SV("qwen3_moe_attention_rmsnorm_quantize_q8_1_x4"),
-        IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
-        qwen_attention_prepare_config_bindings,
+        terminal_attention_prepare_config_binding_list.count,
+        terminal_attention_prepare_config_binding_list.bindings,
         IREE_ARRAYSIZE(terminal_token_workload), terminal_token_workload,
         &program
              ->executables[QWEN_PROGRAM_EXECUTABLE_FINAL_RMSNORM_QUANTIZE_Q8]);

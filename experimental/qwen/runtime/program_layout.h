@@ -13,6 +13,12 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Logical F32 elements packed into one physical GGML Q8_1 x4 group.
+#define QWEN_PROGRAM_Q8_1_X4_GROUP_ELEMENT_COUNT 128
+
+// Bytes occupied by one physical GGML Q8_1 x4 group.
+#define QWEN_PROGRAM_Q8_1_X4_GROUP_BYTE_LENGTH 144
+
 // Byte span within per-issue transient program storage.
 typedef struct qwen_program_span_t {
   // Byte offset from the transient allocation base.

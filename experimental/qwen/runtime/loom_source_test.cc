@@ -193,9 +193,11 @@ TEST(QwenLoomSourceTest, EmbedsCanonicalVocabularyEndpointSources) {
   std::string quantize_text(
       reinterpret_cast<const char*>(quantize_source.source_contents.data),
       quantize_source.source_contents.data_length);
-  EXPECT_NE(
-      quantize_text.find("%group_count = kernel.workgroup.count<x> : index"),
-      std::string::npos);
+  EXPECT_NE(quantize_text.find("%group_count0 = index.div %element_count, "
+                               "%elements_per_group : index"),
+            std::string::npos);
+  EXPECT_NE(quantize_text.find("le(%group_count0, %group_capacity)"),
+            std::string::npos);
   EXPECT_NE(
       quantize_text.find("%launched_element_count = index.mul %group_count, "
                          "%onetwentyeight : index"),
@@ -293,6 +295,53 @@ TEST(QwenLoomSourceTest, EmbedsDirectF32Q6DownFixedModelWorkaround) {
   EXPECT_NE(
       source_text.find("func.apply<qwen3_moe.routed_down.next_q8_completion>"),
       std::string::npos);
+}
+
+TEST(QwenLoomSourceTest, EmbedsCapacityBoundAttentionPreparationSource) {
+  qwen_loom_source_module_t source_module;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED), &source_module));
+
+  EXPECT_TRUE(iree_string_view_equal(
+      source_module.source_identifier,
+      IREE_SV("qwen3_moe_attention_prepare_quantized.loom")));
+  std::string source_text(
+      reinterpret_cast<const char*>(source_module.source_contents.data),
+      source_module.source_contents.data_length);
+  EXPECT_NE(source_text.find("@qwen3_moe.workload.token_capacity"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("workgroups(%token_capacity, %one, %one)"),
+            std::string::npos);
+  EXPECT_NE(source_text.find(
+                "%safe_token0 = scf.select %valid_token, %token0, %zero"),
+            std::string::npos);
+  EXPECT_NE(source_text.find(
+                "%publishes_normalized = scalar.andi %publish_normalized, "
+                "%valid_token"),
+            std::string::npos);
+}
+
+TEST(QwenLoomSourceTest, EmbedsCapacityBoundQ8PackerSource) {
+  qwen_loom_source_module_t source_module;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4), &source_module));
+
+  EXPECT_TRUE(
+      iree_string_view_equal(source_module.source_identifier,
+                             IREE_SV("qwen3_moe_quantize_q8_1_x4.loom")));
+  std::string source_text(
+      reinterpret_cast<const char*>(source_module.source_contents.data),
+      source_module.source_contents.data_length);
+  EXPECT_NE(source_text.find("@ggml.quantize_q8_1_x4.group_capacity"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("workgroups(%group_capacity, %unit, %unit)"),
+            std::string::npos);
+  EXPECT_NE(
+      source_text.find("%safe_group = scf.select %valid_group, %group0, %zero"),
+      std::string::npos);
+  EXPECT_NE(source_text.find("func.apply<ggml.quantize_q8_1_x4.group_body>"
+                             "(%valid_group"),
+            std::string::npos);
 }
 
 TEST(QwenLoomSourceTest, EmbedsCanonicalFlashAttentionSource) {

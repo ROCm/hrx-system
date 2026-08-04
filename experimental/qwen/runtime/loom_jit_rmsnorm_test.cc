@@ -15,7 +15,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/numa.h"
-#include "iree/hal/drivers/init.h"
+#include "iree/hal/drivers/amdgpu/api.h"
 #include "iree/io/memory_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -39,6 +39,9 @@ using FrontierTrackerPtr =
 using DevicePtr =
     std::unique_ptr<iree_hal_device_t,
                     HandleDeleter<iree_hal_device_t, iree_hal_device_release>>;
+using DriverPtr =
+    std::unique_ptr<iree_hal_driver_t,
+                    HandleDeleter<iree_hal_driver_t, iree_hal_driver_release>>;
 using DeviceGroupPtr = std::unique_ptr<
     iree_hal_device_group_t,
     HandleDeleter<iree_hal_device_group_t, iree_hal_device_group_release>>;
@@ -144,8 +147,6 @@ static iree_status_t CreateLiveDevice(iree_string_view_t device_uri,
                                       DevicePtr* out_device,
                                       DeviceGroupPtr* out_device_group) {
   iree_allocator_t host_allocator = iree_allocator_system();
-  IREE_RETURN_IF_ERROR(iree_hal_register_all_available_drivers(
-      iree_hal_driver_registry_default()));
 
   iree_async_proactor_pool_t* proactor_pool = nullptr;
   IREE_RETURN_IF_ERROR(iree_async_proactor_pool_create(
@@ -157,10 +158,16 @@ static iree_status_t CreateLiveDevice(iree_string_view_t device_uri,
   iree_hal_device_create_params_t create_params =
       iree_hal_device_create_params_default();
   create_params.proactor_pool = out_proactor_pool->get();
+  iree_hal_amdgpu_driver_options_t driver_options;
+  iree_hal_amdgpu_driver_options_initialize(&driver_options);
+  driver_options.default_device_options.asan.enabled = 1;
+  iree_hal_driver_t* driver = nullptr;
+  IREE_RETURN_IF_ERROR(iree_hal_amdgpu_driver_create(
+      IREE_SV("amdgpu"), &driver_options, host_allocator, &driver));
+  DriverPtr driver_ptr(driver);
   iree_hal_device_t* device = nullptr;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_create_device(iree_hal_driver_registry_default(), device_uri,
-                             &create_params, host_allocator, &device));
+  IREE_RETURN_IF_ERROR(iree_hal_driver_create_device_by_uri(
+      driver_ptr.get(), device_uri, &create_params, host_allocator, &device));
   out_device->reset(device);
 
   iree_async_frontier_tracker_options_t tracker_options =
@@ -280,6 +287,10 @@ static iree_status_t RunRmsnormFixture(const std::string& fixture_directory) {
           .key = IREE_SV("qwen3_moe.model.rms_epsilon"),
           .value = IREE_SV("0.000001"),
       },
+      {
+          .key = IREE_SV("qwen3_moe.workload.token_capacity"),
+          .value = IREE_SV("512"),
+      },
   };
   const int64_t workload_arguments[] = {512};
   qwen_loom_jit_prepare_options_t prepare_options = {
@@ -332,12 +343,14 @@ static iree_status_t RunRmsnormFixture(const std::string& fixture_directory) {
   }
   if (distinct_executable == executable_ptr.get() ||
       qwen_loom_jit_entry_count(jit_ptr.get()) != 2 ||
-      distinct_dispatch_config.workgroup_count[0] != 511 ||
+      distinct_dispatch_config.workgroup_count[0] != 512 ||
+      distinct_dispatch_config.workgroup_count[1] != 1 ||
+      distinct_dispatch_config.workgroup_count[2] != 1 ||
       qwen_loom_executable_hal_executable(distinct_executable_ptr.get()) !=
           qwen_loom_executable_hal_executable(executable_ptr.get())) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
-        "batched workloads did not retain exact geometry over shared code");
+        "batched workloads did not retain capacity geometry over shared code");
   }
 
   qwen_loom_executable_t* cache_hit = nullptr;
