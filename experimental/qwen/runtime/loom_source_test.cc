@@ -574,18 +574,22 @@ TEST(QwenLoomSourceTest, EmbedsCanonicalDecodeSplitCapacityContract) {
                 "func.apply<qwen3_moe.attention.decode_split.produce_partials>("
                 "%bounded_key_value_token_count, %query"),
             std::string::npos);
-  EXPECT_NE(source_text.find("func.call inline "
-                             "@qwen3_moe_flash_attention_decode_split_"
-                             "reduce_fused_direct_f32"),
+  EXPECT_NE(source_text.find(
+                "func.apply<qwen3_moe.attention.decode_split.reduce_fused>("
+                "%launch_key_value_token_capacity, %publish_q8"),
             std::string::npos);
-  EXPECT_NE(
-      source_text.find("func.call inline "
-                       "@qwen3_moe_flash_attention_decode_split_reduce_fused_"
-                       "cooperative_f32"),
-      std::string::npos);
+  EXPECT_NE(source_text.find("func.apply<qwen3_moe.attention.decode_split."
+                             "pack_completed_q8>"),
+            std::string::npos);
   EXPECT_NE(source_text.find("%next_q8_output: buffer"), std::string::npos);
-  EXPECT_EQ(source_text.find(
-                "func.apply<qwen3_moe.attention.decode_split.reduce_fused>"),
+  EXPECT_EQ(source_text.find("%use_direct_reducer"), std::string::npos);
+  EXPECT_EQ(source_text.find("func.call inline "
+                             "@qwen3_moe_flash_attention_decode_split_"
+                             "reduce_fused_"),
+            std::string::npos);
+  EXPECT_EQ(source_text.find("func.call inline "
+                             "@qwen3_moe_flash_attention_decode_pack_"
+                             "completed_"),
             std::string::npos);
   EXPECT_EQ(source_text.find("@qwen.decode.key_value_capacity"),
             std::string::npos);
