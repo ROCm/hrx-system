@@ -13,6 +13,7 @@ load(":clang_tidy.bzl", "iree_clang_tidy")
 package(default_visibility = ["//visibility:public"])
 
 exports_files([
+    "clang_tidy_config.yaml",
     "clang_tidy.bzl",
     "llvm_repo.bzl",
 ])
@@ -30,6 +31,7 @@ filegroup(
     srcs = [
         "CMakeLists.txt",
         "README.md",
+        "clang_tidy_config.yaml",
         ":plugin_sources",
     ],
 )

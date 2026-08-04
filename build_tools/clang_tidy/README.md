@@ -7,6 +7,10 @@ The plugin builds against the LLVM installation that provides the `clang-tidy`
 binary that loads it. Normal runtime, Loom, and libhrx builds do not require
 LLVM development packages.
 
+`clang_tidy_config.yaml` is the single repository analysis policy. Bazel
+declares it as an input to each clang-tidy action, and the secondary CMake lane
+passes the same file to `run-clang-tidy`.
+
 ## Bazel
 
 ```bash

@@ -123,7 +123,7 @@ def _run_clang_tidy_action(ctx, target, cc_toolchain, feature_configuration, sou
     args.add("--plugin", ctx.executable._plugin)
     args.add("--source", source)
     args.add("--output", report)
-    args.add("--checks=%s" % ctx.attr._checks)
+    args.add("--config-file", ctx.file._config)
     if emit_fixes:
         fixes = ctx.actions.declare_file(_clang_tidy_fixes_path(target.label, source))
         outputs.append(fixes)
@@ -140,7 +140,7 @@ def _run_clang_tidy_action(ctx, target, cc_toolchain, feature_configuration, sou
 
     compilation_context = target[CcInfo].compilation_context
     inputs = depset(
-        direct = [source],
+        direct = [source, ctx.file._config],
         transitive = _compilation_input_depsets(compilation_context),
     )
     ctx.actions.run(
@@ -226,14 +226,15 @@ collect_clang_tidy_aspect = aspect(
             values = ["false", "true"],
             doc = "When true, emit clang-tidy replacement YAML files instead of failing on diagnostics.",
         ),
-        "_checks": attr.string(
-            default = "-*,iree-*",
-            doc = "clang-tidy checks enabled for IREE analysis.",
-        ),
         "_clang_tidy": attr.label(
             cfg = "exec",
             default = Label("@iree_clang_tidy_llvm//:clang-tidy"),
             executable = True,
+        ),
+        "_config": attr.label(
+            allow_single_file = True,
+            default = Label("//build_tools/clang_tidy:clang_tidy_config.yaml"),
+            doc = "Repository clang-tidy policy configuration.",
         ),
         "_plugin": attr.label(
             cfg = "exec",

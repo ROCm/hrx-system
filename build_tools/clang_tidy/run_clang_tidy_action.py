@@ -23,7 +23,7 @@ def parse_arguments(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--plugin", required=True, type=Path)
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--checks", required=True)
+    parser.add_argument("--config-file", required=True, type=Path)
     parser.add_argument("--warnings-as-errors")
     parser.add_argument("--export-fixes", type=Path)
     parser.add_argument("--line-filter")
@@ -53,7 +53,7 @@ def main(argv: list[str]) -> int:
     command = [
         str(args.clang_tidy),
         f"--load={args.plugin}",
-        f"--checks={args.checks}",
+        f"--config-file={args.config_file}",
         str(args.source),
     ]
     if args.warnings_as_errors:

@@ -104,7 +104,7 @@ CLANG_TIDY_LOCAL_OUTPUT_GROUP = "iree_clang_tidy_local_reports"
 CLANG_TIDY_OUTPUT_GROUP = "iree_clang_tidy_reports"
 CLANG_TIDY_PATH_PREFIXES = SEMGREP_PATH_PREFIXES
 CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
-CLANG_TIDY_CHECKS = "-*,iree-*"
+CLANG_TIDY_CONFIG = REPO_ROOT / "build_tools/clang_tidy/clang_tidy_config.yaml"
 CLANG_TIDY_CMAKE_BUILD_DIR = REPO_ROOT / ".tmp" / "iree-clang-tidy-plugin"
 CLANG_TIDY_FIXES_ROOT = "iree-clang-tidy-fixes"
 CLANG_TIDY_SETUP_HINT = (
@@ -1629,7 +1629,7 @@ def cmake_clang_tidy_command(
         clang_tidy,
         "-p",
         str(compile_commands_dir),
-        f"-checks={CLANG_TIDY_CHECKS}",
+        f"-config-file={CLANG_TIDY_CONFIG}",
         f"-load={plugin}",
         "-j",
         str(clang_tidy_jobs()),
@@ -1667,7 +1667,7 @@ def cmake_run_clang_tidy_fix_command(
         clang_apply_replacements,
         "-p",
         str(compile_commands_dir),
-        f"-checks={CLANG_TIDY_CHECKS}",
+        f"-config-file={CLANG_TIDY_CONFIG}",
         f"-load={plugin}",
         "-j",
         str(clang_tidy_jobs()),
