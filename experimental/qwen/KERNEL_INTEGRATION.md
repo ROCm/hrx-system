@@ -138,7 +138,7 @@ cuts in order:
 | 1 | `qwen3_moe_attention_qkv_postprocess_fused_decode` | `qwen3_moe/attention_qkv_postprocess_fused.loom`, using `qwen3_moe/attention_qkv_quantized.loom` and `qwen3_moe/attention_postprocess_f32_f16.loom` | None |
 | 2 | `qwen3_moe_flash_attention_decode_split_f32_f16_wmma_next_q8`, including the Q8_1 x4 attention result consumed by the output projection | `qwen3_moe/flash_attention_decode_split_f32_f16_wmma.loom` | `flash_attention_decode_split_bringup_workaround.loom` specializes a 64-row capacity class while request metadata masks its zero-initialized inactive suffix |
 | 3 | `qwen3_moe_dense_linear_q4k_q8_1_x4_next_q8`, including output residual and feed-forward RMSNorm/Q8_1 x4 publication | `qwen3_moe/dense_linear_quantized_f16_wmma.loom` and `qwen3_moe/attention_prepare_quantized.loom` | None |
-| 4 | `qwen3_moe_router_projection_top8_fused_decode_f32` | `qwen3_moe/router_projection_top8_fused_f32.loom`, using `qwen3_moe/router_projection_f32.loom` and `qwen3_moe/router_top8_f32.loom` | `router_projection_top8_fused_bringup_workaround.loom` |
+| 4 | `qwen3_moe_router_projection_top8_fused_decode_f32` | `qwen3_moe/router_projection_top8_fused_f32.loom`, using `qwen3_moe/router_projection_f32.loom` and `qwen3_moe/router_top8_f32.loom` | None |
 | 5 | Storage-selected `qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8` for Q4_K down or `qwen3_moe_routed_gate_up_swiglu_q4k_q8` for Q6_K down | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` and `ggml/quantize_q8_1_x4.loom` | `routed_gate_up_next_q8_bringup_workaround.loom` |
 | 6 | Storage-selected `qwen3_moe_routed_down_q4k_q8_1_x4_next_q8` or `qwen3_moe_routed_down_q6k_f32_wave64_next_q8` | `qwen3_moe/routed_down_q4k.loom` or `qwen3_moe/routed_down_q6k.loom` | Matching `routed_down_*_next_q8_bringup_workaround.loom` |
 
@@ -160,8 +160,8 @@ these canonical families:
   record the proven one-row specialization once per query row;
 - `qwen3_moe_router_projection_f32_four_row_wave32` and
   `qwen3_moe_router_top8_f32` from their correspondingly named canonical
-  files; the projection is linked directly, while the top-8 adapter still
-  carries its missing generic route-stride relation; and
+  files, both linked directly with an explicit token-capacity launch contract;
+  and
 - `qwen3_moe_build_expert_table_partition_prefill_512` from
   `qwen3_moe/expert_table_partition_fused.loom` for the exact headline shape.
 
@@ -255,18 +255,20 @@ Each `qwen_program_prepare_kernel` call supplies:
 
 1. a stable embedded module path;
 2. a semantic function name;
-3. exact model config bindings such as hidden width, head counts, expert
-   count, route count, and projection dimensions; and
-4. the exact workload arguments used to evaluate launch configuration.
+3. exact config bindings such as model dimensions and bounded launch
+   capacities; and
+4. runtime workload arguments retained as dispatch ABI values.
 
 `runtime_exports.loom` then gives the selectively linked definition an
 explicit gfx11 target, export name, scalar constant order, and buffer-binding
 order. A graph integration should preserve this separation: graph routing owns
 semantic buffer edges and workload values, while the authored Loom source owns
-its physical target schedule. The JIT evaluates both workgroup count and size,
-verifies that the static size agrees with the loaded executable's function
-metadata, and then leaves static workgroup-size ownership with the executable.
-Recorded dispatches carry only the evaluated workgroup count.
+its physical target schedule. The JIT applies config capacities before it
+evaluates workgroup count and size, verifies that the static size agrees with
+the loaded executable's function metadata, and then leaves static
+workgroup-size ownership with the executable. Recorded dispatches carry only
+the evaluated workgroup count; active workload values remain ordinary dispatch
+arguments and do not create position-specific executable identities.
 
 ## What the remaining bring-up workarounds prove
 
@@ -276,8 +278,6 @@ not copied wholesale into a second kernel corpus.
 
 | Workaround | Canonical source or missing provider | Exact pressure exposed |
 | --- | --- | --- |
-| `router_top8_f32_bringup_workaround.loom` | `qwen3_moe/router_top8_f32.loom` | The generic kernel lacks `route_count <= route_id_stride`, while this model has compact `8 == 8` rows. Workload-evaluated decode/prefill workgroup choice also does not reach source-to-low compilation, so the fork pins the wide 256-thread geometry. |
-| `router_projection_top8_fused_bringup_workaround.loom` | `qwen3_moe/router_projection_top8_fused_f32.loom` and `qwen3_moe/router_top8_f32.loom` | The shared generic top-8 helper has the same missing route-count/physical-stride relation. The one-function fork retains the canonical projection and last-arrival schedule, then passes the configured route count as the physical stride for this model's exact compact `8 == 8` rows. |
 | `expert_table_bringup_workaround.loom` | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` | AMDGPU division/remainder lowering needs the exact route-count divisor. The JIT workload already knows eight, but that value does not reach target lowering, so the fork makes eight structural. |
 | `routed_gate_up_next_q8_bringup_workaround.loom` | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` and `ggml/quantize_q8_1_x4.loom` | Exact one-token, eight-route, 128-expert, and 768-channel workload facts do not reach scalar footprint analysis. The fork makes only model dimensions structural, delegates contraction to the canonical body, and exposes F32-only and F32-plus-Q8 providers selected by down-weight storage. |
 | `routed_down_q4_next_q8_bringup_workaround.loom` | `qwen3_moe/routed_down_q4k.loom` and `qwen3_moe/routed_down_next_q8.loom` | Exact decode dimensions do not reach source-to-low, so the eight-iteration route loop cannot be unrolled. The one-function fork makes only those dimensions structural, then delegates contraction, residual arithmetic, last-arrival synchronization, and next-row publication to canonical device templates. |

@@ -331,6 +331,9 @@ TEST(QwenLoomSourceTest, EmbedsCanonicalRouterProjectionSource) {
   IREE_ASSERT_OK(qwen_loom_source_lookup(
       IREE_SV(QWEN_LOOM_SOURCE_ROUTER_PROJECTION_F32), &source_module));
 
+  EXPECT_TRUE(
+      iree_string_view_equal(source_module.source_identifier,
+                             IREE_SV("qwen3_moe_router_projection_f32.loom")));
   std::string source_text(
       reinterpret_cast<const char*>(source_module.source_contents.data),
       source_module.source_contents.data_length);
@@ -338,63 +341,80 @@ TEST(QwenLoomSourceTest, EmbedsCanonicalRouterProjectionSource) {
                 "export(\"qwen3_moe_router_projection_f32_four_row_wave32\") "
                 "@qwen3_moe_router_projection_f32_four_row_wave32"),
             std::string::npos);
-  EXPECT_NE(source_text.find("[%lane_channel to %hidden_size step "
+  EXPECT_NE(source_text.find("@qwen3_moe.workload.token_capacity"),
+            std::string::npos);
+  EXPECT_NE(
+      source_text.find("workgroups(%expert_tiles, %token_capacity, %one)"),
+      std::string::npos);
+  EXPECT_NE(source_text.find("%bounded_token_count = index.assume %token_count "
+                             "[range(%token_count, 1, 2048), "
+                             "le(%token_count, %token_capacity)]"),
+            std::string::npos);
+  EXPECT_NE(
+      source_text.find("%full_channel_limit = index.sub %hidden_size, %three"),
+      std::string::npos);
+  EXPECT_NE(source_text.find("[%lane_channel to %full_channel_limit step "
                              "%onetwentyeight]"),
             std::string::npos);
   EXPECT_EQ(source_text.find("%vector_channel_end"), std::string::npos);
 }
 
-TEST(QwenLoomSourceTest, EmbedsWorkaroundRouterTop8Source) {
+TEST(QwenLoomSourceTest, EmbedsCanonicalRouterTop8Source) {
   qwen_loom_source_module_t source_module;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
       IREE_SV(QWEN_LOOM_SOURCE_ROUTER_TOP8_F32), &source_module));
 
+  EXPECT_TRUE(
+      iree_string_view_equal(source_module.source_identifier,
+                             IREE_SV("qwen3_moe_router_top8_f32.loom")));
   std::string source_text(
       reinterpret_cast<const char*>(source_module.source_contents.data),
       source_module.source_contents.data_length);
+  EXPECT_NE(source_text.find("le(%route_count0, %bounded_route_id_stride0)"),
+            std::string::npos);
   EXPECT_NE(source_text.find("%route_id_storage_count = index.mul "
-                             "%launch_token_count, %route_count : index"),
-            std::string::npos);
-  EXPECT_NE(source_text.find(
-                "%route_id_token_base = index.mul %token, %route_count : "
-                "index"),
-            std::string::npos);
-  EXPECT_EQ(source_text.find("%route_id_storage_count = index.mul "
                              "%launch_token_count, %bounded_route_id_stride"),
             std::string::npos);
-  EXPECT_EQ(source_text.find("%route_id_token_base = index.mul %token, "
+  EXPECT_NE(source_text.find("%route_id_token_base = index.mul %safe_token, "
                              "%bounded_route_id_stride"),
             std::string::npos);
-  EXPECT_NE(source_text.find(
-                "kernel.launch.config workgroups(%wide_workgroup_count, %one, "
-                "%one) workgroup_size(%wide_workgroup_size, %one, %one)"),
+  EXPECT_NE(
+      source_text.find("%uses_decode_geometry = index.cmp eq, %token_capacity, "
+                       "%one"),
+      std::string::npos);
+  EXPECT_NE(source_text.find("%workgroup_count = scf.select"),
             std::string::npos);
-  EXPECT_NE(source_text.find(
-                "%token_base = index.mul %token_workgroup, %four : index"),
+  EXPECT_NE(source_text.find("%subgroup_count = scf.select"),
             std::string::npos);
-  EXPECT_EQ(source_text.find("%workgroup_count = scf.select"),
+  EXPECT_NE(source_text.find("%bounded_token_count = index.assume %token_count "
+                             "[range(%token_count, 1, 2048), "
+                             "le(%token_count, %token_capacity)]"),
             std::string::npos);
-  EXPECT_EQ(source_text.find("%subgroup_count = scf.select"),
-            std::string::npos);
+  EXPECT_NE(
+      source_text.find("%safe_token = scf.select %valid_token, %token0, %zero"),
+      std::string::npos);
 }
 
-TEST(QwenLoomSourceTest, EmbedsWorkaroundFusedRouterSource) {
+TEST(QwenLoomSourceTest, EmbedsCanonicalFusedRouterSource) {
   qwen_loom_source_module_t source_module;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
       IREE_SV(QWEN_LOOM_SOURCE_ROUTER_PROJECTION_TOP8_FUSED_F32),
       &source_module));
 
+  EXPECT_TRUE(iree_string_view_equal(
+      source_module.source_identifier,
+      IREE_SV("qwen3_moe_router_projection_top8_fused_f32.loom")));
   std::string source_text(
       reinterpret_cast<const char*>(source_module.source_contents.data),
       source_module.source_contents.data_length);
-  EXPECT_NE(source_text.find("%route_count = config.get "
-                             "@qwen3_moe.router.route_count"),
+  EXPECT_NE(source_text.find(
+                "export(\"qwen3_moe_router_projection_top8_fused_decode_f32\") "
+                "@qwen3_moe_router_projection_top8_fused_decode_f32"),
             std::string::npos);
-  EXPECT_NE(
-      source_text.find("%route_count, %logits_noalias, %route_ids_noalias"),
-      std::string::npos);
-  EXPECT_EQ(source_text.find("%bounded_route_id_stride, %logits_noalias, "
+  EXPECT_NE(source_text.find("%bounded_route_id_stride, %logits_noalias, "
                              "%route_ids_noalias"),
+            std::string::npos);
+  EXPECT_NE(source_text.find("le(%route_count0, %bounded_route_id_stride0)"),
             std::string::npos);
 }
 
