@@ -58,6 +58,7 @@ from loom.dsl import (
     Result,
     SameType,
     SymbolDefinition,
+    SymbolDefinitionFlag,
     SymbolReference,
 )
 
@@ -110,6 +111,7 @@ _CASE_SYMBOL_DEF = SymbolDefinition(
     name="check case",
     interfaces=["record"],
     bytecode_kind="LOOM_SYMBOL_RECORD",
+    flags=[SymbolDefinitionFlag.TEST_ONLY],
 )
 
 
@@ -599,6 +601,7 @@ check_benchmark = Op(
         name="check benchmark",
         interfaces=["record"],
         bytecode_kind="LOOM_SYMBOL_RECORD",
+        flags=[SymbolDefinitionFlag.TEST_ONLY],
     ),
     format=[
         TemplateParam("case_ref"),

@@ -16,6 +16,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/target/provider.h"
 #include "loom/target/test/target_records.h"
@@ -110,6 +111,7 @@ class TargetSpecializationTest : public ::testing::Test {
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
+    RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(
@@ -457,6 +459,45 @@ func.def public @entry() {
                             },
                             /*diagnostic_emitter=*/{}, &arena_, &result));
   EXPECT_EQ(result.function_versions.count, 0u);
+}
+
+TEST_F(TargetSpecializationTest,
+       SpecializesAuthoredTargetDeclarationFromProfile) {
+  ModulePtr module = Parse(R"(
+target.decl @external
+
+func.def public target(@external) @entry() {
+  func.return
+}
+)");
+  const TestTargetProfile exact_profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  const loom_target_specialization_request_t request = {
+      /*.function_name=*/IREE_SV("entry"),
+      /*.target_profile=*/&exact_profile.base,
+  };
+  const loom_func_like_t entry = Function(module.get(), IREE_SV("entry"));
+  const loom_symbol_ref_t authored_target_ref = loom_func_like_target(entry);
+  const iree_host_size_t symbol_count = module->symbols.count;
+
+  const loom_target_specialization_result_t result =
+      Specialize(module.get(), &request, 1);
+  ASSERT_EQ(result.error_count, 0u);
+  ASSERT_EQ(result.function_versions.count, 1u);
+  EXPECT_EQ(module->symbols.count, symbol_count);
+  EXPECT_EQ(loom_func_like_target(entry).module_id,
+            authored_target_ref.module_id);
+  EXPECT_EQ(loom_func_like_target(entry).symbol_id,
+            authored_target_ref.symbol_id);
+  const loom_target_function_version_t* version =
+      loom_target_function_version_list_find(&result.function_versions, entry);
+  ASSERT_NE(version, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(version->authored_target_name,
+                                     IREE_SV("external")));
+  EXPECT_EQ(version->authored_target_facts, nullptr);
+  ASSERT_NE(version->effective_target_facts, nullptr);
+  EXPECT_EQ(version->effective_target_facts->selector,
+            LOOM_TEST_TARGET_KIND_LOW_CORE);
 }
 
 TEST_F(TargetSpecializationTest, RejectsMissingAndDuplicateFunctions) {

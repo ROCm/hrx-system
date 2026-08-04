@@ -1039,6 +1039,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_readonly_uniform_smem() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 16 : index
@@ -1082,6 +1083,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f32x4_readonly_uniform_smem_copy() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 16 : index
@@ -1136,6 +1138,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f32x8_readonly_uniform_smem_copy() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 16 : index
@@ -1206,6 +1209,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_workgroup_global_saddr() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 16 : index
@@ -1251,6 +1255,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_zero_workgroup_saddr_term() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1282,6 +1287,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_dynamic_leading_dim_global_saddr() {
   %unit = index.constant 1 : index
   %workgroups_x = index.constant 2 : index
@@ -1329,6 +1335,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_readonly_uniform_smem_non_power_two_stride() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 2 : index
@@ -1370,6 +1377,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_readonly_uniform_smem_scalar_branch() {
   %unit = index.constant 1 : index
   %workgroups = index.constant 16 : index
@@ -1422,6 +1430,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_readonly_uniform_smem_loop_bound() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1474,6 +1483,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @f32_readonly_uniform_smem_vector_math() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
@@ -1523,6 +1533,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_readonly_uniform_smem_address() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -1561,6 +1572,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i32_readonly_uniform_smem_guarded_index_address() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -1605,6 +1617,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @i64_readonly_uniform_smem_guarded_index_address() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
@@ -2820,6 +2833,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(16, 1, 
 // ====
 
 amdgpu.target<gfx11-generic> @target
+
 kernel.def target(@target) @grid_stride_store_offset() {
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index

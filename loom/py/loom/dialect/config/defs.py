@@ -33,7 +33,9 @@ from loom.dsl import (
     Op,
     Result,
     SymbolDefinition,
+    SymbolDefinitionFlag,
     SymbolReference,
+    SymbolValueContract,
 )
 
 # ============================================================================
@@ -46,11 +48,27 @@ config_ops = Dialect(
     doc="Compile/link-time configuration symbols and reads.",
 )
 
-_CONFIG_SYMBOL_DEF = SymbolDefinition(
+_CONFIG_DECL_SYMBOL_DEF = SymbolDefinition(
     field="symbol",
     name="config",
     interfaces=["config"],
     bytecode_kind="LOOM_SYMBOL_GLOBAL",
+    flags=[SymbolDefinitionFlag.DECLARATION],
+    value_contract=SymbolValueContract(
+        result="type",
+        predicates="predicates",
+    ),
+)
+
+_CONFIG_DEF_SYMBOL_DEF = SymbolDefinition(
+    field="symbol",
+    name="config",
+    interfaces=["config"],
+    bytecode_kind="LOOM_SYMBOL_GLOBAL",
+    value_contract=SymbolValueContract(
+        result="type",
+        value="value",
+    ),
 )
 
 _CONFIG_SYMBOL_REF = SymbolReference("config", ["config"])
@@ -70,7 +88,7 @@ config_decl = Op(
         "must resolve reachable config.get users to exactly one config.def."
     ),
     traits=[SYMBOL_DEFINE, PURE],
-    symbol_def=_CONFIG_SYMBOL_DEF,
+    symbol_def=_CONFIG_DECL_SYMBOL_DEF,
     attrs=[
         AttrDef("symbol", "symbol"),
         AttrDef("predicates", "predicate_list", optional=True),
@@ -111,7 +129,7 @@ config_def = Op(
         "ordinary value facts so config.get can fold through canonicalization."
     ),
     traits=[SYMBOL_DEFINE, PURE],
-    symbol_def=_CONFIG_SYMBOL_DEF,
+    symbol_def=_CONFIG_DEF_SYMBOL_DEF,
     attrs=[
         AttrDef("symbol", "symbol"),
         AttrDef("value", "any"),

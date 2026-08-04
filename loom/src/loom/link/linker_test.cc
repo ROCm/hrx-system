@@ -182,28 +182,6 @@ class LinkerTest : public ::testing::Test {
   std::vector<loom_module_t*> modules_;
 };
 
-TEST_F(LinkerTest, ResolvesForwardReferenceFromLaterCorpusModule) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-func.def @caller(%x: i32) -> (i32) {
-  %y = func.call @identity(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-)"));
-  loom_module_t* corpus = Parse(IREE_SV(R"(
-func.def @identity(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-
-  loom_module_t* linked = Link({harness, corpus});
-  Verify(linked);
-
-  std::string text = Print(linked);
-  EXPECT_NE(text.find("func.def @caller"), std::string::npos);
-  EXPECT_NE(text.find("func.call @identity"), std::string::npos);
-  EXPECT_NE(text.find("func.def @identity"), std::string::npos);
-}
-
 TEST_F(LinkerTest, ConcreteDefinitionSupersedesDeclaration) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 func.decl @identity(%x: i32) -> (i32)
@@ -225,6 +203,45 @@ func.def @identity(%x: i32) -> (i32) {
   std::string text = Print(linked);
   EXPECT_EQ(text.find("func.decl @identity"), std::string::npos);
   EXPECT_NE(text.find("func.def @identity"), std::string::npos);
+}
+
+TEST_F(LinkerTest, ConcreteTargetRecordSupersedesDeclaration) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+target.decl @gpu
+
+func.def target(@gpu) @entry() {
+  func.return
+}
+)"));
+  loom_module_t* corpus = Parse(IREE_SV(R"(
+test.target<low_core> @gpu
+)"));
+
+  Verify(harness);
+  loom_module_t* linked = Link({harness, corpus});
+  Verify(linked);
+
+  std::string text = Print(linked);
+  EXPECT_EQ(text.find("target.decl @gpu"), std::string::npos);
+  EXPECT_NE(text.find("test.target<low_core> @gpu"), std::string::npos);
+  EXPECT_NE(text.find("func.def target(@gpu) @entry"), std::string::npos);
+}
+
+TEST_F(LinkerTest, ConcreteRodataSupersedesDeclaration) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+global.rodata.decl @metadata
+)"));
+  loom_module_t* corpus = Parse(IREE_SV(R"(
+global.rodata.def @metadata = bytes("4c4f4f4d"), align 4
+)"));
+
+  loom_module_t* linked = Link({harness, corpus});
+  Verify(linked);
+
+  std::string text = Print(linked);
+  EXPECT_EQ(text.find("global.rodata.decl @metadata"), std::string::npos);
+  EXPECT_NE(text.find("global.rodata.def @metadata = bytes(\"4c4f4f4d\")"),
+            std::string::npos);
 }
 
 TEST_F(LinkerTest, SelectiveRootMaterializesReachableSymbols) {

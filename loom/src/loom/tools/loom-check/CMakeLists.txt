@@ -216,6 +216,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::format::text::parser
     loom::ir
+    loom::link::linker
     loom::ops::op_defs
   TESTONLY
   PUBLIC
@@ -248,6 +249,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::ir
+    loom::ops::config
     loom::ops::func
     loom::ops::index
     loom::ops::kernel

@@ -19,7 +19,6 @@ loom_cc_library(
   DEPS
     iree::base
     loom::ir
-    loom::ops::config
     loom::ops::op_defs
   PUBLIC
 )
@@ -36,9 +35,9 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::analysis::symbol_dependencies
+    loom::analysis::symbol_value_constraints
     loom::ir
     loom::ir::symbol_map
-    loom::ops::config
     loom::ops::func
     loom::ops::op_defs
     loom::rewrite::materialize
@@ -63,6 +62,7 @@ loom_cc_test(
     loom::format::text::printer
     loom::ir
     loom::ops::op_registry
+    loom::ops::target
     loom::ops::test
     loom::target::test::alt_descriptors
     loom::target::test::descriptors
@@ -105,6 +105,7 @@ loom_cc_test(
     loom::ops::check
     loom::ops::config
     loom::ops::func
+    loom::ops::target
     loom::ops::test
 )
 
@@ -145,6 +146,7 @@ loom_cc_test(
     loom::ops::check
     loom::ops::config
     loom::ops::func
+    loom::ops::target
     loom::ops::test
 )
 

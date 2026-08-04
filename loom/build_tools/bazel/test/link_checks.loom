@@ -1,3 +1,5 @@
+func.decl @scale(%input: buffer, %output: buffer)
+
 check.case public @scale_case {
   %input = check.generate.fill value(7) : tensor<4xi32>
   %output = check.generate.fill value(0) : tensor<4xi32>

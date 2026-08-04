@@ -1707,6 +1707,30 @@ TEST_F(ReaderTest, ReadsFunctionModuleIndex) {
   loom_module_free(module);
 }
 
+TEST_F(ReaderTest, RejectsDefinitionRolesNotDeclaredByOp) {
+  loom_module_t* module = CreateFunctionModule();
+  for (loom_bytecode_symbol_flags_t role : {
+           LOOM_BYTECODE_SYMBOL_FLAG_DECLARATION,
+           LOOM_BYTECODE_SYMBOL_FLAG_TEST_ONLY,
+       }) {
+    SCOPED_TRACE(role);
+    auto bytes = WriteModule(module);
+    size_t offset = SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_SYMBOLS);
+    ASSERT_EQ(ReadUVarint(bytes, &offset), 1u);  // symbol_count
+    uint64_t import_count = ReadUVarint(bytes, &offset);
+    uint64_t export_count = ReadUVarint(bytes, &offset);
+    offset += (import_count + export_count) * sizeof(uint64_t);
+    ReadUVarint(bytes, &offset);  // name_id
+    offset += 1;                  // kind
+    offset += 1;                  // visibility
+    uint16_t flags = ReadU16LE(bytes, offset);
+    WriteU16LE(&bytes, offset, flags | role);
+
+    ExpectReadError(bytes, "ERR_BYTECODE_006");
+  }
+  loom_module_free(module);
+}
+
 TEST_F(ReaderTest, RetainedFunctionSurvivesModuleRead) {
   loom_module_t* module = CreateRetainedFunctionModule();
   auto bytes = WriteModule(module);

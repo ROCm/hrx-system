@@ -141,11 +141,8 @@ typedef enum loomc_link_symbol_flag_bits_e {
   /// Symbol implements the config symbol interface.
   LOOMC_LINK_SYMBOL_FLAG_CONFIG = 1u << 5,
 
-  /// Symbol is a check.case correctness harness.
-  LOOMC_LINK_SYMBOL_FLAG_CHECK_CASE = 1u << 6,
-
-  /// Symbol is a check.benchmark policy record.
-  LOOMC_LINK_SYMBOL_FLAG_CHECK_BENCHMARK = 1u << 7,
+  /// Symbol exists only for test or benchmark tooling.
+  LOOMC_LINK_SYMBOL_FLAG_TEST_ONLY = 1u << 6,
 } loomc_link_symbol_flag_bits_t;
 
 /// Bitmask of `loomc_link_symbol_flag_bits_t` values.

@@ -65,6 +65,7 @@ from loom.dsl import (
     RegionDef,
     Result,
     SymbolDefinition,
+    SymbolDefinitionFlag,
     SymbolReference,
 )
 
@@ -371,6 +372,7 @@ func_decl = Op(
         bytecode_kind="LOOM_SYMBOL_FUNC_DECL",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
+        flags=[SymbolDefinitionFlag.DECLARATION],
     ),
     results=[Result("results", ANY, variadic=True)],
     interfaces=[FuncLikeInterface(**_FUNC_LIKE_DECL_CONTRACT, args_as_operands=True)],

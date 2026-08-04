@@ -111,7 +111,9 @@ __all__ = [
     "RegionDef",
     # Symbol support.
     "SymbolDefinition",
+    "SymbolDefinitionFlag",
     "SymbolReference",
+    "SymbolValueContract",
     # Enum support.
     "EnumCase",
     "EnumDef",
@@ -539,6 +541,7 @@ _VALID_SYMBOL_INTERFACES = frozenset(
         "global",
         "executable",
         "record",
+        "rodata",
         "target",
         "config",
     }
@@ -578,6 +581,39 @@ class SymbolReference:
         object.__setattr__(self, "interfaces", frozen_interfaces)
 
 
+@unique
+class SymbolDefinitionFlag(Enum):
+    """Generic roles carried by a symbol-defining operation."""
+
+    DECLARATION = "declaration"
+    TEST_ONLY = "test_only"
+
+
+@dataclass(frozen=True, slots=True)
+class SymbolValueContract:
+    """Declares the typed-value contract carried by a symbol definition.
+
+    result: Result field whose type is part of the symbol contract.
+    value: Optional attribute containing an exact definition value.
+    predicates: Optional predicate-list attribute constraining a partial value.
+
+    The generated indices let generic link code compare and merge typed symbol
+    contracts without switching on the concrete defining operation.
+    """
+
+    result: str
+    value: str | None = None
+    predicates: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.result:
+            raise ValueError("SymbolValueContract: result must be non-empty")
+        if self.value is not None and not self.value:
+            raise ValueError("SymbolValueContract: value must be non-empty")
+        if self.predicates is not None and not self.predicates:
+            raise ValueError("SymbolValueContract: predicates must be non-empty")
+
+
 @dataclass(frozen=True, slots=True)
 class SymbolDefinition:
     """Declares how an op defines a module symbol.
@@ -592,6 +628,10 @@ class SymbolDefinition:
     fact_domain: Optional C symbol for the dialect-owned symbol fact domain.
     retain: Optional enum attribute that marks symbols which ordinary symbol
         DCE must preserve even when unreachable.
+    flags: Generic roles that affect symbol processing independent of the
+        defining dialect.
+    value_contract: Optional typed-value contract described by generated field
+        indices.
     """
 
     field: str
@@ -600,6 +640,8 @@ class SymbolDefinition:
     bytecode_kind: str = "LOOM_SYMBOL_NONE"
     fact_domain: str | None = None
     retain: str | None = None
+    flags: tuple[SymbolDefinitionFlag, ...] = ()
+    value_contract: SymbolValueContract | None = None
 
     def __init__(
         self,
@@ -610,8 +652,11 @@ class SymbolDefinition:
         bytecode_kind: str = "LOOM_SYMBOL_NONE",
         fact_domain: str | None = None,
         retain: str | None = None,
+        flags: list[SymbolDefinitionFlag] | tuple[SymbolDefinitionFlag, ...] = (),
+        value_contract: SymbolValueContract | None = None,
     ) -> None:
         frozen_interfaces = tuple(interfaces)
+        frozen_flags = tuple(flags)
         if not field:
             raise ValueError("SymbolDefinition: field must be non-empty")
         if not name:
@@ -627,12 +672,34 @@ class SymbolDefinition:
                     f"'{interface}', must be one of "
                     f"{sorted(_VALID_SYMBOL_INTERFACES)}"
                 )
+        if len(frozen_flags) != len(set(frozen_flags)):
+            raise ValueError(f"SymbolDefinition '{name}': flags must be unique")
+        for flag in frozen_flags:
+            if not isinstance(flag, SymbolDefinitionFlag):
+                raise ValueError(
+                    f"SymbolDefinition '{name}': invalid flag {flag!r}, "
+                    "must be a SymbolDefinitionFlag"
+                )
         object.__setattr__(self, "field", field)
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "interfaces", frozen_interfaces)
         object.__setattr__(self, "bytecode_kind", bytecode_kind)
         object.__setattr__(self, "fact_domain", fact_domain)
         object.__setattr__(self, "retain", retain)
+        object.__setattr__(self, "flags", frozen_flags)
+        object.__setattr__(self, "value_contract", value_contract)
+
+    @property
+    def is_declaration(self) -> bool:
+        """Returns whether another definition may satisfy this declaration."""
+
+        return SymbolDefinitionFlag.DECLARATION in self.flags
+
+    @property
+    def is_test_only(self) -> bool:
+        """Returns whether the symbol exists only for tests or benchmarks."""
+
+        return SymbolDefinitionFlag.TEST_ONLY in self.flags
 
 
 @dataclass(frozen=True, slots=True)

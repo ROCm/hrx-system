@@ -207,6 +207,30 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_EQ(helper.identity, LOOMC_LINK_SYMBOL_IDENTITY_PRIVATE);
 }
 
+TEST(LinkIndexTest, ExposesGenericTestOnlySymbolRole) {
+  ContextPtr context = CreateContext();
+  BuilderPtr builder = CreateBuilder(context.get());
+  SourcePtr source = CreateTextSource("checks.loom", R"(
+check.case public @kernel_case {
+  check.return
+}
+)");
+  loomc_link_index_source_options_t options = {
+      /*.provider_name=*/loomc_make_cstring_view("checks"),
+      /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
+  };
+  LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
+      builder.get(), source.get(), &options, nullptr));
+
+  LinkIndexPtr link_index;
+  FinishSucceeded(builder.get(), &link_index);
+
+  loomc_link_index_symbol_t symbol = {};
+  ASSERT_TRUE(loomc_link_index_lookup_global(
+      link_index.get(), loomc_make_cstring_view("@kernel_case"), &symbol));
+  EXPECT_TRUE((symbol.flags & LOOMC_LINK_SYMBOL_FLAG_TEST_ONLY) != 0);
+}
+
 TEST(LinkIndexTest, InputProviderPrecedesLibraryProvider) {
   ContextPtr context = CreateContext();
   BuilderPtr builder = CreateBuilder(context.get());

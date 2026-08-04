@@ -269,11 +269,8 @@ static loomc_link_symbol_flags_t loomc_link_symbol_flags_from_loom(
   if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_CONFIG)) {
     result |= LOOMC_LINK_SYMBOL_FLAG_CONFIG;
   }
-  if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_CHECK_CASE)) {
-    result |= LOOMC_LINK_SYMBOL_FLAG_CHECK_CASE;
-  }
-  if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_CHECK_BENCHMARK)) {
-    result |= LOOMC_LINK_SYMBOL_FLAG_CHECK_BENCHMARK;
+  if (iree_all_bits_set(flags, LOOM_LINK_SYMBOL_FLAG_TEST_ONLY)) {
+    result |= LOOMC_LINK_SYMBOL_FLAG_TEST_ONLY;
   }
   return result;
 }

@@ -774,7 +774,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_collect_rodata_symbols(
   iree_host_size_t rodata_count = 0;
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
     const loom_symbol_t* symbol = &module->symbols.entries[i];
-    if (symbol->defining_op && loom_global_rodata_isa(symbol->defining_op)) {
+    if (symbol->defining_op &&
+        loom_global_rodata_def_isa(symbol->defining_op)) {
       ++rodata_count;
     }
   }
@@ -789,16 +790,16 @@ static iree_status_t loom_amdgpu_hal_kernel_library_collect_rodata_symbols(
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
     const loom_symbol_t* symbol = &module->symbols.entries[i];
     const loom_op_t* op = symbol->defining_op;
-    if (!op || !loom_global_rodata_isa(op)) {
+    if (!op || !loom_global_rodata_def_isa(op)) {
       continue;
     }
 
     const iree_string_view_t name =
         loom_amdgpu_hal_kernel_library_rodata_symbol_name(module, symbol);
-    const iree_const_byte_span_t contents = loom_global_rodata_contents(op);
+    const iree_const_byte_span_t contents = loom_global_rodata_def_contents(op);
     uint64_t alignment = 0;
     const loom_attribute_t alignment_attr =
-        loom_op_const_attrs(op)[loom_global_rodata_alignment_ATTR_INDEX];
+        loom_op_const_attrs(op)[loom_global_rodata_def_alignment_ATTR_INDEX];
     if (!loom_attr_is_absent(alignment_attr)) {
       alignment = (uint64_t)loom_attr_as_i64(alignment_attr);
     }

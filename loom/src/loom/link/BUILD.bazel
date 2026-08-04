@@ -19,7 +19,6 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/config",
         "//runtime/src/iree/base",
     ],
 )
@@ -31,10 +30,10 @@ loom_cc_library(
     deps = [
         ":symbol_policy",
         "//loom/src/loom/analysis:symbol_dependencies",
+        "//loom/src/loom/analysis:symbol_value_constraints",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:symbol_map",
         "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/config",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/rewrite:materialize",
         "//loom/src/loom/rewrite:remap",
@@ -54,6 +53,7 @@ loom_cc_test(
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/target/test:alt_descriptors",
         "//loom/src/loom/target/test:descriptors",
@@ -91,6 +91,7 @@ loom_cc_test(
         "//loom/src/loom/ops/check",
         "//loom/src/loom/ops/config",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/test",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -127,6 +128,7 @@ loom_cc_test(
         "//loom/src/loom/ops/check",
         "//loom/src/loom/ops/config",
         "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/test",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

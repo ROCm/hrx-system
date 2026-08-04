@@ -40,6 +40,9 @@ typedef struct loom_text_parse_options_t {
 // functions, regions, blocks), format element walker for op interiors
 // (same .rodata tables the printer uses). Two arenas: module arena
 // (persistent IR), parser arena (transient scope/accumulator storage).
+// Symbol references may precede their declaration or definition within the
+// source, but a clean parse never exposes an unresolved symbol-table entry.
+// Missing declarations or definitions produce ERR_SYMBOL_002.
 //
 // Security model: input is untrusted. Every token, integer, and index
 // is validated before use. Failures produce structured diagnostics

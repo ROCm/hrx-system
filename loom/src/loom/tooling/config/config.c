@@ -11,16 +11,23 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/json.h"
+#include "loom/analysis/symbol_value_constraints.h"
 #include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
 #include "loom/ir/attribute.h"
 #include "loom/ir/encoding.h"
-#include "loom/ops/config/contract.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/encoding/roles.h"
 #include "loom/tooling/io/file.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
+
+static loom_value_id_t loom_tooling_config_symbol_result_value(
+    const loom_op_t* op) {
+  if (loom_config_decl_isa(op)) return loom_config_decl_type(op);
+  if (loom_config_def_isa(op)) return loom_config_def_type(op);
+  return LOOM_VALUE_ID_INVALID;
+}
 
 void loom_tooling_config_materialize_options_initialize(
     loom_tooling_config_materialize_options_t* out_options) {
@@ -720,7 +727,7 @@ static iree_status_t loom_tooling_config_replace_with_def(
   loom_op_t* before_op = old_op->next_op;
   loom_op_t* parent_op = old_op->parent_op;
   loom_location_id_t location = old_op->location;
-  loom_value_id_t old_result = loom_config_symbol_result_value(old_op);
+  loom_value_id_t old_result = loom_tooling_config_symbol_result_value(old_op);
 
   IREE_RETURN_IF_ERROR(loom_op_erase(module, old_op));
 
@@ -790,7 +797,8 @@ iree_status_t loom_tooling_config_materialize_module(
                               (int)key.size, key.data);
     }
     loom_op_t* old_op = symbol->defining_op;
-    loom_value_id_t config_value = loom_config_symbol_result_value(old_op);
+    loom_value_id_t config_value =
+        loom_tooling_config_symbol_result_value(old_op);
     if (config_value == LOOM_VALUE_ID_INVALID ||
         config_value >= module->values.count) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -803,7 +811,7 @@ iree_status_t loom_tooling_config_materialize_module(
     IREE_RETURN_IF_ERROR(loom_tooling_config_parse_value(
         module, key, config_type, value_text, block_pool, &value));
     if (loom_config_decl_isa(old_op)) {
-      IREE_RETURN_IF_ERROR(loom_config_check_value_constraints(
+      IREE_RETURN_IF_ERROR(loom_symbol_value_constraints_check_exact(
           loom_tooling_config_symbol_name(module, symbol), config_type,
           loom_config_decl_type(old_op), value,
           loom_config_decl_predicates(old_op)));
@@ -973,7 +981,7 @@ static iree_status_t loom_tooling_config_format_schema_entry_json(
                             (int)symbol_name.size, symbol_name.data);
   }
 
-  loom_value_id_t config_value = loom_config_symbol_result_value(op);
+  loom_value_id_t config_value = loom_tooling_config_symbol_result_value(op);
   if (config_value == LOOM_VALUE_ID_INVALID ||
       config_value >= module->values.count) {
     iree_string_view_t symbol_name =

@@ -155,9 +155,9 @@ kernel.def target(@target) @write_kernel() {
 
   const loom_op_t* site_table_op = FindSiteTableOp(module.get());
   ASSERT_NE(site_table_op, nullptr);
-  ASSERT_TRUE(loom_global_rodata_isa(site_table_op));
+  ASSERT_TRUE(loom_global_rodata_def_isa(site_table_op));
   const iree_const_byte_span_t contents =
-      loom_global_rodata_contents(site_table_op);
+      loom_global_rodata_def_contents(site_table_op);
   ASSERT_GE(contents.data_length,
             LOOM_SANITIZER_SITE_TABLE_HEADER_LENGTH +
                 2 * LOOM_SANITIZER_SITE_TABLE_RECORD_LENGTH);

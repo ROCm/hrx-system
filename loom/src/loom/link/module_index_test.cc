@@ -22,6 +22,7 @@
 #include "loom/ops/check/ops.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
 
 namespace loom {
@@ -63,6 +64,8 @@ class ModuleIndexTest : public ::testing::Test {
                     loom_config_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables,
                     loom_func_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables,
+                    loom_target_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables,
                     loom_test_dialect_op_semantics);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
@@ -265,6 +268,52 @@ func.decl public import("math", "dot") @dot(%a: f32, %b: f32) -> (f32)
   EXPECT_FALSE(iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT));
 }
 
+TEST_F(ModuleIndexTest, TargetDeclarationsHaveGlobalIdentity) {
+  loom_module_t* module = Parse(IREE_SV(R"(
+target.decl @gpu
+)"));
+  IndexPtr index = CreateIndex();
+  loom_link_module_index_add_options_t options = {
+      /*.provider_name=*/IREE_SV("targets"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+  };
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      index.get(), module, &options, /*out_provider_ordinal=*/nullptr));
+
+  const loom_link_module_index_symbol_t* symbol =
+      loom_link_module_index_lookup_global(index.get(), IREE_SV("@gpu"));
+  ASSERT_NE(symbol, nullptr);
+  EXPECT_EQ(symbol->identity, LOOM_LINK_SYMBOL_IDENTITY_GLOBAL);
+  EXPECT_TRUE(
+      iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_DECLARATION));
+  EXPECT_FALSE(iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT));
+}
+
+TEST_F(ModuleIndexTest, IndexesBytecodeTargetDeclarations) {
+  loom_module_t* module = Parse(IREE_SV(R"(
+target.decl @gpu
+)"));
+  std::vector<uint8_t> bytes = WriteModule(module);
+
+  IndexPtr index = CreateIndex();
+  loom_link_module_index_add_options_t options = {
+      /*.provider_name=*/IREE_SV("targets"),
+      /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+  };
+  IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
+      index.get(), iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("targets.loombc"), /*read_options=*/nullptr, &options,
+      /*out_provider_ordinal=*/nullptr));
+
+  const loom_link_module_index_symbol_t* symbol =
+      loom_link_module_index_lookup_global(index.get(), IREE_SV("@gpu"));
+  ASSERT_NE(symbol, nullptr);
+  EXPECT_EQ(symbol->identity, LOOM_LINK_SYMBOL_IDENTITY_GLOBAL);
+  EXPECT_TRUE(
+      iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_DECLARATION));
+  EXPECT_FALSE(iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT));
+}
+
 TEST_F(ModuleIndexTest, IndexesBytecodeProviderWithoutMaterializingModule) {
   loom_module_t* module = Parse(IREE_SV(R"(
 func.def public @exported(%x: i32) -> (i32) {
@@ -299,7 +348,7 @@ func.def public @exported(%x: i32) -> (i32) {
   EXPECT_TRUE(iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_EXPORT));
 }
 
-TEST_F(ModuleIndexTest, IndexesCheckSymbolsForStripPolicy) {
+TEST_F(ModuleIndexTest, IndexesTestOnlySymbolRole) {
   loom_module_t* module = Parse(IREE_SV(R"(
 check.case public @kernel_case {
   check.return
@@ -309,13 +358,24 @@ check.benchmark<@kernel_case>
 check.benchmark<@kernel_case> @kernel_bench {}
 )"));
   ASSERT_NE(module, nullptr);
-  std::vector<uint8_t> bytes = WriteModule(module);
-
-  IndexPtr index = CreateIndex();
   loom_link_module_index_add_options_t options = {
       /*.provider_name=*/IREE_SV("checks"),
       /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
   };
+  IndexPtr materialized_index = CreateIndex();
+  IREE_ASSERT_OK(loom_link_module_index_add_materialized(
+      materialized_index.get(), module, &options,
+      /*out_provider_ordinal=*/nullptr));
+  const loom_link_module_index_symbol_t* materialized_case =
+      loom_link_module_index_lookup_global(materialized_index.get(),
+                                           IREE_SV("kernel_case"));
+  ASSERT_NE(materialized_case, nullptr);
+  EXPECT_TRUE(iree_all_bits_set(materialized_case->flags,
+                                LOOM_LINK_SYMBOL_FLAG_TEST_ONLY));
+
+  std::vector<uint8_t> bytes = WriteModule(module);
+
+  IndexPtr index = CreateIndex();
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index.get(), iree_make_const_byte_span(bytes.data(), bytes.size()),
       IREE_SV("checks.loombc"), /*read_options=*/nullptr, &options,
@@ -326,7 +386,7 @@ check.benchmark<@kernel_case> @kernel_bench {}
       loom_link_module_index_lookup_global(index.get(), IREE_SV("kernel_case"));
   ASSERT_NE(check_case, nullptr);
   EXPECT_TRUE(
-      iree_all_bits_set(check_case->flags, LOOM_LINK_SYMBOL_FLAG_CHECK_CASE));
+      iree_all_bits_set(check_case->flags, LOOM_LINK_SYMBOL_FLAG_TEST_ONLY));
   EXPECT_TRUE(
       iree_all_bits_set(check_case->flags, LOOM_LINK_SYMBOL_FLAG_HAS_BODY));
 
@@ -337,8 +397,8 @@ check.benchmark<@kernel_case> @kernel_bench {}
       loom_link_module_index_lookup_private(index.get(), indexed_module,
                                             IREE_SV("kernel_bench"));
   ASSERT_NE(benchmark, nullptr);
-  EXPECT_TRUE(iree_all_bits_set(benchmark->flags,
-                                LOOM_LINK_SYMBOL_FLAG_CHECK_BENCHMARK));
+  EXPECT_TRUE(
+      iree_all_bits_set(benchmark->flags, LOOM_LINK_SYMBOL_FLAG_TEST_ONLY));
 }
 
 TEST_F(ModuleIndexTest, IndexesTextProviderThroughMaterializedColdPath) {

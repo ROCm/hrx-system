@@ -893,6 +893,24 @@ static iree_status_t loom_ir_remap_attribute_impl(
       return iree_ok_status();
     }
 
+    case LOOM_ATTR_BYTES: {
+      const uint32_t byte_length = source_attr.reserved_1;
+      if (byte_length == 0) {
+        out_target_attr->bytes = NULL;
+        return iree_ok_status();
+      }
+      if (!source_attr.bytes) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "non-empty bytes attribute has a NULL payload");
+      }
+      uint8_t* target_bytes = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(payload_arena, byte_length,
+                                               (void**)&target_bytes));
+      memcpy(target_bytes, source_attr.bytes, byte_length);
+      out_target_attr->bytes = target_bytes;
+      return iree_ok_status();
+    }
+
     case LOOM_ATTR_PREDICATE_LIST: {
       loom_predicate_t* target_predicates = NULL;
       IREE_RETURN_IF_ERROR(loom_ir_remap_predicate_list_into(

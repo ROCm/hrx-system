@@ -15,7 +15,6 @@ loom_generated_cc_library(
   GENERATOR
     loom::py::loom::gen::ops::c_tables_config_generator
   SRCS
-    "contract.c"
     "facts.c"
     "verify.c"
   GENERATED_SRC_FLAGS
@@ -25,7 +24,6 @@ loom_generated_cc_library(
     "builders.c"
     "tables.c"
   HDRS
-    "contract.h"
     "ops.h"
   ARGS
     "--dialect=config"

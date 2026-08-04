@@ -168,6 +168,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_getpc_assembly(%res
 
 // RUN: emit amdgpu-assembly @gfx11_rel32_pc_copy waits=none strategy=source fixed=%pc:physical_register:4:2 fixed=%pc_copy:physical_register:20:2 fixed=%config_lo:physical_register:22:1 fixed=%config_hi:physical_register:23:1 fixed=%shadow_base:physical_register:24:2
 amdgpu.target<gfx1100> @gfx11_target
+global.rodata.decl @iree_asan_config
 low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_rel32_pc_copy() asm {
   %pc = s_getpc_b64
   %pc_copy = copy %pc : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr x2>

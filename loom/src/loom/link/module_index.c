@@ -401,17 +401,6 @@ static iree_string_view_t loom_link_materialized_symbol_provider_contract(
 // Symbol classification
 //===----------------------------------------------------------------------===//
 
-static loom_link_symbol_flags_t loom_link_check_symbol_flags(
-    iree_string_view_t defining_op_name) {
-  if (iree_string_view_equal(defining_op_name, IREE_SV("check.case"))) {
-    return LOOM_LINK_SYMBOL_FLAG_CHECK_CASE;
-  }
-  if (iree_string_view_equal(defining_op_name, IREE_SV("check.benchmark"))) {
-    return LOOM_LINK_SYMBOL_FLAG_CHECK_BENCHMARK;
-  }
-  return 0;
-}
-
 static bool loom_link_materialized_symbol_has_visibility_attr(
     const loom_module_t* module, const loom_symbol_t* symbol) {
   if (!symbol->defining_op) return false;
@@ -451,11 +440,9 @@ static loom_link_symbol_flags_t loom_link_materialized_symbol_flags(
   if (loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_CONFIG)) {
     flags |= LOOM_LINK_SYMBOL_FLAG_CONFIG;
   }
-  if (symbol->defining_op) {
-    flags |= loom_link_check_symbol_flags(
-        loom_op_vtable_name(loom_op_vtable(module, symbol->defining_op)));
+  if (loom_symbol_definition_is_test_only(symbol->definition)) {
+    flags |= LOOM_LINK_SYMBOL_FLAG_TEST_ONLY;
   }
-
   loom_func_like_t func = loom_func_like_cast(module, symbol->defining_op);
   const bool has_import =
       loom_func_like_isa(func) &&
@@ -496,14 +483,6 @@ static loom_symbol_kind_t loom_link_bytecode_symbol_kind(
   }
 }
 
-static bool loom_link_bytecode_symbol_is_config(
-    const loom_bytecode_symbol_metadata_t* symbol) {
-  return iree_string_view_equal(symbol->defining_op_name,
-                                IREE_SV("config.decl")) ||
-         iree_string_view_equal(symbol->defining_op_name,
-                                IREE_SV("config.def"));
-}
-
 static loom_link_symbol_flags_t loom_link_bytecode_symbol_flags(
     const loom_bytecode_symbol_metadata_t* symbol) {
   loom_link_symbol_flags_t flags = 0;
@@ -521,18 +500,19 @@ static loom_link_symbol_flags_t loom_link_bytecode_symbol_flags(
   if (is_public && !is_import) {
     flags |= LOOM_LINK_SYMBOL_FLAG_EXPORT;
   }
-  if (symbol->kind == LOOM_BYTECODE_SYMBOL_FUNC_DECL || is_import ||
-      iree_string_view_equal(symbol->defining_op_name,
-                             IREE_SV("config.decl"))) {
+  if (iree_any_bit_set(symbol->flags, LOOM_BYTECODE_SYMBOL_FLAG_DECLARATION) ||
+      is_import) {
     flags |= LOOM_LINK_SYMBOL_FLAG_DECLARATION;
   }
   if (symbol->has_body) {
     flags |= LOOM_LINK_SYMBOL_FLAG_HAS_BODY;
   }
-  if (loom_link_bytecode_symbol_is_config(symbol)) {
+  if (iree_any_bit_set(symbol->interfaces, LOOM_SYMBOL_INTERFACE_CONFIG)) {
     flags |= LOOM_LINK_SYMBOL_FLAG_CONFIG;
   }
-  flags |= loom_link_check_symbol_flags(symbol->defining_op_name);
+  if (iree_any_bit_set(symbol->flags, LOOM_BYTECODE_SYMBOL_FLAG_TEST_ONLY)) {
+    flags |= LOOM_LINK_SYMBOL_FLAG_TEST_ONLY;
+  }
   return flags;
 }
 

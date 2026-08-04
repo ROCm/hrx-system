@@ -44,3 +44,9 @@ class TargetBuilder(DialectBuilder):
         contract_feature_bits: int | None = ...,
         location_id: int | None = ...,
     ) -> None: ...
+    def decl(
+        self,
+        *,
+        symbol: str,
+        location_id: int | None = ...,
+    ) -> None: ...

@@ -304,6 +304,17 @@ iree_status_t loom_parse_symbol_ref_attr(loom_parser_t* parser,
         loom_module_add_symbol(parser->module, name_id, &ref.symbol_id));
     IREE_RETURN_IF_ERROR(loom_symbol_map_insert(
         &parser->symbol_lookup, &parser->parser_arena, name_id, ref.symbol_id));
+    loom_parser_symbol_origins_t* origins = &parser->symbol_origins;
+    if (origins->count >= origins->capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          &parser->parser_arena, origins->count, origins->count + 1,
+          sizeof(loom_parser_symbol_origin_t), &origins->capacity,
+          (void**)&origins->entries));
+    }
+    origins->entries[origins->count++] = (loom_parser_symbol_origin_t){
+        .symbol_id = ref.symbol_id,
+        .token = token,
+    };
   }
   *out_attr = loom_attr_symbol(ref);
   return iree_ok_status();

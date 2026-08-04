@@ -22,6 +22,7 @@
 #include "loom/ops/check/ops.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/target/ops.h"
 #include "loom/ops/test/ops.h"
 
 namespace loom {
@@ -55,6 +56,8 @@ class LinkPlannerTest : public ::testing::Test {
                     loom_config_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables,
                     loom_func_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables,
+                    loom_target_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables,
                     loom_test_dialect_op_semantics);
     IREE_ASSERT_OK(loom_context_finalize(&context_));
@@ -386,7 +389,7 @@ func.def public @unused(%x: i32) -> (i32) {
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
       /*.include_exported_roots=*/{},
       /*.unresolved_policy=*/{},
-      /*.check_policy=*/{},
+      /*.test_symbol_policy=*/{},
       /*.strip_symbol=*/{},
       /*.strip_symbol_user_data=*/{},
       /*.materialize_module=*/MaterializeUsedBytecodeModule,
@@ -463,7 +466,7 @@ func.template<demo.unused> @unused_provider(%x: i32) -> (i32) {
       },
       /*.include_exported_roots=*/{},
       /*.unresolved_policy=*/{},
-      /*.check_policy=*/{},
+      /*.test_symbol_policy=*/{},
       /*.strip_symbol=*/{},
       /*.strip_symbol_user_data=*/{},
       /*.materialize_module=*/MaterializeUsedBytecodeModule,
@@ -589,6 +592,48 @@ func.def public @unused(%x: i32) -> (i32) {
   EXPECT_EQ(planned_decl->reason, LOOM_LINK_PLAN_LIVE_DEPENDENCY);
   EXPECT_EQ(planned_def->reason, LOOM_LINK_PLAN_LIVE_DEPENDENCY);
   EXPECT_EQ(planned_def->cause_ordinal, planned_decl->ordinal);
+}
+
+TEST_F(LinkPlannerTest, SelectiveTargetDeclarationPullsConcreteRecord) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+target.decl @gpu
+
+func.def public target(@gpu) @entry() {
+  func.return
+}
+)"));
+  loom_module_t* library = Parse(IREE_SV(R"(
+test.target<low_core> @gpu
+)"));
+
+  IndexPtr index = CreateIndex();
+  AddMaterialized(index.get(), harness, IREE_SV("harness"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+  AddMaterialized(index.get(), library, IREE_SV("library"),
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+  iree_string_view_t roots[] = {IREE_SV("@entry")};
+  loom_link_plan_options_t options = {
+      /*.mode=*/LOOM_LINK_PLAN_SELECTIVE,
+      /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+  };
+  PlanPtr plan = BuildPlan(index.get(), &options);
+
+  const loom_link_module_index_symbol_t* entry =
+      loom_link_module_index_lookup_global(index.get(), IREE_SV("entry"));
+  const loom_link_module_index_symbol_t* target_decl =
+      loom_link_module_index_lookup_global(index.get(), IREE_SV("gpu"));
+  ASSERT_NE(target_decl, nullptr);
+  const loom_link_module_index_module_t* library_module =
+      loom_link_module_index_module_at(index.get(), 1);
+  ASSERT_NE(library_module, nullptr);
+  const loom_link_module_index_symbol_t* target_def =
+      loom_link_module_index_lookup_private(index.get(), library_module,
+                                            IREE_SV("gpu"));
+  ASSERT_NE(target_def, nullptr);
+
+  EXPECT_TRUE(ContainsSymbol(plan.get(), entry));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), target_decl));
+  EXPECT_TRUE(ContainsSymbol(plan.get(), target_def));
 }
 
 TEST_F(LinkPlannerTest, SelectiveDeclarationMayPullPrivateConcreteDefinition) {
@@ -873,7 +918,7 @@ func.def @helper(%x: i32) -> (i32) {
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
       /*.include_exported_roots=*/{},
       /*.unresolved_policy=*/{},
-      /*.check_policy=*/{},
+      /*.test_symbol_policy=*/{},
       /*.strip_symbol=*/StripNamedSymbol,
       /*.strip_symbol_user_data=*/&stripped_name,
   };
@@ -896,7 +941,7 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_FALSE(ContainsSymbol(plan.get(), helper));
 }
 
-TEST_F(LinkPlannerTest, CheckStripPolicyRemovesBytecodeCasesAndBenchmarks) {
+TEST_F(LinkPlannerTest, TestSymbolStripPolicyRemovesBytecodeSymbols) {
   loom_module_t* module = Parse(IREE_SV(R"(
 func.def public @kernel(%x: i32) -> (i32) {
   func.return %x : i32
@@ -933,7 +978,7 @@ check.benchmark<@kernel_case> @kernel_bench
       /*.root_symbols=*/{},
       /*.include_exported_roots=*/{},
       /*.unresolved_policy=*/{},
-      /*.check_policy=*/LOOM_LINK_PLAN_CHECK_STRIP,
+      /*.test_symbol_policy=*/LOOM_LINK_PLAN_TEST_SYMBOL_STRIP,
   };
   PlanPtr plan = BuildPlan(index.get(), &strip_options);
 
@@ -949,7 +994,7 @@ check.benchmark<@kernel_case> @kernel_bench
   EXPECT_FALSE(ContainsSymbol(plan.get(), benchmark));
 }
 
-TEST_F(LinkPlannerTest, KeepCheckPolicyPreservesCaseDependencies) {
+TEST_F(LinkPlannerTest, KeepTestSymbolPolicyPreservesDependencies) {
   loom_module_t* module = Parse(IREE_SV(R"(
 func.def public @kernel(%x: i32) -> (i32) {
   func.return %x : i32
@@ -981,7 +1026,7 @@ check.case public @kernel_case {
   EXPECT_TRUE(ContainsSymbol(plan.get(), check_case));
 }
 
-TEST_F(LinkPlannerTest, CheckStripPolicyRejectsStrippedRoots) {
+TEST_F(LinkPlannerTest, TestSymbolStripPolicyRejectsStrippedRoots) {
   loom_module_t* module = Parse(IREE_SV(R"(
 check.case public @kernel_case {
   check.return
@@ -997,7 +1042,7 @@ check.case public @kernel_case {
       /*.root_symbols=*/{/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
       /*.include_exported_roots=*/{},
       /*.unresolved_policy=*/{},
-      /*.check_policy=*/LOOM_LINK_PLAN_CHECK_STRIP,
+      /*.test_symbol_policy=*/LOOM_LINK_PLAN_TEST_SYMBOL_STRIP,
   };
 
   PlanPtr plan;

@@ -72,10 +72,9 @@ static iree_status_t loom_link_plan_reserve_symbols(loom_link_plan_t* plan,
 static bool loom_link_plan_symbol_is_stripped(
     const loom_link_plan_options_t* options, const loom_link_plan_t* plan,
     const loom_link_module_index_symbol_t* symbol) {
-  const loom_link_symbol_flags_t check_flags =
-      LOOM_LINK_SYMBOL_FLAG_CHECK_CASE | LOOM_LINK_SYMBOL_FLAG_CHECK_BENCHMARK;
-  if (options && options->check_policy == LOOM_LINK_PLAN_CHECK_STRIP &&
-      iree_any_bit_set(symbol->flags, check_flags)) {
+  if (options &&
+      options->test_symbol_policy == LOOM_LINK_PLAN_TEST_SYMBOL_STRIP &&
+      iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_TEST_ONLY)) {
     return true;
   }
   return options && options->strip_symbol &&

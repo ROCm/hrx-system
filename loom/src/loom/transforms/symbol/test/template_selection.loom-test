@@ -579,3 +579,51 @@ func.def public @entry(%value: f32) -> (f32) {
   %sum = func.apply<demo.workgroup_reduce>(%value) : (f32) -> (f32)
   func.return %sum : f32
 }
+
+// ====
+
+// A target declaration preserves the target witness while target-neutral
+// specialization proceeds without inventing target facts.
+// RUN: pass select-templates,inline-callables
+
+target.decl @external
+
+func.template<demo.partial_target> @identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@external) @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.partial_target>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+target.decl @external
+
+func.def public target(@external) @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}
+
+// ====
+
+// The shared declaration identity is sufficient to specialize a provider that
+// names the same still-partial target contract.
+// RUN: pass select-templates,inline-callables
+
+target.decl @external
+
+func.template<demo.partial_target_identity> target(@external) @identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public target(@external) @entry(%arg: i32) -> (i32) {
+  %result = func.apply<demo.partial_target_identity>(%arg) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+target.decl @external
+
+func.def public target(@external) @entry(%arg: i32) -> (i32) {
+  func.return %arg : i32
+}

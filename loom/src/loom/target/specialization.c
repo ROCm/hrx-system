@@ -29,8 +29,11 @@ typedef struct loom_target_resolved_specialization_t {
   // Function facts projected at specialization construction.
   const loom_func_symbol_facts_t* function_facts;
 
-  // Authored target facts, or NULL for a targetless function.
-  const loom_target_symbol_facts_t* authored_target;
+  // Authored target witness name, or empty for a targetless function.
+  iree_string_view_t authored_target_name;
+
+  // Authored target facts when projected by the target witness, or NULL.
+  const loom_target_symbol_facts_t* authored_target_facts;
 
   // Compiler-owned target-refined function version.
   loom_target_function_version_t* version;
@@ -45,20 +48,17 @@ static iree_string_view_t loom_target_specialization_normalize_function_name(
 
 static iree_status_t loom_target_specialization_lookup_target(
     const loom_module_t* module, loom_symbol_fact_table_t* fact_table,
-    loom_symbol_ref_t target_ref,
-    const loom_target_symbol_facts_t** out_target) {
-  *out_target = NULL;
+    loom_symbol_ref_t target_ref, iree_string_view_t* out_target_name,
+    const loom_target_symbol_facts_t** out_target_facts) {
+  *out_target_name = iree_string_view_empty();
+  *out_target_facts = NULL;
   const loom_symbol_facts_base_t* base_facts = NULL;
   IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(
       fact_table, module, target_ref, &base_facts));
-  const loom_target_symbol_facts_t* target_facts =
-      loom_target_symbol_facts_cast(base_facts);
-  if (target_facts == NULL) {
-    IREE_ASSERT_UNREACHABLE(
-        "verified function target has no indexed target facts");
-    IREE_BUILTIN_UNREACHABLE();
-  }
-  *out_target = target_facts;
+  const loom_symbol_t* target_symbol =
+      &module->symbols.entries[target_ref.symbol_id];
+  *out_target_name = module->strings.entries[target_symbol->name_id];
+  *out_target_facts = loom_target_symbol_facts_cast(base_facts);
   return iree_ok_status();
 }
 
@@ -120,17 +120,20 @@ static iree_status_t loom_target_specialization_resolve_function(
   }
 
   const loom_symbol_ref_t authored_target_ref = function_facts->target_symbol;
-  const loom_target_symbol_facts_t* authored_target = NULL;
+  iree_string_view_t authored_target_name = iree_string_view_empty();
+  const loom_target_symbol_facts_t* authored_target_facts = NULL;
   if (loom_symbol_ref_is_valid(authored_target_ref)) {
     IREE_RETURN_IF_ERROR(loom_target_specialization_lookup_target(
-        module, fact_table, authored_target_ref, &authored_target));
+        module, fact_table, authored_target_ref, &authored_target_name,
+        &authored_target_facts));
   }
 
   *out_specialization = (loom_target_resolved_specialization_t){
       .function = function,
       .function_name_id = function_name_id,
       .function_facts = function_facts,
-      .authored_target = authored_target,
+      .authored_target_name = authored_target_name,
+      .authored_target_facts = authored_target_facts,
   };
   return iree_ok_status();
 }
@@ -143,7 +146,7 @@ static iree_status_t loom_target_specialization_emit_conflict(
       module->strings.entries[specialization->function_name_id];
   const loom_diagnostic_param_t params[] = {
       loom_param_string(function_name),
-      loom_param_string(specialization->authored_target->name),
+      loom_param_string(specialization->authored_target_name),
       loom_param_string(effective_target_name),
   };
   const loom_diagnostic_emission_t emission = {
@@ -168,9 +171,10 @@ static iree_status_t loom_target_specialization_prepare_versions(
     loom_target_facts_t* effective_facts = NULL;
     IREE_RETURN_IF_ERROR(loom_target_profile_project_facts(
         specialization->target_profile, arena, &effective_facts));
-    if (specialization->authored_target != NULL &&
+    if (specialization->authored_target_facts != NULL &&
         !loom_target_facts_satisfy_requirement(
-            effective_facts, specialization->authored_target->projection)) {
+            effective_facts,
+            specialization->authored_target_facts->projection)) {
       IREE_RETURN_IF_ERROR(loom_target_specialization_emit_conflict(
           diagnostic_emitter, module, specialization,
           loom_target_facts_identity_name(effective_facts)));
@@ -180,14 +184,14 @@ static iree_status_t loom_target_specialization_prepare_versions(
       continue;
     }
 
-    if (specialization->authored_target != NULL) {
+    if (specialization->authored_target_facts != NULL) {
       loom_target_facts_builder_apply_requirement(
-          specialization->authored_target->projection, effective_facts);
+          specialization->authored_target_facts->projection, effective_facts);
     }
 
     const iree_string_view_t target_name =
-        specialization->authored_target != NULL
-            ? specialization->authored_target->name
+        !iree_string_view_is_empty(specialization->authored_target_name)
+            ? specialization->authored_target_name
             : loom_target_facts_identity_name(effective_facts);
     bool contract_valid = false;
     const loom_target_facts_t* function_facts = NULL;
@@ -207,12 +211,10 @@ static iree_status_t loom_target_specialization_prepare_versions(
                 .type = &loom_target_function_version_type,
                 .function = specialization->function,
             },
-        .authored_target_name = specialization->authored_target != NULL
-                                    ? specialization->authored_target->name
-                                    : iree_string_view_empty(),
+        .authored_target_name = specialization->authored_target_name,
         .authored_target_facts =
-            specialization->authored_target != NULL
-                ? specialization->authored_target->projection
+            specialization->authored_target_facts != NULL
+                ? specialization->authored_target_facts->projection
                 : NULL,
         .effective_target_facts = function_facts,
     };

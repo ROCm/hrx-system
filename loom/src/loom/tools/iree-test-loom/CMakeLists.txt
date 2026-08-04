@@ -37,6 +37,7 @@ loom_cc_library(
     loom::tooling::testbench::requirements
     loom::util::json
     loom::util::stream
+    loom::verify
   PUBLIC
 )
 

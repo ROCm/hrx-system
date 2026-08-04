@@ -104,8 +104,8 @@ typedef enum loomc_link_flag_bits_e {
   /// Leave unresolved references for later verification or specialization.
   LOOMC_LINK_FLAG_ALLOW_UNRESOLVED_SYMBOLS = 1u << 1,
 
-  /// Strip check dialect testbench symbols before materialization.
-  LOOMC_LINK_FLAG_STRIP_CHECK_SYMBOLS = 1u << 2,
+  /// Strip symbols used only by test or benchmark tooling.
+  LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS = 1u << 2,
 } loomc_link_flag_bits_t;
 
 /// Bitmask of `loomc_link_flag_bits_t` values.

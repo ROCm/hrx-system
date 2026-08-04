@@ -270,6 +270,25 @@ static iree_status_t loom_parser_resolve_pending_successor_refs(
   return iree_ok_status();
 }
 
+static iree_status_t loom_parser_verify_symbols_resolved(
+    loom_parser_t* parser) {
+  for (iree_host_size_t i = 0;
+       i < parser->symbol_origins.count && !loom_parser_at_error_limit(parser);
+       ++i) {
+    loom_parser_symbol_origin_t origin = parser->symbol_origins.entries[i];
+    const loom_symbol_t* symbol =
+        &parser->module->symbols.entries[origin.symbol_id];
+    if (symbol->definition && symbol->defining_op) continue;
+    loom_diagnostic_param_t params[] = {
+        loom_param_string(origin.token.text),
+    };
+    IREE_RETURN_IF_ERROR(loom_parser_emit(parser, LOOM_ERR_SYMBOL_002, params,
+                                          IREE_ARRAYSIZE(params),
+                                          origin.token));
+  }
+  return iree_ok_status();
+}
+
 static bool loom_parser_type_is_known(loom_type_t type) {
   return type.header != 0;
 }
@@ -1159,6 +1178,13 @@ iree_status_t loom_text_parse(iree_string_view_t source,
   if (iree_status_is_ok(status) && parser.error_count == 0) {
     status = loom_parser_resolve_pending_successor_refs(&parser, module->body,
                                                         /*pending_start=*/0);
+  }
+
+  // A symbol-table placeholder exists only to support a forward reference
+  // within this parse. Every symbol must have an explicit declaration or
+  // definition by the time the full module has been consumed.
+  if (iree_status_is_ok(status) && parser.error_count == 0) {
+    status = loom_parser_verify_symbols_resolved(&parser);
   }
 
   // Build use-def chains in one pass.

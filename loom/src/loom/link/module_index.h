@@ -65,10 +65,8 @@ enum loom_link_symbol_flag_bits_e {
   LOOM_LINK_SYMBOL_FLAG_HAS_BODY = 1u << 4,
   // Symbol implements the config symbol interface.
   LOOM_LINK_SYMBOL_FLAG_CONFIG = 1u << 5,
-  // Symbol is a check.case correctness harness.
-  LOOM_LINK_SYMBOL_FLAG_CHECK_CASE = 1u << 6,
-  // Symbol is a check.benchmark policy record.
-  LOOM_LINK_SYMBOL_FLAG_CHECK_BENCHMARK = 1u << 7,
+  // Symbol exists only for test or benchmark tooling.
+  LOOM_LINK_SYMBOL_FLAG_TEST_ONLY = 1u << 6,
 };
 typedef uint32_t loom_link_symbol_flags_t;
 

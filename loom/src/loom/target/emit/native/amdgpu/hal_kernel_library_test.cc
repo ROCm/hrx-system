@@ -1517,6 +1517,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   };
   static const char kSource[] =
       "amdgpu.target<gfx1250> @gfx_target\n"
+      "global.rodata.decl @loom_sanitizer_sites\n"
       "low.kernel.def target<amdgpu.gfx12_5.generic.core>(@gfx_target) "
       "workgroup_size(64, 1, 1) "
       "@loom_kernel() {\n"
@@ -1606,6 +1607,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
 TEST_F(AmdgpuHalKernelLibraryTest, RejectsRel32AddWithoutPcProvenance) {
   static const char kSource[] =
       "amdgpu.target<gfx11-generic> @gfx_target\n"
+      "global.rodata.decl @iree_feedback_config\n"
       "low.kernel.def target<amdgpu.gfx11.generic.core>(@gfx_target) "
       "workgroup_size(64, 1, 1) "
       "@loom_kernel() {\n"
@@ -1645,7 +1647,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
       0x00, 0x01, 0x01, 0x06, 0x01, 0x01, 0x00, 0x00,
   };
   static const char kSource[] =
-      "global.rodata @loom_sanitizer_sites = "
+      "global.rodata.def @loom_sanitizer_sites = "
       "bytes(\"00020302010100000001010601010000\"), align 16\n"
       "amdgpu.target<gfx1100> @gfx_target\n"
       "low.kernel.def target<amdgpu.rdna3.core>(@gfx_target) "

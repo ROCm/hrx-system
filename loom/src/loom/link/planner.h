@@ -39,13 +39,13 @@ typedef enum loom_link_plan_unresolved_policy_e {
   LOOM_LINK_PLAN_UNRESOLVED_ALLOW = 1,
 } loom_link_plan_unresolved_policy_t;
 
-// Policy for check dialect testbench symbols.
-typedef enum loom_link_plan_check_policy_e {
-  // Keep check.case and check.benchmark symbols.
-  LOOM_LINK_PLAN_CHECK_KEEP = 0,
-  // Strip check.case and check.benchmark symbols before materialization.
-  LOOM_LINK_PLAN_CHECK_STRIP = 1,
-} loom_link_plan_check_policy_t;
+// Policy for symbols that exist only for test or benchmark tooling.
+typedef enum loom_link_plan_test_symbol_policy_e {
+  // Keep test-only symbols.
+  LOOM_LINK_PLAN_TEST_SYMBOL_KEEP = 0,
+  // Strip test-only symbols before materialization.
+  LOOM_LINK_PLAN_TEST_SYMBOL_STRIP = 1,
+} loom_link_plan_test_symbol_policy_t;
 
 // Reason a planned symbol is live.
 typedef enum loom_link_plan_live_reason_e {
@@ -84,8 +84,8 @@ typedef struct loom_link_plan_options_t {
   bool include_exported_roots;
   // Unresolved reference handling. Zero defaults to ERROR.
   loom_link_plan_unresolved_policy_t unresolved_policy;
-  // Check dialect symbol handling. Zero defaults to KEEP.
-  loom_link_plan_check_policy_t check_policy;
+  // Test-only symbol handling. Zero defaults to KEEP.
+  loom_link_plan_test_symbol_policy_t test_symbol_policy;
   // Optional strip filter.
   loom_link_plan_strip_symbol_fn_t strip_symbol;
   // User data passed to strip_symbol.

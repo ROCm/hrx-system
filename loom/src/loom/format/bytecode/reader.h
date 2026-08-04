@@ -88,6 +88,8 @@ typedef struct loom_bytecode_symbol_metadata_t {
   loom_bytecode_symbol_visibility_t visibility;
   // Validated symbol flags.
   loom_bytecode_symbol_flags_t flags;
+  // Structural symbol interfaces declared by the defining op metadata.
+  uint32_t interfaces;
   // Borrowed source module name for imports, or empty when not imported.
   iree_string_view_t import_module;
   // Borrowed source symbol name for imports, or empty when not imported.
