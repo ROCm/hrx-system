@@ -143,8 +143,9 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_routed_d
   %output_tiles = index.div %padded_output_size, %eight : index
   kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%workgroup_size, %one, %one) : index
 } launch(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %route_weights: buffer, %weight: buffer, %output: buffer, %norm_weight: buffer, %completion_counter: buffer, %next_q8_output: buffer) {
+  %eight = index.constant 8 : index
   func.apply<qwen3_moe.routed_down.q6k_q8_1_x4.body>(%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %q8_input, %route_ids, %route_weights, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
-  func.apply<qwen3_moe.routed_down.next_q8_completion>(%token_count, %output_size, %output, %norm_weight, %completion_counter, %next_q8_output) : (index, index, buffer, buffer, buffer, buffer)
+  func.apply<qwen3_moe.routed_down.next_q8_completion>(%eight, %eight, %token_count, %output_size, %output, %norm_weight, %completion_counter, %next_q8_output) : (index, index, index, index, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -326,6 +327,25 @@ kernel.def target(@qwen3_moe_routed_down_q6k_gfx11_wave64) @qwen3_moe_routed_dow
   kernel.return
 }
 
+// Decode-only direct-F32 route that publishes the normalized Q8_1 x4 row
+// consumed by the next projection boundary. Each wave64 subgroup owns one of
+// four output channels, so the completion epilogue reduces four subgroup sums.
+kernel.def target(@qwen3_moe_routed_down_q6k_gfx11_wave64) @qwen3_moe_routed_down_q6k_f32_wave64_next_q8(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index) {
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %twofiftysix = index.constant 256 : index
+  %padded_output_size = index.add %output_size, %three : index
+  %output_tiles = index.div %padded_output_size, %four : index
+  kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%twofiftysix, %one, %one) : index
+} launch(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index, %input: buffer, %route_ids: buffer, %route_weights: buffer, %weight: buffer, %output: buffer, %norm_weight: buffer, %completion_counter: buffer, %next_q8_output: buffer) {
+  %four = index.constant 4 : index
+  %scale_stage_bytes = index.constant 1024 : offset
+  func.apply<qwen3_moe.routed_down.q6k_f32.body>(%four, %four, %scale_stage_bytes, %token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %input, %route_ids, %route_weights, %weight, %output) : (index, index, offset, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
+  func.apply<qwen3_moe.routed_down.next_q8_completion>(%four, %four, %token_count, %output_size, %output, %norm_weight, %completion_counter, %next_q8_output) : (index, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
 // Two selected experts exercise the noncompact route-ID stride, normalized
 // weighted reduction, in-place residual update, K=768, and the output tile
 // tail. Uniform 0xaa Q6_K bytes decode to a deterministic nonzero row with
@@ -395,6 +415,72 @@ check.case public @qwen3_moe_routed_down_q6k_f32_wave64_differential_case {
   func.call @qwen3_moe_routed_down_q6k_q8_1_x4(%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %q8_input, %route_ids, %route_weights, %weight, %expected) : (index, index, index, index, index, index, tensor<2x864xi8>, tensor<1x4xi32>, tensor<1x2xf32>, tensor<2x9x3x210xi8>, tensor<1x9xf32>)
   func.call @qwen3_moe_routed_down_q6k_f32_wave64(%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %routed_input, %route_ids, %route_weights, %weight, %actual_wave64) : (index, index, index, index, index, index, tensor<2x768xf32>, tensor<1x4xi32>, tensor<1x2xf32>, tensor<2x9x3x210xi8>, tensor<1x9xf32>)
   check.expect.close actual(%actual_wave64) expected(%expected) atol(0.25) rtol(0.01) nan(same) : tensor<1x9xf32>
+  check.return
+}
+
+// Fixed production-shape provider for the completion differential below. The
+// static launch is necessary until check literals participate in HAL
+// compilation; the production export above retains the dynamic ABI.
+kernel.def target(@qwen3_moe_routed_down_q6k_gfx11_wave64) @qwen3_moe_routed_down_q6k_f32_wave64_next_q8_production_check() {
+  %one = index.constant 1 : index
+  %fivehundredtwelve = index.constant 512 : index
+  %twofiftysix = index.constant 256 : index
+  kernel.launch.config workgroups(%fivehundredtwelve, %one, %one) workgroup_size(%twofiftysix, %one, %one) : index
+} launch(%input: buffer, %route_ids: buffer, %route_weights: buffer, %weight: buffer, %output: buffer, %norm_weight: buffer, %completion_counter: buffer, %next_q8_output: buffer) {
+  %token_count = index.constant 1 : index
+  %input_size = index.constant 768 : index
+  %route_count = index.constant 8 : index
+  %route_id_stride = index.constant 8 : index
+  %expert_count = index.constant 8 : index
+  %output_size = index.constant 2048 : index
+  %four = index.constant 4 : index
+  %scale_stage_bytes = index.constant 1024 : offset
+  func.apply<qwen3_moe.routed_down.q6k_f32.body>(%four, %four, %scale_stage_bytes, %token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %input, %route_ids, %route_weights, %weight, %output) : (index, index, offset, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
+  func.apply<qwen3_moe.routed_down.next_q8_completion>(%four, %four, %token_count, %output_size, %output, %norm_weight, %completion_counter, %next_q8_output) : (index, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+// Wave64 reference for the row producer used by the fused completion path.
+kernel.def target(@qwen3_moe_routed_down_q6k_gfx11_wave64) @qwen3_moe_rmsnorm_quantize_q8_1_x4_wave64_production_check() {
+  %one = index.constant 1 : index
+  %twofiftysix = index.constant 256 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%twofiftysix, %one, %one) : index
+} launch(%input: buffer, %norm_weight: buffer, %q8_output: buffer) {
+  %publish_normalized = scalar.constant false : i1
+  %reduction_subgroup_count = index.constant 4 : index
+  %token_count = index.constant 1 : index
+  %token = index.constant 0 : index
+  func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>(%publish_normalized, %reduction_subgroup_count, %token_count, %token, %input, %norm_weight, %q8_output, %q8_output) : (i1, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+// The production hidden width requires all 512 direct-F32 output tiles to
+// arrive before normalization. Zero Q6_K scales preserve the known residual
+// row while still exercising every contraction workgroup. Compare fused Q8
+// publication with the same wave64 producer, then reuse the completion word so
+// stale completion state is observable.
+check.case public @qwen3_moe_routed_down_q6k_f32_wave64_next_q8_differential_case {
+  %input = check.generate.iota offset(-0.5) step(0.00016276041666666666) period(6144) : tensor<8x768xf32>
+  %route_ids = check.generate.iota offset(0) step(1) period(8) : tensor<8xi32>
+  %route_weights = check.generate.iota offset(0.027777777777777776) step(0.027777777777777776) : tensor<8xf32>
+  %weight = check.generate.fill value(0) : tensor<8x2048x3x210xi8>
+  %norm_weight = check.generate.iota offset(-1.0) step(0.0009765625) : tensor<2048xf32>
+  %expected_output = check.generate.iota offset(-0.5) step(0.00048828125) period(2048) : tensor<2048xf32>
+  %actual_output0 = check.generate.iota offset(-0.5) step(0.00048828125) period(2048) : tensor<2048xf32>
+  %actual_output1 = check.generate.iota offset(-0.5) step(0.00048828125) period(2048) : tensor<2048xf32>
+  %expected_q8 = check.generate.fill value(0) : tensor<2304xi8>
+  %actual_q8_0 = check.generate.fill value(1) : tensor<2304xi8>
+  %actual_q8_1 = check.generate.fill value(1) : tensor<2304xi8>
+  %completion_counter = check.generate.fill value(0) : tensor<1xi32>
+  %expected_counter = check.generate.fill value(0) : tensor<1xi32>
+  func.call @qwen3_moe_rmsnorm_quantize_q8_1_x4_wave64_production_check(%expected_output, %norm_weight, %expected_q8) : (tensor<2048xf32>, tensor<2048xf32>, tensor<2304xi8>)
+  func.call @qwen3_moe_routed_down_q6k_f32_wave64_next_q8_production_check(%input, %route_ids, %route_weights, %weight, %actual_output0, %norm_weight, %completion_counter, %actual_q8_0) : (tensor<8x768xf32>, tensor<8xi32>, tensor<8xf32>, tensor<8x2048x3x210xi8>, tensor<2048xf32>, tensor<2048xf32>, tensor<1xi32>, tensor<2304xi8>)
+  func.call @qwen3_moe_routed_down_q6k_f32_wave64_next_q8_production_check(%input, %route_ids, %route_weights, %weight, %actual_output1, %norm_weight, %completion_counter, %actual_q8_1) : (tensor<8x768xf32>, tensor<8xi32>, tensor<8xf32>, tensor<8x2048x3x210xi8>, tensor<2048xf32>, tensor<2048xf32>, tensor<1xi32>, tensor<2304xi8>)
+  check.expect.close actual(%actual_output0) expected(%expected_output) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
+  check.expect.close actual(%actual_output1) expected(%expected_output) atol(0.0) rtol(0.0) nan(same) : tensor<2048xf32>
+  check.expect.equal actual(%actual_q8_0) expected(%expected_q8) : tensor<2304xi8>
+  check.expect.equal actual(%actual_q8_1) expected(%expected_q8) : tensor<2304xi8>
+  check.expect.equal actual(%completion_counter) expected(%expected_counter) : tensor<1xi32>
   check.return
 }
 

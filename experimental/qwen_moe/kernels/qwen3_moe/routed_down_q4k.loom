@@ -135,8 +135,9 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_routed_d
   %output_tiles = index.div %padded_output_size, %eight : index
   kernel.launch.config workgroups(%output_tiles, %token_count, %one) workgroup_size(%workgroup_size, %one, %one) : index
 } launch(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %route_weights: buffer, %weight: buffer, %output: buffer, %norm_weight: buffer, %completion_counter: buffer, %next_q8_output: buffer) {
+  %eight = index.constant 8 : index
   func.apply<qwen3_moe.routed_down.q4k_q8_1_x4.body>(%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %q8_input, %route_ids, %route_weights, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
-  func.apply<qwen3_moe.routed_down.next_q8_completion>(%token_count, %output_size, %output, %norm_weight, %completion_counter, %next_q8_output) : (index, index, buffer, buffer, buffer, buffer)
+  func.apply<qwen3_moe.routed_down.next_q8_completion>(%eight, %eight, %token_count, %output_size, %output, %norm_weight, %completion_counter, %next_q8_output) : (index, index, index, index, buffer, buffer, buffer, buffer)
   kernel.return
 }
 

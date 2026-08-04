@@ -1,21 +1,24 @@
 // Shared decode completion protocol for routed-down projections that publish
 // the normalized Q8_1 x4 row consumed by the next projection boundary. Each
-// x workgroup must publish one eight-channel output tile before applying this
-// body. The last arrival acquires the complete residual row, normalizes and
-// packs it, then resets the reusable completion word after every Q8 store.
+// x workgroup must publish one output tile before applying this body and must
+// provide both its tile width and the number of target subgroups participating
+// in the row reduction. The last arrival acquires the complete residual row,
+// normalizes and packs it, then resets the reusable completion word after every
+// Q8 store.
 //
 // This outer device template deliberately applies the RMSNorm/Q8 device
 // template. Keeping that composition authored here ensures the compiler
 // preserves the eventual kernel ancestor through nested template selection.
-func.template<qwen3_moe.routed_down.next_q8_completion> device @qwen3_moe_routed_down_next_q8_completion(%token_count: index, %output_size: index, %output: buffer, %norm_weight: buffer, %completion_counter: buffer, %next_q8_output: buffer) {
+func.template<qwen3_moe.routed_down.next_q8_completion> device @qwen3_moe_routed_down_next_q8_completion(%output_channels_per_workgroup0: index, %reduction_subgroup_count0: index, %token_count: index, %output_size: index, %output: buffer, %norm_weight: buffer, %completion_counter: buffer, %next_q8_output: buffer) {
+  %output_channels_per_workgroup = index.assume %output_channels_per_workgroup0 [range(%output_channels_per_workgroup0, 1, 8)] : index
+  %reduction_subgroup_count = index.assume %reduction_subgroup_count0 [range(%reduction_subgroup_count0, 1, 8)] : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 1)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 128, 32768), mul(%output_size, 128)] : index
   %token0 = kernel.workgroup.id<y> : index
   %token = index.assume %token0 [lt(%token0, %bounded_token_count)] : index
   %zero = index.constant 0 : index
-  %eight = index.constant 8 : index
   %workitem = kernel.workitem.id<x> : index
-  %output_tile_count = index.div %bounded_output_size, %eight : index
+  %output_tile_count = index.div %bounded_output_size, %output_channels_per_workgroup : index
   %is_arrival_workitem = index.cmp eq, %workitem, %zero : index
   %zero_i32 = scalar.constant 0 : i32
   %one_i32 = scalar.constant 1 : i32
@@ -41,7 +44,7 @@ func.template<qwen3_moe.routed_down.next_q8_completion> device @qwen3_moe_routed
   scf.if %is_last_output_tile {
     kernel.barrier<global> {ordering = acquire, scope = workgroup}
     %publish_normalized = scalar.constant false : i1
-    func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>(%publish_normalized, %bounded_token_count, %token, %output_noalias, %norm_weight_noalias, %next_q8_output_noalias, %next_q8_output_noalias) : (i1, index, index, buffer, buffer, buffer, buffer)
+    func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>(%publish_normalized, %reduction_subgroup_count, %bounded_token_count, %token, %output_noalias, %norm_weight_noalias, %next_q8_output_noalias, %next_q8_output_noalias) : (i1, index, index, index, buffer, buffer, buffer, buffer)
     kernel.barrier<global> {ordering = release, scope = workgroup}
     scf.if %is_arrival_workitem {
       view.atomic.reduce<addi> %negative_output_tile_count_i32, %completion_counter_view[%zero] {ordering = release, scope = device} : i32, view<1xi32, #dense>
