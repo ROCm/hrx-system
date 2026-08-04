@@ -881,8 +881,7 @@ static iree_status_t qwen_loom_jit_link_code_group(
                 .bindings = config_bindings,
                 .binding_count = options->config_binding_count,
                 .json_object = loomc_string_view_empty(),
-                .flags = LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-                         LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+                .flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
             },
     };
     status = iree_status_from_loomc(
