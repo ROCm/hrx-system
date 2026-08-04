@@ -15,6 +15,7 @@
 #include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
 #include "loom/ir/module.h"
+#include "loom/verify/verify.h"
 
 //===----------------------------------------------------------------------===//
 // Format parsing and detection
@@ -237,6 +238,46 @@ static iree_status_t loom_format_write_output(
                           loom_module_format_name(output_format));
 }
 
+// Verifies the complete module after parsing or reading and before any output
+// formatter observes it. Parsing must permit forward references, so unresolved
+// symbols and other cross-operation errors become visible only at this point.
+static iree_status_t loom_format_verify_input_module(
+    iree_const_byte_span_t input, iree_string_view_t filename,
+    loom_module_format_t input_format, const loom_module_t* module,
+    loom_diagnostic_sink_t diagnostic_sink) {
+  loom_source_entry_t source_entry = {
+      .source_id = 0,
+      .source =
+          iree_make_string_view((const char*)input.data, input.data_length),
+      .filename = filename,
+  };
+  loom_source_table_resolver_t source_table = {
+      .entries = &source_entry,
+      .count = 1,
+  };
+  loom_verify_options_t verify_options = {
+      .sink = diagnostic_sink,
+      .max_errors = 100,
+  };
+  if (input_format == LOOM_MODULE_FORMAT_TEXT) {
+    verify_options.source_resolver = (loom_source_resolver_t){
+        .fn = loom_source_table_resolve,
+        .user_data = &source_table,
+    };
+  }
+
+  loom_verify_result_t verify_result = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_verify_module(module, &verify_options, &verify_result));
+  if (verify_result.error_count > 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "module verification failed with %u error%s",
+                            verify_result.error_count,
+                            verify_result.error_count == 1 ? "" : "s");
+  }
+  return iree_ok_status();
+}
+
 //===----------------------------------------------------------------------===//
 // Conversion
 //===----------------------------------------------------------------------===//
@@ -262,11 +303,21 @@ iree_status_t loom_format_convert(iree_const_byte_span_t input,
                             "output format must be explicit");
   }
 
+  loom_module_format_t input_format = resolved_options.input_format;
+  if (input_format == LOOM_MODULE_FORMAT_AUTO) {
+    input_format = loom_module_format_detect_input(input);
+  }
+
   loom_module_t* module = NULL;
   iree_status_t status = loom_format_read_module(
-      input, filename, resolved_options.input_format, context, block_pool,
+      input, filename, input_format, context, block_pool,
       resolved_options.diagnostic_sink, resolved_options.low_asm_environment,
       &module, allocator);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_format_verify_input_module(input, filename, input_format, module,
+                                        resolved_options.diagnostic_sink);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_format_write_output(
         module, resolved_options.output_format, block_pool,
