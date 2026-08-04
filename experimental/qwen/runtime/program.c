@@ -1038,6 +1038,12 @@ static iree_status_t qwen_program_prepare_layer_executables(
       qwen_attention_postprocess_config_bindings, token_count,
       &attention_postprocess_config_binding_list);
 
+  qwen_program_config_binding_list_t flash_attention_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_flash_attention_config_bindings),
+      qwen_flash_attention_config_bindings, token_count,
+      &flash_attention_config_binding_list);
+
   qwen_program_config_binding_list_t attention_query_wmma_config_binding_list;
   qwen_program_config_binding_list_initialize_with_token_capacity(
       IREE_ARRAYSIZE(qwen_attention_query_wmma_config_bindings),
@@ -1192,8 +1198,8 @@ static iree_status_t qwen_program_prepare_layer_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_PREFILL_F32_F16),
         IREE_SV("qwen3_moe_flash_attention_f32_f16_wmma"),
-        IREE_ARRAYSIZE(qwen_flash_attention_config_bindings),
-        qwen_flash_attention_config_bindings,
+        flash_attention_config_binding_list.count,
+        flash_attention_config_binding_list.bindings,
         IREE_ARRAYSIZE(flash_attention_workload), flash_attention_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_FLASH_ATTENTION]);
   }
