@@ -206,10 +206,61 @@ static bool loom_amdgpu_cfg_cond_br_edge_implied_bool(
       module, fact_table, &edge_facts, condition, out_condition);
 }
 
-static iree_status_t loom_amdgpu_materialize_branch_address(
+// Materializes a subgroup-uniform 32- or 64-bit address stored in VGPRs as an
+// SGPR branch payload.
+static iree_status_t loom_amdgpu_materialize_uniform_vgpr_address_as_sgpr(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_value_id, loom_type_t required_low_type,
     loom_value_id_t* out_low_value_id) {
+  *out_low_value_id = LOOM_VALUE_ID_INVALID;
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_type_t actual_type = loom_module_value_type(module, low_value_id);
+  IREE_ASSERT(loom_amdgpu_low_type_is_register_class(
+      context, actual_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR));
+  IREE_ASSERT(loom_amdgpu_low_type_is_register_class(
+      context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR));
+
+  const uint32_t register_count =
+      loom_low_register_type_unit_count(actual_type);
+  IREE_ASSERT_GE(register_count, 1);
+  IREE_ASSERT_LE(register_count, 2);
+  const loom_type_t vgpr_type =
+      loom_low_register_type_with_unit_count(actual_type, 1);
+  const loom_type_t sgpr_type =
+      loom_low_register_type_with_unit_count(required_low_type, 1);
+  // Address scalars contain at most two 32-bit register units.
+  loom_value_id_t sgpr_registers[2] = {
+      LOOM_VALUE_ID_INVALID,
+      LOOM_VALUE_ID_INVALID,
+  };
+  for (uint32_t i = 0; i < register_count; ++i) {
+    loom_value_id_t vgpr_register = low_value_id;
+    if (register_count != 1) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
+          context, source_op, low_value_id, register_count, i, vgpr_type,
+          &vgpr_register));
+    }
+    const loom_value_id_t operands[] = {vgpr_register};
+    loom_op_t* readfirstlane_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_READFIRSTLANE_B32,
+        operands, IREE_ARRAYSIZE(operands), loom_make_named_attr_slice(NULL, 0),
+        &sgpr_type, 1, &readfirstlane_op));
+    sgpr_registers[i] =
+        loom_value_slice_get(loom_low_op_results(readfirstlane_op), 0);
+  }
+
+  const loom_type_t result_type =
+      loom_low_register_type_with_unit_count(required_low_type, register_count);
+  return loom_amdgpu_build_low_register_range(context, source_op,
+                                              sgpr_registers, register_count,
+                                              result_type, out_low_value_id);
+}
+
+static iree_status_t loom_amdgpu_materialize_branch_address(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value_id, loom_value_id_t low_value_id,
+    loom_type_t required_low_type, loom_value_id_t* out_low_value_id) {
   *out_low_value_id = low_value_id;
 
   const loom_module_t* module = loom_low_lower_context_module(context);
@@ -230,10 +281,21 @@ static iree_status_t loom_amdgpu_materialize_branch_address(
 
   const bool actual_is_sgpr = loom_amdgpu_low_type_is_register_class(
       context, actual_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
+  const bool actual_is_vgpr = loom_amdgpu_low_type_is_register_class(
+      context, actual_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   if (requires_vgpr && actual_is_sgpr) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32_registers(
         context, source_op, *out_low_value_id, out_low_value_id));
     actual_type = loom_module_value_type(module, *out_low_value_id);
+  } else if (requires_sgpr && actual_is_vgpr) {
+    const loom_value_facts_t source_facts = loom_value_fact_table_lookup(
+        loom_low_lower_context_fact_table(context), source_value_id);
+    if (loom_value_facts_is_subgroup_uniform(source_facts)) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_uniform_vgpr_address_as_sgpr(
+          context, source_op, *out_low_value_id, required_low_type,
+          out_low_value_id));
+      actual_type = loom_module_value_type(module, *out_low_value_id);
+    }
   }
 
   if (loom_type_equal(actual_type, required_low_type)) {
@@ -289,8 +351,8 @@ iree_status_t loom_amdgpu_materialize_branch_arg(
   if ((requires_sgpr || requires_vgpr) &&
       loom_amdgpu_type_is_address_scalar(source_type)) {
     return loom_amdgpu_materialize_branch_address(
-        context, source_terminator, low_value_id, required_low_type,
-        out_low_value_id);
+        context, source_terminator, source_value_id, low_value_id,
+        required_low_type, out_low_value_id);
   }
   if (requires_vgpr) {
     if (loom_amdgpu_type_is_i32(source_type) ||
