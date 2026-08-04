@@ -253,13 +253,15 @@ static iree_status_t iree_hal_amdgpu_libhsa_try_load_library_from_file(
     iree_string_builder_t* error_builder, iree_allocator_t host_allocator,
     iree_dynamic_library_t** out_library) {
   IREE_ASSERT_ARGUMENT(out_library);
+  (void)flags;
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, file_path);
   *out_library = NULL;
 
   // Try loading from the given file path.
   iree_status_t status = iree_dynamic_library_load_from_file(
-      file_path, flags, host_allocator, out_library);
+      file_path, IREE_DYNAMIC_LIBRARY_FLAG_NODELETE, host_allocator,
+      out_library);
 
   // Append error message to the status builder.
   if (!iree_status_is_ok(status)) {

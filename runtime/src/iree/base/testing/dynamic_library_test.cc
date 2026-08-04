@@ -86,6 +86,28 @@ TEST_F(DynamicLibraryTest, LoadLibraryTwice) {
   iree_dynamic_library_release(library2);
 }
 
+TEST_F(DynamicLibraryTest, NodeletePreservesModuleState) {
+  int (*next_value)() = nullptr;
+  iree_dynamic_library_t* library = NULL;
+  IREE_ASSERT_OK(iree_dynamic_library_load_from_file(
+      library_temp_path_.path().c_str(), IREE_DYNAMIC_LIBRARY_FLAG_NODELETE,
+      iree_allocator_system(), &library));
+  IREE_ASSERT_OK(iree_dynamic_library_lookup_symbol(
+      library, "next_value", reinterpret_cast<void**>(&next_value)));
+  EXPECT_EQ(1, next_value());
+  iree_dynamic_library_release(library);
+
+  library = NULL;
+  next_value = nullptr;
+  IREE_ASSERT_OK(iree_dynamic_library_load_from_file(
+      library_temp_path_.path().c_str(), IREE_DYNAMIC_LIBRARY_FLAG_NODELETE,
+      iree_allocator_system(), &library));
+  IREE_ASSERT_OK(iree_dynamic_library_lookup_symbol(
+      library, "next_value", reinterpret_cast<void**>(&next_value)));
+  EXPECT_EQ(2, next_value());
+  iree_dynamic_library_release(library);
+}
+
 TEST_F(DynamicLibraryTest, GetSymbolSuccess) {
   iree_dynamic_library_t* library = NULL;
   IREE_ASSERT_OK(iree_dynamic_library_load_from_file(

@@ -30,6 +30,9 @@ struct iree_dynamic_library_t {
   iree_atomic_ref_count_t ref_count;
   iree_allocator_t allocator;
 
+  // Flags controlling module lifetime.
+  iree_dynamic_library_flags_t flags;
+
   // dlopen shared object handle.
   void* handle;
 };
@@ -119,8 +122,8 @@ static iree_status_t iree_dynamic_library_write_temp_file(
 
 // Allocates an iree_dynamic_library_t with the given allocator.
 static iree_status_t iree_dynamic_library_create(
-    void* handle, iree_allocator_t allocator,
-    iree_dynamic_library_t** out_library) {
+    void* handle, iree_dynamic_library_flags_t flags,
+    iree_allocator_t allocator, iree_dynamic_library_t** out_library) {
   *out_library = NULL;
 
   iree_dynamic_library_t* library = NULL;
@@ -129,6 +132,7 @@ static iree_status_t iree_dynamic_library_create(
   memset(library, 0, sizeof(*library));
   iree_atomic_ref_count_init(&library->ref_count);
   library->allocator = allocator;
+  library->flags = flags;
   library->handle = handle;
 
   *out_library = library;
@@ -167,7 +171,7 @@ iree_status_t iree_dynamic_library_load_from_files(
 
   iree_dynamic_library_t* library = NULL;
   iree_status_t status =
-      iree_dynamic_library_create(handle, allocator, &library);
+      iree_dynamic_library_create(handle, flags, allocator, &library);
 
   if (iree_status_is_ok(status)) {
     *out_library = library;
@@ -287,7 +291,8 @@ static void iree_dynamic_library_delete(iree_dynamic_library_t* library) {
 #else
   // Close the library first as it may be loaded from one of the temp files we
   // are about to delete.
-  if (library->handle != NULL) {
+  if (library->handle != NULL &&
+      !iree_any_bit_set(library->flags, IREE_DYNAMIC_LIBRARY_FLAG_NODELETE)) {
     dlclose(library->handle);
   }
 #endif  // IREE_TRACING_FEATURES & IREE_TRACING_FEATURE_INSTRUMENTATION
