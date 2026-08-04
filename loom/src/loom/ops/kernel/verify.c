@@ -1060,25 +1060,41 @@ iree_status_t loom_kernel_barrier_verify(const loom_module_t* module,
 
   loom_value_fact_memory_space_t memory_space =
       loom_kernel_barrier_memory_space(op);
-  if (memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
+  if (memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP &&
+      memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL) {
     return loom_kernel_emit_attribute_value_constraint(
         emitter, op, IREE_SV("memory_space"), memory_space,
-        IREE_SV("workgroup memory space"));
+        IREE_SV("workgroup or global memory space"));
   }
 
   loom_atomic_ordering_t ordering = loom_kernel_barrier_ordering(op);
-  if (ordering != LOOM_ATOMIC_ORDERING_ACQ_REL) {
+  const bool ordering_supported =
+      memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP
+          ? ordering == LOOM_ATOMIC_ORDERING_ACQ_REL
+          : ordering == LOOM_ATOMIC_ORDERING_ACQUIRE ||
+                ordering == LOOM_ATOMIC_ORDERING_RELEASE ||
+                ordering == LOOM_ATOMIC_ORDERING_ACQ_REL;
+  if (!ordering_supported) {
     return loom_kernel_emit_attribute_value_constraint(
         emitter, op, IREE_SV("ordering"), ordering,
-        IREE_SV("acq_rel ordering"));
+        memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP
+            ? IREE_SV("acq_rel ordering for workgroup memory")
+            : IREE_SV(
+                  "acquire, release, or acq_rel ordering for global memory"));
   }
 
   loom_atomic_scope_t scope = loom_kernel_barrier_scope(op);
-  if (scope != LOOM_ATOMIC_SCOPE_SUBGROUP &&
-      scope != LOOM_ATOMIC_SCOPE_WORKGROUP) {
+  const bool scope_supported =
+      memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP
+          ? scope == LOOM_ATOMIC_SCOPE_SUBGROUP ||
+                scope == LOOM_ATOMIC_SCOPE_WORKGROUP
+          : scope == LOOM_ATOMIC_SCOPE_WORKGROUP;
+  if (!scope_supported) {
     return loom_kernel_emit_attribute_value_constraint(
         emitter, op, IREE_SV("scope"), scope,
-        IREE_SV("subgroup or workgroup scope"));
+        memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP
+            ? IREE_SV("subgroup or workgroup scope for workgroup memory")
+            : IREE_SV("workgroup scope for global memory"));
   }
   return iree_ok_status();
 }

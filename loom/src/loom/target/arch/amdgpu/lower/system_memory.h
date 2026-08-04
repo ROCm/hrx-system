@@ -14,6 +14,7 @@
 #ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_SYSTEM_MEMORY_H_
 #define LOOM_TARGET_ARCH_AMDGPU_LOWER_SYSTEM_MEMORY_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "iree/base/api.h"
@@ -28,6 +29,16 @@ extern "C" {
 #endif
 
 typedef struct loom_builder_t loom_builder_t;
+
+// Returns true when the descriptor set provides every packet required to emit
+// release ordering for prior global-memory accesses.
+bool loom_amdgpu_system_memory_release_ordering_available(
+    const loom_low_descriptor_set_t* descriptor_set);
+
+// Returns true when the descriptor set provides every packet required to emit
+// acquire ordering for later global-memory accesses.
+bool loom_amdgpu_system_memory_acquire_ordering_available(
+    const loom_low_descriptor_set_t* descriptor_set);
 
 // Flags controlling system-memory loads.
 typedef uint32_t loom_amdgpu_system_memory_load_flags_t;
