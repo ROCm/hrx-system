@@ -125,11 +125,12 @@ passes the same differential.
 The three direct feed-forward forks
 `kernels/routed_gate_up_next_q8_bringup_workaround.loom`,
 `kernels/routed_down_q4_next_q8_bringup_workaround.loom`, and
-`kernels/routed_down_q6_next_q8_bringup_workaround.loom` retain the canonical
+`kernels/routed_down_q6_f32_next_q8_bringup_workaround.loom` retain the canonical
 decode ABIs and device bodies while making this model's exact one-token,
-eight-route dimensions structural. The gate/up variant publishes its F32
-SwiGLU rows and packed Q8_1 x4 groups together; the routed-down variants
-publish the following layer's normalized Q8_1 x4 row through the shared
+eight-route dimensions structural. The gate/up variant publishes both F32-only
+and F32-plus-Q8_1 x4 providers so the down-weight format selects only the data
+it consumes. The routed-down variants publish the following layer's normalized
+Q8_1 x4 row through the shared
 `qwen3_moe.routed_down.next_q8_completion` device template. Only exact
 workload facts remain local to these adapters; nested device-template
 selection is canonical again. Delete all three when workload specialization

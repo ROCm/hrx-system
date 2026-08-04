@@ -510,7 +510,10 @@ loom_link_module(
     ],
     mode = "selective",
     output = "qwen3_moe_routed_gate_up_q8.loom",
-    roots = ["@qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8"],
+    roots = [
+        "@qwen3_moe_routed_gate_up_swiglu_q4k_q8",
+        "@qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8",
+    ],
     strip_check = True,
 )
 
@@ -572,17 +575,17 @@ loom_link_module(
 )
 
 loom_link_module(
-    name = "routed_down_q6_q8_runtime_module",
+    name = "routed_down_q6_f32_runtime_module",
     srcs = [
-        "routed_down_q6_next_q8_bringup_workaround.loom",
+        "routed_down_q6_f32_next_q8_bringup_workaround.loom",
         "runtime_exports.loom",
     ],
     libraries = [
         "//experimental/qwen_moe/kernels:routed_down_q6k_linked",
     ],
     mode = "selective",
-    output = "qwen3_moe_routed_down_q6_q8.loom",
-    roots = ["@qwen3_moe_routed_down_q6k_q8_1_x4_next_q8"],
+    output = "qwen3_moe_routed_down_q6_f32.loom",
+    roots = ["@qwen3_moe_routed_down_q6k_f32_wave64_next_q8"],
     strip_check = True,
 )
 
@@ -604,7 +607,7 @@ iree_c_embed_data(
         ":routed_down_f16_runtime_module",
         ":routed_down_next_rmsnorm_f32_runtime_module",
         ":routed_down_q4_q8_runtime_module",
-        ":routed_down_q6_q8_runtime_module",
+        ":routed_down_q6_f32_runtime_module",
         ":routed_gate_up_f16_runtime_module",
         ":routed_gate_up_q8_runtime_module",
         ":router_projection_f32_runtime_module",

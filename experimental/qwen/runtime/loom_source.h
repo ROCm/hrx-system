@@ -93,8 +93,8 @@ extern "C" {
 // Stable runtime path for direct Q4_K routed down and residual publication.
 #define QWEN_LOOM_SOURCE_ROUTED_DOWN_Q4_Q8 "qwen3_moe/routed_down_q4_q8"
 
-// Stable runtime path for direct Q6_K routed down and residual publication.
-#define QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_Q8 "qwen3_moe/routed_down_q6_q8"
+// Stable runtime path for direct-F32 Q6_K routed down and residual publication.
+#define QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_F32 "qwen3_moe/routed_down_q6_f32"
 
 // Borrowed embedded Loom module source.
 typedef struct qwen_loom_source_module_t {

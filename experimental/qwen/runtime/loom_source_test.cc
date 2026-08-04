@@ -149,9 +149,9 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
           "qwen3_moe_routed_down_q4k_q8_1_x4_next_q8",
       },
       {
-          QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_Q8,
-          "qwen3_moe_routed_down_q6_q8.loom",
-          "qwen3_moe_routed_down_q6k_q8_1_x4_next_q8",
+          QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_F32,
+          "qwen3_moe_routed_down_q6_f32.loom",
+          "qwen3_moe_routed_down_q6k_f32_wave64_next_q8",
       },
   };
 
@@ -242,6 +242,9 @@ TEST(QwenLoomSourceTest, EmbedsDirectGateUpNextQ8FixedModelWorkaround) {
   EXPECT_NE(
       source_text.find("func.apply<qwen3_moe.routed_gate_up.q4k_q8.body>"),
       std::string::npos);
+  EXPECT_NE(source_text.find("export(\"qwen3_moe_routed_gate_up_swiglu_"
+                             "q4k_q8\")"),
+            std::string::npos);
   EXPECT_NE(source_text.find("func.apply<ggml.quantize_q8_1_x4.group_body>"),
             std::string::npos);
 }
@@ -249,7 +252,7 @@ TEST(QwenLoomSourceTest, EmbedsDirectGateUpNextQ8FixedModelWorkaround) {
 TEST(QwenLoomSourceTest, EmbedsDirectDownFixedModelWorkarounds) {
   const char* module_paths[] = {
       QWEN_LOOM_SOURCE_ROUTED_DOWN_Q4_Q8,
-      QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_Q8,
+      QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_F32,
   };
   for (const char* module_path : module_paths) {
     SCOPED_TRACE(module_path);
@@ -276,6 +279,20 @@ TEST(QwenLoomSourceTest, EmbedsDirectDownFixedModelWorkarounds) {
         source_text.find("func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>"),
         std::string::npos);
   }
+}
+
+TEST(QwenLoomSourceTest, EmbedsDirectF32Q6DownFixedModelWorkaround) {
+  qwen_loom_source_module_t source_module;
+  IREE_ASSERT_OK(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_Q6_F32), &source_module));
+  std::string source_text(
+      reinterpret_cast<const char*>(source_module.source_contents.data),
+      source_module.source_contents.data_length);
+  EXPECT_NE(source_text.find("func.apply<qwen3_moe.routed_down.q6k_f32.body>"),
+            std::string::npos);
+  EXPECT_NE(
+      source_text.find("func.apply<qwen3_moe.routed_down.next_q8_completion>"),
+      std::string::npos);
 }
 
 TEST(QwenLoomSourceTest, EmbedsCanonicalFlashAttentionSource) {

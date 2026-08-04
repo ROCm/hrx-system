@@ -1,9 +1,27 @@
-// Temporary, non-sanctioned one-function fork for Qwen decode bring-up. This
-// is not a second kernel authoring path. Delete it when exact model facts reach
-// scalar footprint analysis and nested device-template requirements propagate
-// to their eventual kernel caller. The contraction and physical-group pack
-// delegate to canonical bodies; only the completion epilogue is repeated.
+// Temporary, non-sanctioned model specialization for Qwen decode bring-up.
+// This is not a second kernel authoring path. Delete it when exact model facts
+// reach scalar footprint analysis and nested device-template requirements
+// propagate to their eventual kernel caller. Both providers delegate the
+// contraction to the canonical body. The Q4_K down path additionally repeats
+// only the physical-group completion epilogue needed to publish Q8_1 x4.
 config.decl @qwen3_moe.routed_gate_up.input_size : %value: index where [range(%value, 2048, 2048), mul(%value, 512)]
+
+kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 1)] : index
+  %bounded_route_count = index.assume %route_count [range(%route_count, 8, 8)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 768, 768), mul(%output_size, 128)] : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%bounded_output_size, %bounded_route_count, %bounded_token_count) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 1)] : index
+  %bounded_route_count = index.assume %route_count [range(%route_count, 8, 8)] : index
+  %bounded_route_stride = index.assume %route_stride [range(%route_stride, 8, 8)] : index
+  %bounded_expert_count = index.assume %expert_count [range(%expert_count, 128, 128)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 768, 768), mul(%output_size, 128)] : index
+  func.apply<qwen3_moe.routed_gate_up.q4k_q8.body>(%bounded_token_count, %bounded_route_count, %bounded_route_stride, %bounded_expert_count, %bounded_output_size, %q8_input, %route_ids, %gate_weight, %up_weight, %output) : (index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
 
 kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 1)] : index
