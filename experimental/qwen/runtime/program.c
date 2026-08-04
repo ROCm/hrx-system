@@ -1511,6 +1511,14 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   };
 
   qwen_program_config_binding_list_t
+      weighted_reduce_next_rmsnorm_config_binding_list;
+  qwen_program_config_binding_list_initialize_with_token_capacity(
+      IREE_ARRAYSIZE(qwen_weighted_reduce_next_rmsnorm_config_bindings),
+      qwen_weighted_reduce_next_rmsnorm_config_bindings,
+      (int64_t)program->token_count,
+      &weighted_reduce_next_rmsnorm_config_binding_list);
+
+  qwen_program_config_binding_list_t
       terminal_attention_prepare_config_binding_list;
   qwen_program_config_binding_list_initialize_with_token_capacity(
       IREE_ARRAYSIZE(qwen_attention_prepare_config_bindings),
@@ -1554,8 +1562,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_ROUTED_DOWN_NEXT_RMSNORM_F32),
         IREE_SV("qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32"),
-        IREE_ARRAYSIZE(qwen_weighted_reduce_next_rmsnorm_config_bindings),
-        qwen_weighted_reduce_next_rmsnorm_config_bindings,
+        weighted_reduce_next_rmsnorm_config_binding_list.count,
+        weighted_reduce_next_rmsnorm_config_binding_list.bindings,
         IREE_ARRAYSIZE(interlayer_token_workload), interlayer_token_workload,
         &program->executables
              [QWEN_PROGRAM_EXECUTABLE_WEIGHTED_REDUCE_NEXT_RMSNORM]);
