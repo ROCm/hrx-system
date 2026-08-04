@@ -42,9 +42,10 @@ kernel.def @qwen3_moe_flash_attention_decode_split_quantize_reference_4096() {
   %thirtytwo = index.constant 32 : index
   kernel.launch.config workgroups(%thirtytwo, %one, %one) workgroup_size(%thirtytwo, %one, %one) : index
 } launch(%input: buffer, %output: buffer) {
+  %publish_output = scalar.constant true : i1
   %group_count = index.constant 32 : index
   %group = kernel.workgroup.id<x> : index
-  func.apply<ggml.quantize_q8_1_x4.group_body>(%group_count, %group, %input, %output) : (index, index, buffer, buffer)
+  func.apply<ggml.quantize_q8_1_x4.group_body>(%publish_output, %group_count, %group, %input, %output) : (i1, index, index, buffer, buffer)
   kernel.return
 }
 

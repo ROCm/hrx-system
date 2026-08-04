@@ -890,7 +890,8 @@ kernel.def @qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8(%token_count: in
   %negative_group_size_i32 = scalar.subi %zero_i32, %group_size_i32 : i32
   %is_last_arrival = scalar.cmpi eq, %old_counter, %last_arrival_i32 : i32
   scf.if %is_last_arrival {
-    func.apply<ggml.quantize_q8_1_x4.group_body>(%bounded_completion_counter_count, %counter_index, %output_noalias, %next_q8_output_noalias) : (index, index, buffer, buffer)
+    %publish_output = scalar.constant true : i1
+    func.apply<ggml.quantize_q8_1_x4.group_body>(%publish_output, %bounded_completion_counter_count, %counter_index, %output_noalias, %next_q8_output_noalias) : (i1, index, index, buffer, buffer)
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
     scf.if %is_arrival_lane {
       view.atomic.reduce<addi> %negative_group_size_i32, %completion_counters_view[%counter_index] {ordering = release, scope = device} : i32, view<[%bounded_completion_counter_count]xi32, #dense>
