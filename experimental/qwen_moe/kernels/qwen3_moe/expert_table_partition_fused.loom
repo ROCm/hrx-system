@@ -14,8 +14,9 @@ func.decl @qwen3_moe_build_expert_partition_table(%token_count: index, %route_co
 
 kernel.def target(@qwen3_moe_expert_table_partition_gfx11_wave32) @qwen3_moe_build_expert_table_partition_prefill_512(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index) {
   %one = index.constant 1 : index
+  %launch_expert_count = index.constant 128 : index
   %workgroup_size = index.constant 256 : index
-  kernel.launch.config workgroups(%expert_count, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%launch_expert_count, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
 } launch(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %route_ids: buffer, %expert_table: buffer, %partition_table: buffer, %completion_counter: buffer) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 512, 512)] : index
   %bounded_route_count = index.assume %route_count [range(%route_count, 8, 8)] : index

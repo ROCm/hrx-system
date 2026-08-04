@@ -23,6 +23,8 @@ config.decl @qwen3_moe.routed_gate_up.expert_count : %value: index where [range(
 
 config.decl @qwen3_moe.routed_gate_up.output_size : %value: index where [range(%value, 1, 4096)]
 
+config.decl @qwen3_moe.workload.token_capacity : %value: index where [range(%value, 1, 2048)]
+
 func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
 func.decl @qwen3_moe_build_expert_table(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %route_ids: buffer, %expert_table: buffer)
@@ -139,13 +141,14 @@ func.def inline @qwen3_moe_q4k_wmma_vector4(%weight: buffer, %row_byte_base: off
 kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma(%token_count: index) {
   %expert_count = config.get @qwen3_moe.routed_gate_up.expert_count : index
   %output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %one = index.constant 1 : index
   %sixtythree = index.constant 63 : index
   %sixtyfour = index.constant 64 : index
   %onetwentyeight = index.constant 128 : index
   %padded_output_size = index.add %output_size, %sixtythree : index
   %output_tiles = index.div %padded_output_size, %sixtyfour : index
-  %padded_token_count = index.add %token_count, %sixtythree : index
+  %padded_token_count = index.add %token_capacity, %sixtythree : index
   %route_tiles = index.div %padded_token_count, %sixtyfour : index
   kernel.launch.config workgroups(%output_tiles, %route_tiles, %expert_count) workgroup_size(%onetwentyeight, %one, %one) : index
 } launch(%token_count: index, %input: buffer, %expert_table: buffer, %weight: buffer, %output: buffer) {
@@ -153,7 +156,8 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_linear_q4k_f16_wmma
   %route_count = config.get @qwen3_moe.routed_gate_up.route_count : index
   %expert_count = config.get @qwen3_moe.routed_gate_up.expert_count : index
   %output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
   %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
   %bounded_expert_count = index.assume %expert_count [range(%expert_count, 1, 128)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 4096)] : index
@@ -423,6 +427,7 @@ kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_
   %route_count = config.get @qwen3_moe.routed_gate_up.route_count : index
   %expert_count = config.get @qwen3_moe.routed_gate_up.expert_count : index
   %output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %one = index.constant 1 : index
   %thirtyone = index.constant 31 : index
   %thirtytwo = index.constant 32 : index
@@ -434,7 +439,7 @@ kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_
   // The exact partition count lives in device memory. The rounding bound keeps
   // it below assignment_partitions + expert_count, so launching the larger
   // term lets every workgroup consume at most two strided descriptors.
-  %assignment_count = index.mul %token_count, %route_count : index
+  %assignment_count = index.mul %token_capacity, %route_count : index
   %rounded_assignment_count = index.add %assignment_count, %thirtyone : index
   %assignment_partition_count = index.div %rounded_assignment_count, %thirtytwo : index
   %has_more_assignment_partitions = index.cmp ugt, %assignment_partition_count, %expert_count : index
@@ -445,7 +450,8 @@ kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_
   %route_count = config.get @qwen3_moe.routed_gate_up.route_count : index
   %expert_count = config.get @qwen3_moe.routed_gate_up.expert_count : index
   %output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
   %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
   %bounded_expert_count = index.assume %expert_count [range(%expert_count, 1, 128)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 4096)] : index
@@ -684,7 +690,8 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_swiglu_f32(%token_c
   %rounding = index.constant 255 : index
   %output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
   %route_count = config.get @qwen3_moe.routed_gate_up.route_count : index
-  %row_count = index.mul %token_count, %route_count : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
+  %row_count = index.mul %token_capacity, %route_count : index
   %element_count = index.mul %row_count, %output_size : index
   %rounded_count = index.add %element_count, %rounding : index
   %workgroup_count = index.div %rounded_count, %workgroup_size : index
@@ -692,7 +699,8 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_swiglu_f32(%token_c
 } launch(%token_count: index, %gate: buffer, %up: buffer, %output: buffer) {
   %route_count = config.get @qwen3_moe.routed_gate_up.route_count : index
   %output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
   %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 4096)] : index
   %workgroup = kernel.workgroup.id<x> : index
@@ -727,7 +735,8 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_swiglu_f16(%token_c
   %rounding = index.constant 255 : index
   %output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
   %route_count = config.get @qwen3_moe.routed_gate_up.route_count : index
-  %row_count = index.mul %token_count, %route_count : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
+  %row_count = index.mul %token_capacity, %route_count : index
   %element_count = index.mul %row_count, %output_size : index
   %rounded_count = index.add %element_count, %rounding : index
   %workgroup_count = index.div %rounded_count, %workgroup_size : index
@@ -735,7 +744,8 @@ kernel.def target(@qwen3_moe_gfx11_wave64) @qwen3_moe_routed_swiglu_f16(%token_c
 } launch(%token_count: index, %gate: buffer, %up: buffer, %output: buffer) {
   %route_count = config.get @qwen3_moe.routed_gate_up.route_count : index
   %output_size = config.get @qwen3_moe.routed_gate_up.output_size : index
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
   %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 4096)] : index
   %workgroup = kernel.workgroup.id<x> : index
