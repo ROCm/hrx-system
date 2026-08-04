@@ -22,6 +22,7 @@ exports_files([
     "qwen3_moe/attention_qkv_postprocess_fused.loom",
     "qwen3_moe/attention_qkv_same_format_prefill.loom",
     "qwen3_moe/attention_qkv_quantized.loom",
+    "qwen3_moe/batched_decode_gate_up_q4k.loom",
     "qwen3_moe/batched_decode_expert_dispatch.loom",
     "qwen3_moe/dense_linear_quantized_f16_wmma.loom",
     "qwen3_moe/expert_table_partition_fused.loom",
@@ -1289,6 +1290,73 @@ loom_link_module(
     libraries = ["qwen3_moe/model_config.loom"],
 )
 
+loom_link_module(
+    name = "batched_decode_gate_up_q4k_linked",
+    srcs = ["qwen3_moe/batched_decode_gate_up_q4k.loom"],
+    libraries = [
+        "ggml/quantize_q8_1_x4.loom",
+        "qwen3_moe/batched_decode_expert_dispatch.loom",
+        "qwen3_moe/routed_gate_up_swiglu_q4k.loom",
+    ],
+)
+
+iree_executable_test(
+    name = "batched_decode_gate_up_q4k_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :batched_decode_gate_up_q4k_linked)",
+        "--benchmark=@qwen3_moe_batched_decode_gate_up_q4k_rows2_benchmark",
+        "--config=qwen3_moe.batched_decode.rows2_descriptor_capacity=64",
+        "--config=qwen3_moe.batched_decode.schedule0_row_limit=1",
+        "--config=qwen3_moe.batched_decode.schedule1_row_limit=2",
+        "--config=qwen3_moe.batched_decode.schedule2_row_limit=4",
+        "--config=qwen3_moe.router.expert_count=128",
+        "--config=qwen3_moe.router.route_count=8",
+        "--config=qwen3_moe.routed_gate_up.expert_count=128",
+        "--config=qwen3_moe.routed_gate_up.input_size=2048",
+        "--config=qwen3_moe.routed_gate_up.output_size=768",
+        "--config=qwen3_moe.routed_gate_up.route_count=8",
+        "--config=qwen3_moe.workload.token_capacity=16",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = [":batched_decode_gate_up_q4k_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "batched_decode_gate_up_q4k_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :batched_decode_gate_up_q4k_linked)",
+        "--case=@qwen3_moe_batched_decode_gate_up_q4k_rows2_differential_case",
+        "--config=ggml.quantize_q8_1_x4.group_capacity=8",
+        "--config=qwen3_moe.batched_decode.rows2_descriptor_capacity=8",
+        "--config=qwen3_moe.batched_decode.schedule0_row_limit=1",
+        "--config=qwen3_moe.batched_decode.schedule1_row_limit=2",
+        "--config=qwen3_moe.batched_decode.schedule2_row_limit=4",
+        "--config=qwen3_moe.router.expert_count=32",
+        "--config=qwen3_moe.router.route_count=8",
+        "--config=qwen3_moe.routed_gate_up.expert_count=32",
+        "--config=qwen3_moe.routed_gate_up.input_size=512",
+        "--config=qwen3_moe.routed_gate_up.output_size=32",
+        "--config=qwen3_moe.routed_gate_up.route_count=8",
+        "--config=qwen3_moe.workload.token_capacity=2",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":batched_decode_gate_up_q4k_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
 iree_executable_test(
     name = "batched_decode_expert_dispatch_plan_test",
     src = "//loom/src/loom/tools/iree-benchmark-loom",
@@ -2293,6 +2361,8 @@ test_suite(
         ":batched_decode_expert_dispatch_mixed_hal_test",
         ":batched_decode_expert_dispatch_plan_test",
         ":batched_decode_expert_dispatch_singleton_hal_test",
+        ":batched_decode_gate_up_q4k_hal_test",
+        ":batched_decode_gate_up_q4k_plan_test",
         ":dense_linear_q4k_f16_wmma_o_hal_test",
         ":dense_linear_q4k_f16_wmma_o_plan_test",
         ":dense_linear_q4k_q8_1_x4_accumulation_hal_test",
