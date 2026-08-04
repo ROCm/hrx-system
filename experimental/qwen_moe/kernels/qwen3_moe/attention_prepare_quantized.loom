@@ -99,10 +99,11 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_rmsnorm_
 // The attention export discards the ordinary F32 row, while feed-forward
 // publishes it for the router without rereading and requantizing the normalized
 // values.
-func.template<qwen3_moe.rmsnorm_quantize_q8_1_x4.body> device @qwen3_moe_rmsnorm_quantize_q8_1_x4_body(%publish_normalized: i1, %token_count: index, %token0: index, %input: buffer, %weight: buffer, %normalized_output: buffer, %q8_output: buffer) {
+func.template<qwen3_moe.rmsnorm_quantize_q8_1_x4.body> device @qwen3_moe_rmsnorm_quantize_q8_1_x4_body(%publish_normalized: i1, %reduction_subgroup_count0: index, %token_count: index, %token0: index, %input: buffer, %weight: buffer, %normalized_output: buffer, %q8_output: buffer) {
   %hidden_size0 = config.get @qwen3_moe.model.hidden_size : index
   %epsilon = config.get @qwen3_moe.model.rms_epsilon : f32
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %reduction_subgroup_count = index.assume %reduction_subgroup_count0 [range(%reduction_subgroup_count0, 1, 8)] : index
   %hidden_size = index.assume %hidden_size0 [range(%hidden_size0, 128, 32768), mul(%hidden_size0, 128)] : index
   %token, %launch_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
   %workitem = kernel.workitem.id<x> : index
@@ -154,7 +155,7 @@ func.template<qwen3_moe.rmsnorm_quantize_q8_1_x4.body> device @qwen3_moe_rmsnorm
   }
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   %is_reduction_subgroup = index.cmp eq, %subgroup, %zero : index
-  %is_reduction_lane = index.cmp ult, %lane, %eight : index
+  %is_reduction_lane = index.cmp ult, %lane, %reduction_subgroup_count : index
   %loads_subgroup_sum = scalar.andi %is_reduction_subgroup, %is_reduction_lane : i1
   %subgroup_partial = scf.if %loads_subgroup_sum -> (f32) {
     %value = view.load %scratch_values[%lane] : view<256xf32, #dense> -> f32
@@ -273,9 +274,10 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_attentio
   kernel.launch.config workgroups(%token_count, %one, %one) workgroup_size(%twofiftysix, %one, %one) : index
 } launch(%token_count: index, %input: buffer, %weight: buffer, %output: buffer) {
   %publish_normalized = scalar.constant false : i1
+  %reduction_subgroup_count = index.constant 8 : index
   %token = kernel.workgroup.id<x> : index
   %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
-  func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>(%publish_normalized, %token_count, %token, %input_noalias, %weight_noalias, %output_noalias, %output_noalias) : (i1, index, index, buffer, buffer, buffer, buffer)
+  func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>(%publish_normalized, %reduction_subgroup_count, %token_count, %token, %input_noalias, %weight_noalias, %output_noalias, %output_noalias) : (i1, index, index, index, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -287,9 +289,10 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_rmsnorm_
   kernel.launch.config workgroups(%token_count, %one, %one) workgroup_size(%twofiftysix, %one, %one) : index
 } launch(%token_count: index, %input: buffer, %weight: buffer, %normalized_output: buffer, %q8_output: buffer) {
   %publish_normalized = scalar.constant true : i1
+  %reduction_subgroup_count = index.constant 8 : index
   %token = kernel.workgroup.id<x> : index
   %input_noalias, %weight_noalias, %normalized_output_noalias, %q8_output_noalias = buffer.assume.noalias %input, %weight, %normalized_output, %q8_output : buffer, buffer, buffer, buffer
-  func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>(%publish_normalized, %token_count, %token, %input_noalias, %weight_noalias, %normalized_output_noalias, %q8_output_noalias) : (i1, index, index, buffer, buffer, buffer, buffer)
+  func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>(%publish_normalized, %reduction_subgroup_count, %token_count, %token, %input_noalias, %weight_noalias, %normalized_output_noalias, %q8_output_noalias) : (i1, index, index, index, buffer, buffer, buffer, buffer)
   kernel.return
 }
 

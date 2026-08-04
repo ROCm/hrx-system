@@ -1063,6 +1063,28 @@ iree_executable_test(
 )
 
 iree_executable_test(
+    name = "routed_down_q6k_f32_next_q8_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :routed_down_q6k_linked)",
+        "--case=@qwen3_moe_routed_down_q6k_f32_wave64_next_q8_differential_case",
+        "--config=qwen3_moe.model.hidden_size=2048",
+        "--config=qwen3_moe.model.rms_epsilon=0.000001",
+        "--device=amdgpu://0",
+    ],
+    data = [":routed_down_q6k_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
     name = "routed_down_q6k_next_q8_hal_test",
     src = "//loom/src/loom/tools/iree-test-loom",
     args = [
