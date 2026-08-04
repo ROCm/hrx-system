@@ -15,6 +15,14 @@
 // rows; violating that trusted contract is an error rather than a skipped write.
 amdgpu.target<gfx11-generic> @qwen3_moe_attention_postprocess_gfx11_wave32 {subgroup_size = 32}
 
+config.decl @qwen3_moe.model.rms_epsilon : f32
+
+config.decl @qwen3_moe.attention.head_size : %value: index where [range(%value, 4, 1024), mul(%value, 4)]
+
+config.decl @qwen3_moe.attention.query_size : %value: index where [range(%value, 1, 262144)]
+
+config.decl @qwen3_moe.attention.key_value_size : %value: index where [range(%value, 1, 262144)]
+
 // Applies one RMSNorm and two adjacent NEOX pairs. NEOX pairs corresponding
 // channels from the low and high halves, while keeping each half contiguous.
 // A two-pair packet therefore gives both halves naturally coalesced loads and

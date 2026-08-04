@@ -17,13 +17,19 @@
 // Q6_K row primitive while staging each expert row across multiple tokens.
 amdgpu.target<gfx11-generic> @qwen3_moe_routed_down_q6k_gfx11_wave64 {subgroup_size = 64}
 
+target.decl @qwen3_moe_attention_prepare_gfx11_wave32
+
 func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
+
+func.decl @ggml_q6k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32)
 
 func.decl @ggml_q6k_stage_f32_scales(%input_size: index, %row: index, %block: index, %frame_count: index, %frame: index, %lane: index, %weight: buffer, %scale_stage: buffer)
 
 func.decl @ggml_q6k_load_f32_block(%token_count: index, %input_size: index, %token: index, %block: index, %lane: index, %input: buffer) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>)
 
 func.decl @ggml_q6k_f32_block_row(%input_size: index, %row: index, %block: index, %frame_count: index, %frame: index, %lane: index, %weight: buffer, %scale_stage: buffer, %input0: vector<4xf32>, %input1: vector<4xf32>, %input2: vector<4xf32>, %input3: vector<4xf32>) -> (f32)
+
+func.decl @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4(%token_count: index, %input: buffer, %weight: buffer, %q8_output: buffer)
 
 // Shared Q6_K contraction and residual publication used by ordinary and
 // completion-fused exports with identical launch geometry.

@@ -13,9 +13,13 @@
 // registers. The 32 lanes cover two Q4_K blocks per iteration. Qwen's K=768
 // down projection therefore has a deliberate half-wave tail on its third and
 // final block; inactive lanes never address a synthetic fourth block.
+target.decl @qwen3_moe_attention_prepare_gfx11_wave32
+
 func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
 func.decl @qwen3_moe_q4k_q8_1_x4_paired_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32)
+
+func.decl @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4(%token_count: index, %input: buffer, %weight: buffer, %q8_output: buffer)
 
 // Shared Q4_K contraction and residual publication. Each lane consumes both
 // nibbles of a packed code load before the subgroup reduces the row.

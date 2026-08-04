@@ -10,6 +10,14 @@
 // projection and routing independent without paying completion atomics.
 amdgpu.target<gfx11-generic> @qwen3_moe_router_fused_gfx11_wave64 {subgroup_size = 64}
 
+config.decl @qwen3_moe.model.hidden_size : %value: index where [range(%value, 128, 32768), mul(%value, 128)]
+
+config.decl @qwen3_moe.router.expert_count : %value: index where [range(%value, 32, 512), mul(%value, 32)]
+
+func.decl @qwen3_moe_router_projection_f32_four_row_wave32(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
+
+func.decl @qwen3_moe_router_top8_f32(%token_count: index, %route_id_stride: index, %logits: buffer, %route_ids: buffer, %route_weights: buffer)
+
 kernel.def target(@qwen3_moe_router_fused_gfx11_wave64) @qwen3_moe_router_projection_top8_fused_decode_f32(%token_count: index, %route_id_stride: index) {
   %expert_count = config.get @qwen3_moe.router.expert_count : index
   %one = index.constant 1 : index
