@@ -16,6 +16,28 @@
           "loom-link --library"
         ]
       }
+    },
+    {
+      "name": "diagnoses unresolved symbol before bytecode output",
+      "run": {
+        "tool": "loom-format",
+        "args": [
+          "--from=text",
+          "--to=bc",
+          "--output={tmp}/invalid.loombc"
+        ]
+      },
+      "stdin": {
+        "text": "func.def @caller(%value: index) -> (index) {\n  %result = func.call @external_identity(%value) : (index) -> (index)\n  func.return %result : index\n}\n"
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stderr": {
+        "contains": [
+          "error [SYMBOL/002]: symbol '@external_identity' is referenced but not defined"
+        ]
+      }
     }
   ]
 }

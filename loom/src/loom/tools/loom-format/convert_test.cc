@@ -7,6 +7,7 @@
 #include "loom/tools/loom-format/convert.h"
 
 #include <string>
+#include <vector>
 
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
@@ -19,6 +20,13 @@ namespace loom {
 namespace {
 
 using DialectVtablesFn = const loom_op_vtable_t* const* (*)(iree_host_size_t*);
+
+static iree_status_t CaptureDiagnostic(void* user_data,
+                                       const loom_diagnostic_t* diagnostic) {
+  auto* error_ids = static_cast<std::vector<std::string>*>(user_data);
+  error_ids->push_back(diagnostic->error->error_id);
+  return iree_ok_status();
+}
 
 iree_status_t RegisterDialect(loom_context_t* context, uint8_t dialect_id,
                               DialectVtablesFn dialect_vtables_fn) {
@@ -96,6 +104,26 @@ static iree_string_view_t ModuleText() {
       "}\n");
 }
 
+static iree_string_view_t UnresolvedCallText() {
+  return IREE_SV(
+      "func.def @caller(%value: index) -> (index) {\n"
+      "  %result = func.call @external_identity(%value) : (index) -> "
+      "(index)\n"
+      "  func.return %result : index\n"
+      "}\n");
+}
+
+static iree_string_view_t DeclaredCallText() {
+  return IREE_SV(
+      "func.decl @external_identity(%value: index) -> (index)\n"
+      "\n"
+      "func.def @caller(%value: index) -> (index) {\n"
+      "  %result = func.call @external_identity(%value) : (index) -> "
+      "(index)\n"
+      "  func.return %result : index\n"
+      "}\n");
+}
+
 TEST(FormatKind, ParsesAcceptedSpellings) {
   loom_module_format_t format = LOOM_MODULE_FORMAT_AUTO;
 
@@ -137,6 +165,37 @@ TEST_F(LoomFormatConvertTest, TextToBytecodeEmitsMagic) {
   ASSERT_GE(bytecode.size(), static_cast<size_t>(LOOM_BYTECODE_MAGIC_LENGTH));
   EXPECT_EQ(
       bytecode.compare(0, LOOM_BYTECODE_MAGIC_LENGTH, LOOM_BYTECODE_MAGIC), 0);
+}
+
+TEST_F(LoomFormatConvertTest, TextToBytecodeAcceptsDeclaredCall) {
+  std::string bytecode = ConvertTextToBytecode(DeclaredCallText());
+  ASSERT_GE(bytecode.size(), static_cast<size_t>(LOOM_BYTECODE_MAGIC_LENGTH));
+  EXPECT_EQ(
+      bytecode.compare(0, LOOM_BYTECODE_MAGIC_LENGTH, LOOM_BYTECODE_MAGIC), 0);
+}
+
+TEST_F(LoomFormatConvertTest, RejectsUnresolvedCallBeforeWritingOutput) {
+  for (loom_module_format_t output_format :
+       {LOOM_MODULE_FORMAT_TEXT, LOOM_MODULE_FORMAT_BYTECODE}) {
+    std::vector<std::string> error_ids;
+    loom_format_output_t output = {0};
+    loom_format_convert_options_t options = {
+        /*.input_format=*/LOOM_MODULE_FORMAT_TEXT,
+        /*.output_format=*/output_format,
+        /*.diagnostic_sink=*/{CaptureDiagnostic, &error_ids},
+    };
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_format_convert(
+            iree_make_const_byte_span(UnresolvedCallText().data,
+                                      UnresolvedCallText().size),
+            IREE_SV("unresolved.loom"), &context_, &block_pool_, &options,
+            &output, iree_allocator_system()));
+    EXPECT_EQ(error_ids, std::vector<std::string>({"ERR_SYMBOL_002"}));
+    EXPECT_EQ(output.data, nullptr);
+    EXPECT_EQ(output.length, 0u);
+    loom_format_output_deinitialize(&output, iree_allocator_system());
+  }
 }
 
 TEST_F(LoomFormatConvertTest, BytecodeRoundTripsToText) {

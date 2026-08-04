@@ -1412,9 +1412,11 @@ TEST_F(ExecuteTest, FormatModeBytecodeRoundTrips) {
   IREE_ASSERT_OK(
       ExecuteFirst("// RUN: format bytecode\n"
                    "func.def @f() {\n"
+                   "  func.return\n"
                    "}\n"
                    "// ----\n"
                    "func.def @f() {\n"
+                   "  func.return\n"
                    "}\n",
                    &result));
   EXPECT_EQ(result.raw_outcome, LOOM_CHECK_PASS);

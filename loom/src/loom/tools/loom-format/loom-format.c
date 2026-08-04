@@ -62,7 +62,9 @@ static void loom_format_print_agents_markdown(FILE* stream) {
       "`--from=auto` detects bytecode by the LOOM file magic and treats every\n"
       "other input as text. `--to=text` prints canonical text IR. `--to=bc`\n"
       "writes bytecode suitable for `loom-link --library=...` and\n"
-      "`loom-compile` input.\n");
+      "`loom-compile` input. The complete module is verified before either\n"
+      "output is written; external calls require a matching `func.decl` or\n"
+      "definition.\n");
 }
 
 int main(int argc, char** argv) {
@@ -81,7 +83,8 @@ int main(int argc, char** argv) {
       "stdout.\n"
       "The auto input format detects bytecode by the LOOM file magic and "
       "treats\n"
-      "all other input as text.\n");
+      "all other input as text. The complete module is verified before output "
+      "is written.\n");
   for (int i = 1; i < argc; ++i) {
     if (loom_tooling_cli_is_agents_markdown_arg(argv[i])) {
       loom_format_print_agents_markdown(stdout);
