@@ -656,6 +656,12 @@ static iree_status_t iree_hal_amdgpu_allocator_resolve_virtual_memory_placement(
         IREE_STATUS_INVALID_ARGUMENT,
         "AMDGPU virtual-memory parameters cannot be placed on this device");
   }
+  if (!iree_all_bits_set(memory_placement.memory_type,
+                         IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU virtual-memory physical backing must be device-local");
+  }
   if (memory_placement.memory_pool->allocation_flags != 0) {
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,

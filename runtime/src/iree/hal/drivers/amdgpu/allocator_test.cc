@@ -64,6 +64,17 @@ static iree_hal_buffer_params_t HostLocalVirtualMemoryParams() {
   };
 }
 
+static iree_hal_buffer_params_t DeviceLocalHostVisibleVirtualMemoryParams() {
+  return (iree_hal_buffer_params_t){
+      /*.usage=*/IREE_HAL_BUFFER_USAGE_TRANSFER,
+      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
+      /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+          IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+          IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
+      /*.queue_affinity=*/kQueueAffinity0,
+  };
+}
+
 class VirtualMemoryReservation {
  public:
   explicit VirtualMemoryReservation(iree_hal_allocator_t* allocator)
@@ -471,12 +482,19 @@ TEST_F(AllocatorTest, VirtualMemoryMapsMinimumGranuleAcrossPools) {
   ASSERT_NE(0u, device_minimum_page_size);
   ASSERT_GE(device_recommended_page_size, device_minimum_page_size);
 
-  const iree_hal_buffer_params_t host_params = HostLocalVirtualMemoryParams();
+  const iree_hal_buffer_params_t host_params =
+      DeviceLocalHostVisibleVirtualMemoryParams();
   iree_device_size_t host_minimum_page_size = 0;
   iree_device_size_t host_recommended_page_size = 0;
-  IREE_ASSERT_OK(iree_hal_allocator_virtual_memory_query_granularity(
-      allocator, host_params, &host_minimum_page_size,
-      &host_recommended_page_size));
+  iree_status_t host_granularity_status =
+      iree_hal_allocator_virtual_memory_query_granularity(
+          allocator, host_params, &host_minimum_page_size,
+          &host_recommended_page_size);
+  if (iree_status_is_invalid_argument(host_granularity_status)) {
+    iree_status_free(host_granularity_status);
+    GTEST_SKIP() << "device-local host-visible VMM backing is unavailable";
+  }
+  IREE_ASSERT_OK(host_granularity_status);
   ASSERT_NE(0u, host_minimum_page_size);
   ASSERT_GE(host_recommended_page_size, host_minimum_page_size);
 
@@ -503,6 +521,19 @@ TEST_F(AllocatorTest, VirtualMemoryMapsMinimumGranuleAcrossPools) {
       IREE_HAL_MEMORY_PROTECTION_READ_WRITE));
 
   IREE_ASSERT_OK(mapping.Unmap());
+}
+
+TEST_F(AllocatorTest, VirtualMemoryRejectsHostLocalBacking) {
+  TestLogicalDevice test_device;
+  IREE_ASSERT_OK(test_device.Initialize(&libhsa_, &topology_, host_allocator_));
+  iree_hal_allocator_t* allocator = test_device.allocator();
+
+  iree_device_size_t minimum_page_size = 0;
+  iree_device_size_t recommended_page_size = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_allocator_virtual_memory_query_granularity(
+                            allocator, HostLocalVirtualMemoryParams(),
+                            &minimum_page_size, &recommended_page_size));
 }
 
 TEST_F(AllocatorTest, AsanStateReservesDefaultShadowMapWhenEnabled) {

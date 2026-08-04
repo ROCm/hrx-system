@@ -613,10 +613,10 @@ iree_status_t iree_hal_streaming_memory_allocate_device_from_pool(
   return status;
 }
 
-typedef struct iree_hal_streaming_deferred_device_free_t {
-  // Next pending async free in the process-wide reuse registry.
-  struct iree_hal_streaming_deferred_device_free_t* next;
-  // Context retained while the detached allocation is pending release.
+struct iree_hal_streaming_deferred_device_free_t {
+  // Next pending async free in the owning context's reuse registry.
+  iree_hal_streaming_deferred_device_free_t* next;
+  // Context owning the registry and allocation bookkeeping.
   iree_hal_streaming_context_t* owner_context;
   // Stable identifier of the stream that orders this logical free.
   unsigned long long source_stream_id;
@@ -624,36 +624,36 @@ typedef struct iree_hal_streaming_deferred_device_free_t {
   uint64_t completion_value;
   // Detached allocation wrapper to release on the stream timeline.
   iree_hal_streaming_buffer_t* buffer;
-  // True while this operation is visible in the pending-free registry.
+  // True while this operation is visible in |owner_context|'s registry.
   bool is_registered;
-  // True after the source stream has completed the free operation.
+  // True when the host call ran after all stream prerequisites completed.
   bool is_ready;
-  // True when completion occurred before publication and permits immediate
-  // opportunistic release once publication completes.
-  bool release_on_registration;
+  // True after the queue has released its terminal resource reference.
+  bool is_terminal;
   // True when a later stream-ordered allocation adopted |buffer|.
   bool is_reused;
-} iree_hal_streaming_deferred_device_free_t;
+  // Reuse policy captured when the free is enqueued.
+  bool allow_opportunistic;
+};
 
-static iree_once_flag iree_hal_streaming_pending_free_mutex_once =
-    IREE_ONCE_FLAG_INIT;
-static iree_slim_mutex_t iree_hal_streaming_pending_free_mutex;
-static iree_hal_streaming_deferred_device_free_t*
-    iree_hal_streaming_pending_free_head = NULL;
+typedef struct iree_hal_streaming_pending_free_terminal_t {
+  // Resource retained by the accepted host call until callback completion or
+  // cancellation. It transitively owns the operation's context retain.
+  iree_hal_resource_t resource;
+  // Context-owned operation notified when the queued call becomes terminal.
+  iree_hal_streaming_deferred_device_free_t* free_op;
+} iree_hal_streaming_pending_free_terminal_t;
 
-static void iree_hal_streaming_pending_free_mutex_initialize(void) {
-  iree_slim_mutex_initialize(&iree_hal_streaming_pending_free_mutex);
-}
+static void iree_hal_streaming_pending_free_terminal_destroy(
+    iree_hal_resource_t* resource);
 
-static void iree_hal_streaming_pending_free_lock(void) {
-  iree_call_once(&iree_hal_streaming_pending_free_mutex_once,
-                 iree_hal_streaming_pending_free_mutex_initialize);
-  iree_slim_mutex_lock(&iree_hal_streaming_pending_free_mutex);
-}
+static const iree_hal_resource_vtable_t
+    iree_hal_streaming_pending_free_terminal_vtable = {
+        .destroy = iree_hal_streaming_pending_free_terminal_destroy,
+};
 
 static void iree_hal_streaming_pending_free_destroy(
     iree_hal_streaming_deferred_device_free_t* free_op) {
-  iree_hal_streaming_context_release(free_op->owner_context);
   iree_allocator_free(iree_allocator_system(), free_op);
 }
 
@@ -683,9 +683,10 @@ static iree_status_t iree_hal_streaming_pending_free_release_buffer(
 }
 
 static void iree_hal_streaming_pending_free_remove_locked(
+    iree_hal_streaming_context_t* context,
     iree_hal_streaming_deferred_device_free_t* free_op) {
   iree_hal_streaming_deferred_device_free_t** current =
-      &iree_hal_streaming_pending_free_head;
+      &context->pending_free_head;
   while (*current && *current != free_op) {
     current = &(*current)->next;
   }
@@ -695,26 +696,52 @@ static void iree_hal_streaming_pending_free_remove_locked(
   free_op->is_registered = false;
 }
 
-static void iree_hal_streaming_pending_free_register(
-    iree_hal_streaming_deferred_device_free_t* free_op) {
-  bool release_buffer = false;
-  iree_hal_streaming_pending_free_lock();
-  if (free_op->is_ready && free_op->release_on_registration) {
-    release_buffer = true;
-  } else {
-    free_op->next = iree_hal_streaming_pending_free_head;
-    iree_hal_streaming_pending_free_head = free_op;
-    free_op->is_registered = true;
+static void iree_hal_streaming_pending_free_terminal_destroy(
+    iree_hal_resource_t* resource) {
+  iree_hal_streaming_pending_free_terminal_t* terminal =
+      (iree_hal_streaming_pending_free_terminal_t*)resource;
+  iree_hal_streaming_deferred_device_free_t* free_op = terminal->free_op;
+  iree_hal_streaming_context_t* context = free_op->owner_context;
+  iree_hal_streaming_buffer_t* buffer = NULL;
+  bool destroy_free_op = false;
+
+  iree_slim_mutex_lock(&context->pending_free_mutex);
+  free_op->is_terminal = true;
+  if (free_op->is_reused) {
+    destroy_free_op = true;
+  } else if (!free_op->is_ready || free_op->allow_opportunistic) {
+    if (free_op->is_registered) {
+      iree_hal_streaming_pending_free_remove_locked(context, free_op);
+    }
+    buffer = free_op->buffer;
+    free_op->buffer = NULL;
+    destroy_free_op = true;
   }
-  iree_slim_mutex_unlock(&iree_hal_streaming_pending_free_mutex);
-  if (release_buffer) {
-    iree_status_t status = iree_hal_streaming_pending_free_release_buffer(
-        free_op, /*trim_to_release_threshold=*/true);
+  iree_slim_mutex_unlock(&context->pending_free_mutex);
+
+  if (buffer) {
+    iree_status_t status = iree_hal_streaming_buffer_free_and_trim_pool(
+        buffer, /*trim_to_release_threshold=*/true);
     if (!iree_status_is_ok(status)) {
       iree_status_fprint(stderr, status);
       iree_status_free(status);
     }
   }
+  if (destroy_free_op) {
+    iree_hal_streaming_pending_free_destroy(free_op);
+  }
+  iree_allocator_free(iree_allocator_system(), terminal);
+  iree_hal_streaming_context_release(context);
+}
+
+static void iree_hal_streaming_pending_free_register(
+    iree_hal_streaming_deferred_device_free_t* free_op) {
+  iree_hal_streaming_context_t* context = free_op->owner_context;
+  iree_slim_mutex_lock(&context->pending_free_mutex);
+  free_op->next = context->pending_free_head;
+  context->pending_free_head = free_op;
+  free_op->is_registered = true;
+  iree_slim_mutex_unlock(&context->pending_free_mutex);
 }
 
 static iree_status_t iree_hal_streaming_memory_try_reuse_pending_free(
@@ -723,14 +750,14 @@ static iree_status_t iree_hal_streaming_memory_try_reuse_pending_free(
     iree_hal_streaming_buffer_t** out_buffer) {
   *out_buffer = NULL;
 
-  iree_hal_streaming_pending_free_lock();
+  bool destroy_free_op = false;
+  iree_slim_mutex_lock(&context->pending_free_mutex);
   iree_hal_streaming_deferred_device_free_t** current =
-      &iree_hal_streaming_pending_free_head;
+      &context->pending_free_head;
   while (*current) {
     iree_hal_streaming_deferred_device_free_t* free_op = *current;
     iree_hal_streaming_buffer_t* buffer = free_op->buffer;
-    bool can_reuse = free_op->owner_context == context &&
-                     buffer->allocation_pool == pool && buffer->size == size;
+    bool can_reuse = buffer->allocation_pool == pool && buffer->size == size;
     if (can_reuse && free_op->source_stream_id != stream->stream_id) {
       uint64_t follow_event_dependencies = 0;
       uint64_t allow_opportunistic = 0;
@@ -754,23 +781,28 @@ static iree_status_t iree_hal_streaming_memory_try_reuse_pending_free(
           &context->buffer_table, buffer->device_ptr, buffer->host_ptr,
           buffer->size, buffer->hrx_buf, buffer);
       if (!hrx_status_is_ok(insert_status)) {
-        iree_slim_mutex_unlock(&iree_hal_streaming_pending_free_mutex);
+        iree_slim_mutex_unlock(&context->pending_free_mutex);
         return HRX_CALL(insert_status);
       }
       *current = free_op->next;
       free_op->next = NULL;
       free_op->is_registered = false;
       free_op->is_reused = true;
+      free_op->buffer = NULL;
+      destroy_free_op = free_op->is_terminal;
       iree_hal_streaming_buffer_activate_pool_allocation(buffer);
       iree_hal_streaming_memory_account_device_allocation(context->device_entry,
                                                           buffer->size);
       *out_buffer = buffer;
-      iree_slim_mutex_unlock(&iree_hal_streaming_pending_free_mutex);
+      iree_slim_mutex_unlock(&context->pending_free_mutex);
+      if (destroy_free_op) {
+        iree_hal_streaming_pending_free_destroy(free_op);
+      }
       return iree_ok_status();
     }
     current = &free_op->next;
   }
-  iree_slim_mutex_unlock(&iree_hal_streaming_pending_free_mutex);
+  iree_slim_mutex_unlock(&context->pending_free_mutex);
   return iree_ok_status();
 }
 
@@ -1046,50 +1078,18 @@ iree_status_t iree_hal_streaming_memory_free_device(
   return status;
 }
 
-static void iree_hal_streaming_deferred_device_free(void* user_data) {
+static iree_status_t iree_hal_streaming_deferred_device_free(
+    void* user_data, const uint64_t args[4],
+    iree_hal_host_call_context_t* call_context) {
+  (void)args;
+  (void)call_context;
   iree_hal_streaming_deferred_device_free_t* free_op =
       (iree_hal_streaming_deferred_device_free_t*)user_data;
-  hrx_mem_pool_t allocation_pool = free_op->buffer->allocation_pool;
-  // Non-pool allocations have no backing storage available for reuse and can
-  // be released as soon as the stream reaches the free operation.
-  uint64_t allow_opportunistic = allocation_pool ? 0 : 1;
-  if (allocation_pool) {
-    iree_status_t policy_status = HRX_CALL(hrx_mem_pool_get_attribute(
-        allocation_pool, HRX_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC,
-        &allow_opportunistic));
-    if (!iree_status_is_ok(policy_status)) {
-      iree_status_fprint(stderr, policy_status);
-      iree_status_free(policy_status);
-      allow_opportunistic = 0;
-    }
-  }
-
-  bool is_reused = false;
-  bool release_buffer = false;
-  iree_hal_streaming_pending_free_lock();
-  is_reused = free_op->is_reused;
-  if (!is_reused) {
-    free_op->is_ready = true;
-    if (free_op->is_registered && allow_opportunistic != 0) {
-      iree_hal_streaming_pending_free_remove_locked(free_op);
-      release_buffer = true;
-    } else if (!free_op->is_registered) {
-      // The callback may run before the enqueueing thread publishes the
-      // operation. Publication observes this state and performs the release.
-      free_op->release_on_registration = allow_opportunistic != 0;
-    }
-  }
-  iree_slim_mutex_unlock(&iree_hal_streaming_pending_free_mutex);
-  if (is_reused) {
-    iree_hal_streaming_pending_free_destroy(free_op);
-  } else if (release_buffer) {
-    iree_status_t status = iree_hal_streaming_pending_free_release_buffer(
-        free_op, /*trim_to_release_threshold=*/true);
-    if (!iree_status_is_ok(status)) {
-      iree_status_fprint(stderr, status);
-      iree_status_free(status);
-    }
-  }
+  iree_hal_streaming_context_t* context = free_op->owner_context;
+  iree_slim_mutex_lock(&context->pending_free_mutex);
+  free_op->is_ready = true;
+  iree_slim_mutex_unlock(&context->pending_free_mutex);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_streaming_pending_free_release_list(
@@ -1109,13 +1109,15 @@ static iree_status_t iree_hal_streaming_pending_free_release_list(
 iree_status_t iree_hal_streaming_memory_release_completed_async_frees(
     iree_hal_streaming_stream_t* stream) {
   iree_hal_streaming_deferred_device_free_t* completed_frees = NULL;
+  iree_hal_streaming_context_t* context = stream->context;
 
-  iree_hal_streaming_pending_free_lock();
+  iree_slim_mutex_lock(&context->pending_free_mutex);
   iree_hal_streaming_deferred_device_free_t** current =
-      &iree_hal_streaming_pending_free_head;
+      &context->pending_free_head;
   while (*current) {
     iree_hal_streaming_deferred_device_free_t* free_op = *current;
-    if (free_op->source_stream_id == stream->stream_id && free_op->is_ready) {
+    if (free_op->source_stream_id == stream->stream_id && free_op->is_ready &&
+        free_op->is_terminal) {
       *current = free_op->next;
       free_op->next = completed_frees;
       free_op->is_registered = false;
@@ -1124,7 +1126,28 @@ iree_status_t iree_hal_streaming_memory_release_completed_async_frees(
       current = &free_op->next;
     }
   }
-  iree_slim_mutex_unlock(&iree_hal_streaming_pending_free_mutex);
+  iree_slim_mutex_unlock(&context->pending_free_mutex);
+
+  return iree_hal_streaming_pending_free_release_list(
+      completed_frees, /*trim_to_release_threshold=*/true);
+}
+
+iree_status_t iree_hal_streaming_memory_release_terminal_async_frees(
+    iree_hal_streaming_context_t* context) {
+  iree_hal_streaming_deferred_device_free_t* completed_frees = NULL;
+
+  iree_slim_mutex_lock(&context->pending_free_mutex);
+  while (context->pending_free_head) {
+    iree_hal_streaming_deferred_device_free_t* free_op =
+        context->pending_free_head;
+    IREE_ASSERT(free_op->is_terminal,
+                "a nonterminal asynchronous free retained its context");
+    context->pending_free_head = free_op->next;
+    free_op->next = completed_frees;
+    free_op->is_registered = false;
+    completed_frees = free_op;
+  }
+  iree_slim_mutex_unlock(&context->pending_free_mutex);
 
   return iree_hal_streaming_pending_free_release_list(
       completed_frees, /*trim_to_release_threshold=*/true);
@@ -1135,21 +1158,37 @@ iree_status_t iree_hal_streaming_memory_release_completed_async_frees_from_pool(
   if (!pool) return iree_ok_status();
 
   iree_hal_streaming_deferred_device_free_t* completed_frees = NULL;
-  iree_hal_streaming_pending_free_lock();
-  iree_hal_streaming_deferred_device_free_t** current =
-      &iree_hal_streaming_pending_free_head;
-  while (*current) {
-    iree_hal_streaming_deferred_device_free_t* free_op = *current;
-    if (free_op->is_ready && free_op->buffer->allocation_pool == pool) {
-      *current = free_op->next;
-      free_op->next = completed_frees;
-      free_op->is_registered = false;
-      completed_frees = free_op;
-    } else {
-      current = &free_op->next;
-    }
+  iree_hal_streaming_device_registry_t* device_registry =
+      iree_hal_streaming_device_registry();
+  if (!device_registry) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "HAL stream layer not initialized");
   }
-  iree_slim_mutex_unlock(&iree_hal_streaming_pending_free_mutex);
+
+  // Pool trimming is an explicit cold-path operation. Scan contexts here
+  // instead of imposing a process-wide registry on every allocation.
+  iree_slim_mutex_lock(&device_registry->context_list.mutex);
+  for (iree_hal_streaming_context_t* context =
+           device_registry->context_list.head;
+       context; context = context->context_list_entry.next) {
+    iree_slim_mutex_lock(&context->pending_free_mutex);
+    iree_hal_streaming_deferred_device_free_t** current =
+        &context->pending_free_head;
+    while (*current) {
+      iree_hal_streaming_deferred_device_free_t* free_op = *current;
+      if (free_op->is_ready && free_op->is_terminal && free_op->buffer &&
+          free_op->buffer->allocation_pool == pool) {
+        *current = free_op->next;
+        free_op->next = completed_frees;
+        free_op->is_registered = false;
+        completed_frees = free_op;
+      } else {
+        current = &free_op->next;
+      }
+    }
+    iree_slim_mutex_unlock(&context->pending_free_mutex);
+  }
+  iree_slim_mutex_unlock(&device_registry->context_list.mutex);
 
   return iree_hal_streaming_pending_free_release_list(
       completed_frees, /*trim_to_release_threshold=*/false);
@@ -1177,6 +1216,22 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
         "stream-ordered free cannot be enqueued on a foreign device context");
   }
 
+  // Non-pool allocations have no reusable backing and are retired as soon as
+  // the stream reaches the free. Pool policy is sampled when the operation is
+  // enqueued so terminal cleanup never needs to query a possibly reused
+  // wrapper.
+  uint64_t allow_opportunistic = wrapper->allocation_pool ? 0 : 1;
+  if (wrapper->allocation_pool) {
+    status = HRX_CALL(hrx_mem_pool_get_attribute(
+        wrapper->allocation_pool, HRX_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC,
+        &allow_opportunistic));
+    if (!iree_status_is_ok(status)) {
+      iree_hal_streaming_context_release(owner_context);
+      IREE_TRACE_ZONE_END(z0);
+      return status;
+    }
+  }
+
   iree_hal_streaming_deferred_device_free_t* free_op = NULL;
   status = iree_allocator_malloc(iree_allocator_system(), sizeof(*free_op),
                                  (void**)&free_op);
@@ -1194,14 +1249,29 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
   free_op->next = NULL;
   free_op->is_registered = false;
   free_op->is_ready = false;
-  free_op->release_on_registration = false;
+  free_op->is_terminal = false;
   free_op->is_reused = false;
+  free_op->allow_opportunistic = allow_opportunistic != 0;
+
+  iree_hal_streaming_pending_free_terminal_t* terminal = NULL;
+  status = iree_allocator_malloc(iree_allocator_system(), sizeof(*terminal),
+                                 (void**)&terminal);
+  if (!iree_status_is_ok(status)) {
+    free_op->buffer = NULL;
+    iree_hal_streaming_pending_free_destroy(free_op);
+    iree_hal_streaming_context_release(owner_context);
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
+  iree_hal_resource_initialize(&iree_hal_streaming_pending_free_terminal_vtable,
+                               &terminal->resource);
+  terminal->free_op = free_op;
 
   status =
       HRX_CALL(hrx_buffer_table_reserve_insert(&owner_context->buffer_table));
   if (!iree_status_is_ok(status)) {
-    iree_allocator_free(iree_allocator_system(), free_op);
-    iree_hal_streaming_context_release(owner_context);
+    free_op->buffer = NULL;
+    iree_hal_resource_release(&terminal->resource);
     IREE_TRACE_ZONE_END(z0);
     return status;
   }
@@ -1210,8 +1280,8 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
       &owner_context->buffer_table, wrapper->device_ptr);
   if (!hrx_status_is_ok(remove_status)) {
     hrx_buffer_table_cancel_reserved_insert(&owner_context->buffer_table);
-    iree_allocator_free(iree_allocator_system(), free_op);
-    iree_hal_streaming_context_release(owner_context);
+    free_op->buffer = NULL;
+    iree_hal_resource_release(&terminal->resource);
     IREE_TRACE_ZONE_END(z0);
     return HRX_CALL(remove_status);
   }
@@ -1221,16 +1291,21 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
   // free reaches the host callback.
   iree_hal_streaming_buffer_release_pool_allocation(wrapper);
   iree_hal_streaming_memory_account_device_free(wrapper);
-  status = iree_hal_streaming_launch_host_function(
-      stream, iree_hal_streaming_deferred_device_free, free_op);
+  uint64_t args[4] = {0, 0, 0, 0};
+  iree_hal_host_call_t call = iree_hal_make_host_call_with_resource(
+      iree_hal_streaming_deferred_device_free, free_op, &terminal->resource);
+  status = iree_hal_streaming_queue_host_call(stream, call, args,
+                                              IREE_HAL_HOST_CALL_FLAG_NONE);
   if (iree_status_is_ok(status)) {
     hrx_buffer_table_cancel_reserved_insert(&owner_context->buffer_table);
     iree_slim_mutex_lock(&stream->mutex);
     free_op->completion_value = stream->pending_value;
     iree_slim_mutex_unlock(&stream->mutex);
-    // Publish only after the callback has a stable completion value. If the
-    // callback already ran, publication retires the allocation immediately.
+    // Publish only after the callback has a stable completion value. The
+    // caller's resource reference prevents terminal cleanup from racing this
+    // publication even when the callback executes inline.
     iree_hal_streaming_pending_free_register(free_op);
+    iree_hal_resource_release(&terminal->resource);
   }
   if (!iree_status_is_ok(status)) {
     hrx_status_t insert_status = hrx_buffer_table_insert_reserved(
@@ -1246,8 +1321,8 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
       iree_hal_streaming_memory_account_device_allocation(
           owner_context->device_entry, wrapper->size);
     }
-    iree_allocator_free(iree_allocator_system(), free_op);
-    iree_hal_streaming_context_release(owner_context);
+    free_op->buffer = NULL;
+    iree_hal_resource_release(&terminal->resource);
   }
 
   IREE_TRACE_ZONE_END(z0);
