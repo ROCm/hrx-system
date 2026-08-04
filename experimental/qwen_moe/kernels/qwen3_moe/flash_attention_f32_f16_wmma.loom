@@ -22,17 +22,24 @@ config.decl @qwen3_moe.attention.query_head_count : %value: index where [range(%
 
 config.decl @qwen3_moe.attention.key_value_head_count : %value: index where [range(%value, 1, 64)]
 
+config.decl @qwen3_moe.workload.token_capacity : %value: index where [range(%value, 1, 2048)]
+
+// Bounds the context copied by the test-only row-extraction kernel below.
+config.decl @qwen3_moe.attention.test.context_capacity : %value: index where [range(%value, 1, 32768)]
+
 kernel.def target(@qwen3_moe_attention_gfx11_wave64) @qwen3_moe_flash_attention_f32_f16_wmma(%query_token_count: index, %key_value_token_count: index) {
   %query_head_count = config.get @qwen3_moe.attention.query_head_count : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %one = index.constant 1 : index
   %fifteen = index.constant 15 : index
   %sixteen = index.constant 16 : index
   %twofiftysix = index.constant 256 : index
-  %padded_query_token_count = index.add %query_token_count, %fifteen : index
+  %padded_query_token_count = index.add %token_capacity, %fifteen : index
   %query_tile_count = index.div %padded_query_token_count, %sixteen : index
   kernel.launch.config workgroups(%query_tile_count, %query_head_count, %one) workgroup_size(%twofiftysix, %one, %one) : index
 } launch(%query_token_count: index, %key_value_token_count: index, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer) {
-  %bounded_query_token_count = index.assume %query_token_count [range(%query_token_count, 1, 2048)] : index
+  %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
+  %bounded_query_token_count = index.assume %query_token_count [range(%query_token_count, 1, 2048), le(%query_token_count, %token_capacity)] : index
   %bounded_key_value_token_count = index.assume %key_value_token_count [range(%key_value_token_count, 1, 32768)] : index
   %query_head_count0 = config.get @qwen3_moe.attention.query_head_count : index
   %key_value_head_count0 = config.get @qwen3_moe.attention.key_value_head_count : index
@@ -566,12 +573,13 @@ kernel.def target(@qwen3_moe_attention_gfx11_wave64) @qwen3_moe_flash_attention_
 // this helper from production roots.
 kernel.def target(@qwen3_moe_attention_gfx11_wave64) @qwen3_moe_flash_attention_test_extract_row(%query_token_count: index, %context_count: index, %source_row: index) {
   %query_head_count = config.get @qwen3_moe.attention.query_head_count : index
+  %context_capacity = config.get @qwen3_moe.attention.test.context_capacity : index
   %onetwentyeight = index.constant 128 : index
   %twofiftyfive = index.constant 255 : index
   %twofiftysix = index.constant 256 : index
   %one = index.constant 1 : index
   %query_element_count = index.mul %query_head_count, %onetwentyeight : index
-  %element_count = index.add %query_element_count, %context_count : index
+  %element_count = index.add %query_element_count, %context_capacity : index
   %padded_element_count = index.add %element_count, %twofiftyfive : index
   %workgroup_count = index.div %padded_element_count, %twofiftysix : index
   kernel.launch.config workgroups(%workgroup_count, %one, %one) workgroup_size(%twofiftysix, %one, %one) : index
@@ -581,10 +589,11 @@ kernel.def target(@qwen3_moe_attention_gfx11_wave64) @qwen3_moe_flash_attention_
   %onetwentyeight = index.constant 128 : index
   %twofiftysix = index.constant 256 : index
   %query_head_count0 = config.get @qwen3_moe.attention.query_head_count : index
+  %context_capacity = config.get @qwen3_moe.attention.test.context_capacity : index
   %query_head_count = index.assume %query_head_count0 [range(%query_head_count0, 1, 64)] : index
   %bounded_query_token_count = index.assume %query_token_count [range(%query_token_count, 1, 2048)] : index
-  %bounded_context_count = index.assume %context_count [range(%context_count, 1, 32768)] : index
-  %bounded_source_row, %source_query_token_count = index.assume %source_row, %bounded_query_token_count [lt(%source_row, %bounded_query_token_count)] : index, index
+  %bounded_context_count = index.assume %context_count [range(%context_count, 1, 32768), le(%context_count, %context_capacity)] : index
+  %bounded_source_row, %source_query_token_count = index.assume %source_row, %bounded_query_token_count [range(%source_row, 0, 2047), lt(%source_row, %bounded_query_token_count)] : index, index
   %workgroup = kernel.workgroup.id<x> : index
   %workitem = kernel.workitem.id<x> : index
   %linear = index.madd %workgroup, %twofiftysix, %workitem : index
