@@ -22,6 +22,7 @@ exports_files([
     "qwen3_moe/attention_qkv_postprocess_fused.loom",
     "qwen3_moe/attention_qkv_same_format_prefill.loom",
     "qwen3_moe/attention_qkv_quantized.loom",
+    "qwen3_moe/batched_decode_expert_dispatch.loom",
     "qwen3_moe/dense_linear_quantized_f16_wmma.loom",
     "qwen3_moe/expert_table_partition_fused.loom",
     "qwen3_moe/flash_attention_decode_f32_f16_wmma.loom",
@@ -1283,6 +1284,158 @@ loom_link_module(
 )
 
 loom_link_module(
+    name = "batched_decode_expert_dispatch_linked",
+    srcs = ["qwen3_moe/batched_decode_expert_dispatch.loom"],
+    libraries = ["qwen3_moe/model_config.loom"],
+)
+
+iree_executable_test(
+    name = "batched_decode_expert_dispatch_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :batched_decode_expert_dispatch_linked)",
+        "--benchmark=@qwen3_moe_batched_decode_expert_dispatch_diverse",
+        "--config=qwen3_moe.batched_decode.schedule0_row_limit=1",
+        "--config=qwen3_moe.batched_decode.schedule1_row_limit=2",
+        "--config=qwen3_moe.batched_decode.schedule2_row_limit=4",
+        "--config=qwen3_moe.router.expert_count=128",
+        "--config=qwen3_moe.router.route_count=8",
+        "--config=qwen3_moe.workload.token_capacity=16",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = [":batched_decode_expert_dispatch_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "batched_decode_expert_dispatch_configurable_plan_test",
+    src = "//loom/src/loom/tools/iree-benchmark-loom",
+    args = [
+        "$(location :batched_decode_expert_dispatch_linked)",
+        "--benchmark=@qwen3_moe_batched_decode_expert_dispatch_configurable",
+        "--config=qwen3_moe.batched_decode.schedule0_row_limit=1",
+        "--config=qwen3_moe.batched_decode.schedule1_row_limit=3",
+        "--config=qwen3_moe.batched_decode.schedule2_row_limit=6",
+        "--config=qwen3_moe.router.expert_count=32",
+        "--config=qwen3_moe.router.route_count=4",
+        "--config=qwen3_moe.workload.token_capacity=8",
+        "--dry-run",
+        "--output-format=jsonl",
+    ],
+    data = [":batched_decode_expert_dispatch_linked"],
+    tags = ["hostonly"],
+)
+
+iree_executable_test(
+    name = "batched_decode_expert_dispatch_singleton_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :batched_decode_expert_dispatch_linked)",
+        "--case=@qwen3_moe_batched_decode_expert_dispatch_singleton_case",
+        "--config=qwen3_moe.batched_decode.schedule0_row_limit=1",
+        "--config=qwen3_moe.batched_decode.schedule1_row_limit=2",
+        "--config=qwen3_moe.batched_decode.schedule2_row_limit=4",
+        "--config=qwen3_moe.router.expert_count=128",
+        "--config=qwen3_moe.router.route_count=8",
+        "--config=qwen3_moe.workload.token_capacity=16",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":batched_decode_expert_dispatch_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "batched_decode_expert_dispatch_mixed_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :batched_decode_expert_dispatch_linked)",
+        "--case=@qwen3_moe_batched_decode_expert_dispatch_three_row_case",
+        "--config=qwen3_moe.batched_decode.schedule0_row_limit=1",
+        "--config=qwen3_moe.batched_decode.schedule1_row_limit=2",
+        "--config=qwen3_moe.batched_decode.schedule2_row_limit=4",
+        "--config=qwen3_moe.router.expert_count=128",
+        "--config=qwen3_moe.router.route_count=8",
+        "--config=qwen3_moe.workload.token_capacity=16",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":batched_decode_expert_dispatch_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "batched_decode_expert_dispatch_coherent_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :batched_decode_expert_dispatch_linked)",
+        "--case=@qwen3_moe_batched_decode_expert_dispatch_coherent_case",
+        "--config=qwen3_moe.batched_decode.schedule0_row_limit=1",
+        "--config=qwen3_moe.batched_decode.schedule1_row_limit=2",
+        "--config=qwen3_moe.batched_decode.schedule2_row_limit=4",
+        "--config=qwen3_moe.router.expert_count=128",
+        "--config=qwen3_moe.router.route_count=8",
+        "--config=qwen3_moe.workload.token_capacity=16",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":batched_decode_expert_dispatch_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+iree_executable_test(
+    name = "batched_decode_expert_dispatch_configurable_hal_test",
+    src = "//loom/src/loom/tools/iree-test-loom",
+    args = [
+        "$(location :batched_decode_expert_dispatch_linked)",
+        "--case=@qwen3_moe_batched_decode_expert_dispatch_configurable_geometry_case",
+        "--config=qwen3_moe.batched_decode.schedule0_row_limit=1",
+        "--config=qwen3_moe.batched_decode.schedule1_row_limit=3",
+        "--config=qwen3_moe.batched_decode.schedule2_row_limit=6",
+        "--config=qwen3_moe.router.expert_count=32",
+        "--config=qwen3_moe.router.route_count=4",
+        "--config=qwen3_moe.workload.token_capacity=8",
+        "--device=amdgpu://0",
+        "--sanitizer=access",
+    ],
+    data = [":batched_decode_expert_dispatch_linked"],
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "manual",
+        "requires-gpu-amd",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+)
+
+loom_link_module(
     name = "expert_table_partition_fused_linked",
     srcs = ["qwen3_moe/expert_table_partition_fused.loom"],
     libraries = [
@@ -2134,6 +2287,12 @@ test_suite(
         ":attention_qkv_quantized_q6_hal_test",
         ":attention_qkv_same_format_prefill_hal_test",
         ":attention_qkv_same_format_prefill_plan_test",
+        ":batched_decode_expert_dispatch_coherent_hal_test",
+        ":batched_decode_expert_dispatch_configurable_hal_test",
+        ":batched_decode_expert_dispatch_configurable_plan_test",
+        ":batched_decode_expert_dispatch_mixed_hal_test",
+        ":batched_decode_expert_dispatch_plan_test",
+        ":batched_decode_expert_dispatch_singleton_hal_test",
         ":dense_linear_q4k_f16_wmma_o_hal_test",
         ":dense_linear_q4k_f16_wmma_o_plan_test",
         ":dense_linear_q4k_q8_1_x4_accumulation_hal_test",
