@@ -13,9 +13,10 @@
 /// Per-invocation configuration bindings.
 ///
 /// Configuration is intentionally represented as plain borrowed key/value data
-/// plus one optional JSON/JSONC object string. Operation descriptors decide how
-/// strictly bindings are validated and whether unresolved configuration is
-/// allowed to remain in the produced result.
+/// plus one optional JSON/JSONC object string. Bindings without a matching
+/// config declaration are ignored so one stable config bag can serve modules
+/// that consume different subsets. Operation descriptors decide whether
+/// unresolved configuration may remain in the produced result.
 ///
 /// @par Example
 /// Use JSON for a framework-provided configuration file and explicit bindings
@@ -33,8 +34,7 @@
 ///     .bindings = overrides,
 ///     .binding_count = 1,
 ///     .json_object = loomc_make_cstring_view(json_config),
-///     .flags = LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-///              LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+///     .flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
 /// };
 /// @endcode
 
@@ -57,13 +57,8 @@ typedef struct loomc_config_binding_t {
 
 /// Configuration validation and resolution policy bit values.
 typedef enum loomc_config_policy_flag_bits_e {
-  /// Reject config bindings outside the current operation's known config
-  /// declaration set. Link operations validate this before final pruning so
-  /// declared-but-unused bindings may be accepted and ignored.
-  LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN = 1u << 0,
-
   /// Require all final operation config values to be resolved.
-  LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED = 1u << 1,
+  LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED = 1u << 0,
 } loomc_config_policy_flag_bits_t;
 
 /// Bitmask of `loomc_config_policy_flag_bits_t` values.

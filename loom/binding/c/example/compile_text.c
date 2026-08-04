@@ -178,8 +178,7 @@ static loomc_status_t compile_module(compile_text_state_t* state) {
           {
               .bindings = bindings,
               .binding_count = 1,
-              .flags = LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-                       LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+              .flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
           },
   };
   loomc_status_t status = loomc_compile_module(

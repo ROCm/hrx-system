@@ -753,8 +753,7 @@ func.def public @entry() -> (index) {
                   "model": {"hidden_size": 2048}
                 }
               })"),
-          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-              LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
       },
   };
   ResultPtr first_result;
@@ -1114,8 +1113,7 @@ func.def public @from_bytecode() -> (index) {
           /*.bindings=*/bindings,
           /*.binding_count=*/1,
           /*.json_object=*/loomc_string_view_empty(),
-          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-              LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
       },
   };
   ResultPtr result;
@@ -1183,8 +1181,7 @@ func.def public @specialized_rgb() -> (index) {
           /*.bindings=*/bindings,
           /*.binding_count=*/1,
           /*.json_object=*/loomc_string_view_empty(),
-          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-              LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
       },
   };
   ResultPtr result;
@@ -1201,7 +1198,7 @@ func.def public @specialized_rgb() -> (index) {
             std::string::npos);
 }
 
-TEST(LinkTest, LinkModuleRejectsConfigDeclaredOnlyByUnselectedProvider) {
+TEST(LinkTest, LinkModuleIgnoresConfigDeclaredOnlyByUnselectedProvider) {
   ContextPtr context = CreateContext();
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr selected_source = CreateTextSource("selected.loom", R"(
@@ -1250,18 +1247,22 @@ func.def public @unused() -> (index) {
           /*.bindings=*/bindings,
           /*.binding_count=*/1,
           /*.json_object=*/loomc_string_view_empty(),
-          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN,
+          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
       },
   };
   ResultPtr result;
   ModulePtr module = LinkIndex(linker.get(), workspace.get(), link_index.get(),
                                &options, &result);
 
-  EXPECT_EQ(module.get(), nullptr);
-  ExpectFailedResultCode(result.get(), "CONFIG/INVALID");
+  ASSERT_TRUE(loomc_result_succeeded(result.get()));
+  ASSERT_NE(module.get(), nullptr);
+  std::string text = SerializeModuleToText(module.get());
+  EXPECT_NE(text.find("func.def public retain @selected"), std::string::npos);
+  EXPECT_EQ(text.find("@unused"), std::string::npos);
+  EXPECT_EQ(text.find("unused.operation.tile_count"), std::string::npos);
 }
 
-TEST(LinkTest, LinkModuleReportsUnknownConfigAsResultDiagnostic) {
+TEST(LinkTest, LinkModuleIgnoresUnknownConfig) {
   ContextPtr context = CreateContext();
   BuilderPtr builder = CreateBuilder(context.get());
   SourcePtr source = CreateTextSource("entry.loom", R"(
@@ -1296,15 +1297,17 @@ func.def public @entry(%x: i32) -> (i32) {
           /*.bindings=*/bindings,
           /*.binding_count=*/1,
           /*.json_object=*/loomc_string_view_empty(),
-          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN,
+          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
       },
   };
   ResultPtr result;
   ModulePtr module = LinkIndex(linker.get(), workspace.get(), link_index.get(),
                                &options, &result);
 
-  EXPECT_EQ(module.get(), nullptr);
-  ExpectFailedResultCode(result.get(), "CONFIG/INVALID");
+  ASSERT_TRUE(loomc_result_succeeded(result.get()));
+  ASSERT_NE(module.get(), nullptr);
+  std::string text = SerializeModuleToText(module.get());
+  EXPECT_NE(text.find("func.def public @entry"), std::string::npos);
 }
 
 TEST(LinkTest, LinkModuleReportsUnresolvedConfigAsResultDiagnostic) {

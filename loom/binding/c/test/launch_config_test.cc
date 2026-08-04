@@ -206,8 +206,7 @@ kernel.def @entry() {
                                LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE);
   options.config.bindings = bindings;
   options.config.binding_count = 3;
-  options.config.flags = LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-                         LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
+  options.config.flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
   loomc_launch_config_t config = EmptyResultConfig();
   ResultPtr result;
   Evaluate(module.get(), workspace.get(), &options, &config, &result);
@@ -248,8 +247,7 @@ kernel.def @entry() {
           "cols": 17
         }
       })");
-  options.config.flags = LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-                         LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
+  options.config.flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
   loomc_launch_config_t config = EmptyResultConfig();
   ResultPtr result;
   Evaluate(module.get(), workspace.get(), &options, &config, &result);
@@ -263,7 +261,7 @@ kernel.def @entry() {
   EXPECT_EQ(config.workgroup_size.z, 1u);
 }
 
-TEST(LaunchConfigTest, ReportsInvalidConfigBindingAsResultDiagnostic) {
+TEST(LaunchConfigTest, IgnoresUnusedConfigBinding) {
   ContextPtr context = CreateContext();
   WorkspacePtr workspace = CreateWorkspace();
   ModulePtr module = DeserializeModule(context.get(), workspace.get(), R"(
@@ -278,20 +276,29 @@ kernel.def @entry() {
 }
 )");
 
-  loomc_config_binding_t bindings[] = {{
-      /*.key=*/loomc_make_cstring_view("shape.cols"),
-      /*.value=*/loomc_make_cstring_view("7"),
-  }};
+  loomc_config_binding_t bindings[] = {
+      {
+          /*.key=*/loomc_make_cstring_view("shape.rows"),
+          /*.value=*/loomc_make_cstring_view("7"),
+      },
+      {
+          /*.key=*/loomc_make_cstring_view("shape.cols"),
+          /*.value=*/loomc_make_cstring_view("not parsed"),
+      },
+  };
   loomc_launch_config_eval_options_t options =
       EvalOptions("entry", LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT);
   options.config.bindings = bindings;
-  options.config.binding_count = 1;
-  options.config.flags = LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN;
+  options.config.binding_count = 2;
+  options.config.flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
   loomc_launch_config_t config = EmptyResultConfig();
   ResultPtr result;
   Evaluate(module.get(), workspace.get(), &options, &config, &result);
 
-  ExpectFailedResultCode(result.get(), "CONFIG/INVALID");
+  ExpectSucceededResult(result.get());
+  EXPECT_EQ(config.workgroup_count.x, 7u);
+  EXPECT_EQ(config.workgroup_count.y, 1u);
+  EXPECT_EQ(config.workgroup_count.z, 1u);
 }
 
 TEST(LaunchConfigTest, EvaluatesWorkloadArguments) {
