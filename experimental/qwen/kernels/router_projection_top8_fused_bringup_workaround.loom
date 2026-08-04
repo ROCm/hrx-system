@@ -81,7 +81,7 @@ kernel.def target(@qwen3_moe_router_fused_gfx11_wave64) export("qwen3_moe_router
 
   // Every projection store precedes its workgroup's release. The last arrival
   // acquires all preceding releases before any lane loads the complete row.
-  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  kernel.barrier<global> {ordering = release, scope = workgroup}
   %local_old_counter = scf.if %writes_projection -> (i32) {
     %old_counter = view.atomic.rmw<addi> %one_i32, %completion_counter_view[%zero] {ordering = acq_rel, scope = device} : i32, view<1xi32, #dense> -> i32
     scf.yield %old_counter : i32
@@ -96,9 +96,10 @@ kernel.def target(@qwen3_moe_router_fused_gfx11_wave64) export("qwen3_moe_router
   %last_expert_tile_f32 = scalar.sitofp %last_expert_tile_i32 : i32 to f32
   %is_last_projection = scalar.cmpf oeq, %old_counter_f32, %last_expert_tile_f32 : f32
   scf.if %is_last_projection {
+    kernel.barrier<global> {ordering = acquire, scope = workgroup}
     func.apply<qwen3_moe.router.top8.row>(%publishes_row, %token, %bounded_token_count, %route_count, %logits_noalias, %route_ids_noalias, %route_weights_noalias) : (i1, index, index, index, buffer, buffer, buffer)
     // The counter cannot become reusable until all route stores complete.
-    kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+    kernel.barrier<global> {ordering = release, scope = workgroup}
     scf.if %writes_projection {
       view.atomic.reduce<addi> %negative_expert_tile_count_i32, %completion_counter_view[%zero] {ordering = release, scope = device} : i32, view<1xi32, #dense>
     }
