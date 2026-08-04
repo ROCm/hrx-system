@@ -38,7 +38,6 @@ func.template<qwen3_moe.attention.decode_split.produce_partials.active> device @
   %three = index.constant 3 : index
   %four = index.constant 4 : index
   %eight = index.constant 8 : index
-  %fifteen = index.constant 15 : index
   %sixteen = index.constant 16 : index
   %thirtytwo = index.constant 32 : index
   %sixtyfour = index.constant 64 : index
@@ -150,12 +149,15 @@ func.template<qwen3_moe.attention.decode_split.produce_partials.active> device @
   %score_init_values = vector.constant 0.0 : vector<4xf32>
   %score_init = vector.fragment<init> %score_init_values shape [%m, %n] : vector<4xf32>
   %score_fragment = scf.if %is_full_block -> (vector<4xf32>) {
-    %score_key_origin0 = index.add %key_origin, %subgroup_score_column : index
-    %last_full_score_origin = index.sub %bounded_key_value_token_count, %fifteen : index
-    %score_key_origin = index.assume %score_key_origin0 [lt(%score_key_origin0, %last_full_score_origin)] : index
     %full_score_fragment = scf.for %head_tile = [%zero to %onetwentyeight step %sixteen](%score_accumulator = %score_init : vector<4xf32>) -> (vector<4xf32>) unroll {
+      // Bound this view by the proven tile end so the full vector footprint is
+      // visible without treating physical tail padding as logical storage.
+      %score_key_origin0 = index.add %key_origin, %subgroup_score_column : index
+      %score_key_end0 = index.add %score_key_origin0, %sixteen : index
+      %score_key_origin, %score_key_end = index.assume %score_key_origin0, %score_key_end0 [le(%score_key_end0, %bounded_key_value_token_count)] : index, index
+      %full_key_view = buffer.view %key_aligned[%zero_offset] : buffer -> view<[%score_key_end]x[%key_value_width]xf16, #dense>
       %key_channel = index.add %key_value_head_base, %head_tile : index
-      %key_fragment = vector.fragment.load<lhs> %key_view[%score_key_origin, %key_channel] shape [%m, %k] : view<[%bounded_key_value_token_count]x[%key_value_width]xf16, #dense> -> vector<16xf16>
+      %key_fragment = vector.fragment.load<lhs> %full_key_view[%score_key_origin, %key_channel] shape [%m, %k] : view<[%score_key_end]x[%key_value_width]xf16, #dense> -> vector<16xf16>
       %query_fragment = vector.fragment.load<rhs> %query_transposed_view[%head_tile, %zero] shape [%k, %n] : view<128x16xf16, %query_transposed_layout> -> vector<16xf16>
       %next_score_accumulator = vector.mma %key_fragment, %query_fragment, %score_accumulator : vector<16xf16>, vector<16xf16>, vector<4xf32>
       scf.yield %next_score_accumulator : vector<4xf32>
@@ -250,13 +252,15 @@ func.template<qwen3_moe.attention.decode_split.produce_partials.active> device @
   %value_channel0 = index.add %key_value_head_base, %subgroup_output_channel : index
   %value_channel1 = index.add %key_value_head_base, %subgroup_output_channel1 : index
   %product_fragment0, %product_fragment1 = scf.if %is_full_block -> (vector<8xf16>, vector<8xf16>) {
-    %last_full_value_origin = index.sub %bounded_key_value_token_count, %fifteen : index
     %full_product_fragment0, %full_product_fragment1 = scf.for %key_tile = [%zero to %sixtyfour step %sixteen](%product_accumulator0 = %product_init0 : vector<8xf16>, %product_accumulator1 = %product_init1 : vector<8xf16>) -> (vector<8xf16>, vector<8xf16>) unroll {
+      // Retain the same logical-extent contract for the full P*V tile.
       %value_token0 = index.add %key_origin, %key_tile : index
-      %value_token = index.assume %value_token0 [lt(%value_token0, %last_full_value_origin)] : index
+      %value_token_end0 = index.add %value_token0, %sixteen : index
+      %value_token, %value_token_end = index.assume %value_token0, %value_token_end0 [le(%value_token_end0, %bounded_key_value_token_count)] : index, index
+      %full_value_view = buffer.view %value_aligned[%zero_offset] : buffer -> view<[%value_token_end]x[%key_value_width]xf16, #dense>
       %probability_fragment = vector.fragment.load<lhs> %probability_stage_view[%zero, %key_tile] shape [%m, %k] : view<16x64xf16, %probability_transposed_layout> -> vector<16xf16>
-      %value_fragment0 = vector.fragment.load<rhs> %value_view[%value_token, %value_channel0] shape [%k, %n] : view<[%bounded_key_value_token_count]x[%key_value_width]xf16, #dense> -> vector<16xf16>
-      %value_fragment1 = vector.fragment.load<rhs> %value_view[%value_token, %value_channel1] shape [%k, %n] : view<[%bounded_key_value_token_count]x[%key_value_width]xf16, #dense> -> vector<16xf16>
+      %value_fragment0 = vector.fragment.load<rhs> %full_value_view[%value_token, %value_channel0] shape [%k, %n] : view<[%value_token_end]x[%key_value_width]xf16, #dense> -> vector<16xf16>
+      %value_fragment1 = vector.fragment.load<rhs> %full_value_view[%value_token, %value_channel1] shape [%k, %n] : view<[%value_token_end]x[%key_value_width]xf16, #dense> -> vector<16xf16>
       %next_product_accumulator0 = vector.mma %probability_fragment, %value_fragment0, %product_accumulator0 : vector<16xf16>, vector<16xf16>, vector<8xf16>
       %next_product_accumulator1 = vector.mma %probability_fragment, %value_fragment1, %product_accumulator1 : vector<16xf16>, vector<16xf16>, vector<8xf16>
       scf.yield %next_product_accumulator0, %next_product_accumulator1 : vector<8xf16>, vector<8xf16>
