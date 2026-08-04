@@ -100,16 +100,12 @@ kernel.def retain @retained_kernel() {
 
 // ====
 
-test.target<low_core> @test_target
-
 func.def @workgroup_barrier() {
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   func.return
 }
 
 // ====
-
-test.target<low_core> @test_target
 
 func.def @subgroup_barrier() {
   kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
@@ -118,7 +114,14 @@ func.def @subgroup_barrier() {
 
 // ====
 
-test.target<low_core> @test_target
+func.def @global_barriers() {
+  kernel.barrier<global> {ordering = release, scope = workgroup}
+  kernel.barrier<global> {ordering = acquire, scope = workgroup}
+  kernel.barrier<global> {ordering = acq_rel, scope = workgroup}
+  func.return
+}
+
+// ====
 
 kernel.def @workitem_coordinates() {
   %c1 = index.constant 1 : index
@@ -132,8 +135,6 @@ kernel.def @workitem_coordinates() {
 
 // ====
 
-test.target<low_core> @test_target
-
 kernel.def @conditional_exit() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -143,8 +144,6 @@ kernel.def @conditional_exit() {
 }
 
 // ====
-
-test.target<low_core> @test_target
 
 kernel.def @conditional_exit_with_body() {
   %c1 = index.constant 1 : index
@@ -157,8 +156,6 @@ kernel.def @conditional_exit_with_body() {
 
 // ====
 
-test.target<low_core> @test_target
-
 kernel.def @runtime_asserts() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -169,8 +166,6 @@ kernel.def @runtime_asserts() {
 }
 
 // ====
-
-test.target<low_core> @test_target
 
 kernel.def @workgroup_coordinates() {
   %c1 = index.constant 1 : index
@@ -183,8 +178,6 @@ kernel.def @workgroup_coordinates() {
 }
 
 // ====
-
-test.target<low_core> @test_target
 
 kernel.def @launch_queries() {
   %c1 = index.constant 1 : index
@@ -204,8 +197,6 @@ kernel.def @launch_queries() {
 
 // ====
 
-test.target<low_core> @test_target
-
 kernel.def @subgroup_queries() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -218,8 +209,6 @@ kernel.def @subgroup_queries() {
 }
 
 // ====
-
-test.target<low_core> @test_target
 
 kernel.def @subgroup_collectives() {
   %c1 = index.constant 1 : index
@@ -244,8 +233,6 @@ kernel.def @subgroup_collectives() {
 
 // ====
 
-test.target<low_core> @test_target
-
 kernel.def @workgroup_collectives() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
@@ -259,8 +246,6 @@ kernel.def @workgroup_collectives() {
 }
 
 // ====
-
-test.target<low_core> @test_target
 
 func.def @async_copy_global_to_workgroup(%source_buffer: buffer, %byte_offset: offset) {
   %zero = index.constant 0 : offset
@@ -279,8 +264,6 @@ func.def @async_copy_global_to_workgroup(%source_buffer: buffer, %byte_offset: o
 
 // ====
 
-test.target<low_core> @test_target
-
 func.def @async_copy_masked(%source_buffer: buffer, %byte_offset: offset, %in_bounds: i1) {
   %zero = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
@@ -296,8 +279,6 @@ func.def @async_copy_masked(%source_buffer: buffer, %byte_offset: offset, %in_bo
 }
 
 // ====
-
-test.target<low_core> @test_target
 
 func.def @async_copy_workgroup_to_global(%dest_buffer: buffer, %byte_offset: offset) {
   %zero = index.constant 0 : offset
@@ -315,8 +296,6 @@ func.def @async_copy_workgroup_to_global(%dest_buffer: buffer, %byte_offset: off
 
 // ====
 
-test.target<low_core> @test_target
-
 func.def @async_copy_reinterpreted_bytes(%source_buffer: buffer, %byte_offset: offset) {
   %zero = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
@@ -332,8 +311,6 @@ func.def @async_copy_reinterpreted_bytes(%source_buffer: buffer, %byte_offset: o
 }
 
 // ====
-
-test.target<low_core> @test_target
 
 func.def @async_subgroup_gather(%source_buffer: buffer, %byte_offset: offset) {
   %zero = index.constant 0 : offset
@@ -351,8 +328,6 @@ func.def @async_subgroup_gather(%source_buffer: buffer, %byte_offset: offset) {
 
 // ====
 
-test.target<low_core> @test_target
-
 func.def @async_subgroup_gather_padded_lane_slot(%source_buffer: buffer, %byte_offset: offset) {
   %zero = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
@@ -369,8 +344,6 @@ func.def @async_subgroup_gather_padded_lane_slot(%source_buffer: buffer, %byte_o
 
 // ====
 
-test.target<low_core> @test_target
-
 func.def @async_subgroup_gather_gfx950_padded_lane_slot(%source_buffer: buffer, %byte_offset: offset) {
   %zero = index.constant 0 : offset
   %bytes = index.constant 4096 : offset
@@ -386,8 +359,6 @@ func.def @async_subgroup_gather_gfx950_padded_lane_slot(%source_buffer: buffer, 
 }
 
 // ====
-
-test.target<low_core> @test_target
 
 func.def @async_cluster_gather_widths(%source_buffer: buffer, %byte_offset: offset) {
   %zero = index.constant 0 : offset
@@ -415,8 +386,6 @@ func.def @async_cluster_gather_widths(%source_buffer: buffer, %byte_offset: offs
 
 // ====
 
-test.target<low_core> @test_target
-
 func.def @async_cluster_gather_masked(%source_buffer: buffer, %byte_offset: offset, %in_bounds: i1) {
   %zero = index.constant 0 : offset
   %bytes = index.constant 1024 : offset
@@ -433,8 +402,6 @@ func.def @async_cluster_gather_masked(%source_buffer: buffer, %byte_offset: offs
 }
 
 // ====
-
-test.target<low_core> @test_target
 
 func.def @async_tensor_load_to_lds(%source_buffer: buffer, %byte_offset: offset) {
   %zero = index.constant 0 : offset
@@ -459,8 +426,6 @@ func.def @async_tensor_load_to_lds(%source_buffer: buffer, %byte_offset: offset)
 
 // ====
 
-test.target<low_core> @test_target
-
 func.def @async_tensor_store_from_lds(%dest_buffer: buffer, %byte_offset: offset) {
   %zero = index.constant 0 : offset
   %bytes = index.constant 16384 : offset
@@ -480,8 +445,6 @@ func.def @async_tensor_store_from_lds(%dest_buffer: buffer, %byte_offset: offset
 }
 
 // ====
-
-test.target<low_core> @test_target
 
 func.def @async_empty_pipeline_marker() {
   %group = kernel.async.group -> kernel.async.group

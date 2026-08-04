@@ -519,6 +519,53 @@ loom_amdgpu_system_memory_policy_lookup(
   return NULL;
 }
 
+static bool loom_amdgpu_system_memory_actions_available(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_amdgpu_system_memory_action_t* actions,
+    iree_host_size_t action_count) {
+  for (iree_host_size_t i = 0; i < action_count; ++i) {
+    const loom_amdgpu_system_memory_action_t* action = &actions[i];
+    switch (action->kind) {
+      case LOOM_AMDGPU_SYSTEM_MEMORY_ACTION_NONE:
+        break;
+      case LOOM_AMDGPU_SYSTEM_MEMORY_ACTION_WAIT_COUNTER: {
+        loom_amdgpu_wait_packet_selection_t selection = {0};
+        if (!loom_amdgpu_wait_packet_try_select_counter_mask(
+                descriptor_set, action->counter_mask, /*target_count=*/0,
+                &selection)) {
+          return false;
+        }
+        break;
+      }
+      case LOOM_AMDGPU_SYSTEM_MEMORY_ACTION_EXPLICIT_PACKET:
+        if (!loom_amdgpu_descriptor_set_has_ref(descriptor_set,
+                                                action->descriptor_ref)) {
+          return false;
+        }
+        break;
+    }
+  }
+  return true;
+}
+
+bool loom_amdgpu_system_memory_release_ordering_available(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  const loom_amdgpu_system_memory_policy_t* policy =
+      loom_amdgpu_system_memory_policy_lookup(descriptor_set);
+  return policy != NULL && loom_amdgpu_system_memory_actions_available(
+                               descriptor_set, policy->release_actions,
+                               policy->release_action_count);
+}
+
+bool loom_amdgpu_system_memory_acquire_ordering_available(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  const loom_amdgpu_system_memory_policy_t* policy =
+      loom_amdgpu_system_memory_policy_lookup(descriptor_set);
+  return policy != NULL && loom_amdgpu_system_memory_actions_available(
+                               descriptor_set, policy->acquire_actions,
+                               policy->acquire_action_count);
+}
+
 static const loom_amdgpu_system_memory_policy_t*
 loom_amdgpu_system_memory_policy_require(
     const loom_low_descriptor_set_t* descriptor_set) {

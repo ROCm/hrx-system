@@ -1268,12 +1268,13 @@ kernel_barrier = Op(
     contracts=[ContractFamily.KERNEL_SYNCHRONIZATION],
     doc=(
         "Synchronize invocations in an explicit execution scope and fence a "
-        "named memory space with a required ordering. Supported source-level "
-        "kernel barriers synchronize either the current subgroup or workgroup "
-        "while fencing workgroup memory with acquire-release ordering. "
+        "named memory space with a required ordering. Workgroup-memory "
+        "barriers synchronize either the current subgroup or workgroup with "
+        "acquire-release ordering. Global-memory barriers synchronize the "
+        "current workgroup with acquire, release, or acquire-release ordering. "
         "Async-copy completion is modeled by kernel.async.wait; use "
         "kernel.barrier only when invocations must rendezvous before "
-        "consuming shared memory."
+        "consuming shared or global memory."
     ),
     attrs=[
         AttrDef(
@@ -1301,6 +1302,8 @@ kernel_barrier = Op(
     examples=[
         "kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}",
         "kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}",
+        "kernel.barrier<global> {ordering = release, scope = workgroup}",
+        "kernel.barrier<global> {ordering = acquire, scope = workgroup}",
     ],
 )
 
