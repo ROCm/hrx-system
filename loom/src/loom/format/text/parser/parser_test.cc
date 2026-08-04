@@ -6,6 +6,7 @@
 
 #include "loom/format/text/parser/parser.h"
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -784,6 +785,30 @@ TEST_F(ParserTest, AttrDictSymbolRefRoundTrip) {
             std::string::npos)
       << "symbol references in generic dictionaries should round-trip: "
       << text;
+}
+
+TEST_F(ParserTest, SymbolForwardReferenceResolvesToLaterDefinition) {
+  std::string text = RoundTrip(
+      "test.template_param_symbol<@target>\n"
+      "test.record @target {}\n");
+  EXPECT_NE(text.find("test.template_param_symbol<@target>"),
+            std::string::npos);
+  EXPECT_NE(text.find("test.record @target"), std::string::npos);
+}
+
+TEST_F(ParserTest, UnresolvedSymbolReferenceIsParseError) {
+  const char* source =
+      "test.template_param_symbol<@missing>\n"
+      "test.template_param_symbol<@missing>\n";
+  const auto& diagnostics = ParseExpectErrors(source);
+  ASSERT_EQ(diagnostics.size(), 1u);
+  ExpectError(diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_SYMBOL, 2));
+  EXPECT_EQ(GetStringParam(diagnostics[0], 0), "missing");
+  EXPECT_EQ(diagnostics[0].origin_line, 1u);
+  EXPECT_EQ(diagnostics[0].origin_column,
+            static_cast<uint32_t>(std::strchr(source, '@') - source + 1));
+  EXPECT_EQ(diagnostics[0].emitter, LOOM_EMITTER_PARSER);
 }
 
 TEST_F(ParserTest, AttrDictNestedDictRoundTripInCanonicalOrder) {

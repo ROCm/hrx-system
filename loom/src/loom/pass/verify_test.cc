@@ -255,10 +255,24 @@ TEST_F(PassVerifyTest, RejectsIfChangedWithoutPrecedingSibling) {
 }
 
 TEST_F(PassVerifyTest, RejectsUnresolvedCall) {
-  ExpectVerifyStatus(IREE_STATUS_INVALID_ARGUMENT,
-                     IREE_SV("pass.pipeline<module> @pipeline pipeline {\n"
-                             "  call @missing\n"
-                             "}\n"));
+  loom_module_t* module =
+      Parse(IREE_SV("pass.pipeline<module> @callee pipeline {\n"
+                    "  test.noop\n"
+                    "}\n"
+                    "\n"
+                    "pass.pipeline<module> @pipeline pipeline {\n"
+                    "  call @callee\n"
+                    "}\n"));
+  ASSERT_NE(module, nullptr);
+  loom_op_t* call = const_cast<loom_op_t*>(PipelineBodyOp(module, 1, 0));
+  ASSERT_NE(call, nullptr);
+  ASSERT_TRUE(loom_pass_call_isa(call));
+  loom_op_attrs(call)[loom_pass_call_callee_ATTR_INDEX] = loom_attr_symbol({
+      /*.module_id=*/0,
+      /*.symbol_id=*/(uint16_t)module->symbols.count,
+  });
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, VerifyModule(module));
 }
 
 TEST_F(PassVerifyTest, RejectsCallAnchorMismatch) {

@@ -182,28 +182,6 @@ class LinkerTest : public ::testing::Test {
   std::vector<loom_module_t*> modules_;
 };
 
-TEST_F(LinkerTest, ResolvesForwardReferenceFromLaterCorpusModule) {
-  loom_module_t* harness = Parse(IREE_SV(R"(
-func.def @caller(%x: i32) -> (i32) {
-  %y = func.call @identity(%x) : (i32) -> (i32)
-  func.return %y : i32
-}
-)"));
-  loom_module_t* corpus = Parse(IREE_SV(R"(
-func.def @identity(%x: i32) -> (i32) {
-  func.return %x : i32
-}
-)"));
-
-  loom_module_t* linked = Link({harness, corpus});
-  Verify(linked);
-
-  std::string text = Print(linked);
-  EXPECT_NE(text.find("func.def @caller"), std::string::npos);
-  EXPECT_NE(text.find("func.call @identity"), std::string::npos);
-  EXPECT_NE(text.find("func.def @identity"), std::string::npos);
-}
-
 TEST_F(LinkerTest, ConcreteDefinitionSupersedesDeclaration) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 func.decl @identity(%x: i32) -> (i32)
