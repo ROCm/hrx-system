@@ -89,8 +89,7 @@ class TunerFlowScenario final : public CompileScenario {
             /*.binding_count=*/IREE_ARRAYSIZE(bindings),
             /*.json_object=*/
             loomc_make_cstring_view("{\"@tuner.model.hidden_size\":\"4096\"}"),
-            /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-                LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+            /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
         },
     };
 
@@ -203,8 +202,7 @@ class ModelFlowScenario final : public CompileScenario {
             /*.bindings=*/bindings,
             /*.binding_count=*/IREE_ARRAYSIZE(bindings),
             /*.json_object=*/loomc_string_view_empty(),
-            /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-                LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+            /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
         },
     };
 

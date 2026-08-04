@@ -491,8 +491,7 @@ kernel.def target(@gfx11_generic) @configured_store() {
           /*.bindings=*/bindings,
           /*.binding_count=*/IREE_ARRAYSIZE(bindings),
           /*.json_object=*/loomc_string_view_empty(),
-          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-              LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+          /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
       },
   };
 

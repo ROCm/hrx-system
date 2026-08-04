@@ -767,8 +767,6 @@ iree_status_t loom_tooling_config_materialize_module(
     return iree_ok_status();
   }
 
-  const bool require_matches = iree_any_bit_set(
-      options->flags, LOOM_TOOLING_CONFIG_MATERIALIZE_REQUIRE_MATCHES);
   for (iree_host_size_t i = 0; i < binding_count; ++i) {
     const loom_tooling_config_binding_t* binding = &config_set->bindings[i];
     iree_string_view_t key = binding->key;
@@ -777,24 +775,14 @@ iree_status_t loom_tooling_config_materialize_module(
     IREE_RETURN_IF_ERROR(
         loom_tooling_config_lookup_symbol(module, key, &symbol_id));
     if (symbol_id == LOOM_SYMBOL_ID_INVALID) {
-      if (require_matches) {
-        return iree_make_status(IREE_STATUS_NOT_FOUND, "unknown config '%.*s'",
-                                (int)key.size, key.data);
-      }
       ++result.ignored_count;
       continue;
     }
 
     loom_symbol_t* symbol = &module->symbols.entries[symbol_id];
     if (!loom_tooling_config_symbol_is_config(symbol)) {
-      if (!require_matches && symbol->definition == NULL &&
-          symbol->defining_op == NULL) {
-        ++result.ignored_count;
-        continue;
-      }
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "symbol '%.*s' is not a config symbol",
-                              (int)key.size, key.data);
+      ++result.ignored_count;
+      continue;
     }
     loom_op_t* old_op = symbol->defining_op;
     loom_value_id_t config_value =

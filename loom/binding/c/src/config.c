@@ -44,7 +44,6 @@ loomc_status_t loomc_config_validate_options(
   LOOMC_RETURN_IF_ERROR(
       loomc_config_validate_string_view(options->json_object));
   const loomc_config_policy_flags_t known_flags =
-      LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
       LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED;
   if ((options->flags & ~known_flags) != 0) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
@@ -104,30 +103,6 @@ static iree_status_t loomc_config_populate_set(
   return status;
 }
 
-static loom_tooling_config_materialize_flags_t loomc_config_materialize_flags(
-    loomc_config_policy_flags_t flags) {
-  loom_tooling_config_materialize_flags_t result = 0;
-  if (iree_any_bit_set(flags, LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN)) {
-    result |= LOOM_TOOLING_CONFIG_MATERIALIZE_REQUIRE_MATCHES;
-  }
-  return result;
-}
-
-static iree_status_t loomc_config_validate_known_keys(
-    const loom_tooling_config_set_t* config_set,
-    loomc_config_known_key_fn_t is_known_key, void* known_key_user_data) {
-  if (!config_set || !is_known_key) return iree_ok_status();
-  for (iree_host_size_t i = 0; i < config_set->binding_count; ++i) {
-    const loom_tooling_config_binding_t* binding = &config_set->bindings[i];
-    if (is_known_key(known_key_user_data, binding->key)) {
-      continue;
-    }
-    return iree_make_status(IREE_STATUS_NOT_FOUND, "unknown config '%.*s'",
-                            (int)binding->key.size, binding->key.data);
-  }
-  return iree_ok_status();
-}
-
 loomc_status_t loomc_config_apply_to_module(
     const loomc_config_apply_to_module_options_t* options) {
   if (options == NULL || options->module == NULL || options->result == NULL ||
@@ -148,21 +123,9 @@ loomc_status_t loomc_config_apply_to_module(
   loomc_status_t status = loomc_status_from_iree(
       loomc_config_populate_set(options->config, host_allocator, &config_set));
   loom_tooling_config_materialize_result_t materialize_result = {0};
-  if (loomc_status_is_ok(status) && options->is_known_key &&
-      iree_any_bit_set(options->config->flags,
-                       LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN)) {
-    status = loomc_status_from_iree(loomc_config_validate_known_keys(
-        &config_set, options->is_known_key, options->known_key_user_data));
-  }
   if (loomc_status_is_ok(status)) {
     loom_tooling_config_materialize_options_t materialize_options;
     loom_tooling_config_materialize_options_initialize(&materialize_options);
-    materialize_options.flags =
-        loomc_config_materialize_flags(options->config->flags);
-    if (options->is_known_key) {
-      materialize_options.flags &=
-          ~LOOM_TOOLING_CONFIG_MATERIALIZE_REQUIRE_MATCHES;
-    }
     materialize_options.config_set = &config_set;
     status = loomc_status_from_iree(loom_tooling_config_materialize_module(
         options->module, &materialize_options, options->block_pool,

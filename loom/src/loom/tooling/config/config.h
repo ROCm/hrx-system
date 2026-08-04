@@ -60,19 +60,8 @@ typedef struct loom_tooling_config_set_t {
   iree_host_size_t binding_capacity;
 } loom_tooling_config_set_t;
 
-// Materialization policy flags.
-enum loom_tooling_config_materialize_flag_bits_e {
-  // Reject bindings whose keys do not name config symbols in the module.
-  // Programmatic callers compiling many modules with a shared config map can
-  // leave this unset so non-sensitive bindings are ignored.
-  LOOM_TOOLING_CONFIG_MATERIALIZE_REQUIRE_MATCHES = 1u << 0,
-};
-typedef uint32_t loom_tooling_config_materialize_flags_t;
-
 // Options for materializing config values into a module.
 typedef struct loom_tooling_config_materialize_options_t {
-  // Policy flags controlling typo handling and module sensitivity.
-  loom_tooling_config_materialize_flags_t flags;
   // Borrowed config set for the current compiler operation. NULL is accepted
   // and treated as an empty set.
   const loom_tooling_config_set_t* config_set;
@@ -83,7 +72,7 @@ typedef struct loom_tooling_config_materialize_result_t {
   // Number of bindings that replaced config symbols with config.def ops.
   iree_host_size_t materialized_count;
   // Number of bindings ignored because the module has no matching config
-  // symbol and REQUIRE_MATCHES was unset.
+  // symbol.
   iree_host_size_t ignored_count;
 } loom_tooling_config_materialize_result_t;
 
@@ -149,7 +138,7 @@ iree_status_t loom_tooling_config_set_append_json_file(
 
 // Replaces matching config.decl/config.def symbol ops with config.def ops whose
 // initializer attributes are parsed from |options->config_set|. Bindings
-// without matching config symbols are ignored unless REQUIRE_MATCHES is set.
+// without matching config symbols are ignored.
 //
 // This is intentionally a direct module operation rather than a pass. Tooling
 // should call it immediately after loading and, when requested, initially

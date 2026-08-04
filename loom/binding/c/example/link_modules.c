@@ -279,8 +279,7 @@ static loomc_status_t compile_linked_module(link_modules_state_t* state) {
               .binding_count = 1,
               .json_object =
                   loomc_make_cstring_view("{\"model\":{\"hidden_size\":2048}}"),
-              .flags = LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-                       LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+              .flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
           },
   };
 

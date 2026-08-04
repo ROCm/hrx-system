@@ -139,8 +139,7 @@ class AmdgpuI32ChainScenario final : public TargetCompileScenario {
         /*.bindings=*/bindings,
         /*.binding_count=*/IREE_ARRAYSIZE(bindings),
         /*.json_object=*/loomc_string_view_empty(),
-        /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REJECT_UNKNOWN |
-            LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+        /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
     };
     IREE_RETURN_IF_ERROR(CompileModuleToPreparedLow(
         workspace, module, loomc_make_cstring_view("i32_memory_chain"),
