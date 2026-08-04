@@ -66,7 +66,7 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
       {
           QWEN_LOOM_SOURCE_FLASH_ATTENTION_DECODE_SPLIT_F32_F16,
           "qwen3_moe_flash_attention_decode_split_f32_f16.loom",
-          "qwen3_moe_flash_attention_decode_split_f32_f16_wmma",
+          "qwen3_moe_flash_attention_decode_split_f32_f16_wmma_next_q8",
       },
       {
           QWEN_LOOM_SOURCE_DENSE_LINEAR_QUANTIZED_F16,
@@ -439,6 +439,7 @@ TEST(QwenLoomSourceTest, EmbedsDecodeSplitReusableCapacityWorkaround) {
                        "@qwen3_moe_flash_attention_decode_split_reduce_fused_"
                        "cooperative_f32"),
       std::string::npos);
+  EXPECT_NE(source_text.find("%next_q8_output: buffer"), std::string::npos);
   EXPECT_EQ(source_text.find(
                 "func.apply<qwen3_moe.attention.decode_split.reduce_fused>"),
             std::string::npos);

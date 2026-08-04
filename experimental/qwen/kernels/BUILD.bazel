@@ -313,7 +313,7 @@ loom_link_module(
     ],
     mode = "selective",
     output = "qwen3_moe_flash_attention_decode_split_f32_f16.loom",
-    roots = ["@qwen3_moe_flash_attention_decode_split_f32_f16_wmma"],
+    roots = ["@qwen3_moe_flash_attention_decode_split_f32_f16_wmma_next_q8"],
     strip_check = True,
 )
 

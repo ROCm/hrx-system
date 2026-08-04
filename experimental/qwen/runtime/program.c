@@ -810,7 +810,7 @@ static iree_status_t qwen_program_prepare_decode_flash_attention(
   const int64_t workload[] = {(int64_t)program->context_count};
   return qwen_program_prepare_batch_append(
       batch, IREE_SV(QWEN_LOOM_SOURCE_FLASH_ATTENTION_DECODE_SPLIT_F32_F16),
-      IREE_SV("qwen3_moe_flash_attention_decode_split_f32_f16_wmma"),
+      IREE_SV("qwen3_moe_flash_attention_decode_split_f32_f16_wmma_next_q8"),
       IREE_ARRAYSIZE(config_bindings), config_bindings,
       IREE_ARRAYSIZE(workload), workload,
       &program->executables[QWEN_PROGRAM_EXECUTABLE_FLASH_ATTENTION]);
@@ -1046,7 +1046,9 @@ static iree_status_t qwen_program_prepare_layer_executables(
   }
   if (iree_status_is_ok(status) &&
       program->attention_output_schedule ==
-          QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8) {
+          QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8 &&
+      program->attention_schedule !=
+          QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT) {
     status = qwen_program_prepare_batch_append(
         batch, IREE_SV(QWEN_LOOM_SOURCE_QUANTIZE_Q8_1_X4),
         IREE_SV("ggml_quantize_q8_1_x4_f32"),
@@ -1875,6 +1877,7 @@ static iree_status_t qwen_program_record_attention(
         qwen_program_transient_ref(
             program->full_layout.decode_completion.attention),
         qwen_program_transient_ref(transient->attention_output),
+        qwen_program_transient_ref(transient->projection_input_scratch),
     };
     status = qwen_program_record_dispatch(
         program, QWEN_PROGRAM_EXECUTABLE_FLASH_ATTENTION,
@@ -1887,7 +1890,9 @@ static iree_status_t qwen_program_record_attention(
 
   if (iree_status_is_ok(status) &&
       program->attention_output_schedule ==
-          QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8) {
+          QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8 &&
+      program->attention_schedule !=
+          QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT) {
     const uint32_t quantize_constants[] = {
         token_count,
         QWEN_MODEL_QUERY_HEAD_COUNT * QWEN_MODEL_HEAD_SIZE,
@@ -1903,7 +1908,9 @@ static iree_status_t qwen_program_record_attention(
   }
   if (iree_status_is_ok(status) &&
       program->attention_output_schedule ==
-          QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8) {
+          QWEN_PROGRAM_ATTENTION_OUTPUT_SCHEDULE_DIRECT_Q8 &&
+      program->attention_schedule !=
+          QWEN_PROGRAM_ATTENTION_SCHEDULE_DECODE_SPLIT) {
     status = qwen_program_record_dispatch_barrier(program);
   }
 
