@@ -518,7 +518,48 @@ TEST_F(AmdgpuSanitizerAccessTest, EmitsPacketizedStaticAccessCheck) {
       OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32).size(), 9u);
 }
 
-TEST_F(AmdgpuSanitizerAccessTest, EmitsFailureMaskWithoutReportTuple) {
+TEST_F(AmdgpuSanitizerAccessTest, EmitsExactWidthFullGranuleFailureMasks) {
+  loom_symbol_ref_t asan_config_symbol = AddSymbol(IREE_SV("iree_asan_config"));
+  loom_value_id_t fault_address = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(BuildFaultAddress(asan_config_symbol, &fault_address));
+
+  loom_amdgpu_sanitizer_access_config_t config = {};
+  IREE_ASSERT_OK(loom_amdgpu_build_sanitizer_access_config(
+      &builder_, descriptor_set_, asan_config_symbol, LOOM_LOCATION_UNKNOWN,
+      &config));
+  for (uint32_t access_size : {8u, 16u, 24u, 32u, 40u, 64u, 72u}) {
+    loom_value_id_t failure_mask = LOOM_VALUE_ID_INVALID;
+    IREE_ASSERT_OK(loom_amdgpu_build_sanitizer_access_failure_mask_with_config(
+        &builder_, descriptor_set_, &config, fault_address, access_size,
+        /*minimum_alignment=*/8, /*wavefront_size=*/32, LOOM_LOCATION_UNKNOWN,
+        &failure_mask));
+    ExpectRegisterType(failure_mask, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2);
+  }
+  loom_op_t* return_op = NULL;
+  IREE_ASSERT_OK(loom_low_return_build(&builder_, /*values=*/NULL,
+                                       /*value_count=*/0, LOOM_LOCATION_UNKNOWN,
+                                       &return_op));
+
+  VerifyModuleOk();
+  VerifyLowModuleOk();
+
+  EXPECT_EQ(OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_FLAT_LOAD_U8).size(),
+            4u);
+  EXPECT_EQ(
+      OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_FLAT_LOAD_U16).size(), 2u);
+  EXPECT_EQ(
+      OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_FLAT_LOAD_B32).size(), 2u);
+  EXPECT_EQ(
+      OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_FLAT_LOAD_B64).size(), 2u);
+  EXPECT_EQ(OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT).size(),
+            10u);
+  EXPECT_EQ(OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_NE_I32).size(),
+            12u);
+  EXPECT_TRUE(
+      OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32).empty());
+}
+
+TEST_F(AmdgpuSanitizerAccessTest, ChecksUnalignedFinalShadowGranule) {
   loom_symbol_ref_t asan_config_symbol = AddSymbol(IREE_SV("iree_asan_config"));
   loom_value_id_t fault_address = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(BuildFaultAddress(asan_config_symbol, &fault_address));
@@ -538,9 +579,11 @@ TEST_F(AmdgpuSanitizerAccessTest, EmitsFailureMaskWithoutReportTuple) {
 
   ExpectRegisterType(failure_mask, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2);
   EXPECT_EQ(OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_FLAT_LOAD_U8).size(),
-            4u);
+            1u);
+  EXPECT_EQ(
+      OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_FLAT_LOAD_U16).size(), 1u);
   EXPECT_EQ(OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT).size(),
-            4u);
+            2u);
   EXPECT_TRUE(
       OpsForDescriptorRef(LOOM_AMDGPU_DESCRIPTOR_REF_V_CNDMASK_B32).empty());
 }
