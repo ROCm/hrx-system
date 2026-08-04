@@ -413,6 +413,15 @@ typedef struct hrx_graph_schedule_t {
   iree_host_size_t block_count;
 } hrx_graph_schedule_t;
 
+// Tracks commands recorded since the most recent graph command-buffer
+// barrier. Exposed internally so the barrier planner can be tested without
+// depending on backend command scheduling behavior.
+typedef struct hrx_graph_barrier_state_t {
+  uint32_t values[8];
+  uint32_t count : 31;
+  uint32_t invalid : 1;
+} hrx_graph_barrier_state_t;
+
 typedef struct hrx_graph_exec_s {
   iree_atomic_ref_count_t ref_count;
   hrx_device_t device;
@@ -438,6 +447,13 @@ iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
                                        hrx_graph_edge_t* additional_edges,
                                        iree_arena_allocator_t* arena,
                                        hrx_graph_schedule_t* out_schedule);
+
+void hrx_graph_barrier_state_reset(hrx_graph_barrier_state_t* state);
+iree_status_t hrx_graph_record_node_barrier(
+    hrx_graph_barrier_state_t* state, const hrx_graph_node_s* node,
+    const hrx_graph_edge_t* additional_edges, const uint32_t* node_index_map,
+    uint32_t sorted_index, iree_hal_command_buffer_t* command_buffer,
+    bool* out_did_barrier);
 
 // Internal graph exec APIs (implemented in graph_exec.c).
 iree_status_t hrx_graph_exec_instantiate_locked(
