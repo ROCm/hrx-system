@@ -4,7 +4,11 @@
 // the canonical algorithm bodies and temporarily makes only a 64-row launch
 // capacity class structural. Active context is request-owned dispatch state
 // and must never participate in specialization identity.
+target.decl @qwen3_moe_decode_split_gfx11_wave64
+
 config.decl @qwen.decode.key_value_capacity : %value: index where [range(%value, 64, 2048), mul(%value, 64)]
+
+func.decl inline @qwen3_moe_flash_attention_decode_split_reduce_fused_cooperative_f32(%publish_q8: i1, %key_value_token_count: index, %partial_max: buffer, %partial_sum: buffer, %partial_output: buffer, %completion_counter: buffer, %output: buffer, %q8_output: buffer)
 
 kernel.def target(@qwen3_moe_decode_split_gfx11_wave64) @qwen3_moe_flash_attention_decode_split_f32_f16_wmma_next_q8(%key_value_capacity: index) {
   %configured_key_value_capacity0 = config.get @qwen.decode.key_value_capacity : index

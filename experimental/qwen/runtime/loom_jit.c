@@ -875,7 +875,7 @@ static iree_status_t qwen_loom_jit_link_code_group(
             loomc_string_view_from_iree(options->source_module->module_path),
         .root_symbols = &out_linked_group->root_symbol,
         .root_symbol_count = 1,
-        .flags = LOOMC_LINK_FLAG_STRIP_CHECK_SYMBOLS,
+        .flags = LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS,
         .config =
             {
                 .bindings = config_bindings,

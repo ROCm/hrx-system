@@ -4,6 +4,8 @@
 // unroll trip count visible. The specialization delegates direct-F32
 // contraction, residual arithmetic, and next-row completion to canonical
 // bodies while making only this model's one-token dimensions structural.
+target.decl @qwen3_moe_routed_down_q6k_gfx11_wave64
+
 kernel.def target(@qwen3_moe_routed_down_q6k_gfx11_wave64) @qwen3_moe_routed_down_q6k_f32_wave64_next_q8(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index) {
   %one = index.constant 1 : index
   %three = index.constant 3 : index

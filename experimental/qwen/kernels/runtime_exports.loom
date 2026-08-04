@@ -5,6 +5,38 @@ amdgpu.target<gfx11-generic> @qwen3_moe_vocabulary_projection_gfx11_wave32 {subg
 
 amdgpu.target<gfx11-generic> @qwen3_moe_routed_quantized_gfx11_wave32 {subgroup_size = 32}
 
+target.decl @qwen3_moe_attention_gfx11_wave64
+
+target.decl @qwen3_moe_attention_postprocess_gfx11_wave32
+
+target.decl @qwen3_moe_attention_prepare_gfx11_wave32
+
+target.decl @qwen3_moe_attention_qkv_gfx11_wave32
+
+target.decl @qwen3_moe_attention_qkv_postprocess_gfx11_wave32
+
+target.decl @qwen3_moe_decode_split_gfx11_wave64
+
+target.decl @qwen3_moe_dense_gfx11_wave32
+
+target.decl @qwen3_moe_dense_gfx11_wave64
+
+target.decl @qwen3_moe_expert_table_partition_gfx11_wave32
+
+target.decl @qwen3_moe_gfx11_wave32
+
+target.decl @qwen3_moe_routed_down_gfx11_wave64
+
+target.decl @qwen3_moe_routed_down_next_norm_gfx11_wave32
+
+target.decl @qwen3_moe_routed_down_q6k_gfx11_wave64
+
+target.decl @qwen3_moe_router_fused_gfx11_wave64
+
+target.decl @qwen3_moe_router_gfx11_wave64
+
+target.decl @qwen3_moe_router_projection_gfx11_wave32
+
 func.decl target(@qwen3_moe_attention_prepare_gfx11_wave32) export("qwen3_moe_rmsnorm_f32") @qwen3_moe_rmsnorm_f32(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
 
 func.decl target(@qwen3_moe_attention_prepare_gfx11_wave32) export("qwen3_moe_attention_rmsnorm_quantize_q8_1_x4") @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
