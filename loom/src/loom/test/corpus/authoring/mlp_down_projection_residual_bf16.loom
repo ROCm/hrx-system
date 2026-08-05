@@ -1,10 +1,10 @@
 // The down-projection kernel calls this concrete per-row dot helper for each
 // output row handled by the workgroup.
 func.def inline @bf16_dot32(%input_values: vector<32xf32>, %weight_values: vector<32xbf16>) -> (f32) {
-  %zero_f32 = scalar.constant 0.0 : f32
+  %sum_initial = scalar.constant 0.0 : f32
   %weight_f32 = vector.extf %weight_values : vector<32xbf16> to vector<32xf32>
   %products = vector.mulf<reassoc|nnan|ninf|nsz> %input_values, %weight_f32 : vector<32xf32>
-  %sum = vector.reduce<addf, reassoc|nnan|ninf|nsz> %products, %zero_f32 : vector<32xf32>, f32
+  %sum = vector.reduce<addf, reassoc|nnan|ninf|nsz> %products, %sum_initial : vector<32xf32>, f32
   func.return %sum : f32
 }
 

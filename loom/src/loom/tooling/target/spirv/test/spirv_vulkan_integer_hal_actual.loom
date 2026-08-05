@@ -63,23 +63,23 @@ kernel.def target(@target) @integer_i32_truth_table() {
 
   %lhs = view.load %input_lhs_view[0] : view<1xi32, #dense> -> i32
   %rhs = view.load %input_rhs_view[0] : view<1xi32, #dense> -> i32
-  %minus_eight = scalar.constant -8 : i32
-  %minus_six = scalar.constant -6 : i32
-  %minus_one = scalar.constant -1 : i32
-  %zero = scalar.constant 0 : i32
-  %one = scalar.constant 1 : i32
-  %two = scalar.constant 2 : i32
-  %three = scalar.constant 3 : i32
-  %eight = scalar.constant 8 : i32
-  %bitwise_and = scalar.andi %minus_six, %minus_one : i32
-  %shift_right_arithmetic = scalar.shrsi %minus_eight, %one : i32
-  %bitwise_xor = scalar.xori %minus_one, %one : i32
+  %cn8 = scalar.constant -8 : i32
+  %cn6 = scalar.constant -6 : i32
+  %cn1 = scalar.constant -1 : i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c3 = scalar.constant 3 : i32
+  %c8 = scalar.constant 8 : i32
+  %bitwise_and = scalar.andi %cn6, %cn1 : i32
+  %shift_right_arithmetic = scalar.shrsi %cn8, %c1 : i32
+  %bitwise_xor = scalar.xori %cn1, %c1 : i32
   %equal = scalar.cmpi eq, %lhs, %rhs : i32
-  %selected = scf.select %equal, %eight, %zero : i32
-  %bitwise_or = scalar.ori %zero, %two : i32
-  %shift_right_logical = scalar.shrui %eight, %one : i32
-  %shift_left = scalar.shli %three, %one : i32
-  view.store %minus_eight, %value_output0_view[0] : i32, view<1xi32, #dense>
+  %selected = scf.select %equal, %c8, %c0 : i32
+  %bitwise_or = scalar.ori %c0, %c2 : i32
+  %shift_right_logical = scalar.shrui %c8, %c1 : i32
+  %shift_left = scalar.shli %c3, %c1 : i32
+  view.store %cn8, %value_output0_view[0] : i32, view<1xi32, #dense>
   view.store %bitwise_and, %value_output1_view[0] : i32, view<1xi32, #dense>
   view.store %shift_right_arithmetic, %value_output2_view[0] : i32, view<1xi32, #dense>
   view.store %bitwise_xor, %value_output3_view[0] : i32, view<1xi32, #dense>
@@ -97,16 +97,16 @@ kernel.def target(@target) @integer_i32_truth_table() {
   %unsigned_less_equal = scalar.cmpi ule, %lhs, %rhs : i32
   %unsigned_greater = scalar.cmpi ugt, %lhs, %rhs : i32
   %unsigned_greater_equal = scalar.cmpi uge, %lhs, %rhs : i32
-  %equal_i32 = scf.select %equal, %one, %zero : i32
-  %not_equal_i32 = scf.select %not_equal, %one, %zero : i32
-  %signed_greater_i32 = scf.select %signed_greater, %one, %zero : i32
-  %signed_less_i32 = scf.select %signed_less, %one, %zero : i32
-  %signed_greater_equal_i32 = scf.select %signed_greater_equal, %one, %zero : i32
-  %signed_less_equal_i32 = scf.select %signed_less_equal, %one, %zero : i32
-  %unsigned_less_i32 = scf.select %unsigned_less, %one, %zero : i32
-  %unsigned_greater_i32 = scf.select %unsigned_greater, %one, %zero : i32
-  %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %one, %zero : i32
-  %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %one, %zero : i32
+  %equal_i32 = scf.select %equal, %c1, %c0 : i32
+  %not_equal_i32 = scf.select %not_equal, %c1, %c0 : i32
+  %signed_greater_i32 = scf.select %signed_greater, %c1, %c0 : i32
+  %signed_less_i32 = scf.select %signed_less, %c1, %c0 : i32
+  %signed_greater_equal_i32 = scf.select %signed_greater_equal, %c1, %c0 : i32
+  %signed_less_equal_i32 = scf.select %signed_less_equal, %c1, %c0 : i32
+  %unsigned_less_i32 = scf.select %unsigned_less, %c1, %c0 : i32
+  %unsigned_greater_i32 = scf.select %unsigned_greater, %c1, %c0 : i32
+  %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %c1, %c0 : i32
+  %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %c1, %c0 : i32
   view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #dense>
   view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #dense>
   view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #dense>
@@ -134,22 +134,22 @@ kernel.def target(@target) @integer_i32_truth_table() {
   %xor_true_false = scalar.xori %not_equal, %equal : i1
   %select_false = scf.select %equal, %not_equal, %equal : i1
   %select_true = scf.select %not_equal, %not_equal, %equal : i1
-  %constant_false_i32 = scf.select %constant_false, %one, %zero : i32
-  %constant_true_i32 = scf.select %constant_true, %one, %zero : i32
-  %and_false_false_i32 = scf.select %and_false_false, %one, %zero : i32
-  %and_true_true_i32 = scf.select %and_true_true, %one, %zero : i32
-  %and_false_true_i32 = scf.select %and_false_true, %one, %zero : i32
-  %or_false_true_i32 = scf.select %or_false_true, %one, %zero : i32
-  %and_true_false_i32 = scf.select %and_true_false, %one, %zero : i32
-  %or_true_false_i32 = scf.select %or_true_false, %one, %zero : i32
-  %or_false_false_i32 = scf.select %or_false_false, %one, %zero : i32
-  %or_true_true_i32 = scf.select %or_true_true, %one, %zero : i32
-  %xor_false_false_i32 = scf.select %xor_false_false, %one, %zero : i32
-  %xor_false_true_i32 = scf.select %xor_false_true, %one, %zero : i32
-  %xor_true_true_i32 = scf.select %xor_true_true, %one, %zero : i32
-  %xor_true_false_i32 = scf.select %xor_true_false, %one, %zero : i32
-  %select_false_i32 = scf.select %select_false, %one, %zero : i32
-  %select_true_i32 = scf.select %select_true, %one, %zero : i32
+  %constant_false_i32 = scf.select %constant_false, %c1, %c0 : i32
+  %constant_true_i32 = scf.select %constant_true, %c1, %c0 : i32
+  %and_false_false_i32 = scf.select %and_false_false, %c1, %c0 : i32
+  %and_true_true_i32 = scf.select %and_true_true, %c1, %c0 : i32
+  %and_false_true_i32 = scf.select %and_false_true, %c1, %c0 : i32
+  %or_false_true_i32 = scf.select %or_false_true, %c1, %c0 : i32
+  %and_true_false_i32 = scf.select %and_true_false, %c1, %c0 : i32
+  %or_true_false_i32 = scf.select %or_true_false, %c1, %c0 : i32
+  %or_false_false_i32 = scf.select %or_false_false, %c1, %c0 : i32
+  %or_true_true_i32 = scf.select %or_true_true, %c1, %c0 : i32
+  %xor_false_false_i32 = scf.select %xor_false_false, %c1, %c0 : i32
+  %xor_false_true_i32 = scf.select %xor_false_true, %c1, %c0 : i32
+  %xor_true_true_i32 = scf.select %xor_true_true, %c1, %c0 : i32
+  %xor_true_false_i32 = scf.select %xor_true_false, %c1, %c0 : i32
+  %select_false_i32 = scf.select %select_false, %c1, %c0 : i32
+  %select_true_i32 = scf.select %select_true, %c1, %c0 : i32
   view.store %constant_false_i32, %boolean_output0_view[0] : i32, view<1xi32, #dense>
   view.store %constant_true_i32, %boolean_output1_view[0] : i32, view<1xi32, #dense>
   view.store %and_false_false_i32, %boolean_output2_view[0] : i32, view<1xi32, #dense>
@@ -230,25 +230,25 @@ kernel.def target(@target) @integer_i8_truth_table() {
 
   %lhs = view.load %input_lhs_view[0] : view<1xi8, #dense> -> i8
   %rhs = view.load %input_rhs_view[0] : view<1xi8, #dense> -> i8
-  %minus_eight = scalar.constant -8 : i8
-  %minus_six = scalar.constant -6 : i8
-  %minus_one = scalar.constant -1 : i8
-  %zero = scalar.constant 0 : i8
-  %one = scalar.constant 1 : i8
-  %two = scalar.constant 2 : i8
-  %three = scalar.constant 3 : i8
-  %eight = scalar.constant 8 : i8
-  %zero_i32 = scalar.constant 0 : i32
-  %one_i32 = scalar.constant 1 : i32
-  %bitwise_and = scalar.andi %minus_six, %minus_one : i8
-  %shift_right_arithmetic = scalar.shrsi %minus_eight, %one : i8
-  %bitwise_xor = scalar.xori %minus_one, %one : i8
+  %cn8 = scalar.constant -8 : i8
+  %cn6 = scalar.constant -6 : i8
+  %cn1 = scalar.constant -1 : i8
+  %c0 = scalar.constant 0 : i8
+  %c1 = scalar.constant 1 : i8
+  %c2 = scalar.constant 2 : i8
+  %c3 = scalar.constant 3 : i8
+  %c8 = scalar.constant 8 : i8
+  %false_i32 = scalar.constant 0 : i32
+  %true_i32 = scalar.constant 1 : i32
+  %bitwise_and = scalar.andi %cn6, %cn1 : i8
+  %shift_right_arithmetic = scalar.shrsi %cn8, %c1 : i8
+  %bitwise_xor = scalar.xori %cn1, %c1 : i8
   %equal = scalar.cmpi eq, %lhs, %rhs : i8
-  %selected = scf.select %equal, %eight, %zero : i8
-  %bitwise_or = scalar.ori %zero, %two : i8
-  %shift_right_logical = scalar.shrui %eight, %one : i8
-  %shift_left = scalar.shli %three, %one : i8
-  view.store %minus_eight, %value_output0_view[0] : i8, view<1xi8, #dense>
+  %selected = scf.select %equal, %c8, %c0 : i8
+  %bitwise_or = scalar.ori %c0, %c2 : i8
+  %shift_right_logical = scalar.shrui %c8, %c1 : i8
+  %shift_left = scalar.shli %c3, %c1 : i8
+  view.store %cn8, %value_output0_view[0] : i8, view<1xi8, #dense>
   view.store %bitwise_and, %value_output1_view[0] : i8, view<1xi8, #dense>
   view.store %shift_right_arithmetic, %value_output2_view[0] : i8, view<1xi8, #dense>
   view.store %bitwise_xor, %value_output3_view[0] : i8, view<1xi8, #dense>
@@ -266,16 +266,16 @@ kernel.def target(@target) @integer_i8_truth_table() {
   %unsigned_less_equal = scalar.cmpi ule, %lhs, %rhs : i8
   %unsigned_greater = scalar.cmpi ugt, %lhs, %rhs : i8
   %unsigned_greater_equal = scalar.cmpi uge, %lhs, %rhs : i8
-  %equal_i32 = scf.select %equal, %one_i32, %zero_i32 : i32
-  %not_equal_i32 = scf.select %not_equal, %one_i32, %zero_i32 : i32
-  %signed_greater_i32 = scf.select %signed_greater, %one_i32, %zero_i32 : i32
-  %signed_less_i32 = scf.select %signed_less, %one_i32, %zero_i32 : i32
-  %signed_greater_equal_i32 = scf.select %signed_greater_equal, %one_i32, %zero_i32 : i32
-  %signed_less_equal_i32 = scf.select %signed_less_equal, %one_i32, %zero_i32 : i32
-  %unsigned_less_i32 = scf.select %unsigned_less, %one_i32, %zero_i32 : i32
-  %unsigned_greater_i32 = scf.select %unsigned_greater, %one_i32, %zero_i32 : i32
-  %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %one_i32, %zero_i32 : i32
-  %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %one_i32, %zero_i32 : i32
+  %equal_i32 = scf.select %equal, %true_i32, %false_i32 : i32
+  %not_equal_i32 = scf.select %not_equal, %true_i32, %false_i32 : i32
+  %signed_greater_i32 = scf.select %signed_greater, %true_i32, %false_i32 : i32
+  %signed_less_i32 = scf.select %signed_less, %true_i32, %false_i32 : i32
+  %signed_greater_equal_i32 = scf.select %signed_greater_equal, %true_i32, %false_i32 : i32
+  %signed_less_equal_i32 = scf.select %signed_less_equal, %true_i32, %false_i32 : i32
+  %unsigned_less_i32 = scf.select %unsigned_less, %true_i32, %false_i32 : i32
+  %unsigned_greater_i32 = scf.select %unsigned_greater, %true_i32, %false_i32 : i32
+  %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %true_i32, %false_i32 : i32
+  %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %true_i32, %false_i32 : i32
   view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #dense>
   view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #dense>
   view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #dense>
@@ -347,25 +347,25 @@ kernel.def target(@target) @integer_i16_truth_table() {
 
   %lhs = view.load %input_lhs_view[0] : view<1xi16, #dense> -> i16
   %rhs = view.load %input_rhs_view[0] : view<1xi16, #dense> -> i16
-  %minus_eight = scalar.constant -8 : i16
-  %minus_six = scalar.constant -6 : i16
-  %minus_one = scalar.constant -1 : i16
-  %zero = scalar.constant 0 : i16
-  %one = scalar.constant 1 : i16
-  %two = scalar.constant 2 : i16
-  %three = scalar.constant 3 : i16
-  %eight = scalar.constant 8 : i16
-  %zero_i32 = scalar.constant 0 : i32
-  %one_i32 = scalar.constant 1 : i32
-  %bitwise_and = scalar.andi %minus_six, %minus_one : i16
-  %shift_right_arithmetic = scalar.shrsi %minus_eight, %one : i16
-  %bitwise_xor = scalar.xori %minus_one, %one : i16
+  %cn8 = scalar.constant -8 : i16
+  %cn6 = scalar.constant -6 : i16
+  %cn1 = scalar.constant -1 : i16
+  %c0 = scalar.constant 0 : i16
+  %c1 = scalar.constant 1 : i16
+  %c2 = scalar.constant 2 : i16
+  %c3 = scalar.constant 3 : i16
+  %c8 = scalar.constant 8 : i16
+  %false_i32 = scalar.constant 0 : i32
+  %true_i32 = scalar.constant 1 : i32
+  %bitwise_and = scalar.andi %cn6, %cn1 : i16
+  %shift_right_arithmetic = scalar.shrsi %cn8, %c1 : i16
+  %bitwise_xor = scalar.xori %cn1, %c1 : i16
   %equal = scalar.cmpi eq, %lhs, %rhs : i16
-  %selected = scf.select %equal, %eight, %zero : i16
-  %bitwise_or = scalar.ori %zero, %two : i16
-  %shift_right_logical = scalar.shrui %eight, %one : i16
-  %shift_left = scalar.shli %three, %one : i16
-  view.store %minus_eight, %value_output0_view[0] : i16, view<1xi16, #dense>
+  %selected = scf.select %equal, %c8, %c0 : i16
+  %bitwise_or = scalar.ori %c0, %c2 : i16
+  %shift_right_logical = scalar.shrui %c8, %c1 : i16
+  %shift_left = scalar.shli %c3, %c1 : i16
+  view.store %cn8, %value_output0_view[0] : i16, view<1xi16, #dense>
   view.store %bitwise_and, %value_output1_view[0] : i16, view<1xi16, #dense>
   view.store %shift_right_arithmetic, %value_output2_view[0] : i16, view<1xi16, #dense>
   view.store %bitwise_xor, %value_output3_view[0] : i16, view<1xi16, #dense>
@@ -383,16 +383,16 @@ kernel.def target(@target) @integer_i16_truth_table() {
   %unsigned_less_equal = scalar.cmpi ule, %lhs, %rhs : i16
   %unsigned_greater = scalar.cmpi ugt, %lhs, %rhs : i16
   %unsigned_greater_equal = scalar.cmpi uge, %lhs, %rhs : i16
-  %equal_i32 = scf.select %equal, %one_i32, %zero_i32 : i32
-  %not_equal_i32 = scf.select %not_equal, %one_i32, %zero_i32 : i32
-  %signed_greater_i32 = scf.select %signed_greater, %one_i32, %zero_i32 : i32
-  %signed_less_i32 = scf.select %signed_less, %one_i32, %zero_i32 : i32
-  %signed_greater_equal_i32 = scf.select %signed_greater_equal, %one_i32, %zero_i32 : i32
-  %signed_less_equal_i32 = scf.select %signed_less_equal, %one_i32, %zero_i32 : i32
-  %unsigned_less_i32 = scf.select %unsigned_less, %one_i32, %zero_i32 : i32
-  %unsigned_greater_i32 = scf.select %unsigned_greater, %one_i32, %zero_i32 : i32
-  %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %one_i32, %zero_i32 : i32
-  %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %one_i32, %zero_i32 : i32
+  %equal_i32 = scf.select %equal, %true_i32, %false_i32 : i32
+  %not_equal_i32 = scf.select %not_equal, %true_i32, %false_i32 : i32
+  %signed_greater_i32 = scf.select %signed_greater, %true_i32, %false_i32 : i32
+  %signed_less_i32 = scf.select %signed_less, %true_i32, %false_i32 : i32
+  %signed_greater_equal_i32 = scf.select %signed_greater_equal, %true_i32, %false_i32 : i32
+  %signed_less_equal_i32 = scf.select %signed_less_equal, %true_i32, %false_i32 : i32
+  %unsigned_less_i32 = scf.select %unsigned_less, %true_i32, %false_i32 : i32
+  %unsigned_greater_i32 = scf.select %unsigned_greater, %true_i32, %false_i32 : i32
+  %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %true_i32, %false_i32 : i32
+  %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %true_i32, %false_i32 : i32
   view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #dense>
   view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #dense>
   view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #dense>
@@ -463,25 +463,25 @@ kernel.def target(@target) @integer_i64_truth_table() {
 
   %lhs = view.load %input_lhs_view[0] : view<1xi64, #dense> -> i64
   %rhs = view.load %input_rhs_view[0] : view<1xi64, #dense> -> i64
-  %minus_eight = scalar.constant -8 : i64
-  %minus_six = scalar.constant -6 : i64
-  %minus_one = scalar.constant -1 : i64
-  %zero = scalar.constant 0 : i64
-  %one = scalar.constant 1 : i64
-  %two = scalar.constant 2 : i64
-  %three = scalar.constant 3 : i64
-  %eight = scalar.constant 8 : i64
-  %zero_i32 = scalar.constant 0 : i32
-  %one_i32 = scalar.constant 1 : i32
-  %bitwise_and = scalar.andi %minus_six, %minus_one : i64
-  %shift_right_arithmetic = scalar.shrsi %minus_eight, %one : i64
-  %bitwise_xor = scalar.xori %minus_one, %one : i64
+  %cn8 = scalar.constant -8 : i64
+  %cn6 = scalar.constant -6 : i64
+  %cn1 = scalar.constant -1 : i64
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %c2 = scalar.constant 2 : i64
+  %c3 = scalar.constant 3 : i64
+  %c8 = scalar.constant 8 : i64
+  %false_i32 = scalar.constant 0 : i32
+  %true_i32 = scalar.constant 1 : i32
+  %bitwise_and = scalar.andi %cn6, %cn1 : i64
+  %shift_right_arithmetic = scalar.shrsi %cn8, %c1 : i64
+  %bitwise_xor = scalar.xori %cn1, %c1 : i64
   %equal = scalar.cmpi eq, %lhs, %rhs : i64
-  %selected = scf.select %equal, %eight, %zero : i64
-  %bitwise_or = scalar.ori %zero, %two : i64
-  %shift_right_logical = scalar.shrui %eight, %one : i64
-  %shift_left = scalar.shli %three, %one : i64
-  view.store %minus_eight, %value_output0_view[0] : i64, view<1xi64, #dense>
+  %selected = scf.select %equal, %c8, %c0 : i64
+  %bitwise_or = scalar.ori %c0, %c2 : i64
+  %shift_right_logical = scalar.shrui %c8, %c1 : i64
+  %shift_left = scalar.shli %c3, %c1 : i64
+  view.store %cn8, %value_output0_view[0] : i64, view<1xi64, #dense>
   view.store %bitwise_and, %value_output1_view[0] : i64, view<1xi64, #dense>
   view.store %shift_right_arithmetic, %value_output2_view[0] : i64, view<1xi64, #dense>
   view.store %bitwise_xor, %value_output3_view[0] : i64, view<1xi64, #dense>
@@ -499,16 +499,16 @@ kernel.def target(@target) @integer_i64_truth_table() {
   %unsigned_less_equal = scalar.cmpi ule, %lhs, %rhs : i64
   %unsigned_greater = scalar.cmpi ugt, %lhs, %rhs : i64
   %unsigned_greater_equal = scalar.cmpi uge, %lhs, %rhs : i64
-  %equal_i32 = scf.select %equal, %one_i32, %zero_i32 : i32
-  %not_equal_i32 = scf.select %not_equal, %one_i32, %zero_i32 : i32
-  %signed_greater_i32 = scf.select %signed_greater, %one_i32, %zero_i32 : i32
-  %signed_less_i32 = scf.select %signed_less, %one_i32, %zero_i32 : i32
-  %signed_greater_equal_i32 = scf.select %signed_greater_equal, %one_i32, %zero_i32 : i32
-  %signed_less_equal_i32 = scf.select %signed_less_equal, %one_i32, %zero_i32 : i32
-  %unsigned_less_i32 = scf.select %unsigned_less, %one_i32, %zero_i32 : i32
-  %unsigned_greater_i32 = scf.select %unsigned_greater, %one_i32, %zero_i32 : i32
-  %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %one_i32, %zero_i32 : i32
-  %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %one_i32, %zero_i32 : i32
+  %equal_i32 = scf.select %equal, %true_i32, %false_i32 : i32
+  %not_equal_i32 = scf.select %not_equal, %true_i32, %false_i32 : i32
+  %signed_greater_i32 = scf.select %signed_greater, %true_i32, %false_i32 : i32
+  %signed_less_i32 = scf.select %signed_less, %true_i32, %false_i32 : i32
+  %signed_greater_equal_i32 = scf.select %signed_greater_equal, %true_i32, %false_i32 : i32
+  %signed_less_equal_i32 = scf.select %signed_less_equal, %true_i32, %false_i32 : i32
+  %unsigned_less_i32 = scf.select %unsigned_less, %true_i32, %false_i32 : i32
+  %unsigned_greater_i32 = scf.select %unsigned_greater, %true_i32, %false_i32 : i32
+  %unsigned_less_equal_i32 = scf.select %unsigned_less_equal, %true_i32, %false_i32 : i32
+  %unsigned_greater_equal_i32 = scf.select %unsigned_greater_equal, %true_i32, %false_i32 : i32
   view.store %equal_i32, %comparison_output0_view[0] : i32, view<1xi32, #dense>
   view.store %not_equal_i32, %comparison_output1_view[0] : i32, view<1xi32, #dense>
   view.store %signed_greater_i32, %comparison_output2_view[0] : i32, view<1xi32, #dense>

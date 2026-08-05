@@ -3,11 +3,11 @@ amdgpu.target<gfx1250> @gfx1250
 
 kernel.def target(@gfx1250) export("planner_attention_bf16") @planner_attention_bf16() {
   %unit = index.constant 1 : index
-  %sixteen = index.constant 16 : index
+  %query_tile_extent = index.constant 16 : index
   %workgroup_size_x = index.constant 32 : index
   %query_block_token_count = index.constant 4096 : index
   %attention_head_count = index.constant 18 : index
-  %query_tile_count = index.div %query_block_token_count, %sixteen : index
+  %query_tile_count = index.div %query_block_token_count, %query_tile_extent : index
   kernel.launch.config workgroups(%query_tile_count, %attention_head_count, %unit) workgroup_size(%workgroup_size_x, %unit, %unit) : index
 } launch(%query: buffer, %key: buffer, %value: buffer, %output: buffer) {
   %query_tile = kernel.workgroup.id<x> : index
@@ -21,21 +21,20 @@ func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
   %k_step_gfx1250 = index.constant 32 : index
   %base = index.constant 0 : offset
   %probability_scratch_bytes = index.constant 512 : offset
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %eight = index.constant 8 : index
-  %fifteen = index.constant 15 : index
-  %sixteen = index.constant 16 : index
-  %thirty_two = index.constant 32 : index
-  %forty_eight = index.constant 48 : index
-  %sixty_four = index.constant 64 : index
-  %eighty = index.constant 80 : index
-  %ninety_six = index.constant 96 : index
-  %one_twelve = index.constant 112 : index
-  %one_twenty_eight = index.constant 128 : index
-  %lane_column = index.rem %lane, %sixteen : index
-  %lane_group = index.div %lane, %sixteen : index
-  %lane_group_even = index.cmp eq, %lane_group, %zero : index
+  %c0 = index.constant 0 : index
+  %tile_step = index.constant 1 : index
+  %tile_rounding_bias = index.constant 15 : index
+  %tile_extent = index.constant 16 : index
+  %channel_offset2 = index.constant 32 : index
+  %channel_offset3 = index.constant 48 : index
+  %channel_offset4 = index.constant 64 : index
+  %channel_offset5 = index.constant 80 : index
+  %channel_offset6 = index.constant 96 : index
+  %channel_offset7 = index.constant 112 : index
+  %channel_offset8 = index.constant 128 : index
+  %lane_column = index.rem %lane, %tile_extent : index
+  %lane_group = index.div %lane, %tile_extent : index
+  %lane_group_even = index.cmp eq, %lane_group, %c0 : index
   %valid_token_count = index.constant 4096 : index
   %padded_token_count = index.constant 4096 : index
   %query_block_offset = index.constant 0 : index
@@ -44,16 +43,16 @@ func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
   %head_pair_tile_count = index.div %head_size, %k_step_gfx1250 : index
   %hidden_size = index.mul %attention_head_count, %head_size : index
   %head_base = index.mul %query_head, %head_size : index
-  %value_base = index.add %head_base, %zero : index
-  %local_query_origin = index.mul %query_tile, %sixteen : index
+  %value_base = index.add %head_base, %c0 : index
+  %local_query_origin = index.mul %query_tile, %tile_extent : index
   %query_origin = index.add %query_block_offset, %local_query_origin : index
-  %valid_token_count_rounded = index.add %valid_token_count, %fifteen : index
-  %key_tile_count = index.div %valid_token_count_rounded, %sixteen : index
-  %zero_f32 = scalar.constant 0.0 : f32
+  %valid_token_count_rounded = index.add %valid_token_count, %tile_rounding_bias : index
+  %key_tile_count = index.div %valid_token_count_rounded, %tile_extent : index
+  %additive_identity = scalar.constant 0.0 : f32
   %negative_large = scalar.constant -1000000000.0 : f32
   %zero_acc = vector.constant 0.0 : vector<8xf32>
   %zero_operand = vector.constant 0.0 : vector<16xbf16>
-  %zero_vector = vector.splat %zero_f32 : vector<8xf32>
+  %zero_vector = vector.splat %additive_identity : vector<8xf32>
   %negative_vector = vector.splat %negative_large : vector<8xf32>
   %head_size_i32 = index.cast %head_size : index to i32
   %head_size_f32 = scalar.sitofp %head_size_i32 : i32 to f32
@@ -78,13 +77,13 @@ func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
   %probability_scratch = buffer.alloca %probability_scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %probability_scratch_view = buffer.view %probability_scratch[%base] : buffer -> view<16x16xbf16, #dense>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
-  %final_max_even, %final_sum_even, %final_max_odd, %final_sum_odd, %final_acc0, %final_acc1, %final_acc2, %final_acc3, %final_acc4, %final_acc5, %final_acc6, %final_acc7, %final_acc8, %final_acc9, %final_acc10, %final_acc11, %final_acc12, %final_acc13, %final_acc14, %final_acc15 = scf.for %key_tile = [%zero to %key_tile_count step %one](%current_max_even = %negative_vector : vector<8xf32>, %current_sum_even = %zero_vector : vector<8xf32>, %current_max_odd = %negative_vector : vector<8xf32>, %current_sum_odd = %zero_vector : vector<8xf32>, %current_acc0 = %init : vector<8xf32>, %current_acc1 = %init : vector<8xf32>, %current_acc2 = %init : vector<8xf32>, %current_acc3 = %init : vector<8xf32>, %current_acc4 = %init : vector<8xf32>, %current_acc5 = %init : vector<8xf32>, %current_acc6 = %init : vector<8xf32>, %current_acc7 = %init : vector<8xf32>, %current_acc8 = %init : vector<8xf32>, %current_acc9 = %init : vector<8xf32>, %current_acc10 = %init : vector<8xf32>, %current_acc11 = %init : vector<8xf32>, %current_acc12 = %init : vector<8xf32>, %current_acc13 = %init : vector<8xf32>, %current_acc14 = %init : vector<8xf32>, %current_acc15 = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
-    %key_origin = index.mul %key_tile, %sixteen : index
+  %final_max_even, %final_sum_even, %final_max_odd, %final_sum_odd, %final_acc0, %final_acc1, %final_acc2, %final_acc3, %final_acc4, %final_acc5, %final_acc6, %final_acc7, %final_acc8, %final_acc9, %final_acc10, %final_acc11, %final_acc12, %final_acc13, %final_acc14, %final_acc15 = scf.for %key_tile = [%c0 to %key_tile_count step %tile_step](%current_max_even = %negative_vector : vector<8xf32>, %current_sum_even = %zero_vector : vector<8xf32>, %current_max_odd = %negative_vector : vector<8xf32>, %current_sum_odd = %zero_vector : vector<8xf32>, %current_acc0 = %init : vector<8xf32>, %current_acc1 = %init : vector<8xf32>, %current_acc2 = %init : vector<8xf32>, %current_acc3 = %init : vector<8xf32>, %current_acc4 = %init : vector<8xf32>, %current_acc5 = %init : vector<8xf32>, %current_acc6 = %init : vector<8xf32>, %current_acc7 = %init : vector<8xf32>, %current_acc8 = %init : vector<8xf32>, %current_acc9 = %init : vector<8xf32>, %current_acc10 = %init : vector<8xf32>, %current_acc11 = %init : vector<8xf32>, %current_acc12 = %init : vector<8xf32>, %current_acc13 = %init : vector<8xf32>, %current_acc14 = %init : vector<8xf32>, %current_acc15 = %init : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    %key_origin = index.mul %key_tile, %tile_extent : index
     %key_token = index.add %key_origin, %lane_column : index
     %key_valid = index.cmp ult, %key_token, %valid_token_count : index
     %lane_query_token = index.add %query_origin, %lane_column : index
-    %lane_head_offset = index.mul %lane_group, %sixteen : index
-    %raw_scores = scf.for %head_pair_tile = [%zero to %head_pair_tile_count step %one](%qk_acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+    %lane_head_offset = index.mul %lane_group, %tile_extent : index
+    %raw_scores = scf.for %head_pair_tile = [%c0 to %head_pair_tile_count step %tile_step](%qk_acc = %init : vector<8xf32>) -> (vector<8xf32>) {
       %head_pair_offset = index.mul %head_pair_tile, %k_step_gfx1250 : index
       %lane_head_origin = index.add %head_pair_offset, %lane_head_offset : index
       %query_channel = index.add %head_base, %lane_head_origin : index
@@ -152,31 +151,31 @@ func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
     } else {
       scf.yield %old_scale_odd : vector<8xf32>
     }
-    vector.fragment.store<result> %weight, %probability_scratch_view[%zero, %zero] shape [%m, %n] : vector<8xf32>, view<16x16xbf16, #dense>
+    vector.fragment.store<result> %weight, %probability_scratch_view[%c0, %c0] shape [%m, %n] : vector<8xf32>, view<16x16xbf16, #dense>
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
     %probability_values = scf.if %lane_group_even -> (vector<16xbf16>) {
-      %loaded_probability = vector.load %probability_scratch_view[%lane_column, %zero] : view<16x16xbf16, #dense> -> vector<16xbf16>
+      %loaded_probability = vector.load %probability_scratch_view[%lane_column, %c0] : view<16x16xbf16, #dense> -> vector<16xbf16>
       scf.yield %loaded_probability : vector<16xbf16>
     } else {
       scf.yield %zero_operand : vector<16xbf16>
     }
     %probability_lhs = vector.fragment<lhs> %probability_values shape [%m, %k] : vector<16xbf16>
-    %channel0 = index.add %value_base, %zero : index
-    %channel1 = index.add %value_base, %sixteen : index
-    %channel2 = index.add %value_base, %thirty_two : index
-    %channel3 = index.add %value_base, %forty_eight : index
-    %channel4 = index.add %value_base, %sixty_four : index
-    %channel5 = index.add %value_base, %eighty : index
-    %channel6 = index.add %value_base, %ninety_six : index
-    %channel7 = index.add %value_base, %one_twelve : index
-    %channel8 = index.add %value_base, %one_twenty_eight : index
-    %channel9 = index.add %channel8, %sixteen : index
-    %channel10 = index.add %channel9, %sixteen : index
-    %channel11 = index.add %channel10, %sixteen : index
-    %channel12 = index.add %channel11, %sixteen : index
-    %channel13 = index.add %channel12, %sixteen : index
-    %channel14 = index.add %channel13, %sixteen : index
-    %channel15 = index.add %channel14, %sixteen : index
+    %channel0 = index.add %value_base, %c0 : index
+    %channel1 = index.add %value_base, %tile_extent : index
+    %channel2 = index.add %value_base, %channel_offset2 : index
+    %channel3 = index.add %value_base, %channel_offset3 : index
+    %channel4 = index.add %value_base, %channel_offset4 : index
+    %channel5 = index.add %value_base, %channel_offset5 : index
+    %channel6 = index.add %value_base, %channel_offset6 : index
+    %channel7 = index.add %value_base, %channel_offset7 : index
+    %channel8 = index.add %value_base, %channel_offset8 : index
+    %channel9 = index.add %channel8, %tile_extent : index
+    %channel10 = index.add %channel9, %tile_extent : index
+    %channel11 = index.add %channel10, %tile_extent : index
+    %channel12 = index.add %channel11, %tile_extent : index
+    %channel13 = index.add %channel12, %tile_extent : index
+    %channel14 = index.add %channel13, %tile_extent : index
+    %channel15 = index.add %channel14, %tile_extent : index
     %lane_channel0 = index.add %channel0, %lane_column : index
     %lane_channel1 = index.add %channel1, %lane_column : index
     %lane_channel2 = index.add %channel2, %lane_column : index
@@ -302,22 +301,22 @@ func.template<benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
   %output13 = vector.divf<nnan|ninf|nsz|arcp> %final_acc13, %selected_final_sum : vector<8xf32>
   %output14 = vector.divf<nnan|ninf|nsz|arcp> %final_acc14, %selected_final_sum : vector<8xf32>
   %output15 = vector.divf<nnan|ninf|nsz|arcp> %final_acc15, %selected_final_sum : vector<8xf32>
-  %channel0 = index.add %value_base, %zero : index
-  %channel1 = index.add %value_base, %sixteen : index
-  %channel2 = index.add %value_base, %thirty_two : index
-  %channel3 = index.add %value_base, %forty_eight : index
-  %channel4 = index.add %value_base, %sixty_four : index
-  %channel5 = index.add %value_base, %eighty : index
-  %channel6 = index.add %value_base, %ninety_six : index
-  %channel7 = index.add %value_base, %one_twelve : index
-  %channel8 = index.add %value_base, %one_twenty_eight : index
-  %channel9 = index.add %channel8, %sixteen : index
-  %channel10 = index.add %channel9, %sixteen : index
-  %channel11 = index.add %channel10, %sixteen : index
-  %channel12 = index.add %channel11, %sixteen : index
-  %channel13 = index.add %channel12, %sixteen : index
-  %channel14 = index.add %channel13, %sixteen : index
-  %channel15 = index.add %channel14, %sixteen : index
+  %channel0 = index.add %value_base, %c0 : index
+  %channel1 = index.add %value_base, %tile_extent : index
+  %channel2 = index.add %value_base, %channel_offset2 : index
+  %channel3 = index.add %value_base, %channel_offset3 : index
+  %channel4 = index.add %value_base, %channel_offset4 : index
+  %channel5 = index.add %value_base, %channel_offset5 : index
+  %channel6 = index.add %value_base, %channel_offset6 : index
+  %channel7 = index.add %value_base, %channel_offset7 : index
+  %channel8 = index.add %value_base, %channel_offset8 : index
+  %channel9 = index.add %channel8, %tile_extent : index
+  %channel10 = index.add %channel9, %tile_extent : index
+  %channel11 = index.add %channel10, %tile_extent : index
+  %channel12 = index.add %channel11, %tile_extent : index
+  %channel13 = index.add %channel12, %tile_extent : index
+  %channel14 = index.add %channel13, %tile_extent : index
+  %channel15 = index.add %channel14, %tile_extent : index
   vector.fragment.store<result> %output0, %output_view[%query_origin, %channel0] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
   vector.fragment.store<result> %output1, %output_view[%query_origin, %channel1] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>
   vector.fragment.store<result> %output2, %output_view[%query_origin, %channel2] shape [%m, %n] : vector<8xf32>, view<[%padded_token_count]x[%hidden_size]xbf16, #dense>

@@ -175,19 +175,19 @@ low.kernel.def target<spirv.logical.core>(@hal_target_scalar_payloads) abi_layou
 spirv.target<vulkan1_3> @target
 
 func.def target(@target) @spirv_index_arithmetic(%index: index, %factor: index) -> (index) {
-  %one = index.constant 1 : index
-  %previous = index.sub %index, %one : index
+  %index_adjustment = index.constant 1 : index
+  %previous = index.sub %index, %index_adjustment : index
   %scaled = index.mul %previous, %factor : index
-  %next = index.madd %scaled, %factor, %one : index
+  %next = index.madd %scaled, %factor, %index_adjustment : index
   func.return %next : index
 }
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_index_arithmetic(%index: reg<spirv.id>, %factor: reg<spirv.id>) -> (reg<spirv.id>) asm {
-  %one = OpConstant.i32 1
-  %previous = OpISub %index, %one
+  %index_adjustment = OpConstant.i32 1
+  %previous = OpISub %index, %index_adjustment
   %scaled = OpIMul %previous, %factor
-  %next = OpIMulAdd %scaled, %factor, %one
+  %next = OpIMulAdd %scaled, %factor, %index_adjustment
   return %next
 }
 
@@ -196,17 +196,17 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
 spirv.target<vulkan1_3> @target
 
 func.def target(@target) @spirv_offset_compare_select(%byte_offset: offset, %limit: offset) -> (offset) {
-  %zero = index.constant 0 : offset
+  %fallback = index.constant 0 : offset
   %inside = index.cmp ule, %byte_offset, %limit : offset
-  %selected = scf.select %inside, %byte_offset, %zero : offset
+  %selected = scf.select %inside, %byte_offset, %fallback : offset
   func.return %selected : offset
 }
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_offset_compare_select(%byte_offset: reg<spirv.offset64>, %limit: reg<spirv.offset64>) -> (reg<spirv.offset64>) asm {
-  %zero = OpConstant.offset64 0
+  %fallback = OpConstant.offset64 0
   %inside = OpULessThanEqual.offset64 %byte_offset, %limit
-  %selected = OpSelect.offset64 %inside, %byte_offset, %zero
+  %selected = OpSelect.offset64 %inside, %byte_offset, %fallback
   return %selected
 }
 
@@ -240,9 +240,9 @@ spirv.target<vulkan1_3> @hal_target {abi = hal_kernel}
 kernel.def target(@hal_target) @spirv_dynamic_builtin_storage_buffer_i32() {
   %groups_x = index.constant 4 : index
   %groups_z = index.constant 3 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  kernel.launch.config workgroups(%groups_x, %one, %groups_z) workgroup_size(%one, %two, %one) : index
+  %unit = index.constant 1 : index
+  %workgroup_size_y = index.constant 2 : index
+  kernel.launch.config workgroups(%groups_x, %unit, %groups_z) workgroup_size(%unit, %workgroup_size_y, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %workgroup_x = kernel.workgroup.id<x> : index
   %local_y = kernel.workitem.id<y> : index

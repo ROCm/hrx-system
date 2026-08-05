@@ -242,9 +242,9 @@ kernel.def target(@target) @llvmir_hal_buffer_resources() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32, #dense>
   %loaded = view.load %input_view[0] : view<1xi32, #dense> -> i32
   view.store %loaded, %output_view[0] : i32, view<1xi32, #dense>
   kernel.return
@@ -267,18 +267,18 @@ llvmir.target<object> @target {
 }
 
 func.def target(@target) @llvmir_canonical_dynamic_memory_address(%input: buffer, %output: buffer, %i: index) {
-  %zero = index.constant 0 : offset
-  %two = index.constant 2 : index
-  %four = index.constant 4 : index
-  %element_index = index.madd %i, %two, %four : index
+  %buffer_base = index.constant 0 : offset
+  %index_stride = index.constant 2 : index
+  %index_bias = index.constant 4 : index
+  %element_index = index.madd %i, %index_stride, %index_bias : index
   %bounded_index = index.assume %element_index [range(%element_index, 0, 31)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
   %loaded = view.load %input_view[%bounded_index] : view<64xi32, #dense> -> i32
   view.store %loaded, %output_view[%bounded_index] : i32, view<64xi32, #dense>
-  %one = scalar.constant 1 : i32
-  view.atomic.reduce<addi> %one, %output_view[%bounded_index] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
-  %old = view.atomic.rmw<addi> %one, %output_view[%bounded_index] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
+  %increment = scalar.constant 1 : i32
+  view.atomic.reduce<addi> %increment, %output_view[%bounded_index] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense>
+  %old = view.atomic.rmw<addi> %increment, %output_view[%bounded_index] {ordering = relaxed, scope = device} : i32, view<64xi32, #dense> -> i32
   %replacement = scalar.constant 9 : i32
   %previous = view.atomic.cmpxchg %old, %replacement, %output_view[%bounded_index] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<64xi32, #dense> -> i32
   func.return
@@ -288,9 +288,9 @@ func.def target(@target) @llvmir_canonical_dynamic_memory_address(%input: buffer
 low.func.def target<llvmir.generic.core>(@target) abi(object_function) @llvmir_canonical_dynamic_memory_address(%input_view: reg<llvmir.ptr>, %output_view: reg<llvmir.ptr>, %i: reg<llvmir.i64>) asm {
   %loaded = load.indexed.i32 %input_view, %i, 16, 8
   store.indexed.i32 %loaded, %output_view, %i, 16, 8
-  %one = const.i32 1
-  atomic.reduce.indexed.add.i32 %one, %output_view, %i, 16, 0, 3, 8
-  %old = atomic.rmw.indexed.add.i32 %one, %output_view, %i, 16, 0, 3, 8
+  %increment = const.i32 1
+  atomic.reduce.indexed.add.i32 %increment, %output_view, %i, 16, 0, 3, 8
+  %old = atomic.rmw.indexed.add.i32 %increment, %output_view, %i, 16, 0, 3, 8
   %replacement = const.i32 9
   %previous = atomic.cmpxchg.indexed.i32 %old, %replacement, %output_view, %i, 16, 0, 0, 3, 8
   return

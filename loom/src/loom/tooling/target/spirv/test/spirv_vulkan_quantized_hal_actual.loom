@@ -11,7 +11,7 @@ kernel.def target(@target) @quantized_projection_u8_scalar_128() {
   %k_count = index.constant 128 : index
   %n_count = index.constant 128 : index
   %unit = index.constant 1 : index
-  %zero = index.constant 0 : index
+  %loop_begin = index.constant 0 : index
   %f32_bytes = index.constant 4 : index
   %lhs_aligned = buffer.assume.alignment %lhs_buffer {minimum_alignment = 1} : buffer
   %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 1} : buffer
@@ -23,7 +23,7 @@ kernel.def target(@target) @quantized_projection_u8_scalar_128() {
   %out_byte_offset_aligned = index.assume %out_byte_offset [mul(%out_byte_offset, 4)] : offset
   %init_view = buffer.view %init_aligned[%out_byte_offset_aligned] : buffer -> view<1xf32, #dense>
   %init = view.load %init_view[0] : view<1xf32, #dense> -> f32
-  %result = scf.for %k = [%zero to %k_count step %unit](%acc = %init : f32) -> (f32) {
+  %result = scf.for %k = [%loop_begin to %k_count step %unit](%acc = %init : f32) -> (f32) {
     %lhs_element_index = index.madd %row, %k_count, %k : index
     %rhs_element_index = index.madd %k, %n_count, %column : index
     %lhs_byte_offset = index.cast %lhs_element_index : index to offset

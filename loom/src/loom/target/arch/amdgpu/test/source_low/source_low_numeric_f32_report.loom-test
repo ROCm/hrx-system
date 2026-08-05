@@ -3,8 +3,8 @@
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_scalar_arcp_reciprocal_div(%rhs: f32) -> (f32) {
-  %one = scalar.constant 1.0 : f32
-  %quotient = scalar.divf<nnan|ninf|nsz|arcp> %one, %rhs : f32
+  %reciprocal_numerator = scalar.constant 1.0 : f32
+  %quotient = scalar.divf<nnan|ninf|nsz|arcp> %reciprocal_numerator, %rhs : f32
   func.return %quotient : f32
 }
 
@@ -63,8 +63,8 @@ COMPILE-REPORT: source_low[0] function=report_scalar_exact_div source_op=scalar.
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_vector_arcp_reciprocal_div(%rhs: vector<2xf32>) -> (vector<2xf32>) {
-  %one = vector.constant 1.0 : vector<2xf32>
-  %quotient = vector.divf<nnan|ninf|nsz|arcp> %one, %rhs : vector<2xf32>
+  %reciprocal_numerator = vector.constant 1.0 : vector<2xf32>
+  %quotient = vector.divf<nnan|ninf|nsz|arcp> %reciprocal_numerator, %rhs : vector<2xf32>
   func.return %quotient : vector<2xf32>
 }
 

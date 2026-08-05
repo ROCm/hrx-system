@@ -1,10 +1,10 @@
 spirv.target<vulkan1_3> @target {abi = hal_kernel}
 
 kernel.def target(@target) @cooperative_matrix_f16_two_tiles() {
-  %two = index.constant 2 : index
+  %workgroup_count = index.constant 2 : index
   %unit = index.constant 1 : index
   %subgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%two, %unit, %unit) workgroup_size(%subgroup_size, %unit, %unit) : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%subgroup_size, %unit, %unit) : index
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %init_buffer: buffer, %out_buffer: buffer) {
   %workgroup_x = kernel.workgroup.id<x> : index
   %lhs_tile_bytes = index.constant 512 : index
@@ -15,8 +15,8 @@ kernel.def target(@target) @cooperative_matrix_f16_two_tiles() {
   %acc_byte_offset = index.cast %acc_byte_index : index to offset
   %lhs_byte_offset_aligned = index.assume %lhs_byte_offset [mul(%lhs_byte_offset, 16)] : offset
   %acc_byte_offset_aligned = index.assume %acc_byte_offset [mul(%acc_byte_offset, 16)] : offset
-  %zero_offset = index.constant 0 : offset
-  %zero_offset_aligned = index.assume %zero_offset [mul(%zero_offset, 16)] : offset
+  %rhs_base = index.constant 0 : offset
+  %rhs_base_aligned = index.assume %rhs_base [mul(%rhs_base, 16)] : offset
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
@@ -25,7 +25,7 @@ kernel.def target(@target) @cooperative_matrix_f16_two_tiles() {
   %init_aligned = buffer.assume.alignment %init_buffer {minimum_alignment = 16} : buffer
   %out_aligned = buffer.assume.alignment %out_buffer {minimum_alignment = 16} : buffer
   %lhs_view = buffer.view %lhs_aligned[%lhs_byte_offset_aligned] : buffer -> view<16x16xf16, #dense>
-  %rhs_view = buffer.view %rhs_aligned[%zero_offset_aligned] : buffer -> view<16x16xf16, #dense>
+  %rhs_view = buffer.view %rhs_aligned[%rhs_base_aligned] : buffer -> view<16x16xf16, #dense>
   %init_view = buffer.view %init_aligned[%acc_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
   %out_view = buffer.view %out_aligned[%acc_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xf16, #dense> -> vector<16xf16>
@@ -63,7 +63,7 @@ kernel.def target(@target) @dense_projection_tiled_f16_128() {
   %k_tiles = index.constant 8 : index
   %n_tiles = index.constant 8 : index
   %unit = index.constant 1 : index
-  %zero = index.constant 0 : index
+  %loop_begin = index.constant 0 : index
   %lhs_tile_bytes = index.constant 512 : index
   %rhs_tile_bytes = index.constant 512 : index
   %acc_tile_bytes = index.constant 1024 : index
@@ -81,7 +81,7 @@ kernel.def target(@target) @dense_projection_tiled_f16_128() {
   %init_view = buffer.view %init_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
   %out_view = buffer.view %out_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
   %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
-  %result = scf.for %kt = [%zero to %k_tiles step %unit](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+  %result = scf.for %kt = [%loop_begin to %k_tiles step %unit](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
     %lhs_tile_index = index.madd %workgroup_m, %k_tiles, %kt : index
     %rhs_tile_index = index.madd %kt, %n_tiles, %workgroup_n : index
     %lhs_byte_index = index.mul %lhs_tile_index, %lhs_tile_bytes : index
@@ -128,14 +128,14 @@ kernel.def target(@target) @narrow_score_tiled_f16_128x16_m1() {
   %k_tiles = index.constant 8 : index
   %n_tiles = index.constant 1 : index
   %unit = index.constant 1 : index
-  %zero = index.constant 0 : index
+  %c0 = index.constant 0 : index
   %lhs_tile_bytes = index.constant 512 : index
   %rhs_tile_bytes = index.constant 512 : index
   %acc_tile_bytes = index.constant 1024 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %out_tile_index = index.madd %workgroup_m, %n_tiles, %zero : index
+  %out_tile_index = index.madd %workgroup_m, %n_tiles, %c0 : index
   %out_byte_index = index.mul %out_tile_index, %acc_tile_bytes : index
   %out_byte_offset = index.cast %out_byte_index : index to offset
   %out_byte_offset_aligned = index.assume %out_byte_offset [mul(%out_byte_offset, 16)] : offset
@@ -146,9 +146,9 @@ kernel.def target(@target) @narrow_score_tiled_f16_128x16_m1() {
   %init_view = buffer.view %init_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
   %out_view = buffer.view %out_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xf32, #dense>
   %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
-  %result = scf.for %kt = [%zero to %k_tiles step %unit](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+  %result = scf.for %kt = [%c0 to %k_tiles step %unit](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
     %lhs_tile_index = index.madd %workgroup_m, %k_tiles, %kt : index
-    %rhs_tile_index = index.madd %kt, %n_tiles, %zero : index
+    %rhs_tile_index = index.madd %kt, %n_tiles, %c0 : index
     %lhs_byte_index = index.mul %lhs_tile_index, %lhs_tile_bytes : index
     %rhs_byte_index = index.mul %rhs_tile_index, %rhs_tile_bytes : index
     %lhs_byte_offset = index.cast %lhs_byte_index : index to offset
@@ -176,30 +176,30 @@ kernel.def target(@target) @narrow_score_tiled_f16_128x16_m2() {
   %k_tiles = index.constant 8 : index
   %n_tiles = index.constant 1 : index
   %unit = index.constant 1 : index
-  %zero = index.constant 0 : index
-  %two = index.constant 2 : index
+  %c0 = index.constant 0 : index
+  %tiles_per_workgroup = index.constant 2 : index
   %lhs_tile_bytes = index.constant 512 : index
   %rhs_tile_bytes = index.constant 512 : index
   %acc_tile_bytes = index.constant 1024 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %workgroup_m0 = index.mul %workgroup_pair, %two : index
+  %workgroup_m0 = index.mul %workgroup_pair, %tiles_per_workgroup : index
   %workgroup_m1 = index.add %workgroup_m0, %unit : index
   %lhs_aligned = buffer.assume.alignment %lhs_buffer {minimum_alignment = 16} : buffer
   %rhs_aligned = buffer.assume.alignment %rhs_buffer {minimum_alignment = 16} : buffer
   %init_aligned = buffer.assume.alignment %init_buffer {minimum_alignment = 16} : buffer
   %out_aligned = buffer.assume.alignment %out_buffer {minimum_alignment = 16} : buffer
-  %out_tile_index0 = index.madd %workgroup_m0, %n_tiles, %zero : index
+  %out_tile_index0 = index.madd %workgroup_m0, %n_tiles, %c0 : index
   %out_byte_index0 = index.mul %out_tile_index0, %acc_tile_bytes : index
   %out_byte_offset0 = index.cast %out_byte_index0 : index to offset
   %out_byte_offset_aligned0 = index.assume %out_byte_offset0 [mul(%out_byte_offset0, 16)] : offset
   %init_view0 = buffer.view %init_aligned[%out_byte_offset_aligned0] : buffer -> view<16x16xf32, #dense>
   %out_view0 = buffer.view %out_aligned[%out_byte_offset_aligned0] : buffer -> view<16x16xf32, #dense>
   %init0 = vector.fragment.load<init> %init_view0[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
-  %result0 = scf.for %kt0 = [%zero to %k_tiles step %unit](%acc0 = %init0 : vector<8xf32>) -> (vector<8xf32>) {
+  %result0 = scf.for %kt0 = [%c0 to %k_tiles step %unit](%acc0 = %init0 : vector<8xf32>) -> (vector<8xf32>) {
     %lhs_tile_index0 = index.madd %workgroup_m0, %k_tiles, %kt0 : index
-    %rhs_tile_index0 = index.madd %kt0, %n_tiles, %zero : index
+    %rhs_tile_index0 = index.madd %kt0, %n_tiles, %c0 : index
     %lhs_byte_index0 = index.mul %lhs_tile_index0, %lhs_tile_bytes : index
     %rhs_byte_index0 = index.mul %rhs_tile_index0, %rhs_tile_bytes : index
     %lhs_byte_offset0 = index.cast %lhs_byte_index0 : index to offset
@@ -214,16 +214,16 @@ kernel.def target(@target) @narrow_score_tiled_f16_128x16_m2() {
     scf.yield %next0 : vector<8xf32>
   }
   vector.fragment.store<result> %result0, %out_view0[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
-  %out_tile_index1 = index.madd %workgroup_m1, %n_tiles, %zero : index
+  %out_tile_index1 = index.madd %workgroup_m1, %n_tiles, %c0 : index
   %out_byte_index1 = index.mul %out_tile_index1, %acc_tile_bytes : index
   %out_byte_offset1 = index.cast %out_byte_index1 : index to offset
   %out_byte_offset_aligned1 = index.assume %out_byte_offset1 [mul(%out_byte_offset1, 16)] : offset
   %init_view1 = buffer.view %init_aligned[%out_byte_offset_aligned1] : buffer -> view<16x16xf32, #dense>
   %out_view1 = buffer.view %out_aligned[%out_byte_offset_aligned1] : buffer -> view<16x16xf32, #dense>
   %init1 = vector.fragment.load<init> %init_view1[0, 0] shape [%m, %n] : view<16x16xf32, #dense> -> vector<8xf32>
-  %result1 = scf.for %kt1 = [%zero to %k_tiles step %unit](%acc1 = %init1 : vector<8xf32>) -> (vector<8xf32>) {
+  %result1 = scf.for %kt1 = [%c0 to %k_tiles step %unit](%acc1 = %init1 : vector<8xf32>) -> (vector<8xf32>) {
     %lhs_tile_index1 = index.madd %workgroup_m1, %k_tiles, %kt1 : index
-    %rhs_tile_index1 = index.madd %kt1, %n_tiles, %zero : index
+    %rhs_tile_index1 = index.madd %kt1, %n_tiles, %c0 : index
     %lhs_byte_index1 = index.mul %lhs_tile_index1, %lhs_tile_bytes : index
     %rhs_byte_index1 = index.mul %rhs_tile_index1, %rhs_tile_bytes : index
     %lhs_byte_offset1 = index.cast %lhs_byte_index1 : index to offset

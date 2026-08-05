@@ -10,7 +10,7 @@ kernel.def @lane_distribution_contract() {
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs: i32, %rhs: i32) {
-  %zero_index = index.constant 0 : index
+  %leader_lane = index.constant 0 : index
   %workgroup_size = index.constant 64 : index
 
   // HIP concept: `blockIdx.x`, `blockDim.x`, grid constants, and scalar kernel
@@ -54,7 +54,7 @@ kernel.def @lane_distribution_contract() {
   // Loom spelling: a comparison that depends on the lane id is a lane predicate.
   // Selecting between uniform scalar arguments with such a predicate produces
   // lane-varying data.
-  %is_lane_zero = index.cmp eq, %lane, %zero_index : index
+  %is_lane_zero = index.cmp eq, %lane, %leader_lane : index
   %selected = scf.select %is_lane_zero, %lhs, %rhs : i32
   %predicate_is_lane = test.fact_lane_predicate %is_lane_zero : i1 -> i1
   %predicate_is_uniform = test.fact_subgroup_uniform %is_lane_zero : i1 -> i1

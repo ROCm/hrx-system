@@ -10,16 +10,18 @@ kernel.def @signed_i8_tile_quantize_even_ties_f32() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%values: buffer, %inverse_scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
+  %tile_origin = index.constant 0 : index
+  %scale_index = index.constant 0 : index
+  %first_output_index = index.constant 0 : index
+  %last_output_index = index.constant 1 : index
 
   %values_noalias, %inverse_scale_noalias, %output_noalias = buffer.assume.noalias %values, %inverse_scale, %output : buffer, buffer, buffer
   %values_view = buffer.view %values_noalias[%base] : buffer -> view<4xf32, #dense>
   %inverse_scale_view = buffer.view %inverse_scale_noalias[%base] : buffer -> view<1xf32, #dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<2xi8, #dense>
 
-  %value_vector = vector.load %values_view[%zero] : view<4xf32, #dense> -> vector<4xf32>
-  %inverse_scale_scalar = view.load %inverse_scale_view[%zero] : view<1xf32, #dense> -> f32
+  %value_vector = vector.load %values_view[%tile_origin] : view<4xf32, #dense> -> vector<4xf32>
+  %inverse_scale_scalar = view.load %inverse_scale_view[%scale_index] : view<1xf32, #dense> -> f32
   %inverse_scale_vector = vector.splat %inverse_scale_scalar : vector<4xf32>
   %scaled = vector.mulf %value_vector, %inverse_scale_vector : vector<4xf32>
   %rounded = vector.roundevenf %scaled : vector<4xf32>
@@ -27,8 +29,8 @@ kernel.def @signed_i8_tile_quantize_even_ties_f32() {
   %i8_values = vector.trunci %i32_values : vector<4xi32> to vector<4xi8>
   %first = vector.extract %i8_values[0] : vector<4xi8> -> i8
   %last = vector.extract %i8_values[3] : vector<4xi8> -> i8
-  view.store %first, %output_view[%zero] : i8, view<2xi8, #dense>
-  view.store %last, %output_view[%one] : i8, view<2xi8, #dense>
+  view.store %first, %output_view[%first_output_index] : i8, view<2xi8, #dense>
+  view.store %last, %output_view[%last_output_index] : i8, view<2xi8, #dense>
   kernel.return
 }
 
@@ -37,15 +39,17 @@ kernel.def @signed_i8_tile_quantize_arcp_f32() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%values: buffer, %amax: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %tile_origin = index.constant 0 : index
+  %amax_index = index.constant 0 : index
+  %output_origin = index.constant 0 : index
 
   %values_noalias, %amax_noalias, %output_noalias = buffer.assume.noalias %values, %amax, %output : buffer, buffer, buffer
   %values_view = buffer.view %values_noalias[%base] : buffer -> view<4xf32, #dense>
   %amax_view = buffer.view %amax_noalias[%base] : buffer -> view<1xf32, #dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xi8, #dense>
 
-  %value_vector = vector.load %values_view[%zero] : view<4xf32, #dense> -> vector<4xf32>
-  %amax_scalar = view.load %amax_view[%zero] : view<1xf32, #dense> -> f32
+  %value_vector = vector.load %values_view[%tile_origin] : view<4xf32, #dense> -> vector<4xf32>
+  %amax_scalar = view.load %amax_view[%amax_index] : view<1xf32, #dense> -> f32
   %scale_limit = scalar.constant 127.0 : f32
   %inverse_scale = scalar.divf<nnan|ninf|nsz|arcp> %scale_limit, %amax_scalar : f32
   %inverse_scale_vector = vector.splat %inverse_scale : vector<4xf32>
@@ -53,7 +57,7 @@ kernel.def @signed_i8_tile_quantize_arcp_f32() {
   %rounded = vector.roundf<afn> %scaled : vector<4xf32>
   %i32_values = vector.fptosi %rounded : vector<4xf32> to vector<4xi32>
   %i8_values = vector.trunci %i32_values : vector<4xi32> to vector<4xi8>
-  vector.store %i8_values, %output_view[%zero] : vector<4xi8>, view<4xi8, #dense>
+  vector.store %i8_values, %output_view[%output_origin] : vector<4xi8>, view<4xi8, #dense>
   kernel.return
 }
 

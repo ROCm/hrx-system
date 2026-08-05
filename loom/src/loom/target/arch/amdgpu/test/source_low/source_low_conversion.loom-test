@@ -1671,13 +1671,13 @@ kernel.def target(@target) @scalar_bitcast_direct_i32_arg_f32_store() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%output: buffer, %scale_bits: i32) {
-  %zero_offset = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<1xf32, #dense>
+  %output_base = index.constant 0 : offset
+  %output_element = index.constant 0 : index
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xf32, #dense>
   %scale = scalar.bitcast %scale_bits : i32 to f32
   %unit = scalar.constant 1.0 : f32
   %scaled = scalar.mulf %unit, %scale : f32
-  view.store %scaled, %output_view[%zero_index] : f32, view<1xf32, #dense>
+  view.store %scaled, %output_view[%output_element] : f32, view<1xf32, #dense>
   kernel.return
 }
 
@@ -1714,17 +1714,19 @@ kernel.def target(@target) @scalar_bitcast_lane_byte_decode_select_tree_store() 
   %exp = scalar.shrui %exp_bits, %exp_shift : i32
   %mantissa_mask = scalar.constant 7 : i32
   %mantissa = scalar.andi %wide, %mantissa_mask : i32
-  %zero = scalar.constant 0 : i32
+  %absent_mantissa_bit = scalar.constant 0 : i32
+  %base_mantissa_shift = scalar.constant 0 : i32
+  %zero_exponent = scalar.constant 0 : i32
   %mantissa_bit1_mask = scalar.constant 2 : i32
   %mantissa_bit1 = scalar.andi %mantissa, %mantissa_bit1_mask : i32
-  %has_mantissa_bit1 = scalar.cmpi ne, %mantissa_bit1, %zero : i32
-  %one = scalar.constant 1 : i32
-  %shift0 = scf.select %has_mantissa_bit1, %one, %zero : i32
+  %has_mantissa_bit1 = scalar.cmpi ne, %mantissa_bit1, %absent_mantissa_bit : i32
+  %low_mantissa_shift = scalar.constant 1 : i32
+  %shift0 = scf.select %has_mantissa_bit1, %low_mantissa_shift, %base_mantissa_shift : i32
   %mantissa_bit2_mask = scalar.constant 4 : i32
   %mantissa_bit2 = scalar.andi %mantissa, %mantissa_bit2_mask : i32
-  %has_mantissa_bit2 = scalar.cmpi ne, %mantissa_bit2, %zero : i32
-  %two = scalar.constant 2 : i32
-  %selected_shift = scf.select %has_mantissa_bit2, %two, %shift0 : i32
+  %has_mantissa_bit2 = scalar.cmpi ne, %mantissa_bit2, %absent_mantissa_bit : i32
+  %high_mantissa_shift = scalar.constant 2 : i32
+  %selected_shift = scf.select %has_mantissa_bit2, %high_mantissa_shift, %shift0 : i32
   %bias = scalar.constant 118 : i32
   %biased_exp = scalar.addi %selected_shift, %bias : i32
   %f32_exp_shift = scalar.constant 23 : i32
@@ -1736,7 +1738,7 @@ kernel.def target(@target) @scalar_bitcast_lane_byte_decode_select_tree_store() 
   %normal_head = scalar.ori %sign_bits, %f32_exp : i32
   %normal_bits = scalar.ori %normal_head, %f32_mantissa : i32
   %subnormal = scf.select %has_mantissa_bit2, %normal_bits, %sign_bits : i32
-  %is_zero_exp = scalar.cmpi eq, %exp, %zero : i32
+  %is_zero_exp = scalar.cmpi eq, %exp, %zero_exponent : i32
   %regular_exp_bias = scalar.constant 120 : i32
   %regular_exp = scalar.addi %exp, %regular_exp_bias : i32
   %regular_exp_bits = scalar.shli %regular_exp, %f32_exp_shift : i32
@@ -1774,19 +1776,19 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %mantissa_bit2 = v_and_b32_lit %mantissa, 4
   %has_mantissa_bit2 = v_cmp_ne_i32_src1_inline %mantissa_bit2 {rhs = 0}
   %selected_shift = v_cndmask_b32_src1_inline %shift0, %has_mantissa_bit2 {true_value = 2}
-  %79 = v_mov_b32 118
-  %biased_exp = v_add_u32 %selected_shift, %79
+  %81 = v_mov_b32 118
+  %biased_exp = v_add_u32 %selected_shift, %81
   %f32_exp = v_lshlrev_b32_lit %biased_exp, 23
-  %83 = v_mov_b32 23
-  %remaining_shift = v_sub_nc_u32 %83, %selected_shift
+  %85 = v_mov_b32 23
+  %remaining_shift = v_sub_nc_u32 %85, %selected_shift
   %shifted_mantissa = v_lshlrev_b32 %remaining_shift, %mantissa
   %f32_mantissa = v_and_b32_lit %shifted_mantissa, 8388607
   %normal_head = v_or_b32 %sign_bits, %f32_exp
   %normal_bits = v_or_b32 %normal_head, %f32_mantissa
   %subnormal = v_cndmask_b32 %sign_bits, %normal_bits, %has_mantissa_bit2
   %is_zero_exp = v_cmp_eq_i32_src1_inline %exp {rhs = 0}
-  %91 = v_mov_b32 120
-  %regular_exp = v_add_u32 %exp, %91
+  %93 = v_mov_b32 120
+  %regular_exp = v_add_u32 %exp, %93
   %regular_exp_bits = v_lshlrev_b32_lit %regular_exp, 23
   %regular_head = v_or_b32 %sign_bits, %regular_exp_bits
   %regular_bits = v_or_b32 %regular_head, %f32_mantissa
@@ -1795,8 +1797,8 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %is_nan_payload = v_cmp_eq_i32_src1_inline %mantissa {rhs = 7}
   %use_nan = s_and_b64 %is_special_exp, %is_nan_payload
   %value = v_cndmask_b32_src1_lit %finite_bits, %use_nan, 2143289344
-  %104 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %104, %value, %output_view
+  %106 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %106, %value, %output_view
   return
 }
 

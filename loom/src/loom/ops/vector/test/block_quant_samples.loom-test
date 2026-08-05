@@ -300,8 +300,8 @@ func.def @turboquant_logit_reference(%query: vector<4xf16>, %packed_codes: vecto
   %decoded = vector.table.lookup %centroids[%codes] : vector<4xf16>, vector<4xi8> -> vector<4xf16>
   %q32 = vector.extf %query : vector<4xf16> to vector<4xf32>
   %d32 = vector.extf %decoded : vector<4xf16> to vector<4xf32>
-  %zero = scalar.constant 0.0 : f32
-  %logit = vector.dotf %q32, %d32, %zero : vector<4xf32>, vector<4xf32>, f32
+  %reduction_init = scalar.constant 0.0 : f32
+  %logit = vector.dotf %q32, %d32, %reduction_init : vector<4xf32>, vector<4xf32>, f32
   func.return %logit : f32
 }
 
@@ -370,11 +370,11 @@ func.def @binary_sketch_dot_reference(%lhs_bits: vector<16xi8>, %rhs_bits: vecto
   %diff = vector.xori %lhs_bits, %rhs_bits : vector<16xi8>
   %byte_counts = vector.ctpopi %diff : vector<16xi8>
   %counts = vector.extui %byte_counts : vector<16xi8> to vector<16xi32>
-  %zero = scalar.constant 0 : i32
-  %hamming = vector.reduce<addi> %counts, %zero : vector<16xi32>, i32
-  %two = scalar.constant 2 : i32
+  %reduction_init = scalar.constant 0 : i32
+  %hamming = vector.reduce<addi> %counts, %reduction_init : vector<16xi32>, i32
+  %score_scale = scalar.constant 2 : i32
   %total = scalar.constant 128 : i32
-  %twice_hamming = scalar.muli %hamming, %two : i32
+  %twice_hamming = scalar.muli %hamming, %score_scale : i32
   %dot = scalar.subi %total, %twice_hamming : i32
   func.return %dot : i32
 }

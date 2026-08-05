@@ -4,8 +4,8 @@
 func.def @minimumf_propagates_nan() -> (i1) {
   %neg = scalar.constant -1.0 : f32
   %nan = scalar.logf %neg : f32
-  %three = scalar.constant 3.0 : f32
-  %min = scalar.minimumf %nan, %three : f32
+  %c3 = scalar.constant 3.0 : f32
+  %min = scalar.minimumf %nan, %c3 : f32
   %r = scalar.isnanf %min : f32
   func.return %r : i1
 }
@@ -21,8 +21,8 @@ func.def @minimumf_propagates_nan() -> (i1) {
 func.def @maximumf_propagates_nan() -> (i1) {
   %neg = scalar.constant -1.0 : f32
   %nan = scalar.logf %neg : f32
-  %three = scalar.constant 3.0 : f32
-  %max = scalar.maximumf %three, %nan : f32
+  %c3 = scalar.constant 3.0 : f32
+  %max = scalar.maximumf %c3, %nan : f32
   %r = scalar.isnanf %max : f32
   func.return %r : i1
 }
@@ -38,8 +38,8 @@ func.def @maximumf_propagates_nan() -> (i1) {
 func.def @minnumf_skips_nan() -> (f32) {
   %neg = scalar.constant -1.0 : f32
   %nan = scalar.logf %neg : f32
-  %three = scalar.constant 3.0 : f32
-  %min = scalar.minnumf %nan, %three : f32
+  %c3 = scalar.constant 3.0 : f32
+  %min = scalar.minnumf %nan, %c3 : f32
   func.return %min : f32
 }
 // ----
@@ -55,11 +55,11 @@ func.def @minnumf_skips_nan() -> (f32) {
 func.def @clampf_modes_name_nan_semantics() -> (i1, i1, i1) {
   %neg = scalar.constant -1.0 : f32
   %nan = scalar.logf %neg : f32
-  %zero = scalar.constant 0.0 : f32
-  %one = scalar.constant 1.0 : f32
-  %ordered = scalar.clampf<ordered> %nan, %zero, %one : f32
-  %number = scalar.clampf<number> %nan, %zero, %one : f32
-  %ieee = scalar.clampf<ieee> %nan, %zero, %one : f32
+  %c0 = scalar.constant 0.0 : f32
+  %c1 = scalar.constant 1.0 : f32
+  %ordered = scalar.clampf<ordered> %nan, %c0, %c1 : f32
+  %number = scalar.clampf<number> %nan, %c0, %c1 : f32
+  %ieee = scalar.clampf<ieee> %nan, %c0, %c1 : f32
   %ordered_is_nan = scalar.isnanf %ordered : f32
   %number_is_nan = scalar.isnanf %number : f32
   %ieee_is_nan = scalar.isnanf %ieee : f32
@@ -79,12 +79,12 @@ func.def @clampf_modes_name_nan_semantics() -> (i1, i1, i1) {
 // loses the unit before the subtraction while f64 retains it.
 func.def @rounds_each_instruction() -> (f32, f64) {
   %large_f32 = scalar.constant 16777216.0 : f32
-  %one_f32 = scalar.constant 1.0 : f32
-  %sum_f32 = scalar.addf %large_f32, %one_f32 : f32
+  %c1_f32 = scalar.constant 1.0 : f32
+  %sum_f32 = scalar.addf %large_f32, %c1_f32 : f32
   %result_f32 = scalar.subf %sum_f32, %large_f32 : f32
   %large_f64 = scalar.constant 16777216.0 : f64
-  %one_f64 = scalar.constant 1.0 : f64
-  %sum_f64 = scalar.addf %large_f64, %one_f64 : f64
+  %c1_f64 = scalar.constant 1.0 : f64
+  %sum_f64 = scalar.addf %large_f64, %c1_f64 : f64
   %result_f64 = scalar.subf %sum_f64, %large_f64 : f64
   func.return %result_f32, %result_f64 : f32, f64
 }
@@ -99,10 +99,10 @@ func.def @rounds_each_instruction() -> (f32, f64) {
 
 // IEEE minimum and maximum choose opposite signed zeros.
 func.def @minmax_preserve_signed_zero_semantics() -> (i32, i32) {
-  %positive_zero = scalar.constant 0.0 : f32
-  %negative_zero = scalar.constant -0.0 : f32
-  %minimum = scalar.minimumf %positive_zero, %negative_zero : f32
-  %maximum = scalar.maximumf %positive_zero, %negative_zero : f32
+  %positive_signed_zero = scalar.constant 0.0 : f32
+  %cn0 = scalar.constant -0.0 : f32
+  %minimum = scalar.minimumf %positive_signed_zero, %cn0 : f32
+  %maximum = scalar.maximumf %positive_signed_zero, %cn0 : f32
   %minimum_bits = scalar.bitcast %minimum : f32 to i32
   %maximum_bits = scalar.bitcast %maximum : f32 to i32
   func.return %minimum_bits, %maximum_bits : i32, i32

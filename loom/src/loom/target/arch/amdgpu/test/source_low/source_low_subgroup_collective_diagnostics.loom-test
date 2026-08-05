@@ -6,8 +6,8 @@ kernel.def target(@target) @subgroup_broadcast_dynamic_lane_rejected() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%input: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<1xi32, #dense>
+  %input_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%input_base] : buffer -> view<1xi32, #dense>
   %lane_vector = vector.load %input_view[0] : view<1xi32, #dense> -> vector<1xi32>
   %lane = vector.extract %lane_vector[0] : vector<1xi32> -> i32
   %workitem = kernel.workitem.id<x> : index
@@ -74,8 +74,8 @@ kernel.def target(@target) @subgroup_shuffle_dynamic_offset_rejected() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%input: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<1xi32, #dense>
+  %input_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%input_base] : buffer -> view<1xi32, #dense>
   %offset_vector = vector.load %input_view[0] : view<1xi32, #dense> -> vector<1xi32>
   %offset = vector.extract %offset_vector[0] : vector<1xi32> -> i32
   %width = scalar.constant 32 : i32
@@ -94,8 +94,8 @@ kernel.def target(@target) @subgroup_shuffle_dynamic_width_rejected() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%input: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<1xi32, #dense>
+  %input_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%input_base] : buffer -> view<1xi32, #dense>
   %width_vector = vector.load %input_view[0] : view<1xi32, #dense> -> vector<1xi32>
   %width = vector.extract %width_vector[0] : vector<1xi32> -> i32
   %offset = scalar.constant 1 : i32
@@ -426,15 +426,15 @@ kernel.def target(@target) @subgroup_reduce_wave64_leader_publication_rejected()
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%output: buffer) {
   %lane = kernel.subgroup.lane.id : index
-  %zero_index = index.constant 0 : index
-  %zero_offset = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<1xi32, #dense>
+  %leader_lane = index.constant 0 : index
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #dense>
   %value = scalar.constant 1 : i32
   // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_reduce.native_width.scalar_broadcast"}
   %sum = kernel.subgroup.reduce<addi> %value : i32
-  %is_leader_lane = index.cmp eq, %lane, %zero_index : index
+  %is_leader_lane = index.cmp eq, %lane, %leader_lane : index
   scf.if %is_leader_lane {
-    view.store %sum, %output_view[%zero_index] : i32, view<1xi32, #dense>
+    view.store %sum, %output_view[%leader_lane] : i32, view<1xi32, #dense>
   }
   kernel.return
 }

@@ -8,12 +8,44 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
 from pathlib import Path
 
 CMAKE_BUILD_DIR_ENV = "IREE_CMAKE_BUILD_DIR"
+
+
+def add_common_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    project_name: str,
+) -> None:
+    """Adds the phases and inputs understood by every project presubmit."""
+    mutation = parser.add_mutually_exclusive_group()
+    mutation.add_argument("--fix", action="store_true", help="Accepted for symmetry.")
+    mutation.add_argument("--check", action="store_true", help="Accepted for symmetry.")
+    parser.add_argument(
+        "--lane",
+        choices=("bazel", "cmake"),
+        default="bazel",
+        help="Build-system lane used for tests. Defaults to bazel.",
+    )
+    parser.add_argument(
+        "--hygiene",
+        action="store_true",
+        help=f"Run cheap {project_name} invariant checks.",
+    )
+    parser.add_argument(
+        "--tests",
+        action="store_true",
+        help=f"Run {project_name} tests.",
+    )
+    parser.add_argument(
+        "--files-from",
+        help="Path to a newline-separated repo-relative changed-file list.",
+    )
 
 
 def cmake_build_dir(repo_root: Path) -> Path:

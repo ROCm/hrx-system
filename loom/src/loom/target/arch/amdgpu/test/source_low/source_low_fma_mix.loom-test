@@ -42,12 +42,12 @@ kernel.def target(@gfx11_target) @packed_f16_affine_epilogue_kernel() {
   %workgroup_size = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %scale_buffer: buffer, %bias_buffer: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %tid = kernel.workitem.id<x> : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xf16, #dense>
-  %scale_view = buffer.view %scale_buffer[%zero] : buffer -> view<64x4xf16, #dense>
-  %bias_view = buffer.view %bias_buffer[%zero] : buffer -> view<64x4xf16, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xf16, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xf16, #dense>
+  %scale_view = buffer.view %scale_buffer[%buffer_base] : buffer -> view<64x4xf16, #dense>
+  %bias_view = buffer.view %bias_buffer[%buffer_base] : buffer -> view<64x4xf16, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf16, #dense>
   %x = vector.load %input_view[%tid, 0] : view<64x4xf16, #dense> -> vector<4xf16>
   %scale = vector.load %scale_view[%tid, 0] : view<64x4xf16, #dense> -> vector<4xf16>
   %bias = vector.load %bias_view[%tid, 0] : view<64x4xf16, #dense> -> vector<4xf16>
@@ -529,11 +529,11 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @v
 
 amdgpu.target<gfx11-generic> @gfx11_target
 func.def target(@gfx11_target) @vector_f32_mulf_fragment_splat_extf(%q: vector<2xf32>, %scale_half: f16) -> (vector<2xf32>) {
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
+  %m = index.constant 1 : index
+  %n = index.constant 2 : index
   %scale = scalar.extf %scale_half : f16 to f32
   %scale_splat = vector.splat %scale : vector<2xf32>
-  %scale_vector = vector.fragment<result> %scale_splat shape [%one, %two] : vector<2xf32>
+  %scale_vector = vector.fragment<result> %scale_splat shape [%m, %n] : vector<2xf32>
   // REMARK@+1: AMDGPU/027 {descriptor_name="amdgpu.v_fma_mix_f32.f16lo_f32_f32.src2_lit", source_operand_index="2", descriptor_set_name="amdgpu.gfx11.generic.core", constant_form="exact_f32_positive_zero", decision_key="selected", reason_key="literal_descriptor_available"}
   %result = vector.mulf<nnan|nsz|contract> %q, %scale_vector : vector<2xf32>
   func.return %result : vector<2xf32>

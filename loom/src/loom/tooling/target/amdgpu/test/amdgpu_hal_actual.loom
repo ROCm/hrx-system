@@ -2,12 +2,12 @@ kernel.def @store_i32() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%output: buffer) {
-  %zero_offset = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %output_index = index.constant 0 : index
   %value = scalar.constant 42 : i32
   %global = buffer.assume.memory_space<global> %output : buffer
-  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
-  view.store %value, %view[%zero_index] : i32, view<1xi32, #dense>
+  %view = buffer.view %global[%base] : buffer -> view<1xi32, #dense>
+  view.store %value, %view[%output_index] : i32, view<1xi32, #dense>
   kernel.return
 }
 
@@ -15,13 +15,13 @@ kernel.def @double_i32() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%output: buffer) {
-  %zero_offset = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %output_index = index.constant 0 : index
   %global = buffer.assume.memory_space<global> %output : buffer
-  %view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
-  %loaded = view.load %view[%zero_index] : view<1xi32, #dense> -> i32
+  %view = buffer.view %global[%base] : buffer -> view<1xi32, #dense>
+  %loaded = view.load %view[%output_index] : view<1xi32, #dense> -> i32
   %doubled = scalar.addi %loaded, %loaded : i32
-  view.store %doubled, %view[%zero_index] : i32, view<1xi32, #dense>
+  view.store %doubled, %view[%output_index] : i32, view<1xi32, #dense>
   kernel.return
 }
 

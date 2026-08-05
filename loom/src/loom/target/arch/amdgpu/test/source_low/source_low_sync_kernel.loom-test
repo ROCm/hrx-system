@@ -3,9 +3,9 @@
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @single_wave_barrier() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   kernel.return
@@ -22,9 +22,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @multi_wave_barrier() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   kernel.return
@@ -41,9 +41,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @global_release_barrier() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<global> {ordering = release, scope = workgroup}
   kernel.return
@@ -62,9 +62,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @global_acquire_barrier() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<global> {ordering = acquire, scope = workgroup}
   kernel.return
@@ -84,9 +84,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @global_acq_rel_barrier() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<global> {ordering = acq_rel, scope = workgroup}
   kernel.return
@@ -108,9 +108,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @multi_wave_subgroup_barrier() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
   kernel.return
@@ -127,9 +127,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
 amdgpu.target<gfx12-generic> @target
 
 kernel.def target(@target) @single_wave_barrier_gfx12() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   kernel.return
@@ -147,9 +147,9 @@ low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(32, 1, 
 amdgpu.target<gfx12-generic> @target
 
 kernel.def target(@target) @multi_wave_barrier_gfx12() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   kernel.return
@@ -167,9 +167,9 @@ low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(64, 1, 
 amdgpu.target<gfx12-generic> @target
 
 kernel.def target(@target) @global_acq_rel_barrier_gfx12() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<global> {ordering = acq_rel, scope = workgroup}
   kernel.return
@@ -191,9 +191,9 @@ low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(64, 1, 
 amdgpu.target<gfx12-generic> @target
 
 kernel.def target(@target) @multi_wave_subgroup_barrier_gfx12() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
   kernel.return
@@ -210,9 +210,9 @@ low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(64, 1, 
 amdgpu.target<gfx12-5-generic> @target
 
 kernel.def target(@target) @single_wave_barrier_gfx12_5() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   kernel.return
@@ -230,9 +230,9 @@ low.kernel.def target<amdgpu.gfx12_5.generic.core>(@target) workgroup_size(32, 1
 amdgpu.target<gfx12-5-generic> @target
 
 kernel.def target(@target) @multi_wave_barrier_gfx12_5() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   kernel.return
@@ -250,9 +250,9 @@ low.kernel.def target<amdgpu.gfx12_5.generic.core>(@target) workgroup_size(64, 1
 amdgpu.target<gfx12-5-generic> @target
 
 kernel.def target(@target) @multi_wave_subgroup_barrier_gfx12_5() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
   kernel.return
@@ -269,9 +269,9 @@ low.kernel.def target<amdgpu.gfx12_5.generic.core>(@target) workgroup_size(64, 1
 amdgpu.target<gfx9-4-generic> @target
 
 kernel.def target(@target) @single_wave_barrier_gfx9_4() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   kernel.return
@@ -288,9 +288,9 @@ low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(64, 1,
 amdgpu.target<gfx9-4-generic> @target
 
 kernel.def target(@target) @global_acq_rel_barrier_gfx9_4() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<global> {ordering = acq_rel, scope = workgroup}
   kernel.return
@@ -310,9 +310,9 @@ low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(64, 1,
 amdgpu.target<gfx9-4-generic> @target
 
 kernel.def target(@target) @multi_wave_subgroup_barrier_gfx9_4() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 128 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<workgroup> {ordering = acq_rel, scope = subgroup}
   kernel.return
@@ -329,9 +329,9 @@ low.kernel.def target<amdgpu.gfx9_4.generic.core>(@target) workgroup_size(128, 1
 amdgpu.target<gfx950> @target
 
 kernel.def target(@target) @global_acq_rel_barrier_gfx950() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch() {
   kernel.barrier<global> {ordering = acq_rel, scope = workgroup}
   kernel.return
@@ -353,16 +353,16 @@ amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 // A read-only control value loaded from a uniform global address is uniform
 // across the workgroup and may guard a convergent barrier.
 kernel.def target(@target) @uniform_global_load_controls_barrier() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch(%control: buffer) {
-  %zero_index = index.constant 0 : index
-  %zero_offset = index.constant 0 : offset
-  %zero_i32 = scalar.constant 0 : i32
-  %control_view = buffer.view %control[%zero_offset] : buffer -> view<1xi32, #dense>
-  %control_value = view.load %control_view[%zero_index] : view<1xi32, #dense> -> i32
-  %is_zero = scalar.cmpi eq, %control_value, %zero_i32 : i32
+  %control_index = index.constant 0 : index
+  %control_base = index.constant 0 : offset
+  %barrier_control = scalar.constant 0 : i32
+  %control_view = buffer.view %control[%control_base] : buffer -> view<1xi32, #dense>
+  %control_value = view.load %control_view[%control_index] : view<1xi32, #dense> -> i32
+  %is_zero = scalar.cmpi eq, %control_value, %barrier_control : i32
   scf.if %is_zero {
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
     scf.yield

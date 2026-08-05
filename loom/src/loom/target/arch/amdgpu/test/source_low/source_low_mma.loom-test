@@ -23,15 +23,15 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @f16_wmmar3(%lhs
 
 amdgpu.target<gfx1100> @target
 func.def target(@target) @f16_wmmar3_static_k_loop_unroll(%lhs_data: vector<16xf16>, %rhs_data: vector<16xf16>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
-  %zero = index.constant 0 : index
-  %sixteen = index.constant 16 : index
-  %thirty_two = index.constant 32 : index
+  %k_begin = index.constant 0 : index
+  %k_tile_size = index.constant 16 : index
+  %k_extent = index.constant 32 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
-  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %sixteen] : vector<16xf16>
-  %rhs = vector.fragment<rhs> %rhs_data shape [%sixteen, %n] : vector<16xf16>
+  %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k_tile_size] : vector<16xf16>
+  %rhs = vector.fragment<rhs> %rhs_data shape [%k_tile_size, %n] : vector<16xf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
-  %result = scf.for %ki = [%zero to %thirty_two step %sixteen](%acc = %init : vector<8xf32>) -> (vector<8xf32>) unroll {
+  %result = scf.for %ki = [%k_begin to %k_extent step %k_tile_size](%acc = %init : vector<8xf32>) -> (vector<8xf32>) unroll {
     %next = vector.mma %lhs, %rhs, %acc : vector<16xf16>, vector<16xf16>, vector<8xf32>
     scf.yield %next : vector<8xf32>
   }
@@ -51,16 +51,16 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @f16_wmmar3_stat
 
 amdgpu.target<gfx1100> @target
 func.def target(@target) @bf16_wmmar3_loop_carried_accumulator(%lhs_data: vector<16xbf16>, %rhs_data: vector<16xbf16>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
+  %k_tile_begin = index.constant 0 : index
+  %k_tile_step = index.constant 1 : index
+  %k_tile_end = index.constant 2 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<16xbf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<16xbf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
-  %result = scf.for %k_tile = [%zero to %two step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+  %result = scf.for %k_tile = [%k_tile_begin to %k_tile_end step %k_tile_step](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
     %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     scf.yield %next : vector<8xf32>
   }
@@ -69,17 +69,17 @@ func.def target(@target) @bf16_wmmar3_loop_carried_accumulator(%lhs_data: vector
 
 // ----
 low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @bf16_wmmar3_loop_carried_accumulator(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
-  %zero = s_mov_b32 0
-  %one = s_mov_b32 1
-  %two = s_mov_b32 2
-  low.br ^_bb1(%zero: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>)
+  %k_tile_begin = s_mov_b32 0
+  %k_tile_step = s_mov_b32 1
+  %k_tile_end = s_mov_b32 2
+  low.br ^_bb1(%k_tile_begin: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>)
 ^_bb1(%k_tile: reg<amdgpu.sgpr>, %acc: reg<amdgpu.vgpr x8>):
-  %32 = s_cmp_lt_i32 %k_tile, %two
+  %32 = s_cmp_lt_i32 %k_tile, %k_tile_end
   low.cond_br %32, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
   %33 = copy %acc : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %next = v_wmma_f32_16x16x16_bf16 %lhs, %rhs, %33
-  %35 = s_add_u32 %k_tile, %one
+  %35 = s_add_u32 %k_tile, %k_tile_step
   low.br ^_bb1(%35: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr x8>)
 ^_bb3:
   return %acc
@@ -89,16 +89,16 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @bf16_wmmar3_loo
 
 amdgpu.target<gfx1100> @target
 func.def target(@target) @bf16_wmmar3_four_loop_carried_accumulators(%lhs_data: vector<16xbf16>, %rhs_data: vector<16xbf16>, %init_data: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
+  %k_tile_begin = index.constant 0 : index
+  %k_tile_step = index.constant 1 : index
+  %k_tile_end = index.constant 2 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<16xbf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<16xbf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
-  %result0, %result1, %result2, %result3 = scf.for %k_tile = [%zero to %two step %one](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %result0, %result1, %result2, %result3 = scf.for %k_tile = [%k_tile_begin to %k_tile_end step %k_tile_step](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
     %next0 = vector.mma %lhs, %rhs, %acc0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next1 = vector.mma %lhs, %rhs, %acc1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     %next2 = vector.mma %lhs, %rhs, %acc2 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
@@ -110,12 +110,12 @@ func.def target(@target) @bf16_wmmar3_four_loop_carried_accumulators(%lhs_data: 
 
 // ----
 low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @bf16_wmmar3_four_loop_carried_accumulators(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm {
-  %zero = s_mov_b32 0
-  %one = s_mov_b32 1
-  %two = s_mov_b32 2
-  low.br ^_bb1(%zero: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>)
+  %k_tile_begin = s_mov_b32 0
+  %k_tile_step = s_mov_b32 1
+  %k_tile_end = s_mov_b32 2
+  low.br ^_bb1(%k_tile_begin: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>)
 ^_bb1(%k_tile: reg<amdgpu.sgpr>, %acc0: reg<amdgpu.vgpr x8>, %acc1: reg<amdgpu.vgpr x8>, %acc2: reg<amdgpu.vgpr x8>, %acc3: reg<amdgpu.vgpr x8>):
-  %56 = s_cmp_lt_i32 %k_tile, %two
+  %56 = s_cmp_lt_i32 %k_tile, %k_tile_end
   low.cond_br %56, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
   %57 = copy %acc0 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
@@ -126,7 +126,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @bf16_wmmar3_fou
   %next2 = v_wmma_f32_16x16x16_bf16 %lhs, %rhs, %61
   %63 = copy %acc3 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %next3 = v_wmma_f32_16x16x16_bf16 %lhs, %rhs, %63
-  %65 = s_add_u32 %k_tile, %one
+  %65 = s_add_u32 %k_tile, %k_tile_step
   low.br ^_bb1(%65: reg<amdgpu.sgpr>, %next0: reg<amdgpu.vgpr x8>, %next1: reg<amdgpu.vgpr x8>, %next2: reg<amdgpu.vgpr x8>, %next3: reg<amdgpu.vgpr x8>)
 ^_bb3:
   return %acc0, %acc1, %acc2, %acc3
@@ -571,8 +571,8 @@ kernel.def target(@target) @bf16_wmmar3_f32_acc_bf16_epilogue() {
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xbf16, #dense>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16, #dense> -> vector<16xbf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
-  %zero_values = vector.constant 0.0 : vector<8xf32>
-  %init = vector.fragment<init> %zero_values shape [%m, %n] : vector<8xf32>
+  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %initial_values shape [%m, %n] : vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %scale = view.load %scale_view[0] : view<1xf32, #dense> -> f32
   %scale_vector = vector.splat %scale : vector<8xf32>
@@ -690,8 +690,8 @@ kernel.def target(@target) @bf16_wmmar3_two_k_blocks_fragment_memory() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %out_buffer: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %sixteen = index.constant 16 : index
+  %fragment_origin = index.constant 0 : index
+  %k_block_size = index.constant 16 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
@@ -699,15 +699,15 @@ kernel.def target(@target) @bf16_wmmar3_two_k_blocks_fragment_memory() {
   %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x32xbf16, #dense>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<32x16xbf16, %rhs_layout>
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %lhs0 = vector.fragment.load<lhs> %lhs_view[%zero, %zero] shape [%m, %k] : view<16x32xbf16, #dense> -> vector<16xbf16>
-  %rhs0 = vector.fragment.load<rhs> %rhs_view[%zero, %zero] shape [%k, %n] : view<32x16xbf16, %rhs_layout> -> vector<16xbf16>
-  %zero_values = vector.constant 0.0 : vector<8xf32>
-  %zero_acc = vector.fragment<init> %zero_values shape [%m, %n] : vector<8xf32>
+  %lhs0 = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %fragment_origin] shape [%m, %k] : view<16x32xbf16, #dense> -> vector<16xbf16>
+  %rhs0 = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%k, %n] : view<32x16xbf16, %rhs_layout> -> vector<16xbf16>
+  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %zero_acc = vector.fragment<init> %initial_values shape [%m, %n] : vector<8xf32>
   %partial = vector.mma %lhs0, %rhs0, %zero_acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-  %lhs1 = vector.fragment.load<lhs> %lhs_view[%zero, %sixteen] shape [%m, %k] : view<16x32xbf16, #dense> -> vector<16xbf16>
-  %rhs1 = vector.fragment.load<rhs> %rhs_view[%sixteen, %zero] shape [%k, %n] : view<32x16xbf16, %rhs_layout> -> vector<16xbf16>
+  %lhs1 = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %k_block_size] shape [%m, %k] : view<16x32xbf16, #dense> -> vector<16xbf16>
+  %rhs1 = vector.fragment.load<rhs> %rhs_view[%k_block_size, %fragment_origin] shape [%k, %n] : view<32x16xbf16, %rhs_layout> -> vector<16xbf16>
   %result = vector.mma %lhs1, %rhs1, %partial : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-  vector.fragment.store<result> %result, %out_view[%zero, %zero] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
   kernel.return
 }
 
@@ -913,26 +913,26 @@ kernel.def target(@target) @f16_wmmar3_wave64_dynamic_fragment_origins() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %out_buffer: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %two = index.constant 2 : index
+  %k_origin = index.constant 0 : index
+  %subgroup_grid_width = index.constant 2 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %sixty_four = index.constant 64 : index
+  %quadrant_extent = index.constant 64 : index
   %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
   %subgroup_raw = kernel.subgroup.id : index
   %subgroup = index.assume %subgroup_raw [range(%subgroup_raw, 0, 3)] : index
-  %quadrant_row = index.div %subgroup, %two : index
-  %quadrant_column = index.rem %subgroup, %two : index
-  %row_origin_raw = index.mul %quadrant_row, %sixty_four : index
-  %column_origin_raw = index.mul %quadrant_column, %sixty_four : index
+  %quadrant_row = index.div %subgroup, %subgroup_grid_width : index
+  %quadrant_column = index.rem %subgroup, %subgroup_grid_width : index
+  %row_origin_raw = index.mul %quadrant_row, %quadrant_extent : index
+  %column_origin_raw = index.mul %quadrant_column, %quadrant_extent : index
   %row_origin = index.assume %row_origin_raw [range(%row_origin_raw, 0, 64), mul(%row_origin_raw, 64)] : index
   %column_origin = index.assume %column_origin_raw [range(%column_origin_raw, 0, 64), mul(%column_origin_raw, 64)] : index
   %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<128x16xf16, #dense>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x128xf16, %rhs_layout>
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<128x128xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[%row_origin, %zero] shape [%m, %k] : view<128x16xf16, #dense> -> vector<16xf16>
-  %rhs = vector.fragment.load<rhs> %rhs_view[%zero, %column_origin] shape [%k, %n] : view<16x128xf16, %rhs_layout> -> vector<16xf16>
+  %lhs = vector.fragment.load<lhs> %lhs_view[%row_origin, %k_origin] shape [%m, %k] : view<128x16xf16, #dense> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[%k_origin, %column_origin] shape [%k, %n] : view<16x128xf16, %rhs_layout> -> vector<16xf16>
   %zero_acc = vector.constant 0.0 : vector<4xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<4xf32>
@@ -1131,15 +1131,15 @@ kernel.def target(@target) @f16_wmmar3_wave64_half_acc_loop_f32_fragment_memory(
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%out_buffer: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %sixteen = index.constant 16 : index
-  %sixty_four = index.constant 64 : index
+  %c0 = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %loop_end = index.constant 2 : index
+  %output_column = index.constant 16 : index
+  %row_stride = index.constant 64 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %layout = encoding.layout.strided [1, %sixty_four] : encoding<layout>
+  %layout = encoding.layout.strided [1, %row_stride] : encoding<layout>
   %out_global = buffer.assume.memory_space<global> %out_buffer : buffer
   %out_aligned = buffer.assume.alignment %out_global {minimum_alignment = 16} : buffer
   %out_view = buffer.view %out_aligned[%base] : buffer -> view<64x64xf32, %layout>
@@ -1149,11 +1149,11 @@ kernel.def target(@target) @f16_wmmar3_wave64_half_acc_loop_f32_fragment_memory(
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xf16>
   %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xf16>
   %init = vector.fragment<init> %init_values shape [%m, %n] : vector<8xf16>
-  %result = scf.for %i = [%zero to %two step %one](%acc = %init : vector<8xf16>) -> (vector<8xf16>) {
+  %result = scf.for %i = [%c0 to %loop_end step %loop_step](%acc = %init : vector<8xf16>) -> (vector<8xf16>) {
     %next = vector.mma %lhs, %rhs, %acc : vector<16xf16>, vector<16xf16>, vector<8xf16>
     scf.yield %next : vector<8xf16>
   }
-  vector.fragment.store<result> %result, %out_view[%zero, %sixteen] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
+  vector.fragment.store<result> %result, %out_view[%c0, %output_column] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
   kernel.return
 }
 
@@ -1161,21 +1161,21 @@ kernel.def target(@target) @f16_wmmar3_wave64_half_acc_loop_f32_fragment_memory(
 low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f16_wmmar3_wave64_half_acc_loop_f32_fragment_memory() asm {
   %34 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %out_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 16384} : reg<amdgpu.sgpr x2>
-  %zero = s_mov_b32 0
-  %one = s_mov_b32 1
-  %two = s_mov_b32 2
+  %c0 = s_mov_b32 0
+  %loop_step = s_mov_b32 1
+  %loop_end = s_mov_b32 2
   %39 = v_mov_b32 0
   %rhs = concat(%39, %39, %39, %39, %39, %39, %39, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
   %48 = v_mov_b32 1006648320
   %init = concat(%48, %48, %48, %48) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  low.br ^_bb1(%zero: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x4>)
+  low.br ^_bb1(%c0: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x4>)
 ^_bb1(%i: reg<amdgpu.sgpr>, %acc: reg<amdgpu.vgpr x4>):
-  %53 = s_cmp_lt_i32 %i, %two
+  %53 = s_cmp_lt_i32 %i, %loop_end
   low.cond_br %53, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
   %54 = copy %acc : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %next = v_wmma_f16_16x16x16_f16_w64 %rhs, %rhs, %54
-  %56 = s_add_u32 %i, %one
+  %56 = s_add_u32 %i, %loop_step
   low.br ^_bb1(%56: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr x4>)
 ^_bb3:
   %57 = v_and_b32_src0_inline %34, 15
@@ -2531,16 +2531,16 @@ low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @f16_wmma_gfx12(
 
 amdgpu.target<gfx1200> @target
 func.def target(@target) @f16_wmma_gfx12_four_loop_carried_accumulators(%lhs_data: vector<8xf16>, %rhs_data: vector<8xf16>, %init_data: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
+  %k_tile_begin = index.constant 0 : index
+  %k_tile_step = index.constant 1 : index
+  %k_tile_end = index.constant 2 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<8xf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<8xf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
-  %result0, %result1, %result2, %result3 = scf.for %k_tile = [%zero to %two step %one](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %result0, %result1, %result2, %result3 = scf.for %k_tile = [%k_tile_begin to %k_tile_end step %k_tile_step](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
     %next0 = vector.mma %lhs, %rhs, %acc0 : vector<8xf16>, vector<8xf16>, vector<8xf32>
     %next1 = vector.mma %lhs, %rhs, %acc1 : vector<8xf16>, vector<8xf16>, vector<8xf32>
     %next2 = vector.mma %lhs, %rhs, %acc2 : vector<8xf16>, vector<8xf16>, vector<8xf32>
@@ -2552,12 +2552,12 @@ func.def target(@target) @f16_wmma_gfx12_four_loop_carried_accumulators(%lhs_dat
 
 // ----
 low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @f16_wmma_gfx12_four_loop_carried_accumulators(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm {
-  %zero = s_mov_b32 0
-  %one = s_mov_b32 1
-  %two = s_mov_b32 2
-  low.br ^_bb1(%zero: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>)
+  %k_tile_begin = s_mov_b32 0
+  %k_tile_step = s_mov_b32 1
+  %k_tile_end = s_mov_b32 2
+  low.br ^_bb1(%k_tile_begin: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>)
 ^_bb1(%k_tile: reg<amdgpu.sgpr>, %acc0: reg<amdgpu.vgpr x8>, %acc1: reg<amdgpu.vgpr x8>, %acc2: reg<amdgpu.vgpr x8>, %acc3: reg<amdgpu.vgpr x8>):
-  %56 = s_cmp_lt_i32 %k_tile, %two
+  %56 = s_cmp_lt_i32 %k_tile, %k_tile_end
   low.cond_br %56, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
   %57 = copy %acc0 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
@@ -2568,7 +2568,7 @@ low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @f16_wmma_gfx12_
   %next2 = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %61
   %63 = copy %acc3 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %next3 = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %63
-  %65 = s_add_u32 %k_tile, %one
+  %65 = s_add_u32 %k_tile, %k_tile_step
   low.br ^_bb1(%65: reg<amdgpu.sgpr>, %next0: reg<amdgpu.vgpr x8>, %next1: reg<amdgpu.vgpr x8>, %next2: reg<amdgpu.vgpr x8>, %next3: reg<amdgpu.vgpr x8>)
 ^_bb3:
   return %acc0, %acc1, %acc2, %acc3
@@ -2923,16 +2923,16 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(32, 1, 
 amdgpu.target<gfx1250> @target
 
 func.def target(@target) @f16_wmma_gfx1250_four_loop_carried_accumulators(%lhs_data: vector<16xf16>, %rhs_data: vector<16xf16>, %init_data: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
+  %k_tile_begin = index.constant 0 : index
+  %k_tile_step = index.constant 1 : index
+  %k_tile_end = index.constant 2 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<16xf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<16xf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
-  %result0, %result1, %result2, %result3 = scf.for %k_tile = [%zero to %two step %one](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  %result0, %result1, %result2, %result3 = scf.for %k_tile = [%k_tile_begin to %k_tile_end step %k_tile_step](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
     %next0 = vector.mma %lhs, %rhs, %acc0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
     %next1 = vector.mma %lhs, %rhs, %acc1 : vector<16xf16>, vector<16xf16>, vector<8xf32>
     %next2 = vector.mma %lhs, %rhs, %acc2 : vector<16xf16>, vector<16xf16>, vector<8xf32>
@@ -2944,12 +2944,12 @@ func.def target(@target) @f16_wmma_gfx1250_four_loop_carried_accumulators(%lhs_d
 
 // ----
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @f16_wmma_gfx1250_four_loop_carried_accumulators(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) asm {
-  %zero = s_mov_b32 0
-  %one = s_mov_b32 1
-  %two = s_mov_b32 2
-  low.br ^_bb1(%zero: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>)
+  %k_tile_begin = s_mov_b32 0
+  %k_tile_step = s_mov_b32 1
+  %k_tile_end = s_mov_b32 2
+  low.br ^_bb1(%k_tile_begin: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>, %init: reg<amdgpu.vgpr x8>)
 ^_bb1(%k_tile: reg<amdgpu.sgpr>, %acc0: reg<amdgpu.vgpr x8>, %acc1: reg<amdgpu.vgpr x8>, %acc2: reg<amdgpu.vgpr x8>, %acc3: reg<amdgpu.vgpr x8>):
-  %56 = s_cmp_lt_i32 %k_tile, %two
+  %56 = s_cmp_lt_i32 %k_tile, %k_tile_end
   low.cond_br %56, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
   %57 = copy %acc0 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
@@ -2960,7 +2960,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @f16_wmm
   %next2 = v_wmma_f32_16x16x32_f16 %lhs, %rhs, %61
   %63 = copy %acc3 : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %next3 = v_wmma_f32_16x16x32_f16 %lhs, %rhs, %63
-  %65 = s_add_u32 %k_tile, %one
+  %65 = s_add_u32 %k_tile, %k_tile_step
   low.br ^_bb1(%65: reg<amdgpu.sgpr>, %next0: reg<amdgpu.vgpr x8>, %next1: reg<amdgpu.vgpr x8>, %next2: reg<amdgpu.vgpr x8>, %next3: reg<amdgpu.vgpr x8>)
 ^_bb3:
   return %acc0, %acc1, %acc2, %acc3
@@ -3684,13 +3684,13 @@ kernel.def target(@target) @f16acc_to_f32_dynamic_strided_column_store() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%out_buffer: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %sixteen = index.constant 16 : index
-  %sixty_four = index.constant 64 : index
+  %output_row = index.constant 0 : index
+  %output_column = index.constant 16 : index
+  %row_stride = index.constant 64 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %layout = encoding.layout.strided [1, %sixty_four] : encoding<layout>
+  %layout = encoding.layout.strided [1, %row_stride] : encoding<layout>
   %out_global = buffer.assume.memory_space<global> %out_buffer : buffer
   %out_aligned = buffer.assume.alignment %out_global {minimum_alignment = 16} : buffer
   %out_view = buffer.view %out_aligned[%base] : buffer -> view<64x64xf32, %layout>
@@ -3701,7 +3701,7 @@ kernel.def target(@target) @f16acc_to_f32_dynamic_strided_column_store() {
   %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xf16>
   %init = vector.fragment<init> %init_values shape [%m, %n] : vector<8xf16>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf16>
-  vector.fragment.store<result> %result, %out_view[%zero, %sixteen] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
+  vector.fragment.store<result> %result, %out_view[%output_row, %output_column] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
   kernel.return
 }
 
@@ -3745,13 +3745,13 @@ kernel.def target(@target) @f32acc_dynamic_strided_column_store() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%out_buffer: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %sixteen = index.constant 16 : index
-  %sixty_four = index.constant 64 : index
+  %output_row = index.constant 0 : index
+  %output_column = index.constant 16 : index
+  %row_stride = index.constant 64 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %layout = encoding.layout.strided [1, %sixty_four] : encoding<layout>
+  %layout = encoding.layout.strided [1, %row_stride] : encoding<layout>
   %out_global = buffer.assume.memory_space<global> %out_buffer : buffer
   %out_aligned = buffer.assume.alignment %out_global {minimum_alignment = 16} : buffer
   %out_view = buffer.view %out_aligned[%base] : buffer -> view<64x64xf32, %layout>
@@ -3762,7 +3762,7 @@ kernel.def target(@target) @f32acc_dynamic_strided_column_store() {
   %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xf16>
   %init = vector.fragment<init> %init_values shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<4xf32>
-  vector.fragment.store<result> %result, %out_view[%zero, %sixteen] shape [%m, %n] : vector<4xf32>, view<64x64xf32, %layout>
+  vector.fragment.store<result> %result, %out_view[%output_row, %output_column] shape [%m, %n] : vector<4xf32>, view<64x64xf32, %layout>
   kernel.return
 }
 
@@ -4242,7 +4242,7 @@ kernel.def target(@target) @f16_wmmar3_wave64_dynamic_view_extents() {
 } launch(%row_count: index, %lhs_buffer: buffer, %rhs_buffer: buffer, %out_buffer: buffer) {
   %bounded_row_count = index.assume %row_count [range(%row_count, 16, 128)] : index
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %fragment_origin = index.constant 0 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
@@ -4250,12 +4250,12 @@ kernel.def target(@target) @f16_wmmar3_wave64_dynamic_view_extents() {
   %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<[%bounded_row_count]x16xf16, #dense>
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x[%bounded_row_count]xf16, %rhs_layout>
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
-  %lhs = vector.fragment.load<lhs> %lhs_view[%zero, %zero] shape [%m, %k] : view<[%bounded_row_count]x16xf16, #dense> -> vector<16xf16>
-  %rhs = vector.fragment.load<rhs> %rhs_view[%zero, %zero] shape [%k, %n] : view<16x[%bounded_row_count]xf16, %rhs_layout> -> vector<16xf16>
+  %lhs = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %fragment_origin] shape [%m, %k] : view<[%bounded_row_count]x16xf16, #dense> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%k, %n] : view<16x[%bounded_row_count]xf16, %rhs_layout> -> vector<16xf16>
   %zero_acc = vector.constant 0.0 : vector<4xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<4xf32>
-  vector.fragment.store<result> %result, %out_view[%zero, %zero] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
   kernel.return
 }
 
@@ -4299,7 +4299,7 @@ kernel.def target(@target) @f16_wmmar3_wave64_row_major_rhs() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%rhs_buffer: buffer, %out_buffer: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %fragment_origin = index.constant 0 : index
   %column_origin = index.constant 32 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
@@ -4308,11 +4308,11 @@ kernel.def target(@target) @f16_wmmar3_wave64_row_major_rhs() {
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32, #dense>
   %lhs_values = vector.constant 1.0 : vector<16xf16>
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xf16>
-  %rhs = vector.fragment.load<rhs> %rhs_view[%zero, %column_origin] shape [%k, %n] : view<16x128xf16, #dense> -> vector<16xf16>
-  %zero_values = vector.constant 0.0 : vector<4xf32>
-  %init = vector.fragment<init> %zero_values shape [%m, %n] : vector<4xf32>
+  %rhs = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %column_origin] shape [%k, %n] : view<16x128xf16, #dense> -> vector<16xf16>
+  %initial_values = vector.constant 0.0 : vector<4xf32>
+  %init = vector.fragment<init> %initial_values shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<4xf32>
-  vector.fragment.store<result> %result, %out_view[%zero, %zero] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %out_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<4xf32>, view<16x16xf32, #dense>
   kernel.return
 }
 

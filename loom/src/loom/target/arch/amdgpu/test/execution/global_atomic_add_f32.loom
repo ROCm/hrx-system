@@ -2,35 +2,35 @@
 // with a native instruction retain the source operation, while targets without
 // one legalize it to a bitwise compare-exchange loop.
 kernel.def @global_atomic_reduce_add_f32() {
-  %one = index.constant 1 : index
-  %four = index.constant 4 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%four, %one, %one) : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%output: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %output_index = index.constant 0 : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_view = buffer.view %output_global[%base] : buffer -> view<1xf32, #dense>
-  %one = scalar.constant 1.0 : f32
-  view.atomic.reduce<addf> %one, %output_view[%zero] {ordering = relaxed, scope = device} : f32, view<1xf32, #dense>
+  %atomic_increment = scalar.constant 1.0 : f32
+  view.atomic.reduce<addf> %atomic_increment, %output_view[%output_index] {ordering = relaxed, scope = device} : f32, view<1xf32, #dense>
   kernel.return
 }
 
 // The old values returned by four unit increments of an accumulator initialized
 // to one are a permutation of [1, 2, 3, 4], whose sum is always ten.
 kernel.def @global_atomic_rmw_add_f32() {
-  %one = index.constant 1 : index
-  %four = index.constant 4 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%four, %one, %one) : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%accumulator: buffer, %old_sum: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %result_index = index.constant 0 : index
   %accumulator_global = buffer.assume.memory_space<global> %accumulator : buffer
   %old_sum_global = buffer.assume.memory_space<global> %old_sum : buffer
   %accumulator_view = buffer.view %accumulator_global[%base] : buffer -> view<1xf32, #dense>
   %old_sum_view = buffer.view %old_sum_global[%base] : buffer -> view<1xf32, #dense>
-  %one = scalar.constant 1.0 : f32
-  %old = view.atomic.rmw<addf> %one, %accumulator_view[%zero] {ordering = relaxed, scope = device} : f32, view<1xf32, #dense> -> f32
-  view.atomic.reduce<addf> %old, %old_sum_view[%zero] {ordering = relaxed, scope = device} : f32, view<1xf32, #dense>
+  %atomic_increment = scalar.constant 1.0 : f32
+  %old = view.atomic.rmw<addf> %atomic_increment, %accumulator_view[%result_index] {ordering = relaxed, scope = device} : f32, view<1xf32, #dense> -> f32
+  view.atomic.reduce<addf> %old, %old_sum_view[%result_index] {ordering = relaxed, scope = device} : f32, view<1xf32, #dense>
   kernel.return
 }
 
@@ -38,19 +38,19 @@ kernel.def @global_atomic_rmw_add_f32() {
 // expected into its high half. Checking both memory and the returned old value
 // makes that physical operand order observable.
 kernel.def @global_atomic_cmpxchg_i64() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%value: buffer, %old_value: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %value_index = index.constant 0 : index
   %value_global = buffer.assume.memory_space<global> %value : buffer
   %old_value_global = buffer.assume.memory_space<global> %old_value : buffer
   %value_view = buffer.view %value_global[%base] : buffer -> view<1xi64, #dense>
   %old_value_view = buffer.view %old_value_global[%base] : buffer -> view<1xi64, #dense>
   %expected = scalar.constant 7 : i64
   %replacement = scalar.constant 9 : i64
-  %old = view.atomic.cmpxchg %expected, %replacement, %value_view[%zero] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i64, view<1xi64, #dense> -> i64
-  view.store %old, %old_value_view[%zero] : i64, view<1xi64, #dense>
+  %old = view.atomic.cmpxchg %expected, %replacement, %value_view[%value_index] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i64, view<1xi64, #dense> -> i64
+  view.store %old, %old_value_view[%value_index] : i64, view<1xi64, #dense>
   kernel.return
 }
 

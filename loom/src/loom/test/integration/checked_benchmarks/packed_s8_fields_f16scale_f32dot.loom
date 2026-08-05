@@ -13,8 +13,7 @@ kernel.def @packed_s8_fields_f16scale_f32dot() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%packed_fields: buffer, %scales: buffer, %rhs: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %four = index.constant 4 : index
+  %packed_field_count = index.constant 4 : index
   %lane = kernel.workitem.id<x> : index
 
   %fields_noalias, %scales_noalias, %rhs_noalias, %output_noalias = buffer.assume.noalias %packed_fields, %scales, %rhs, %output : buffer, buffer, buffer, buffer
@@ -23,7 +22,7 @@ kernel.def @packed_s8_fields_f16scale_f32dot() {
   %rhs_view = buffer.view %rhs_noalias[%base] : buffer -> view<16xf32, #dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<4xf32, #dense>
 
-  %rhs_base0 = index.mul %lane, %four : index
+  %rhs_base0 = index.mul %lane, %packed_field_count : index
   %rhs_base = index.assume %rhs_base0 [range(%rhs_base0, 0, 12), mul(%rhs_base0, 4)] : index
   %packed = vector.load %field_view[%lane] : view<4xi32, #dense> -> vector<1xi32>
   %scale_f16 = view.load %scale_view[%lane] : view<4xf16, #dense> -> f16
@@ -34,8 +33,8 @@ kernel.def @packed_s8_fields_f16scale_f32dot() {
   %scale_f32 = scalar.extf %scale_f16 : f16 to f32
   %scale_vector = vector.splat %scale_f32 : vector<4xf32>
   %scaled_fields = vector.mulf<reassoc|nnan|ninf|nsz|contract> %field_f32, %scale_vector : vector<4xf32>
-  %zero_f32 = scalar.constant 0.0 : f32
-  %dot = vector.dotf %scaled_fields, %rhs_values, %zero_f32 : vector<4xf32>, vector<4xf32>, f32
+  %dot_initial = scalar.constant 0.0 : f32
+  %dot = vector.dotf %scaled_fields, %rhs_values, %dot_initial : vector<4xf32>, vector<4xf32>, f32
   view.store %dot, %output_view[%lane] : f32, view<4xf32, #dense>
   kernel.return
 }

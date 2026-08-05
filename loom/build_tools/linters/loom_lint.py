@@ -9,8 +9,9 @@
 
 Runs checked-in code generators and Ruff fixups in place, then runs mypy on the
 Loom Python package. This is an explicit maintenance command, not the
-`dev.py bazel precommit` policy path. Normal presubmit checks generated files
-without mutating the worktree.
+`dev.py bazel precommit` policy path. Project hygiene runs the read-only builder
+and source-invariant checks during normal presubmit; this command additionally
+owns the mutating generator and formatter workflow plus mypy.
 
 Run from the repository root:
 

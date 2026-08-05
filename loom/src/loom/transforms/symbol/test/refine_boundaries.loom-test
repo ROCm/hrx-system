@@ -4,9 +4,9 @@
 // return facts then seed call results, letting callers fold ordinary local code.
 func.def @private_extent_identity(%n: index) -> (index) {
   %tile = index.constant 16 : index
-  %zero = index.constant 0 : index
+  %no_remainder = index.constant 0 : index
   %remainder = index.rem %n, %tile : index
-  %is_aligned = index.cmp eq, %remainder, %zero : index
+  %is_aligned = index.cmp eq, %remainder, %no_remainder : index
   %result = scf.if %is_aligned -> (index) {
     scf.yield %n : index
   } else {
@@ -19,8 +19,8 @@ func.def @private_extent_identity(%n: index) -> (index) {
 func.def public @entry() -> (index) {
   %n = index.constant 32 : index
   %result = func.call @private_extent_identity(%n) : (index) -> (index)
-  %two = index.constant 2 : index
-  %scaled = index.mul %result, %two : index
+  %scale_factor = index.constant 2 : index
+  %scaled = index.mul %result, %scale_factor : index
   func.return %scaled : index
 }
 
@@ -40,9 +40,9 @@ func.def public @entry() -> (index) {
 // external callers may pass different values.
 func.def public @public_extent_identity(%n: index) -> (index) {
   %tile = index.constant 16 : index
-  %zero = index.constant 0 : index
+  %no_remainder = index.constant 0 : index
   %remainder = index.rem %n, %tile : index
-  %is_aligned = index.cmp eq, %remainder, %zero : index
+  %is_aligned = index.cmp eq, %remainder, %no_remainder : index
   %result = scf.if %is_aligned -> (index) {
     scf.yield %n : index
   } else {
@@ -55,17 +55,17 @@ func.def public @public_extent_identity(%n: index) -> (index) {
 func.def public @calls_public() -> (index) {
   %n = index.constant 32 : index
   %result = func.call @public_extent_identity(%n) : (index) -> (index)
-  %two = index.constant 2 : index
-  %scaled = index.mul %result, %two : index
+  %scale_factor = index.constant 2 : index
+  %scaled = index.mul %result, %scale_factor : index
   func.return %scaled : index
 }
 
 // ----
 func.def public @public_extent_identity(%n: index) -> (index) {
   %tile = index.constant 16 : index
-  %zero = index.constant 0 : index
+  %no_remainder = index.constant 0 : index
   %remainder = index.rem %n, %tile : index
-  %is_aligned = index.cmp eq, %remainder, %zero : index
+  %is_aligned = index.cmp eq, %remainder, %no_remainder : index
   %result = scf.if %is_aligned -> (index) {
     scf.yield %n : index
   } else {
@@ -78,8 +78,8 @@ func.def public @public_extent_identity(%n: index) -> (index) {
 func.def public @calls_public() -> (index) {
   %n = index.constant 32 : index
   %result = func.call pure @public_extent_identity(%n) : (index) -> (index)
-  %two = index.constant 2 : index
-  %scaled = index.mul %result, %two : index
+  %scale_factor = index.constant 2 : index
+  %scaled = index.mul %result, %scale_factor : index
   func.return %scaled : index
 }
 
@@ -90,9 +90,9 @@ func.def public @calls_public() -> (index) {
 // checks without pretending both calls returned the same constant.
 func.def @private_joined_extent(%n: index) -> (index) {
   %tile = index.constant 16 : index
-  %zero = index.constant 0 : index
+  %no_remainder = index.constant 0 : index
   %remainder = index.rem %n, %tile : index
-  %is_aligned = index.cmp eq, %remainder, %zero : index
+  %is_aligned = index.cmp eq, %remainder, %no_remainder : index
   %result = scf.if %is_aligned -> (index) {
     scf.yield %n : index
   } else {
@@ -136,8 +136,8 @@ func.def @same_actual_arguments(%lhs: index, %rhs: index) -> (index) {
 
 func.def public @call_same_actual(%n: index) -> (index) {
   %result = func.call @same_actual_arguments(%n, %n) : (index, index) -> (index)
-  %one = index.constant 1 : index
-  %biased = index.add %result, %one : index
+  %bias = index.constant 1 : index
+  %biased = index.add %result, %bias : index
   func.return %biased : index
 }
 
@@ -389,8 +389,8 @@ func.def public @call_effectful_return_tied_after_dead(%dead: index, %buffer: bu
 // slot is pruned. This is weaker than argument forwarding: the value cannot be
 // named by the caller until the call executes.
 func.def @effectful_return_duplicate_computed(%x: index) -> (index, index) {
-  %one = index.constant 1 : index
-  %sum = index.add %x, %one : index
+  %increment = index.constant 1 : index
+  %sum = index.add %x, %increment : index
   test.use %x : index
   func.return %sum, %sum : index, index
 }
@@ -403,8 +403,8 @@ func.def public @call_effectful_return_duplicate_computed(%x: index) -> (index) 
 
 // ----
 func.def @effectful_return_duplicate_computed(%x: index) -> (index) {
-  %one = index.constant 1 : index
-  %sum = index.add %x, %one : index
+  %increment = index.constant 1 : index
+  %sum = index.add %x, %increment : index
   test.use %x : index
   func.return %sum : index
 }
@@ -566,13 +566,13 @@ func.def public @call_private_conflicting_layout_view(%buffer: buffer) {
 // facts materialize as separate constants in each isolated projection so body
 // and config rewrite independently without crossing region SSA boundaries.
 test.split_func @projected_exact_constant(%n: index) {
-  %cfg_one = index.constant 1 : index
-  %cfg_sum = index.add %n, %cfg_one : index
+  %cfg_bias = index.constant 1 : index
+  %cfg_sum = index.add %n, %cfg_bias : index
   test.use %cfg_sum : index
   test.yield
 } launch {
-  %one = index.constant 1 : index
-  %sum = index.add %n, %one : index
+  %launch_bias = index.constant 1 : index
+  %sum = index.add %n, %launch_bias : index
   test.use %sum : index
   test.yield
 }
@@ -677,7 +677,7 @@ func.def @identity(%value: index) -> (index) {
 }
 
 func.def public @caller() -> (index) {
-  %zero = index.constant 0 : index
-  %result = func.call @identity(%zero) : (index) -> (index)
+  %identity_input = index.constant 0 : index
+  %result = func.call @identity(%identity_input) : (index) -> (index)
   func.return %result : index
 }

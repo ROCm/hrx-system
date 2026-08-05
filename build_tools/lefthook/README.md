@@ -270,5 +270,6 @@ configured project entry point instead of maintaining dependency-specific folder
 lists.
 
 This keeps root policy focused on repository-wide hygiene while preserving
-project ownership of tests, expensive checks, and future project-specific static
-analysis.
+project ownership of cheap invariant checks, tests, expensive checks, and
+future project-specific static analysis. `--no-project-tests` suppresses only
+the project test phase; project hygiene still runs in CI.

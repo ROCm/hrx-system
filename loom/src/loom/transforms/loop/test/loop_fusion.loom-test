@@ -1,13 +1,13 @@
 // RUN: pass loop-fusion
 
 func.def @fuses_independent_pure_loops(%n: index, %a: i32, %b: i32) -> (i32, i32) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %sum_a = scf.for %i = [%zero to %n step %one](%acc = %a : i32) -> (i32) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %sum_a = scf.for %i = [%loop_begin to %n step %loop_step](%acc = %a : i32) -> (i32) {
     %next = test.addi %acc, %b : i32
     scf.yield %next : i32
   }
-  %sum_b = scf.for %j = [%zero to %n step %one](%acc = %b : i32) -> (i32) {
+  %sum_b = scf.for %j = [%loop_begin to %n step %loop_step](%acc = %b : i32) -> (i32) {
     %next = test.addi %acc, %a : i32
     scf.yield %next : i32
   }
@@ -16,9 +16,9 @@ func.def @fuses_independent_pure_loops(%n: index, %a: i32, %b: i32) -> (i32, i32
 
 // ----
 func.def @fuses_independent_pure_loops(%n: index, %a: i32, %b: i32) -> (i32, i32) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %sum_a, %sum_b = scf.for %15 = [%zero to %n step %one](%16 = %a : i32, %17 = %b : i32) -> (i32, i32) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %sum_a, %sum_b = scf.for %15 = [%loop_begin to %n step %loop_step](%16 = %a : i32, %17 = %b : i32) -> (i32, i32) {
     %next = test.addi %16, %b : i32
     %14 = test.addi %17, %a : i32
     scf.yield %next, %14 : i32, i32
@@ -29,17 +29,17 @@ func.def @fuses_independent_pure_loops(%n: index, %a: i32, %b: i32) -> (i32, i32
 // ====
 
 func.def @fuses_equal_constant_domains(%a: i32, %b: i32) -> (i32, i32) {
-  %zero_a = index.constant 0 : index
-  %zero_b = index.constant 0 : index
-  %four_a = index.constant 4 : index
-  %four_b = index.constant 4 : index
-  %one_a = index.constant 1 : index
-  %one_b = index.constant 1 : index
-  %sum_a = scf.for %i = [%zero_a to %four_a step %one_a](%acc = %a : i32) -> (i32) {
+  %loop_a_begin = index.constant 0 : index
+  %loop_b_begin = index.constant 0 : index
+  %loop_a_end = index.constant 4 : index
+  %loop_b_end = index.constant 4 : index
+  %loop_a_step = index.constant 1 : index
+  %loop_b_step = index.constant 1 : index
+  %sum_a = scf.for %i = [%loop_a_begin to %loop_a_end step %loop_a_step](%acc = %a : i32) -> (i32) {
     %next = test.addi %acc, %b : i32
     scf.yield %next : i32
   }
-  %sum_b = scf.for %j = [%zero_b to %four_b step %one_b](%acc = %b : i32) -> (i32) {
+  %sum_b = scf.for %j = [%loop_b_begin to %loop_b_end step %loop_b_step](%acc = %b : i32) -> (i32) {
     %next = test.addi %acc, %a : i32
     scf.yield %next : i32
   }
@@ -48,13 +48,13 @@ func.def @fuses_equal_constant_domains(%a: i32, %b: i32) -> (i32, i32) {
 
 // ----
 func.def @fuses_equal_constant_domains(%a: i32, %b: i32) -> (i32, i32) {
-  %zero_a = index.constant 0 : index
-  %zero_b = index.constant 0 : index
-  %four_a = index.constant 4 : index
-  %four_b = index.constant 4 : index
-  %one_a = index.constant 1 : index
-  %one_b = index.constant 1 : index
-  %sum_a, %sum_b = scf.for %18 = [%zero_a to %four_a step %one_a](%19 = %a : i32, %20 = %b : i32) -> (i32, i32) {
+  %loop_a_begin = index.constant 0 : index
+  %loop_b_begin = index.constant 0 : index
+  %loop_a_end = index.constant 4 : index
+  %loop_b_end = index.constant 4 : index
+  %loop_a_step = index.constant 1 : index
+  %loop_b_step = index.constant 1 : index
+  %sum_a, %sum_b = scf.for %18 = [%loop_a_begin to %loop_a_end step %loop_a_step](%19 = %a : i32, %20 = %b : i32) -> (i32, i32) {
     %next = test.addi %19, %b : i32
     %17 = test.addi %20, %a : i32
     scf.yield %next, %17 : i32, i32
@@ -85,16 +85,16 @@ func.def @does_not_fuse_while(%cond: i1, %a: i32, %b: i32) -> (i32, i32) {
 // ====
 
 func.def @fuses_dynamic_result_type_references(%n: index, %buffer: buffer, %offset: offset) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
   %base_layout = encoding.layout.dense : encoding<layout>
   %base_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %base_layout>
-  %left_layout, %left_view = scf.for %i = [%zero to %n step %one](%layout_acc = %base_layout : encoding<layout>, %view_acc = %base_view : view<4xf32, %base_layout>) -> (encoding<layout>, view<4xf32, %left_layout>) {
+  %left_layout, %left_view = scf.for %i = [%loop_begin to %n step %loop_step](%layout_acc = %base_layout : encoding<layout>, %view_acc = %base_view : view<4xf32, %base_layout>) -> (encoding<layout>, view<4xf32, %left_layout>) {
     %dense = encoding.layout.dense : encoding<layout>
     %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %dense>
     scf.yield %dense, %view : encoding<layout>, view<4xf32, %dense>
   }
-  %right_layout, %right_view = scf.for %j = [%zero to %n step %one](%layout_acc = %base_layout : encoding<layout>, %view_acc = %base_view : view<4xf32, %base_layout>) -> (encoding<layout>, view<4xf32, %right_layout>) {
+  %right_layout, %right_view = scf.for %j = [%loop_begin to %n step %loop_step](%layout_acc = %base_layout : encoding<layout>, %view_acc = %base_view : view<4xf32, %base_layout>) -> (encoding<layout>, view<4xf32, %right_layout>) {
     %dense = encoding.layout.dense : encoding<layout>
     %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %dense>
     scf.yield %dense, %view : encoding<layout>, view<4xf32, %dense>
@@ -106,11 +106,11 @@ func.def @fuses_dynamic_result_type_references(%n: index, %buffer: buffer, %offs
 
 // ----
 func.def @fuses_dynamic_result_type_references(%n: index, %buffer: buffer, %offset: offset) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
   %base_layout = encoding.layout.dense : encoding<layout>
   %base_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %base_layout>
-  %left_layout, %left_view, %right_layout, %right_view = scf.for %21 = [%zero to %n step %one](%22 = %base_layout : encoding<layout>, %23 = %base_view : view<4xf32, %base_layout>, %24 = %base_layout : encoding<layout>, %25 = %base_view : view<4xf32, %base_layout>) -> (encoding<layout>, view<4xf32, %left_layout>, encoding<layout>, view<4xf32, %right_layout>) {
+  %left_layout, %left_view, %right_layout, %right_view = scf.for %21 = [%loop_begin to %n step %loop_step](%22 = %base_layout : encoding<layout>, %23 = %base_view : view<4xf32, %base_layout>, %24 = %base_layout : encoding<layout>, %25 = %base_view : view<4xf32, %base_layout>) -> (encoding<layout>, view<4xf32, %left_layout>, encoding<layout>, view<4xf32, %right_layout>) {
     %dense = encoding.layout.dense : encoding<layout>
     %view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %dense>
     %19 = encoding.layout.dense : encoding<layout>
@@ -127,15 +127,15 @@ func.def @fuses_dynamic_result_type_references(%n: index, %buffer: buffer, %offs
 func.def @fuses_load_then_lane_local_compute(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %seed: vector<[%n]xf32>, %old: vector<[%n]xf32>) -> (vector<[%n]xf32>, vector<[%n]xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xf32, %layout>
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %loaded = scf.for %i = [%zero to %n step %one](%acc = %seed : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %loaded = scf.for %i = [%loop_begin to %n step %loop_step](%acc = %seed : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
     %address = index.add %origin, %i : index
     %lane = view.load %view[%address] : view<[%n]xf32, %layout> -> f32
     %next = vector.insert %lane into %acc[%i] : f32, vector<[%n]xf32>
     scf.yield %next : vector<[%n]xf32>
   }
-  %doubled = scf.for %j = [%zero to %n step %one](%acc = %old : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
+  %doubled = scf.for %j = [%loop_begin to %n step %loop_step](%acc = %old : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
     %lane = vector.extract %loaded[%j] : vector<[%n]xf32> -> f32
     %twice = scalar.addf %lane, %lane : f32
     %next = vector.insert %twice into %acc[%j] : f32, vector<[%n]xf32>
@@ -148,9 +148,9 @@ func.def @fuses_load_then_lane_local_compute(%n: index, %buffer: buffer, %byte_o
 func.def @fuses_load_then_lane_local_compute(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %seed: vector<[%n]xf32>, %old: vector<[%n]xf32>) -> (vector<[%n]xf32>, vector<[%n]xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xf32, %layout>
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %loaded, %doubled = scf.for %24 = [%zero to %n step %one](%25 = %seed : vector<[%n]xf32>, %26 = %old : vector<[%n]xf32>) -> (vector<[%n]xf32>, vector<[%n]xf32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %loaded, %doubled = scf.for %24 = [%loop_begin to %n step %loop_step](%25 = %seed : vector<[%n]xf32>, %26 = %old : vector<[%n]xf32>) -> (vector<[%n]xf32>, vector<[%n]xf32>) {
     %address = index.add %origin, %24 : index
     %lane = view.load %view[%address] : view<[%n]xf32, %layout> -> f32
     %next = vector.insert %lane into %25[%24] : f32, vector<[%n]xf32>
@@ -165,9 +165,9 @@ func.def @fuses_load_then_lane_local_compute(%n: index, %buffer: buffer, %byte_o
 // ====
 
 func.def @fuses_masked_lane_local_compute(%n: index, %mask: vector<[%n]xi1>, %seed: vector<[%n]xi32>, %old: vector<[%n]xi32>, %one_i32: i32) -> (vector<[%n]xi32>, vector<[%n]xi32>) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %selected = scf.for %i = [%zero to %n step %one](%acc = %seed : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %selected = scf.for %i = [%loop_begin to %n step %loop_step](%acc = %seed : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
     %m = vector.extract %mask[%i] : vector<[%n]xi1> -> i1
     %lane = scf.if %m -> (i32) {
       scf.yield %one_i32 : i32
@@ -178,7 +178,7 @@ func.def @fuses_masked_lane_local_compute(%n: index, %mask: vector<[%n]xi1>, %se
     %next = vector.insert %lane into %acc[%i] : i32, vector<[%n]xi32>
     scf.yield %next : vector<[%n]xi32>
   }
-  %incremented = scf.for %j = [%zero to %n step %one](%acc = %old : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
+  %incremented = scf.for %j = [%loop_begin to %n step %loop_step](%acc = %old : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
     %lane = vector.extract %selected[%j] : vector<[%n]xi32> -> i32
     %next_lane = test.addi %lane, %one_i32 : i32
     %next = vector.insert %next_lane into %acc[%j] : i32, vector<[%n]xi32>
@@ -189,9 +189,9 @@ func.def @fuses_masked_lane_local_compute(%n: index, %mask: vector<[%n]xi1>, %se
 
 // ----
 func.def @fuses_masked_lane_local_compute(%n: index, %mask: vector<[%n]xi1>, %seed: vector<[%n]xi32>, %old: vector<[%n]xi32>, %one_i32: i32) -> (vector<[%n]xi32>, vector<[%n]xi32>) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %selected, %incremented = scf.for %22 = [%zero to %n step %one](%23 = %seed : vector<[%n]xi32>, %24 = %old : vector<[%n]xi32>) -> (vector<[%n]xi32>, vector<[%n]xi32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %selected, %incremented = scf.for %22 = [%loop_begin to %n step %loop_step](%23 = %seed : vector<[%n]xi32>, %24 = %old : vector<[%n]xi32>) -> (vector<[%n]xi32>, vector<[%n]xi32>) {
     %m = vector.extract %mask[%22] : vector<[%n]xi1> -> i1
     %lane = scf.if %m -> (i32) {
       scf.yield %one_i32 : i32
@@ -211,14 +211,14 @@ func.def @fuses_masked_lane_local_compute(%n: index, %mask: vector<[%n]xi1>, %se
 // ====
 
 func.def @rejects_non_lane_local_forwarding(%n: index, %seed: vector<[%n]xi32>, %old: vector<[%n]xi32>, %lane_value: i32) -> (vector<[%n]xi32>, vector<[%n]xi32>) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %built = scf.for %i = [%zero to %n step %one](%acc = %seed : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %built = scf.for %i = [%loop_begin to %n step %loop_step](%acc = %seed : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
     %next = vector.insert %lane_value into %acc[%i] : i32, vector<[%n]xi32>
     scf.yield %next : vector<[%n]xi32>
   }
-  %broadcast_first = scf.for %j = [%zero to %n step %one](%acc = %old : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
-    %first_lane = vector.extract %built[%zero] : vector<[%n]xi32> -> i32
+  %broadcast_first = scf.for %j = [%loop_begin to %n step %loop_step](%acc = %old : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
+    %first_lane = vector.extract %built[%loop_begin] : vector<[%n]xi32> -> i32
     %next = vector.insert %first_lane into %acc[%j] : i32, vector<[%n]xi32>
     scf.yield %next : vector<[%n]xi32>
   }
@@ -228,13 +228,13 @@ func.def @rejects_non_lane_local_forwarding(%n: index, %seed: vector<[%n]xi32>, 
 // ====
 
 func.def @rejects_write_effect_hazard(%n: index, %pool: pool<16>, %tile: tile<4xf32>, %a: i32, %b: i32) -> (i32) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  scf.for %i = [%zero to %n step %one] {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  scf.for %i = [%loop_begin to %n step %loop_step] {
     test.write_resource %pool, %tile : pool<16>, tile<4xf32>
     scf.yield
   }
-  %sum = scf.for %j = [%zero to %n step %one](%acc = %a : i32) -> (i32) {
+  %sum = scf.for %j = [%loop_begin to %n step %loop_step](%acc = %a : i32) -> (i32) {
     %next = test.addi %acc, %b : i32
     scf.yield %next : i32
   }
@@ -243,12 +243,12 @@ func.def @rejects_write_effect_hazard(%n: index, %pool: pool<16>, %tile: tile<4x
 
 // ----
 func.def @rejects_write_effect_hazard(%n: index, %pool: pool<16>, %tile: tile<4xf32>, %a: i32, %b: i32) -> (i32) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  scf.for %i = [%zero to %n step %one] {
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  scf.for %i = [%loop_begin to %n step %loop_step] {
     test.write_resource %pool, %tile : pool<16>, tile<4xf32>
   }
-  %sum = scf.for %j = [%zero to %n step %one](%acc = %a : i32) -> (i32) {
+  %sum = scf.for %j = [%loop_begin to %n step %loop_step](%acc = %a : i32) -> (i32) {
     %next = test.addi %acc, %b : i32
     scf.yield %next : i32
   }

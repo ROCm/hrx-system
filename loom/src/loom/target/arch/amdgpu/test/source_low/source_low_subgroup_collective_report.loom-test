@@ -3,9 +3,9 @@
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_workgroup_reduce_scalar_publication() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %start = index.constant 0 : offset
@@ -47,23 +47,23 @@ COMPILE-REPORT: target_legalization[0] function=report_workgroup_reduce_scalar_p
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_workgroup_reduce_scalar_leader_publication() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %start = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %leader_index = index.constant 0 : index
   %input_view = buffer.view %input[%start] : buffer -> view<64xf32, #dense>
   %output_view = buffer.view %output[%start] : buffer -> view<1xf32, #dense>
   %loaded = vector.load %input_view[%tid] : view<64xf32, #dense> -> vector<1xf32>
   %value = vector.extract %loaded[0] : vector<1xf32> -> f32
   %sum = kernel.workgroup.reduce<addf> %value : f32
-  %is_leader = index.cmp eq, %tid, %zero : index
+  %is_leader = index.cmp eq, %tid, %leader_index : index
   cfg.cond_br %is_leader, ^then, ^done
 ^then:
   %result = vector.from_elements %sum : vector<1xf32>
-  vector.store %result, %output_view[%zero] : vector<1xf32>, view<1xf32, #dense>
+  vector.store %result, %output_view[%leader_index] : vector<1xf32>, view<1xf32, #dense>
   cfg.br ^done
 ^done:
   kernel.return
@@ -99,25 +99,25 @@ COMPILE-REPORT: target_legalization[0] function=report_workgroup_reduce_scalar_l
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_workgroup_reduce_scalar_leader_publication_projected_tid() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
   cfg.br ^body(%tid: index)
 ^body(%tid_arg: index):
   %start = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %leader_index = index.constant 0 : index
   %input_view = buffer.view %input[%start] : buffer -> view<64xf32, #dense>
   %output_view = buffer.view %output[%start] : buffer -> view<1xf32, #dense>
   %loaded = vector.load %input_view[%tid_arg] : view<64xf32, #dense> -> vector<1xf32>
   %value = vector.extract %loaded[0] : vector<1xf32> -> f32
   %sum = kernel.workgroup.reduce<addf> %value : f32
-  %is_leader = index.cmp eq, %tid_arg, %zero : index
+  %is_leader = index.cmp eq, %tid_arg, %leader_index : index
   cfg.cond_br %is_leader, ^then, ^done
 ^then:
   %result = vector.from_elements %sum : vector<1xf32>
-  vector.store %result, %output_view[%zero] : vector<1xf32>, view<1xf32, #dense>
+  vector.store %result, %output_view[%leader_index] : vector<1xf32>, view<1xf32, #dense>
   cfg.br ^done
 ^done:
   kernel.return
@@ -153,20 +153,20 @@ COMPILE-REPORT: target_legalization[0] function=report_workgroup_reduce_scalar_l
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_workgroup_reduce_scalar_wave_leader_publication() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %lane = kernel.subgroup.lane.id : index
   %start = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %leader_lane = index.constant 0 : index
   %input_view = buffer.view %input[%start] : buffer -> view<64xf32, #dense>
   %output_view = buffer.view %output[%start] : buffer -> view<64xf32, #dense>
   %loaded = vector.load %input_view[%tid] : view<64xf32, #dense> -> vector<1xf32>
   %value = vector.extract %loaded[0] : vector<1xf32> -> f32
   %sum = kernel.workgroup.reduce<addf> %value : f32
-  %is_wave_leader = index.cmp eq, %lane, %zero : index
+  %is_wave_leader = index.cmp eq, %lane, %leader_lane : index
   cfg.cond_br %is_wave_leader, ^then, ^done
 ^then:
   %result = vector.from_elements %sum : vector<1xf32>
@@ -207,9 +207,9 @@ COMPILE-REPORT: target_legalization[0] function=report_workgroup_reduce_scalar_w
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_workgroup_reduce_vector_publication() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %start = index.constant 0 : offset
@@ -263,9 +263,9 @@ COMPILE-REPORT: target_legalization[0] function=report_workgroup_reduce_vector_p
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @report_subgroup_reduce_addf_f32_wave32_all_lanes() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %start = index.constant 0 : offset
@@ -303,22 +303,22 @@ COMPILE-REPORT: source_low_memory_argument_packet[1] function=report_subgroup_re
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @report_subgroup_reduce_addf_f32_wave64_leader_lane() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %lane = kernel.subgroup.lane.id : index
-  %zero = index.constant 0 : index
+  %leader_lane = index.constant 0 : index
   %start = index.constant 0 : offset
   %input_view = buffer.view %input[%start] : buffer -> view<64xf32, #dense>
   %output_view = buffer.view %output[%start] : buffer -> view<1xf32, #dense>
   %value = view.load %input_view[%tid] : view<64xf32, #dense> -> f32
   %sum = kernel.subgroup.reduce<addf> %value : f32
-  %is_leader_lane = index.cmp eq, %lane, %zero : index
+  %is_leader_lane = index.cmp eq, %lane, %leader_lane : index
   cfg.cond_br %is_leader_lane, ^then, ^done
 ^then:
-  view.store %sum, %output_view[%zero] : f32, view<1xf32, #dense>
+  view.store %sum, %output_view[%leader_lane] : f32, view<1xf32, #dense>
   cfg.br ^done
 ^done:
   kernel.return
@@ -353,14 +353,14 @@ COMPILE-REPORT: source_low_memory_argument_packet[1] function=report_subgroup_re
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @report_subgroup_reduce_addf_f32_wave64_scalar_workitem_guard_nested() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer, %bias: buffer, %flags: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : index
+  %element_index = index.constant 0 : index
   %start = index.constant 0 : offset
-  %zero_i32 = scalar.constant 0 : i32
+  %c0 = scalar.constant 0 : i32
   %input_view = buffer.view %input[%start] : buffer -> view<64xf32, #dense>
   %output_view = buffer.view %output[%start] : buffer -> view<1xf32, #dense>
   %bias_view = buffer.view %bias[%start] : buffer -> view<1xf32, #dense>
@@ -368,20 +368,20 @@ kernel.def target(@target) @report_subgroup_reduce_addf_f32_wave64_scalar_workit
   %value = view.load %input_view[%tid] : view<64xf32, #dense> -> f32
   %sum = kernel.subgroup.reduce<addf> %value : f32
   %tid_i32 = index.cast %tid : index to i32
-  %is_leader = scalar.cmpi eq, %tid_i32, %zero_i32 : i32
+  %is_leader = scalar.cmpi eq, %tid_i32, %c0 : i32
   cfg.cond_br %is_leader, ^then, ^done
 ^then:
-  %flag = view.load %flags_view[%zero] : view<1xi32, #dense> -> i32
-  %has_bias = scalar.cmpi ne, %flag, %zero_i32 : i32
+  %flag = view.load %flags_view[%element_index] : view<1xi32, #dense> -> i32
+  %has_bias = scalar.cmpi ne, %flag, %c0 : i32
   cfg.cond_br %has_bias, ^bias, ^no_bias
 ^bias:
-  %bias_value = view.load %bias_view[%zero] : view<1xf32, #dense> -> f32
+  %bias_value = view.load %bias_view[%element_index] : view<1xf32, #dense> -> f32
   %biased = scalar.addf %sum, %bias_value : f32
   cfg.br ^join(%biased: f32)
 ^no_bias:
   cfg.br ^join(%sum: f32)
 ^join(%out: f32):
-  view.store %out, %output_view[%zero] : f32, view<1xf32, #dense>
+  view.store %out, %output_view[%element_index] : f32, view<1xf32, #dense>
   cfg.br ^done
 ^done:
   kernel.return

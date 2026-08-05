@@ -27,15 +27,19 @@ kernel.def @top2_routing_expert_gather_f32() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%scores: buffer, %expert_payloads: buffer, %route_ids: buffer, %route_scores: buffer, %combined_payload: buffer) {
   %base = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
-  %one_index = index.constant 1 : index
-  %two_index = index.constant 2 : index
-  %three_index = index.constant 3 : index
+  %initial_route_row = index.constant 0 : index
+  %expert_row0 = index.constant 0 : index
+  %expert_row1 = index.constant 1 : index
+  %expert_row2 = index.constant 2 : index
+  %expert_row3 = index.constant 3 : index
+  %payload_origin = index.constant 0 : index
+  %best_route_slot = index.constant 0 : index
+  %second_route_slot = index.constant 1 : index
   %invalid_id = scalar.constant -1 : i32
-  %zero_i32 = scalar.constant 0 : i32
-  %one_i32 = scalar.constant 1 : i32
-  %two_i32 = scalar.constant 2 : i32
-  %three_i32 = scalar.constant 3 : i32
+  %expert_id0 = scalar.constant 0 : i32
+  %expert_id1 = scalar.constant 1 : i32
+  %expert_id2 = scalar.constant 2 : i32
+  %expert_id3 = scalar.constant 3 : i32
   %negative_large = scalar.constant -1000000000.0 : f32
 
   %scores_noalias, %expert_payloads_noalias, %route_ids_noalias, %route_scores_noalias, %combined_payload_noalias = buffer.assume.noalias %scores, %expert_payloads, %route_ids, %route_scores, %combined_payload : buffer, buffer, buffer, buffer, buffer
@@ -51,19 +55,19 @@ kernel.def @top2_routing_expert_gather_f32() {
   %score2 = vector.extract %score_values[2] : vector<4xf32> -> f32
   %score3 = vector.extract %score_values[3] : vector<4xf32> -> f32
 
-  %best_score0, %best_id0, %best_row0, %second_score0, %second_id0, %second_row0 = func.call @top2_route_update(%score0, %zero_i32, %zero_index, %negative_large, %invalid_id, %zero_index, %negative_large, %invalid_id, %zero_index) : (f32, i32, index, f32, i32, index, f32, i32, index) -> (f32, i32, index, f32, i32, index)
-  %best_score1, %best_id1, %best_row1, %second_score1, %second_id1, %second_row1 = func.call @top2_route_update(%score1, %one_i32, %one_index, %best_score0, %best_id0, %best_row0, %second_score0, %second_id0, %second_row0) : (f32, i32, index, f32, i32, index, f32, i32, index) -> (f32, i32, index, f32, i32, index)
-  %best_score2, %best_id2, %best_row2, %second_score2, %second_id2, %second_row2 = func.call @top2_route_update(%score2, %two_i32, %two_index, %best_score1, %best_id1, %best_row1, %second_score1, %second_id1, %second_row1) : (f32, i32, index, f32, i32, index, f32, i32, index) -> (f32, i32, index, f32, i32, index)
-  %best_score3, %best_id3, %best_row3, %second_score3, %second_id3, %second_row3 = func.call @top2_route_update(%score3, %three_i32, %three_index, %best_score2, %best_id2, %best_row2, %second_score2, %second_id2, %second_row2) : (f32, i32, index, f32, i32, index, f32, i32, index) -> (f32, i32, index, f32, i32, index)
+  %best_score0, %best_id0, %best_row0, %second_score0, %second_id0, %second_row0 = func.call @top2_route_update(%score0, %expert_id0, %expert_row0, %negative_large, %invalid_id, %initial_route_row, %negative_large, %invalid_id, %initial_route_row) : (f32, i32, index, f32, i32, index, f32, i32, index) -> (f32, i32, index, f32, i32, index)
+  %best_score1, %best_id1, %best_row1, %second_score1, %second_id1, %second_row1 = func.call @top2_route_update(%score1, %expert_id1, %expert_row1, %best_score0, %best_id0, %best_row0, %second_score0, %second_id0, %second_row0) : (f32, i32, index, f32, i32, index, f32, i32, index) -> (f32, i32, index, f32, i32, index)
+  %best_score2, %best_id2, %best_row2, %second_score2, %second_id2, %second_row2 = func.call @top2_route_update(%score2, %expert_id2, %expert_row2, %best_score1, %best_id1, %best_row1, %second_score1, %second_id1, %second_row1) : (f32, i32, index, f32, i32, index, f32, i32, index) -> (f32, i32, index, f32, i32, index)
+  %best_score3, %best_id3, %best_row3, %second_score3, %second_id3, %second_row3 = func.call @top2_route_update(%score3, %expert_id3, %expert_row3, %best_score2, %best_id2, %best_row2, %second_score2, %second_id2, %second_row2) : (f32, i32, index, f32, i32, index, f32, i32, index) -> (f32, i32, index, f32, i32, index)
 
-  %best_payload = vector.load %expert_payloads_view[%best_row3, %zero_index] : view<4x4xf32, #dense> -> vector<4xf32>
-  %second_payload = vector.load %expert_payloads_view[%second_row3, %zero_index] : view<4x4xf32, #dense> -> vector<4xf32>
+  %best_payload = vector.load %expert_payloads_view[%best_row3, %payload_origin] : view<4x4xf32, #dense> -> vector<4xf32>
+  %second_payload = vector.load %expert_payloads_view[%second_row3, %payload_origin] : view<4x4xf32, #dense> -> vector<4xf32>
   %combined = vector.addf<reassoc|nnan|nsz> %best_payload, %second_payload : vector<4xf32>
 
-  view.store %best_id3, %route_ids_view[%zero_index] : i32, view<2xi32, #dense>
-  view.store %second_id3, %route_ids_view[%one_index] : i32, view<2xi32, #dense>
-  view.store %best_score3, %route_scores_view[%zero_index] : f32, view<2xf32, #dense>
-  view.store %second_score3, %route_scores_view[%one_index] : f32, view<2xf32, #dense>
+  view.store %best_id3, %route_ids_view[%best_route_slot] : i32, view<2xi32, #dense>
+  view.store %second_id3, %route_ids_view[%second_route_slot] : i32, view<2xi32, #dense>
+  view.store %best_score3, %route_scores_view[%best_route_slot] : f32, view<2xf32, #dense>
+  view.store %second_score3, %route_scores_view[%second_route_slot] : f32, view<2xf32, #dense>
   vector.store %combined, %combined_payload_view[0] : vector<4xf32>, view<4xf32, #dense>
   kernel.return
 }

@@ -57,8 +57,8 @@ func.def @f16x4_insert_static(%values: vector<4xf16>, %value: f16) -> (vector<4x
 // ====
 
 func.def @bf16x8_insert_static_constant(%values: vector<8xbf16>) -> (vector<8xbf16>) {
-  %zero = scalar.constant 0.0 : bf16
-  %updated = vector.insert %zero into %values[5] : bf16, vector<8xbf16>
+  %replacement = scalar.constant 0.0 : bf16
+  %updated = vector.insert %replacement into %values[5] : bf16, vector<8xbf16>
   func.return %updated : vector<8xbf16>
 }
 

@@ -2,10 +2,10 @@
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_dotf_zero_seed_fmac_diagnostics(%lhs: vector<2xf32>, %rhs: vector<2xf32>) -> (f32) {
-  %zero = scalar.constant 0.0 : f32
+  %initial_accumulator = scalar.constant 0.0 : f32
   // REMARK@+2: AMDGPU/028 {descriptor_name="amdgpu.v_fmac_f32", lane_index="0", descriptor_set_name="amdgpu.gfx11.generic.core", accumulator_kind="dot_local", decision_key="selected", reason_key="dot_local_accumulator"}
   // REMARK@+1: AMDGPU/028 {descriptor_name="amdgpu.v_fmac_f32", lane_index="1", descriptor_set_name="amdgpu.gfx11.generic.core", accumulator_kind="dot_local", decision_key="selected", reason_key="dot_local_accumulator"}
-  %dot = vector.dotf %lhs, %rhs, %zero : vector<2xf32>, vector<2xf32>, f32
+  %dot = vector.dotf %lhs, %rhs, %initial_accumulator : vector<2xf32>, vector<2xf32>, f32
   func.return %dot : f32
 }
 

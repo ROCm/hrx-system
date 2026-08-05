@@ -147,9 +147,9 @@ func.def target(@target) @mfma_f64_4x4x4_4_blocks(%lhs_data: vector<1xf64>, %rhs
 }
 
 func.def target(@target) @mfma_f32_32x32x4_f16_2_blocks_loop_carried(%lhs_data: vector<4xf16>, %rhs_data: vector<4xf16>, %init_data: vector<32xf32>) -> (vector<32xf32>) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
+  %k_tile_begin = index.constant 0 : index
+  %k_tile_step = index.constant 1 : index
+  %k_tile_end = index.constant 2 : index
   %blocks = index.constant 2 : index
   %m = index.constant 32 : index
   %n = index.constant 32 : index
@@ -157,7 +157,7 @@ func.def target(@target) @mfma_f32_32x32x4_f16_2_blocks_loop_carried(%lhs_data: 
   %lhs = vector.fragment<lhs> %lhs_data shape [blocks(%blocks), %m, %k] : vector<4xf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [blocks(%blocks), %k, %n] : vector<4xf16>
   %init = vector.fragment<init> %init_data shape [blocks(%blocks), %m, %n] : vector<32xf32>
-  %result = scf.for %k_tile = [%zero to %two step %one](%acc = %init : vector<32xf32>) -> (vector<32xf32>) {
+  %result = scf.for %k_tile = [%k_tile_begin to %k_tile_end step %k_tile_step](%acc = %init : vector<32xf32>) -> (vector<32xf32>) {
     %next = vector.mma %lhs, %rhs, %acc : vector<4xf16>, vector<4xf16>, vector<32xf32>
     scf.yield %next : vector<32xf32>
   }
@@ -329,17 +329,17 @@ low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @mfma_f64_4x4x4_
 }
 
 low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @mfma_f32_32x32x4_f16_2_blocks_loop_carried(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>, %init: reg<amdgpu.vgpr x32>) -> (reg<amdgpu.vgpr x32>) asm {
-  %zero = s_mov_b32 0
-  %one = s_mov_b32 1
-  %two = s_mov_b32 2
-  low.br ^_bb1(%zero: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x32>)
+  %k_tile_begin = s_mov_b32 0
+  %k_tile_step = s_mov_b32 1
+  %k_tile_end = s_mov_b32 2
+  low.br ^_bb1(%k_tile_begin: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x32>)
 ^_bb1(%k_tile: reg<amdgpu.sgpr>, %acc: reg<amdgpu.vgpr x32>):
-  %328 = s_cmp_lt_i32 %k_tile, %two
+  %328 = s_cmp_lt_i32 %k_tile, %k_tile_end
   low.cond_br %328, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
   %329 = copy %acc : reg<amdgpu.vgpr x32> -> reg<amdgpu.vgpr x32>
   %next = v_mfma_f32_32x32x4_2b_f16 %lhs, %rhs, %329
-  %331 = s_add_u32 %k_tile, %one
+  %331 = s_add_u32 %k_tile, %k_tile_step
   low.br ^_bb1(%331: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr x32>)
 ^_bb3:
   return %acc

@@ -60,17 +60,17 @@ kernel.def @q8_mixed_u8s8_dot4_all_ones() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%output: buffer) {
   %base = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
+  %output_index = index.constant 0 : index
   %lhs0 = scalar.constant -1 : i8
   %rhs0 = scalar.constant -1 : i8
-  %zero = scalar.constant 0 : i32
+  %dot_initial = scalar.constant 0 : i32
   %output_words = buffer.view %output[%base] : buffer -> view<1xi32, #dense>
   %lhs = vector.from_elements %lhs0, %lhs0, %lhs0, %lhs0 : vector<4xi8>
   %rhs = vector.from_elements %rhs0, %rhs0, %rhs0, %rhs0 : vector<4xi8>
-  %acc = vector.from_elements %zero : vector<1xi32>
+  %acc = vector.from_elements %dot_initial : vector<1xi32>
   %dot = vector.dot4i<u8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   %result = vector.extract %dot[0] : vector<1xi32> -> i32
-  view.store %result, %output_words[%zero_index] : i32, view<1xi32, #dense>
+  view.store %result, %output_words[%output_index] : i32, view<1xi32, #dense>
   kernel.return
 }
 

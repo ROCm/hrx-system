@@ -11,8 +11,8 @@ amdgpu.target<gfx1200> @gfx1200
 // Loom spelling: a `func.template<contract>` provider filtered by target and
 // ranked by priority. `target(@gfx1100)` says where this provider is legal.
 func.template<hip.recipe.scale_i32> target(@gfx1100) priority(20) @scale_i32_gfx1100(%value: i32) -> (i32) {
-  %two = scalar.constant 2 : i32
-  %scaled = scalar.muli %value, %two : i32
+  %scale_factor = scalar.constant 2 : i32
+  %scaled = scalar.muli %value, %scale_factor : i32
   func.return %scaled : i32
 }
 

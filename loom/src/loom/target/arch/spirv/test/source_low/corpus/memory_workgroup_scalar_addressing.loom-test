@@ -64,12 +64,12 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @workgroup_dynamic_stride_rank2_i32(%value: i32, %column_count: index, %row: index, %column: index) -> (i32) {
   %byte_length = index.constant 128 : offset
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %column_count_bounded = index.assume %column_count [range(%column_count, 1, 8)] : index
   %row_bounded = index.assume %row [range(%row, 0, 3)] : index
   %column_bounded = index.assume %column [range(%column, 0, 7), lt(%column, %column_count_bounded)] : index
   %scratch = buffer.alloca %byte_length {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<4x[%column_count_bounded]xi32, #dense>
+  %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<4x[%column_count_bounded]xi32, #dense>
   view.store %value, %scratch_view[%row_bounded, %column_bounded] : i32, view<4x[%column_count_bounded]xi32, #dense>
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   %loaded = view.load %scratch_view[%row_bounded, %column_bounded] : view<4x[%column_count_bounded]xi32, #dense> -> i32
@@ -130,15 +130,15 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @workgroup_integer_scalar_widths(%value_i8: i8, %value_i16: i16, %value_i32: i32, %value_i64: i64) -> (i8, i16, i32, i64) {
   %byte_length = index.constant 16 : offset
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %scratch_i8 = buffer.alloca %byte_length {base_alignment = 1, memory_space = workgroup} : buffer
   %scratch_i16 = buffer.alloca %byte_length {base_alignment = 2, memory_space = workgroup} : buffer
   %scratch_i32 = buffer.alloca %byte_length {base_alignment = 4, memory_space = workgroup} : buffer
   %scratch_i64 = buffer.alloca %byte_length {base_alignment = 8, memory_space = workgroup} : buffer
-  %view_i8 = buffer.view %scratch_i8[%zero] : buffer -> view<2xi8, #dense>
-  %view_i16 = buffer.view %scratch_i16[%zero] : buffer -> view<2xi16, #dense>
-  %view_i32 = buffer.view %scratch_i32[%zero] : buffer -> view<2xi32, #dense>
-  %view_i64 = buffer.view %scratch_i64[%zero] : buffer -> view<2xi64, #dense>
+  %view_i8 = buffer.view %scratch_i8[%scratch_base] : buffer -> view<2xi8, #dense>
+  %view_i16 = buffer.view %scratch_i16[%scratch_base] : buffer -> view<2xi16, #dense>
+  %view_i32 = buffer.view %scratch_i32[%scratch_base] : buffer -> view<2xi32, #dense>
+  %view_i64 = buffer.view %scratch_i64[%scratch_base] : buffer -> view<2xi64, #dense>
   view.store %value_i8, %view_i8[1] : i8, view<2xi8, #dense>
   view.store %value_i16, %view_i16[1] : i16, view<2xi16, #dense>
   view.store %value_i32, %view_i32[1] : i32, view<2xi32, #dense>
@@ -188,15 +188,15 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 func.def target(@target) @workgroup_float_scalar_widths(%value_f16: f16, %value_bf16: bf16, %value_f32: f32, %value_f64: f64) -> (f16, bf16, f32, f64) {
   %byte_length = index.constant 16 : offset
-  %zero = index.constant 0 : offset
+  %scratch_base = index.constant 0 : offset
   %scratch_f16 = buffer.alloca %byte_length {base_alignment = 2, memory_space = workgroup} : buffer
   %scratch_bf16 = buffer.alloca %byte_length {base_alignment = 2, memory_space = workgroup} : buffer
   %scratch_f32 = buffer.alloca %byte_length {base_alignment = 4, memory_space = workgroup} : buffer
   %scratch_f64 = buffer.alloca %byte_length {base_alignment = 8, memory_space = workgroup} : buffer
-  %view_f16 = buffer.view %scratch_f16[%zero] : buffer -> view<2xf16, #dense>
-  %view_bf16 = buffer.view %scratch_bf16[%zero] : buffer -> view<2xbf16, #dense>
-  %view_f32 = buffer.view %scratch_f32[%zero] : buffer -> view<2xf32, #dense>
-  %view_f64 = buffer.view %scratch_f64[%zero] : buffer -> view<2xf64, #dense>
+  %view_f16 = buffer.view %scratch_f16[%scratch_base] : buffer -> view<2xf16, #dense>
+  %view_bf16 = buffer.view %scratch_bf16[%scratch_base] : buffer -> view<2xbf16, #dense>
+  %view_f32 = buffer.view %scratch_f32[%scratch_base] : buffer -> view<2xf32, #dense>
+  %view_f64 = buffer.view %scratch_f64[%scratch_base] : buffer -> view<2xf64, #dense>
   view.store %value_f16, %view_f16[1] : f16, view<2xf16, #dense>
   view.store %value_bf16, %view_bf16[1] : bf16, view<2xbf16, #dense>
   view.store %value_f32, %view_f32[1] : f32, view<2xf32, #dense>

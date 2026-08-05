@@ -73,9 +73,9 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
 
 spirv.target<vulkan1_3> @target
 func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
-  %zero = scalar.constant 0 : i32
-  %lhs_nonzero = scalar.cmpi ne, %lhs, %zero : i32
-  %rhs_nonzero = scalar.cmpi ne, %rhs, %zero : i32
+  %inactive_condition = scalar.constant 0 : i32
+  %lhs_nonzero = scalar.cmpi ne, %lhs, %inactive_condition : i32
+  %rhs_nonzero = scalar.cmpi ne, %rhs, %inactive_condition : i32
   %both_nonzero = scalar.andi %lhs_nonzero, %rhs_nonzero : i1
   %either_nonzero = scalar.ori %lhs_nonzero, %rhs_nonzero : i1
   %one_nonzero = scalar.xori %both_nonzero, %either_nonzero : i1
@@ -84,9 +84,9 @@ func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [1]}) @scalar_i1_bitwise_scc(%lhs: reg<spirv.id>, %rhs: reg<spirv.id>) -> (reg<spirv.id>) asm {
-  %zero = OpConstant.i32 0
-  %lhs_nonzero = OpINotEqual %lhs, %zero
-  %rhs_nonzero = OpINotEqual %rhs, %zero
+  %inactive_condition = OpConstant.i32 0
+  %lhs_nonzero = OpINotEqual %lhs, %inactive_condition
+  %rhs_nonzero = OpINotEqual %rhs, %inactive_condition
   %both_nonzero = OpLogicalAnd.bool %lhs_nonzero, %rhs_nonzero
   %either_nonzero = OpLogicalOr.bool %lhs_nonzero, %rhs_nonzero
   %one_nonzero = OpLogicalNotEqual.bool %both_nonzero, %either_nonzero

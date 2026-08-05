@@ -41,15 +41,15 @@ amdgpu.target<gfx11-generic> @target
 func.def target(@target) @index_uniform_signed32_subtract(%value_i32: i32) -> (index) {
   %value0 = index.cast %value_i32 : i32 to index
   %value = index.assume %value0 [range(%value0, 1, 32768)] : index
-  %fifteen = index.constant 15 : index
-  %difference = index.sub %value, %fifteen : index
+  %adjustment = index.constant 15 : index
+  %difference = index.sub %value, %adjustment : index
   func.return %difference : index
 }
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_uniform_signed32_subtract(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %fifteen = s_mov_b32 15
-  %difference = s_sub_u32 %value, %fifteen
+  %adjustment = s_mov_b32 15
+  %difference = s_sub_u32 %value, %adjustment
   return %difference
 }
 

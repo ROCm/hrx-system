@@ -10,13 +10,13 @@
 config.decl @fp8_encode.row_capacity : %value: index where [range(%value, 1, 4294967295)]
 
 kernel.def @f32_to_fp8(%row_count: index) {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   %rounding = index.constant 63 : index
   %row_capacity = config.get @fp8_encode.row_capacity : index
   %rounded_rows = index.add %row_capacity, %rounding : index
   %workgroups = index.div %rounded_rows, %workgroup_size : index
-  kernel.launch.config workgroups(%workgroups, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%row_count: index, %input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %row_capacity = config.get @fp8_encode.row_capacity : index
@@ -25,27 +25,27 @@ kernel.def @f32_to_fp8(%row_count: index) {
   %lane = kernel.workitem.id<x> : index
   %workgroup_size = index.constant 64 : index
   %row = index.madd %workgroup, %workgroup_size, %lane : index
-  %zero = index.constant 0 : index
+  %vector_column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf32, #dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf8E4M3, #dense>
   scf.if %in_bounds {
-    %source = vector.load %input_view[%row, %zero] : view<[%bounded_row_count]x4xf32, #dense> -> vector<4xf32>
+    %source = vector.load %input_view[%row, %vector_column] : view<[%bounded_row_count]x4xf32, #dense> -> vector<4xf32>
     %encoded = vector.fptrunc %source : vector<4xf32> to vector<4xf8E4M3>
-    vector.store %encoded, %output_view[%row, %zero] : vector<4xf8E4M3>, view<[%bounded_row_count]x4xf8E4M3, #dense>
+    vector.store %encoded, %output_view[%row, %vector_column] : vector<4xf8E4M3>, view<[%bounded_row_count]x4xf8E4M3, #dense>
   }
   kernel.return
 }
 
 kernel.def @f32_to_bf8(%row_count: index) {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   %rounding = index.constant 63 : index
   %row_capacity = config.get @fp8_encode.row_capacity : index
   %rounded_rows = index.add %row_capacity, %rounding : index
   %workgroups = index.div %rounded_rows, %workgroup_size : index
-  kernel.launch.config workgroups(%workgroups, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%row_count: index, %input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %row_capacity = config.get @fp8_encode.row_capacity : index
@@ -54,27 +54,27 @@ kernel.def @f32_to_bf8(%row_count: index) {
   %lane = kernel.workitem.id<x> : index
   %workgroup_size = index.constant 64 : index
   %row = index.madd %workgroup, %workgroup_size, %lane : index
-  %zero = index.constant 0 : index
+  %vector_column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf32, #dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf8E5M2, #dense>
   scf.if %in_bounds {
-    %source = vector.load %input_view[%row, %zero] : view<[%bounded_row_count]x4xf32, #dense> -> vector<4xf32>
+    %source = vector.load %input_view[%row, %vector_column] : view<[%bounded_row_count]x4xf32, #dense> -> vector<4xf32>
     %encoded = vector.fptrunc %source : vector<4xf32> to vector<4xf8E5M2>
-    vector.store %encoded, %output_view[%row, %zero] : vector<4xf8E5M2>, view<[%bounded_row_count]x4xf8E5M2, #dense>
+    vector.store %encoded, %output_view[%row, %vector_column] : vector<4xf8E5M2>, view<[%bounded_row_count]x4xf8E5M2, #dense>
   }
   kernel.return
 }
 
 kernel.def @f16_to_bf8(%row_count: index) {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   %rounding = index.constant 63 : index
   %row_capacity = config.get @fp8_encode.row_capacity : index
   %rounded_rows = index.add %row_capacity, %rounding : index
   %workgroups = index.div %rounded_rows, %workgroup_size : index
-  kernel.launch.config workgroups(%workgroups, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%row_count: index, %input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %row_capacity = config.get @fp8_encode.row_capacity : index
@@ -83,27 +83,27 @@ kernel.def @f16_to_bf8(%row_count: index) {
   %lane = kernel.workitem.id<x> : index
   %workgroup_size = index.constant 64 : index
   %row = index.madd %workgroup, %workgroup_size, %lane : index
-  %zero = index.constant 0 : index
+  %vector_column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf16, #dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf8E5M2, #dense>
   scf.if %in_bounds {
-    %source = vector.load %input_view[%row, %zero] : view<[%bounded_row_count]x4xf16, #dense> -> vector<4xf16>
+    %source = vector.load %input_view[%row, %vector_column] : view<[%bounded_row_count]x4xf16, #dense> -> vector<4xf16>
     %encoded = vector.fptrunc %source : vector<4xf16> to vector<4xf8E5M2>
-    vector.store %encoded, %output_view[%row, %zero] : vector<4xf8E5M2>, view<[%bounded_row_count]x4xf8E5M2, #dense>
+    vector.store %encoded, %output_view[%row, %vector_column] : vector<4xf8E5M2>, view<[%bounded_row_count]x4xf8E5M2, #dense>
   }
   kernel.return
 }
 
 kernel.def @bf16_to_fp8(%row_count: index) {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   %rounding = index.constant 63 : index
   %row_capacity = config.get @fp8_encode.row_capacity : index
   %rounded_rows = index.add %row_capacity, %rounding : index
   %workgroups = index.div %rounded_rows, %workgroup_size : index
-  kernel.launch.config workgroups(%workgroups, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%row_count: index, %input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %row_capacity = config.get @fp8_encode.row_capacity : index
@@ -112,15 +112,15 @@ kernel.def @bf16_to_fp8(%row_count: index) {
   %lane = kernel.workitem.id<x> : index
   %workgroup_size = index.constant 64 : index
   %row = index.madd %workgroup, %workgroup_size, %lane : index
-  %zero = index.constant 0 : index
+  %vector_column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x4xbf16, #dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x4xf8E4M3, #dense>
   scf.if %in_bounds {
-    %source = vector.load %input_view[%row, %zero] : view<[%bounded_row_count]x4xbf16, #dense> -> vector<4xbf16>
+    %source = vector.load %input_view[%row, %vector_column] : view<[%bounded_row_count]x4xbf16, #dense> -> vector<4xbf16>
     %encoded = vector.fptrunc %source : vector<4xbf16> to vector<4xf8E4M3>
-    vector.store %encoded, %output_view[%row, %zero] : vector<4xf8E4M3>, view<[%bounded_row_count]x4xf8E4M3, #dense>
+    vector.store %encoded, %output_view[%row, %vector_column] : vector<4xf8E4M3>, view<[%bounded_row_count]x4xf8E4M3, #dense>
   }
   kernel.return
 }
@@ -128,13 +128,13 @@ kernel.def @bf16_to_fp8(%row_count: index) {
 // Converts raw F32 payloads and stores the encoded bytes so signed zero, NaN,
 // infinity, and exact RNE boundaries can be checked bit-for-bit.
 kernel.def @f32_bits_to_fp8_bytes(%row_count: index) {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   %rounding = index.constant 63 : index
   %row_capacity = config.get @fp8_encode.row_capacity : index
   %rounded_rows = index.add %row_capacity, %rounding : index
   %workgroups = index.div %rounded_rows, %workgroup_size : index
-  kernel.launch.config workgroups(%workgroups, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%row_count: index, %input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %row_capacity = config.get @fp8_encode.row_capacity : index
@@ -143,29 +143,29 @@ kernel.def @f32_bits_to_fp8_bytes(%row_count: index) {
   %lane = kernel.workitem.id<x> : index
   %workgroup_size = index.constant 64 : index
   %row = index.madd %workgroup, %workgroup_size, %lane : index
-  %zero = index.constant 0 : index
+  %vector_column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x4xi32, #dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x4xi8, #dense>
   scf.if %in_bounds {
-    %source_bits = vector.load %input_view[%row, %zero] : view<[%bounded_row_count]x4xi32, #dense> -> vector<4xi32>
+    %source_bits = vector.load %input_view[%row, %vector_column] : view<[%bounded_row_count]x4xi32, #dense> -> vector<4xi32>
     %source = vector.bitcast %source_bits : vector<4xi32> to vector<4xf32>
     %encoded = vector.fptrunc %source : vector<4xf32> to vector<4xf8E4M3>
     %encoded_bits = vector.bitcast %encoded : vector<4xf8E4M3> to vector<4xi8>
-    vector.store %encoded_bits, %output_view[%row, %zero] : vector<4xi8>, view<[%bounded_row_count]x4xi8, #dense>
+    vector.store %encoded_bits, %output_view[%row, %vector_column] : vector<4xi8>, view<[%bounded_row_count]x4xi8, #dense>
   }
   kernel.return
 }
 
 kernel.def @f32_bits_to_bf8_bytes(%row_count: index) {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
   %rounding = index.constant 63 : index
   %row_capacity = config.get @fp8_encode.row_capacity : index
   %rounded_rows = index.add %row_capacity, %rounding : index
   %workgroups = index.div %rounded_rows, %workgroup_size : index
-  kernel.launch.config workgroups(%workgroups, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%row_count: index, %input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %row_capacity = config.get @fp8_encode.row_capacity : index
@@ -174,17 +174,17 @@ kernel.def @f32_bits_to_bf8_bytes(%row_count: index) {
   %lane = kernel.workitem.id<x> : index
   %workgroup_size = index.constant 64 : index
   %row = index.madd %workgroup, %workgroup_size, %lane : index
-  %zero = index.constant 0 : index
+  %vector_column = index.constant 0 : index
   %in_bounds = index.cmp ult, %row, %bounded_row_count : index
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<[%bounded_row_count]x4xi32, #dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<[%bounded_row_count]x4xi8, #dense>
   scf.if %in_bounds {
-    %source_bits = vector.load %input_view[%row, %zero] : view<[%bounded_row_count]x4xi32, #dense> -> vector<4xi32>
+    %source_bits = vector.load %input_view[%row, %vector_column] : view<[%bounded_row_count]x4xi32, #dense> -> vector<4xi32>
     %source = vector.bitcast %source_bits : vector<4xi32> to vector<4xf32>
     %encoded = vector.fptrunc %source : vector<4xf32> to vector<4xf8E5M2>
     %encoded_bits = vector.bitcast %encoded : vector<4xf8E5M2> to vector<4xi8>
-    vector.store %encoded_bits, %output_view[%row, %zero] : vector<4xi8>, view<[%bounded_row_count]x4xi8, #dense>
+    vector.store %encoded_bits, %output_view[%row, %vector_column] : vector<4xi8>, view<[%bounded_row_count]x4xi8, #dense>
   }
   kernel.return
 }

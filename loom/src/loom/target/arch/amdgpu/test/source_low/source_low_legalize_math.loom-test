@@ -1065,8 +1065,8 @@ amdgpu.target<gfx11-generic> @target
 func.def target(@target) @scalar_box_muller_native_math(%u1: f32, %u2: f32) -> (f32, f32) {
   %two_pi = scalar.constant 6.283185307179586 : f32
   %radius_base = scalar.logf<afn> %u1 : f32
-  %negative_two = scalar.constant -2.0 : f32
-  %radius_squared = scalar.mulf<afn> %negative_two, %radius_base : f32
+  %radius_scale = scalar.constant -2.0 : f32
+  %radius_squared = scalar.mulf<afn> %radius_scale, %radius_base : f32
   %radius = scalar.sqrtf<afn> %radius_squared : f32
   %theta = scalar.mulf<afn> %u2, %two_pi : f32
   %sine = scalar.sinf<afn> %theta : f32

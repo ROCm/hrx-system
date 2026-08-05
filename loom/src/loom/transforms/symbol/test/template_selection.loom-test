@@ -527,9 +527,9 @@ func.template<demo.workgroup_reduce> @reduce_provider(%value: f32) -> (f32) {
 }
 
 kernel.def export("entry") @entry() {
-  %one = index.constant 1 : index
+  %unit_extent = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%workgroup_size, %unit_extent, %unit_extent) : index
 } launch(%value: f32) {
   %sum = func.apply<demo.workgroup_reduce>(%value) : (f32) -> (f32)
   kernel.return
@@ -537,9 +537,9 @@ kernel.def export("entry") @entry() {
 
 // ----
 kernel.def export("entry") @entry() {
-  %one = index.constant 1 : index
+  %unit_extent = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%workgroup_size, %unit_extent, %unit_extent) : index
 } launch(%value: f32) {
   %sum = kernel.workgroup.reduce<addf> %value : f32
   kernel.return
@@ -551,16 +551,16 @@ kernel.def export("entry") @entry() {
 // RUN: pass select-templates{mode=final}
 
 kernel.def @implicit_export() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+  %unit_extent = index.constant 1 : index
+  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%unit_extent, %unit_extent, %unit_extent) : index
 } launch() {
   kernel.return
 }
 
 // ----
 kernel.def @implicit_export() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+  %unit_extent = index.constant 1 : index
+  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%unit_extent, %unit_extent, %unit_extent) : index
 } launch() {
   kernel.return
 }

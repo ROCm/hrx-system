@@ -17,25 +17,25 @@ func.def @f32_cmpf_select(%lhs: vector<1xf32>, %rhs: vector<1xf32>, %true_value:
 // ====
 
 func.def @scalar_cmpf_rhs_zero_inline(%value: f32) -> (i1) {
-  %zero = scalar.constant 0.0 : f32
-  %mask = scalar.cmpf one, %value, %zero : f32
+  %comparison_rhs = scalar.constant 0.0 : f32
+  %mask = scalar.cmpf one, %value, %comparison_rhs : f32
   func.return %mask : i1
 }
 
 // ====
 
 func.def @scalar_cmpf_lhs_one_inline(%value: f32) -> (i1) {
-  %one = scalar.constant 1.0 : f32
-  %mask = scalar.cmpf olt, %one, %value : f32
+  %comparison_lhs = scalar.constant 1.0 : f32
+  %mask = scalar.cmpf olt, %comparison_lhs, %value : f32
   func.return %mask : i1
 }
 
 // ====
 
 func.def @vector_cmpf_rhs_zero_inline(%value: vector<2xf32>) -> (vector<2xi1>) {
-  %zero = scalar.constant 0.0 : f32
-  %zeros = vector.splat %zero : vector<2xf32>
-  %mask = vector.cmpf one, %value, %zeros : vector<2xf32> -> vector<2xi1>
+  %comparison_rhs_element = scalar.constant 0.0 : f32
+  %comparison_rhs = vector.splat %comparison_rhs_element : vector<2xf32>
+  %mask = vector.cmpf one, %value, %comparison_rhs : vector<2xf32> -> vector<2xi1>
   func.return %mask : vector<2xi1>
 }
 
@@ -43,8 +43,8 @@ func.def @vector_cmpf_rhs_zero_inline(%value: vector<2xf32>) -> (vector<2xi1>) {
 
 func.def @i32_cmpi_select_zero_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %false_value: vector<2xi32>) -> (vector<2xi32>) {
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
-  %zero = scalar.constant 0 : i32
-  %true_value = vector.splat %zero : vector<2xi32>
+  %true_element = scalar.constant 0 : i32
+  %true_value = vector.splat %true_element : vector<2xi32>
   %selected = vector.select %mask, %true_value, %false_value : vector<2xi32>
   func.return %selected : vector<2xi32>
 }

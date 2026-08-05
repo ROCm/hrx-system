@@ -7,13 +7,13 @@ kernel.def target(@target) @cluster_gather_b32() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c2, %c1) workgroup_size(%c64, %c1, %c1) cluster_size(%c1, %c2, %c1) : index
 } launch(%input: buffer) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source = buffer.view %global[%zero] : buffer -> view<4xi8, #dense>
+  %source = buffer.view %global[%buffer_base] : buffer -> view<4xi8, #dense>
   %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %dest = buffer.view %scratch[%zero] : buffer -> view<4xi8, #dense>
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<4xi8, #dense>
   %copy = kernel.async.cluster.gather %source to %dest using %participants {cache_scope = device, cache_temporal = regular} : view<4xi8, #dense> to view<4xi8, #dense>, i32 -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
@@ -40,21 +40,21 @@ kernel.def target(@target) @cluster_gather_packet_widths() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c2, %c1) workgroup_size(%c64, %c1, %c1) cluster_size(%c1, %c2, %c1) : index
 } launch(%input: buffer) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %offset16 = index.constant 16 : offset
   %offset32 = index.constant 32 : offset
   %bytes16 = index.constant 16 : offset
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source8 = buffer.view %global[%zero] : buffer -> view<1xi8, #dense>
+  %source8 = buffer.view %global[%buffer_base] : buffer -> view<1xi8, #dense>
   %source64 = buffer.view %global[%offset16] : buffer -> view<8xi8, #dense>
   %source128 = buffer.view %global[%offset32] : buffer -> view<16xi8, #dense>
   %scratch8 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch64 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch128 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
-  %dest8 = buffer.view %scratch8[%zero] : buffer -> view<1xi8, #dense>
-  %dest64 = buffer.view %scratch64[%zero] : buffer -> view<8xi8, #dense>
-  %dest128 = buffer.view %scratch128[%zero] : buffer -> view<16xi8, #dense>
+  %dest8 = buffer.view %scratch8[%buffer_base] : buffer -> view<1xi8, #dense>
+  %dest64 = buffer.view %scratch64[%buffer_base] : buffer -> view<8xi8, #dense>
+  %dest128 = buffer.view %scratch128[%buffer_base] : buffer -> view<16xi8, #dense>
   %copy8 = kernel.async.cluster.gather %source8 to %dest8 using %participants {cache_scope = cu, cache_temporal = regular} : view<1xi8, #dense> to view<1xi8, #dense>, i32 -> kernel.async.token
   %copy64 = kernel.async.cluster.gather %source64 to %dest64 using %participants {cache_scope = se, cache_temporal = high_temporal} : view<8xi8, #dense> to view<8xi8, #dense>, i32 -> kernel.async.token
   %copy128 = kernel.async.cluster.gather %source128 to %dest128 using %participants {cache_scope = system, cache_temporal = bypass} : view<16xi8, #dense> to view<16xi8, #dense>, i32 -> kernel.async.token
@@ -129,21 +129,21 @@ kernel.def target(@target) @cluster_gather_two_stage_wait_depth() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c2, %c1) workgroup_size(%c64, %c1, %c1) cluster_size(%c1, %c2, %c1) : index
 } launch(%input: buffer) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %bytes16 = index.constant 16 : offset
   %participants = scalar.constant 3 : i32
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source = buffer.view %global[%zero] : buffer -> view<16xi8, #dense>
+  %source = buffer.view %global[%buffer_base] : buffer -> view<16xi8, #dense>
   %scratch0 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch1 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch2 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch3 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch4 = buffer.alloca %bytes16 {base_alignment = 16, memory_space = workgroup} : buffer
-  %dest0 = buffer.view %scratch0[%zero] : buffer -> view<16xi8, #dense>
-  %dest1 = buffer.view %scratch1[%zero] : buffer -> view<16xi8, #dense>
-  %dest2 = buffer.view %scratch2[%zero] : buffer -> view<16xi8, #dense>
-  %dest3 = buffer.view %scratch3[%zero] : buffer -> view<16xi8, #dense>
-  %dest4 = buffer.view %scratch4[%zero] : buffer -> view<16xi8, #dense>
+  %dest0 = buffer.view %scratch0[%buffer_base] : buffer -> view<16xi8, #dense>
+  %dest1 = buffer.view %scratch1[%buffer_base] : buffer -> view<16xi8, #dense>
+  %dest2 = buffer.view %scratch2[%buffer_base] : buffer -> view<16xi8, #dense>
+  %dest3 = buffer.view %scratch3[%buffer_base] : buffer -> view<16xi8, #dense>
+  %dest4 = buffer.view %scratch4[%buffer_base] : buffer -> view<16xi8, #dense>
   %copy0 = kernel.async.cluster.gather %source to %dest0 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #dense> to view<16xi8, #dense>, i32 -> kernel.async.token
   %group0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
   %copy1 = kernel.async.cluster.gather %source to %dest1 using %participants {cache_scope = device, cache_temporal = regular} : view<16xi8, #dense> to view<16xi8, #dense>, i32 -> kernel.async.token
@@ -193,7 +193,7 @@ kernel.def target(@target) @cluster_gather_same_root_disjoint_slots() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c2, %c1) workgroup_size(%c64, %c1, %c1) cluster_size(%c1, %c2, %c1) : index
 } launch(%input: buffer) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %c16 = index.constant 16 : index
   %c32 = index.constant 32 : index
   %c48 = index.constant 48 : index
@@ -210,7 +210,7 @@ kernel.def target(@target) @cluster_gather_same_root_disjoint_slots() {
   %offset2 = index.cast %slot2 : index to offset
   %offset3 = index.cast %slot3 : index to offset
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source = buffer.view %global[%zero] : buffer -> view<16xi8, #dense>
+  %source = buffer.view %global[%buffer_base] : buffer -> view<16xi8, #dense>
   %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %dest0 = buffer.view %scratch[%offset0] : buffer -> view<16xi8, #dense>
   %dest1 = buffer.view %scratch[%offset1] : buffer -> view<16xi8, #dense>
@@ -256,7 +256,7 @@ kernel.def target(@target) @cluster_gather_disjoint_workgroup_store() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c2, %c1) workgroup_size(%c64, %c1, %c1) cluster_size(%c1, %c2, %c1) : index
 } launch(%input: buffer, %payload: buffer) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %c16 = index.constant 16 : index
   %bytes = index.constant 1024 : offset
   %participants = scalar.constant 3 : i32

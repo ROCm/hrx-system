@@ -5,7 +5,7 @@ amdgpu.target<gfx11-generic> @target
 func.def target(@target) @sanitizer_bounded_dynamic_stride_write(
     %output: buffer, %row_count_i32: i32, %row_size_i32: i32, %row_i32: i32) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %column = index.constant 0 : index
   %row_count0 = index.cast %row_count_i32 : i32 to index
   %row_count = index.assume %row_count0 [range(%row_count0, 1, 512)] : index
   %row_size0 = index.cast %row_size_i32 : i32 to index
@@ -14,7 +14,7 @@ func.def target(@target) @sanitizer_bounded_dynamic_stride_write(
   %row = index.assume %row0 [range(%row0, 0, 511), lt(%row0, %row_count)] : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_view = buffer.view %output_global[%base] : buffer -> view<[%row_count]x[%row_size]xf32, #dense>
-  sanitizer.assert.access<write> %output_view[%row, %zero] : view<[%row_count]x[%row_size]xf32, #dense>
+  sanitizer.assert.access<write> %output_view[%row, %column] : view<[%row_count]x[%row_size]xf32, #dense>
   func.return
 }
 
@@ -116,18 +116,18 @@ amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @sanitizer_bounded_lane_dynamic_stride_write(
     %row_size_i32: i32) {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%output: buffer, %row_size_i32: i32) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %column = index.constant 0 : index
   %row = kernel.workitem.id<x> : index
   %row_size0 = index.cast %row_size_i32 : i32 to index
   %row_size = index.assume %row_size0 [range(%row_size0, 1, 4096)] : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_view = buffer.view %output_global[%base] : buffer -> view<64x[%row_size]xf32, #dense>
-  sanitizer.assert.access<write> %output_view[%row, %zero] : view<64x[%row_size]xf32, #dense>
+  sanitizer.assert.access<write> %output_view[%row, %column] : view<64x[%row_size]xf32, #dense>
   kernel.return
 }
 
@@ -224,7 +224,7 @@ amdgpu.target<gfx11-generic> @target
 func.def target(@target) @sanitizer_wide_dynamic_stride_write_rejected(
     %output: buffer, %row_size_i32: i32, %row_i32: i32) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %column = index.constant 0 : index
   %row_size0 = index.cast %row_size_i32 : i32 to index
   %row_size = index.assume %row_size0 [range(%row_size0, 1, 1073741824)] : index
   %row0 = index.cast %row_i32 : i32 to index
@@ -232,6 +232,6 @@ func.def target(@target) @sanitizer_wide_dynamic_stride_write_rejected(
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_view = buffer.view %output_global[%base] : buffer -> view<2x[%row_size]xf32, #dense>
   // ERROR@+1: AMDGPU/020
-  sanitizer.assert.access<write> %output_view[%row, %zero] : view<2x[%row_size]xf32, #dense>
+  sanitizer.assert.access<write> %output_view[%row, %column] : view<2x[%row_size]xf32, #dense>
   func.return
 }

@@ -34,20 +34,20 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @select_
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @select_nested_global_buffer(%select_lhs: index, %select_rhs: index) {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%select_lhs: index, %select_rhs: index, %lhs: buffer, %middle: buffer, %rhs: buffer, %output: buffer) {
-  %zero = index.constant 0 : index
-  %two = index.constant 2 : index
-  %zero_offset = index.constant 0 : offset
-  %use_lhs = index.cmp eq, %select_lhs, %zero : index
-  %use_rhs = index.cmp eq, %select_rhs, %two : index
+  %c0 = index.constant 0 : index
+  %rhs_selector = index.constant 2 : index
+  %buffer_base = index.constant 0 : offset
+  %use_lhs = index.cmp eq, %select_lhs, %c0 : index
+  %use_rhs = index.cmp eq, %select_rhs, %rhs_selector : index
   %middle_or_rhs = scf.select %use_rhs, %rhs, %middle : buffer
   %selected = scf.select %use_lhs, %lhs, %middle_or_rhs : buffer
-  %selected_view = buffer.view %selected[%zero_offset] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<1xi32, #dense>
-  %selected_value = view.load %selected_view[%zero] : view<1xi32, #dense> -> i32
-  view.store %selected_value, %output_view[%zero] : i32, view<1xi32, #dense>
+  %selected_view = buffer.view %selected[%buffer_base] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32, #dense>
+  %selected_value = view.load %selected_view[%c0] : view<1xi32, #dense> -> i32
+  view.store %selected_value, %output_view[%c0] : i32, view<1xi32, #dense>
   kernel.return
 }
 
@@ -57,12 +57,12 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1
   %middle = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %rhs = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 3, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
-  %zero = s_mov_b32 0
-  %two = s_mov_b32 2
-  %27 = s_cmp_eq_i32 %select_lhs, %zero
+  %c0 = s_mov_b32 0
+  %rhs_selector = s_mov_b32 2
+  %27 = s_cmp_eq_i32 %select_lhs, %c0
   %29 = s_mov_b32 1
-  %use_lhs = s_cselect_b32 %29, %zero, %27
-  %use_rhs = s_cmp_eq_i32 %select_rhs, %two
+  %use_lhs = s_cselect_b32 %29, %c0, %27
+  %use_rhs = s_cmp_eq_i32 %select_rhs, %rhs_selector
   %32 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %33 = slice %middle[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %34 = s_cselect_b32 %32, %33, %use_rhs

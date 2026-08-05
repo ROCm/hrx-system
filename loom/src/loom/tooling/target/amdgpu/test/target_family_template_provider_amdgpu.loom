@@ -10,15 +10,15 @@ func.template<demo.target_family> target(@gfx12_5_family) @gfx12_5_provider(%val
 }
 
 kernel.def export("target_family_template_provider") @target_family_template_provider() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%output: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %output_index = index.constant 0 : index
   %value = scalar.constant 42 : i32
   %selected = func.apply<demo.target_family>(%value) : (i32) -> (i32)
   %global = buffer.assume.memory_space<global> %output : buffer
   %view = buffer.view %global[%base] : buffer -> view<1xi32, #dense>
-  view.store %selected, %view[%zero] : i32, view<1xi32, #dense>
+  view.store %selected, %view[%output_index] : i32, view<1xi32, #dense>
   kernel.return
 }

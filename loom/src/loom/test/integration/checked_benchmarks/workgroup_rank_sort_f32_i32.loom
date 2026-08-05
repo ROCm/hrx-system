@@ -12,11 +12,11 @@ kernel.def @workgroup_rank_sort_f32_i32() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%scores: buffer, %sorted_ids: buffer) {
   %base = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
-  %eight_index = index.constant 8 : index
-  %one_index = index.constant 1 : index
-  %zero_i32 = scalar.constant 0 : i32
-  %one_i32 = scalar.constant 1 : i32
+  %peer_begin = index.constant 0 : index
+  %peer_end = index.constant 8 : index
+  %peer_step = index.constant 1 : index
+  %initial_rank = scalar.constant 0 : i32
+  %rank_increment = scalar.constant 1 : i32
   %scratch_bytes = index.constant 32 : offset
 
   %lane0 = kernel.workitem.id<x> : index
@@ -34,7 +34,7 @@ kernel.def @workgroup_rank_sort_f32_i32() {
 
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
 
-  %rank = scf.for %other = [%zero_index to %eight_index step %one_index](%acc = %zero_i32 : i32) -> (i32) {
+  %rank = scf.for %other = [%peer_begin to %peer_end step %peer_step](%acc = %initial_rank : i32) -> (i32) {
     %other_score = view.load %scratch_view[%other] : view<8xf32, #dense> -> f32
     %other_i32 = index.cast %other : index to i32
     %greater = scalar.cmpf ogt, %other_score, %score : f32
@@ -43,7 +43,7 @@ kernel.def @workgroup_rank_sort_f32_i32() {
     %tie_before = scalar.andi %equal, %other_before : i1
     %precedes = scalar.ori %greater, %tie_before : i1
     %next = scf.if %precedes -> (i32) {
-      %incremented = scalar.addi %acc, %one_i32 : i32
+      %incremented = scalar.addi %acc, %rank_increment : i32
       scf.yield %incremented : i32
     } else {
       scf.yield %acc : i32

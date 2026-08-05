@@ -8,14 +8,14 @@
 amdgpu.target<gfx11-generic> @target
 
 func.template<nested.leaf> priority(20) @leaf_specialized(%value: index) -> (index) where [range(%value, 1, 256)] {
-  %one = index.constant 1 : index
-  %result = index.add %value, %one : index
+  %increment = index.constant 1 : index
+  %result = index.add %value, %increment : index
   func.return %result : index
 }
 
 func.template<nested.leaf> priority(10) @leaf_fallback(%value: index) -> (index) {
-  %zero = index.constant 0 : index
-  func.return %zero : index
+  %fallback_value = index.constant 0 : index
+  func.return %fallback_value : index
 }
 
 func.template<nested.middle> priority(20) @middle_specialized(%value: index) -> (index) where [range(%value, 1, 256)] {
@@ -24,8 +24,8 @@ func.template<nested.middle> priority(20) @middle_specialized(%value: index) -> 
 }
 
 func.template<nested.middle> priority(10) @middle_fallback(%value: index) -> (index) {
-  %zero = index.constant 0 : index
-  func.return %zero : index
+  %fallback_value = index.constant 0 : index
+  func.return %fallback_value : index
 }
 
 func.template<nested.outer> @outer(%value: index) -> (index) {
@@ -57,9 +57,9 @@ func.def target(@target) @nested_template_fallback() -> (index) {
 }
 
 kernel.def target(@target) @nested_kernel_template_expansion() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch() {
   func.apply<nested.kernel_outer>() : ()
   kernel.return
@@ -72,8 +72,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @nested_
 }
 
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @nested_template_fallback() -> (reg<amdgpu.sgpr>) asm {
-  %zero = s_mov_b32 0
-  return %zero
+  %fallback_value = s_mov_b32 0
+  return %fallback_value
 }
 
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @nested_kernel_template_expansion() asm {

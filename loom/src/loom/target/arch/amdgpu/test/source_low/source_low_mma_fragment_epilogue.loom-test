@@ -2,19 +2,19 @@
 
 amdgpu.target<gfx1100> @target
 kernel.def target(@target) @bf16_result_fragment_epilogue_two_tiles() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%gate: buffer, %scale_buffer: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %sixteen = index.constant 16 : index
-  %thirty_two = index.constant 32 : index
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
+  %row_pair_stride = index.constant 32 : index
   %token_tile = kernel.workgroup.id<x> : index
   %row_pair = kernel.workgroup.id<y> : index
-  %token_origin = index.mul %token_tile, %sixteen : index
-  %row_origin0 = index.mul %row_pair, %thirty_two : index
-  %row_origin1 = index.add %row_origin0, %sixteen : index
+  %token_origin = index.mul %token_tile, %tile_extent : index
+  %row_origin0 = index.mul %row_pair, %row_pair_stride : index
+  %row_origin1 = index.add %row_origin0, %tile_extent : index
   %gate_global = buffer.assume.memory_space<global> %gate : buffer
   %scale_global = buffer.assume.memory_space<global> %scale_buffer : buffer
   %output_global = buffer.assume.memory_space<global> %output : buffer
@@ -25,16 +25,16 @@ kernel.def target(@target) @bf16_result_fragment_epilogue_two_tiles() {
   %gate_view = buffer.view %gate_aligned[%base] : buffer -> view<64x64xbf16, #dense>
   %scale_view = buffer.view %scale_aligned[%base] : buffer -> view<1xf32, #dense>
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<64x64xbf16, #dense>
-  %gate0_bf16 = vector.fragment.load<result> %gate_view[%token_origin, %row_origin0] shape [%sixteen, %sixteen] : view<64x64xbf16, #dense> -> vector<8xbf16>
-  %gate1_bf16 = vector.fragment.load<result> %gate_view[%token_origin, %row_origin1] shape [%sixteen, %sixteen] : view<64x64xbf16, #dense> -> vector<8xbf16>
+  %gate0_bf16 = vector.fragment.load<result> %gate_view[%token_origin, %row_origin0] shape [%tile_extent, %tile_extent] : view<64x64xbf16, #dense> -> vector<8xbf16>
+  %gate1_bf16 = vector.fragment.load<result> %gate_view[%token_origin, %row_origin1] shape [%tile_extent, %tile_extent] : view<64x64xbf16, #dense> -> vector<8xbf16>
   %gate0 = vector.extf %gate0_bf16 : vector<8xbf16> to vector<8xf32>
   %gate1 = vector.extf %gate1_bf16 : vector<8xbf16> to vector<8xf32>
   %scale = view.load %scale_view[0] : view<1xf32, #dense> -> f32
   %scale_vector = vector.splat %scale : vector<8xf32>
   %product0 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate0, %scale_vector : vector<8xf32>
   %product1 = vector.mulf<reassoc|nnan|ninf|nsz|contract> %scale_vector, %gate1 : vector<8xf32>
-  vector.fragment.store<result> %product0, %output_view[%token_origin, %row_origin0] shape [%sixteen, %sixteen] : vector<8xf32>, view<64x64xbf16, #dense>
-  vector.fragment.store<result> %product1, %output_view[%token_origin, %row_origin1] shape [%sixteen, %sixteen] : vector<8xf32>, view<64x64xbf16, #dense>
+  vector.fragment.store<result> %product0, %output_view[%token_origin, %row_origin0] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<64x64xbf16, #dense>
+  vector.fragment.store<result> %product1, %output_view[%token_origin, %row_origin1] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<64x64xbf16, #dense>
   kernel.return
 }
 
@@ -260,13 +260,13 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
 
 amdgpu.target<gfx1100> @target
 kernel.def target(@target) @bf16_result_fragment_epilogue_after_barrier() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%gate: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %sixteen = index.constant 16 : index
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
   %gate_global = buffer.assume.memory_space<global> %gate : buffer
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %gate_noalias, %output_noalias = buffer.assume.noalias %gate_global, %output_global : buffer, buffer
@@ -274,12 +274,12 @@ kernel.def target(@target) @bf16_result_fragment_epilogue_after_barrier() {
   %output_aligned = buffer.assume.alignment %output_noalias {minimum_alignment = 16} : buffer
   %gate_view = buffer.view %gate_aligned[%base] : buffer -> view<16x16xbf16, #dense>
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16, #dense>
-  %gate_bf16 = vector.fragment.load<result> %gate_view[%zero, %zero] shape [%sixteen, %sixteen] : view<16x16xbf16, #dense> -> vector<8xbf16>
+  %gate_bf16 = vector.fragment.load<result> %gate_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16, #dense> -> vector<8xbf16>
   %gate_f32 = vector.extf %gate_bf16 : vector<8xbf16> to vector<8xf32>
   %scale = vector.constant 2.0 : vector<8xf32>
   %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_f32, %scale : vector<8xf32>
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-  vector.fragment.store<result> %product, %output_view[%zero, %zero] shape [%sixteen, %sixteen] : vector<8xf32>, view<16x16xbf16, #dense>
+  vector.fragment.store<result> %product, %output_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xbf16, #dense>
   kernel.return
 }
 
@@ -415,9 +415,9 @@ low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @result_fragment
 
 amdgpu.target<gfx1100> @target
 kernel.def target(@target) @result_fragment_repack_to_lhs_bf16_bpermute() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %init_values: vector<8xf32>, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
@@ -545,9 +545,9 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
 amdgpu.target<gfx1100> @target
 
 kernel.def target(@target) @result_fragment_repack_to_lhs_bf16_mma_chain() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>,
     %init_values: vector<8xf32>, %output: buffer) {
   %base = index.constant 0 : offset
@@ -690,9 +690,9 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
 
 amdgpu.target<gfx1100> @wave64_target {subgroup_size = 64}
 kernel.def target(@wave64_target) @result_fragment_repack_to_lhs_bf16_bpermute_wave64() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_values: vector<16xbf16>, %rhs_values: vector<16xbf16>, %init_values: vector<4xf32>, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
@@ -781,9 +781,9 @@ low.kernel.def target<amdgpu.rdna3.core>(@wave64_target) workgroup_size(64, 1, 1
 amdgpu.target<gfx942> @target
 
 kernel.def target(@target) @cdna_result_fragment_repack_to_lhs_bf16_mma_chain() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_data: vector<4xbf16>, %rhs_data: vector<4xbf16>, %init_data: vector<4xf32>, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
@@ -891,9 +891,9 @@ low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) workg
 amdgpu.target<gfx1200> @target
 
 kernel.def target(@target) @rdna4_result_fragment_repack_to_lhs_bf16_mma_chain() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_data: vector<8xbf16>, %rhs_data: vector<8xbf16>, %init_data: vector<8xf32>, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
@@ -1039,9 +1039,9 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) workgroup_size(32, 1, 1) workg
 amdgpu.target<gfx1250> @target
 
 kernel.def target(@target) @gfx1250_rejects_legacy_k16_bf16_mma_chain() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_data: vector<8xbf16>, %rhs_data: vector<8xbf16>, %init_data: vector<8xf32>, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
@@ -1067,9 +1067,9 @@ kernel.def target(@target) @gfx1250_rejects_legacy_k16_bf16_mma_chain() {
 amdgpu.target<gfx950> @target
 
 kernel.def target(@target) @gfx950_result_fragment_repack_to_lhs_bf16_mma_chain() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_data: vector<4xbf16>, %rhs_data: vector<4xbf16>, %init_data: vector<4xf32>, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
@@ -1172,8 +1172,8 @@ kernel.def target(@target) @bf16_wmmar3_dual_result_product_bf16_epilogue() {
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16, #dense> -> vector<16xbf16>
   %gate_rhs = vector.fragment.load<rhs> %gate_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
   %up_rhs = vector.fragment.load<rhs> %up_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
-  %zero_values = vector.constant 0.0 : vector<8xf32>
-  %zero_acc = vector.fragment<init> %zero_values shape [%m, %n] : vector<8xf32>
+  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %zero_acc = vector.fragment<init> %initial_values shape [%m, %n] : vector<8xf32>
   %gate = vector.mma %lhs, %gate_rhs, %zero_acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %up = vector.mma %lhs, %up_rhs, %zero_acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate, %up : vector<8xf32>
@@ -1300,9 +1300,9 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
 amdgpu.target<gfx1100> @target
 
 kernel.def target(@target) @report_result_fragment_repack_to_lhs_bf16() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%payload: vector<8xf32>, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
@@ -1338,19 +1338,19 @@ COMPILE-REPORT: source_low_memory_argument_packet[0] function=report_result_frag
 amdgpu.target<gfx1100> @target
 
 kernel.def target(@target) @report_select_fptrunc_bf16_result_fragment_epilogue() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%payload: vector<8xf32>, %selector: i32, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
   %n = index.constant 16 : index
-  %zero_i32 = scalar.constant 0 : i32
+  %false_selector = scalar.constant 0 : i32
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16, #dense>
   %selector_true = scalar.assume %selector [range(%selector, 1, 1)] : i32
-  %condition = scalar.cmpi ne, %selector_true, %zero_i32 : i32
+  %condition = scalar.cmpi ne, %selector_true, %false_selector : i32
   %mask = vector.splat %condition : vector<8xi1>
   %payload_alias = vector.slice %payload[0] : vector<8xf32> -> vector<8xf32>
   %rounded_true = vector.fptrunc %payload : vector<8xf32> to vector<8xbf16>
@@ -1443,9 +1443,9 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(32, 1, 1) workg
 amdgpu.target<gfx1100> @target
 
 kernel.def target(@target) @report_large_bf16_result_epilogue_group() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%payload0: vector<8xf32>, %payload1: vector<8xf32>, %payload2: vector<8xf32>, %payload3: vector<8xf32>, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
@@ -1468,9 +1468,9 @@ kernel.def target(@target) @report_large_bf16_result_epilogue_group() {
 amdgpu.target<gfx1100> @target
 
 kernel.def target(@target) @report_large_bf16_result_epilogue_group() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%payload0: vector<8xf32>, %payload1: vector<8xf32>, %payload2: vector<8xf32>, %payload3: vector<8xf32>, %output: buffer) {
   %base = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer
@@ -1541,9 +1541,9 @@ kernel.def target(@target) @report_large_bf16_result_epilogue_group() {
 amdgpu.target<gfx1100> @target
 
 kernel.def target(@target) @report_mixed_bf16_result_epilogue_group() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%payload0: vector<8xf32>, %payload1: vector<8xf32>, %payload2: vector<8xf32>, %payload3: vector<8xf32>, %payload4: vector<8xf32>, %payload5: vector<8xf32>, %payload6: vector<8xf32>, %payload7: vector<8xf32>, %scale: f32, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
@@ -1575,9 +1575,9 @@ kernel.def target(@target) @report_mixed_bf16_result_epilogue_group() {
 amdgpu.target<gfx1100> @target
 
 kernel.def target(@target) @report_mixed_bf16_result_epilogue_group() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%payload0: vector<8xf32>, %payload1: vector<8xf32>, %payload2: vector<8xf32>, %payload3: vector<8xf32>, %payload4: vector<8xf32>, %payload5: vector<8xf32>, %payload6: vector<8xf32>, %payload7: vector<8xf32>, %scale: f32, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
@@ -1659,9 +1659,9 @@ kernel.def target(@target) @report_mixed_bf16_result_epilogue_group() {
 amdgpu.target<gfx1100> @target
 
 kernel.def target(@target) @report_large_scaled_bf16_result_epilogue_group() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%payload0: vector<8xf32>, %payload1: vector<8xf32>, %payload2: vector<8xf32>, %payload3: vector<8xf32>, %scale: f32, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
@@ -1685,9 +1685,9 @@ kernel.def target(@target) @report_large_scaled_bf16_result_epilogue_group() {
 amdgpu.target<gfx1100> @target
 
 kernel.def target(@target) @report_large_scaled_bf16_result_epilogue_group() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%payload0: vector<8xf32>, %payload1: vector<8xf32>, %payload2: vector<8xf32>, %payload3: vector<8xf32>, %scale: f32, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index

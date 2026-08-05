@@ -204,8 +204,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11) abi(hal_kernel) @target_t
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @prepared_pipeline_probe() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%arg: buffer) {
   kernel.return
 }
@@ -334,9 +334,9 @@ func.template<pipeline.late_fragment_epilogue> target(@target) @late_fragment_ep
 }
 
 kernel.def target(@target) @target_legalization_precedes_cfg_finalization() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%output: buffer) {
   %payload0 = vector.constant 1.0 : vector<8xf32>
   %payload1 = vector.constant 2.0 : vector<8xf32>

@@ -1,12 +1,12 @@
 // RUN: pass promote-private-fragments,dce
 
 func.def @promote_static_fragment_load(%input: buffer, %output: buffer) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<4xf32, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<4xf32, #dense>
   %fragment_bytes = index.constant 16 : offset
   %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 4, memory_space = private} : buffer
-  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %fragment = buffer.view %fragment_buffer[%base] : buffer -> view<4xf32, #dense>
   %start = index.constant 0 : index
   %end = index.constant 4 : index
   %step = index.constant 1 : index
@@ -21,9 +21,9 @@ func.def @promote_static_fragment_load(%input: buffer, %output: buffer) {
 
 // ----
 func.def @promote_static_fragment_load(%input: buffer, %output: buffer) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<4xf32, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<4xf32, #dense>
   %fragment_vector = vector.load %input_view[0] : view<4xf32, #dense> -> vector<4xf32>
   %selected = vector.extract %fragment_vector[2] : vector<4xf32> -> f32
   view.store %selected, %output_view[2] : f32, view<4xf32, #dense>
@@ -33,12 +33,12 @@ func.def @promote_static_fragment_load(%input: buffer, %output: buffer) {
 // ====
 
 func.def @promote_trailing_axis_fragment(%input: buffer, %output: buffer, %row: index, %lane: index) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<8x4xi32, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<4xi32, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<8x4xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<4xi32, #dense>
   %fragment_bytes = index.constant 16 : offset
   %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 4, memory_space = private} : buffer
-  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<4xi32, #dense>
+  %fragment = buffer.view %fragment_buffer[%base] : buffer -> view<4xi32, #dense>
   %start = index.constant 0 : index
   %end = index.constant 4 : index
   %step = index.constant 1 : index
@@ -53,9 +53,9 @@ func.def @promote_trailing_axis_fragment(%input: buffer, %output: buffer, %row: 
 
 // ----
 func.def @promote_trailing_axis_fragment(%input: buffer, %output: buffer, %row: index, %lane: index) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<8x4xi32, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<4xi32, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<8x4xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<4xi32, #dense>
   %fragment_vector = vector.load %input_view[%row, 0] : view<8x4xi32, #dense> -> vector<4xi32>
   %selected = vector.extract %fragment_vector[%lane] : vector<4xi32> -> i32
   view.store %selected, %output_view[%lane] : i32, view<4xi32, #dense>
@@ -67,12 +67,12 @@ func.def @promote_trailing_axis_fragment(%input: buffer, %output: buffer, %row: 
 // Partial initialization stays explicit. The pass only promotes full-copy
 // fragments because anything else needs a stronger dataflow representation.
 func.def @keeps_partial_fragment_copy(%input: buffer, %output: buffer) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<4xf32, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<4xf32, #dense>
   %fragment_bytes = index.constant 16 : offset
   %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 4, memory_space = private} : buffer
-  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %fragment = buffer.view %fragment_buffer[%base] : buffer -> view<4xf32, #dense>
   %start = index.constant 0 : index
   %partial_end = index.constant 3 : index
   %step = index.constant 1 : index
@@ -87,12 +87,12 @@ func.def @keeps_partial_fragment_copy(%input: buffer, %output: buffer) {
 
 // ----
 func.def @keeps_partial_fragment_copy(%input: buffer, %output: buffer) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<4xf32, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<4xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<4xf32, #dense>
   %fragment_bytes = index.constant 16 : offset
   %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 4, memory_space = private} : buffer
-  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<4xf32, #dense>
+  %fragment = buffer.view %fragment_buffer[%base] : buffer -> view<4xf32, #dense>
   %start = index.constant 0 : index
   %partial_end = index.constant 3 : index
   %step = index.constant 1 : index
@@ -108,12 +108,12 @@ func.def @keeps_partial_fragment_copy(%input: buffer, %output: buffer) {
 // ====
 
 func.def @forward_dominated_private_lane(%input: buffer, %output: buffer, %lane: index, %cond: i1) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<64xf16, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf16, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf16, #dense>
   %fragment_bytes = index.constant 128 : offset
   %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 2, memory_space = private} : buffer
-  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %fragment = buffer.view %fragment_buffer[%base] : buffer -> view<64xf16, #dense>
   %copy = view.load %input_view[%lane] : view<64xf16, #dense> -> f16
   view.store %copy, %fragment[%lane] : f16, view<64xf16, #dense>
   scf.if %cond {
@@ -125,9 +125,9 @@ func.def @forward_dominated_private_lane(%input: buffer, %output: buffer, %lane:
 
 // ----
 func.def @forward_dominated_private_lane(%input: buffer, %output: buffer, %lane: index, %cond: i1) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<64xf16, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf16, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf16, #dense>
   %copy = view.load %input_view[%lane] : view<64xf16, #dense> -> f16
   scf.if %cond {
     view.store %copy, %output_view[%lane] : f16, view<64xf16, #dense>
@@ -138,11 +138,11 @@ func.def @forward_dominated_private_lane(%input: buffer, %output: buffer, %lane:
 // ====
 
 func.def @forward_linear_scalar_slot(%output: buffer, %lhs: i64, %rhs: i64) {
-  %zero_bytes = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64, #dense>
   %slot_bytes = index.constant 8 : offset
   %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 8, memory_space = private} : buffer
-  %slot = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %slot = buffer.view %slot_buffer[%base] : buffer -> view<1xi64, #dense>
   %slot_index = index.constant 0 : index
   %initial = scalar.constant 0 : i64
   view.store %initial, %slot[%slot_index] : i64, view<1xi64, #dense>
@@ -158,8 +158,8 @@ func.def @forward_linear_scalar_slot(%output: buffer, %lhs: i64, %rhs: i64) {
 
 // ----
 func.def @forward_linear_scalar_slot(%output: buffer, %lhs: i64, %rhs: i64) {
-  %zero_bytes = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64, #dense>
   %slot_index = index.constant 0 : index
   %initial = scalar.constant 0 : i64
   %sum = scalar.addi %initial, %lhs : i64
@@ -171,12 +171,12 @@ func.def @forward_linear_scalar_slot(%output: buffer, %lhs: i64, %rhs: i64) {
 // ====
 
 func.def @forward_static_private_slots(%input: buffer, %output: buffer) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<2xf32, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<2xf32, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<2xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xf32, #dense>
   %slot_bytes = index.constant 8 : offset
   %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 4, memory_space = private} : buffer
-  %slots = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<2xf32, #dense>
+  %slots = buffer.view %slot_buffer[%base] : buffer -> view<2xf32, #dense>
   %lane0 = index.constant 0 : index
   %lane1 = index.constant 1 : index
   %loaded0 = view.load %input_view[%lane0] : view<2xf32, #dense> -> f32
@@ -192,9 +192,9 @@ func.def @forward_static_private_slots(%input: buffer, %output: buffer) {
 
 // ----
 func.def @forward_static_private_slots(%input: buffer, %output: buffer) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<2xf32, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<2xf32, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<2xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<2xf32, #dense>
   %lane0 = index.constant 0 : index
   %lane1 = index.constant 1 : index
   %loaded0 = view.load %input_view[%lane0] : view<2xf32, #dense> -> f32
@@ -207,11 +207,11 @@ func.def @forward_static_private_slots(%input: buffer, %output: buffer) {
 // ====
 
 func.def @erase_noop_private_slot_before_static_forward(%output: buffer, %lhs: i64, %rhs: i64) {
-  %zero_bytes = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64, #dense>
   %slot_bytes = index.constant 16 : offset
   %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 8, memory_space = private} : buffer
-  %slots = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<2xi64, #dense>
+  %slots = buffer.view %slot_buffer[%base] : buffer -> view<2xi64, #dense>
   %slot0 = index.constant 0 : index
   %slot1 = index.constant 1 : index
   %initial = scalar.constant 0 : i64
@@ -230,8 +230,8 @@ func.def @erase_noop_private_slot_before_static_forward(%output: buffer, %lhs: i
 
 // ----
 func.def @erase_noop_private_slot_before_static_forward(%output: buffer, %lhs: i64, %rhs: i64) {
-  %zero_bytes = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64, #dense>
   %slot0 = index.constant 0 : index
   %initial = scalar.constant 0 : i64
   %sum = scalar.addi %initial, %lhs : i64
@@ -243,11 +243,11 @@ func.def @erase_noop_private_slot_before_static_forward(%output: buffer, %lhs: i
 // ====
 
 func.def @keeps_conditionally_stored_scalar_slot(%output: buffer, %value: i64, %cond: i1) {
-  %zero_bytes = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64, #dense>
   %slot_bytes = index.constant 8 : offset
   %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 8, memory_space = private} : buffer
-  %slot = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %slot = buffer.view %slot_buffer[%base] : buffer -> view<1xi64, #dense>
   %slot_index = index.constant 0 : index
   %initial = scalar.constant 0 : i64
   view.store %initial, %slot[%slot_index] : i64, view<1xi64, #dense>
@@ -261,11 +261,11 @@ func.def @keeps_conditionally_stored_scalar_slot(%output: buffer, %value: i64, %
 
 // ----
 func.def @keeps_conditionally_stored_scalar_slot(%output: buffer, %value: i64, %cond: i1) {
-  %zero_bytes = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi64, #dense>
   %slot_bytes = index.constant 8 : offset
   %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 8, memory_space = private} : buffer
-  %slot = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<1xi64, #dense>
+  %slot = buffer.view %slot_buffer[%base] : buffer -> view<1xi64, #dense>
   %slot_index = index.constant 0 : index
   %initial = scalar.constant 0 : i64
   view.store %initial, %slot[%slot_index] : i64, view<1xi64, #dense>
@@ -280,12 +280,12 @@ func.def @keeps_conditionally_stored_scalar_slot(%output: buffer, %value: i64, %
 // ====
 
 func.def @forward_branch_local_accumulator(%input: buffer, %output: buffer, %cond: i1) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<2xf32, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xf32, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<2xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32, #dense>
   %slot_bytes = index.constant 4 : offset
   %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 4, memory_space = private} : buffer
-  %slot = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<1xf32, #dense>
+  %slot = buffer.view %slot_buffer[%base] : buffer -> view<1xf32, #dense>
   %slot_index = index.constant 0 : index
   %initial = scalar.constant 0.0 : f32
   view.store %initial, %slot[%slot_index] : f32, view<1xf32, #dense>
@@ -304,9 +304,9 @@ func.def @forward_branch_local_accumulator(%input: buffer, %output: buffer, %con
 
 // ----
 func.def @forward_branch_local_accumulator(%input: buffer, %output: buffer, %cond: i1) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<2xf32, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xf32, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<2xf32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32, #dense>
   %slot_index = index.constant 0 : index
   %initial = scalar.constant 0.0 : f32
   scf.if %cond {
@@ -325,13 +325,13 @@ kernel.def @forward_kernel_branch_local_accumulator() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer, %cond: i1) {
-  %zero_bytes = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<2xf32, %layout>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xf32, %layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<2xf32, %layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32, %layout>
   %slot_bytes = index.constant 4 : offset
   %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 4, memory_space = private} : buffer
-  %slot = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<1xf32, %layout>
+  %slot = buffer.view %slot_buffer[%base] : buffer -> view<1xf32, %layout>
   %slot_index = index.constant 0 : index
   %initial = scalar.constant 0.0 : f32
   view.store %initial, %slot[%slot_index] : f32, view<1xf32, %layout>
@@ -353,10 +353,10 @@ kernel.def @forward_kernel_branch_local_accumulator() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer, %cond: i1) {
-  %zero_bytes = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<2xf32, %layout>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<1xf32, %layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<2xf32, %layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xf32, %layout>
   %slot_index = index.constant 0 : index
   %initial = scalar.constant 0.0 : f32
   scf.if %cond {
@@ -375,14 +375,14 @@ kernel.def @forward_imported_branch_accumulator() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %sum_output: buffer, %normalized_output: buffer, %limit: index) {
-  %zero_bytes = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
-  %sum_output_view = buffer.view %sum_output[%zero_bytes] : buffer -> view<[%limit]xf32, %layout>
-  %normalized_output_view = buffer.view %normalized_output[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%limit]x2xf32, %layout>
+  %sum_output_view = buffer.view %sum_output[%base] : buffer -> view<[%limit]xf32, %layout>
+  %normalized_output_view = buffer.view %normalized_output[%base] : buffer -> view<[%limit]x2xf32, %layout>
   %slot_bytes = index.constant 4 : offset
   %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 4, memory_space = private} : buffer
-  %slot = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<1xf32, %layout>
+  %slot = buffer.view %slot_buffer[%base] : buffer -> view<1xf32, %layout>
   %slot_index = index.constant 0 : index
   %initial = scalar.constant 9.9999999999999995e-21 : f32
   view.store %initial, %slot[%slot_index] : f32, view<1xf32, %layout>
@@ -415,11 +415,11 @@ kernel.def @forward_imported_branch_accumulator() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %sum_output: buffer, %normalized_output: buffer, %limit: index) {
-  %zero_bytes = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
-  %sum_output_view = buffer.view %sum_output[%zero_bytes] : buffer -> view<[%limit]xf32, %layout>
-  %normalized_output_view = buffer.view %normalized_output[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%limit]x2xf32, %layout>
+  %sum_output_view = buffer.view %sum_output[%base] : buffer -> view<[%limit]xf32, %layout>
+  %normalized_output_view = buffer.view %normalized_output[%base] : buffer -> view<[%limit]x2xf32, %layout>
   %slot_index = index.constant 0 : index
   %initial = scalar.constant 9.9999999999999995e-21 : f32
   %workgroup = kernel.workgroup.id<x> : index
@@ -449,17 +449,17 @@ kernel.def @forward_fragment_and_accumulator() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %sum_output: buffer, %normalized_output: buffer, %limit: index) {
-  %zero_bytes = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
-  %sum_output_view = buffer.view %sum_output[%zero_bytes] : buffer -> view<[%limit]xf32, %layout>
-  %normalized_output_view = buffer.view %normalized_output[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%limit]x2xf32, %layout>
+  %sum_output_view = buffer.view %sum_output[%base] : buffer -> view<[%limit]xf32, %layout>
+  %normalized_output_view = buffer.view %normalized_output[%base] : buffer -> view<[%limit]x2xf32, %layout>
   %fragment_bytes = index.constant 8 : offset
   %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 4, memory_space = private} : buffer
-  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<2xf32, %layout>
+  %fragment = buffer.view %fragment_buffer[%base] : buffer -> view<2xf32, %layout>
   %slot_bytes = index.constant 4 : offset
   %slot_buffer = buffer.alloca %slot_bytes {base_alignment = 4, memory_space = private} : buffer
-  %slot = buffer.view %slot_buffer[%zero_bytes] : buffer -> view<1xf32, %layout>
+  %slot = buffer.view %slot_buffer[%base] : buffer -> view<1xf32, %layout>
   %slot_index = index.constant 0 : index
   %initial = scalar.constant 9.9999999999999995e-21 : f32
   view.store %initial, %slot[%slot_index] : f32, view<1xf32, %layout>
@@ -499,11 +499,11 @@ kernel.def @forward_fragment_and_accumulator() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %sum_output: buffer, %normalized_output: buffer, %limit: index) {
-  %zero_bytes = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
-  %sum_output_view = buffer.view %sum_output[%zero_bytes] : buffer -> view<[%limit]xf32, %layout>
-  %normalized_output_view = buffer.view %normalized_output[%zero_bytes] : buffer -> view<[%limit]x2xf32, %layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<[%limit]x2xf32, %layout>
+  %sum_output_view = buffer.view %sum_output[%base] : buffer -> view<[%limit]xf32, %layout>
+  %normalized_output_view = buffer.view %normalized_output[%base] : buffer -> view<[%limit]x2xf32, %layout>
   %slot_index = index.constant 0 : index
   %initial = scalar.constant 9.9999999999999995e-21 : f32
   %workgroup = kernel.workgroup.id<x> : index
@@ -534,12 +534,12 @@ kernel.def @forward_fragment_and_accumulator() {
 // ====
 
 func.def @keeps_mismatched_private_lane(%input: buffer, %output: buffer, %store_lane: index, %load_lane: index) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<64xf16, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf16, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf16, #dense>
   %fragment_bytes = index.constant 128 : offset
   %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 2, memory_space = private} : buffer
-  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %fragment = buffer.view %fragment_buffer[%base] : buffer -> view<64xf16, #dense>
   %copy = view.load %input_view[%store_lane] : view<64xf16, #dense> -> f16
   view.store %copy, %fragment[%store_lane] : f16, view<64xf16, #dense>
   %selected = view.load %fragment[%load_lane] : view<64xf16, #dense> -> f16
@@ -549,12 +549,12 @@ func.def @keeps_mismatched_private_lane(%input: buffer, %output: buffer, %store_
 
 // ----
 func.def @keeps_mismatched_private_lane(%input: buffer, %output: buffer, %store_lane: index, %load_lane: index) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<64xf16, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf16, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf16, #dense>
   %fragment_bytes = index.constant 128 : offset
   %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 2, memory_space = private} : buffer
-  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %fragment = buffer.view %fragment_buffer[%base] : buffer -> view<64xf16, #dense>
   %copy = view.load %input_view[%store_lane] : view<64xf16, #dense> -> f16
   view.store %copy, %fragment[%store_lane] : f16, view<64xf16, #dense>
   %selected = view.load %fragment[%load_lane] : view<64xf16, #dense> -> f16
@@ -565,12 +565,12 @@ func.def @keeps_mismatched_private_lane(%input: buffer, %output: buffer, %store_
 // ====
 
 func.def @keeps_conditionally_stored_private_lane(%input: buffer, %output: buffer, %lane: index, %cond: i1) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<64xf16, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf16, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf16, #dense>
   %fragment_bytes = index.constant 128 : offset
   %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 2, memory_space = private} : buffer
-  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %fragment = buffer.view %fragment_buffer[%base] : buffer -> view<64xf16, #dense>
   %copy = view.load %input_view[%lane] : view<64xf16, #dense> -> f16
   scf.if %cond {
     view.store %copy, %fragment[%lane] : f16, view<64xf16, #dense>
@@ -582,12 +582,12 @@ func.def @keeps_conditionally_stored_private_lane(%input: buffer, %output: buffe
 
 // ----
 func.def @keeps_conditionally_stored_private_lane(%input: buffer, %output: buffer, %lane: index, %cond: i1) {
-  %zero_bytes = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_bytes] : buffer -> view<64xf16, #dense>
-  %output_view = buffer.view %output[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<64xf16, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xf16, #dense>
   %fragment_bytes = index.constant 128 : offset
   %fragment_buffer = buffer.alloca %fragment_bytes {base_alignment = 2, memory_space = private} : buffer
-  %fragment = buffer.view %fragment_buffer[%zero_bytes] : buffer -> view<64xf16, #dense>
+  %fragment = buffer.view %fragment_buffer[%base] : buffer -> view<64xf16, #dense>
   %copy = view.load %input_view[%lane] : view<64xf16, #dense> -> f16
   scf.if %cond {
     view.store %copy, %fragment[%lane] : f16, view<64xf16, #dense>

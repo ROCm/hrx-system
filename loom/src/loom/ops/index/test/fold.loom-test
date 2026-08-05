@@ -330,8 +330,8 @@ func.def @cast_i32_to_offset_uses_unsigned_domain(%raw: i32) -> (i64, i64, i1) {
 // Exact negative integer payloads become their unsigned bit pattern when cast
 // into offset.
 func.def @cast_negative_i32_to_offset_zero_extends() -> (i64, i64) {
-  %negative_one = scalar.constant -1 : i32
-  %offset = index.cast %negative_one : i32 to offset
+  %cn1 = scalar.constant -1 : i32
+  %offset = index.cast %cn1 : i32 to offset
   %lo = test.fact_range_lo %offset : offset -> i64
   %hi = test.fact_range_hi %offset : offset -> i64
   func.return %lo, %hi : i64, i64
@@ -389,8 +389,8 @@ func.def @cast_index_to_i8_uses_result_domain(%raw: index) -> (i64, i64) {
 // index.add removes a fact-proven zero operand without requiring the other
 // operand to be constant.
 func.def @add_zero_identity(%x: index) -> (index) {
-  %zero = index.constant 0 : index
-  %r = index.add %x, %zero : index
+  %c0 = index.constant 0 : index
+  %r = index.add %x, %c0 : index
   func.return %r : index
 }
 // ----
@@ -402,10 +402,10 @@ func.def @add_zero_identity(%x: index) -> (index) {
 
 // index.mul removes one and annihilates with zero.
 func.def @mul_identities(%x: index) -> (index, index) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %same = index.mul %x, %one : index
-  %zeroed = index.mul %x, %zero : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %same = index.mul %x, %c1 : index
+  %zeroed = index.mul %x, %c0 : index
   func.return %same, %zeroed : index, index
 }
 // ----
@@ -435,8 +435,8 @@ func.def @mul_power_of_two_waits_for_target_width(%x: index) -> (index) {
 // index.madd simplifies the common address form a*1 + c to add, keeping the
 // addend first because it is usually the base address.
 func.def @madd_identity_multiplier(%a: index, %c: index) -> (index) {
-  %one = index.constant 1 : index
-  %r = index.madd %a, %one, %c : index
+  %c1 = index.constant 1 : index
+  %r = index.madd %a, %c1, %c : index
   func.return %r : index
 }
 // ----
@@ -823,9 +823,9 @@ func.def @rem_divisible_coordinate(%x: index) -> (index) {
 // Zero modulo any fact-proven positive divisor is zero, even when the divisor
 // itself is dynamic.
 func.def @rem_zero_dynamic_positive_divisor(%d: index) -> (index) {
-  %zero = index.constant 0 : index
+  %c0 = index.constant 0 : index
   %d2 = index.assume %d [range(%d, 1, 64)] : index
-  %r = index.rem %zero, %d2 : index
+  %r = index.rem %c0, %d2 : index
   func.return %r : index
 }
 // ----
@@ -1027,13 +1027,13 @@ func.def @minmax_identities() -> (index, index, index, index) {
 func.def @bitwise_facts(%x: index) -> (i64, i64, i1, i64, i64) {
   %mask_aligned = index.constant -4 : index
   %mask_small = index.constant 15 : index
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %shift4 = index.constant 4 : index
   %shift3 = index.constant 3 : index
   %aligned = index.assume %x [range(%x, 0, 4096), mul(%x, 64)] : index
   %and_aligned = index.andi %x, %mask_aligned : index
   %and_small = index.andi %x, %mask_small : index
-  %or_one = index.ori %x, %one : index
+  %or_one = index.ori %x, %c1 : index
   %shifted_left = index.shli %x, %shift4 : index
   %shifted_right = index.shrui %aligned, %shift3 : index
   %and_div = test.fact_divisor %and_aligned : index -> i64
@@ -1057,22 +1057,22 @@ func.def @bitwise_facts(%x: index) -> (i64, i64, i1, i64, i64) {
 
 // Bit counts remain symbolic when no target has established index width.
 func.def @bit_count_facts_require_target_width() -> (index, index, index) {
-  %one = index.constant 1 : index
-  %zero = index.constant 0 : index
-  %ones = index.constant -1 : index
-  %clz = index.ctlzi %one : index
-  %ctz = index.cttzi %zero : index
-  %pop = index.ctpopi %ones : index
+  %c1 = index.constant 1 : index
+  %c0 = index.constant 0 : index
+  %all_bits_set = index.constant -1 : index
+  %clz = index.ctlzi %c1 : index
+  %ctz = index.cttzi %c0 : index
+  %pop = index.ctpopi %all_bits_set : index
   func.return %clz, %ctz, %pop : index, index, index
 }
 // ----
 func.def @bit_count_facts_require_target_width() -> (index, index, index) {
-  %one = index.constant 1 : index
-  %zero = index.constant 0 : index
-  %ones = index.constant -1 : index
-  %clz = index.ctlzi %one : index
-  %ctz = index.cttzi %zero : index
-  %pop = index.ctpopi %ones : index
+  %c1 = index.constant 1 : index
+  %c0 = index.constant 0 : index
+  %all_bits_set = index.constant -1 : index
+  %clz = index.ctlzi %c1 : index
+  %ctz = index.cttzi %c0 : index
+  %pop = index.ctpopi %all_bits_set : index
   func.return %clz, %ctz, %pop : index, index, index
 }
 
@@ -1104,24 +1104,24 @@ func.def @bitwise_exact_folds_preserve_target_rotate() -> (index, index, index, 
 // ====
 
 func.def @bitwise_identities(%x: index) -> (index, index, index, index, index, index, index, index) {
-  %zero = index.constant 0 : index
-  %ones = index.constant -1 : index
+  %c0 = index.constant 0 : index
+  %all_bits_set = index.constant -1 : index
   %and_self = index.andi %x, %x : index
-  %and_zero = index.andi %x, %zero : index
-  %and_ones = index.andi %x, %ones : index
+  %and_zero = index.andi %x, %c0 : index
+  %and_ones = index.andi %x, %all_bits_set : index
   %or_self = index.ori %x, %x : index
-  %or_zero = index.ori %x, %zero : index
-  %or_ones = index.ori %x, %ones : index
-  %xor_zero = index.xori %x, %zero : index
+  %or_zero = index.ori %x, %c0 : index
+  %or_ones = index.ori %x, %all_bits_set : index
+  %xor_zero = index.xori %x, %c0 : index
   %xor_self = index.xori %x, %x : index
   func.return %and_self, %and_zero, %and_ones, %or_self, %or_zero, %or_ones, %xor_zero, %xor_self : index, index, index, index, index, index, index, index
 }
 // ----
 func.def @bitwise_identities(%x: index) -> (index, index, index, index, index, index, index, index) {
-  %ones = index.constant -1 : index
+  %all_bits_set = index.constant -1 : index
   %and_zero = index.constant 0 : index
   %xor_self = index.constant 0 : index
-  func.return %x, %and_zero, %x, %x, %x, %ones, %x, %xor_self : index, index, index, index, index, index, index, index
+  func.return %x, %and_zero, %x, %x, %x, %all_bits_set, %x, %xor_self : index, index, index, index, index, index, index, index
 }
 
 // ====
@@ -1141,10 +1141,10 @@ func.def @xori_cancels_nested_operand(%x: index, %y: index) -> (index, index) {
 // ====
 
 func.def @xori_cancels_duplicate_exact_constants(%x: index) -> (index) {
-  %c1 = index.constant 7 : index
-  %c2 = index.constant 7 : index
-  %nested = index.xori %x, %c1 : index
-  %r = index.xori %nested, %c2 : index
+  %lhs_constant = index.constant 7 : index
+  %rhs_constant = index.constant 7 : index
+  %nested = index.xori %x, %lhs_constant : index
+  %r = index.xori %nested, %rhs_constant : index
   func.return %r : index
 }
 // ----
@@ -1155,28 +1155,28 @@ func.def @xori_cancels_duplicate_exact_constants(%x: index) -> (index) {
 // ====
 
 func.def @shift_identities_without_target_reassociation(%x: index) -> (index, index, index, index, index, index) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %shl_zero_amount = index.shli %x, %zero : index
-  %shrsi_zero_amount = index.shrsi %x, %zero : index
-  %shrui_zero_amount = index.shrui %x, %zero : index
-  %shl_zero_value = index.shli %zero, %one : index
-  %inner_shl = index.shli %x, %one : index
-  %reassoc_shl = index.shli %inner_shl, %two : index
-  %inner_shr = index.shrui %x, %one : index
-  %reassoc_shr = index.shrui %inner_shr, %two : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %shl_zero_amount = index.shli %x, %c0 : index
+  %shrsi_zero_amount = index.shrsi %x, %c0 : index
+  %shrui_zero_amount = index.shrui %x, %c0 : index
+  %shl_zero_value = index.shli %c0, %c1 : index
+  %inner_shl = index.shli %x, %c1 : index
+  %reassoc_shl = index.shli %inner_shl, %c2 : index
+  %inner_shr = index.shrui %x, %c1 : index
+  %reassoc_shr = index.shrui %inner_shr, %c2 : index
   func.return %shl_zero_amount, %shrsi_zero_amount, %shrui_zero_amount, %shl_zero_value, %reassoc_shl, %reassoc_shr : index, index, index, index, index, index
 }
 // ----
 func.def @shift_identities_without_target_reassociation(%x: index) -> (index, index, index, index, index, index) {
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
   %shl_zero_value = index.constant 0 : index
-  %inner_shl = index.shli %x, %one : index
-  %reassoc_shl = index.shli %inner_shl, %two : index
-  %inner_shr = index.shrui %x, %one : index
-  %reassoc_shr = index.shrui %inner_shr, %two : index
+  %inner_shl = index.shli %x, %c1 : index
+  %reassoc_shl = index.shli %inner_shl, %c2 : index
+  %inner_shr = index.shrui %x, %c1 : index
+  %reassoc_shr = index.shrui %inner_shr, %c2 : index
   func.return %x, %x, %x, %shl_zero_value, %reassoc_shl, %reassoc_shr : index, index, index, index, index, index
 }
 
@@ -1197,17 +1197,17 @@ func.def @shrsi_non_negative_becomes_shrui(%x: index, %amount: index) -> (index)
 // ====
 
 func.def @rotate_identities_without_target_direction_change(%x: index) -> (index, index, index) {
-  %zero = index.constant 0 : index
-  %eight = index.constant 8 : index
-  %rotl_zero = index.rotli %x, %zero : index
-  %rotr_zero = index.rotri %x, %zero : index
-  %rotr = index.rotri %x, %eight : index
+  %c0 = index.constant 0 : index
+  %c8 = index.constant 8 : index
+  %rotl_zero = index.rotli %x, %c0 : index
+  %rotr_zero = index.rotri %x, %c0 : index
+  %rotr = index.rotri %x, %c8 : index
   func.return %rotl_zero, %rotr_zero, %rotr : index, index, index
 }
 // ----
 func.def @rotate_identities_without_target_direction_change(%x: index) -> (index, index, index) {
-  %eight = index.constant 8 : index
-  %rotr = index.rotri %x, %eight : index
+  %c8 = index.constant 8 : index
+  %rotr = index.rotri %x, %c8 : index
   func.return %x, %x, %rotr : index, index, index
 }
 
@@ -1414,25 +1414,25 @@ func.def @select_identities(%x: index, %y: index) -> (index, index) {
 test.target<quirky> @target32
 test.target<low_core> @target64
 func.def target(@target32) @target_width_32(%x: index) -> (index, index, index, index) {
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %eight = index.constant 8 : index
-  %count = index.ctlzi %one : index
-  %rotate = index.rotri %x, %eight : index
-  %multiply = index.mul %x, %eight : index
-  %inner_shift = index.shli %x, %one : index
-  %outer_shift = index.shli %inner_shift, %two : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %count = index.ctlzi %c1 : index
+  %rotate = index.rotri %x, %c8 : index
+  %multiply = index.mul %x, %c8 : index
+  %inner_shift = index.shli %x, %c1 : index
+  %outer_shift = index.shli %inner_shift, %c2 : index
   func.return %count, %rotate, %multiply, %outer_shift : index, index, index, index
 }
 func.def target(@target64) @target_width_64(%x: index) -> (index, index, index, index) {
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %eight = index.constant 8 : index
-  %count = index.ctlzi %one : index
-  %rotate = index.rotri %x, %eight : index
-  %multiply = index.mul %x, %eight : index
-  %inner_shift = index.shli %x, %one : index
-  %outer_shift = index.shli %inner_shift, %two : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %count = index.ctlzi %c1 : index
+  %rotate = index.rotri %x, %c8 : index
+  %multiply = index.mul %x, %c8 : index
+  %inner_shift = index.shli %x, %c1 : index
+  %outer_shift = index.shli %inner_shift, %c2 : index
   func.return %count, %rotate, %multiply, %outer_shift : index, index, index, index
 }
 
@@ -1475,13 +1475,13 @@ test.target<low_core> @target64
 func.def target(@target32) @target_carrier_range_proofs_32(%x: index, %y: index) -> (i1, i1, index, index, index, i64, i64) {
   %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
   %low = index.assume %y [range(%y, 0, 15)] : index
-  %eight = index.constant 8 : index
-  %one = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %c1 = index.constant 1 : index
   %comparison = index.cmp slt, %high, %low : index
   %unsigned_comparison = index.cmp ugt, %high, %low : index
   %minimum = index.min %high, %low : index
-  %quotient = index.div %high, %eight : index
-  %shifted = index.shrsi %high, %one : index
+  %quotient = index.div %high, %c8 : index
+  %shifted = index.shrsi %high, %c1 : index
   %minimum_lo = test.fact_range_lo %minimum : index -> i64
   %minimum_hi = test.fact_range_hi %minimum : index -> i64
   func.return %comparison, %unsigned_comparison, %minimum, %quotient, %shifted, %minimum_lo, %minimum_hi : i1, i1, index, index, index, i64, i64
@@ -1489,13 +1489,13 @@ func.def target(@target32) @target_carrier_range_proofs_32(%x: index, %y: index)
 func.def target(@target64) @target_carrier_range_proofs_64(%x: index, %y: index) -> (i1, i1, index, index, index, i64, i64) {
   %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
   %low = index.assume %y [range(%y, 0, 15)] : index
-  %eight = index.constant 8 : index
-  %one = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %c1 = index.constant 1 : index
   %comparison = index.cmp slt, %high, %low : index
   %unsigned_comparison = index.cmp ugt, %high, %low : index
   %minimum = index.min %high, %low : index
-  %quotient = index.div %high, %eight : index
-  %shifted = index.shrsi %high, %one : index
+  %quotient = index.div %high, %c8 : index
+  %shifted = index.shrsi %high, %c1 : index
   %minimum_lo = test.fact_range_lo %minimum : index -> i64
   %minimum_hi = test.fact_range_hi %minimum : index -> i64
   func.return %comparison, %unsigned_comparison, %minimum, %quotient, %shifted, %minimum_lo, %minimum_hi : i1, i1, index, index, index, i64, i64
@@ -1509,13 +1509,13 @@ test.target<low_core> @target64
 func.def target(@target32) @target_carrier_range_proofs_32(%x: index, %y: index) -> (i1, i1, index, index, index, i64, i64) {
   %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
   %low = index.assume %y [range(%y, 0, 15)] : index
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %comparison = index.cmp slt, %high, %low : index
   %unsigned_comparison = scalar.constant true : i1
   %minimum = index.min %high, %low : index
   %42 = index.constant 3 : index
   %quotient = index.shrui %high, %42 : index
-  %shifted = index.shrsi %high, %one : index
+  %shifted = index.shrsi %high, %c1 : index
   %minimum_lo = scalar.constant -2147483648 : i64
   %minimum_hi = scalar.constant 2147483647 : i64
   func.return %comparison, %unsigned_comparison, %minimum, %quotient, %shifted, %minimum_lo, %minimum_hi : i1, i1, index, index, index, i64, i64
@@ -1524,12 +1524,12 @@ func.def target(@target32) @target_carrier_range_proofs_32(%x: index, %y: index)
 func.def target(@target64) @target_carrier_range_proofs_64(%x: index, %y: index) -> (i1, i1, index, index, index, i64, i64) {
   %high = index.assume %x [range(%x, 2147483648, 2147483663)] : index
   %low = index.assume %y [range(%y, 0, 15)] : index
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %comparison = scalar.constant false : i1
   %unsigned_comparison = scalar.constant true : i1
   %48 = index.constant 3 : index
   %quotient = index.shrui %high, %48 : index
-  %shifted = index.shrui %high, %one : index
+  %shifted = index.shrui %high, %c1 : index
   %minimum_lo = scalar.constant 0 : i64
   %minimum_hi = scalar.constant 15 : i64
   func.return %comparison, %unsigned_comparison, %low, %quotient, %shifted, %minimum_lo, %minimum_hi : i1, i1, index, index, index, i64, i64
@@ -1544,30 +1544,30 @@ func.def target(@target64) @target_carrier_range_proofs_64(%x: index, %y: index)
 test.target<quirky> @target32
 test.target<low_core> @target64
 func.def target(@target32) @target_carrier_equality_32() -> (i1) {
-  %negative_one = index.constant -1 : index
+  %cn1 = index.constant -1 : index
   %unsigned_max = index.constant 4294967295 : index
-  %comparison = index.cmp eq, %negative_one, %unsigned_max : index
+  %comparison = index.cmp eq, %cn1, %unsigned_max : index
   func.return %comparison : i1
 }
 func.def target(@target64) @target_carrier_equality_64() -> (i1) {
-  %negative_one = index.constant -1 : index
+  %cn1 = index.constant -1 : index
   %unsigned_max = index.constant 4294967295 : index
-  %comparison = index.cmp eq, %negative_one, %unsigned_max : index
+  %comparison = index.cmp eq, %cn1, %unsigned_max : index
   func.return %comparison : i1
 }
 func.def target(@target32) @target_carrier_symbolic_compare_32(%x: index) -> (i1) {
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %lhs = index.add %x, %one : index
-  %rhs = index.add %x, %two : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %lhs = index.add %x, %c1 : index
+  %rhs = index.add %x, %c2 : index
   %comparison = index.cmp slt, %lhs, %rhs : index
   func.return %comparison : i1
 }
 func.def target(@target64) @target_carrier_symbolic_compare_64(%x: index) -> (i1) {
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %lhs = index.add %x, %one : index
-  %rhs = index.add %x, %two : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %lhs = index.add %x, %c1 : index
+  %rhs = index.add %x, %c2 : index
   %comparison = index.cmp slt, %lhs, %rhs : index
   func.return %comparison : i1
 }
@@ -1578,9 +1578,9 @@ test.target<quirky> @target32
 test.target<low_core> @target64
 
 func.def target(@target32) @target_carrier_equality_32() -> (i1) {
-  %negative_one = index.constant -1 : index
+  %cn1 = index.constant -1 : index
   %unsigned_max = index.constant 4294967295 : index
-  %comparison = index.cmp eq, %negative_one, %unsigned_max : index
+  %comparison = index.cmp eq, %cn1, %unsigned_max : index
   func.return %comparison : i1
 }
 
@@ -1590,10 +1590,10 @@ func.def target(@target64) @target_carrier_equality_64() -> (i1) {
 }
 
 func.def target(@target32) @target_carrier_symbolic_compare_32(%x: index) -> (i1) {
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %lhs = index.add %x, %one : index
-  %rhs = index.add %x, %two : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %lhs = index.add %x, %c1 : index
+  %rhs = index.add %x, %c2 : index
   %comparison = index.cmp slt, %lhs, %rhs : index
   func.return %comparison : i1
 }

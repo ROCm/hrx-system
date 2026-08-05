@@ -190,8 +190,8 @@ amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @sanitizer_explicit_gfx11_strided_access_write(%output: buffer) {
   %base = index.constant 0 : offset
-  %sixty_four = index.constant 64 : index
-  %layout = encoding.layout.strided [1, %sixty_four] : encoding<layout>
+  %row_stride = index.constant 64 : index
+  %layout = encoding.layout.strided [1, %row_stride] : encoding<layout>
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_view = buffer.view %output_global[%base] : buffer -> view<64x64xf32, %layout>
   sanitizer.assert.access<write> %output_view[0, 0] {static_extents = [2, 1]} : view<64x64xf32, %layout>
@@ -796,9 +796,9 @@ low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @sanitizer_expli
 amdgpu.target<gfx11-generic> @target
 
 kernel.def target(@target) @sanitizer_dynamic_byte_stride_read() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer) {
   %base = index.constant 0 : offset
   %lane0 = kernel.workitem.id<x> : index

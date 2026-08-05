@@ -23,16 +23,16 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @f16_mfma_gfx950
 
 amdgpu.target<gfx950> @target
 func.def target(@target) @f16_mfma_gfx950_four_loop_carried_accumulators(%lhs_data: vector<8xf16>, %rhs_data: vector<8xf16>, %init_data: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
+  %k_tile_begin = index.constant 0 : index
+  %k_tile_step = index.constant 1 : index
+  %k_tile_end = index.constant 2 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<8xf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<8xf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<4xf32>
-  %result0, %result1, %result2, %result3 = scf.for %k_tile = [%zero to %two step %one](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+  %result0, %result1, %result2, %result3 = scf.for %k_tile = [%k_tile_begin to %k_tile_end step %k_tile_step](%acc0 = %init, %acc1 = %init, %acc2 = %init, %acc3 = %init : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
     %next0 = vector.mma %lhs, %rhs, %acc0 : vector<8xf16>, vector<8xf16>, vector<4xf32>
     %next1 = vector.mma %lhs, %rhs, %acc1 : vector<8xf16>, vector<8xf16>, vector<4xf32>
     %next2 = vector.mma %lhs, %rhs, %acc2 : vector<8xf16>, vector<8xf16>, vector<4xf32>
@@ -44,12 +44,12 @@ func.def target(@target) @f16_mfma_gfx950_four_loop_carried_accumulators(%lhs_da
 
 // ----
 low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @f16_mfma_gfx950_four_loop_carried_accumulators(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
-  %zero = s_mov_b32 0
-  %one = s_mov_b32 1
-  %two = s_mov_b32 2
-  low.br ^_bb1(%zero: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x4>)
+  %k_tile_begin = s_mov_b32 0
+  %k_tile_step = s_mov_b32 1
+  %k_tile_end = s_mov_b32 2
+  low.br ^_bb1(%k_tile_begin: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x4>, %init: reg<amdgpu.vgpr x4>)
 ^_bb1(%k_tile: reg<amdgpu.sgpr>, %acc0: reg<amdgpu.vgpr x4>, %acc1: reg<amdgpu.vgpr x4>, %acc2: reg<amdgpu.vgpr x4>, %acc3: reg<amdgpu.vgpr x4>):
-  %56 = s_cmp_lt_i32 %k_tile, %two
+  %56 = s_cmp_lt_i32 %k_tile, %k_tile_end
   low.cond_br %56, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
   %57 = copy %acc0 : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
@@ -60,7 +60,7 @@ low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @f16_mfma_gfx950
   %next2 = v_mfma_f32_16x16x32_f16 %lhs, %rhs, %61
   %63 = copy %acc3 : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
   %next3 = v_mfma_f32_16x16x32_f16 %lhs, %rhs, %63
-  %65 = s_add_u32 %k_tile, %one
+  %65 = s_add_u32 %k_tile, %k_tile_step
   low.br ^_bb1(%65: reg<amdgpu.sgpr>, %next0: reg<amdgpu.vgpr x4>, %next1: reg<amdgpu.vgpr x4>, %next2: reg<amdgpu.vgpr x4>, %next3: reg<amdgpu.vgpr x4>)
 ^_bb3:
   return %acc0, %acc1, %acc2, %acc3
