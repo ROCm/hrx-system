@@ -383,23 +383,6 @@ kernel.def target(@target) @lds_i8x8_strided_load_rejected() {
 
 amdgpu.target<gfx11-generic> @target
 
-kernel.def target(@target) @cache_policy_non_temporal_load_rejected() {
-  %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
-} launch(%input: buffer) {
-  %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
-  // REMARK@+2: BACKEND/040 "rejected cache policy 'device/non_temporal'" "decision 'memory_cache_policy.descriptor_encoding'" "encoding 'gfx9_11_glc_slc_dlc'"
-  // ERROR@+1: AMDGPU/024 {constraint_key="memory_cache_policy.descriptor_encoding", memory_space="global", cache_scope="device", cache_temporal="non_temporal", descriptor_set_key="amdgpu.gfx11.generic.core"}
-  %loaded = vector.load %input_view[%tid, 0] {cache_scope = device, cache_temporal = non_temporal} : view<64x4xi32, #dense> -> vector<4xi32>
-  kernel.return
-}
-
-// ====
-
-amdgpu.target<gfx11-generic> @target
-
 kernel.def target(@target) @cache_policy_workgroup_store_rejected() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index

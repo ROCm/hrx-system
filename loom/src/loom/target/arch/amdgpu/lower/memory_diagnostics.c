@@ -505,23 +505,28 @@ iree_status_t loom_amdgpu_record_memory_cache_policy_diagnostic(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_t* access,
-    loom_low_source_memory_operation_kind_t kind) {
+    loom_amdgpu_memory_cache_policy_resolution_t resolution,
+    const loom_amdgpu_memory_cache_policy_attrs_t* cache_attrs) {
   if (!iree_any_bit_set(loom_target_low_legality_diagnostic_flags(context),
                         LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_MEMORY_ACCESS) ||
-      !loom_amdgpu_memory_cache_policy_is_present(
-          &access->source.cache_policy)) {
+      resolution == LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_ABSENT) {
     return iree_ok_status();
   }
 
-  loom_amdgpu_memory_cache_policy_attrs_t cache_attrs = {0};
-  if (!loom_amdgpu_memory_cache_policy_encode(descriptor_set, access,
-                                              &cache_attrs)) {
-    return iree_ok_status();
+  IREE_ASSERT_NE(resolution,
+                 LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_REJECTED);
+  const loom_low_source_memory_operation_kind_t kind =
+      access->source.operation_kind;
+  if (resolution == LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_DROPPED) {
+    return loom_amdgpu_record_memory_cache_policy(
+        context, op, descriptor_set, access, kind,
+        IREE_SV("memory_cache_policy.unsupported"), IREE_SV("dropped"),
+        /*cache_attrs=*/NULL);
   }
   return loom_amdgpu_record_memory_cache_policy(
       context, op, descriptor_set, access, kind,
       loom_amdgpu_memory_cache_policy_selected_key(descriptor_set),
-      IREE_SV("selected"), &cache_attrs);
+      IREE_SV("selected"), cache_attrs);
 }
 
 iree_status_t loom_amdgpu_record_memory_cache_policy_rejection_diagnostic(

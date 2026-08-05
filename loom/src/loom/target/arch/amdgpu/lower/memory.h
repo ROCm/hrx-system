@@ -138,6 +138,18 @@ typedef struct loom_amdgpu_memory_cache_policy_attrs_t {
   int64_t nt;
 } loom_amdgpu_memory_cache_policy_attrs_t;
 
+// Result of resolving an advisory source cache policy for a descriptor set.
+typedef enum loom_amdgpu_memory_cache_policy_resolution_e {
+  // The source memory operation has no cache policy.
+  LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_ABSENT = 0,
+  // The selected descriptor set can encode the source cache policy.
+  LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_ENCODED = 1,
+  // The policy is valid but unsupported and must be omitted from the packet.
+  LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_DROPPED = 2,
+  // The policy is invalid for the selected memory access or descriptor set.
+  LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_REJECTED = 3,
+} loom_amdgpu_memory_cache_policy_resolution_t;
+
 // Reads common offset-immediate limits from a descriptor.
 bool loom_amdgpu_descriptor_offset_immediate_info(
     const loom_low_descriptor_set_t* descriptor_set,
@@ -279,8 +291,8 @@ loom_amdgpu_memory_cache_policy_descriptor_encoding(
 iree_string_view_t loom_amdgpu_memory_cache_policy_selected_key(
     const loom_low_descriptor_set_t* descriptor_set);
 
-// Returns true when the selected descriptor set can encode the cache policy on
-// the memory access plan.
+// Returns true when the cache policy can be encoded or safely omitted for the
+// selected descriptor set and memory access plan.
 bool loom_amdgpu_memory_cache_policy_can_lower(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_t* access);
@@ -316,9 +328,10 @@ iree_string_view_t loom_amdgpu_cache_scope_name(uint8_t scope);
 // Returns the stable diagnostic name for a cache temporal policy.
 iree_string_view_t loom_amdgpu_cache_temporal_name(uint8_t temporal);
 
-// Encodes the target-specific cache-policy attributes for a selected memory
-// access plan. Missing source cache policy encodes as an empty attrs struct.
-bool loom_amdgpu_memory_cache_policy_encode(
+// Resolves target-specific cache-policy attributes for a selected memory
+// access plan. Absent and dropped policies produce an empty attrs struct.
+loom_amdgpu_memory_cache_policy_resolution_t
+loom_amdgpu_memory_cache_policy_resolve(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_t* access,
     loom_amdgpu_memory_cache_policy_attrs_t* out_attrs);
@@ -361,7 +374,8 @@ iree_status_t loom_amdgpu_record_memory_cache_policy_diagnostic(
     loom_target_low_legality_context_t* context, const loom_op_t* op,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_memory_access_t* access,
-    loom_low_source_memory_operation_kind_t kind);
+    loom_amdgpu_memory_cache_policy_resolution_t resolution,
+    const loom_amdgpu_memory_cache_policy_attrs_t* cache_attrs);
 
 // Records optional cache-policy diagnostics for a rejected memory access plan.
 iree_status_t loom_amdgpu_record_memory_cache_policy_rejection_diagnostic(

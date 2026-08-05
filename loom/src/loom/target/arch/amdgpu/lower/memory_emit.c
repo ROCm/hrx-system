@@ -1787,9 +1787,14 @@ static iree_status_t loom_amdgpu_append_memory_cache_attrs(
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);
   loom_amdgpu_memory_cache_policy_attrs_t cache_attrs = {0};
-  const bool encoded = loom_amdgpu_memory_cache_policy_encode(
-      descriptor_set, access, &cache_attrs);
-  IREE_ASSERT(encoded);
+  const loom_amdgpu_memory_cache_policy_resolution_t resolution =
+      loom_amdgpu_memory_cache_policy_resolve(descriptor_set, access,
+                                              &cache_attrs);
+  IREE_ASSERT_NE(resolution,
+                 LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_REJECTED);
+  if (resolution != LOOM_AMDGPU_MEMORY_CACHE_POLICY_RESOLUTION_ENCODED) {
+    return iree_ok_status();
+  }
 
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(kLoomAmdgpuMemoryCacheAttrFields); ++i) {

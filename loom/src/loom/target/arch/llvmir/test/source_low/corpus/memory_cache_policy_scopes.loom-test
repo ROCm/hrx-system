@@ -27,3 +27,32 @@ low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) wor
   store.indexed.v4i32 %loaded, %output_view, %lane, 0, 16 {cache_scope = 2, cache_temporal = 8}
   return
 }
+
+// ====
+
+llvmir.target<object> @target {
+  triple = "amdgcn-amd-amdhsa"
+}
+kernel.def target(@target) @cache_system_bypass_scalar_load() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %zero = index.constant 0 : offset
+  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %loaded = view.load %input_view[%lane] {cache_scope = system, cache_temporal = bypass} : view<64xi32, #dense> -> i32
+  view.store %loaded, %output_view[%lane] : i32, view<64xi32, #dense>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<llvmir.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @cache_system_bypass_scalar_load() asm {
+  %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<llvmir.ptr>
+  %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<llvmir.ptr>
+  %lane = kernel.workitem_id.x
+  %loaded = load.indexed.i32 %input_view, %lane, 0, 4 {cache_scope = 3, cache_temporal = 9}
+  store.indexed.i32 %loaded, %output_view, %lane, 0, 4
+  return
+}
