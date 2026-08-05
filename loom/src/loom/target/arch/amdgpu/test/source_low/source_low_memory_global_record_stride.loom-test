@@ -9,8 +9,8 @@ kernel.def target(@target) @global_vector_record_non_power_two_stride() {
 } launch(%input: buffer, %output: buffer) {
   %expert = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
-  %sixteen = index.constant 16 : index
-  %channel = index.mul %lane, %sixteen : index
+  %channel_stride = index.constant 16 : index
+  %channel = index.mul %lane, %channel_stride : index
   %base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
   %input_noalias = buffer.assume.noalias %input_global : buffer

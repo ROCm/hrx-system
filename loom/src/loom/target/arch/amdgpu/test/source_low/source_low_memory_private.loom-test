@@ -7,12 +7,12 @@ kernel.def target(@target) @private_f32_dynamic_roundtrip() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %bytes = index.constant 256 : offset
   %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = private} : buffer
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
-  %scratch_view = buffer.view %scratch[%zero] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32, #dense>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32, #dense>
   %loaded = vector.load %input_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
   vector.store %loaded, %scratch_view[%lane] : vector<1xf32>, view<64xf32, #dense>
   %roundtrip = vector.load %scratch_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
@@ -43,23 +43,23 @@ kernel.def target(@target) @private_root_static_offsets() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %one = index.constant 1 : index
+  %buffer_base = index.constant 0 : offset
+  %second_index_offset = index.constant 1 : index
   %first_bytes = index.constant 8 : offset
   %first = buffer.alloca %first_bytes {base_alignment = 4, memory_space = private} : buffer
   %second_bytes = index.constant 16 : offset
   %second = buffer.alloca %second_bytes {base_alignment = 8, memory_space = private} : buffer
-  %first_view = buffer.view %first[%zero] : buffer -> view<2xi32, #dense>
-  %second_view = buffer.view %second[%zero] : buffer -> view<4xi32, #dense>
-  %input_view = buffer.view %input[%zero] : buffer -> view<2xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<4xi32, #dense>
+  %first_view = buffer.view %first[%buffer_base] : buffer -> view<2xi32, #dense>
+  %second_view = buffer.view %second[%buffer_base] : buffer -> view<4xi32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<2xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<4xi32, #dense>
   %lhs = view.load %input_view[0] : view<2xi32, #dense> -> i32
   view.store %lhs, %first_view[0] : i32, view<2xi32, #dense>
   %rhs = view.load %input_view[1] : view<2xi32, #dense> -> i32
   view.store %rhs, %first_view[1] : i32, view<2xi32, #dense>
   view.store %lhs, %second_view[1] : i32, view<4xi32, #dense>
   view.store %rhs, %second_view[2] : i32, view<4xi32, #dense>
-  %second_index = index.add %lane, %one : index
+  %second_index = index.add %lane, %second_index_offset : index
   %first_loaded = view.load %first_view[%lane] : view<2xi32, #dense> -> i32
   %second_loaded = view.load %second_view[%second_index] : view<4xi32, #dense> -> i32
   view.store %first_loaded, %output_view[%lane] : i32, view<4xi32, #dense>
@@ -98,12 +98,12 @@ kernel.def target(@target) @private_f16_static_and_dynamic_roundtrip() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero_offset = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %bytes = index.constant 4 : offset
   %scratch = buffer.alloca %bytes {base_alignment = 2, memory_space = private} : buffer
-  %input_view = buffer.view %input[%zero_offset] : buffer -> view<2xf16, #dense>
-  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<2xf16, #dense>
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<2xf16, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<2xf16, #dense>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<2xf16, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xf16, #dense>
   %static_value = view.load %input_view[0] : view<2xf16, #dense> -> f16
   view.store %static_value, %scratch_view[0] : f16, view<2xf16, #dense>
   %dynamic_value = view.load %input_view[%lane] : view<2xf16, #dense> -> f16
@@ -145,12 +145,12 @@ kernel.def target(@target) @private_bf16_static_and_dynamic_roundtrip() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero_offset = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %bytes = index.constant 4 : offset
   %scratch = buffer.alloca %bytes {base_alignment = 2, memory_space = private} : buffer
-  %input_view = buffer.view %input[%zero_offset] : buffer -> view<2xbf16, #dense>
-  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<2xbf16, #dense>
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<2xbf16, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<2xbf16, #dense>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<2xbf16, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xbf16, #dense>
   %static_value = view.load %input_view[0] : view<2xbf16, #dense> -> bf16
   view.store %static_value, %scratch_view[0] : bf16, view<2xbf16, #dense>
   %dynamic_value = view.load %input_view[%lane] : view<2xbf16, #dense> -> bf16
@@ -192,12 +192,12 @@ kernel.def target(@target) @private_i8_static_and_dynamic_roundtrip() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero_offset = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %bytes = index.constant 2 : offset
   %scratch = buffer.alloca %bytes {base_alignment = 1, memory_space = private} : buffer
-  %input_view = buffer.view %input[%zero_offset] : buffer -> view<2xi8, #dense>
-  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<2xi8, #dense>
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<2xi8, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<2xi8, #dense>
+  %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<2xi8, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<2xi8, #dense>
   %static_value = view.load %input_view[0] : view<2xi8, #dense> -> i8
   view.store %static_value, %scratch_view[0] : i8, view<2xi8, #dense>
   %dynamic_value = view.load %input_view[%lane] : view<2xi8, #dense> -> i8
