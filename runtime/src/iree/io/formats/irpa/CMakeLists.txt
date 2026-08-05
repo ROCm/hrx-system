@@ -35,6 +35,7 @@ iree_cc_test(
   DEPS
     ::irpa
     iree::io::formats::irpa::testdata::irpa_files
+    iree::schemas::parameter_archive
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

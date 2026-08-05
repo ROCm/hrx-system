@@ -39,6 +39,7 @@ iree_runtime_cc_test(
     deps = [
         ":irpa",
         "//runtime/src/iree/io/formats/irpa/testdata:irpa_files",
+        "//runtime/src/iree/schemas:parameter_archive",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
