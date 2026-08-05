@@ -13,7 +13,7 @@ kernel.def @split_kv_online_softmax_combine_f32() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%state0: buffer, %acc0: buffer, %state1: buffer, %acc1: buffer, %combined_state: buffer, %combined_acc: buffer) {
   %base = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
+  %max_state_index = index.constant 0 : index
 
   %state0_noalias, %acc0_noalias, %state1_noalias, %acc1_noalias, %combined_state_noalias, %combined_acc_noalias = buffer.assume.noalias %state0, %acc0, %state1, %acc1, %combined_state, %combined_acc : buffer, buffer, buffer, buffer, buffer, buffer
   %state0_view = buffer.view %state0_noalias[%base] : buffer -> view<2xf32, #dense>
@@ -45,7 +45,7 @@ kernel.def @split_kv_online_softmax_combine_f32() {
   %scaled_acc1 = vector.mulf<reassoc|nnan|nsz|contract> %acc1_values, %scale1_vector : vector<4xf32>
   %combined_acc_values = vector.addf<reassoc|nnan|nsz|contract> %scaled_acc0, %scaled_acc1 : vector<4xf32>
 
-  view.store %combined_max, %combined_state_view[%zero_index] : f32, view<2xf32, #dense>
+  view.store %combined_max, %combined_state_view[%max_state_index] : f32, view<2xf32, #dense>
   view.store %combined_sum, %combined_state_view[1] : f32, view<2xf32, #dense>
   vector.store %combined_acc_values, %combined_acc_view[0] : vector<4xf32>, view<4xf32, #dense>
   kernel.return

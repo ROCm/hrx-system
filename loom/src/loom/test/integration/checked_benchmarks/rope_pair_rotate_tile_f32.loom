@@ -11,7 +11,7 @@ kernel.def @rope_pair_rotate_tile_f32() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%even: buffer, %odd: buffer, %angles: buffer, %rotated_even: buffer, %rotated_odd: buffer) {
   %base = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
+  %tile_origin = index.constant 0 : index
 
   %even_noalias, %odd_noalias, %angles_noalias, %rotated_even_noalias, %rotated_odd_noalias = buffer.assume.noalias %even, %odd, %angles, %rotated_even, %rotated_odd : buffer, buffer, buffer, buffer, buffer
   %even_view = buffer.view %even_noalias[%base] : buffer -> view<4xf32, #dense>
@@ -33,8 +33,8 @@ kernel.def @rope_pair_rotate_tile_f32() {
   %odd_cos = vector.mulf<reassoc|nnan|nsz|contract> %odd_values, %cosine : vector<4xf32>
   %new_odd = vector.addf<reassoc|nnan|nsz|contract> %even_sin, %odd_cos : vector<4xf32>
 
-  vector.store %new_even, %rotated_even_view[%zero_index] : vector<4xf32>, view<4xf32, #dense>
-  vector.store %new_odd, %rotated_odd_view[%zero_index] : vector<4xf32>, view<4xf32, #dense>
+  vector.store %new_even, %rotated_even_view[%tile_origin] : vector<4xf32>, view<4xf32, #dense>
+  vector.store %new_odd, %rotated_odd_view[%tile_origin] : vector<4xf32>, view<4xf32, #dense>
   kernel.return
 }
 

@@ -13,13 +13,13 @@ kernel.def target(@gfx1100_wave64) @fragment_result_dynamic_strided_f16acc_f32_s
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%out_buffer: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %sixteen = index.constant 16 : index
-  %sixty_four = index.constant 64 : index
+  %tile_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
+  %column_stride = index.constant 64 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %layout = encoding.layout.strided [1, %sixty_four] : encoding<layout>
+  %layout = encoding.layout.strided [1, %column_stride] : encoding<layout>
 
   %out_global = buffer.assume.memory_space<global> %out_buffer : buffer
   %out_aligned = buffer.assume.alignment %out_global {minimum_alignment = 16} : buffer
@@ -44,10 +44,10 @@ kernel.def target(@gfx1100_wave64) @fragment_result_dynamic_strided_f16acc_f32_s
   %result2 = vector.mma %lhs, %rhs, %init2 : vector<16xf16>, vector<16xf16>, vector<8xf16>
   %result3 = vector.mma %lhs, %rhs, %init3 : vector<16xf16>, vector<16xf16>, vector<8xf16>
 
-  vector.fragment.store<result> %result0, %out_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
-  vector.fragment.store<result> %result1, %out_view[%zero, %sixteen] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
-  vector.fragment.store<result> %result2, %out_view[%sixteen, %zero] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
-  vector.fragment.store<result> %result3, %out_view[%sixteen, %sixteen] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
+  vector.fragment.store<result> %result0, %out_view[%tile_origin, %tile_origin] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
+  vector.fragment.store<result> %result1, %out_view[%tile_origin, %tile_extent] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
+  vector.fragment.store<result> %result2, %out_view[%tile_extent, %tile_origin] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
+  vector.fragment.store<result> %result3, %out_view[%tile_extent, %tile_extent] shape [%m, %n] : vector<8xf16>, view<64x64xf32, %layout>
   kernel.return
 }
 
@@ -60,22 +60,22 @@ kernel.def @fill_fragment_result_dynamic_strided_f16acc_f32_store_expected() {
   %base = index.constant 0 : offset
   %wg = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %sixteen = index.constant 16 : index
-  %sixty_four = index.constant 64 : index
+  %tile_value_bias = index.constant 1 : index
+  %tile_grid_width = index.constant 2 : index
+  %tile_extent = index.constant 16 : index
+  %column_stride = index.constant 64 : index
 
-  %tile_row = index.div %wg, %two : index
-  %tile_column = index.rem %wg, %two : index
-  %row_origin = index.mul %tile_row, %sixteen : index
-  %column_origin = index.mul %tile_column, %sixteen : index
-  %local_row = index.rem %lane, %sixteen : index
-  %local_column = index.div %lane, %sixteen : index
+  %tile_row = index.div %wg, %tile_grid_width : index
+  %tile_column = index.rem %wg, %tile_grid_width : index
+  %row_origin = index.mul %tile_row, %tile_extent : index
+  %column_origin = index.mul %tile_column, %tile_extent : index
+  %local_row = index.rem %lane, %tile_extent : index
+  %local_column = index.div %lane, %tile_extent : index
   %row = index.add %row_origin, %local_row : index
   %column = index.add %column_origin, %local_column : index
-  %element_index = index.madd %column, %sixty_four, %row : index
+  %element_index = index.madd %column, %column_stride, %row : index
 
-  %tile_value_index = index.add %wg, %one : index
+  %tile_value_index = index.add %wg, %tile_value_bias : index
   %tile_value_i32 = index.cast %tile_value_index : index to i32
   %tile_value = scalar.uitofp %tile_value_i32 : i32 to f32
 

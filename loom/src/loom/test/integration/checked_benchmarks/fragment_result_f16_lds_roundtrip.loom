@@ -11,11 +11,12 @@ kernel.def target(@gfx1100_wave64) @fragment_result_f16_lds_roundtrip() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%direct_buffer: buffer, %roundtrip_buffer: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %four = index.constant 4 : index
-  %sixteen = index.constant 16 : index
-  %sixty_four = index.constant 64 : index
+  %fragment_origin = index.constant 0 : index
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %lane_segment_count = index.constant 4 : index
+  %tile_extent = index.constant 16 : index
+  %wave_size = index.constant 64 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
@@ -26,20 +27,20 @@ kernel.def target(@gfx1100_wave64) @fragment_result_f16_lds_roundtrip() {
   %lane_i32 = index.cast %lane : index to i32
   %lane_f32 = scalar.uitofp %lane_i32 : i32 to f32
   %lane_f16 = scalar.fptrunc %lane_f32 : f32 to f16
-  %one_f32 = scalar.constant 1.0 : f32
-  %two_f32 = scalar.constant 2.0 : f32
-  %three_f32 = scalar.constant 3.0 : f32
-  %four_f32 = scalar.constant 4.0 : f32
-  %five_f32 = scalar.constant 5.0 : f32
-  %six_f32 = scalar.constant 6.0 : f32
-  %seven_f32 = scalar.constant 7.0 : f32
-  %lane_plus1_f32 = scalar.addf %lane_f32, %one_f32 : f32
-  %lane_plus2_f32 = scalar.addf %lane_f32, %two_f32 : f32
-  %lane_plus3_f32 = scalar.addf %lane_f32, %three_f32 : f32
-  %lane_plus4_f32 = scalar.addf %lane_f32, %four_f32 : f32
-  %lane_plus5_f32 = scalar.addf %lane_f32, %five_f32 : f32
-  %lane_plus6_f32 = scalar.addf %lane_f32, %six_f32 : f32
-  %lane_plus7_f32 = scalar.addf %lane_f32, %seven_f32 : f32
+  %lane_value_offset1 = scalar.constant 1.0 : f32
+  %lane_value_offset2 = scalar.constant 2.0 : f32
+  %lane_value_offset3 = scalar.constant 3.0 : f32
+  %lane_value_offset4 = scalar.constant 4.0 : f32
+  %lane_value_offset5 = scalar.constant 5.0 : f32
+  %lane_value_offset6 = scalar.constant 6.0 : f32
+  %lane_value_offset7 = scalar.constant 7.0 : f32
+  %lane_plus1_f32 = scalar.addf %lane_f32, %lane_value_offset1 : f32
+  %lane_plus2_f32 = scalar.addf %lane_f32, %lane_value_offset2 : f32
+  %lane_plus3_f32 = scalar.addf %lane_f32, %lane_value_offset3 : f32
+  %lane_plus4_f32 = scalar.addf %lane_f32, %lane_value_offset4 : f32
+  %lane_plus5_f32 = scalar.addf %lane_f32, %lane_value_offset5 : f32
+  %lane_plus6_f32 = scalar.addf %lane_f32, %lane_value_offset6 : f32
+  %lane_plus7_f32 = scalar.addf %lane_f32, %lane_value_offset7 : f32
   %lane_plus1_f16 = scalar.fptrunc %lane_plus1_f32 : f32 to f16
   %lane_plus2_f16 = scalar.fptrunc %lane_plus2_f32 : f32 to f16
   %lane_plus3_f16 = scalar.fptrunc %lane_plus3_f32 : f32 to f16
@@ -59,20 +60,20 @@ kernel.def target(@gfx1100_wave64) @fragment_result_f16_lds_roundtrip() {
 
   %direct_global = buffer.assume.memory_space<global> %direct_buffer : buffer
   %direct_view = buffer.view %direct_global[%base] : buffer -> view<16x16xf32, #dense>
-  vector.fragment.store<result> %result, %direct_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %result, %direct_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<8xf16>, view<16x16xf32, #dense>
 
   %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xf16, #dense>
-  vector.fragment.store<result> %result, %scratch_view[%zero, %zero] shape [%m, %n] : vector<8xf16>, view<16x16xf16, #dense>
+  vector.fragment.store<result> %result, %scratch_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<8xf16>, view<16x16xf16, #dense>
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
 
   %roundtrip_global = buffer.assume.memory_space<global> %roundtrip_buffer : buffer
   %roundtrip_view = buffer.view %roundtrip_global[%base] : buffer -> view<256xf32, #dense>
-  scf.for %i = [%zero to %four step %one] {
-    %linear_lane = index.mul %i, %sixty_four : index
+  scf.for %i = [%loop_begin to %lane_segment_count step %loop_step] {
+    %linear_lane = index.mul %i, %wave_size : index
     %linear = index.add %linear_lane, %lane : index
-    %row = index.div %linear, %sixteen : index
-    %column = index.rem %linear, %sixteen : index
+    %row = index.div %linear, %tile_extent : index
+    %column = index.rem %linear, %tile_extent : index
     %value_f16 = view.load %scratch_view[%row, %column] : view<16x16xf16, #dense> -> f16
     %value = scalar.extf %value_f16 : f16 to f32
     view.store %value, %roundtrip_view[%linear] : f32, view<256xf32, #dense>
