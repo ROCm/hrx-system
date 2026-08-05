@@ -74,6 +74,7 @@ iree_py_test(
     "loom.verify_test"
   DEPS
     loom::py::loom::package
+    loom::py::loom::dialect::func::func
     loom::py::loom::dialect::test::test
     loom::py::loom::format::bytecode::bytecode
     loom::py::loom::format::text::text

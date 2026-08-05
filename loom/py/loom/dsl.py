@@ -234,6 +234,7 @@ __all__ = [
     "CallLikeInterface",
     "CallLikeKind",
     "FuncLikeInterface",
+    "InlinePolicy",
     "LoopLikeInterface",
     "MemoryAccessInterface",
     "MemoryAccessOperationKind",
@@ -3547,6 +3548,14 @@ class CallLikeKind(Enum):
     LOW_INTERNAL = "low_internal"
     # Explicit semantic-to-target-low invocation of an already selected low function.
     LOW_INVOKE = "low_invoke"
+
+
+class InlinePolicy(Enum):
+    """Required callable-boundary policy."""
+
+    UNSPECIFIED = 0
+    INLINE = 1
+    NOINLINE = 2
 
 
 class CallLikeInterface(NamedTuple):

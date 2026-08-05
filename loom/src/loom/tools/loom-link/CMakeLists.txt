@@ -51,6 +51,7 @@ iree_execution_test_suite(
     "loom-format=loom::tools::loom-format"
     "loom-link=::loom-link"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/archive_inline_kernel_helper.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-link/testdata/archive_many_symbols.loom"
   LABELS
     "hostonly"

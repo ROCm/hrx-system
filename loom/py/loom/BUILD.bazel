@@ -78,6 +78,7 @@ iree_py_test(
     main = "pytest_style_runner.py",
     deps = [
         ":package",
+        "//loom/py/loom/dialect/func",
         "//loom/py/loom/dialect/test",
         "//loom/py/loom/format/bytecode",
         "//loom/py/loom/format/text",
