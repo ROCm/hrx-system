@@ -643,12 +643,17 @@ source hid storage materialization inside the matrix kernel.
 %weight_view = buffer.view %weight_buffer[%base] : buffer -> view<[%input_size]x[%output_size]xf8E4M3, %weight_storage>
 ```
 
-The authoring source linter keeps this reference surface aligned with those
-rules. It rejects redundant kernel-buffer memory-space assumes, sentinel-sized
-views, late `index.cast` byte-address conversions, and ggml-style `nb*` byte
-strides typed as `index`. It also rejects English-spelled numeric constant
-names in favor of semantic roles or the `%c<literal>` convention, because
-agents copy examples before they read design notes.
+The Loom source linter applies constant naming to every checked `.loom` file
+and to authored input sections in `.loom-test` files. Runner-owned expected
+sections remain generated test output; only `loom-check --update` changes them.
+The linter rejects English-spelled numeric constant names in favor of semantic
+roles or the `%c<literal>` convention, because agents copy examples before they
+read design notes.
+
+Additional authoring-corpus rules keep this reference surface aligned with the
+boundary contract. They reject redundant kernel-buffer memory-space assumes,
+sentinel-sized views, late `index.cast` byte-address conversions, and ggml-style
+`nb*` byte strides typed as `index`.
 
 `check.case` owns correctness policy for a workload. It creates inputs, calls
 the unit under test, and states expectations. `check.benchmark<@case>` selects
