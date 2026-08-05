@@ -10,6 +10,7 @@
 #define LOOM_CODEGEN_LOW_ALLOCATION_SEARCH_H_
 
 #include "iree/base/api.h"
+#include "iree/base/bitmap.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/active_set.h"
@@ -56,6 +57,9 @@ typedef struct loom_low_allocation_search_context_t {
   loom_low_allocation_spill_plan_traffic_t* spill_traffic_by_value_ordinal;
   // Optional target residency model used for physical extent decisions.
   const struct loom_target_residency_model_t* residency_model;
+  // Borrowed bitmap indexed by module value ID. Set values require register
+  // storage throughout allocation.
+  iree_bitmap_t required_register_values;
 } loom_low_allocation_search_context_t;
 
 // Active assignment set selected for spilling before an interval is assigned.

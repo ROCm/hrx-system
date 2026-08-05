@@ -114,6 +114,11 @@ typedef struct loom_low_emission_frame_t {
 typedef struct loom_low_emission_frame_lower_spill_traffic_result_t {
   // Number of user-facing diagnostics emitted while lowering spill traffic.
   uint32_t error_count;
+  // Scratch-arena-owned value IDs that the lowered traffic requires in
+  // registers during subsequent allocation rounds.
+  const loom_value_id_t* required_register_value_ids;
+  // Number of entries in |required_register_value_ids|.
+  iree_host_size_t required_register_value_count;
 } loom_low_emission_frame_lower_spill_traffic_result_t;
 
 // Target callback that rewrites structural low.spill/low.reload traffic into

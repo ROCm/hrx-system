@@ -352,6 +352,9 @@ static iree_status_t loom_amdgpu_loom_check_lower_spill_traffic(
   IREE_RETURN_IF_ERROR(loom_amdgpu_lower_spill_traffic(
       module, low_function_op, target.descriptor_set, emitter, &result, arena));
   out_result->error_count = result.error_count;
+  out_result->required_register_value_ids = result.required_register_value_ids;
+  out_result->required_register_value_count =
+      result.required_register_value_count;
   return iree_ok_status();
 }
 

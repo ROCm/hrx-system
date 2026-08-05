@@ -88,6 +88,7 @@ loom_low_allocation_interval_assignment_search_context(
       .placement = state->context->placement,
       .active_set = &state->active,
       .storage_leases = state->context->storage_leases,
+      .required_register_values = state->context->required_register_values,
       .spill_traffic_by_value_ordinal = state->spill_traffic_by_value_ordinal,
   };
 }
@@ -980,6 +981,9 @@ iree_status_t loom_low_allocation_interval_assignment_build(
     const bool requires_register =
         loom_low_allocation_storage_lease_state_value_has_records(
             context->storage_leases, context->liveness, interval->value_id) ||
+        (interval->value_id < context->required_register_values.bit_count &&
+         iree_bitmap_test(context->required_register_values,
+                          interval->value_id)) ||
         loom_low_allocation_spill_traffic_interval_requires_register_location(
             context->module, interval);
     if (!assigned && (capacity.is_spillable || requires_register)) {
