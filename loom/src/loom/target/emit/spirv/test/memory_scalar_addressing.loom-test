@@ -79,11 +79,11 @@ func.def target(@target) @scalar_static_rank2_i32(%input: buffer, %output: buffe
 spirv.target<vulkan1_3> @target
 func.def target(@target) @scalar_dynamic_view_base_i32(%input: buffer, %output: buffer, %base: offset) -> (i32) {
   %base_aligned = index.assume %base [range(%base, 0, 4092), mul(%base, 4)] : offset
-  %zero = index.constant 0 : offset
+  %output_base = index.constant 0 : offset
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
   %input_view = buffer.view %input_aligned[%base_aligned] : buffer -> view<4xi32, #dense>
-  %output_view = buffer.view %output_aligned[%zero] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output_aligned[%output_base] : buffer -> view<1xi32, #dense>
   %loaded = view.load %input_view[2] : view<4xi32, #dense> -> i32
   view.store %loaded, %output_view[0] : i32, view<1xi32, #dense>
   func.return %loaded : i32
@@ -246,12 +246,12 @@ func.def target(@target) @scalar_materialized_view_base_suffix_i32(%input: buffe
 
 spirv.target<vulkan1_3> @target
 func.def target(@target) @scalar_dynamic_index_i32(%input: buffer, %output: buffer, %element: index) -> (i32) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %element_bounded = index.assume %element [range(%element, 0, 7)] : index
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%zero] : buffer -> view<8xi32, #dense>
-  %output_view = buffer.view %output_aligned[%zero] : buffer -> view<8xi32, #dense>
+  %input_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<8xi32, #dense>
+  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<8xi32, #dense>
   %loaded = view.load %input_view[%element_bounded] : view<8xi32, #dense> -> i32
   view.store %loaded, %output_view[%element_bounded] : i32, view<8xi32, #dense>
   func.return %loaded : i32
@@ -431,14 +431,14 @@ func.def target(@target) @scalar_mixed_rank2_i32(%input: buffer, %output: buffer
 
 spirv.target<vulkan1_3> @target
 func.def target(@target) @scalar_dynamic_stride_i32(%input: buffer, %output: buffer, %columns: index, %row: index, %column: index) -> (i32) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %columns_bounded = index.assume %columns [range(%columns, 1, 8)] : index
   %row_bounded = index.assume %row [range(%row, 0, 3)] : index
   %column_bounded = index.assume %column [range(%column, 0, 7), lt(%column, %columns_bounded)] : index
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %input_view = buffer.view %input_aligned[%zero] : buffer -> view<4x[%columns_bounded]xi32, #dense>
-  %output_view = buffer.view %output_aligned[%zero] : buffer -> view<4x[%columns_bounded]xi32, #dense>
+  %input_view = buffer.view %input_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32, #dense>
+  %output_view = buffer.view %output_aligned[%buffer_base] : buffer -> view<4x[%columns_bounded]xi32, #dense>
   %loaded = view.load %input_view[%row_bounded, %column_bounded] : view<4x[%columns_bounded]xi32, #dense> -> i32
   view.store %loaded, %output_view[%row_bounded, %column_bounded] : i32, view<4x[%columns_bounded]xi32, #dense>
   func.return %loaded : i32
