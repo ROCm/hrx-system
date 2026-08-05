@@ -16,6 +16,16 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Creates a proactor for one pool entry.
+//
+// The pool supplies its per-entry options and retains the returned proactor.
+// Implementations may select a specific backend or delegate to the platform
+// creator. Creation is lazy and occurs while the pool mutex is held.
+typedef iree_status_t(
+    IREE_API_PTR* iree_async_proactor_pool_proactor_create_fn_t)(
+    iree_async_proactor_options_t options, iree_allocator_t allocator,
+    iree_async_proactor_t** out_proactor);
+
 // Factory callbacks for creating poll runners that drive proactors.
 //
 // When a proactor is first accessed via pool_get(), the pool calls |create| to
