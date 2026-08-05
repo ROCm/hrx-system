@@ -245,38 +245,31 @@ kernel.def target(@qwen3_moe_batched_decode_dispatch_gfx11_wave32) @qwen3_moe_bu
     %is_schedule1 = scalar.andi %above_schedule0, %at_most_schedule1 : i1
     %is_schedule2 = scalar.andi %above_schedule1, %at_most_schedule2 : i1
     %is_schedule3 = index.cmp ugt, %expert_row_count, %schedule2_row_limit : index
-    scf.if %is_schedule0 {
-      %queue_ordinal0 = index.cast %schedule0_count : i32 to index
-      %queue_ordinal, %queue_capacity = index.assume %queue_ordinal0, %configured_expert_count [range(%queue_ordinal0, 0, 511), lt(%queue_ordinal0, %configured_expert_count)] : index, index
-      view.store %expert_i32, %queue_descriptor_view[0, %queue_ordinal, 0] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-      view.store %assignment_base, %queue_descriptor_view[0, %queue_ordinal, 1] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-      view.store %expert_assignment_count, %queue_descriptor_view[0, %queue_ordinal, 2] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-      view.store %zero_i32, %queue_descriptor_view[0, %queue_ordinal, 3] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-    }
-    scf.if %is_schedule1 {
-      %queue_ordinal0 = index.cast %schedule1_count : i32 to index
-      %queue_ordinal, %queue_capacity = index.assume %queue_ordinal0, %configured_expert_count [range(%queue_ordinal0, 0, 511), lt(%queue_ordinal0, %configured_expert_count)] : index, index
-      view.store %expert_i32, %queue_descriptor_view[1, %queue_ordinal, 0] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-      view.store %assignment_base, %queue_descriptor_view[1, %queue_ordinal, 1] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-      view.store %expert_assignment_count, %queue_descriptor_view[1, %queue_ordinal, 2] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-      view.store %zero_i32, %queue_descriptor_view[1, %queue_ordinal, 3] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-    }
-    scf.if %is_schedule2 {
-      %queue_ordinal0 = index.cast %schedule2_count : i32 to index
-      %queue_ordinal, %queue_capacity = index.assume %queue_ordinal0, %configured_expert_count [range(%queue_ordinal0, 0, 511), lt(%queue_ordinal0, %configured_expert_count)] : index, index
-      view.store %expert_i32, %queue_descriptor_view[2, %queue_ordinal, 0] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-      view.store %assignment_base, %queue_descriptor_view[2, %queue_ordinal, 1] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-      view.store %expert_assignment_count, %queue_descriptor_view[2, %queue_ordinal, 2] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-      view.store %zero_i32, %queue_descriptor_view[2, %queue_ordinal, 3] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-    }
-    scf.if %is_schedule3 {
-      %queue_ordinal0 = index.cast %schedule3_count : i32 to index
-      %queue_ordinal, %queue_capacity = index.assume %queue_ordinal0, %configured_expert_count [range(%queue_ordinal0, 0, 511), lt(%queue_ordinal0, %configured_expert_count)] : index, index
-      view.store %expert_i32, %queue_descriptor_view[3, %queue_ordinal, 0] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-      view.store %assignment_base, %queue_descriptor_view[3, %queue_ordinal, 1] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-      view.store %expert_assignment_count, %queue_descriptor_view[3, %queue_ordinal, 2] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-      view.store %zero_i32, %queue_descriptor_view[3, %queue_ordinal, 3] : i32, view<4x[%configured_expert_count]x4xi32, #dense>
-    }
+    %descriptor = vector.from_elements %expert_i32, %assignment_base, %expert_assignment_count, %zero_i32 : vector<4xi32>
+
+    // The scalar oracle retains its loop-carried queue tails. Masked b128
+    // stores express conditional publication without divergent branch regions,
+    // while safe ordinal zero keeps inactive physical origins in bounds.
+    %safe_schedule0_count = scf.select %is_schedule0, %schedule0_count, %zero_i32 : i32
+    %schedule0_ordinal0 = index.cast %safe_schedule0_count : i32 to index
+    %schedule0_ordinal, %schedule0_capacity = index.assume %schedule0_ordinal0, %configured_expert_count [range(%schedule0_ordinal0, 0, 511), lt(%schedule0_ordinal0, %configured_expert_count)] : index, index
+    %schedule0_mask = vector.splat %is_schedule0 : vector<4xi1>
+    vector.store.mask %descriptor, %queue_descriptor_view[0, %schedule0_ordinal, 0], %schedule0_mask : vector<4xi32>, view<4x[%configured_expert_count]x4xi32, #dense>, vector<4xi1>
+    %safe_schedule1_count = scf.select %is_schedule1, %schedule1_count, %zero_i32 : i32
+    %schedule1_ordinal0 = index.cast %safe_schedule1_count : i32 to index
+    %schedule1_ordinal, %schedule1_capacity = index.assume %schedule1_ordinal0, %configured_expert_count [range(%schedule1_ordinal0, 0, 511), lt(%schedule1_ordinal0, %configured_expert_count)] : index, index
+    %schedule1_mask = vector.splat %is_schedule1 : vector<4xi1>
+    vector.store.mask %descriptor, %queue_descriptor_view[1, %schedule1_ordinal, 0], %schedule1_mask : vector<4xi32>, view<4x[%configured_expert_count]x4xi32, #dense>, vector<4xi1>
+    %safe_schedule2_count = scf.select %is_schedule2, %schedule2_count, %zero_i32 : i32
+    %schedule2_ordinal0 = index.cast %safe_schedule2_count : i32 to index
+    %schedule2_ordinal, %schedule2_capacity = index.assume %schedule2_ordinal0, %configured_expert_count [range(%schedule2_ordinal0, 0, 511), lt(%schedule2_ordinal0, %configured_expert_count)] : index, index
+    %schedule2_mask = vector.splat %is_schedule2 : vector<4xi1>
+    vector.store.mask %descriptor, %queue_descriptor_view[2, %schedule2_ordinal, 0], %schedule2_mask : vector<4xi32>, view<4x[%configured_expert_count]x4xi32, #dense>, vector<4xi1>
+    %safe_schedule3_count = scf.select %is_schedule3, %schedule3_count, %zero_i32 : i32
+    %schedule3_ordinal0 = index.cast %safe_schedule3_count : i32 to index
+    %schedule3_ordinal, %schedule3_capacity = index.assume %schedule3_ordinal0, %configured_expert_count [range(%schedule3_ordinal0, 0, 511), lt(%schedule3_ordinal0, %configured_expert_count)] : index, index
+    %schedule3_mask = vector.splat %is_schedule3 : vector<4xi1>
+    vector.store.mask %descriptor, %queue_descriptor_view[3, %schedule3_ordinal, 0], %schedule3_mask : vector<4xi32>, view<4x[%configured_expert_count]x4xi32, #dense>, vector<4xi1>
 
     %schedule0_increment = scf.select %is_schedule0, %one_i32, %zero_i32 : i32
     %schedule1_increment = scf.select %is_schedule1, %one_i32, %zero_i32 : i32
