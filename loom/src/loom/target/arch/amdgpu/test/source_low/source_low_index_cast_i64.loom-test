@@ -9,8 +9,8 @@ kernel.def target(@target) @index_divergent_zero_extend_i64() {
 } launch(%output: buffer) {
   %lane = kernel.subgroup.lane.id : index
   %lane_i64 = index.cast %lane : index to i64
-  %zero = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi64, #dense>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi64, #dense>
   %result = vector.from_elements %lane_i64 : vector<1xi64>
   vector.store %result, %output_view[%lane] : vector<1xi64>, view<64xi64, #dense>
   kernel.return

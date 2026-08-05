@@ -160,12 +160,12 @@ kernel.def target(@target) @config_decl_runtime_use_stays_illegal() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%output: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %output_index = index.constant 0 : index
   %output_view = buffer.view %output[%base] : buffer -> view<1xi32, #dense>
   // ERROR@+1: TARGET/003 {subject_role="value", subject_name="result", constraint_key="no_ordinary_uses"}
   %columns = config.get @runtime.scalar_count : index
   %columns_i32 = index.cast %columns : index to i32
   %stored = vector.splat %columns_i32 : vector<1xi32>
-  vector.store %stored, %output_view[%zero] : vector<1xi32>, view<1xi32, #dense>
+  vector.store %stored, %output_view[%output_index] : vector<1xi32>, view<1xi32, #dense>
   kernel.return
 }
