@@ -926,10 +926,51 @@ static iree_status_t loom_low_schedule_record_first_unresolved_dependency(
   return iree_ok_status();
 }
 
+// Records a dependency that points backward across the current source range.
+// Source-order boundaries impose an implicit edge from the current range to
+// every later range. A dependency in the opposite direction therefore closes
+// a cycle even though that implicit edge is not stored in the dependency graph.
+static bool loom_low_schedule_record_source_range_cycle(
+    loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_block_t* block_record, iree_host_size_t node_count,
+    uint32_t scheduled_in_block, uint32_t range_start, uint32_t range_end) {
+  const loom_low_schedule_dependency_t* selected_dependency = NULL;
+  for (uint32_t i = 0; i < state->dependencies.count; ++i) {
+    const loom_low_schedule_dependency_t* dependency =
+        loom_low_schedule_dependency_graph_at(&state->dependencies, i);
+    if (dependency->consumer_node < range_start ||
+        dependency->consumer_node >= range_end ||
+        dependency->producer_node < range_end ||
+        !loom_low_schedule_node_is_unscheduled_in_block(
+            state, dependency->producer_node, node_count,
+            state->current_block_index)) {
+      continue;
+    }
+    selected_dependency = dependency;
+    if (dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_STATE &&
+        dependency->operand_index != UINT32_MAX) {
+      break;
+    }
+  }
+  if (selected_dependency == NULL) {
+    return false;
+  }
+
+  loom_low_schedule_record_dependency_cycle_failure(
+      state, block_record, scheduled_in_block,
+      selected_dependency->producer_node, selected_dependency->consumer_node,
+      selected_dependency);
+  state->failure.flags |= LOOM_LOW_SCHEDULE_FAILURE_FLAG_WITNESS_EDGE_ONLY;
+  state->failure.cycle_nodes[0] = selected_dependency->producer_node;
+  state->failure.cycle_nodes[1] = selected_dependency->consumer_node;
+  state->failure.cycle_node_count = 2;
+  return true;
+}
+
 static iree_status_t loom_low_schedule_record_dependency_cycle(
     loom_low_schedule_build_state_t* state,
     const loom_low_schedule_block_t* block_record, iree_host_size_t node_count,
-    uint32_t scheduled_in_block) {
+    uint32_t scheduled_in_block, uint32_t range_start, uint32_t range_end) {
   uint8_t* visit_states = NULL;
   uint32_t* parent_nodes = NULL;
   uint32_t* stack_nodes = NULL;
@@ -1008,6 +1049,11 @@ static iree_status_t loom_low_schedule_record_dependency_cycle(
     }
   }
 
+  if (loom_low_schedule_record_source_range_cycle(
+          state, block_record, node_count, scheduled_in_block, range_start,
+          range_end)) {
+    return iree_ok_status();
+  }
   return loom_low_schedule_record_first_unresolved_dependency(
       state, block_record, node_count, scheduled_in_block);
 }
@@ -1015,9 +1061,10 @@ static iree_status_t loom_low_schedule_record_dependency_cycle(
 static iree_status_t loom_low_schedule_handle_dependency_cycle(
     loom_low_schedule_build_state_t* state,
     const loom_low_schedule_block_t* block_record, iree_host_size_t node_count,
-    uint32_t scheduled_in_block) {
+    uint32_t scheduled_in_block, uint32_t range_start, uint32_t range_end) {
   IREE_RETURN_IF_ERROR(loom_low_schedule_record_dependency_cycle(
-      state, block_record, node_count, scheduled_in_block));
+      state, block_record, node_count, scheduled_in_block, range_start,
+      range_end));
   if (state->options->emitter.fn != NULL) {
     IREE_RETURN_IF_ERROR(
         loom_low_schedule_emit_dependency_cycle(state, &state->failure));
@@ -1136,7 +1183,8 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
           loom_low_schedule_ready_frontier_count(&ready_policy.frontier);
       if (ready_candidate_count == 0) {
         return loom_low_schedule_handle_dependency_cycle(
-            state, block_record, node_count, scheduled_in_block);
+            state, block_record, node_count, scheduled_in_block, range_start,
+            range_end);
       }
       loom_low_schedule_candidate_selection_t selection;
       loom_low_schedule_candidate_policy_select(
