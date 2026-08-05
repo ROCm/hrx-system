@@ -202,6 +202,17 @@ static iree_status_t loom_low_schedule_add_state_dependency(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_schedule_add_state_value_dependency(
+    loom_low_schedule_build_state_t* state, uint32_t producer_node,
+    uint32_t consumer_node, uint16_t operand_index) {
+  IREE_ASSERT(state->state_last_dependency_consumer_nodes != NULL);
+  IREE_RETURN_IF_ERROR(loom_low_schedule_add_dependency(
+      state, producer_node, consumer_node, LOOM_LOW_SCHEDULE_DEPENDENCY_STATE,
+      operand_index));
+  state->state_last_dependency_consumer_nodes[producer_node] = consumer_node;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_schedule_descriptor_operand_reg_class_id(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor, uint16_t descriptor_operand_index,
@@ -907,7 +918,8 @@ static iree_status_t loom_low_schedule_note_state_fence(
 
 static iree_status_t loom_low_schedule_note_explicit_state_value_read(
     loom_low_schedule_build_state_t* state, uint32_t node_index,
-    loom_value_ordinal_t value_ordinal, uint16_t reg_class_id) {
+    uint16_t operand_index, loom_value_ordinal_t value_ordinal,
+    uint16_t reg_class_id) {
   const loom_low_schedule_value_record_t* value = &state->values[value_ordinal];
   const uint32_t producer_node = value->producer_node;
   const bool has_same_block_producer =
@@ -917,8 +929,8 @@ static iree_status_t loom_low_schedule_note_explicit_state_value_read(
       has_same_block_producer ? value->state_next_write_node
                               : state->state_first_write_nodes[reg_class_id];
   if (first_clobber != LOOM_LOW_SCHEDULE_NODE_NONE) {
-    IREE_RETURN_IF_ERROR(loom_low_schedule_add_state_dependency(
-        state, node_index, first_clobber));
+    IREE_RETURN_IF_ERROR(loom_low_schedule_add_state_value_dependency(
+        state, node_index, first_clobber, operand_index));
   }
   const uint32_t ordering_frontier =
       state->state_ordering_frontier_nodes[reg_class_id];
@@ -935,13 +947,13 @@ static iree_status_t loom_low_schedule_note_explicit_state_value_read(
 
 static iree_status_t loom_low_schedule_note_state_value_read(
     loom_low_schedule_build_state_t* state, uint32_t node_index,
-    loom_value_ordinal_t value_ordinal) {
+    uint16_t operand_index, loom_value_ordinal_t value_ordinal) {
   const uint16_t reg_class_id = state->values[value_ordinal].register_class_id;
   if (!loom_low_schedule_reg_class_is_state(state, reg_class_id)) {
     return iree_ok_status();
   }
   return loom_low_schedule_note_explicit_state_value_read(
-      state, node_index, value_ordinal, reg_class_id);
+      state, node_index, operand_index, value_ordinal, reg_class_id);
 }
 
 static bool loom_low_schedule_effect_is_ordered(
@@ -1616,7 +1628,7 @@ iree_status_t loom_low_schedule_build_dependencies(
         }
         if (descriptor == NULL || reads_descriptor_state) {
           IREE_RETURN_IF_ERROR(loom_low_schedule_note_state_value_read(
-              state, node_index, operand_ordinal));
+              state, node_index, operand_index, operand_ordinal));
         }
       }
 
