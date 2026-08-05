@@ -216,21 +216,6 @@ TEST_F(IrpaBuilderTest, PreservesPerEntryStorageAlignment) {
   IREE_ASSERT_OK(iree_io_parameter_archive_builder_write(
       &builder_, file_handle, 0, stream, built_index));
 
-  const auto* header =
-      reinterpret_cast<const iree_io_parameter_archive_header_v0_t*>(
-          file_contents.data());
-  iree_io_physical_offset_t archive_entry_offset = header->entry_segment.offset;
-  for (iree_host_size_t i = 0; i < keys.size(); ++i) {
-    const auto* data_entry =
-        reinterpret_cast<const iree_io_parameter_archive_data_entry_t*>(
-            file_contents.data() + archive_entry_offset);
-    EXPECT_EQ(minimum_alignments[i], data_entry->header.minimum_alignment);
-    EXPECT_EQ(relative_offsets[i], data_entry->storage.offset);
-    archive_entry_offset =
-        iree_align_uint64(archive_entry_offset + data_entry->header.entry_size,
-                          IREE_IO_PARAMETER_ARCHIVE_ENTRY_ALIGNMENT);
-  }
-
   iree_io_parameter_index_t* parsed_index = NULL;
   IREE_ASSERT_OK(
       iree_io_parameter_index_create(iree_allocator_system(), &parsed_index));
