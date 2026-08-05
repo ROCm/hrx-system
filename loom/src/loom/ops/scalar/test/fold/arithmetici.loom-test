@@ -235,9 +235,9 @@ func.def @fmai_const() -> (i32) {
 
 // fmai: zero multiplier folds to exact c.
 func.def @fmai_zero_mul(%x: i32) -> (i32) {
-  %zero = scalar.constant 0 : i32
+  %c0 = scalar.constant 0 : i32
   %c = scalar.constant 42 : i32
-  %r = scalar.fmai %x, %zero, %c : i32
+  %r = scalar.fmai %x, %c0, %c : i32
   func.return %r : i32
 }
 // ----
@@ -250,9 +250,9 @@ func.def @fmai_zero_mul(%x: i32) -> (i32) {
 
 // fmai: zero multiplier first operand.
 func.def @fmai_zero_mul_first(%x: i32) -> (i32) {
-  %zero = scalar.constant 0 : i32
+  %c0 = scalar.constant 0 : i32
   %c = scalar.constant 42 : i32
-  %r = scalar.fmai %zero, %x, %c : i32
+  %r = scalar.fmai %c0, %x, %c : i32
   func.return %r : i32
 }
 // ----

@@ -6,8 +6,8 @@ config.def @answer = 40 : index
 
 func.def @read_scalar_config() -> (index) {
   %value = config.get @answer : index
-  %two = index.constant 2 : index
-  %result = index.add %value, %two : index
+  %c2 = index.constant 2 : index
+  %result = index.add %value, %c2 : index
   func.return %result : index
 }
 
@@ -48,8 +48,8 @@ config.decl @runtime_batch_size : index
 
 func.def @read_decl_config() -> (index) {
   %value = config.get @runtime_batch_size : index
-  %zero = index.constant 0 : index
-  %result = index.add %value, %zero : index
+  %c0 = index.constant 0 : index
+  %result = index.add %value, %c0 : index
   func.return %result : index
 }
 
@@ -92,8 +92,8 @@ config.decl @runtime_chunk_size : %value: index where [range(%value, 0, 131072),
 func.def @read_decl_config_predicate() -> (index) {
   %value = config.get @runtime_chunk_size : index
   test.use %value : index
-  %sixteen = index.constant 16 : index
-  %remainder = index.rem %value, %sixteen : index
+  %c16 = index.constant 16 : index
+  %remainder = index.rem %value, %c16 : index
   func.return %remainder : index
 }
 
