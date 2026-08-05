@@ -500,9 +500,19 @@ static iree_status_t loom_canonicalize_try_symbolic_integer_cmp(
   }
 
   loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
-  IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_value_relation(
-      expression_context, relation->relation, relation->left.value_id,
-      relation->right.value_id, &proof));
+  if (loom_scalar_cmpi_isa(op)) {
+    // Scalar comparisons describe data-path predicates. Use facts already
+    // established by surrounding control flow instead of speculating through
+    // every select in an unrolled data graph.
+    IREE_RETURN_IF_ERROR(
+        loom_symbolic_expr_prove_value_relation_with_active_facts(
+            expression_context, relation->relation, relation->left.value_id,
+            relation->right.value_id, &proof));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_value_relation(
+        expression_context, relation->relation, relation->left.value_id,
+        relation->right.value_id, &proof));
+  }
   if (proof == LOOM_SYMBOLIC_PROOF_UNKNOWN) return iree_ok_status();
 
   IREE_RETURN_IF_ERROR(loom_canonicalize_replace_single_result_with_exact_i64(

@@ -148,6 +148,21 @@ TEST_F(ConditionFactsTest, IndexCompareTrueEdgeProducesRelation) {
   EXPECT_EQ(relation.right.value_id, upper_bound);
 }
 
+TEST_F(ConditionFactsTest, RepeatedConditionDoesNotDuplicateRelation) {
+  loom_value_id_t induction = DefineIndexValue();
+  loom_value_id_t upper_bound = DefineIndexValue();
+  loom_op_t* compare =
+      BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_SLT, induction, upper_bound);
+  const loom_value_id_t condition = loom_index_cmp_result(compare);
+
+  ASSERT_TRUE(Query(condition));
+  ASSERT_TRUE(loom_condition_facts_query_into(module_, &fact_table_, condition,
+                                              /*assumed_truth=*/true,
+                                              &condition_facts_));
+
+  EXPECT_EQ(condition_facts_.integer_relation_count, 1u);
+}
+
 TEST_F(ConditionFactsTest, IndexCompareFalseEdgeInvertsRelation) {
   loom_value_id_t induction = DefineIndexValue();
   loom_value_id_t upper_bound = DefineIndexValue();

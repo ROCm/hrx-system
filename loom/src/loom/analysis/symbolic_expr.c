@@ -29,6 +29,7 @@ enum loom_symbolic_expr_memo_state_e {
 };
 
 #define LOOM_SYMBOLIC_EXPR_CONDITION_FACT_INFER_DEPTH_LIMIT 16
+#define LOOM_SYMBOLIC_EXPR_CONDITION_FACT_STACK_VALUE_CAPACITY 8
 #define LOOM_SYMBOLIC_EXPR_IDENTITY_CHAIN_LIMIT 64
 #define LOOM_SYMBOLIC_EXPR_SELECT_CASE_CONDITION_LIMIT 8
 #define LOOM_SYMBOLIC_EXPR_SELECT_CASE_DEPTH_LIMIT 2
@@ -36,12 +37,28 @@ enum loom_symbolic_expr_memo_state_e {
 #define LOOM_SYMBOLIC_EXPR_SEMANTIC_MATCH_DEPTH_LIMIT 16
 #define LOOM_SYMBOLIC_EXPR_SEMANTIC_MATCH_PAIR_LIMIT 64
 
+typedef enum loom_symbolic_expr_proof_scope_e {
+  LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_ACTIVE_FACTS = 0,
+  LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_SELECT_CASES = 1,
+} loom_symbolic_expr_proof_scope_t;
+
 struct loom_symbolic_expr_memo_entry_t {
   // Current memo state for this value ID.
   uint8_t state;
 
   // Cached expression when state is LOOM_SYMBOLIC_EXPR_MEMO_READY.
   loom_symbolic_expr_t expression;
+};
+
+struct loom_symbolic_expr_condition_fact_memo_entry_t {
+  // Current memo state for this value ID.
+  uint8_t state;
+
+  // Maximum producer depth represented by facts.
+  uint8_t depth;
+
+  // Cached facts when state is LOOM_SYMBOLIC_EXPR_MEMO_READY.
+  loom_value_facts_t facts;
 };
 
 static loom_value_facts_t loom_symbolic_expr_intersect_integer_facts(
@@ -71,6 +88,12 @@ void loom_symbolic_expr_context_reset(loom_symbolic_expr_context_t* context) {
     memset(context->memo_entries, 0,
            context->memo_capacity * sizeof(*context->memo_entries));
   }
+  if (context->condition_fact_memo_entries &&
+      context->condition_fact_memo_capacity > 0) {
+    memset(context->condition_fact_memo_entries, 0,
+           context->condition_fact_memo_capacity *
+               sizeof(*context->condition_fact_memo_entries));
+  }
 }
 
 static iree_status_t loom_symbolic_expr_ensure_memo_capacity(
@@ -85,6 +108,25 @@ static iree_status_t loom_symbolic_expr_ensure_memo_capacity(
   memset(
       context->memo_entries + old_capacity, 0,
       (context->memo_capacity - old_capacity) * sizeof(*context->memo_entries));
+  return iree_ok_status();
+}
+
+static iree_status_t loom_symbolic_expr_ensure_condition_fact_memo_capacity(
+    loom_symbolic_expr_context_t* context, iree_host_size_t minimum_capacity) {
+  if (minimum_capacity <= context->condition_fact_memo_capacity) {
+    return iree_ok_status();
+  }
+  iree_host_size_t old_capacity = context->condition_fact_memo_capacity;
+  void* entries = context->condition_fact_memo_entries;
+  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+      context->arena, context->condition_fact_memo_capacity, minimum_capacity,
+      sizeof(*context->condition_fact_memo_entries),
+      &context->condition_fact_memo_capacity, &entries));
+  context->condition_fact_memo_entries =
+      (loom_symbolic_expr_condition_fact_memo_entry_t*)entries;
+  memset(context->condition_fact_memo_entries + old_capacity, 0,
+         (context->condition_fact_memo_capacity - old_capacity) *
+             sizeof(*context->condition_fact_memo_entries));
   return iree_ok_status();
 }
 
@@ -142,94 +184,211 @@ static loom_value_facts_t loom_symbolic_expr_lookup_facts(
   if (context->condition_facts && context->fact_table) {
     loom_condition_fact_set_apply_to_value_facts(
         context->condition_facts, context->fact_table, value_id, &facts);
-    if (context->module && value_id < context->module->values.count) {
+    while (context->module && value_id < context->module->values.count) {
       const loom_op_t* defining_op =
           loom_symbolic_expr_value_defining_op(context, value_id);
       bool condition = false;
-      if (defining_op && loom_scf_select_isa(defining_op) &&
-          loom_condition_fact_set_proves_condition(
+      if (!defining_op || !loom_scf_select_isa(defining_op) ||
+          !loom_condition_fact_set_proves_condition(
               context->module, context->fact_table, context->condition_facts,
               loom_scf_select_condition(defining_op), &condition)) {
-        loom_value_id_t selected_value =
-            condition ? loom_scf_select_true_value(defining_op)
-                      : loom_scf_select_false_value(defining_op);
-        facts = loom_symbolic_expr_intersect_integer_facts(
-            facts, loom_symbolic_expr_lookup_facts(context, selected_value));
+        break;
       }
+      value_id = condition ? loom_scf_select_true_value(defining_op)
+                           : loom_scf_select_false_value(defining_op);
+      loom_value_facts_t selected_facts =
+          loom_value_fact_table_lookup(context->fact_table, value_id);
+      loom_condition_fact_set_apply_to_value_facts(context->condition_facts,
+                                                   context->fact_table,
+                                                   value_id, &selected_facts);
+      facts = loom_symbolic_expr_intersect_integer_facts(facts, selected_facts);
     }
   }
   return facts;
 }
 
-static iree_status_t loom_symbolic_expr_lookup_condition_refined_facts(
-    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
-    uint8_t remaining_depth, loom_value_facts_t* out_facts) {
-  loom_value_facts_t facts = loom_symbolic_expr_lookup_facts(context, value_id);
+typedef struct loom_symbolic_expr_condition_fact_frame_t {
+  // SSA value whose facts this frame computes.
+  loom_value_id_t value_id;
+
+  // Remaining producer depth available to operand frames.
+  uint8_t remaining_depth;
+
+  // Next producer operand requiring condition-refined facts.
+  uint16_t next_operand;
+
+  // Defining operation whose transfer function computes the result facts.
+  const loom_op_t* defining_op;
+
+  // Result ordinal represented by value_id.
+  uint16_t result_index;
+
+  // Facts known before recursively applying the defining transfer function.
+  loom_value_facts_t base_facts;
+
+  // Destination receiving this frame's completed facts.
+  loom_value_facts_t* out_facts;
+
+  // Operand facts passed to the defining transfer function.
+  loom_value_facts_t* operand_facts;
+
+  // Inline operand-fact storage for ordinary scalar operations.
+  loom_value_facts_t operand_facts_storage
+      [LOOM_SYMBOLIC_EXPR_CONDITION_FACT_STACK_VALUE_CAPACITY];
+} loom_symbolic_expr_condition_fact_frame_t;
+
+static iree_status_t loom_symbolic_expr_condition_fact_frame_begin(
+    loom_symbolic_expr_context_t* context,
+    iree_arena_allocator_t* transient_arena, loom_value_id_t value_id,
+    uint8_t remaining_depth, loom_value_facts_t* out_facts,
+    loom_symbolic_expr_condition_fact_frame_t* out_frame, bool* out_pending) {
+  *out_pending = false;
   if (!context->condition_facts || !context->module || !context->fact_table ||
       remaining_depth == 0 || value_id >= context->module->values.count) {
-    *out_facts = facts;
+    *out_facts = loom_symbolic_expr_lookup_facts(context, value_id);
     return iree_ok_status();
   }
 
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_ensure_condition_fact_memo_capacity(
+      context, value_id + 1));
+  loom_symbolic_expr_condition_fact_memo_entry_t* memo_entry =
+      &context->condition_fact_memo_entries[value_id];
+  if (memo_entry->state == LOOM_SYMBOLIC_EXPR_MEMO_READY &&
+      memo_entry->depth >= remaining_depth) {
+    *out_facts = memo_entry->facts;
+    return iree_ok_status();
+  }
+
+  loom_value_facts_t facts = loom_symbolic_expr_lookup_facts(context, value_id);
   IREE_RETURN_IF_ERROR(
       loom_symbolic_expr_apply_identity_chain_predicates_to_value_facts(
           context, value_id, &facts));
+  if (memo_entry->state == LOOM_SYMBOLIC_EXPR_MEMO_VISITING) {
+    *out_facts = facts;
+    return iree_ok_status();
+  }
 
   const loom_value_t* value = loom_module_value(context->module, value_id);
-  if (loom_value_is_block_arg(value)) {
-    *out_facts = facts;
-    return iree_ok_status();
-  }
-  const loom_op_t* defining_op = loom_value_def_op(value);
+  const loom_op_t* defining_op =
+      loom_value_is_block_arg(value) ? NULL : loom_value_def_op(value);
   const loom_op_vtable_t* vtable =
       defining_op ? loom_op_vtable(context->module, defining_op) : NULL;
-  if (!vtable || !vtable->infer_facts) {
-    *out_facts = facts;
-    return iree_ok_status();
-  }
-
-  const uint16_t result_index = loom_value_def_index(value);
-  if (result_index >= defining_op->result_count ||
+  const uint16_t result_index =
+      defining_op ? loom_value_def_index(value) : UINT16_MAX;
+  if (!vtable || !vtable->infer_facts ||
+      result_index >= defining_op->result_count ||
       !loom_type_is_scalar(loom_module_value_type(context->module, value_id))) {
+    memo_entry->facts = facts;
+    memo_entry->depth = remaining_depth;
+    memo_entry->state = LOOM_SYMBOLIC_EXPR_MEMO_READY;
     *out_facts = facts;
     return iree_ok_status();
   }
 
-  loom_value_facts_t* operand_facts = NULL;
-  if (defining_op->operand_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate(
-        context->arena, defining_op->operand_count * sizeof(*operand_facts),
-        (void**)&operand_facts));
-  }
-  const loom_value_id_t* operands = loom_op_const_operands(defining_op);
-  for (uint16_t i = 0; i < defining_op->operand_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_symbolic_expr_lookup_condition_refined_facts(
-        context, operands[i], (uint8_t)(remaining_depth - 1),
-        &operand_facts[i]));
-  }
+  memo_entry->state = LOOM_SYMBOLIC_EXPR_MEMO_VISITING;
 
-  loom_value_facts_t* result_facts = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate(
-      context->arena, defining_op->result_count * sizeof(*result_facts),
-      (void**)&result_facts));
-  for (uint16_t i = 0; i < defining_op->result_count; ++i) {
-    result_facts[i] = loom_value_facts_unknown();
+  *out_frame = (loom_symbolic_expr_condition_fact_frame_t){
+      .value_id = value_id,
+      .remaining_depth = remaining_depth,
+      .next_operand = 0,
+      .defining_op = defining_op,
+      .result_index = result_index,
+      .base_facts = facts,
+      .out_facts = out_facts,
+      .operand_facts = NULL,
+  };
+  if (defining_op->operand_count <=
+      IREE_ARRAYSIZE(out_frame->operand_facts_storage)) {
+    if (defining_op->operand_count != 0) {
+      out_frame->operand_facts = out_frame->operand_facts_storage;
+    }
+  } else {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        transient_arena, defining_op->operand_count,
+        sizeof(*out_frame->operand_facts), (void**)&out_frame->operand_facts));
   }
-
-  loom_fact_context_t fact_context = context->fact_table->context;
-  IREE_RETURN_IF_ERROR(vtable->infer_facts(&fact_context, context->module,
-                                           defining_op, operand_facts,
-                                           result_facts));
-
-  loom_value_facts_t inferred_facts = result_facts[result_index];
-  loom_condition_fact_set_apply_to_value_facts(
-      context->condition_facts, context->fact_table, value_id, &inferred_facts);
-  IREE_RETURN_IF_ERROR(
-      loom_symbolic_expr_apply_identity_chain_predicates_to_value_facts(
-          context, value_id, &inferred_facts));
-  *out_facts =
-      loom_symbolic_expr_intersect_integer_facts(facts, inferred_facts);
+  *out_pending = true;
   return iree_ok_status();
+}
+
+static iree_status_t loom_symbolic_expr_lookup_condition_refined_facts(
+    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
+    uint8_t remaining_depth, loom_value_facts_t* out_facts) {
+  iree_arena_allocator_t transient_arena;
+  iree_arena_initialize(context->arena->block_pool, &transient_arena);
+
+  loom_symbolic_expr_condition_fact_frame_t
+      frames[LOOM_SYMBOLIC_EXPR_CONDITION_FACT_INFER_DEPTH_LIMIT + 1];
+  iree_host_size_t frame_count = 0;
+  bool root_pending = false;
+  iree_status_t status = loom_symbolic_expr_condition_fact_frame_begin(
+      context, &transient_arena, value_id, remaining_depth, out_facts,
+      &frames[0], &root_pending);
+  if (iree_status_is_ok(status) && root_pending) {
+    frame_count = 1;
+  }
+
+  while (iree_status_is_ok(status) && frame_count > 0) {
+    loom_symbolic_expr_condition_fact_frame_t* frame = &frames[frame_count - 1];
+    if (frame->next_operand < frame->defining_op->operand_count) {
+      const uint16_t operand_index = frame->next_operand++;
+      const loom_value_id_t operand =
+          loom_op_const_operands(frame->defining_op)[operand_index];
+      bool operand_pending = false;
+      status = loom_symbolic_expr_condition_fact_frame_begin(
+          context, &transient_arena, operand,
+          (uint8_t)(frame->remaining_depth - 1),
+          &frame->operand_facts[operand_index], &frames[frame_count],
+          &operand_pending);
+      if (iree_status_is_ok(status) && operand_pending) {
+        ++frame_count;
+      }
+      continue;
+    }
+
+    loom_value_facts_t result_facts_storage
+        [LOOM_SYMBOLIC_EXPR_CONDITION_FACT_STACK_VALUE_CAPACITY];
+    loom_value_facts_t* result_facts = result_facts_storage;
+    if (frame->defining_op->result_count >
+        IREE_ARRAYSIZE(result_facts_storage)) {
+      status = iree_arena_allocate_array(
+          &transient_arena, frame->defining_op->result_count,
+          sizeof(*result_facts), (void**)&result_facts);
+      if (!iree_status_is_ok(status)) continue;
+    }
+    for (uint16_t i = 0; i < frame->defining_op->result_count; ++i) {
+      result_facts[i] = loom_value_facts_unknown();
+    }
+    const loom_op_vtable_t* vtable =
+        loom_op_vtable(context->module, frame->defining_op);
+    loom_fact_context_t fact_context = context->fact_table->context;
+    status =
+        vtable->infer_facts(&fact_context, context->module, frame->defining_op,
+                            frame->operand_facts, result_facts);
+    if (!iree_status_is_ok(status)) continue;
+
+    loom_value_facts_t inferred_facts = result_facts[frame->result_index];
+    loom_condition_fact_set_apply_to_value_facts(
+        context->condition_facts, context->fact_table, frame->value_id,
+        &inferred_facts);
+    status = loom_symbolic_expr_apply_identity_chain_predicates_to_value_facts(
+        context, frame->value_id, &inferred_facts);
+    if (!iree_status_is_ok(status)) continue;
+
+    *frame->out_facts = loom_symbolic_expr_intersect_integer_facts(
+        frame->base_facts, inferred_facts);
+    // Preparing operand frames can grow and move the memo table. Reacquire the
+    // entry before publishing the completed facts.
+    loom_symbolic_expr_condition_fact_memo_entry_t* memo_entry =
+        &context->condition_fact_memo_entries[frame->value_id];
+    memo_entry->facts = *frame->out_facts;
+    memo_entry->depth = frame->remaining_depth;
+    memo_entry->state = LOOM_SYMBOLIC_EXPR_MEMO_READY;
+    --frame_count;
+  }
+
+  iree_arena_deinitialize(&transient_arena);
+  return status;
 }
 
 static bool loom_symbolic_expr_exact_integer_facts(loom_value_facts_t facts,
@@ -3671,6 +3830,7 @@ static iree_status_t loom_symbolic_expr_prove_le_by_scaled_relation(
     loom_symbolic_expr_context_t* context,
     const loom_symbolic_expr_t* left_expression,
     const loom_symbolic_expr_t* right_expression,
+    loom_symbolic_expr_proof_scope_t proof_scope,
     loom_symbolic_proof_result_t* out_result) {
   *out_result = LOOM_SYMBOLIC_PROOF_UNKNOWN;
   int64_t constant = 0;
@@ -3714,7 +3874,8 @@ static iree_status_t loom_symbolic_expr_prove_le_by_scaled_relation(
     IREE_RETURN_IF_ERROR(
         loom_symbolic_expr_prove_le_by_scaled_relation_with_residual(
             context, constant, terms, term_count, out_result));
-    if (*out_result == LOOM_SYMBOLIC_PROOF_UNKNOWN) {
+    if (*out_result == LOOM_SYMBOLIC_PROOF_UNKNOWN &&
+        proof_scope == LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_SELECT_CASES) {
       IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_by_common_product_factor(
           context, constant, terms, term_count, out_result));
     }
@@ -3770,7 +3931,8 @@ static iree_status_t loom_symbolic_expr_prove_le_by_scaled_relation(
   IREE_RETURN_IF_ERROR(
       loom_symbolic_expr_prove_le_by_scaled_relation_with_residual(
           context, constant, terms, term_count, out_result));
-  if (*out_result == LOOM_SYMBOLIC_PROOF_UNKNOWN) {
+  if (*out_result == LOOM_SYMBOLIC_PROOF_UNKNOWN &&
+      proof_scope == LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_SELECT_CASES) {
     IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_by_common_product_factor(
         context, constant, terms, term_count, out_result));
   }
@@ -3991,6 +4153,7 @@ static iree_status_t loom_symbolic_expr_prove_le_with_condition_facts(
     const loom_symbolic_expr_t* left_expression,
     const loom_symbolic_expr_t* right_expression, loom_value_id_t condition,
     bool assumed_truth, loom_symbolic_proof_result_t* out_result) {
+  *out_result = LOOM_SYMBOLIC_PROOF_UNKNOWN;
   loom_condition_integer_relation_t relation_storage[32];
   loom_condition_fact_set_t condition_facts;
   loom_condition_fact_set_initialize(
@@ -4008,9 +4171,15 @@ static iree_status_t loom_symbolic_expr_prove_le_with_condition_facts(
           previous_condition_facts->integer_relations[i];
     }
   }
+  const iree_host_size_t previous_integer_relation_count =
+      condition_facts.integer_relation_count;
   (void)loom_condition_facts_query_into(context->module, context->fact_table,
                                         condition, assumed_truth,
                                         &condition_facts);
+  if (condition_facts.integer_relation_count ==
+      previous_integer_relation_count) {
+    return iree_ok_status();
+  }
 
   uint8_t previous_condition_proof_depth = context->condition_proof_depth;
   context->condition_facts = &condition_facts;
@@ -4074,10 +4243,11 @@ static iree_status_t loom_symbolic_expr_prove_le_by_select_cases(
   return iree_ok_status();
 }
 
-iree_status_t loom_symbolic_expr_prove_le(
+static iree_status_t loom_symbolic_expr_prove_le_with_scope(
     loom_symbolic_expr_context_t* context,
     const loom_symbolic_expr_t* left_expression,
     const loom_symbolic_expr_t* right_expression,
+    loom_symbolic_expr_proof_scope_t proof_scope,
     loom_symbolic_proof_result_t* out_result) {
   *out_result = LOOM_SYMBOLIC_PROOF_UNKNOWN;
   if (loom_symbolic_expr_is_linear(left_expression) &&
@@ -4089,11 +4259,13 @@ iree_status_t loom_symbolic_expr_prove_le(
         context, left_expression, right_expression, out_result));
     if (*out_result != LOOM_SYMBOLIC_PROOF_UNKNOWN) return iree_ok_status();
     IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_by_scaled_relation(
-        context, left_expression, right_expression, out_result));
+        context, left_expression, right_expression, proof_scope, out_result));
     if (*out_result != LOOM_SYMBOLIC_PROOF_UNKNOWN) return iree_ok_status();
-    IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_by_select_cases(
-        context, left_expression, right_expression, out_result));
-    if (*out_result != LOOM_SYMBOLIC_PROOF_UNKNOWN) return iree_ok_status();
+    if (proof_scope == LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_SELECT_CASES) {
+      IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_by_select_cases(
+          context, left_expression, right_expression, out_result));
+      if (*out_result != LOOM_SYMBOLIC_PROOF_UNKNOWN) return iree_ok_status();
+    }
   }
   // Expanded expressions may still carry stronger facts from their defining
   // SSA value, such as index.assume range facts on a value that algebraically
@@ -4103,17 +4275,28 @@ iree_status_t loom_symbolic_expr_prove_le(
   return iree_ok_status();
 }
 
-static iree_status_t loom_symbolic_expr_prove_equal(
+iree_status_t loom_symbolic_expr_prove_le(
     loom_symbolic_expr_context_t* context,
     const loom_symbolic_expr_t* left_expression,
     const loom_symbolic_expr_t* right_expression,
     loom_symbolic_proof_result_t* out_result) {
+  return loom_symbolic_expr_prove_le_with_scope(
+      context, left_expression, right_expression,
+      LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_SELECT_CASES, out_result);
+}
+
+static iree_status_t loom_symbolic_expr_prove_equal(
+    loom_symbolic_expr_context_t* context,
+    const loom_symbolic_expr_t* left_expression,
+    const loom_symbolic_expr_t* right_expression,
+    loom_symbolic_expr_proof_scope_t proof_scope,
+    loom_symbolic_proof_result_t* out_result) {
   loom_symbolic_proof_result_t left_le_right = LOOM_SYMBOLIC_PROOF_UNKNOWN;
-  IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le(
-      context, left_expression, right_expression, &left_le_right));
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_with_scope(
+      context, left_expression, right_expression, proof_scope, &left_le_right));
   loom_symbolic_proof_result_t right_le_left = LOOM_SYMBOLIC_PROOF_UNKNOWN;
-  IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le(
-      context, right_expression, left_expression, &right_le_left));
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_with_scope(
+      context, right_expression, left_expression, proof_scope, &right_le_left));
   if (left_le_right == LOOM_SYMBOLIC_PROOF_TRUE &&
       right_le_left == LOOM_SYMBOLIC_PROOF_TRUE) {
     *out_result = LOOM_SYMBOLIC_PROOF_TRUE;
@@ -4130,10 +4313,11 @@ static iree_status_t loom_symbolic_expr_prove_less_than(
     loom_symbolic_expr_context_t* context,
     const loom_symbolic_expr_t* left_expression,
     const loom_symbolic_expr_t* right_expression,
+    loom_symbolic_expr_proof_scope_t proof_scope,
     loom_symbolic_proof_result_t* out_result) {
   loom_symbolic_proof_result_t right_le_left = LOOM_SYMBOLIC_PROOF_UNKNOWN;
-  IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le(
-      context, right_expression, left_expression, &right_le_left));
+  IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_le_with_scope(
+      context, right_expression, left_expression, proof_scope, &right_le_left));
   if (right_le_left == LOOM_SYMBOLIC_PROOF_TRUE) {
     *out_result = LOOM_SYMBOLIC_PROOF_FALSE;
   } else if (right_le_left == LOOM_SYMBOLIC_PROOF_FALSE) {
@@ -4144,10 +4328,11 @@ static iree_status_t loom_symbolic_expr_prove_less_than(
   return iree_ok_status();
 }
 
-iree_status_t loom_symbolic_expr_prove_value_relation(
+static iree_status_t loom_symbolic_expr_prove_value_relation_with_scope(
     loom_symbolic_expr_context_t* context,
     loom_symbolic_integer_relation_t relation, loom_value_id_t left_value,
-    loom_value_id_t right_value, loom_symbolic_proof_result_t* out_result) {
+    loom_value_id_t right_value, loom_symbolic_expr_proof_scope_t proof_scope,
+    loom_symbolic_proof_result_t* out_result) {
   IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_direct_value_relation(
       context, relation, left_value, right_value, out_result));
   if (*out_result != LOOM_SYMBOLIC_PROOF_UNKNOWN) return iree_ok_status();
@@ -4162,11 +4347,12 @@ iree_status_t loom_symbolic_expr_prove_value_relation(
   switch (relation) {
     case LOOM_SYMBOLIC_INTEGER_RELATION_EQ:
       return loom_symbolic_expr_prove_equal(context, &left_expression,
-                                            &right_expression, out_result);
+                                            &right_expression, proof_scope,
+                                            out_result);
     case LOOM_SYMBOLIC_INTEGER_RELATION_NE: {
       loom_symbolic_proof_result_t equal = LOOM_SYMBOLIC_PROOF_UNKNOWN;
       IREE_RETURN_IF_ERROR(loom_symbolic_expr_prove_equal(
-          context, &left_expression, &right_expression, &equal));
+          context, &left_expression, &right_expression, proof_scope, &equal));
       if (equal == LOOM_SYMBOLIC_PROOF_TRUE) {
         *out_result = LOOM_SYMBOLIC_PROOF_FALSE;
       } else if (equal == LOOM_SYMBOLIC_PROOF_FALSE) {
@@ -4176,17 +4362,39 @@ iree_status_t loom_symbolic_expr_prove_value_relation(
     }
     case LOOM_SYMBOLIC_INTEGER_RELATION_LT:
       return loom_symbolic_expr_prove_less_than(context, &left_expression,
-                                                &right_expression, out_result);
+                                                &right_expression, proof_scope,
+                                                out_result);
     case LOOM_SYMBOLIC_INTEGER_RELATION_LE:
-      return loom_symbolic_expr_prove_le(context, &left_expression,
-                                         &right_expression, out_result);
+      return loom_symbolic_expr_prove_le_with_scope(context, &left_expression,
+                                                    &right_expression,
+                                                    proof_scope, out_result);
     case LOOM_SYMBOLIC_INTEGER_RELATION_GT:
       return loom_symbolic_expr_prove_less_than(context, &right_expression,
-                                                &left_expression, out_result);
+                                                &left_expression, proof_scope,
+                                                out_result);
     case LOOM_SYMBOLIC_INTEGER_RELATION_GE:
-      return loom_symbolic_expr_prove_le(context, &right_expression,
-                                         &left_expression, out_result);
+      return loom_symbolic_expr_prove_le_with_scope(context, &right_expression,
+                                                    &left_expression,
+                                                    proof_scope, out_result);
     default:
       return iree_ok_status();
   }
+}
+
+iree_status_t loom_symbolic_expr_prove_value_relation(
+    loom_symbolic_expr_context_t* context,
+    loom_symbolic_integer_relation_t relation, loom_value_id_t left_value,
+    loom_value_id_t right_value, loom_symbolic_proof_result_t* out_result) {
+  return loom_symbolic_expr_prove_value_relation_with_scope(
+      context, relation, left_value, right_value,
+      LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_SELECT_CASES, out_result);
+}
+
+iree_status_t loom_symbolic_expr_prove_value_relation_with_active_facts(
+    loom_symbolic_expr_context_t* context,
+    loom_symbolic_integer_relation_t relation, loom_value_id_t left_value,
+    loom_value_id_t right_value, loom_symbolic_proof_result_t* out_result) {
+  return loom_symbolic_expr_prove_value_relation_with_scope(
+      context, relation, left_value, right_value,
+      LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_ACTIVE_FACTS, out_result);
 }

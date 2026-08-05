@@ -18,8 +18,8 @@
 //
 // Storage is caller-owned. The context memoizes value-to-expression queries and
 // owns a reusable scratch term buffer so fixed-point analyses can query without
-// allocating on every comparison. Reset the context memo when the module or
-// fact table changes.
+// allocating on every comparison. Reset the context memo when the module,
+// fact table, or active condition fact set changes.
 
 #ifndef LOOM_ANALYSIS_SYMBOLIC_EXPR_H_
 #define LOOM_ANALYSIS_SYMBOLIC_EXPR_H_
@@ -40,6 +40,8 @@ extern "C" {
 #define LOOM_SYMBOLIC_EXPR_DEFAULT_TERM_LIMIT 64
 
 typedef struct loom_symbolic_expr_memo_entry_t loom_symbolic_expr_memo_entry_t;
+typedef struct loom_symbolic_expr_condition_fact_memo_entry_t
+    loom_symbolic_expr_condition_fact_memo_entry_t;
 typedef struct loom_condition_fact_set_t loom_condition_fact_set_t;
 
 // A single coefficient times an SSA value.
@@ -87,7 +89,8 @@ typedef struct loom_symbolic_expr_context_t {
   // Dense facts used to seed ranges, exact constants, and divisibility.
   const loom_value_fact_table_t* fact_table;
 
-  // Optional edge-local facts applied during branch-sensitive proofs.
+  // Optional edge-local facts applied during branch-sensitive proofs. Reset
+  // the context after changing this pointer or the facts it references.
   const loom_condition_fact_set_t* condition_facts;
 
   // Arena used for memo entries, retained term arrays, and scratch growth.
@@ -101,6 +104,12 @@ typedef struct loom_symbolic_expr_context_t {
 
   // Allocated memo entry count.
   iree_host_size_t memo_capacity;
+
+  // Condition-refined fact memo entries indexed by value ID.
+  loom_symbolic_expr_condition_fact_memo_entry_t* condition_fact_memo_entries;
+
+  // Allocated condition-refined fact memo entry count.
+  iree_host_size_t condition_fact_memo_capacity;
 
   // Reusable term buffer for normalization and comparison.
   loom_symbolic_term_t* scratch_terms;
@@ -165,7 +174,8 @@ void loom_symbolic_expr_context_initialize(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     iree_arena_allocator_t* arena, loom_symbolic_expr_context_t* out_context);
 
-// Clears memoized value expressions while retaining scratch and memo capacity.
+// Clears memoized expressions and condition-refined facts while retaining
+// scratch and memo capacity.
 void loom_symbolic_expr_context_reset(loom_symbolic_expr_context_t* context);
 
 // Constructs a facts-only expression. This is the conservative result for
@@ -226,6 +236,14 @@ iree_status_t loom_symbolic_expr_simplify_value_difference(
 
 // Attempts to prove an integer relation between two SSA values.
 iree_status_t loom_symbolic_expr_prove_value_relation(
+    loom_symbolic_expr_context_t* context,
+    loom_symbolic_integer_relation_t relation, loom_value_id_t left_value,
+    loom_value_id_t right_value, loom_symbolic_proof_result_t* out_result);
+
+// Attempts to prove an integer relation using only facts already active on
+// |context|. This does not enumerate hypothetical select outcomes, keeping the
+// query suitable for speculative canonicalization on large value graphs.
+iree_status_t loom_symbolic_expr_prove_value_relation_with_active_facts(
     loom_symbolic_expr_context_t* context,
     loom_symbolic_integer_relation_t relation, loom_value_id_t left_value,
     loom_value_id_t right_value, loom_symbolic_proof_result_t* out_result);

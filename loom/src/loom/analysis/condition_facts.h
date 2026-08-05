@@ -57,7 +57,8 @@ typedef struct loom_condition_integer_relation_t {
 } loom_condition_integer_relation_t;
 
 typedef struct loom_condition_fact_set_t {
-  // Caller-owned storage for integer relations.
+  // Caller-owned storage for integer relations. Query APIs append each exact
+  // relation at most once.
   loom_condition_integer_relation_t* integer_relations;
   // Number of populated entries in integer_relations.
   iree_host_size_t integer_relation_count;

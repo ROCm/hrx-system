@@ -966,6 +966,61 @@ TEST_F(SymbolicExprTest, SelectUsesConstantConditionExpression) {
   EXPECT_EQ(expression.terms[0].value_id, false_value);
 }
 
+TEST_F(SymbolicExprTest, ConditionRefinementMemoReusesPersistentStorage) {
+  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t source = DefineIndexValue();
+  DefineFacts(source, loom_value_facts_make(0, 1023, 1));
+  loom_value_id_t upper = loom_index_constant_result(BuildIndexConstant(1024));
+  DefineFacts(upper, loom_value_facts_exact_i64(1024));
+
+  loom_op_t* condition_op = nullptr;
+  IREE_ASSERT_OK(loom_index_cmp_build(&builder_, LOOM_INDEX_CMP_PREDICATE_ULT,
+                                      source, upper, index_type,
+                                      loom_type_scalar(LOOM_SCALAR_TYPE_I1),
+                                      LOOM_LOCATION_UNKNOWN, &condition_op));
+  loom_value_id_t condition = loom_index_cmp_result(condition_op);
+
+  // Each select references the preceding value twice. Condition-refined fact
+  // inference memoizes the shared DAG instead of retaining per-visit storage.
+  loom_value_id_t selected_value = source;
+  for (iree_host_size_t i = 0; i < 8; ++i) {
+    loom_op_t* select_op = nullptr;
+    IREE_ASSERT_OK(loom_scf_select_build(&builder_, condition, selected_value,
+                                         selected_value, index_type,
+                                         LOOM_LOCATION_UNKNOWN, &select_op));
+    selected_value = loom_scf_select_result(select_op);
+  }
+
+  loom_condition_integer_relation_t relation_storage[2];
+  loom_condition_fact_set_t condition_facts;
+  loom_condition_fact_set_initialize(
+      relation_storage, IREE_ARRAYSIZE(relation_storage), &condition_facts);
+  ASSERT_TRUE(loom_condition_facts_query(module_, &fact_table_, condition,
+                                         /*assumed_truth=*/true,
+                                         &condition_facts));
+  expression_context_.condition_facts = &condition_facts;
+
+  loom_symbolic_expr_t zero = {0};
+  loom_symbolic_expr_constant(0, &zero);
+  loom_symbolic_expr_t selected_expression = {0};
+  IREE_ASSERT_OK(loom_symbolic_expr_value(&expression_context_, selected_value,
+                                          &selected_expression));
+  loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(loom_symbolic_expr_prove_le(&expression_context_, &zero,
+                                             &selected_expression, &proof));
+  ASSERT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
+
+  const iree_host_size_t warmed_allocation_size =
+      analysis_arena_.used_allocation_size;
+  for (iree_host_size_t i = 0; i < 4; ++i) {
+    loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+    IREE_ASSERT_OK(loom_symbolic_expr_prove_le(&expression_context_, &zero,
+                                               &selected_expression, &proof));
+    EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
+  }
+  EXPECT_EQ(analysis_arena_.used_allocation_size, warmed_allocation_size);
+}
+
 TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopLowerBound) {
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_value_id_t output = DefineIndexValue();
@@ -1009,11 +1064,17 @@ TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopLowerBound) {
   IREE_ASSERT_OK(loom_index_sub_build(&builder_, loom_index_add_result(sum_op),
                                       one_value, index_type,
                                       LOOM_LOCATION_UNKNOWN, &shifted_op));
+  const loom_value_id_t shifted = loom_index_sub_result(shifted_op);
+
+  loom_symbolic_proof_result_t active_facts_proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(loom_symbolic_expr_prove_value_relation_with_active_facts(
+      &expression_context_, LOOM_SYMBOLIC_INTEGER_RELATION_GE, shifted,
+      zero_value, &active_facts_proof));
+  EXPECT_EQ(active_facts_proof, LOOM_SYMBOLIC_PROOF_UNKNOWN);
 
   loom_symbolic_expr_t shifted_expression = {0};
-  IREE_ASSERT_OK(loom_symbolic_expr_from_value(
-      &expression_context_, loom_index_sub_result(shifted_op),
-      &shifted_expression));
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(&expression_context_, shifted,
+                                               &shifted_expression));
   loom_symbolic_expr_t zero_expression = {0};
   loom_symbolic_expr_constant(0, &zero_expression);
   loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
