@@ -14,9 +14,9 @@ config.decl @qwen3_moe.model.hidden_size : %value: index where [range(%value, 12
 
 config.decl @qwen3_moe.router.expert_count : %value: index where [range(%value, 32, 512), mul(%value, 32)]
 
-func.decl @qwen3_moe_router_projection_f32_four_row_wave32(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen3_moe_router_projection_f32_four_row_wave32(%token_count: index) launch(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
 
-func.decl @qwen3_moe_router_top8_f32(%token_count: index, %route_id_stride: index, %logits: buffer, %route_ids: buffer, %route_weights: buffer)
+kernel.decl @qwen3_moe_router_top8_f32(%token_count: index, %route_id_stride: index) launch(%token_count: index, %route_id_stride: index, %logits: buffer, %route_ids: buffer, %route_weights: buffer)
 
 kernel.def target(@qwen3_moe_router_fused_gfx11_wave64) @qwen3_moe_router_projection_top8_fused_decode_f32(%token_count: index, %route_id_stride: index) {
   %expert_count = config.get @qwen3_moe.router.expert_count : index
@@ -129,10 +129,10 @@ check.case public @qwen3_moe_router_projection_top8_fused_differential_case {
   %actual_route_weights1 = check.generate.fill value(0.0) : tensor<1x8xf32>
   %completion_counter = check.generate.fill value(0) : tensor<1xi32>
   %expected_counter = check.generate.fill value(0) : tensor<1xi32>
-  func.call @qwen3_moe_router_projection_f32_four_row_wave32(%token_count, %input, %weight, %expected_logits) : (index, tensor<1x2048xf32>, tensor<128x2048xf32>, tensor<1x128xf32>)
-  func.call @qwen3_moe_router_top8_f32(%token_count, %route_id_stride, %expected_logits, %expected_route_ids, %expected_route_weights) : (index, index, tensor<1x128xf32>, tensor<1x8xi32>, tensor<1x8xf32>)
-  func.call @qwen3_moe_router_projection_top8_fused_decode_f32(%token_count, %route_id_stride, %input, %weight, %actual_logits0, %completion_counter, %actual_route_ids0, %actual_route_weights0) : (index, index, tensor<1x2048xf32>, tensor<128x2048xf32>, tensor<1x128xf32>, tensor<1xi32>, tensor<1x8xi32>, tensor<1x8xf32>)
-  func.call @qwen3_moe_router_projection_top8_fused_decode_f32(%token_count, %route_id_stride, %input, %weight, %actual_logits1, %completion_counter, %actual_route_ids1, %actual_route_weights1) : (index, index, tensor<1x2048xf32>, tensor<128x2048xf32>, tensor<1x128xf32>, tensor<1xi32>, tensor<1x8xi32>, tensor<1x8xf32>)
+  kernel.launch @qwen3_moe_router_projection_f32_four_row_wave32[%token_count](%token_count, %input, %weight, %expected_logits) : [index](index, tensor<1x2048xf32>, tensor<128x2048xf32>, tensor<1x128xf32>)
+  kernel.launch @qwen3_moe_router_top8_f32[%token_count, %route_id_stride](%token_count, %route_id_stride, %expected_logits, %expected_route_ids, %expected_route_weights) : [index, index](index, index, tensor<1x128xf32>, tensor<1x8xi32>, tensor<1x8xf32>)
+  kernel.launch @qwen3_moe_router_projection_top8_fused_decode_f32[%token_count, %route_id_stride](%token_count, %route_id_stride, %input, %weight, %actual_logits0, %completion_counter, %actual_route_ids0, %actual_route_weights0) : [index, index](index, index, tensor<1x2048xf32>, tensor<128x2048xf32>, tensor<1x128xf32>, tensor<1xi32>, tensor<1x8xi32>, tensor<1x8xf32>)
+  kernel.launch @qwen3_moe_router_projection_top8_fused_decode_f32[%token_count, %route_id_stride](%token_count, %route_id_stride, %input, %weight, %actual_logits1, %completion_counter, %actual_route_ids1, %actual_route_weights1) : [index, index](index, index, tensor<1x2048xf32>, tensor<128x2048xf32>, tensor<1x128xf32>, tensor<1xi32>, tensor<1x8xi32>, tensor<1x8xf32>)
   check.expect.close actual(%actual_logits0) expected(%expected_logits) atol(0.001) rtol(0.001) nan(same) : tensor<1x128xf32>
   check.expect.close actual(%actual_logits1) expected(%expected_logits) atol(0.001) rtol(0.001) nan(same) : tensor<1x128xf32>
   check.expect.equal actual(%actual_route_ids0) expected(%expected_route_ids) : tensor<1x8xi32>
@@ -152,7 +152,7 @@ check.case public @qwen3_moe_router_projection_top8_fused_benchmark_case {
   %completion_counter = check.generate.fill value(0) : tensor<1xi32>
   %route_ids = check.generate.fill value(-1) : tensor<1x8xi32>
   %route_weights = check.generate.fill value(0.0) : tensor<1x8xf32>
-  func.call @qwen3_moe_router_projection_top8_fused_decode_f32(%token_count, %route_id_stride, %input, %weight, %logits, %completion_counter, %route_ids, %route_weights) : (index, index, tensor<1x2048xf32>, tensor<128x2048xf32>, tensor<1x128xf32>, tensor<1xi32>, tensor<1x8xi32>, tensor<1x8xf32>)
+  kernel.launch @qwen3_moe_router_projection_top8_fused_decode_f32[%token_count, %route_id_stride](%token_count, %route_id_stride, %input, %weight, %logits, %completion_counter, %route_ids, %route_weights) : [index, index](index, index, tensor<1x2048xf32>, tensor<128x2048xf32>, tensor<1x128xf32>, tensor<1xi32>, tensor<1x8xi32>, tensor<1x8xf32>)
   check.return
 }
 
@@ -164,8 +164,8 @@ check.case public @qwen3_moe_router_projection_top8_composed_benchmark_case {
   %logits = check.generate.fill value(0.0) : tensor<1x128xf32>
   %route_ids = check.generate.fill value(-1) : tensor<1x8xi32>
   %route_weights = check.generate.fill value(0.0) : tensor<1x8xf32>
-  func.call @qwen3_moe_router_projection_f32_four_row_wave32(%token_count, %input, %weight, %logits) : (index, tensor<1x2048xf32>, tensor<128x2048xf32>, tensor<1x128xf32>)
-  func.call @qwen3_moe_router_top8_f32(%token_count, %route_id_stride, %logits, %route_ids, %route_weights) : (index, index, tensor<1x128xf32>, tensor<1x8xi32>, tensor<1x8xf32>)
+  kernel.launch @qwen3_moe_router_projection_f32_four_row_wave32[%token_count](%token_count, %input, %weight, %logits) : [index](index, tensor<1x2048xf32>, tensor<128x2048xf32>, tensor<1x128xf32>)
+  kernel.launch @qwen3_moe_router_top8_f32[%token_count, %route_id_stride](%token_count, %route_id_stride, %logits, %route_ids, %route_weights) : [index, index](index, index, tensor<1x128xf32>, tensor<1x8xi32>, tensor<1x8xf32>)
   check.return
 }
 

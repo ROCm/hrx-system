@@ -8,9 +8,9 @@
 // issue the kernel again against the same storage.
 amdgpu.target<gfx11-generic> @qwen3_moe_expert_table_partition_gfx11_wave32 {subgroup_size = 32}
 
-func.decl @qwen3_moe_build_expert_table(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %route_ids: buffer, %expert_table: buffer)
+kernel.decl @qwen3_moe_build_expert_table(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index) launch(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %route_ids: buffer, %expert_table: buffer)
 
-func.decl @qwen3_moe_build_expert_partition_table(%token_count: index, %route_count: index, %expert_count: index, %expert_table: buffer, %partition_table: buffer)
+kernel.decl @qwen3_moe_build_expert_partition_table(%token_count: index, %route_count: index, %expert_count: index) launch(%token_count: index, %route_count: index, %expert_count: index, %expert_table: buffer, %partition_table: buffer)
 
 kernel.def target(@qwen3_moe_expert_table_partition_gfx11_wave32) @qwen3_moe_build_expert_table_partition_prefill_512(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index) {
   %one = index.constant 1 : index
@@ -188,10 +188,10 @@ check.case public @qwen3_moe_expert_table_partition_fused_differential_case {
   %actual_partition_table1 = check.generate.fill value(-1) : tensor<257xi32>
   %completion_counter = check.generate.fill value(0) : tensor<1xi32>
   %expected_counter = check.generate.fill value(0) : tensor<1xi32>
-  func.call @qwen3_moe_build_expert_table(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_expert_table) : (index, index, index, index, tensor<512x8xi32>, tensor<65664xi32>)
-  func.call @qwen3_moe_build_expert_partition_table(%token_count, %route_count, %expert_count, %expected_expert_table, %expected_partition_table) : (index, index, index, tensor<65664xi32>, tensor<257xi32>)
-  func.call @qwen3_moe_build_expert_table_partition_prefill_512(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_expert_table0, %actual_partition_table0, %completion_counter) : (index, index, index, index, tensor<512x8xi32>, tensor<65664xi32>, tensor<257xi32>, tensor<1xi32>)
-  func.call @qwen3_moe_build_expert_table_partition_prefill_512(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_expert_table1, %actual_partition_table1, %completion_counter) : (index, index, index, index, tensor<512x8xi32>, tensor<65664xi32>, tensor<257xi32>, tensor<1xi32>)
+  kernel.launch @qwen3_moe_build_expert_table[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_expert_table) : [index, index, index, index](index, index, index, index, tensor<512x8xi32>, tensor<65664xi32>)
+  kernel.launch @qwen3_moe_build_expert_partition_table[%token_count, %route_count, %expert_count](%token_count, %route_count, %expert_count, %expected_expert_table, %expected_partition_table) : [index, index, index](index, index, index, tensor<65664xi32>, tensor<257xi32>)
+  kernel.launch @qwen3_moe_build_expert_table_partition_prefill_512[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_expert_table0, %actual_partition_table0, %completion_counter) : [index, index, index, index](index, index, index, index, tensor<512x8xi32>, tensor<65664xi32>, tensor<257xi32>, tensor<1xi32>)
+  kernel.launch @qwen3_moe_build_expert_table_partition_prefill_512[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_expert_table1, %actual_partition_table1, %completion_counter) : [index, index, index, index](index, index, index, index, tensor<512x8xi32>, tensor<65664xi32>, tensor<257xi32>, tensor<1xi32>)
   check.expect.equal actual(%actual_expert_table0) expected(%expected_expert_table) : tensor<65664xi32>
   check.expect.equal actual(%actual_partition_table0) expected(%expected_partition_table) : tensor<257xi32>
   check.expect.equal actual(%actual_expert_table1) expected(%expected_expert_table) : tensor<65664xi32>
@@ -209,7 +209,7 @@ check.case public @qwen3_moe_expert_table_partition_fused_benchmark_case {
   %expert_table = check.generate.fill value(-1) : tensor<65664xi32>
   %partition_table = check.generate.fill value(-1) : tensor<257xi32>
   %completion_counter = check.generate.fill value(0) : tensor<1xi32>
-  func.call @qwen3_moe_build_expert_table_partition_prefill_512(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table, %partition_table, %completion_counter) : (index, index, index, index, tensor<512x8xi32>, tensor<65664xi32>, tensor<257xi32>, tensor<1xi32>)
+  kernel.launch @qwen3_moe_build_expert_table_partition_prefill_512[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table, %partition_table, %completion_counter) : [index, index, index, index](index, index, index, index, tensor<512x8xi32>, tensor<65664xi32>, tensor<257xi32>, tensor<1xi32>)
   check.return
 }
 
@@ -221,8 +221,8 @@ check.case public @qwen3_moe_expert_table_partition_composed_benchmark_case {
   %route_ids = check.generate.iota offset(0) step(1) period(128) : tensor<512x8xi32>
   %expert_table = check.generate.fill value(-1) : tensor<65664xi32>
   %partition_table = check.generate.fill value(-1) : tensor<257xi32>
-  func.call @qwen3_moe_build_expert_table(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table) : (index, index, index, index, tensor<512x8xi32>, tensor<65664xi32>)
-  func.call @qwen3_moe_build_expert_partition_table(%token_count, %route_count, %expert_count, %expert_table, %partition_table) : (index, index, index, tensor<65664xi32>, tensor<257xi32>)
+  kernel.launch @qwen3_moe_build_expert_table[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table) : [index, index, index, index](index, index, index, index, tensor<512x8xi32>, tensor<65664xi32>)
+  kernel.launch @qwen3_moe_build_expert_partition_table[%token_count, %route_count, %expert_count](%token_count, %route_count, %expert_count, %expert_table, %partition_table) : [index, index, index](index, index, index, tensor<65664xi32>, tensor<257xi32>)
   check.return
 }
 

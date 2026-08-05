@@ -24,7 +24,7 @@ config.decl @qwen3_moe.workload.token_capacity : %value: index where [range(%val
 // launch replaces this upper bound with the producer's exact queue count.
 config.decl @qwen3_moe.batched_decode.rows2_descriptor_capacity : %value: index where [range(%value, 1, 512)]
 
-func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
+kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
 func.decl @qwen3_moe_q4k_chunk_pair_global(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group_pair: index, %q4_half: index, %header_words: vector<4xi32>) -> (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32)
 
@@ -32,9 +32,9 @@ func.decl @qwen3_moe_q4k_q8_1_dot(%q4_values: vector<16xi8>, %d_scale: f32, %dmi
 
 func.decl @qwen3_moe_unpack_batched_decode_expert_descriptor(%descriptor: vector<4xi32>) -> (index, index, index)
 
-func.decl @qwen3_moe_build_batched_decode_expert_dispatch(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %route_ids: buffer, %assignment_ordinals: buffer, %queue_counts: buffer, %queue_descriptors: buffer)
+kernel.decl @qwen3_moe_build_batched_decode_expert_dispatch(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index) launch(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %route_ids: buffer, %assignment_ordinals: buffer, %queue_counts: buffer, %queue_descriptors: buffer)
 
-func.decl @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer)
+kernel.decl @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index) launch(%token_count: index, %route_count: index, %route_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer)
 
 // Contracts one expert/channel Q4_K row against two independently quantized
 // activation rows. Splitting gate and up into separate contractions keeps each
@@ -286,10 +286,10 @@ check.case public @qwen3_moe_batched_decode_gate_up_q4k_rows2_differential_case 
   %up_weight = check.generate.iota offset(-71) step(1) period(144) : tensor<32x32x2x144xi8>
   %expected = check.generate.fill value(0.0) : tensor<2x8x32xf32>
   %actual = check.generate.fill value(1.0) : tensor<2x8x32xf32>
-  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %q8_input) : (index, index, tensor<2x512xf32>, tensor<2x576xi8>)
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %assignment_ordinals, %queue_counts, %queue_descriptors) : (index, index, index, index, tensor<2x8xi32>, tensor<16xi32>, tensor<4xi32>, tensor<4x32x4xi32>)
-  func.call @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count, %route_count, %route_stride, %expert_count, %output_size, %q8_input, %route_ids, %gate_weight, %up_weight, %expected) : (index, index, index, index, index, tensor<2x576xi8>, tensor<2x8xi32>, tensor<32x32x2x144xi8>, tensor<32x32x2x144xi8>, tensor<2x8x32xf32>)
-  func.call @qwen3_moe_batched_decode_gate_up_q4k_rows2(%descriptor_count, %queue_ordinal, %token_count, %route_count, %expert_count, %output_size, %queue_descriptors, %assignment_ordinals, %q8_input, %gate_weight, %up_weight, %actual) : (index, index, index, index, index, index, tensor<4x32x4xi32>, tensor<16xi32>, tensor<2x576xi8>, tensor<32x32x2x144xi8>, tensor<32x32x2x144xi8>, tensor<2x8x32xf32>)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %input_size](%token_count, %input_size, %input, %q8_input) : [index, index](index, index, tensor<2x512xf32>, tensor<2x576xi8>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %assignment_ordinals, %queue_counts, %queue_descriptors) : [index, index, index, index](index, index, index, index, tensor<2x8xi32>, tensor<16xi32>, tensor<4xi32>, tensor<4x32x4xi32>)
+  kernel.launch @qwen3_moe_routed_gate_up_swiglu_q4k_q8[%token_count, %route_count, %route_stride, %expert_count, %output_size](%token_count, %route_count, %route_stride, %expert_count, %output_size, %q8_input, %route_ids, %gate_weight, %up_weight, %expected) : [index, index, index, index, index](index, index, index, index, index, tensor<2x576xi8>, tensor<2x8xi32>, tensor<32x32x2x144xi8>, tensor<32x32x2x144xi8>, tensor<2x8x32xf32>)
+  kernel.launch @qwen3_moe_batched_decode_gate_up_q4k_rows2[%descriptor_count, %queue_ordinal, %token_count, %route_count, %expert_count, %output_size](%descriptor_count, %queue_ordinal, %token_count, %route_count, %expert_count, %output_size, %queue_descriptors, %assignment_ordinals, %q8_input, %gate_weight, %up_weight, %actual) : [index, index, index, index, index, index](index, index, index, index, index, index, tensor<4x32x4xi32>, tensor<16xi32>, tensor<2x576xi8>, tensor<32x32x2x144xi8>, tensor<32x32x2x144xi8>, tensor<2x8x32xf32>)
   check.expect.close actual(%actual) expected(%expected) atol(0.25) rtol(9.9999999999999995e-07) nan(same) : tensor<2x8x32xf32>
   check.return
 }
@@ -313,8 +313,8 @@ check.case public @qwen3_moe_batched_decode_gate_up_q4k_rows2_benchmark_case {
   %gate_weight = check.generate.fill value(0) : tensor<128x768x8x144xi8>
   %up_weight = check.generate.fill value(0) : tensor<128x768x8x144xi8>
   %output = check.generate.fill value(1.0) : tensor<16x8x768xf32>
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %assignment_ordinals, %queue_counts, %queue_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
-  func.call @qwen3_moe_batched_decode_gate_up_q4k_rows2(%descriptor_count, %queue_ordinal, %token_count, %route_count, %expert_count, %output_size, %queue_descriptors, %assignment_ordinals, %q8_input, %gate_weight, %up_weight, %output) : (index, index, index, index, index, index, tensor<4x128x4xi32>, tensor<128xi32>, tensor<16x2304xi8>, tensor<128x768x8x144xi8>, tensor<128x768x8x144xi8>, tensor<16x8x768xf32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %assignment_ordinals, %queue_counts, %queue_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_batched_decode_gate_up_q4k_rows2[%descriptor_count, %queue_ordinal, %token_count, %route_count, %expert_count, %output_size](%descriptor_count, %queue_ordinal, %token_count, %route_count, %expert_count, %output_size, %queue_descriptors, %assignment_ordinals, %q8_input, %gate_weight, %up_weight, %output) : [index, index, index, index, index, index](index, index, index, index, index, index, tensor<4x128x4xi32>, tensor<128xi32>, tensor<16x2304xi8>, tensor<128x768x8x144xi8>, tensor<128x768x8x144xi8>, tensor<16x8x768xf32>)
   check.return
 }
 

@@ -21,9 +21,9 @@ config.decl @ggml.linear_q6k_f32.token_capacity : %value: index where [range(%va
 config.decl @ggml.linear_q6k_f32.output_capacity : %value: index where [range(%value, 1, 262144)]
 
 // Q8_1 reference declarations used only by the differential case.
-func.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
+kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
-func.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer)
 
 // Computes an ordered four-element F32 dot product. The scalar recurrence
 // mirrors the GLSL oracle and gives target scheduling four independent dot
@@ -371,10 +371,10 @@ check.case public @ggml_linear_q6k_f32_differential_case {
   %expected = check.generate.fill value(0.0) : tensor<2x9xf32>
   %actual_wave64 = check.generate.fill value(1.0) : tensor<2x9xf32>
   %actual_wave32 = check.generate.fill value(1.0) : tensor<2x9xf32>
-  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %q8_input) : (index, index, tensor<2x2048xf32>, tensor<2x2304xi8>)
-  func.call @ggml_linear_q6k_q8_1_x4(%token_count, %input_size, %output_size, %q8_input, %weight, %expected) : (index, index, index, tensor<2x2304xi8>, tensor<9x8x210xi8>, tensor<2x9xf32>)
-  func.call @ggml_linear_q6k_f32_wave64(%token_count, %input_size, %output_size, %input, %weight, %actual_wave64) : (index, index, index, tensor<2x2048xf32>, tensor<9x8x210xi8>, tensor<2x9xf32>)
-  func.call @ggml_linear_q6k_f32_wave32(%token_count, %input_size, %output_size, %input, %weight, %actual_wave32) : (index, index, index, tensor<2x2048xf32>, tensor<9x8x210xi8>, tensor<2x9xf32>)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %input_size](%token_count, %input_size, %input, %q8_input) : [index, index](index, index, tensor<2x2048xf32>, tensor<2x2304xi8>)
+  kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %q8_input, %weight, %expected) : [index, index, index](index, index, index, tensor<2x2304xi8>, tensor<9x8x210xi8>, tensor<2x9xf32>)
+  kernel.launch @ggml_linear_q6k_f32_wave64[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %input, %weight, %actual_wave64) : [index, index, index](index, index, index, tensor<2x2048xf32>, tensor<9x8x210xi8>, tensor<2x9xf32>)
+  kernel.launch @ggml_linear_q6k_f32_wave32[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %input, %weight, %actual_wave32) : [index, index, index](index, index, index, tensor<2x2048xf32>, tensor<9x8x210xi8>, tensor<2x9xf32>)
   check.expect.close actual(%actual_wave64) expected(%expected) atol(0.25) rtol(0.01) nan(same) : tensor<2x9xf32>
   check.expect.close actual(%actual_wave32) expected(%expected) atol(0.25) rtol(0.01) nan(same) : tensor<2x9xf32>
   check.return
@@ -388,7 +388,7 @@ check.case public @ggml_linear_q6k_f32_wave64_dense_v_benchmark_case {
   %weight = check.generate.fill value(0) : tensor<512x8x210xi8>
   %output = check.generate.fill value(1.0) : tensor<[%token_count]x512xf32>
   %expected = check.generate.fill value(0.0) : tensor<[%token_count]x512xf32>
-  func.call @ggml_linear_q6k_f32_wave64(%token_count, %input_size, %output_size, %input, %weight, %output) : (index, index, index, tensor<[%token_count]x2048xf32>, tensor<512x8x210xi8>, tensor<[%token_count]x512xf32>)
+  kernel.launch @ggml_linear_q6k_f32_wave64[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %input, %weight, %output) : [index, index, index](index, index, index, tensor<[%token_count]x2048xf32>, tensor<512x8x210xi8>, tensor<[%token_count]x512xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x512xf32>
   check.return
 }
@@ -401,7 +401,7 @@ check.case public @ggml_linear_q6k_f32_wave32_dense_v_benchmark_case {
   %weight = check.generate.fill value(0) : tensor<512x8x210xi8>
   %output = check.generate.fill value(1.0) : tensor<[%token_count]x512xf32>
   %expected = check.generate.fill value(0.0) : tensor<[%token_count]x512xf32>
-  func.call @ggml_linear_q6k_f32_wave32(%token_count, %input_size, %output_size, %input, %weight, %output) : (index, index, index, tensor<[%token_count]x2048xf32>, tensor<512x8x210xi8>, tensor<[%token_count]x512xf32>)
+  kernel.launch @ggml_linear_q6k_f32_wave32[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %input, %weight, %output) : [index, index, index](index, index, index, tensor<[%token_count]x2048xf32>, tensor<512x8x210xi8>, tensor<[%token_count]x512xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x512xf32>
   check.return
 }

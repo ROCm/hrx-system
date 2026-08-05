@@ -17,9 +17,9 @@ config.decl @qwen3_moe.routed_down.output_size : %value: index where [range(%val
 
 config.decl @qwen3_moe.workload.token_capacity : %value: index where [range(%value, 1, 2048)]
 
-func.decl @qwen3_moe_routed_down_weighted_reduce_f16_f32(%token_count: index, %route_weights: buffer, %routed_output: buffer, %hidden_state: buffer)
+kernel.decl @qwen3_moe_routed_down_weighted_reduce_f16_f32(%token_count: index) launch(%token_count: index, %route_weights: buffer, %routed_output: buffer, %hidden_state: buffer)
 
-func.decl @qwen3_moe_rmsnorm_f32(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen3_moe_rmsnorm_f32(%token_count: index) launch(%token_count: index, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.def target(@qwen3_moe_routed_down_next_norm_gfx11_wave32) @qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32(%token_count: index) {
   %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
@@ -129,9 +129,9 @@ check.case public @qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32_differ
   %next_norm_weight = check.generate.iota offset(0.5) step(0.0078125) period(29) : tensor<2048xf32>
   %expected_next_projection_input = check.generate.fill value(0.0) : tensor<512x2048xf32>
   %actual_next_projection_input = check.generate.fill value(1.0) : tensor<512x2048xf32>
-  func.call @qwen3_moe_routed_down_weighted_reduce_f16_f32(%token_count, %route_weights, %routed_output, %expected_hidden_state) : (index, tensor<512x8xf32>, tensor<512x8x2048xf16>, tensor<512x2048xf32>)
-  func.call @qwen3_moe_rmsnorm_f32(%token_count, %expected_hidden_state, %next_norm_weight, %expected_next_projection_input) : (index, tensor<512x2048xf32>, tensor<2048xf32>, tensor<512x2048xf32>)
-  func.call @qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32(%token_count, %route_weights, %routed_output, %actual_hidden_state, %next_norm_weight, %actual_next_projection_input) : (index, tensor<512x8xf32>, tensor<512x8x2048xf16>, tensor<512x2048xf32>, tensor<2048xf32>, tensor<512x2048xf32>)
+  kernel.launch @qwen3_moe_routed_down_weighted_reduce_f16_f32[%token_count](%token_count, %route_weights, %routed_output, %expected_hidden_state) : [index](index, tensor<512x8xf32>, tensor<512x8x2048xf16>, tensor<512x2048xf32>)
+  kernel.launch @qwen3_moe_rmsnorm_f32[%token_count](%token_count, %expected_hidden_state, %next_norm_weight, %expected_next_projection_input) : [index](index, tensor<512x2048xf32>, tensor<2048xf32>, tensor<512x2048xf32>)
+  kernel.launch @qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32[%token_count](%token_count, %route_weights, %routed_output, %actual_hidden_state, %next_norm_weight, %actual_next_projection_input) : [index](index, tensor<512x8xf32>, tensor<512x8x2048xf16>, tensor<512x2048xf32>, tensor<2048xf32>, tensor<512x2048xf32>)
   check.expect.close actual(%actual_hidden_state) expected(%expected_hidden_state) atol(0.0001) rtol(0.0001) nan(same) : tensor<512x2048xf32>
   check.expect.close actual(%actual_next_projection_input) expected(%expected_next_projection_input) atol(0.001) rtol(0.001) nan(same) : tensor<512x2048xf32>
   check.return
@@ -144,7 +144,7 @@ check.case public @qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32_fused_
   %hidden_state = check.generate.fill value(1.0) : tensor<512x2048xf32>
   %next_norm_weight = check.generate.fill value(1.0) : tensor<2048xf32>
   %next_projection_input = check.generate.fill value(0.0) : tensor<512x2048xf32>
-  func.call @qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32(%token_count, %route_weights, %routed_output, %hidden_state, %next_norm_weight, %next_projection_input) : (index, tensor<512x8xf32>, tensor<512x8x2048xf16>, tensor<512x2048xf32>, tensor<2048xf32>, tensor<512x2048xf32>)
+  kernel.launch @qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32[%token_count](%token_count, %route_weights, %routed_output, %hidden_state, %next_norm_weight, %next_projection_input) : [index](index, tensor<512x8xf32>, tensor<512x8x2048xf16>, tensor<512x2048xf32>, tensor<2048xf32>, tensor<512x2048xf32>)
   check.return
 }
 
@@ -155,8 +155,8 @@ check.case public @qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32_compos
   %hidden_state = check.generate.fill value(1.0) : tensor<512x2048xf32>
   %next_norm_weight = check.generate.fill value(1.0) : tensor<2048xf32>
   %next_projection_input = check.generate.fill value(0.0) : tensor<512x2048xf32>
-  func.call @qwen3_moe_routed_down_weighted_reduce_f16_f32(%token_count, %route_weights, %routed_output, %hidden_state) : (index, tensor<512x8xf32>, tensor<512x8x2048xf16>, tensor<512x2048xf32>)
-  func.call @qwen3_moe_rmsnorm_f32(%token_count, %hidden_state, %next_norm_weight, %next_projection_input) : (index, tensor<512x2048xf32>, tensor<2048xf32>, tensor<512x2048xf32>)
+  kernel.launch @qwen3_moe_routed_down_weighted_reduce_f16_f32[%token_count](%token_count, %route_weights, %routed_output, %hidden_state) : [index](index, tensor<512x8xf32>, tensor<512x8x2048xf16>, tensor<512x2048xf32>)
+  kernel.launch @qwen3_moe_rmsnorm_f32[%token_count](%token_count, %hidden_state, %next_norm_weight, %next_projection_input) : [index](index, tensor<512x2048xf32>, tensor<2048xf32>, tensor<512x2048xf32>)
   check.return
 }
 
