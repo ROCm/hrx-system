@@ -294,13 +294,26 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn("-clang-tidy-binary", command)
         self.assertIn("clang-tidy", command)
         self.assertIn(f"-load={Path('.tmp/plugin/libIREEClangTidyPlugin.so')}", command)
-        self.assertIn(f"-checks={presubmit.CLANG_TIDY_CHECKS}", command)
+        self.assertIn(f"-config-file={presubmit.CLANG_TIDY_CONFIG}", command)
         self.assertIn("-p", command)
         self.assertIn(str(Path("build/cmake-debug")), command)
         self.assertIn("-j", command)
         self.assertIn("17", command)
         self.assertIn("-warnings-as-errors=*", command)
         self.assertEqual(command[-1], "runtime/src/iree/base/status.c")
+
+    def test_cmake_clang_tidy_plugin_configure_pins_matching_packages(self):
+        llvm_package_dir = Path("/opt/llvm/lib/cmake/llvm")
+
+        command = presubmit.cmake_clang_tidy_plugin_configure_command(
+            llvm_package_dir=llvm_package_dir
+        )
+
+        self.assertEqual(command[0], "cmake")
+        self.assertIn("-S", command)
+        self.assertIn("build_tools/clang_tidy", command)
+        self.assertIn(f"-DLLVM_DIR={llvm_package_dir}", command)
+        self.assertIn("-DClang_DIR=/opt/llvm/lib/cmake/clang", command)
 
     def test_cmake_generated_compile_inputs_command_uses_cmake_build(self):
         with mock.patch.object(presubmit, "clang_tidy_jobs", return_value=23):
@@ -332,6 +345,7 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn("clang-tidy", command)
         self.assertIn("-clang-apply-replacements-binary", command)
         self.assertIn("clang-apply-replacements", command)
+        self.assertIn(f"-config-file={presubmit.CLANG_TIDY_CONFIG}", command)
         self.assertIn("-j", command)
         self.assertIn("19", command)
         self.assertIn("-fix", command)
@@ -544,7 +558,7 @@ class PresubmitTest(unittest.TestCase):
 
         self.assertTrue(ok)
         plugin_test_command = run_command.call_args_list[0].args[0]
-        self.assertIn("//build_tools/clang_tidy:plugin_smoke_test", plugin_test_command)
+        self.assertIn("//build_tools/clang_tidy:plugin_tests", plugin_test_command)
         clang_tidy_command = run_command.call_args_list[-1].args[0]
         self.assertIn("//runtime/src/iree/base:all", clang_tidy_command)
 
@@ -566,15 +580,7 @@ class PresubmitTest(unittest.TestCase):
 
         self.assertTrue(ok)
         plugin_test_command = run_command.call_args_list[0].args[0]
-        self.assertIn("//build_tools/clang_tidy:plugin_smoke_test", plugin_test_command)
-        self.assertIn(
-            "//build_tools/clang_tidy:refcount_checks_test", plugin_test_command
-        )
-        self.assertIn(
-            "//build_tools/clang_tidy:status_checks_test", plugin_test_command
-        )
-        self.assertIn("//build_tools/clang_tidy:style_checks_test", plugin_test_command)
-        self.assertIn("//build_tools/clang_tidy:trace_checks_test", plugin_test_command)
+        self.assertIn("//build_tools/clang_tidy:plugin_tests", plugin_test_command)
 
     def test_default_profile_has_no_static_analysis_provider(self):
         ok = presubmit.run_static_analysis(

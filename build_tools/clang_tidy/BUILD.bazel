@@ -8,11 +8,12 @@ load("@iree_clang_tidy_llvm//:config.bzl", "CLANG_TIDY_LLVM_COPTS", "CLANG_TIDY_
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//python:defs.bzl", "py_binary", "py_test")
-load(":clang_tidy.bzl", "iree_clang_tidy")
+load(":clang_tidy.bzl", "iree_clang_tidy", "iree_recursion_analysis")
 
 package(default_visibility = ["//visibility:public"])
 
 exports_files([
+    "clang_tidy_config.yaml",
     "clang_tidy.bzl",
     "llvm_repo.bzl",
 ])
@@ -30,7 +31,10 @@ filegroup(
     srcs = [
         "CMakeLists.txt",
         "README.md",
+        "aggregate_recursion_summaries.py",
+        "clang_tidy_config.yaml",
         ":plugin_sources",
+        ":testdata",
     ],
 )
 
@@ -43,9 +47,25 @@ filegroup(
 )
 
 py_binary(
+    name = "aggregate_recursion_summaries",
+    srcs = ["aggregate_recursion_summaries.py"],
+    main = "aggregate_recursion_summaries.py",
+)
+
+py_binary(
     name = "run_clang_tidy_action",
     srcs = ["run_clang_tidy_action.py"],
     main = "run_clang_tidy_action.py",
+)
+
+py_test(
+    name = "aggregate_recursion_summaries_test",
+    srcs = [
+        "aggregate_recursion_summaries.py",
+        "test/aggregate_recursion_summaries_test.py",
+    ],
+    imports = ["."],
+    main = "test/aggregate_recursion_summaries_test.py",
 )
 
 cc_binary(
@@ -56,6 +76,8 @@ cc_binary(
         "iree/IreeTidyModule.cc",
         "iree/LifecycleChecks.cc",
         "iree/LifecycleChecks.h",
+        "iree/RecursionCheck.cc",
+        "iree/RecursionCheck.h",
         "iree/RefCountChecks.cc",
         "iree/RefCountChecks.h",
         "iree/SmokeCheck.cc",
@@ -165,6 +187,63 @@ py_test(
 )
 
 py_test(
+    name = "recursion_check_test",
+    srcs = [
+        "test/clang_tidy_test.py",
+        "test/recursion_check_test.py",
+    ],
+    args = [
+        "--clang-tidy=$(location @iree_clang_tidy_llvm//:clang-tidy)",
+        "--plugin=$(location :IREEClangTidyPlugin.so)",
+    ],
+    data = [
+        "test/recursion_check.c",
+        ":IREEClangTidyPlugin.so",
+        "@iree_clang_tidy_llvm//:clang-tidy",
+    ],
+    imports = ["test"],
+    main = "test/recursion_check_test.py",
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+)
+
+cc_library(
+    name = "recursion_cross_tu_subject",
+    testonly = True,
+    srcs = [
+        "test/recursion_cross_tu_a.c",
+        "test/recursion_cross_tu_b.c",
+    ],
+    tags = ["manual"],
+)
+
+iree_recursion_analysis(
+    name = "loom_recursion_inventory",
+    testonly = True,
+    allow_diagnostics = True,
+    tags = ["manual"],
+    targets = ["//loom/src/loom/tools/loom-compile"],
+)
+
+iree_recursion_analysis(
+    name = "recursion_cross_tu_analysis",
+    testonly = True,
+    allow_diagnostics = True,
+    tags = ["manual"],
+    targets = [":recursion_cross_tu_subject"],
+)
+
+py_test(
+    name = "recursion_cross_tu_analysis_test",
+    srcs = ["test/recursion_cross_tu_analysis_test.py"],
+    args = ["--report=$(location :recursion_cross_tu_analysis)"],
+    data = [":recursion_cross_tu_analysis"],
+    main = "test/recursion_cross_tu_analysis_test.py",
+    tags = ["manual"],
+    target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+)
+
+py_test(
     name = "refcount_checks_test",
     srcs = [
         "test/clang_tidy_test.py",
@@ -229,6 +308,23 @@ py_test(
     main = "test/style_checks_test.py",
     tags = ["manual"],
     target_compatible_with = CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
+)
+
+test_suite(
+    name = "plugin_tests",
+    tags = ["manual"],
+    tests = [
+        ":aggregate_recursion_summaries_test",
+        ":extent_checks_test",
+        ":lifecycle_checks_test",
+        ":plugin_smoke_test",
+        ":recursion_check_test",
+        ":recursion_cross_tu_analysis_test",
+        ":refcount_checks_test",
+        ":status_checks_test",
+        ":style_checks_test",
+        ":trace_checks_test",
+    ],
 )
 
 cc_library(

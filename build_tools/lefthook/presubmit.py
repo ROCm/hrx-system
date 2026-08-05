@@ -104,7 +104,7 @@ CLANG_TIDY_LOCAL_OUTPUT_GROUP = "iree_clang_tidy_local_reports"
 CLANG_TIDY_OUTPUT_GROUP = "iree_clang_tidy_reports"
 CLANG_TIDY_PATH_PREFIXES = SEMGREP_PATH_PREFIXES
 CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
-CLANG_TIDY_CHECKS = "-*,iree-*"
+CLANG_TIDY_CONFIG = REPO_ROOT / "build_tools/clang_tidy/clang_tidy_config.yaml"
 CLANG_TIDY_CMAKE_BUILD_DIR = REPO_ROOT / ".tmp" / "iree-clang-tidy-plugin"
 CLANG_TIDY_FIXES_ROOT = "iree-clang-tidy-fixes"
 CLANG_TIDY_SETUP_HINT = (
@@ -1593,6 +1593,19 @@ def llvm_cmake_dir(llvm_config: str) -> str | None:
     return result.stdout.strip()
 
 
+def cmake_clang_tidy_plugin_configure_command(*, llvm_package_dir: Path) -> list[str]:
+    clang_package_dir = llvm_package_dir.parent / "clang"
+    return [
+        "cmake",
+        "-S",
+        "build_tools/clang_tidy",
+        "-B",
+        str(CLANG_TIDY_CMAKE_BUILD_DIR),
+        f"-DLLVM_DIR={llvm_package_dir}",
+        f"-DClang_DIR={clang_package_dir}",
+    ]
+
+
 def cmake_clang_tidy_plugin_path(build_dir: Path) -> Path | None:
     names = (
         "IREEClangTidyPlugin.dll",
@@ -1629,7 +1642,7 @@ def cmake_clang_tidy_command(
         clang_tidy,
         "-p",
         str(compile_commands_dir),
-        f"-checks={CLANG_TIDY_CHECKS}",
+        f"-config-file={CLANG_TIDY_CONFIG}",
         f"-load={plugin}",
         "-j",
         str(clang_tidy_jobs()),
@@ -1667,7 +1680,7 @@ def cmake_run_clang_tidy_fix_command(
         clang_apply_replacements,
         "-p",
         str(compile_commands_dir),
-        f"-checks={CLANG_TIDY_CHECKS}",
+        f"-config-file={CLANG_TIDY_CONFIG}",
         f"-load={plugin}",
         "-j",
         str(clang_tidy_jobs()),
@@ -1810,19 +1823,22 @@ def run_clang_tidy_cmake(
     if not require_tool("cmake", "clang-tidy CMake plugin"):
         return False
 
-    cmake_dir = llvm_cmake_dir(llvm_config)
-    if not cmake_dir:
+    llvm_package_dir_value = llvm_cmake_dir(llvm_config)
+    if not llvm_package_dir_value:
+        return False
+    llvm_package_dir = Path(llvm_package_dir_value)
+    clang_package_dir = llvm_package_dir.parent / "clang"
+    if not (clang_package_dir / "ClangConfig.cmake").is_file():
+        print(
+            "[fail] clang-tidy CMake plugin: matching Clang package is "
+            f"missing under {clang_package_dir}"
+        )
         return False
 
     ok = True
-    configure_command = [
-        "cmake",
-        "-S",
-        "build_tools/clang_tidy",
-        "-B",
-        str(CLANG_TIDY_CMAKE_BUILD_DIR),
-        f"-DLLVM_DIR={cmake_dir}",
-    ]
+    configure_command = cmake_clang_tidy_plugin_configure_command(
+        llvm_package_dir=llvm_package_dir
+    )
     ok = (
         run_command(
             configure_command,
@@ -2066,11 +2082,7 @@ def run_clang_tidy(
                     "test",
                     "--config=presubmit",
                     CLANG_TIDY_REPO_ENV,
-                    "//build_tools/clang_tidy:plugin_smoke_test",
-                    "//build_tools/clang_tidy:refcount_checks_test",
-                    "//build_tools/clang_tidy:status_checks_test",
-                    "//build_tools/clang_tidy:style_checks_test",
-                    "//build_tools/clang_tidy:trace_checks_test",
+                    "//build_tools/clang_tidy:plugin_tests",
                 ],
                 "clang-tidy plugin tests",
                 verbose,

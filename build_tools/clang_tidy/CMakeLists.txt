@@ -19,6 +19,7 @@ add_library(IREEClangTidyPlugin MODULE
   iree/ExtentChecks.cc
   iree/IreeTidyModule.cc
   iree/LifecycleChecks.cc
+  iree/RecursionCheck.cc
   iree/RefCountChecks.cc
   iree/SmokeCheck.cc
   iree/StatusChecks.cc
@@ -96,6 +97,25 @@ add_test(
   COMMAND
     Python3::Interpreter
     "${CMAKE_CURRENT_SOURCE_DIR}/test/lifecycle_checks_test.py"
+    "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
+    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+)
+
+add_test(
+  NAME iree-clang-tidy-recursion-check
+  COMMAND
+    Python3::Interpreter
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/recursion_check_test.py"
+    "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
+    "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
+)
+
+add_test(
+  NAME iree-clang-tidy-recursion-cross-tu
+  COMMAND
+    Python3::Interpreter
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/recursion_cross_tu_driver_test.py"
+    "--aggregator=${CMAKE_CURRENT_SOURCE_DIR}/aggregate_recursion_summaries.py"
     "--clang-tidy=${CLANG_TIDY_EXECUTABLE}"
     "--plugin=$<TARGET_FILE:IREEClangTidyPlugin>"
 )

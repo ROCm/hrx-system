@@ -7,6 +7,10 @@ The plugin builds against the LLVM installation that provides the `clang-tidy`
 binary that loads it. Normal runtime, Loom, and libhrx builds do not require
 LLVM development packages.
 
+`clang_tidy_config.yaml` is the single repository analysis policy. Bazel
+declares it as an input to each clang-tidy action, and the secondary CMake lane
+passes the same file to `run-clang-tidy`.
+
 ## Bazel
 
 ```bash
@@ -31,9 +35,7 @@ file, and writes a per-source report:
 
 ```bash
 iree-bazel-test --repo_env=IREE_CLANG_TIDY_LLVM=auto \
-  //build_tools/clang_tidy:refcount_checks_test \
-  //build_tools/clang_tidy:status_checks_test \
-  //build_tools/clang_tidy:trace_checks_test
+  //build_tools/clang_tidy:plugin_tests
 ```
 
 ## CMake
@@ -130,6 +132,35 @@ and documented borrowed callback boundaries are modeled explicitly. Ordinary
 debug/reporting helpers should use `iree_status_code_t`, `const iree_status_t`,
 or `const iree_status_t&` instead of accepting an owned status they do not
 consume.
+
+### `iree-unbounded-recursion`
+
+`iree-unbounded-recursion` diagnoses one call-graph cycle for each recursive
+strongly connected component. It follows direct calls and locally resolvable
+function-pointer flow through callback parameters, aggregate initializers, and
+constant dispatch tables. The representative notes show a concrete cycle,
+including which edges are indirect.
+
+The Bazel-owned whole-target lane writes one versioned JSON call graph per
+translation unit and aggregates those graphs before computing SCCs. This makes
+cycles spanning C/C++ source files visible without relying on link-time
+optimization or a compilation database. The secondary CMake plugin tests feed
+the same summaries into the same aggregator. A local inventory of the Loom
+compiler and its configured runtime dependencies is available without enabling
+policy enforcement:
+
+```bash
+iree-bazel-build --repo_env=IREE_CLANG_TIDY_LLVM=auto \
+  //build_tools/clang_tidy:loom_recursion_inventory
+less bazel-bin/build_tools/clang_tidy/loom_recursion_inventory.txt
+```
+
+Native recursion is unsafe when authored IR, graph, type, or container depth
+can become stack depth. Those traversals use explicit worklists with indexed
+visited and result state. A recursive implementation is accepted only when a
+small fixed maximum depth is mechanically established. The check is registered
+but explicitly disabled in `clang_tidy_config.yaml` while the current findings
+are converted; removing that exclusion is the final enablement gate.
 
 ### `iree-status-lifetime`
 

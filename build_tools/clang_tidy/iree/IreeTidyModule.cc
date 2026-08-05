@@ -8,6 +8,7 @@
 #include "clang-tidy/ClangTidyModuleRegistry.h"
 #include "iree/ExtentChecks.h"
 #include "iree/LifecycleChecks.h"
+#include "iree/RecursionCheck.h"
 #include "iree/RefCountChecks.h"
 #include "iree/SmokeCheck.h"
 #include "iree/StatusChecks.h"
@@ -40,6 +41,8 @@ class IreeTidyModule final : public ClangTidyModule {
     CheckFactories.registerCheck<LifecycleNamingCheck>("iree-lifecycle-naming");
     CheckFactories.registerCheck<RefCountLifecycleCheck>(
         "iree-refcount-lifecycle");
+    CheckFactories.registerCheck<UnboundedRecursionCheck>(
+        "iree-unbounded-recursion");
     CheckFactories.registerCheck<TestStatusMacroCheck>(
         "iree-test-status-macro-scope");
     CheckFactories.registerCheck<TestStatusPredicateCheck>(
