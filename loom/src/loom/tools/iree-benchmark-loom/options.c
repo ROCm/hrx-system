@@ -39,12 +39,12 @@ IREE_FLAG(string, pipeline, "default",
           "'none', '@symbol', or a comma-separated pass list.");
 IREE_FLAG_LIST(
     string, config,
-    "Compile-time config binding for HAL actual invocations. Repeat as "
+    "Compile-time config binding for HAL kernel launches. Repeat as "
     "--config=key=value. Bindings not referenced by the loaded module are "
     "ignored.");
 IREE_FLAG_LIST_NAMED(
     string, config_file, "config-file",
-    "JSON/JSONC config object file for HAL actual invocations. Repeat for "
+    "JSON/JSONC config object file for HAL kernel launches. Repeat for "
     "multiple files. Nested object keys are flattened with '.' separators.");
 IREE_FLAG(string, sanitizer, "none",
           "Sanitizer checks inserted by the target pipeline. Use 'none', "

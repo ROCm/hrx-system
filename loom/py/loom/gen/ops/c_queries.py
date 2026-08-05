@@ -14,7 +14,6 @@ from loom.assembly import Clause, FormatElement, FuncArgs, OptionalGroup, Scope
 from loom.dsl import (
     ATTR_TYPE_FLAGS,
     AttrDef,
-    FuncLikeInterface,
     Op,
     RegionDef,
     TypeConstraint,
@@ -29,29 +28,6 @@ def find_interface[T](op: Op, iface_class: type[T]) -> T | None:
         if isinstance(iface, iface_class):
             return iface
     return None
-
-
-def func_args_field_name(op: Op) -> str:
-    """Returns the FuncArgs field name declared by a func-like op format."""
-
-    func_like_iface = find_interface(op, FuncLikeInterface)
-    if func_like_iface is not None and func_like_iface.args is not None:
-        return func_like_iface.args
-
-    def walk(elements: Sequence[FormatElement]) -> str | None:
-        for element in elements:
-            match element:
-                case FuncArgs(field=name):
-                    return name
-                case OptionalGroup(elements=inner) | Scope(elements=inner) | Clause(elements=inner):
-                    nested = walk(inner)
-                    if nested is not None:
-                        return nested
-                case _:
-                    continue
-        return None
-
-    return walk(op.format) or "args"
 
 
 def func_args_field_names(op: Op) -> set[str]:

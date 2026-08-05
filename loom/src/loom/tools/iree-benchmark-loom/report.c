@@ -416,27 +416,26 @@ iree_status_t iree_benchmark_loom_append_device_row(
   return iree_ok_status();
 }
 
-static iree_status_t iree_benchmark_loom_write_actual_invocation_plan_json(
+static iree_status_t iree_benchmark_loom_write_kernel_launch_plan_json(
     const loom_module_t* module, const loom_testbench_case_plan_t* case_plan,
     loom_json_object_writer_t* object) {
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-      object, IREE_SV("actual_invocation_count"),
-      case_plan->actual_invocation_count));
-  if (case_plan->actual_invocation_count != 1) {
+      object, IREE_SV("kernel_launch_count"), case_plan->kernel_launch_count));
+  if (case_plan->kernel_launch_count != 1) {
     return iree_ok_status();
   }
 
-  iree_string_view_t actual_entry = iree_string_view_empty();
+  iree_string_view_t kernel_entry = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_module_symbol_name_from_ref(
-      module, case_plan->first_actual_invocation->callee_ref, &actual_entry));
+      module, case_plan->first_kernel_launch->callee_ref, &kernel_entry));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-      object, IREE_SV("actual_entry"), actual_entry));
+      object, IREE_SV("kernel_entry"), kernel_entry));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-      object, IREE_SV("actual_input_count"),
-      case_plan->first_actual_invocation->input_count));
+      object, IREE_SV("kernel_workload_count"),
+      case_plan->first_kernel_launch->workload_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-      object, IREE_SV("actual_result_count"),
-      case_plan->first_actual_invocation->result_count));
+      object, IREE_SV("kernel_argument_count"),
+      case_plan->first_kernel_launch->input_count));
   return iree_ok_status();
 }
 
@@ -482,7 +481,7 @@ iree_status_t iree_benchmark_loom_append_plan_row(
     IREE_RETURN_IF_ERROR(loom_json_object_write_int32_field(
         &object, IREE_SV("selected_sample"), options->sample_ordinal));
   }
-  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_actual_invocation_plan_json(
+  IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_kernel_launch_plan_json(
       module, case_plan, &object));
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_case_sample_plan_fields_json(
       module, case_plan, &object));
@@ -1747,7 +1746,7 @@ static iree_status_t iree_benchmark_loom_append_compile_report_artifact_json(
   iree_string_view_t entry_symbol = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_module_symbol_name_from_ref(
       provider->execution.test_module,
-      provider->execution.actual_invocation->callee_ref, &entry_symbol));
+      provider->execution.kernel_launch->callee_ref, &entry_symbol));
 
   loom_output_stream_t stream;
   loom_output_stream_for_builder(output, &stream);
@@ -2232,7 +2231,7 @@ iree_status_t iree_benchmark_loom_append_compile_row(
   iree_string_view_t entry_symbol = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(iree_benchmark_loom_module_symbol_name_from_ref(
       provider->execution.test_module,
-      provider->execution.actual_invocation->callee_ref, &entry_symbol));
+      provider->execution.kernel_launch->callee_ref, &entry_symbol));
 
   loom_output_stream_t stream;
   loom_output_stream_for_builder(compile_output, &stream);

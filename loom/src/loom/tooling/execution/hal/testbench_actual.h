@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// HAL actual-invocation bridge for Loom check testbench execution.
+// HAL kernel-launch bridge for Loom check testbench actual-candidate execution.
 //
 // This layer is target-neutral: tools inject a composed target environment and
 // linked HAL artifact providers, while this bridge owns HAL runtime selection,
@@ -47,7 +47,7 @@ typedef struct loom_run_hal_testbench_context_t {
   loom_sanitizer_options_t runtime_sanitizer_options;
   // Selected HAL artifact provider for the active device.
   const loom_run_hal_artifact_provider_t* artifact_provider;
-  // Shared HAL runtime used by actual invocations.
+  // Shared HAL runtime used by kernel launches.
   loom_run_hal_runtime_t runtime;
   // True when |runtime_sanitizer_options| has been set by the tool.
   bool has_runtime_sanitizer_options;
@@ -87,17 +87,15 @@ iree_string_view_t loom_run_hal_testbench_device_uri_driver_name(
 iree_hal_buffer_params_t loom_run_hal_testbench_host_visible_buffer_params(
     void);
 
-// Finds the single semantic actual invocation in |case_plan| accepted by the
-// HAL bridge. HAL kernels currently model outputs as in-place buffer arguments.
-iree_status_t loom_run_hal_testbench_select_actual_invocation(
+// Finds the single kernel launch in |case_plan| accepted by the HAL bridge.
+iree_status_t loom_run_hal_testbench_select_kernel_launch(
     const loom_testbench_case_plan_t* case_plan,
-    const loom_testbench_invocation_plan_t** out_invocation);
+    const loom_testbench_invocation_plan_t** out_kernel_launch);
 
-// Counts actual invocations in |case_plan| and validates that each invocation
-// uses in-place HAL buffer outputs.
-iree_status_t loom_run_hal_testbench_count_actual_invocations(
+// Counts kernel launches in |case_plan| and validates their schedule shape.
+iree_status_t loom_run_hal_testbench_count_kernel_launches(
     const loom_testbench_case_plan_t* case_plan,
-    iree_host_size_t* out_actual_invocation_count);
+    iree_host_size_t* out_kernel_launch_count);
 
 typedef struct loom_run_hal_testbench_actual_provider_options_t {
   // Shared HAL context used to prepare and dispatch the candidate.
@@ -116,10 +114,10 @@ typedef struct loom_run_hal_testbench_actual_provider_options_t {
   loom_sanitizer_options_t sanitizer;
   // Config bindings materialized into the private compile copy.
   const loom_tooling_config_set_t* config_set;
-  // Module that owns |actual_invocation|.
+  // Module that owns |kernel_launch|.
   const loom_module_t* test_module;
-  // Actual invocation selected from the owning check.case.
-  const loom_testbench_invocation_plan_t* actual_invocation;
+  // Kernel launch selected from the owning check.case.
+  const loom_testbench_invocation_plan_t* kernel_launch;
   // Diagnostic sink used while parsing, lowering, and emitting the candidate.
   loom_diagnostic_sink_t diagnostic_sink;
   // Maximum diagnostics to emit before stopping. Zero uses the default.
@@ -149,10 +147,10 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   loom_sanitizer_options_t sanitizer;
   // Config bindings materialized into the private compile copy.
   const loom_tooling_config_set_t* config_set;
-  // Module that owns |actual_invocation|.
+  // Module that owns |kernel_launch|.
   const loom_module_t* test_module;
-  // Actual invocation selected from the owning check.case.
-  const loom_testbench_invocation_plan_t* actual_invocation;
+  // Kernel launch selected from the owning check.case.
+  const loom_testbench_invocation_plan_t* kernel_launch;
   // Diagnostic sink used while parsing, lowering, and emitting the candidate.
   loom_diagnostic_sink_t diagnostic_sink;
   // Maximum diagnostics to emit before stopping. Zero uses the default.
@@ -230,7 +228,7 @@ typedef struct loom_run_hal_testbench_actual_sequence_options_t {
   const loom_tooling_config_set_t* config_set;
   // Module that owns |case_plan|.
   const loom_module_t* test_module;
-  // Case plan whose actual invocations are executed by the sequence.
+  // Case plan whose kernel launches are executed by the sequence.
   const loom_testbench_case_plan_t* case_plan;
   // Diagnostic sink used while parsing, lowering, and emitting candidates.
   loom_diagnostic_sink_t diagnostic_sink;
@@ -288,15 +286,15 @@ loom_testbench_invocation_provider_t
 loom_run_hal_testbench_actual_sequence_execution_provider(
     loom_run_hal_testbench_actual_sequence_execution_t* execution);
 
-// Testbench invocation callback for HAL actual invocations.
+// Testbench invocation callback for HAL kernel launches.
 iree_status_t loom_run_hal_testbench_actual_invoke(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
     iree_host_size_t workload_count, const loom_testbench_value_t* workloads,
     iree_host_size_t input_count, const loom_testbench_value_t* inputs,
     iree_host_size_t result_count, loom_testbench_value_t* out_results);
 
-// Initializes a compile-on-first-use provider sequence for every actual
-// invocation in a check.case.
+// Initializes a compile-on-first-use provider sequence for every kernel launch
+// in a check.case.
 iree_status_t loom_run_hal_testbench_actual_sequence_initialize(
     const loom_run_hal_testbench_actual_sequence_options_t* options,
     loom_run_hal_testbench_actual_sequence_t* out_sequence);
@@ -320,7 +318,7 @@ iree_status_t loom_run_hal_testbench_invocation_inputs_from_values(
     iree_host_size_t input_count, loom_run_hal_invocation_options_t* options,
     iree_allocator_t allocator, loom_run_hal_binding_list_t* out_bindings);
 
-// Materializes one actual invocation's launch geometry and HAL bindings from
+// Materializes one kernel launch's geometry and HAL bindings from
 // an already-materialized case sample value table.
 iree_status_t loom_run_hal_testbench_materialize_invocation_from_table(
     const loom_testbench_value_table_t* table,
@@ -328,8 +326,7 @@ iree_status_t loom_run_hal_testbench_materialize_invocation_from_table(
     iree_allocator_t allocator, loom_run_hal_invocation_options_t* out_options,
     loom_run_hal_binding_list_t* out_bindings);
 
-// Materializes one case sample's actual invocation as launch geometry and HAL
-// bindings.
+// Materializes one case sample's kernel launch as geometry and HAL bindings.
 iree_status_t loom_run_hal_testbench_materialize_invocation_for_sample(
     const loom_module_t* module,
     const loom_testbench_value_materializer_options_t* materializer_options,

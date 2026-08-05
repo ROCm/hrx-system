@@ -132,7 +132,6 @@ iree_execution_test_suite(
 iree_execution_test_suite(
     name = "iree_test_loom_execution_test",
     data = [
-        "test/amdgpu_compile_rejection.loom",
         "test/amdgpu_hal_actual.loom",
         "test/amdgpu_unused_kernargs.loom",
         "test/generated_tensor_cases.loom",

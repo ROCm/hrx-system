@@ -374,7 +374,7 @@ static iree_status_t iree_benchmark_loom_hal_sequence_input_ring_initialize(
       out_ring->candidates[i] =
           &sequence->providers[i].execution.prepared_candidate;
       out_ring->execution_epochs[i] =
-          sequence->providers[i].execution.actual_invocation->execution_epoch;
+          sequence->providers[i].execution.kernel_launch->execution_epoch;
     }
     iree_host_size_t dispatches_per_batch = 0;
     if (!iree_host_size_checked_mul(policy->hal_options.timing.batch_size,

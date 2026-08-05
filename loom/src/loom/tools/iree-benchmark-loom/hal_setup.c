@@ -53,7 +53,7 @@ static iree_status_t iree_benchmark_loom_initialize_sequence_compile_context(
   }
   if (iree_status_is_ok(status)) {
     context->hal_sequence_initialized = true;
-    context->execution_options.invocation.actual =
+    context->execution_options.invocation.kernel_launch =
         loom_run_hal_testbench_actual_sequence_execution_provider(
             context->hal_sequence.execution);
     iree_benchmark_loom_configure_reference_oracles(
@@ -106,7 +106,7 @@ static iree_status_t iree_benchmark_loom_initialize_single_compile_context(
     const iree_benchmark_loom_hal_compile_item_t* compile_item,
     const iree_benchmark_loom_selected_benchmark_t* selection,
     iree_benchmark_loom_hal_compile_context_t* context) {
-  const loom_testbench_invocation_plan_t* actual_invocation = NULL;
+  const loom_testbench_invocation_plan_t* kernel_launch = NULL;
   const loom_testbench_benchmark_plan_t* benchmark_plan =
       selection->benchmark_plan;
   const loom_testbench_case_plan_t* case_plan = selection->case_plan;
@@ -114,8 +114,8 @@ static iree_status_t iree_benchmark_loom_initialize_single_compile_context(
   context->benchmark_materializer =
       options->case_execution_options->materializer;
 
-  iree_status_t status = loom_run_hal_testbench_select_actual_invocation(
-      case_plan, &actual_invocation);
+  iree_status_t status =
+      loom_run_hal_testbench_select_kernel_launch(case_plan, &kernel_launch);
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_testbench_context_ensure_runtime(
         &options->hal_context->execution);
@@ -136,7 +136,7 @@ static iree_status_t iree_benchmark_loom_initialize_single_compile_context(
         options->hal_context, options->session, options->filename,
         options->source, options->benchmark_options->pipeline,
         options->benchmark_options->sanitizer, options->module_plan->module,
-        actual_invocation, iree_string_view_empty(),
+        kernel_launch, iree_string_view_empty(),
         options->compile_report_options, options->artifact_manifest_options,
         &context->hal_provider);
   }
@@ -149,7 +149,7 @@ static iree_status_t iree_benchmark_loom_initialize_single_compile_context(
             options->hal_context->execution.runtime.device);
     context->execution_options.materializer.buffer_params =
         loom_run_hal_testbench_host_visible_buffer_params();
-    context->execution_options.invocation.actual =
+    context->execution_options.invocation.kernel_launch =
         (loom_testbench_invocation_provider_t){
             .invoke = loom_run_hal_testbench_actual_invoke,
             .user_data = &context->hal_provider.execution,
@@ -197,7 +197,7 @@ iree_status_t iree_benchmark_loom_hal_compile_context_initialize(
       &options->work_plan
            ->selected_benchmarks[compile_item->representative_selection_index];
   iree_status_t status = iree_ok_status();
-  if (selection->case_plan->actual_invocation_count > 1) {
+  if (selection->case_plan->kernel_launch_count > 1) {
     status = iree_benchmark_loom_initialize_sequence_compile_context(
         options, compile_item, selection, context);
   } else {

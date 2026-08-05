@@ -300,66 +300,11 @@ check.case @nested_launch_schedule {
   ParseAndPlan(IREE_SV(kSource), &run_module, &module_plan);
   ASSERT_EQ(module_plan.case_count, 1u);
 
-  iree_host_size_t actual_invocation_count = 0;
+  iree_host_size_t kernel_launch_count = 0;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
-                        loom_run_hal_testbench_count_actual_invocations(
-                            &module_plan.cases[0], &actual_invocation_count));
+                        loom_run_hal_testbench_count_kernel_launches(
+                            &module_plan.cases[0], &kernel_launch_count));
 
-  loom_run_module_deinitialize(&run_module);
-}
-
-TEST_F(HalTestbenchActualTest, SampleValuesDoNotResolveDynamicWorkgroupCount) {
-  static constexpr char kSource[] = R"(
-kernel.def @dynamic_workgroups(%element_count: index) {
-  %unit = index.constant 1 : index
-  kernel.launch.config workgroups(%element_count, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
-} launch(%element_count: index) {
-  kernel.return
-}
-
-check.case @dynamic_workgroups_case {
-  %element_count = check.param.choice values([31, 32]) name("element_count") : index
-  func.call @dynamic_workgroups(%element_count) : (index)
-  check.return
-}
-)";
-  loom_run_module_t run_module = {};
-  loom_testbench_module_plan_t module_plan = {};
-  ParseAndPlan(IREE_SV(kSource), &run_module, &module_plan);
-  ASSERT_EQ(module_plan.case_count, 1u);
-  const loom_testbench_case_plan_t* case_plan = &module_plan.cases[0];
-  const loom_testbench_invocation_plan_t* actual_invocation = nullptr;
-  IREE_ASSERT_OK(loom_run_hal_testbench_select_actual_invocation(
-      case_plan, &actual_invocation));
-
-  loom_run_hal_testbench_context_t context = {};
-  context.artifact_provider = &kFakeHalArtifactProvider;
-  // The check sample supplies runtime values only. Provider compile therefore
-  // reaches launch validation without resolving the dynamic workgroup count.
-  context.runtime_initialized = true;
-  context.host_allocator = iree_allocator_system();
-
-  loom_run_hal_testbench_actual_provider_options_t options = {};
-  options.context = &context;
-  options.session = &session_;
-  options.filename = IREE_SV("hal_testbench_actual_test.loom");
-  options.source = IREE_SV(kSource);
-  options.test_module = run_module.module;
-  options.actual_invocation = actual_invocation;
-
-  loom_run_hal_testbench_actual_provider_t provider = {};
-  loom_run_hal_testbench_actual_provider_initialize(&options, &provider);
-  IREE_ASSERT_OK(loom_run_hal_testbench_actual_provider_compile(&provider));
-  EXPECT_TRUE(provider.compile_rejected);
-  EXPECT_TRUE(iree_string_view_equal(provider.compile_failure_stage,
-                                     IREE_SV("compile")));
-  EXPECT_TRUE(iree_string_view_equal(provider.compile_failure_kind,
-                                     IREE_SV("unresolved_workgroup_count")));
-  EXPECT_TRUE(iree_string_view_find(provider.compile_failure_message,
-                                    IREE_SV("bind launch config values"),
-                                    0) != IREE_STRING_VIEW_NPOS);
-
-  loom_run_hal_testbench_actual_provider_deinitialize(&provider);
   loom_run_module_deinitialize(&run_module);
 }
 
@@ -381,7 +326,7 @@ kernel.def @uncalled() {
 
 check.case @selected_case {
   %element_count = check.param.choice values([31, 32]) name("element_count") : index
-  func.call @selected(%element_count) : (index)
+  kernel.launch @selected[](%element_count) : [](index)
   check.return
 }
 )";
@@ -390,9 +335,9 @@ check.case @selected_case {
   ParseAndPlan(IREE_SV(kSource), &run_module, &module_plan);
   ASSERT_EQ(module_plan.case_count, 1u);
   const loom_testbench_case_plan_t* case_plan = &module_plan.cases[0];
-  const loom_testbench_invocation_plan_t* actual_invocation = nullptr;
-  IREE_ASSERT_OK(loom_run_hal_testbench_select_actual_invocation(
-      case_plan, &actual_invocation));
+  const loom_testbench_invocation_plan_t* kernel_launch = nullptr;
+  IREE_ASSERT_OK(
+      loom_run_hal_testbench_select_kernel_launch(case_plan, &kernel_launch));
 
   loom_run_hal_testbench_context_t context = {};
   context.artifact_provider = &kFakeHalArtifactProvider;
@@ -408,7 +353,7 @@ check.case @selected_case {
   options.filename = IREE_SV("hal_testbench_actual_test.loom");
   options.source = IREE_SV(kSource);
   options.test_module = run_module.module;
-  options.actual_invocation = actual_invocation;
+  options.kernel_launch = kernel_launch;
 
   loom_run_hal_testbench_actual_provider_t provider = {};
   loom_run_hal_testbench_actual_provider_initialize(&options, &provider);

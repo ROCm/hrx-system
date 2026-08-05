@@ -493,7 +493,7 @@ low_func_def = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
@@ -579,7 +579,7 @@ low_func_decl = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DECL",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
@@ -639,7 +639,7 @@ low_func_call = Op(
         AttrDef(
             "callee",
             "symbol",
-            symbol_ref=SymbolReference("function", ["func_like"]),
+            symbol_ref=SymbolReference("function", ["callable"]),
         ),
         AttrDef("purity", "enum", enum_def=Purity, optional=True),
     ],
@@ -1358,7 +1358,7 @@ low_invoke = Op(
         AttrDef(
             "callee",
             "symbol",
-            symbol_ref=SymbolReference("function", ["func_like"]),
+            symbol_ref=SymbolReference("function", ["callable"]),
         ),
         AttrDef("purity", "enum", enum_def=Purity, optional=True),
     ],

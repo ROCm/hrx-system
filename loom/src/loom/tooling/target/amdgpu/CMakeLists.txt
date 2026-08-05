@@ -137,7 +137,6 @@ iree_execution_test_suite(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/dynamic_workgroup_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/launch_schedule_hal_actual.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/amdgpu_compile_rejection.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/amdgpu_hal_actual.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/amdgpu_unused_kernargs.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/generated_tensor_cases.loom"

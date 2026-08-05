@@ -70,12 +70,18 @@ iree_status_t loom_testbench_prepare_case_invocations(
         &case_plan->invocations[invocation_index];
     loom_testbench_invocation_provider_t provider = {0};
     switch (invocation->kind) {
-      case LOOM_TESTBENCH_INVOCATION_ACTUAL:
-        provider = options->actual;
+      case LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL:
+        provider = options->function_call;
         if (!provider.invoke) {
-          return iree_make_status(
-              IREE_STATUS_UNAVAILABLE,
-              "no actual invocation provider is configured");
+          return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                                  "no function call provider is configured");
+        }
+        break;
+      case LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH:
+        provider = options->kernel_launch;
+        if (!provider.invoke) {
+          return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                                  "no kernel launch provider is configured");
         }
         break;
       case LOOM_TESTBENCH_INVOCATION_ORACLE:

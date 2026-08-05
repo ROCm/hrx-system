@@ -220,7 +220,7 @@ def _find_func_like_interface(op_decl: Op) -> FuncLikeInterface | None:
 
 
 def _find_func_args_field(op_decl: Op) -> str:
-    """Return op_decl's FuncArgs format field name, defaulting to args."""
+    """Return the explicit FuncArgs format field for a bodyful func-like op."""
 
     def walk(elements: Sequence[Any]) -> str | None:
         for element in elements:
@@ -239,7 +239,10 @@ def _find_func_args_field(op_decl: Op) -> str:
                     continue
         return None
 
-    return walk(op_decl.format) or "args"
+    field = walk(op_decl.format)
+    if field is None:
+        raise ValueError(f"Op '{op_decl.name}' has no explicit FuncArgs format field.")
+    return field
 
 
 class IRBuilder:

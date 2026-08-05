@@ -1197,8 +1197,8 @@ class ParsedFields:
         self.operand_fields: dict[str, list[int]] = {}
 
 
-def _func_args_field(op_decl: Op) -> str:
-    """Return the FuncArgs format field name, defaulting to args."""
+def _func_args_field(op_decl: Op) -> str | None:
+    """Return the explicit FuncArgs format field name, if present."""
 
     def walk(elements: Sequence[FormatElement]) -> str | None:
         for element in elements:
@@ -1217,7 +1217,7 @@ def _func_args_field(op_decl: Op) -> str:
                     continue
         return None
 
-    return walk(op_decl.format) or "args"
+    return walk(op_decl.format)
 
 
 def _func_like_body_field(op_decl: Op) -> str | None:
@@ -2299,6 +2299,7 @@ class Parser:
                     func_args_field = _func_args_field(op_decl)
                     if (
                         parsed.func_arg_ids
+                        and func_args_field is not None
                         and region_def is not None
                         and region_def.arg_source == func_args_field
                     ):

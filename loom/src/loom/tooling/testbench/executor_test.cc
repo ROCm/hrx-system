@@ -114,8 +114,8 @@ class ExecutorTest : public ::testing::Test {
       loom_testbench_oracle_provider_t* oracle_providers) {
     loom_testbench_case_execution_options_t options = {};
     loom_testbench_case_execution_options_initialize(&options);
-    options.invocation.actual.invoke = ExecutorTest::InvokeDelta;
-    options.invocation.actual.user_data = actual_state;
+    options.invocation.function_call.invoke = ExecutorTest::InvokeDelta;
+    options.invocation.function_call.user_data = actual_state;
     oracle_providers[0].name = IREE_SV("reference.scalar");
     oracle_providers[0].provider.invoke = ExecutorTest::InvokeDelta;
     oracle_providers[0].provider.user_data = oracle_state;

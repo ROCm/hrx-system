@@ -538,6 +538,7 @@ _VALID_ATTR_TYPES = frozenset(
 _VALID_SYMBOL_INTERFACES = frozenset(
     {
         "func_like",
+        "callable",
         "global",
         "executable",
         "record",
@@ -721,6 +722,11 @@ class SymbolDefinition:
             raise ValueError(
                 f"SymbolDefinition '{name}': the kernel interface requires "
                 "the func_like interface for its launch ABI"
+            )
+        if "callable" in frozen_interfaces and "func_like" not in frozen_interfaces:
+            raise ValueError(
+                f"SymbolDefinition '{name}': the callable interface requires "
+                "the func_like interface for its call ABI"
             )
         object.__setattr__(self, "field", field)
         object.__setattr__(self, "name", name)
@@ -4190,6 +4196,20 @@ class Op:
             raise ValueError(
                 f"Op '{name}': FuncLikeInterface must declare exactly one "
                 "signature representation with body or args"
+            )
+        if func_like is not None and not func_args_fields:
+            raise ValueError(
+                f"Op '{name}': FuncLikeInterface requires an explicit "
+                "FuncArgs format field"
+            )
+        if (
+            func_like is not None
+            and func_like.body is not None
+            and len(func_args_fields) != 1
+        ):
+            raise ValueError(
+                f"Op '{name}': body-backed FuncLikeInterface requires exactly "
+                "one FuncArgs format field"
             )
         if kernel_contract is not None and func_like is not None:
             if (

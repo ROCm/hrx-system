@@ -17,6 +17,7 @@ from loom.assembly import (
     Attr,
     BlockRef,
     Clause,
+    FuncArgs,
     IndexList,
     Keyword,
     Ref,
@@ -24,6 +25,7 @@ from loom.assembly import (
     ResultType,
     Scope,
     ScopedEnumRef,
+    SymbolRef,
     TypeOf,
     kw,
 )
@@ -2237,6 +2239,14 @@ class TestScopedEnumOp:
 
 
 class TestSymbolKernelContract:
+    def test_callable_interface_requires_func_like_interface(self) -> None:
+        with _raises(ValueError, match="requires the func_like interface"):
+            SymbolDefinition(
+                field="callee",
+                name="function",
+                interfaces=["callable"],
+            )
+
     def test_func_like_requires_one_signature_representation(self) -> None:
         for func_like in (
             FuncLikeInterface(callee="callee"),
@@ -2254,6 +2264,22 @@ class TestSymbolKernelContract:
                     ),
                     interfaces=[func_like],
                 )
+
+    def test_func_like_requires_explicit_func_args_format(self) -> None:
+        with _raises(ValueError, match="requires an explicit FuncArgs"):
+            Op(
+                "test.function",
+                traits=[SYMBOL_DEFINE],
+                attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="function",
+                    interfaces=["func_like", "callable"],
+                ),
+                regions=[RegionDef("body")],
+                interfaces=[FuncLikeInterface(callee="callee", body="body")],
+                format=[SymbolRef("callee"), Region("body")],
+            )
 
     def test_requires_exactly_one_workload_signature_storage(self) -> None:
         with _raises(ValueError, match="exactly one"):
@@ -2303,6 +2329,7 @@ class TestSymbolKernelContract:
                     interfaces=["func_like"],
                 ),
                 interfaces=[FuncLikeInterface(callee="callee", args="args")],
+                format=[FuncArgs("args")],
             )
 
     def test_kernel_contract_requires_func_like_implementation(self) -> None:
@@ -2334,6 +2361,7 @@ class TestSymbolKernelContract:
                     kernel_contract=SymbolKernelContract(workload_operands="args"),
                 ),
                 interfaces=[FuncLikeInterface(callee="callee", args="args")],
+                format=[FuncArgs("args")],
             )
 
     def test_kernel_signatures_require_distinct_regions(self) -> None:
@@ -2350,4 +2378,5 @@ class TestSymbolKernelContract:
                 ),
                 interfaces=[FuncLikeInterface(callee="callee", body="body")],
                 regions=[RegionDef("body")],
+                format=[FuncArgs("args")],
             )

@@ -425,9 +425,8 @@ static bool loom_testbench_value_ids_are_in_range(
   return true;
 }
 
-static bool loom_testbench_is_actual_invocation_op(const loom_module_t* module,
-                                                   const loom_op_t* op) {
-  if (loom_kernel_launch_isa(op)) return true;
+static bool loom_testbench_is_function_call_op(const loom_module_t* module,
+                                               const loom_op_t* op) {
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
   return vtable && vtable->call_like &&
          vtable->call_like->kind == LOOM_CALL_LIKE_KIND_SEMANTIC;
@@ -441,7 +440,7 @@ static bool loom_testbench_plan_kernel_launch_invocation(
   const loom_value_slice_t workloads = loom_kernel_launch_workloads(op);
   const loom_value_slice_t arguments = loom_kernel_launch_arguments(op);
   memset(out_invocation, 0, sizeof(*out_invocation));
-  out_invocation->kind = LOOM_TESTBENCH_INVOCATION_ACTUAL;
+  out_invocation->kind = LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH;
   out_invocation->module = module;
   out_invocation->op = op;
   out_invocation->callee_ref = loom_kernel_launch_callee(op);
@@ -479,7 +478,7 @@ static bool loom_testbench_plan_semantic_call_invocation(
   }
 
   memset(out_invocation, 0, sizeof(*out_invocation));
-  out_invocation->kind = LOOM_TESTBENCH_INVOCATION_ACTUAL;
+  out_invocation->kind = LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL;
   out_invocation->module = module;
   out_invocation->op = op;
   out_invocation->callee_ref = loom_attr_as_symbol(
@@ -539,8 +538,8 @@ static bool loom_testbench_plan_oracle_invocation(
 
 static bool loom_testbench_is_invocation_op(const loom_module_t* module,
                                             const loom_op_t* op) {
-  return loom_check_oracle_call_isa(op) ||
-         loom_testbench_is_actual_invocation_op(module, op);
+  return loom_check_oracle_call_isa(op) || loom_kernel_launch_isa(op) ||
+         loom_testbench_is_function_call_op(module, op);
 }
 
 static bool loom_testbench_plan_invocation(
@@ -770,7 +769,7 @@ static bool loom_testbench_is_supported_check_body_op(
       break;
   }
   return loom_testbench_is_expectation_op(op) ||
-         loom_testbench_is_actual_invocation_op(module, op);
+         loom_testbench_is_invocation_op(module, op);
 }
 
 static void loom_testbench_count_launch_schedule(
@@ -920,7 +919,7 @@ typedef struct loom_testbench_invocation_planner_t {
   iree_host_size_t issue_capacity;
   // Number of initialized entries in |issues|.
   iree_host_size_t* issue_count;
-  // Epoch assigned to the next ordered actual invocation.
+  // Epoch assigned to the next ordered kernel launch.
   iree_host_size_t next_execution_epoch;
 } loom_testbench_invocation_planner_t;
 
@@ -939,11 +938,11 @@ static void loom_testbench_append_invocation_plan(
 
   invocation->execution_epoch = execution_epoch;
   invocation->launch_schedule_depth = schedule_depth;
-  if (invocation->kind == LOOM_TESTBENCH_INVOCATION_ACTUAL) {
-    if (planner->case_plan->first_actual_invocation == NULL) {
-      planner->case_plan->first_actual_invocation = invocation;
+  if (invocation->kind == LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH) {
+    if (planner->case_plan->first_kernel_launch == NULL) {
+      planner->case_plan->first_kernel_launch = invocation;
     }
-    ++planner->case_plan->actual_invocation_count;
+    ++planner->case_plan->kernel_launch_count;
   }
 }
 
@@ -1005,8 +1004,8 @@ static void loom_testbench_plan_case_body(
       file_writes ? file_writes + *inout_file_write_count : NULL;
   case_plan->invocations =
       invocations ? invocations + *inout_invocation_count : NULL;
-  case_plan->first_actual_invocation = NULL;
-  case_plan->actual_invocation_count = 0;
+  case_plan->first_kernel_launch = NULL;
+  case_plan->kernel_launch_count = 0;
   case_plan->expectations =
       expectations ? expectations + *inout_expectation_count : NULL;
   case_plan->issues = issues ? issues + *inout_issue_count : NULL;
@@ -1084,11 +1083,10 @@ static void loom_testbench_plan_case_body(
       }
 
       if (loom_testbench_is_invocation_op(module, op)) {
-        const bool is_actual =
-            loom_testbench_is_actual_invocation_op(module, op);
+        const bool is_kernel_launch = loom_kernel_launch_isa(op);
         const iree_host_size_t execution_epoch =
-            is_actual ? invocation_planner.next_execution_epoch++
-                      : LOOM_TESTBENCH_EXECUTION_EPOCH_INVALID;
+            is_kernel_launch ? invocation_planner.next_execution_epoch++
+                             : LOOM_TESTBENCH_EXECUTION_EPOCH_INVALID;
         loom_testbench_append_invocation_plan(
             &invocation_planner, op, execution_epoch, /*schedule_depth=*/0);
         continue;

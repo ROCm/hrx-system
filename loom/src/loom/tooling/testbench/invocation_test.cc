@@ -182,7 +182,8 @@ check.case @invoke {
   ASSERT_EQ(plan.issue_count, 0u);
   const loom_testbench_case_plan_t& case_plan = plan.cases[0];
   ASSERT_EQ(case_plan.invocation_count, 2u);
-  EXPECT_EQ(case_plan.invocations[0].kind, LOOM_TESTBENCH_INVOCATION_ACTUAL);
+  EXPECT_EQ(case_plan.invocations[0].kind,
+            LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL);
   EXPECT_EQ(case_plan.invocations[0].input_count, 1u);
   EXPECT_EQ(case_plan.invocations[0].result_count, 1u);
   EXPECT_EQ(case_plan.invocations[1].kind, LOOM_TESTBENCH_INVOCATION_ORACLE);
@@ -208,9 +209,9 @@ check.case @invoke {
   oracle_providers[0].provider.user_data = &oracle_state;
   loom_testbench_invocation_options_t invocation_options = {};
   loom_testbench_invocation_options_initialize(&invocation_options);
-  invocation_options.actual.invoke = InvocationTest::InvokeDelta;
-  invocation_options.actual.query_issue = InvocationTest::QueryNoIssue;
-  invocation_options.actual.user_data = &actual_state;
+  invocation_options.function_call.invoke = InvocationTest::InvokeDelta;
+  invocation_options.function_call.query_issue = InvocationTest::QueryNoIssue;
+  invocation_options.function_call.user_data = &actual_state;
   invocation_options.oracle_providers =
       loom_make_testbench_oracle_provider_list(
           oracle_providers, IREE_ARRAYSIZE(oracle_providers));
@@ -261,6 +262,7 @@ check.case @invoke {
   ASSERT_EQ(case_plan.sample_count, 2u);
   ASSERT_EQ(case_plan.invocation_count, 1u);
   const loom_testbench_invocation_plan_t& invocation = case_plan.invocations[0];
+  EXPECT_EQ(invocation.kind, LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH);
   ASSERT_EQ(invocation.workload_count, 1u);
   ASSERT_EQ(invocation.input_count, 2u);
   EXPECT_EQ(invocation.result_count, 0u);
@@ -269,8 +271,8 @@ check.case @invoke {
   LaunchProviderState state = {};
   loom_testbench_invocation_options_t options = {};
   loom_testbench_invocation_options_initialize(&options);
-  options.actual.invoke = InvocationTest::InvokeLaunch;
-  options.actual.user_data = &state;
+  options.kernel_launch.invoke = InvocationTest::InvokeLaunch;
+  options.kernel_launch.user_data = &state;
 
   loom_testbench_invocation_schedule_t schedule = {};
   IREE_ASSERT_OK(loom_testbench_prepare_case_invocations(&options, &case_plan,

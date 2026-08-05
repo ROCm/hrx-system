@@ -866,6 +866,8 @@ enum loom_symbol_interface_bits_e {
   LOOM_SYMBOL_INTERFACE_RODATA = 1u << 6,
   // Symbol defines or declares a host-launchable kernel contract.
   LOOM_SYMBOL_INTERFACE_KERNEL = 1u << 7,
+  // Function-like symbol may be targeted by an ordinary call operation.
+  LOOM_SYMBOL_INTERFACE_CALLABLE = 1u << 8,
 };
 
 typedef uint16_t loom_symbol_definition_flags_t;

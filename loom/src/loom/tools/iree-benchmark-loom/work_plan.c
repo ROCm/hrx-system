@@ -464,7 +464,7 @@ static iree_status_t iree_benchmark_loom_append_case_end_to_end_work(
   }
   iree_host_size_t compile_item_index =
       IREE_BENCHMARK_LOOM_WORK_PLAN_INDEX_INVALID;
-  if (selection->case_plan->actual_invocation_count != 0) {
+  if (selection->case_plan->kernel_launch_count != 0) {
     compile_item_index =
         iree_benchmark_loom_find_or_append_compile_item(plan, selection_index);
   }

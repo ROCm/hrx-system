@@ -109,9 +109,10 @@ static inline bool loom_testbench_oracle_provider_list_is_empty(
 }
 
 typedef struct loom_testbench_invocation_options_t {
-  // Provider used for semantic call-like invocations of the function under
-  // test.
-  loom_testbench_invocation_provider_t actual;
+  // Provider used for ordinary semantic function calls.
+  loom_testbench_invocation_provider_t function_call;
+  // Provider used for device kernel launches.
+  loom_testbench_invocation_provider_t kernel_launch;
   // Named oracle providers visible to check.oracle.call.
   loom_testbench_oracle_provider_list_t oracle_providers;
 } loom_testbench_invocation_options_t;

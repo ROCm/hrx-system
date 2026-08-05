@@ -86,45 +86,6 @@
       }
     },
     {
-      "name": "reports amdgpu compile rejection as sample issue",
-      "run": {
-        "tool": "iree-test-loom",
-        "args": [
-          "{srcdir}/amdgpu_compile_rejection.loom",
-          "--case=@dynamic_workgroup_count_case",
-          "--device=amdgpu"
-        ]
-      },
-      "exit": {
-        "nonzero": true
-      },
-      "stdout": {
-        "contains": {
-          "unordered": [
-            "\"format\":\"loom.test.v0\"",
-            "\"case_count\":1",
-            "\"sample_count\":1",
-            "\"failed_sample_count\":1",
-            {
-              "regex": "\"case\":\"dynamic_workgroup_count_case\"[^}]*\"passed\":false"
-            },
-            "\"issues\":[",
-            "\"category\":\"compile_rejected\"",
-            "\"provider\":\"actual\"",
-            "\"stage\":\"compile\"",
-            "\"kind\":\"unresolved_workgroup_count\"",
-            "HAL actual invocation requires a statically resolved workgroup count"
-          ]
-        }
-      },
-      "stderr": {
-        "not_contains": [
-          "HAL actual invocation compile was rejected before dispatch",
-          "FAILED_PRECONDITION"
-        ]
-      }
-    },
-    {
       "name": "runs generated fp8 tensor case",
       "run": {
         "tool": "iree-test-loom",

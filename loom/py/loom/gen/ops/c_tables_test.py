@@ -576,6 +576,27 @@ def test_generate_kernel_declaration_preserves_both_signatures() -> None:
     assert "loom_builder_define_value(builder, args_types[_i]" in builders_c
 
 
+def test_generate_callable_symbol_interface() -> None:
+    op = Op(
+        "test.function",
+        group=Dialect("test"),
+        traits=[SYMBOL_DEFINE],
+        attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+        symbol_def=SymbolDefinition(
+            field="callee",
+            name="function",
+            interfaces=["func_like", "callable"],
+        ),
+        regions=[RegionDef("body")],
+        interfaces=[FuncLikeInterface(callee="callee", body="body")],
+        format=[SymbolRef("callee"), FuncArgs("args"), Region("body")],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert (".interfaces = LOOM_SYMBOL_INTERFACE_FUNC_LIKE | LOOM_SYMBOL_INTERFACE_CALLABLE,") in tables_c
+
+
 def test_generate_tables_emits_symbol_value_contract_indices() -> None:
     op = Op(
         "test.value",
@@ -1357,6 +1378,7 @@ def test_generate_tables_emits_func_like_representation_contract() -> None:
                 args="args",
             )
         ],
+        format=[FuncArgs("args")],
     )
 
     tables_c = generate_tables_c("test", 0, [op])
@@ -1381,6 +1403,7 @@ def test_generate_tables_rejects_non_string_representation_contract() -> None:
                 args="args",
             )
         ],
+        format=[FuncArgs("args")],
     )
 
     with _raises_value_error(

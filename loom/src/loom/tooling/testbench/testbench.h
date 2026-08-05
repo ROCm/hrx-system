@@ -85,10 +85,12 @@ typedef enum loom_testbench_value_source_kind_e {
 typedef enum loom_testbench_invocation_kind_e {
   // Invalid or uninitialized invocation slot.
   LOOM_TESTBENCH_INVOCATION_NONE = 0,
-  // Semantic call-like op that invokes the function under test.
-  LOOM_TESTBENCH_INVOCATION_ACTUAL = 1,
+  // Semantic call-like op that invokes an ordinary function.
+  LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL = 1,
+  // kernel.launch op that dispatches a device kernel.
+  LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH = 2,
   // check.oracle.call op that invokes a reference provider.
-  LOOM_TESTBENCH_INVOCATION_ORACLE = 2,
+  LOOM_TESTBENCH_INVOCATION_ORACLE = 3,
 } loom_testbench_invocation_kind_t;
 
 typedef enum loom_testbench_expectation_kind_e {
@@ -257,9 +259,9 @@ typedef struct loom_testbench_invocation_plan_t {
   iree_string_view_t provider;
   // Provider-specific attributes for oracle invocations.
   loom_named_attr_slice_t attrs;
-  // Execution epoch for actual invocations, or INVALID for oracle invocations.
-  // Adjacent actual invocations in the same epoch may execute concurrently;
-  // increasing epochs require an execution and visibility edge.
+  // Execution epoch for kernel launches, or INVALID for other invocations.
+  // Adjacent launches in the same epoch may execute concurrently; increasing
+  // epochs require an execution and visibility edge.
   iree_host_size_t execution_epoch;
   // Number of enclosing kernel launch schedule operations. Direct check.case
   // launches have depth zero.
@@ -379,10 +381,10 @@ typedef struct loom_testbench_case_plan_t {
   const loom_testbench_invocation_plan_t* invocations;
   // Number of entries in |invocations|.
   iree_host_size_t invocation_count;
-  // First actual invocation in |invocations|, or NULL when none are present.
-  const loom_testbench_invocation_plan_t* first_actual_invocation;
-  // Number of actual invocation entries in |invocations|.
-  iree_host_size_t actual_invocation_count;
+  // First kernel launch in |invocations|, or NULL when none are present.
+  const loom_testbench_invocation_plan_t* first_kernel_launch;
+  // Number of kernel launch entries in |invocations|.
+  iree_host_size_t kernel_launch_count;
   // Expectation plans in source order.
   const loom_testbench_expectation_plan_t* expectations;
   // Number of entries in |expectations|.

@@ -112,6 +112,7 @@ def _emit_dialect_table_accessors(lines: list[str], dialect_name: str) -> None:
 # Maps Python symbol interface names to C interface flag constants.
 SYMBOL_INTERFACE_MAP: dict[str, str] = {
     "func_like": "LOOM_SYMBOL_INTERFACE_FUNC_LIKE",
+    "callable": "LOOM_SYMBOL_INTERFACE_CALLABLE",
     "global": "LOOM_SYMBOL_INTERFACE_GLOBAL",
     "executable": "LOOM_SYMBOL_INTERFACE_EXECUTABLE",
     "record": "LOOM_SYMBOL_INTERFACE_RECORD",

@@ -43,7 +43,7 @@ typedef struct iree_test_loom_configuration_t {
   loom_run_register_context_callback_t register_context;
   // Target environment composed from linked execution providers.
   const loom_target_environment_t* target_environment;
-  // Linked HAL artifact providers available to actual invocations.
+  // Linked HAL artifact providers available to kernel launches.
   const loom_run_hal_artifact_provider_registry_t*
       hal_artifact_provider_registry;
   // Appends target-specific requirement providers linked into this runner.

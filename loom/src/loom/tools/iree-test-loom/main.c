@@ -40,16 +40,16 @@ IREE_FLAG_NAMED(int32_t, max_samples_per_case, "max-samples-per-case",
                 LOOM_TESTBENCH_DEFAULT_MAX_SAMPLES_PER_CASE,
                 "Maximum number of samples planned per check.case.");
 IREE_FLAG(string, pipeline, "default",
-          "Pass pipeline used for HAL actual invocations. Use 'default', "
+          "Pass pipeline used for HAL kernel launches. Use 'default', "
           "'none', '@symbol', or a comma-separated pass list.");
 IREE_FLAG_LIST(
     string, config,
-    "Compile-time config binding for HAL actual invocations. Repeat as "
+    "Compile-time config binding for HAL kernel launches. Repeat as "
     "--config=key=value. Bindings not referenced by the loaded module are "
     "ignored.");
 IREE_FLAG_LIST_NAMED(
     string, config_file, "config-file",
-    "JSON/JSONC config object file for HAL actual invocations. Repeat for "
+    "JSON/JSONC config object file for HAL kernel launches. Repeat for "
     "multiple files. Nested object keys are flattened with '.' separators.");
 IREE_FLAG(string, sanitizer, "none",
           "Sanitizer checks inserted by the target pipeline. Use 'none', "
@@ -205,14 +205,9 @@ static iree_status_t iree_test_loom_validate_sample_flag(
   return iree_ok_status();
 }
 
-static bool iree_test_loom_case_has_actual_invocation(
+static bool iree_test_loom_case_has_kernel_launch(
     const loom_testbench_case_plan_t* case_plan) {
-  for (iree_host_size_t i = 0; i < case_plan->invocation_count; ++i) {
-    if (case_plan->invocations[i].kind == LOOM_TESTBENCH_INVOCATION_ACTUAL) {
-      return true;
-    }
-  }
-  return false;
+  return case_plan->kernel_launch_count != 0;
 }
 
 static bool iree_test_loom_case_has_device_event_expectation(
@@ -322,7 +317,7 @@ static iree_status_t iree_test_loom_configure_hal_actual_sequence(
   };
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_actual_sequence_initialize(
       &sequence_options, out_sequence));
-  execution_options->invocation.actual =
+  execution_options->invocation.kernel_launch =
       loom_run_hal_testbench_actual_sequence_provider(out_sequence);
   return iree_ok_status();
 }
@@ -382,7 +377,7 @@ static iree_status_t iree_test_loom_run_case_samples(
   loom_testbench_reference_matmul_oracle_options_t matmul_oracle_options = {0};
   loom_testbench_oracle_provider_t oracle_providers[2] = {0};
   bool hal_actual_sequence_initialized = false;
-  if (iree_test_loom_case_has_actual_invocation(case_plan)) {
+  if (iree_test_loom_case_has_kernel_launch(case_plan)) {
     status = iree_test_loom_configure_hal_actual_sequence(
         configuration, session, run_module, module_plan, case_plan, config_set,
         sanitizer_options, hal_context, &execution_options,
@@ -542,13 +537,13 @@ static void iree_test_loom_print_agents_markdown(FILE* stream) {
       "cases.\n"
       "`--max-samples-per-case=N` bounds planning for generator-heavy cases.\n"
       "\n"
-      "### Actual invocations\n"
+      "### Kernel launches\n"
       "\n"
-      "A case can mix reference/oracle checks with HAL actual invocations. "
-      "Actual\n"
-      "invocations use the selected HAL artifact provider, target provider, "
+      "A case can mix reference/oracle checks with HAL kernel launches. "
+      "Kernel\n"
+      "launches use the selected HAL artifact provider, target provider, "
       "and HAL device linked into this binary. "
-      "`--pipeline=default|none|@symbol|pass,list` controls the HAL actual "
+      "`--pipeline=default|none|@symbol|pass,list` controls the HAL kernel "
       "compile pipeline. `--config=key=value` and `--config-file=path` "
       "materialize config declarations in the private compile copy before "
       "lowering runs. Case sample values remain runtime invocation inputs. "

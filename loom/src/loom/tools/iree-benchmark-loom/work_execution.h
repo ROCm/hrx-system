@@ -34,7 +34,7 @@ typedef struct iree_benchmark_loom_work_plan_execution_options_t {
   const iree_benchmark_loom_work_plan_t* work_plan;
   // Parsed benchmark options controlling compilation and measurement.
   const iree_benchmark_loom_options_t* benchmark_options;
-  // Shared HAL context used by work items with actual invocations.
+  // Shared HAL context used by work items with kernel launches.
   iree_benchmark_loom_hal_context_t* hal_context;
   // Shared Loom run session used for candidate compilation.
   loom_run_session_t* session;

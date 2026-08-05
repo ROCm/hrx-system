@@ -17,7 +17,7 @@ iree_status_t iree_benchmark_loom_hal_actual_provider_initialize(
     iree_string_view_t filename, iree_string_view_t source,
     iree_string_view_t pipeline, loom_sanitizer_options_t sanitizer,
     const loom_module_t* test_module,
-    const loom_testbench_invocation_plan_t* actual_invocation,
+    const loom_testbench_invocation_plan_t* kernel_launch,
     iree_string_view_t artifact_path_suffix,
     const loom_run_compile_report_capture_options_t* compile_report_options,
     const loom_run_candidate_artifact_manifest_options_t*
@@ -59,7 +59,7 @@ iree_status_t iree_benchmark_loom_hal_actual_provider_initialize(
         .sanitizer = sanitizer,
         .config_set = context->config_set,
         .test_module = test_module,
-        .actual_invocation = actual_invocation,
+        .kernel_launch = kernel_launch,
         .diagnostic_sink =
             (loom_diagnostic_sink_t){
                 .fn = iree_benchmark_loom_diagnostic_capture_sink,
@@ -122,24 +122,24 @@ iree_status_t iree_benchmark_loom_hal_actual_sequence_initialize(
       .host_allocator = host_allocator,
   };
 
-  iree_host_size_t actual_invocation_count = 0;
-  iree_status_t status = loom_run_hal_testbench_count_actual_invocations(
-      case_plan, &actual_invocation_count);
-  if (iree_status_is_ok(status) && actual_invocation_count == 0) {
+  iree_host_size_t kernel_launch_count = 0;
+  iree_status_t status = loom_run_hal_testbench_count_kernel_launches(
+      case_plan, &kernel_launch_count);
+  if (iree_status_is_ok(status) && kernel_launch_count == 0) {
     status = iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "HAL actual sequence requires at least one actual invocation in "
-        "check.case `%.*s`",
+        "HAL actual sequence requires at least one kernel launch in check.case "
+        "`%.*s`",
         (int)case_plan->name.size, case_plan->name.data);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(
-        host_allocator, actual_invocation_count,
-        sizeof(*out_sequence->providers), (void**)&out_sequence->providers);
+    status = iree_allocator_malloc_array(host_allocator, kernel_launch_count,
+                                         sizeof(*out_sequence->providers),
+                                         (void**)&out_sequence->providers);
   }
   if (iree_status_is_ok(status)) {
     memset(out_sequence->providers, 0,
-           actual_invocation_count * sizeof(*out_sequence->providers));
+           kernel_launch_count * sizeof(*out_sequence->providers));
   }
 
   iree_host_size_t provider_index = 0;
@@ -147,11 +147,11 @@ iree_status_t iree_benchmark_loom_hal_actual_sequence_initialize(
        iree_status_is_ok(status) && i < case_plan->invocation_count; ++i) {
     const loom_testbench_invocation_plan_t* invocation =
         &case_plan->invocations[i];
-    if (invocation->kind != LOOM_TESTBENCH_INVOCATION_ACTUAL) {
+    if (invocation->kind != LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH) {
       continue;
     }
     iree_string_view_t artifact_path_suffix = iree_string_view_empty();
-    if (actual_invocation_count > 1) {
+    if (kernel_launch_count > 1) {
       status = iree_benchmark_loom_module_symbol_name_from_ref(
           test_module, invocation->callee_ref, &artifact_path_suffix);
     }

@@ -17,6 +17,7 @@ from dataclasses import replace
 
 import pytest
 
+from loom.assembly import FuncArgs
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.cfg import ALL_CFG_OPS
@@ -1506,6 +1507,7 @@ class TestCrossFormatRoundTrip:
                 AttrDef("priority", "i64", optional=True),
             ],
             results=[Result("results", ANY, variadic=True)],
+            format=[FuncArgs("args")],
         )
         module = Module()
         input_id = module.add_value(Value(name="input", type=F32))
