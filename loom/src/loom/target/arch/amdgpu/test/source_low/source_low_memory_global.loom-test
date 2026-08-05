@@ -25,9 +25,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @global_f32x7_roundtrip(%input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<7xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<7xf32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<7xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<7xf32, #dense>
   %loaded = vector.load %input_view[0] : view<7xf32, #dense> -> vector<7xf32>
   vector.store %loaded, %output_view[0] : vector<7xf32>, view<7xf32, #dense>
   func.return
@@ -49,9 +49,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @global_f32x64_roundtrip(%input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32, #dense>
   %loaded = vector.load %input_view[0] : view<64xf32, #dense> -> vector<64xf32>
   vector.store %loaded, %output_view[0] : vector<64xf32>, view<64xf32, #dense>
   func.return
@@ -101,10 +101,10 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @global_f32x64_add_roundtrip(%lhs: buffer, %rhs: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs[%zero] : buffer -> view<64xf32, #dense>
-  %rhs_view = buffer.view %rhs[%zero] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs[%buffer_base] : buffer -> view<64xf32, #dense>
+  %rhs_view = buffer.view %rhs[%buffer_base] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32, #dense>
   %lhs_loaded = vector.load %lhs_view[0] : view<64xf32, #dense> -> vector<64xf32>
   %rhs_loaded = vector.load %rhs_view[0] : view<64xf32, #dense> -> vector<64xf32>
   %sum = vector.addf %lhs_loaded, %rhs_loaded : vector<64xf32>
@@ -381,9 +381,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @global_bf16x14_roundtrip(%input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<14xbf16, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<14xbf16, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<14xbf16, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<14xbf16, #dense>
   %loaded = vector.load %input_view[0] : view<14xbf16, #dense> -> vector<14xbf16>
   vector.store %loaded, %output_view[0] : vector<14xbf16>, view<14xbf16, #dense>
   func.return
@@ -405,9 +405,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @global_bf16x64_roundtrip(%input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xbf16, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xbf16, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xbf16, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xbf16, #dense>
   %loaded = vector.load %input_view[0] : view<64xbf16, #dense> -> vector<64xbf16>
   vector.store %loaded, %output_view[0] : vector<64xbf16>, view<64xbf16, #dense>
   func.return
@@ -441,9 +441,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @global_f16x7_roundtrip(%input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<7xf16, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<7xf16, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<7xf16, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<7xf16, #dense>
   %loaded = vector.load %input_view[0] : view<7xf16, #dense> -> vector<7xf16>
   vector.store %loaded, %output_view[0] : vector<7xf16>, view<7xf16, #dense>
   func.return
@@ -465,9 +465,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @global_bf16x7_roundtrip(%input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<7xbf16, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<7xbf16, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<7xbf16, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<7xbf16, #dense>
   %loaded = vector.load %input_view[0] : view<7xbf16, #dense> -> vector<7xbf16>
   vector.store %loaded, %output_view[0] : vector<7xbf16>, view<7xbf16, #dense>
   func.return
@@ -514,9 +514,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @global_store_i32_constant_saddr(%output: buffer) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%zero] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output_global[%buffer_base] : buffer -> view<1xi32, #dense>
   %value = scalar.constant 42 : i32
   view.store %value, %output_view[0] : i32, view<1xi32, #dense>
   func.return
@@ -554,9 +554,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @global_load_i16_saddr(%input: buffer) -> (i16) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
-  %input_view = buffer.view %input_global[%zero] : buffer -> view<1xi16, #dense>
+  %input_view = buffer.view %input_global[%buffer_base] : buffer -> view<1xi16, #dense>
   %loaded = view.load %input_view[0] : view<1xi16, #dense> -> i16
   func.return %loaded : i16
 }
@@ -573,9 +573,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @global_store_i16_saddr(%output: buffer, %value: i16) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%zero] : buffer -> view<1xi16, #dense>
+  %output_view = buffer.view %output_global[%buffer_base] : buffer -> view<1xi16, #dense>
   view.store %value, %output_view[0] : i16, view<1xi16, #dense>
   func.return
 }
@@ -592,8 +592,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @i8x2_buffer_load(%input: buffer) -> (vector<2xi8>) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<2xi8, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<2xi8, #dense>
   %loaded = vector.load %input_view[0] : view<2xi8, #dense> -> vector<2xi8>
   func.return %loaded : vector<2xi8>
 }
@@ -610,9 +610,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x2_bu
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @global_load_i8x2_saddr(%input: buffer) -> (vector<2xi8>) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %input_global = buffer.assume.memory_space<global> %input : buffer
-  %input_view = buffer.view %input_global[%zero] : buffer -> view<2xi8, #dense>
+  %input_view = buffer.view %input_global[%buffer_base] : buffer -> view<2xi8, #dense>
   %loaded = vector.load %input_view[0] : view<2xi8, #dense> -> vector<2xi8>
   func.return %loaded : vector<2xi8>
 }
@@ -629,9 +629,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @global_store_i8x2_saddr(%output: buffer, %value: vector<2xi8>) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %output_global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %output_global[%zero] : buffer -> view<2xi8, #dense>
+  %output_view = buffer.view %output_global[%buffer_base] : buffer -> view<2xi8, #dense>
   vector.store %value, %output_view[0] : vector<2xi8>, view<2xi8, #dense>
   func.return
 }
@@ -648,9 +648,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @global_
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @descriptor_load_i16(%input: buffer) -> (i16) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
-  %input_view = buffer.view %input_descriptor[%zero] : buffer -> view<1xi16, #dense>
+  %input_view = buffer.view %input_descriptor[%buffer_base] : buffer -> view<1xi16, #dense>
   %loaded = view.load %input_view[0] : view<1xi16, #dense> -> i16
   func.return %loaded : i16
 }
@@ -674,9 +674,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @descriptor_store_i16(%output: buffer, %value: i16) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %output_descriptor = buffer.assume.memory_space<descriptor> %output : buffer
-  %output_view = buffer.view %output_descriptor[%zero] : buffer -> view<1xi16, #dense>
+  %output_view = buffer.view %output_descriptor[%buffer_base] : buffer -> view<1xi16, #dense>
   view.store %value, %output_view[0] : i16, view<1xi16, #dense>
   func.return
 }
@@ -702,9 +702,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @descriptor_load_i8x2(%input: buffer) -> (vector<2xi8>) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
-  %input_view = buffer.view %input_descriptor[%zero] : buffer -> view<2xi8, #dense>
+  %input_view = buffer.view %input_descriptor[%buffer_base] : buffer -> view<2xi8, #dense>
   %loaded = vector.load %input_view[0] : view<2xi8, #dense> -> vector<2xi8>
   func.return %loaded : vector<2xi8>
 }
@@ -728,9 +728,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @descriptor_store_i8x2(%output: buffer, %value: vector<2xi8>) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %output_descriptor = buffer.assume.memory_space<descriptor> %output : buffer
-  %output_view = buffer.view %output_descriptor[%zero] : buffer -> view<2xi8, #dense>
+  %output_view = buffer.view %output_descriptor[%buffer_base] : buffer -> view<2xi8, #dense>
   vector.store %value, %output_view[0] : vector<2xi8>, view<2xi8, #dense>
   func.return
 }
@@ -756,9 +756,9 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @descriptor_b128_off_zero(%input: buffer) -> (vector<4xi32>) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %input_descriptor = buffer.assume.memory_space<descriptor> %input : buffer
-  %input_view = buffer.view %input_descriptor[%zero] : buffer -> view<4xi32, #dense>
+  %input_view = buffer.view %input_descriptor[%buffer_base] : buffer -> view<4xi32, #dense>
   %loaded = vector.load %input_view[0] : view<4xi32, #dense> -> vector<4xi32>
   func.return %loaded : vector<4xi32>
 }
@@ -972,14 +972,14 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @descrip
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @descriptor_dynamic_extent_store_f32x4(%output: buffer, %value: vector<4xf32>, %row_count_i32: i32, %row_i32: i32) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %first_column = index.constant 0 : index
   %output_descriptor = buffer.assume.memory_space<descriptor> %output : buffer
   %row_count0 = index.cast %row_count_i32 : i32 to index
   %row_count = index.assume %row_count0 [range(%row_count0, 1, 1024)] : index
   %row0 = index.cast %row_i32 : i32 to index
   %row = index.assume %row0 [range(%row0, 0, 1023), lt(%row0, %row_count)] : index
   %output_view = buffer.view %output_descriptor[%base] : buffer -> view<[%row_count]x4xf32, #dense>
-  vector.store %value, %output_view[%row, %zero] : vector<4xf32>, view<[%row_count]x4xf32, #dense>
+  vector.store %value, %output_view[%row, %first_column] : vector<4xf32>, view<[%row_count]x4xf32, #dense>
   func.return
 }
 
@@ -1006,14 +1006,14 @@ amdgpu.target<gfx11-generic> @target
 func.def target(@target) @descriptor_dynamic_base_extent_store_f32x4(%output: buffer, %value: vector<4xf32>, %base_i32: i32, %row_count_i32: i32, %row_i32: i32) {
   %base0 = index.cast %base_i32 : i32 to offset
   %base = index.assume %base0 [range(%base0, 0, 8192), mul(%base0, 16)] : offset
-  %zero = index.constant 0 : index
+  %first_column = index.constant 0 : index
   %output_descriptor = buffer.assume.memory_space<descriptor> %output : buffer
   %row_count0 = index.cast %row_count_i32 : i32 to index
   %row_count = index.assume %row_count0 [range(%row_count0, 1, 512)] : index
   %row0 = index.cast %row_i32 : i32 to index
   %row = index.assume %row0 [range(%row0, 0, 511), lt(%row0, %row_count)] : index
   %output_view = buffer.view %output_descriptor[%base] : buffer -> view<[%row_count]x4xf32, #dense>
-  vector.store %value, %output_view[%row, %zero] : vector<4xf32>, view<[%row_count]x4xf32, #dense>
+  vector.store %value, %output_view[%row, %first_column] : vector<4xf32>, view<[%row_count]x4xf32, #dense>
   func.return
 }
 
@@ -1301,8 +1301,8 @@ kernel.def target(@target) @i32_dynamic_leading_dim_global_saddr() {
   %columns = index.assume %columns0 [range(%columns0, 32, 2147483647)] : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_view = buffer.view %output_global[%base] : buffer -> view<2x[%columns]x8xi32, #dense>
-  %zero = scalar.constant 0 : i32
-  view.store %zero, %output_view[%workgroup, %column, 0] : i32, view<2x[%columns]x8xi32, #dense>
+  %cleared_value = scalar.constant 0 : i32
+  view.store %cleared_value, %output_view[%workgroup, %column, 0] : i32, view<2x[%columns]x8xi32, #dense>
   kernel.return
 }
 
@@ -1393,11 +1393,11 @@ kernel.def target(@target) @i32_readonly_uniform_smem_scalar_branch() {
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<16xi32, #dense>
   %output_view = buffer.view %output_noalias[%base] : buffer -> view<16xi32, #dense>
   %loaded = view.load %input_view[%workgroup] : view<16xi32, #dense> -> i32
-  %zero = scalar.constant 0 : i32
-  %negative = scalar.cmpi slt, %loaded, %zero : i32
+  %clamp_floor = scalar.constant 0 : i32
+  %negative = scalar.cmpi slt, %loaded, %clamp_floor : i32
   cfg.cond_br %negative, ^then, ^join
 ^then:
-  view.store %zero, %output_view[%workgroup] : i32, view<16xi32, #dense>
+  view.store %clamp_floor, %output_view[%workgroup] : i32, view<16xi32, #dense>
   cfg.br ^join
 ^join:
   kernel.return
@@ -1410,8 +1410,8 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 64} : reg<amdgpu.sgpr x2>
   %19 = s_lshl_b32_rhs_inline %workgroup, 2
   %loaded = s_load_dword %input_view, %19
-  %zero = s_mov_b32 0
-  %negative = s_cmp_lt_i32 %loaded, %zero
+  %clamp_floor = s_mov_b32 0
+  %negative = s_cmp_lt_i32 %loaded, %clamp_floor
   low.cond_br %negative, ^then, ^join : reg<amdgpu.scc>
 ^then:
   %23 = v_mov_b32 0
@@ -1419,7 +1419,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %26 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %27 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %29 = s_add_u32 %26, %25
-  %30 = s_addc_u32 %27, %zero
+  %30 = s_addc_u32 %27, %clamp_floor
   %31 = concat(%29, %30) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   global_store_b32_saddr %23, %23, %31
   low.br ^join
@@ -1439,7 +1439,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_loop_bound() {
   %base = index.constant 0 : offset
   %start = index.constant 0 : index
   %step = index.constant 1 : index
-  %zero = scalar.constant 0.0 : f32
+  %initial_sum = scalar.constant 0.0 : f32
   %control_noalias, %input_noalias, %output_noalias = buffer.assume.noalias %control, %input, %output : buffer, buffer, buffer
   %control_view = buffer.view %control_noalias[%base] : buffer -> view<1xi32, #dense>
   %input_view = buffer.view %input_noalias[%base] : buffer -> view<128xf32, #dense>
@@ -1447,7 +1447,7 @@ kernel.def target(@target) @i32_readonly_uniform_smem_loop_bound() {
   %limit_i32 = view.load %control_view[0] : view<1xi32, #dense> -> i32
   %limit0 = index.cast %limit_i32 : i32 to index
   %limit = index.assume %limit0 [range(%limit0, 0, 128)] : index
-  %sum = scf.for %position = [%start to %limit step %step](%current_sum = %zero : f32) -> (f32) {
+  %sum = scf.for %position = [%start to %limit step %step](%current_sum = %initial_sum : f32) -> (f32) {
     %loaded = view.load %input_view[%position] : view<128xf32, #dense> -> f32
     %next_sum = scalar.addf<reassoc|nnan|nsz> %current_sum, %loaded : f32
     scf.yield %next_sum : f32
@@ -1463,9 +1463,9 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %start = s_mov_b32 0
   %step = s_mov_b32 1
-  %zero = v_mov_b32 0
+  %initial_sum = v_mov_b32 0
   %limit = s_load_dword %control_view, %start
-  low.br ^_bb1(%start: reg<amdgpu.sgpr>, %zero: reg<amdgpu.vgpr>)
+  low.br ^_bb1(%start: reg<amdgpu.sgpr>, %initial_sum: reg<amdgpu.vgpr>)
 ^_bb1(%position: reg<amdgpu.sgpr>, %current_sum: reg<amdgpu.vgpr>):
   %39 = s_cmp_lt_i32 %position, %limit
   low.cond_br %39, ^_bb2, ^_bb3 : reg<amdgpu.scc>
@@ -1476,7 +1476,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %43 = s_add_u32 %position, %step
   low.br ^_bb1(%43: reg<amdgpu.sgpr>, %next_sum: reg<amdgpu.vgpr>)
 ^_bb3:
-  global_store_b32_saddr %zero, %current_sum, %output_view
+  global_store_b32_saddr %initial_sum, %current_sum, %output_view
   return
 }
 
@@ -1547,8 +1547,8 @@ kernel.def target(@target) @i32_readonly_uniform_smem_address() {
   %column_i32 = view.load %control_view[0] : view<1xi32, #dense> -> i32
   %column0 = index.cast %column_i32 : i32 to index
   %column = index.assume %column0 [range(%column0, 0, 63)] : index
-  %zero = scalar.constant 0 : i32
-  view.store %zero, %output_view[%column] : i32, view<64xi32, #dense>
+  %cleared_value = scalar.constant 0 : i32
+  view.store %cleared_value, %output_view[%column] : i32, view<64xi32, #dense>
   kernel.return
 }
 
@@ -1582,13 +1582,14 @@ kernel.def target(@target) @i32_readonly_uniform_smem_guarded_index_address() {
   %output_view = buffer.view %output[%base] : buffer -> view<64xi32, #dense>
   %column_i32 = view.load %control_view[0] : view<1xi32, #dense> -> i32
   %column = index.cast %column_i32 : i32 to index
-  %zero_i32 = scalar.constant 0 : i32
+  %minimum_column = scalar.constant 0 : i32
+  %cleared_value = scalar.constant 0 : i32
   %limit_i32 = scalar.constant 64 : i32
-  %nonnegative = scalar.cmpi sge, %column_i32, %zero_i32 : i32
+  %nonnegative = scalar.cmpi sge, %column_i32, %minimum_column : i32
   %below = scalar.cmpi slt, %column_i32, %limit_i32 : i32
   %guard = scalar.andi %nonnegative, %below : i1
   scf.if %guard {
-    view.store %zero_i32, %output_view[%column] : i32, view<64xi32, #dense>
+    view.store %cleared_value, %output_view[%column] : i32, view<64xi32, #dense>
   }
   kernel.return
 }
@@ -1597,20 +1598,20 @@ kernel.def target(@target) @i32_readonly_uniform_smem_guarded_index_address() {
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_readonly_uniform_smem_guarded_index_address() asm {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
-  %16 = v_mov_b32 0
-  %column = global_load_b32_saddr %16, %control_view
+  %17 = v_mov_b32 0
+  %column = global_load_b32_saddr %17, %control_view
   %nonnegative = v_cmp_ge_i32_src1_inline %column {rhs = 0}
   %below = v_cmp_lt_i32_src1_inline %column {rhs = 64}
   %guard = s_and_b64 %nonnegative, %below
-  %22, %23 = s_and_saveexec_b64 %guard
-  low.cond_br %23, ^_bb1, ^_bb2 : reg<amdgpu.scc>
+  %23, %24 = s_and_saveexec_b64 %guard
+  low.cond_br %24, ^_bb1, ^_bb2 : reg<amdgpu.scc>
 ^_bb1:
-  %24 = v_mov_b32 0
-  %25 = v_lshlrev_b32_src0_inline %column, 2
-  global_store_b32_saddr %25, %24, %output_view
+  %25 = v_mov_b32 0
+  %26 = v_lshlrev_b32_src0_inline %column, 2
+  global_store_b32_saddr %26, %25, %output_view
   low.br ^_bb2
 ^_bb2:
-  s_mov_b64_exec %22
+  s_mov_b64_exec %23
   return
 }
 
@@ -1626,16 +1627,16 @@ kernel.def target(@target) @i64_readonly_uniform_smem_guarded_index_address() {
   %control_view = buffer.view %control[%base] : buffer -> view<1xi64, #dense>
   %output_view = buffer.view %output[%base] : buffer -> view<64xi32, #dense>
   %column_i64 = view.load %control_view[0] : view<1xi64, #dense> -> i64
-  %zero_i64 = scalar.constant 0 : i64
+  %minimum_column = scalar.constant 0 : i64
   %limit_i64 = scalar.constant 64 : i64
-  %nonnegative = scalar.cmpi sge, %column_i64, %zero_i64 : i64
+  %nonnegative = scalar.cmpi sge, %column_i64, %minimum_column : i64
   %below = scalar.cmpi slt, %column_i64, %limit_i64 : i64
   %guard = scalar.andi %nonnegative, %below : i1
-  %zero_i32 = scalar.constant 0 : i32
+  %cleared_value = scalar.constant 0 : i32
   scf.if %guard {
     %bounded_column_i64 = scalar.assume %column_i64 [range(%column_i64, 0, 63)] : i64
     %column = index.cast %bounded_column_i64 : i64 to index
-    view.store %zero_i32, %output_view[%column] : i32, view<64xi32, #dense>
+    view.store %cleared_value, %output_view[%column] : i32, view<64xi32, #dense>
   }
   kernel.return
 }
@@ -1684,9 +1685,9 @@ kernel.def target(@target) @i32_b128() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xi32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32, #dense>
   %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
   %raise = vector.constant 9 : vector<4xi32>
   %raised = vector.addi %loaded, %raise : vector<4xi32>
@@ -1730,9 +1731,9 @@ kernel.def target(@target) @f32x8_split_b128() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64x8xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x8xf32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x8xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x8xf32, #dense>
   %loaded = vector.load %input_view[%lane, 0] : view<64x8xf32, #dense> -> vector<8xf32>
   %raise = vector.constant 2.0 : vector<8xf32>
   %result = vector.addf %loaded, %raise : vector<8xf32>
@@ -1782,9 +1783,9 @@ kernel.def target(@target) @i32_scalar_2d_store() {
 } launch(%input: buffer, %output: buffer) {
   %column = kernel.workitem.id<x> : index
   %row = kernel.workitem.id<y> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<4x8xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<4x8xi32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4x8xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<4x8xi32, #dense>
   %loaded = vector.load %input_view[%row, %column] : view<4x8xi32, #dense> -> vector<1xi32>
   vector.store %loaded, %output_view[%row, %column] : vector<1xi32>, view<4x8xi32, #dense>
   kernel.return
@@ -1848,12 +1849,12 @@ kernel.def target(@target) @i32_dynamic_constant_index() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero_offset = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %input_view = buffer.view %input[%zero_offset] : buffer -> view<64x1x4xi32, #dense>
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<64x1x4xi32, #dense>
-  %loaded = vector.load %input_view[%lane, %zero, 0] : view<64x1x4xi32, #dense> -> vector<4xi32>
-  vector.store %loaded, %output_view[%lane, %zero, 0] : vector<4xi32>, view<64x1x4xi32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %singleton_axis = index.constant 0 : index
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x1x4xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x1x4xi32, #dense>
+  %loaded = vector.load %input_view[%lane, %singleton_axis, 0] : view<64x1x4xi32, #dense> -> vector<4xi32>
+  vector.store %loaded, %output_view[%lane, %singleton_axis, 0] : vector<4xi32>, view<64x1x4xi32, #dense>
   kernel.return
 }
 
@@ -1917,9 +1918,9 @@ kernel.def target(@target) @i32_dynamic_view_base() {
 } launch(%control: buffer, %output: buffer, %offset_i32: i32) {
   %base0 = index.cast %offset_i32 : i32 to offset
   %base = index.assume %base0 [range(%base0, 0, 4092), mul(%base0, 4)] : offset
-  %zero = index.constant 0 : offset
+  %output_base = index.constant 0 : offset
   %control_view = buffer.view %control[%base] : buffer -> view<4xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #dense>
   %loaded = view.load %control_view[2] : view<4xi32, #dense> -> i32
   view.store %loaded, %output_view[0] : i32, view<1xi32, #dense>
   kernel.return
@@ -1948,12 +1949,13 @@ kernel.def target(@target) @i32_dynamic_view_base_loaded() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%control: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %header_view = buffer.view %control[%zero] : buffer -> view<8xi32, #dense>
+  %header_base = index.constant 0 : offset
+  %output_base = index.constant 0 : offset
+  %header_view = buffer.view %control[%header_base] : buffer -> view<8xi32, #dense>
   %base_i32 = view.load %header_view[7] : view<8xi32, #dense> -> i32
   %base = index.cast %base_i32 : i32 to offset
   %control_view = buffer.view %control[%base] : buffer -> view<4xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #dense>
   %loaded = view.load %control_view[2] : view<4xi32, #dense> -> i32
   view.store %loaded, %output_view[0] : i32, view<1xi32, #dense>
   kernel.return
@@ -1963,10 +1965,10 @@ kernel.def target(@target) @i32_dynamic_view_base_loaded() {
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @i32_dynamic_view_base_loaded() asm {
   %control_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
-  %12 = v_mov_b32 0
-  %base = global_load_b32_saddr %12, %control_view {offset = 28}
+  %13 = v_mov_b32 0
+  %base = global_load_b32_saddr %13, %control_view {offset = 28}
   %loaded = global_load_b32_saddr %base, %control_view {offset = 8}
-  global_store_b32_saddr %12, %loaded, %output_view
+  global_store_b32_saddr %13, %loaded, %output_view
   return
 }
 
@@ -1979,9 +1981,9 @@ kernel.def target(@target) @i32x4_dynamic_view_base_b128() {
 } launch(%input: buffer, %output: buffer, %offset_i32: i32) {
   %base0 = index.cast %offset_i32 : i32 to offset
   %base = index.assume %base0 [range(%base0, 0, 4096), mul(%base0, 16)] : offset
-  %zero = index.constant 0 : offset
+  %output_base = index.constant 0 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<4xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<4xi32, #dense>
+  %output_view = buffer.view %output[%output_base] : buffer -> view<4xi32, #dense>
   %loaded = vector.load %input_view[0] : view<4xi32, #dense> -> vector<4xi32>
   vector.store %loaded, %output_view[0] : vector<4xi32>, view<4xi32, #dense>
   kernel.return
@@ -2056,7 +2058,7 @@ kernel.def target(@target) @f16_view_scalar() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer, %column_i32: i32) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %first_column = index.constant 0 : index
   %column0 = index.cast %column_i32 : i32 to index
   %column = index.assume %column0 [range(%column0, 0, 7)] : index
   %input_view = buffer.view %input[%base] : buffer -> view<8xf16, #dense>
@@ -2064,7 +2066,7 @@ kernel.def target(@target) @f16_view_scalar() {
   %loaded = view.load %input_view[%column] : view<8xf16, #dense> -> f16
   view.store %loaded, %output_view[%column] : f16, view<8xf16, #dense>
   %cleared = scalar.constant 0.0 : f16
-  view.store %cleared, %output_view[%zero] : f16, view<8xf16, #dense>
+  view.store %cleared, %output_view[%first_column] : f16, view<8xf16, #dense>
   kernel.return
 }
 
@@ -2101,7 +2103,7 @@ kernel.def target(@target) @bf16_view_scalar() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer, %column_i32: i32) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %first_column = index.constant 0 : index
   %column0 = index.cast %column_i32 : i32 to index
   %column = index.assume %column0 [range(%column0, 0, 7)] : index
   %input_view = buffer.view %input[%base] : buffer -> view<8xbf16, #dense>
@@ -2109,7 +2111,7 @@ kernel.def target(@target) @bf16_view_scalar() {
   %loaded = view.load %input_view[%column] : view<8xbf16, #dense> -> bf16
   view.store %loaded, %output_view[%column] : bf16, view<8xbf16, #dense>
   %cleared = scalar.constant 0.0 : bf16
-  view.store %cleared, %output_view[%zero] : bf16, view<8xbf16, #dense>
+  view.store %cleared, %output_view[%first_column] : bf16, view<8xbf16, #dense>
   kernel.return
 }
 
@@ -2147,9 +2149,9 @@ kernel.def target(@target) @f16x2_b32() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64x2xf16, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x2xf16, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x2xf16, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x2xf16, #dense>
   %loaded = vector.load %input_view[%lane, 0] : view<64x2xf16, #dense> -> vector<2xf16>
   vector.store %loaded, %output_view[%lane, 0] : vector<2xf16>, view<64x2xf16, #dense>
   kernel.return
@@ -2175,9 +2177,9 @@ kernel.def target(@target) @f16x4_b64() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xf16, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xf16, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xf16, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf16, #dense>
   %loaded = vector.load %input_view[%lane, 0] : view<64x4xf16, #dense> -> vector<4xf16>
   vector.store %loaded, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16, #dense>
   kernel.return
@@ -2203,9 +2205,9 @@ kernel.def target(@target) @bf16x2_b32() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64x2xbf16, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x2xbf16, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x2xbf16, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x2xbf16, #dense>
   %loaded = vector.load %input_view[%lane, 0] : view<64x2xbf16, #dense> -> vector<2xbf16>
   vector.store %loaded, %output_view[%lane, 0] : vector<2xbf16>, view<64x2xbf16, #dense>
   kernel.return
@@ -2231,9 +2233,9 @@ kernel.def target(@target) @bf16x4_b64() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xbf16, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xbf16, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xbf16, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xbf16, #dense>
   %loaded = vector.load %input_view[%lane, 0] : view<64x4xbf16, #dense> -> vector<4xbf16>
   vector.store %loaded, %output_view[%lane, 0] : vector<4xbf16>, view<64x4xbf16, #dense>
   kernel.return
@@ -2528,7 +2530,8 @@ kernel.def target(@target) @selected_i32_row_shift_store() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%idx: buffer, %output: buffer, %value: f32, %element_count_i32: i32, %condition_i32: i32) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %inactive_condition = index.constant 0 : index
+  %inactive_element = index.constant 0 : index
   %shift = index.constant 2 : index
   %element_count0 = index.cast %element_count_i32 : i32 to index
   %element_count = index.assume %element_count0 [range(%element_count0, 1, 2147483647)] : index
@@ -2540,8 +2543,8 @@ kernel.def target(@target) @selected_i32_row_shift_store() {
   %raw = index.shli %row, %shift : index
   %condition0 = index.cast %condition_i32 : i32 to index
   %condition = index.assume %condition0 [range(%condition0, 1, 1)] : index
-  %selected_condition = index.cmp ne, %condition, %zero : index
-  %selected = scf.select %selected_condition, %raw, %zero : index
+  %selected_condition = index.cmp ne, %condition, %inactive_condition : index
+  %selected = scf.select %selected_condition, %raw, %inactive_element : index
   %element = index.assume %selected [range(%selected, 0, 1073741823), lt(%selected, %element_count)] : index
   view.store %value, %output_view[%element] : f32, view<[%element_count]xf32, #dense>
   kernel.return
@@ -2551,11 +2554,11 @@ kernel.def target(@target) @selected_i32_row_shift_store() {
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @selected_i32_row_shift_store(%value: reg<amdgpu.sgpr>, %element_count: reg<amdgpu.sgpr>, %condition_i32: reg<amdgpu.sgpr>) asm {
   %idx_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 4} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %27 = v_mov_b32 0
-  %row = global_load_b32_saddr %27, %idx_view
-  %30 = v_mov_b32_copy %value
-  %31 = v_lshlrev_b32_src0_inline %row, 4
-  global_store_b32_saddr %31, %30, %output_view
+  %28 = v_mov_b32 0
+  %row = global_load_b32_saddr %28, %idx_view
+  %31 = v_mov_b32_copy %value
+  %32 = v_lshlrev_b32_src0_inline %row, 4
+  global_store_b32_saddr %32, %31, %output_view
   return
 }
 
