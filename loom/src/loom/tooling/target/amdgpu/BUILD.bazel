@@ -102,6 +102,7 @@ iree_execution_test_suite(
     data = [
         "test/amdgpu_bad_return.loom",
         "test/amdgpu_unused_kernargs.loom",
+        "test/complete_authoring_module.loom",
         "test/gfx1250_configured_fragment_bank.loom",
         "test/selected_root_amdgpu.loom",
         "test/target_family_template_provider_amdgpu.loom",
