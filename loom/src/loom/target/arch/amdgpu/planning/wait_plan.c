@@ -20,6 +20,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/planning/structural_packet.h"
 #include "loom/target/arch/amdgpu/planning/wait_frontier.h"
+#include "loom/target/arch/amdgpu/planning/wait_loop.h"
 #include "loom/target/arch/amdgpu/planning/wait_packet_tables.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_id/target_id.h"
@@ -207,6 +208,12 @@ typedef struct loom_amdgpu_wait_plan_builder_t {
   uint32_t* first_block_arg_source_by_value;
   // Incoming low.br source records for non-entry block arguments.
   loom_amdgpu_wait_block_arg_source_t* block_arg_sources;
+  // Representative SSA dependency indexed by loop-entry block and counter.
+  uint32_t* loop_entry_dependency_links;
+  // Original consumer indexed by loop-entry block and counter.
+  uint32_t* loop_entry_consumer_nodes;
+  // Counter classes fully drained at each planned loop-entry block.
+  uint32_t* loop_entry_drain_counter_masks;
   // Storage-release actions grouped by insertion node.
   loom_low_storage_release_action_index_t storage_release_action_index;
   // DFS visit epoch per value while forwarding SSA wait dependencies.
@@ -1899,6 +1906,101 @@ static iree_status_t loom_amdgpu_wait_plan_classify_nodes(
   return loom_amdgpu_wait_plan_build_dependency_links(builder);
 }
 
+static iree_host_size_t loom_amdgpu_wait_plan_loop_entry_slot_index(
+    uint16_t block_index, uint32_t counter_slot) {
+  IREE_ASSERT_LT(counter_slot, LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT);
+  return (iree_host_size_t)block_index * LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT +
+         counter_slot;
+}
+
+static iree_status_t loom_amdgpu_wait_plan_allocate_loop_entry_tables(
+    loom_amdgpu_wait_plan_builder_t* builder) {
+  const iree_host_size_t entry_slot_count =
+      builder->schedule->block_count * LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(builder->transient_arena, entry_slot_count,
+                                sizeof(*builder->loop_entry_dependency_links),
+                                (void**)&builder->loop_entry_dependency_links));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(builder->transient_arena, entry_slot_count,
+                                sizeof(*builder->loop_entry_consumer_nodes),
+                                (void**)&builder->loop_entry_consumer_nodes));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      builder->transient_arena, builder->schedule->block_count,
+      sizeof(*builder->loop_entry_drain_counter_masks),
+      (void**)&builder->loop_entry_drain_counter_masks));
+  for (iree_host_size_t i = 0; i < entry_slot_count; ++i) {
+    builder->loop_entry_dependency_links[i] = LOOM_LOW_SCHEDULE_NODE_NONE;
+    builder->loop_entry_consumer_nodes[i] = LOOM_LOW_SCHEDULE_NODE_NONE;
+  }
+  memset(builder->loop_entry_drain_counter_masks, 0,
+         builder->schedule->block_count *
+             sizeof(*builder->loop_entry_drain_counter_masks));
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_wait_plan_relocate_loop_entry_dependencies(
+    loom_amdgpu_wait_plan_builder_t* builder) {
+  const loom_low_schedule_table_t* schedule = builder->schedule;
+  if (builder->dependency_link_count == 0 || schedule->block_count <= 1 ||
+      schedule->cfg_graph.blocks == NULL) {
+    return iree_ok_status();
+  }
+
+  loom_amdgpu_wait_loop_analysis_t loop_analysis = {0};
+  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_loop_analysis_initialize(
+      schedule, builder->transient_arena, &loop_analysis));
+  if (loop_analysis.loop_count == 0) return iree_ok_status();
+
+  // Consumer adjacency lists partition the dependency-link table. The nested
+  // loop therefore takes O(N+16D) for N nodes and D dependency links: it visits
+  // each node and link once, then performs at most 16 ancestor probes per link.
+  // It never rescans links or loop bodies for each natural loop.
+  for (uint32_t consumer_node = 0; consumer_node < schedule->node_count;
+       ++consumer_node) {
+    uint32_t* link_index_ptr =
+        &builder->first_dependency_link_by_consumer[consumer_node];
+    while (*link_index_ptr != LOOM_LOW_SCHEDULE_NODE_NONE) {
+      const uint32_t link_index = *link_index_ptr;
+      loom_amdgpu_wait_dependency_link_t* link =
+          &builder->dependency_links[link_index];
+      const uint32_t next_link = link->next_link;
+      if (link->reason != LOOM_AMDGPU_WAIT_PLAN_REASON_SSA_USE ||
+          iree_math_count_ones_u32(link->counter_mask) != 1) {
+        link_index_ptr = &link->next_link;
+        continue;
+      }
+      const uint16_t preheader_index = loom_amdgpu_wait_loop_analysis_preheader(
+          &loop_analysis, link->producer_node, consumer_node);
+      if (preheader_index == UINT16_MAX) {
+        link_index_ptr = &link->next_link;
+        continue;
+      }
+
+      if (builder->loop_entry_dependency_links == NULL) {
+        IREE_RETURN_IF_ERROR(
+            loom_amdgpu_wait_plan_allocate_loop_entry_tables(builder));
+      }
+
+      *link_index_ptr = next_link;
+      const uint32_t counter_slot =
+          (uint32_t)iree_math_count_trailing_zeros_u32(link->counter_mask);
+      const iree_host_size_t entry_slot_index =
+          loom_amdgpu_wait_plan_loop_entry_slot_index(preheader_index,
+                                                      counter_slot);
+      if (builder->loop_entry_dependency_links[entry_slot_index] ==
+          LOOM_LOW_SCHEDULE_NODE_NONE) {
+        builder->loop_entry_dependency_links[entry_slot_index] = link_index;
+        builder->loop_entry_consumer_nodes[entry_slot_index] = consumer_node;
+        builder->loop_entry_drain_counter_masks[preheader_index] |=
+            link->counter_mask;
+      }
+      link->next_link = LOOM_LOW_SCHEDULE_NODE_NONE;
+    }
+  }
+  return iree_ok_status();
+}
+
 static void loom_amdgpu_wait_plan_mark_drained_producers(
     loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index,
     uint32_t slot, uint32_t completed_position_count) {
@@ -2048,38 +2150,52 @@ static void loom_amdgpu_wait_plan_apply_counter_progress(
   }
 }
 
-static iree_status_t loom_amdgpu_wait_plan_wait_counter(
+static iree_status_t loom_amdgpu_wait_plan_wait_counter_at(
     loom_amdgpu_wait_plan_builder_t* builder,
     loom_amdgpu_wait_plan_action_kind_t kind,
     loom_amdgpu_wait_plan_action_flags_t flags,
-    loom_amdgpu_wait_plan_reason_t reason, uint32_t node_index,
-    uint32_t producer_node, uint16_t counter_id, uint16_t target_count) {
-  const loom_low_schedule_node_t* node = &builder->schedule->nodes[node_index];
+    loom_amdgpu_wait_plan_reason_t reason, uint32_t insertion_node,
+    uint32_t producer_node, uint32_t consumer_node, uint16_t counter_id,
+    uint16_t target_count) {
+  const loom_low_schedule_node_t* node =
+      &builder->schedule->nodes[insertion_node];
   IREE_ASSERT(loom_amdgpu_wait_counter_id_is_valid(counter_id));
   const uint32_t slot = loom_amdgpu_wait_counter_slot_from_id(counter_id);
   const uint32_t outstanding_before = builder->outstanding_counts[slot];
   target_count = loom_amdgpu_wait_plan_normalize_target_count(
       builder, counter_id, target_count);
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_append_action(
-      builder,
-      (loom_amdgpu_wait_plan_action_t){
-          .kind = kind,
-          .flags = flags,
-          .reason = reason,
-          .counter_id = counter_id,
-          .target_count = target_count,
-          .block_index = node->block_index,
-          .node_index = node_index,
-          .scheduled_ordinal = node->scheduled_ordinal,
-          .producer_node = producer_node,
-          .consumer_node = loom_amdgpu_wait_plan_reason_has_consumer(reason)
-                               ? node_index
-                               : LOOM_LOW_SCHEDULE_NODE_NONE,
-          .outstanding_before = outstanding_before,
-      }));
+      builder, (loom_amdgpu_wait_plan_action_t){
+                   .kind = kind,
+                   .flags = flags,
+                   .reason = reason,
+                   .counter_id = counter_id,
+                   .target_count = target_count,
+                   .block_index = node->block_index,
+                   .node_index = insertion_node,
+                   .scheduled_ordinal = node->scheduled_ordinal,
+                   .producer_node = producer_node,
+                   .consumer_node = consumer_node,
+                   .outstanding_before = outstanding_before,
+               }));
   loom_amdgpu_wait_plan_apply_counter_progress(
-      builder, node_index, producer_node, counter_id, target_count);
+      builder, insertion_node, producer_node, counter_id, target_count);
   return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_wait_plan_wait_counter(
+    loom_amdgpu_wait_plan_builder_t* builder,
+    loom_amdgpu_wait_plan_action_kind_t kind,
+    loom_amdgpu_wait_plan_action_flags_t flags,
+    loom_amdgpu_wait_plan_reason_t reason, uint32_t node_index,
+    uint32_t producer_node, uint16_t counter_id, uint16_t target_count) {
+  const uint32_t consumer_node =
+      loom_amdgpu_wait_plan_reason_has_consumer(reason)
+          ? node_index
+          : LOOM_LOW_SCHEDULE_NODE_NONE;
+  return loom_amdgpu_wait_plan_wait_counter_at(
+      builder, kind, flags, reason, node_index, producer_node, consumer_node,
+      counter_id, target_count);
 }
 
 static iree_status_t loom_amdgpu_wait_plan_drain_counter(
@@ -2104,6 +2220,31 @@ static iree_status_t loom_amdgpu_wait_plan_drain_mask(
     const uint16_t counter_id = loom_amdgpu_wait_counter_id_from_slot(slot);
     IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_drain_counter(
         builder, kind, reason, node_index, producer_node, counter_id));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_wait_plan_handle_loop_entry_dependencies(
+    loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
+  if (builder->loop_entry_dependency_links == NULL) return iree_ok_status();
+  const loom_low_schedule_node_t* node = &builder->schedule->nodes[node_index];
+  const loom_low_schedule_block_t* block =
+      &builder->schedule->blocks[node->block_index];
+  if (node->op != block->block->last_op) return iree_ok_status();
+
+  for (uint32_t slot = 0; slot < LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT; ++slot) {
+    const iree_host_size_t entry_slot_index =
+        loom_amdgpu_wait_plan_loop_entry_slot_index(node->block_index, slot);
+    const uint32_t link_index =
+        builder->loop_entry_dependency_links[entry_slot_index];
+    if (link_index == LOOM_LOW_SCHEDULE_NODE_NONE) continue;
+    const loom_amdgpu_wait_dependency_link_t* link =
+        &builder->dependency_links[link_index];
+    IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_wait_counter_at(
+        builder, LOOM_AMDGPU_WAIT_PLAN_ACTION_PLANNED, /*flags=*/0,
+        link->reason, node_index, link->producer_node,
+        builder->loop_entry_consumer_nodes[entry_slot_index],
+        loom_amdgpu_wait_counter_id_from_slot(slot), /*target_count=*/0));
   }
   return iree_ok_status();
 }
@@ -3119,6 +3260,10 @@ static iree_status_t loom_amdgpu_wait_plan_process_node(
     loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
   loom_amdgpu_wait_node_state_t* node_state = &builder->node_states[node_index];
 
+  // Loop-entry waits execute before branch-edge copies and the branch packet.
+  // Their producer/consumer provenance still names the original loop use.
+  IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_handle_loop_entry_dependencies(
+      builder, node_index));
   // Branch-edge copies execute before the packet represented by the source
   // node. Protect them before crediting any progress supplied by that packet,
   // including an implicit XCNT drain from a hardware branch.
@@ -3407,13 +3552,17 @@ iree_status_t loom_amdgpu_wait_plan_build(
     status = loom_amdgpu_wait_plan_classify_nodes(&builder);
   }
   if (iree_status_is_ok(status)) {
+    status = loom_amdgpu_wait_plan_relocate_loop_entry_dependencies(&builder);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_plan_allocate_physical_state(&builder);
   }
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_frontier_initialize(
         schedule, allocation, builder.frontier_nodes,
         builder.physical_registers.vgpr_count,
-        builder.physical_registers.agpr_count, transient_arena,
+        builder.physical_registers.agpr_count,
+        builder.loop_entry_drain_counter_masks, transient_arena,
         &builder.frontier);
   }
   if (iree_status_is_ok(status)) {

@@ -174,6 +174,37 @@ static void loom_amdgpu_wait_storage_lease_state_drain(
   }
 }
 
+static bool loom_amdgpu_wait_storage_lease_state_union_after_drain_changed(
+    const loom_amdgpu_wait_frontier_t* frontier, uint64_t* target,
+    const uint64_t* source, uint32_t counter_mask) {
+  if (counter_mask == 0) {
+    return loom_amdgpu_wait_storage_lease_state_union_changed(
+        target, source, frontier->storage_leases.word_count);
+  }
+  bool changed = false;
+  // The inner mask traversal is bounded by the eight architectural wait
+  // counters, keeping this linear in the storage-lease word count.
+  for (iree_host_size_t word_index = 0;
+       word_index < frontier->storage_leases.word_count; ++word_index) {
+    uint64_t retained_source = source[word_index];
+    uint32_t remaining_counter_mask =
+        counter_mask & LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL;
+    while (remaining_counter_mask != 0) {
+      const uint32_t counter_slot =
+          (uint32_t)iree_math_count_trailing_zeros_u32(remaining_counter_mask);
+      const uint64_t* release_counter_words =
+          loom_amdgpu_wait_frontier_const_storage_lease_counter_words(
+              frontier, counter_slot);
+      retained_source &= ~release_counter_words[word_index];
+      remaining_counter_mask &= remaining_counter_mask - 1;
+    }
+    const uint64_t result = target[word_index] | retained_source;
+    changed |= result != target[word_index];
+    target[word_index] = result;
+  }
+  return changed;
+}
+
 static void loom_amdgpu_wait_storage_lease_state_drain_xcnt_groups(
     const loom_amdgpu_wait_frontier_t* frontier, uint64_t* words,
     loom_amdgpu_wait_xcnt_group_flags_t group_flags) {
@@ -434,7 +465,8 @@ static void loom_amdgpu_wait_frontier_apply_static_xcnt_producer(
 }
 
 static void loom_amdgpu_wait_frontier_build_local_states(
-    loom_amdgpu_wait_frontier_t* frontier) {
+    loom_amdgpu_wait_frontier_t* frontier,
+    const uint32_t* planned_block_drain_counter_masks) {
   const loom_low_schedule_table_t* schedule = frontier->schedule;
   iree_host_size_t next_storage_lease_index = 0;
   for (iree_host_size_t block_index = 0; block_index < schedule->block_count;
@@ -460,6 +492,7 @@ static void loom_amdgpu_wait_frontier_build_local_states(
         frontier->xcnt.static_outgoing_flags == NULL
             ? NULL
             : &frontier->xcnt.static_outgoing_flags[block_index];
+    uint32_t block_drain_counter_mask = 0;
     for (uint32_t i = 0; i < block->scheduled_node_count; ++i) {
       const iree_host_size_t packet_index =
           (iree_host_size_t)block->scheduled_node_start + i;
@@ -467,15 +500,20 @@ static void loom_amdgpu_wait_frontier_build_local_states(
           schedule->scheduled_node_indices[packet_index];
       const loom_amdgpu_wait_frontier_node_t* node =
           &frontier->nodes[node_index];
+      uint32_t drain_counter_mask = node->drain_counter_mask;
+      if (planned_block_drain_counter_masks != NULL &&
+          schedule->nodes[node_index].op == block->block->last_op) {
+        drain_counter_mask |= planned_block_drain_counter_masks[block_index];
+      }
+      block_drain_counter_mask |= drain_counter_mask;
       if (memory_state != NULL) {
-        loom_amdgpu_wait_memory_state_drain(memory_state,
-                                            node->drain_counter_mask);
+        loom_amdgpu_wait_memory_state_drain(memory_state, drain_counter_mask);
         loom_amdgpu_wait_memory_state_add_node(memory_state, node,
                                                node->read_counter_mask,
                                                node->write_counter_mask);
       }
       if (vmem_result_words != NULL) {
-        if (iree_any_bit_set(node->drain_counter_mask,
+        if (iree_any_bit_set(drain_counter_mask,
                              LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD)) {
           memset(
               vmem_result_words, 0,
@@ -486,10 +524,10 @@ static void loom_amdgpu_wait_frontier_build_local_states(
       }
       if (storage_lease_words != NULL) {
         loom_amdgpu_wait_storage_lease_state_drain(
-            frontier, storage_lease_words, node->drain_counter_mask);
+            frontier, storage_lease_words, drain_counter_mask);
       }
       if (xcnt_group_flags != NULL) {
-        if (iree_any_bit_set(node->drain_counter_mask,
+        if (iree_any_bit_set(drain_counter_mask,
                              LOOM_AMDGPU_WAIT_COUNTER_MASK_X)) {
           *xcnt_group_flags = 0;
         }
@@ -503,6 +541,7 @@ static void loom_amdgpu_wait_frontier_build_local_states(
             /*excluded_counter_mask=*/0, &next_storage_lease_index);
       }
     }
+    frontier->block_drain_counter_masks[block_index] = block_drain_counter_mask;
   }
 }
 
@@ -510,12 +549,19 @@ static bool loom_amdgpu_wait_frontier_block_state_union_changed(
     loom_amdgpu_wait_frontier_t* frontier, uint16_t target_block,
     uint16_t source_block) {
   bool changed = false;
+  const uint32_t drain_counter_mask =
+      frontier->block_drain_counter_masks[target_block];
   if (frontier->memory.static_outgoing_states != NULL) {
+    loom_amdgpu_wait_memory_state_t incoming_state =
+        frontier->memory.static_outgoing_states[source_block];
+    loom_amdgpu_wait_memory_state_drain(&incoming_state, drain_counter_mask);
     changed |= loom_amdgpu_wait_memory_state_union_changed(
         &frontier->memory.static_outgoing_states[target_block],
-        &frontier->memory.static_outgoing_states[source_block]);
+        &incoming_state);
   }
-  if (frontier->vmem_results.static_outgoing_words != NULL) {
+  if (frontier->vmem_results.static_outgoing_words != NULL &&
+      !iree_any_bit_set(drain_counter_mask,
+                        LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD)) {
     changed |= loom_amdgpu_wait_vmem_result_state_union_changed(
         loom_amdgpu_wait_frontier_vmem_result_block_words(
             frontier, frontier->vmem_results.static_outgoing_words,
@@ -526,16 +572,18 @@ static bool loom_amdgpu_wait_frontier_block_state_union_changed(
         frontier->vmem_results.word_count);
   }
   if (frontier->storage_leases.static_outgoing_words != NULL) {
-    changed |= loom_amdgpu_wait_storage_lease_state_union_changed(
+    changed |= loom_amdgpu_wait_storage_lease_state_union_after_drain_changed(
+        frontier,
         loom_amdgpu_wait_frontier_storage_lease_block_words(
             frontier, frontier->storage_leases.static_outgoing_words,
             target_block),
         loom_amdgpu_wait_frontier_const_storage_lease_block_words(
             frontier, frontier->storage_leases.static_outgoing_words,
             source_block),
-        frontier->storage_leases.word_count);
+        drain_counter_mask);
   }
-  if (frontier->xcnt.static_outgoing_flags != NULL) {
+  if (frontier->xcnt.static_outgoing_flags != NULL &&
+      !iree_any_bit_set(drain_counter_mask, LOOM_AMDGPU_WAIT_COUNTER_MASK_X)) {
     const loom_amdgpu_wait_xcnt_group_flags_t flags =
         frontier->xcnt.static_outgoing_flags[target_block] |
         frontier->xcnt.static_outgoing_flags[source_block];
@@ -631,6 +679,7 @@ iree_status_t loom_amdgpu_wait_frontier_initialize(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_wait_frontier_node_t* nodes,
     iree_host_size_t vgpr_unit_count, iree_host_size_t agpr_unit_count,
+    const uint32_t* planned_block_drain_counter_masks,
     iree_arena_allocator_t* arena, loom_amdgpu_wait_frontier_t* out_frontier) {
   IREE_ASSERT_ARGUMENT(schedule);
   IREE_ASSERT_ARGUMENT(arena);
@@ -810,6 +859,13 @@ iree_status_t loom_amdgpu_wait_frontier_initialize(
                sizeof(*out_frontier->xcnt.resolved_outgoing_flags));
   }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, schedule->block_count,
+      sizeof(*out_frontier->block_drain_counter_masks),
+      (void**)&out_frontier->block_drain_counter_masks));
+  memset(
+      out_frontier->block_drain_counter_masks, 0,
+      schedule->block_count * sizeof(*out_frontier->block_drain_counter_masks));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, schedule->block_count, sizeof(*out_frontier->block_flags),
       (void**)&out_frontier->block_flags));
   uint16_t* worklist = NULL;
@@ -818,7 +874,8 @@ iree_status_t loom_amdgpu_wait_frontier_initialize(
   memset(out_frontier->block_flags, 0,
          schedule->block_count * sizeof(*out_frontier->block_flags));
 
-  loom_amdgpu_wait_frontier_build_local_states(out_frontier);
+  loom_amdgpu_wait_frontier_build_local_states(
+      out_frontier, planned_block_drain_counter_masks);
   loom_amdgpu_wait_frontier_propagate_static_states(out_frontier, worklist);
   return iree_ok_status();
 }
