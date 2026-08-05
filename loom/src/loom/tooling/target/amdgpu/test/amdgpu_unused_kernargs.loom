@@ -20,9 +20,9 @@ kernel.def @unused_middle_binding() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %unused: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32, #dense>
   %value = view.load %input_view[0] : view<1xi32, #dense> -> i32
   view.store %value, %output_view[0] : i32, view<1xi32, #dense>
   kernel.return
@@ -43,16 +43,16 @@ kernel.def @selected_buffer(%select_rhs: index) {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%select_rhs: index, %lhs: buffer, %rhs: buffer, %output: buffer) {
-  %one = index.constant 1 : index
-  %zero = index.constant 0 : offset
-  %use_rhs = index.cmp eq, %select_rhs, %one : index
+  %rhs_selector = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %use_rhs = index.cmp eq, %select_rhs, %rhs_selector : index
   %selected = scf.if %use_rhs -> (buffer) {
     scf.yield %rhs : buffer
   } else {
     scf.yield %lhs : buffer
   }
-  %selected_view = buffer.view %selected[%zero] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<1xi32, #dense>
+  %selected_view = buffer.view %selected[%base] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32, #dense>
   %value = view.load %selected_view[0] : view<1xi32, #dense> -> i32
   view.store %value, %output_view[0] : i32, view<1xi32, #dense>
   kernel.return
@@ -82,20 +82,20 @@ check.case @selected_rhs_case {
 // within one dispatch, preventing check-case specialization from folding the
 // choices.
 kernel.def @selected_buffer_per_workgroup() {
-  %three = index.constant 3 : index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%three, %one, %one) workgroup_size(%one, %one, %one) : index
+  %workgroup_count = index.constant 3 : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%lhs: buffer, %middle: buffer, %rhs: buffer, %output: buffer) {
   %workgroup = kernel.workgroup.id<x> : index
-  %zero = index.constant 0 : index
-  %two = index.constant 2 : index
-  %zero_offset = index.constant 0 : offset
-  %use_lhs = index.cmp eq, %workgroup, %zero : index
-  %use_rhs = index.cmp eq, %workgroup, %two : index
+  %lhs_workgroup = index.constant 0 : index
+  %rhs_workgroup = index.constant 2 : index
+  %base = index.constant 0 : offset
+  %use_lhs = index.cmp eq, %workgroup, %lhs_workgroup : index
+  %use_rhs = index.cmp eq, %workgroup, %rhs_workgroup : index
   %middle_or_rhs = scf.select %use_rhs, %rhs, %middle : buffer
   %selected = scf.select %use_lhs, %lhs, %middle_or_rhs : buffer
-  %selected_view = buffer.view %selected[%zero_offset] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<3xi32, #dense>
+  %selected_view = buffer.view %selected[%base] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<3xi32, #dense>
   %value = view.load %selected_view[0] : view<1xi32, #dense> -> i32
   view.store %value, %output_view[%workgroup] : i32, view<3xi32, #dense>
   kernel.return
