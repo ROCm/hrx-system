@@ -851,8 +851,12 @@ loom_cc_library(
     symbolic_expr
   HDRS
     "symbolic_expr.h"
+    "symbolic_expr_proof.h"
   SRCS
     "symbolic_expr.c"
+    "symbolic_expr_proof.c"
+    "symbolic_value.c"
+    "symbolic_value.h"
   DEPS
     ::condition_facts
     ::integer_relation
@@ -867,6 +871,44 @@ loom_cc_library(
     loom::ops::scf
     loom::util::adaptive_sort
     loom::util::fact_table
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    symbolic_expr_bounded
+  HDRS
+    "symbolic_expr_bounded.h"
+  SRCS
+    "symbolic_expr_bounded.c"
+  DEPS
+    ::symbolic_expr
+    iree::base
+    iree::base::internal
+    loom::ir
+    loom::ops::index
+    loom::ops::scalar
+    loom::ops::scf
+    loom::util::adaptive_sort
+    loom::util::fact_table
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    symbolic_expr_test_fixture
+  HDRS
+    "symbolic_expr_test_fixture.h"
+  DEPS
+    ::symbolic_expr
+    iree::base::internal::arena
+    iree::testing::gtest
+    loom::ir
+    loom::ops::index
+    loom::ops::scalar
+    loom::ops::scf
+    loom::util::fact_table
+  TESTONLY
   PUBLIC
 )
 
@@ -950,8 +992,25 @@ loom_cc_test(
   SRCS
     "symbolic_expr_test.cc"
   DEPS
+    ::symbolic_expr
+    ::symbolic_expr_test_fixture
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::index
+    loom::ops::scalar
+    loom::ops::scf
+)
+
+loom_cc_test(
+  NAME
+    symbolic_expr_proof_test
+  SRCS
+    "symbolic_expr_proof_test.cc"
+  DEPS
     ::condition_facts
     ::symbolic_expr
+    ::symbolic_expr_test_fixture
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
@@ -962,6 +1021,19 @@ loom_cc_test(
     loom::ops::scalar
     loom::ops::scf
     loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
+    symbolic_expr_bounded_test
+  SRCS
+    "symbolic_expr_bounded_test.cc"
+  DEPS
+    ::symbolic_expr_bounded
+    ::symbolic_expr_test_fixture
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ops::index
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

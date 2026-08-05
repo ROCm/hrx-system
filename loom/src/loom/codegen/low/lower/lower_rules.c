@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/analysis/symbolic_expr_proof.h"
 #include "loom/codegen/low/lower/lower_internal.h"
 #include "loom/codegen/low/lower/lower_rule_descriptor.h"
 #include "loom/codegen/low/lower/lower_rule_source_memory.h"

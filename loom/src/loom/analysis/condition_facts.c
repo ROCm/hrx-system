@@ -26,6 +26,20 @@ void loom_condition_fact_set_reset(loom_condition_fact_set_t* facts) {
   facts->integer_relation_count = 0;
 }
 
+bool loom_condition_integer_operands_equal(
+    loom_condition_integer_operand_t left,
+    loom_condition_integer_operand_t right) {
+  if (left.kind != right.kind) return false;
+  switch (left.kind) {
+    case LOOM_CONDITION_INTEGER_OPERAND_VALUE:
+      return left.value_id == right.value_id;
+    case LOOM_CONDITION_INTEGER_OPERAND_CONSTANT:
+      return left.constant == right.constant;
+    default:
+      return false;
+  }
+}
+
 static loom_condition_integer_operand_t loom_condition_value_operand(
     loom_value_id_t value_id) {
   return (loom_condition_integer_operand_t){
@@ -38,6 +52,16 @@ static loom_condition_integer_operand_t loom_condition_value_operand(
 static bool loom_condition_fact_set_append_integer_relation(
     loom_condition_fact_set_t* facts,
     loom_condition_integer_relation_t relation) {
+  for (iree_host_size_t i = 0; i < facts->integer_relation_count; ++i) {
+    const loom_condition_integer_relation_t* existing =
+        &facts->integer_relations[i];
+    if (existing->relation == relation.relation &&
+        loom_condition_integer_operands_equal(existing->left, relation.left) &&
+        loom_condition_integer_operands_equal(existing->right,
+                                              relation.right)) {
+      return true;
+    }
+  }
   if (!facts->integer_relations ||
       facts->integer_relation_count >= facts->integer_relation_capacity) {
     return false;
@@ -759,20 +783,6 @@ bool loom_condition_fact_set_apply_to_value_facts(
         &facts->integer_relations[i], fact_table, value_id, inout_facts);
   }
   return applied;
-}
-
-bool loom_condition_integer_operands_equal(
-    loom_condition_integer_operand_t left,
-    loom_condition_integer_operand_t right) {
-  if (left.kind != right.kind) return false;
-  switch (left.kind) {
-    case LOOM_CONDITION_INTEGER_OPERAND_VALUE:
-      return left.value_id == right.value_id;
-    case LOOM_CONDITION_INTEGER_OPERAND_CONSTANT:
-      return left.constant == right.constant;
-    default:
-      return false;
-  }
 }
 
 bool loom_condition_integer_relation_implies(
