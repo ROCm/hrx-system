@@ -63,6 +63,9 @@ typedef struct iree_io_parameter_index_entry_t {
       iree_io_file_handle_t* handle;
       // Offset of the entry in bytes relative to the base file offset.
       uint64_t offset;
+      // Minimum required byte alignment of the file offset, or zero if
+      // unspecified.
+      uint64_t minimum_alignment;
     } file;
   } storage;
 } iree_io_parameter_index_entry_t;

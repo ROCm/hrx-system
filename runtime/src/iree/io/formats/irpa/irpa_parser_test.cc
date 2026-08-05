@@ -106,6 +106,39 @@ static std::vector<uint8_t> BuildLinkedSplatArchive(
   return archive_contents;
 }
 
+static std::vector<uint8_t> BuildDataArchive(
+    iree_io_physical_size_t minimum_alignment,
+    iree_io_physical_offset_t storage_relative_offset) {
+  const iree_host_size_t entry_offset = ArchiveHeaderStride();
+  const iree_host_size_t metadata_offset =
+      entry_offset + sizeof(iree_io_parameter_archive_data_entry_t);
+  const iree_host_size_t storage_segment_offset =
+      (iree_host_size_t)iree_align_uint64(
+          metadata_offset, IREE_IO_PARAMETER_ARCHIVE_DEFAULT_DATA_ALIGNMENT);
+  const iree_host_size_t storage_segment_length =
+      (iree_host_size_t)storage_relative_offset + 1;
+
+  std::vector<uint8_t> archive_contents(
+      storage_segment_offset + storage_segment_length, 0);
+  iree_io_parameter_archive_header_v0_t header = MakeArchiveHeader(0);
+  header.entry_count = 1;
+  header.entry_segment.offset = entry_offset;
+  header.entry_segment.length = sizeof(iree_io_parameter_archive_data_entry_t);
+  header.metadata_segment.offset = metadata_offset;
+  header.storage_segment.offset = storage_segment_offset;
+  header.storage_segment.length = storage_segment_length;
+  WriteArchiveStruct(archive_contents, 0, header);
+
+  iree_io_parameter_archive_data_entry_t entry = {};
+  entry.header.entry_size = sizeof(entry);
+  entry.header.type = IREE_IO_PARAMETER_ARCHIVE_ENTRY_TYPE_DATA;
+  entry.header.minimum_alignment = minimum_alignment;
+  entry.storage.offset = storage_relative_offset;
+  entry.storage.length = 1;
+  WriteArchiveStruct(archive_contents, entry_offset, entry);
+  return archive_contents;
+}
+
 static iree_io_file_handle_t* OpenTestFile(const char* name) {
   const struct iree_file_toc_t* file_toc = iree_io_irpa_files_create();
   for (size_t i = 0; i < iree_io_irpa_files_size(); ++i) {
@@ -347,6 +380,30 @@ TEST(IrpaFormatTest, RejectsOverflowingMetadataReference) {
       iree_io_parameter_index_create(iree_allocator_system(), &index));
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        ParseTestArchive(archive_contents, index));
+
+  iree_io_parameter_index_release(index);
+}
+
+TEST(IrpaFormatTest, RejectsNonPowerOfTwoDataAlignment) {
+  std::vector<uint8_t> archive_contents = BuildDataArchive(3, 0);
+  iree_io_parameter_index_t* index = NULL;
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_create(iree_allocator_system(), &index));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        ParseTestArchive(archive_contents, index));
+
+  iree_io_parameter_index_release(index);
+}
+
+TEST(IrpaFormatTest, RejectsMisalignedDataStorage) {
+  std::vector<uint8_t> archive_contents = BuildDataArchive(64, 1);
+  iree_io_parameter_index_t* index = NULL;
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_create(iree_allocator_system(), &index));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         ParseTestArchive(archive_contents, index));
 
   iree_io_parameter_index_release(index);

@@ -177,21 +177,83 @@ TEST_F(IrpaBuilderTest, WritesExpectedV0Layout) {
   iree_io_file_handle_release(file_handle);
 }
 
-TEST_F(IrpaBuilderTest, UsesStrongestStorageAlignment) {
+TEST_F(IrpaBuilderTest, PreservesPerEntryStorageAlignment) {
   IREE_ASSERT_OK(iree_io_parameter_archive_builder_add_data_entry(
-      &builder_, IREE_SV("a"), iree_const_byte_span_empty(), 16, 1));
+      &builder_, IREE_SV("a"), iree_const_byte_span_empty(), 0, 1));
   IREE_ASSERT_OK(iree_io_parameter_archive_builder_add_data_entry(
-      &builder_, IREE_SV("b"), iree_const_byte_span_empty(), 256, 1));
+      &builder_, IREE_SV("b"), iree_const_byte_span_empty(), 16, 1));
+  IREE_ASSERT_OK(iree_io_parameter_archive_builder_add_data_entry(
+      &builder_, IREE_SV("c"), iree_const_byte_span_empty(), 256, 1));
 
-  EXPECT_EQ(256u, HeaderSize());
+  EXPECT_EQ(512u, HeaderSize());
   EXPECT_EQ(4096u, TotalSize());
+  const std::array<iree_string_view_t, 3> keys = {IREE_SV("a"), IREE_SV("b"),
+                                                  IREE_SV("c")};
+  const std::array<iree_io_physical_offset_t, 3> relative_offsets = {0, 16,
+                                                                     256};
+  const std::array<iree_io_physical_size_t, 3> minimum_alignments = {0, 16,
+                                                                     256};
   const iree_io_parameter_index_entry_t* entry = NULL;
-  IREE_ASSERT_OK(iree_io_parameter_index_get(builder_.index, 0, &entry));
-  EXPECT_EQ(0u, entry->storage.file.offset);
-  EXPECT_EQ(0u, (HeaderSize() + entry->storage.file.offset) % 16);
-  IREE_ASSERT_OK(iree_io_parameter_index_get(builder_.index, 1, &entry));
-  EXPECT_EQ(256u, entry->storage.file.offset);
-  EXPECT_EQ(0u, (HeaderSize() + entry->storage.file.offset) % 256);
+  for (iree_host_size_t i = 0; i < keys.size(); ++i) {
+    IREE_ASSERT_OK(iree_io_parameter_index_get(builder_.index, i, &entry));
+    EXPECT_EQ(relative_offsets[i], entry->storage.file.offset);
+    EXPECT_EQ(minimum_alignments[i], entry->storage.file.minimum_alignment);
+  }
+
+  std::vector<uint8_t> file_contents(TotalSize(), 0);
+  iree_io_file_handle_t* file_handle = NULL;
+  IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+      iree_make_byte_span(file_contents.data(), file_contents.size()),
+      iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+      &file_handle));
+  iree_io_stream_t* stream = NULL;
+  IREE_ASSERT_OK(iree_io_stream_open(IREE_IO_STREAM_MODE_WRITABLE, file_handle,
+                                     0, iree_allocator_system(), &stream));
+  iree_io_parameter_index_t* built_index = NULL;
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_create(iree_allocator_system(), &built_index));
+  IREE_ASSERT_OK(iree_io_parameter_archive_builder_write(
+      &builder_, file_handle, 0, stream, built_index));
+
+  const auto* header =
+      reinterpret_cast<const iree_io_parameter_archive_header_v0_t*>(
+          file_contents.data());
+  iree_io_physical_offset_t archive_entry_offset = header->entry_segment.offset;
+  for (iree_host_size_t i = 0; i < keys.size(); ++i) {
+    const auto* data_entry =
+        reinterpret_cast<const iree_io_parameter_archive_data_entry_t*>(
+            file_contents.data() + archive_entry_offset);
+    EXPECT_EQ(minimum_alignments[i], data_entry->header.minimum_alignment);
+    EXPECT_EQ(relative_offsets[i], data_entry->storage.offset);
+    archive_entry_offset =
+        iree_align_uint64(archive_entry_offset + data_entry->header.entry_size,
+                          IREE_IO_PARAMETER_ARCHIVE_ENTRY_ALIGNMENT);
+  }
+
+  iree_io_parameter_index_t* parsed_index = NULL;
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_create(iree_allocator_system(), &parsed_index));
+  IREE_ASSERT_OK(iree_io_parse_irpa_index(file_handle, parsed_index,
+                                          iree_allocator_system()));
+  const std::array<iree_io_parameter_index_t*, 2> output_indices = {
+      built_index, parsed_index};
+  for (iree_io_parameter_index_t* output_index : output_indices) {
+    for (iree_host_size_t i = 0; i < keys.size(); ++i) {
+      IREE_ASSERT_OK(
+          iree_io_parameter_index_lookup(output_index, keys[i], &entry));
+      EXPECT_EQ(HeaderSize() + relative_offsets[i], entry->storage.file.offset);
+      EXPECT_EQ(minimum_alignments[i], entry->storage.file.minimum_alignment);
+      if (minimum_alignments[i] != 0) {
+        EXPECT_EQ(0u, entry->storage.file.offset % minimum_alignments[i]);
+      }
+    }
+  }
+
+  iree_io_parameter_index_release(parsed_index);
+  iree_io_parameter_index_release(built_index);
+  iree_io_stream_release(stream);
+  iree_io_file_handle_release(file_handle);
 }
 
 TEST_F(IrpaBuilderTest, TreatsZeroAlignmentAsUnspecified) {
@@ -267,6 +329,7 @@ TEST(IrpaBuilderIntegrationTest, BuildsEmbeddedArchiveAtReportedOffset) {
   source_entry.type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE;
   source_entry.storage.file.handle = source_file_handle;
   source_entry.storage.file.offset = 0;
+  source_entry.storage.file.minimum_alignment = 256;
   IREE_ASSERT_OK(iree_io_parameter_index_add(source_index, &source_entry));
   iree_io_file_handle_release(source_file_handle);
 
@@ -288,7 +351,7 @@ TEST(IrpaBuilderIntegrationTest, BuildsEmbeddedArchiveAtReportedOffset) {
   ASSERT_EQ(1u, target.open_count);
   const iree_io_physical_size_t archive_alignment =
       iree_max(IREE_IO_PARAMETER_ARCHIVE_HEADER_ALIGNMENT,
-               IREE_IO_PARAMETER_ARCHIVE_DEFAULT_DATA_ALIGNMENT);
+               source_entry.storage.file.minimum_alignment);
   ASSERT_EQ(iree_align_uint64(requested_offset, archive_alignment),
             target.archive_offset);
   EXPECT_EQ(target.archive_offset + target.archive_length,
@@ -306,6 +369,8 @@ TEST(IrpaBuilderIntegrationTest, BuildsEmbeddedArchiveAtReportedOffset) {
       target.archive_offset + archive_header->storage_segment.offset;
   EXPECT_EQ(expected_data_offset, target_entry->storage.file.offset);
   EXPECT_EQ(0u, target_entry->storage.file.offset % archive_alignment);
+  EXPECT_EQ(source_entry.storage.file.minimum_alignment,
+            target_entry->storage.file.minimum_alignment);
   EXPECT_EQ(0, memcmp(target.contents.data() + expected_data_offset,
                       source_contents.data(), source_contents.size()));
 
@@ -324,6 +389,8 @@ TEST(IrpaBuilderIntegrationTest, BuildsEmbeddedArchiveAtReportedOffset) {
   IREE_ASSERT_OK(iree_io_parameter_index_lookup(
       parsed_index, IREE_SV("embedded"), &parsed_entry));
   EXPECT_EQ(expected_data_offset, parsed_entry->storage.file.offset);
+  EXPECT_EQ(source_entry.storage.file.minimum_alignment,
+            parsed_entry->storage.file.minimum_alignment);
 
   iree_io_parameter_index_release(parsed_index);
   iree_io_file_handle_release(target_file_handle);

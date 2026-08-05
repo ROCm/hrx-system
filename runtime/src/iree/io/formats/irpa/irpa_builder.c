@@ -313,7 +313,7 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_write(
                     .name = name_ref,
                     .metadata = metadata_ref,
                     .minimum_alignment =
-                        IREE_IO_PARAMETER_ARCHIVE_DEFAULT_DATA_ALIGNMENT,
+                        target_entry.storage.file.minimum_alignment,
                 },
             .storage =
                 {
@@ -464,6 +464,7 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_add_data_entry(
                   {
                       .handle = NULL,  // set on commit
                       .offset = storage_offset,
+                      .minimum_alignment = minimum_alignment,
                   },
           },
   };
@@ -509,7 +510,8 @@ IREE_API_EXPORT iree_status_t iree_io_build_parameter_archive(
       case IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE:
         status = iree_io_parameter_archive_builder_add_data_entry(
             &builder, source_entry->key, source_entry->metadata,
-            IREE_IO_PARAMETER_ARCHIVE_DEFAULT_DATA_ALIGNMENT,
+            iree_max(IREE_IO_PARAMETER_ARCHIVE_DEFAULT_DATA_ALIGNMENT,
+                     source_entry->storage.file.minimum_alignment),
             source_entry->length);
         break;
       default:
