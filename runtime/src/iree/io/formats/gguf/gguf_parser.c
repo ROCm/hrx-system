@@ -411,10 +411,15 @@ typedef struct {
 //   uint64_t offset;
 // };
 typedef struct {
+  // Tensor name referencing the mapped file contents.
   iree_string_view_t name;
-  uint32_t n_dimensions;
-  const uint64_t* dimensions;  // n_dimensions
+  // Number of encoded uint64_t dimension values.
+  uint32_t dimension_count;
+  // Little-endian dimension values referencing byte-aligned file contents.
+  const uint8_t* dimension_data;
+  // GGML tensor element type.
   ggml_type_t type;
+  // Byte offset within the tensor data region.
   uint64_t offset;
 } gguf_tensor_info_t;
 
@@ -461,9 +466,10 @@ static iree_status_t iree_io_gguf_calculate_storage_size(
   }
 
   uint64_t element_count = 1;
-  for (uint32_t i = 0; i < tensor_info->n_dimensions; ++i) {
-    if (!iree_checked_mul_u64(element_count, tensor_info->dimensions[i],
-                              &element_count)) {
+  for (uint32_t i = 0; i < tensor_info->dimension_count; ++i) {
+    const uint64_t dimension = iree_unaligned_load_le_u64(
+        tensor_info->dimension_data + i * sizeof(uint64_t));
+    if (!iree_checked_mul_u64(element_count, dimension, &element_count)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "GGML tensor element count overflow");
     }
@@ -499,11 +505,25 @@ static iree_status_t iree_io_gguf_parse_value(iree_const_byte_span_t* contents,
 }
 static iree_status_t iree_io_gguf_parse_uint32(iree_const_byte_span_t* contents,
                                                uint32_t* out_value) {
-  return iree_io_gguf_parse_value(contents, sizeof(*out_value), out_value);
+  if (contents->data_length < sizeof(*out_value)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "file buffer underrun parsing uint32 value");
+  }
+  *out_value = iree_unaligned_load_le_u32(contents->data);
+  contents->data += sizeof(*out_value);
+  contents->data_length -= sizeof(*out_value);
+  return iree_ok_status();
 }
 static iree_status_t iree_io_gguf_parse_uint64(iree_const_byte_span_t* contents,
                                                uint64_t* out_value) {
-  return iree_io_gguf_parse_value(contents, sizeof(*out_value), out_value);
+  if (contents->data_length < sizeof(*out_value)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "file buffer underrun parsing uint64 value");
+  }
+  *out_value = iree_unaligned_load_le_u64(contents->data);
+  contents->data += sizeof(*out_value);
+  contents->data_length -= sizeof(*out_value);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_io_gguf_parse_array(iree_const_byte_span_t* contents,
@@ -535,9 +555,12 @@ static iree_status_t iree_io_gguf_parse_string(iree_const_byte_span_t* contents,
                             "attempting to load a 64-bit file on a 32-bit arch "
                             "(out of bounds string length)");
   }
-  out_value->size = (iree_host_size_t)length;
-  return iree_io_gguf_parse_array(contents, length, sizeof(char),
-                                  (const uint8_t**)&out_value->data);
+  const uint8_t* value_data = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_io_gguf_parse_array(contents, length, sizeof(char), &value_data));
+  *out_value =
+      iree_make_string_view((const char*)value_data, (iree_host_size_t)length);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_io_gguf_skip_metadata_array(
@@ -638,10 +661,10 @@ static iree_status_t iree_io_gguf_enumerate_tensor_info(
     IREE_RETURN_IF_ERROR(
         iree_io_gguf_parse_string(contents, &tensor_info.name));
     IREE_RETURN_IF_ERROR(
-        iree_io_gguf_parse_uint32(contents, &tensor_info.n_dimensions));
+        iree_io_gguf_parse_uint32(contents, &tensor_info.dimension_count));
     IREE_RETURN_IF_ERROR(iree_io_gguf_parse_array(
-        contents, tensor_info.n_dimensions, sizeof(tensor_info.dimensions[0]),
-        (const uint8_t**)&tensor_info.dimensions));
+        contents, tensor_info.dimension_count, sizeof(uint64_t),
+        &tensor_info.dimension_data));
     IREE_RETURN_IF_ERROR(
         iree_io_gguf_parse_uint32(contents, &tensor_info.type));
     IREE_RETURN_IF_ERROR(

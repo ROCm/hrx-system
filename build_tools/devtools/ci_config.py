@@ -115,7 +115,6 @@ CPU_SANITIZERS_XFAILS = (
     bazel_xfail("//runtime/src/iree/hal/local/elf/..."),
     bazel_xfail("//runtime/src/iree/hal/local:profile_test"),
     bazel_xfail("//runtime/src/iree/hal/replay:execute_test"),
-    bazel_xfail("//runtime/src/iree/io/formats/gguf:gguf_parser_test"),
     bazel_xfail("//runtime/src/iree/tokenizer/..."),
     bazel_xfail("//runtime/src/iree/tooling/profile:cli_test"),
     bazel_xfail("//runtime/src/iree/vm:list_test"),
