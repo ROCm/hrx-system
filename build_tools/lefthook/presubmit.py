@@ -1265,15 +1265,20 @@ def is_global_trigger(path: str) -> bool:
     )
 
 
-def run_project_tests(
+def run_project_presubmits(
     projects: list[Project],
     paths: list[str],
     fix: bool,
     verbose: bool,
     lane: str,
+    *,
+    phase: str,
 ) -> bool:
+    if phase not in ("hygiene", "tests"):
+        raise ValueError(f"unknown project presubmit phase: {phase}")
+    phase_description = "Project hygiene" if phase == "hygiene" else "Project tests"
     if not projects:
-        return skip_step("Project tests", "no affected project entry points")
+        return skip_step(phase_description, "no affected project entry points")
     ok = True
     with tempfile.NamedTemporaryFile(
         mode="w",
@@ -1294,10 +1299,10 @@ def run_project_tests(
                 lane,
                 "--files-from",
                 file_list_path,
-                "--tests",
+                f"--{phase}",
             ]
             command.append("--fix" if fix else "--check")
-            ok = run_command(command, f"{project.name} tests", verbose) and ok
+            ok = run_command(command, f"{project.name} {phase}", verbose) and ok
     finally:
         Path(file_list_path).unlink(missing_ok=True)
     return ok
@@ -2294,6 +2299,17 @@ def run_presubmit(
     ok = True
     if args.hygiene:
         ok = run_hygiene(paths, fix=args.fix, verbose=args.verbose) and ok
+        ok = (
+            run_project_presubmits(
+                projects,
+                paths,
+                fix=args.fix,
+                verbose=args.verbose,
+                lane=args.lane,
+                phase="hygiene",
+            )
+            and ok
+        )
     if args.tests:
         print_section("Tests")
         ok = (
@@ -2304,12 +2320,13 @@ def run_presubmit(
         )
         if args.project_tests:
             ok = (
-                run_project_tests(
+                run_project_presubmits(
                     projects,
                     paths,
                     fix=args.fix,
                     verbose=args.verbose,
                     lane=args.lane,
+                    phase="tests",
                 )
                 and ok
             )

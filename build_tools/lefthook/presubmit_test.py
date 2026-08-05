@@ -12,6 +12,7 @@ import io
 import os
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -638,6 +639,86 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn(
             "loom",
             {project.name for project in presubmit.existing_project_scripts()},
+        )
+
+    def test_project_hygiene_dispatch_uses_project_presubmit_interface(self):
+        project = presubmit.Project(
+            name="loom",
+            root="loom/",
+            script="loom/build_tools/presubmit.py",
+        )
+        with (
+            tempfile.TemporaryDirectory() as temporary_directory,
+            mock.patch.object(
+                presubmit,
+                "git_worktree_dir",
+                return_value=Path(temporary_directory),
+            ),
+            mock.patch.object(
+                presubmit, "run_command", return_value=True
+            ) as run_command,
+        ):
+            self.assertTrue(
+                presubmit.run_project_presubmits(
+                    [project],
+                    ["loom/test.loom"],
+                    fix=False,
+                    verbose=False,
+                    lane="bazel",
+                    phase="hygiene",
+                )
+            )
+
+        command, description, verbose = run_command.call_args.args
+        self.assertEqual(command[:2], ["python", "loom/build_tools/presubmit.py"])
+        self.assertIn("--hygiene", command)
+        self.assertNotIn("--tests", command)
+        self.assertIn("--check", command)
+        self.assertEqual(description, "loom hygiene")
+        self.assertFalse(verbose)
+
+    def test_disabling_project_tests_preserves_project_hygiene(self):
+        project = presubmit.Project(
+            name="loom",
+            root="loom/",
+            script="loom/build_tools/presubmit.py",
+        )
+        args = types.SimpleNamespace(
+            check=True,
+            clang_tidy=False,
+            fix=False,
+            hygiene=True,
+            lane="bazel",
+            print_plan=False,
+            profile="ci",
+            project_tests=False,
+            static_analysis=False,
+            tests=True,
+            verbose=False,
+        )
+        with (
+            mock.patch.object(presubmit, "run_hygiene", return_value=True),
+            mock.patch.object(
+                presubmit, "run_project_presubmits", return_value=True
+            ) as run_project_presubmits,
+            mock.patch.object(
+                presubmit, "run_root_devtools_tests_for_lane", return_value=True
+            ),
+            mock.patch.object(presubmit, "skip_step", return_value=True),
+        ):
+            self.assertEqual(
+                presubmit.run_presubmit(
+                    args,
+                    input_scope(["loom/test.loom"]),
+                    [project],
+                ),
+                0,
+            )
+
+        run_project_presubmits.assert_called_once()
+        self.assertEqual(
+            run_project_presubmits.call_args.kwargs["phase"],
+            "hygiene",
         )
 
 

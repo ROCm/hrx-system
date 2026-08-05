@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import os
@@ -18,6 +19,19 @@ from build_tools.devtools import project_presubmit
 
 
 class ProjectPresubmitTest(unittest.TestCase):
+    def test_common_arguments_expose_project_hygiene_phase(self):
+        parser = argparse.ArgumentParser()
+        project_presubmit.add_common_arguments(parser, project_name="example")
+
+        args = parser.parse_args(
+            ["--hygiene", "--lane", "cmake", "--files-from", "paths.txt"]
+        )
+
+        self.assertTrue(args.hygiene)
+        self.assertFalse(args.tests)
+        self.assertEqual(args.lane, "cmake")
+        self.assertEqual(args.files_from, "paths.txt")
+
     def test_cmake_build_dir_uses_environment_override(self):
         with mock.patch.dict(
             os.environ,
