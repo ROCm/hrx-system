@@ -11,20 +11,20 @@
 amdgpu.target<gfx11-generic> @qwen_greedy_argmax_gfx11_wave64 {subgroup_size = 64}
 
 kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax") @qwen_greedy_argmax() {
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
 } launch(%logits: buffer, %token_id: buffer) {
-  %zero = index.constant 0 : index
+  %c0 = index.constant 0 : index
   %workgroup_size = index.constant 256 : index
   %vocabulary_size = index.constant 151936 : index
   %largest_i32 = scalar.constant 2147483647 : i32
-  %zero_offset = index.constant 0 : offset
+  %c0_offset = index.constant 0 : offset
   %workitem0 = kernel.workitem.id<x> : index
   %workitem = index.assume %workitem0 [range(%workitem0, 0, 255)] : index
   %logits_noalias, %token_id_noalias = buffer.assume.noalias %logits, %token_id : buffer, buffer
-  %logits_view = buffer.view %logits_noalias[%zero_offset] : buffer -> view<151936xf32, #dense>
-  %token_id_view = buffer.view %token_id_noalias[%zero_offset] : buffer -> view<1xi32, #dense>
+  %logits_view = buffer.view %logits_noalias[%c0_offset] : buffer -> view<151936xf32, #dense>
+  %token_id_view = buffer.view %token_id_noalias[%c0_offset] : buffer -> view<1xi32, #dense>
   %initial_logit = view.load %logits_view[%workitem] : view<151936xf32, #dense> -> f32
   %initial_id = index.cast %workitem : index to i32
   %scan_begin = index.add %workitem, %workgroup_size : index
@@ -44,9 +44,9 @@ kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax")
   %owns_winning_logit = scalar.cmpf oeq, %local_logit, %winning_logit : f32
   %candidate_winning_id = scf.select %owns_winning_logit, %local_id, %largest_i32 : i32
   %winning_id = kernel.workgroup.reduce<minsi> %candidate_winning_id : i32
-  %publishes_token = index.cmp eq, %workitem, %zero : index
+  %publishes_token = index.cmp eq, %workitem, %c0 : index
   scf.if %publishes_token {
-    view.store %winning_id, %token_id_view[%zero] : i32, view<1xi32, #dense>
+    view.store %winning_id, %token_id_view[%c0] : i32, view<1xi32, #dense>
   }
   kernel.return
 }
@@ -54,25 +54,25 @@ kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax")
 // Publishes the winning partial pair to device-local continuation state and a
 // host-observation sideband, then advances the device context position.
 kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax_partials") @qwen_greedy_argmax_partials(%partial_count: index, %context_increment: index) {
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
 } launch(%partial_count: index, %context_increment: index, %partial_logits: buffer, %partial_ids: buffer, %next_token_id: buffer, %next_control: buffer, %observed_token_id: buffer) {
   %bounded_partial_count = index.assume %partial_count [range(%partial_count, 256, 18992)] : index
   %bounded_context_increment = index.assume %context_increment [range(%context_increment, 1, 2048)] : index
-  %zero = index.constant 0 : index
+  %c0 = index.constant 0 : index
   %workgroup_size = index.constant 256 : index
   %largest_i32 = scalar.constant 2147483647 : i32
-  %zero_offset = index.constant 0 : offset
+  %c0_offset = index.constant 0 : offset
   %workitem0 = kernel.workitem.id<x> : index
   %workitem = index.assume %workitem0 [range(%workitem0, 0, 255), lt(%workitem0, %bounded_partial_count)] : index
   %partial_logits_noalias, %partial_ids_noalias, %next_token_id_noalias, %next_control_noalias, %observed_token_id_noalias = buffer.assume.noalias %partial_logits, %partial_ids, %next_token_id, %next_control, %observed_token_id : buffer, buffer, buffer, buffer, buffer
-  %partial_logits_view = buffer.view %partial_logits_noalias[%zero_offset] : buffer -> view<[%bounded_partial_count]xf32, #dense>
-  %partial_ids_view = buffer.view %partial_ids_noalias[%zero_offset] : buffer -> view<[%bounded_partial_count]xi32, #dense>
-  %next_token_id_view = buffer.view %next_token_id_noalias[%zero_offset] : buffer -> view<1xi32, #dense>
-  %next_control_view = buffer.view %next_control_noalias[%zero_offset] : buffer -> view<1xi32, #dense>
-  %observed_token_id_view = buffer.view %observed_token_id_noalias[%zero_offset] : buffer -> view<1xi32, #dense>
-  %current_context_base_raw = view.load %next_control_view[%zero] : view<1xi32, #dense> -> i32
+  %partial_logits_view = buffer.view %partial_logits_noalias[%c0_offset] : buffer -> view<[%bounded_partial_count]xf32, #dense>
+  %partial_ids_view = buffer.view %partial_ids_noalias[%c0_offset] : buffer -> view<[%bounded_partial_count]xi32, #dense>
+  %next_token_id_view = buffer.view %next_token_id_noalias[%c0_offset] : buffer -> view<1xi32, #dense>
+  %next_control_view = buffer.view %next_control_noalias[%c0_offset] : buffer -> view<1xi32, #dense>
+  %observed_token_id_view = buffer.view %observed_token_id_noalias[%c0_offset] : buffer -> view<1xi32, #dense>
+  %current_context_base_raw = view.load %next_control_view[%c0] : view<1xi32, #dense> -> i32
   %current_context_base_i32 = scalar.assume %current_context_base_raw [range(%current_context_base_raw, 0, 32767)] : i32
   %current_context_base0 = index.cast %current_context_base_i32 : i32 to index
   %current_context_base = index.assume %current_context_base0 [range(%current_context_base0, 0, 32767)] : index
@@ -98,11 +98,11 @@ kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax_p
   %candidate_winning_id = scf.select %owns_winning_logit, %local_id, %largest_i32 : i32
   %winning_id = kernel.workgroup.reduce<minsi> %candidate_winning_id : i32
   %next_context_base_i32 = index.cast %next_context_base : index to i32
-  %publishes_token = index.cmp eq, %workitem, %zero : index
+  %publishes_token = index.cmp eq, %workitem, %c0 : index
   scf.if %publishes_token {
-    view.store %winning_id, %next_token_id_view[%zero] : i32, view<1xi32, #dense>
-    view.store %next_context_base_i32, %next_control_view[%zero] : i32, view<1xi32, #dense>
-    view.store %winning_id, %observed_token_id_view[%zero] : i32, view<1xi32, #dense>
+    view.store %winning_id, %next_token_id_view[%c0] : i32, view<1xi32, #dense>
+    view.store %next_context_base_i32, %next_control_view[%c0] : i32, view<1xi32, #dense>
+    view.store %winning_id, %observed_token_id_view[%c0] : i32, view<1xi32, #dense>
   }
   kernel.return
 }

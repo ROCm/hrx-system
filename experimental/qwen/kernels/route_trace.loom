@@ -7,22 +7,22 @@ func.template<qwen3_moe.route_trace.capture> device @qwen3_moe_route_trace_captu
   %layer = index.assume %layer_ordinal [range(%layer_ordinal, 0, 47)] : index
   %token0 = kernel.workgroup.id<x> : index
   %lane0 = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : index
+  %c0 = index.constant 0 : index
   %route_count = index.constant 8 : index
-  %zero_offset = index.constant 0 : offset
+  %c0_offset = index.constant 0 : offset
   %token, %launch_token_count = index.assume %token0, %bounded_token_count [range(%token0, 0, 2047), lt(%token0, %bounded_token_count)] : index, index
   %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
   %route_ids_noalias, %route_weights_noalias, %control_noalias, %trace_ids_noalias, %trace_weights_noalias = buffer.assume.noalias %route_ids, %route_weights, %control, %trace_ids, %trace_weights : buffer, buffer, buffer, buffer, buffer
-  %route_ids_view = buffer.view %route_ids_noalias[%zero_offset] : buffer -> view<[%bounded_token_count]x8xi32, #dense>
-  %route_weights_view = buffer.view %route_weights_noalias[%zero_offset] : buffer -> view<[%bounded_token_count]x8xf32, #dense>
-  %control_view = buffer.view %control_noalias[%zero_offset] : buffer -> view<1xi32, #dense>
-  %trace_ids_view = buffer.view %trace_ids_noalias[%zero_offset] : buffer -> view<[%bounded_context_capacity]x48x8xi32, #dense>
-  %trace_weights_view = buffer.view %trace_weights_noalias[%zero_offset] : buffer -> view<[%bounded_context_capacity]x48x8xf32, #dense>
+  %route_ids_view = buffer.view %route_ids_noalias[%c0_offset] : buffer -> view<[%bounded_token_count]x8xi32, #dense>
+  %route_weights_view = buffer.view %route_weights_noalias[%c0_offset] : buffer -> view<[%bounded_token_count]x8xf32, #dense>
+  %control_view = buffer.view %control_noalias[%c0_offset] : buffer -> view<1xi32, #dense>
+  %trace_ids_view = buffer.view %trace_ids_noalias[%c0_offset] : buffer -> view<[%bounded_context_capacity]x48x8xi32, #dense>
+  %trace_weights_view = buffer.view %trace_weights_noalias[%c0_offset] : buffer -> view<[%bounded_context_capacity]x48x8xf32, #dense>
 
   %has_route = index.cmp ult, %lane, %route_count : index
   scf.if %has_route {
     %route = index.assume %lane [range(%lane, 0, 7)] : index
-    %context_base_raw = view.load %control_view[%zero] : view<1xi32, #dense> -> i32
+    %context_base_raw = view.load %control_view[%c0] : view<1xi32, #dense> -> i32
     %context_base_i32 = scalar.assume %context_base_raw [range(%context_base_raw, 0, 32767)] : i32
     %context_base0 = index.cast %context_base_i32 : i32 to index
     %context_base = index.assume %context_base0 [range(%context_base0, 0, 32767)] : index
@@ -42,9 +42,9 @@ func.template<qwen3_moe.route_trace.capture> device @qwen3_moe_route_trace_captu
 // command buffer serves every token position.
 kernel.def @qwen3_moe_route_trace_capture(%token_count: index, %source_token_offset: index, %layer_ordinal: index, %context_capacity: index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%bounded_token_count, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%bounded_token_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
 } launch(%token_count: index, %source_token_offset: index, %layer_ordinal: index, %context_capacity: index, %route_ids: buffer, %route_weights: buffer, %control: buffer, %trace_ids: buffer, %trace_weights: buffer) {
   func.apply<qwen3_moe.route_trace.capture>(%token_count, %source_token_offset, %layer_ordinal, %context_capacity, %route_ids, %route_weights, %control, %trace_ids, %trace_weights) : (index, index, index, index, buffer, buffer, buffer, buffer, buffer)
   kernel.return
@@ -52,9 +52,9 @@ kernel.def @qwen3_moe_route_trace_capture(%token_count: index, %source_token_off
 
 // Statically launched test adapter for one captured token.
 kernel.def @qwen3_moe_route_trace_capture_one_test(%source_token_offset: index, %layer_ordinal: index, %context_capacity: index) {
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
 } launch(%source_token_offset: index, %layer_ordinal: index, %context_capacity: index, %route_ids: buffer, %route_weights: buffer, %control: buffer, %trace_ids: buffer, %trace_weights: buffer) {
   %token_count = index.constant 1 : index
   func.apply<qwen3_moe.route_trace.capture>(%token_count, %source_token_offset, %layer_ordinal, %context_capacity, %route_ids, %route_weights, %control, %trace_ids, %trace_weights) : (index, index, index, index, buffer, buffer, buffer, buffer, buffer)
@@ -63,10 +63,10 @@ kernel.def @qwen3_moe_route_trace_capture_one_test(%source_token_offset: index, 
 
 // Statically launched test adapter for two captured tokens.
 kernel.def @qwen3_moe_route_trace_capture_two_test(%source_token_offset: index, %layer_ordinal: index, %context_capacity: index) {
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%two, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%c2, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
 } launch(%source_token_offset: index, %layer_ordinal: index, %context_capacity: index, %route_ids: buffer, %route_weights: buffer, %control: buffer, %trace_ids: buffer, %trace_weights: buffer) {
   %token_count = index.constant 2 : index
   func.apply<qwen3_moe.route_trace.capture>(%token_count, %source_token_offset, %layer_ordinal, %context_capacity, %route_ids, %route_weights, %control, %trace_ids, %trace_weights) : (index, index, index, index, buffer, buffer, buffer, buffer, buffer)
@@ -78,9 +78,9 @@ kernel.def @qwen3_moe_route_trace_capture_two_test(%source_token_offset: index, 
 // helper together with both static capture adapters.
 kernel.def @qwen3_moe_route_trace_inspect_four_test(%layer_ordinal: index, %context_capacity: index) {
   %bounded_token_count = index.constant 4 : index
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%bounded_token_count, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%bounded_token_count, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
 } launch(%layer_ordinal: index, %context_capacity: index, %trace_ids: buffer, %trace_weights: buffer, %output_ids: buffer, %output_weights: buffer) {
   %bounded_token_count = index.constant 4 : index
   %bounded_context_capacity = index.assume %context_capacity [range(%context_capacity, 1, 32768)] : index
@@ -88,15 +88,15 @@ kernel.def @qwen3_moe_route_trace_inspect_four_test(%layer_ordinal: index, %cont
   %token0 = kernel.workgroup.id<x> : index
   %lane0 = kernel.workitem.id<x> : index
   %route_count = index.constant 8 : index
-  %zero_offset = index.constant 0 : offset
+  %c0_offset = index.constant 0 : offset
   %token_in_launch, %launch_token_count = index.assume %token0, %bounded_token_count [range(%token0, 0, 2047), lt(%token0, %bounded_token_count)] : index, index
   %token, %trace_context_capacity = index.assume %token_in_launch, %bounded_context_capacity [lt(%token_in_launch, %bounded_context_capacity)] : index, index
   %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
   %trace_ids_noalias, %trace_weights_noalias, %output_ids_noalias, %output_weights_noalias = buffer.assume.noalias %trace_ids, %trace_weights, %output_ids, %output_weights : buffer, buffer, buffer, buffer
-  %trace_ids_view = buffer.view %trace_ids_noalias[%zero_offset] : buffer -> view<[%bounded_context_capacity]x48x8xi32, #dense>
-  %trace_weights_view = buffer.view %trace_weights_noalias[%zero_offset] : buffer -> view<[%bounded_context_capacity]x48x8xf32, #dense>
-  %output_ids_view = buffer.view %output_ids_noalias[%zero_offset] : buffer -> view<[%bounded_token_count]x8xi32, #dense>
-  %output_weights_view = buffer.view %output_weights_noalias[%zero_offset] : buffer -> view<[%bounded_token_count]x8xf32, #dense>
+  %trace_ids_view = buffer.view %trace_ids_noalias[%c0_offset] : buffer -> view<[%bounded_context_capacity]x48x8xi32, #dense>
+  %trace_weights_view = buffer.view %trace_weights_noalias[%c0_offset] : buffer -> view<[%bounded_context_capacity]x48x8xf32, #dense>
+  %output_ids_view = buffer.view %output_ids_noalias[%c0_offset] : buffer -> view<[%bounded_token_count]x8xi32, #dense>
+  %output_weights_view = buffer.view %output_weights_noalias[%c0_offset] : buffer -> view<[%bounded_token_count]x8xf32, #dense>
   %has_route = index.cmp ult, %lane, %route_count : index
   scf.if %has_route {
     %route = index.assume %lane [range(%lane, 0, 7)] : index
