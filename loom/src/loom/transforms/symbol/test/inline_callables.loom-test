@@ -26,9 +26,9 @@ func.def inline @lane_id() -> (index) {
 }
 
 kernel.def @inlines_into_required_ancestor() {
-  %one = index.constant 1 : index
-  %thirtytwo = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%thirtytwo, %one, %one) : index
+  %unit_extent = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%workgroup_size, %unit_extent, %unit_extent) : index
 } launch() {
   %lane = func.call @lane_id() : () -> (index)
   kernel.return
@@ -36,9 +36,9 @@ kernel.def @inlines_into_required_ancestor() {
 
 // ----
 kernel.def @inlines_into_required_ancestor() {
-  %one = index.constant 1 : index
-  %thirtytwo = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%thirtytwo, %one, %one) : index
+  %unit_extent = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit_extent, %unit_extent, %unit_extent) workgroup_size(%workgroup_size, %unit_extent, %unit_extent) : index
 } launch() {
   %lane = kernel.subgroup.lane.id : index
   kernel.return
