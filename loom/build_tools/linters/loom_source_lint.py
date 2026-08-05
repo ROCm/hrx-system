@@ -13,9 +13,10 @@ function-local compiler phases: allocating or resetting scratch sized by
 `module->values.count`/`capacity` instead of using function-local domains,
 maintained facts, or reviewed module-owned structures.
 
-It also protects the Loom execution package boundary. Optional production
-targets may project device/environment facts and emit artifacts, but they must
-not grow private runner/execution stacks under `loom/src/loom/target/**`.
+It also protects the Loom execution mechanism boundary. Target-owned
+qualification programs and manifests may invoke shared tools, but production
+targets must not include execution internals or grow private runner/provider
+stacks under `loom/src/loom/target/**`.
 
 The core Loom compiler must stay independent from command-line flag machinery.
 Only tools, tooling helpers, and tests may include `iree/base/tooling/flags.h`
@@ -46,7 +47,6 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 LOOM_SOURCE_ROOT = REPO_ROOT / "loom" / "src" / "loom"
 AUTHORING_CORPUS_ROOT = LOOM_SOURCE_ROOT / "test" / "corpus" / "authoring"
 SOURCE_SUFFIXES = {".c", ".cc", ".h"}
-TARGET_SOURCE_ROOT = LOOM_SOURCE_ROOT / "target"
 SPIRV_BACKEND_RELATIVE_ROOTS = (
     "loom/src/loom/target/arch/spirv",
     "loom/src/loom/target/emit/spirv",
@@ -78,9 +78,14 @@ CARDINALITY_ALIAS_PATTERN = re.compile(
     r"\s*(?:=|\+=)"
 )
 
-TARGET_EXECUTION_INCLUDE_OR_DEP_PATTERN = re.compile(
-    r"(?:#\s*include\s+\"loom/tooling/execution/(?:hal|ireevm)/)"
-    r"|(?://loom/src/loom/tooling/execution/(?:hal|ireevm)(?::|/))"
+TARGET_EXECUTION_INCLUDE_PATTERN = re.compile(
+    r'#\s*include\s+"loom/tooling/execution/(?:hal|ireevm)/'
+)
+TARGET_EXECUTION_DEP_LABEL_PATTERN = re.compile(
+    r"//loom/src/loom/tooling/execution/(?:hal|ireevm)(?::|/)"
+)
+TARGET_EXECUTION_BAZEL_DEPS_PATTERN = re.compile(
+    r"\b(?:deps|implementation_deps)\s*=\s*\[(?P<body>.*?)\]", re.DOTALL
 )
 
 TARGET_PRIVATE_EXECUTION_SYMBOL_PATTERN = re.compile(
@@ -422,14 +427,6 @@ def _scan_spirv_backend_text(
     return findings
 
 
-def _target_path_has_execution_package(path: Path) -> bool:
-    try:
-        target_relative_path = path.relative_to(TARGET_SOURCE_ROOT)
-    except ValueError:
-        return False
-    return "execution" in target_relative_path.parts[:-1]
-
-
 def _iter_lint_files() -> list[Path]:
     return sorted(
         path
@@ -571,55 +568,83 @@ def _scan_authoring_corpus(path: Path) -> list[Finding]:
     return _scan_authoring_text(path, path.read_text())
 
 
-def _scan_target_execution_boundaries(path: Path) -> list[Finding]:
-    if not path.is_relative_to(TARGET_SOURCE_ROOT):
+def _scan_target_execution_text(
+    relative_path: str, text: str
+) -> list[tuple[int, str, str]]:
+    path = PurePosixPath(relative_path)
+    if len(path.parts) < 4 or path.parts[:4] != (
+        "loom",
+        "src",
+        "loom",
+        "target",
+    ):
+        return []
+    if path.suffix in SOURCE_SUFFIXES and _is_test_source_name(path.name):
         return []
 
-    findings: list[Finding] = []
-    if _target_path_has_execution_package(path):
-        findings.append(
-            Finding(
-                path=path,
-                line=1,
-                message="target packages must not own execution subpackages",
-                context=(
-                    "move runner/backend/provider/invocation code under "
-                    "loom/src/loom/tooling/execution/<mechanism>"
-                ),
-            )
-        )
-    if path.suffix in SOURCE_SUFFIXES and _is_test_source_name(path.name):
+    findings: list[tuple[int, str, str]] = []
+    if path.suffix in SOURCE_SUFFIXES:
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            stripped_line = _strip_line_comments(line).strip()
+            if TARGET_EXECUTION_INCLUDE_PATTERN.search(stripped_line):
+                findings.append(
+                    (
+                        line_number,
+                        (
+                            "target packages must not include or depend on "
+                            "execution mechanism internals"
+                        ),
+                        stripped_line,
+                    )
+                )
+            if TARGET_PRIVATE_EXECUTION_SYMBOL_PATTERN.search(stripped_line):
+                findings.append(
+                    (
+                        line_number,
+                        (
+                            "target packages must not define private Loom "
+                            "execution backend/provider stacks"
+                        ),
+                        stripped_line,
+                    )
+                )
         return findings
 
-    for line_number, line in enumerate(path.read_text().splitlines(), start=1):
-        stripped_line = _strip_line_comments(line).strip()
-        if TARGET_EXECUTION_INCLUDE_OR_DEP_PATTERN.search(stripped_line):
+    if path.name != "BUILD.bazel":
+        return findings
+    bazel_text = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+    lines = text.splitlines()
+    for deps_match in TARGET_EXECUTION_BAZEL_DEPS_PATTERN.finditer(bazel_text):
+        body = deps_match.group("body")
+        for label_match in TARGET_EXECUTION_DEP_LABEL_PATTERN.finditer(body):
+            offset = deps_match.start("body") + label_match.start()
+            line_number = bazel_text.count("\n", 0, offset) + 1
             findings.append(
-                Finding(
-                    path=path,
-                    line=line_number,
-                    message=(
+                (
+                    line_number,
+                    (
                         "target packages must not include or depend on "
                         "execution mechanism internals"
                     ),
-                    context=stripped_line,
+                    lines[line_number - 1].strip(),
                 )
             )
-        if (
-            path.suffix in SOURCE_SUFFIXES
-            and TARGET_PRIVATE_EXECUTION_SYMBOL_PATTERN.search(stripped_line)
-        ):
-            findings.append(
-                Finding(
-                    path=path,
-                    line=line_number,
-                    message=(
-                        "target packages must not define private Loom "
-                        "execution backend/provider stacks"
-                    ),
-                    context=stripped_line,
-                )
+    return findings
+
+
+def _scan_target_execution_guardrails(path: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for line, message, context in _scan_target_execution_text(
+        _relative_path(path), path.read_text()
+    ):
+        findings.append(
+            Finding(
+                path=path,
+                line=line,
+                message=message,
+                context=context,
             )
+        )
     return findings
 
 
@@ -675,6 +700,20 @@ def _expect_core_tooling_flags_self_test(
     name: str, relative_path: str, text: str, expected_messages: tuple[str, ...]
 ) -> bool:
     findings = _scan_core_tooling_flags_text(relative_path, text)
+    messages = tuple(finding[1] for finding in findings)
+    if messages == expected_messages:
+        print(f"  PASS  {name}")
+        return True
+    print(f"  FAIL  {name}")
+    print(f"        expected: {expected_messages!r}")
+    print(f"        actual:   {messages!r}")
+    return False
+
+
+def _expect_target_execution_self_test(
+    name: str, relative_path: str, text: str, expected_messages: tuple[str, ...]
+) -> bool:
+    findings = _scan_target_execution_text(relative_path, text)
     messages = tuple(finding[1] for finding in findings)
     if messages == expected_messages:
         print(f"  PASS  {name}")
@@ -756,6 +795,54 @@ def _run_self_tests() -> int:
         "loom/src/loom/sanitizer/options_test.cc",
         '#include "iree/base/tooling/flags.h"\n',
         (),
+    )
+    ok &= _expect_target_execution_self_test(
+        "target-owned qualification package passes",
+        "loom/src/loom/target/arch/amdgpu/test/execution/BUILD.bazel",
+        'tools = {"iree-test-loom": "//loom/src/loom/tools/iree-test-loom"}\n',
+        (),
+    )
+    ok &= _expect_target_execution_self_test(
+        "execution package visibility grant passes",
+        "loom/src/loom/target/arch/ireevm/BUILD.bazel",
+        (
+            "_EXECUTION_VISIBILITY = ["
+            '"//loom/src/loom/tooling/execution/ireevm:__pkg__"]\n'
+        ),
+        (),
+    )
+    ok &= _expect_target_execution_self_test(
+        "commented execution dependency passes",
+        "loom/src/loom/target/arch/amdgpu/BUILD.bazel",
+        ('# deps = [\n#     "//loom/src/loom/tooling/execution/hal:runtime",\n# ]\n'),
+        (),
+    )
+    ok &= _expect_target_execution_self_test(
+        "target execution-internal dependency fails",
+        "loom/src/loom/target/arch/amdgpu/BUILD.bazel",
+        ('deps = [\n    "//loom/src/loom/tooling/execution/hal:runtime",\n]\n'),
+        (
+            "target packages must not include or depend on execution "
+            "mechanism internals",
+        ),
+    )
+    ok &= _expect_target_execution_self_test(
+        "target execution-internal include fails",
+        "loom/src/loom/target/arch/amdgpu/run.c",
+        '#include "loom/tooling/execution/hal/runtime.h"\n',
+        (
+            "target packages must not include or depend on execution "
+            "mechanism internals",
+        ),
+    )
+    ok &= _expect_target_execution_self_test(
+        "target private execution stack fails",
+        "loom/src/loom/target/arch/amdgpu/run.c",
+        "void loom_run_hal_backend(void) {}\n",
+        (
+            "target packages must not define private Loom execution "
+            "backend/provider stacks",
+        ),
     )
     ok &= _expect_authoring_self_test(
         "authoring happy-path source passes",
@@ -842,7 +929,7 @@ def main() -> int:
         findings.extend(_scan_file(path))
     for path in _iter_lint_files():
         findings.extend(_scan_core_tooling_flags_guardrails(path))
-        findings.extend(_scan_target_execution_boundaries(path))
+        findings.extend(_scan_target_execution_guardrails(path))
         findings.extend(_scan_spirv_backend_guardrails(path))
     for path in _iter_authoring_loom_files():
         findings.extend(_scan_authoring_corpus(path))
