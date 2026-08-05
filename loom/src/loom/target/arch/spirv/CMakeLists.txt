@@ -6,6 +6,14 @@
 #                                                                              #
 # To disable autogeneration for this file entirely, delete this header.        #
 ################################################################################
+if(LOOM_TARGET_ARCH_SPIRV)
+
+iree_get_spirv_registry_sources(
+  _LOOM_SPIRV_CORE_GRAMMAR
+  _LOOM_VULKAN_XML_REGISTRY
+)
+
+endif()
 
 iree_add_all_subdirs()
 
@@ -56,8 +64,12 @@ loom_generated_textual_header(
     "--tables"
   ARGS
     "--isa-header=${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/spirv/isa.h"
+    "--spirv-grammar=${_LOOM_SPIRV_CORE_GRAMMAR}"
+    "--vulkan-registry=${_LOOM_VULKAN_XML_REGISTRY}"
   INPUTS
     "isa.h"
+    "${_LOOM_SPIRV_CORE_GRAMMAR}"
+    "${_LOOM_VULKAN_XML_REGISTRY}"
 )
 endif()
 

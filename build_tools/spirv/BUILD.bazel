@@ -10,7 +10,10 @@ package(
 )
 
 exports_files(
-    ["iree_spirv_asm_module.cmake"],
+    [
+        "iree_spirv_asm_module.cmake",
+        "registry_sources.bzl",
+    ],
     visibility = ["//:__subpackages__"],
 )
 

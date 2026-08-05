@@ -10,6 +10,8 @@ iree_py_library(
   SRCS
     "__init__.py"
     "dependency_expression.py"
+  IMPORTS
+    "../../.."
 )
 
 iree_py_library(
@@ -18,6 +20,8 @@ iree_py_library(
   SRCS
     "__init__.py"
     "registry_source.py"
+  IMPORTS
+    "../../.."
 )
 
 iree_py_library(
@@ -25,6 +29,8 @@ iree_py_library(
     spirv_core_grammar
   SRCS
     "spirv_core_grammar.py"
+  IMPORTS
+    "../../.."
   DEPS
     ::registry_source
 )
@@ -35,6 +41,8 @@ iree_py_library(
   SRCS
     "vulkan_spirv_availability.py"
     "vulkan_spirv_availability_model.py"
+  IMPORTS
+    "../../.."
   DEPS
     ::dependency_expression
     ::registry_source
@@ -80,15 +88,9 @@ iree_dependency_pinned_source_allowed(_pinned_source_allowed)
 if(IREE_BUILD_TESTS AND _pinned_source_allowed AND
     (IREE_HAL_DRIVER_VULKAN OR
       (LOOM_BUILD AND LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV)))
-  iree_populate_locked_fetch_content(
-    spirv_headers _spirv_headers_source_dir)
-  set(_spirv_core_grammar
-    "${_spirv_headers_source_dir}/include/spirv/unified1/spirv.core.grammar.json")
-  if(NOT EXISTS "${_spirv_core_grammar}")
-    message(FATAL_ERROR
-      "Pinned SPIRV-Headers source has no core grammar: "
-      "${_spirv_headers_source_dir}")
-  endif()
+  iree_get_spirv_registry_sources(
+    _spirv_core_grammar
+    _vulkan_xml_registry)
   iree_py_test(
     NAME
       spirv_core_grammar_registry_test
@@ -102,15 +104,6 @@ if(IREE_BUILD_TESTS AND _pinned_source_allowed AND
       "${PROJECT_SOURCE_DIR}"
   )
 
-  iree_populate_locked_fetch_content(
-    vulkan_headers _vulkan_headers_source_dir)
-  set(_vulkan_xml_registry
-    "${_vulkan_headers_source_dir}/registry/vk.xml")
-  if(NOT EXISTS "${_vulkan_xml_registry}")
-    message(FATAL_ERROR
-      "Pinned Vulkan-Headers source has no registry/vk.xml: "
-      "${_vulkan_headers_source_dir}")
-  endif()
   iree_py_test(
     NAME
       dependency_expression_registry_test

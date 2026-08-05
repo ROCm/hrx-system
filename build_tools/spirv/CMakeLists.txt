@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 set(IREE_PACKAGE_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-set(IREE_PACKAGE_ROOT_PREFIX "build_tools/spirv")
+set(IREE_PACKAGE_ROOT_PREFIX "iree/build_tools/spirv")
 
 add_subdirectory(registry)
 

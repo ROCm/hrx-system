@@ -17,6 +17,7 @@ iree_py_library(
         "__init__.py",
         "dependency_expression.py",
     ],
+    imports = ["../../.."],
 )
 
 iree_py_library(
@@ -25,11 +26,13 @@ iree_py_library(
         "__init__.py",
         "registry_source.py",
     ],
+    imports = ["../../.."],
 )
 
 iree_py_library(
     name = "spirv_core_grammar",
     srcs = ["spirv_core_grammar.py"],
+    imports = ["../../.."],
     deps = [":registry_source"],
 )
 
@@ -39,6 +42,7 @@ iree_py_library(
         "vulkan_spirv_availability.py",
         "vulkan_spirv_availability_model.py",
     ],
+    imports = ["../../.."],
     deps = [
         ":dependency_expression",
         ":registry_source",

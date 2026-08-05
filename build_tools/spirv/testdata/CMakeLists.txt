@@ -6,7 +6,7 @@
 
 iree_spirv_asm_module(
   PACKAGE
-    build_tools::spirv::testdata
+    iree::build_tools::spirv::testdata
   NAME
     minimal
   SRC
