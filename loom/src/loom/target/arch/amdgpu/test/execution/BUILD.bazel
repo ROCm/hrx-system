@@ -23,6 +23,7 @@ exports_files([
     "gfx9_4_mfma_families.loom",
     "loop_carried_lane_liveness.loom",
     "mxfp4_decode_bf16.loom",
+    "workgroup_scan_wave64.loom",
 ])
 
 _BEHAVIOR_QUALIFICATION_CASES = [
@@ -133,6 +134,19 @@ iree_execution_test_suite(
     ],
     manifests = ["global_atomic_add_f32.test.json"],
     tags = _AMDGPU_EXECUTION_TEST_TAGS,
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    tools = {
+        "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
+    },
+)
+
+iree_execution_test_suite(
+    name = "workgroup_scan_wave64_execution_test",
+    data = [
+        "workgroup_scan_wave64.loom",
+    ],
+    manifests = ["workgroup_scan_wave64.test.json"],
+    tags = _AMDGPU_EXECUTION_TEST_TAGS + ["manual"],
     target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
     tools = {
         "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",

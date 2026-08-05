@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "executes wave64 workgroup scans across native partitions",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/workgroup_scan_wave64.loom",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case_count\":1",
+            "\"sample_count\":1",
+            "\"failed_sample_count\":0",
+            "\"skipped_case_count\":0",
+            "\"planning_issue_count\":0"
+          ]
+        }
+      }
+    }
+  ]
+}
