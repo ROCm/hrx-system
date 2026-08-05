@@ -54,6 +54,11 @@ filegroup(
 )
 
 filegroup(
+    name = "spirv_ext_inst_nonsemantic_shader_debuginfo_grammar_unified1",
+    srcs = ["include/spirv/unified1/extinst.nonsemantic.shader.debuginfo.grammar.json"],
+)
+
+filegroup(
     name = "spirv_ext_inst_spv_amd_gcn_shader_grammar_unified1",
     srcs = ["include/spirv/unified1/extinst.spv-amd-gcn-shader.grammar.json"],
 )
@@ -83,24 +88,32 @@ filegroup(
     srcs = ["include/spirv/unified1/extinst.arm.motion-engine.100.grammar.json"],
 )
 
+filegroup(
+    name = "spirv_ext_inst_non_semantic_graph_debuginfo_grammar_unified1",
+    srcs = ["include/spirv/unified1/extinst.nonsemantic.graph.debuginfo.grammar.json"],
+)
+
+filegroup(
+    name = "spirv_ext_inst_arm_experimental_ml_operations",
+    srcs = ["include/spirv/unified1/extinst.arm.experimental-ml-operations.grammar.json"],
+)
+
 cc_library(
     name = "spirv_common_headers",
-    hdrs = [
-        "include/spirv/1.0/GLSL.std.450.h",
-        "include/spirv/1.0/OpenCL.std.h",
-        "include/spirv/1.1/GLSL.std.450.h",
-        "include/spirv/1.1/OpenCL.std.h",
-        "include/spirv/1.2/GLSL.std.450.h",
-        "include/spirv/1.2/OpenCL.std.h",
-        "include/spirv/unified1/ArmMotionEngine.100.h",
-        "include/spirv/unified1/GLSL.std.450.h",
-        "include/spirv/unified1/NonSemanticClspvReflection.h",
-        "include/spirv/unified1/NonSemanticDebugPrintf.h",
-        "include/spirv/unified1/NonSemanticShaderDebugInfo100.h",
-        "include/spirv/unified1/NonSemanticVkspReflection.h",
-        "include/spirv/unified1/OpenCL.std.h",
-        "include/spirv/unified1/TOSA.001000.1.h",
-    ],
+    hdrs = glob(
+        [
+            "include/spirv/1.0/*.h",
+            "include/spirv/1.1/*.h",
+            "include/spirv/1.2/*.h",
+            "include/spirv/unified1/*.h",
+        ],
+        exclude = [
+            "include/spirv/1.0/spirv.h",
+            "include/spirv/1.1/spirv.h",
+            "include/spirv/1.2/spirv.h",
+            "include/spirv/unified1/spirv.h",
+        ],
+    ),
     includes = ["include"],
 )
 
