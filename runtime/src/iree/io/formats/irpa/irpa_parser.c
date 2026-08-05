@@ -98,11 +98,20 @@ static iree_status_t iree_io_parse_irpa_v0_splat_entry(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "splat entry length underflow");
   }
-  if (splat_entry->pattern_length > sizeof(splat_entry->pattern)) {
+  if (splat_entry->pattern_length == 0 ||
+      splat_entry->pattern_length >
+          IREE_IO_PARAMETER_MAX_SPLAT_PATTERN_LENGTH ||
+      !iree_is_power_of_two_uint64(splat_entry->pattern_length)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "splat pattern length %u invalid; must be 1, 2, 4, 8, or 16 bytes",
+        splat_entry->pattern_length);
+  }
+  if (splat_entry->length % splat_entry->pattern_length != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "splat pattern length %u out of bounds %" PRIhsz,
-                            splat_entry->pattern_length,
-                            sizeof(splat_entry->pattern));
+                            "splat data length %" PRIu64
+                            " is not evenly divisible by pattern length %u",
+                            splat_entry->length, splat_entry->pattern_length);
   }
   iree_io_parameter_index_entry_t entry = {
       .key = name,
