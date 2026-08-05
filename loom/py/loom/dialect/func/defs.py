@@ -129,6 +129,9 @@ InlinePolicy = EnumDef(
         EnumCase("noinline", 2, doc="Preserve the callable boundary."),
     ],
     doc="Author inline policy. Absent (0) leaves the edge to the current pass.",
+    c_type="loom_inline_policy_t",
+    c_const_prefix="LOOM_INLINE_POLICY",
+    c_include="loom/ir/ir.h",
 )
 
 _RETAIN_ATTR = AttrDef("retain", "enum", enum_def=Retain, optional=True)

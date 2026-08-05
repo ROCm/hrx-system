@@ -13,6 +13,7 @@
 #define LOOM_OPS_FUNC_OPS_H_
 
 #include "loom/ops/op_defs.h"
+#include "loom/ir/ir.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -58,13 +59,6 @@ typedef enum loom_func_temperature_e {
   LOOM_FUNC_TEMPERATURE_COUNT_ = 3,
 } loom_func_temperature_t;
 
-// Author inline policy. Absent (0) leaves the edge to the current pass.
-typedef enum loom_func_inline_policy_e {
-  LOOM_FUNC_INLINE_POLICY_INLINE = 1,
-  LOOM_FUNC_INLINE_POLICY_NOINLINE = 2,
-  LOOM_FUNC_INLINE_POLICY_COUNT_ = 3,
-} loom_func_inline_policy_t;
-
 // Private symbol retention policy. Absent (0) permits ordinary DCE.
 typedef enum loom_func_retain_e {
   LOOM_FUNC_RETAIN_RETAIN = 1,
@@ -82,7 +76,7 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_visibility, 1, loom_func_visibility_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_cc, 2, loom_func_cc_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_purity, 3, loom_func_purity_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_temperature, 4, loom_func_temperature_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_inline_policy, 5, loom_func_inline_policy_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_inline_policy, 5, loom_inline_policy_t)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_def_predicates, 6)
 LOOM_DEFINE_ATTR_SYMBOL(loom_func_def_target, 7)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_abi, 8, loom_target_abi_kind_t)
@@ -144,7 +138,7 @@ LOOM_DEFINE_ATTR_STRING(loom_func_decl_import_symbol, 3)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_cc, 4, loom_func_cc_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_purity, 5, loom_func_purity_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_temperature, 6, loom_func_temperature_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_inline_policy, 7, loom_func_inline_policy_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_inline_policy, 7, loom_inline_policy_t)
 LOOM_DEFINE_ATTR_SYMBOL(loom_func_decl_target, 8)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_abi, 9, loom_target_abi_kind_t)
 LOOM_DEFINE_ATTR_DICT(loom_func_decl_abi_attrs, 10)
@@ -209,7 +203,7 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_template_visibility, 2, loom_func_visibili
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_template_cc, 3, loom_func_cc_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_template_purity, 4, loom_func_purity_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_template_temperature, 5, loom_func_temperature_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_template_inline_policy, 6, loom_func_inline_policy_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_template_inline_policy, 6, loom_inline_policy_t)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_template_predicates, 7)
 LOOM_DEFINE_ATTR_SYMBOL(loom_func_template_target, 8)
 LOOM_DEFINE_ATTR_I64(loom_func_template_priority, 9)
@@ -261,7 +255,7 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_ukernel_visibility, 2, loom_func_visibilit
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_ukernel_cc, 3, loom_func_cc_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_ukernel_purity, 4, loom_func_purity_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_ukernel_temperature, 5, loom_func_temperature_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_ukernel_inline_policy, 6, loom_func_inline_policy_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_ukernel_inline_policy, 6, loom_inline_policy_t)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_ukernel_predicates, 7)
 LOOM_DEFINE_ATTR_SYMBOL(loom_func_ukernel_target, 8)
 LOOM_DEFINE_ATTR_I64(loom_func_ukernel_priority, 9)
@@ -309,7 +303,7 @@ LOOM_DEFINE_VARIADIC_RESULTS(loom_func_call_results, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_func_call_callee, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_call_purity, 1, loom_func_purity_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_call_temperature, 2, loom_func_temperature_t)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_call_inline_policy, 3, loom_func_inline_policy_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_call_inline_policy, 3, loom_inline_policy_t)
 enum loom_func_call_build_flag_bits_e {
   LOOM_FUNC_CALL_BUILD_FLAG_HAS_PURITY = 1u << 0,
   LOOM_FUNC_CALL_BUILD_FLAG_HAS_TEMPERATURE = 1u << 1,

@@ -120,11 +120,11 @@ typedef struct loom_inline_plan_entry_t {
   // Function-like interface for the target definition.
   loom_func_like_t callee;
   // Inline policy read from the callee symbol definition.
-  uint8_t callee_policy;
+  loom_inline_policy_t callee_policy;
   // Inline policy read from the call site.
-  uint8_t call_policy;
+  loom_inline_policy_t call_policy;
   // Effective edge inline policy after conflict resolution.
-  uint8_t effective_policy;
+  loom_inline_policy_t effective_policy;
   // Temperature hint read from the callee symbol definition.
   uint8_t callee_temperature;
   // Temperature hint read from the call site.
@@ -162,12 +162,12 @@ typedef struct loom_inline_state_t {
   iree_host_size_t* component_by_symbol;
 } loom_inline_state_t;
 
-static bool loom_inline_policy_is_inline(uint8_t policy) {
-  return policy == LOOM_FUNC_INLINE_POLICY_INLINE;
+static bool loom_inline_policy_is_inline(loom_inline_policy_t policy) {
+  return policy == LOOM_INLINE_POLICY_INLINE;
 }
 
-static bool loom_inline_policy_is_noinline(uint8_t policy) {
-  return policy == LOOM_FUNC_INLINE_POLICY_NOINLINE;
+static bool loom_inline_policy_is_noinline(loom_inline_policy_t policy) {
+  return policy == LOOM_INLINE_POLICY_NOINLINE;
 }
 
 static iree_string_view_t loom_inline_symbol_name(const loom_module_t* module,
@@ -341,20 +341,20 @@ static void loom_inline_resolve_entry_policy(loom_inline_state_t* state,
   const bool call_noinline = loom_inline_policy_is_noinline(entry->call_policy);
 
   if ((callee_inline && call_noinline) || (callee_noinline && call_inline)) {
-    entry->effective_policy = LOOM_FUNC_INLINE_POLICY_INLINE;
+    entry->effective_policy = LOOM_INLINE_POLICY_INLINE;
     loom_inline_mark_blocker(entry, LOOM_INLINE_BLOCKER_POLICY_CONFLICT);
     return;
   }
 
   if (callee_noinline || call_noinline) {
-    entry->effective_policy = LOOM_FUNC_INLINE_POLICY_NOINLINE;
+    entry->effective_policy = LOOM_INLINE_POLICY_NOINLINE;
     entry->action = LOOM_INLINE_PLAN_ACTION_KEEP;
     ++state->statistics->kept_edges;
     return;
   }
 
   if (callee_inline || call_inline) {
-    entry->effective_policy = LOOM_FUNC_INLINE_POLICY_INLINE;
+    entry->effective_policy = LOOM_INLINE_POLICY_INLINE;
     entry->action = LOOM_INLINE_PLAN_ACTION_REQUIRED;
     ++state->statistics->required_edges;
     return;

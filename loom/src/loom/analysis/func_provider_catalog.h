@@ -74,7 +74,7 @@ typedef struct loom_func_provider_summary_t {
   uint8_t temperature;
 
   // Inline policy enum value.
-  uint8_t inline_policy;
+  loom_inline_policy_t inline_policy;
 
   // Local module symbol reference, or null for external providers.
   loom_symbol_ref_t symbol;
