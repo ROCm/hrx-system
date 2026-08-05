@@ -5,6 +5,10 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load(
+    "//build_tools/spirv:registry_sources.bzl",
+    "loom_spirv_registry_sources",
+)
+load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
     "loom_cc_test",
@@ -20,6 +24,11 @@ package(
     default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+exports_files(
+    ["isa.h"],
+    visibility = ["//loom/py/loom/gen/target/arch/spirv:__pkg__"],
 )
 
 _SPIRV_CHECK_PACKAGE_VISIBILITY = ["//loom/src/loom/target/arch/spirv/check:__pkg__"]
@@ -52,6 +61,8 @@ _SPIRV_TOOLING_VISIBILITY = [
 # SPIR-V low descriptors
 #===------------------------------------------------------------------------===#
 
+loom_spirv_registry_sources(name = "registry_sources")
+
 loom_generated_cc_library(
     name = "error_defs",
     args = [
@@ -77,9 +88,17 @@ loom_cc_library(
 
 loom_generated_textual_header(
     name = "features_gen",
-    args = ["--isa-header=$(location isa.h)"],
+    args = [
+        "--isa-header=$(location isa.h)",
+        "--spirv-grammar=$(rootpath @spirv_headers//:spirv_core_grammar_unified1)",
+        "--vulkan-registry=$(rootpath @vulkan_headers//:vulkan_xml_registry)",
+    ],
     generator = "//loom/py/loom/gen/target/arch/spirv:features",
-    inputs = ["isa.h"],
+    inputs = [
+        "isa.h",
+        "@spirv_headers//:spirv_core_grammar_unified1",
+        "@vulkan_headers//:vulkan_xml_registry",
+    ],
     output = "features_tables.inl",
     output_flag = "--tables",
 )

@@ -597,6 +597,55 @@ iree_executable_test(
             converter.body,
         )
 
+    def test_py_test_maps_size_to_default_timeout(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        for size, timeout in {
+            "small": 60,
+            "medium": 300,
+            "large": 900,
+            "enormous": 3600,
+        }.items():
+            with self.subTest(size=size):
+                converter = SimpleNamespace(body="")
+                functions = _PythonBuildFileFunctions(
+                    converter=converter,
+                    targets=bazel_to_cmake_targets.TargetConverter(
+                        repo_map={"@iree": ""}
+                    ),
+                    build_dir="build_tools/bazel_to_cmake",
+                    repo_root=str(repo_root),
+                )
+
+                functions.iree_py_test(
+                    name="sized_test",
+                    srcs=["config_test.py"],
+                    deps=[],
+                    size=size,
+                )
+
+                self.assertIn(f"TIMEOUT\n    {timeout}", converter.body)
+
+    def test_py_test_explicit_timeout_overrides_size(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        converter = SimpleNamespace(body="")
+        functions = _PythonBuildFileFunctions(
+            converter=converter,
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@iree": ""}),
+            build_dir="build_tools/bazel_to_cmake",
+            repo_root=str(repo_root),
+        )
+
+        functions.iree_py_test(
+            name="sized_test",
+            srcs=["config_test.py"],
+            deps=[],
+            size="enormous",
+            timeout="short",
+        )
+
+        self.assertIn("TIMEOUT\n    60", converter.body)
+        self.assertNotIn("TIMEOUT\n    3600", converter.body)
+
     def test_py_library_resolves_cross_package_sources(self):
         repo_root = Path(__file__).resolve().parents[2]
         converter = SimpleNamespace(body="")

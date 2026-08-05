@@ -4,17 +4,4 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-iree_spirv_asm_module(
-  PACKAGE
-    iree::build_tools::spirv::testdata
-  NAME
-    minimal
-  SRC
-    minimal.spvasm
-  TARGET_ENV
-    vulkan1.3
-  C_IDENTIFIER
-    minimal_spv
-  TESTONLY
-  PUBLIC
-)
+"""Target-neutral SPIR-V and Vulkan registry models."""

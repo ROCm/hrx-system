@@ -59,6 +59,15 @@ translates it, and when it is consumed. A general provenance or rewrite
 tracking facility must be justified as reusable compiler infrastructure and
 must remain separate from program semantics.
 
+## Operation IR Boundaries
+
+Every operation field carries stable public semantics; compiler caches,
+resolved facts, provider or table IDs, feature masks, and pass state remain
+outside IR. Raw encodings such as `contract_feature_bits` are invalid even in
+tests, while typed attributes may use private physical payloads only when text
+and bytecode preserve the stable public value. Work that authors or changes
+operations follows `loom/py/loom/dialect/README.md`.
+
 ## Assembly Formatting Is A Source Contract
 
 A Low function's `target<representation_contract>` binds its assembly

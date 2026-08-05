@@ -6,6 +6,14 @@
 #                                                                              #
 # To disable autogeneration for this file entirely, delete this header.        #
 ################################################################################
+if(LOOM_TARGET_ARCH_SPIRV)
+
+iree_get_spirv_registry_sources(
+  _LOOM_SPIRV_CORE_GRAMMAR
+  _LOOM_VULKAN_XML_REGISTRY
+)
+
+endif()
 
 iree_add_all_subdirs()
 
@@ -18,7 +26,20 @@ iree_py_library(
     "__init__.py"
     "spirv_features.py"
   DEPS
+    loom::py::loom::gen::target::arch::spirv::feature_catalog_validation
     loom::py::loom::gen::support::support
+    loom::py::loom::target::arch::spirv::features
+)
+
+iree_py_library(
+  NAME
+    feature_catalog_validation
+  SRCS
+    "feature_catalog_validation.py"
+  DEPS
+    iree::build_tools::spirv::registry::registry_source
+    iree::build_tools::spirv::registry::spirv_core_grammar
+    iree::build_tools::spirv::registry::vulkan_spirv_availability
     loom::py::loom::target::arch::spirv::features
 )
 
@@ -39,7 +60,36 @@ iree_py_test(
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"
     "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
+
+if(LOOM_TARGET_ARCH_SPIRV)
+iree_py_test(
+  NAME
+    feature_catalog_validation_test
+  MAIN
+    "feature_catalog_validation_test.py"
+  SRCS
+    "feature_catalog_validation_test.py"
+  ARGS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/spirv/isa.h"
+    "${_LOOM_SPIRV_CORE_GRAMMAR}"
+    "${_LOOM_VULKAN_XML_REGISTRY}"
+  DEPS
+    loom::py::loom::gen::target::arch::spirv::feature_catalog_validation
+    loom::py::loom::gen::target::arch::spirv::features
+    iree::build_tools::spirv::registry::spirv_core_grammar
+    iree::build_tools::spirv::registry::vulkan_spirv_availability
+    loom::py::loom::target::arch::spirv::features
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
+)
+endif()
 
 iree_py_library(
   NAME

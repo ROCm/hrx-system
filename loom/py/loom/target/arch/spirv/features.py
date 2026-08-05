@@ -18,6 +18,7 @@ SPIRV_VERSION_1_3 = 0x00010300
 ADDRESSING_MODEL_UNSPECIFIED = "LOOM_SPIRV_ADDRESSING_MODEL_UNSPECIFIED"
 MEMORY_MODEL_UNSPECIFIED = "LOOM_SPIRV_MEMORY_MODEL_UNSPECIFIED"
 
+
 _C_SUFFIX_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -299,15 +300,10 @@ def feature_row_capacity(
     return len(unique_values)
 
 
-def parse_isa_symbols(isa_header: str) -> frozenset[str]:
-    return frozenset(re.findall(r"\bLOOM_SPIRV_[A-Z0-9_]+\b", isa_header))
-
-
 def validate_feature_catalog(
     *,
     atoms: tuple[FeatureAtom, ...] = FEATURE_ATOMS,
     profiles: tuple[FeatureProfile, ...] = FEATURE_PROFILES,
-    isa_symbols: frozenset[str] | None = None,
 ) -> None:
     _validate_unique_atoms(atoms)
     atoms_by_key = atom_by_key(atoms)
@@ -315,8 +311,6 @@ def validate_feature_catalog(
     _validate_profiles(profiles, atoms_by_key)
     _validate_row_sets(atoms)
     _validate_model_consistency(atoms)
-    if isa_symbols is not None:
-        _validate_isa_symbols(atoms, isa_symbols)
     if len(atoms) >= 64:
         raise ValueError("SPIR-V feature atom bitset supports at most 63 atoms")
     for field_name in _ROW_FIELD_NAMES:
@@ -329,13 +323,6 @@ def validate_feature_catalog(
 
 _ROW_FIELD_NAMES = (
     "extensions",
-    "capabilities",
-    "opcodes",
-    "storage_classes",
-    "decorations",
-)
-
-_ISA_SYMBOL_FIELD_NAMES = (
     "capabilities",
     "opcodes",
     "storage_classes",
@@ -444,29 +431,6 @@ def _validate_model_consistency(atoms: tuple[FeatureAtom, ...]) -> None:
         field_name="memory_model",
         unspecified_value=MEMORY_MODEL_UNSPECIFIED,
     )
-
-
-def _validate_isa_symbols(
-    atoms: tuple[FeatureAtom, ...], isa_symbols: frozenset[str]
-) -> None:
-    for atom in atoms:
-        for field_name in _ISA_SYMBOL_FIELD_NAMES:
-            for symbol in getattr(atom, field_name):
-                if symbol not in isa_symbols:
-                    raise ValueError(
-                        f"feature atom {atom.key!r} {field_name} references "
-                        f"unknown SPIR-V ISA symbol {symbol}"
-                    )
-        for field_name, unspecified_value in (
-            ("addressing_model", ADDRESSING_MODEL_UNSPECIFIED),
-            ("memory_model", MEMORY_MODEL_UNSPECIFIED),
-        ):
-            symbol = getattr(atom, field_name)
-            if symbol != unspecified_value and symbol not in isa_symbols:
-                raise ValueError(
-                    f"feature atom {atom.key!r} {field_name} references "
-                    f"unknown SPIR-V ISA symbol {symbol}"
-                )
 
 
 def _ensure_unique(label: str, values: Iterable[str]) -> None:

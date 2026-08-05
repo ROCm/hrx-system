@@ -230,6 +230,14 @@ class BuildFileFunctions(object):
         "eternal": 3600,
     }
 
+    # Match the default timeout implied by each Bazel test size.
+    _size_timeout_map = {
+        "small": 60,
+        "medium": 300,
+        "large": 900,
+        "enormous": 3600,
+    }
+
     def _should_skip_target(self, tags=None, **kwargs):
         if tags and "skip-bazel_to_cmake" in tags:
             return True
@@ -473,6 +481,14 @@ class BuildFileFunctions(object):
         if value is None:
             return ""
         value = self._timeout_map[value]
+        return f"  {name}\n    {value}\n"
+
+    def _convert_test_timeout_arg_block(self, name, timeout, size):
+        if timeout is not None:
+            return self._convert_timeout_arg_block(name, timeout)
+        if size is None:
+            return ""
+        value = self._size_timeout_map[size]
         return f"  {name}\n    {value}\n"
 
     def _convert_string_list_block(self, name, values, quote=True, sort=False):
@@ -1271,6 +1287,7 @@ class BuildFileFunctions(object):
         target_compatible_with=None,
         testonly=None,
         timeout=None,
+        size=None,
         visibility=None,
         **kwargs,
     ):
@@ -1334,7 +1351,7 @@ class BuildFileFunctions(object):
             package_dirs or self._python_package_dirs(),
             sort=False,
         )
-        timeout_block = self._convert_timeout_arg_block("TIMEOUT", timeout)
+        timeout_block = self._convert_test_timeout_arg_block("TIMEOUT", timeout, size)
         self._emit_platform_guard_begin(target_compatible_with)
         if deps_var_block:
             self._converter.body += deps_var_block

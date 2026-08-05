@@ -78,13 +78,14 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
 }
 _LOOM_CONFIG_CMAKE_OPTIONS.update(_loom_amdgpu_config_cmake_options())
 
-_LOW_DESCRIPTOR_ROOTPATH_PATTERN = re.compile(r"\$\(rootpath ([^)]+)\)")
+_GENERATED_ROOTPATH_PATTERN = re.compile(r"\$\(rootpath ([^)]+)\)")
 
 
 class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def _custom_initialize(self):
         self._loom_low_descriptor_archive_source_vars = {}
         self._loom_low_descriptor_archive_targets = {}
+        self._loom_generated_external_files = {}
         self.LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY = _LOOM_AMDGPU_TARGET_CONFIG[
             "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY"
         ]
@@ -413,37 +414,74 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
             return repo_name, f"{package}/{filename}"
         return repo_name, filename
 
-    def _convert_low_descriptor_file_label(self, label):
+    def _convert_generated_file_label(self, label):
+        generated_external_file = self._loom_generated_external_files.get(label)
+        if generated_external_file is not None:
+            return generated_external_file
         if label.startswith("@"):
             repo_name, filename = self._parse_external_file_label(label)
             try:
                 source_var = self._loom_low_descriptor_archive_source_vars[repo_name]
             except KeyError as exc:
                 raise ValueError(
-                    f"Low descriptor input {label} requires a prior "
-                    f"loom_low_descriptor_data_archive for repo '{repo_name}'"
+                    f"Generated input {label} has no CMake source mapping for "
+                    f"external repo '{repo_name}'"
                 ) from exc
             return f"${{{source_var}}}/{filename}"
         return self._normalize_label(label)
 
-    def _convert_low_descriptor_input_label(self, label):
-        inputs = [self._convert_low_descriptor_file_label(label)]
-        if label.startswith("@"):
+    def _cmake_location_paths(self, label):
+        generated_external_file = self._loom_generated_external_files.get(label)
+        if generated_external_file is not None:
+            return [generated_external_file]
+        return super()._cmake_location_paths(label)
+
+    def loom_spirv_registry_sources(
+        self,
+        name,
+        tags=None,
+        target_compatible_with=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        _ = name
+        target_compatible_with = self._apply_loom_target_compatible_with(
+            target_compatible_with
+        )
+        self._loom_generated_external_files[
+            "@spirv_headers//:spirv_core_grammar_unified1"
+        ] = "${_LOOM_SPIRV_CORE_GRAMMAR}"
+        self._loom_generated_external_files["@vulkan_headers//:vulkan_xml_registry"] = (
+            "${_LOOM_VULKAN_XML_REGISTRY}"
+        )
+        self._converter.header += self._guard_cmake_text(
+            "\n"
+            "iree_get_spirv_registry_sources(\n"
+            "  _LOOM_SPIRV_CORE_GRAMMAR\n"
+            "  _LOOM_VULKAN_XML_REGISTRY\n"
+            ")\n\n",
+            target_compatible_with,
+        )
+
+    def _convert_generated_input_label(self, label):
+        inputs = [self._convert_generated_file_label(label)]
+        if label.startswith("@") and label not in self._loom_generated_external_files:
             repo_name, _ = self._parse_external_file_label(label)
             inputs.append(self._loom_low_descriptor_archive_targets[repo_name])
         return inputs
 
-    def _convert_low_descriptor_arg(self, arg):
+    def _convert_generated_arg(self, arg):
         def replace_rootpath(match):
-            return self._convert_low_descriptor_file_label(match.group(1))
+            return self._convert_generated_file_label(match.group(1))
 
-        return _LOW_DESCRIPTOR_ROOTPATH_PATTERN.sub(replace_rootpath, arg)
+        return _GENERATED_ROOTPATH_PATTERN.sub(replace_rootpath, arg)
 
     def _convert_generated_args(self, args):
         def convert(args):
             converted_args = []
             for arg in args or []:
-                arg = self._convert_low_descriptor_arg(arg)
+                arg = self._convert_generated_arg(arg)
                 converted_args.extend(self._convert_location_arg(arg))
             return converted_args
 
@@ -453,7 +491,7 @@ class LoomBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
         def convert(inputs):
             converted_inputs = []
             for label in inputs or []:
-                for converted_input in self._convert_low_descriptor_input_label(label):
+                for converted_input in self._convert_generated_input_label(label):
                     if converted_input not in converted_inputs:
                         converted_inputs.append(converted_input)
             return converted_inputs

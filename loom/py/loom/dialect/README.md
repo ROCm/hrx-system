@@ -53,6 +53,52 @@ The `format` order is part of the API exposed to generated Python and C builder
 surfaces. Reordering format fields changes the way generated builders ask for
 arguments even when the underlying IR fields are unchanged.
 
+### Public Field Semantics
+
+Every declared operation field is public Loom IR, including optional,
+backend-specific, generated, or lowering-only attributes, operands, results,
+types, regions, and enum cases. Each field has a stable meaning that can be
+authored, documented, verified, round-tripped through text and bytecode,
+cloned, and transformed without compiler-private producer context.
+
+This semantic contract is distinct from a typed attribute's private physical
+layout. A `scoped_enum` field carries the stable key encoded in text and
+bytecode even though canonical C IR stores a dense ordinal interpreted by the
+function's representation contract. String-, symbol-, and type-table indexes
+follow the same rule: changing their private layout cannot change the authored
+field value or meaning.
+
+Caches, analysis results, resolved facts, capability masks, provider records,
+pointer-like handles, fingerprints, and pass-local state remain in
+compiler-owned objects. Private indexes and dense ordinals are valid physical
+payloads only behind a typed public attribute whose format codecs preserve the
+stable semantic value. An opaque integer or string does not create public
+semantics; `contract_feature_bits` is invalid because generated provider bit
+positions become the authored meaning and a table-layout change reinterprets
+the IR.
+
+Target information represented in IR follows the same rule without presuming
+that target records, authored feature sets, or compatibility witnesses should
+exist. Each construct still needs a real caller and semantic owner, with an
+explicit relation to environment facts, lowering choices, and artifact
+requirements; invocation-owned profiles or program-derived facts may be the
+correct owner instead. Corpus fixtures reach target-dependent behavior through
+the same public IR and compiler APIs as shipping callers rather than injecting
+internal masks, IDs, cached facts, or provider records.
+
+Every proposed field satisfies all of these review conditions:
+
+- Its meaning does not rely on a compiler-private data structure or table.
+- A user can select or understand it from program or compilation semantics.
+- Parsing, bytecode round-trip, cloning, canonicalization, and independent
+  transformation preserve it using only declared public context.
+- Verification depends only on public IR and declared public contracts.
+- Internal representation changes leave the authored value and meaning
+  unchanged.
+
+A field that fails any condition belongs in analysis, plan, target facts, or
+pipeline-owned state outside IR.
+
 ## Assembly Formats
 
 Assembly format elements live in

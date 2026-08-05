@@ -87,10 +87,10 @@ set(IREE_DEP_SPIRV_HEADERS_VERSION "")
 set(IREE_DEP_SPIRV_HEADERS_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_SPIRV_HEADERS_SOURCE_URL "")
 set(IREE_DEP_SPIRV_HEADERS_URLS
-  "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.341.0.tar.gz"
+  "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.357.0.tar.gz"
 )
-set(IREE_DEP_SPIRV_HEADERS_SHA256 "cab0a654c4917e16367483296b44cdb1d614e3120c721beafcd37e3a8580486c")
-set(IREE_DEP_SPIRV_HEADERS_STRIP_PREFIX "SPIRV-Headers-vulkan-sdk-1.4.341.0")
+set(IREE_DEP_SPIRV_HEADERS_SHA256 "4d703067a7e06331ccb37bdfed3f9b7879cc61969a2689ae95c95db34a47ff07")
+set(IREE_DEP_SPIRV_HEADERS_STRIP_PREFIX "SPIRV-Headers-vulkan-sdk-1.4.357.0")
 set(IREE_DEP_SPIRV_HEADERS_BUILD_FILE "//build_tools/third_party/spirv_tools:spirv_headers.BUILD.bazel")
 
 set(IREE_DEP_SPIRV_TOOLS_KIND "http_archive")
@@ -101,10 +101,10 @@ set(IREE_DEP_SPIRV_TOOLS_VERSION "")
 set(IREE_DEP_SPIRV_TOOLS_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_SPIRV_TOOLS_SOURCE_URL "")
 set(IREE_DEP_SPIRV_TOOLS_URLS
-  "https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/v2026.1.tar.gz"
+  "https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/vulkan-sdk-1.4.357.0.tar.gz"
 )
-set(IREE_DEP_SPIRV_TOOLS_SHA256 "35dc16cf2dc64be5b6bbbe86d210e6f4a82b070cffd751605a3365cd8bce2d7e")
-set(IREE_DEP_SPIRV_TOOLS_STRIP_PREFIX "SPIRV-Tools-2026.1")
+set(IREE_DEP_SPIRV_TOOLS_SHA256 "d31e7109b6ef3559067e53e520870eafed7c9534d00db9728814b6df03fa4a5e")
+set(IREE_DEP_SPIRV_TOOLS_STRIP_PREFIX "SPIRV-Tools-vulkan-sdk-1.4.357.0")
 set(IREE_DEP_SPIRV_TOOLS_BUILD_FILE "//build_tools/third_party/spirv_tools:spirv_tools.BUILD.bazel")
 
 set(IREE_DEP_VULKAN_HEADERS_KIND "http_archive")
@@ -115,10 +115,10 @@ set(IREE_DEP_VULKAN_HEADERS_VERSION "")
 set(IREE_DEP_VULKAN_HEADERS_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_VULKAN_HEADERS_SOURCE_URL "")
 set(IREE_DEP_VULKAN_HEADERS_URLS
-  "https://github.com/KhronosGroup/Vulkan-Headers/archive/df60f0316899460eeaaefa06d2dd7e4e300c1604.tar.gz"
+  "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/vulkan-sdk-1.4.357.0.tar.gz"
 )
-set(IREE_DEP_VULKAN_HEADERS_SHA256 "70de3ec1eec289552052dfb886a49a4578b65d84fd536da3254731c8165cb3e6")
-set(IREE_DEP_VULKAN_HEADERS_STRIP_PREFIX "Vulkan-Headers-df60f0316899460eeaaefa06d2dd7e4e300c1604")
+set(IREE_DEP_VULKAN_HEADERS_SHA256 "e87dce08116151f6b6d7de6b6faf41498e87e6cf848ff16fa3bd5402190ad4a3")
+set(IREE_DEP_VULKAN_HEADERS_STRIP_PREFIX "Vulkan-Headers-vulkan-sdk-1.4.357.0")
 set(IREE_DEP_VULKAN_HEADERS_BUILD_FILE "//build_tools/third_party/vulkan_headers:vulkan_headers.BUILD.bazel")
 
 set(IREE_DEP_FLATCC_KIND "http_archive")
