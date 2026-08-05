@@ -44,8 +44,8 @@ kernel.def @shared_memory_wave_i32_roundtrip_static_offset() {
 } launch(%output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %four = index.constant 4 : index
-  %scratch_index = index.add %lane, %four : index
+  %scratch_prefix_elements = index.constant 4 : index
+  %scratch_index = index.add %lane, %scratch_prefix_elements : index
   %lane_i32 = index.cast %lane : index to i32
   %bias = scalar.constant 11 : i32
   %value = scalar.addi %lane_i32, %bias : i32
@@ -111,8 +111,8 @@ kernel.def @shared_memory_cross_wave_i32_roundtrip_two_regions() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %onehundredtwentyeight = index.constant 128 : index
-  %second_region_index = index.add %lane, %onehundredtwentyeight : index
+  %region_element_count = index.constant 128 : index
+  %second_region_index = index.add %lane, %region_element_count : index
   %scratch_bytes = index.constant 1024 : offset
 
   %input_view = buffer.view %input[%base] : buffer -> view<256xi32, #dense>

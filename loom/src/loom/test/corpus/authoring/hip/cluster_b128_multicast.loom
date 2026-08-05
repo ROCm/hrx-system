@@ -10,31 +10,30 @@
 amdgpu.target<gfx1250> @gfx1250
 
 kernel.def target(@gfx1250) @cluster_b128_multicast() {
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %thirty_two = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %two, %one) workgroup_size(%thirty_two, %one, %one) cluster_size(%one, %two, %one) : index
+  %unit = index.constant 1 : index
+  %cluster_workgroups_y = index.constant 2 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %cluster_workgroups_y, %unit) workgroup_size(%workgroup_size, %unit, %unit) cluster_size(%unit, %cluster_workgroups_y, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %sixteen = index.constant 16 : index
+  %lane_transfer_bytes = index.constant 16 : offset
   %scratch_bytes = index.constant 512 : offset
   %participants = scalar.constant 3 : i32
-  %zero_i32 = scalar.constant 0 : i32
-  %one_i32 = scalar.constant 1 : i32
-  %two_i32 = scalar.constant 2 : i32
-  %three_i32 = scalar.constant 3 : i32
-  %four_i32 = scalar.constant 4 : i32
+  %failure_value = scalar.constant 0 : i32
+  %success_value = scalar.constant 1 : i32
+  %first_word_ordinal = scalar.constant 1 : i32
+  %second_word_ordinal = scalar.constant 2 : i32
+  %third_word_ordinal = scalar.constant 3 : i32
+  %fourth_word_ordinal = scalar.constant 4 : i32
+  %words_per_lane = scalar.constant 4 : i32
 
   %lane = kernel.workitem.id<x> : index
   %workgroup_y = kernel.workgroup.id<y> : index
-  %lane_byte_index = index.mul %lane, %sixteen : index
-  %lane_byte_offset = index.cast %lane_byte_index : index to offset
+  %lane_byte_offset = index.scale %lane, %lane_transfer_bytes : index, offset -> offset
 
   %input_noalias, %output_noalias = buffer.assume.noalias %input, %output : buffer, buffer
-  %input_global = buffer.assume.memory_space<global> %input_noalias : buffer
-  %output_global = buffer.assume.memory_space<global> %output_noalias : buffer
-  %source = buffer.view %input_global[%lane_byte_offset] : buffer -> view<16xi8, #dense>
-  %output_view = buffer.view %output_global[%base] : buffer -> view<2x32xi32, #dense>
+  %source = buffer.view %input_noalias[%lane_byte_offset] : buffer -> view<16xi8, #dense>
+  %output_view = buffer.view %output_noalias[%base] : buffer -> view<2x32xi32, #dense>
 
   %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
   %destination = buffer.view %scratch[%lane_byte_offset] : buffer -> view<16xi8, #dense>
@@ -51,11 +50,11 @@ kernel.def target(@gfx1250) @cluster_b128_multicast() {
   %actual2 = vector.extract %actual[2] : vector<4xi32> -> i32
   %actual3 = vector.extract %actual[3] : vector<4xi32> -> i32
   %lane_i32 = index.cast %lane : index to i32
-  %expected_base = scalar.muli %lane_i32, %four_i32 : i32
-  %expected0 = scalar.addi %expected_base, %one_i32 : i32
-  %expected1 = scalar.addi %expected_base, %two_i32 : i32
-  %expected2 = scalar.addi %expected_base, %three_i32 : i32
-  %expected3 = scalar.addi %expected_base, %four_i32 : i32
+  %expected_base = scalar.muli %lane_i32, %words_per_lane : i32
+  %expected0 = scalar.addi %expected_base, %first_word_ordinal : i32
+  %expected1 = scalar.addi %expected_base, %second_word_ordinal : i32
+  %expected2 = scalar.addi %expected_base, %third_word_ordinal : i32
+  %expected3 = scalar.addi %expected_base, %fourth_word_ordinal : i32
   %valid0 = scalar.cmpi eq, %actual0, %expected0 : i32
   %valid1 = scalar.cmpi eq, %actual1, %expected1 : i32
   %valid2 = scalar.cmpi eq, %actual2, %expected2 : i32
@@ -63,7 +62,7 @@ kernel.def target(@gfx1250) @cluster_b128_multicast() {
   %valid01 = scalar.andi %valid0, %valid1 : i1
   %valid23 = scalar.andi %valid2, %valid3 : i1
   %valid = scalar.andi %valid01, %valid23 : i1
-  %result = scf.select %valid, %one_i32, %zero_i32 : i32
+  %result = scf.select %valid, %success_value, %failure_value : i32
   view.store %result, %output_view[%workgroup_y, %lane] : i32, view<2x32xi32, #dense>
   kernel.return
 }

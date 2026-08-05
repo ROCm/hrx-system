@@ -22,7 +22,7 @@ kernel.def @indexed_row_gather_f32(%nrows: index, %ncols: index, %source_rows: i
   kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%nrows: index, %ncols: index, %source_rows: index, %source: buffer, %indices: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %zero_i32 = scalar.constant 0 : i32
+  %minimum_row_id = scalar.constant 0 : i32
   %workgroup = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %workgroup_size = index.constant 256 : index
@@ -43,7 +43,7 @@ kernel.def @indexed_row_gather_f32(%nrows: index, %ncols: index, %source_rows: i
     %row0 = index.div %linear, %bounded_ncols : index
     %row = index.assume %row0 [range(%row0, 0, 65534), lt(%row0, %bounded_nrows)] : index
     %source_row_i32 = view.load %indices_view[%row] : view<[%bounded_nrows]xi32, #dense> -> i32
-    %source_row_nonnegative = scalar.cmpi sge, %source_row_i32, %zero_i32 : i32
+    %source_row_nonnegative = scalar.cmpi sge, %source_row_i32, %minimum_row_id : i32
     scf.if %source_row_nonnegative {
       %source_row = index.cast %source_row_i32 : i32 to index
       %source_row_valid = index.cmp ult, %source_row, %bounded_source_rows : index
