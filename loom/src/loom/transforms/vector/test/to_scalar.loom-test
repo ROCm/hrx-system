@@ -953,8 +953,9 @@ func.def @rejects_static_lane_count_beyond_value_slice() {
 // ====
 
 func.def @rejects_out_of_bounds_transform_iota_permutation(%v: vector<2xf32>, %signs: vector<2xi1>) -> (vector<2xf32>) {
-  %one = index.constant 1 : index
-  %permutation = vector.iota %one step %one : vector<2xindex>
+  %permutation_start = index.constant 1 : index
+  %permutation_step = index.constant 1 : index
+  %permutation = vector.iota %permutation_start step %permutation_step : vector<2xindex>
   %xf = encoding.define #numeric_transform<family="sign_permute_hadamard", input_elems=2, output_elems=2> {permutation = %permutation : vector<2xindex>, signs = %signs : vector<2xi1>} : encoding<transform>
   // ERROR@+1: ENCODING/020 {op_name="vector.transform", pass_name="vector-to-scalar"}
   %r = vector.transform %v, %xf : vector<2xf32>, encoding<transform> -> vector<2xf32>
