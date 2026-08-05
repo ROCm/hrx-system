@@ -1243,7 +1243,7 @@ def _v_binary_u32_overlay(
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
-            AmdgpuOperandOverlay("SRC0", _vgpr_operand(lhs_name)),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand(lhs_name)),
             AmdgpuOperandOverlay("VSRC1", _vgpr_operand(rhs_name)),
         ),
         operand_forms=tuple(operand_forms),
@@ -1262,7 +1262,7 @@ def _v_mul_lo_u32_overlay() -> AmdgpuDescriptorOverlay:
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
-            AmdgpuOperandOverlay("SRC0", _vgpr_operand("lhs")),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("lhs")),
             AmdgpuOperandOverlay("SRC1", _vgpr_operand("rhs")),
         ),
         constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
@@ -1280,7 +1280,7 @@ def _v_mul_hi_u32_overlay() -> AmdgpuDescriptorOverlay:
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
-            AmdgpuOperandOverlay("SRC0", _vgpr_operand("lhs")),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("lhs")),
             AmdgpuOperandOverlay("SRC1", _vgpr_operand("rhs")),
         ),
         constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,

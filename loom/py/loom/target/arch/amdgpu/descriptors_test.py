@@ -1317,6 +1317,37 @@ def test_pure_integer_valu_results_are_rematerializable() -> None:
             )
 
 
+def test_integer_binary_src0_accepts_scalar_or_vector_registers() -> None:
+    descriptor_keys = (
+        "amdgpu.v_mul_lo_u32",
+        "amdgpu.v_mul_hi_u32",
+        "amdgpu.v_mul_u32_u24",
+        "amdgpu.v_min_i32",
+        "amdgpu.v_max_i32",
+        "amdgpu.v_min_u32",
+        "amdgpu.v_max_u32",
+        "amdgpu.v_and_b32",
+        "amdgpu.v_or_b32",
+        "amdgpu.v_xor_b32",
+        "amdgpu.v_lshlrev_b32",
+        "amdgpu.v_lshrrev_b32",
+        "amdgpu.v_ashrrev_i32",
+    )
+    expected_alternatives = (RegClassAlt(_REG_SGPR), RegClassAlt(_REG_VGPR))
+    for overlays in (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx117x_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx125x_core_overlays(),
+    ):
+        descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
+        for descriptor_key in descriptor_keys:
+            lhs = descriptors[descriptor_key].operands[1].descriptor_operand
+            assert lhs.reg_alts == expected_alternatives
+
+
 def test_full_width_conversion_results_are_rematerializable() -> None:
     descriptor_keys = (
         "amdgpu.v_cvt_f32_i32",

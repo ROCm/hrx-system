@@ -714,11 +714,9 @@ static bool loom_amdgpu_subgroup_reduce_dpp_row_descriptor_is_present(
 }
 
 static bool loom_amdgpu_subgroup_reduce_scalar_broadcast_is_supported(
-    loom_amdgpu_subgroup_payload_kind_t payload_kind, uint32_t register_count,
-    uint32_t wavefront_size, uint32_t active_lane_count,
-    bool has_cluster_attrs) {
-  return loom_amdgpu_collective_payload_is_float(payload_kind) &&
-         register_count > 0 && wavefront_size == 64 &&
+    uint32_t register_count, uint32_t wavefront_size,
+    uint32_t active_lane_count, bool has_cluster_attrs) {
+  return register_count > 0 && wavefront_size == 64 &&
          active_lane_count == 64 && !has_cluster_attrs;
 }
 
@@ -789,8 +787,7 @@ iree_status_t loom_amdgpu_select_kernel_subgroup_reduce_plan(
       LOOM_AMDGPU_SUBGROUP_REDUCE_PUBLICATION_ALL_LANES;
   if (!direct_width_selected) {
     if (!loom_amdgpu_subgroup_reduce_scalar_broadcast_is_supported(
-            payload_kind, register_count, wavefront_size, active_lane_count,
-            is_clustered)) {
+            register_count, wavefront_size, active_lane_count, is_clustered)) {
       return iree_ok_status();
     }
     publication_kind = LOOM_AMDGPU_SUBGROUP_REDUCE_PUBLICATION_SCALAR_BROADCAST;
@@ -2196,8 +2193,8 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_reduce(
   if (!direct_width_supported) {
     scalar_broadcast_supported =
         loom_amdgpu_subgroup_reduce_scalar_broadcast_is_supported(
-            payload_kind, unused_register_count, wavefront_size,
-            active_lane_count, is_clustered);
+            unused_register_count, wavefront_size, active_lane_count,
+            is_clustered);
     if (!scalar_broadcast_supported) {
       return loom_amdgpu_low_legality_reject(
           context, op,
