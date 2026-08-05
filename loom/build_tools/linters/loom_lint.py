@@ -5,15 +5,19 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Loom Python linting orchestrator.
+"""Standalone Loom Python source maintenance driver.
 
-Runs code generators, ruff (lint + format), and mypy on the loom Python
-package. Used by the `dev.py bazel precommit` Loom lint path and runnable
-standalone:
+Runs checked-in code generators and Ruff fixups in place, then runs mypy on the
+Loom Python package. This is an explicit maintenance command, not the
+`dev.py bazel precommit` policy path. Normal presubmit checks generated files
+without mutating the worktree.
+
+Run from the repository root:
 
     python loom/build_tools/linters/loom_lint.py
 
-Exit code is 0 only if all steps pass and no files were modified.
+Exit code is zero when all maintenance steps succeed; generated or formatted
+changes may remain in the worktree for review.
 """
 
 import os
