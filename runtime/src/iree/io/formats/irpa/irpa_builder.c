@@ -239,13 +239,21 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_write(
   // Write entry table following the header.
   // This references ranges in the metadata and storage segment but to preserve
   // forward-only writes we populate those after writing the table.
+  const uint8_t zero = 0;
+  iree_io_physical_offset_t entry_offset = sizeof(header);
   iree_io_physical_offset_t metadata_offset = 0;
   for (iree_host_size_t i = 0;
        i < iree_io_parameter_index_count(builder->index); ++i) {
-    // Align each entry to the base alignment.
+    // Explicitly zero alignment padding so writing into reused storage produces
+    // the deterministic bytes required by the archive format.
+    const iree_io_physical_offset_t aligned_entry_offset = iree_align_uint64(
+        entry_offset, IREE_IO_PARAMETER_ARCHIVE_ENTRY_ALIGNMENT);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_io_stream_seek_to_alignment(
-                stream, IREE_IO_PARAMETER_ARCHIVE_ENTRY_ALIGNMENT));
+        z0,
+        iree_io_stream_fill(
+            stream, (iree_io_stream_pos_t)(aligned_entry_offset - entry_offset),
+            &zero, sizeof(zero)));
+    entry_offset = aligned_entry_offset;
 
     // Query the source entry template.
     const iree_io_parameter_index_entry_t* source_entry = NULL;
@@ -292,6 +300,7 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_write(
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0,
             iree_io_stream_write(stream, sizeof(splat_entry), &splat_entry));
+        entry_offset += sizeof(splat_entry);
         break;
       }
       case IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE: {
@@ -316,6 +325,7 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_write(
         target_entry.storage.file.offset += storage_base_offset;
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0, iree_io_stream_write(stream, sizeof(data_entry), &data_entry));
+        entry_offset += sizeof(data_entry);
         break;
       }
       default: {

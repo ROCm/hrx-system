@@ -111,7 +111,7 @@ TEST_F(IrpaBuilderTest, WritesExpectedV0Layout) {
   const iree_io_physical_size_t total_size = TotalSize();
   EXPECT_EQ(4096u, total_size);
 
-  std::vector<uint8_t> file_contents(total_size, 0);
+  std::vector<uint8_t> file_contents(total_size, 0xCD);
   iree_io_file_handle_t* file_handle = NULL;
   IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
       IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
@@ -136,6 +136,25 @@ TEST_F(IrpaBuilderTest, WritesExpectedV0Layout) {
   EXPECT_EQ(8u, header->metadata_segment.length);
   EXPECT_EQ(320u, header->storage_segment.offset);
   EXPECT_EQ(69u, header->storage_segment.length);
+
+  iree_io_physical_offset_t entry_offset = header->entry_segment.offset;
+  for (iree_host_size_t i = 0; i < header->entry_count; ++i) {
+    const auto* archive_entry =
+        reinterpret_cast<const iree_io_parameter_archive_entry_header_t*>(
+            file_contents.data() + entry_offset);
+    const iree_io_physical_offset_t unaligned_next_entry_offset =
+        entry_offset + archive_entry->entry_size;
+    const iree_io_physical_offset_t next_entry_offset = iree_align_uint64(
+        unaligned_next_entry_offset, IREE_IO_PARAMETER_ARCHIVE_ENTRY_ALIGNMENT);
+    if (i + 1 < header->entry_count) {
+      for (iree_io_physical_offset_t padding_offset =
+               unaligned_next_entry_offset;
+           padding_offset < next_entry_offset; ++padding_offset) {
+        EXPECT_EQ(0u, file_contents[padding_offset]);
+      }
+    }
+    entry_offset = next_entry_offset;
+  }
 
   const iree_io_parameter_index_entry_t* entry = NULL;
   IREE_ASSERT_OK(
