@@ -16,6 +16,7 @@
 #include "loom/error/emitter.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/util/cfg_graph.h"
+#include "loom/util/cfg_loop.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,6 +46,8 @@ typedef struct loom_low_function_model_t {
   loom_local_value_domain_t value_domain;
   // Read-only control-flow graph for the function body.
   loom_cfg_graph_t cfg_graph;
+  // Canonical loop intervals preserved from |cfg_graph|.
+  loom_cfg_loop_forest_t loop_forest;
   // Number of top-level operations in |body|.
   iree_host_size_t node_count;
   // Number of user-facing errors emitted while constructing the model.

@@ -1429,6 +1429,7 @@ iree_status_t loom_low_schedule_function(
                 .block_count = state.body->block_count,
             },
         .cfg_graph = model->cfg_graph,
+        .loop_forest = model->loop_forest,
         .nodes = state.nodes,
         .node_count = node_count,
         .dependency_group_count = state.dependency_index.group_count,

@@ -138,6 +138,8 @@ typedef struct loom_amdgpu_wait_frontier_t {
     // Incoming and locally produced groups active in the current block.
     loom_amdgpu_wait_xcnt_group_flags_t active_flags;
   } xcnt;
+  // Counter classes fully drained on every path through each block.
+  uint32_t* block_drain_counter_masks;
   // Per-block worklist and resolved-state bits.
   uint8_t* block_flags;
   // Current block index, or UINT16_MAX outside block processing.
@@ -156,6 +158,7 @@ iree_status_t loom_amdgpu_wait_frontier_initialize(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_wait_frontier_node_t* nodes,
     iree_host_size_t vgpr_unit_count, iree_host_size_t agpr_unit_count,
+    const uint32_t* planned_block_drain_counter_masks,
     iree_arena_allocator_t* arena, loom_amdgpu_wait_frontier_t* out_frontier);
 
 // Begins processing |block_index| and selects predecessor state. Processed

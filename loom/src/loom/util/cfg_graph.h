@@ -102,6 +102,10 @@ typedef struct loom_cfg_graph_t {
   iree_host_size_t block_count;
   // Number of valid in-region successor edges.
   iree_host_size_t edge_count;
+  // Number of edges whose target does not follow their source in region block
+  // order. This is a cheap rejection fact for loop analyses; a backward edge
+  // is not necessarily a semantic CFG backedge.
+  iree_host_size_t backward_edge_count;
   // True when malformed successor structure was seen while building the graph.
   bool malformed;
 } loom_cfg_graph_t;
@@ -144,18 +148,6 @@ loom_cfg_block_index_span_t loom_cfg_graph_predecessors(
 // Returns incoming predecessor edge indices for |block_index|.
 loom_cfg_edge_index_span_t loom_cfg_graph_predecessor_edges(
     const loom_cfg_graph_t* graph, uint16_t block_index);
-
-// Marks the natural loop induced by a backedge from |latch_index| to
-// |header_index| in |loop_blocks|. |loop_blocks| and |stack| must have at
-// least graph->block_count entries and are overwritten on entry. Returns false
-// when the indices are invalid or the temporary stack cannot represent the
-// graph. Unreachable predecessors are ignored so callers can build conservative
-// execution counts after CFG simplification.
-bool loom_cfg_graph_mark_natural_loop_blocks(const loom_cfg_graph_t* graph,
-                                             uint16_t header_index,
-                                             uint16_t latch_index,
-                                             uint8_t* loop_blocks,
-                                             uint16_t* stack);
 
 // Returns edge metadata for |edge_index|, or NULL when out of range.
 const loom_cfg_edge_info_t* loom_cfg_graph_edge(

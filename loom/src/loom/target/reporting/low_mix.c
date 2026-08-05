@@ -19,6 +19,7 @@
 #include "loom/target/registers.h"
 #include "loom/target/reporting/low_names.h"
 #include "loom/util/cfg_graph.h"
+#include "loom/util/cfg_loop.h"
 
 static bool loom_target_compile_report_low_branch_falls_through(
     const loom_low_schedule_table_t* schedule,
@@ -491,53 +492,42 @@ static bool loom_target_compile_report_low_block_branch_to(
 }
 
 static bool loom_target_compile_report_low_edge_copy_branch_arg(
-    const loom_low_allocation_table_t* allocation, const loom_op_t* branch_op,
-    const loom_block_t* dest, uint16_t arg_index,
-    loom_value_id_t* out_value_id) {
-  if (allocation == NULL || branch_op == NULL || dest == NULL ||
-      arg_index >= dest->arg_count) {
+    const loom_low_allocation_table_t* allocation,
+    uint32_t branch_source_ordinal, const loom_block_t* dest,
+    uint16_t arg_index, loom_value_id_t* out_value_id) {
+  if (allocation == NULL || dest == NULL || arg_index >= dest->arg_count) {
     return false;
   }
   const loom_value_id_t destination_value_id =
       loom_block_arg_id(dest, arg_index);
-  for (iree_host_size_t i = 0; i < allocation->edge_copy_group_count; ++i) {
-    const loom_low_allocation_edge_copy_group_t* group =
-        &allocation->edge_copy_groups[i];
-    if (group->terminator_op != branch_op) {
+  const loom_low_allocation_edge_copy_group_t* group =
+      loom_low_allocation_find_edge_copy_group_by_source_ordinal(
+          allocation, branch_source_ordinal);
+  if (group == NULL) return false;
+  bool found = false;
+  loom_value_id_t source_value_id = LOOM_VALUE_ID_INVALID;
+  const iree_host_size_t copy_end =
+      (iree_host_size_t)group->copy_start + (iree_host_size_t)group->copy_count;
+  if (copy_end > allocation->edge_copy_count) return false;
+  for (iree_host_size_t i = group->copy_start; i < copy_end; ++i) {
+    const loom_low_allocation_edge_copy_t* copy = &allocation->edge_copies[i];
+    if (copy->payload_index != arg_index ||
+        copy->destination_value_id != destination_value_id) {
       continue;
     }
-    bool found = false;
-    loom_value_id_t source_value_id = LOOM_VALUE_ID_INVALID;
-    const iree_host_size_t copy_end = (iree_host_size_t)group->copy_start +
-                                      (iree_host_size_t)group->copy_count;
-    if (copy_end > allocation->edge_copy_count) {
-      return false;
-    }
-    for (iree_host_size_t j = group->copy_start; j < copy_end; ++j) {
-      const loom_low_allocation_edge_copy_t* copy = &allocation->edge_copies[j];
-      if (copy->payload_index != arg_index ||
-          copy->destination_value_id != destination_value_id) {
-        continue;
-      }
-      if (found && copy->source_value_id != source_value_id) {
-        return false;
-      }
-      found = true;
-      source_value_id = copy->source_value_id;
-    }
-    if (!found) {
-      return false;
-    }
-    *out_value_id = source_value_id;
-    return true;
+    if (found && copy->source_value_id != source_value_id) return false;
+    found = true;
+    source_value_id = copy->source_value_id;
   }
-  return false;
+  if (!found) return false;
+  *out_value_id = source_value_id;
+  return true;
 }
 
 static bool loom_target_compile_report_low_branch_arg(
     const loom_low_allocation_table_t* allocation, const loom_op_t* branch_op,
-    const loom_block_t* dest, uint16_t arg_index,
-    loom_value_id_t* out_value_id) {
+    uint32_t branch_source_ordinal, const loom_block_t* dest,
+    uint16_t arg_index, loom_value_id_t* out_value_id) {
   *out_value_id = LOOM_VALUE_ID_INVALID;
   if (branch_op == NULL || arg_index >= dest->arg_count) {
     return false;
@@ -548,7 +538,7 @@ static bool loom_target_compile_report_low_branch_arg(
     return true;
   }
   return loom_target_compile_report_low_edge_copy_branch_arg(
-      allocation, branch_op, dest, arg_index, out_value_id);
+      allocation, branch_source_ordinal, dest, arg_index, out_value_id);
 }
 
 static bool loom_target_compile_report_low_add_step(
@@ -658,139 +648,65 @@ static bool loom_target_compile_report_low_compute_trip_count(
   return true;
 }
 
-static bool loom_target_compile_report_low_multiply_block(
-    uint64_t* block_multipliers, uint16_t block_index, uint64_t multiplier) {
-  return iree_checked_mul_u64(block_multipliers[block_index], multiplier,
-                              &block_multipliers[block_index]);
-}
-
-static bool loom_target_compile_report_low_find_counted_backedge(
-    const loom_cfg_graph_t* graph, uint16_t header_index,
-    const loom_op_t** out_backedge_op, loom_cfg_edge_index_t* out_backedge_edge,
-    uint16_t* out_latch_index) {
-  *out_backedge_op = NULL;
-  *out_backedge_edge = LOOM_CFG_EDGE_INDEX_INVALID;
-  *out_latch_index = UINT16_MAX;
-  const loom_block_t* header = graph->blocks[header_index].block;
-  loom_cfg_edge_index_span_t predecessor_edges =
-      loom_cfg_graph_predecessor_edges(graph, header_index);
-  for (iree_host_size_t i = 0; i < predecessor_edges.count; ++i) {
-    const loom_cfg_edge_index_t edge_index = predecessor_edges.values[i];
-    const loom_cfg_edge_info_t* edge = loom_cfg_graph_edge(graph, edge_index);
-    if (edge == NULL ||
-        !loom_cfg_graph_block_is_reachable(graph, edge->source_block_index) ||
-        edge->source_block_index < header_index) {
-      continue;
-    }
-    const loom_op_t* branch_op = NULL;
-    if (!loom_target_compile_report_low_block_branch_to(
-            graph->blocks[edge->source_block_index].block, header,
-            &branch_op)) {
-      return false;
-    }
-    if (*out_backedge_op != NULL) {
-      return false;
-    }
-    *out_backedge_op = branch_op;
-    *out_backedge_edge = edge_index;
-    *out_latch_index = edge->source_block_index;
-  }
-  return true;
-}
-
-static bool loom_target_compile_report_low_loop_has_unmodeled_conditional(
-    const loom_cfg_graph_t* graph, uint16_t header_index,
-    const uint8_t* loop_blocks) {
-  for (uint16_t block_index = 0; block_index < graph->block_count;
-       ++block_index) {
-    if (block_index == header_index || !loop_blocks[block_index]) {
-      continue;
-    }
-    const loom_block_t* block = graph->blocks[block_index].block;
-    const loom_op_t* terminator = block ? block->last_op : NULL;
-    if (terminator == NULL || !loom_low_cond_br_isa(terminator)) {
-      continue;
-    }
-    const loom_op_t* nested_backedge_op = NULL;
-    loom_cfg_edge_index_t nested_backedge_edge = LOOM_CFG_EDGE_INDEX_INVALID;
-    uint16_t nested_latch_index = UINT16_MAX;
-    if (!loom_target_compile_report_low_find_counted_backedge(
-            graph, block_index, &nested_backedge_op, &nested_backedge_edge,
-            &nested_latch_index) ||
-        nested_backedge_op == NULL) {
-      return true;
-    }
-  }
-  return false;
+static uint32_t loom_target_compile_report_low_block_terminator_ordinal(
+    const loom_low_schedule_table_t* schedule, uint16_t block_index) {
+  const loom_low_schedule_block_t* block = &schedule->blocks[block_index];
+  IREE_ASSERT_GT(block->node_count, 0);
+  const uint32_t node_index = block->node_start + block->node_count - 1;
+  IREE_ASSERT_LT(node_index, schedule->node_count);
+  IREE_ASSERT(schedule->nodes[node_index].op == block->block->last_op);
+  return schedule->nodes[node_index].source_ordinal;
 }
 
 static bool loom_target_compile_report_low_try_counted_loop(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_value_fact_table_t* fact_table, const loom_module_t* module,
-    const loom_cfg_graph_t* graph, uint16_t header_index,
-    uint64_t* block_multipliers, uint8_t* counted_backedge_edges,
-    uint8_t* loop_blocks, uint16_t* loop_stack) {
-  const loom_block_t* header = graph->blocks[header_index].block;
+    const loom_cfg_graph_t* graph, const loom_cfg_loop_interval_t* interval,
+    uint64_t* out_trip_count) {
+  *out_trip_count = 0;
+  const loom_block_t* header = graph->blocks[interval->header_index].block;
   if (header == NULL || header->arg_count == 0 || header->last_op == NULL ||
       !loom_low_cond_br_isa(header->last_op)) {
-    return true;
+    return false;
   }
   const loom_value_id_t iv_id = loom_block_arg_id(header, 0);
-  const loom_op_t* body_backedge_op = NULL;
-  loom_cfg_edge_index_t body_backedge_edge = LOOM_CFG_EDGE_INDEX_INVALID;
-  uint16_t latch_index = UINT16_MAX;
-  if (!loom_target_compile_report_low_find_counted_backedge(
-          graph, header_index, &body_backedge_op, &body_backedge_edge,
-          &latch_index)) {
-    return false;
-  }
-  if (body_backedge_op == NULL) {
-    return true;
-  }
-  if (!loom_cfg_graph_mark_natural_loop_blocks(graph, header_index, latch_index,
-                                               loop_blocks, loop_stack)) {
-    return false;
-  }
-  if (loom_target_compile_report_low_loop_has_unmodeled_conditional(
-          graph, header_index, loop_blocks)) {
-    return false;
-  }
-
-  loom_value_id_t body_backedge_arg = LOOM_VALUE_ID_INVALID;
-  if (!loom_target_compile_report_low_branch_arg(allocation, body_backedge_op,
-                                                 header, /*arg_index=*/0,
-                                                 &body_backedge_arg)) {
-    return false;
-  }
+  const loom_cfg_edge_info_t* entry_edge =
+      loom_cfg_graph_edge(graph, interval->entry_edge_index);
+  const loom_cfg_edge_info_t* backedge =
+      loom_cfg_graph_edge(graph, interval->backedge_edge_index);
+  if (entry_edge == NULL || backedge == NULL) return false;
 
   const loom_op_t* initial_branch_op = NULL;
-  loom_value_id_t initial_arg = LOOM_VALUE_ID_INVALID;
-  loom_cfg_block_index_span_t predecessors =
-      loom_cfg_graph_predecessors(graph, header_index);
-  for (iree_host_size_t i = 0; i < predecessors.count; ++i) {
-    const uint16_t predecessor_index = predecessors.values[i];
-    if (loop_blocks[predecessor_index] ||
-        !loom_cfg_graph_block_is_reachable(graph, predecessor_index)) {
-      continue;
-    }
-    const loom_op_t* branch_op = NULL;
-    if (!loom_target_compile_report_low_block_branch_to(
-            graph->blocks[predecessor_index].block, header, &branch_op)) {
-      return false;
-    }
-    loom_value_id_t branch_arg = LOOM_VALUE_ID_INVALID;
-    if (!loom_target_compile_report_low_branch_arg(
-            allocation, branch_op, header, /*arg_index=*/0, &branch_arg)) {
-      return false;
-    }
-    if (initial_branch_op != NULL) {
-      return false;
-    }
-    initial_branch_op = branch_op;
-    initial_arg = branch_arg;
+  if (!loom_target_compile_report_low_block_branch_to(
+          graph->blocks[entry_edge->source_block_index].block, header,
+          &initial_branch_op)) {
+    return false;
   }
-  if (initial_branch_op == NULL) {
+  const loom_op_t* body_backedge_op = NULL;
+  if (!loom_target_compile_report_low_block_branch_to(
+          graph->blocks[backedge->source_block_index].block, header,
+          &body_backedge_op)) {
+    return false;
+  }
+
+  const uint32_t backedge_source_ordinal =
+      loom_target_compile_report_low_block_terminator_ordinal(
+          schedule, backedge->source_block_index);
+  loom_value_id_t body_backedge_arg = LOOM_VALUE_ID_INVALID;
+  if (!loom_target_compile_report_low_branch_arg(
+          allocation, body_backedge_op, backedge_source_ordinal, header,
+          /*arg_index=*/0, &body_backedge_arg)) {
+    return false;
+  }
+
+  const uint32_t entry_source_ordinal =
+      loom_target_compile_report_low_block_terminator_ordinal(
+          schedule, entry_edge->source_block_index);
+  loom_value_id_t initial_arg = LOOM_VALUE_ID_INVALID;
+  if (!loom_target_compile_report_low_branch_arg(
+          allocation, initial_branch_op, entry_source_ordinal, header,
+          /*arg_index=*/0, &initial_arg)) {
     return false;
   }
 
@@ -798,7 +714,6 @@ static bool loom_target_compile_report_low_try_counted_loop(
   int64_t upper_bound = 0;
   int64_t step = 0;
   bool inclusive_upper_bound = false;
-  uint64_t trip_count = 0;
   bool lower_ok = loom_target_compile_report_value_exact_i64(
       fact_table, initial_arg, &lower_bound);
   bool step_ok = loom_target_compile_report_low_add_step(
@@ -807,57 +722,16 @@ static bool loom_target_compile_report_low_try_counted_loop(
       schedule, fact_table, module, header->last_op, iv_id, &upper_bound,
       &inclusive_upper_bound);
   bool trip_ok = loom_target_compile_report_low_compute_trip_count(
-      lower_bound, upper_bound, inclusive_upper_bound, step, &trip_count);
-  if (!lower_ok || !step_ok || !upper_ok || !trip_ok) {
-    return false;
-  }
-
-  uint64_t header_count = 0;
-  if (!iree_checked_add_u64(trip_count, 1, &header_count) ||
-      !loom_target_compile_report_low_multiply_block(
-          block_multipliers, header_index, header_count)) {
-    return false;
-  }
-  for (uint16_t block_index = 0; block_index < graph->block_count;
-       ++block_index) {
-    if (block_index == header_index || !loop_blocks[block_index]) {
-      continue;
-    }
-    if (!loom_target_compile_report_low_multiply_block(
-            block_multipliers, block_index, trip_count)) {
-      return false;
-    }
-  }
-  if (body_backedge_edge == LOOM_CFG_EDGE_INDEX_INVALID ||
-      body_backedge_edge >= graph->edge_count) {
-    return false;
-  }
-  counted_backedge_edges[body_backedge_edge] = 1;
-  return true;
-}
-
-static bool loom_target_compile_report_low_has_uncounted_backedge(
-    const loom_cfg_graph_t* graph, const uint8_t* counted_backedge_edges) {
-  for (iree_host_size_t i = 0; i < graph->edge_count; ++i) {
-    const loom_cfg_edge_info_t* edge = loom_cfg_graph_edge(graph, (uint32_t)i);
-    if (edge == NULL ||
-        !loom_cfg_graph_block_is_reachable(graph, edge->source_block_index)) {
-      continue;
-    }
-    if (edge->target_block_index <= edge->source_block_index &&
-        counted_backedge_edges[i] == 0) {
-      return true;
-    }
-  }
-  return false;
+      lower_bound, upper_bound, inclusive_upper_bound, step, out_trip_count);
+  return lower_ok && step_ok && upper_ok && trip_ok;
 }
 
 static iree_status_t loom_target_compile_report_low_block_multipliers(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_value_fact_table_t* fact_table, const loom_module_t* module,
-    const loom_op_t* function_op, iree_arena_allocator_t* arena,
-    uint64_t** out_block_multipliers, bool* out_exact) {
+    iree_arena_allocator_t* arena, uint64_t** out_block_multipliers,
+    bool* out_exact) {
   *out_block_multipliers = NULL;
   *out_exact = true;
   if (schedule->block_count == 0) {
@@ -867,53 +741,31 @@ static iree_status_t loom_target_compile_report_low_block_multipliers(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, schedule->block_count,
                                                  sizeof(*block_multipliers),
                                                  (void**)&block_multipliers));
-  for (iree_host_size_t i = 0; i < schedule->block_count; ++i) {
-    block_multipliers[i] = 1;
-  }
-
-  const loom_region_t* body = loom_low_function_const_body(function_op);
-  if (body == NULL || body->block_count == 0) {
-    *out_block_multipliers = block_multipliers;
+  const loom_cfg_graph_t* graph = &schedule->cfg_graph;
+  const loom_cfg_loop_forest_t* loop_forest = &schedule->loop_forest;
+  if (graph->malformed || graph->block_count != schedule->block_count) {
+    *out_exact = false;
     return iree_ok_status();
   }
-  loom_cfg_graph_t graph = {0};
-  IREE_RETURN_IF_ERROR(loom_cfg_graph_build(module, body, arena, &graph));
-  if (graph.malformed || graph.block_count != schedule->block_count) {
-    *out_block_multipliers = block_multipliers;
-    return iree_ok_status();
+  uint64_t* trip_counts = NULL;
+  if (loop_forest->interval_count > 0) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(arena, loop_forest->interval_count,
+                                  sizeof(*trip_counts), (void**)&trip_counts));
   }
-  uint8_t* counted_backedge_edges = NULL;
-  if (graph.edge_count > 0) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        arena, graph.edge_count, sizeof(*counted_backedge_edges),
-        (void**)&counted_backedge_edges));
-    memset(counted_backedge_edges, 0,
-           graph.edge_count * sizeof(*counted_backedge_edges));
-  }
-  uint8_t* loop_blocks = NULL;
-  uint16_t* loop_stack = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, graph.block_count, sizeof(*loop_blocks), (void**)&loop_blocks));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, graph.block_count, sizeof(*loop_stack), (void**)&loop_stack));
-  for (uint16_t block_index = 0; block_index < graph.block_count;
-       ++block_index) {
+  for (iree_host_size_t i = 0; i < loop_forest->interval_count; ++i) {
     if (!loom_target_compile_report_low_try_counted_loop(
-            schedule, allocation, fact_table, module, &graph, block_index,
-            block_multipliers, counted_backedge_edges, loop_blocks,
-            loop_stack)) {
-      *out_block_multipliers = NULL;
+            schedule, allocation, fact_table, module, graph,
+            &loop_forest->intervals[i], &trip_counts[i])) {
       *out_exact = false;
       return iree_ok_status();
     }
   }
-  if (loom_target_compile_report_low_has_uncounted_backedge(
-          &graph, counted_backedge_edges)) {
-    *out_block_multipliers = NULL;
-    *out_exact = false;
-    return iree_ok_status();
+  *out_exact = loom_cfg_loop_forest_calculate_block_execution_counts(
+      loop_forest, graph, trip_counts, block_multipliers);
+  if (*out_exact) {
+    *out_block_multipliers = block_multipliers;
   }
-  *out_block_multipliers = block_multipliers;
   return iree_ok_status();
 }
 
@@ -968,8 +820,8 @@ iree_status_t loom_target_compile_report_low_dynamic_context_initialize(
   if (iree_status_is_ok(status)) {
     status = loom_target_compile_report_low_block_multipliers(
         &frame->schedule, &frame->allocation, &out_context->fact_table,
-        frame->module, frame->function_op, &out_context->arena,
-        &out_context->block_multipliers, &block_multipliers_exact);
+        frame->module, &out_context->arena, &out_context->block_multipliers,
+        &block_multipliers_exact);
   }
   out_context->exact = iree_status_is_ok(status) && block_multipliers_exact;
   return status;

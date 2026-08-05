@@ -110,6 +110,7 @@ loom_cc_library(
     loom::target::registers
     loom::target::residency
     loom::util::cfg_graph
+    loom::util::cfg_loop
     loom::util::json
     loom::util::segmented_storage
     loom::util::stream

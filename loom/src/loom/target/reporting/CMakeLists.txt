@@ -138,6 +138,7 @@ loom_cc_library(
     loom::ops::low
     loom::target::registers
     loom::util::cfg_graph
+    loom::util::cfg_loop
     loom::util::fact_table
   PUBLIC
 )

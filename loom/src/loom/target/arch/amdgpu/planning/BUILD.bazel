@@ -209,6 +209,20 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "wait_loop",
+    srcs = ["wait_loop.c"],
+    hdrs = ["wait_loop.h"],
+    deps = [
+        "//loom/src/loom/codegen/low/schedule",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:cfg_loop",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "wait_plan",
     srcs = ["wait_plan.c"],
     hdrs = ["wait_plan.h"],
@@ -217,6 +231,7 @@ loom_cc_library(
         ":structural_packet",
         ":wait_counters",
         ":wait_frontier",
+        ":wait_loop",
         ":wait_packet_tables",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:descriptors",
