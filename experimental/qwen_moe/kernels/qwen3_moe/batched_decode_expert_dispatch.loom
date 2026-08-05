@@ -309,8 +309,8 @@ check.case public @qwen3_moe_batched_decode_expert_dispatch_singleton_case {
   %expected_assignments = check.generate.fill value(-1) : tensor<128xi32>
   %expected_counts = check.generate.fill value(-1) : tensor<4xi32>
   %expected_descriptors = check.generate.fill value(-1) : tensor<4x128x4xi32>
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch_reference(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch_reference[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
   check.expect.equal actual(%actual_assignments) expected(%expected_assignments) : tensor<128xi32>
   check.expect.equal actual(%actual_counts) expected(%expected_counts) : tensor<4xi32>
   check.expect.equal actual(%actual_descriptors) expected(%expected_descriptors) : tensor<4x128x4xi32>
@@ -329,8 +329,8 @@ check.case public @qwen3_moe_batched_decode_expert_dispatch_pair_case {
   %expected_assignments = check.generate.fill value(-1) : tensor<128xi32>
   %expected_counts = check.generate.fill value(-1) : tensor<4xi32>
   %expected_descriptors = check.generate.fill value(-1) : tensor<4x128x4xi32>
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch_reference(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch_reference[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
   check.expect.equal actual(%actual_assignments) expected(%expected_assignments) : tensor<128xi32>
   check.expect.equal actual(%actual_counts) expected(%expected_counts) : tensor<4xi32>
   check.expect.equal actual(%actual_descriptors) expected(%expected_descriptors) : tensor<4x128x4xi32>
@@ -349,8 +349,8 @@ check.case public @qwen3_moe_batched_decode_expert_dispatch_three_row_case {
   %expected_assignments = check.generate.fill value(-1) : tensor<128xi32>
   %expected_counts = check.generate.fill value(-1) : tensor<4xi32>
   %expected_descriptors = check.generate.fill value(-1) : tensor<4x128x4xi32>
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch_reference(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch_reference[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
   check.expect.equal actual(%actual_assignments) expected(%expected_assignments) : tensor<128xi32>
   check.expect.equal actual(%actual_counts) expected(%expected_counts) : tensor<4xi32>
   check.expect.equal actual(%actual_descriptors) expected(%expected_descriptors) : tensor<4x128x4xi32>
@@ -369,8 +369,8 @@ check.case public @qwen3_moe_batched_decode_expert_dispatch_four_row_case {
   %expected_assignments = check.generate.fill value(-1) : tensor<128xi32>
   %expected_counts = check.generate.fill value(-1) : tensor<4xi32>
   %expected_descriptors = check.generate.fill value(-1) : tensor<4x128x4xi32>
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch_reference(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch_reference[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
   check.expect.equal actual(%actual_assignments) expected(%expected_assignments) : tensor<128xi32>
   check.expect.equal actual(%actual_counts) expected(%expected_counts) : tensor<4xi32>
   check.expect.equal actual(%actual_descriptors) expected(%expected_descriptors) : tensor<4x128x4xi32>
@@ -389,8 +389,8 @@ check.case public @qwen3_moe_batched_decode_expert_dispatch_five_to_six_row_case
   %expected_assignments = check.generate.fill value(-1) : tensor<128xi32>
   %expected_counts = check.generate.fill value(-1) : tensor<4xi32>
   %expected_descriptors = check.generate.fill value(-1) : tensor<4x128x4xi32>
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch_reference(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch_reference[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
   check.expect.equal actual(%actual_assignments) expected(%expected_assignments) : tensor<128xi32>
   check.expect.equal actual(%actual_counts) expected(%expected_counts) : tensor<4xi32>
   check.expect.equal actual(%actual_descriptors) expected(%expected_descriptors) : tensor<4x128x4xi32>
@@ -409,8 +409,8 @@ check.case public @qwen3_moe_batched_decode_expert_dispatch_fourteen_to_fifteen_
   %expected_assignments = check.generate.fill value(-1) : tensor<128xi32>
   %expected_counts = check.generate.fill value(-1) : tensor<4xi32>
   %expected_descriptors = check.generate.fill value(-1) : tensor<4x128x4xi32>
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch_reference(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch_reference[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
   check.expect.equal actual(%actual_assignments) expected(%expected_assignments) : tensor<128xi32>
   check.expect.equal actual(%actual_counts) expected(%expected_counts) : tensor<4xi32>
   check.expect.equal actual(%actual_descriptors) expected(%expected_descriptors) : tensor<4x128x4xi32>
@@ -429,8 +429,8 @@ check.case public @qwen3_moe_batched_decode_expert_dispatch_coherent_case {
   %expected_assignments = check.generate.fill value(-1) : tensor<128xi32>
   %expected_counts = check.generate.fill value(-1) : tensor<4xi32>
   %expected_descriptors = check.generate.fill value(-1) : tensor<4x128x4xi32>
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch_reference(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch_reference[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
   check.expect.equal actual(%actual_assignments) expected(%expected_assignments) : tensor<128xi32>
   check.expect.equal actual(%actual_counts) expected(%expected_counts) : tensor<4xi32>
   check.expect.equal actual(%actual_descriptors) expected(%expected_descriptors) : tensor<4x128x4xi32>
@@ -451,8 +451,8 @@ check.case public @qwen3_moe_batched_decode_expert_dispatch_configurable_geometr
   %expected_assignments = check.generate.fill value(-1) : tensor<32xi32>
   %expected_counts = check.generate.fill value(-1) : tensor<4xi32>
   %expected_descriptors = check.generate.fill value(-1) : tensor<4x32x4xi32>
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : (index, index, index, index, tensor<8x4xi32>, tensor<32xi32>, tensor<4xi32>, tensor<4x32x4xi32>)
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch_reference(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : (index, index, index, index, tensor<8x4xi32>, tensor<32xi32>, tensor<4xi32>, tensor<4x32x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %actual_assignments, %actual_counts, %actual_descriptors) : [index, index, index, index](index, index, index, index, tensor<8x4xi32>, tensor<32xi32>, tensor<4xi32>, tensor<4x32x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch_reference[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expected_assignments, %expected_counts, %expected_descriptors) : [index, index, index, index](index, index, index, index, tensor<8x4xi32>, tensor<32xi32>, tensor<4xi32>, tensor<4x32x4xi32>)
   check.expect.equal actual(%actual_assignments) expected(%expected_assignments) : tensor<32xi32>
   check.expect.equal actual(%actual_counts) expected(%expected_counts) : tensor<4xi32>
   check.expect.equal actual(%actual_descriptors) expected(%expected_descriptors) : tensor<4x32x4xi32>
@@ -468,7 +468,7 @@ check.case public @qwen3_moe_batched_decode_expert_dispatch_diverse_benchmark_ca
   %assignment_ordinals = check.generate.fill value(-1) : tensor<128xi32>
   %queue_counts = check.generate.fill value(-1) : tensor<4xi32>
   %queue_descriptors = check.generate.fill value(-1) : tensor<4x128x4xi32>
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %assignment_ordinals, %queue_counts, %queue_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %assignment_ordinals, %queue_counts, %queue_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
   check.return
 }
 
@@ -481,7 +481,7 @@ check.case public @qwen3_moe_batched_decode_expert_dispatch_coherent_benchmark_c
   %assignment_ordinals = check.generate.fill value(-1) : tensor<128xi32>
   %queue_counts = check.generate.fill value(-1) : tensor<4xi32>
   %queue_descriptors = check.generate.fill value(-1) : tensor<4x128x4xi32>
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %assignment_ordinals, %queue_counts, %queue_descriptors) : (index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %assignment_ordinals, %queue_counts, %queue_descriptors) : [index, index, index, index](index, index, index, index, tensor<16x8xi32>, tensor<128xi32>, tensor<4xi32>, tensor<4x128x4xi32>)
   check.return
 }
 
@@ -494,7 +494,7 @@ check.case public @qwen3_moe_batched_decode_expert_dispatch_configurable_benchma
   %assignment_ordinals = check.generate.fill value(-1) : tensor<32xi32>
   %queue_counts = check.generate.fill value(-1) : tensor<4xi32>
   %queue_descriptors = check.generate.fill value(-1) : tensor<4x32x4xi32>
-  func.call @qwen3_moe_build_batched_decode_expert_dispatch(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %assignment_ordinals, %queue_counts, %queue_descriptors) : (index, index, index, index, tensor<8x4xi32>, tensor<32xi32>, tensor<4xi32>, tensor<4x32x4xi32>)
+  kernel.launch @qwen3_moe_build_batched_decode_expert_dispatch[%token_count, %route_count, %route_stride, %expert_count](%token_count, %route_count, %route_stride, %expert_count, %route_ids, %assignment_ordinals, %queue_counts, %queue_descriptors) : [index, index, index, index](index, index, index, index, tensor<8x4xi32>, tensor<32xi32>, tensor<4xi32>, tensor<4x32x4xi32>)
   check.return
 }
 

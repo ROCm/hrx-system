@@ -239,10 +239,10 @@ check.case public @ggml_quantize_q8_1_x4_f32_nonzero_case {
   %expected_d = check.generate.fill value(0.00787353515625) : tensor<4xf32>
   %expected_positive_s = check.generate.fill value(32.0) : tensor<4xf32>
   %expected_negative_s = check.generate.fill value(-32.0) : tensor<4xf32>
-  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %positive_input, %positive_packed) : (index, index, tensor<128xf32>, tensor<144xi8>)
-  func.call @ggml_q8_1_x4_inspect_one_group(%positive_packed, %positive_words, %positive_d, %positive_s) : (tensor<144xi8>, tensor<32xi32>, tensor<4xf32>, tensor<4xf32>)
-  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %negative_input, %negative_packed) : (index, index, tensor<128xf32>, tensor<144xi8>)
-  func.call @ggml_q8_1_x4_inspect_one_group(%negative_packed, %negative_words, %negative_d, %negative_s) : (tensor<144xi8>, tensor<32xi32>, tensor<4xf32>, tensor<4xf32>)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %input_size](%token_count, %input_size, %positive_input, %positive_packed) : [index, index](index, index, tensor<128xf32>, tensor<144xi8>)
+  kernel.launch @ggml_q8_1_x4_inspect_one_group[](%positive_packed, %positive_words, %positive_d, %positive_s) : [](tensor<144xi8>, tensor<32xi32>, tensor<4xf32>, tensor<4xf32>)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %input_size](%token_count, %input_size, %negative_input, %negative_packed) : [index, index](index, index, tensor<128xf32>, tensor<144xi8>)
+  kernel.launch @ggml_q8_1_x4_inspect_one_group[](%negative_packed, %negative_words, %negative_d, %negative_s) : [](tensor<144xi8>, tensor<32xi32>, tensor<4xf32>, tensor<4xf32>)
   check.expect.equal actual(%positive_words) expected(%expected_positive_words) : tensor<32xi32>
   check.expect.equal actual(%negative_words) expected(%expected_negative_words) : tensor<32xi32>
   check.expect.close actual(%positive_d) expected(%expected_d) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
@@ -258,7 +258,7 @@ check.case public @ggml_quantize_q8_1_x4_f32_benchmark_case {
   %input = check.generate.fill value(0.0) : tensor<[%token_count]x2048xf32>
   %packed = check.generate.fill value(1) : tensor<[%token_count]x2304xi8>
   %expected = check.generate.fill value(0) : tensor<[%token_count]x2304xi8>
-  func.call @ggml_quantize_q8_1_x4_f32(%token_count, %input_size, %input, %packed) : (index, index, tensor<[%token_count]x2048xf32>, tensor<[%token_count]x2304xi8>)
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %input_size](%token_count, %input_size, %input, %packed) : [index, index](index, index, tensor<[%token_count]x2048xf32>, tensor<[%token_count]x2304xi8>)
   check.expect.equal actual(%packed) expected(%expected) : tensor<[%token_count]x2304xi8>
   check.return
 }

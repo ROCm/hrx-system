@@ -222,9 +222,9 @@ check.case public @qwen3_moe_router_projection_f32_differential_case {
   %expected = check.generate.fill value(0.0) : tensor<2x32xf32>
   %decode_actual = check.generate.fill value(1.0) : tensor<2x32xf32>
   %prefill_actual = check.generate.fill value(1.0) : tensor<2x32xf32>
-  func.call @qwen3_moe_router_projection_f32_reference(%token_count, %input, %weight, %expected) : (index, tensor<2x512xf32>, tensor<32x512xf32>, tensor<2x32xf32>)
-  func.call @qwen3_moe_router_projection_f32_one_row_wave64(%token_count, %input, %weight, %decode_actual) : (index, tensor<2x512xf32>, tensor<32x512xf32>, tensor<2x32xf32>)
-  func.call @qwen3_moe_router_projection_f32_four_row_wave32(%token_count, %input, %weight, %prefill_actual) : (index, tensor<2x512xf32>, tensor<32x512xf32>, tensor<2x32xf32>)
+  kernel.launch @qwen3_moe_router_projection_f32_reference[%token_count](%token_count, %input, %weight, %expected) : [index](index, tensor<2x512xf32>, tensor<32x512xf32>, tensor<2x32xf32>)
+  kernel.launch @qwen3_moe_router_projection_f32_one_row_wave64[%token_count](%token_count, %input, %weight, %decode_actual) : [index](index, tensor<2x512xf32>, tensor<32x512xf32>, tensor<2x32xf32>)
+  kernel.launch @qwen3_moe_router_projection_f32_four_row_wave32[%token_count](%token_count, %input, %weight, %prefill_actual) : [index](index, tensor<2x512xf32>, tensor<32x512xf32>, tensor<2x32xf32>)
   check.expect.close actual(%decode_actual) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<2x32xf32>
   check.expect.close actual(%prefill_actual) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<2x32xf32>
   check.return
@@ -240,7 +240,7 @@ check.case public @qwen3_moe_router_projection_f32_decode_benchmark_case {
   %weight = check.generate.fill value(0.015625) : tensor<128x2048xf32>
   %output = check.generate.fill value(1.0) : tensor<[%token_count]x128xf32>
   %expected = check.generate.fill value(0.125) : tensor<[%token_count]x128xf32>
-  func.call @qwen3_moe_router_projection_f32_one_row_wave64(%token_count, %input, %weight, %output) : (index, tensor<[%token_count]x2048xf32>, tensor<128x2048xf32>, tensor<[%token_count]x128xf32>)
+  kernel.launch @qwen3_moe_router_projection_f32_one_row_wave64[%token_count](%token_count, %input, %weight, %output) : [index](index, tensor<[%token_count]x2048xf32>, tensor<128x2048xf32>, tensor<[%token_count]x128xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<[%token_count]x128xf32>
   check.return
 }
@@ -251,7 +251,7 @@ check.case public @qwen3_moe_router_projection_f32_prefill_benchmark_case {
   %weight = check.generate.fill value(0.015625) : tensor<128x2048xf32>
   %output = check.generate.fill value(1.0) : tensor<[%token_count]x128xf32>
   %expected = check.generate.fill value(0.125) : tensor<[%token_count]x128xf32>
-  func.call @qwen3_moe_router_projection_f32_four_row_wave32(%token_count, %input, %weight, %output) : (index, tensor<[%token_count]x2048xf32>, tensor<128x2048xf32>, tensor<[%token_count]x128xf32>)
+  kernel.launch @qwen3_moe_router_projection_f32_four_row_wave32[%token_count](%token_count, %input, %weight, %output) : [index](index, tensor<[%token_count]x2048xf32>, tensor<128x2048xf32>, tensor<[%token_count]x128xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0001) rtol(0.0001) nan(same) : tensor<[%token_count]x128xf32>
   check.return
 }

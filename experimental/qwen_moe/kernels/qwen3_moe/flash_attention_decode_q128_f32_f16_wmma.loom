@@ -238,7 +238,7 @@ check.case public @qwen3_moe_flash_attention_decode_q128_fused_selected_row_case
   %mask = check.generate.iota offset(0.0) step(-10000.0) : tensor<128xf16>
   %output = check.generate.fill value(-1.0) : tensor<1x128xf32>
   %expected = check.generate.iota offset(0.0) step(0.125) : tensor<1x128xf32>
-  func.call @qwen3_moe_flash_attention_decode_q128_fused_f32_f16_wmma(%key_value_token_count, %query, %key, %value, %mask, %output) : (index, tensor<1x128xf32>, tensor<128x1x128xf16>, tensor<128x1x128xf16>, tensor<128xf16>, tensor<1x128xf32>)
+  kernel.launch @qwen3_moe_flash_attention_decode_q128_fused_f32_f16_wmma[%key_value_token_count](%key_value_token_count, %query, %key, %value, %mask, %output) : [index](index, tensor<1x128xf32>, tensor<128x1x128xf16>, tensor<128x1x128xf16>, tensor<128xf16>, tensor<1x128xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.001) rtol(0.001) nan(same) : tensor<1x128xf32>
   check.return
 }
@@ -252,7 +252,7 @@ check.case public @qwen3_moe_flash_attention_decode_q128_fused_gqa_case {
   %mask = check.generate.fill value(0.0) : tensor<128xf16>
   %output = check.generate.fill value(-1.0) : tensor<32x128xf32>
   %expected = check.generate.fill value(2.0) : tensor<32x128xf32>
-  func.call @qwen3_moe_flash_attention_decode_q128_fused_f32_f16_wmma(%key_value_token_count, %query, %key, %value, %mask, %output) : (index, tensor<32x128xf32>, tensor<128x4x128xf16>, tensor<128x4x128xf16>, tensor<128xf16>, tensor<32x128xf32>)
+  kernel.launch @qwen3_moe_flash_attention_decode_q128_fused_f32_f16_wmma[%key_value_token_count](%key_value_token_count, %query, %key, %value, %mask, %output) : [index](index, tensor<32x128xf32>, tensor<128x4x128xf16>, tensor<128x4x128xf16>, tensor<128xf16>, tensor<32x128xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.001) rtol(0.001) nan(same) : tensor<32x128xf32>
   check.return
 }
@@ -265,7 +265,7 @@ check.case public @qwen3_moe_flash_attention_decode_q128_fused_benchmark_case {
   %mask = check.generate.fill value(0.0) : tensor<128xf16>
   %output = check.generate.fill value(1.0) : tensor<32x128xf32>
   %expected = check.generate.fill value(0.0) : tensor<32x128xf32>
-  func.call @qwen3_moe_flash_attention_decode_q128_fused_f32_f16_wmma(%key_value_token_count, %query, %key, %value, %mask, %output) : (index, tensor<32x128xf32>, tensor<128x4x128xf16>, tensor<128x4x128xf16>, tensor<128xf16>, tensor<32x128xf32>)
+  kernel.launch @qwen3_moe_flash_attention_decode_q128_fused_f32_f16_wmma[%key_value_token_count](%key_value_token_count, %query, %key, %value, %mask, %output) : [index](index, tensor<32x128xf32>, tensor<128x4x128xf16>, tensor<128x4x128xf16>, tensor<128xf16>, tensor<32x128xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<32x128xf32>
   check.return
 }
