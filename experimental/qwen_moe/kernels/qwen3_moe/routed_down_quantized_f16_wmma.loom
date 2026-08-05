@@ -538,7 +538,7 @@ check.case public @qwen3_moe_routed_down_q6k_f16_wmma_differential_case {
 }
 
 check.case public @qwen3_moe_routed_down_q4k_f16_wmma_benchmark_case {
-  %token_count = check.param.choice values([17, 32, 63, 128, 129, 512]) name("token_count") : index
+  %token_count = check.param.choice values([1, 2, 4, 8, 16, 17, 32, 63, 128, 129, 512]) name("token_count") : index
   %route_count = check.literal value(8) : index
   %route_stride = check.literal value(128) : index
   %expert_count = check.literal value(128) : index
@@ -558,7 +558,7 @@ check.case public @qwen3_moe_routed_down_q4k_f16_wmma_benchmark_case {
 }
 
 check.case public @qwen3_moe_routed_down_q6k_f16_wmma_benchmark_case {
-  %token_count = check.param.choice values([17, 32, 63, 128, 129, 512]) name("token_count") : index
+  %token_count = check.param.choice values([1, 2, 4, 8, 16, 17, 32, 63, 128, 129, 512]) name("token_count") : index
   %route_count = check.literal value(8) : index
   %route_stride = check.literal value(128) : index
   %expert_count = check.literal value(128) : index
@@ -577,7 +577,69 @@ check.case public @qwen3_moe_routed_down_q6k_f16_wmma_benchmark_case {
   check.return
 }
 
+// Maximally diverse decode-batch controls. Compact route storage makes the
+// flattened 0..127 iota assign every M=16 route to a different expert.
+check.case public @qwen3_moe_routed_down_q4k_f16_wmma_diverse_benchmark_case {
+  %token_count = check.param.choice values([1, 2, 4, 8, 16]) name("token_count") : index
+  %route_count = check.literal value(8) : index
+  %route_stride = check.literal value(8) : index
+  %expert_count = check.literal value(128) : index
+  %route_ids = check.generate.iota offset(0) step(1) period(128) : tensor<[%token_count]x8xi32>
+  %route_weights = check.generate.fill value(0.125) : tensor<[%token_count]x8xf32>
+  %expert_table = check.generate.fill value(-1) : tensor<65664xi32>
+  %input = check.generate.fill value(0.0) : tensor<[%token_count]x8x768xf16>
+  %weight = check.generate.fill value(0) : tensor<128x2048x3x144xi8>
+  %routed_output = check.generate.fill value(0.0) : tensor<[%token_count]x8x2048xf16>
+  %output = check.generate.fill value(1.0) : tensor<[%token_count]x2048xf32>
+  %expected = check.generate.fill value(1.0) : tensor<[%token_count]x2048xf32>
+  func.call @qwen3_moe_build_expert_table(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table) : (index, index, index, index, tensor<[%token_count]x8xi32>, tensor<65664xi32>)
+  func.call @qwen3_moe_routed_down_q4k_f16_wmma_grouped(%token_count, %input, %expert_table, %weight, %routed_output) : (index, tensor<[%token_count]x8x768xf16>, tensor<65664xi32>, tensor<128x2048x3x144xi8>, tensor<[%token_count]x8x2048xf16>)
+  func.call @qwen3_moe_routed_down_weighted_reduce_f16_f32(%token_count, %route_weights, %routed_output, %output) : (index, tensor<[%token_count]x8xf32>, tensor<[%token_count]x8x2048xf16>, tensor<[%token_count]x2048xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x2048xf32>
+  check.return
+}
+
+check.case public @qwen3_moe_routed_down_q6k_f16_wmma_diverse_benchmark_case {
+  %token_count = check.param.choice values([1, 2, 4, 8, 16]) name("token_count") : index
+  %route_count = check.literal value(8) : index
+  %route_stride = check.literal value(8) : index
+  %expert_count = check.literal value(128) : index
+  %route_ids = check.generate.iota offset(0) step(1) period(128) : tensor<[%token_count]x8xi32>
+  %route_weights = check.generate.fill value(0.125) : tensor<[%token_count]x8xf32>
+  %expert_table = check.generate.fill value(-1) : tensor<65664xi32>
+  %input = check.generate.fill value(0.0) : tensor<[%token_count]x8x768xf16>
+  %weight = check.generate.fill value(0) : tensor<128x2048x3x210xi8>
+  %routed_output = check.generate.fill value(0.0) : tensor<[%token_count]x8x2048xf16>
+  %output = check.generate.fill value(1.0) : tensor<[%token_count]x2048xf32>
+  %expected = check.generate.fill value(1.0) : tensor<[%token_count]x2048xf32>
+  func.call @qwen3_moe_build_expert_table(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table) : (index, index, index, index, tensor<[%token_count]x8xi32>, tensor<65664xi32>)
+  func.call @qwen3_moe_routed_down_q6k_f16_wmma_grouped(%token_count, %input, %expert_table, %weight, %routed_output) : (index, tensor<[%token_count]x8x768xf16>, tensor<65664xi32>, tensor<128x2048x3x210xi8>, tensor<[%token_count]x8x2048xf16>)
+  func.call @qwen3_moe_routed_down_weighted_reduce_f16_f32(%token_count, %route_weights, %routed_output, %output) : (index, tensor<[%token_count]x8xf32>, tensor<[%token_count]x8x2048xf16>, tensor<[%token_count]x2048xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x2048xf32>
+  check.return
+}
+
 check.benchmark<@qwen3_moe_routed_down_q4k_f16_wmma_differential_case> @qwen3_moe_routed_down_q4k_f16_wmma_small
+
+check.benchmark<@qwen3_moe_routed_down_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_down_q4k_f16_wmma_decode {token_count = 1}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_down_q4k_f16_wmma_small_batch_2 {token_count = 2}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_down_q4k_f16_wmma_small_batch_4 {token_count = 4}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_down_q4k_f16_wmma_small_batch_8 {token_count = 8}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_down_q4k_f16_wmma_small_batch_16 {token_count = 16}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_f16_wmma_diverse_benchmark_case> @qwen3_moe_routed_down_q4k_f16_wmma_diverse_decode {token_count = 1}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_f16_wmma_diverse_benchmark_case> @qwen3_moe_routed_down_q4k_f16_wmma_diverse_small_batch_2 {token_count = 2}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_f16_wmma_diverse_benchmark_case> @qwen3_moe_routed_down_q4k_f16_wmma_diverse_small_batch_4 {token_count = 4}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_f16_wmma_diverse_benchmark_case> @qwen3_moe_routed_down_q4k_f16_wmma_diverse_small_batch_8 {token_count = 8}
+
+check.benchmark<@qwen3_moe_routed_down_q4k_f16_wmma_diverse_benchmark_case> @qwen3_moe_routed_down_q4k_f16_wmma_diverse_small_batch_16 {token_count = 16}
 
 check.benchmark<@qwen3_moe_routed_down_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_down_q4k_f16_wmma_prefill_32 {token_count = 32}
 
@@ -586,6 +648,26 @@ check.benchmark<@qwen3_moe_routed_down_q4k_f16_wmma_benchmark_case> @qwen3_moe_r
 check.benchmark<@qwen3_moe_routed_down_q4k_f16_wmma_benchmark_case> @qwen3_moe_routed_down_q4k_f16_wmma_prefill_512 {token_count = 512}
 
 check.benchmark<@qwen3_moe_routed_down_q6k_f16_wmma_differential_case> @qwen3_moe_routed_down_q6k_f16_wmma_small
+
+check.benchmark<@qwen3_moe_routed_down_q6k_f16_wmma_benchmark_case> @qwen3_moe_routed_down_q6k_f16_wmma_decode {token_count = 1}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_f16_wmma_benchmark_case> @qwen3_moe_routed_down_q6k_f16_wmma_small_batch_2 {token_count = 2}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_f16_wmma_benchmark_case> @qwen3_moe_routed_down_q6k_f16_wmma_small_batch_4 {token_count = 4}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_f16_wmma_benchmark_case> @qwen3_moe_routed_down_q6k_f16_wmma_small_batch_8 {token_count = 8}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_f16_wmma_benchmark_case> @qwen3_moe_routed_down_q6k_f16_wmma_small_batch_16 {token_count = 16}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_f16_wmma_diverse_benchmark_case> @qwen3_moe_routed_down_q6k_f16_wmma_diverse_decode {token_count = 1}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_f16_wmma_diverse_benchmark_case> @qwen3_moe_routed_down_q6k_f16_wmma_diverse_small_batch_2 {token_count = 2}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_f16_wmma_diverse_benchmark_case> @qwen3_moe_routed_down_q6k_f16_wmma_diverse_small_batch_4 {token_count = 4}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_f16_wmma_diverse_benchmark_case> @qwen3_moe_routed_down_q6k_f16_wmma_diverse_small_batch_8 {token_count = 8}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_f16_wmma_diverse_benchmark_case> @qwen3_moe_routed_down_q6k_f16_wmma_diverse_small_batch_16 {token_count = 16}
 
 check.benchmark<@qwen3_moe_routed_down_q6k_f16_wmma_benchmark_case> @qwen3_moe_routed_down_q6k_f16_wmma_prefill_32 {token_count = 32}
 

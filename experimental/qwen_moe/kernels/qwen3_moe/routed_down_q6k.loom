@@ -540,7 +540,7 @@ check.case public @qwen3_moe_routed_down_q6k_f32_wave64_next_q8_differential_cas
 }
 
 check.case public @qwen3_moe_routed_down_q6k_q8_1_x4_benchmark_case {
-  %token_count = check.param.choice values([1, 17, 32, 63, 128, 129, 512]) name("token_count") : index
+  %token_count = check.param.choice values([1, 2, 4, 8, 16, 17, 32, 63, 128, 129, 512]) name("token_count") : index
   %input_size = check.literal value(768) : index
   %route_count = check.literal value(8) : index
   %route_id_stride = check.literal value(128) : index
@@ -558,7 +558,7 @@ check.case public @qwen3_moe_routed_down_q6k_q8_1_x4_benchmark_case {
 }
 
 check.case public @qwen3_moe_routed_down_q6k_q8_1_x4_pipeline_benchmark_case {
-  %token_count = check.param.choice values([1, 17, 32, 63, 128, 129, 512]) name("token_count") : index
+  %token_count = check.param.choice values([1, 2, 4, 8, 16, 17, 32, 63, 128, 129, 512]) name("token_count") : index
   %input_size = check.literal value(768) : index
   %route_count = check.literal value(8) : index
   %route_id_stride = check.literal value(128) : index
@@ -582,7 +582,7 @@ check.case public @qwen3_moe_routed_down_q6k_q8_1_x4_pipeline_benchmark_case {
 }
 
 check.case public @qwen3_moe_routed_down_q6k_f32_wave64_benchmark_case {
-  %token_count = check.param.choice values([1, 17, 32, 63, 128, 129, 512]) name("token_count") : index
+  %token_count = check.param.choice values([1, 2, 4, 8, 16, 17, 32, 63, 128, 129, 512]) name("token_count") : index
   %input_size = check.literal value(768) : index
   %route_count = check.literal value(8) : index
   %route_id_stride = check.literal value(128) : index
@@ -603,6 +603,14 @@ check.benchmark<@qwen3_moe_routed_down_q6k_q8_1_x4_nonzero_residual_case> @qwen3
 
 check.benchmark<@qwen3_moe_routed_down_q6k_q8_1_x4_benchmark_case> @qwen3_moe_routed_down_q6k_q8_1_x4_decode {token_count = 1}
 
+check.benchmark<@qwen3_moe_routed_down_q6k_q8_1_x4_benchmark_case> @qwen3_moe_routed_down_q6k_q8_1_x4_small_batch_2 {token_count = 2}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_q8_1_x4_benchmark_case> @qwen3_moe_routed_down_q6k_q8_1_x4_small_batch_4 {token_count = 4}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_q8_1_x4_benchmark_case> @qwen3_moe_routed_down_q6k_q8_1_x4_small_batch_8 {token_count = 8}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_q8_1_x4_benchmark_case> @qwen3_moe_routed_down_q6k_q8_1_x4_small_batch_16 {token_count = 16}
+
 check.benchmark<@qwen3_moe_routed_down_q6k_q8_1_x4_benchmark_case> @qwen3_moe_routed_down_q6k_q8_1_x4_prefill_32 {token_count = 32}
 
 check.benchmark<@qwen3_moe_routed_down_q6k_q8_1_x4_benchmark_case> @qwen3_moe_routed_down_q6k_q8_1_x4_prefill_128 {token_count = 128}
@@ -618,6 +626,14 @@ check.benchmark<@qwen3_moe_routed_down_q6k_q8_1_x4_pipeline_benchmark_case> @qwe
 check.benchmark<@qwen3_moe_routed_down_q6k_q8_1_x4_pipeline_benchmark_case> @qwen3_moe_routed_down_q6k_q8_1_x4_pipeline_prefill_512 {token_count = 512}
 
 check.benchmark<@qwen3_moe_routed_down_q6k_f32_wave64_benchmark_case> @qwen3_moe_routed_down_q6k_f32_wave64_decode {token_count = 1}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_f32_wave64_benchmark_case> @qwen3_moe_routed_down_q6k_f32_wave64_small_batch_2 {token_count = 2}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_f32_wave64_benchmark_case> @qwen3_moe_routed_down_q6k_f32_wave64_small_batch_4 {token_count = 4}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_f32_wave64_benchmark_case> @qwen3_moe_routed_down_q6k_f32_wave64_small_batch_8 {token_count = 8}
+
+check.benchmark<@qwen3_moe_routed_down_q6k_f32_wave64_benchmark_case> @qwen3_moe_routed_down_q6k_f32_wave64_small_batch_16 {token_count = 16}
 
 check.benchmark<@qwen3_moe_routed_down_q6k_q8_1_x4_next_q8_benchmark_case> @qwen3_moe_routed_down_q6k_q8_1_x4_next_q8_decode
 

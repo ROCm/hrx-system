@@ -1308,7 +1308,7 @@ check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_partition_stri
 }
 
 check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_q8_benchmark_case {
-  %token_count = check.param.choice values([1, 4, 8, 17, 32, 63, 128, 129, 512]) name("token_count") : index
+  %token_count = check.param.choice values([1, 2, 4, 8, 16, 17, 32, 63, 128, 129, 512]) name("token_count") : index
   %route_count = check.literal value(8) : index
   %route_stride = check.literal value(128) : index
   %expert_count = check.literal value(128) : index
@@ -1370,7 +1370,7 @@ check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8_composed_
 }
 
 check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_benchmark_case {
-  %token_count = check.param.choice values([17, 32, 63, 128, 129, 512]) name("token_count") : index
+  %token_count = check.param.choice values([1, 2, 4, 8, 16, 17, 32, 63, 128, 129, 512]) name("token_count") : index
   %route_count = check.literal value(8) : index
   %route_stride = check.literal value(128) : index
   %expert_count = check.literal value(128) : index
@@ -1393,8 +1393,29 @@ check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_benchmark_case
   check.return
 }
 
+// Maximally diverse decode-batch control. Compact route storage makes the
+// flattened 0..127 iota assign every M=16 route to a different expert.
+check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_diverse_benchmark_case {
+  %token_count = check.param.choice values([1, 2, 4, 8, 16]) name("token_count") : index
+  %route_count = check.literal value(8) : index
+  %route_stride = check.literal value(8) : index
+  %expert_count = check.literal value(128) : index
+  %output_size = check.literal value(768) : index
+  %q8_input = check.generate.fill value(0) : tensor<[%token_count]x2304xi8>
+  %route_ids = check.generate.iota offset(0) step(1) period(128) : tensor<[%token_count]x8xi32>
+  %expert_table = check.generate.fill value(-1) : tensor<65664xi32>
+  %gate_weight = check.generate.fill value(0) : tensor<128x768x8x144xi8>
+  %up_weight = check.generate.fill value(0) : tensor<128x768x8x144xi8>
+  %output = check.generate.fill value(1.0) : tensor<[%token_count]x8x768xf32>
+  %expected = check.generate.fill value(0.0) : tensor<[%token_count]x8x768xf32>
+  func.call @qwen3_moe_build_expert_table(%token_count, %route_count, %route_stride, %expert_count, %route_ids, %expert_table) : (index, index, index, index, tensor<[%token_count]x8xi32>, tensor<65664xi32>)
+  func.call @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped(%token_count, %route_count, %expert_count, %output_size, %q8_input, %expert_table, %gate_weight, %up_weight, %output) : (index, index, index, index, tensor<[%token_count]x2304xi8>, tensor<65664xi32>, tensor<128x768x8x144xi8>, tensor<128x768x8x144xi8>, tensor<[%token_count]x8x768xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x8x768xf32>
+  check.return
+}
+
 check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_q8_pipeline_benchmark_case {
-  %token_count = check.param.choice values([1, 4, 8, 32, 128, 512]) name("token_count") : index
+  %token_count = check.param.choice values([1, 2, 4, 8, 16, 32, 128, 512]) name("token_count") : index
   %input_size = check.literal value(2048) : index
   %route_count = check.literal value(8) : index
   %route_stride = check.literal value(128) : index
@@ -1414,7 +1435,7 @@ check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_q8_pipeline_benchmark_cas
 }
 
 check.case public @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_pipeline_benchmark_case {
-  %token_count = check.param.choice values([17, 32, 63, 128, 129, 512]) name("token_count") : index
+  %token_count = check.param.choice values([1, 2, 4, 8, 16, 17, 32, 63, 128, 129, 512]) name("token_count") : index
   %input_size = check.literal value(2048) : index
   %route_count = check.literal value(8) : index
   %route_stride = check.literal value(128) : index
@@ -1439,6 +1460,8 @@ check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_nonzero_case> @qwen3_moe
 
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_decode {token_count = 1}
 
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_small_batch_2 {token_count = 2}
+
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8_decode
 
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8_composed_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8_composed_decode
@@ -1446,6 +1469,8 @@ check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8_composed_be
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_small_batch_4 {token_count = 4}
 
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_small_batch_8 {token_count = 8}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_small_batch_16 {token_count = 16}
 
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_prefill_17 {token_count = 17}
 
@@ -1460,6 +1485,26 @@ check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_benchmark_case> @qwen3_m
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_prefill_512 {token_count = 512}
 
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_prefill_17 {token_count = 17}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_decode {token_count = 1}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_small_batch_2 {token_count = 2}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_small_batch_4 {token_count = 4}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_small_batch_8 {token_count = 8}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_small_batch_16 {token_count = 16}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_diverse_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_diverse_decode {token_count = 1}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_diverse_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_diverse_small_batch_2 {token_count = 2}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_diverse_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_diverse_small_batch_4 {token_count = 4}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_diverse_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_diverse_small_batch_8 {token_count = 8}
+
+check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_diverse_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_diverse_small_batch_16 {token_count = 16}
 
 check.benchmark<@qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_benchmark_case> @qwen3_moe_routed_gate_up_swiglu_q4k_q8_grouped_prefill_32 {token_count = 32}
 
