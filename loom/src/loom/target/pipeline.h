@@ -23,6 +23,22 @@
 extern "C" {
 #endif
 
+// Builds a module-root pipeline that normalizes target source and expands all
+// resolvable authoring templates.
+//
+// The resulting source module retains kernel launch regions and device bodies
+// while selecting the same target providers consumed by later source-to-low
+// lowering. This boundary is suitable for target-specific source inspection
+// and launch configuration evaluation.
+//
+// |pass_environment| must contain exact function versions when target provider
+// predicates depend on invocation-selected target profiles.
+iree_status_t loom_target_pipeline_build_to_expanded_source(
+    loom_module_t* pipeline_module, iree_string_view_t name,
+    const loom_target_pipeline_options_t* options,
+    const loom_target_environment_t* target_environment,
+    loom_pass_environment_t pass_environment, loom_op_t** out_pipeline_op);
+
 // Builds a module-root pipeline that lowers source/kernel IR to target-low IR.
 //
 // The produced pipeline stops before target ABI/resource materialization and

@@ -9,12 +9,16 @@
 #include <stdint.h>
 
 #include "config.h"
+#include "context.h"
 #include "diagnostic.h"
 #include "iree/base/api.h"
 #include "loom/analysis/kernel_launch_config.h"
+#include "loom/ops/op_defs.h"
+#include "loom/tooling/compile/pipeline.h"
 #include "loomc/iree.h"
 #include "module.h"
 #include "result.h"
+#include "target.h"
 #include "workspace.h"
 
 typedef struct loomc_launch_config_target_capture_t {
@@ -37,7 +41,21 @@ typedef struct loomc_launch_config_resolved_options_t {
 
   // Fields that must be proven.
   loomc_launch_config_field_flags_t required_fields;
+
+  // Optional exact per-function target specializations.
+  const loomc_target_specialization_options_t* target_specialization;
 } loomc_launch_config_resolved_options_t;
+
+typedef struct loomc_launch_config_target_preparation_t {
+  // Expanded-source pipeline products owning exact target facts.
+  loom_compile_pipeline_result_t pipeline_result;
+
+  // Exact target facts selected for the requested launch function.
+  const loom_target_facts_t* effective_target_facts;
+
+  // True when pipeline_result requires deinitialization.
+  bool pipeline_initialized;
+} loomc_launch_config_target_preparation_t;
 
 static iree_status_t loomc_launch_config_capture_diagnostic(
     void* user_data, const loom_diagnostic_emission_t* emission) {
@@ -45,6 +63,14 @@ static iree_status_t loomc_launch_config_capture_diagnostic(
       (loomc_launch_config_target_capture_t*)user_data;
   return iree_status_from_loomc(loomc_result_add_loom_diagnostic_emission(
       capture->result, /*source=*/NULL, LOOM_EMITTER_PASS, emission));
+}
+
+static iree_status_t loomc_launch_config_capture_pipeline_diagnostic(
+    void* user_data, const loom_diagnostic_t* diagnostic) {
+  loomc_launch_config_target_capture_t* capture =
+      (loomc_launch_config_target_capture_t*)user_data;
+  return iree_status_from_loomc(loomc_result_add_loom_diagnostic(
+      capture->result, /*source=*/NULL, diagnostic));
 }
 
 static bool loomc_launch_config_string_view_is_valid(
@@ -108,12 +134,22 @@ loomc_launch_config_field_flags_from_kernel(
   return public_fields;
 }
 
+static bool loomc_launch_config_options_have_target_specialization(
+    const loomc_launch_config_resolved_options_t* options) {
+  return options->target_specialization != NULL &&
+         options->target_specialization->specialization_count != 0;
+}
+
+// TODO(benvanik): Remove source-module cloning when compilation emits a
+// compact launch configuration artifact. Configuration and target
+// specialization must then be applied only by the owning compilation.
 static bool loomc_launch_config_options_require_module_clone(
     const loomc_launch_config_resolved_options_t* options) {
   const loomc_config_options_t* config = options->config;
-  return config != NULL && (config->binding_count != 0 ||
-                            !loomc_string_view_is_empty(config->json_object) ||
-                            config->flags != 0);
+  return loomc_launch_config_options_have_target_specialization(options) ||
+         (config != NULL && (config->binding_count != 0 ||
+                             !loomc_string_view_is_empty(config->json_object) ||
+                             config->flags != 0));
 }
 
 static loomc_status_t loomc_launch_config_validate_result(
@@ -158,11 +194,9 @@ static loomc_status_t loomc_launch_config_resolve_options(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "launch config eval options structure_size is too small");
   }
-  if (options->next != NULL) {
-    return loomc_make_status(
-        LOOMC_STATUS_UNIMPLEMENTED,
-        "launch config eval option extensions are not supported");
-  }
+  const loomc_target_specialization_options_t* target_specialization = NULL;
+  LOOMC_RETURN_IF_ERROR(loomc_target_specialization_options_resolve(
+      options->next, &target_specialization));
   if (!loomc_launch_config_string_view_is_valid(options->function_symbol)) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "function symbol has length but no data");
@@ -190,6 +224,7 @@ static loomc_status_t loomc_launch_config_resolve_options(
       .workload_arguments = options->workload_arguments,
       .workload_argument_count = options->workload_argument_count,
       .required_fields = options->required_fields,
+      .target_specialization = target_specialization,
   };
   return loomc_ok_status();
 }
@@ -293,6 +328,7 @@ static void loomc_launch_config_copy_from_kernel(
 static loom_kernel_launch_config_options_t
 loomc_launch_config_make_kernel_options(
     const loomc_launch_config_resolved_options_t* options,
+    const loom_target_facts_t* effective_target_facts,
     iree_diagnostic_emitter_t emitter) {
   return (loom_kernel_launch_config_options_t){
       .function_symbol = options->function_symbol,
@@ -300,8 +336,106 @@ loomc_launch_config_make_kernel_options(
       .workload_argument_count = options->workload_argument_count,
       .required_fields =
           loomc_launch_config_field_flags_to_kernel(options->required_fields),
+      .effective_target_facts = effective_target_facts,
       .diagnostic_emitter = emitter,
   };
+}
+
+static loom_func_like_t loomc_launch_config_find_function(
+    loom_module_t* module, iree_string_view_t function_symbol) {
+  function_symbol = iree_string_view_trim(function_symbol);
+  (void)iree_string_view_consume_prefix_char(&function_symbol, '@');
+  const loom_string_id_t name_id =
+      loom_module_lookup_string(module, function_symbol);
+  if (name_id == LOOM_STRING_ID_INVALID) {
+    return (loom_func_like_t){0};
+  }
+  const loom_symbol_id_t symbol_id = loom_module_find_symbol(module, name_id);
+  if (symbol_id == LOOM_SYMBOL_ID_INVALID) {
+    return (loom_func_like_t){0};
+  }
+  return loom_func_like_cast(module,
+                             module->symbols.entries[symbol_id].defining_op);
+}
+
+static void loomc_launch_config_target_preparation_deinitialize(
+    loomc_launch_config_target_preparation_t* preparation) {
+  if (preparation->pipeline_initialized) {
+    loom_compile_pipeline_result_deinitialize(&preparation->pipeline_result);
+  }
+  *preparation = (loomc_launch_config_target_preparation_t){0};
+}
+
+// TODO(benvanik): Delete this parallel expanded-source compilation when the
+// device compilation emits launch functions from its prepared function
+// versions.
+static loomc_status_t loomc_launch_config_prepare_target(
+    loomc_context_t* context, loom_module_t* module,
+    loomc_workspace_t* workspace,
+    const loomc_launch_config_resolved_options_t* options,
+    loomc_result_t* result,
+    loomc_launch_config_target_preparation_t* out_preparation) {
+  *out_preparation = (loomc_launch_config_target_preparation_t){0};
+  const loomc_target_specialization_options_t* target_specialization =
+      options->target_specialization;
+  if (target_specialization == NULL ||
+      target_specialization->specialization_count == 0) {
+    return loomc_ok_status();
+  }
+
+  loomc_target_environment_t* public_target_environment =
+      loomc_context_target_environment(context);
+  const loomc_target_pass_environment_t* pass_environment =
+      loomc_context_target_pass_environment(context);
+
+  iree_arena_allocator_t request_arena;
+  iree_arena_initialize(loomc_workspace_block_pool(workspace), &request_arena);
+  loom_target_specialization_request_list_t requests = {0};
+  loomc_status_t status = loomc_target_specialization_options_make_request_list(
+      target_specialization, &request_arena, &requests);
+  if (loomc_status_is_ok(status)) {
+    loomc_launch_config_target_capture_t capture = {
+        .result = result,
+    };
+    loom_compile_pipeline_options_t pipeline_options = {0};
+    loom_compile_pipeline_options_initialize(&pipeline_options);
+    pipeline_options.default_pipeline =
+        LOOM_COMPILE_DEFAULT_PIPELINE_EXPANDED_SOURCE;
+    pipeline_options.target_environment =
+        loomc_target_environment_loom_target_environment(
+            public_target_environment);
+    pipeline_options.target_specializations = requests;
+    pipeline_options.low_descriptor_registry =
+        &pass_environment->low_descriptor_registry;
+    pipeline_options.diagnostic_sink = (loom_diagnostic_sink_t){
+        .fn = loomc_launch_config_capture_pipeline_diagnostic,
+        .user_data = &capture,
+    };
+    out_preparation->pipeline_initialized = true;
+    status = loomc_status_from_iree(loom_compile_run_pipeline(
+        module, &pipeline_options, loomc_workspace_block_pool(workspace),
+        &out_preparation->pipeline_result));
+  }
+  iree_arena_deinitialize(&request_arena);
+
+  if (loomc_status_is_ok(status) &&
+      out_preparation->pipeline_result.pass.error_count != 0) {
+    status = loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
+  }
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+    const loom_func_like_t function =
+        loomc_launch_config_find_function(module, options->function_symbol);
+    if (loom_func_like_isa(function)) {
+      const loom_target_function_version_t* function_version =
+          loom_target_function_version_list_find(
+              &out_preparation->pipeline_result.function_versions, function);
+      if (function_version != NULL) {
+        out_preparation->effective_target_facts =
+            function_version->effective_target_facts;
+      }
+    }
+  }
+  return status;
 }
 
 loomc_status_t loomc_module_evaluate_launch_config(
@@ -324,6 +458,11 @@ loomc_status_t loomc_module_evaluate_launch_config(
   loomc_launch_config_resolved_options_t resolved_options = {0};
   LOOMC_RETURN_IF_ERROR(
       loomc_launch_config_resolve_options(options, &resolved_options));
+  loomc_context_t* context = loomc_module_context(module);
+  LOOMC_RETURN_IF_ERROR(
+      loomc_target_specialization_options_validate_environment(
+          resolved_options.target_specialization,
+          loomc_context_target_environment(context)));
 
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(
@@ -338,7 +477,7 @@ loomc_status_t loomc_module_evaluate_launch_config(
     bool direct_evaluated = false;
     loom_kernel_launch_config_t kernel_config = {0};
     const loom_kernel_launch_config_options_t kernel_options =
-        loomc_launch_config_make_kernel_options(&resolved_options,
+        loomc_launch_config_make_kernel_options(&resolved_options, NULL,
                                                 (iree_diagnostic_emitter_t){0});
     loomc_status_t direct_status =
         loomc_status_from_iree(loom_kernel_launch_config_try_evaluate_direct(
@@ -356,6 +495,7 @@ loomc_status_t loomc_module_evaluate_launch_config(
   }
 
   loomc_module_t* scratch_module = NULL;
+  loomc_launch_config_target_preparation_t target_preparation = {0};
   loomc_status_t status = loomc_ok_status();
   const loom_module_t* internal_module = source_internal_module;
   if (internal_module == NULL || requires_module_clone) {
@@ -375,6 +515,13 @@ loomc_status_t loomc_module_evaluate_launch_config(
     };
     status = loomc_config_apply_to_module(&config_options);
   }
+  if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
+      loomc_launch_config_options_have_target_specialization(
+          &resolved_options)) {
+    status = loomc_launch_config_prepare_target(
+        context, loomc_module_loom_module(scratch_module), workspace,
+        &resolved_options, result, &target_preparation);
+  }
 
   loom_kernel_launch_config_t kernel_config = {0};
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
@@ -386,7 +533,9 @@ loomc_status_t loomc_module_evaluate_launch_config(
         .user_data = &capture,
     };
     const loom_kernel_launch_config_options_t kernel_options =
-        loomc_launch_config_make_kernel_options(&resolved_options, emitter);
+        loomc_launch_config_make_kernel_options(
+            &resolved_options, target_preparation.effective_target_facts,
+            emitter);
     status = loomc_status_from_iree(loom_kernel_launch_config_evaluate(
         internal_module, loomc_workspace_block_pool(workspace), &kernel_options,
         &kernel_config));
@@ -404,6 +553,7 @@ loomc_status_t loomc_module_evaluate_launch_config(
   }
 
   loomc_result_release(result);
+  loomc_launch_config_target_preparation_deinitialize(&target_preparation);
   loomc_module_release(scratch_module);
   return status;
 }

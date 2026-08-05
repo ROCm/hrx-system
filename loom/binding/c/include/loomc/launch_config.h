@@ -92,7 +92,7 @@ typedef struct loomc_launch_config_eval_options_t {
   /// Size of this structure in bytes.
   loomc_host_size_t structure_size;
 
-  /// Extension chain for future launch configuration evaluation options.
+  /// Unordered extension chain for launch configuration evaluation options.
   const void* next;
 
   /// Kernel function symbol to evaluate, with or without a leading `@`.

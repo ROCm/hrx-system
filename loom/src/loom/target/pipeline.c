@@ -402,6 +402,16 @@ static iree_status_t loom_target_pipeline_build_low_preparation(
   return loom_low_pipeline_build_packetization_preparation(builder);
 }
 
+static iree_status_t loom_target_pipeline_build_expanded_source_body(
+    loom_builder_t* builder, void* user_data) {
+  loom_op_t* for_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
+      builder,
+      loom_target_pipeline_build_source_normalization_before_authoring_expansion,
+      user_data, &for_op));
+  return loom_target_pipeline_build_authoring_expansion(builder);
+}
+
 static iree_status_t loom_target_pipeline_build_source_low_body(
     loom_builder_t* builder, void* user_data) {
   const loom_target_pipeline_build_context_t* context =
@@ -411,11 +421,8 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
   IREE_RETURN_IF_ERROR(loom_target_pipeline_resolve_control_flow_lowering(
       context->options, &control_flow_lowering));
   loom_op_t* for_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
-      builder,
-      loom_target_pipeline_build_source_normalization_before_authoring_expansion,
-      user_data, &for_op));
-  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_authoring_expansion(builder));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_expanded_source_body(builder, user_data));
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
       builder,
       loom_target_pipeline_build_math_legalization_after_authoring_expansion,
@@ -495,6 +502,27 @@ static iree_status_t loom_target_pipeline_build_prepared_low_body(
   loom_op_t* for_op = NULL;
   return loom_target_pipeline_build_for_target_functions(
       builder, loom_target_pipeline_build_low_preparation, user_data, &for_op);
+}
+
+iree_status_t loom_target_pipeline_build_to_expanded_source(
+    loom_module_t* pipeline_module, iree_string_view_t name,
+    const loom_target_pipeline_options_t* options,
+    const loom_target_environment_t* target_environment,
+    loom_pass_environment_t pass_environment, loom_op_t** out_pipeline_op) {
+  IREE_ASSERT_ARGUMENT(pipeline_module);
+  IREE_ASSERT_ARGUMENT(target_environment);
+  IREE_ASSERT_ARGUMENT(out_pipeline_op);
+  *out_pipeline_op = NULL;
+
+  const loom_target_pipeline_build_context_t context = {
+      .target_environment = target_environment,
+      .pass_environment = pass_environment,
+      .options = options,
+  };
+  return loom_pass_ir_build_pipeline(
+      pipeline_module, name, LOOM_PASS_ANCHOR_MODULE,
+      loom_target_pipeline_build_expanded_source_body, (void*)&context,
+      out_pipeline_op);
 }
 
 iree_status_t loom_target_pipeline_build_to_source_low(

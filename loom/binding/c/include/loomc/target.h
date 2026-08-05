@@ -176,15 +176,16 @@ typedef struct loomc_target_specialization_t {
   /// Function symbol name. A leading `@` is accepted.
   loomc_string_view_t function_symbol;
 
-  /// Complete target profile borrowed for the compile invocation.
+  /// Complete target profile borrowed for the invocation.
   loomc_target_profile_t* target_profile;
 } loomc_target_specialization_t;
 
-/// Compile option extension carrying per-function target specializations.
+/// Option extension carrying per-function target specializations.
 ///
-/// Put this descriptor on `loomc_compile_options_t::next`. Every row is
-/// validated before any function target is changed. The invocation borrows the
-/// row array, symbol strings, and profiles for the duration of the call.
+/// Put this descriptor on `loomc_compile_options_t::next` or
+/// `loomc_launch_config_eval_options_t::next`. Every row is validated before
+/// any function target is changed. The invocation borrows the row array,
+/// symbol strings, and profiles for the duration of the call.
 typedef struct loomc_target_specialization_options_t {
   /// Structure type. Must be
   /// `LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS`.
@@ -193,7 +194,7 @@ typedef struct loomc_target_specialization_options_t {
   /// Size of this structure in bytes.
   loomc_host_size_t structure_size;
 
-  /// Next compile option extension.
+  /// Additional option extensions in the same unordered chain.
   const void* next;
 
   /// Specialization rows borrowed for the invocation.

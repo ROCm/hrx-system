@@ -165,20 +165,9 @@ static loomc_status_t loomc_compile_specialize_functions(
     return loomc_ok_status();
   }
 
-  loom_target_specialization_request_t* requests = NULL;
-  LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(
-      iree_arena_allocate_array(arena, options->specialization_count,
-                                sizeof(*requests), (void**)&requests)));
-  for (loomc_host_size_t i = 0; i < options->specialization_count; ++i) {
-    const loomc_target_specialization_t* specialization =
-        &options->specializations[i];
-    requests[i] = (loom_target_specialization_request_t){
-        .function_name =
-            iree_string_view_from_loomc(specialization->function_symbol),
-        .target_profile = loomc_target_profile_loom_target_profile(
-            specialization->target_profile),
-    };
-  }
+  loom_target_specialization_request_list_t requests = {0};
+  LOOMC_RETURN_IF_ERROR(loomc_target_specialization_options_make_request_list(
+      options, arena, &requests));
 
   loomc_compile_diagnostic_capture_t capture = {
       .result = result,
@@ -186,11 +175,7 @@ static loomc_status_t loomc_compile_specialize_functions(
   loom_target_specialization_result_t specialization_result = {0};
   LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(loom_target_specialize_functions(
       loomc_target_environment_loom_target_environment(target_environment),
-      module,
-      (loom_target_specialization_request_list_t){
-          .values = requests,
-          .count = options->specialization_count,
-      },
+      module, requests,
       (iree_diagnostic_emitter_t){
           .fn = loomc_compile_capture_diagnostic_emission,
           .user_data = &capture,

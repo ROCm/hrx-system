@@ -45,6 +45,9 @@ typedef enum loom_compile_default_pipeline_e {
   // Build the full prepared target-low pipeline including target ABI/resource
   // materialization and packetization preparation.
   LOOM_COMPILE_DEFAULT_PIPELINE_PREPARED_LOW = 3,
+  // Normalize target source and expand resolvable authoring templates while
+  // retaining source kernel launch regions and device bodies.
+  LOOM_COMPILE_DEFAULT_PIPELINE_EXPANDED_SOURCE = 4,
 } loom_compile_default_pipeline_t;
 
 typedef struct loom_compile_pipeline_options_t {
