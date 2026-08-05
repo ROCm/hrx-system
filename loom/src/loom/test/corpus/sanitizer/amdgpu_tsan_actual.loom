@@ -1,54 +1,54 @@
 kernel.def @tsan_workgroup_write_race() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 2 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch(%output: buffer) {
-  %zero_offset = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %element_index = index.constant 0 : index
   %bytes = index.constant 4 : offset
   %value = scalar.constant 1 : i32
   %continued_value = scalar.constant 9 : i32
   %global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
-  view.store %value, %output_view[%zero_index] : i32, view<1xi32, #dense>
+  %output_view = buffer.view %global[%base] : buffer -> view<1xi32, #dense>
+  view.store %value, %output_view[%element_index] : i32, view<1xi32, #dense>
   %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<1xi32, #dense>
-  view.store %value, %scratch_view[%zero_index] : i32, view<1xi32, #dense>
-  view.store %continued_value, %output_view[%zero_index] : i32, view<1xi32, #dense>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<1xi32, #dense>
+  view.store %value, %scratch_view[%element_index] : i32, view<1xi32, #dense>
+  view.store %continued_value, %output_view[%element_index] : i32, view<1xi32, #dense>
   kernel.return
 }
 
 kernel.def @tsan_workgroup_barrier_safe_write() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %threads = index.constant 2 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
 } launch(%output: buffer) {
-  %zero_offset = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
-  %one_index = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %first_lane = index.constant 0 : index
+  %second_lane = index.constant 1 : index
   %bytes = index.constant 4 : offset
   %before_value = scalar.constant 1 : i32
   %after_value = scalar.constant 2 : i32
   %lane = kernel.workitem.id<x> : index
   %global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %global[%base] : buffer -> view<1xi32, #dense>
   %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<1xi32, #dense>
-  %is_lane_zero = index.cmp eq, %lane, %zero_index : index
-  scf.if %is_lane_zero {
-    view.store %before_value, %scratch_view[%zero_index] : i32, view<1xi32, #dense>
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<1xi32, #dense>
+  %is_first_lane = index.cmp eq, %lane, %first_lane : index
+  scf.if %is_first_lane {
+    view.store %before_value, %scratch_view[%first_lane] : i32, view<1xi32, #dense>
     scf.yield
   }
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-  %is_lane_one = index.cmp eq, %lane, %one_index : index
-  scf.if %is_lane_one {
-    view.store %after_value, %scratch_view[%zero_index] : i32, view<1xi32, #dense>
+  %is_second_lane = index.cmp eq, %lane, %second_lane : index
+  scf.if %is_second_lane {
+    view.store %after_value, %scratch_view[%first_lane] : i32, view<1xi32, #dense>
     scf.yield
   }
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-  scf.if %is_lane_zero {
-    %result = view.load %scratch_view[%zero_index] : view<1xi32, #dense> -> i32
-    view.store %result, %output_view[%zero_index] : i32, view<1xi32, #dense>
+  scf.if %is_first_lane {
+    %result = view.load %scratch_view[%first_lane] : view<1xi32, #dense> -> i32
+    view.store %result, %output_view[%first_lane] : i32, view<1xi32, #dense>
     scf.yield
   }
   kernel.return

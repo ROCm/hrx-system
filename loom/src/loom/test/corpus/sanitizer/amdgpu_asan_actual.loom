@@ -1,29 +1,29 @@
 kernel.def @asan_global_store_valid() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%output: buffer) {
-  %zero_offset = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %output_index = index.constant 0 : index
   %value = scalar.constant 7 : i32
   %global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %global[%zero_offset] : buffer -> view<1xi32, #dense>
-  view.store %value, %output_view[%zero_index] : i32, view<1xi32, #dense>
+  %output_view = buffer.view %global[%base] : buffer -> view<1xi32, #dense>
+  view.store %value, %output_view[%output_index] : i32, view<1xi32, #dense>
   kernel.return
 }
 
 kernel.def @asan_global_store_redzone() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%output: buffer) {
-  %zero_offset = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
-  %one_index = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %valid_index = index.constant 0 : index
+  %redzone_index = index.constant 1 : index
   %value = scalar.constant 11 : i32
   %continued_value = scalar.constant 99 : i32
   %global = buffer.assume.memory_space<global> %output : buffer
-  %output_view = buffer.view %global[%zero_offset] : buffer -> view<2xi32, #dense>
-  view.store %value, %output_view[%one_index] : i32, view<2xi32, #dense>
-  view.store %continued_value, %output_view[%zero_index] : i32, view<2xi32, #dense>
+  %output_view = buffer.view %global[%base] : buffer -> view<2xi32, #dense>
+  view.store %value, %output_view[%redzone_index] : i32, view<2xi32, #dense>
+  view.store %continued_value, %output_view[%valid_index] : i32, view<2xi32, #dense>
   kernel.return
 }
 
