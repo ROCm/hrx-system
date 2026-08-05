@@ -12,7 +12,7 @@ kernel.def target(@target) @dense_projection_tiled_u8_128() {
   %k_tiles = index.constant 4 : index
   %n_tiles = index.constant 8 : index
   %unit = index.constant 1 : index
-  %zero = index.constant 0 : index
+  %loop_begin = index.constant 0 : index
   %lhs_tile_bytes = index.constant 512 : index
   %rhs_tile_bytes = index.constant 512 : index
   %acc_tile_bytes = index.constant 1024 : index
@@ -33,7 +33,7 @@ kernel.def target(@target) @dense_projection_tiled_u8_128() {
   %init_view = buffer.view %init_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xi32, %acc_storage>
   %out_view = buffer.view %out_aligned[%out_byte_offset_aligned] : buffer -> view<16x16xi32, %acc_storage>
   %init = vector.fragment.load<init> %init_view[0, 0] shape [%m, %n] : view<16x16xi32, %acc_storage> -> vector<8xi32>
-  %result = scf.for %kt = [%zero to %k_tiles step %unit](%acc = %init : vector<8xi32>) -> (vector<8xi32>) {
+  %result = scf.for %kt = [%loop_begin to %k_tiles step %unit](%acc = %init : vector<8xi32>) -> (vector<8xi32>) {
     %lhs_tile_index = index.madd %workgroup_m, %k_tiles, %kt : index
     %rhs_tile_index = index.madd %kt, %n_tiles, %workgroup_n : index
     %lhs_byte_index = index.mul %lhs_tile_index, %lhs_tile_bytes : index
