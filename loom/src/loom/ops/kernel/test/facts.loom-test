@@ -65,10 +65,10 @@ kernel.def @collective_uniform_scope_facts() {
 } launch(%arg: i32) {
   %lane = kernel.workitem.id<x> : index
   %lane_i32 = index.cast %lane : index to i32
-  %zero = index.constant 0 : index
-  %zero_i32 = scalar.constant 0 : i32
-  %predicate = index.cmp eq, %lane, %zero : index
-  %broadcast = kernel.subgroup.broadcast %lane_i32 from %zero_i32 : i32, i32
+  %first_lane = index.constant 0 : index
+  %first_lane_i32 = scalar.constant 0 : i32
+  %predicate = index.cmp eq, %lane, %first_lane : index
+  %broadcast = kernel.subgroup.broadcast %lane_i32 from %first_lane_i32 : i32, i32
   %broadcast_first = kernel.subgroup.broadcast.first %lane_i32 : i32
   %broadcast_uniform = kernel.subgroup.broadcast %arg from %lane_i32 : i32, i32
   %subgroup_sum = kernel.subgroup.reduce<addi> %lane_i32 : i32
@@ -97,10 +97,10 @@ kernel.def @collective_uniform_scope_facts() {
 } launch(%arg: i32) {
   %lane = kernel.workitem.id<x> : index
   %lane_i32 = index.cast %lane : index to i32
-  %zero = index.constant 0 : index
-  %zero_i32 = scalar.constant 0 : i32
-  %predicate = index.cmp eq, %lane, %zero : index
-  %broadcast = kernel.subgroup.broadcast %lane_i32 from %zero_i32 : i32, i32
+  %first_lane = index.constant 0 : index
+  %first_lane_i32 = scalar.constant 0 : i32
+  %predicate = index.cmp eq, %lane, %first_lane : index
+  %broadcast = kernel.subgroup.broadcast %lane_i32 from %first_lane_i32 : i32, i32
   %broadcast_first = kernel.subgroup.broadcast.first %lane_i32 : i32
   %broadcast_uniform = kernel.subgroup.broadcast %arg from %lane_i32 : i32, i32
   %subgroup_sum = kernel.subgroup.reduce<addi> %lane_i32 : i32
@@ -480,15 +480,15 @@ kernel.def @lane_predicate_bitwise_facts() {
   %index_predicate = index.cmp slt, %lane, %limit : index
   %both = scalar.andi %scalar_predicate, %index_predicate : i1
   %either = scalar.ori %scalar_predicate, %index_predicate : i1
-  %one = scalar.xori %scalar_predicate, %index_predicate : i1
+  %exclusive = scalar.xori %scalar_predicate, %index_predicate : i1
   %scalar_is_predicate = test.fact_lane_predicate %scalar_predicate : i1 -> i1
   %index_is_predicate = test.fact_lane_predicate %index_predicate : i1 -> i1
   %both_is_predicate = test.fact_lane_predicate %both : i1 -> i1
   %either_is_predicate = test.fact_lane_predicate %either : i1 -> i1
-  %one_is_predicate = test.fact_lane_predicate %one : i1 -> i1
+  %exclusive_is_predicate = test.fact_lane_predicate %exclusive : i1 -> i1
   %both_is_uniform = test.fact_subgroup_uniform %both : i1 -> i1
   %either_hi = test.fact_range_hi %either : i1 -> i64
-  test.use %scalar_is_predicate, %index_is_predicate, %both_is_predicate, %either_is_predicate, %one_is_predicate, %both_is_uniform, %either_hi : i1, i1, i1, i1, i1, i1, i64
+  test.use %scalar_is_predicate, %index_is_predicate, %both_is_predicate, %either_is_predicate, %exclusive_is_predicate, %both_is_uniform, %either_hi : i1, i1, i1, i1, i1, i1, i64
   kernel.return
 }
 
@@ -502,10 +502,10 @@ kernel.def @lane_predicate_bitwise_facts() {
   %index_is_predicate = scalar.constant true : i1
   %both_is_predicate = scalar.constant true : i1
   %either_is_predicate = scalar.constant true : i1
-  %one_is_predicate = scalar.constant true : i1
+  %exclusive_is_predicate = scalar.constant true : i1
   %both_is_uniform = scalar.constant false : i1
   %either_hi = scalar.constant 1 : i64
-  test.use %scalar_is_predicate, %index_is_predicate, %both_is_predicate, %either_is_predicate, %one_is_predicate, %both_is_uniform, %either_hi : i1, i1, i1, i1, i1, i1, i64
+  test.use %scalar_is_predicate, %index_is_predicate, %both_is_predicate, %either_is_predicate, %exclusive_is_predicate, %both_is_uniform, %either_hi : i1, i1, i1, i1, i1, i1, i64
   kernel.return
 }
 
@@ -517,8 +517,8 @@ kernel.def @lane_predicate_cmpf_facts() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%lhs: f32, %rhs: f32) {
   %lane = kernel.subgroup.lane.id : index
-  %zero = index.constant 0 : index
-  %condition = index.cmp eq, %lane, %zero : index
+  %first_lane = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %first_lane : index
   %varying = scf.select %condition, %lhs, %rhs : f32
   %predicate = scalar.cmpf olt, %varying, %lhs : f32
   %predicate_is_lane = test.fact_lane_predicate %predicate : i1 -> i1
@@ -547,8 +547,8 @@ kernel.def @scalar_conversion_lane_distribution_facts() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch() {
   %lane = kernel.subgroup.lane.id : index
-  %zero = index.constant 0 : index
-  %condition = index.cmp eq, %lane, %zero : index
+  %first_lane = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %first_lane : index
   %wide_a = scalar.constant 300 : i32
   %wide_b = scalar.constant 4 : i32
   %wide = scf.select %condition, %wide_a, %wide_b : i32
