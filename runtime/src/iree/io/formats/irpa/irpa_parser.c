@@ -98,11 +98,20 @@ static iree_status_t iree_io_parse_irpa_v0_splat_entry(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "splat entry length underflow");
   }
-  if (splat_entry->pattern_length > sizeof(splat_entry->pattern)) {
+  if (splat_entry->pattern_length == 0 ||
+      splat_entry->pattern_length >
+          IREE_IO_PARAMETER_MAX_SPLAT_PATTERN_LENGTH ||
+      !iree_is_power_of_two_uint64(splat_entry->pattern_length)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "splat pattern length %u invalid; must be 1, 2, 4, 8, or 16 bytes",
+        splat_entry->pattern_length);
+  }
+  if (splat_entry->length % splat_entry->pattern_length != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "splat pattern length %u out of bounds %" PRIhsz,
-                            splat_entry->pattern_length,
-                            sizeof(splat_entry->pattern));
+                            "splat data length %" PRIu64
+                            " is not evenly divisible by pattern length %u",
+                            splat_entry->length, splat_entry->pattern_length);
   }
   iree_io_parameter_index_entry_t entry = {
       .key = name,
@@ -133,9 +142,24 @@ static iree_status_t iree_io_parse_irpa_v0_data_entry(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "data entry length underflow");
   }
+  const iree_io_physical_size_t minimum_alignment =
+      data_entry->header.minimum_alignment;
+  if (minimum_alignment != 0 &&
+      !iree_is_power_of_two_uint64(minimum_alignment)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "data entry minimum alignment %" PRIu64
+                            " is not zero or a power of two",
+                            minimum_alignment);
+  }
   iree_io_physical_offset_t storage_offset = 0;
   IREE_RETURN_IF_ERROR(iree_io_resolve_irpa_v0_storage(
       storage_segment, data_entry->storage, &storage_offset));
+  if (minimum_alignment != 0 && storage_offset % minimum_alignment != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "data entry storage offset %" PRIu64
+                            " is not aligned to %" PRIu64 " bytes",
+                            storage_offset, minimum_alignment);
+  }
   iree_io_parameter_index_entry_t entry = {
       .key = name,
       .metadata = metadata,
@@ -147,6 +171,7 @@ static iree_status_t iree_io_parse_irpa_v0_data_entry(
                   {
                       .handle = file_handle,
                       .offset = storage_offset,
+                      .minimum_alignment = minimum_alignment,
                   },
           },
   };
