@@ -369,6 +369,22 @@ _AMDGPU_DESCRIPTOR_PUBLIC_HEADER_DIR = "loom/target/arch/amdgpu/descriptors"
 _AMDGPU_INLINE_F32_ENUM_DOMAIN_NAME = "amdgpu.source_inline_f32"
 _AMDGPU_INLINE_U32_16_ENUM_DOMAIN_NAME = "amdgpu.source_inline_u32_16"
 
+_AMDGPU_SOURCE_INLINE_F32_NAMED_VALUES = (
+    ("f32_0_0", 0.0),
+    ("f32_0_5", 0.5),
+    ("f32_n0_5", -0.5),
+    ("f32_1_0", 1.0),
+    ("f32_n1_0", -1.0),
+    ("f32_2_0", 2.0),
+    ("f32_n2_0", -2.0),
+    ("f32_4_0", 4.0),
+    ("f32_n4_0", -4.0),
+    ("f32_inv_2pi", 0.15915494),
+)
+AMDGPU_SOURCE_INLINE_F32_VALUES = tuple(
+    value for _, value in _AMDGPU_SOURCE_INLINE_F32_NAMED_VALUES
+)
+
 
 def _f32_bits(value: float) -> int:
     return int(struct.unpack("<I", struct.pack("<f", value))[0])
@@ -376,17 +392,9 @@ def _f32_bits(value: float) -> int:
 
 _AMDGPU_SOURCE_INLINE_F32_ENUM_DOMAIN = EnumDomain(
     _AMDGPU_INLINE_F32_ENUM_DOMAIN_NAME,
-    values=(
-        EnumValue("f32_0_0", _f32_bits(0.0)),
-        EnumValue("f32_0_5", _f32_bits(0.5)),
-        EnumValue("f32_n0_5", _f32_bits(-0.5)),
-        EnumValue("f32_1_0", _f32_bits(1.0)),
-        EnumValue("f32_n1_0", _f32_bits(-1.0)),
-        EnumValue("f32_2_0", _f32_bits(2.0)),
-        EnumValue("f32_n2_0", _f32_bits(-2.0)),
-        EnumValue("f32_4_0", _f32_bits(4.0)),
-        EnumValue("f32_n4_0", _f32_bits(-4.0)),
-        EnumValue("f32_inv_2pi", _f32_bits(0.15915494)),
+    values=tuple(
+        EnumValue(name, _f32_bits(value))
+        for name, value in _AMDGPU_SOURCE_INLINE_F32_NAMED_VALUES
     ),
 )
 _AMDGPU_SOURCE_INLINE_U32_16_ENUM_DOMAIN = EnumDomain(
@@ -2997,6 +3005,7 @@ def _implicit_m0_input(
 
 
 __all__ = (
+    "AMDGPU_SOURCE_INLINE_F32_VALUES",
     "_AmdgpuMatrixTiming",
     "AMDGPU_ATOMIC_DESCRIPTOR_CATEGORY",
     "AMDGPU_CACHE_DESCRIPTOR_CATEGORY",

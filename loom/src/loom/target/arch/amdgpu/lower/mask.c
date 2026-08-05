@@ -124,54 +124,6 @@ iree_status_t loom_amdgpu_select_vector_cmpf_plan(
       out_selected);
 }
 
-iree_status_t loom_amdgpu_select_scalar_cmpf_plan(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_vector_compare_plan_t* out_plan, bool* out_selected) {
-  *out_plan = (loom_amdgpu_vector_compare_plan_t){0};
-  *out_selected = false;
-  const loom_amdgpu_compare_descriptor_candidate_t* candidate =
-      loom_amdgpu_find_compare_descriptor_candidate(
-          source_op->kind, loom_scalar_cmpf_predicate(source_op));
-  if (candidate == NULL) {
-    return iree_ok_status();
-  }
-  loom_low_lower_resolved_descriptor_t descriptor = {0};
-  bool descriptor_present = false;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref_if_present(
-      context, candidate->descriptor_ref, &descriptor, &descriptor_present));
-  if (!descriptor_present) {
-    return iree_ok_status();
-  }
-  loom_low_lower_resolved_descriptor_t src0_inline_descriptor = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_optional_descriptor_ref(
-      context, candidate->src0_inline_descriptor_ref, &src0_inline_descriptor));
-  loom_low_lower_resolved_descriptor_t src1_inline_descriptor = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_optional_descriptor_ref(
-      context, candidate->src1_inline_descriptor_ref, &src1_inline_descriptor));
-
-  const loom_module_t* module = loom_low_lower_context_module(context);
-  const loom_value_id_t lhs = loom_scalar_cmpf_lhs(source_op);
-  const loom_value_id_t rhs = loom_scalar_cmpf_rhs(source_op);
-  const loom_value_id_t result = loom_scalar_cmpf_result(source_op);
-  if (!loom_amdgpu_type_is_f32(loom_module_value_type(module, lhs)) ||
-      !loom_type_equal(loom_module_value_type(module, rhs),
-                       loom_module_value_type(module, lhs)) ||
-      !loom_amdgpu_type_is_i1(loom_module_value_type(module, result))) {
-    return iree_ok_status();
-  }
-  *out_plan = (loom_amdgpu_vector_compare_plan_t){
-      .descriptor = descriptor,
-      .src0_inline_descriptor = src0_inline_descriptor,
-      .src1_inline_descriptor = src1_inline_descriptor,
-      .lhs = lhs,
-      .rhs = rhs,
-      .result = result,
-      .lane_count = 1,
-  };
-  *out_selected = true;
-  return iree_ok_status();
-}
-
 static bool loom_amdgpu_select_vector_storage(
     loom_type_t result_type, loom_amdgpu_vector_storage_t* out_storage,
     bool* out_allows_vector_mask, bool* out_allows_lane_immediates) {
@@ -1555,12 +1507,6 @@ iree_status_t loom_amdgpu_lower_vector_cmpi(
 }
 
 iree_status_t loom_amdgpu_lower_vector_cmpf(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_amdgpu_vector_compare_plan_t* plan) {
-  return loom_amdgpu_lower_vector_compare(context, source_op, plan);
-}
-
-iree_status_t loom_amdgpu_lower_scalar_cmpf(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_vector_compare_plan_t* plan) {
   return loom_amdgpu_lower_vector_compare(context, source_op, plan);

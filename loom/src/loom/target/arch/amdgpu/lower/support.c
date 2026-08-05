@@ -18,6 +18,7 @@
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
+#include "loom/target/arch/amdgpu/target_info_defs.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/fact_table.h"
 
@@ -141,11 +142,12 @@ static const loom_amdgpu_scalar_value_register_mapping_t
             LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED,
             LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR |
                 LOOM_AMDGPU_SCALAR_VALUE_REGISTER_OP_RESULT_VGPR),
-        [LOOM_SCALAR_TYPE_F16] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
-            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1,
-            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED,
+        [LOOM_SCALAR_TYPE_F16] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER_TYPE_DEFAULT(
+            LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1,
+            LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK,
             LOOM_AMDGPU_SCALAR_VALUE_REGISTER_NATURAL_VGPR |
-                LOOM_AMDGPU_SCALAR_VALUE_REGISTER_OP_RESULT_VGPR),
+                LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FALLBACK_RESULT_VGPR |
+                LOOM_AMDGPU_SCALAR_VALUE_REGISTER_REQUIRES_ANALYSIS),
         [LOOM_SCALAR_TYPE_BF16] = LOOM_AMDGPU_SCALAR_VALUE_REGISTER(
             LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1,
             LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED,
@@ -242,6 +244,15 @@ static bool loom_amdgpu_scalar_type_fallback_result_prefers_vgpr(
       LOOM_AMDGPU_SCALAR_VALUE_REGISTER_FLAG_FALLBACK_RESULT_PREFERS_VGPR);
 }
 
+static bool loom_amdgpu_scalar_type_has_fixed_vgpr_storage(
+    loom_type_t source_type) {
+  const loom_amdgpu_scalar_value_register_mapping_t* mapping =
+      loom_amdgpu_scalar_value_register_mapping_for_type(source_type);
+  return mapping != NULL &&
+         mapping->policy == LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_FIXED &&
+         mapping->default_shape.class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR;
+}
+
 typedef uint8_t loom_amdgpu_source_value_analysis_bits_t;
 
 enum loom_amdgpu_source_value_analysis_bit_e {
@@ -269,6 +280,10 @@ typedef struct loom_amdgpu_source_value_analysis_t {
   const loom_local_value_domain_t* value_domain;
   // Fact table used to derive records.
   const loom_value_fact_table_t* fact_table;
+  // Descriptor set governing target-specific source placement capabilities.
+  const loom_low_descriptor_set_t* descriptor_set;
+  // Cached target capabilities for descriptor_set.
+  loom_amdgpu_descriptor_set_info_flags_t descriptor_set_info_flags;
   // Cached analysis records indexed by function-local source value ordinal.
   loom_amdgpu_source_value_analysis_record_t* records;
   // Number of initialized records.
@@ -310,8 +325,20 @@ static iree_status_t loom_amdgpu_source_value_analysis_prepare(
     const loom_module_t* module, loom_func_like_t source_function,
     const loom_value_fact_table_t* fact_table,
     const loom_local_value_domain_t* value_domain,
+    const loom_low_descriptor_set_t* descriptor_set,
     iree_arena_allocator_t* arena,
     loom_amdgpu_source_value_analysis_t* analysis) {
+  if (analysis->descriptor_set != descriptor_set) {
+    analysis->descriptor_set = descriptor_set;
+    const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
+        descriptor_set != NULL ? loom_amdgpu_target_info_descriptor_set_at(
+                                     descriptor_set->descriptor_set_ordinal)
+                               : NULL;
+    analysis->descriptor_set_info_flags =
+        descriptor_set_info != NULL ? descriptor_set_info->flags : 0;
+    analysis->value_domain = NULL;
+    analysis->fact_table = NULL;
+  }
   if (analysis->value_domain != value_domain ||
       analysis->fact_table != fact_table ||
       (value_domain != NULL &&
@@ -357,6 +384,7 @@ static iree_status_t loom_amdgpu_source_value_analysis_for_context(
       loom_low_lower_context_source_function(context),
       loom_low_lower_context_fact_table(context),
       loom_low_lower_context_value_domain(context),
+      loom_low_lower_context_descriptor_set(context),
       loom_low_lower_context_scratch_arena(context), analysis));
   *out_analysis = analysis;
   return iree_ok_status();
@@ -378,6 +406,7 @@ static iree_status_t loom_amdgpu_source_value_analysis_for_target_low_legality(
       loom_target_low_legality_function(context),
       loom_target_low_legality_fact_table(context),
       loom_target_low_legality_value_domain(context),
+      loom_target_low_legality_descriptor_set(context),
       loom_target_low_legality_scratch_arena(context), analysis));
   *out_analysis = analysis;
   return iree_ok_status();
@@ -400,7 +429,8 @@ static iree_status_t loom_amdgpu_source_value_analysis_for_contract_query(
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_value_analysis_prepare(
       environment->module, environment->function, environment->fact_table,
-      environment->value_domain, environment->arena, analysis));
+      environment->value_domain, environment->descriptor_set,
+      environment->arena, analysis));
   *out_analysis = analysis;
   return iree_ok_status();
 }
@@ -700,6 +730,9 @@ enum loom_amdgpu_source_producer_flag_bits_e {
   LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_LOGICAL_BINARY = 1u << 16,
   LOOM_AMDGPU_SOURCE_PRODUCER_RESULT1_NATIVE_I1_MASK = 1u << 17,
   LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CONSTANT = 1u << 18,
+  LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_ARITHMETIC = 1u << 19,
+  LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_CONVERSION = 1u << 20,
+  LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_COMPARE = 1u << 21,
 };
 
 #define LOOM_AMDGPU_OP_INDEX(kind_) ((kind_) & 0xFF)
@@ -801,10 +834,38 @@ static const loom_amdgpu_source_producer_flags_t
     kAmdgpuScalarSourceProducerFlags[LOOM_OP_SCALAR_COUNT_] = {
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_CONSTANT)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CONSTANT,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_ADDF)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_ARITHMETIC,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_SUBF)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_ARITHMETIC,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_MULF)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_ARITHMETIC,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_MINNUMF)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_ARITHMETIC,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_MAXNUMF)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_ARITHMETIC,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_CEILF)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_ARITHMETIC,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_FLOORF)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_ARITHMETIC,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_ROUNDEVENF)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_ARITHMETIC,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_TRUNCF)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_ARITHMETIC,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_SITOFP)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_CONVERSION,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_UITOFP)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_CONVERSION,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_FPTOSI)] =
-            LOOM_AMDGPU_SOURCE_PRODUCER_INT_CONVERSION_RESULT,
+            LOOM_AMDGPU_SOURCE_PRODUCER_INT_CONVERSION_RESULT |
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_CONVERSION,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_FPTOUI)] =
-            LOOM_AMDGPU_SOURCE_PRODUCER_INT_CONVERSION_RESULT,
+            LOOM_AMDGPU_SOURCE_PRODUCER_INT_CONVERSION_RESULT |
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_CONVERSION,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_EXTF)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_CONVERSION,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_FPTRUNC)] =
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_CONVERSION,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_EXTSI)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_FOLLOWS_OPERAND,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_EXTUI)] =
@@ -816,7 +877,8 @@ static const loom_amdgpu_source_producer_flags_t
             LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE_SUPPORTS_SGPR_BOOL |
             LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CMPI,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_CMPF)] =
-            LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE,
+            LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE |
+            LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_COMPARE,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_ANDI)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_LOGICAL_BINARY,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_ORI)] =
@@ -873,6 +935,66 @@ static loom_amdgpu_source_producer_flags_t loom_amdgpu_source_producer_flags(
   return table->entries != NULL && dialect_index < table->count
              ? table->entries[dialect_index]
              : 0;
+}
+
+static bool loom_amdgpu_source_scalar_float_conversion_is_native(
+    const loom_module_t* module, const loom_op_t* defining_op,
+    loom_type_t result_type) {
+  if (defining_op->operand_count != 1) {
+    return false;
+  }
+  const loom_type_t input_type =
+      loom_module_value_type(module, loom_op_const_operands(defining_op)[0]);
+  switch (defining_op->kind) {
+    case LOOM_OP_SCALAR_SITOFP:
+    case LOOM_OP_SCALAR_UITOFP:
+      return loom_amdgpu_type_is_i32(input_type) &&
+             loom_amdgpu_type_is_f32(result_type);
+    case LOOM_OP_SCALAR_FPTOSI:
+    case LOOM_OP_SCALAR_FPTOUI:
+      return loom_amdgpu_type_is_f32(input_type) &&
+             loom_amdgpu_type_is_i32(result_type);
+    case LOOM_OP_SCALAR_EXTF:
+      return loom_type_is_scalar(input_type) &&
+             loom_type_element_type(input_type) == LOOM_SCALAR_TYPE_F16 &&
+             loom_amdgpu_type_is_f32(result_type);
+    case LOOM_OP_SCALAR_FPTRUNC:
+      return loom_amdgpu_type_is_f32(input_type) &&
+             loom_type_is_scalar(result_type) &&
+             loom_type_element_type(result_type) == LOOM_SCALAR_TYPE_F16;
+    default:
+      return false;
+  }
+}
+
+static bool loom_amdgpu_source_scalar_float_result_follows_operands(
+    const loom_module_t* module,
+    const loom_amdgpu_source_value_analysis_t* analysis,
+    loom_value_id_t source_value_id, const loom_op_t* defining_op,
+    loom_amdgpu_source_producer_flags_t producer_flags) {
+  if (analysis == NULL ||
+      loom_value_def_index(loom_module_value(module, source_value_id)) != 0) {
+    return false;
+  }
+  const loom_type_t result_type =
+      loom_module_value_type(module, source_value_id);
+  if (iree_any_bit_set(producer_flags,
+                       LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_ARITHMETIC)) {
+    return iree_all_bits_set(
+               analysis->descriptor_set_info_flags,
+               LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_ARITHMETIC) &&
+           (loom_amdgpu_type_is_f32(result_type) ||
+            (loom_type_is_scalar(result_type) &&
+             loom_type_element_type(result_type) == LOOM_SCALAR_TYPE_F16));
+  }
+  return iree_any_bit_set(
+             producer_flags,
+             LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_CONVERSION) &&
+         iree_all_bits_set(
+             analysis->descriptor_set_info_flags,
+             LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_CONVERSION) &&
+         loom_amdgpu_source_scalar_float_conversion_is_native(
+             module, defining_op, result_type);
 }
 
 static bool loom_amdgpu_workitem_dimension_is_valid(
@@ -1173,27 +1295,34 @@ static bool loom_amdgpu_source_value_directly_prefers_vgpr(
 
 static bool loom_amdgpu_select_payload_prefers_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis,
     loom_value_id_t source_value_id, loom_value_id_t condition_value_id) {
   if (source_value_id == condition_value_id ||
       source_value_id >= module->values.count) {
     return false;
   }
-  return loom_amdgpu_source_value_facts_prefer_vgpr(module, fact_table,
-                                                    source_value_id) ||
-         loom_amdgpu_source_value_directly_prefers_vgpr(module, source_value_id,
-                                                        condition_value_id);
+  if (loom_amdgpu_scalar_type_has_fixed_vgpr_storage(
+          loom_module_value_type(module, source_value_id))) {
+    return true;
+  }
+  return loom_amdgpu_analyzed_source_value_prefers_vgpr(
+      module, fact_table, view_regions, analysis, source_value_id);
 }
 
 static bool loom_amdgpu_op_results_prefer_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    const loom_op_t* op, loom_value_id_t excluded_value_id) {
+    const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis, const loom_op_t* op,
+    loom_value_id_t excluded_value_id) {
   if (op == NULL) {
     return false;
   }
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
-    if (loom_amdgpu_select_payload_prefers_vgpr(module, fact_table, results[i],
-                                                excluded_value_id)) {
+    if (loom_amdgpu_select_payload_prefers_vgpr(
+            module, fact_table, view_regions, analysis, results[i],
+            excluded_value_id)) {
       return true;
     }
   }
@@ -1202,8 +1331,9 @@ static bool loom_amdgpu_op_results_prefer_vgpr(
 
 static bool loom_amdgpu_op_operands_with_role_prefer_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    const loom_op_t* op, loom_operand_role_t role,
-    loom_value_id_t excluded_value_id) {
+    const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis, const loom_op_t* op,
+    loom_operand_role_t role, loom_value_id_t excluded_value_id) {
   if (op == NULL) {
     return false;
   }
@@ -1217,8 +1347,9 @@ static bool loom_amdgpu_op_operands_with_role_prefer_vgpr(
     if (loom_op_operand_role_at(vtable, op, i) != role) {
       continue;
     }
-    if (loom_amdgpu_select_payload_prefers_vgpr(module, fact_table, operands[i],
-                                                excluded_value_id)) {
+    if (loom_amdgpu_select_payload_prefers_vgpr(
+            module, fact_table, view_regions, analysis, operands[i],
+            excluded_value_id)) {
       return true;
     }
   }
@@ -1227,19 +1358,21 @@ static bool loom_amdgpu_op_operands_with_role_prefer_vgpr(
 
 static bool loom_amdgpu_select_condition_use_needs_native_i1_mask(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    const loom_op_t* user_op, uint16_t operand_index,
-    loom_value_id_t source_value_id) {
+    const loom_view_region_table_t* view_regions,
+    loom_amdgpu_source_value_analysis_t* analysis, const loom_op_t* user_op,
+    uint16_t operand_index, loom_value_id_t source_value_id) {
   if (operand_index >= user_op->operand_count ||
       loom_op_const_operands(user_op)[operand_index] != source_value_id ||
       !loom_op_operand_has_role(module, user_op, operand_index,
                                 LOOM_OPERAND_ROLE_SELECT_CONDITION)) {
     return false;
   }
-  return loom_amdgpu_op_results_prefer_vgpr(module, fact_table, user_op,
+  return loom_amdgpu_op_results_prefer_vgpr(module, fact_table, view_regions,
+                                            analysis, user_op,
                                             source_value_id) ||
          loom_amdgpu_op_operands_with_role_prefer_vgpr(
-             module, fact_table, user_op, LOOM_OPERAND_ROLE_SELECT_PAYLOAD,
-             source_value_id);
+             module, fact_table, view_regions, analysis, user_op,
+             LOOM_OPERAND_ROLE_SELECT_PAYLOAD, source_value_id);
 }
 
 static bool loom_amdgpu_vector_i1_constructor_use_needs_native_mask(
@@ -1297,8 +1430,9 @@ static bool loom_amdgpu_scalar_cmpi_i64_requires_native_mask(
 }
 
 static bool loom_amdgpu_i1_compare_values(
-    const loom_module_t* module, const loom_op_t* source_op,
-    loom_amdgpu_i1_compare_values_t* out_values) {
+    const loom_module_t* module,
+    const loom_amdgpu_source_value_analysis_t* analysis,
+    const loom_op_t* source_op, loom_amdgpu_i1_compare_values_t* out_values) {
   out_values->lhs = LOOM_VALUE_ID_INVALID;
   out_values->rhs = LOOM_VALUE_ID_INVALID;
   out_values->flags = 0;
@@ -1316,6 +1450,17 @@ static bool loom_amdgpu_i1_compare_values(
           producer_flags,
           LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE_SUPPORTS_SGPR_BOOL)) {
     out_values->flags |= LOOM_AMDGPU_I1_COMPARE_SUPPORTS_SGPR_BOOL;
+  }
+  if (iree_any_bit_set(producer_flags,
+                       LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_FLOAT_COMPARE)) {
+    if (analysis != NULL &&
+        iree_all_bits_set(
+            analysis->descriptor_set_info_flags,
+            LOOM_AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_COMPARE)) {
+      out_values->flags |= LOOM_AMDGPU_I1_COMPARE_SUPPORTS_SGPR_BOOL;
+    } else {
+      out_values->flags |= LOOM_AMDGPU_I1_COMPARE_REQUIRES_NATIVE_MASK;
+    }
   }
   if (iree_any_bit_set(producer_flags,
                        LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_CMPI) &&
@@ -1367,7 +1512,8 @@ static bool loom_amdgpu_source_value_is_direct_native_i1_mask_except(
 
   loom_amdgpu_i1_compare_values_t compare;
   if (loom_value_def_index(value) == 0 &&
-      loom_amdgpu_i1_compare_values(module, defining_op, &compare)) {
+      loom_amdgpu_i1_compare_values(module, /*analysis=*/NULL, defining_op,
+                                    &compare)) {
     return iree_any_bit_set(compare.flags,
                             LOOM_AMDGPU_I1_COMPARE_REQUIRES_NATIVE_MASK) ||
            loom_amdgpu_i1_compare_has_direct_vgpr_operand(module, &compare,
@@ -1782,7 +1928,7 @@ static bool loom_amdgpu_source_value_can_lower_as_scc_i1(
   }
 
   loom_amdgpu_i1_compare_values_t compare;
-  if (loom_amdgpu_i1_compare_values(module, defining_op, &compare)) {
+  if (loom_amdgpu_i1_compare_values(module, analysis, defining_op, &compare)) {
     return !iree_any_bit_set(compare.flags,
                              LOOM_AMDGPU_I1_COMPARE_REQUIRES_NATIVE_MASK) &&
            !loom_amdgpu_i1_compare_has_vgpr_operand(
@@ -1851,7 +1997,7 @@ static bool loom_amdgpu_source_value_can_lower_as_sgpr_i1_bool(
   }
 
   loom_amdgpu_i1_compare_values_t compare;
-  if (loom_amdgpu_i1_compare_values(module, defining_op, &compare)) {
+  if (loom_amdgpu_i1_compare_values(module, analysis, defining_op, &compare)) {
     return iree_any_bit_set(compare.flags,
                             LOOM_AMDGPU_I1_COMPARE_SUPPORTS_SGPR_BOOL) &&
            !iree_any_bit_set(compare.flags,
@@ -1915,7 +2061,8 @@ static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
     const loom_op_t* user_op = loom_use_user_op(*use);
     const uint16_t operand_index = loom_use_operand_index(*use);
     if (loom_amdgpu_select_condition_use_needs_native_i1_mask(
-            module, fact_table, user_op, operand_index, source_value_id) ||
+            module, fact_table, view_regions, analysis, user_op, operand_index,
+            source_value_id) ||
         loom_amdgpu_vector_i1_constructor_use_needs_native_mask(
             module, user_op, operand_index, source_value_id)) {
       return true;
@@ -1974,7 +2121,7 @@ static bool loom_amdgpu_source_value_is_native_i1_mask_excluding(
 
   loom_amdgpu_i1_compare_values_t compare;
   if (loom_value_def_index(value) == 0 &&
-      loom_amdgpu_i1_compare_values(module, defining_op, &compare)) {
+      loom_amdgpu_i1_compare_values(module, analysis, defining_op, &compare)) {
     return iree_any_bit_set(compare.flags,
                             LOOM_AMDGPU_I1_COMPARE_REQUIRES_NATIVE_MASK) ||
            loom_amdgpu_i1_compare_has_vgpr_operand(
@@ -2042,7 +2189,8 @@ static bool loom_amdgpu_i1_use_needs_native_mask(
     loom_amdgpu_source_value_analysis_t* analysis, const loom_op_t* user_op,
     uint16_t operand_index, loom_value_id_t source_value_id) {
   if (loom_amdgpu_select_condition_use_needs_native_i1_mask(
-          module, fact_table, user_op, operand_index, source_value_id) ||
+          module, fact_table, view_regions, analysis, user_op, operand_index,
+          source_value_id) ||
       loom_amdgpu_vector_i1_constructor_use_needs_native_mask(
           module, user_op, operand_index, source_value_id)) {
     return true;
@@ -2425,6 +2573,29 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
         loom_op_const_operands(defining_op)[0];
     return loom_amdgpu_analyzed_source_value_prefers_vgpr(
         module, fact_table, view_regions, analysis, input_value_id);
+  }
+
+  if (loom_amdgpu_source_scalar_float_result_follows_operands(
+          module, analysis, source_value_id, defining_op, producer_flags)) {
+    const loom_value_id_t* operands = loom_op_const_operands(defining_op);
+    for (uint16_t i = 0; i < defining_op->operand_count; ++i) {
+      if (loom_amdgpu_analyzed_source_value_prefers_vgpr(
+              module, fact_table, view_regions, analysis, operands[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  if (iree_any_bit_set(producer_flags,
+                       LOOM_AMDGPU_SOURCE_PRODUCER_SCF_SELECT) &&
+      loom_value_def_index(value) == 0) {
+    return loom_amdgpu_analyzed_source_value_prefers_vgpr(
+               module, fact_table, view_regions, analysis,
+               loom_scf_select_true_value(defining_op)) ||
+           loom_amdgpu_analyzed_source_value_prefers_vgpr(
+               module, fact_table, view_regions, analysis,
+               loom_scf_select_false_value(defining_op));
   }
 
   if (loom_amdgpu_scalar_type_op_result_prefers_vgpr(source_type)) {

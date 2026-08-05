@@ -22,7 +22,10 @@ from loom.target.arch.amdgpu.contracts.materializers import (
     ADDRESS_VGPR_MATERIALIZER,
     F32_VGPR_MATERIALIZER,
 )
-from loom.target.arch.amdgpu.descriptors import build_amdgpu_contract_descriptor_set
+from loom.target.arch.amdgpu.descriptors import (
+    AMDGPU_SOURCE_INLINE_F32_VALUES,
+    build_amdgpu_contract_descriptor_set,
+)
 from loom.target.contracts import (
     AttrProject,
     ContractCase,
@@ -47,6 +50,32 @@ from loom.target.contracts import (
 from loom.target.low_descriptors import Descriptor
 
 _DESCRIPTOR_KEYS = (
+    "amdgpu.s_add_f16",
+    "amdgpu.s_sub_f16",
+    "amdgpu.s_mul_f16",
+    "amdgpu.s_min_f16",
+    "amdgpu.s_max_f16",
+    "amdgpu.s_ceil_f16",
+    "amdgpu.s_floor_f16",
+    "amdgpu.s_rndne_f16",
+    "amdgpu.s_trunc_f16",
+    "amdgpu.s_add_f32",
+    "amdgpu.s_sub_f32",
+    "amdgpu.s_mul_f32",
+    "amdgpu.s_min_f32",
+    "amdgpu.s_max_f32",
+    "amdgpu.s_ceil_f32",
+    "amdgpu.s_floor_f32",
+    "amdgpu.s_rndne_f32",
+    "amdgpu.s_trunc_f32",
+    "amdgpu.s_cvt_f32_i32",
+    "amdgpu.s_cvt_f32_u32",
+    "amdgpu.s_cvt_i32_f32",
+    "amdgpu.s_cvt_u32_f32",
+    "amdgpu.s_cvt_f16_f32",
+    "amdgpu.s_cvt_f32_f16",
+    "amdgpu.s_cvt_hi_f32_f16",
+    "amdgpu.s_cvt_pk_rtz_f16_f32",
     "amdgpu.v_add_f32",
     "amdgpu.v_add_f32.lit",
     "amdgpu.v_add_f32.src0_inline",
@@ -259,18 +288,6 @@ _F32_SIGN_MASK = 0x80000000
 _BF16_ROUND_BIAS = 0x7FFF
 _PACKED_I8_LOW7_MASK = 0x7F7F7F7F
 _PACKED_I8_SIGN_MASK = 0x80808080
-_SOURCE_INLINE_F32_VALUES = (
-    0.0,
-    0.5,
-    -0.5,
-    1.0,
-    -1.0,
-    2.0,
-    -2.0,
-    4.0,
-    -4.0,
-    0.15915494,
-)
 
 _VEC_I32_DIAGNOSTIC = GuardDiagnostic(
     subject_role="type",
@@ -620,6 +637,7 @@ def _binary_rule(
     f32_operands: bool = False,
     f32_rhs: bool = False,
     extra_guards: tuple[Guard, ...] = (),
+    report_key: str = "",
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     operands = {
@@ -633,6 +651,7 @@ def _binary_rule(
     return DescriptorRule(
         source_op=source_op,
         descriptor=descriptor,
+        report_key=report_key,
         guards=(
             *_typed_guards((source_lhs, source_rhs, "result"), type_pattern),
             *extra_guards,
@@ -680,6 +699,37 @@ def _unary_rule(
                 form=_emit_form(type_pattern),
             ),
         ),
+    )
+
+
+def _scalar_float_binary_rule(
+    source_op: Op, type_pattern: TypePattern, descriptor_key: str
+) -> DescriptorRule:
+    return _binary_rule(
+        source_op,
+        type_pattern,
+        descriptor_key,
+        extra_guards=(
+            Guard.low_value_register_class("lhs", "amdgpu.sgpr"),
+            Guard.low_value_register_class("rhs", "amdgpu.sgpr"),
+            Guard.low_value_register_class("result", "amdgpu.sgpr"),
+        ),
+        report_key=_report_key(source_op, "scalar"),
+    )
+
+
+def _scalar_float_unary_rule(
+    source_op: Op, type_pattern: TypePattern, descriptor_key: str
+) -> DescriptorRule:
+    return _unary_rule(
+        source_op,
+        type_pattern,
+        descriptor_key,
+        extra_guards=(
+            Guard.low_value_register_class("input", "amdgpu.sgpr"),
+            Guard.low_value_register_class("result", "amdgpu.sgpr"),
+        ),
+        report_key=_report_key(source_op, "scalar"),
     )
 
 
@@ -1898,14 +1948,18 @@ def _cast_rule(
     descriptor_key: str,
     *,
     f32_input: bool = False,
+    extra_guards: tuple[Guard, ...] = (),
+    report_key: str = "",
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     return DescriptorRule(
         source_op=source_op,
         descriptor=descriptor,
+        report_key=report_key,
         guards=(
             _value_type("input", input_type),
             _value_type("result", result_type),
+            *extra_guards,
             Guard.descriptor_available(descriptor),
         ),
         emit=(
@@ -1918,6 +1972,60 @@ def _cast_rule(
                 },
                 results={"dst": ValueRef.result("result")},
                 form=_emit_form(result_type),
+            ),
+        ),
+    )
+
+
+def _scalar_float_cast_rule(
+    source_op: Op,
+    input_type: TypePattern,
+    result_type: TypePattern,
+    descriptor_key: str,
+) -> DescriptorRule:
+    return _cast_rule(
+        source_op,
+        input_type,
+        result_type,
+        descriptor_key,
+        extra_guards=(
+            Guard.low_value_register_class("input", "amdgpu.sgpr"),
+            Guard.low_value_register_class("result", "amdgpu.sgpr"),
+        ),
+        report_key=_report_key(source_op, "scalar"),
+    )
+
+
+def _narrow_f32_to_integer_rule(
+    source_op: Op,
+    result_type: TypePattern,
+    result_bit_width: int,
+    conversion_descriptor_key: str,
+) -> DescriptorRule:
+    conversion_descriptor = _descriptor(conversion_descriptor_key)
+    extract_descriptor = _descriptor("amdgpu.v_bfe_i32.offset_width_inline")
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=conversion_descriptor,
+        guards=(
+            _value_type("input", _F32),
+            _value_type("result", result_type),
+            Guard.low_value_register_class("result", "amdgpu.vgpr"),
+            Guard.descriptor_available(conversion_descriptor),
+            Guard.descriptor_available(extract_descriptor),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=conversion_descriptor,
+                operands={"input": _f32_vgpr_operand("input")},
+                results={"dst": ValueRef.temporary("wide_result")},
+                result_types={"dst": ValueRef.result("result")},
+            ),
+            EmitDescriptorOp(
+                descriptor=extract_descriptor,
+                operands={"value": ValueRef.temporary("wide_result")},
+                results={"dst": ValueRef.result("result")},
+                immediates={"offset": 0, "width": result_bit_width},
             ),
         ),
     )
@@ -3197,7 +3305,7 @@ def _commutative_f32_vector_literal_rules(
 ) -> tuple[DescriptorRule, ...]:
     rules: list[DescriptorRule] = []
     inline_descriptor_key = descriptor_key.removesuffix(".lit") + ".src0_inline"
-    for literal_value in _SOURCE_INLINE_F32_VALUES:
+    for literal_value in AMDGPU_SOURCE_INLINE_F32_VALUES:
         rules.extend(
             (
                 _f32_inline_binary_rule(
@@ -3255,7 +3363,7 @@ def _f32_vector_sub_literal_rules() -> tuple[DescriptorRule, ...]:
                 literal_value=literal_value,
                 f32_operand=True,
             )
-            for literal_value in _SOURCE_INLINE_F32_VALUES
+            for literal_value in AMDGPU_SOURCE_INLINE_F32_VALUES
         ),
         _f32_literal_binary_rule(
             vector.vector_subf,
@@ -3270,6 +3378,101 @@ def _f32_vector_sub_literal_rules() -> tuple[DescriptorRule, ...]:
 
 def _rules() -> tuple[ContractCase, ...]:
     rules: list[ContractCase] = []
+    for type_pattern, type_suffix in ((_F16, "f16"), (_F32, "f32")):
+        for source_op, instruction in (
+            (scalar_arithmetic.scalar_addf, "add"),
+            (scalar_arithmetic.scalar_subf, "sub"),
+            (scalar_arithmetic.scalar_mulf, "mul"),
+            (scalar_arithmetic.scalar_minnumf, "min"),
+            (scalar_arithmetic.scalar_maxnumf, "max"),
+        ):
+            rules.append(
+                _scalar_float_binary_rule(
+                    source_op,
+                    type_pattern,
+                    f"amdgpu.s_{instruction}_{type_suffix}",
+                )
+            )
+        for source_op, instruction in (
+            (scalar_math.scalar_ceilf, "ceil"),
+            (scalar_math.scalar_floorf, "floor"),
+            (scalar_math.scalar_roundevenf, "rndne"),
+            (scalar_math.scalar_truncf, "trunc"),
+        ):
+            rules.append(
+                _scalar_float_unary_rule(
+                    source_op,
+                    type_pattern,
+                    f"amdgpu.s_{instruction}_{type_suffix}",
+                )
+            )
+    rules.extend(
+        (
+            _scalar_float_cast_rule(
+                scalar_conversion.scalar_sitofp,
+                _I32,
+                _F32,
+                "amdgpu.s_cvt_f32_i32",
+            ),
+            _scalar_float_cast_rule(
+                scalar_conversion.scalar_uitofp,
+                _I32,
+                _F32,
+                "amdgpu.s_cvt_f32_u32",
+            ),
+            _scalar_float_cast_rule(
+                scalar_conversion.scalar_fptosi,
+                _F32,
+                _I32,
+                "amdgpu.s_cvt_i32_f32",
+            ),
+            _scalar_float_cast_rule(
+                scalar_conversion.scalar_fptoui,
+                _F32,
+                _I32,
+                "amdgpu.s_cvt_u32_f32",
+            ),
+            _scalar_float_cast_rule(
+                scalar_conversion.scalar_extf,
+                _F16,
+                _F32,
+                "amdgpu.s_cvt_f32_f16",
+            ),
+            _scalar_float_cast_rule(
+                scalar_conversion.scalar_fptrunc,
+                _F32,
+                _F16,
+                "amdgpu.s_cvt_f16_f32",
+            ),
+            _cast_rule(
+                scalar_conversion.scalar_fptosi,
+                _F32,
+                _I32,
+                "amdgpu.v_cvt_i32_f32",
+                f32_input=True,
+            ),
+            _cast_rule(
+                scalar_conversion.scalar_fptoui,
+                _F32,
+                _I32,
+                "amdgpu.v_cvt_u32_f32",
+                f32_input=True,
+            ),
+        )
+    )
+    for source_op, conversion_descriptor_key in (
+        (scalar_conversion.scalar_fptosi, "amdgpu.v_cvt_i32_f32"),
+        (scalar_conversion.scalar_fptoui, "amdgpu.v_cvt_u32_f32"),
+    ):
+        for result_type, result_bit_width in ((_I8, 8), (_I16, 16)):
+            rules.append(
+                _narrow_f32_to_integer_rule(
+                    source_op,
+                    result_type,
+                    result_bit_width,
+                    conversion_descriptor_key,
+                )
+            )
     rules.extend(
         (
             _packed_float_binary_rule(
@@ -3558,7 +3761,7 @@ def _rules() -> tuple[ContractCase, ...]:
         (scalar_arithmetic.scalar_maxnumf, "amdgpu.v_max_f32.lit"),
     ):
         inline_descriptor_key = descriptor_key.removesuffix(".lit") + ".src0_inline"
-        for literal_value in _SOURCE_INLINE_F32_VALUES:
+        for literal_value in AMDGPU_SOURCE_INLINE_F32_VALUES:
             rules.extend(
                 (
                     _f32_inline_binary_rule(
@@ -3611,7 +3814,7 @@ def _rules() -> tuple[ContractCase, ...]:
             literal_value=literal_value,
             f32_operand=True,
         )
-        for literal_value in _SOURCE_INLINE_F32_VALUES
+        for literal_value in AMDGPU_SOURCE_INLINE_F32_VALUES
     )
     rules.append(
         _f32_literal_binary_rule(

@@ -1,0 +1,65 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1151> @target
+func.def target(@target) @scalar_float_uniform(%lhs_i32: i32, %rhs_i32: i32) -> (f32, f32, f32, f32, i32, i32) {
+  %lhs = scalar.sitofp %lhs_i32 : i32 to f32
+  %rhs = scalar.uitofp %rhs_i32 : i32 to f32
+  %sum = scalar.addf %lhs, %rhs : f32
+  %difference = scalar.subf %sum, %lhs : f32
+  %product = scalar.mulf %sum, %difference : f32
+  %minimum = scalar.minnumf %product, %sum : f32
+  %maximum = scalar.maxnumf %minimum, %difference : f32
+  %ceil = scalar.ceilf %maximum : f32
+  %floor = scalar.floorf %maximum : f32
+  %rounded = scalar.roundevenf %maximum : f32
+  %truncated = scalar.truncf %maximum : f32
+  %lhs_f16 = scalar.fptrunc %lhs : f32 to f16
+  %rhs_f16 = scalar.fptrunc %rhs : f32 to f16
+  %sum_f16 = scalar.addf %lhs_f16, %rhs_f16 : f16
+  %sum_from_f16 = scalar.extf %sum_f16 : f16 to f32
+  %condition = scalar.cmpf olt, %sum_from_f16, %maximum : f32
+  %selected = scf.select %condition, %ceil, %floor : f32
+  %signed = scalar.fptosi %rounded : f32 to i32
+  %unsigned = scalar.fptoui %truncated : f32 to i32
+  func.return %selected, %rounded, %truncated, %sum_from_f16, %signed, %unsigned : f32, f32, f32, f32, i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_float_uniform(%lhs_i32: reg<amdgpu.sgpr>, %rhs_i32: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %lhs = s_cvt_f32_i32 %lhs_i32
+  %rhs = s_cvt_f32_u32 %rhs_i32
+  %sum = s_add_f32 %lhs, %rhs
+  %difference = s_sub_f32 %sum, %lhs
+  %product = s_mul_f32 %sum, %difference
+  %minimum = s_min_f32 %product, %sum
+  %maximum = s_max_f32 %minimum, %difference
+  %ceil = s_ceil_f32 %maximum
+  %floor = s_floor_f32 %maximum
+  %rounded = s_rndne_f32 %maximum
+  %truncated = s_trunc_f32 %maximum
+  %lhs_f16 = s_cvt_f16_f32 %lhs
+  %rhs_f16 = s_cvt_f16_f32 %rhs
+  %sum_f16 = s_add_f16 %lhs_f16, %rhs_f16
+  %sum_from_f16 = s_cvt_f32_f16 %sum_f16
+  %condition = s_cmp_lt_f32 %sum_from_f16, %maximum
+  %selected = s_cselect_b32 %ceil, %floor, %condition
+  %signed = s_cvt_i32_f32 %rounded
+  %unsigned = s_cvt_u32_f32 %truncated
+  return %selected, %rounded, %truncated, %sum_from_f16, %signed, %unsigned
+}
+
+// ====
+
+amdgpu.target<gfx1151> @target
+func.def target(@target) @scalar_float_lane_values(%lhs: f32, %rhs: f32) -> (f32) {
+  %condition = scalar.cmpf olt, %lhs, %rhs : f32
+  %result = scf.select %condition, %lhs, %rhs : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core>(@target) abi(hal_kernel) @scalar_float_lane_values(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %condition = v_cmp_lt_f32 %lhs, %rhs
+  %result = v_cndmask_b32 %rhs, %lhs, %condition
+  return %result
+}

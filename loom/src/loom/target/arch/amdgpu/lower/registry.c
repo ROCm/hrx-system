@@ -553,14 +553,6 @@ LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_vector_cmpf_dispatch,
                              loom_amdgpu_vector_compare_plan_t,
                              loom_amdgpu_lower_vector_cmpf)
 
-LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_scalar_cmpf_dispatch,
-                               loom_amdgpu_vector_compare_plan_t,
-                               loom_amdgpu_select_scalar_cmpf_plan)
-
-LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_scalar_cmpf_dispatch,
-                             loom_amdgpu_vector_compare_plan_t,
-                             loom_amdgpu_lower_scalar_cmpf)
-
 LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_vector_dotf_dispatch,
                                loom_amdgpu_dotf_plan_t,
                                loom_amdgpu_select_vector_dotf_plan)
