@@ -155,10 +155,10 @@ low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i64_s
 x86.target<scalar> @target
 
 func.def target(@target) @scalar_i64_dynamic_memory(%input: buffer, %output: buffer, %i: index) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %bounded_i = index.assume %i [range(%i, 0, 7)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<8xi64, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<8xi64, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<8xi64, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<8xi64, #dense>
   %loaded = view.load %input_view[%bounded_i] : view<8xi64, #dense> -> i64
   %incremented = scalar.addi %loaded, %loaded : i64
   view.store %incremented, %output_view[%bounded_i] : i64, view<8xi64, #dense>

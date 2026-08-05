@@ -129,13 +129,13 @@ low.func.def target<x86.scalar.core>(@target) abi(object_function) @index_madd_d
 x86.target<avx512> @target
 
 func.def target(@target) @f32x16_index_madd_scaled_bias_memory(%input: buffer, %output: buffer, %row: index) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %stride = index.constant 4 : index
   %bias = index.constant 1 : index
   %linear = index.madd %row, %stride, %bias : index
   %bounded_linear = index.assume %linear [range(%linear, 0, 16)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<32xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<32xf32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<32xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32xf32, #dense>
   %loaded = vector.load %input_view[%bounded_linear] : view<32xf32, #dense> -> vector<16xf32>
   vector.store %loaded, %output_view[%bounded_linear] : vector<16xf32>, view<32xf32, #dense>
   func.return
@@ -154,13 +154,13 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x16_index
 x86.target<scalar> @target
 
 func.def target(@target) @i32_index_madd_scaled_bias_memory(%input: buffer, %output: buffer, %row: index) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %stride = index.constant 4 : index
   %bias = index.constant 1 : index
   %linear = index.madd %row, %stride, %bias : index
   %bounded_linear = index.assume %linear [range(%linear, 0, 16)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<32xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<32xi32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<32xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32xi32, #dense>
   %loaded = view.load %input_view[%bounded_linear] : view<32xi32, #dense> -> i32
   %incremented = scalar.addi %loaded, %loaded : i32
   view.store %incremented, %output_view[%bounded_linear] : i32, view<32xi32, #dense>
@@ -182,13 +182,13 @@ low.func.def target<x86.scalar.core>(@target) abi(object_function) @i32_index_ma
 x86.target<scalar> @target
 
 func.def target(@target) @i64_index_madd_scaled_bias_memory(%input: buffer, %output: buffer, %row: index) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %stride = index.constant 4 : index
   %bias = index.constant 1 : index
   %linear = index.madd %row, %stride, %bias : index
   %bounded_linear = index.assume %linear [range(%linear, 0, 16)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<32xi64, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<32xi64, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<32xi64, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32xi64, #dense>
   %loaded = view.load %input_view[%bounded_linear] : view<32xi64, #dense> -> i64
   %incremented = scalar.addi %loaded, %loaded : i64
   view.store %incremented, %output_view[%bounded_linear] : i64, view<32xi64, #dense>
@@ -210,13 +210,13 @@ low.func.def target<x86.scalar.core>(@target) abi(object_function) @i64_index_ma
 x86.target<scalar> @target
 
 func.def target(@target) @i64_index_add_madd_memory(%input: buffer, %output: buffer, %i: index, %j: index, %row: index) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %stride = index.constant 4 : index
   %sum = index.add %i, %j : index
   %linear = index.madd %row, %stride, %sum : index
   %bounded_linear = index.assume %linear [range(%linear, 0, 16)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<32xi64, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<32xi64, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<32xi64, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32xi64, #dense>
   %loaded = view.load %input_view[%bounded_linear] : view<32xi64, #dense> -> i64
   %incremented = scalar.addi %loaded, %loaded : i64
   view.store %incremented, %output_view[%bounded_linear] : i64, view<32xi64, #dense>
@@ -244,14 +244,14 @@ func.def target(@target) @guarded_loaded_i64_index_address(%control: buffer, %ou
   %output_view = buffer.view %output[%base] : buffer -> view<64xi32, #dense>
   %row_i64 = view.load %control_view[0] : view<1xi64, #dense> -> i64
   %row = index.cast %row_i64 : i64 to index
-  %zero_i64 = scalar.constant 0 : i64
+  %minimum_row = scalar.constant 0 : i64
   %limit_i64 = scalar.constant 64 : i64
-  %nonnegative = scalar.cmpi sge, %row_i64, %zero_i64 : i64
+  %nonnegative = scalar.cmpi sge, %row_i64, %minimum_row : i64
   %below = scalar.cmpi slt, %row_i64, %limit_i64 : i64
   %guard = scalar.andi %nonnegative, %below : i1
-  %zero_i32 = scalar.constant 0 : i32
+  %stored_value = scalar.constant 0 : i32
   scf.if %guard {
-    view.store %zero_i32, %output_view[%row] : i32, view<64xi32, #dense>
+    view.store %stored_value, %output_view[%row] : i32, view<64xi32, #dense>
   }
   func.return
 }
@@ -259,16 +259,16 @@ func.def target(@target) @guarded_loaded_i64_index_address(%control: buffer, %ou
 // ----
 low.func.def target<x86.scalar.core>(@target) abi(object_function) @guarded_loaded_i64_index_address(%control_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
   %row = mov.load.gpr64 %control_view {disp32 = 0}
-  %zero_i64 = mov.imm64 0
+  %minimum_row = mov.imm64 0
   %limit_i64 = mov.imm64 64
-  %nonnegative = cmp.sge.gpr64 %row, %zero_i64
+  %nonnegative = cmp.sge.gpr64 %row, %minimum_row
   %below = cmp.slt.gpr64 %row, %limit_i64
-  %zero_i32 = mov.imm32 0
+  %stored_value = mov.imm32 0
   %22 = copy %nonnegative : reg<x86.gpr32> -> reg<x86.gpr32>
   %guard = and.gpr32 %22, %below
   low.cond_br %guard, ^_bb1, ^_bb2 : reg<x86.gpr32>
 ^_bb1:
-  mov.store.indexed.gpr32 %zero_i32, %output_view, %row {disp32 = 0, scale = 4}
+  mov.store.indexed.gpr32 %stored_value, %output_view, %row {disp32 = 0, scale = 4}
   low.br ^_bb2
 ^_bb2:
   return
@@ -284,13 +284,13 @@ func.def target(@target) @guarded_loaded_i32_index_address(%control: buffer, %ou
   %output_view = buffer.view %output[%base] : buffer -> view<64xi32, #dense>
   %row_i32 = view.load %control_view[0] : view<1xi32, #dense> -> i32
   %row = index.cast %row_i32 : i32 to index
-  %zero_i32 = scalar.constant 0 : i32
+  %c0 = scalar.constant 0 : i32
   %limit_i32 = scalar.constant 64 : i32
-  %nonnegative = scalar.cmpi sge, %row_i32, %zero_i32 : i32
+  %nonnegative = scalar.cmpi sge, %row_i32, %c0 : i32
   %below = scalar.cmpi slt, %row_i32, %limit_i32 : i32
   %guard = scalar.andi %nonnegative, %below : i1
   scf.if %guard {
-    view.store %zero_i32, %output_view[%row] : i32, view<64xi32, #dense>
+    view.store %c0, %output_view[%row] : i32, view<64xi32, #dense>
   }
   func.return
 }
@@ -299,15 +299,15 @@ func.def target(@target) @guarded_loaded_i32_index_address(%control: buffer, %ou
 low.func.def target<x86.scalar.core>(@target) abi(object_function) @guarded_loaded_i32_index_address(%control_view: reg<x86.gpr64>, %output_view: reg<x86.gpr64>) asm {
   %row_i32 = mov.load.gpr32 %control_view {disp32 = 0}
   %row = movsxd.gpr64.gpr32 %row_i32
-  %zero_i32 = mov.imm32 0
+  %c0 = mov.imm32 0
   %limit_i32 = mov.imm32 64
-  %nonnegative = cmp.sge.gpr32 %row_i32, %zero_i32
+  %nonnegative = cmp.sge.gpr32 %row_i32, %c0
   %below = cmp.slt.gpr32 %row_i32, %limit_i32
   %21 = copy %nonnegative : reg<x86.gpr32> -> reg<x86.gpr32>
   %guard = and.gpr32 %21, %below
   low.cond_br %guard, ^_bb1, ^_bb2 : reg<x86.gpr32>
 ^_bb1:
-  mov.store.indexed.gpr32 %zero_i32, %output_view, %row {disp32 = 0, scale = 4}
+  mov.store.indexed.gpr32 %c0, %output_view, %row {disp32 = 0, scale = 4}
   low.br ^_bb2
 ^_bb2:
   return
@@ -334,12 +334,12 @@ low.func.def target<x86.scalar.core>(@target) abi(object_function) @nonnegative_
 x86.target<scalar> @target
 
 func.def target(@target) @i32_source_index_static_suffix(%input: buffer, %output: buffer, %i: index) {
-  %zero = index.constant 0 : offset
-  %four = index.constant 4 : index
-  %element_index = index.add %i, %four : index
+  %buffer_base = index.constant 0 : offset
+  %element_suffix = index.constant 4 : index
+  %element_index = index.add %i, %element_suffix : index
   %bounded_index = index.assume %element_index [range(%element_index, 0, 31)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
   %loaded = view.load %input_view[%bounded_index] : view<64xi32, #dense> -> i32
   view.store %loaded, %output_view[%bounded_index] : i32, view<64xi32, #dense>
   func.return
@@ -357,12 +357,12 @@ low.func.def target<x86.scalar.core>(@target) abi(object_function) @i32_source_i
 x86.target<avx2> @target
 
 func.def target(@target) @f32x4_source_index_static_suffix(%input: buffer, %output: buffer, %i: index) {
-  %zero = index.constant 0 : offset
-  %four = index.constant 4 : index
-  %element_index = index.add %i, %four : index
+  %buffer_base = index.constant 0 : offset
+  %element_suffix = index.constant 4 : index
+  %element_index = index.add %i, %element_suffix : index
   %bounded_index = index.assume %element_index [range(%element_index, 0, 31)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32, #dense>
   %loaded = vector.load %input_view[%bounded_index] : view<64xf32, #dense> -> vector<4xf32>
   vector.store %loaded, %output_view[%bounded_index] : vector<4xf32>, view<64xf32, #dense>
   func.return
@@ -380,12 +380,12 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @f32x4_source_i
 x86.target<avx512> @target
 
 func.def target(@target) @f32x16_source_index_static_suffix(%input: buffer, %output: buffer, %i: index) {
-  %zero = index.constant 0 : offset
-  %four = index.constant 4 : index
-  %element_index = index.add %i, %four : index
+  %buffer_base = index.constant 0 : offset
+  %element_suffix = index.constant 4 : index
+  %element_index = index.add %i, %element_suffix : index
   %bounded_index = index.assume %element_index [range(%element_index, 0, 31)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32, #dense>
   %loaded = vector.load %input_view[%bounded_index] : view<64xf32, #dense> -> vector<16xf32>
   vector.store %loaded, %output_view[%bounded_index] : vector<16xf32>, view<64xf32, #dense>
   func.return
@@ -403,13 +403,13 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x16_sourc
 x86.target<scalar> @target
 
 func.def target(@target) @i32_multi_term_static_suffix(%input: buffer, %output: buffer, %i: index, %j: index) {
-  %zero = index.constant 0 : offset
-  %four = index.constant 4 : index
+  %buffer_base = index.constant 0 : offset
+  %element_suffix = index.constant 4 : index
   %linear = index.add %i, %j : index
-  %element_index = index.add %linear, %four : index
+  %element_index = index.add %linear, %element_suffix : index
   %bounded_index = index.assume %element_index [range(%element_index, 0, 31)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
   %loaded = view.load %input_view[%bounded_index] : view<64xi32, #dense> -> i32
   view.store %loaded, %output_view[%bounded_index] : i32, view<64xi32, #dense>
   func.return
@@ -440,13 +440,13 @@ low.func.def target<x86.scalar.core>(@target) abi(object_function) @i32_multi_te
 x86.target<avx2> @target
 
 func.def target(@target) @f32x4_multi_term_static_suffix(%input: buffer, %output: buffer, %i: index, %j: index) {
-  %zero = index.constant 0 : offset
-  %four = index.constant 4 : index
+  %buffer_base = index.constant 0 : offset
+  %element_suffix = index.constant 4 : index
   %linear = index.add %i, %j : index
-  %element_index = index.add %linear, %four : index
+  %element_index = index.add %linear, %element_suffix : index
   %bounded_index = index.assume %element_index [range(%element_index, 0, 31)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32, #dense>
   %loaded = vector.load %input_view[%bounded_index] : view<64xf32, #dense> -> vector<4xf32>
   vector.store %loaded, %output_view[%bounded_index] : vector<4xf32>, view<64xf32, #dense>
   func.return
@@ -477,13 +477,13 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @f32x4_multi_te
 x86.target<avx512> @target
 
 func.def target(@target) @f32x16_multi_term_static_suffix(%input: buffer, %output: buffer, %i: index, %j: index) {
-  %zero = index.constant 0 : offset
-  %four = index.constant 4 : index
+  %buffer_base = index.constant 0 : offset
+  %element_suffix = index.constant 4 : index
   %linear = index.add %i, %j : index
-  %element_index = index.add %linear, %four : index
+  %element_index = index.add %linear, %element_suffix : index
   %bounded_index = index.assume %element_index [range(%element_index, 0, 31)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32, #dense>
   %loaded = vector.load %input_view[%bounded_index] : view<64xf32, #dense> -> vector<16xf32>
   vector.store %loaded, %output_view[%bounded_index] : vector<16xf32>, view<64xf32, #dense>
   func.return
