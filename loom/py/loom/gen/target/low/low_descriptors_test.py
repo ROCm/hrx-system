@@ -1656,6 +1656,10 @@ def test_generator_emits_asm_form_native_assembly_values() -> None:
                     NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="lhs"),
                     NativeAsmValue(NativeAsmValueKind.LITERAL, literal="literal"),
                     NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="rhs"),
+                    NativeAsmValue(
+                        NativeAsmValueKind.MODIFIER_LITERAL,
+                        literal="modifier:1",
+                    ),
                 ),
             ),
         ),
@@ -1665,11 +1669,40 @@ def test_generator_emits_asm_form_native_assembly_values() -> None:
     generated = generate_descriptor_set(descriptor_set)
 
     assert "static const loom_low_native_asm_value_t kTestLowCoreNativeAsmValues[]" in generated.source
-    assert ".native_assembly_value_count = 4," in generated.source
+    assert ".native_assembly_value_count = 5," in generated.source
     assert ".native_asm_values = kTestLowCoreNativeAsmValues," in generated.source
     assert "LOOM_LOW_NATIVE_ASM_VALUE_KIND_RESULT" in generated.source
     assert "LOOM_LOW_NATIVE_ASM_VALUE_KIND_LITERAL" in generated.source
+    assert "LOOM_LOW_NATIVE_ASM_VALUE_KIND_MODIFIER_LITERAL" in generated.source
     assert '"literal"' in generated.source
+    assert '"modifier:1"' in generated.source
+
+
+def test_generator_emits_native_register_part_values() -> None:
+    descriptor = replace(
+        TEST_LOW_WRITE_LOW16_I32_DESCRIPTOR,
+        asm_forms=(
+            AsmForm(
+                results=("dst",),
+                operands=("address",),
+                native_assembly_values=(
+                    NativeAsmValue(
+                        NativeAsmValueKind.REGISTER_PART,
+                        field_name="dst",
+                    ),
+                    NativeAsmValue(
+                        NativeAsmValueKind.OPERAND,
+                        field_name="address",
+                    ),
+                ),
+            ),
+        ),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert "LOOM_LOW_NATIVE_ASM_VALUE_KIND_REGISTER_PART" in generated.source
 
 
 def test_generator_emits_target_native_asm_immediate_values() -> None:

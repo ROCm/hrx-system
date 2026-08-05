@@ -42,6 +42,11 @@ typedef enum loom_amdgpu_native_asm_immediate_format_e {
   LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64 = 10,
 } loom_amdgpu_native_asm_immediate_format_t;
 
+typedef enum loom_amdgpu_register_part_mask_e {
+  LOOM_AMDGPU_REGISTER_PART_MASK_LOW16 = 0x1u,
+  LOOM_AMDGPU_REGISTER_PART_MASK_HIGH16 = 0x2u,
+} loom_amdgpu_register_part_mask_t;
+
 typedef struct loom_amdgpu_assembly_emit_state_t {
   // Function-local storage layout shared by all storage-address packets.
   const loom_amdgpu_storage_layout_t* storage_layout;
@@ -212,6 +217,37 @@ static iree_status_t loom_amdgpu_append_descriptor_assignment(
   return loom_amdgpu_append_register_range_units(
       context, "v", assignment->location_base % operand->addressable_unit_count,
       assignment->location_count);
+}
+
+static iree_status_t loom_amdgpu_append_descriptor_register_part_assignment(
+    const loom_native_assembly_packet_context_t* context,
+    uint16_t descriptor_operand_index) {
+  const loom_low_descriptor_t* descriptor = context->packet->descriptor;
+  const loom_low_descriptor_set_t* descriptor_set =
+      context->schedule->target.descriptor_set;
+  IREE_ASSERT_LT(descriptor_operand_index, descriptor->operand_count);
+  const loom_low_operand_t* operand =
+      &descriptor_set
+           ->operands[descriptor->operand_start + descriptor_operand_index];
+  IREE_ASSERT_NE(operand->register_part_id, LOOM_LOW_REGISTER_PART_NONE);
+  IREE_ASSERT_LT(operand->register_part_id,
+                 descriptor_set->register_part_count);
+  const loom_low_register_part_t* register_part =
+      &descriptor_set->register_parts[operand->register_part_id];
+  IREE_ASSERT(register_part->reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR ||
+              register_part->reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR);
+
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_descriptor_assignment(
+      context, descriptor_operand_index));
+  switch (register_part->mask) {
+    case LOOM_AMDGPU_REGISTER_PART_MASK_LOW16:
+      return iree_string_builder_append_cstring(context->builder, ".l");
+    case LOOM_AMDGPU_REGISTER_PART_MASK_HIGH16:
+      return iree_string_builder_append_cstring(context->builder, ".h");
+    default:
+      IREE_ASSERT_UNREACHABLE("unsupported AMDGPU assembly register part");
+      return iree_ok_status();
+  }
 }
 
 static iree_status_t loom_amdgpu_append_descriptor_operand(
@@ -1137,12 +1173,22 @@ static iree_status_t loom_amdgpu_append_native_asm_form_value(
           descriptor_set, value->literal_string_offset);
       return iree_string_builder_append_string(context->builder, literal);
     }
+    case LOOM_LOW_NATIVE_ASM_VALUE_KIND_MODIFIER_LITERAL: {
+      const iree_string_view_t literal = loom_native_assembly_descriptor_string(
+          descriptor_set, value->literal_string_offset);
+      IREE_RETURN_IF_ERROR(
+          iree_string_builder_append_cstring(context->builder, " "));
+      return iree_string_builder_append_string(context->builder, literal);
+    }
     case LOOM_LOW_NATIVE_ASM_VALUE_KIND_RESULT:
       return loom_amdgpu_append_asm_form_value(
           context, descriptor, value->index, /*is_result=*/true);
     case LOOM_LOW_NATIVE_ASM_VALUE_KIND_OPERAND:
       return loom_amdgpu_append_asm_form_value(
           context, descriptor, value->index, /*is_result=*/false);
+    case LOOM_LOW_NATIVE_ASM_VALUE_KIND_REGISTER_PART:
+      return loom_amdgpu_append_descriptor_register_part_assignment(
+          context, value->index);
     case LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_I64:
       return loom_amdgpu_append_packet_immediate_i64(context, value->index);
     case LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_UNSIGNED_HEX:
@@ -1200,9 +1246,11 @@ static iree_status_t loom_amdgpu_append_native_asm_form_values(
     const loom_low_native_asm_value_t* value =
         &descriptor_set->native_asm_values[native_value_index];
     const bool is_named_modifier =
-        value->kind == LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_TARGET_FORMAT &&
-        loom_amdgpu_native_asm_format_is_named_modifier(
-            value->target_format_id);
+        value->kind == LOOM_LOW_NATIVE_ASM_VALUE_KIND_MODIFIER_LITERAL ||
+        (value->kind ==
+             LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_TARGET_FORMAT &&
+         loom_amdgpu_native_asm_format_is_named_modifier(
+             value->target_format_id));
     if (!is_named_modifier) {
       IREE_RETURN_IF_ERROR(
           loom_amdgpu_append_asm_form_separator(context, in_list));

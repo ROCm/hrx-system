@@ -269,8 +269,12 @@ def _validate_native_asm_values(descriptor_set: DescriptorSet) -> None:
             saw_named_modifier = False
             for value in form.native_assembly_values:
                 is_named_modifier = (
-                    value.kind is NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT
-                    and value.target_format_id in _NAMED_NATIVE_ASM_IMMEDIATE_FORMAT_IDS
+                    value.kind is NativeAsmValueKind.MODIFIER_LITERAL
+                    or (
+                        value.kind is NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT
+                        and value.target_format_id
+                        in _NAMED_NATIVE_ASM_IMMEDIATE_FORMAT_IDS
+                    )
                 )
                 if not is_named_modifier:
                     if saw_named_modifier:
@@ -280,6 +284,8 @@ def _validate_native_asm_values(descriptor_set: DescriptorSet) -> None:
                         )
                     continue
                 saw_named_modifier = True
+                if value.kind is NativeAsmValueKind.MODIFIER_LITERAL:
+                    continue
                 immediate = immediate_by_name.get(value.field_name)
                 if immediate is None:
                     raise ValueError(

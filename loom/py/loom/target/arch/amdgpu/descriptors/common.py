@@ -1076,8 +1076,16 @@ def _native_operand(field_name: str) -> NativeAsmValue:
     return NativeAsmValue(NativeAsmValueKind.OPERAND, field_name=field_name)
 
 
+def _native_register_part(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(NativeAsmValueKind.REGISTER_PART, field_name=field_name)
+
+
 def _native_literal(spelling: str) -> NativeAsmValue:
     return NativeAsmValue(NativeAsmValueKind.LITERAL, literal=spelling)
+
+
+def _native_modifier_literal(spelling: str) -> NativeAsmValue:
+    return NativeAsmValue(NativeAsmValueKind.MODIFIER_LITERAL, literal=spelling)
 
 
 def _native_i64_immediate(field_name: str) -> NativeAsmValue:
@@ -3444,7 +3452,9 @@ __all__ = (
     "_native_amdgpu_delay_alu_immediate",
     "_native_amdgpu_scale_sel_immediate",
     "_native_literal",
+    "_native_modifier_literal",
     "_native_operand",
+    "_native_register_part",
     "_native_result",
     "_native_unsigned_hex_immediate",
     "_named_offset_immediate",

@@ -426,6 +426,8 @@ static bool loom_low_native_asm_value_kind_is_valid(
     case LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_I64:
     case LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_UNSIGNED_HEX:
     case LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_TARGET_FORMAT:
+    case LOOM_LOW_NATIVE_ASM_VALUE_KIND_REGISTER_PART:
+    case LOOM_LOW_NATIVE_ASM_VALUE_KIND_MODIFIER_LITERAL:
       return true;
     default:
       return false;
@@ -446,7 +448,8 @@ static iree_status_t loom_low_verify_native_asm_values(
                               " has invalid native value kind %u",
                               descriptor_index, (unsigned)value->kind);
     }
-    if (value->kind == LOOM_LOW_NATIVE_ASM_VALUE_KIND_LITERAL) {
+    if (value->kind == LOOM_LOW_NATIVE_ASM_VALUE_KIND_LITERAL ||
+        value->kind == LOOM_LOW_NATIVE_ASM_VALUE_KIND_MODIFIER_LITERAL) {
       iree_string_view_t literal = iree_string_view_empty();
       IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
           descriptor_set, value->literal_string_offset,
@@ -532,6 +535,43 @@ static iree_status_t loom_low_verify_native_asm_values(
                                   "low asm form for descriptor %" PRIu32
                                   " native operand must not set target format",
                                   descriptor_index);
+        }
+        break;
+      }
+      case LOOM_LOW_NATIVE_ASM_VALUE_KIND_REGISTER_PART: {
+        if (value->index >= descriptor->operand_count) {
+          return iree_make_status(
+              IREE_STATUS_OUT_OF_RANGE,
+              "low asm form for descriptor %" PRIu32
+              " native register-part value references operand %" PRIu16
+              " but descriptor has only %" PRIu16 " operands",
+              descriptor_index, value->index, descriptor->operand_count);
+        }
+        const loom_low_operand_t* operand =
+            &descriptor_set->operands[descriptor->operand_start + value->index];
+        if (operand->role != LOOM_LOW_OPERAND_ROLE_RESULT &&
+            !loom_low_operand_role_is_packet_operand(operand->role)) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "low asm form for descriptor %" PRIu32
+              " native register-part operand %" PRIu16
+              " does not name a result or explicit packet operand",
+              descriptor_index, value->index);
+        }
+        if (operand->register_part_id == LOOM_LOW_REGISTER_PART_NONE) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "low asm form for descriptor %" PRIu32
+                                  " native register-part operand %" PRIu16
+                                  " names a full-register operand",
+                                  descriptor_index, value->index);
+        }
+        if (value->bit_width != 0 || value->target_format_id != 0) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "low asm form for descriptor %" PRIu32
+              " native register-part value must not set bit width or target "
+              "format",
+              descriptor_index);
         }
         break;
       }
