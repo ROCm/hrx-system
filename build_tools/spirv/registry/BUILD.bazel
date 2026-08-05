@@ -19,6 +19,20 @@ iree_py_library(
     ],
 )
 
+iree_py_library(
+    name = "registry_source",
+    srcs = [
+        "__init__.py",
+        "registry_source.py",
+    ],
+)
+
+iree_py_library(
+    name = "spirv_core_grammar",
+    srcs = ["spirv_core_grammar.py"],
+    deps = [":registry_source"],
+)
+
 iree_py_test(
     name = "dependency_expression_test",
     size = "small",
@@ -36,10 +50,32 @@ iree_py_test(
     deps = [":dependency_expression"],
 )
 
+iree_py_test(
+    name = "spirv_core_grammar_test",
+    size = "small",
+    srcs = ["spirv_core_grammar_test.py"],
+    deps = [
+        ":registry_source",
+        ":spirv_core_grammar",
+    ],
+)
+
+iree_py_test(
+    name = "spirv_core_grammar_registry_test",
+    size = "small",
+    srcs = ["spirv_core_grammar_registry_test.py"],
+    args = ["$(location @spirv_headers//:spirv_core_grammar_unified1)"],
+    data = ["@spirv_headers//:spirv_core_grammar_unified1"],
+    tags = ["skip-bazel_to_cmake"],
+    deps = [":spirv_core_grammar"],
+)
+
 test_suite(
     name = "registry_tests",
     tests = [
         ":dependency_expression_registry_test",
         ":dependency_expression_test",
+        ":spirv_core_grammar_registry_test",
+        ":spirv_core_grammar_test",
     ],
 )
