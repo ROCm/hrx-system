@@ -270,16 +270,18 @@ workgroup-size ownership with the executable. Recorded dispatches carry only
 the evaluated workgroup count; active workload values remain ordinary dispatch
 arguments and do not create position-specific executable identities.
 
-## What the remaining bring-up workarounds prove
+## Qwen-owned endpoints and remaining schedule workaround
 
-The workaround files are valuable compiler reproducers because each has a
-small, named missing fact. They should be compared with the canonical source,
-not copied wholesale into a second kernel corpus.
+The runtime owns the model-specific endpoints that have no reusable provider in
+the shared Qwen kernel corpus. These are ordinary authored Loom sources, not
+compiler workarounds or a second kernel framework. The pure-tail recording
+schedule remains a bounded correctness workaround around the shared attention
+kernel.
 
-| Workaround | Canonical source or missing provider | Exact pressure exposed |
+| Owned surface | Shared source or corpus boundary | Exact contract |
 | --- | --- | --- |
 | Runtime pure-tail row-by-row recording | `qwen3_moe/flash_attention_f32_f16_wmma.loom` | The canonical multirow specialization corrupts nonleading query rows when the context consists entirely of a key-tile tail. The same canonical kernel specialized for one query row is exact, so the command buffer temporarily records that specialization once per prompt row without introducing another Loom source. |
-| `token_embedding_bringup_workaround.loom` | No corpus provider yet | Fixed Q4_K GGUF row decoding into the 2048-wide F32 hidden layout. This is endpoint glue, not an assumption repair. |
+| `token_embedding_q4k.loom` | Qwen-owned model endpoint | Fixed Q4_K GGUF row decoding into the 2048-wide F32 hidden layout. |
 | `attention_metadata_bringup_workaround.loom` | No corpus provider yet | Direct no-ring K/V indices, positions, and dense causal-mask construction from one context-base word. This is request-policy glue, not an assumption repair. |
 | `greedy_argmax_bringup_workaround.loom` | No corpus provider yet | Compact finalization over 18992 finite F32/I32 maximum pairs with lowest-token tie breaking. This is endpoint glue, not an assumption repair. |
 

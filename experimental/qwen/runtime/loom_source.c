@@ -19,10 +19,8 @@ typedef struct qwen_loom_source_mapping_t {
 
 static const qwen_loom_source_mapping_t qwen_loom_source_mappings[] = {
     {
-        .module_path =
-            IREE_SVL(QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K_BRINGUP_WORKAROUND),
-        .embedded_name =
-            IREE_SVL("qwen_token_embedding_q4k_bringup_workaround.loom"),
+        .module_path = IREE_SVL(QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K),
+        .embedded_name = IREE_SVL("qwen_token_embedding_q4k.loom"),
     },
     {
         .module_path = IREE_SVL(

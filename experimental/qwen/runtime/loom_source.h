@@ -13,9 +13,8 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Stable runtime path for the temporary raw-Q4_K embedding producer.
-#define QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K_BRINGUP_WORKAROUND \
-  "qwen3_moe/token_embedding_q4k_bringup_workaround"
+// Stable runtime path for the raw-Q4_K embedding producer.
+#define QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K "qwen3_moe/token_embedding_q4k"
 
 // Stable runtime path for the temporary partial-pair token selector.
 #define QWEN_LOOM_SOURCE_GREEDY_ARGMAX_PARTIALS_BRINGUP_WORKAROUND \

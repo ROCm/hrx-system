@@ -54,35 +54,35 @@ iree_executable_test(
 )
 
 loom_link_module(
-    name = "token_embedding_bringup_workaround_linked",
-    srcs = ["token_embedding_bringup_workaround.loom"],
+    name = "token_embedding_q4k_linked",
+    srcs = ["token_embedding_q4k.loom"],
 )
 
 iree_executable_test(
-    name = "token_embedding_bringup_workaround_plan_test",
+    name = "token_embedding_q4k_plan_test",
     src = "//loom/src/loom/tools/iree-benchmark-loom",
     args = [
-        "$(location :token_embedding_bringup_workaround_linked)",
+        "$(location :token_embedding_q4k_linked)",
         "--benchmark=@qwen_token_embedding_q4k_prefill_512",
         "--config=qwen3_moe.workload.token_capacity=512",
         "--dry-run",
         "--output-format=jsonl",
     ],
-    data = [":token_embedding_bringup_workaround_linked"],
+    data = [":token_embedding_q4k_linked"],
     tags = ["hostonly"],
 )
 
 iree_executable_test(
-    name = "token_embedding_bringup_workaround_hal_test",
+    name = "token_embedding_q4k_hal_test",
     src = "//loom/src/loom/tools/iree-test-loom",
     args = [
-        "$(location :token_embedding_bringup_workaround_linked)",
+        "$(location :token_embedding_q4k_linked)",
         "--case=@qwen_token_embedding_q4k_row_access_case",
         "--config=qwen3_moe.workload.token_capacity=3",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
-    data = [":token_embedding_bringup_workaround_linked"],
+    data = [":token_embedding_q4k_linked"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",
@@ -95,11 +95,11 @@ iree_executable_test(
 )
 
 loom_link_module(
-    name = "token_embedding_bringup_workaround_runtime_module",
-    srcs = ["token_embedding_bringup_workaround.loom"],
+    name = "token_embedding_q4k_runtime_module",
+    srcs = ["token_embedding_q4k.loom"],
     mode = "selective",
-    output = "qwen_token_embedding_q4k_bringup_workaround.loom",
-    roots = ["@qwen_token_embedding_q4k_bringup_workaround"],
+    output = "qwen_token_embedding_q4k.loom",
+    roots = ["@qwen_token_embedding_q4k"],
     strip_check = True,
 )
 
@@ -610,7 +610,7 @@ iree_c_embed_data(
         ":router_projection_f32_runtime_module",
         ":router_projection_top8_fused_f32_runtime_module",
         ":router_top8_f32_runtime_module",
-        ":token_embedding_bringup_workaround_runtime_module",
+        ":token_embedding_q4k_runtime_module",
         ":vocabulary_projection_q6_runtime_module",
     ],
     c_file_output = "runtime_modules.c",
@@ -630,8 +630,8 @@ test_suite(
         ":greedy_argmax_partials_tie_bringup_workaround_hal_test",
         ":route_trace_hal_test",
         ":route_trace_plan_test",
-        ":token_embedding_bringup_workaround_hal_test",
-        ":token_embedding_bringup_workaround_plan_test",
+        ":token_embedding_q4k_hal_test",
+        ":token_embedding_q4k_plan_test",
         ":vocabulary_partial_argmax_plan_test",
         ":vocabulary_partial_argmax_tail_hal_test",
         ":vocabulary_partial_argmax_vocabulary_hal_test",

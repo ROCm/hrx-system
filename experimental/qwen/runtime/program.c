@@ -1581,8 +1581,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
       &terminal_routed_down_config_binding_list);
 
   iree_status_t status = qwen_program_prepare_batch_append(
-      batch, IREE_SV(QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K_BRINGUP_WORKAROUND),
-      IREE_SV("qwen_token_embedding_q4k_bringup_workaround"),
+      batch, IREE_SV(QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K),
+      IREE_SV("qwen_token_embedding_q4k"),
       token_embedding_config_binding_list.count,
       token_embedding_config_binding_list.bindings,
       IREE_ARRAYSIZE(embedding_workload), embedding_workload,

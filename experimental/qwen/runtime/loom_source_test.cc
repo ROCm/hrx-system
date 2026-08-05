@@ -24,9 +24,9 @@ struct ExpectedSource {
 TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
   const ExpectedSource expected_sources[] = {
       {
-          QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K_BRINGUP_WORKAROUND,
-          "qwen_token_embedding_q4k_bringup_workaround.loom",
-          "qwen_token_embedding_q4k_bringup_workaround",
+          QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K,
+          "qwen_token_embedding_q4k.loom",
+          "qwen_token_embedding_q4k",
       },
       {
           QWEN_LOOM_SOURCE_GREEDY_ARGMAX_PARTIALS_BRINGUP_WORKAROUND,
@@ -189,8 +189,7 @@ TEST(QwenLoomSourceTest, RejectsUnknownPath) {
 TEST(QwenLoomSourceTest, EmbedsConfiguredQwenLaunchCapacities) {
   qwen_loom_source_module_t token_embedding_source;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
-      IREE_SV(QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K_BRINGUP_WORKAROUND),
-      &token_embedding_source));
+      IREE_SV(QWEN_LOOM_SOURCE_TOKEN_EMBEDDING_Q4K), &token_embedding_source));
   std::string token_embedding_text(
       reinterpret_cast<const char*>(
           token_embedding_source.source_contents.data),

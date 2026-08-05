@@ -4,19 +4,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Temporary, non-sanctioned one-function kernel for Qwen bring-up. This is not
-// an embedding-kernel framework, a generator, or a second Loom authoring path.
-// It gathers token rows directly from the model's unmodified GGUF Q4_K payload
-// and decodes them to the owned F32 hidden-state layout. Delete this file when
-// the Qwen kernel corpus provides the canonical token-embedding producer.
-//
-// The fixed model row contract is:
+// Gathers token rows directly from the model's unmodified GGUF Q4_K payload
+// and decodes them to the owned F32 hidden-state layout. The fixed model row
+// contract is:
 //   Q4_K: [vocabulary row][8 blocks][144 bytes] -> [2048xf32]
 amdgpu.target<gfx11-generic> @qwen_token_embedding_gfx11_wave64 {subgroup_size = 64}
 
 config.decl @qwen3_moe.workload.token_capacity : %value: index where [range(%value, 1, 2048)]
 
-kernel.def target(@qwen_token_embedding_gfx11_wave64) export("qwen_token_embedding_q4k_bringup_workaround") @qwen_token_embedding_q4k_bringup_workaround(%token_count: index, %vocabulary_count: index) {
+kernel.def target(@qwen_token_embedding_gfx11_wave64) export("qwen_token_embedding_q4k") @qwen_token_embedding_q4k(%token_count: index, %vocabulary_count: index) {
   %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %one = index.constant 1 : index
   %two = index.constant 2 : index
@@ -158,7 +154,7 @@ check.case public @qwen_token_embedding_q4k_decode_case {
   %weight = check.generate.fill value(85) : tensor<1x8x144xi8>
   %output = check.generate.fill value(0.0) : tensor<1x2048xf32>
   %expected = check.generate.fill value(7166.25) : tensor<1x2048xf32>
-  kernel.launch @qwen_token_embedding_q4k_bringup_workaround[%token_count, %vocabulary_count](%token_count, %vocabulary_count, %token_ids, %weight, %output) : [index, index](index, index, tensor<1xi32>, tensor<1x8x144xi8>, tensor<1x2048xf32>)
+  kernel.launch @qwen_token_embedding_q4k[%token_count, %vocabulary_count](%token_count, %vocabulary_count, %token_ids, %weight, %output) : [index, index](index, index, tensor<1xi32>, tensor<1x8x144xi8>, tensor<1x2048xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x2048xf32>
   check.return
 }
@@ -172,7 +168,7 @@ check.case public @qwen_token_embedding_q4k_row_access_case {
   %weight = check.generate.fill value(0) : tensor<3x8x144xi8>
   %output = check.generate.fill value(1.0) : tensor<3x2048xf32>
   %expected = check.generate.fill value(0.0) : tensor<3x2048xf32>
-  kernel.launch @qwen_token_embedding_q4k_bringup_workaround[%token_count, %vocabulary_count](%token_count, %vocabulary_count, %token_ids, %weight, %output) : [index, index](index, index, tensor<3xi32>, tensor<3x8x144xi8>, tensor<3x2048xf32>)
+  kernel.launch @qwen_token_embedding_q4k[%token_count, %vocabulary_count](%token_count, %vocabulary_count, %token_ids, %weight, %output) : [index, index](index, index, tensor<3xi32>, tensor<3x8x144xi8>, tensor<3x2048xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<3x2048xf32>
   check.return
 }
@@ -184,7 +180,7 @@ check.case public @qwen_token_embedding_q4k_benchmark_case {
   %weight = check.generate.fill value(0) : tensor<151936x8x144xi8>
   %output = check.generate.fill value(1.0) : tensor<[%token_count]x2048xf32>
   %expected = check.generate.fill value(0.0) : tensor<[%token_count]x2048xf32>
-  kernel.launch @qwen_token_embedding_q4k_bringup_workaround[%token_count, %vocabulary_count](%token_count, %vocabulary_count, %token_ids, %weight, %output) : [index, index](index, index, tensor<[%token_count]xi32>, tensor<151936x8x144xi8>, tensor<[%token_count]x2048xf32>)
+  kernel.launch @qwen_token_embedding_q4k[%token_count, %vocabulary_count](%token_count, %vocabulary_count, %token_ids, %weight, %output) : [index, index](index, index, tensor<[%token_count]xi32>, tensor<151936x8x144xi8>, tensor<[%token_count]x2048xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x2048xf32>
   check.return
 }
