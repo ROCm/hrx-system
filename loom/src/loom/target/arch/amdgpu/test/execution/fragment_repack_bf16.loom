@@ -6,8 +6,8 @@ kernel.def @fragment_repack_roundtrip_bf16() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %rhs: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %sixteen = index.constant 16 : index
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
   %scratch_bytes = index.constant 512 : offset
 
   %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
@@ -18,14 +18,14 @@ kernel.def @fragment_repack_roundtrip_bf16() {
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xbf16, #dense>
 
   %zero_accumulator = vector.constant 0.0 : vector<8xf32>
-  %init = vector.fragment<init> %zero_accumulator shape [%sixteen, %sixteen] : vector<8xf32>
-  %result = vector.fragment.load<result> %input_view[%zero, %zero] shape [%sixteen, %sixteen] : view<16x16xf32, #dense> -> vector<8xf32>
-  vector.fragment.store<result> %result, %scratch_view[%zero, %zero] shape [%sixteen, %sixteen] : vector<8xf32>, view<16x16xbf16, #dense>
+  %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
+  %result = vector.fragment.load<result> %input_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf32, #dense> -> vector<8xf32>
+  vector.fragment.store<result> %result, %scratch_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xbf16, #dense>
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-  %lhs = vector.fragment.load<lhs> %scratch_view[%zero, %zero] shape [%sixteen, %sixteen] : view<16x16xbf16, #dense> -> vector<16xbf16>
-  %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%zero, %zero] shape [%sixteen, %sixteen] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
+  %lhs = vector.fragment.load<lhs> %scratch_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16, #dense> -> vector<16xbf16>
+  %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
   %product = vector.mma %lhs, %rhs_fragment, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-  vector.fragment.store<result> %product, %output_view[%zero, %zero] shape [%sixteen, %sixteen] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %product, %output_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xf32, #dense>
   kernel.return
 }
 
@@ -35,8 +35,8 @@ kernel.def @fragment_repack_direct_bf16() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %rhs: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %sixteen = index.constant 16 : index
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
 
   %rhs_layout = encoding.layout.strided [1, 16] : encoding<layout>
   %input_view = buffer.view %input[%base] : buffer -> view<16x16xf32, #dense>
@@ -44,12 +44,12 @@ kernel.def @fragment_repack_direct_bf16() {
   %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32, #dense>
 
   %zero_accumulator = vector.constant 0.0 : vector<8xf32>
-  %init = vector.fragment<init> %zero_accumulator shape [%sixteen, %sixteen] : vector<8xf32>
-  %result = vector.fragment.load<result> %input_view[%zero, %zero] shape [%sixteen, %sixteen] : view<16x16xf32, #dense> -> vector<8xf32>
-  %lhs = vector.fragment.repack<lhs> %result shape [%sixteen, %sixteen] : vector<8xf32> -> vector<16xbf16>
-  %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%zero, %zero] shape [%sixteen, %sixteen] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
+  %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
+  %result = vector.fragment.load<result> %input_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf32, #dense> -> vector<8xf32>
+  %lhs = vector.fragment.repack<lhs> %result shape [%tile_extent, %tile_extent] : vector<8xf32> -> vector<16xbf16>
+  %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
   %product = vector.mma %lhs, %rhs_fragment, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-  vector.fragment.store<result> %product, %output_view[%zero, %zero] shape [%sixteen, %sixteen] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %product, %output_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xf32, #dense>
   kernel.return
 }
 

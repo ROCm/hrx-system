@@ -3,22 +3,22 @@
 amdgpu.target<gfx11-generic> @gfx11_wave64 {subgroup_size = 64}
 
 kernel.def target(@gfx11_wave64) @divergent_loop_carry() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%upper_bounds: buffer, %values: buffer, %output: buffer) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %zero_i32 = scalar.constant 0 : i32
-  %zero_offset = index.constant 0 : offset
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %initial_count = scalar.constant 0 : i32
+  %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %upper_bound_view = buffer.view %upper_bounds[%zero_offset] : buffer -> view<64xi32, #dense>
-  %value_view = buffer.view %values[%zero_offset] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<64xi32, #dense>
+  %upper_bound_view = buffer.view %upper_bounds[%base] : buffer -> view<64xi32, #dense>
+  %value_view = buffer.view %values[%base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<64xi32, #dense>
   %upper_bound_i32 = view.load %upper_bound_view[%lane] : view<64xi32, #dense> -> i32
   %upper_bound0 = index.cast %upper_bound_i32 : i32 to index
   %upper_bound = index.assume %upper_bound0 [range(%upper_bound0, 0, 64)] : index
-  %count = scf.for %position = [%zero to %upper_bound step %one](%running_count = %zero_i32 : i32) -> (i32) {
+  %count = scf.for %position = [%loop_begin to %upper_bound step %loop_step](%running_count = %initial_count : i32) -> (i32) {
     %bounded_position = index.assume %position [range(%position, 0, 63)] : index
     %value = view.load %value_view[%bounded_position] : view<64xi32, #dense> -> i32
     %next_count = scalar.addi %running_count, %value : i32
@@ -39,4 +39,3 @@ check.case public @divergent_loop_carry_case {
 }
 
 check.benchmark<@divergent_loop_carry_case>
-
