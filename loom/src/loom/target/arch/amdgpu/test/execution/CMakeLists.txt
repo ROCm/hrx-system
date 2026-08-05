@@ -281,6 +281,23 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 iree_execution_test_suite(
   NAME
+    subgroup_shuffle_dynamic_execution_test
+  MANIFESTS
+    "subgroup_shuffle_dynamic.test.json"
+  TOOLS
+    "iree-test-loom=loom::tools::iree-test-loom"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amdgpu/test/execution/subgroup_shuffle_dynamic.loom"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "requires-gpu-amd"
+    "runtime-resource=amd-gpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+iree_execution_test_suite(
+  NAME
     target_specialized_launch_config_execution_test
   MANIFESTS
     "target_specialized_launch_config.test.json"

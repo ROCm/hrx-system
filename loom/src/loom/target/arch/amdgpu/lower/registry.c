@@ -124,8 +124,10 @@ enum loom_amdgpu_storage_policy_e {
   LOOM_AMDGPU_STORAGE_ASYNC_TENSOR = 13,
   // Cluster gather plans own both independently materialized addresses.
   LOOM_AMDGPU_STORAGE_ASYNC_CLUSTER = 14,
+  // Subgroup shuffle plans own their payload and dynamic lane demands.
+  LOOM_AMDGPU_STORAGE_SUBGROUP_SHUFFLE = 15,
   // Maximum storage-policy value accepted by dispatch row policy bits.
-  LOOM_AMDGPU_STORAGE_MAX = LOOM_AMDGPU_STORAGE_ASYNC_CLUSTER,
+  LOOM_AMDGPU_STORAGE_MAX = LOOM_AMDGPU_STORAGE_SUBGROUP_SHUFFLE,
 };
 
 enum loom_amdgpu_preselect_policy_e {
@@ -1291,6 +1293,11 @@ static void loom_amdgpu_mark_plan_storage_demands(
       loom_amdgpu_mark_subgroup_broadcast_plan_storage_demands(
           context, source_op,
           (const loom_amdgpu_subgroup_broadcast_plan_t*)plan.target_data);
+      return;
+    case LOOM_AMDGPU_STORAGE_SUBGROUP_SHUFFLE:
+      loom_amdgpu_mark_subgroup_shuffle_plan_storage_demands(
+          context, source_op,
+          (const loom_amdgpu_subgroup_shuffle_plan_t*)plan.target_data);
       return;
     case LOOM_AMDGPU_STORAGE_NONE:
       return;

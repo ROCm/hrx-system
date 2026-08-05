@@ -80,7 +80,7 @@ kernel.def target(@target) @subgroup_shuffle_dynamic_offset_rejected() {
   %offset = vector.extract %offset_vector[0] : vector<1xi32> -> i32
   %width = scalar.constant 32 : i32
   %value = scalar.constant 1 : i32
-  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_shuffle.exact_lane"}
+  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_shuffle.lane_range"}
   %shuffle, %valid = kernel.subgroup.shuffle<xor> %value, %offset, %width : i32, i32, i32
   kernel.return
 }

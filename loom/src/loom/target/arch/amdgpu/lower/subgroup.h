@@ -62,6 +62,12 @@ iree_status_t loom_amdgpu_lower_kernel_subgroup_shuffle(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_subgroup_shuffle_plan_t* plan);
 
+// Marks the physical source values needed by a selected AMDGPU subgroup
+// shuffle plan.
+void loom_amdgpu_mark_subgroup_shuffle_plan_storage_demands(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_subgroup_shuffle_plan_t* plan);
+
 // Verifies source subgroup shuffle legality for native AMDGPU lowering.
 iree_status_t loom_amdgpu_low_legality_verify_kernel_subgroup_shuffle(
     const loom_target_low_legality_provider_t* provider,

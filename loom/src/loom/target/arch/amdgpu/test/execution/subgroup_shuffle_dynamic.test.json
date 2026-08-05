@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "executes bounded dynamic subgroup shuffle cases",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/subgroup_shuffle_dynamic.loom",
+          "--device=amdgpu"
+        ]
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "\"format\":\"loom.test.v0\"",
+            "\"case_count\":4",
+            "\"sample_count\":4",
+            "\"failed_sample_count\":0",
+            "\"skipped_case_count\":0",
+            "\"planning_issue_count\":0"
+          ]
+        }
+      }
+    }
+  ]
+}
