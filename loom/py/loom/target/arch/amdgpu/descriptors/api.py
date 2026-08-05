@@ -28,6 +28,7 @@ from loom.target.arch.amdgpu.encoding import (
 )
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_ARITHMETIC,
     AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE,
     AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE,
     AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS,
@@ -340,6 +341,48 @@ _NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS = frozenset(
     )
 )
 
+_NATIVE_SCALAR_FLOAT_ARITHMETIC_DESCRIPTOR_KEYS = frozenset(
+    f"amdgpu.s_{operation}_f{bit_width}"
+    for bit_width in (16, 32)
+    for operation in (
+        "add",
+        "sub",
+        "mul",
+        "min",
+        "max",
+        "ceil",
+        "floor",
+        "rndne",
+        "trunc",
+    )
+)
+
+
+def _validate_descriptor_family_capability(
+    *,
+    generator_target: str,
+    descriptor_keys: frozenset[str],
+    family_descriptor_keys: frozenset[str],
+    capability_name: str,
+    declares_capability: bool,
+) -> None:
+    present_keys = descriptor_keys & family_descriptor_keys
+    if present_keys and present_keys != family_descriptor_keys:
+        missing_keys = sorted(family_descriptor_keys - present_keys)
+        raise ValueError(
+            f"AMDGPU descriptor target '{generator_target}' has an incomplete "
+            f"{capability_name} family; missing: {', '.join(missing_keys)}"
+        )
+    has_capability = present_keys == family_descriptor_keys
+    if declares_capability != has_capability:
+        declared_state = "declares" if declares_capability else "omits"
+        actual_state = "provides" if has_capability else "omits"
+        raise ValueError(
+            f"AMDGPU descriptor target '{generator_target}' {declared_state} "
+            f"{capability_name} capability but its descriptor set "
+            f"{actual_state} the instruction family"
+        )
+
 
 def _validate_descriptor_set_info_capabilities(
     generator_target: str, descriptor_set: DescriptorSet
@@ -348,32 +391,24 @@ def _validate_descriptor_set_info_capabilities(
     descriptor_keys = frozenset(
         descriptor.key for descriptor in descriptor_set.descriptors
     )
-    present_keys = descriptor_keys & _NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS
-    declares_native_packed_bf16_arithmetic = bool(
-        info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC
+    _validate_descriptor_family_capability(
+        generator_target=generator_target,
+        descriptor_keys=descriptor_keys,
+        family_descriptor_keys=_NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS,
+        capability_name="native packed BF16 arithmetic",
+        declares_capability=bool(
+            info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC
+        ),
     )
-    if present_keys and present_keys != _NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS:
-        missing_keys = sorted(
-            _NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS - present_keys
-        )
-        raise ValueError(
-            f"AMDGPU descriptor target '{generator_target}' has an incomplete "
-            "native packed BF16 arithmetic family; missing: "
-            f"{', '.join(missing_keys)}"
-        )
-    has_native_packed_bf16_arithmetic = (
-        present_keys == _NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS
+    _validate_descriptor_family_capability(
+        generator_target=generator_target,
+        descriptor_keys=descriptor_keys,
+        family_descriptor_keys=_NATIVE_SCALAR_FLOAT_ARITHMETIC_DESCRIPTOR_KEYS,
+        capability_name="native scalar floating-point arithmetic",
+        declares_capability=bool(
+            info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_ARITHMETIC
+        ),
     )
-    if declares_native_packed_bf16_arithmetic != has_native_packed_bf16_arithmetic:
-        declared_state = (
-            "declares" if declares_native_packed_bf16_arithmetic else "omits"
-        )
-        actual_state = "provides" if has_native_packed_bf16_arithmetic else "omits"
-        raise ValueError(
-            f"AMDGPU descriptor target '{generator_target}' {declared_state} "
-            "native packed BF16 arithmetic capability but its descriptor set "
-            f"{actual_state} the instruction family"
-        )
 
 
 def _validate_matrix_coexecution_profile_coverage(

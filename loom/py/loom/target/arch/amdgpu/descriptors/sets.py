@@ -38,6 +38,7 @@ from .matrix import *
 from .memory import *
 from .rdna3 import *
 from .rdna4 import *
+from .scalar_float import *
 from .workgroup import *
 
 _CDNA_DWORD_MEMORY_INSTRUCTION_SUFFIXES = (
@@ -1469,7 +1470,11 @@ def _gfx11_core_overlay_descriptors(
 
 
 def _gfx117x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
-    return (*_gfx11_core_overlays(), *_rdna_scalar_domain_fma_overlays())
+    return (
+        *_gfx11_core_overlays(),
+        *_s_float_arithmetic_overlays(),
+        *_rdna_scalar_domain_fma_overlays(),
+    )
 
 
 def _gfx117x_core_overlay_descriptors(
@@ -1560,6 +1565,7 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         ),
         *_v_binary_f32_dpp16_overlays(),
         *_v_subrev_f32_overlays(),
+        *_s_float_arithmetic_overlays(),
         _v_fma_f32_overlay(),
         _v_fmaak_f32_overlay(),
         _v_fmac_f32_overlay(),

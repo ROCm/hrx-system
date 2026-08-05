@@ -3195,6 +3195,53 @@ def test_scalar_domain_fma_descriptors_are_arch_specific() -> None:
         assert scalar_domain_keys <= descriptors.keys()
 
 
+def test_scalar_float_arithmetic_descriptors_are_arch_specific() -> None:
+    scalar_float_keys = {
+        f"amdgpu.s_{operation}_f{bit_width}"
+        for bit_width in (16, 32)
+        for operation in (
+            "add",
+            "sub",
+            "mul",
+            "min",
+            "max",
+            "ceil",
+            "floor",
+            "rndne",
+            "trunc",
+        )
+    }
+
+    for descriptor_set in (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx11_generic_core_overlays(),
+    ):
+        descriptor_keys = {descriptor.descriptor_key for descriptor in descriptor_set}
+        assert not scalar_float_keys & descriptor_keys
+
+    for descriptor_set in (
+        _gfx117x_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx125x_core_overlays(),
+    ):
+        descriptors = {
+            descriptor.descriptor_key: descriptor for descriptor in descriptor_set
+        }
+        assert scalar_float_keys <= descriptors.keys()
+        for descriptor_key in scalar_float_keys:
+            descriptor = descriptors[descriptor_key]
+            assert descriptor.schedule_class == _SCHEDULE_SALU
+            expected_register_part = (
+                _REG_PART_SGPR_LOW16 if descriptor_key.endswith("f16") else None
+            )
+            assert all(
+                operand.descriptor_operand.register_part == expected_register_part
+                for operand in descriptor.operands
+            )
+
+
 def test_scalar_domain_fma_descriptors_pin_sgpr_contracts() -> None:
     for descriptor_set in (
         _gfx117x_core_overlays(),

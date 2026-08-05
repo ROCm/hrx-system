@@ -162,6 +162,7 @@ iree_py_library(
         "descriptors/memory.py",
         "descriptors/rdna3.py",
         "descriptors/rdna4.py",
+        "descriptors/scalar_float.py",
         "descriptors/sets.py",
         "descriptors/tensor.py",
         "descriptors/workgroup.py",
