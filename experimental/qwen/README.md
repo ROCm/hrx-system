@@ -21,8 +21,8 @@ reference evidence only; this package has no source, build, or ABI dependency
 on it.
 
 See [KERNEL_INTEGRATION.md](KERNEL_INTEGRATION.md) for the exact authored-source
-map, prefill/decode routing, JIT and export boundary, and the compiler facts
-exposed by each transient bring-up workaround.
+map, prefill/decode routing, JIT and export boundary, Qwen-owned model
+endpoints, and remaining bounded attention-tail workaround.
 
 The first completed integration milestone was one complete layer-0 prefill-512
 execution:

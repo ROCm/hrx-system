@@ -29,9 +29,9 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
           "qwen_token_embedding_q4k",
       },
       {
-          QWEN_LOOM_SOURCE_GREEDY_ARGMAX_PARTIALS_BRINGUP_WORKAROUND,
-          "qwen_greedy_argmax_partials_bringup_workaround.loom",
-          "qwen_greedy_argmax_partials_bringup_workaround",
+          QWEN_LOOM_SOURCE_GREEDY_ARGMAX_PARTIALS,
+          "qwen_greedy_argmax_partials.loom",
+          "qwen_greedy_argmax_partials",
       },
       {
           QWEN_LOOM_SOURCE_ATTENTION_METADATA,
@@ -641,8 +641,7 @@ TEST(QwenLoomSourceTest, EmbedsCanonicalDecodeSplitCapacityContract) {
 TEST(QwenLoomSourceTest, EmbedsDynamicGreedyContinuationPosition) {
   qwen_loom_source_module_t source_module;
   IREE_ASSERT_OK(qwen_loom_source_lookup(
-      IREE_SV(QWEN_LOOM_SOURCE_GREEDY_ARGMAX_PARTIALS_BRINGUP_WORKAROUND),
-      &source_module));
+      IREE_SV(QWEN_LOOM_SOURCE_GREEDY_ARGMAX_PARTIALS), &source_module));
 
   std::string source_text(
       reinterpret_cast<const char*>(source_module.source_contents.data),

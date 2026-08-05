@@ -104,33 +104,33 @@ loom_link_module(
 )
 
 loom_link_module(
-    name = "greedy_argmax_bringup_workaround_linked",
-    srcs = ["greedy_argmax_bringup_workaround.loom"],
+    name = "greedy_argmax_linked",
+    srcs = ["greedy_argmax.loom"],
 )
 
 iree_executable_test(
-    name = "greedy_argmax_bringup_workaround_plan_test",
+    name = "greedy_argmax_plan_test",
     src = "//loom/src/loom/tools/iree-benchmark-loom",
     args = [
-        "$(location :greedy_argmax_bringup_workaround_linked)",
+        "$(location :greedy_argmax_linked)",
         "--benchmark=@qwen_greedy_argmax_vocabulary_row",
         "--dry-run",
         "--output-format=jsonl",
     ],
-    data = [":greedy_argmax_bringup_workaround_linked"],
+    data = [":greedy_argmax_linked"],
     tags = ["hostonly"],
 )
 
 iree_executable_test(
-    name = "greedy_argmax_bringup_workaround_hal_test",
+    name = "greedy_argmax_hal_test",
     src = "//loom/src/loom/tools/iree-test-loom",
     args = [
-        "$(location :greedy_argmax_bringup_workaround_linked)",
+        "$(location :greedy_argmax_linked)",
         "--case=@qwen_greedy_argmax_nontrivial_winner_case",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
-    data = [":greedy_argmax_bringup_workaround_linked"],
+    data = [":greedy_argmax_linked"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",
@@ -143,15 +143,15 @@ iree_executable_test(
 )
 
 iree_executable_test(
-    name = "greedy_argmax_partials_bringup_workaround_hal_test",
+    name = "greedy_argmax_partials_hal_test",
     src = "//loom/src/loom/tools/iree-test-loom",
     args = [
-        "$(location :greedy_argmax_bringup_workaround_linked)",
+        "$(location :greedy_argmax_linked)",
         "--case=@qwen_greedy_argmax_partials_nontrivial_winner_case",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
-    data = [":greedy_argmax_bringup_workaround_linked"],
+    data = [":greedy_argmax_linked"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",
@@ -164,15 +164,15 @@ iree_executable_test(
 )
 
 iree_executable_test(
-    name = "greedy_argmax_partials_tie_bringup_workaround_hal_test",
+    name = "greedy_argmax_partials_tie_hal_test",
     src = "//loom/src/loom/tools/iree-test-loom",
     args = [
-        "$(location :greedy_argmax_bringup_workaround_linked)",
+        "$(location :greedy_argmax_linked)",
         "--case=@qwen_greedy_argmax_partials_equal_logit_tie_case",
         "--device=amdgpu://0",
         "--sanitizer=access",
     ],
-    data = [":greedy_argmax_bringup_workaround_linked"],
+    data = [":greedy_argmax_linked"],
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",
         "manual",
@@ -185,11 +185,11 @@ iree_executable_test(
 )
 
 loom_link_module(
-    name = "greedy_argmax_partials_bringup_workaround_runtime_module",
-    srcs = ["greedy_argmax_bringup_workaround.loom"],
+    name = "greedy_argmax_partials_runtime_module",
+    srcs = ["greedy_argmax.loom"],
     mode = "selective",
-    output = "qwen_greedy_argmax_partials_bringup_workaround.loom",
-    roots = ["@qwen_greedy_argmax_partials_bringup_workaround"],
+    output = "qwen_greedy_argmax_partials.loom",
+    roots = ["@qwen_greedy_argmax_partials"],
     strip_check = True,
 )
 
@@ -352,7 +352,7 @@ loom_link_module(
 loom_link_module(
     name = "vocabulary_partial_argmax_linked",
     srcs = [
-        "greedy_argmax_bringup_workaround.loom",
+        "greedy_argmax.loom",
         "runtime_exports.loom",
         "vocabulary_q6k_partial_argmax.loom",
         "//experimental/qwen_moe/kernels:linear_q6k_q8_1_x4_linked",
@@ -364,7 +364,7 @@ loom_link_module(
         "@ggml_linear_q6k_q8_1_x4_partial_argmax_endpoint",
         "@ggml_linear_q6k_q8_1_x4_partial_argmax_tail_case",
         "@ggml_linear_q6k_q8_1_x4_partial_argmax_vocabulary_differential_case",
-        "@qwen_greedy_argmax_partials_bringup_workaround",
+        "@qwen_greedy_argmax_partials",
     ],
 )
 
@@ -598,7 +598,7 @@ iree_c_embed_data(
         ":expert_table_partition_fused_runtime_module",
         ":flash_attention_decode_split_f32_f16_runtime_module",
         ":flash_attention_prefill_f32_f16_runtime_module",
-        ":greedy_argmax_partials_bringup_workaround_runtime_module",
+        ":greedy_argmax_partials_runtime_module",
         ":quantize_q8_1_x4_runtime_module",
         ":route_trace_runtime_module",
         ":routed_down_f16_runtime_module",
@@ -624,10 +624,10 @@ test_suite(
     tests = [
         ":attention_metadata_hal_test",
         ":attention_metadata_plan_test",
-        ":greedy_argmax_bringup_workaround_hal_test",
-        ":greedy_argmax_bringup_workaround_plan_test",
-        ":greedy_argmax_partials_bringup_workaround_hal_test",
-        ":greedy_argmax_partials_tie_bringup_workaround_hal_test",
+        ":greedy_argmax_hal_test",
+        ":greedy_argmax_partials_hal_test",
+        ":greedy_argmax_partials_tie_hal_test",
+        ":greedy_argmax_plan_test",
         ":route_trace_hal_test",
         ":route_trace_plan_test",
         ":token_embedding_q4k_hal_test",

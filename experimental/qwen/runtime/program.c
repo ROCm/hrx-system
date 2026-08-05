@@ -1730,9 +1730,8 @@ static iree_status_t qwen_program_prepare_full_model_executables(
   }
   if (iree_status_is_ok(status)) {
     status = qwen_program_prepare_batch_append(
-        batch,
-        IREE_SV(QWEN_LOOM_SOURCE_GREEDY_ARGMAX_PARTIALS_BRINGUP_WORKAROUND),
-        IREE_SV("qwen_greedy_argmax_partials_bringup_workaround"),
+        batch, IREE_SV(QWEN_LOOM_SOURCE_GREEDY_ARGMAX_PARTIALS),
+        IREE_SV("qwen_greedy_argmax_partials"),
         /*config_binding_count=*/0, /*config_bindings=*/NULL,
         IREE_ARRAYSIZE(vocabulary_argmax_workload), vocabulary_argmax_workload,
         &program->executables[QWEN_PROGRAM_EXECUTABLE_GREEDY_ARGMAX_PARTIALS]);

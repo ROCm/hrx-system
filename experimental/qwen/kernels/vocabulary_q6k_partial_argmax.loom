@@ -8,9 +8,7 @@
 // contraction body. The ordinary full-logit export remains defined by the
 // shared kernel corpus; this module owns only endpoint reductions and checks.
 
-kernel.decl @qwen_greedy_argmax_bringup_workaround() launch(%logits: buffer, %token_id: buffer)
-
-kernel.decl @qwen_greedy_argmax_partials_bringup_workaround(%partial_count: index, %context_increment: index) launch(%partial_count: index, %context_increment: index, %partial_logits: buffer, %partial_ids: buffer, %next_token_id: buffer, %next_control: buffer, %observed_token_id: buffer)
+kernel.decl @qwen_greedy_argmax_partials(%partial_count: index, %context_increment: index) launch(%partial_count: index, %context_increment: index, %partial_logits: buffer, %partial_ids: buffer, %next_token_id: buffer, %next_control: buffer, %observed_token_id: buffer)
 
 config.decl @ggml.linear_q6k_q8_1_x4.output_capacity : %value: index where [range(%value, 1, 262144)]
 
@@ -106,7 +104,7 @@ check.case public @ggml_linear_q6k_q8_1_x4_partial_argmax_vocabulary_differentia
   %next_control = check.generate.fill value(512) : tensor<1xi32>
   %observed_token = check.generate.fill value(-1) : tensor<1xi32>
   kernel.launch @ggml_linear_q6k_q8_1_x4_partial_argmax[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %q8_input, %weight, %partial_logits, %partial_ids) : [index, index, index](index, index, index, tensor<1x2304xi8>, tensor<151936x8x210xi8>, tensor<18992xf32>, tensor<18992xi32>)
-  kernel.launch @qwen_greedy_argmax_partials_bringup_workaround[%partial_count, %context_increment](%partial_count, %context_increment, %partial_logits, %partial_ids, %actual_token, %next_control, %observed_token) : [index, index](index, index, tensor<18992xf32>, tensor<18992xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @qwen_greedy_argmax_partials[%partial_count, %context_increment](%partial_count, %context_increment, %partial_logits, %partial_ids, %actual_token, %next_control, %observed_token) : [index, index](index, index, tensor<18992xf32>, tensor<18992xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
   check.expect.close actual(%partial_logits) expected(%expected_partial_logits) atol(0.0) rtol(0.0) nan(same) : tensor<18992xf32>
   check.expect.equal actual(%partial_ids) expected(%expected_partial_ids) : tensor<18992xi32>
   check.expect.equal actual(%actual_token) expected(%expected_token) : tensor<1xi32>
@@ -129,7 +127,7 @@ check.case public @ggml_linear_q6k_q8_1_x4_partial_argmax_benchmark_case {
   %next_control = check.generate.fill value(512) : tensor<1xi32>
   %observed_token = check.generate.fill value(-1) : tensor<1xi32>
   kernel.launch @ggml_linear_q6k_q8_1_x4_partial_argmax[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %q8_input, %weight, %partial_logits, %partial_ids) : [index, index, index](index, index, index, tensor<1x2304xi8>, tensor<151936x8x210xi8>, tensor<18992xf32>, tensor<18992xi32>)
-  kernel.launch @qwen_greedy_argmax_partials_bringup_workaround[%partial_count, %context_increment](%partial_count, %context_increment, %partial_logits, %partial_ids, %token, %next_control, %observed_token) : [index, index](index, index, tensor<18992xf32>, tensor<18992xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @qwen_greedy_argmax_partials[%partial_count, %context_increment](%partial_count, %context_increment, %partial_logits, %partial_ids, %token, %next_control, %observed_token) : [index, index](index, index, tensor<18992xf32>, tensor<18992xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
   check.return
 }
 

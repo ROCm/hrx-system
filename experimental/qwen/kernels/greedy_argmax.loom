@@ -4,15 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Temporary, non-sanctioned one-function kernel for Qwen bring-up. This is not
-// an argmax-kernel framework or a second Loom authoring path. The owned model
-// consumes exactly one 151936-element F32 vocabulary row and publishes the
-// lowest token ID having the greatest logit. All logits must be finite trusted
-// model output. Delete this file when the Qwen kernel corpus provides the
-// canonical device-side token selector.
+// Selects the lowest token ID having the greatest finite logit. The full-row
+// endpoint consumes exactly one 151936-element F32 vocabulary row; the partial
+// endpoint finalizes explicit (logit, token ID) pairs from the Qwen-owned
+// vocabulary projection.
 amdgpu.target<gfx11-generic> @qwen_greedy_argmax_gfx11_wave64 {subgroup_size = 64}
 
-kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax_bringup_workaround") @qwen_greedy_argmax_bringup_workaround() {
+kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax") @qwen_greedy_argmax() {
   %one = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
   kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
@@ -53,12 +51,9 @@ kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax_b
   kernel.return
 }
 
-// Temporary, non-sanctioned finalizer for the Qwen-owned partial vocabulary
-// projection. This consumes explicit (logit, token ID) pairs and publishes the
-// winning token to both device-local continuation state and a host-observation
-// sideband. It is not a generic selection framework and disappears with the
-// surrounding bring-up kernels.
-kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax_partials_bringup_workaround") @qwen_greedy_argmax_partials_bringup_workaround(%partial_count: index, %context_increment: index) {
+// Publishes the winning partial pair to device-local continuation state and a
+// host-observation sideband, then advances the device context position.
+kernel.def target(@qwen_greedy_argmax_gfx11_wave64) export("qwen_greedy_argmax_partials") @qwen_greedy_argmax_partials(%partial_count: index, %context_increment: index) {
   %one = index.constant 1 : index
   %workgroup_size = index.constant 256 : index
   kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
@@ -118,7 +113,7 @@ check.case public @qwen_greedy_argmax_nontrivial_winner_case {
   %logits = check.generate.iota offset(0.0) step(1.0) period(1009) : tensor<151936xf32>
   %token_id = check.generate.fill value(-1) : tensor<1xi32>
   %expected = check.generate.fill value(1008) : tensor<1xi32>
-  kernel.launch @qwen_greedy_argmax_bringup_workaround[](%logits, %token_id) : [](tensor<151936xf32>, tensor<1xi32>)
+  kernel.launch @qwen_greedy_argmax[](%logits, %token_id) : [](tensor<151936xf32>, tensor<1xi32>)
   check.expect.equal actual(%token_id) expected(%expected) : tensor<1xi32>
   check.return
 }
@@ -129,7 +124,7 @@ check.case public @qwen_greedy_argmax_equal_logit_tie_case {
   %logits = check.generate.fill value(7.0) : tensor<151936xf32>
   %token_id = check.generate.fill value(-1) : tensor<1xi32>
   %expected = check.generate.fill value(0) : tensor<1xi32>
-  kernel.launch @qwen_greedy_argmax_bringup_workaround[](%logits, %token_id) : [](tensor<151936xf32>, tensor<1xi32>)
+  kernel.launch @qwen_greedy_argmax[](%logits, %token_id) : [](tensor<151936xf32>, tensor<1xi32>)
   check.expect.equal actual(%token_id) expected(%expected) : tensor<1xi32>
   check.return
 }
@@ -146,7 +141,7 @@ check.case public @qwen_greedy_argmax_partials_nontrivial_winner_case {
   %observed_token_id = check.generate.fill value(-1) : tensor<1xi32>
   %expected_token_id = check.generate.fill value(744) : tensor<1xi32>
   %expected_control = check.generate.fill value(513) : tensor<1xi32>
-  kernel.launch @qwen_greedy_argmax_partials_bringup_workaround[%partial_count, %context_increment](%partial_count, %context_increment, %partial_logits, %partial_ids, %next_token_id, %next_control, %observed_token_id) : [index, index](index, index, tensor<512xf32>, tensor<512xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @qwen_greedy_argmax_partials[%partial_count, %context_increment](%partial_count, %context_increment, %partial_logits, %partial_ids, %next_token_id, %next_control, %observed_token_id) : [index, index](index, index, tensor<512xf32>, tensor<512xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
   check.expect.equal actual(%next_token_id) expected(%expected_token_id) : tensor<1xi32>
   check.expect.equal actual(%next_control) expected(%expected_control) : tensor<1xi32>
   check.expect.equal actual(%observed_token_id) expected(%expected_token_id) : tensor<1xi32>
@@ -165,7 +160,7 @@ check.case public @qwen_greedy_argmax_partials_equal_logit_tie_case {
   %observed_token_id = check.generate.fill value(-1) : tensor<1xi32>
   %expected_token_id = check.generate.fill value(0) : tensor<1xi32>
   %expected_control = check.generate.fill value(513) : tensor<1xi32>
-  kernel.launch @qwen_greedy_argmax_partials_bringup_workaround[%partial_count, %context_increment](%partial_count, %context_increment, %partial_logits, %partial_ids, %next_token_id, %next_control, %observed_token_id) : [index, index](index, index, tensor<512xf32>, tensor<512xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @qwen_greedy_argmax_partials[%partial_count, %context_increment](%partial_count, %context_increment, %partial_logits, %partial_ids, %next_token_id, %next_control, %observed_token_id) : [index, index](index, index, tensor<512xf32>, tensor<512xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
   check.expect.equal actual(%next_token_id) expected(%expected_token_id) : tensor<1xi32>
   check.expect.equal actual(%next_control) expected(%expected_control) : tensor<1xi32>
   check.expect.equal actual(%observed_token_id) expected(%expected_token_id) : tensor<1xi32>

@@ -15,11 +15,10 @@ The distinction between the two experimental subtrees is important:
   exports, selectively links only the functions it issues, embeds the linked
   source, specializes it against a live HAL device, records the model schedule,
   and gathers unmodified GGUF payloads into resident storage.
-- `experimental/qwen/kernels/*_bringup_workaround.loom` files are transient
-  diagnostic artifacts. They expose compiler facts or missing corpus endpoints
-  that block the vertical slice. They are not alternate canonical kernels or a
-  supported Loom generation mechanism. Source-rewriting patchers are not part
-  of the integration path.
+- `experimental/qwen/kernels/` also owns handwritten fixed-model endpoints that
+  have no reusable provider in the shared corpus. They are selectively linked
+  like the shared sources; source-rewriting patchers and generated Loom are not
+  part of the integration path.
 
 ## Start here
 
@@ -283,7 +282,7 @@ kernel.
 | Runtime pure-tail row-by-row recording | `qwen3_moe/flash_attention_f32_f16_wmma.loom` | The canonical multirow specialization corrupts nonleading query rows when the context consists entirely of a key-tile tail. The same canonical kernel specialized for one query row is exact, so the command buffer temporarily records that specialization once per prompt row without introducing another Loom source. |
 | `token_embedding_q4k.loom` | Qwen-owned model endpoint | Fixed Q4_K GGUF row decoding into the 2048-wide F32 hidden layout. |
 | `attention_metadata.loom` | Qwen-owned request endpoint | Direct no-ring K/V indices, positions, and dense causal-mask construction from one context-base word. |
-| `greedy_argmax_bringup_workaround.loom` | No corpus provider yet | Compact finalization over 18992 finite F32/I32 maximum pairs with lowest-token tie breaking. This is endpoint glue, not an assumption repair. |
+| `greedy_argmax.loom` | Qwen-owned model endpoint | Compact finalization over 18992 finite F32/I32 maximum pairs with lowest-token tie breaking. |
 
 ## Building and inspecting
 
