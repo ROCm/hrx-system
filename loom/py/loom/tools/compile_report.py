@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TextIO
 
 from loom.reporting.compile_report import (
+    CompileReportComparisonMode,
     CompileReportError,
     IncomparableCompileReportsError,
     load_compile_report,
@@ -53,7 +54,11 @@ def run(args: argparse.Namespace, *, stdout: TextIO) -> int:
     elif args.command == "diff":
         baseline = load_compile_report(args.baseline)
         candidate = load_compile_report(args.candidate)
-        view = build_compile_report_diff(baseline, candidate)
+        view = build_compile_report_diff(
+            baseline,
+            candidate,
+            CompileReportComparisonMode(args.comparison),
+        )
         text = format_compile_report_diff_text(view)
     elif args.command == "suggest":
         document = load_compile_report(args.report)
@@ -94,10 +99,20 @@ def _create_argument_parser() -> argparse.ArgumentParser:
 
     diff_parser = subparsers.add_parser(
         "diff",
-        help="Compares reports with exact target and workload identity.",
+        help="Compares reports under a strict identity contract.",
     )
     diff_parser.add_argument("baseline", type=Path, help="Baseline report path.")
     diff_parser.add_argument("candidate", type=Path, help="Candidate report path.")
+    diff_parser.add_argument(
+        "--comparison",
+        choices=tuple(mode.value for mode in CompileReportComparisonMode),
+        default=CompileReportComparisonMode.EXACT.value,
+        help=(
+            "Identity contract. 'exact' requires identical compilation identity; "
+            "'target' permits only target specialization identity to vary within "
+            "one target and backend family. Defaults to exact."
+        ),
+    )
     _add_output_format_argument(diff_parser)
 
     suggest_parser = subparsers.add_parser(

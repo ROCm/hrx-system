@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import cast
 
@@ -60,6 +61,30 @@ _ENVELOPE_CONTEXT_FIELDS = (
     "sample_id",
     "sample_index",
 )
+
+_TARGET_VARIANT_REPORT_FIELDS = frozenset(
+    (
+        "target_key",
+        "target_bundle",
+        "target_snapshot",
+        "target_config",
+    )
+)
+
+_TARGET_VARIANT_ENTRY_FIELDS = frozenset(
+    (
+        "target_bundle",
+        "target_snapshot",
+        "target_config",
+    )
+)
+
+
+class CompileReportComparisonMode(Enum):
+    """Identity contract used to compare two compile reports."""
+
+    EXACT = "exact"
+    TARGET = "target"
 
 
 class CompileReportError(ValueError):
@@ -282,8 +307,9 @@ def compile_report_entry_identity(
 def match_compile_report_entries(
     baseline: CompileReportDocument,
     candidate: CompileReportDocument,
+    comparison_mode: CompileReportComparisonMode = CompileReportComparisonMode.EXACT,
 ) -> tuple[CompileReportEntryPair, ...]:
-    """Checks strict comparability and returns exact entry pairs."""
+    """Checks the selected comparability contract and returns entry pairs."""
     differences: list[str] = []
     if baseline.status_code != 0:
         differences.append(
@@ -294,7 +320,22 @@ def match_compile_report_entries(
             f"candidate status is {candidate.status_name} ({candidate.status_code})"
         )
 
+    if comparison_mode is CompileReportComparisonMode.TARGET:
+        for document_role, document in (
+            ("baseline", baseline),
+            ("candidate", candidate),
+        ):
+            if not document.report.get("target_family"):
+                differences.append(f"{document_role} target_family is unavailable")
+            if not document.report.get("target_key"):
+                differences.append(f"{document_role} target_key is unavailable")
+
     for field in _REPORT_IDENTITY_FIELDS:
+        if (
+            comparison_mode is CompileReportComparisonMode.TARGET
+            and field in _TARGET_VARIANT_REPORT_FIELDS
+        ):
+            continue
         baseline_value = _canonical_value(baseline.report.get(field))
         candidate_value = _canonical_value(candidate.report.get(field))
         if baseline_value != candidate_value:
@@ -335,6 +376,11 @@ def match_compile_report_entries(
         baseline_entry = baseline_entries[identity]
         candidate_entry = candidate_entries[identity]
         for field in _ENTRY_CONTEXT_FIELDS:
+            if (
+                comparison_mode is CompileReportComparisonMode.TARGET
+                and field in _TARGET_VARIANT_ENTRY_FIELDS
+            ):
+                continue
             baseline_value = _canonical_value(baseline_entry.get(field))
             candidate_value = _canonical_value(candidate_entry.get(field))
             if baseline_value != candidate_value:
@@ -372,6 +418,37 @@ def report_identity_json(document: CompileReportDocument) -> dict[str, object]:
             {"key": key, "value": value} for key, value in document.config_bindings
         ]
     return identity
+
+
+def report_common_identity_json(
+    document: CompileReportDocument,
+    comparison_mode: CompileReportComparisonMode,
+) -> dict[str, object]:
+    """Returns identity fields held constant by a comparison contract."""
+    identity = report_identity_json(document)
+    if comparison_mode is CompileReportComparisonMode.TARGET:
+        for field in _TARGET_VARIANT_REPORT_FIELDS:
+            identity.pop(field, None)
+    return identity
+
+
+def report_target_identity_json(
+    document: CompileReportDocument,
+) -> dict[str, object]:
+    """Returns the selected target specialization identity."""
+    fields = (
+        "backend",
+        "target_family",
+        "target_key",
+        "target_bundle",
+        "target_snapshot",
+        "target_config",
+    )
+    return {
+        field: document.report[field]
+        for field in fields
+        if document.report.get(field) is not None
+    }
 
 
 def _validate_indexed_rows(
