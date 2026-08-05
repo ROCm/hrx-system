@@ -63,7 +63,7 @@ class AmdgpuCompileReportSuggestionProvider:
                 unavailable_reason="unknown_target_key",
             )
 
-        suggestions = []
+        suggestions = list(_suggest_vmem_source_reuse(document))
         for entry in document.entries:
             entry_index = entry["index"]
             entry_name = compile_report_entry_identity(entry).display_name()
@@ -100,6 +100,90 @@ class AmdgpuCompileReportSuggestionProvider:
 
 
 AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER = AmdgpuCompileReportSuggestionProvider()
+
+
+def _suggest_vmem_source_reuse(
+    document: CompileReportDocument,
+) -> tuple[CompileReportSuggestion, ...]:
+    rows_value = document.report.get("wait_reason_summary_rows")
+    if rows_value is None:
+        return ()
+    rows = _report_indexed_rows(
+        _report_object(rows_value, "wait_reason_summary_rows"),
+        "wait_reason_summary_rows",
+    )
+    suggestions = []
+    for position, row in enumerate(rows):
+        if row.get("counter") != "vmem_load" or row.get("reason") != (
+            "amdgpu.memory_source_reuse"
+        ):
+            continue
+        row_path = f"wait_reason_summary_rows.rows[{position}]"
+        summary = _report_object(row.get("summary"), f"{row_path}.summary")
+        action_count = _report_integer(
+            summary.get("action_count"), f"{row_path}.summary.action_count"
+        )
+        full_drain_count = _report_integer(
+            summary.get("full_drain_count"),
+            f"{row_path}.summary.full_drain_count",
+        )
+        # Isolated source-register reuse is ordinary scheduling fallout. Surface
+        # only a repeated pattern that dominates both its reason and the entry.
+        if full_drain_count < 8 or full_drain_count * 2 < action_count:
+            continue
+        function_name = _optional_report_string(
+            row.get("function"), f"{row_path}.function"
+        )
+        entry = _entry_for_function(document, function_name)
+        if entry is None:
+            continue
+        entry_index = entry["index"]
+        wait_plan = _object_at(entry, "wait_plan")
+        if wait_plan is None:
+            continue
+        wait_plan_path = f"entries.rows[{entry_index}].wait_plan"
+        total_full_drain_count = _report_integer(
+            wait_plan.get("full_drain_count"),
+            f"{wait_plan_path}.full_drain_count",
+        )
+        if total_full_drain_count == 0 or full_drain_count * 4 < total_full_drain_count:
+            continue
+        max_outstanding = _report_integer(
+            summary.get("max_full_drain_outstanding_before"),
+            f"{row_path}.summary.max_full_drain_outstanding_before",
+        )
+        suggestions.append(
+            CompileReportSuggestion(
+                suggestion_id="amdgpu.vmem_source_reuse_serialization",
+                entry_name=compile_report_entry_identity(entry).display_name(),
+                action=(
+                    "Reduce global-load source-state turnover by consolidating "
+                    "or staging loads, preserving independent address state, "
+                    "or scheduling more work before source-register reuse; "
+                    "then require memory-source full drains to fall before "
+                    "benchmarking."
+                ),
+                evidence=(
+                    CompileReportSuggestionEvidence(
+                        path=f"{row_path}.summary.action_count",
+                        value=action_count,
+                    ),
+                    CompileReportSuggestionEvidence(
+                        path=f"{row_path}.summary.full_drain_count",
+                        value=full_drain_count,
+                    ),
+                    CompileReportSuggestionEvidence(
+                        path=(f"{row_path}.summary.max_full_drain_outstanding_before"),
+                        value=max_outstanding,
+                    ),
+                    CompileReportSuggestionEvidence(
+                        path=(f"{wait_plan_path}.full_drain_count"),
+                        value=total_full_drain_count,
+                    ),
+                ),
+            )
+        )
+    return tuple(suggestions)
 
 
 def _suggest_spill_traffic(
