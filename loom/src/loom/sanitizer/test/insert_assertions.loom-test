@@ -148,56 +148,56 @@ func.def @access_only_instruments_scalar_view_memory(%layout: encoding<layout>, 
 
 // RUN: pass sanitizer-insert-assertions{checks=access}
 func.def @access_only_uses_memory_space_facts(%input: buffer, %output: buffer) {
-  %zero_offset = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %origin = index.constant 0 : index
   %global_input = buffer.assume.memory_space<global> %input : buffer
   %global_output = buffer.assume.memory_space<global> %output : buffer
   %generic_input = buffer.assume.memory_space<generic> %input : buffer
   %host_output = buffer.assume.memory_space<host> %output : buffer
-  %input_view = buffer.view %global_input[%zero_offset] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %global_output[%zero_offset] : buffer -> view<1xi32, #dense>
-  %generic_view = buffer.view %generic_input[%zero_offset] : buffer -> view<1xi32, #dense>
-  %host_view = buffer.view %host_output[%zero_offset] : buffer -> view<1xi32, #dense>
-  %global_value = view.load %input_view[%zero_index] : view<1xi32, #dense> -> i32
-  view.store %global_value, %output_view[%zero_index] : i32, view<1xi32, #dense>
-  %generic_value = view.load %generic_view[%zero_index] : view<1xi32, #dense> -> i32
-  view.store %generic_value, %host_view[%zero_index] : i32, view<1xi32, #dense>
+  %input_view = buffer.view %global_input[%base] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %global_output[%base] : buffer -> view<1xi32, #dense>
+  %generic_view = buffer.view %generic_input[%base] : buffer -> view<1xi32, #dense>
+  %host_view = buffer.view %host_output[%base] : buffer -> view<1xi32, #dense>
+  %global_value = view.load %input_view[%origin] : view<1xi32, #dense> -> i32
+  view.store %global_value, %output_view[%origin] : i32, view<1xi32, #dense>
+  %generic_value = view.load %generic_view[%origin] : view<1xi32, #dense> -> i32
+  view.store %generic_value, %host_view[%origin] : i32, view<1xi32, #dense>
   %bytes = index.constant 4 : offset
   %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<1xi32, #dense>
-  %scratch_value = view.load %scratch_view[%zero_index] : view<1xi32, #dense> -> i32
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<1xi32, #dense>
+  %scratch_value = view.load %scratch_view[%origin] : view<1xi32, #dense> -> i32
   %private = buffer.alloca %bytes {base_alignment = 4, memory_space = private} : buffer
-  %private_view = buffer.view %private[%zero_offset] : buffer -> view<1xi32, #dense>
-  view.store %scratch_value, %private_view[%zero_index] : i32, view<1xi32, #dense>
+  %private_view = buffer.view %private[%base] : buffer -> view<1xi32, #dense>
+  view.store %scratch_value, %private_view[%origin] : i32, view<1xi32, #dense>
   func.return
 }
 
 // ----
 func.def @access_only_uses_memory_space_facts(%input: buffer, %output: buffer) {
-  %zero_offset = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %origin = index.constant 0 : index
   %global_input = buffer.assume.memory_space<global> %input : buffer
   %global_output = buffer.assume.memory_space<global> %output : buffer
   %generic_input = buffer.assume.memory_space<generic> %input : buffer
   %host_output = buffer.assume.memory_space<host> %output : buffer
-  %input_view = buffer.view %global_input[%zero_offset] : buffer -> view<1xi32, #dense>
-  %output_view = buffer.view %global_output[%zero_offset] : buffer -> view<1xi32, #dense>
-  %generic_view = buffer.view %generic_input[%zero_offset] : buffer -> view<1xi32, #dense>
-  %host_view = buffer.view %host_output[%zero_offset] : buffer -> view<1xi32, #dense>
-  sanitizer.assert.access<read> %input_view[%zero_index] : view<1xi32, #dense>
-  %global_value = view.load %input_view[%zero_index] : view<1xi32, #dense> -> i32
-  sanitizer.assert.access<write> %output_view[%zero_index] : view<1xi32, #dense>
-  view.store %global_value, %output_view[%zero_index] : i32, view<1xi32, #dense>
-  sanitizer.assert.access<read> %generic_view[%zero_index] : view<1xi32, #dense>
-  %generic_value = view.load %generic_view[%zero_index] : view<1xi32, #dense> -> i32
-  view.store %generic_value, %host_view[%zero_index] : i32, view<1xi32, #dense>
+  %input_view = buffer.view %global_input[%base] : buffer -> view<1xi32, #dense>
+  %output_view = buffer.view %global_output[%base] : buffer -> view<1xi32, #dense>
+  %generic_view = buffer.view %generic_input[%base] : buffer -> view<1xi32, #dense>
+  %host_view = buffer.view %host_output[%base] : buffer -> view<1xi32, #dense>
+  sanitizer.assert.access<read> %input_view[%origin] : view<1xi32, #dense>
+  %global_value = view.load %input_view[%origin] : view<1xi32, #dense> -> i32
+  sanitizer.assert.access<write> %output_view[%origin] : view<1xi32, #dense>
+  view.store %global_value, %output_view[%origin] : i32, view<1xi32, #dense>
+  sanitizer.assert.access<read> %generic_view[%origin] : view<1xi32, #dense>
+  %generic_value = view.load %generic_view[%origin] : view<1xi32, #dense> -> i32
+  view.store %generic_value, %host_view[%origin] : i32, view<1xi32, #dense>
   %bytes = index.constant 4 : offset
   %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<1xi32, #dense>
-  %scratch_value = view.load %scratch_view[%zero_index] : view<1xi32, #dense> -> i32
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<1xi32, #dense>
+  %scratch_value = view.load %scratch_view[%origin] : view<1xi32, #dense> -> i32
   %private = buffer.alloca %bytes {base_alignment = 4, memory_space = private} : buffer
-  %private_view = buffer.view %private[%zero_offset] : buffer -> view<1xi32, #dense>
-  view.store %scratch_value, %private_view[%zero_index] : i32, view<1xi32, #dense>
+  %private_view = buffer.view %private[%base] : buffer -> view<1xi32, #dense>
+  view.store %scratch_value, %private_view[%origin] : i32, view<1xi32, #dense>
   func.return
 }
 
@@ -241,16 +241,16 @@ func.def @access_only_instruments_rank1_vector_memory(%layout: encoding<layout>,
 
 // RUN: pass sanitizer-insert-assertions{checks=access}
 func.def @access_only_instruments_dense_fragment_memory(%output: view<64x64xf32, #dense>, %row: index, %column: index, %value: vector<8xf32>) {
-  %four = index.constant 4 : index
-  vector.fragment.store<result> %value, %output[%row, %column] shape [%four, %four] : vector<8xf32>, view<64x64xf32, #dense>
+  %fragment_extent = index.constant 4 : index
+  vector.fragment.store<result> %value, %output[%row, %column] shape [%fragment_extent, %fragment_extent] : vector<8xf32>, view<64x64xf32, #dense>
   func.return
 }
 
 // ----
 func.def @access_only_instruments_dense_fragment_memory(%output: view<64x64xf32, #dense>, %row: index, %column: index, %value: vector<8xf32>) {
-  %four = index.constant 4 : index
+  %fragment_extent = index.constant 4 : index
   sanitizer.assert.accesses<write> %output[%row, %column] {static_count = 4, static_extents = [1, 4], static_strides = [1, 0]} : view<64x64xf32, #dense>
-  vector.fragment.store<result> %value, %output[%row, %column] shape [%four, %four] : vector<8xf32>, view<64x64xf32, #dense>
+  vector.fragment.store<result> %value, %output[%row, %column] shape [%fragment_extent, %fragment_extent] : vector<8xf32>, view<64x64xf32, #dense>
   func.return
 }
 
@@ -258,26 +258,26 @@ func.def @access_only_instruments_dense_fragment_memory(%output: view<64x64xf32,
 
 // RUN: pass sanitizer-insert-assertions{checks=access}
 func.def @access_only_instruments_strided_fragment_memory(%buffer: buffer, %row: index, %column: index, %value: vector<8xf32>) {
-  %two = index.constant 2 : index
-  %sixty_four = index.constant 64 : index
-  %layout = encoding.layout.strided [1, %sixty_four] : encoding<layout>
+  %fragment_extent = index.constant 2 : index
+  %row_stride = index.constant 64 : index
+  %layout = encoding.layout.strided [1, %row_stride] : encoding<layout>
   %base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %output = buffer.view %global[%base] : buffer -> view<64x64xf32, %layout>
-  vector.fragment.store<result> %value, %output[%row, %column] shape [%two, %two] : vector<8xf32>, view<64x64xf32, %layout>
+  vector.fragment.store<result> %value, %output[%row, %column] shape [%fragment_extent, %fragment_extent] : vector<8xf32>, view<64x64xf32, %layout>
   func.return
 }
 
 // ----
 func.def @access_only_instruments_strided_fragment_memory(%buffer: buffer, %row: index, %column: index, %value: vector<8xf32>) {
-  %two = index.constant 2 : index
-  %sixty_four = index.constant 64 : index
-  %layout = encoding.layout.strided [1, %sixty_four] : encoding<layout>
+  %fragment_extent = index.constant 2 : index
+  %row_stride = index.constant 64 : index
+  %layout = encoding.layout.strided [1, %row_stride] : encoding<layout>
   %base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %output = buffer.view %global[%base] : buffer -> view<64x64xf32, %layout>
   sanitizer.assert.accesses<write> %output[%row, %column] {static_count = 2, static_extents = [2, 1], static_strides = [0, 1]} : view<64x64xf32, %layout>
-  vector.fragment.store<result> %value, %output[%row, %column] shape [%two, %two] : vector<8xf32>, view<64x64xf32, %layout>
+  vector.fragment.store<result> %value, %output[%row, %column] shape [%fragment_extent, %fragment_extent] : vector<8xf32>, view<64x64xf32, %layout>
   func.return
 }
 
@@ -285,21 +285,21 @@ func.def @access_only_instruments_strided_fragment_memory(%buffer: buffer, %row:
 
 // RUN: pass sanitizer-insert-assertions{checks=access}
 func.def @access_only_instruments_non_contiguous_fragment_memory(%buffer: buffer, %row: index, %column: index, %value: vector<8xf32>) {
-  %two = index.constant 2 : index
-  %sixty_four = index.constant 64 : index
-  %layout = encoding.layout.strided [2, %sixty_four] : encoding<layout>
+  %fragment_extent = index.constant 2 : index
+  %row_stride = index.constant 64 : index
+  %layout = encoding.layout.strided [2, %row_stride] : encoding<layout>
   %base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %output = buffer.view %global[%base] : buffer -> view<64x64xf32, %layout>
-  vector.fragment.store<result> %value, %output[%row, %column] shape [%two, %two] : vector<8xf32>, view<64x64xf32, %layout>
+  vector.fragment.store<result> %value, %output[%row, %column] shape [%fragment_extent, %fragment_extent] : vector<8xf32>, view<64x64xf32, %layout>
   func.return
 }
 
 // ----
 func.def @access_only_instruments_non_contiguous_fragment_memory(%buffer: buffer, %row: index, %column: index, %value: vector<8xf32>) {
-  %two = index.constant 2 : index
-  %sixty_four = index.constant 64 : index
-  %layout = encoding.layout.strided [2, %sixty_four] : encoding<layout>
+  %fragment_extent = index.constant 2 : index
+  %row_stride = index.constant 64 : index
+  %layout = encoding.layout.strided [2, %row_stride] : encoding<layout>
   %base = index.constant 0 : offset
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %output = buffer.view %global[%base] : buffer -> view<64x64xf32, %layout>
@@ -307,7 +307,7 @@ func.def @access_only_instruments_non_contiguous_fragment_memory(%buffer: buffer
   %10 = index.constant 1 : index
   %11 = index.add %column, %10 : index
   sanitizer.assert.accesses<write> %output[%row, %11] {static_count = 2, static_extents = [1, 1], static_strides = [1, 0]} : view<64x64xf32, %layout>
-  vector.fragment.store<result> %value, %output[%row, %column] shape [%two, %two] : vector<8xf32>, view<64x64xf32, %layout>
+  vector.fragment.store<result> %value, %output[%row, %column] shape [%fragment_extent, %fragment_extent] : vector<8xf32>, view<64x64xf32, %layout>
   func.return
 }
 
@@ -315,21 +315,21 @@ func.def @access_only_instruments_non_contiguous_fragment_memory(%buffer: buffer
 
 // RUN: pass sanitizer-insert-assertions{checks=access}
 func.def @access_only_instruments_blocked_fragment_memory(%output: view<8x64x64xf32, #dense>, %block: index, %row: index, %column: index, %value: vector<32xf32>) {
-  %two = index.constant 2 : index
-  %four = index.constant 4 : index
-  vector.fragment.store<result> %value, %output[%block, %row, %column] shape [blocks(%two), %four, %four] : vector<32xf32>, view<8x64x64xf32, #dense>
+  %block_count = index.constant 2 : index
+  %fragment_extent = index.constant 4 : index
+  vector.fragment.store<result> %value, %output[%block, %row, %column] shape [blocks(%block_count), %fragment_extent, %fragment_extent] : vector<32xf32>, view<8x64x64xf32, #dense>
   func.return
 }
 
 // ----
 func.def @access_only_instruments_blocked_fragment_memory(%output: view<8x64x64xf32, #dense>, %block: index, %row: index, %column: index, %value: vector<32xf32>) {
-  %two = index.constant 2 : index
-  %four = index.constant 4 : index
+  %block_count = index.constant 2 : index
+  %fragment_extent = index.constant 4 : index
   sanitizer.assert.accesses<write> %output[%block, %row, %column] {static_count = 4, static_extents = [1, 1, 4], static_strides = [0, 1, 0]} : view<8x64x64xf32, #dense>
   %7 = index.constant 1 : index
   %8 = index.add %block, %7 : index
   sanitizer.assert.accesses<write> %output[%8, %row, %column] {static_count = 4, static_extents = [1, 1, 4], static_strides = [0, 1, 0]} : view<8x64x64xf32, #dense>
-  vector.fragment.store<result> %value, %output[%block, %row, %column] shape [blocks(%two), %four, %four] : vector<32xf32>, view<8x64x64xf32, #dense>
+  vector.fragment.store<result> %value, %output[%block, %row, %column] shape [blocks(%block_count), %fragment_extent, %fragment_extent] : vector<32xf32>, view<8x64x64xf32, #dense>
   func.return
 }
 
@@ -337,25 +337,25 @@ func.def @access_only_instruments_blocked_fragment_memory(%output: view<8x64x64x
 
 // RUN: pass sanitizer-insert-assertions{checks=access}
 func.def @access_only_skips_workgroup_vector_memory() {
-  %zero_offset = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %origin = index.constant 0 : index
   %bytes = index.constant 64 : offset
   %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %view = buffer.view %scratch[%zero_offset] : buffer -> view<4x4xi32, #dense>
-  %value = vector.load %view[%zero_index, 0] : view<4x4xi32, #dense> -> vector<4xi32>
-  vector.store %value, %view[%zero_index, 0] : vector<4xi32>, view<4x4xi32, #dense>
+  %view = buffer.view %scratch[%base] : buffer -> view<4x4xi32, #dense>
+  %value = vector.load %view[%origin, 0] : view<4x4xi32, #dense> -> vector<4xi32>
+  vector.store %value, %view[%origin, 0] : vector<4xi32>, view<4x4xi32, #dense>
   func.return
 }
 
 // ----
 func.def @access_only_skips_workgroup_vector_memory() {
-  %zero_offset = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %origin = index.constant 0 : index
   %bytes = index.constant 64 : offset
   %scratch = buffer.alloca %bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %view = buffer.view %scratch[%zero_offset] : buffer -> view<4x4xi32, #dense>
-  %value = vector.load %view[%zero_index, 0] : view<4x4xi32, #dense> -> vector<4xi32>
-  vector.store %value, %view[%zero_index, 0] : vector<4xi32>, view<4x4xi32, #dense>
+  %view = buffer.view %scratch[%base] : buffer -> view<4x4xi32, #dense>
+  %value = vector.load %view[%origin, 0] : view<4x4xi32, #dense> -> vector<4xi32>
+  vector.store %value, %view[%origin, 0] : vector<4xi32>, view<4x4xi32, #dense>
   func.return
 }
 
@@ -379,28 +379,28 @@ func.def @access_only_keeps_existing_vector_assertions(%layout: encoding<layout>
 
 // RUN: pass sanitizer-insert-assertions{checks=access}
 func.def @access_only_skips_workgroup_vector_atomic_memory() {
-  %zero_offset = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %origin = index.constant 0 : index
   %bytes = index.constant 64 : offset
   %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %view = buffer.view %scratch[%zero_offset] : buffer -> view<16xi32, #dense>
+  %view = buffer.view %scratch[%base] : buffer -> view<16xi32, #dense>
   %offsets = vector.splat %origin : vector<2xindex>
-  %one = scalar.constant 1 : i32
-  %value = vector.splat %one : vector<2xi32>
+  %increment = scalar.constant 1 : i32
+  %value = vector.splat %increment : vector<2xi32>
   vector.atomic.reduce<addi> %value, %view[%origin][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xi32>, view<16xi32, #dense>, vector<2xindex>
   func.return
 }
 
 // ----
 func.def @access_only_skips_workgroup_vector_atomic_memory() {
-  %zero_offset = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %origin = index.constant 0 : index
   %bytes = index.constant 64 : offset
   %scratch = buffer.alloca %bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %view = buffer.view %scratch[%zero_offset] : buffer -> view<16xi32, #dense>
+  %view = buffer.view %scratch[%base] : buffer -> view<16xi32, #dense>
   %offsets = vector.splat %origin : vector<2xindex>
-  %one = scalar.constant 1 : i32
-  %value = vector.splat %one : vector<2xi32>
+  %increment = scalar.constant 1 : i32
+  %value = vector.splat %increment : vector<2xi32>
   vector.atomic.reduce<addi> %value, %view[%origin][%offsets] {ordering = relaxed, scope = workgroup} : vector<2xi32>, view<16xi32, #dense>, vector<2xindex>
   func.return
 }
