@@ -530,7 +530,11 @@ static iree_status_t iree_io_gguf_parse_array(iree_const_byte_span_t* contents,
                                               uint64_t element_count,
                                               uint64_t element_size,
                                               const uint8_t** out_base_ptr) {
-  uint64_t total_length = element_count * element_size;
+  uint64_t total_length = 0;
+  if (!iree_checked_mul_u64(element_count, element_size, &total_length)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "GGUF array byte length overflow");
+  }
   if (total_length > IREE_HOST_SIZE_MAX) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "attempting to load a 64-bit file on a 32-bit arch "
