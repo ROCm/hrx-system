@@ -454,11 +454,11 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
-    allocation_rematerialization
+    rematerialization
   HDRS
-    "allocation_rematerialization.h"
+    "rematerialization.h"
   SRCS
-    "allocation_rematerialization.c"
+    "rematerialization.c"
   DEPS
     ::allocation
     ::descriptor_traits
@@ -685,7 +685,6 @@ loom_cc_library(
     ::allocation
     ::allocation_live_range_splitting
     ::allocation_materialization
-    ::allocation_rematerialization
     ::diagnostics
     ::function
     ::function_model
@@ -693,6 +692,7 @@ loom_cc_library(
     ::memory_access_ir
     ::packet
     ::planning_statistics
+    ::rematerialization
     ::storage_lease
     iree::base
     iree::base::internal::arena

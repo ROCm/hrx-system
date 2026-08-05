@@ -779,6 +779,80 @@ static void loom_low_schedule_record_dependency_cycle_path(
   }
 }
 
+static const loom_low_schedule_dependency_t*
+loom_low_schedule_find_dependency_witness(
+    const loom_low_schedule_build_state_t* state, uint32_t producer_node,
+    uint32_t consumer_node) {
+  for (uint32_t dependency_index = 0;
+       dependency_index < state->dependencies.count; ++dependency_index) {
+    const loom_low_schedule_dependency_t* dependency =
+        loom_low_schedule_dependency_graph_at(&state->dependencies,
+                                              dependency_index);
+    if (dependency->producer_node == producer_node &&
+        dependency->consumer_node == consumer_node) {
+      return dependency;
+    }
+  }
+  IREE_ASSERT_UNREACHABLE("dependency group must retain a raw witness");
+  return NULL;
+}
+
+// Finds the explicit architectural-state value responsible for a
+// read-before-clobber dependency. Other state dependency forms have no SSA
+// value that can be rematerialized.
+static loom_value_id_t loom_low_schedule_state_value_for_dependency(
+    const loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_dependency_t* dependency) {
+  if (dependency->kind != LOOM_LOW_SCHEDULE_DEPENDENCY_STATE) {
+    return LOOM_VALUE_ID_INVALID;
+  }
+  const loom_low_schedule_node_t* reader =
+      &state->nodes[dependency->producer_node];
+  const loom_value_ordinal_t* operand_ordinals =
+      loom_low_schedule_node_const_operand_ordinals(reader);
+  loom_value_id_t state_value_id = LOOM_VALUE_ID_INVALID;
+  for (uint16_t i = 0; i < reader->operand_count; ++i) {
+    const loom_low_schedule_value_record_t* value =
+        &state->values[operand_ordinals[i]];
+    if (value->register_class_id == LOOM_LOW_REG_CLASS_NONE ||
+        state->reg_class_state_flags[value->register_class_id] == 0 ||
+        value->state_next_write_node != dependency->consumer_node) {
+      continue;
+    }
+    if (state_value_id != LOOM_VALUE_ID_INVALID &&
+        state_value_id != value->value_id) {
+      return LOOM_VALUE_ID_INVALID;
+    }
+    state_value_id = value->value_id;
+  }
+  return state_value_id;
+}
+
+static void loom_low_schedule_record_cycle_state_value(
+    loom_low_schedule_build_state_t* state) {
+  if (state->failure.state_value_id != LOOM_VALUE_ID_INVALID ||
+      state->failure.cycle_node_count < 2 ||
+      iree_any_bit_set(state->failure.flags,
+                       LOOM_LOW_SCHEDULE_FAILURE_FLAG_CYCLE_PATH_TRUNCATED |
+                           LOOM_LOW_SCHEDULE_FAILURE_FLAG_WITNESS_EDGE_ONLY)) {
+    return;
+  }
+  for (uint32_t i = 0; i < state->failure.cycle_node_count; ++i) {
+    const uint32_t producer_node = state->failure.cycle_nodes[i];
+    const uint32_t consumer_node =
+        state->failure.cycle_nodes[(i + 1) % state->failure.cycle_node_count];
+    const loom_low_schedule_dependency_t* dependency =
+        loom_low_schedule_find_dependency_witness(state, producer_node,
+                                                  consumer_node);
+    const loom_value_id_t state_value_id =
+        loom_low_schedule_state_value_for_dependency(state, dependency);
+    if (state_value_id != LOOM_VALUE_ID_INVALID) {
+      state->failure.state_value_id = state_value_id;
+      return;
+    }
+  }
+}
+
 static void loom_low_schedule_record_dependency_cycle_failure(
     loom_low_schedule_build_state_t* state,
     const loom_low_schedule_block_t* block_record, uint32_t scheduled_in_block,
@@ -797,26 +871,10 @@ static void loom_low_schedule_record_dependency_cycle_failure(
       .consumer_node = consumer_node,
       .dependency_kind = dependency->kind,
       .operand_index = dependency->operand_index,
+      .state_value_id =
+          loom_low_schedule_state_value_for_dependency(state, dependency),
       .cycle_node_count = 0,
   };
-}
-
-static const loom_low_schedule_dependency_t*
-loom_low_schedule_find_dependency_witness(
-    const loom_low_schedule_build_state_t* state, uint32_t producer_node,
-    uint32_t consumer_node) {
-  for (uint32_t dependency_index = 0;
-       dependency_index < state->dependencies.count; ++dependency_index) {
-    const loom_low_schedule_dependency_t* dependency =
-        loom_low_schedule_dependency_graph_at(&state->dependencies,
-                                              dependency_index);
-    if (dependency->producer_node == producer_node &&
-        dependency->consumer_node == consumer_node) {
-      return dependency;
-    }
-  }
-  IREE_ASSERT_UNREACHABLE("dependency group must retain a raw witness");
-  return NULL;
 }
 
 static iree_status_t loom_low_schedule_record_first_unresolved_dependency(
@@ -858,6 +916,7 @@ static iree_status_t loom_low_schedule_record_first_unresolved_dependency(
       .consumer_node = LOOM_LOW_SCHEDULE_NODE_NONE,
       .dependency_kind = LOOM_LOW_SCHEDULE_DEPENDENCY_UNKNOWN,
       .operand_index = UINT32_MAX,
+      .state_value_id = LOOM_VALUE_ID_INVALID,
       .cycle_node_count = 0,
   };
   return iree_ok_status();
@@ -933,6 +992,7 @@ static iree_status_t loom_low_schedule_record_dependency_cycle(
               consumer_node, dependency);
           loom_low_schedule_record_dependency_cycle_path(
               &state->failure, parent_nodes, producer_node, consumer_node);
+          loom_low_schedule_record_cycle_state_value(state);
           return iree_ok_status();
         }
       }
@@ -954,13 +1014,10 @@ static iree_status_t loom_low_schedule_handle_dependency_cycle(
     uint32_t scheduled_in_block) {
   IREE_RETURN_IF_ERROR(loom_low_schedule_record_dependency_cycle(
       state, block_record, node_count, scheduled_in_block));
-  if (state->options->emitter.fn == NULL) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "low schedule dependency cycle in block %" PRIu32,
-                            state->current_block_index);
+  if (state->options->emitter.fn != NULL) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_schedule_emit_dependency_cycle(state, &state->failure));
   }
-  IREE_RETURN_IF_ERROR(
-      loom_low_schedule_emit_dependency_cycle(state, &state->failure));
   ++state->error_count;
   return iree_ok_status();
 }

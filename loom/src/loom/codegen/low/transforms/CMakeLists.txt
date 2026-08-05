@@ -22,11 +22,11 @@ loom_cc_library(
     loom::codegen::low::allocation
     loom::codegen::low::allocation_live_range_splitting
     loom::codegen::low::allocation_materialization
-    loom::codegen::low::allocation_rematerialization
     loom::codegen::low::descriptors
     loom::codegen::low::function
     loom::codegen::low::function_model
     loom::codegen::low::pipeline::pass_environment
+    loom::codegen::low::rematerialization
     loom::ir
     loom::ops::low
     loom::pass::pipeline
