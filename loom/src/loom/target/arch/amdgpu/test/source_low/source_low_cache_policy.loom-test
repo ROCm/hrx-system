@@ -38,9 +38,9 @@ kernel.def target(@target) @cache_system_bypass_scalar_load() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
   // REMARK@+1: BACKEND/040 "selected cache policy 'system/bypass'" "decision 'memory_cache_policy.gfx12_nv_scope_th'" "scope_attr present true value 3" "th_attr present true value 3"
   %loaded = view.load %input_view[%lane] {cache_scope = system, cache_temporal = bypass} : view<64xi32, #dense> -> i32
   view.store %loaded, %output_view[%lane] : i32, view<64xi32, #dense>
