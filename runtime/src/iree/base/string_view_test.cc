@@ -818,20 +818,18 @@ TEST(StringViewTest, MatchPattern) {
   EXPECT_TRUE(match("abc", "?*?"));
   EXPECT_TRUE(match("abcdef", "a?c*f"));
 
-  // Consecutive wildcards (tests coalescing to avoid exponential backtracking).
+  // Consecutive stars share the same match semantics as one star.
   EXPECT_TRUE(match("abc", "**"));
   EXPECT_TRUE(match("abc", "***"));
   EXPECT_TRUE(match("abc", "a**c"));
   EXPECT_TRUE(match("abc", "**c"));
   EXPECT_TRUE(match("abc", "a**"));
+  EXPECT_TRUE(match("*ba", "*a"));
 
-  // Pathological pattern that would cause exponential backtracking without
-  // coalescing: many wildcards followed by a non-matching suffix.
-  // This must complete in reasonable time (milliseconds, not seconds).
+  // Repeated stars do not multiply suffix retries.
   EXPECT_FALSE(match("aaaaaaaaaaaaaaaaaaaab", "**************c"));
   EXPECT_TRUE(match("aaaaaaaaaaaaaaaaaaaab", "**************b"));
 
-  // Alternating ?* patterns - also pathological without normalization.
   // ?* means "1 or more chars", ?*?* means "2 or more chars", etc.
   EXPECT_TRUE(match("ab", "?*"));
   EXPECT_TRUE(match("abc", "?*?"));
@@ -839,19 +837,23 @@ TEST(StringViewTest, MatchPattern) {
   EXPECT_TRUE(match("abcd", "?*?*"));
   EXPECT_FALSE(match("a", "?*?*"));  // Need at least 2 chars.
 
-  // Pathological alternating patterns - must complete quickly.
+  // Alternating patterns retry both matching and non-matching suffixes.
   EXPECT_FALSE(match("aaaaaaaaaaaaaaaaaaaab", "?*?*?*?*?*?*?*c"));
   EXPECT_TRUE(match("aaaaaaaaaaaaaaaaaaaab", "?*?*?*?*?*?*?*b"));
   EXPECT_FALSE(match("aaaaaaaaaaaaaaaaaaaab", "*?*?*?*?*?*?*?c"));
   EXPECT_TRUE(match("aaaaaaaaaaaaaaaaaaaab", "*?*?*?*?*?*?*?b"));
 
-  // Patterns with too many wildcards are rejected (returns false).
-  // Limit is 16 wildcards to prevent O(n^2) blowup.
+  // Separated stars retry the remaining suffix without recursive
+  // combinatorial backtracking.
+  EXPECT_TRUE(match("aaaaaaaaaaaaaaaaab", "*a*a*a*a*a*a*a*a*b"));
+  EXPECT_FALSE(match("aaaaaaaaaaaaaaaaac", "*a*a*a*a*a*a*a*a*b"));
+
+  // Wildcard count does not change matching semantics.
   EXPECT_TRUE(match("abcdefghijklmnop", "????????????????"));  // 16 - ok
-  EXPECT_FALSE(
-      match("abcdefghijklmnopq", "?????????????????"));  // 17 - rejected
-  EXPECT_FALSE(
-      match("anything", "?*?*?*?*?*?*?*?*?*"));  // 18 wildcards - rejected
+  EXPECT_TRUE(match("abcdefghijklmnopq", "?????????????????"));
+  EXPECT_FALSE(match("abcdefghijklmnop", "?????????????????"));
+  EXPECT_TRUE(match("abcdefghijklmnopq", "*****************"));
+  EXPECT_TRUE(match("abcdefghijklmnopq", "?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*?*"));
 }
 
 }  // namespace
