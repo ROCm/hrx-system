@@ -99,10 +99,10 @@ func.def @rounds_each_instruction() -> (f32, f64) {
 
 // IEEE minimum and maximum choose opposite signed zeros.
 func.def @minmax_preserve_signed_zero_semantics() -> (i32, i32) {
-  %positive_zero = scalar.constant 0.0 : f32
+  %positive_signed_zero = scalar.constant 0.0 : f32
   %cn0 = scalar.constant -0.0 : f32
-  %minimum = scalar.minimumf %positive_zero, %cn0 : f32
-  %maximum = scalar.maximumf %positive_zero, %cn0 : f32
+  %minimum = scalar.minimumf %positive_signed_zero, %cn0 : f32
+  %maximum = scalar.maximumf %positive_signed_zero, %cn0 : f32
   %minimum_bits = scalar.bitcast %minimum : f32 to i32
   %maximum_bits = scalar.bitcast %maximum : f32 to i32
   func.return %minimum_bits, %maximum_bits : i32, i32

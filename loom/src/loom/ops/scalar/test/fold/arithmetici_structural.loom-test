@@ -134,8 +134,8 @@ func.def @muli_power_of_two_to_shift(%x: i32) -> (i32) {
 // ====
 
 func.def @muli_negative_one_to_negi(%x: i32) -> (i32) {
-  %neg_one = scalar.constant -1 : i32
-  %r = scalar.muli %x, %neg_one : i32
+  %negation_factor = scalar.constant -1 : i32
+  %r = scalar.muli %x, %negation_factor : i32
   func.return %r : i32
 }
 
@@ -312,36 +312,36 @@ func.def @signed_minmax_extremes(%x: i32) -> (i32, i32, i32, i32, i32, i32) {
 
 func.def @unsigned_minmax_extremes(%x: i32) -> (i32, i32, i32, i32) {
   %c0 = scalar.constant 0 : i32
-  %all_ones = scalar.constant -1 : i32
+  %unsigned_max = scalar.constant -1 : i32
   %min_absorb = scalar.minui %x, %c0 : i32
-  %min_identity = scalar.minui %x, %all_ones : i32
+  %min_identity = scalar.minui %x, %unsigned_max : i32
   %max_identity = scalar.maxui %x, %c0 : i32
-  %max_absorb = scalar.maxui %x, %all_ones : i32
+  %max_absorb = scalar.maxui %x, %unsigned_max : i32
   func.return %min_absorb, %min_identity, %max_identity, %max_absorb : i32, i32, i32, i32
 }
 
 // ----
 func.def @unsigned_minmax_extremes(%x: i32) -> (i32, i32, i32, i32) {
   %c0 = scalar.constant 0 : i32
-  %all_ones = scalar.constant -1 : i32
-  func.return %c0, %x, %x, %all_ones : i32, i32, i32, i32
+  %unsigned_max = scalar.constant -1 : i32
+  func.return %c0, %x, %x, %unsigned_max : i32, i32, i32, i32
 }
 
 // ====
 
 func.def @unsigned_i64_minmax_extremes(%x: i64) -> (i64, i64, i64, i64) {
   %c0 = scalar.constant 0 : i64
-  %all_ones = scalar.constant -1 : i64
+  %unsigned_max = scalar.constant -1 : i64
   %min_absorb = scalar.minui %x, %c0 : i64
-  %min_identity = scalar.minui %x, %all_ones : i64
+  %min_identity = scalar.minui %x, %unsigned_max : i64
   %max_identity = scalar.maxui %x, %c0 : i64
-  %max_absorb = scalar.maxui %x, %all_ones : i64
+  %max_absorb = scalar.maxui %x, %unsigned_max : i64
   func.return %min_absorb, %min_identity, %max_identity, %max_absorb : i64, i64, i64, i64
 }
 
 // ----
 func.def @unsigned_i64_minmax_extremes(%x: i64) -> (i64, i64, i64, i64) {
   %c0 = scalar.constant 0 : i64
-  %all_ones = scalar.constant -1 : i64
-  func.return %c0, %x, %x, %all_ones : i64, i64, i64, i64
+  %unsigned_max = scalar.constant -1 : i64
+  func.return %c0, %x, %x, %unsigned_max : i64, i64, i64, i64
 }

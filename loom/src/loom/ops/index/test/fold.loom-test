@@ -1059,20 +1059,20 @@ func.def @bitwise_facts(%x: index) -> (i64, i64, i1, i64, i64) {
 func.def @bit_count_facts_require_target_width() -> (index, index, index) {
   %c1 = index.constant 1 : index
   %c0 = index.constant 0 : index
-  %ones = index.constant -1 : index
+  %all_bits_set = index.constant -1 : index
   %clz = index.ctlzi %c1 : index
   %ctz = index.cttzi %c0 : index
-  %pop = index.ctpopi %ones : index
+  %pop = index.ctpopi %all_bits_set : index
   func.return %clz, %ctz, %pop : index, index, index
 }
 // ----
 func.def @bit_count_facts_require_target_width() -> (index, index, index) {
   %c1 = index.constant 1 : index
   %c0 = index.constant 0 : index
-  %ones = index.constant -1 : index
+  %all_bits_set = index.constant -1 : index
   %clz = index.ctlzi %c1 : index
   %ctz = index.cttzi %c0 : index
-  %pop = index.ctpopi %ones : index
+  %pop = index.ctpopi %all_bits_set : index
   func.return %clz, %ctz, %pop : index, index, index
 }
 
@@ -1105,23 +1105,23 @@ func.def @bitwise_exact_folds_preserve_target_rotate() -> (index, index, index, 
 
 func.def @bitwise_identities(%x: index) -> (index, index, index, index, index, index, index, index) {
   %c0 = index.constant 0 : index
-  %ones = index.constant -1 : index
+  %all_bits_set = index.constant -1 : index
   %and_self = index.andi %x, %x : index
   %and_zero = index.andi %x, %c0 : index
-  %and_ones = index.andi %x, %ones : index
+  %and_ones = index.andi %x, %all_bits_set : index
   %or_self = index.ori %x, %x : index
   %or_zero = index.ori %x, %c0 : index
-  %or_ones = index.ori %x, %ones : index
+  %or_ones = index.ori %x, %all_bits_set : index
   %xor_zero = index.xori %x, %c0 : index
   %xor_self = index.xori %x, %x : index
   func.return %and_self, %and_zero, %and_ones, %or_self, %or_zero, %or_ones, %xor_zero, %xor_self : index, index, index, index, index, index, index, index
 }
 // ----
 func.def @bitwise_identities(%x: index) -> (index, index, index, index, index, index, index, index) {
-  %ones = index.constant -1 : index
+  %all_bits_set = index.constant -1 : index
   %and_zero = index.constant 0 : index
   %xor_self = index.constant 0 : index
-  func.return %x, %and_zero, %x, %x, %x, %ones, %x, %xor_self : index, index, index, index, index, index, index, index
+  func.return %x, %and_zero, %x, %x, %x, %all_bits_set, %x, %xor_self : index, index, index, index, index, index, index, index
 }
 
 // ====
