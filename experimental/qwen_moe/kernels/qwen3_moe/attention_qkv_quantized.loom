@@ -53,36 +53,36 @@ func.template<qwen3_moe.attention.qkv_quantized.body> device @qwen3_moe_attentio
   %channel_tile = kernel.workgroup.id<x> : index
   %subgroup0 = kernel.subgroup.id : index
   %lane = kernel.subgroup.lane.id : index
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %eight = index.constant 8 : index
-  %onehundredtwentyeight = index.constant 128 : index
-  %onehundredfortyfour = index.constant 144 : index
-  %twohundredten = index.constant 210 : index
-  %twofiftysix = index.constant 256 : index
-  %zero_i32 = scalar.constant 0 : i32
-  %zero_f32 = scalar.constant 0.0 : f32
-  %zero_offset = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %c128 = index.constant 128 : index
+  %c144 = index.constant 144 : index
+  %c210 = index.constant 210 : index
+  %c256 = index.constant 256 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c0_f32 = scalar.constant 0.0 : f32
+  %c0_offset = index.constant 0 : offset
   %token, %launch_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
-  %channel_base = index.mul %channel_tile, %eight : index
+  %channel_base = index.mul %channel_tile, %c8 : index
   %global_channel = index.add %channel_base, %subgroup : index
   %key_value_end = index.add %query_size, %key_value_size : index
-  %key_value_output_size = index.mul %key_value_size, %two : index
+  %key_value_output_size = index.mul %key_value_size, %c2 : index
   %total_output_size = index.add %query_size, %key_value_output_size : index
   %valid_channel = index.cmp ult, %global_channel, %total_output_size : index
   %is_query = index.cmp ult, %global_channel, %query_size : index
   %is_key = index.cmp ult, %global_channel, %key_value_end : index
   %key_value_channel = index.rem %global_channel, %key_value_size : index
-  %value_uses_q6 = index.cmp eq, %value_uses_q6_index, %one : index
+  %value_uses_q6 = index.cmp eq, %value_uses_q6_index, %c1 : index
   %lane_i32 = index.cast %lane : index to i32
-  %is_lane_zero = scalar.cmpi eq, %lane_i32, %zero_i32 : i32
-  %quant_block_count = index.div %hidden_size, %twofiftysix : index
-  %q4_row_byte_count = index.mul %quant_block_count, %onehundredfortyfour : index
-  %q6_row_byte_count = index.mul %quant_block_count, %twohundredten : index
-  %q8_group_count = index.div %hidden_size, %onehundredtwentyeight : index
-  %q8_row_byte_count = index.mul %q8_group_count, %onehundredfortyfour : index
+  %is_lane_zero = scalar.cmpi eq, %lane_i32, %c0_i32 : i32
+  %quant_block_count = index.div %hidden_size, %c256 : index
+  %q4_row_byte_count = index.mul %quant_block_count, %c144 : index
+  %q6_row_byte_count = index.mul %quant_block_count, %c210 : index
+  %q8_group_count = index.div %hidden_size, %c128 : index
+  %q8_row_byte_count = index.mul %q8_group_count, %c144 : index
   %q8_row_byte_index = index.mul %token, %q8_row_byte_count : index
   %q8_row_byte_base = index.cast %q8_row_byte_index : index to offset
   %q8_noalias, %query_weight_noalias, %key_weight_noalias, %value_weight_noalias, %query_output_noalias, %key_output_noalias, %value_output_noalias = buffer.assume.noalias %q8_input, %query_weight, %key_weight, %value_weight, %query_output, %key_output, %value_output : buffer, buffer, buffer, buffer, buffer, buffer, buffer
@@ -117,16 +117,16 @@ func.template<qwen3_moe.attention.qkv_quantized.body> device @qwen3_moe_attentio
       }
       scf.yield %projection_sum : f32
     } else {
-      scf.yield %zero_f32 : f32
+      scf.yield %c0_f32 : f32
     }
     scf.yield %channel_sum : f32
   } else {
-    scf.yield %zero_f32 : f32
+    scf.yield %c0_f32 : f32
   }
   %dot = kernel.subgroup.reduce<addf> %lane_sum : f32
-  %query_output_view = buffer.view %query_output_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%query_size]xf32, #dense>
-  %key_output_view = buffer.view %key_output_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%key_value_size]xf32, #dense>
-  %value_output_view = buffer.view %value_output_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%key_value_size]xf32, #dense>
+  %query_output_view = buffer.view %query_output_noalias[%c0_offset] : buffer -> view<[%launch_token_count]x[%query_size]xf32, #dense>
+  %key_output_view = buffer.view %key_output_noalias[%c0_offset] : buffer -> view<[%launch_token_count]x[%key_value_size]xf32, #dense>
+  %value_output_view = buffer.view %value_output_noalias[%c0_offset] : buffer -> view<[%launch_token_count]x[%key_value_size]xf32, #dense>
   scf.if %publish_output {
     scf.if %valid_channel {
       scf.if %is_lane_zero {
@@ -149,23 +149,23 @@ kernel.def target(@qwen3_moe_attention_qkv_gfx11_wave32) @qwen3_moe_attention_qk
   %query_size = config.get @qwen3_moe.attention.query_size : index
   %key_value_size = config.get @qwen3_moe.attention.key_value_size : index
   %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %seven = index.constant 7 : index
-  %eight = index.constant 8 : index
-  %twofiftysix = index.constant 256 : index
-  %key_value_output_size = index.mul %key_value_size, %two : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c7 = index.constant 7 : index
+  %c8 = index.constant 8 : index
+  %c256 = index.constant 256 : index
+  %key_value_output_size = index.mul %key_value_size, %c2 : index
   %output_size = index.add %query_size, %key_value_output_size : index
-  %padded_output_size = index.add %output_size, %seven : index
-  %output_tiles = index.div %padded_output_size, %eight : index
-  kernel.launch.config workgroups(%output_tiles, %token_capacity, %one) workgroup_size(%twofiftysix, %one, %one) : index
+  %padded_output_size = index.add %output_size, %c7 : index
+  %output_tiles = index.div %padded_output_size, %c8 : index
+  kernel.launch.config workgroups(%output_tiles, %token_capacity, %c1) workgroup_size(%c256, %c1, %c1) : index
 } launch(%token_count: index, %q8_input: buffer, %query_weight: buffer, %key_weight: buffer, %value_weight: buffer, %query_output: buffer, %key_output: buffer, %value_output: buffer) {
   %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
   %token0 = kernel.workgroup.id<y> : index
-  %zero = index.constant 0 : index
+  %c0 = index.constant 0 : index
   %valid_token = index.cmp ult, %token0, %bounded_token_count : index
-  %safe_token = scf.select %valid_token, %token0, %zero : index
+  %safe_token = scf.select %valid_token, %token0, %c0 : index
   func.apply<qwen3_moe.attention.qkv_quantized.body>(%valid_token, %bounded_token_count, %safe_token, %q8_input, %query_weight, %key_weight, %value_weight, %query_output, %key_output, %value_output) : (i1, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }

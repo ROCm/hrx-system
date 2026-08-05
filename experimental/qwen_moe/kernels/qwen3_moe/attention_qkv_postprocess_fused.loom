@@ -30,16 +30,16 @@ kernel.decl @qwen3_moe_attention_postprocess_f32_f16(%token_count: index, %cache
 kernel.def target(@qwen3_moe_attention_qkv_postprocess_gfx11_wave32) @qwen3_moe_attention_qkv_postprocess_fused_decode(%token_count: index, %cache_row_count: index) {
   %query_size = config.get @qwen3_moe.attention.query_size : index
   %key_value_size = config.get @qwen3_moe.attention.key_value_size : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %seven = index.constant 7 : index
-  %eight = index.constant 8 : index
-  %twofiftysix = index.constant 256 : index
-  %key_value_output_size = index.mul %key_value_size, %two : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c7 = index.constant 7 : index
+  %c8 = index.constant 8 : index
+  %c256 = index.constant 256 : index
+  %key_value_output_size = index.mul %key_value_size, %c2 : index
   %output_size = index.add %query_size, %key_value_output_size : index
-  %padded_output_size = index.add %output_size, %seven : index
-  %output_tiles = index.div %padded_output_size, %eight : index
-  kernel.launch.config workgroups(%output_tiles, %one, %one) workgroup_size(%twofiftysix, %one, %one) : index
+  %padded_output_size = index.add %output_size, %c7 : index
+  %output_tiles = index.div %padded_output_size, %c8 : index
+  kernel.launch.config workgroups(%output_tiles, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
 } launch(%token_count: index, %cache_row_count: index, %q8_input: buffer, %query_weight: buffer, %key_weight: buffer, %value_weight: buffer, %positions: buffer, %key_cache_indices: buffer, %value_cache_indices: buffer, %query_output_raw: buffer, %key_output_raw: buffer, %value_output_raw: buffer, %query_norm_weight: buffer, %key_norm_weight: buffer, %inverse_frequencies: buffer, %query_output: buffer, %key_cache: buffer, %value_cache: buffer, %completion_counters: buffer) {
   %publish_projection_output = scalar.constant true : i1
   %projection_token = kernel.workgroup.id<y> : index
@@ -49,42 +49,42 @@ kernel.def target(@qwen3_moe_attention_qkv_postprocess_gfx11_wave32) @qwen3_moe_
   %head_size0 = config.get @qwen3_moe.attention.head_size : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 1)] : index
   %query_size, %key_value_size, %head_size = index.assume %query_size0, %key_value_size0, %head_size0 [range(%query_size0, 128, 262144), range(%key_value_size0, 128, 262144), range(%head_size0, 128, 128), mul(%query_size0, %head_size0), mul(%key_value_size0, %head_size0)] : index, index, index
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %eight = index.constant 8 : index
-  %zero_i32 = scalar.constant 0 : i32
-  %one_i32 = scalar.constant 1 : i32
-  %zero_offset = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c8 = index.constant 8 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %c0_offset = index.constant 0 : offset
   %counter_scratch_bytes = index.constant 4 : offset
   %channel_tile = kernel.workgroup.id<x> : index
   %workitem = kernel.workitem.id<x> : index
-  %token = index.assume %zero [lt(%zero, %bounded_token_count)] : index
-  %head_tile_count = index.div %head_size, %eight : index
+  %token = index.assume %c0 [lt(%c0, %bounded_token_count)] : index
+  %head_tile_count = index.div %head_size, %c8 : index
   %head_domain0 = index.div %channel_tile, %head_tile_count : index
   %query_head_count = index.div %query_size, %head_size : index
   %key_value_head_count = index.div %key_value_size, %head_size : index
-  %key_value_domain_count = index.mul %key_value_head_count, %two : index
+  %key_value_domain_count = index.mul %key_value_head_count, %c2 : index
   %head_domain_count = index.add %query_head_count, %key_value_domain_count : index
   %head_domain, %completion_counter_count = index.assume %head_domain0, %head_domain_count [lt(%head_domain0, %head_domain_count)] : index, index
-  %is_arrival_workitem = index.cmp eq, %workitem, %zero : index
+  %is_arrival_workitem = index.cmp eq, %workitem, %c0 : index
   %completion_counters_global = buffer.assume.memory_space<global> %completion_counters : buffer
   %completion_counters_aligned = buffer.assume.alignment %completion_counters_global {minimum_alignment = 16} : buffer
-  %completion_counters_view = buffer.view %completion_counters_aligned[%zero_offset] : buffer -> view<[%completion_counter_count]xi32, #dense>
+  %completion_counters_view = buffer.view %completion_counters_aligned[%c0_offset] : buffer -> view<[%completion_counter_count]xi32, #dense>
   %counter_scratch = buffer.alloca %counter_scratch_bytes {base_alignment = 4, memory_space = workgroup} : buffer
-  %counter_scratch_view = buffer.view %counter_scratch[%zero_offset] : buffer -> view<1xi32, #dense>
+  %counter_scratch_view = buffer.view %counter_scratch[%c0_offset] : buffer -> view<1xi32, #dense>
   // Publish every producer's projection stores before the leader advances one
   // workgroup arrival. The last arrival then acquires the complete head.
   kernel.barrier<global> {ordering = release, scope = workgroup}
   scf.if %is_arrival_workitem {
-    %old_counter = view.atomic.rmw<addi> %one_i32, %completion_counters_view[%head_domain] {ordering = acq_rel, scope = device} : i32, view<[%completion_counter_count]xi32, #dense> -> i32
-    view.store %old_counter, %counter_scratch_view[%zero] : i32, view<1xi32, #dense>
+    %old_counter = view.atomic.rmw<addi> %c1_i32, %completion_counters_view[%head_domain] {ordering = acq_rel, scope = device} : i32, view<[%completion_counter_count]xi32, #dense> -> i32
+    view.store %old_counter, %counter_scratch_view[%c0] : i32, view<1xi32, #dense>
   }
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-  %old_counter = view.load %counter_scratch_view[%zero] : view<1xi32, #dense> -> i32
+  %old_counter = view.load %counter_scratch_view[%c0] : view<1xi32, #dense> -> i32
   %head_tile_count_i32 = index.cast %head_tile_count : index to i32
-  %last_head_tile_i32 = scalar.subi %head_tile_count_i32, %one_i32 : i32
-  %negative_head_tile_count_i32 = scalar.subi %zero_i32, %head_tile_count_i32 : i32
+  %last_head_tile_i32 = scalar.subi %head_tile_count_i32, %c1_i32 : i32
+  %negative_head_tile_count_i32 = scalar.subi %c0_i32, %head_tile_count_i32 : i32
   %is_last_head_tile = scalar.cmpi eq, %old_counter, %last_head_tile_i32 : i32
   scf.if %is_last_head_tile {
     kernel.barrier<global> {ordering = acquire, scope = workgroup}

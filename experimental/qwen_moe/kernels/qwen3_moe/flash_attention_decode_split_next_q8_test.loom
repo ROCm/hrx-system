@@ -9,9 +9,9 @@ kernel.decl target(@qwen3_moe_decode_split_gfx11_wave64) @qwen3_moe_flash_attent
 
 // Publishes the canonical reference Q8_1 x4 layout for one 4096-element row.
 kernel.def @qwen3_moe_flash_attention_decode_split_quantize_reference_4096() {
-  %one = index.constant 1 : index
-  %thirtytwo = index.constant 32 : index
-  kernel.launch.config workgroups(%thirtytwo, %one, %one) workgroup_size(%thirtytwo, %one, %one) : index
+  %c1 = index.constant 1 : index
+  %c32 = index.constant 32 : index
+  kernel.launch.config workgroups(%c32, %c1, %c1) workgroup_size(%c32, %c1, %c1) : index
 } launch(%input: buffer, %output: buffer) {
   %publish_output = scalar.constant true : i1
   %group_count = index.constant 32 : index
@@ -23,10 +23,10 @@ kernel.def @qwen3_moe_flash_attention_decode_split_quantize_reference_4096() {
 // Isolates the new publication phase for access-sanitized coverage without
 // inflating the complete fused attention kernel beyond a short branch's range.
 kernel.def target(@qwen3_moe_decode_split_gfx11_wave64) @qwen3_moe_flash_attention_decode_split_pack_completed_q8_test() {
-  %one = index.constant 1 : index
-  %four = index.constant 4 : index
-  %twofiftysix = index.constant 256 : index
-  kernel.launch.config workgroups(%one, %four, %one) workgroup_size(%twofiftysix, %one, %one) : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%c1, %c4, %c1) workgroup_size(%c256, %c1, %c1) : index
 } launch(%input: buffer, %output: buffer) {
   %key_value_head = kernel.workgroup.id<y> : index
   func.apply<qwen3_moe.attention.decode_split.pack_completed_q8>(%key_value_head, %input, %output) : (index, buffer, buffer)
@@ -35,21 +35,21 @@ kernel.def target(@qwen3_moe_decode_split_gfx11_wave64) @qwen3_moe_flash_attenti
 
 // Models the request-owned Decode-513 mask inside its 576-row capacity class.
 kernel.def @qwen3_moe_flash_attention_decode_split_mask_513_of_576() {
-  %one = index.constant 1 : index
-  %sixtyfour = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%sixtyfour, %one, %one) : index
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%mask: buffer) {
   %workitem = kernel.workitem.id<x> : index
-  %sixtythree = index.constant 63 : index
-  %fivehundredthirteen = index.constant 513 : index
-  %zero = index.constant 0 : index
-  %zero_offset = index.constant 0 : offset
+  %c63 = index.constant 63 : index
+  %c513 = index.constant 513 : index
+  %c0 = index.constant 0 : index
+  %c0_offset = index.constant 0 : offset
   %negative_large = scalar.constant -1e+30 : f32
   %negative_infinity = scalar.fptrunc %negative_large : f32 to f16
-  %valid = index.cmp ult, %workitem, %sixtythree : index
-  %row0 = index.add %fivehundredthirteen, %workitem : index
-  %row = scf.select %valid, %row0, %zero : index
-  %mask_view = buffer.view %mask[%zero_offset] : buffer -> view<576xf16, #dense>
+  %valid = index.cmp ult, %workitem, %c63 : index
+  %row0 = index.add %c513, %workitem : index
+  %row = scf.select %valid, %row0, %c0 : index
+  %mask_view = buffer.view %mask[%c0_offset] : buffer -> view<576xf16, #dense>
   scf.if %valid {
     view.store %negative_infinity, %mask_view[%row] : f16, view<576xf16, #dense>
   }
