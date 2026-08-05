@@ -52,7 +52,8 @@ typedef struct loom_low_schedule_dependency_t {
   uint32_t consumer_node;
   // Dependency kind.
   loom_low_schedule_dependency_kind_t kind;
-  // Operand index for SSA dependencies, or UINT32_MAX.
+  // Operand index for SSA and explicit state-value dependencies, or
+  // UINT32_MAX for dependencies without one owning operand.
   uint32_t operand_index;
 } loom_low_schedule_dependency_t;
 

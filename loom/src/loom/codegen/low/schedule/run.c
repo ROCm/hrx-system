@@ -810,6 +810,10 @@ static loom_value_id_t loom_low_schedule_state_value_for_dependency(
       &state->nodes[dependency->producer_node];
   const loom_value_ordinal_t* operand_ordinals =
       loom_low_schedule_node_const_operand_ordinals(reader);
+  if (dependency->operand_index != UINT32_MAX) {
+    IREE_ASSERT_LT(dependency->operand_index, reader->operand_count);
+    return state->values[operand_ordinals[dependency->operand_index]].value_id;
+  }
   loom_value_id_t state_value_id = LOOM_VALUE_ID_INVALID;
   for (uint16_t i = 0; i < reader->operand_count; ++i) {
     const loom_low_schedule_value_record_t* value =

@@ -20,3 +20,30 @@ s_cmp_lt_u32 s0, s1
   s_cmp_lt_u32 s0, s1
   s_cselect_b32 s0, s3, s2
   s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @scc_compare_rematerializes_across_block_clobber strategy=source waits=none
+
+amdgpu.target<gfx1100> @target
+
+// The successor block reads a predicate defined before the CFG edge. The
+// read-before-clobber dependency retains that exact operand so cycle repair can
+// rematerialize the compare in the successor.
+low.func.def target<amdgpu.rdna3.core>(@target) @scc_compare_rematerializes_across_block_clobber(%ordinal: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %valid = s_cmp_lt_u32 %ordinal, %limit
+  %bounded = s_cselect_b32 %ordinal, %fallback, %valid
+  low.br ^body
+^body:
+  %advanced = s_add_u32 %bounded, %limit
+  %result = s_cselect_b32 %advanced, %fallback, %valid
+  return %result
+}
+
+// ----
+s_cmp_lt_u32 s0, s1
+  s_cselect_b32 s3, s0, s2
+.Lbb1:
+  s_add_u32 s3, s3, s1
+  s_cmp_lt_u32 s0, s1
+  s_cselect_b32 s0, s3, s2
+  s_endpgm
