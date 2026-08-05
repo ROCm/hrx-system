@@ -517,3 +517,41 @@ class KernelBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
+    def decl(
+        self,
+        *,
+        retain: str | None = ...,
+        target: str | None = ...,
+        export_symbol: str | None = ...,
+        export_linkage: str | None = ...,
+        callee: str,
+        workloads: list[ValueRef] = ...,
+        args: list[ValueRef] = ...,
+        predicates: list[Predicate] = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def launch(
+        self,
+        *,
+        callee: str,
+        workloads: list[ValueRef] = ...,
+        arguments: list[ValueRef] = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def yield_(
+        self,
+        *,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def serial(
+        self,
+        *,
+        body: Region | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
+    def concurrent(
+        self,
+        *,
+        body: Region | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...

@@ -90,6 +90,18 @@ def should_run_tests(files_from: str | None) -> bool:
     )
 
 
+def run_generated_builder_check() -> bool:
+    return run_command(
+        [
+            sys.executable,
+            "loom/py/loom/gen/run.py",
+            "builders_pyi",
+            "--check",
+        ],
+        "Generated builder stubs",
+    )
+
+
 def bazel_test_command() -> list[str]:
     return [
         "bazel",
@@ -138,10 +150,11 @@ def run_presubmit(args: argparse.Namespace) -> int:
     if not should_run_tests(args.files_from):
         print("loom presubmit: no Loom-affecting files")
         return 0
+    ok = run_generated_builder_check()
     if args.lane == "bazel":
-        ok = run_bazel_tests()
+        ok = run_bazel_tests() and ok
     elif args.lane == "cmake":
-        ok = run_cmake_tests()
+        ok = run_cmake_tests() and ok
     else:
         raise ValueError(f"unknown lane: {args.lane}")
     return 0 if ok else 1
