@@ -3,22 +3,22 @@
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @divergent_loop_carry() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%upper_bounds: buffer, %values: buffer, %output: buffer) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %zero_i32 = scalar.constant 0 : i32
-  %zero_offset = index.constant 0 : offset
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
+  %initial_count = scalar.constant 0 : i32
+  %buffer_base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %upper_bound_view = buffer.view %upper_bounds[%zero_offset] : buffer -> view<64xi32, #dense>
-  %value_view = buffer.view %values[%zero_offset] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<64xi32, #dense>
+  %upper_bound_view = buffer.view %upper_bounds[%buffer_base] : buffer -> view<64xi32, #dense>
+  %value_view = buffer.view %values[%buffer_base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
   %upper_bound_i32 = view.load %upper_bound_view[%lane] : view<64xi32, #dense> -> i32
   %upper_bound0 = index.cast %upper_bound_i32 : i32 to index
   %upper_bound = index.assume %upper_bound0 [range(%upper_bound0, 0, 64)] : index
-  %count = scf.for %position = [%zero to %upper_bound step %one](%running_count = %zero_i32 : i32) -> (i32) {
+  %count = scf.for %position = [%loop_begin to %upper_bound step %loop_step](%running_count = %initial_count : i32) -> (i32) {
     %bounded_position = index.assume %position [range(%position, 0, 63)] : index
     %value = view.load %value_view[%bounded_position] : view<64xi32, #dense> -> i32
     %next_count = scalar.addi %running_count, %value : i32
@@ -34,8 +34,8 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %upper_bound_view = resource<hal_binding> {index = 0, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %value_view = resource<hal_binding> {index = 1, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 2, source_type = hal.buffer, extent = 256} : reg<amdgpu.sgpr x2>
-  %zero = s_mov_b32 0
-  %one = s_mov_b32 1
+  %loop_begin = s_mov_b32 0
+  %loop_step = s_mov_b32 1
   %39 = v_lshlrev_b32_src0_inline %lane, 2
   %upper_bound = global_load_b32_saddr %39, %upper_bound_view
   %41 = v_mov_b32 0
@@ -56,7 +56,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   %54 = concat(%52, %53) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %value = global_load_b32_saddr %47, %54
   %next_count = v_add_u32 %running_count, %value
-  %57 = s_add_u32 %bounded_position, %one
+  %57 = s_add_u32 %bounded_position, %loop_step
   low.br ^_bb1(%57: reg<amdgpu.sgpr>, %next_count: reg<amdgpu.vgpr>)
 ^_bb3:
   %58 = v_lshlrev_b32_src0_inline %lane, 2
@@ -64,7 +64,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(64, 1, 
   return
 ^_bb4:
   %44 = s_mov_b64_exec_read
-  low.br ^_bb1(%zero: reg<amdgpu.sgpr>, %41: reg<amdgpu.vgpr>)
+  low.br ^_bb1(%loop_begin: reg<amdgpu.sgpr>, %41: reg<amdgpu.vgpr>)
 ^_bb5:
   s_mov_b64_exec %44
   low.br ^_bb3
