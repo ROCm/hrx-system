@@ -6,15 +6,15 @@ kernel.def target(@target) @report_tensor_load_to_lds() {
   %c64 = index.constant 64 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%input: buffer) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %bytes = index.constant 16384 : offset
   %d0 = vector.constant 0 : vector<4xi32>
   %d1 = vector.constant 0 : vector<8xi32>
   %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %input : buffer
-  %source = buffer.view %global[%zero] : buffer -> view<64x64xf32, #dense>
+  %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32, #dense>
   %scratch = buffer.alloca %bytes {base_alignment = 256, memory_space = workgroup} : buffer
-  %dest = buffer.view %scratch[%zero] : buffer -> view<64x64xf32, #dense>
+  %dest = buffer.view %scratch[%buffer_base] : buffer -> view<64x64xf32, #dense>
   %copy = kernel.async.tensor.load.to.lds %source to %dest using %descriptor {cache_scope = cu, cache_temporal = regular} : view<64x64xf32, #dense> to view<64x64xf32, #dense>, kernel.tensor.lds.descriptor -> kernel.async.token
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group

@@ -3,16 +3,16 @@
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_fixed_trip_matrix_loop(%lhs_data: vector<16xbf16>, %rhs_data: vector<16xbf16>, %init_data: vector<8xf32>) -> (vector<8xf32>) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
+  %k_tile_begin = index.constant 0 : index
+  %k_tile_step = index.constant 1 : index
+  %k_tile_end = index.constant 2 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] : vector<16xbf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] : vector<16xbf16>
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
-  %result = scf.for %k_tile = [%zero to %two step %one](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
+  %result = scf.for %k_tile = [%k_tile_begin to %k_tile_end step %k_tile_step](%acc = %init : vector<8xf32>) -> (vector<8xf32>) {
     %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     scf.yield %next : vector<8xf32>
   }
@@ -45,14 +45,14 @@ kernel.def target(@target) @report_strided_packed_b16_fragment_load() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%rhs_buffer: buffer, %output_buffer: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
+  %fragment_row_origin = index.constant 0 : index
   %column_origin = index.constant 32 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x128xf16, #dense>
   %output_view = buffer.view %output_buffer[%base] : buffer -> view<64xf16, #dense>
-  %rhs = vector.fragment.load<rhs> %rhs_view[%zero, %column_origin] shape [%k, %n] : view<16x128xf16, #dense> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[%fragment_row_origin, %column_origin] shape [%k, %n] : view<16x128xf16, #dense> -> vector<16xf16>
   %lane0 = vector.extract %rhs[0] : vector<16xf16> -> f16
   %lane = kernel.workitem.id<x> : index
   view.store %lane0, %output_view[%lane] : f16, view<64xf16, #dense>

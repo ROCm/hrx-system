@@ -1503,12 +1503,12 @@ kernel.def target(@target) @gfx1100_direct_decode_scalef32_identity_finite_f8e4m
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %one = scalar.constant 1.0 : f32
+  %identity_scale = scalar.constant 1.0 : f32
   %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=8, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only, scale_format=f32, scale_group_elements=8, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %input_view = buffer.view %input[%base] : buffer -> view<64x8xf8E4M3, #dense>
   %output_view = buffer.view %output[%base] : buffer -> view<64x8xbf16, #dense>
   %payload = vector.load %input_view[%lane, 0] : view<64x8xf8E4M3, #dense> -> vector<8xf8E4M3>
-  %scale_vector = vector.splat %one : vector<1xf32>
+  %scale_vector = vector.splat %identity_scale : vector<1xf32>
   %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xf32>} : vector<8xf8E4M3>, encoding<schema> -> vector<8xbf16>
   vector.store %decoded, %output_view[%lane, 0] : vector<8xbf16>, view<64x8xbf16, #dense>
   kernel.return
@@ -1575,12 +1575,12 @@ kernel.def target(@target) @gfx1100_direct_decode_scalef32_identity_finite_f8e4m
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %one = scalar.constant 1.0 : f32
+  %identity_scale = scalar.constant 1.0 : f32
   %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=4, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
   %output_view = buffer.view %output[%base] : buffer -> view<64x4xf16, #dense>
   %payload = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
-  %scale_vector = vector.splat %one : vector<1xf32>
+  %scale_vector = vector.splat %identity_scale : vector<1xf32>
   %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xf32>} : vector<4xf8E4M3>, encoding<schema> -> vector<4xf16>
   vector.store %decoded, %output_view[%lane, 0] : vector<4xf16>, view<64x4xf16, #dense>
   kernel.return
@@ -1649,12 +1649,12 @@ kernel.def target(@target) @gfx1100_direct_decode_scalef32_identity_finite_f8e4m
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %one = scalar.constant 1.0 : f32
+  %identity_scale = scalar.constant 1.0 : f32
   %schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3fn, payload_elements=4, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %input_view = buffer.view %input[%base] : buffer -> view<64x4xf8E4M3, #dense>
   %output_view = buffer.view %output[%base] : buffer -> view<64x4xf32, #dense>
   %payload = vector.load %input_view[%lane, 0] : view<64x4xf8E4M3, #dense> -> vector<4xf8E4M3>
-  %scale_vector = vector.splat %one : vector<1xf32>
+  %scale_vector = vector.splat %identity_scale : vector<1xf32>
   %decoded = vector.decode %payload using %schema {scale = %scale_vector : vector<1xf32>} : vector<4xf8E4M3>, encoding<schema> -> vector<4xf32>
   vector.store %decoded, %output_view[%lane, 0] : vector<4xf32>, view<64x4xf32, #dense>
   kernel.return

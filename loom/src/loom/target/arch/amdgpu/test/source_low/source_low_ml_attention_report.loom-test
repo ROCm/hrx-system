@@ -5,25 +5,25 @@ amdgpu.target<gfx11-generic> @target
 // A uniform tail-tile branch should keep the WMMA work attributable to the
 // source operations that shape the full-tile and tail paths.
 kernel.def target(@target) @report_attention_tail_peel_accumulator_merge() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_values: vector<16xbf16>, %rhs_values0: vector<16xbf16>, %rhs_values1: vector<16xbf16>, %init_accumulator: vector<8xf32>, %tail_tile_count: i32, %output_buffer: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %zero_i32 = scalar.constant 0 : i32
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %no_tail_tiles = scalar.constant 0 : i32
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
-  %has_tail_tile = scalar.cmpi ne, %tail_tile_count, %zero_i32 : i32
+  %has_tail_tile = scalar.cmpi ne, %tail_tile_count, %no_tail_tiles : i32
   %output_global = buffer.assume.memory_space<global> %output_buffer : buffer
   %output_aligned = buffer.assume.alignment %output_global {minimum_alignment = 16} : buffer
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32, #dense>
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xbf16>
   %rhs0 = vector.fragment<rhs> %rhs_values0 shape [%k, %n] : vector<16xbf16>
   %rhs1 = vector.fragment<rhs> %rhs_values1 shape [%k, %n] : vector<16xbf16>
-  %carried = scf.for %tile = [%zero to %one step %one](%accumulator = %init_accumulator : vector<8xf32>) -> (vector<8xf32>) {
+  %carried = scf.for %tile = [%c0 to %c1 step %c1](%accumulator = %init_accumulator : vector<8xf32>) -> (vector<8xf32>) {
     %init = vector.fragment<init> %accumulator shape [%m, %n] : vector<8xf32>
     %next = vector.mma %lhs, %rhs0, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     scf.yield %next : vector<8xf32>
@@ -35,7 +35,7 @@ kernel.def target(@target) @report_attention_tail_peel_accumulator_merge() {
   } else {
     scf.yield %carried : vector<8xf32>
   }
-  vector.fragment.store<result> %output_accumulator, %output_view[%zero, %zero] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
+  vector.fragment.store<result> %output_accumulator, %output_view[%c0, %c0] shape [%m, %n] : vector<8xf32>, view<16x16xf32, #dense>
   kernel.return
 }
 
