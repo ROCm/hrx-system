@@ -10,7 +10,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/math.h"
-#include "loom/analysis/symbolic_expr.h"
+#include "loom/analysis/symbolic_expr_bounded.h"
 #include "loom/analysis/view_regions.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/ir/facts.h"

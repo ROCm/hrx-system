@@ -741,7 +741,7 @@ loom_cc_library(
     ::memory_access
     iree::base
     iree::base::internal
-    loom::analysis::symbolic_expr
+    loom::analysis::symbolic_expr_bounded
     loom::analysis::view_regions
     loom::ir
     loom::ir::facts
