@@ -134,11 +134,11 @@ check.case public @qwen3_moe_route_trace_capture_sequence_case {
   %expected_weights = check.generate.iota offset(0.0) step(0.03125) : tensor<4x8xf32>
   %expected_neighbor_ids = check.generate.fill value(-1) : tensor<4x8xi32>
   %expected_neighbor_weights = check.generate.fill value(0.0) : tensor<4x8xf32>
-  func.call @qwen3_moe_route_trace_capture_one_test(%source_token_zero, %layer_ordinal, %context_capacity, %route_ids_zero, %route_weights_zero, %control_zero, %trace_ids, %trace_weights) : (index, index, index, tensor<1x8xi32>, tensor<1x8xf32>, tensor<1xi32>, tensor<4x48x8xi32>, tensor<4x48x8xf32>)
-  func.call @qwen3_moe_route_trace_capture_two_test(%source_token_zero, %layer_ordinal, %context_capacity, %route_ids_decode, %route_weights_decode, %control_one, %trace_ids, %trace_weights) : (index, index, index, tensor<2x8xi32>, tensor<2x8xf32>, tensor<1xi32>, tensor<4x48x8xi32>, tensor<4x48x8xf32>)
-  func.call @qwen3_moe_route_trace_capture_one_test(%source_token_two, %layer_ordinal, %context_capacity, %route_ids_terminal, %route_weights_terminal, %control_one, %trace_ids, %trace_weights) : (index, index, index, tensor<1x8xi32>, tensor<1x8xf32>, tensor<1xi32>, tensor<4x48x8xi32>, tensor<4x48x8xf32>)
-  func.call @qwen3_moe_route_trace_inspect_four_test(%layer_ordinal, %context_capacity, %trace_ids, %trace_weights, %captured_ids, %captured_weights) : (index, index, tensor<4x48x8xi32>, tensor<4x48x8xf32>, tensor<4x8xi32>, tensor<4x8xf32>)
-  func.call @qwen3_moe_route_trace_inspect_four_test(%neighbor_layer_ordinal, %context_capacity, %trace_ids, %trace_weights, %neighbor_ids, %neighbor_weights) : (index, index, tensor<4x48x8xi32>, tensor<4x48x8xf32>, tensor<4x8xi32>, tensor<4x8xf32>)
+  kernel.launch @qwen3_moe_route_trace_capture_one_test[%source_token_zero, %layer_ordinal, %context_capacity](%source_token_zero, %layer_ordinal, %context_capacity, %route_ids_zero, %route_weights_zero, %control_zero, %trace_ids, %trace_weights) : [index, index, index](index, index, index, tensor<1x8xi32>, tensor<1x8xf32>, tensor<1xi32>, tensor<4x48x8xi32>, tensor<4x48x8xf32>)
+  kernel.launch @qwen3_moe_route_trace_capture_two_test[%source_token_zero, %layer_ordinal, %context_capacity](%source_token_zero, %layer_ordinal, %context_capacity, %route_ids_decode, %route_weights_decode, %control_one, %trace_ids, %trace_weights) : [index, index, index](index, index, index, tensor<2x8xi32>, tensor<2x8xf32>, tensor<1xi32>, tensor<4x48x8xi32>, tensor<4x48x8xf32>)
+  kernel.launch @qwen3_moe_route_trace_capture_one_test[%source_token_two, %layer_ordinal, %context_capacity](%source_token_two, %layer_ordinal, %context_capacity, %route_ids_terminal, %route_weights_terminal, %control_one, %trace_ids, %trace_weights) : [index, index, index](index, index, index, tensor<1x8xi32>, tensor<1x8xf32>, tensor<1xi32>, tensor<4x48x8xi32>, tensor<4x48x8xf32>)
+  kernel.launch @qwen3_moe_route_trace_inspect_four_test[%layer_ordinal, %context_capacity](%layer_ordinal, %context_capacity, %trace_ids, %trace_weights, %captured_ids, %captured_weights) : [index, index](index, index, tensor<4x48x8xi32>, tensor<4x48x8xf32>, tensor<4x8xi32>, tensor<4x8xf32>)
+  kernel.launch @qwen3_moe_route_trace_inspect_four_test[%neighbor_layer_ordinal, %context_capacity](%neighbor_layer_ordinal, %context_capacity, %trace_ids, %trace_weights, %neighbor_ids, %neighbor_weights) : [index, index](index, index, tensor<4x48x8xi32>, tensor<4x48x8xf32>, tensor<4x8xi32>, tensor<4x8xf32>)
   check.expect.equal actual(%captured_ids) expected(%expected_ids) : tensor<4x8xi32>
   check.expect.close actual(%captured_weights) expected(%expected_weights) atol(0.0) rtol(0.0) nan(same) : tensor<4x8xf32>
   check.expect.equal actual(%neighbor_ids) expected(%expected_neighbor_ids) : tensor<4x8xi32>
@@ -156,7 +156,7 @@ check.case public @qwen3_moe_route_trace_capture_prefill_plan_case {
   %control = check.generate.fill value(0) : tensor<1xi32>
   %trace_ids = check.generate.fill value(-1) : tensor<2048x48x8xi32>
   %trace_weights = check.generate.fill value(0.0) : tensor<2048x48x8xf32>
-  func.call @qwen3_moe_route_trace_capture(%token_count, %source_token_offset, %layer_ordinal, %context_capacity, %route_ids, %route_weights, %control, %trace_ids, %trace_weights) : (index, index, index, index, tensor<512x8xi32>, tensor<512x8xf32>, tensor<1xi32>, tensor<2048x48x8xi32>, tensor<2048x48x8xf32>)
+  kernel.launch @qwen3_moe_route_trace_capture[%token_count, %source_token_offset, %layer_ordinal, %context_capacity](%token_count, %source_token_offset, %layer_ordinal, %context_capacity, %route_ids, %route_weights, %control, %trace_ids, %trace_weights) : [index, index, index, index](index, index, index, index, tensor<512x8xi32>, tensor<512x8xf32>, tensor<1xi32>, tensor<2048x48x8xi32>, tensor<2048x48x8xf32>)
   check.return
 }
 

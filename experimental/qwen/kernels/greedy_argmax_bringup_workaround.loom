@@ -118,7 +118,7 @@ check.case public @qwen_greedy_argmax_nontrivial_winner_case {
   %logits = check.generate.iota offset(0.0) step(1.0) period(1009) : tensor<151936xf32>
   %token_id = check.generate.fill value(-1) : tensor<1xi32>
   %expected = check.generate.fill value(1008) : tensor<1xi32>
-  func.call @qwen_greedy_argmax_bringup_workaround(%logits, %token_id) : (tensor<151936xf32>, tensor<1xi32>)
+  kernel.launch @qwen_greedy_argmax_bringup_workaround[](%logits, %token_id) : [](tensor<151936xf32>, tensor<1xi32>)
   check.expect.equal actual(%token_id) expected(%expected) : tensor<1xi32>
   check.return
 }
@@ -129,7 +129,7 @@ check.case public @qwen_greedy_argmax_equal_logit_tie_case {
   %logits = check.generate.fill value(7.0) : tensor<151936xf32>
   %token_id = check.generate.fill value(-1) : tensor<1xi32>
   %expected = check.generate.fill value(0) : tensor<1xi32>
-  func.call @qwen_greedy_argmax_bringup_workaround(%logits, %token_id) : (tensor<151936xf32>, tensor<1xi32>)
+  kernel.launch @qwen_greedy_argmax_bringup_workaround[](%logits, %token_id) : [](tensor<151936xf32>, tensor<1xi32>)
   check.expect.equal actual(%token_id) expected(%expected) : tensor<1xi32>
   check.return
 }
@@ -146,7 +146,7 @@ check.case public @qwen_greedy_argmax_partials_nontrivial_winner_case {
   %observed_token_id = check.generate.fill value(-1) : tensor<1xi32>
   %expected_token_id = check.generate.fill value(744) : tensor<1xi32>
   %expected_control = check.generate.fill value(513) : tensor<1xi32>
-  func.call @qwen_greedy_argmax_partials_bringup_workaround(%partial_count, %context_increment, %partial_logits, %partial_ids, %next_token_id, %next_control, %observed_token_id) : (index, index, tensor<512xf32>, tensor<512xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @qwen_greedy_argmax_partials_bringup_workaround[%partial_count, %context_increment](%partial_count, %context_increment, %partial_logits, %partial_ids, %next_token_id, %next_control, %observed_token_id) : [index, index](index, index, tensor<512xf32>, tensor<512xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
   check.expect.equal actual(%next_token_id) expected(%expected_token_id) : tensor<1xi32>
   check.expect.equal actual(%next_control) expected(%expected_control) : tensor<1xi32>
   check.expect.equal actual(%observed_token_id) expected(%expected_token_id) : tensor<1xi32>
@@ -165,7 +165,7 @@ check.case public @qwen_greedy_argmax_partials_equal_logit_tie_case {
   %observed_token_id = check.generate.fill value(-1) : tensor<1xi32>
   %expected_token_id = check.generate.fill value(0) : tensor<1xi32>
   %expected_control = check.generate.fill value(513) : tensor<1xi32>
-  func.call @qwen_greedy_argmax_partials_bringup_workaround(%partial_count, %context_increment, %partial_logits, %partial_ids, %next_token_id, %next_control, %observed_token_id) : (index, index, tensor<512xf32>, tensor<512xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @qwen_greedy_argmax_partials_bringup_workaround[%partial_count, %context_increment](%partial_count, %context_increment, %partial_logits, %partial_ids, %next_token_id, %next_control, %observed_token_id) : [index, index](index, index, tensor<512xf32>, tensor<512xi32>, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
   check.expect.equal actual(%next_token_id) expected(%expected_token_id) : tensor<1xi32>
   check.expect.equal actual(%next_control) expected(%expected_control) : tensor<1xi32>
   check.expect.equal actual(%observed_token_id) expected(%expected_token_id) : tensor<1xi32>
