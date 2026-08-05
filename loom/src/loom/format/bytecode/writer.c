@@ -1558,10 +1558,23 @@ static iree_status_t loom_bytecode_number_function(
   IREE_RETURN_IF_ERROR(
       loom_bytecode_numbering_intern_op(numbering, func_like.op, &unused_id));
 
-  // Arg names and types.
+  // Kernel workload and ordinary FuncLike signature names and types.
+  loom_value_slice_t workload_args =
+      loom_kernel_workload_arg_ids(numbering->module, func_like.op);
   uint16_t arg_count = 0;
   const loom_value_id_t* arg_ids =
       loom_func_like_arg_ids(func_like, &arg_count);
+  for (uint16_t i = 0; i < workload_args.count; ++i) {
+    loom_value_id_t value_id = workload_args.values[i];
+    if (value_id < numbering->module->values.count) {
+      loom_string_id_t name_id =
+          loom_module_value(numbering->module, value_id)->name_id;
+      if (name_id != LOOM_STRING_ID_INVALID) {
+        IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
+            numbering, name_id, &unused_id));
+      }
+    }
+  }
   for (uint16_t i = 0; i < arg_count; ++i) {
     loom_value_id_t value_id = arg_ids[i];
     if (value_id < numbering->module->values.count) {
@@ -1573,9 +1586,15 @@ static iree_status_t loom_bytecode_number_function(
       }
     }
   }
-  for (uint16_t i = 0; i < arg_count; ++i) {
+  for (uint16_t i = 0; i < workload_args.count; ++i) {
     loom_type_t arg_type =
-        loom_module_value_type(numbering->module, arg_ids[i]);
+        loom_module_value_type(numbering->module, workload_args.values[i]);
+    IREE_RETURN_IF_ERROR(
+        loom_bytecode_numbering_intern_type(numbering, arg_type, &unused_id));
+  }
+  for (uint16_t i = 0; i < arg_count; ++i) {
+    loom_value_id_t value_id = arg_ids[i];
+    loom_type_t arg_type = loom_module_value_type(numbering->module, value_id);
     IREE_RETURN_IF_ERROR(
         loom_bytecode_numbering_intern_type(numbering, arg_type, &unused_id));
   }
@@ -1949,9 +1968,11 @@ static iree_status_t loom_bytecode_count_serialized_bodies(
       loom_bytecode_count_op_region_forest(
           func_like.op, func_like.vtable->body_region_index, counts);
     } else {
+      loom_value_slice_t workload_args =
+          loom_kernel_workload_arg_ids(module, func_like.op);
       uint16_t arg_count = 0;
       loom_func_like_arg_ids(func_like, &arg_count);
-      counts->value_count += arg_count;
+      counts->value_count += (uint64_t)workload_args.count + arg_count;
     }
   }
   return iree_ok_status();
@@ -2949,15 +2970,24 @@ static iree_status_t loom_bytecode_write_func_metadata(
   IREE_RETURN_IF_ERROR(
       loom_bytecode_emit_u8(builder, loom_func_like_purity(func_like)));
 
+  loom_value_slice_t workload_args =
+      loom_kernel_workload_arg_ids(module, func_like.op);
   uint16_t arg_count = 0;
   const loom_value_id_t* arg_ids =
       loom_func_like_arg_ids(func_like, &arg_count);
   uint16_t result_count = func_like.op->result_count;
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_emit_uvarint(builder, workload_args.count));
   IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, arg_count));
   IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, result_count));
   IREE_RETURN_IF_ERROR(loom_bytecode_value_numbering_ensure_capacity(
-      signature_numbering, (iree_host_size_t)arg_count + result_count));
+      signature_numbering,
+      (iree_host_size_t)workload_args.count + arg_count + result_count));
 
+  for (uint16_t i = 0; i < workload_args.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_bytecode_value_numbering_assign_value(
+        signature_numbering, workload_args.values[i]));
+  }
   for (uint16_t i = 0; i < arg_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_bytecode_value_numbering_assign_value(
         signature_numbering, arg_ids[i]));
@@ -2968,7 +2998,12 @@ static iree_status_t loom_bytecode_write_func_metadata(
         signature_numbering, result_ids[i]));
   }
 
-  // Arg value definitions.
+  // Kernel workload and ordinary FuncLike argument value definitions.
+  for (uint16_t i = 0; i < workload_args.count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_bytecode_emit_value_def(
+        builder, numbering, signature_numbering,
+        loom_module_value(module, workload_args.values[i])));
+  }
   for (uint16_t i = 0; i < arg_count; ++i) {
     IREE_RETURN_IF_ERROR(
         loom_bytecode_emit_value_def(builder, numbering, signature_numbering,

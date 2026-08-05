@@ -259,7 +259,8 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                     elements.append(("LOOM_FORMAT_KIND_BLOCK_ARGS", index, "0"))
 
                 case FuncArgs(field=name):
-                    elements.append(("LOOM_FORMAT_KIND_FUNC_ARGS", 0, "0"))
+                    field_index = c_queries.resolve_func_args_operand_index(op, name)
+                    elements.append(("LOOM_FORMAT_KIND_FUNC_ARGS", field_index, "0"))
 
                 case PredicateList(field=name):
                     _field_kind, index = resolve_field(name)

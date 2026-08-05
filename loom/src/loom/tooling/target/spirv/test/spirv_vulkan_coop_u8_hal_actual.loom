@@ -62,7 +62,7 @@ check.case @dense_projection_tiled_u8_128_case {
   %rhs = check.generate.fill value(2) : tensor<4x8x32x16xi8>
   %init = check.generate.fill value(5) : tensor<8x8x16x16xi32>
   %output = check.generate.fill value(0) : tensor<8x8x16x16xi32>
-  func.call @dense_projection_tiled_u8_128(%lhs, %rhs, %init, %output) : (tensor<8x4x16x32xi8>, tensor<4x8x32x16xi8>, tensor<8x8x16x16xi32>, tensor<8x8x16x16xi32>)
+  kernel.launch @dense_projection_tiled_u8_128[](%lhs, %rhs, %init, %output) : [](tensor<8x4x16x32xi8>, tensor<4x8x32x16xi8>, tensor<8x8x16x16xi32>, tensor<8x8x16x16xi32>)
   %expected = check.oracle.call<reference.tiled_matmul> {accumulator = "i32", lhs = "u8", result = "i32", rhs = "u8"} callee(@dense_projection_tiled_u8_128) inputs(%lhs, %rhs, %init) : (tensor<8x4x16x32xi8>, tensor<4x8x32x16xi8>, tensor<8x8x16x16xi32>) -> (tensor<8x8x16x16xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<8x8x16x16xi32>
   check.return

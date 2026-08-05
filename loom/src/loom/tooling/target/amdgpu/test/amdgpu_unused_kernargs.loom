@@ -8,7 +8,7 @@ kernel.def export("unused_kernargs") @unused_kernargs() {
 check.case @unused_kernargs_case {
   %actual = check.generate.fill value(17) : tensor<4xi32>
   %unused_scalar = check.literal value(42) : i32
-  func.call @unused_kernargs(%actual, %unused_scalar) : (tensor<4xi32>, i32)
+  kernel.launch @unused_kernargs[](%actual, %unused_scalar) : [](tensor<4xi32>, i32)
   %expected = check.generate.fill value(17) : tensor<4xi32>
   check.expect.equal actual(%actual) expected(%expected) : tensor<4xi32>
   check.return
@@ -32,7 +32,7 @@ check.case @unused_middle_binding_case {
   %input = check.generate.fill value(29) : tensor<1xi32>
   %unused = check.generate.fill value(-1) : tensor<1xi32>
   %output = check.generate.fill value(0) : tensor<1xi32>
-  func.call @unused_middle_binding(%input, %unused, %output) : (tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @unused_middle_binding[](%input, %unused, %output) : [](tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
   check.expect.equal actual(%output) expected(%input) : tensor<1xi32>
   check.return
 }
@@ -63,7 +63,7 @@ check.case @selected_lhs_case {
   %lhs = check.generate.fill value(17) : tensor<1xi32>
   %rhs = check.generate.fill value(42) : tensor<1xi32>
   %output = check.generate.fill value(0) : tensor<1xi32>
-  func.call @selected_buffer(%select_lhs, %lhs, %rhs, %output) : (index, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @selected_buffer[%select_lhs](%select_lhs, %lhs, %rhs, %output) : [index](index, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
   check.expect.equal actual(%output) expected(%lhs) : tensor<1xi32>
   check.return
 }
@@ -73,7 +73,7 @@ check.case @selected_rhs_case {
   %lhs = check.generate.fill value(17) : tensor<1xi32>
   %rhs = check.generate.fill value(42) : tensor<1xi32>
   %output = check.generate.fill value(0) : tensor<1xi32>
-  func.call @selected_buffer(%select_rhs, %lhs, %rhs, %output) : (index, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
+  kernel.launch @selected_buffer[%select_rhs](%select_rhs, %lhs, %rhs, %output) : [index](index, tensor<1xi32>, tensor<1xi32>, tensor<1xi32>)
   check.expect.equal actual(%output) expected(%rhs) : tensor<1xi32>
   check.return
 }
@@ -106,7 +106,7 @@ check.case @selected_buffer_per_workgroup_case {
   %middle = check.generate.fill value(42) : tensor<1xi32>
   %rhs = check.generate.fill value(67) : tensor<1xi32>
   %output = check.generate.fill value(0) : tensor<3xi32>
-  func.call @selected_buffer_per_workgroup(%lhs, %middle, %rhs, %output) : (tensor<1xi32>, tensor<1xi32>, tensor<1xi32>, tensor<3xi32>)
+  kernel.launch @selected_buffer_per_workgroup[](%lhs, %middle, %rhs, %output) : [](tensor<1xi32>, tensor<1xi32>, tensor<1xi32>, tensor<3xi32>)
   %expected = check.generate.iota offset(17) step(25) : tensor<3xi32>
   check.expect.equal actual(%output) expected(%expected) : tensor<3xi32>
   check.return

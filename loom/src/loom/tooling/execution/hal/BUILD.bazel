@@ -16,6 +16,11 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+exports_files([
+    "testdata/dynamic_workgroup_hal_actual.loom",
+    "testdata/launch_schedule_hal_actual.loom",
+])
+
 loom_cc_library(
     name = "artifact",
     srcs = ["artifact.c"],
@@ -89,6 +94,7 @@ loom_cc_library(
         ":candidate",
         ":invocation",
         ":runtime",
+        "//loom/src/loom/analysis:kernel_launch_config",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/ir",
@@ -100,6 +106,7 @@ loom_cc_library(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/sanitizer:options",
+        "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:types",
         "//loom/src/loom/tooling/compile:pipeline",

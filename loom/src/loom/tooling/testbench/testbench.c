@@ -11,6 +11,7 @@
 
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 
 enum {
@@ -424,14 +425,43 @@ static bool loom_testbench_value_ids_are_in_range(
   return true;
 }
 
-static bool loom_testbench_is_actual_invocation_op(const loom_module_t* module,
-                                                   const loom_op_t* op) {
+static bool loom_testbench_is_function_call_op(const loom_module_t* module,
+                                               const loom_op_t* op) {
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
   return vtable && vtable->call_like &&
          vtable->call_like->kind == LOOM_CALL_LIKE_KIND_SEMANTIC;
 }
 
-static bool loom_testbench_plan_actual_invocation(
+static bool loom_testbench_plan_kernel_launch_invocation(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_testbench_invocation_plan_t* out_invocation) {
+  if (!loom_kernel_launch_isa(op)) return false;
+
+  const loom_value_slice_t workloads = loom_kernel_launch_workloads(op);
+  const loom_value_slice_t arguments = loom_kernel_launch_arguments(op);
+  memset(out_invocation, 0, sizeof(*out_invocation));
+  out_invocation->kind = LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH;
+  out_invocation->module = module;
+  out_invocation->op = op;
+  out_invocation->callee_ref = loom_kernel_launch_callee(op);
+  out_invocation->provider_id = LOOM_STRING_ID_INVALID;
+  out_invocation->provider = iree_string_view_empty();
+  out_invocation->attrs = loom_named_attr_slice_empty();
+  out_invocation->execution_epoch = LOOM_TESTBENCH_EXECUTION_EPOCH_INVALID;
+  out_invocation->workload_value_ids = workloads.values;
+  out_invocation->workload_count = workloads.count;
+  out_invocation->input_value_ids = arguments.values;
+  out_invocation->input_count = arguments.count;
+  return loom_symbol_ref_is_valid(out_invocation->callee_ref) &&
+         loom_testbench_value_ids_are_in_range(
+             module, out_invocation->workload_value_ids,
+             out_invocation->workload_count) &&
+         loom_testbench_value_ids_are_in_range(module,
+                                               out_invocation->input_value_ids,
+                                               out_invocation->input_count);
+}
+
+static bool loom_testbench_plan_semantic_call_invocation(
     const loom_module_t* module, const loom_op_t* op,
     loom_testbench_invocation_plan_t* out_invocation) {
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
@@ -448,7 +478,7 @@ static bool loom_testbench_plan_actual_invocation(
   }
 
   memset(out_invocation, 0, sizeof(*out_invocation));
-  out_invocation->kind = LOOM_TESTBENCH_INVOCATION_ACTUAL;
+  out_invocation->kind = LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL;
   out_invocation->module = module;
   out_invocation->op = op;
   out_invocation->callee_ref = loom_attr_as_symbol(
@@ -456,6 +486,7 @@ static bool loom_testbench_plan_actual_invocation(
   out_invocation->provider_id = LOOM_STRING_ID_INVALID;
   out_invocation->provider = iree_string_view_empty();
   out_invocation->attrs = loom_named_attr_slice_empty();
+  out_invocation->execution_epoch = LOOM_TESTBENCH_EXECUTION_EPOCH_INVALID;
   out_invocation->input_value_ids =
       loom_op_const_operands(op) + call_like->operand_offset;
   out_invocation->input_count = op->operand_count - call_like->operand_offset;
@@ -489,6 +520,7 @@ static bool loom_testbench_plan_oracle_invocation(
   out_invocation->provider =
       loom_testbench_string_from_id(module, out_invocation->provider_id);
   out_invocation->attrs = loom_check_oracle_call_attrs(op);
+  out_invocation->execution_epoch = LOOM_TESTBENCH_EXECUTION_EPOCH_INVALID;
   out_invocation->input_value_ids = inputs.values;
   out_invocation->input_count = inputs.count;
   out_invocation->result_value_ids = results.values;
@@ -506,8 +538,8 @@ static bool loom_testbench_plan_oracle_invocation(
 
 static bool loom_testbench_is_invocation_op(const loom_module_t* module,
                                             const loom_op_t* op) {
-  return loom_check_oracle_call_isa(op) ||
-         loom_testbench_is_actual_invocation_op(module, op);
+  return loom_check_oracle_call_isa(op) || loom_kernel_launch_isa(op) ||
+         loom_testbench_is_function_call_op(module, op);
 }
 
 static bool loom_testbench_plan_invocation(
@@ -516,7 +548,12 @@ static bool loom_testbench_plan_invocation(
   if (loom_check_oracle_call_isa(op)) {
     return loom_testbench_plan_oracle_invocation(module, op, out_invocation);
   }
-  return loom_testbench_plan_actual_invocation(module, op, out_invocation);
+  if (loom_kernel_launch_isa(op)) {
+    return loom_testbench_plan_kernel_launch_invocation(module, op,
+                                                        out_invocation);
+  }
+  return loom_testbench_plan_semantic_call_invocation(module, op,
+                                                      out_invocation);
 }
 
 static bool loom_testbench_is_expectation_op(const loom_op_t* op) {
@@ -642,6 +679,73 @@ static bool loom_testbench_is_value_source_op(const loom_op_t* op) {
          loom_check_file_read_npy_isa(op);
 }
 
+static bool loom_testbench_is_launch_schedule_op(const loom_op_t* op) {
+  return loom_kernel_launch_serial_isa(op) ||
+         loom_kernel_launch_concurrent_isa(op);
+}
+
+static loom_region_t* loom_testbench_launch_schedule_body(const loom_op_t* op) {
+  return loom_kernel_launch_serial_isa(op)
+             ? loom_kernel_launch_serial_body(op)
+             : loom_kernel_launch_concurrent_body(op);
+}
+
+// Iterates a launch schedule tree in source order without recursion or
+// transient allocations. Verified launch schedule regions contain one block
+// and only launch, nested schedule, and yield operations.
+typedef struct loom_testbench_launch_schedule_iterator_t {
+  // Top-level schedule operation whose body bounds the walk.
+  const loom_op_t* root_op;
+  // Next operation to return, or NULL once the walk is complete.
+  loom_op_t* next_op;
+  // Schedule nesting depth of |next_op|, beginning at one.
+  iree_host_size_t next_depth;
+} loom_testbench_launch_schedule_iterator_t;
+
+static void loom_testbench_launch_schedule_iterator_initialize(
+    const loom_op_t* root_op,
+    loom_testbench_launch_schedule_iterator_t* out_iterator) {
+  loom_region_t* body = loom_testbench_launch_schedule_body(root_op);
+  loom_block_t* block =
+      body && body->block_count != 0 ? loom_region_entry_block(body) : NULL;
+  *out_iterator = (loom_testbench_launch_schedule_iterator_t){
+      .root_op = root_op,
+      .next_op = block ? block->first_op : NULL,
+      .next_depth = 1,
+  };
+}
+
+static bool loom_testbench_launch_schedule_iterator_next(
+    loom_testbench_launch_schedule_iterator_t* iterator, loom_op_t** out_op,
+    iree_host_size_t* out_depth) {
+  loom_op_t* op = iterator->next_op;
+  if (op == NULL) return false;
+
+  *out_op = op;
+  *out_depth = iterator->next_depth;
+  if (loom_testbench_is_launch_schedule_op(op)) {
+    loom_region_t* body = loom_testbench_launch_schedule_body(op);
+    loom_block_t* block =
+        body && body->block_count != 0 ? loom_region_entry_block(body) : NULL;
+    if (block && block->first_op) {
+      iterator->next_op = block->first_op;
+      ++iterator->next_depth;
+      return true;
+    }
+  }
+
+  while (op->next_op == NULL) {
+    op = op->parent_op;
+    if (op == iterator->root_op) {
+      iterator->next_op = NULL;
+      return true;
+    }
+    --iterator->next_depth;
+  }
+  iterator->next_op = op->next_op;
+  return true;
+}
+
 static bool loom_testbench_is_supported_check_body_op(
     const loom_module_t* module, const loom_op_t* op) {
   switch (op->kind) {
@@ -658,12 +762,27 @@ static bool loom_testbench_is_supported_check_body_op(
     case LOOM_OP_CHECK_FILE_READ_NPY:
     case LOOM_OP_CHECK_FILE_WRITE_NPY:
     case LOOM_OP_CHECK_ORACLE_CALL:
+    case LOOM_OP_KERNEL_LAUNCH_SERIAL:
+    case LOOM_OP_KERNEL_LAUNCH_CONCURRENT:
       return true;
     default:
       break;
   }
   return loom_testbench_is_expectation_op(op) ||
-         loom_testbench_is_actual_invocation_op(module, op);
+         loom_testbench_is_invocation_op(module, op);
+}
+
+static void loom_testbench_count_launch_schedule(
+    const loom_op_t* schedule_op, loom_testbench_plan_counts_t* counts) {
+  loom_testbench_launch_schedule_iterator_t iterator;
+  loom_testbench_launch_schedule_iterator_initialize(schedule_op, &iterator);
+  loom_op_t* op = NULL;
+  iree_host_size_t depth = 0;
+  while (loom_testbench_launch_schedule_iterator_next(&iterator, &op, &depth)) {
+    (void)depth;
+    ++counts->issue_capacity;
+    if (loom_kernel_launch_isa(op)) ++counts->invocation_count;
+  }
 }
 
 static void loom_testbench_count_case_body(
@@ -675,6 +794,10 @@ static void loom_testbench_count_case_body(
     loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
       ++counts->issue_capacity;
+      if (loom_testbench_is_launch_schedule_op(op)) {
+        loom_testbench_count_launch_schedule(op, counts);
+        continue;
+      }
       if (loom_testbench_is_parameter_op(op)) ++counts->parameter_count;
       if (loom_testbench_is_value_source_op(op)) ++counts->value_source_count;
       if (loom_check_file_write_npy_isa(op)) ++counts->file_write_count;
@@ -779,6 +902,85 @@ static bool loom_testbench_parameter_names_have_duplicate(
   return false;
 }
 
+typedef struct loom_testbench_invocation_planner_t {
+  // Module whose invocation operations are being planned.
+  const loom_module_t* module;
+  // Module-local ordinal of |case_plan|.
+  iree_host_size_t case_index;
+  // Case receiving planned invocation metadata.
+  loom_testbench_case_plan_t* case_plan;
+  // Module-wide invocation storage.
+  loom_testbench_invocation_plan_t* invocations;
+  // Number of initialized entries in |invocations|.
+  iree_host_size_t* invocation_count;
+  // Module-wide planning issue storage.
+  loom_testbench_issue_t* issues;
+  // Number of entries available in |issues|.
+  iree_host_size_t issue_capacity;
+  // Number of initialized entries in |issues|.
+  iree_host_size_t* issue_count;
+  // Epoch assigned to the next ordered kernel launch.
+  iree_host_size_t next_execution_epoch;
+} loom_testbench_invocation_planner_t;
+
+static void loom_testbench_append_invocation_plan(
+    loom_testbench_invocation_planner_t* planner, const loom_op_t* op,
+    iree_host_size_t execution_epoch, iree_host_size_t schedule_depth) {
+  loom_testbench_invocation_plan_t* invocation =
+      &planner->invocations[(*planner->invocation_count)++];
+  if (!loom_testbench_plan_invocation(planner->module, op, invocation)) {
+    loom_testbench_append_issue(
+        planner->issues, planner->issue_capacity, planner->issue_count,
+        LOOM_TESTBENCH_ISSUE_INVALID_INVOCATION, planner->case_index,
+        LOOM_TESTBENCH_BENCHMARK_INDEX_INVALID, op, planner->case_plan->ref);
+    return;
+  }
+
+  invocation->execution_epoch = execution_epoch;
+  invocation->launch_schedule_depth = schedule_depth;
+  if (invocation->kind == LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH) {
+    if (planner->case_plan->first_kernel_launch == NULL) {
+      planner->case_plan->first_kernel_launch = invocation;
+    }
+    ++planner->case_plan->kernel_launch_count;
+  }
+}
+
+static void loom_testbench_plan_launch_schedule(
+    loom_testbench_invocation_planner_t* planner,
+    const loom_op_t* schedule_op) {
+  const bool is_concurrent = loom_kernel_launch_concurrent_isa(schedule_op);
+  const iree_host_size_t concurrent_epoch = planner->next_execution_epoch;
+  iree_host_size_t direct_launch_count = 0;
+
+  loom_testbench_launch_schedule_iterator_t iterator;
+  loom_testbench_launch_schedule_iterator_initialize(schedule_op, &iterator);
+  loom_op_t* op = NULL;
+  iree_host_size_t depth = 0;
+  while (loom_testbench_launch_schedule_iterator_next(&iterator, &op, &depth)) {
+    if (loom_kernel_launch_isa(op)) {
+      iree_host_size_t execution_epoch = LOOM_TESTBENCH_EXECUTION_EPOCH_INVALID;
+      if (depth == 1) {
+        execution_epoch =
+            is_concurrent ? concurrent_epoch : planner->next_execution_epoch++;
+        ++direct_launch_count;
+      }
+      loom_testbench_append_invocation_plan(planner, op, execution_epoch,
+                                            depth);
+    } else if (!loom_testbench_is_launch_schedule_op(op) &&
+               !loom_kernel_launch_yield_isa(op)) {
+      loom_testbench_append_issue(
+          planner->issues, planner->issue_capacity, planner->issue_count,
+          LOOM_TESTBENCH_ISSUE_UNSUPPORTED_CASE_BODY_OP, planner->case_index,
+          LOOM_TESTBENCH_BENCHMARK_INDEX_INVALID, op, planner->case_plan->ref);
+    }
+  }
+
+  if (is_concurrent && direct_launch_count != 0) {
+    ++planner->next_execution_epoch;
+  }
+}
+
 static void loom_testbench_plan_case_body(
     const loom_module_t* module, iree_host_size_t case_index,
     iree_host_size_t max_samples_per_case,
@@ -802,13 +1004,24 @@ static void loom_testbench_plan_case_body(
       file_writes ? file_writes + *inout_file_write_count : NULL;
   case_plan->invocations =
       invocations ? invocations + *inout_invocation_count : NULL;
-  case_plan->first_actual_invocation = NULL;
-  case_plan->actual_invocation_count = 0;
+  case_plan->first_kernel_launch = NULL;
+  case_plan->kernel_launch_count = 0;
   case_plan->expectations =
       expectations ? expectations + *inout_expectation_count : NULL;
   case_plan->issues = issues ? issues + *inout_issue_count : NULL;
   case_plan->cartesian_sample_count = 1;
   case_plan->sample_count = 1;
+
+  loom_testbench_invocation_planner_t invocation_planner = {
+      .module = module,
+      .case_index = case_index,
+      .case_plan = case_plan,
+      .invocations = invocations,
+      .invocation_count = inout_invocation_count,
+      .issues = issues,
+      .issue_capacity = issue_capacity,
+      .issue_count = inout_issue_count,
+  };
 
   loom_region_t* body = loom_check_case_body(case_plan->op);
   loom_block_t* block = NULL;
@@ -822,6 +1035,12 @@ static void loom_testbench_plan_case_body(
             LOOM_TESTBENCH_BENCHMARK_INDEX_INVALID, op, case_plan->ref);
         continue;
       }
+
+      if (loom_testbench_is_launch_schedule_op(op)) {
+        loom_testbench_plan_launch_schedule(&invocation_planner, op);
+        continue;
+      }
+
       if (loom_testbench_is_parameter_op(op)) {
         loom_testbench_parameter_plan_t* parameter =
             &parameters[(*inout_parameter_count)++];
@@ -864,19 +1083,12 @@ static void loom_testbench_plan_case_body(
       }
 
       if (loom_testbench_is_invocation_op(module, op)) {
-        loom_testbench_invocation_plan_t* invocation =
-            &invocations[(*inout_invocation_count)++];
-        if (!loom_testbench_plan_invocation(module, op, invocation)) {
-          loom_testbench_append_issue(
-              issues, issue_capacity, inout_issue_count,
-              LOOM_TESTBENCH_ISSUE_INVALID_INVOCATION, case_index,
-              LOOM_TESTBENCH_BENCHMARK_INDEX_INVALID, op, case_plan->ref);
-        } else if (invocation->kind == LOOM_TESTBENCH_INVOCATION_ACTUAL) {
-          if (case_plan->first_actual_invocation == NULL) {
-            case_plan->first_actual_invocation = invocation;
-          }
-          ++case_plan->actual_invocation_count;
-        }
+        const bool is_kernel_launch = loom_kernel_launch_isa(op);
+        const iree_host_size_t execution_epoch =
+            is_kernel_launch ? invocation_planner.next_execution_epoch++
+                             : LOOM_TESTBENCH_EXECUTION_EPOCH_INVALID;
+        loom_testbench_append_invocation_plan(
+            &invocation_planner, op, execution_epoch, /*schedule_depth=*/0);
         continue;
       }
 

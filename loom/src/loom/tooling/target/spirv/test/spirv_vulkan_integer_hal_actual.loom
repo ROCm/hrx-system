@@ -174,7 +174,7 @@ check.case @integer_i32_truth_table_case {
   %value_output = check.generate.fill value(99) : tensor<8xi32>
   %comparison_output = check.generate.fill value(99) : tensor<10xi32>
   %boolean_output = check.generate.fill value(99) : tensor<16xi32>
-  func.call @integer_i32_truth_table(%input, %value_output, %comparison_output, %boolean_output) : (tensor<2xi32>, tensor<8xi32>, tensor<10xi32>, tensor<16xi32>)
+  kernel.launch @integer_i32_truth_table[](%input, %value_output, %comparison_output, %boolean_output) : [](tensor<2xi32>, tensor<8xi32>, tensor<10xi32>, tensor<16xi32>)
   %expected_values = check.generate.iota offset(-8) step(2) : tensor<8xi32>
   %expected_comparisons = check.generate.iota offset(0) step(1) period(2) : tensor<10xi32>
   %expected_booleans = check.generate.iota offset(0) step(1) period(2) : tensor<16xi32>
@@ -295,7 +295,7 @@ check.case @integer_i8_truth_table_case {
   %input = check.generate.iota offset(-8) step(14) : tensor<2xi8>
   %value_output = check.generate.fill value(99) : tensor<8xi8>
   %comparison_output = check.generate.fill value(99) : tensor<10xi32>
-  func.call @integer_i8_truth_table(%input, %value_output, %comparison_output) : (tensor<2xi8>, tensor<8xi8>, tensor<10xi32>)
+  kernel.launch @integer_i8_truth_table[](%input, %value_output, %comparison_output) : [](tensor<2xi8>, tensor<8xi8>, tensor<10xi32>)
   %expected_values = check.generate.iota offset(-8) step(2) : tensor<8xi8>
   %expected_comparisons = check.generate.iota offset(0) step(1) period(2) : tensor<10xi32>
   check.expect.equal actual(%value_output) expected(%expected_values) : tensor<8xi8>
@@ -412,7 +412,7 @@ check.case @integer_i16_truth_table_case {
   %input = check.generate.iota offset(-8) step(14) : tensor<2xi16>
   %value_output = check.generate.fill value(99) : tensor<8xi16>
   %comparison_output = check.generate.fill value(99) : tensor<10xi32>
-  func.call @integer_i16_truth_table(%input, %value_output, %comparison_output) : (tensor<2xi16>, tensor<8xi16>, tensor<10xi32>)
+  kernel.launch @integer_i16_truth_table[](%input, %value_output, %comparison_output) : [](tensor<2xi16>, tensor<8xi16>, tensor<10xi32>)
   %expected_values = check.generate.iota offset(-8) step(2) : tensor<8xi16>
   %expected_comparisons = check.generate.iota offset(0) step(1) period(2) : tensor<10xi32>
   check.expect.equal actual(%value_output) expected(%expected_values) : tensor<8xi16>
@@ -527,7 +527,7 @@ check.case @integer_i64_truth_table_case {
   %input = check.generate.iota offset(-8) step(14) : tensor<2xi64>
   %value_output = check.generate.fill value(99) : tensor<8xi64>
   %comparison_output = check.generate.fill value(99) : tensor<10xi32>
-  func.call @integer_i64_truth_table(%input, %value_output, %comparison_output) : (tensor<2xi64>, tensor<8xi64>, tensor<10xi32>)
+  kernel.launch @integer_i64_truth_table[](%input, %value_output, %comparison_output) : [](tensor<2xi64>, tensor<8xi64>, tensor<10xi32>)
   %expected_values = check.generate.iota offset(-8) step(2) : tensor<8xi64>
   %expected_comparisons = check.generate.iota offset(0) step(1) period(2) : tensor<10xi32>
   check.expect.equal actual(%value_output) expected(%expected_values) : tensor<8xi64>
@@ -710,7 +710,7 @@ check.case @index_numeric_truth_table_case {
   %input = check.generate.iota offset(0) step(1) : tensor<22xi32>
   %arithmetic_output = check.generate.fill value(-1) : tensor<10xi32>
   %bitwise_output = check.generate.fill value(-1) : tensor<13xi32>
-  func.call @index_numeric_truth_table(%input, %arithmetic_output, %bitwise_output) : (tensor<22xi32>, tensor<10xi32>, tensor<13xi32>)
+  kernel.launch @index_numeric_truth_table[](%input, %arithmetic_output, %bitwise_output) : [](tensor<22xi32>, tensor<10xi32>, tensor<13xi32>)
   %expected_arithmetic = check.generate.iota offset(0) step(1) : tensor<10xi32>
   %expected_bitwise = check.generate.iota offset(0) step(1) : tensor<13xi32>
   check.expect.equal actual(%arithmetic_output) expected(%expected_arithmetic) : tensor<10xi32>

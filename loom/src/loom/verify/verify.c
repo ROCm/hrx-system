@@ -100,11 +100,22 @@ static iree_status_t loom_verify_op(loom_verify_state_t* state,
   const bool has_signature_scope = loom_verify_has_func_signature_scope(vtable);
   if (has_signature_scope) {
     IREE_RETURN_IF_ERROR(loom_verify_push_scope(state));
-    uint16_t arg_count = 0;
-    const loom_value_id_t* arg_ids =
-        loom_verify_func_signature_arg_ids(op, vtable, &arg_count);
-    for (uint16_t i = 0; i < arg_count; ++i) {
-      IREE_RETURN_IF_ERROR(loom_verify_define_value(state, arg_ids[i]));
+    if (loom_verify_func_args_use_operand_field(vtable)) {
+      const loom_value_id_t* operands = loom_op_const_operands(op);
+      for (uint16_t i = 0; i < op->operand_count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_verify_define_value(state, operands[i]));
+      }
+    } else {
+      uint16_t arg_count = 0;
+      const loom_value_id_t* arg_ids = loom_func_like_arg_ids(
+          (loom_func_like_t){
+              .op = (loom_op_t*)op,
+              .vtable = vtable->func_like,
+          },
+          &arg_count);
+      for (uint16_t i = 0; i < arg_count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_verify_define_value(state, arg_ids[i]));
+      }
     }
   }
 

@@ -94,30 +94,4 @@ iree_execution_test_suite(
     "hostonly"
 )
 
-if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
-iree_execution_test_suite(
-  NAME
-    spirv_vulkan_execution_test
-  MANIFESTS
-    "iree-test-loom_spirv_vulkan.test.json"
-  TOOLS
-    "iree-test-loom=::iree-test-loom"
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_coop_hal_actual.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_coop_u8_hal_actual.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_hal_actual.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_integer_hal_actual.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/iree-test-loom/testdata/spirv_vulkan_quantized_hal_actual.loom"
-  SANITIZER_SUPPRESSIONS
-    lsan
-    vulkan
-  LABELS
-    "iree-run-requirement=runtime.resource.vulkan_device"
-    "requires-gpu-vulkan"
-    "runtime-resource=vulkan-device"
-  RESOURCE_GROUP
-    loom-vulkan-tests
-)
-endif()
-
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

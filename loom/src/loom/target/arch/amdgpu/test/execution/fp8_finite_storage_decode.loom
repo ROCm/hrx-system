@@ -499,7 +499,7 @@ check.case public @fp8_finite_storage_decode_case {
   %input = check.generate.fill value(1.0) : tensor<[%row_count]x4xf8E4M3>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf32>
   %expected = check.generate.fill value(1.0) : tensor<[%row_count]x4xf32>
-  func.call @fp8_finite_storage_decode(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xf32>)
+  kernel.launch @fp8_finite_storage_decode[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xf32>
   check.return
 }
@@ -510,7 +510,7 @@ check.case public @fp8_finite_storage_decode_bf16_case {
   %input = check.generate.fill value(1.0) : tensor<[%row_count]x4xf8E4M3>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xbf16>
   %expected = check.generate.fill value(1.0) : tensor<[%row_count]x4xbf16>
-  func.call @fp8_finite_storage_decode_bf16(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xbf16>)
+  kernel.launch @fp8_finite_storage_decode_bf16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xbf16>
   check.return
 }
@@ -521,7 +521,7 @@ check.case public @fp8_finite_storage_zero_decode_bf16_case {
   %input = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E4M3>
   %output = check.generate.fill value(1.0) : tensor<[%row_count]x4xbf16>
   %expected = check.generate.fill value(0.0) : tensor<[%row_count]x4xbf16>
-  func.call @fp8_finite_storage_decode_bf16(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xbf16>)
+  kernel.launch @fp8_finite_storage_decode_bf16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xbf16>
   check.return
 }
@@ -533,7 +533,7 @@ check.case public @fp8_finite_storage_mixed_subnormal_decode_bf16_case {
   %input = check.generate.iota offset(-0.013671875) step(0.001953125) : tensor<[%row_count]x4xf8E4M3>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xbf16>
   %expected = check.generate.iota offset(-0.013671875) step(0.001953125) : tensor<[%row_count]x4xbf16>
-  func.call @fp8_finite_storage_decode_bf16(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xbf16>)
+  kernel.launch @fp8_finite_storage_decode_bf16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xbf16>
   check.return
 }
@@ -544,7 +544,7 @@ check.case public @fp8_finite_storage_decode_f16_case {
   %input = check.generate.fill value(1.0) : tensor<[%row_count]x4xf8E4M3>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf16>
   %expected = check.generate.fill value(1.0) : tensor<[%row_count]x4xf16>
-  func.call @fp8_finite_storage_decode_f16(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xf16>)
+  kernel.launch @fp8_finite_storage_decode_f16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xf16>
   check.return
 }
@@ -555,7 +555,7 @@ check.case public @fp8_finite_storage_zero_decode_f16_case {
   %input = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E4M3>
   %output = check.generate.fill value(1.0) : tensor<[%row_count]x4xf16>
   %expected = check.generate.fill value(0.0) : tensor<[%row_count]x4xf16>
-  func.call @fp8_finite_storage_decode_f16(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xf16>)
+  kernel.launch @fp8_finite_storage_decode_f16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xf16>
   check.return
 }
@@ -566,7 +566,7 @@ check.case public @fp8_finite_storage_subnormal_decode_f16_case {
   %input = check.generate.fill value(0.001953125) : tensor<[%row_count]x4xf8E4M3>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf16>
   %expected = check.generate.fill value(0.001953125) : tensor<[%row_count]x4xf16>
-  func.call @fp8_finite_storage_decode_f16(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xf16>)
+  kernel.launch @fp8_finite_storage_decode_f16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]x4xf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xf16>
   check.return
 }
@@ -577,7 +577,7 @@ check.case public @bf8_finite_storage_decode_f16_case {
   %input = check.generate.fill value(1.0) : tensor<[%row_count]x4xf8E5M2>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf16>
   %expected = check.generate.fill value(1.0) : tensor<[%row_count]x4xf16>
-  func.call @bf8_finite_storage_decode_f16(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf8E5M2>, tensor<[%row_count]x4xf16>)
+  kernel.launch @bf8_finite_storage_decode_f16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E5M2>, tensor<[%row_count]x4xf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xf16>
   check.return
 }
@@ -588,7 +588,7 @@ check.case public @bf8_finite_storage_zero_decode_f16_case {
   %input = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E5M2>
   %output = check.generate.fill value(1.0) : tensor<[%row_count]x4xf16>
   %expected = check.generate.fill value(0.0) : tensor<[%row_count]x4xf16>
-  func.call @bf8_finite_storage_decode_f16(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf8E5M2>, tensor<[%row_count]x4xf16>)
+  kernel.launch @bf8_finite_storage_decode_f16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E5M2>, tensor<[%row_count]x4xf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xf16>
   check.return
 }
@@ -599,7 +599,7 @@ check.case public @bf8_finite_storage_subnormal_decode_f16_case {
   %input = check.generate.fill value(1.52587890625e-05) : tensor<[%row_count]x4xf8E5M2>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf16>
   %expected = check.generate.fill value(1.52587890625e-05) : tensor<[%row_count]x4xf16>
-  func.call @bf8_finite_storage_decode_f16(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf8E5M2>, tensor<[%row_count]x4xf16>)
+  kernel.launch @bf8_finite_storage_decode_f16[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf8E5M2>, tensor<[%row_count]x4xf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xf16>
   check.return
 }
@@ -611,7 +611,7 @@ check.case public @fp8_finite_storage_scale_decode_bf16_case {
   %scale = check.generate.fill value(2.0) : tensor<[%row_count]xf32>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xbf16>
   %expected = check.generate.fill value(2.0) : tensor<[%row_count]x4xbf16>
-  func.call @fp8_finite_storage_scale_decode_bf16(%row_count, %input, %scale, %output) : (index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]xf32>, tensor<[%row_count]x4xbf16>)
+  kernel.launch @fp8_finite_storage_scale_decode_bf16[%row_count](%row_count, %input, %scale, %output) : [index](index, tensor<[%row_count]x4xf8E4M3>, tensor<[%row_count]xf32>, tensor<[%row_count]x4xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xbf16>
   check.return
 }
@@ -623,7 +623,7 @@ check.case public @bf8_finite_storage_scale_decode_bf16_case {
   %scale = check.generate.fill value(2.0) : tensor<[%row_count]xf32>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xbf16>
   %expected = check.generate.fill value(2.0) : tensor<[%row_count]x4xbf16>
-  func.call @bf8_finite_storage_scale_decode_bf16(%row_count, %input, %scale, %output) : (index, tensor<[%row_count]x4xf8E5M2>, tensor<[%row_count]xf32>, tensor<[%row_count]x4xbf16>)
+  kernel.launch @bf8_finite_storage_scale_decode_bf16[%row_count](%row_count, %input, %scale, %output) : [index](index, tensor<[%row_count]x4xf8E5M2>, tensor<[%row_count]xf32>, tensor<[%row_count]x4xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%row_count]x4xbf16>
   check.return
 }
@@ -632,7 +632,7 @@ check.case public @fp8_finite_storage_rhs_fragment_decode_bf16_case {
   %input = check.generate.fill value(1.0) : tensor<16x16xf8E4M3>
   %output = check.generate.fill value(0.0) : tensor<16xbf16>
   %expected = check.generate.fill value(1.0) : tensor<16xbf16>
-  func.call @fp8_finite_storage_rhs_fragment_decode_bf16(%input, %output) : (tensor<16x16xf8E4M3>, tensor<16xbf16>)
+  kernel.launch @fp8_finite_storage_rhs_fragment_decode_bf16[](%input, %output) : [](tensor<16x16xf8E4M3>, tensor<16xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16xbf16>
   check.return
 }
@@ -641,7 +641,7 @@ check.case public @fp8_finite_storage_compact_rhs_fragment_decode_bf16_case {
   %input = check.generate.fill value(1.0) : tensor<16x16xf8E4M3>
   %output = check.generate.fill value(0.0) : tensor<16xbf16>
   %expected = check.generate.fill value(1.0) : tensor<16xbf16>
-  func.call @fp8_finite_storage_compact_rhs_fragment_decode_bf16(%input, %output) : (tensor<16x16xf8E4M3>, tensor<16xbf16>)
+  kernel.launch @fp8_finite_storage_compact_rhs_fragment_decode_bf16[](%input, %output) : [](tensor<16x16xf8E4M3>, tensor<16xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16xbf16>
   check.return
 }
@@ -650,7 +650,7 @@ check.case public @bf8_finite_storage_rhs_fragment_decode_bf16_case {
   %input = check.generate.fill value(1.0) : tensor<16x16xf8E5M2>
   %output = check.generate.fill value(0.0) : tensor<16xbf16>
   %expected = check.generate.fill value(1.0) : tensor<16xbf16>
-  func.call @bf8_finite_storage_rhs_fragment_decode_bf16(%input, %output) : (tensor<16x16xf8E5M2>, tensor<16xbf16>)
+  kernel.launch @bf8_finite_storage_rhs_fragment_decode_bf16[](%input, %output) : [](tensor<16x16xf8E5M2>, tensor<16xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16xbf16>
   check.return
 }
@@ -659,7 +659,7 @@ check.case public @bf8_finite_storage_compact_rhs_fragment_decode_bf16_case {
   %input = check.generate.fill value(1.0) : tensor<16x16xf8E5M2>
   %output = check.generate.fill value(0.0) : tensor<16xbf16>
   %expected = check.generate.fill value(1.0) : tensor<16xbf16>
-  func.call @bf8_finite_storage_compact_rhs_fragment_decode_bf16(%input, %output) : (tensor<16x16xf8E5M2>, tensor<16xbf16>)
+  kernel.launch @bf8_finite_storage_compact_rhs_fragment_decode_bf16[](%input, %output) : [](tensor<16x16xf8E5M2>, tensor<16xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16xbf16>
   check.return
 }
@@ -669,7 +669,7 @@ check.case public @fp8_finite_storage_compact_rhs_fragment_mma_f32_case {
   %rhs = check.generate.fill value(1.0) : tensor<16x16xf8E4M3>
   %output = check.generate.fill value(0.0) : tensor<16x16xf32>
   %expected = check.generate.fill value(16.0) : tensor<16x16xf32>
-  func.call @fp8_finite_storage_compact_rhs_fragment_mma_f32(%lhs, %rhs, %output) : (tensor<16x16xbf16>, tensor<16x16xf8E4M3>, tensor<16x16xf32>)
+  kernel.launch @fp8_finite_storage_compact_rhs_fragment_mma_f32[](%lhs, %rhs, %output) : [](tensor<16x16xbf16>, tensor<16x16xf8E4M3>, tensor<16x16xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
   check.return
 }
@@ -679,7 +679,7 @@ check.case public @bf8_finite_storage_compact_rhs_fragment_mma_f32_case {
   %rhs = check.generate.fill value(1.0) : tensor<16x16xf8E5M2>
   %output = check.generate.fill value(0.0) : tensor<16x16xf32>
   %expected = check.generate.fill value(16.0) : tensor<16x16xf32>
-  func.call @bf8_finite_storage_compact_rhs_fragment_mma_f32(%lhs, %rhs, %output) : (tensor<16x16xbf16>, tensor<16x16xf8E5M2>, tensor<16x16xf32>)
+  kernel.launch @bf8_finite_storage_compact_rhs_fragment_mma_f32[](%lhs, %rhs, %output) : [](tensor<16x16xbf16>, tensor<16x16xf8E5M2>, tensor<16x16xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
   check.return
 }
@@ -690,7 +690,7 @@ check.case public @fp8_finite_flush_storage_compact_rhs_fragment_mma_f32_case {
   %rhs = check.generate.fill value(0.0) : tensor<16x16xf8E4M3>
   %output = check.generate.fill value(1.0) : tensor<16x16xf32>
   %expected = check.generate.fill value(0.0) : tensor<16x16xf32>
-  func.call @fp8_finite_flush_storage_compact_rhs_fragment_mma_f32(%lhs, %rhs, %output) : (tensor<16x16xbf16>, tensor<16x16xf8E4M3>, tensor<16x16xf32>)
+  kernel.launch @fp8_finite_flush_storage_compact_rhs_fragment_mma_f32[](%lhs, %rhs, %output) : [](tensor<16x16xbf16>, tensor<16x16xf8E4M3>, tensor<16x16xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
   check.return
 }
@@ -701,7 +701,7 @@ check.case public @bf8_finite_flush_storage_compact_rhs_fragment_mma_f32_case {
   %rhs = check.generate.fill value(0.0) : tensor<16x16xf8E5M2>
   %output = check.generate.fill value(1.0) : tensor<16x16xf32>
   %expected = check.generate.fill value(0.0) : tensor<16x16xf32>
-  func.call @bf8_finite_flush_storage_compact_rhs_fragment_mma_f32(%lhs, %rhs, %output) : (tensor<16x16xbf16>, tensor<16x16xf8E5M2>, tensor<16x16xf32>)
+  kernel.launch @bf8_finite_flush_storage_compact_rhs_fragment_mma_f32[](%lhs, %rhs, %output) : [](tensor<16x16xbf16>, tensor<16x16xf8E5M2>, tensor<16x16xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<16x16xf32>
   check.return
 }
@@ -712,7 +712,7 @@ check.case public @fp8_finite_storage_zero_scale_mixed_pair_bf16_case {
   %scale = check.generate.fill value(0.0) : tensor<1xf32>
   %output = check.generate.fill value(1.0) : tensor<8xbf16>
   %expected = check.generate.fill value(0.0) : tensor<8xbf16>
-  func.call @fp8_finite_storage_zero_scale_mixed_pair_bf16(%input, %scale, %output) : (tensor<8xf8E4M3>, tensor<1xf32>, tensor<8xbf16>)
+  kernel.launch @fp8_finite_storage_zero_scale_mixed_pair_bf16[](%input, %scale, %output) : [](tensor<8xf8E4M3>, tensor<1xf32>, tensor<8xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<8xbf16>
   check.return
 }
@@ -723,7 +723,7 @@ check.case public @bf8_finite_storage_zero_scale_mixed_pair_bf16_case {
   %scale = check.generate.fill value(0.0) : tensor<1xf32>
   %output = check.generate.fill value(1.0) : tensor<8xbf16>
   %expected = check.generate.fill value(0.0) : tensor<8xbf16>
-  func.call @bf8_finite_storage_zero_scale_mixed_pair_bf16(%input, %scale, %output) : (tensor<8xf8E5M2>, tensor<1xf32>, tensor<8xbf16>)
+  kernel.launch @bf8_finite_storage_zero_scale_mixed_pair_bf16[](%input, %scale, %output) : [](tensor<8xf8E5M2>, tensor<1xf32>, tensor<8xbf16>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<8xbf16>
   check.return
 }
@@ -736,7 +736,7 @@ check.case public @fp8_finite_storage_compact_rhs_tile_zero_scale_bf16_k2048_cas
   %scale = check.generate.fill value(0.0) : tensor<[%output_size]xf32>
   %target = check.generate.fill value(1.0) : tensor<[%output_size]x[%input_size]xbf16>
   %expected = check.generate.fill value(0.0) : tensor<[%output_size]x[%input_size]xbf16>
-  func.call @fp8_finite_storage_compact_rhs_tile_zero_scale_bf16(%output_size, %input_size, %weight, %scale, %target) : (index, index, tensor<[%output_size]x[%input_size]xf8E4M3>, tensor<[%output_size]xf32>, tensor<[%output_size]x[%input_size]xbf16>)
+  kernel.launch @fp8_finite_storage_compact_rhs_tile_zero_scale_bf16[%output_size, %input_size](%output_size, %input_size, %weight, %scale, %target) : [index, index](index, index, tensor<[%output_size]x[%input_size]xf8E4M3>, tensor<[%output_size]xf32>, tensor<[%output_size]x[%input_size]xbf16>)
   check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%output_size]x[%input_size]xbf16>
   check.return
 }
@@ -749,7 +749,7 @@ check.case public @fp8_finite_storage_compact_rhs_tile_zero_scale_bf16_k4608_cas
   %scale = check.generate.fill value(0.0) : tensor<[%output_size]xf32>
   %target = check.generate.fill value(1.0) : tensor<[%output_size]x[%input_size]xbf16>
   %expected = check.generate.fill value(0.0) : tensor<[%output_size]x[%input_size]xbf16>
-  func.call @fp8_finite_storage_compact_rhs_tile_zero_scale_bf16(%output_size, %input_size, %weight, %scale, %target) : (index, index, tensor<[%output_size]x[%input_size]xf8E4M3>, tensor<[%output_size]xf32>, tensor<[%output_size]x[%input_size]xbf16>)
+  kernel.launch @fp8_finite_storage_compact_rhs_tile_zero_scale_bf16[%output_size, %input_size](%output_size, %input_size, %weight, %scale, %target) : [index, index](index, index, tensor<[%output_size]x[%input_size]xf8E4M3>, tensor<[%output_size]xf32>, tensor<[%output_size]x[%input_size]xbf16>)
   check.expect.close actual(%target) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%output_size]x[%input_size]xbf16>
   check.return
 }

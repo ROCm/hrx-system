@@ -209,7 +209,7 @@
       }
     },
     {
-      "name": "rejects dispatch measurement without actual invocation",
+      "name": "rejects dispatch measurement without kernel launch",
       "run": {
         "tool": "iree-benchmark-loom",
         "args": [
@@ -224,7 +224,7 @@
       },
       "stderr": {
         "contains": [
-          "HAL actual invocations require exactly one actual invocation"
+          "HAL execution requires exactly one kernel launch"
         ]
       }
     },

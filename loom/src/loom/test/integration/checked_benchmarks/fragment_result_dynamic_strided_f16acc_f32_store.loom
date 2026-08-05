@@ -88,8 +88,8 @@ kernel.def @fill_fragment_result_dynamic_strided_f16acc_f32_store_expected() {
 check.case public @fragment_result_dynamic_strided_f16acc_f32_store_case {
   %actual = check.generate.fill value(0.0) : tensor<4096xf32>
   %expected = check.generate.fill value(0.0) : tensor<4096xf32>
-  func.call @fragment_result_dynamic_strided_f16acc_f32_store(%actual) : (tensor<4096xf32>)
-  func.call @fill_fragment_result_dynamic_strided_f16acc_f32_store_expected(%expected) : (tensor<4096xf32>)
+  kernel.launch @fragment_result_dynamic_strided_f16acc_f32_store[](%actual) : [](tensor<4096xf32>)
+  kernel.launch @fill_fragment_result_dynamic_strided_f16acc_f32_store_expected[](%expected) : [](tensor<4096xf32>)
   check.expect.close actual(%actual) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4096xf32>
   check.return
 }

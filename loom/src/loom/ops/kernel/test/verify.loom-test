@@ -12,6 +12,96 @@ kernel.def target(@test_target) linkage(dso_local) @kernel_linkage_requires_expo
 
 // ====
 
+kernel.decl @launch_contract(%workload: index) launch(%abi_count: index, %output: buffer)
+
+func.def @valid_launch(%count: index, %output: tensor<4xi32>) {
+  kernel.launch @launch_contract[%count](%count, %output) : [index](index, tensor<4xi32>)
+  func.return
+}
+
+// ====
+
+kernel.decl @host_launch_only() launch()
+
+kernel.def @launch_rejected_inside_device_kernel() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch() {
+  // ERROR@+1: STRUCTURE/029 {op_name="kernel.launch", constraint_kind="forbidden", ancestor_name="kernel.def", actual_ancestor="kernel.def"}
+  kernel.launch @host_launch_only[]() : []()
+  kernel.return
+}
+
+// ====
+
+kernel.decl @missing_workload_contract(%workload: index) launch()
+
+func.def @missing_workload() {
+  // ERROR@+1: STRUCTURE/013 "workload" "kernel workload"
+  kernel.launch @missing_workload_contract[]() : []()
+  func.return
+}
+
+// ====
+
+kernel.decl @workload_type_contract(%workload: index) launch()
+
+func.def @wrong_workload_type(%workload: i32) {
+  // ERROR@+1: TYPE/001 "workload 0" "kernel workload 0"
+  kernel.launch @workload_type_contract[%workload]() : [i32]()
+  func.return
+}
+
+// ====
+
+kernel.decl @missing_argument_contract() launch(%argument: i32)
+
+func.def @missing_argument() {
+  // ERROR@+1: STRUCTURE/013 "argument" "kernel ABI argument"
+  kernel.launch @missing_argument_contract[]() : []()
+  func.return
+}
+
+// ====
+
+kernel.decl @argument_type_contract() launch(%argument: i32)
+
+func.def @wrong_argument_type(%argument: f32) {
+  // ERROR@+1: TYPE/001 "argument 0" "kernel ABI argument 0"
+  kernel.launch @argument_type_contract[](%argument) : [](f32)
+  func.return
+}
+
+// ====
+
+func.decl @ordinary_function()
+
+func.def @launch_requires_kernel_symbol() {
+  // ERROR@+1: SYMBOL/003 "expected kernel"
+  kernel.launch @ordinary_function[]() : []()
+  func.return
+}
+
+// ====
+
+// ERROR@+1: STRUCTURE/018 "func.def" "func.return" "kernel.launch.yield"
+func.def @yield_requires_launch_schedule() {
+  // ERROR@+1: STRUCTURE/029 "kernel.launch.yield" "direct" "kernel.launch.serial or kernel.launch.concurrent" "func.def"
+  kernel.launch.yield
+}
+
+// ====
+
+func.def @launch_schedule_rejects_other_operations() {
+  kernel.launch.serial {
+    // ERROR@+1: STRUCTURE/029 "index.constant" "direct" "kernel launch schedule" "kernel.launch.serial"
+    %unused = index.constant 0 : index
+  }
+  func.return
+}
+
+// ====
+
 kernel.def @launch_config_requires_index_operands() {
   %c1 = index.constant 1 : index
   %bad = scalar.constant 0 : i32

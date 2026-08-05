@@ -641,7 +641,7 @@ static iree_status_t loom_run_hal_benchmark_profile_final_batch(
 static iree_status_t loom_run_hal_benchmark_profile_final_sequence_batch(
     const loom_run_hal_runtime_t* runtime, iree_host_size_t sequence_count,
     const loom_run_hal_prepared_candidate_t* const* candidates,
-    iree_host_size_t plan_ring_count,
+    const iree_host_size_t* execution_epochs, iree_host_size_t plan_ring_count,
     const loom_run_hal_invocation_plan_t* const* plans,
     const loom_run_hal_benchmark_options_t* options, iree_allocator_t allocator,
     loom_run_hal_profile_summary_t* out_profile) {
@@ -667,9 +667,9 @@ static iree_status_t loom_run_hal_benchmark_profile_final_sequence_batch(
   loom_run_hal_dispatch_batch_t profile_batch = {0};
   iree_status_t status =
       loom_run_hal_dispatch_sequence_batch_prepare_from_plan_ring(
-          runtime, sequence_count, candidates, plan_ring_count, plans,
-          /*plan_ring_offset=*/0, &profile_dispatch_options, allocator,
-          &profile_batch);
+          runtime, sequence_count, candidates, execution_epochs,
+          plan_ring_count, plans, /*plan_ring_offset=*/0,
+          &profile_dispatch_options, allocator, &profile_batch);
   if (iree_status_is_ok(status)) {
     loom_run_hal_benchmark_batch_context_t context = {
         .runtime = runtime,
@@ -860,7 +860,7 @@ iree_status_t loom_run_hal_benchmark_dispatch_binding_ring(
 iree_status_t loom_run_hal_benchmark_dispatch_sequence_plan_ring(
     const loom_run_hal_runtime_t* runtime, iree_host_size_t sequence_count,
     const loom_run_hal_prepared_candidate_t* const* candidates,
-    iree_host_size_t plan_ring_count,
+    const iree_host_size_t* execution_epochs, iree_host_size_t plan_ring_count,
     const loom_run_hal_invocation_plan_t* const* plans,
     const loom_run_hal_benchmark_options_t* options, iree_allocator_t allocator,
     loom_run_hal_benchmark_result_t* out_result) {
@@ -890,8 +890,9 @@ iree_status_t loom_run_hal_benchmark_dispatch_sequence_plan_ring(
     const iree_host_size_t plan_ring_offset =
         i * options->dispatch_batch.dispatch_count;
     status = loom_run_hal_dispatch_sequence_batch_prepare_from_plan_ring(
-        runtime, sequence_count, candidates, plan_ring_count, plans,
-        plan_ring_offset, &options->dispatch_batch, allocator, &batches[i]);
+        runtime, sequence_count, candidates, execution_epochs, plan_ring_count,
+        plans, plan_ring_offset, &options->dispatch_batch, allocator,
+        &batches[i]);
   }
 
   loom_run_hal_benchmark_batch_context_t context = {
@@ -911,8 +912,8 @@ iree_status_t loom_run_hal_benchmark_dispatch_sequence_plan_ring(
       iree_all_bits_set(options->flags,
                         LOOM_RUN_HAL_BENCHMARK_FLAG_PROFILE_FINAL_BATCH)) {
     status = loom_run_hal_benchmark_profile_final_sequence_batch(
-        runtime, sequence_count, candidates, plan_ring_count, plans, options,
-        allocator, &out_result->profile);
+        runtime, sequence_count, candidates, execution_epochs, plan_ring_count,
+        plans, options, allocator, &out_result->profile);
   }
   if (iree_status_is_ok(status)) {
     out_result->binding_ring_count = plan_ring_count;

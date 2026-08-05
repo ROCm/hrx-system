@@ -209,7 +209,7 @@ static void loom_verify_emit_consumed_value_use(loom_verify_state_t* state,
 void loom_verify_operand_dominance(loom_verify_state_t* state,
                                    const loom_op_t* op,
                                    const loom_op_vtable_t* vtable) {
-  if (loom_verify_func_args_are_operands(vtable) &&
+  if (loom_verify_func_args_use_operand_field(vtable) &&
       iree_any_bit_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE)) {
     return;
   }
@@ -380,8 +380,12 @@ iree_status_t loom_verify_tied_results(loom_verify_state_t* state,
   uint16_t tied_operand_count = 0;
   const loom_value_id_t* tied_operands = NULL;
   if (has_signature_ties) {
-    tied_operands =
-        loom_verify_func_signature_arg_ids(op, vtable, &tied_operand_count);
+    tied_operands = loom_func_like_arg_ids(
+        (loom_func_like_t){
+            .op = (loom_op_t*)op,
+            .vtable = vtable->func_like,
+        },
+        &tied_operand_count);
   } else {
     tied_operand_count = op->operand_count;
     tied_operands = loom_op_const_operands(op);

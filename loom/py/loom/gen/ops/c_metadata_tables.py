@@ -112,12 +112,14 @@ def _emit_dialect_table_accessors(lines: list[str], dialect_name: str) -> None:
 # Maps Python symbol interface names to C interface flag constants.
 SYMBOL_INTERFACE_MAP: dict[str, str] = {
     "func_like": "LOOM_SYMBOL_INTERFACE_FUNC_LIKE",
+    "callable": "LOOM_SYMBOL_INTERFACE_CALLABLE",
     "global": "LOOM_SYMBOL_INTERFACE_GLOBAL",
     "executable": "LOOM_SYMBOL_INTERFACE_EXECUTABLE",
     "record": "LOOM_SYMBOL_INTERFACE_RECORD",
     "rodata": "LOOM_SYMBOL_INTERFACE_RODATA",
     "target": "LOOM_SYMBOL_INTERFACE_TARGET",
     "config": "LOOM_SYMBOL_INTERFACE_CONFIG",
+    "kernel": "LOOM_SYMBOL_INTERFACE_KERNEL",
 }
 
 
@@ -156,6 +158,18 @@ def _symbol_value_contract_indices(
         if attr_def.attr_type != ATTR_TYPE_PREDICATE_LIST:
             raise ValueError(f"Op {op.name!r}: symbol value contract predicates {contract.predicates!r} must name a predicate_list attr")
     return result_index, value_attr_index, predicates_attr_index
+
+
+def _symbol_kernel_contract_indices(op: Op) -> tuple[int | None, int | None]:
+    """Resolves a generated kernel workload-signature contract."""
+    if op.symbol_def is None or op.symbol_def.kernel_contract is None:
+        return None, None
+    contract = op.symbol_def.kernel_contract
+    region_index = c_queries.resolve_region_index(op, contract.workload_region, "symbol_def.kernel_contract") if contract.workload_region is not None else None
+    operand_index = c_queries.resolve_operand_index(op, contract.workload_operands, "symbol_def.kernel_contract") if contract.workload_operands is not None else None
+    if operand_index is not None and not op.operands[operand_index].variadic:
+        raise ValueError(f"Op {op.name!r}: kernel workload signature operand {contract.workload_operands!r} must be variadic")
+    return region_index, operand_index
 
 
 def _symbol_kind(op: Op) -> str:
@@ -299,11 +313,7 @@ def generate_tables_c(
             lines.append("};")
 
         # Operand descriptors.
-        func_args_are_operands = c_queries.func_args_are_operands(op)
-        explicit_func_args_operand = c_queries.explicit_func_args_operand(op)
-        synthesize_func_args_operand = func_args_are_operands and explicit_func_args_operand is None
-        if op.operands or synthesize_func_args_operand:
-            func_args_name = c_queries.func_args_field_name(op) if synthesize_func_args_operand else ""
+        if op.operands:
             effect_map = {effect.operand: effect.kind for effect in op.effects}
             ownership_operand_map = {effect.operand: effect for effect in op.ownership_effects if isinstance(effect, OperandOwnershipEffect)}
             lines.append(f"static const loom_operand_descriptor_t {prefix}_operand_desc[] = {{")
@@ -332,8 +342,6 @@ def generate_tables_c(
                     lines.append(f"    {{{_bstring_expr(operand.name)}, {type_constraint}, {flags}}},")
                 else:
                     lines.append(f"    {{{_bstring_expr(operand.name)}, {type_constraint}, {flags}, {ownership_effect_name}, {ownership_carrier_name}, {role_name}}},")
-            if synthesize_func_args_operand:
-                lines.append(f"    {{{_bstring_expr(func_args_name)}, LOOM_TYPE_CONSTRAINT_ANY, LOOM_OPERAND_VARIADIC}},")
             lines.append("};")
 
         # Result descriptors.
@@ -501,6 +509,7 @@ def generate_tables_c(
             attr_index = c_queries.resolve_attr_index(op, op.symbol_def.field, "symbol_def")
             retain_attr_index = _symbol_retain_attr_index(op)
             value_contract_indices = _symbol_value_contract_indices(op)
+            kernel_contract_indices = _symbol_kernel_contract_indices(op)
             flags = _symbol_interface_flags(op.symbol_def.interfaces)
             fact_domain = c_symbols.symbol_fact_domain_symbol(op)
             lines.append(f"static const loom_symbol_definition_descriptor_t {prefix}_symbol_def = {{")
@@ -527,6 +536,11 @@ def generate_tables_c(
                 lines.append(f"    .interfaces = {flags},")
             if op.symbol_def.bytecode_kind != "LOOM_SYMBOL_NONE":
                 lines.append(f"    .bytecode_kind = {op.symbol_def.bytecode_kind},")
+            kernel_region_index, kernel_operand_index = kernel_contract_indices
+            if kernel_region_index is not None:
+                lines.append(f"    .kernel_workload_region_index_plus_one = {kernel_region_index + 1},")
+            if kernel_operand_index is not None:
+                lines.append(f"    .kernel_workload_operand_field_index_plus_one = {kernel_operand_index + 1},")
             if fact_domain:
                 lines.append(f"    .fact_domain = &{fact_domain},")
             lines.append("};")
@@ -571,7 +585,7 @@ def generate_tables_c(
         vtable_flag_bits: list[str] = []
         if layout.segmented_operands:
             vtable_flag_bits.append("LOOM_OP_VTABLE_SEGMENTED_OPERANDS")
-        elif layout.variadic_operand or c_queries.func_args_are_operands(op):
+        elif layout.variadic_operand:
             vtable_flag_bits.append("LOOM_OP_VTABLE_VARIADIC_OPERANDS")
         if layout.variadic_result:
             vtable_flag_bits.append("LOOM_OP_VTABLE_VARIADIC_RESULTS")
@@ -594,15 +608,13 @@ def generate_tables_c(
         has_placement = any(trait.name in ("HasParent", "HasAncestor", "NoAncestor") for trait in op.traits)
         placement_ptr = f"&{prefix}_placement" if has_placement else "NULL"
         attr_desc_ptr = f"{prefix}_attr_desc" if non_flags else "NULL"
-        operand_desc_ptr = f"{prefix}_operand_desc" if op.operands or c_queries.func_args_are_operands(op) else "NULL"
+        operand_desc_ptr = f"{prefix}_operand_desc" if op.operands else "NULL"
         operand_descriptor_count = len(op.operands)
-        if c_queries.func_args_are_operands(op) and c_queries.explicit_func_args_operand(op) is None:
-            operand_descriptor_count += 1
         successor_selector_operand_index = c_queries.resolve_successor_selector_operand_index(op)
         implied_operand_descriptor_count = layout.fixed_operand_count
         if layout.segmented_operands:
             implied_operand_descriptor_count = -1
-        elif layout.variadic_operand or c_queries.func_args_are_operands(op):
+        elif layout.variadic_operand:
             implied_operand_descriptor_count += 1
         result_desc_ptr = f"{prefix}_result_desc" if op.results else "NULL"
         region_desc_ptr = f"{prefix}_region_desc" if op.regions else "NULL"

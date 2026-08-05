@@ -71,8 +71,19 @@ enum {
   LOOM_OP_KERNEL_CLUSTER_WORKGROUP_FLAT_ID = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 44),
   LOOM_OP_KERNEL_CLUSTER_SIZE = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 45),
   LOOM_OP_KERNEL_CLUSTER_COUNT = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 46),
-  LOOM_OP_KERNEL_COUNT_ = 47,
+  LOOM_OP_KERNEL_DECL = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 47),
+  LOOM_OP_KERNEL_LAUNCH = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 48),
+  LOOM_OP_KERNEL_LAUNCH_YIELD = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 49),
+  LOOM_OP_KERNEL_LAUNCH_SERIAL = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 50),
+  LOOM_OP_KERNEL_LAUNCH_CONCURRENT = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 51),
+  LOOM_OP_KERNEL_COUNT_ = 52,
 };
+
+// Private symbol retention policy. Absent (0) permits ordinary DCE.
+typedef enum loom_kernel_retain_e {
+  LOOM_KERNEL_RETAIN_RETAIN = 1,
+  LOOM_KERNEL_RETAIN_COUNT_ = 2,
+} loom_kernel_retain_t;
 
 // Required async copy direction.
 typedef enum loom_kernel_direction_e {
@@ -88,12 +99,6 @@ typedef enum loom_kernel_dimension_e {
   LOOM_KERNEL_DIMENSION_Z = 2,
   LOOM_KERNEL_DIMENSION_COUNT_ = 3,
 } loom_kernel_dimension_t;
-
-// Private symbol retention policy. Absent (0) permits ordinary DCE.
-typedef enum loom_kernel_def_retain_e {
-  LOOM_KERNEL_DEF_RETAIN_RETAIN = 1,
-  LOOM_KERNEL_DEF_RETAIN_COUNT_ = 2,
-} loom_kernel_def_retain_t;
 
 // Subgroup lane shuffle addressing mode.
 typedef enum loom_kernel_subgroup_shuffle_mode_e {
@@ -145,7 +150,7 @@ LOOM_DEFINE_ATTR_SYMBOL(loom_kernel_def_target, 1)
 LOOM_DEFINE_ATTR_STRING(loom_kernel_def_export_symbol, 2)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_def_export_linkage, 3, loom_target_linkage_t)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_kernel_def_predicates, 4)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_def_retain, 5, loom_kernel_def_retain_t)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_def_retain, 5, loom_kernel_retain_t)
 LOOM_DEFINE_REGION(loom_kernel_def_config, 0)
 LOOM_DEFINE_REGION(loom_kernel_def_body, 1)
 enum loom_kernel_def_build_flag_bits_e {
@@ -1084,6 +1089,102 @@ iree_status_t loom_kernel_cluster_count_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
+
+// LOOM_OP_KERNEL_DECL: Bodyless declaration of a dispatchable kernel. The first signature declares workload values consumed by launch configuration and the launch signature declares the device ABI.
+// kernel.decl @scale_i32_buffer(%element_count: index) launch(%element_count: index, %input: buffer, %output: buffer)
+LOOM_DEFINE_ISA(loom_kernel_decl_isa, LOOM_OP_KERNEL_DECL)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_kernel_decl_workloads, 0)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_kernel_decl_args, 1)
+LOOM_DEFINE_ATTR_SYMBOL(loom_kernel_decl_callee, 0)
+LOOM_DEFINE_ATTR_SYMBOL(loom_kernel_decl_target, 1)
+LOOM_DEFINE_ATTR_STRING(loom_kernel_decl_export_symbol, 2)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_decl_export_linkage, 3, loom_target_linkage_t)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_kernel_decl_predicates, 4)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_kernel_decl_retain, 5, loom_kernel_retain_t)
+enum loom_kernel_decl_build_flag_bits_e {
+  LOOM_KERNEL_DECL_BUILD_FLAG_HAS_RETAIN = 1u << 0,
+  LOOM_KERNEL_DECL_BUILD_FLAG_HAS_TARGET = 1u << 1,
+  LOOM_KERNEL_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 2,
+  LOOM_KERNEL_DECL_BUILD_FLAG_HAS_EXPORT_LINKAGE = 1u << 3,
+};
+typedef uint32_t loom_kernel_decl_build_flags_t;
+iree_status_t loom_kernel_decl_build(
+    loom_builder_t* builder,
+    loom_kernel_decl_build_flags_t build_flags,
+    loom_optional uint8_t retain,
+    loom_optional loom_symbol_ref_t target,
+    loom_optional loom_string_id_t export_symbol,
+    loom_optional uint8_t export_linkage,
+    loom_symbol_ref_t callee,
+    const loom_type_t* workloads_types,
+    iree_host_size_t workloads_types_count,
+    const loom_type_t* args_types,
+    iree_host_size_t args_types_count,
+    loom_optional const loom_predicate_t* predicates,
+    iree_host_size_t predicates_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_decl_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_KERNEL_LAUNCH: Launch a kernel with explicit workload and device-ABI operands. Workloads configure the launch and never alter the kernel ABI.
+// kernel.launch @fill[%count](%count, %output) : [index](index, buffer)
+LOOM_DEFINE_ISA(loom_kernel_launch_isa, LOOM_OP_KERNEL_LAUNCH)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_kernel_launch_workloads, 0)
+LOOM_DEFINE_SEGMENTED_OPERANDS(loom_kernel_launch_arguments, 1)
+LOOM_DEFINE_ATTR_SYMBOL(loom_kernel_launch_callee, 0)
+iree_status_t loom_kernel_launch_build(
+    loom_builder_t* builder,
+    loom_symbol_ref_t callee,
+    const loom_value_id_t* workloads,
+    iree_host_size_t workloads_count,
+    const loom_value_id_t* arguments,
+    iree_host_size_t arguments_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_launch_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_KERNEL_LAUNCH_YIELD: Terminate a structured kernel launch schedule region.
+// kernel.launch.yield
+LOOM_DEFINE_ISA(loom_kernel_launch_yield_isa, LOOM_OP_KERNEL_LAUNCH_YIELD)
+iree_status_t loom_kernel_launch_yield_build(
+    loom_builder_t* builder,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_launch_yield_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_KERNEL_LAUNCH_SERIAL: Order each child launch schedule after the preceding child completes.
+// kernel.launch.serial {
+//   kernel.launch.yield
+// }
+LOOM_DEFINE_ISA(loom_kernel_launch_serial_isa, LOOM_OP_KERNEL_LAUNCH_SERIAL)
+LOOM_DEFINE_REGION(loom_kernel_launch_serial_body, 0)
+iree_status_t loom_kernel_launch_serial_build(
+    loom_builder_t* builder,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_launch_schedule_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_KERNEL_LAUNCH_CONCURRENT: Run child launch schedules without dependency edges between siblings and join them on exit.
+// kernel.launch.concurrent {
+//   kernel.launch.yield
+// }
+LOOM_DEFINE_ISA(loom_kernel_launch_concurrent_isa, LOOM_OP_KERNEL_LAUNCH_CONCURRENT)
+LOOM_DEFINE_REGION(loom_kernel_launch_concurrent_body, 0)
+iree_status_t loom_kernel_launch_concurrent_build(
+    loom_builder_t* builder,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_kernel_launch_schedule_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // Returns the vtable array for the kernel dialect.
 const loom_op_vtable_t* const* loom_kernel_dialect_vtables(

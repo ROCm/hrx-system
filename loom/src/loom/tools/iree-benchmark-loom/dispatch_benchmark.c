@@ -81,18 +81,17 @@ static iree_status_t iree_benchmark_loom_hal_input_ring_count_for_sample(
 static iree_status_t iree_benchmark_loom_prepare_hal_invocation_plan_for_sample(
     const loom_testbench_module_plan_t* module_plan,
     const loom_testbench_case_plan_t* case_plan,
-    const iree_benchmark_loom_hal_actual_provider_t* provider,
+    iree_benchmark_loom_hal_actual_provider_t* provider,
     const loom_testbench_value_materializer_options_t* materializer_options,
     iree_host_size_t sample_ordinal, iree_allocator_t allocator,
     loom_run_hal_invocation_plan_t* out_plan) {
   loom_run_hal_invocation_options_t invocation_options = {0};
   loom_run_hal_binding_list_t bindings = {0};
   iree_status_t status =
-      loom_run_hal_testbench_create_invocation_inputs_for_sample(
+      loom_run_hal_testbench_materialize_invocation_for_sample(
           module_plan->module, materializer_options, case_plan,
-          provider->execution.actual_invocation, sample_ordinal,
-          &provider->execution.invocation_options, allocator,
-          &invocation_options, &bindings);
+          &provider->execution, sample_ordinal, allocator, &invocation_options,
+          &bindings);
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_invocation_plan_prepare_from_lists(
         &invocation_options, &bindings, /*expected_bindings=*/NULL,
@@ -107,7 +106,7 @@ static iree_status_t iree_benchmark_loom_hal_input_ring_initialize(
     const loom_testbench_case_plan_t* case_plan,
     const iree_benchmark_loom_benchmark_policy_t* policy,
     const iree_benchmark_loom_options_t* options,
-    const iree_benchmark_loom_hal_actual_provider_t* provider,
+    iree_benchmark_loom_hal_actual_provider_t* provider,
     const loom_testbench_value_materializer_options_t* materializer_options,
     iree_host_size_t sample_ordinal, iree_allocator_t allocator,
     iree_benchmark_loom_hal_input_ring_t* out_ring) {
@@ -224,6 +223,8 @@ typedef struct iree_benchmark_loom_hal_sequence_input_ring_t {
   const loom_run_hal_invocation_plan_t** plan_ptrs;
   // Borrowed prepared candidates in sequence-step order.
   const loom_run_hal_prepared_candidate_t** candidates;
+  // Execution epochs in sequence-step order.
+  iree_host_size_t* execution_epochs;
   // Number of logical ring slots in |plans|.
   iree_host_size_t plan_ring_count;
   // Number of actual dispatch invocations per logical ring slot.
@@ -267,7 +268,7 @@ static iree_host_size_t iree_benchmark_loom_hal_sequence_binding_count(
 static iree_status_t iree_benchmark_loom_prepare_hal_sequence_plans_for_sample(
     const loom_testbench_module_plan_t* module_plan,
     const loom_testbench_case_plan_t* case_plan,
-    const iree_benchmark_loom_hal_actual_sequence_t* sequence,
+    iree_benchmark_loom_hal_actual_sequence_t* sequence,
     const loom_testbench_value_materializer_options_t* materializer_options,
     iree_host_size_t sample_ordinal, iree_allocator_t allocator,
     loom_run_hal_invocation_plan_t* out_plans) {
@@ -280,13 +281,12 @@ static iree_status_t iree_benchmark_loom_prepare_hal_sequence_plans_for_sample(
   }
   for (iree_host_size_t i = 0;
        iree_status_is_ok(status) && i < sequence->provider_count; ++i) {
-    const loom_run_hal_testbench_actual_provider_t* provider =
+    loom_run_hal_testbench_actual_provider_t* provider =
         &sequence->providers[i].execution;
     loom_run_hal_invocation_options_t invocation_options = {0};
     loom_run_hal_binding_list_t bindings = {0};
-    status = loom_run_hal_testbench_create_invocation_inputs_from_table(
-        &table, provider->actual_invocation, &provider->invocation_options,
-        allocator, &invocation_options, &bindings);
+    status = loom_run_hal_testbench_materialize_invocation_from_table(
+        &table, provider, allocator, &invocation_options, &bindings);
     if (iree_status_is_ok(status)) {
       status = loom_run_hal_invocation_plan_prepare_from_lists(
           &invocation_options, &bindings, /*expected_bindings=*/NULL,
@@ -303,7 +303,7 @@ static iree_status_t iree_benchmark_loom_hal_sequence_input_ring_initialize(
     const loom_testbench_case_plan_t* case_plan,
     const iree_benchmark_loom_benchmark_policy_t* policy,
     const iree_benchmark_loom_options_t* options,
-    const iree_benchmark_loom_hal_actual_sequence_t* sequence,
+    iree_benchmark_loom_hal_actual_sequence_t* sequence,
     const loom_testbench_value_materializer_options_t* materializer_options,
     iree_host_size_t sample_ordinal, iree_allocator_t allocator,
     iree_benchmark_loom_hal_sequence_input_ring_t* out_ring) {
@@ -360,6 +360,11 @@ static iree_status_t iree_benchmark_loom_hal_sequence_input_ring_initialize(
                                          (void**)&out_ring->candidates);
   }
   if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(allocator, sequence->provider_count,
+                                         sizeof(*out_ring->execution_epochs),
+                                         (void**)&out_ring->execution_epochs);
+  }
+  if (iree_status_is_ok(status)) {
     memset(out_ring->plans, 0, plan_count * sizeof(*out_ring->plans));
     out_ring->plan_ring_count = ring_count;
     for (iree_host_size_t i = 0; i < sequence->provider_count; ++i) {
@@ -368,6 +373,8 @@ static iree_status_t iree_benchmark_loom_hal_sequence_input_ring_initialize(
       out_ring->plan_ptrs[i] = &out_ring->plans[i];
       out_ring->candidates[i] =
           &sequence->providers[i].execution.prepared_candidate;
+      out_ring->execution_epochs[i] =
+          sequence->providers[i].execution.kernel_launch->execution_epoch;
     }
     iree_host_size_t dispatches_per_batch = 0;
     if (!iree_host_size_checked_mul(policy->hal_options.timing.batch_size,
@@ -443,6 +450,7 @@ static iree_status_t iree_benchmark_loom_hal_sequence_input_ring_initialize(
     for (iree_host_size_t i = 0; i < plan_count; ++i) {
       loom_run_hal_invocation_plan_deinitialize(&out_ring->plans[i]);
     }
+    iree_allocator_free(out_ring->host_allocator, out_ring->execution_epochs);
     iree_allocator_free(out_ring->host_allocator, out_ring->candidates);
     iree_allocator_free(out_ring->host_allocator, out_ring->plan_ptrs);
     iree_allocator_free(out_ring->host_allocator, out_ring->plans);
@@ -462,6 +470,7 @@ static void iree_benchmark_loom_hal_sequence_input_ring_deinitialize(
   for (iree_host_size_t i = 0; i < plan_count; ++i) {
     loom_run_hal_invocation_plan_deinitialize(&ring->plans[i]);
   }
+  iree_allocator_free(ring->host_allocator, ring->execution_epochs);
   iree_allocator_free(ring->host_allocator, ring->candidates);
   iree_allocator_free(ring->host_allocator, ring->plan_ptrs);
   iree_allocator_free(ring->host_allocator, ring->plans);
@@ -647,9 +656,9 @@ iree_status_t iree_benchmark_loom_run_hal_sequence_benchmark_sample(
     if (iree_status_is_ok(status)) {
       status = loom_run_hal_benchmark_dispatch_sequence_plan_ring(
           &hal_context->execution.runtime, sequence->provider_count,
-          input_ring.candidates, input_ring.plan_ring_count,
-          input_ring.plan_ptrs, &hal_options, allocator,
-          &out_result->hal_benchmark);
+          input_ring.candidates, input_ring.execution_epochs,
+          input_ring.plan_ring_count, input_ring.plan_ptrs, &hal_options,
+          allocator, &out_result->hal_benchmark);
     }
     if (iree_status_is_ok(status)) {
       out_result->data_cache.command_buffer_ring_count =

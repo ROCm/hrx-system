@@ -207,13 +207,13 @@ ireevm_import_decl = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DECL",
         fact_domain="loom_func_symbol_fact_domain",
         flags=[SymbolDefinitionFlag.DECLARATION],
     ),
     results=[Result("results", ANY, variadic=True)],
-    interfaces=[FuncLikeInterface(**_IMPORT_DECL_FUNC_LIKE, args_as_operands=True)],
+    interfaces=[FuncLikeInterface(**_IMPORT_DECL_FUNC_LIKE, args="args")],
     verify="loom_ireevm_import_decl_verify",
     format=[
         *_IMPORT_DECL_MODIFIER_FORMAT,

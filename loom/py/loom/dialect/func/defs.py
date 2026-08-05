@@ -329,7 +329,7 @@ func_def = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
@@ -364,18 +364,19 @@ func_decl = Op(
     phase=OpPhase.EXECUTABLE,
     doc="External function declaration. Callable by name via func.call.",
     traits=[SYMBOL_DEFINE],
+    operands=[Operand("args", ANY, variadic=True)],
     attrs=list(_DECL_ATTRS),
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DECL",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
         flags=[SymbolDefinitionFlag.DECLARATION],
     ),
     results=[Result("results", ANY, variadic=True)],
-    interfaces=[FuncLikeInterface(**_FUNC_LIKE_DECL_CONTRACT, args_as_operands=True)],
+    interfaces=[FuncLikeInterface(**_FUNC_LIKE_DECL_CONTRACT, args="args")],
     verify="loom_func_decl_verify",
     format=[
         OptionalGroup([Attr("visibility")], anchor="visibility"),
@@ -418,7 +419,7 @@ func_template = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_TEMPLATE",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
@@ -460,6 +461,7 @@ func_ukernel = Op(
     group=func_ops,
     doc="Constraint-matched opaque implementation of an abstract op.",
     traits=[SYMBOL_DEFINE],
+    operands=[Operand("args", ANY, variadic=True)],
     attrs=[
         AttrDef("implements", "string"),
         *_MODIFIER_ATTRS,
@@ -470,7 +472,7 @@ func_ukernel = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_UKERNEL",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
@@ -481,7 +483,7 @@ func_ukernel = Op(
             **_FUNC_LIKE_PROVIDER,
             implements="implements",
             priority="priority",
-            args_as_operands=True,
+            args="args",
         )
     ],
     format=[
@@ -516,7 +518,7 @@ func_call = Op(
         AttrDef(
             "callee",
             "symbol",
-            symbol_ref=SymbolReference("function", ["func_like"]),
+            symbol_ref=SymbolReference("function", ["callable"]),
         ),
         AttrDef("purity", "enum", enum_def=Purity, optional=True),
         AttrDef("temperature", "enum", enum_def=Temperature, optional=True),

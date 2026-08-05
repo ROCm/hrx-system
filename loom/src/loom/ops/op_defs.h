@@ -864,6 +864,10 @@ enum loom_symbol_interface_bits_e {
   LOOM_SYMBOL_INTERFACE_CONFIG = 1u << 5,
   // Symbol names a read-only executable data payload.
   LOOM_SYMBOL_INTERFACE_RODATA = 1u << 6,
+  // Symbol defines or declares a host-launchable kernel contract.
+  LOOM_SYMBOL_INTERFACE_KERNEL = 1u << 7,
+  // Function-like symbol may be targeted by an ordinary call operation.
+  LOOM_SYMBOL_INTERFACE_CALLABLE = 1u << 8,
 };
 
 typedef uint16_t loom_symbol_definition_flags_t;
@@ -896,6 +900,12 @@ typedef struct loom_symbol_definition_descriptor_t {
   // Existing bytecode payload kind, or LOOM_SYMBOL_NONE if not serializable
   // through the current SYMBOLS section.
   loom_symbol_kind_t bytecode_kind;
+  // Region index plus one containing a kernel workload signature, or 0 when
+  // the signature is stored as operands or the symbol is not a kernel.
+  uint8_t kernel_workload_region_index_plus_one;
+  // Operand field index plus one containing a kernel workload signature, or 0
+  // when the signature is stored in a region or the symbol is not a kernel.
+  uint8_t kernel_workload_operand_field_index_plus_one;
   // Optional domain that computes typed facts for symbols defined by this op.
   const loom_symbol_fact_domain_t* fact_domain;
 } loom_symbol_definition_descriptor_t;
@@ -1431,6 +1441,13 @@ bool loom_func_like_export_linkage(loom_func_like_t func, uint8_t* out_linkage);
 // Returns NULL and sets |out_count| to 0 if |func| is not valid.
 const loom_value_id_t* loom_func_like_arg_ids(loom_func_like_t func,
                                               uint16_t* out_count);
+
+// Returns the workload signature value IDs for a kernel definition or
+// declaration. Definitions source the signature from their configuration
+// region and declarations source it from their designated operand field.
+// Returns an empty slice for non-kernel symbols.
+loom_value_slice_t loom_kernel_workload_arg_ids(const loom_module_t* module,
+                                                const loom_op_t* op);
 
 // Returns the predicate list and count for a func-like op. Sets |out_count|
 // to 0 and returns NULL for ops with no predicate list attr or if |func| is

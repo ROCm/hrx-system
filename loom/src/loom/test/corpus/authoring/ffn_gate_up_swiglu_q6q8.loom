@@ -193,7 +193,7 @@ check.case public @ffn_gate_up_swiglu_q6q8_zero_case {
   %up_weight = check.generate.fill value(0) : tensor<55695360xi8>
   %output = check.generate.fill value(1.0) : tensor<31x18944xf32>
   %expected = check.generate.fill value(0.0) : tensor<31x18944xf32>
-  func.call @ffn_gate_up_swiglu_q6q8(%q8_input, %gate_weight, %up_weight, %output) : (tensor<124992xi8>, tensor<55695360xi8>, tensor<55695360xi8>, tensor<31x18944xf32>)
+  kernel.launch @ffn_gate_up_swiglu_q6q8[](%q8_input, %gate_weight, %up_weight, %output) : [](tensor<124992xi8>, tensor<55695360xi8>, tensor<55695360xi8>, tensor<31x18944xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<31x18944xf32>
   check.return
 }

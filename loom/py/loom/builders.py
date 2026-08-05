@@ -186,7 +186,10 @@ class OpCallable:
         regions: list[Region] = []
 
         for param in self._signature.params:
-            if param.kind in _OPERAND_PARAM_KINDS:
+            if param.kind in _OPERAND_PARAM_KINDS or (
+                param.kind == BuilderParamKind.FUNC_ARGS
+                and param.operand_field is not None
+            ):
                 continue
             if param.kind == BuilderParamKind.RESULT_TYPES:
                 continue
@@ -243,7 +246,9 @@ class OpCallable:
                         f"{param.kind.name}"
                     )
 
-        params_by_name = {param.name: param for param in self._signature.params}
+        params_by_name = {
+            param.operand_field or param.name: param for param in self._signature.params
+        }
         layout = compute_layout(op)
         if layout.segmented_operands:
             for operand in op.operands:
@@ -319,6 +324,8 @@ class OpCallable:
                 if value is not None:
                     operands.append(cast(ValueRef | int, value))
             case BuilderParamKind.OPERAND_VARIADIC:
+                operands.extend(value or [])
+            case BuilderParamKind.FUNC_ARGS:
                 operands.extend(value or [])
             case BuilderParamKind.INDEX_LIST:
                 static_offsets: list[int] = []

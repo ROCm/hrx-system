@@ -11,7 +11,9 @@ from loom.assembly import (
     COLON,
     COMMA,
     GLUE,
+    LBRACKET,
     LPAREN,
+    RBRACKET,
     RPAREN,
     Attr,
     AttrDict,
@@ -64,6 +66,7 @@ from loom.dsl import (
     HasAncestor,
     HasParent,
     ImplicitTerminator,
+    NoAncestor,
     Op,
     Operand,
     OpPhase,
@@ -72,6 +75,8 @@ from loom.dsl import (
     Result,
     SameType,
     SymbolDefinition,
+    SymbolDefinitionFlag,
+    SymbolKernelContract,
     SymbolReference,
     TypeDef,
     TypeSemantic,
@@ -288,11 +293,12 @@ kernel_def = Op(
     attrs=list(_ENTRY_ATTRS),
     symbol_def=SymbolDefinition(
         field="callee",
-        name="function",
-        interfaces=["func_like"],
+        name="kernel",
+        interfaces=["func_like", "kernel"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
         fact_domain="loom_func_symbol_fact_domain",
         retain="retain",
+        kernel_contract=SymbolKernelContract(workload_region="config"),
     ),
     regions=[
         RegionDef(
@@ -1798,6 +1804,156 @@ kernel_async_wait = Op(
 )
 
 # ============================================================================
+# Host launch programs
+# ============================================================================
+
+kernel_decl = Op(
+    "kernel.decl",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Bodyless declaration of a dispatchable kernel. The first signature declares workload values consumed by launch configuration and the launch signature declares the device ABI."),
+    traits=[SYMBOL_DEFINE],
+    operands=[
+        Operand("workloads", ANY, variadic=True),
+        Operand("args", ANY, variadic=True),
+    ],
+    attrs=list(_ENTRY_ATTRS),
+    symbol_def=SymbolDefinition(
+        field="callee",
+        name="kernel",
+        interfaces=["func_like", "kernel"],
+        bytecode_kind="LOOM_SYMBOL_FUNC_DECL",
+        fact_domain="loom_func_symbol_fact_domain",
+        retain="retain",
+        flags=[SymbolDefinitionFlag.DECLARATION],
+        kernel_contract=SymbolKernelContract(workload_operands="workloads"),
+    ),
+    interfaces=[
+        FuncLikeInterface(
+            callee="callee",
+            target="target",
+            export_symbol="export_symbol",
+            export_linkage="export_linkage",
+            predicates="predicates",
+            args="args",
+        )
+    ],
+    verify="loom_kernel_decl_verify",
+    format=[
+        *_ENTRY_RETAIN_FORMAT,
+        *_ENTRY_TARGET_FORMAT,
+        *_ENTRY_EXPORT_FORMAT,
+        SymbolRef("callee"),
+        Scope([FuncArgs("workloads")]),
+        kw("launch"),
+        Scope(
+            [
+                FuncArgs("args"),
+                OptionalGroup(
+                    [kw("where"), PredicateList("predicates")],
+                    anchor="predicates",
+                ),
+            ]
+        ),
+    ],
+    examples=[
+        "kernel.decl @scale_i32_buffer(%element_count: index) launch(%element_count: index, %input: buffer, %output: buffer)",
+        "kernel.decl @no_workload() launch(%output: buffer)",
+    ],
+)
+
+kernel_launch = Op(
+    "kernel.launch",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Launch a kernel with explicit workload and device-ABI operands. Workloads configure the launch and never alter the kernel ABI."),
+    operands=[
+        Operand("workloads", ANY, variadic=True),
+        Operand("arguments", ANY, variadic=True),
+    ],
+    attrs=[
+        AttrDef(
+            "callee",
+            "symbol",
+            symbol_ref=SymbolReference("kernel", ["kernel"]),
+        ),
+    ],
+    traits=[UNKNOWN_EFFECTS, NoAncestor("kernel.def")],
+    verify="loom_kernel_launch_verify",
+    format=[
+        SymbolRef("callee"),
+        GLUE,
+        LBRACKET,
+        Refs("workloads"),
+        RBRACKET,
+        GLUE,
+        LPAREN,
+        Refs("arguments"),
+        RPAREN,
+        COLON,
+        LBRACKET,
+        TypesOf("workloads"),
+        RBRACKET,
+        GLUE,
+        LPAREN,
+        TypesOf("arguments"),
+        RPAREN,
+    ],
+    examples=[
+        "kernel.launch @fill[%count](%count, %output) : [index](index, buffer)",
+        "kernel.launch @no_workload[](%output) : [](buffer)",
+        "kernel.launch @no_arguments[%count]() : [index]()",
+    ],
+)
+
+kernel_launch_yield = Op(
+    "kernel.launch.yield",
+    group=kernel_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc="Terminate a structured kernel launch schedule region.",
+    traits=[TERMINATOR],
+    verify="loom_kernel_launch_yield_verify",
+    format=[],
+    examples=["kernel.launch.yield"],
+)
+
+
+def _launch_schedule(name: str, doc: str) -> Op:
+    return Op(
+        name,
+        group=kernel_ops,
+        phase=OpPhase.EXECUTABLE,
+        doc=doc,
+        regions=[
+            RegionDef(
+                "body",
+                doc="Nested kernel launches and launch schedules.",
+                single_block=True,
+                terminator="kernel.launch.yield",
+            ),
+        ],
+        traits=[
+            UNKNOWN_EFFECTS,
+            ImplicitTerminator("kernel.launch.yield"),
+            NoAncestor("kernel.def"),
+        ],
+        verify="loom_kernel_launch_schedule_verify",
+        format=[Region("body")],
+        examples=[f"{name} {{\n  kernel.launch.yield\n}}"],
+    )
+
+
+kernel_launch_serial = _launch_schedule(
+    "kernel.launch.serial",
+    "Order each child launch schedule after the preceding child completes.",
+)
+
+kernel_launch_concurrent = _launch_schedule(
+    "kernel.launch.concurrent",
+    "Run child launch schedules without dependency edges between siblings and join them on exit.",
+)
+
+# ============================================================================
 # Registry
 # ============================================================================
 
@@ -1855,4 +2011,9 @@ ALL_KERNEL_OPS: tuple[Op, ...] = (
     kernel_cluster_workgroup_flat_id,
     kernel_cluster_size,
     kernel_cluster_count,
+    kernel_decl,
+    kernel_launch,
+    kernel_launch_yield,
+    kernel_launch_serial,
+    kernel_launch_concurrent,
 )

@@ -61,6 +61,7 @@ iree_status_t loom_testbench_prepare_case_invocations(
     memset(spans, 0, case_plan->invocation_count * sizeof(*spans));
   }
 
+  iree_host_size_t max_workload_count = 0;
   iree_host_size_t max_input_count = 0;
   iree_host_size_t max_result_count = 0;
   for (iree_host_size_t invocation_index = 0;
@@ -69,12 +70,18 @@ iree_status_t loom_testbench_prepare_case_invocations(
         &case_plan->invocations[invocation_index];
     loom_testbench_invocation_provider_t provider = {0};
     switch (invocation->kind) {
-      case LOOM_TESTBENCH_INVOCATION_ACTUAL:
-        provider = options->actual;
+      case LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL:
+        provider = options->function_call;
         if (!provider.invoke) {
-          return iree_make_status(
-              IREE_STATUS_UNAVAILABLE,
-              "no actual invocation provider is configured");
+          return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                                  "no function call provider is configured");
+        }
+        break;
+      case LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH:
+        provider = options->kernel_launch;
+        if (!provider.invoke) {
+          return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                                  "no kernel launch provider is configured");
         }
         break;
       case LOOM_TESTBENCH_INVOCATION_ORACLE:
@@ -100,6 +107,8 @@ iree_status_t loom_testbench_prepare_case_invocations(
 
     prepared_invocations[invocation_index].plan = invocation;
     prepared_invocations[invocation_index].provider = provider;
+    max_workload_count =
+        iree_max(max_workload_count, invocation->workload_count);
     max_input_count = iree_max(max_input_count, invocation->input_count);
     max_result_count = iree_max(max_result_count, invocation->result_count);
   }
@@ -128,6 +137,7 @@ iree_status_t loom_testbench_prepare_case_invocations(
   out_schedule->invocation_count = case_plan->invocation_count;
   out_schedule->spans = spans;
   out_schedule->span_count = span_count;
+  out_schedule->max_workload_count = max_workload_count;
   out_schedule->max_input_count = max_input_count;
   out_schedule->max_result_count = max_result_count;
   return iree_ok_status();
@@ -163,11 +173,17 @@ iree_status_t loom_testbench_invocation_executor_initialize(
   }
   out_executor->schedule = schedule;
   out_executor->host_allocator = host_allocator;
+  out_executor->workload_capacity = schedule->max_workload_count;
   out_executor->input_capacity = schedule->max_input_count;
   out_executor->result_capacity = schedule->max_result_count;
 
   iree_status_t status = loom_testbench_allocate_value_array(
-      host_allocator, out_executor->input_capacity, &out_executor->inputs);
+      host_allocator, out_executor->workload_capacity,
+      &out_executor->workloads);
+  if (iree_status_is_ok(status)) {
+    status = loom_testbench_allocate_value_array(
+        host_allocator, out_executor->input_capacity, &out_executor->inputs);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_testbench_allocate_value_array(
         host_allocator, out_executor->result_capacity, &out_executor->results);
@@ -193,6 +209,11 @@ void loom_testbench_invocation_executor_deinitialize(
     loom_testbench_invocation_executor_t* executor) {
   if (!executor) {
     return;
+  }
+  if (executor->workloads) {
+    loom_testbench_reset_values(executor->workloads,
+                                executor->workload_capacity);
+    iree_allocator_free(executor->host_allocator, executor->workloads);
   }
   if (executor->inputs) {
     loom_testbench_reset_values(executor->inputs, executor->input_capacity);
@@ -227,13 +248,13 @@ static iree_status_t loom_testbench_invocation_executor_query_issue(
   return iree_ok_status();
 }
 
-static iree_status_t loom_testbench_load_invocation_inputs(
-    const loom_testbench_invocation_plan_t* invocation,
-    const loom_testbench_value_table_t* table, loom_testbench_value_t* inputs) {
-  for (iree_host_size_t input_index = 0; input_index < invocation->input_count;
-       ++input_index) {
+static iree_status_t loom_testbench_load_invocation_values(
+    const loom_testbench_value_table_t* table, const loom_value_id_t* value_ids,
+    iree_host_size_t value_count, loom_testbench_value_t* values) {
+  for (iree_host_size_t value_index = 0; value_index < value_count;
+       ++value_index) {
     IREE_RETURN_IF_ERROR(loom_testbench_value_table_lookup_retain(
-        table, invocation->input_value_ids[input_index], &inputs[input_index]));
+        table, value_ids[value_index], &values[value_index]));
   }
   return iree_ok_status();
 }
@@ -263,19 +284,28 @@ static iree_status_t loom_testbench_run_single_invocation(
     const loom_testbench_prepared_invocation_t* prepared,
     loom_testbench_value_table_t* table) {
   const loom_testbench_invocation_plan_t* invocation = prepared->plan;
+  IREE_ASSERT(invocation->workload_count <= executor->workload_capacity);
   IREE_ASSERT(invocation->input_count <= executor->input_capacity);
   IREE_ASSERT(invocation->result_count <= executor->result_capacity);
 
-  iree_status_t status = loom_testbench_load_invocation_inputs(
-      invocation, table, executor->inputs);
+  iree_status_t status = loom_testbench_load_invocation_values(
+      table, invocation->workload_value_ids, invocation->workload_count,
+      executor->workloads);
+  if (iree_status_is_ok(status)) {
+    status = loom_testbench_load_invocation_values(
+        table, invocation->input_value_ids, invocation->input_count,
+        executor->inputs);
+  }
   if (iree_status_is_ok(status)) {
     status = prepared->provider.invoke(
-        prepared->provider.user_data, invocation, invocation->input_count,
-        executor->inputs, invocation->result_count, executor->results);
+        prepared->provider.user_data, invocation, invocation->workload_count,
+        executor->workloads, invocation->input_count, executor->inputs,
+        invocation->result_count, executor->results);
   }
   if (iree_status_is_ok(status)) {
     status = loom_testbench_invocation_executor_query_issue(executor, prepared);
   }
+  loom_testbench_reset_values(executor->workloads, invocation->workload_count);
   loom_testbench_reset_values(executor->inputs, invocation->input_count);
   if (iree_status_is_ok(status) && executor->issue_count == 0) {
     status = loom_testbench_store_invocation_results(invocation, table,

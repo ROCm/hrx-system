@@ -1126,7 +1126,7 @@ test_invoke = Op(
         AttrDef(
             "callee",
             "symbol",
-            symbol_ref=SymbolReference("function", ["func_like"]),
+            symbol_ref=SymbolReference("function", ["callable"]),
         ),
     ],
     results=[Result("results", ANY, variadic=True)],
@@ -1175,7 +1175,7 @@ test_low_call = Op(
         AttrDef(
             "callee",
             "symbol",
-            symbol_ref=SymbolReference("function", ["func_like"]),
+            symbol_ref=SymbolReference("function", ["callable"]),
         ),
     ],
     results=[Result("results", ANY, variadic=True)],
@@ -1220,7 +1220,7 @@ test_low_invoke = Op(
         AttrDef(
             "callee",
             "symbol",
-            symbol_ref=SymbolReference("function", ["func_like"]),
+            symbol_ref=SymbolReference("function", ["callable"]),
         ),
     ],
     results=[Result("results", ANY, variadic=True)],
@@ -1545,7 +1545,7 @@ test_func = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
     ),
     attrs=[
@@ -1600,7 +1600,7 @@ test_split_func = Op(
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
     ),
     attrs=[
@@ -1641,18 +1641,19 @@ test_decl = Op(
     group=test_ops,
     doc="Test function declaration with no body and signature arguments stored as op operands.",
     traits=[SYMBOL_DEFINE],
+    operands=[Operand("args", ANY, variadic=True)],
     interfaces=[
         FuncLikeInterface(
             callee="callee",
             visibility="visibility",
             cc="cc",
-            args_as_operands=True,
+            args="args",
         )
     ],
     symbol_def=SymbolDefinition(
         field="callee",
         name="function",
-        interfaces=["func_like"],
+        interfaces=["func_like", "callable"],
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
     ),
     attrs=[

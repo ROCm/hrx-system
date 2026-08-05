@@ -1062,7 +1062,7 @@ const loom_value_id_t* loom_func_like_arg_ids(loom_func_like_t func,
     *out_count = 0;
     return NULL;
   }
-  if (!func.vtable->args_as_operands) {
+  if (func.vtable->args_operand_field_index == LOOM_OPERAND_INDEX_NONE) {
     loom_region_t* body = loom_func_like_body(func);
     if (body && body->block_count > 0) {
       loom_block_t* entry = loom_region_entry_block(body);
@@ -1072,8 +1072,47 @@ const loom_value_id_t* loom_func_like_arg_ids(loom_func_like_t func,
     *out_count = 0;
     return NULL;
   }
-  *out_count = func.op->operand_count;
-  return loom_op_operands(func.op);
+  if (func.vtable->args_operand_segment_count > 0) {
+    const uint16_t* segment_counts =
+        loom_op_const_operand_segment_counts(func.op);
+    uint16_t operand_offset = 0;
+    for (uint8_t i = 0; i < func.vtable->args_operand_field_index; ++i) {
+      operand_offset += segment_counts[i];
+    }
+    *out_count = segment_counts[func.vtable->args_operand_field_index];
+    return loom_op_operands(func.op) + operand_offset;
+  }
+  uint8_t operand_offset = func.vtable->args_operand_field_index;
+  *out_count = (uint16_t)(func.op->operand_count - operand_offset);
+  return loom_op_operands(func.op) + operand_offset;
+}
+
+loom_value_slice_t loom_kernel_workload_arg_ids(const loom_module_t* module,
+                                                const loom_op_t* op) {
+  if (!op) return (loom_value_slice_t){0};
+  const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
+  const loom_symbol_definition_descriptor_t* definition =
+      vtable ? vtable->symbol_def : NULL;
+  if (!loom_symbol_definition_implements(definition,
+                                         LOOM_SYMBOL_INTERFACE_KERNEL)) {
+    return (loom_value_slice_t){0};
+  }
+  if (definition->kernel_workload_region_index_plus_one != 0) {
+    uint8_t region_index =
+        definition->kernel_workload_region_index_plus_one - 1;
+    loom_region_t* region = loom_op_regions(op)[region_index];
+    if (!region || region->block_count == 0) {
+      return (loom_value_slice_t){0};
+    }
+    loom_block_t* entry = loom_region_entry_block(region);
+    return (loom_value_slice_t){
+        .values = entry->arg_ids,
+        .count = entry->arg_count,
+    };
+  }
+  uint8_t operand_field_index =
+      definition->kernel_workload_operand_field_index_plus_one - 1;
+  return loom_op_operand_field_span(vtable, op, operand_field_index);
 }
 
 const loom_predicate_t* loom_func_like_predicates(loom_func_like_t func,

@@ -175,4 +175,59 @@ loom_cc_test(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+iree_execution_test_suite(
+  NAME
+    iree_test_loom_execution_test
+  MANIFESTS
+    "test/iree-test-loom_spirv_vulkan.test.json"
+  TOOLS
+    "iree-test-loom=loom::tools::iree-test-loom"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/dynamic_workgroup_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/launch_schedule_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_coop_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_coop_u8_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_integer_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_quantized_hal_actual.loom"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    vulkan
+  LABELS
+    "iree-run-requirement=runtime.resource.vulkan_device"
+    "requires-gpu-vulkan"
+    "runtime-resource=vulkan-device"
+  RESOURCE_GROUP
+    loom-vulkan-tests
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
+iree_execution_test_suite(
+  NAME
+    iree_benchmark_loom_execution_test
+  MANIFESTS
+    "test/iree-benchmark-loom_spirv_vulkan.test.json"
+  TOOLS
+    "iree-benchmark-loom=loom::tools::iree-benchmark-loom"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/launch_schedule_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_coop_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_coop_u8_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_hal_actual.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/spirv/test/spirv_vulkan_quantized_hal_actual.loom"
+  SANITIZER_SUPPRESSIONS
+    lsan
+    vulkan
+  LABELS
+    "iree-run-requirement=runtime.resource.vulkan_device"
+    "requires-gpu-vulkan"
+    "runtime-resource=vulkan-device"
+    "manual"
+  RESOURCE_GROUP
+    loom-vulkan-tests
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

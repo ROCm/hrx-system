@@ -1022,11 +1022,15 @@ typedef struct loom_func_like_vtable_t {
   // LOOM_ATTR_INDEX_NONE for def/decl.
   uint8_t priority_attr_index;
 
-  // When true, function arguments are stored as the op's operands
-  // rather than as block arguments of the body region. Used for ops
-  // that declare a signature without providing a body — the parser
-  // stores FUNC_ARGS as operands when no REGION follows.
-  bool args_as_operands;
+  // Operand field containing the signature arguments for a bodyless
+  // declaration. LOOM_OPERAND_INDEX_NONE when arguments are entry block
+  // values in |body_region_index|.
+  uint8_t args_operand_field_index;
+
+  // Number of operand segments stored on bodyless declarations using
+  // segmented operands. Zero when |args_operand_field_index| is a flat
+  // trailing operand field or when arguments are body entry block values.
+  uint8_t args_operand_segment_count;
 } loom_func_like_vtable_t;
 
 // Fat reference to a function-like op: pairs the op with its interface

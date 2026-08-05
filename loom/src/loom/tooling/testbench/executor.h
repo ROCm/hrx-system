@@ -9,7 +9,7 @@
 // This layer binds planning, value materialization, invocation dispatch, and
 // expectation reporting into the production case-execution primitive shared by
 // run, test, benchmark, tuning, and custom harnesses. It stays target-free:
-// callers inject actual/oracle/expectation/file providers.
+// callers inject function-call/kernel-launch/oracle/expectation/file providers.
 
 #ifndef LOOM_TOOLING_TESTBENCH_EXECUTOR_H_
 #define LOOM_TOOLING_TESTBENCH_EXECUTOR_H_
@@ -29,7 +29,7 @@ typedef struct loom_testbench_case_execution_options_t {
   // Runtime dependencies used while materializing parameters, generated values,
   // fixture file values, and reusable executor scratch storage.
   loom_testbench_value_materializer_options_t materializer;
-  // Actual and oracle invocation providers visible while preparing the case.
+  // Invocation providers visible while preparing the case.
   loom_testbench_invocation_options_t invocation;
   // Custom expectation providers visible while preparing the case.
   loom_testbench_expectation_options_t expectation;

@@ -2,6 +2,29 @@
   "version": 1,
   "cases": [
     {
+      "name": "compiles HAL kernel closures from complete authoring modules",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "{srcdir}/complete_authoring_module.loom",
+          "--backend=amdgpu-hal",
+          "--target=gfx1100",
+          "--output={tmp}/complete_authoring_module.hal",
+          "--emit-target-artifact={tmp}/complete_authoring_module.hsaco"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/complete_authoring_module.hal",
+          "non_empty": true
+        },
+        {
+          "path": "{tmp}/complete_authoring_module.hsaco",
+          "non_empty": true
+        }
+      ]
+    },
+    {
       "name": "preserves HAL binding identity without authored export names",
       "run": {
         "tool": "loom-compile",

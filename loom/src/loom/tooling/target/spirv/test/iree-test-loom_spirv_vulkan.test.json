@@ -2,11 +2,32 @@
   "version": 1,
   "cases": [
     {
+      "name": "runs dynamic spirv vulkan workgroup samples",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/dynamic_workgroup_hal_actual.loom",
+          "--case=@dynamic_workgroup_hal_actual_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"sample_count\":2",
+          "\"failed_sample_count\":0",
+          "\"case\":\"dynamic_workgroup_hal_actual_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
       "name": "runs spirv vulkan scalar case",
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/spirv_vulkan_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_hal_actual.loom",
           "--case=@double_i32_at_byte_offset_case",
           "--device=vulkan",
           "--vulkan_validation_layers=false"
@@ -25,7 +46,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/spirv_vulkan_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_hal_actual.loom",
           "--case=@ordered_dispatch_aba_case",
           "--device=vulkan",
           "--vulkan_validation_layers=false"
@@ -40,11 +61,49 @@
       }
     },
     {
+      "name": "runs explicit serial spirv vulkan dispatch epochs",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/launch_schedule_hal_actual.loom",
+          "--case=@launch_schedule_serial_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"launch_schedule_serial_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
+      "name": "runs concurrent spirv vulkan dispatch epoch",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/../../../execution/hal/testdata/launch_schedule_hal_actual.loom",
+          "--case=@launch_schedule_concurrent_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"launch_schedule_concurrent_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
       "name": "runs spirv vulkan scalar addressing matrix",
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/spirv_vulkan_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_hal_actual.loom",
           "--case=@scalar_addressing_i32_case",
           "--device=vulkan",
           "--vulkan_validation_layers=false"
@@ -63,7 +122,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/spirv_vulkan_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_hal_actual.loom",
           "--case=@workgroup_addressing_i32_case",
           "--device=vulkan",
           "--vulkan_validation_layers=false"
@@ -82,7 +141,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/spirv_vulkan_integer_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_integer_hal_actual.loom",
           "--case=@integer_i32_truth_table_case",
           "--device=vulkan",
           "--vulkan_validation_layers=false"
@@ -101,7 +160,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/spirv_vulkan_integer_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_integer_hal_actual.loom",
           "--case=@index_numeric_truth_table_case",
           "--device=vulkan",
           "--vulkan_validation_layers=false"
@@ -121,7 +180,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/spirv_vulkan_integer_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_integer_hal_actual.loom",
           "--case=@integer_i8_truth_table_case",
           "--device=vulkan",
           "--vulkan_validation_layers=false"
@@ -141,7 +200,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/spirv_vulkan_integer_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_integer_hal_actual.loom",
           "--case=@integer_i16_truth_table_case",
           "--device=vulkan",
           "--vulkan_validation_layers=false"
@@ -161,7 +220,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/spirv_vulkan_integer_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_integer_hal_actual.loom",
           "--case=@integer_i64_truth_table_case",
           "--device=vulkan",
           "--vulkan_validation_layers=false"
@@ -181,7 +240,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/spirv_vulkan_coop_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_coop_hal_actual.loom",
           "--case=@dense_projection_tiled_f16_128_case",
           "--device=vulkan",
           "--vulkan_validation_layers=false"
@@ -200,7 +259,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/spirv_vulkan_coop_u8_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_coop_u8_hal_actual.loom",
           "--case=@dense_projection_tiled_u8_128_case",
           "--device=vulkan",
           "--vulkan_validation_layers=false"
@@ -220,7 +279,7 @@
       "run": {
         "tool": "iree-test-loom",
         "args": [
-          "{srcdir}/testdata/spirv_vulkan_quantized_hal_actual.loom",
+          "{srcdir}/spirv_vulkan_quantized_hal_actual.loom",
           "--case=@quantized_projection_u8_scalar_128_case",
           "--device=vulkan",
           "--vulkan_validation_layers=false"

@@ -195,7 +195,7 @@ check.case public @f32_to_fp8_random_case {
   %input = check.generate.random.uniform seed(%seed) range(-1024.0 to 1024.0) : tensor<[%row_count]x4xf32>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E4M3>
   %expected = check.generate.random.uniform seed(%seed) range(-1024.0 to 1024.0) : tensor<[%row_count]x4xf8E4M3>
-  func.call @f32_to_fp8(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf32>, tensor<[%row_count]x4xf8E4M3>)
+  kernel.launch @f32_to_fp8[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf32>, tensor<[%row_count]x4xf8E4M3>)
   check.expect.bitwise actual(%output) expected(%expected) : tensor<[%row_count]x4xf8E4M3>
   check.return
 }
@@ -206,7 +206,7 @@ check.case public @f32_to_fp8_subnormal_case {
   %input = check.generate.random.uniform seed(%seed) range(-0.02 to 0.02) : tensor<[%row_count]x4xf32>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E4M3>
   %expected = check.generate.random.uniform seed(%seed) range(-0.02 to 0.02) : tensor<[%row_count]x4xf8E4M3>
-  func.call @f32_to_fp8(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf32>, tensor<[%row_count]x4xf8E4M3>)
+  kernel.launch @f32_to_fp8[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf32>, tensor<[%row_count]x4xf8E4M3>)
   check.expect.bitwise actual(%output) expected(%expected) : tensor<[%row_count]x4xf8E4M3>
   check.return
 }
@@ -217,7 +217,7 @@ check.case public @f32_to_bf8_random_case {
   %input = check.generate.random.uniform seed(%seed) range(-100000.0 to 100000.0) : tensor<[%row_count]x4xf32>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E5M2>
   %expected = check.generate.random.uniform seed(%seed) range(-100000.0 to 100000.0) : tensor<[%row_count]x4xf8E5M2>
-  func.call @f32_to_bf8(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf32>, tensor<[%row_count]x4xf8E5M2>)
+  kernel.launch @f32_to_bf8[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf32>, tensor<[%row_count]x4xf8E5M2>)
   check.expect.bitwise actual(%output) expected(%expected) : tensor<[%row_count]x4xf8E5M2>
   check.return
 }
@@ -228,7 +228,7 @@ check.case public @f32_to_bf8_subnormal_case {
   %input = check.generate.random.uniform seed(%seed) range(-0.0001 to 0.0001) : tensor<[%row_count]x4xf32>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E5M2>
   %expected = check.generate.random.uniform seed(%seed) range(-0.0001 to 0.0001) : tensor<[%row_count]x4xf8E5M2>
-  func.call @f32_to_bf8(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf32>, tensor<[%row_count]x4xf8E5M2>)
+  kernel.launch @f32_to_bf8[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf32>, tensor<[%row_count]x4xf8E5M2>)
   check.expect.bitwise actual(%output) expected(%expected) : tensor<[%row_count]x4xf8E5M2>
   check.return
 }
@@ -240,7 +240,7 @@ check.case public @f16_to_bf8_case {
   %input = check.generate.iota offset(-0.001953125) step(0.00000762939453125) : tensor<[%row_count]x4xf16>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E5M2>
   %expected = check.generate.iota offset(-0.001953125) step(0.00000762939453125) : tensor<[%row_count]x4xf8E5M2>
-  func.call @f16_to_bf8(%row_count, %input, %output) : (index, tensor<[%row_count]x4xf16>, tensor<[%row_count]x4xf8E5M2>)
+  kernel.launch @f16_to_bf8[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xf16>, tensor<[%row_count]x4xf8E5M2>)
   check.expect.bitwise actual(%output) expected(%expected) : tensor<[%row_count]x4xf8E5M2>
   check.return
 }
@@ -251,7 +251,7 @@ check.case public @bf16_to_fp8_case {
   %input = check.generate.iota offset(-448.0) step(2.0) : tensor<[%row_count]x4xbf16>
   %output = check.generate.fill value(0.0) : tensor<[%row_count]x4xf8E4M3>
   %expected = check.generate.iota offset(-448.0) step(2.0) : tensor<[%row_count]x4xf8E4M3>
-  func.call @bf16_to_fp8(%row_count, %input, %output) : (index, tensor<[%row_count]x4xbf16>, tensor<[%row_count]x4xf8E4M3>)
+  kernel.launch @bf16_to_fp8[%row_count](%row_count, %input, %output) : [index](index, tensor<[%row_count]x4xbf16>, tensor<[%row_count]x4xf8E4M3>)
   check.expect.bitwise actual(%output) expected(%expected) : tensor<[%row_count]x4xf8E4M3>
   check.return
 }
@@ -262,38 +262,38 @@ check.case public @fp8_special_payload_case {
   %positive_infinity = check.generate.fill value(2139095040) : tensor<[%row_count]x4xi32>
   %positive_infinity_output = check.generate.fill value(0) : tensor<[%row_count]x4xi8>
   %positive_infinity_expected = check.generate.fill value(126) : tensor<[%row_count]x4xi8>
-  func.call @f32_bits_to_fp8_bytes(%row_count, %positive_infinity, %positive_infinity_output) : (index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
+  kernel.launch @f32_bits_to_fp8_bytes[%row_count](%row_count, %positive_infinity, %positive_infinity_output) : [index](index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
   check.expect.equal actual(%positive_infinity_output) expected(%positive_infinity_expected) : tensor<[%row_count]x4xi8>
 
   %negative_infinity = check.generate.fill value(-8388608) : tensor<[%row_count]x4xi32>
   %negative_infinity_output = check.generate.fill value(0) : tensor<[%row_count]x4xi8>
   %negative_infinity_expected = check.generate.fill value(-2) : tensor<[%row_count]x4xi8>
-  func.call @f32_bits_to_fp8_bytes(%row_count, %negative_infinity, %negative_infinity_output) : (index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
+  kernel.launch @f32_bits_to_fp8_bytes[%row_count](%row_count, %negative_infinity, %negative_infinity_output) : [index](index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
   check.expect.equal actual(%negative_infinity_output) expected(%negative_infinity_expected) : tensor<[%row_count]x4xi8>
 
   %positive_nan = check.generate.fill value(2143289344) : tensor<[%row_count]x4xi32>
   %positive_nan_output = check.generate.fill value(0) : tensor<[%row_count]x4xi8>
   %positive_nan_expected = check.generate.fill value(127) : tensor<[%row_count]x4xi8>
-  func.call @f32_bits_to_fp8_bytes(%row_count, %positive_nan, %positive_nan_output) : (index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
+  kernel.launch @f32_bits_to_fp8_bytes[%row_count](%row_count, %positive_nan, %positive_nan_output) : [index](index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
   check.expect.equal actual(%positive_nan_output) expected(%positive_nan_expected) : tensor<[%row_count]x4xi8>
 
   %negative_nan = check.generate.fill value(-4194304) : tensor<[%row_count]x4xi32>
   %negative_nan_output = check.generate.fill value(0) : tensor<[%row_count]x4xi8>
   %negative_nan_expected = check.generate.fill value(-1) : tensor<[%row_count]x4xi8>
-  func.call @f32_bits_to_fp8_bytes(%row_count, %negative_nan, %negative_nan_output) : (index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
+  kernel.launch @f32_bits_to_fp8_bytes[%row_count](%row_count, %negative_nan, %negative_nan_output) : [index](index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
   check.expect.equal actual(%negative_nan_output) expected(%negative_nan_expected) : tensor<[%row_count]x4xi8>
 
   %negative_zero = check.generate.fill value(-2147483648) : tensor<[%row_count]x4xi32>
   %negative_zero_output = check.generate.fill value(0) : tensor<[%row_count]x4xi8>
   %negative_zero_expected = check.generate.fill value(-128) : tensor<[%row_count]x4xi8>
-  func.call @f32_bits_to_fp8_bytes(%row_count, %negative_zero, %negative_zero_output) : (index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
+  kernel.launch @f32_bits_to_fp8_bytes[%row_count](%row_count, %negative_zero, %negative_zero_output) : [index](index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
   check.expect.equal actual(%negative_zero_output) expected(%negative_zero_expected) : tensor<[%row_count]x4xi8>
 
   // 2^-10 is exactly halfway from zero to the smallest E4M3 subnormal.
   %positive_zero_tie = check.generate.fill value(981467136) : tensor<[%row_count]x4xi32>
   %positive_zero_tie_output = check.generate.fill value(1) : tensor<[%row_count]x4xi8>
   %positive_zero_tie_expected = check.generate.fill value(0) : tensor<[%row_count]x4xi8>
-  func.call @f32_bits_to_fp8_bytes(%row_count, %positive_zero_tie, %positive_zero_tie_output) : (index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
+  kernel.launch @f32_bits_to_fp8_bytes[%row_count](%row_count, %positive_zero_tie, %positive_zero_tie_output) : [index](index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
   check.expect.equal actual(%positive_zero_tie_output) expected(%positive_zero_tie_expected) : tensor<[%row_count]x4xi8>
   check.return
 }
@@ -304,38 +304,38 @@ check.case public @bf8_special_payload_case {
   %positive_infinity = check.generate.fill value(2139095040) : tensor<[%row_count]x4xi32>
   %positive_infinity_output = check.generate.fill value(0) : tensor<[%row_count]x4xi8>
   %positive_infinity_expected = check.generate.fill value(124) : tensor<[%row_count]x4xi8>
-  func.call @f32_bits_to_bf8_bytes(%row_count, %positive_infinity, %positive_infinity_output) : (index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
+  kernel.launch @f32_bits_to_bf8_bytes[%row_count](%row_count, %positive_infinity, %positive_infinity_output) : [index](index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
   check.expect.equal actual(%positive_infinity_output) expected(%positive_infinity_expected) : tensor<[%row_count]x4xi8>
 
   %negative_infinity = check.generate.fill value(-8388608) : tensor<[%row_count]x4xi32>
   %negative_infinity_output = check.generate.fill value(0) : tensor<[%row_count]x4xi8>
   %negative_infinity_expected = check.generate.fill value(-4) : tensor<[%row_count]x4xi8>
-  func.call @f32_bits_to_bf8_bytes(%row_count, %negative_infinity, %negative_infinity_output) : (index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
+  kernel.launch @f32_bits_to_bf8_bytes[%row_count](%row_count, %negative_infinity, %negative_infinity_output) : [index](index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
   check.expect.equal actual(%negative_infinity_output) expected(%negative_infinity_expected) : tensor<[%row_count]x4xi8>
 
   %positive_nan = check.generate.fill value(2143289344) : tensor<[%row_count]x4xi32>
   %positive_nan_output = check.generate.fill value(0) : tensor<[%row_count]x4xi8>
   %positive_nan_expected = check.generate.fill value(127) : tensor<[%row_count]x4xi8>
-  func.call @f32_bits_to_bf8_bytes(%row_count, %positive_nan, %positive_nan_output) : (index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
+  kernel.launch @f32_bits_to_bf8_bytes[%row_count](%row_count, %positive_nan, %positive_nan_output) : [index](index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
   check.expect.equal actual(%positive_nan_output) expected(%positive_nan_expected) : tensor<[%row_count]x4xi8>
 
   %negative_nan = check.generate.fill value(-4194304) : tensor<[%row_count]x4xi32>
   %negative_nan_output = check.generate.fill value(0) : tensor<[%row_count]x4xi8>
   %negative_nan_expected = check.generate.fill value(-1) : tensor<[%row_count]x4xi8>
-  func.call @f32_bits_to_bf8_bytes(%row_count, %negative_nan, %negative_nan_output) : (index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
+  kernel.launch @f32_bits_to_bf8_bytes[%row_count](%row_count, %negative_nan, %negative_nan_output) : [index](index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
   check.expect.equal actual(%negative_nan_output) expected(%negative_nan_expected) : tensor<[%row_count]x4xi8>
 
   %negative_zero = check.generate.fill value(-2147483648) : tensor<[%row_count]x4xi32>
   %negative_zero_output = check.generate.fill value(0) : tensor<[%row_count]x4xi8>
   %negative_zero_expected = check.generate.fill value(-128) : tensor<[%row_count]x4xi8>
-  func.call @f32_bits_to_bf8_bytes(%row_count, %negative_zero, %negative_zero_output) : (index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
+  kernel.launch @f32_bits_to_bf8_bytes[%row_count](%row_count, %negative_zero, %negative_zero_output) : [index](index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
   check.expect.equal actual(%negative_zero_output) expected(%negative_zero_expected) : tensor<[%row_count]x4xi8>
 
   // 2^-17 is exactly halfway from zero to the smallest E5M2 subnormal.
   %positive_zero_tie = check.generate.fill value(922746880) : tensor<[%row_count]x4xi32>
   %positive_zero_tie_output = check.generate.fill value(1) : tensor<[%row_count]x4xi8>
   %positive_zero_tie_expected = check.generate.fill value(0) : tensor<[%row_count]x4xi8>
-  func.call @f32_bits_to_bf8_bytes(%row_count, %positive_zero_tie, %positive_zero_tie_output) : (index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
+  kernel.launch @f32_bits_to_bf8_bytes[%row_count](%row_count, %positive_zero_tie, %positive_zero_tie_output) : [index](index, tensor<[%row_count]x4xi32>, tensor<[%row_count]x4xi8>)
   check.expect.equal actual(%positive_zero_tie_output) expected(%positive_zero_tie_expected) : tensor<[%row_count]x4xi8>
   check.return
 }

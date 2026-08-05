@@ -24,6 +24,7 @@ extern "C" {
 
 typedef iree_status_t(IREE_API_PTR* loom_testbench_invocation_fn_t)(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
+    iree_host_size_t workload_count, const loom_testbench_value_t* workloads,
     iree_host_size_t input_count, const loom_testbench_value_t* inputs,
     iree_host_size_t result_count, loom_testbench_value_t* out_results);
 
@@ -108,9 +109,10 @@ static inline bool loom_testbench_oracle_provider_list_is_empty(
 }
 
 typedef struct loom_testbench_invocation_options_t {
-  // Provider used for semantic call-like invocations of the function under
-  // test.
-  loom_testbench_invocation_provider_t actual;
+  // Provider used for ordinary semantic function calls.
+  loom_testbench_invocation_provider_t function_call;
+  // Provider used for device kernel launches.
+  loom_testbench_invocation_provider_t kernel_launch;
   // Named oracle providers visible to check.oracle.call.
   loom_testbench_oracle_provider_list_t oracle_providers;
 } loom_testbench_invocation_options_t;
@@ -142,6 +144,8 @@ typedef struct loom_testbench_invocation_schedule_t {
   const loom_testbench_prepared_invocation_span_t* spans;
   // Number of entries in |spans|.
   iree_host_size_t span_count;
+  // Maximum workload arity across prepared invocations.
+  iree_host_size_t max_workload_count;
   // Maximum input arity across prepared invocations.
   iree_host_size_t max_input_count;
   // Maximum result arity across prepared invocations.
@@ -159,14 +163,18 @@ iree_status_t loom_testbench_prepare_case_invocations(
 typedef struct loom_testbench_invocation_executor_t {
   // Prepared invocation schedule to execute.
   const loom_testbench_invocation_schedule_t* schedule;
-  // Host allocator that owns |inputs| and |results|.
+  // Host allocator that owns |workloads|, |inputs|, and |results|.
   iree_allocator_t host_allocator;
+  // Retained workload values reused for each invocation.
+  loom_testbench_value_t* workloads;
   // Retained input values reused for each invocation.
   loom_testbench_value_t* inputs;
   // Move-owned result values reused for each invocation.
   loom_testbench_value_t* results;
   // Provider-owned issues recorded during the current sample.
   loom_testbench_sample_issue_t* issues;
+  // Number of entries in |workloads|.
+  iree_host_size_t workload_capacity;
   // Number of entries in |inputs|.
   iree_host_size_t input_capacity;
   // Number of entries in |results|.

@@ -1154,6 +1154,41 @@ class TestCrossFormat:
         assert op.regions
         assert len(op.regions[0].blocks[0].ops) == 2
 
+    def test_kernel_workload_and_launch_signatures_roundtrip(self) -> None:
+        from loom.builtin_types import ALL_BUILTIN_TYPES
+        from loom.dialect.kernel import ALL_KERNEL_OPS
+        from loom.format.text.parser import Parser
+
+        text = (
+            "kernel.def @dynamic(%grid: index) {\n"
+            "  kernel.launch.config workgroups(%grid, %grid, %grid) "
+            "workgroup_size(%grid, %grid, %grid) : index\n"
+            "} launch(%count: index, %output: buffer) {\n"
+            "  kernel.return\n"
+            "}\n"
+            "kernel.decl @external(%workload: index) "
+            "launch(%abi_count: index, %output: buffer)\n"
+        )
+        parser = Parser()
+        parser.register_ops(ALL_KERNEL_OPS)
+        parser.register_types(ALL_BUILTIN_TYPES)
+        module = parser.parse(text)
+
+        bytecode = write_module(module)
+        loaded = read_module(bytecode)
+        assert write_module(loaded) == bytecode
+
+        definition = loaded.symbols[0].op
+        assert definition is not None
+        assert [len(region.blocks[0].arg_ids) for region in definition.regions] == [
+            1,
+            2,
+        ]
+        declaration = loaded.symbols[1].op
+        assert declaration is not None
+        assert declaration.operand_segment_counts == (1, 2)
+        assert len(declaration.operands) == 3
+
 
 # ============================================================================
 # Import/export round-trips (reader-focused)

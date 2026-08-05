@@ -86,18 +86,120 @@ static iree_status_t loom_kernel_verify_positive_u32_attr(
       emitter, op, attr_name, value, IREE_SV("positive u32"));
 }
 
-static iree_status_t loom_kernel_verify_def_contract(
-    iree_diagnostic_emitter_t emitter, const loom_op_t* op) {
-  const bool has_export_symbol = loom_kernel_optional_attr_is_present(
-      op, loom_kernel_def_export_symbol_ATTR_INDEX);
-  const bool has_export_linkage = loom_kernel_optional_attr_is_present(
-      op, loom_kernel_def_export_linkage_ATTR_INDEX);
+static iree_status_t loom_kernel_verify_export_contract(
+    iree_diagnostic_emitter_t emitter, const loom_op_t* op,
+    uint8_t export_symbol_attr_index, uint8_t export_linkage_attr_index) {
+  const bool has_export_symbol =
+      loom_kernel_optional_attr_is_present(op, export_symbol_attr_index);
+  const bool has_export_linkage =
+      loom_kernel_optional_attr_is_present(op, export_linkage_attr_index);
   if (!has_export_symbol && has_export_linkage) {
     return loom_kernel_verify_contract_attr_present(
-        emitter, op, loom_kernel_def_export_symbol_ATTR_INDEX,
-        IREE_SV("export"), IREE_SV("present when linkage is present"));
+        emitter, op, export_symbol_attr_index, IREE_SV("export"),
+        IREE_SV("present when linkage is present"));
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_kernel_emit_launch_related(
+    iree_diagnostic_emitter_t emitter, const loom_op_t* launch_op,
+    const loom_op_t* definition_op, const loom_error_def_t* error,
+    const loom_diagnostic_param_t* params, iree_host_size_t param_count) {
+  loom_diagnostic_related_op_t related_ops[] = {{
+      .label = IREE_SV("defined here"),
+      .op = definition_op,
+  }};
+  loom_diagnostic_emission_t emission = {
+      .op = launch_op,
+      .error = error,
+      .params = params,
+      .param_count = param_count,
+      .related_ops = related_ops,
+      .related_op_count = IREE_ARRAYSIZE(related_ops),
+  };
+  return iree_diagnostic_emit(emitter, &emission);
+}
+
+static bool loom_kernel_launch_type_matches(
+    loom_type_t actual_type, loom_type_t expected_type,
+    const loom_type_value_remap_t* value_remap) {
+  if (loom_type_kind(actual_type) == LOOM_TYPE_TENSOR &&
+      loom_type_kind(expected_type) == LOOM_TYPE_BUFFER) {
+    return true;
+  }
+  return loom_type_equal_after_value_remap(expected_type, actual_type,
+                                           value_remap);
+}
+
+static iree_status_t loom_kernel_verify_launch_operand_group(
+    const loom_module_t* module, const loom_op_t* launch_op,
+    const loom_op_t* definition_op, iree_diagnostic_emitter_t emitter,
+    iree_string_view_t actual_field_name,
+    iree_string_view_t expected_field_name, loom_value_slice_t actual_values,
+    const loom_value_id_t* expected_values, uint16_t expected_value_count,
+    uint16_t flat_operand_offset) {
+  if (actual_values.count != expected_value_count) {
+    loom_diagnostic_param_t params[] = {
+        loom_param_string(actual_field_name),
+        loom_param_u32(actual_values.count),
+        loom_param_string(expected_field_name),
+        loom_param_u32(expected_value_count),
+    };
+    return loom_kernel_emit_launch_related(emitter, launch_op, definition_op,
+                                           LOOM_ERR_STRUCTURE_013, params,
+                                           IREE_ARRAYSIZE(params));
+  }
+
+  loom_type_value_remap_t value_remap = {
+      .source_values = expected_values,
+      .target_values = actual_values.values,
+      .count = actual_values.count,
+  };
+  for (uint16_t i = 0; i < actual_values.count; ++i) {
+    loom_type_t actual_type =
+        loom_module_value_type(module, actual_values.values[i]);
+    loom_type_t expected_type =
+        loom_module_value_type(module, expected_values[i]);
+    if (loom_kernel_launch_type_matches(actual_type, expected_type,
+                                        &value_remap)) {
+      continue;
+    }
+
+    char actual_name[32];
+    char expected_name[32];
+    iree_snprintf(actual_name, sizeof(actual_name), "%.*s %u",
+                  (int)actual_field_name.size, actual_field_name.data, i);
+    iree_snprintf(expected_name, sizeof(expected_name), "%.*s %u",
+                  (int)expected_field_name.size, expected_field_name.data, i);
+    loom_diagnostic_param_t params[] = {
+        loom_param_with_field_ref(
+            loom_param_string(iree_make_cstring_view(actual_name)),
+            loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND,
+                                      flat_operand_offset + i)),
+        loom_param_type(actual_type),
+        loom_param_string(iree_make_cstring_view(expected_name)),
+        loom_param_type(expected_type),
+    };
+    return loom_kernel_emit_launch_related(emitter, launch_op, definition_op,
+                                           LOOM_ERR_TYPE_001, params,
+                                           IREE_ARRAYSIZE(params));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_kernel_emit_launch_placement_error(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter, iree_string_view_t expected_parent) {
+  iree_string_view_t actual_parent =
+      op->parent_op ? loom_op_name(module, op->parent_op) : IREE_SV("none");
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_name(module, op)),
+      loom_param_string(IREE_SV("direct")),
+      loom_param_string(expected_parent),
+      loom_param_string(actual_parent),
+  };
+  return loom_kernel_emit(emitter, op, LOOM_ERR_STRUCTURE_029, params,
+                          IREE_ARRAYSIZE(params));
 }
 
 iree_status_t loom_kernel_launch_config_verify(
@@ -1049,8 +1151,78 @@ static iree_status_t loom_kernel_verify_barrier_controls(
 iree_status_t loom_kernel_def_verify(const loom_module_t* module,
                                      const loom_op_t* op,
                                      iree_diagnostic_emitter_t emitter) {
-  IREE_RETURN_IF_ERROR(loom_kernel_verify_def_contract(emitter, op));
+  IREE_RETURN_IF_ERROR(loom_kernel_verify_export_contract(
+      emitter, op, loom_kernel_def_export_symbol_ATTR_INDEX,
+      loom_kernel_def_export_linkage_ATTR_INDEX));
   return loom_kernel_verify_barrier_controls(module, op, emitter);
+}
+
+iree_status_t loom_kernel_decl_verify(const loom_module_t* module,
+                                      const loom_op_t* op,
+                                      iree_diagnostic_emitter_t emitter) {
+  (void)module;
+  return loom_kernel_verify_export_contract(
+      emitter, op, loom_kernel_decl_export_symbol_ATTR_INDEX,
+      loom_kernel_decl_export_linkage_ATTR_INDEX);
+}
+
+iree_status_t loom_kernel_launch_verify(const loom_module_t* module,
+                                        const loom_op_t* op,
+                                        iree_diagnostic_emitter_t emitter) {
+  loom_symbol_ref_t callee = loom_kernel_launch_callee(op);
+  const loom_symbol_t* symbol = &module->symbols.entries[callee.symbol_id];
+
+  loom_value_slice_t workloads = loom_kernel_launch_workloads(op);
+  loom_value_slice_t workload_args =
+      loom_kernel_workload_arg_ids(module, symbol->defining_op);
+  IREE_RETURN_IF_ERROR(loom_kernel_verify_launch_operand_group(
+      module, op, symbol->defining_op, emitter, IREE_SV("workload"),
+      IREE_SV("kernel workload"), workloads, workload_args.values,
+      workload_args.count,
+      /*flat_operand_offset=*/0));
+
+  loom_func_like_t kernel = loom_func_like_cast(module, symbol->defining_op);
+  uint16_t argument_count = 0;
+  const loom_value_id_t* argument_ids =
+      loom_func_like_arg_ids(kernel, &argument_count);
+  loom_value_slice_t arguments = loom_kernel_launch_arguments(op);
+  return loom_kernel_verify_launch_operand_group(
+      module, op, symbol->defining_op, emitter, IREE_SV("argument"),
+      IREE_SV("kernel ABI argument"), arguments, argument_ids, argument_count,
+      workloads.count);
+}
+
+iree_status_t loom_kernel_launch_yield_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  if (op->parent_op && (loom_kernel_launch_serial_isa(op->parent_op) ||
+                        loom_kernel_launch_concurrent_isa(op->parent_op))) {
+    return iree_ok_status();
+  }
+  return loom_kernel_emit_launch_placement_error(
+      module, op, emitter,
+      IREE_SV("kernel.launch.serial or kernel.launch.concurrent"));
+}
+
+iree_status_t loom_kernel_launch_schedule_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  loom_region_t* body = loom_kernel_launch_serial_isa(op)
+                            ? loom_kernel_launch_serial_body(op)
+                            : loom_kernel_launch_concurrent_body(op);
+  const loom_block_t* block = loom_region_const_block(body, 0);
+  loom_op_t* child_op = NULL;
+  loom_block_for_each_op(block, child_op) {
+    if (loom_kernel_launch_isa(child_op) ||
+        loom_kernel_launch_serial_isa(child_op) ||
+        loom_kernel_launch_concurrent_isa(child_op) ||
+        loom_kernel_launch_yield_isa(child_op)) {
+      continue;
+    }
+    return loom_kernel_emit_launch_placement_error(
+        module, child_op, emitter, IREE_SV("kernel launch schedule"));
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_kernel_barrier_verify(const loom_module_t* module,

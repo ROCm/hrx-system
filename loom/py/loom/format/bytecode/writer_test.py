@@ -17,6 +17,7 @@ from dataclasses import replace
 
 import pytest
 
+from loom.assembly import FuncArgs
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.cfg import ALL_CFG_OPS
@@ -37,6 +38,7 @@ from loom.dsl import (
     AttrDef,
     FuncLikeInterface,
     Op,
+    Operand,
     Result,
     SymbolDefinition,
     SymbolDefinitionFlag,
@@ -1392,12 +1394,12 @@ class TestCrossFormatRoundTrip:
         op = loaded.symbols[0].op
         assert op is not None
         assert len(op.regions) == 2
-        config_arg_ids = op.regions[0].blocks[0].arg_ids
+        workload_arg_ids = op.regions[0].blocks[0].arg_ids
         body_arg_ids = op.regions[1].blocks[0].arg_ids
-        assert len(body_arg_ids) == len(config_arg_ids) == 2
-        assert body_arg_ids[0] != config_arg_ids[0]
+        assert len(body_arg_ids) == len(workload_arg_ids) == 2
+        assert body_arg_ids[0] != workload_arg_ids[0]
         assert loaded.values[body_arg_ids[0]].name == "arg"
-        assert loaded.values[config_arg_ids[0]].name == "arg"
+        assert loaded.values[workload_arg_ids[0]].name == "arg"
         assert _roundtrip_text_through_bytecode(text) == text
 
     def test_record_symbol_survives_bytecode(self) -> None:
@@ -1481,6 +1483,7 @@ class TestCrossFormatRoundTrip:
         custom_func = Op(
             "bytecode.func",
             traits=[SYMBOL_DEFINE],
+            operands=[Operand("args", ANY, variadic=True)],
             symbol_def=SymbolDefinition(
                 field="callee",
                 name="function",
@@ -1491,7 +1494,7 @@ class TestCrossFormatRoundTrip:
                     SymbolDefinitionFlag.TEST_ONLY,
                 ],
             ),
-            interfaces=[FuncLikeInterface(callee="callee", args_as_operands=True)],
+            interfaces=[FuncLikeInterface(callee="callee", args="args")],
             attrs=[
                 AttrDef("callee", "symbol"),
                 AttrDef(
@@ -1504,6 +1507,7 @@ class TestCrossFormatRoundTrip:
                 AttrDef("priority", "i64", optional=True),
             ],
             results=[Result("results", ANY, variadic=True)],
+            format=[FuncArgs("args")],
         )
         module = Module()
         input_id = module.add_value(Value(name="input", type=F32))

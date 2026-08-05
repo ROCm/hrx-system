@@ -28,7 +28,7 @@ iree_status_t iree_benchmark_loom_hal_actual_provider_initialize(
     iree_string_view_t filename, iree_string_view_t source,
     iree_string_view_t pipeline, loom_sanitizer_options_t sanitizer,
     const loom_module_t* test_module,
-    const loom_testbench_invocation_plan_t* actual_invocation,
+    const loom_testbench_invocation_plan_t* kernel_launch,
     iree_string_view_t artifact_path_suffix,
     const loom_run_compile_report_capture_options_t* compile_report_options,
     const loom_run_candidate_artifact_manifest_options_t*

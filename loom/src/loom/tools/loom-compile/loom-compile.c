@@ -143,8 +143,9 @@ IREE_FLAG(string, target, "",
           "pipeline. Authored targets remain compatibility requirements.");
 IREE_FLAG_LIST(string, root,
                "Root symbol to materialize before compilation. Repeat for "
-               "multiple roots. When omitted, the full input module is "
-               "compiled.");
+               "multiple roots. When omitted, HAL backends compile every "
+               "kernel entry and its dependency closure; other backends "
+               "compile the full input module.");
 IREE_FLAG(string, pipeline, "default",
           "Pass pipeline to run before artifact emission. Use 'default' or "
           "empty for the shared prepared-low compile pipeline, 'none' to "
@@ -381,10 +382,45 @@ static iree_status_t loom_compile_materialize_config_set(
       run_module->module, &options, loom_run_session_block_pool(session), NULL);
 }
 
-static iree_status_t loom_compile_select_roots(loom_run_session_t* session,
-                                               loom_run_module_t* run_module,
-                                               iree_allocator_t allocator) {
-  const iree_flag_string_list_t roots = FLAG_root_list();
+static iree_status_t loom_compile_select_roots(
+    loom_run_session_t* session, loom_run_module_t* run_module,
+    const loom_run_hal_artifact_provider_t* hal_artifact_provider,
+    iree_allocator_t allocator) {
+  iree_string_view_list_t roots = FLAG_root_list();
+  iree_string_view_t* implicit_root_values = NULL;
+  if (roots.count == 0 && hal_artifact_provider != NULL) {
+    loom_op_t* op = NULL;
+    loom_block_for_each_op(loom_module_block(run_module->module), op) {
+      if (loom_func_like_is_kernel_entry(
+              loom_func_like_cast(run_module->module, op))) {
+        ++roots.count;
+      }
+    }
+    if (roots.count == 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "HAL backend '%.*s' requires at least one kernel entry",
+          (int)hal_artifact_provider->name.size,
+          hal_artifact_provider->name.data);
+    }
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        allocator, roots.count, sizeof(*implicit_root_values),
+        (void**)&implicit_root_values));
+    iree_host_size_t root_ordinal = 0;
+    loom_block_for_each_op(loom_module_block(run_module->module), op) {
+      const loom_func_like_t function =
+          loom_func_like_cast(run_module->module, op);
+      if (!loom_func_like_is_kernel_entry(function)) {
+        continue;
+      }
+      const loom_symbol_ref_t function_ref = loom_func_like_callee(function);
+      const loom_symbol_t* function_symbol =
+          &run_module->module->symbols.entries[function_ref.symbol_id];
+      implicit_root_values[root_ordinal++] =
+          run_module->module->strings.entries[function_symbol->name_id];
+    }
+    roots.values = implicit_root_values;
+  }
   if (roots.count == 0) {
     return iree_ok_status();
   }
@@ -396,13 +432,17 @@ static iree_status_t loom_compile_select_roots(loom_run_session_t* session,
         run_module->module->strings.entries[run_module->module->name_id];
   }
   loom_module_t* linked_module = NULL;
-  IREE_RETURN_IF_ERROR(loom_link_materialized_modules(
+  iree_status_t status = loom_link_materialized_modules(
       source_modules, IREE_ARRAYSIZE(source_modules),
       &(loom_link_options_t){
           .module_name = module_name,
           .root_symbols = roots,
       },
-      loom_run_session_block_pool(session), allocator, &linked_module));
+      loom_run_session_block_pool(session), allocator, &linked_module);
+  iree_allocator_free(allocator, implicit_root_values);
+  if (!iree_status_is_ok(status)) {
+    return status;
+  }
 
   loom_module_free(run_module->module);
   run_module->module = linked_module;
@@ -1180,6 +1220,11 @@ static void loom_compile_print_agents_markdown(FILE* stream) {
       "requirements, so a generic `gfx11-generic` kernel can specialize to\n"
       "`gfx1151` while an incompatible family fails. `--target` is required\n"
       "only when a materialized HAL kernel entry has no authored target.\n"
+      "When `--root` is omitted, a HAL backend compiles every kernel entry "
+      "and\n"
+      "its dependency closure; authoring-only check programs and unrelated "
+      "host\n"
+      "code are not part of the executable library.\n"
       "Target-owned emitters such as `--backend=llvmir-text` and\n"
       "`--backend=llvmir-bitcode` write the artifact directly to `--output`.\n"
       "Use repeated `--root=@symbol` values to compile selected entries from "
@@ -1581,6 +1626,7 @@ int main(int argc, char** argv) {
   bool emitted = false;
   bool report_written = false;
   int exit_code = 0;
+  const iree_string_view_t backend_name = iree_make_cstring_view(FLAG_backend);
 
   if (iree_status_is_ok(status)) {
     status = loom_compile_initialize_session(&environment, allocator, &session);
@@ -1601,7 +1647,18 @@ int main(int argc, char** argv) {
         loom_compile_materialize_config_set(&session, &run_module, &config_set);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_compile_select_roots(&session, &run_module, allocator);
+    loom_compile_backend_t backend = {0};
+    status = loom_compile_select_backend(
+        backend_name, &kLoomCompileHalArtifactProviderRegistry,
+        loom_run_execution_environment_target_environment(&environment),
+        allocator, &backend);
+    hal_artifact_provider = backend.hal_artifact_provider;
+    target_emitter = backend.target_emitter;
+    is_vm_backend = backend.is_vm_backend;
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_compile_select_roots(&session, &run_module,
+                                       hal_artifact_provider, allocator);
   }
 
   loom_run_compile_report_capture_options_t compile_report_options = {0};
@@ -1615,17 +1672,6 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     status = loom_run_compile_report_capture_record_materialized_config(
         &compile_report_capture, run_module.module, &config_set);
-  }
-  const iree_string_view_t backend_name = iree_make_cstring_view(FLAG_backend);
-  if (iree_status_is_ok(status)) {
-    loom_compile_backend_t backend = {0};
-    status = loom_compile_select_backend(
-        backend_name, &kLoomCompileHalArtifactProviderRegistry,
-        loom_run_execution_environment_target_environment(&environment),
-        allocator, &backend);
-    hal_artifact_provider = backend.hal_artifact_provider;
-    target_emitter = backend.target_emitter;
-    is_vm_backend = backend.is_vm_backend;
   }
   if (iree_status_is_ok(status)) {
     status = loom_compile_artifact_manifest_options_initialize(

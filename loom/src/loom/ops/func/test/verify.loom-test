@@ -7,6 +7,16 @@ func.def @semantic() {
 
 // ====
 
+kernel.decl @launch_only() launch()
+
+func.def @ordinary_calls_require_callable_symbols() {
+  // ERROR@+1: SYMBOL/003 {symbol_name="launch_only", actual_kind="kernel", expected_kind="function"}
+  func.call @launch_only() : ()
+  func.return
+}
+
+// ====
+
 // ABI contracts can remain target-independent until invocation selection.
 func.def abi(object_function) @targetless_abi() {
   func.return

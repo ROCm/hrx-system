@@ -577,6 +577,84 @@ func.def @identity(%x: i32) -> (i32) {
   EXPECT_EQ(linked, nullptr);
 }
 
+TEST_F(LinkerTest, MatchesKernelWorkloadAndLaunchSignatures) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+kernel.decl @dynamic_copy(%element_count: index) launch(%row_count: index, %output: tensor<[%row_count]xi32>)
+)"));
+  loom_module_t* corpus = Parse(IREE_SV(R"(
+kernel.def @dynamic_copy(%length: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%length, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%rows: index, %destination: tensor<[%rows]xi32>) {
+  kernel.return
+}
+)"));
+
+  loom_module_t* linked = Link({harness, corpus});
+  Verify(linked);
+
+  std::string text = Print(linked);
+  EXPECT_EQ(text.find("kernel.decl @dynamic_copy"), std::string::npos);
+  EXPECT_NE(text.find("kernel.def @dynamic_copy"), std::string::npos);
+}
+
+TEST_F(LinkerTest, RejectsKernelWorkloadCountConflict) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+kernel.decl @fill(%element_count: index, %row_count: index) launch(%output: buffer)
+)"));
+  loom_module_t* corpus = Parse(IREE_SV(R"(
+kernel.def @fill(%element_count: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%element_count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer) {
+  kernel.return
+}
+)"));
+
+  loom_module_t* linked = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        LinkStatus({harness, corpus}, &linked));
+  EXPECT_EQ(linked, nullptr);
+}
+
+TEST_F(LinkerTest, RejectsKernelWorkloadTypeConflict) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+kernel.decl @fill(%element_count: i64) launch(%output: buffer)
+)"));
+  loom_module_t* corpus = Parse(IREE_SV(R"(
+kernel.def @fill(%element_count: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%element_count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer) {
+  kernel.return
+}
+)"));
+
+  loom_module_t* linked = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        LinkStatus({harness, corpus}, &linked));
+  EXPECT_EQ(linked, nullptr);
+}
+
+TEST_F(LinkerTest, RejectsKernelLaunchSignatureConflict) {
+  loom_module_t* harness = Parse(IREE_SV(R"(
+kernel.decl @fill(%element_count: index) launch(%output: buffer)
+)"));
+  loom_module_t* corpus = Parse(IREE_SV(R"(
+kernel.def @fill(%element_count: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%element_count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer, %value: i32) {
+  kernel.return
+}
+)"));
+
+  loom_module_t* linked = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        LinkStatus({harness, corpus}, &linked));
+  EXPECT_EQ(linked, nullptr);
+}
+
 TEST_F(LinkerTest, KeepsDeclarationWhenNoDefinitionExists) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 func.decl @external_identity(%m: index, %x: tensor<[%m]xf32>) -> (tensor<[%m]xf32>) where [mul(%m, 16)]

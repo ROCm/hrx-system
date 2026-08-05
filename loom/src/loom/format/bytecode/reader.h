@@ -100,6 +100,8 @@ typedef struct loom_bytecode_symbol_metadata_t {
   uint8_t calling_convention;
   // Function-like purity byte, or zero for non-function symbols.
   uint8_t purity;
+  // Kernel workload argument count, or zero for ordinary functions.
+  uint16_t kernel_workload_argument_count;
   // Function-like argument count, or zero for non-function symbols.
   uint16_t argument_count;
   // Function/global result count, or zero when the symbol has no signature.

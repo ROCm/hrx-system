@@ -62,7 +62,7 @@ check.case public @signed_i8_tile_quantize_even_ties_f32_case {
   %inverse_scale = check.generate.fill value(1.0) : tensor<1xf32>
   %output = check.generate.fill value(-1) : tensor<2xi8>
   %expected = check.generate.iota offset(-2) step(4) : tensor<2xi8>
-  func.call @signed_i8_tile_quantize_even_ties_f32(%values, %inverse_scale, %output) : (tensor<4xf32>, tensor<1xf32>, tensor<2xi8>)
+  kernel.launch @signed_i8_tile_quantize_even_ties_f32[](%values, %inverse_scale, %output) : [](tensor<4xf32>, tensor<1xf32>, tensor<2xi8>)
   check.expect.equal actual(%output) expected(%expected) : tensor<2xi8>
   check.return
 }
@@ -72,7 +72,7 @@ check.case public @signed_i8_tile_quantize_arcp_f32_case {
   %amax = check.generate.fill value(63.5) : tensor<1xf32>
   %output = check.generate.fill value(0) : tensor<4xi8>
   %expected = check.generate.iota offset(-3) step(2) : tensor<4xi8>
-  func.call @signed_i8_tile_quantize_arcp_f32(%values, %amax, %output) : (tensor<4xf32>, tensor<1xf32>, tensor<4xi8>)
+  kernel.launch @signed_i8_tile_quantize_arcp_f32[](%values, %amax, %output) : [](tensor<4xf32>, tensor<1xf32>, tensor<4xi8>)
   check.expect.equal actual(%output) expected(%expected) : tensor<4xi8>
   check.return
 }

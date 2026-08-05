@@ -118,8 +118,7 @@ def _generate_builder_implementation(
     """Generates the C builder function implementation for a complex op."""
     params = c_builder_model.extract_c_params(op, shared_enums)
     layout = compute_layout(op)
-    func_args_are_operands = c_queries.func_args_are_operands(op)
-    params_by_name = {str(param["name"]): param for param in params if "name" in param}
+    params_by_name = {str(param.get("field", param["name"])): param for param in params if "name" in param}
     lines: list[str] = []
 
     # Compute counts for op_alloc.
@@ -139,7 +138,7 @@ def _generate_builder_implementation(
         if param["kind"] == "index_list":
             variadic_operand_param = param["dynamic_field"]
             break
-        if param["kind"] == "func_args" and func_args_are_operands:
+        if param["kind"] == "func_args" and param.get("operand_field"):
             variadic_operand_param = param["name"]
             break
 
@@ -158,7 +157,7 @@ def _generate_builder_implementation(
                 "binding_list",
                 "operand_dict",
                 "index_list",
-            ) or (param["kind"] == "func_args" and func_args_are_operands):
+            ) or (param["kind"] == "func_args" and param.get("operand_field")):
                 count_name = param["dynamic_field"] if param["kind"] == "index_list" else param["name"]
                 _emit_builder_count_check(
                     lines,
@@ -367,14 +366,15 @@ def _generate_builder_implementation(
                     lines.append(f"           {dyn}, {dyn}_count * sizeof(loom_value_id_t));")
                     lines.append("  }")
                     lines.append(f"  operand_offset += (uint16_t){dyn}_count;")
-                elif operand_param["kind"] == "func_args" and func_args_are_operands:
-                    lines.append("  for (iree_host_size_t _i = 0; _i < arg_types_count; ++_i) {")
+                elif operand_param["kind"] == "func_args" and operand_param.get("operand_field"):
+                    name = operand_param["name"]
+                    lines.append(f"  for (iree_host_size_t _i = 0; _i < {name}_count; ++_i) {{")
                     lines.append("    loom_value_id_t _arg_id = LOOM_VALUE_ID_INVALID;")
                     lines.append("    IREE_RETURN_IF_ERROR(")
-                    lines.append("        loom_builder_define_value(builder, arg_types[_i], &_arg_id));")
+                    lines.append(f"        loom_builder_define_value(builder, {name}[_i], &_arg_id));")
                     lines.append("    loom_op_operands(*out_op)[operand_offset + _i] = _arg_id;")
                     lines.append("  }")
-                    lines.append("  operand_offset += (uint16_t)arg_types_count;")
+                    lines.append(f"  operand_offset += (uint16_t){name}_count;")
             elif operand.optional:
                 if operand_param is None:
                     raise ValueError(f"Op '{op.name}': optional operand '{operand.name}' has no builder parameter")
@@ -419,11 +419,12 @@ def _generate_builder_implementation(
                 lines.append(f"    memcpy(loom_op_operands(*out_op) + {fixed_operand_count},")
                 lines.append(f"           {dyn}, {dyn}_count * sizeof(loom_value_id_t));")
                 lines.append("  }")
-            elif param["kind"] == "func_args" and func_args_are_operands:
-                lines.append("  for (iree_host_size_t _i = 0; _i < arg_types_count; ++_i) {")
+            elif param["kind"] == "func_args" and param.get("operand_field"):
+                name = param["name"]
+                lines.append(f"  for (iree_host_size_t _i = 0; _i < {name}_count; ++_i) {{")
                 lines.append("    loom_value_id_t _arg_id = LOOM_VALUE_ID_INVALID;")
                 lines.append("    IREE_RETURN_IF_ERROR(")
-                lines.append("        loom_builder_define_value(builder, arg_types[_i], &_arg_id));")
+                lines.append(f"        loom_builder_define_value(builder, {name}[_i], &_arg_id));")
                 lines.append(f"    loom_op_operands(*out_op)[{fixed_operand_count} + _i] = _arg_id;")
                 lines.append("  }")
 

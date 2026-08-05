@@ -121,7 +121,7 @@ check.case @case_q8_block_unroll_wg64 {
   %src1 = check.generate.fill value(0.0) : tensor<4096xf32>
   %dst = check.generate.fill value(1.0) : tensor<512xf32>
   %expected = check.generate.fill value(0.0) : tensor<512xf32>
-  func.call @q8_block_unroll_wg64(%src0, %src1, %dst) : (tensor<34816xi8>, tensor<4096xf32>, tensor<512xf32>)
+  kernel.launch @q8_block_unroll_wg64[](%src0, %src1, %dst) : [](tensor<34816xi8>, tensor<4096xf32>, tensor<512xf32>)
   check.expect.close actual(%dst) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<512xf32>
   check.return
 }

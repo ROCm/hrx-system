@@ -728,10 +728,9 @@ class BytecodeReader:
         """
         reserved: list[int] = []
         predefined_values = predefined_values or []
-        for _ in range(count):
-            local_number = len(value_map)
-            if local_number < len(predefined_values):
-                value_id = predefined_values[local_number]
+        for definition_index in range(count):
+            if definition_index < len(predefined_values):
+                value_id = predefined_values[definition_index]
             else:
                 value_id = module.add_value(Value(name="", type=NONE_TYPE))
             value_map.append(value_id)
@@ -802,6 +801,29 @@ class BytecodeReader:
             return target_value_id, offset
         return module.add_value(value), offset
 
+    def _read_value_def_range(
+        self,
+        data: bytes,
+        offset: int,
+        module: Module,
+        value_map: list[int],
+        target_value_ids: list[int],
+        start_index: int,
+        count: int,
+    ) -> tuple[list[int], int]:
+        """Read a contiguous range of pre-reserved value definitions."""
+        value_ids: list[int] = []
+        for definition_index in range(start_index, start_index + count):
+            value_id, offset = self._read_value_def(
+                data,
+                offset,
+                module,
+                value_map,
+                target_value_ids[definition_index],
+            )
+            value_ids.append(value_id)
+        return value_ids, offset
+
     def _read_symbols_section(
         self,
         symbols_section: tuple[int, bytes],
@@ -867,23 +889,34 @@ class BytecodeReader:
                 offset += 1
                 purity_byte = sym_data[offset]
                 offset += 1
+                workload_arg_count, offset = decode_varint(sym_data, offset)
                 arg_count, offset = decode_varint(sym_data, offset)
                 result_count, offset = decode_varint(sym_data, offset)
 
                 signature_value_map: list[int] = []
                 signature_value_ids = self._reserve_value_defs(
-                    module, signature_value_map, arg_count + result_count
+                    module,
+                    signature_value_map,
+                    workload_arg_count + arg_count + result_count,
                 )
-                arg_ids: list[int] = []
-                for i in range(arg_count):
-                    value_id, offset = self._read_value_def(
-                        sym_data,
-                        offset,
-                        module,
-                        signature_value_map,
-                        signature_value_ids[i],
-                    )
-                    arg_ids.append(value_id)
+                workload_arg_ids, offset = self._read_value_def_range(
+                    sym_data,
+                    offset,
+                    module,
+                    signature_value_map,
+                    signature_value_ids,
+                    start_index=0,
+                    count=workload_arg_count,
+                )
+                arg_ids, offset = self._read_value_def_range(
+                    sym_data,
+                    offset,
+                    module,
+                    signature_value_map,
+                    signature_value_ids,
+                    start_index=workload_arg_count,
+                    count=arg_count,
+                )
 
                 result_ids: list[int] = []
                 tied_results: list[TiedResult] = []
@@ -895,7 +928,7 @@ class BytecodeReader:
                         offset,
                         module,
                         signature_value_map,
-                        signature_value_ids[arg_count + i],
+                        signature_value_ids[workload_arg_count + arg_count + i],
                     )
                     result_ids.append(value_id)
                     if is_tied:
@@ -944,12 +977,20 @@ class BytecodeReader:
                     ir_length = struct.unpack_from("<I", sym_data, offset)[0]
                     offset += 4
                     body_region_index = self._func_body_region_index(op_name)
+                    predefined_region_values: dict[int, list[int]] = {}
+                    if body_region_index is not None:
+                        predefined_region_values[body_region_index] = arg_ids
+                    workload_region_index, _ = self._kernel_workload_contract(op_name)
+                    if workload_region_index is not None:
+                        predefined_region_values[workload_region_index] = (
+                            workload_arg_ids
+                        )
                     regions = self._read_symbol_regions(
                         ir_data[ir_offset : ir_offset + ir_length],
                         module,
                         root_region_count=self._op_region_count(op_name),
-                        predefined_values=arg_ids,
-                        predefined_region_index=body_region_index,
+                        predefined_region_values=predefined_region_values,
+                        first_region_index=body_region_index,
                     )
 
                 # Build the attributes dict for this func-like op.
@@ -989,15 +1030,21 @@ class BytecodeReader:
                         )
                     op_attrs[key] = value
 
-                # For declaration-style ops (no body), args are operands.
-                # For definition-style ops (with body), args are entry block args.
+                # Declarations materialize explicitly designated signature
+                # operand fields. Definitions bind signatures to entry blocks.
                 operand_ids: list[int] = []
+                operand_segment_counts: tuple[int, ...] = ()
                 if not regions:
-                    operand_ids = arg_ids
+                    operand_ids, operand_segment_counts = (
+                        self._build_signature_operands(
+                            op_name, workload_arg_ids, arg_ids
+                        )
+                    )
 
                 op = Operation(
                     name=op_name,
                     operands=operand_ids,
+                    operand_segment_counts=operand_segment_counts,
                     results=result_ids,
                     tied_results=tied_results,
                     attributes=op_attrs,
@@ -1201,7 +1248,7 @@ class BytecodeReader:
     def _func_body_region_index(self, op_name: str) -> int | None:
         """Return op_name's FuncLike body region index, if it has one."""
         func_like = func_like_interface_for_op(self._op_decls_by_name, op_name)
-        if func_like is None or func_like.args_as_operands or func_like.body is None:
+        if func_like is None or func_like.body is None:
             return None
         op_decl = self._op_decls_by_name.get(op_name)
         if op_decl is None:
@@ -1210,6 +1257,60 @@ class BytecodeReader:
             if region_def.name == func_like.body:
                 return region_index
         return None
+
+    def _kernel_workload_contract(self, op_name: str) -> tuple[int | None, int | None]:
+        """Return workload region and operand field indices for a kernel."""
+        op_decl = self._op_decls_by_name.get(op_name)
+        symbol_def = symbol_def_for_op(self._op_decls_by_name, op_name)
+        if op_decl is None or symbol_def is None or symbol_def.kernel_contract is None:
+            return None, None
+        contract = symbol_def.kernel_contract
+        layout = compute_layout(op_decl)
+        region_index = (
+            layout.fields[contract.workload_region].index
+            if contract.workload_region is not None
+            else None
+        )
+        operand_field_index = (
+            layout.fields[contract.workload_operands].index
+            if contract.workload_operands is not None
+            else None
+        )
+        return region_index, operand_field_index
+
+    def _build_signature_operands(
+        self, op_name: str, workload_arg_ids: list[int], arg_ids: list[int]
+    ) -> tuple[list[int], tuple[int, ...]]:
+        """Build declaration operands from workload and FuncLike signatures."""
+        op_decl = self._op_decls_by_name.get(op_name)
+        if op_decl is None:
+            return [], ()
+        layout = compute_layout(op_decl)
+        fields: dict[int, list[int]] = {}
+        _, workload_operand_field = self._kernel_workload_contract(op_name)
+        if workload_operand_field is not None:
+            fields[workload_operand_field] = workload_arg_ids
+        func_like = func_like_interface_for_op(self._op_decls_by_name, op_name)
+        if func_like is not None and func_like.args is not None:
+            arg_field_index = layout.fields[func_like.args].index
+            if arg_field_index in fields:
+                raise BytecodeError("kernel signatures share one operand field")
+            fields[arg_field_index] = arg_ids
+        if not fields:
+            return [], ()
+
+        operand_ids: list[int] = []
+        if layout.segmented_operands:
+            segment_counts = [0] * len(op_decl.operands)
+            for field_index in range(len(op_decl.operands)):
+                values = fields.get(field_index, [])
+                segment_counts[field_index] = len(values)
+                operand_ids.extend(values)
+            return operand_ids, tuple(segment_counts)
+
+        for field_index in sorted(fields):
+            operand_ids.extend(fields[field_index])
+        return operand_ids, ()
 
     def _op_region_count(self, op_name: str) -> int:
         """Return the declared root region slot count for op_name."""
@@ -1223,16 +1324,16 @@ class BytecodeReader:
         data: bytes,
         module: Module,
         root_region_count: int,
-        predefined_values: list[int] | None = None,
-        predefined_region_index: int | None = None,
+        predefined_region_values: dict[int, list[int]] | None = None,
+        first_region_index: int | None = None,
     ) -> list[Region]:
         """Read a symbol root-region payload from IR section data.
 
         The bytecode uses function-local sequential value numbers (0, 1, 2, ...)
         for all SSA references within the symbol regions. The value_map
         translates these numbers to module-level value IDs as block args and op
-        results are created during reading. When predefined_values are supplied,
-        they are bound only while reading predefined_region_index.
+        results are created during reading. Signature values are rebound to the
+        entry arguments of their owning root regions.
         """
         offset = 0
         value_map: list[int] = []
@@ -1253,17 +1354,13 @@ class BytecodeReader:
             if region_index in regions_by_index:
                 raise BytecodeError("symbol region index appears more than once")
             if (
-                predefined_region_index is not None
+                first_region_index is not None
                 and root_ordinal == 0
-                and region_index != predefined_region_index
+                and (region_index != first_region_index)
             ):
                 raise BytecodeError("FuncLike body region must be first")
-            region_predefined_values = (
-                predefined_values or []
-                if predefined_region_index is not None
-                and region_index == predefined_region_index
-                else []
-            )
+            region_value_map = predefined_region_values or {}
+            region_predefined_values = region_value_map.get(region_index)
             region, offset = self._read_region(
                 data,
                 offset,
@@ -1274,11 +1371,11 @@ class BytecodeReader:
             regions_by_index[region_index] = region
         if offset != len(data):
             raise BytecodeError("symbol region payload has trailing bytes")
-        if (
-            predefined_region_index is not None
-            and predefined_region_index not in regions_by_index
-        ):
-            raise BytecodeError("symbol region payload is missing the FuncLike body")
+        for region_index in predefined_region_values or {}:
+            if region_index not in regions_by_index:
+                raise BytecodeError(
+                    "symbol region payload is missing a signature region"
+                )
 
         regions: list[Region] = []
         if regions_by_index:
@@ -1332,13 +1429,19 @@ class BytecodeReader:
         offset: int,
         module: Module,
         value_map: list[int],
-        predefined_values: list[int],
+        predefined_values: list[int] | None,
     ) -> tuple[Region, int]:
         block_count, offset = decode_varint(data, offset)
         blocks = [Block() for _ in range(block_count)]
-        for block in blocks:
+        for block_index, block in enumerate(blocks):
             offset = self._read_block(
-                data, offset, module, value_map, predefined_values, block, blocks
+                data,
+                offset,
+                module,
+                value_map,
+                predefined_values if block_index == 0 else None,
+                block,
+                blocks,
             )
         return Region(blocks=blocks), offset
 
@@ -1348,7 +1451,7 @@ class BytecodeReader:
         offset: int,
         module: Module,
         value_map: list[int],
-        predefined_values: list[int],
+        predefined_values: list[int] | None,
         block: Block,
         region_blocks: list[Block],
     ) -> int:
@@ -1362,15 +1465,16 @@ class BytecodeReader:
 
         # Block args.
         arg_count, offset = decode_varint(data, offset)
+        if predefined_values is not None and arg_count != len(predefined_values):
+            raise BytecodeError(
+                "signature argument count does not match region entry block"
+            )
         arg_ids = self._reserve_value_defs(
             module, value_map, arg_count, predefined_values
         )
         for i, arg_id in enumerate(arg_ids):
             vid, offset = self._read_value_def(data, offset, module, value_map, arg_id)
             arg_ids[i] = vid
-        if len(value_map) < len(predefined_values):
-            raise BytecodeError("function body entry block is missing signature args")
-
         # Operations.
         op_count, offset = decode_varint(data, offset)
         ops = []
@@ -1484,7 +1588,7 @@ class BytecodeReader:
                 offset,
                 module,
                 value_map,
-                predefined_values=[],
+                predefined_values=None,
             )
             regions.append(region)
 

@@ -57,7 +57,7 @@ kernel.def @global_atomic_cmpxchg_i64() {
 check.case public @global_atomic_reduce_add_f32_case {
   %output = check.generate.fill value(1.0) : tensor<1xf32>
   %expected = check.generate.fill value(5.0) : tensor<1xf32>
-  func.call @global_atomic_reduce_add_f32(%output) : (tensor<1xf32>)
+  kernel.launch @global_atomic_reduce_add_f32[](%output) : [](tensor<1xf32>)
   check.expect.bitwise actual(%output) expected(%expected) : tensor<1xf32>
   check.return
 }
@@ -67,7 +67,7 @@ check.case public @global_atomic_rmw_add_f32_case {
   %old_sum = check.generate.fill value(0.0) : tensor<1xf32>
   %expected_accumulator = check.generate.fill value(5.0) : tensor<1xf32>
   %expected_old_sum = check.generate.fill value(10.0) : tensor<1xf32>
-  func.call @global_atomic_rmw_add_f32(%accumulator, %old_sum) : (tensor<1xf32>, tensor<1xf32>)
+  kernel.launch @global_atomic_rmw_add_f32[](%accumulator, %old_sum) : [](tensor<1xf32>, tensor<1xf32>)
   check.expect.bitwise actual(%accumulator) expected(%expected_accumulator) : tensor<1xf32>
   check.expect.bitwise actual(%old_sum) expected(%expected_old_sum) : tensor<1xf32>
   check.return
@@ -78,7 +78,7 @@ check.case public @global_atomic_cmpxchg_i64_case {
   %old_value = check.generate.fill value(0) : tensor<1xi64>
   %expected_value = check.generate.fill value(9) : tensor<1xi64>
   %expected_old_value = check.generate.fill value(7) : tensor<1xi64>
-  func.call @global_atomic_cmpxchg_i64(%value, %old_value) : (tensor<1xi64>, tensor<1xi64>)
+  kernel.launch @global_atomic_cmpxchg_i64[](%value, %old_value) : [](tensor<1xi64>, tensor<1xi64>)
   check.expect.bitwise actual(%value) expected(%expected_value) : tensor<1xi64>
   check.expect.bitwise actual(%old_value) expected(%expected_old_value) : tensor<1xi64>
   check.return
