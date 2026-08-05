@@ -820,6 +820,7 @@ func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(20)
   %one = index.constant 1 : index
   %sixtyfour = index.constant 64 : index
   %zero_offset = index.constant 0 : offset
+  %counter_scratch_bytes = index.constant 4 : offset
   %zero_i32 = scalar.constant 0 : i32
   %one_i32 = scalar.constant 1 : i32
   %key_value_block_count0 = index.div %bounded_key_value_token_capacity, %sixtyfour : index
@@ -828,17 +829,18 @@ func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(20)
   %completion_counter_global = buffer.assume.memory_space<global> %completion_counter_noalias : buffer
   %completion_counter_aligned = buffer.assume.alignment %completion_counter_global {minimum_alignment = 16} : buffer
   %completion_counter_view = buffer.view %completion_counter_aligned[%zero_offset] : buffer -> view<[%key_value_head_count]xi32, #dense>
+  %counter_scratch = buffer.alloca %counter_scratch_bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %counter_scratch_view = buffer.view %counter_scratch[%zero_offset] : buffer -> view<1xi32, #dense>
   %workitem_is_zero = index.cmp eq, %workitem, %zero : index
   // Publish every producer's partial stores before the leader advances one
   // workgroup arrival. The last arrival then acquires every partial.
   kernel.barrier<global> {ordering = release, scope = workgroup}
-  %local_old_counter = scf.if %workitem_is_zero -> (i32) {
+  scf.if %workitem_is_zero {
     %old_counter = view.atomic.rmw<addi> %one_i32, %completion_counter_view[%key_value_head] {ordering = acq_rel, scope = device} : i32, view<[%key_value_head_count]xi32, #dense> -> i32
-    scf.yield %old_counter : i32
-  } else {
-    scf.yield %zero_i32 : i32
+    view.store %old_counter, %counter_scratch_view[%zero] : i32, view<1xi32, #dense>
   }
-  %old_counter = kernel.workgroup.reduce<addi> %local_old_counter : i32
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  %old_counter = view.load %counter_scratch_view[%zero] : view<1xi32, #dense> -> i32
   %key_value_block_count_i32 = index.cast %key_value_block_count : index to i32
   %last_block_ordinal_i32 = scalar.subi %key_value_block_count_i32, %one_i32 : i32
   %negative_key_value_block_count_i32 = scalar.subi %zero_i32, %key_value_block_count_i32 : i32
@@ -872,6 +874,7 @@ func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(10)
   %one = index.constant 1 : index
   %sixtyfour = index.constant 64 : index
   %zero_offset = index.constant 0 : offset
+  %counter_scratch_bytes = index.constant 4 : offset
   %zero_i32 = scalar.constant 0 : i32
   %one_i32 = scalar.constant 1 : i32
   %key_value_block_count0 = index.div %bounded_key_value_token_capacity, %sixtyfour : index
@@ -880,17 +883,18 @@ func.template<qwen3_moe.attention.decode_split.reduce_fused> device priority(10)
   %completion_counter_global = buffer.assume.memory_space<global> %completion_counter_noalias : buffer
   %completion_counter_aligned = buffer.assume.alignment %completion_counter_global {minimum_alignment = 16} : buffer
   %completion_counter_view = buffer.view %completion_counter_aligned[%zero_offset] : buffer -> view<[%key_value_head_count]xi32, #dense>
+  %counter_scratch = buffer.alloca %counter_scratch_bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %counter_scratch_view = buffer.view %counter_scratch[%zero_offset] : buffer -> view<1xi32, #dense>
   %workitem_is_zero = index.cmp eq, %workitem, %zero : index
   // Publish every producer's partial stores before the leader advances one
   // workgroup arrival. The last arrival then acquires every partial.
   kernel.barrier<global> {ordering = release, scope = workgroup}
-  %local_old_counter = scf.if %workitem_is_zero -> (i32) {
+  scf.if %workitem_is_zero {
     %old_counter = view.atomic.rmw<addi> %one_i32, %completion_counter_view[%key_value_head] {ordering = acq_rel, scope = device} : i32, view<[%key_value_head_count]xi32, #dense> -> i32
-    scf.yield %old_counter : i32
-  } else {
-    scf.yield %zero_i32 : i32
+    view.store %old_counter, %counter_scratch_view[%zero] : i32, view<1xi32, #dense>
   }
-  %old_counter = kernel.workgroup.reduce<addi> %local_old_counter : i32
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  %old_counter = view.load %counter_scratch_view[%zero] : view<1xi32, #dense> -> i32
   %key_value_block_count_i32 = index.cast %key_value_block_count : index to i32
   %last_block_ordinal_i32 = scalar.subi %key_value_block_count_i32, %one_i32 : i32
   %negative_key_value_block_count_i32 = scalar.subi %zero_i32, %key_value_block_count_i32 : i32

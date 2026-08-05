@@ -56,6 +56,7 @@ kernel.def target(@qwen3_moe_attention_qkv_postprocess_gfx11_wave32) @qwen3_moe_
   %zero_i32 = scalar.constant 0 : i32
   %one_i32 = scalar.constant 1 : i32
   %zero_offset = index.constant 0 : offset
+  %counter_scratch_bytes = index.constant 4 : offset
   %channel_tile = kernel.workgroup.id<x> : index
   %workitem = kernel.workitem.id<x> : index
   %token = index.assume %zero [lt(%zero, %bounded_token_count)] : index
@@ -70,16 +71,17 @@ kernel.def target(@qwen3_moe_attention_qkv_postprocess_gfx11_wave32) @qwen3_moe_
   %completion_counters_global = buffer.assume.memory_space<global> %completion_counters : buffer
   %completion_counters_aligned = buffer.assume.alignment %completion_counters_global {minimum_alignment = 16} : buffer
   %completion_counters_view = buffer.view %completion_counters_aligned[%zero_offset] : buffer -> view<[%completion_counter_count]xi32, #dense>
+  %counter_scratch = buffer.alloca %counter_scratch_bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %counter_scratch_view = buffer.view %counter_scratch[%zero_offset] : buffer -> view<1xi32, #dense>
   // Publish every producer's projection stores before the leader advances one
   // workgroup arrival. The last arrival then acquires the complete head.
   kernel.barrier<global> {ordering = release, scope = workgroup}
-  %local_old_counter = scf.if %is_arrival_workitem -> (i32) {
+  scf.if %is_arrival_workitem {
     %old_counter = view.atomic.rmw<addi> %one_i32, %completion_counters_view[%head_domain] {ordering = acq_rel, scope = device} : i32, view<[%completion_counter_count]xi32, #dense> -> i32
-    scf.yield %old_counter : i32
-  } else {
-    scf.yield %zero_i32 : i32
+    view.store %old_counter, %counter_scratch_view[%zero] : i32, view<1xi32, #dense>
   }
-  %old_counter = kernel.workgroup.reduce<addi> %local_old_counter : i32
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  %old_counter = view.load %counter_scratch_view[%zero] : view<1xi32, #dense> -> i32
   %head_tile_count_i32 = index.cast %head_tile_count : index to i32
   %last_head_tile_i32 = scalar.subi %head_tile_count_i32, %one_i32 : i32
   %negative_head_tile_count_i32 = scalar.subi %zero_i32, %head_tile_count_i32 : i32

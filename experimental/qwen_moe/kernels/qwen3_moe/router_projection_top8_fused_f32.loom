@@ -47,6 +47,7 @@ kernel.def target(@qwen3_moe_router_fused_gfx11_wave64) @qwen3_moe_router_projec
   %zero_f32 = scalar.constant 0.0 : f32
   %publishes_row = scalar.constant true : i1
   %zero_offset = index.constant 0 : offset
+  %counter_scratch_bytes = index.constant 4 : offset
   %token = index.assume %zero [lt(%zero, %bounded_token_count)] : index
   %expert_base = index.mul %expert_tile, %four : index
   %expert1 = index.add %expert_base, %one : index
@@ -60,6 +61,8 @@ kernel.def target(@qwen3_moe_router_fused_gfx11_wave64) @qwen3_moe_router_projec
   %weight_view = buffer.view %weight_noalias[%zero_offset] : buffer -> view<[%expert_count]x[%hidden_size]xf32, #dense>
   %logits_view = buffer.view %logits_noalias[%zero_offset] : buffer -> view<[%bounded_token_count]x[%expert_count]xf32, #dense>
   %completion_counter_view = buffer.view %completion_counter_aligned[%zero_offset] : buffer -> view<1xi32, #dense>
+  %counter_scratch = buffer.alloca %counter_scratch_bytes {base_alignment = 4, memory_space = workgroup} : buffer
+  %counter_scratch_view = buffer.view %counter_scratch[%zero_offset] : buffer -> view<1xi32, #dense>
 
   %zero_f32x4 = vector.splat %zero_f32 : vector<4xf32>
   %lane_sums = scf.for %channel = [%lane_channel to %hidden_size step %twofiftysix](%accumulators = %zero_f32x4 : vector<4xf32>) -> (vector<4xf32>) unroll(%four) schedule(interleaved) {
@@ -89,13 +92,12 @@ kernel.def target(@qwen3_moe_router_fused_gfx11_wave64) @qwen3_moe_router_projec
   // Every projection store precedes its workgroup's release. The last arrival
   // acquires all preceding releases before any lane loads the complete row.
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-  %local_old_counter = scf.if %writes_projection -> (i32) {
+  scf.if %writes_projection {
     %old_counter = view.atomic.rmw<addi> %one_i32, %completion_counter_view[%zero] {ordering = acq_rel, scope = device} : i32, view<1xi32, #dense> -> i32
-    scf.yield %old_counter : i32
-  } else {
-    scf.yield %zero_i32 : i32
+    view.store %old_counter, %counter_scratch_view[%zero] : i32, view<1xi32, #dense>
   }
-  %old_counter = kernel.workgroup.reduce<addi> %local_old_counter : i32
+  kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+  %old_counter = view.load %counter_scratch_view[%zero] : view<1xi32, #dense> -> i32
   %expert_tile_count_i32 = index.cast %expert_tile_count : index to i32
   %last_expert_tile_i32 = scalar.subi %expert_tile_count_i32, %one_i32 : i32
   %negative_expert_tile_count_i32 = scalar.subi %zero_i32, %expert_tile_count_i32 : i32
