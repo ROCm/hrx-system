@@ -7,28 +7,28 @@ kernel.def target(@target) @gfx1250_fragment_bank_service() {
   %workgroup_size = index.constant 128 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
-  %sixteen = index.constant 16 : index
+  %buffer_base = index.constant 0 : offset
+  %fragment_origin = index.constant 0 : index
+  %tile_extent = index.constant 16 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 32 : index
   %scratch_bytes = index.constant 4096 : offset
   %workitem = kernel.workitem.id<x> : index
   %subgroup = kernel.subgroup.id : index
-  %tile_origin = index.mul %subgroup, %sixteen : index
+  %tile_origin = index.mul %subgroup, %tile_extent : index
   %rhs_layout = encoding.layout.strided [1, 32] : encoding<layout>
-  %input_view = buffer.view %input[%zero] : buffer -> view<128x16xbf16, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x64xf32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<128x16xbf16, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x64xf32, #dense>
   %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_stage = buffer.view %scratch[%zero] : buffer -> view<128x16xbf16, #dense>
+  %scratch_stage = buffer.view %scratch[%buffer_base] : buffer -> view<128x16xbf16, #dense>
   %staged = vector.load %input_view[%workitem, 0] : view<128x16xbf16, #dense> -> vector<16xbf16>
   vector.store %staged, %scratch_stage[%workitem, 0] : vector<16xbf16>, view<128x16xbf16, #dense>
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-  %lhs_view = buffer.view %scratch[%zero] : buffer -> view<64x32xbf16, #dense>
-  %rhs_view = buffer.view %scratch[%zero] : buffer -> view<32x64xbf16, %rhs_layout>
-  %lhs = vector.fragment.load<lhs> %lhs_view[%tile_origin, %zero_index] shape [%m, %k] : view<64x32xbf16, #dense> -> vector<16xbf16>
-  %rhs = vector.fragment.load<rhs> %rhs_view[%zero_index, %tile_origin] shape [%k, %n] : view<32x64xbf16, %rhs_layout> -> vector<16xbf16>
+  %lhs_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x32xbf16, #dense>
+  %rhs_view = buffer.view %scratch[%buffer_base] : buffer -> view<32x64xbf16, %rhs_layout>
+  %lhs = vector.fragment.load<lhs> %lhs_view[%tile_origin, %fragment_origin] shape [%m, %k] : view<64x32xbf16, #dense> -> vector<16xbf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %tile_origin] shape [%k, %n] : view<32x64xbf16, %rhs_layout> -> vector<16xbf16>
   %zero_acc = vector.constant 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>

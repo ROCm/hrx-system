@@ -99,9 +99,9 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(32, 1, 
 amdgpu.target<gfx1250> @target
 
 func.def target(@target) @fp4_e4m3_scale16_wmma_k_loop_final_domain_accumulator(%lhs_data: vector<8xi32>, %rhs_data: vector<8xi32>, %lhs_block_scale: vector<2xi32>, %rhs_block_scale: vector<2xi32>, %final_domain_accumulator: vector<8xf32>, %lhs_global_scale: f32, %rhs_global_scale: f32) -> (vector<8xf32>) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
+  %k_tile_begin = index.constant 0 : index
+  %k_tile_step = index.constant 1 : index
+  %k_tile_end = index.constant 2 : index
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 128 : index
@@ -110,7 +110,7 @@ func.def target(@target) @fp4_e4m3_scale16_wmma_k_loop_final_domain_accumulator(
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {scale = %rhs_block_scale : vector<2xi32>, schema = %schema : encoding<schema>} : vector<8xi32>
   %zero_acc = vector.constant 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
-  %local_result = scf.for %k_tile = [%zero to %two step %one](%local_accumulator = %init : vector<8xf32>) -> (vector<8xf32>) {
+  %local_result = scf.for %k_tile = [%k_tile_begin to %k_tile_end step %k_tile_step](%local_accumulator = %init : vector<8xf32>) -> (vector<8xf32>) {
     %next = vector.mma %lhs, %rhs, %local_accumulator : vector<8xi32>, vector<8xi32>, vector<8xf32>
     scf.yield %next : vector<8xf32>
   }
@@ -123,19 +123,19 @@ func.def target(@target) @fp4_e4m3_scale16_wmma_k_loop_final_domain_accumulator(
 
 // ----
 low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @fp4_e4m3_scale16_wmma_k_loop_final_domain_accumulator(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %lhs_block_scale: reg<amdgpu.vgpr x2>, %rhs_block_scale: reg<amdgpu.vgpr x2>, %final_domain_accumulator: reg<amdgpu.vgpr x8>, %lhs_global_scale: reg<amdgpu.vgpr>, %rhs_global_scale: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x8>) asm {
-  %zero = s_mov_b32 0
-  %one = s_mov_b32 1
-  %two = s_mov_b32 2
+  %k_tile_begin = s_mov_b32 0
+  %k_tile_step = s_mov_b32 1
+  %k_tile_end = s_mov_b32 2
   %46 = v_mov_b32 0
   %init = concat(%46, %46, %46, %46, %46, %46, %46, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
-  low.br ^_bb1(%zero: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>)
+  low.br ^_bb1(%k_tile_begin: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>)
 ^_bb1(%k_tile: reg<amdgpu.sgpr>, %local_accumulator: reg<amdgpu.vgpr x8>):
-  %55 = s_cmp_lt_i32 %k_tile, %two
+  %55 = s_cmp_lt_i32 %k_tile, %k_tile_end
   low.cond_br %55, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
   %56 = copy %local_accumulator : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
   %next = v_wmma_scale16_f32_16x16x128_f8f6f4_f4_f4 %lhs, %rhs, %56, %lhs_block_scale, %rhs_block_scale {matrix_a_fmt = 4, matrix_b_fmt = 4, matrix_a_scale_fmt = 2, matrix_b_scale_fmt = 2}
-  %58 = s_add_u32 %k_tile, %one
+  %58 = s_add_u32 %k_tile, %k_tile_step
   low.br ^_bb1(%58: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr x8>)
 ^_bb3:
   %global_scale = v_mul_f32 %lhs_global_scale, %rhs_global_scale
