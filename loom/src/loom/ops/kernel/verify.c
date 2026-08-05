@@ -503,29 +503,69 @@ static iree_status_t loom_kernel_verify_cluster_attrs(
       IREE_SV("cluster_stride"));
 }
 
-static bool loom_kernel_try_get_local_buffer_memory_space(
-    const loom_module_t* module, loom_value_id_t buffer_id,
+static bool loom_kernel_try_get_block_arg_memory_space(
+    const loom_module_t* module, const loom_op_t* use_op,
+    const loom_value_t* value,
     loom_value_fact_memory_space_t* out_memory_space) {
-  if (buffer_id >= module->values.count) return false;
-  const loom_value_t* value = loom_module_value(module, buffer_id);
-  if (loom_value_is_block_arg(value)) return false;
-  const loom_op_t* defining_op = loom_value_def_op(value);
-  if (!defining_op) return false;
-  if (loom_buffer_alloca_isa(defining_op)) {
-    *out_memory_space = loom_buffer_alloca_memory_space(defining_op);
-    return true;
+  const loom_block_t* block = loom_value_def_block(value);
+  const loom_region_t* region = block ? block->parent_region : NULL;
+  if (!region) return false;
+  for (const loom_op_t* parent_op = use_op ? use_op->parent_op : NULL;
+       parent_op != NULL; parent_op = parent_op->parent_op) {
+    loom_region_t* const* regions = loom_op_regions(parent_op);
+    for (uint8_t i = 0; i < parent_op->region_count; ++i) {
+      if (regions[i] != region) continue;
+      const loom_op_vtable_t* vtable = loom_op_vtable(module, parent_op);
+      const loom_region_descriptor_t* descriptor =
+          loom_op_vtable_region_descriptor(vtable, i);
+      if (descriptor &&
+          iree_any_bit_set(descriptor->flags, LOOM_REGION_GLOBAL_BUFFER_ARGS)) {
+        *out_memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL;
+        return true;
+      }
+      return false;
+    }
   }
-  if (loom_buffer_assume_memory_space_isa(defining_op)) {
-    *out_memory_space =
-        loom_buffer_assume_memory_space_memory_space(defining_op);
-    return true;
+  return false;
+}
+
+static bool loom_kernel_try_get_local_buffer_memory_space(
+    const loom_module_t* module, const loom_op_t* use_op,
+    loom_value_id_t buffer_id,
+    loom_value_fact_memory_space_t* out_memory_space) {
+  for (uint8_t depth = 0; depth < 32; ++depth) {
+    if (buffer_id >= module->values.count) return false;
+    const loom_value_t* value = loom_module_value(module, buffer_id);
+    if (loom_value_is_block_arg(value)) {
+      return loom_kernel_try_get_block_arg_memory_space(module, use_op, value,
+                                                        out_memory_space);
+    }
+    const loom_op_t* defining_op = loom_value_def_op(value);
+    if (!defining_op) return false;
+    if (loom_buffer_alloca_isa(defining_op)) {
+      *out_memory_space = loom_buffer_alloca_memory_space(defining_op);
+      return true;
+    }
+    if (loom_buffer_assume_memory_space_isa(defining_op)) {
+      *out_memory_space =
+          loom_buffer_assume_memory_space_memory_space(defining_op);
+      return true;
+    }
+    const loom_trait_flags_t traits =
+        loom_op_effective_traits(module, defining_op);
+    const uint16_t result_index = loom_value_def_index(value);
+    if (!loom_traits_are_fact_identity(traits) ||
+        result_index >= defining_op->operand_count) {
+      return false;
+    }
+    buffer_id = loom_op_const_operands(defining_op)[result_index];
   }
   return false;
 }
 
 static bool loom_kernel_try_get_local_view_memory_space(
-    const loom_module_t* module, loom_value_id_t view_id,
-    loom_value_fact_memory_space_t* out_memory_space) {
+    const loom_module_t* module, const loom_op_t* use_op,
+    loom_value_id_t view_id, loom_value_fact_memory_space_t* out_memory_space) {
   for (uint8_t depth = 0; depth < 32; ++depth) {
     if (view_id >= module->values.count) return false;
     const loom_value_t* value = loom_module_value(module, view_id);
@@ -535,7 +575,8 @@ static bool loom_kernel_try_get_local_view_memory_space(
 
     if (loom_buffer_view_isa(defining_op)) {
       return loom_kernel_try_get_local_buffer_memory_space(
-          module, loom_buffer_view_buffer(defining_op), out_memory_space);
+          module, use_op, loom_buffer_view_buffer(defining_op),
+          out_memory_space);
     }
     if (loom_view_subview_isa(defining_op)) {
       view_id = loom_view_subview_source(defining_op);
@@ -564,11 +605,12 @@ static bool loom_kernel_memory_space_is_global_dest(
 }
 
 static bool loom_kernel_view_memory_space_is(
-    const loom_module_t* module, loom_value_id_t view_id,
+    const loom_module_t* module, const loom_op_t* use_op,
+    loom_value_id_t view_id,
     bool (*predicate)(loom_value_fact_memory_space_t)) {
   loom_value_fact_memory_space_t memory_space =
       LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN;
-  if (!loom_kernel_try_get_local_view_memory_space(module, view_id,
+  if (!loom_kernel_try_get_local_view_memory_space(module, use_op, view_id,
                                                    &memory_space)) {
     return false;
   }
@@ -689,14 +731,15 @@ static iree_status_t loom_kernel_verify_async_copy_memory_spaces(
   switch ((loom_kernel_direction_t)direction) {
     case LOOM_KERNEL_DIRECTION_GLOBAL_TO_WORKGROUP:
       if (!loom_kernel_view_memory_space_is(
-              module, source_id, loom_kernel_memory_space_is_global_source)) {
+              module, op, source_id,
+              loom_kernel_memory_space_is_global_source)) {
         loom_type_t source_type = loom_module_value_type(module, source_id);
         return loom_kernel_emit_operand_constraint(
             emitter, op, IREE_SV("source"), source_type,
             IREE_SV("global, constant, or descriptor memory-space fact"));
       }
       if (!loom_kernel_view_memory_space_is(
-              module, dest_id, loom_kernel_memory_space_is_workgroup)) {
+              module, op, dest_id, loom_kernel_memory_space_is_workgroup)) {
         loom_type_t dest_type = loom_module_value_type(module, dest_id);
         return loom_kernel_emit_operand_constraint(
             emitter, op, IREE_SV("dest"), dest_type,
@@ -705,14 +748,14 @@ static iree_status_t loom_kernel_verify_async_copy_memory_spaces(
       return iree_ok_status();
     case LOOM_KERNEL_DIRECTION_WORKGROUP_TO_GLOBAL:
       if (!loom_kernel_view_memory_space_is(
-              module, source_id, loom_kernel_memory_space_is_workgroup)) {
+              module, op, source_id, loom_kernel_memory_space_is_workgroup)) {
         loom_type_t source_type = loom_module_value_type(module, source_id);
         return loom_kernel_emit_operand_constraint(
             emitter, op, IREE_SV("source"), source_type,
             IREE_SV("workgroup memory-space fact"));
       }
       if (!loom_kernel_view_memory_space_is(
-              module, dest_id, loom_kernel_memory_space_is_global_dest)) {
+              module, op, dest_id, loom_kernel_memory_space_is_global_dest)) {
         loom_type_t dest_type = loom_module_value_type(module, dest_id);
         return loom_kernel_emit_operand_constraint(
             emitter, op, IREE_SV("dest"), dest_type,
@@ -855,14 +898,14 @@ static iree_status_t loom_kernel_verify_gather_memory_spaces(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
     const loom_op_t* op, loom_value_id_t source_id, loom_value_id_t dest_id) {
   if (!loom_kernel_view_memory_space_is(
-          module, source_id, loom_kernel_memory_space_is_global_source)) {
+          module, op, source_id, loom_kernel_memory_space_is_global_source)) {
     loom_type_t source_type = loom_module_value_type(module, source_id);
     return loom_kernel_emit_operand_constraint(
         emitter, op, IREE_SV("source"), source_type,
         IREE_SV("global, constant, or descriptor memory-space fact"));
   }
   if (!loom_kernel_view_memory_space_is(
-          module, dest_id, loom_kernel_memory_space_is_workgroup)) {
+          module, op, dest_id, loom_kernel_memory_space_is_workgroup)) {
     loom_type_t dest_type = loom_module_value_type(module, dest_id);
     return loom_kernel_emit_operand_constraint(
         emitter, op, IREE_SV("dest"), dest_type,
