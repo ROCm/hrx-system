@@ -45,6 +45,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _MUBUF_SOFFSET_INLINE_ZERO,
     _REG_EXEC,
     _REG_MODE,
+    _REG_PART_SGPR_HIGH16,
     _REG_PART_SGPR_LOW16,
     _REG_PART_VGPR_HIGH16,
     _REG_PART_VGPR_LOW16,
@@ -3239,6 +3240,53 @@ def test_scalar_float_arithmetic_descriptors_are_arch_specific() -> None:
             assert all(
                 operand.descriptor_operand.register_part == expected_register_part
                 for operand in descriptor.operands
+            )
+
+
+def test_scalar_float_conversion_descriptors_are_arch_specific() -> None:
+    expected_register_parts = {
+        "amdgpu.s_cvt_f32_i32": (None, None),
+        "amdgpu.s_cvt_f32_u32": (None, None),
+        "amdgpu.s_cvt_i32_f32": (None, None),
+        "amdgpu.s_cvt_u32_f32": (None, None),
+        "amdgpu.s_cvt_f16_f32": (_REG_PART_SGPR_LOW16, None),
+        "amdgpu.s_cvt_f32_f16": (None, _REG_PART_SGPR_LOW16),
+        "amdgpu.s_cvt_hi_f32_f16": (None, _REG_PART_SGPR_HIGH16),
+        "amdgpu.s_cvt_pk_rtz_f16_f32": (None, None, None),
+    }
+
+    for descriptor_set in (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx11_generic_core_overlays(),
+    ):
+        descriptor_keys = {descriptor.descriptor_key for descriptor in descriptor_set}
+        assert not expected_register_parts.keys() & descriptor_keys
+
+    for descriptor_set in (
+        _gfx117x_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx125x_core_overlays(),
+    ):
+        descriptors = {
+            descriptor.descriptor_key: descriptor for descriptor in descriptor_set
+        }
+        assert expected_register_parts.keys() <= descriptors.keys()
+        for descriptor_key, register_parts in expected_register_parts.items():
+            descriptor = descriptors[descriptor_key]
+            assert descriptor.schedule_class == _SCHEDULE_SALU
+            assert descriptor.encoding_name == (
+                "ENC_SOP2"
+                if descriptor_key == "amdgpu.s_cvt_pk_rtz_f16_f32"
+                else "ENC_SOP1"
+            )
+            assert (
+                tuple(
+                    operand.descriptor_operand.register_part
+                    for operand in descriptor.operands
+                )
+                == register_parts
             )
 
 

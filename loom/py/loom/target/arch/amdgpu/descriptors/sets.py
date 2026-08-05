@@ -1473,6 +1473,7 @@ def _gfx117x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *_gfx11_core_overlays(),
         *_s_float_arithmetic_overlays(),
+        *_s_float_conversion_overlays(),
         *_rdna_scalar_domain_fma_overlays(),
     )
 
@@ -1566,6 +1567,7 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         *_v_binary_f32_dpp16_overlays(),
         *_v_subrev_f32_overlays(),
         *_s_float_arithmetic_overlays(),
+        *_s_float_conversion_overlays(),
         _v_fma_f32_overlay(),
         _v_fmaak_f32_overlay(),
         _v_fmac_f32_overlay(),

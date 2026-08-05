@@ -29,6 +29,7 @@ from loom.target.arch.amdgpu.encoding import (
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_ARITHMETIC,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_CONVERSION,
     AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE,
     AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE,
     AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS,
@@ -357,6 +358,20 @@ _NATIVE_SCALAR_FLOAT_ARITHMETIC_DESCRIPTOR_KEYS = frozenset(
     )
 )
 
+_NATIVE_SCALAR_FLOAT_CONVERSION_DESCRIPTOR_KEYS = frozenset(
+    f"amdgpu.s_cvt_{operation}"
+    for operation in (
+        "f16_f32",
+        "f32_f16",
+        "f32_i32",
+        "f32_u32",
+        "hi_f32_f16",
+        "i32_f32",
+        "pk_rtz_f16_f32",
+        "u32_f32",
+    )
+)
+
 
 def _validate_descriptor_family_capability(
     *,
@@ -398,6 +413,15 @@ def _validate_descriptor_set_info_capabilities(
         capability_name="native packed BF16 arithmetic",
         declares_capability=bool(
             info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC
+        ),
+    )
+    _validate_descriptor_family_capability(
+        generator_target=generator_target,
+        descriptor_keys=descriptor_keys,
+        family_descriptor_keys=_NATIVE_SCALAR_FLOAT_CONVERSION_DESCRIPTOR_KEYS,
+        capability_name="native scalar floating-point conversion",
+        declares_capability=bool(
+            info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_CONVERSION
         ),
     )
     _validate_descriptor_family_capability(

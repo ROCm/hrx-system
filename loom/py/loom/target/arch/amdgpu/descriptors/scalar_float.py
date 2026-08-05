@@ -7,7 +7,7 @@
 
 # ruff: noqa: F403, F405
 
-"""Scalar floating-point arithmetic descriptor overlays."""
+"""Scalar floating-point descriptor overlays."""
 
 from __future__ import annotations
 
@@ -31,6 +31,16 @@ _SCALAR_FLOAT_UNARY_OPERATIONS = (
 )
 
 _SCALAR_FLOAT_BIT_WIDTHS = (16, 32)
+
+_SCALAR_FLOAT_CONVERSIONS = (
+    ("f32_i32", "convert.signed.i32.f32", None, None),
+    ("f32_u32", "convert.unsigned.u32.f32", None, None),
+    ("i32_f32", "convert.float.f32.signed.i32", None, None),
+    ("u32_f32", "convert.float.f32.unsigned.u32", None, None),
+    ("f16_f32", "convert.float.f32.f16", _REG_PART_SGPR_LOW16, None),
+    ("f32_f16", "convert.float.f16.f32", None, _REG_PART_SGPR_LOW16),
+    ("hi_f32_f16", "convert.float.f16.high.f32", None, _REG_PART_SGPR_HIGH16),
+)
 
 
 def _scalar_float_register_part(bit_width: int) -> str | None:
@@ -107,4 +117,58 @@ def _s_float_arithmetic_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
-__all__ = ("_s_float_arithmetic_overlays",)
+def _s_float_conversion_overlay(
+    operation: str,
+    semantic_tag: str,
+    result_register_part: str | None,
+    input_register_part: str | None,
+) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=f"amdgpu.s_cvt_{operation}",
+        instruction_name=f"S_CVT_{operation.upper()}",
+        mnemonic=f"s_cvt_{operation}",
+        encoding_name="ENC_SOP1",
+        encoding_condition="Nothas_lit_0_Nothas_lit_1",
+        semantic_tag=semantic_tag,
+        schedule_class=_SCHEDULE_SALU,
+        operands=(
+            AmdgpuOperandOverlay(
+                "SDST", _sgpr_result(register_part=result_register_part)
+            ),
+            AmdgpuOperandOverlay(
+                "SSRC0", _sgpr_operand("input", register_part=input_register_part)
+            ),
+        ),
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _s_float_conversion_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return (
+        *(
+            _s_float_conversion_overlay(*conversion)
+            for conversion in _SCALAR_FLOAT_CONVERSIONS
+        ),
+        AmdgpuDescriptorOverlay(
+            descriptor_key="amdgpu.s_cvt_pk_rtz_f16_f32",
+            instruction_name="S_CVT_PK_RTZ_F16_F32",
+            mnemonic="s_cvt_pk_rtz_f16_f32",
+            encoding_name="ENC_SOP2",
+            semantic_tag="convert.float.f32x2.f16x2.rtz",
+            schedule_class=_SCHEDULE_SALU,
+            operands=(
+                AmdgpuOperandOverlay("SDST", _sgpr_result()),
+                AmdgpuOperandOverlay("SSRC0", _sgpr_operand("lhs")),
+                AmdgpuOperandOverlay("SSRC1", _sgpr_operand("rhs")),
+            ),
+            constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+    )
+
+
+__all__ = (
+    "_s_float_arithmetic_overlays",
+    "_s_float_conversion_overlays",
+)

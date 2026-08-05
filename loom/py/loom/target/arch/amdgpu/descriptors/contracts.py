@@ -48,6 +48,7 @@ _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS: dict[
     "amdgpu.s_max_u32": _s_max_u32_overlay,
     "amdgpu.s_cselect_b32": _s_cselect_b32_overlay,
     **_contract_overlay_builders_from_overlays(_s_float_arithmetic_overlays()),
+    **_contract_overlay_builders_from_overlays(_s_float_conversion_overlays()),
     "amdgpu.v_mov_b32": _v_mov_b32_literal_overlay,
     "amdgpu.v_add_u32": lambda: _v_add_u32_overlay("V_ADD_NC_U32"),
     "amdgpu.v_add_u32.src0_inline": lambda: _v_add_u32_src0_inline_overlay(
