@@ -86,6 +86,32 @@ low.func.def target<test.low.core>(@test_target) @storage_view_passes(%value: re
 
 test.target<low_core> @test_target
 
+low.func.def target<test.low.core>(@test_target) @storage_view_chain_passes(%value: reg<test.i32>) -> (reg<test.i32>) {
+  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 128} : low.storage<scratch>
+  %outer = low.storage.view %storage {offset = 16, byte_length = 96} : low.storage<scratch> -> low.storage<scratch>
+  %middle = low.storage.view %outer {offset = 24, byte_length = 48} : low.storage<scratch> -> low.storage<scratch>
+  %inner = low.storage.view %middle {offset = 8, byte_length = 16} : low.storage<scratch> -> low.storage<scratch>
+  low.spill %value, %inner {offset = 15} : reg<test.i32>, low.storage<scratch>
+  %reload = low.reload %inner {offset = 15} : low.storage<scratch> -> reg<test.i32>
+  low.return %reload : reg<test.i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @storage_view_chain_rejects_nested_overflow() {
+  %storage = low.storage.reserve {byte_alignment = 16, byte_length = 128} : low.storage<scratch>
+  %outer = low.storage.view %storage {offset = 16, byte_length = 64} : low.storage<scratch> -> low.storage<scratch>
+  // ERROR@+1: SUBRANGE/004 {dim_index="0", offset="48", size="32", total="80", bound="64"}
+  %inner = low.storage.view %outer {offset = 48, byte_length = 32} : low.storage<scratch> -> low.storage<scratch>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 low.func.def target<test.low.core>(@test_target) @storage_view_rejects_overflowing_length() {
   %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<scratch>
   // ERROR@+1: SUBRANGE/004 {dim_index="0", offset="48", size="32", total="80", bound="64"}
