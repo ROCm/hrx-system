@@ -6,6 +6,7 @@
 
 #include "iree/io/formats/irpa/irpa_builder.h"
 
+#include <array>
 #include <limits>
 #include <vector>
 
@@ -15,6 +16,56 @@
 
 namespace iree {
 namespace {
+
+struct BuildArchiveTarget {
+  // Full target file contents allocated by the callback.
+  std::vector<uint8_t> contents;
+  // Resolved archive offset reported to the callback.
+  iree_io_physical_offset_t archive_offset = 0;
+  // Archive byte length reported to the callback.
+  iree_io_physical_size_t archive_length = 0;
+  // Number of times the callback has been invoked.
+  iree_host_size_t open_count = 0;
+  // Whether to link a valid empty archive at offset zero to the built archive.
+  bool link_from_file_start = false;
+};
+
+static iree_status_t OpenBuildArchiveTarget(
+    void* user_data, iree_io_physical_offset_t archive_offset,
+    iree_io_physical_size_t archive_length,
+    iree_io_file_handle_t** out_file_handle) {
+  auto* target = static_cast<BuildArchiveTarget*>(user_data);
+  ++target->open_count;
+  target->archive_offset = archive_offset;
+  target->archive_length = archive_length;
+
+  uint64_t file_length = 0;
+  if (!iree_checked_add_u64(archive_offset, archive_length, &file_length) ||
+      file_length > IREE_HOST_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "test archive allocation range overflow");
+  }
+  target->contents.assign(static_cast<size_t>(file_length), 0xCD);
+  if (target->link_from_file_start) {
+    if (archive_offset < sizeof(iree_io_parameter_archive_header_v0_t)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "embedded archive overlaps prefix header");
+    }
+    iree_io_parameter_archive_header_v0_t prefix_header = {};
+    prefix_header.prefix.magic = IREE_IO_PARAMETER_ARCHIVE_MAGIC;
+    prefix_header.prefix.version_major = 0;
+    prefix_header.prefix.version_minor = 0;
+    prefix_header.prefix.header_size = sizeof(prefix_header);
+    prefix_header.prefix.next_header_offset = archive_offset;
+    memcpy(target->contents.data(), &prefix_header, sizeof(prefix_header));
+  }
+
+  return iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE,
+      iree_make_byte_span(target->contents.data(), target->contents.size()),
+      iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+      out_file_handle);
+}
 
 class IrpaBuilderTest : public ::testing::Test {
  protected:
@@ -176,6 +227,129 @@ TEST_F(IrpaBuilderTest, RejectsNonIntegralSplatPattern) {
           &builder_, IREE_SV("invalid"), iree_const_byte_span_empty(), &pattern,
           sizeof(pattern), 6));
   EXPECT_TRUE(iree_io_parameter_archive_builder_is_empty(&builder_));
+}
+
+TEST(IrpaBuilderIntegrationTest, BuildsEmbeddedArchiveAtReportedOffset) {
+  const std::array<uint8_t, 5> source_contents = {1, 3, 5, 7, 9};
+  iree_io_file_handle_t* source_file_handle = NULL;
+  IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ,
+      iree_make_byte_span(const_cast<uint8_t*>(source_contents.data()),
+                          source_contents.size()),
+      iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+      &source_file_handle));
+  iree_io_parameter_index_t* source_index = NULL;
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_create(iree_allocator_system(), &source_index));
+  iree_io_parameter_index_entry_t source_entry = {};
+  source_entry.key = IREE_SV("embedded");
+  source_entry.metadata = iree_const_byte_span_empty();
+  source_entry.length = source_contents.size();
+  source_entry.type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE;
+  source_entry.storage.file.handle = source_file_handle;
+  source_entry.storage.file.offset = 0;
+  IREE_ASSERT_OK(iree_io_parameter_index_add(source_index, &source_entry));
+  iree_io_file_handle_release(source_file_handle);
+
+  iree_io_parameter_index_t* target_index = NULL;
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_create(iree_allocator_system(), &target_index));
+  BuildArchiveTarget target;
+  target.link_from_file_start = true;
+  const iree_io_parameter_archive_file_open_callback_t open_callback = {
+      /*.fn=*/OpenBuildArchiveTarget,
+      /*.user_data=*/&target,
+  };
+  const iree_io_physical_offset_t requested_offset =
+      sizeof(iree_io_parameter_archive_header_v0_t) + 1;
+  IREE_ASSERT_OK(iree_io_build_parameter_archive(
+      source_index, target_index, open_callback, requested_offset,
+      iree_allocator_system()));
+
+  ASSERT_EQ(1u, target.open_count);
+  const iree_io_physical_size_t archive_alignment =
+      iree_max(IREE_IO_PARAMETER_ARCHIVE_HEADER_ALIGNMENT,
+               IREE_IO_PARAMETER_ARCHIVE_DEFAULT_DATA_ALIGNMENT);
+  ASSERT_EQ(iree_align_uint64(requested_offset, archive_alignment),
+            target.archive_offset);
+  EXPECT_EQ(target.archive_offset + target.archive_length,
+            target.contents.size());
+  EXPECT_EQ(0xCD, target.contents[requested_offset]);
+  const auto* archive_header =
+      reinterpret_cast<const iree_io_parameter_archive_header_v0_t*>(
+          target.contents.data() + target.archive_offset);
+  EXPECT_EQ(IREE_IO_PARAMETER_ARCHIVE_MAGIC, archive_header->prefix.magic);
+
+  const iree_io_parameter_index_entry_t* target_entry = NULL;
+  IREE_ASSERT_OK(iree_io_parameter_index_lookup(
+      target_index, IREE_SV("embedded"), &target_entry));
+  const iree_io_physical_offset_t expected_data_offset =
+      target.archive_offset + archive_header->storage_segment.offset;
+  EXPECT_EQ(expected_data_offset, target_entry->storage.file.offset);
+  EXPECT_EQ(0u, target_entry->storage.file.offset % archive_alignment);
+  EXPECT_EQ(0, memcmp(target.contents.data() + expected_data_offset,
+                      source_contents.data(), source_contents.size()));
+
+  iree_io_file_handle_t* target_file_handle = NULL;
+  IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ,
+      iree_make_byte_span(target.contents.data(), target.contents.size()),
+      iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+      &target_file_handle));
+  iree_io_parameter_index_t* parsed_index = NULL;
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_create(iree_allocator_system(), &parsed_index));
+  IREE_ASSERT_OK(iree_io_parse_irpa_index(target_file_handle, parsed_index,
+                                          iree_allocator_system()));
+  const iree_io_parameter_index_entry_t* parsed_entry = NULL;
+  IREE_ASSERT_OK(iree_io_parameter_index_lookup(
+      parsed_index, IREE_SV("embedded"), &parsed_entry));
+  EXPECT_EQ(expected_data_offset, parsed_entry->storage.file.offset);
+
+  iree_io_parameter_index_release(parsed_index);
+  iree_io_file_handle_release(target_file_handle);
+  iree_io_parameter_index_release(target_index);
+  iree_io_parameter_index_release(source_index);
+}
+
+TEST(IrpaBuilderIntegrationTest, RejectsEmbeddedRangeBeforeOpen) {
+  iree_io_parameter_index_t* source_index = NULL;
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_create(iree_allocator_system(), &source_index));
+  iree_io_parameter_index_t* target_index = NULL;
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_create(iree_allocator_system(), &target_index));
+  BuildArchiveTarget target;
+  const iree_io_parameter_archive_file_open_callback_t open_callback = {
+      /*.fn=*/OpenBuildArchiveTarget,
+      /*.user_data=*/&target,
+  };
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_io_build_parameter_archive(
+          source_index, target_index, open_callback,
+          std::numeric_limits<iree_io_physical_offset_t>::max() - 1,
+          iree_allocator_system()));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_io_build_parameter_archive(
+          source_index, target_index, open_callback,
+          std::numeric_limits<iree_io_physical_offset_t>::max() -
+              (IREE_IO_PARAMETER_ARCHIVE_HEADER_ALIGNMENT - 1),
+          iree_allocator_system()));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_io_build_parameter_archive(
+          source_index, target_index, open_callback,
+          static_cast<iree_io_physical_offset_t>(INT64_MAX) -
+              (IREE_IO_PARAMETER_ARCHIVE_HEADER_ALIGNMENT - 1),
+          iree_allocator_system()));
+  EXPECT_EQ(0u, target.open_count);
+  EXPECT_EQ(0u, iree_io_parameter_index_count(target_index));
+
+  iree_io_parameter_index_release(target_index);
+  iree_io_parameter_index_release(source_index);
 }
 
 }  // namespace

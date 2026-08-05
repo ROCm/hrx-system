@@ -14,6 +14,8 @@ typedef struct iree_io_parameter_archive_layout_t {
   iree_io_parameter_archive_range_t metadata_segment;
   // File-backed parameter data range.
   iree_io_parameter_archive_range_t storage_segment;
+  // Required alignment of the archive header in the target file.
+  iree_io_physical_size_t archive_alignment;
   // Final archive size including trailing file-alignment padding.
   iree_io_physical_size_t total_size;
 } iree_io_parameter_archive_layout_t;
@@ -47,6 +49,8 @@ static iree_status_t iree_io_parameter_archive_builder_calculate_layout(
 
   iree_io_parameter_archive_layout_t layout;
   memset(&layout, 0, sizeof(layout));
+  layout.archive_alignment =
+      iree_max(IREE_IO_PARAMETER_ARCHIVE_HEADER_ALIGNMENT, storage_alignment);
   if (!iree_checked_align_u64(sizeof(iree_io_parameter_archive_header_v0_t),
                               IREE_IO_PARAMETER_ARCHIVE_ENTRY_ALIGNMENT,
                               &layout.entry_segment.offset)) {
@@ -81,6 +85,33 @@ static iree_status_t iree_io_parameter_archive_builder_calculate_layout(
   }
 
   *out_layout = layout;
+  return iree_ok_status();
+}
+
+// Verifies that a resolved archive layout can be written at an exact file
+// offset using the signed stream position type.
+static iree_status_t iree_io_parameter_archive_validate_file_range(
+    const iree_io_parameter_archive_layout_t* layout,
+    iree_io_physical_offset_t file_offset) {
+  if (file_offset % layout->archive_alignment != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "IRPA file offset %" PRIu64
+                            " is not aligned to %" PRIu64 " bytes",
+                            file_offset, layout->archive_alignment);
+  }
+  iree_io_physical_offset_t file_end = 0;
+  if (!iree_checked_add_u64(file_offset, layout->total_size, &file_end)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "IRPA file range overflow (offset=%" PRIu64
+                            ", length=%" PRIu64 ")",
+                            file_offset, layout->total_size);
+  }
+  if (file_end > INT64_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "IRPA file range end %" PRIu64
+                            " exceeds stream position range",
+                            file_end);
+  }
   return iree_ok_status();
 }
 
@@ -178,6 +209,13 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_write(
   iree_io_parameter_archive_layout_t layout;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_io_parameter_archive_builder_calculate_layout(builder, &layout));
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_io_parameter_archive_validate_file_range(&layout, file_offset));
+
+  // The complete file range and relative storage segment have been checked,
+  // so this absolute segment base is representable for every builder entry.
+  const iree_io_physical_offset_t storage_base_offset =
+      file_offset + layout.storage_segment.offset;
 
   // Write the archive header referencing the other segments in the file.
   iree_io_parameter_archive_header_v0_t header = {
@@ -275,7 +313,7 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_write(
                 },
         };
         target_entry.storage.file.handle = file_handle;
-        target_entry.storage.file.offset += layout.storage_segment.offset;
+        target_entry.storage.file.offset += storage_base_offset;
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
             z0, iree_io_stream_write(stream, sizeof(data_entry), &data_entry));
         break;
@@ -473,14 +511,28 @@ IREE_API_EXPORT iree_status_t iree_io_build_parameter_archive(
     if (!iree_status_is_ok(status)) break;
   }
 
-  // Open a file of sufficient size (now that we know it) for writing.
-  iree_io_physical_offset_t archive_offset = iree_align_uint64(
-      target_file_offset, IREE_IO_PARAMETER_ARCHIVE_HEADER_ALIGNMENT);
-  iree_io_physical_size_t archive_length = 0;
+  // Resolve the complete archive range before opening or mutating the target.
+  iree_io_parameter_archive_layout_t layout = {0};
   if (iree_status_is_ok(status)) {
     status =
-        iree_io_parameter_archive_builder_total_size(&builder, &archive_length);
+        iree_io_parameter_archive_builder_calculate_layout(&builder, &layout);
   }
+  iree_io_physical_offset_t archive_offset = 0;
+  if (iree_status_is_ok(status) &&
+      !iree_checked_align_u64(target_file_offset, layout.archive_alignment,
+                              &archive_offset)) {
+    status =
+        iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                         "IRPA file offset alignment overflow (offset=%" PRIu64
+                         ", alignment=%" PRIu64 ")",
+                         target_file_offset, layout.archive_alignment);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_io_parameter_archive_validate_file_range(&layout, archive_offset);
+  }
+  const iree_io_physical_size_t archive_length =
+      iree_status_is_ok(status) ? layout.total_size : 0;
   iree_io_file_handle_t* target_file_handle = NULL;
   if (iree_status_is_ok(status)) {
     status = target_file_open.fn(target_file_open.user_data, archive_offset,
@@ -492,14 +544,14 @@ IREE_API_EXPORT iree_status_t iree_io_build_parameter_archive(
   if (iree_status_is_ok(status)) {
     status =
         iree_io_stream_open(IREE_IO_STREAM_MODE_WRITABLE, target_file_handle,
-                            target_file_offset, host_allocator, &target_stream);
+                            archive_offset, host_allocator, &target_stream);
   }
 
   // Commit the archive header to the file and produce an index referencing it.
   // This will allow us to know where to copy file contents.
   if (iree_status_is_ok(status)) {
     status = iree_io_parameter_archive_builder_write(
-        &builder, target_file_handle, target_file_offset, target_stream,
+        &builder, target_file_handle, archive_offset, target_stream,
         target_index);
   }
 
@@ -507,29 +559,40 @@ IREE_API_EXPORT iree_status_t iree_io_build_parameter_archive(
   // This is a slow operation and something we could optimize with lower-level
   // platform primitives.
   if (iree_status_is_ok(status)) {
+    // The writer leaves the stream immediately after the metadata segment.
+    // Track that archive-relative position independently of the stream's
+    // implementation-specific base coordinate.
+    iree_io_physical_offset_t archive_stream_offset =
+        layout.metadata_segment.offset + layout.metadata_segment.length;
     for (iree_host_size_t i = 0;
          i < iree_io_parameter_index_count(source_index); ++i) {
       const iree_io_parameter_index_entry_t* source_entry = NULL;
       status = iree_io_parameter_index_get(source_index, i, &source_entry);
       if (!iree_status_is_ok(status)) break;
-      const iree_io_parameter_index_entry_t* target_entry = NULL;
-      status = iree_io_parameter_index_lookup(target_index, source_entry->key,
-                                              &target_entry);
+      const iree_io_parameter_index_entry_t* builder_entry = NULL;
+      status = iree_io_parameter_index_get(builder.index, i, &builder_entry);
       if (!iree_status_is_ok(status)) break;
       switch (source_entry->type) {
         case IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_SPLAT:
           // No work to do.
           break;
-        case IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE:
+        case IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE: {
+          // Builder storage offsets are monotonically allocated, allowing all
+          // target implementations to use the same forward-only positioning.
+          const iree_io_physical_offset_t target_offset =
+              layout.storage_segment.offset +
+              builder_entry->storage.file.offset;
           status = iree_io_stream_seek(
-              target_stream, IREE_IO_STREAM_SEEK_SET,
-              target_file_offset + target_entry->storage.file.offset);
+              target_stream, IREE_IO_STREAM_SEEK_FROM_CURRENT,
+              (iree_io_stream_pos_t)(target_offset - archive_stream_offset));
           if (!iree_status_is_ok(status)) break;
           status = iree_io_stream_write_file(
               target_stream, source_entry->storage.file.handle,
-              source_entry->storage.file.offset, target_entry->length,
-              host_allocator);
+              source_entry->storage.file.offset,
+              (iree_io_stream_pos_t)source_entry->length, host_allocator);
+          archive_stream_offset = target_offset + source_entry->length;
           break;
+        }
         default:
           status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                     "unhandled index entry storage type %d",

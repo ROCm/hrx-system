@@ -27,7 +27,8 @@ extern "C" {
 //  iree_io_parameter_archive_builder_add_data_entry(&builder, ...);
 //  iree_io_parameter_archive_builder_total_size(&builder, &total_size);
 //  << create file of total_size, map into memory >>
-//  iree_io_parameter_archive_builder_write(&builder, file, &target_index);
+//  iree_io_parameter_archive_builder_write(&builder, file, 0, stream,
+//                                          target_index);
 //  << file now contains the full archive header >>
 //  << target_index now references the ranges in the file >>
 //  << write parameter contents, or don't if leaving uninitialized >>
@@ -88,9 +89,11 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_total_size(
 // Writes the parameter archive to the given |file_handle|. The file must have
 // at least enough storage to fit the size calculated by
 // iree_io_parameter_archive_builder_total_size.
-// The archive will be written starting at the given |file_offset|.
-// Entries for all parameters will be appended to |target_index| referencing
-// the given |file_handle|.
+// The archive will be written starting at the exact |file_offset|, which must
+// satisfy the header and storage alignment requirements. |stream| must already
+// be positioned at that location in |file_handle|. Entries for all parameters
+// will be appended to |target_index| with offsets relative to the base of
+// |file_handle|.
 IREE_API_EXPORT iree_status_t iree_io_parameter_archive_builder_write(
     const iree_io_parameter_archive_builder_t* builder,
     iree_io_file_handle_t* file_handle, iree_io_physical_offset_t file_offset,
@@ -138,6 +141,9 @@ typedef struct {
 // |target_file_open| callback will be used to acquire a handle to a writeable
 // file with enough capacity to fit the whole archive. All parameter contents
 // will be written and flushed to the file prior to returning.
+// |target_file_offset| is the minimum placement offset. The archive may be
+// advanced to satisfy its header and storage alignment requirements; the
+// callback receives the resolved archive offset.
 IREE_API_EXPORT iree_status_t iree_io_build_parameter_archive(
     iree_io_parameter_index_t* source_index,
     iree_io_parameter_index_t* target_index,
