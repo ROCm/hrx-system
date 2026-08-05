@@ -8,8 +8,8 @@ kernel.def target(@target) @subgroup_active_mask_i64_wave64() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%output: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi64, #dense>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi64, #dense>
   %mask = kernel.subgroup.active.mask : i64
   %result = vector.from_elements %mask : vector<1xi64>
   vector.store %result, %output_view[%tid] : vector<1xi64>, view<64xi64, #dense>
@@ -41,8 +41,8 @@ kernel.def target(@target) @subgroup_vote_ballot_i64_wave64() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%output: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi64, #dense>
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi64, #dense>
   %lane = kernel.subgroup.lane.id : index
   %lane_i32 = index.cast %lane : index to i32
   %limit = scalar.constant 32 : i32

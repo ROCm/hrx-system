@@ -3,14 +3,14 @@
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @workgroup_scan_wave64_native_partitions() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %thread = kernel.workitem.id<x> : index
-  %zero_offset = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_offset] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<64xi32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
   %value = view.load %input_view[%thread] : view<64xi32, #dense> -> i32
   %prefix = kernel.workgroup.scan<addi> %value {direction = forward, mode = exclusive} : i32
   view.store %prefix, %output_view[%thread] : i32, view<64xi32, #dense>

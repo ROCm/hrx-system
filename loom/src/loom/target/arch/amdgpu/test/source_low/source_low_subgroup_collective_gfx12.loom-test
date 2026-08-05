@@ -3,9 +3,9 @@
 amdgpu.target<gfx1250> @target
 
 kernel.def target(@target) @workgroup_reduce_addf_f32_multi_wave_gfx1250() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %start = index.constant 0 : offset
@@ -68,9 +68,9 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(64, 1, 
 amdgpu.target<gfx1250> @target
 
 kernel.def target(@target) @workgroup_scan_inclusive_addi_i32_multi_wave_gfx1250() {
-  %one = index.constant 1 : index
+  %unit = index.constant 1 : index
   %workgroup_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%workgroup_size, %one, %one) : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
   %start = index.constant 0 : offset
@@ -161,8 +161,8 @@ kernel.def target(@target) @subgroup_vote_any_wave64_gfx12() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%input: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
   %loaded = vector.load %input_view[%tid] : view<64xi32, #dense> -> vector<1xi32>
   %value = vector.extract %loaded[0] : vector<1xi32> -> i32
   %threshold = scalar.constant 0 : i32
@@ -202,8 +202,8 @@ kernel.def target(@target) @subgroup_vote_all_wave64_gfx12() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%input: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
   %loaded = vector.load %input_view[%tid] : view<64xi32, #dense> -> vector<1xi32>
   %value = vector.extract %loaded[0] : vector<1xi32> -> i32
   %threshold = scalar.constant 0 : i32
@@ -242,9 +242,9 @@ kernel.def target(@target) @subgroup_broadcast_first_i32_wave64_gfx12() {
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
 } launch(%input: buffer, %output: buffer) {
   %tid = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
   %loaded = vector.load %input_view[%tid] : view<64xi32, #dense> -> vector<1xi32>
   %value = vector.extract %loaded[0] : vector<1xi32> -> i32
   %broadcast = kernel.subgroup.broadcast.first %value : i32
