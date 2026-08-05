@@ -82,6 +82,11 @@ class AmdgpuCompileReportSuggestionProvider:
             )
             if residency_suggestion is not None:
                 suggestions.append(residency_suggestion)
+            communication_suggestion = _suggest_single_subgroup_communication(
+                entry, entry_name, path_prefix
+            )
+            if communication_suggestion is not None:
+                suggestions.append(communication_suggestion)
             wave_suggestion = _suggest_nondefault_wave_size(
                 entry,
                 entry_name,
@@ -381,6 +386,74 @@ def _suggest_nondefault_wave_size(
                 value=default_wave_size,
             ),
         ),
+    )
+
+
+def _suggest_single_subgroup_communication(
+    entry: dict[str, object],
+    entry_name: str,
+    path_prefix: str,
+) -> CompileReportSuggestion | None:
+    workgroup_size = _object_at(entry, "workload", "workgroup_size")
+    target_resources = _object_at(entry, "target_resources")
+    instruction_mix = _object_at(entry, "static_instruction_mix")
+    if workgroup_size is None or target_resources is None or instruction_mix is None:
+        return None
+    flat_workgroup_size = _integer(workgroup_size.get("flat"))
+    subgroup_size = _integer(target_resources.get("subgroup_size"))
+    barrier_count = _integer(instruction_mix.get("barrier_count"))
+    if (
+        flat_workgroup_size is None
+        or flat_workgroup_size == 0
+        or subgroup_size is None
+        or subgroup_size == 0
+        or flat_workgroup_size > subgroup_size
+        or barrier_count is None
+        or barrier_count == 0
+    ):
+        return None
+
+    evidence = [
+        CompileReportSuggestionEvidence(
+            path=f"{path_prefix}.workload.workgroup_size.flat",
+            value=flat_workgroup_size,
+        ),
+        CompileReportSuggestionEvidence(
+            path=f"{path_prefix}.target_resources.subgroup_size",
+            value=subgroup_size,
+        ),
+        CompileReportSuggestionEvidence(
+            path=f"{path_prefix}.static_instruction_mix.barrier_count",
+            value=barrier_count,
+        ),
+    ]
+    local_memory_instruction_count = _integer(instruction_mix.get("local_memory_count"))
+    if local_memory_instruction_count is not None:
+        evidence.append(
+            CompileReportSuggestionEvidence(
+                path=(f"{path_prefix}.static_instruction_mix.local_memory_count"),
+                value=local_memory_instruction_count,
+            )
+        )
+    local_memory_bytes = _integer(entry.get("local_memory_bytes"))
+    if local_memory_bytes is not None:
+        evidence.append(
+            CompileReportSuggestionEvidence(
+                path=f"{path_prefix}.local_memory_bytes",
+                value=local_memory_bytes,
+            )
+        )
+    return CompileReportSuggestion(
+        suggestion_id="amdgpu.single_subgroup_workgroup_communication",
+        entry_name=entry_name,
+        action=(
+            "The workgroup fits within one subgroup but still emits workgroup "
+            "barriers. Inspect whether workgroup exchange or reduction can use "
+            "subgroup operations, or whether the barriers are redundant; then "
+            "require barrier and local-memory traffic to fall before "
+            "benchmarking."
+        ),
+        evidence=tuple(evidence),
     )
 
 

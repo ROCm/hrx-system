@@ -309,6 +309,28 @@ def _add_lds_ssa_use_evidence(
     }
 
 
+def _add_single_subgroup_communication_evidence(
+    report: dict[str, object],
+    *,
+    flat_workgroup_size: int,
+    barrier_count: int,
+) -> None:
+    entry = report["entries"]["rows"][0]
+    entry["workload"] = {
+        "workgroup_size": {
+            "x": flat_workgroup_size,
+            "y": 1,
+            "z": 1,
+            "flat": flat_workgroup_size,
+        }
+    }
+    entry["local_memory_bytes"] = 528
+    entry["static_instruction_mix"] = {
+        "barrier_count": barrier_count,
+        "local_memory_count": 16,
+    }
+
+
 def test_suggests_ordered_experiments_from_exact_target_evidence() -> None:
     document = parse_compile_report(_compile_report(), source="report.json")
 
@@ -476,6 +498,57 @@ def test_ignores_pipelined_lds_ssa_uses() -> None:
     result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
 
     assert "amdgpu.lds_ssa_use_serialization" not in {
+        suggestion.suggestion_id for suggestion in result.suggestions
+    }
+
+
+def test_suggests_single_subgroup_workgroup_communication() -> None:
+    report = _compile_report()
+    _add_single_subgroup_communication_evidence(
+        report,
+        flat_workgroup_size=64,
+        barrier_count=4,
+    )
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    suggestion = next(
+        suggestion
+        for suggestion in result.suggestions
+        if suggestion.suggestion_id == "amdgpu.single_subgroup_workgroup_communication"
+    )
+    assert "fits within one subgroup" in suggestion.action
+    evidence = {item.path: item.value for item in suggestion.evidence}
+    assert evidence["entries.rows[0].workload.workgroup_size.flat"] == 64
+    assert evidence["entries.rows[0].target_resources.subgroup_size"] == 64
+    assert evidence["entries.rows[0].static_instruction_mix.barrier_count"] == 4
+    assert evidence["entries.rows[0].static_instruction_mix.local_memory_count"] == 16
+    assert evidence["entries.rows[0].local_memory_bytes"] == 528
+
+
+@pytest.mark.parametrize(
+    ("flat_workgroup_size", "barrier_count"),
+    [
+        (128, 4),
+        (64, 0),
+    ],
+)
+def test_ignores_multi_subgroup_or_barrier_free_communication(
+    flat_workgroup_size: int,
+    barrier_count: int,
+) -> None:
+    report = _compile_report()
+    _add_single_subgroup_communication_evidence(
+        report,
+        flat_workgroup_size=flat_workgroup_size,
+        barrier_count=barrier_count,
+    )
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    assert "amdgpu.single_subgroup_workgroup_communication" not in {
         suggestion.suggestion_id for suggestion in result.suggestions
     }
 
