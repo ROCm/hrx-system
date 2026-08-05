@@ -1331,8 +1331,8 @@ uint8_t loom_call_like_purity(loom_call_like_t call);
 // Returns the temperature attr value (0 = unspecified).
 uint8_t loom_call_like_temperature(loom_call_like_t call);
 
-// Returns the inline policy attr value (0 = unspecified).
-uint8_t loom_call_like_inline_policy(loom_call_like_t call);
+// Returns the authored inline policy.
+loom_inline_policy_t loom_call_like_inline_policy(loom_call_like_t call);
 
 // Returns the semantic class of the call-like op.
 loom_call_like_kind_t loom_call_like_kind(loom_call_like_t call);
@@ -1386,8 +1386,8 @@ uint8_t loom_func_like_purity(loom_func_like_t func);
 // Returns the temperature attr value (0 = unspecified).
 uint8_t loom_func_like_temperature(loom_func_like_t func);
 
-// Returns the inline policy attr value (0 = unspecified).
-uint8_t loom_func_like_inline_policy(loom_func_like_t func);
+// Returns the authored inline policy.
+loom_inline_policy_t loom_func_like_inline_policy(loom_func_like_t func);
 
 // Returns the visibility attr value (0 = private, nonzero = public).
 uint8_t loom_func_like_visibility(loom_func_like_t func);

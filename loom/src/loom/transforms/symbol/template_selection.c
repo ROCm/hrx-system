@@ -1507,7 +1507,7 @@ static iree_status_t loom_template_selection_rewrite_entry(
   loom_op_t* call_op = NULL;
   IREE_RETURN_IF_ERROR(loom_func_call_build(
       &rewriter->builder, build_flags, purity, temperature,
-      LOOM_FUNC_INLINE_POLICY_INLINE, entry->selected_provider->symbol,
+      LOOM_INLINE_POLICY_INLINE, entry->selected_provider->symbol,
       operands.values, operands.count, result_types, results.count,
       loom_op_tied_results(entry->apply_op), entry->apply_op->tied_result_count,
       entry->apply_op->location, &call_op));

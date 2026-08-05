@@ -59,6 +59,7 @@ from loom.dsl import (
     EnumCase,
     EnumDef,
     FuncLikeInterface,
+    InlinePolicy,
     Op,
     Operand,
     OpPhase,
@@ -122,13 +123,24 @@ Temperature = EnumDef(
     doc="Execution temperature hint. Absent (0) means unspecified.",
 )
 
-InlinePolicy = EnumDef(
+InlinePolicyAttr = EnumDef(
     "InlinePolicy",
     [
-        EnumCase("inline", 1, doc="Require inlining at the current IR stage."),
-        EnumCase("noinline", 2, doc="Preserve the callable boundary."),
+        EnumCase(
+            "inline",
+            InlinePolicy.INLINE.value,
+            doc="Require inlining at the current IR stage.",
+        ),
+        EnumCase(
+            "noinline",
+            InlinePolicy.NOINLINE.value,
+            doc="Preserve the callable boundary.",
+        ),
     ],
     doc="Author inline policy. Absent (0) leaves the edge to the current pass.",
+    c_type="loom_inline_policy_t",
+    c_const_prefix="LOOM_INLINE_POLICY",
+    c_include="loom/ir/ir.h",
 )
 
 _RETAIN_ATTR = AttrDef("retain", "enum", enum_def=Retain, optional=True)
@@ -233,7 +245,7 @@ _MODIFIER_ATTRS = [
     AttrDef("cc", "enum", enum_def=CallingConv, optional=True),
     AttrDef("purity", "enum", enum_def=Purity, optional=True),
     AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
-    AttrDef("inline_policy", "enum", enum_def=InlinePolicy, optional=True),
+    AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     AttrDef("predicates", "predicate_list", optional=True),
 ]
 
@@ -274,7 +286,7 @@ _DECL_ATTRS = [
     AttrDef("cc", "enum", enum_def=CallingConv, optional=True),
     AttrDef("purity", "enum", enum_def=Purity, optional=True),
     AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
-    AttrDef("inline_policy", "enum", enum_def=InlinePolicy, optional=True),
+    AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     *_CONTRACT_ATTRS,
     AttrDef("predicates", "predicate_list", optional=True),
     _RETAIN_ATTR,
@@ -522,7 +534,7 @@ func_call = Op(
         ),
         AttrDef("purity", "enum", enum_def=Purity, optional=True),
         AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
-        AttrDef("inline_policy", "enum", enum_def=InlinePolicy, optional=True),
+        AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     ],
     results=[Result("results", ANY, variadic=True)],
     traits=[UNKNOWN_EFFECTS],

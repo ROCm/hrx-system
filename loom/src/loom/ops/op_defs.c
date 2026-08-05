@@ -832,14 +832,14 @@ uint8_t loom_call_like_temperature(loom_call_like_t call) {
       loom_op_attrs(call.op)[call.vtable->temperature_attr_index]);
 }
 
-uint8_t loom_call_like_inline_policy(loom_call_like_t call) {
+loom_inline_policy_t loom_call_like_inline_policy(loom_call_like_t call) {
   if (!call.vtable) {
-    return 0;
+    return LOOM_INLINE_POLICY_UNSPECIFIED;
   }
   if (call.vtable->inline_policy_attr_index == LOOM_ATTR_INDEX_NONE) {
-    return 0;
+    return LOOM_INLINE_POLICY_UNSPECIFIED;
   }
-  return loom_attr_as_enum(
+  return (loom_inline_policy_t)loom_attr_as_enum(
       loom_op_attrs(call.op)[call.vtable->inline_policy_attr_index]);
 }
 
@@ -918,10 +918,12 @@ uint8_t loom_func_like_temperature(loom_func_like_t func) {
       loom_op_attrs(func.op)[func.vtable->temperature_attr_index]);
 }
 
-uint8_t loom_func_like_inline_policy(loom_func_like_t func) {
-  if (!func.vtable) return 0;
-  if (func.vtable->inline_policy_attr_index == LOOM_ATTR_INDEX_NONE) return 0;
-  return loom_attr_as_enum(
+loom_inline_policy_t loom_func_like_inline_policy(loom_func_like_t func) {
+  if (!func.vtable) return LOOM_INLINE_POLICY_UNSPECIFIED;
+  if (func.vtable->inline_policy_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return LOOM_INLINE_POLICY_UNSPECIFIED;
+  }
+  return (loom_inline_policy_t)loom_attr_as_enum(
       loom_op_attrs(func.op)[func.vtable->inline_policy_attr_index]);
 }
 

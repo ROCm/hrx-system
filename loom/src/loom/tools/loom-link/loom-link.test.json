@@ -37,6 +37,23 @@
       }
     },
     {
+      "name": "preserves required-inline kernel helper in archive",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/archive_inline_kernel_helper.loom",
+          "--mode=archive"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "func.def inline @subgroup_broadcast_helper",
+          "kernel.subgroup.broadcast",
+          "kernel.def @subgroup_broadcast_kernel"
+        ]
+      }
+    },
+    {
       "name": "links text corpus into harness",
       "steps": [
         {

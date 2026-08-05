@@ -299,7 +299,7 @@ static const loom_op_t* loom_verify_find_ancestor(const loom_op_t* op,
   return NULL;
 }
 
-static bool loom_verify_has_deferred_template_ancestor(
+static bool loom_verify_has_deferred_required_ancestor(
     const loom_verify_state_t* state, const loom_op_t* op) {
   const loom_op_t* parent = op->parent_op;
   while (parent) {
@@ -308,6 +308,15 @@ static bool loom_verify_has_deferred_template_ancestor(
     if (parent_vtable &&
         parent_vtable->symbol_kind == LOOM_SYMBOL_FUNC_TEMPLATE) {
       return true;
+    }
+    if (parent_vtable && parent_vtable->func_like) {
+      const uint8_t inline_policy_attr_index =
+          parent_vtable->func_like->inline_policy_attr_index;
+      if (inline_policy_attr_index != LOOM_ATTR_INDEX_NONE &&
+          loom_attr_as_enum(loom_op_const_attrs(
+              parent)[inline_policy_attr_index]) == LOOM_INLINE_POLICY_INLINE) {
+        return true;
+      }
     }
     if (parent_vtable && loom_traits_is_isolated(parent_vtable->traits)) {
       return false;
@@ -346,10 +355,10 @@ void loom_verify_op_placement(loom_verify_state_t* state, const loom_op_t* op,
   for (uint8_t i = 0; i < placement->required_ancestor_count; ++i) {
     loom_op_kind_t ancestor_kind = placement->required_ancestors[i];
     if (loom_verify_find_ancestor(op, ancestor_kind)) continue;
-    // Template bodies are verified before their application context is known.
-    // Provider selection checks deferred ancestor requirements at each apply
-    // site before materializing the body.
-    if (loom_verify_has_deferred_template_ancestor(state, op)) {
+    // Templates and required-inline functions are verified before their final
+    // placement context is known. Materialization or inlining supplies that
+    // context, and verification after the transform enforces the requirement.
+    if (loom_verify_has_deferred_required_ancestor(state, op)) {
       continue;
     }
     loom_verify_emit_placement_diagnostic(

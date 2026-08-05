@@ -52,7 +52,7 @@ typedef struct loom_func_symbol_facts_t {
   uint8_t temperature;
 
   // Inline policy enum value from the func interface.
-  uint8_t inline_policy;
+  loom_inline_policy_t inline_policy;
 
   // True when the func op owns an implementation body.
   bool has_body;

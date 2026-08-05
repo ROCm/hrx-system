@@ -6,12 +6,14 @@
 
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.diagnostics import DiagnosticEngine
+from loom.dialect.func import ALL_FUNC_OPS
 from loom.dialect.test import ALL_TEST_OPS
 from loom.dsl import (
     ANY,
     INTEGER,
     ISOLATED_FROM_ABOVE,
     HasAncestor,
+    InlinePolicy,
     Op,
     Operand,
     RegionDef,
@@ -269,6 +271,45 @@ def test_verifier_defers_template_ancestor_requirement() -> None:
     assert not diagnostics.has_errors
 
 
+def test_verifier_defers_required_inline_ancestor_requirement() -> None:
+    diagnostics = _verify_required_ancestor_in_func(
+        InlinePolicy.INLINE,
+        Operation(name="test.requires_context"),
+    )
+
+    assert not diagnostics.has_errors
+
+
+def test_verifier_does_not_defer_noinline_ancestor_requirement() -> None:
+    diagnostics = _verify_required_ancestor_in_func(
+        InlinePolicy.NOINLINE,
+        Operation(name="test.requires_context"),
+    )
+
+    assert _diagnostic_text_contains(diagnostics, "missing required ancestor")
+
+
+def test_verifier_does_not_defer_inline_through_nested_isolation() -> None:
+    isolated_op = Operation(
+        name="test.isolated_region",
+        regions=[
+            Region(
+                blocks=[
+                    Block(
+                        ops=[
+                            Operation(name="test.requires_context"),
+                            Operation(name="test.yield"),
+                        ]
+                    )
+                ]
+            )
+        ],
+    )
+    diagnostics = _verify_required_ancestor_in_func(InlinePolicy.INLINE, isolated_op)
+
+    assert _diagnostic_text_contains(diagnostics, "missing required ancestor")
+
+
 def test_verifier_does_not_defer_through_nested_isolation() -> None:
     requires_context = Op(
         "test.requires_context",
@@ -462,6 +503,45 @@ def _func(body: Region | None = None) -> Operation:
         name="test.func",
         attributes={"callee": "f"},
         regions=[body if body is not None else Region(blocks=[Block()])],
+    )
+
+
+def _func_def_with_ops(
+    name: str, inline_policy: InlinePolicy, *ops: Operation
+) -> Operation:
+    return Operation(
+        name="func.def",
+        attributes={
+            "callee": name,
+            "inline_policy": inline_policy.value,
+        },
+        regions=[
+            Region(
+                blocks=[
+                    Block(ops=[*ops, Operation(name="func.return")]),
+                ]
+            )
+        ],
+    )
+
+
+def _verify_required_ancestor_in_func(
+    inline_policy: InlinePolicy, *ops: Operation
+) -> DiagnosticEngine:
+    requires_context = Op(
+        "test.requires_context",
+        traits=[HasAncestor("test.context")],
+    )
+    module = Module()
+    module.symbols.append(
+        _symbol(
+            "helper",
+            _func_def_with_ops("helper", inline_policy, *ops),
+        )
+    )
+    return verify_module(
+        module,
+        ops=(*ALL_TEST_OPS, *ALL_FUNC_OPS, requires_context),
     )
 
 

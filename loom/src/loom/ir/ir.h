@@ -896,6 +896,15 @@ typedef iree_status_t (*loom_type_transfer_fn_t)(
 // CallLike interface vtable
 //===----------------------------------------------------------------------===//
 
+// Required callable-boundary policy shared by CallLike and FuncLike
+// implementations. Unspecified policy leaves the edge to the active pass.
+typedef enum loom_inline_policy_e {
+  LOOM_INLINE_POLICY_UNSPECIFIED = 0,
+  LOOM_INLINE_POLICY_INLINE = 1,
+  LOOM_INLINE_POLICY_NOINLINE = 2,
+  LOOM_INLINE_POLICY_COUNT_,
+} loom_inline_policy_t;
+
 typedef uint8_t loom_call_like_kind_t;
 
 enum loom_call_like_kind_e {
