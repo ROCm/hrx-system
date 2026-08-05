@@ -279,6 +279,36 @@ def _add_vmem_source_reuse_evidence(
     }
 
 
+def _add_lds_ssa_use_evidence(
+    report: dict[str, object],
+    *,
+    action_count: int,
+    ssa_use_full_drain_count: int,
+    ssa_use_partial_wait_count: int,
+    total_full_drain_count: int,
+    max_outstanding_before: int,
+) -> None:
+    entry = report["entries"]["rows"][0]
+    entry["wait_plan"] = {"full_drain_count": total_full_drain_count}
+    report["wait_reason_summary_rows"] = {
+        "count": 1,
+        "rows": [
+            {
+                "index": 0,
+                "function": "routed_linear",
+                "counter": "lds",
+                "reason": "amdgpu.ssa_use",
+                "summary": {
+                    "action_count": action_count,
+                    "full_drain_count": ssa_use_full_drain_count,
+                    "partial_wait_count": ssa_use_partial_wait_count,
+                    "max_outstanding_before": max_outstanding_before,
+                },
+            }
+        ],
+    }
+
+
 def test_suggests_ordered_experiments_from_exact_target_evidence() -> None:
     document = parse_compile_report(_compile_report(), source="report.json")
 
@@ -404,6 +434,48 @@ def test_ignores_sparse_vmem_source_reuse_serialization(
     result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
 
     assert "amdgpu.vmem_source_reuse_serialization" not in {
+        suggestion.suggestion_id for suggestion in result.suggestions
+    }
+
+
+def test_suggests_dominant_lds_ssa_use_serialization() -> None:
+    report = _compile_report()
+    _add_lds_ssa_use_evidence(
+        report,
+        action_count=27,
+        ssa_use_full_drain_count=27,
+        ssa_use_partial_wait_count=0,
+        total_full_drain_count=125,
+        max_outstanding_before=1,
+    )
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    suggestion = result.suggestions[0]
+    assert suggestion.suggestion_id == "amdgpu.lds_ssa_use_serialization"
+    assert "independent LDS or DS producers" in suggestion.action
+    evidence = {item.path: item.value for item in suggestion.evidence}
+    assert evidence["wait_reason_summary_rows.rows[0].summary.full_drain_count"] == 27
+    assert evidence["wait_reason_summary_rows.rows[0].summary.partial_wait_count"] == 0
+    assert evidence["entries.rows[0].wait_plan.full_drain_count"] == 125
+
+
+def test_ignores_pipelined_lds_ssa_uses() -> None:
+    report = _compile_report()
+    _add_lds_ssa_use_evidence(
+        report,
+        action_count=27,
+        ssa_use_full_drain_count=3,
+        ssa_use_partial_wait_count=24,
+        total_full_drain_count=101,
+        max_outstanding_before=4,
+    )
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    assert "amdgpu.lds_ssa_use_serialization" not in {
         suggestion.suggestion_id for suggestion in result.suggestions
     }
 

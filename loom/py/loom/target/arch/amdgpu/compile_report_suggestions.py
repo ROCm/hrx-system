@@ -63,7 +63,7 @@ class AmdgpuCompileReportSuggestionProvider:
                 unavailable_reason="unknown_target_key",
             )
 
-        suggestions = list(_suggest_vmem_source_reuse(document))
+        suggestions = list(_suggest_wait_serialization(document))
         for entry in document.entries:
             entry_index = entry["index"]
             entry_name = compile_report_entry_identity(entry).display_name()
@@ -102,7 +102,7 @@ class AmdgpuCompileReportSuggestionProvider:
 AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER = AmdgpuCompileReportSuggestionProvider()
 
 
-def _suggest_vmem_source_reuse(
+def _suggest_wait_serialization(
     document: CompileReportDocument,
 ) -> tuple[CompileReportSuggestion, ...]:
     rows_value = document.report.get("wait_reason_summary_rows")
@@ -114,9 +114,13 @@ def _suggest_vmem_source_reuse(
     )
     suggestions = []
     for position, row in enumerate(rows):
-        if row.get("counter") != "vmem_load" or row.get("reason") != (
-            "amdgpu.memory_source_reuse"
-        ):
+        counter = row.get("counter")
+        reason = row.get("reason")
+        is_vmem_source_reuse = (
+            counter == "vmem_load" and reason == "amdgpu.memory_source_reuse"
+        )
+        is_lds_ssa_use = counter == "lds" and reason == "amdgpu.ssa_use"
+        if not is_vmem_source_reuse and not is_lds_ssa_use:
             continue
         row_path = f"wait_reason_summary_rows.rows[{position}]"
         summary = _report_object(row.get("summary"), f"{row_path}.summary")
@@ -127,8 +131,8 @@ def _suggest_vmem_source_reuse(
             summary.get("full_drain_count"),
             f"{row_path}.summary.full_drain_count",
         )
-        # Isolated source-register reuse is ordinary scheduling fallout. Surface
-        # only a repeated pattern that dominates both its reason and the entry.
+        # Isolated waits are ordinary scheduling fallout. Surface only repeated
+        # full drains that dominate their reason and materially affect the entry.
         if full_drain_count < 8 or full_drain_count * 2 < action_count:
             continue
         function_name = _optional_report_string(
@@ -146,23 +150,61 @@ def _suggest_vmem_source_reuse(
             wait_plan.get("full_drain_count"),
             f"{wait_plan_path}.full_drain_count",
         )
-        if total_full_drain_count == 0 or full_drain_count * 4 < total_full_drain_count:
+        if total_full_drain_count == 0:
             continue
-        max_outstanding = _report_integer(
-            summary.get("max_full_drain_outstanding_before"),
-            f"{row_path}.summary.max_full_drain_outstanding_before",
-        )
+        if is_vmem_source_reuse:
+            if full_drain_count * 4 < total_full_drain_count:
+                continue
+            max_full_drain_outstanding = _report_integer(
+                summary.get("max_full_drain_outstanding_before"),
+                f"{row_path}.summary.max_full_drain_outstanding_before",
+            )
+            suggestion_id = "amdgpu.vmem_source_reuse_serialization"
+            action = (
+                "Reduce global-load source-state turnover by consolidating "
+                "or staging loads, preserving independent address state, "
+                "or scheduling more work before source-register reuse; "
+                "then require memory-source full drains to fall before "
+                "benchmarking."
+            )
+            reason_evidence = (
+                CompileReportSuggestionEvidence(
+                    path=(f"{row_path}.summary.max_full_drain_outstanding_before"),
+                    value=max_full_drain_outstanding,
+                ),
+            )
+        else:
+            if full_drain_count * 5 < total_full_drain_count:
+                continue
+            partial_wait_count = _report_integer(
+                summary.get("partial_wait_count"),
+                f"{row_path}.summary.partial_wait_count",
+            )
+            max_outstanding = _report_integer(
+                summary.get("max_outstanding_before"),
+                f"{row_path}.summary.max_outstanding_before",
+            )
+            suggestion_id = "amdgpu.lds_ssa_use_serialization"
+            action = (
+                "Issue independent LDS or DS producers before consuming their "
+                "SSA results so waits can remain partial; then require "
+                "LDS SSA-use full drains to fall before benchmarking."
+            )
+            reason_evidence = (
+                CompileReportSuggestionEvidence(
+                    path=f"{row_path}.summary.partial_wait_count",
+                    value=partial_wait_count,
+                ),
+                CompileReportSuggestionEvidence(
+                    path=f"{row_path}.summary.max_outstanding_before",
+                    value=max_outstanding,
+                ),
+            )
         suggestions.append(
             CompileReportSuggestion(
-                suggestion_id="amdgpu.vmem_source_reuse_serialization",
+                suggestion_id=suggestion_id,
                 entry_name=compile_report_entry_identity(entry).display_name(),
-                action=(
-                    "Reduce global-load source-state turnover by consolidating "
-                    "or staging loads, preserving independent address state, "
-                    "or scheduling more work before source-register reuse; "
-                    "then require memory-source full drains to fall before "
-                    "benchmarking."
-                ),
+                action=action,
                 evidence=(
                     CompileReportSuggestionEvidence(
                         path=f"{row_path}.summary.action_count",
@@ -172,10 +214,7 @@ def _suggest_vmem_source_reuse(
                         path=f"{row_path}.summary.full_drain_count",
                         value=full_drain_count,
                     ),
-                    CompileReportSuggestionEvidence(
-                        path=(f"{row_path}.summary.max_full_drain_outstanding_before"),
-                        value=max_outstanding,
-                    ),
+                    *reason_evidence,
                     CompileReportSuggestionEvidence(
                         path=(f"{wait_plan_path}.full_drain_count"),
                         value=total_full_drain_count,
