@@ -2982,6 +2982,197 @@ def _v_fma_f32_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
+_V_INTERP_HALF_REGISTER_PARTS = (
+    ("lo", _REG_PART_VGPR_LOW16, 0),
+    ("hi", _REG_PART_VGPR_HIGH16, 1),
+)
+
+
+def _v_interp_f32_overlays(
+    op_sel_field: str,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return tuple(
+        AmdgpuDescriptorOverlay(
+            descriptor_key=f"amdgpu.v_interp_{phase}_f32",
+            instruction_name=f"V_INTERP_{phase.upper()}_F32",
+            mnemonic=f"v_interp_{phase}_f32",
+            encoding_name="ENC_VINTERP",
+            semantic_tag=f"float.interpolation.{phase}.f32",
+            schedule_class=_SCHEDULE_VALU,
+            operands=(
+                AmdgpuOperandOverlay("VDST", _vgpr_result()),
+                AmdgpuOperandOverlay("SRC0", _vgpr_operand(first_source_name)),
+                AmdgpuOperandOverlay("SRC1", _vgpr_operand(coordinate_name)),
+                AmdgpuOperandOverlay("SRC2", _vgpr_operand(third_source_name)),
+            ),
+            implicit_operands=(_implicit_m0_input(xml_operand_required=False),),
+            asm_forms=_asm(
+                results=("dst",),
+                operands=(
+                    first_source_name,
+                    coordinate_name,
+                    third_source_name,
+                    "m0",
+                ),
+                native_assembly_values=(
+                    _native_result("dst"),
+                    _native_operand(first_source_name),
+                    _native_operand(coordinate_name),
+                    _native_operand(third_source_name),
+                    _native_modifier_literal("wait_exp:7"),
+                ),
+            ),
+            fixed_encoding_fields=(
+                ("WAIT_EXP", 7),
+                (op_sel_field, 0),
+                ("CLAMP", 0),
+                ("NEG", 0),
+            ),
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        )
+        for phase, first_source_name, coordinate_name, third_source_name in (
+            ("p10", "p10", "i", "p0"),
+            ("p2", "p20", "j", "p10_result"),
+        )
+    )
+
+
+def _v_interp_p10_mixed_overlays(
+    instruction_name: str,
+    mnemonic: str,
+    semantic_tag: str,
+    op_sel_field: str,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return tuple(
+        AmdgpuDescriptorOverlay(
+            descriptor_key=(f"amdgpu.{mnemonic}.p10_{p10_part}.p0_{p0_part}"),
+            instruction_name=instruction_name,
+            mnemonic=f"{mnemonic}_p10_{p10_part}_p0_{p0_part}",
+            encoding_name="ENC_VINTERP",
+            semantic_tag=semantic_tag,
+            schedule_class=_SCHEDULE_VALU,
+            operands=(
+                AmdgpuOperandOverlay("VDST", _vgpr_result()),
+                AmdgpuOperandOverlay(
+                    "SRC0", _vgpr_operand("p10", register_part=p10_register_part)
+                ),
+                AmdgpuOperandOverlay("SRC1", _vgpr_operand("i")),
+                AmdgpuOperandOverlay(
+                    "SRC2", _vgpr_operand("p0", register_part=p0_register_part)
+                ),
+            ),
+            implicit_operands=(_implicit_m0_input(xml_operand_required=False),),
+            asm_forms=_asm(
+                native_assembly_mnemonic=mnemonic,
+                results=("dst",),
+                operands=("p10", "i", "p0", "m0"),
+                native_assembly_values=(
+                    _native_result("dst"),
+                    _native_register_part("p10"),
+                    _native_operand("i"),
+                    _native_register_part("p0"),
+                    _native_modifier_literal("wait_exp:7"),
+                ),
+            ),
+            fixed_encoding_fields=(
+                ("WAIT_EXP", 7),
+                (op_sel_field, p10_op_sel | (p0_op_sel << 2)),
+                ("CLAMP", 0),
+                ("NEG", 0),
+            ),
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        )
+        for p10_part, p10_register_part, p10_op_sel in _V_INTERP_HALF_REGISTER_PARTS
+        for p0_part, p0_register_part, p0_op_sel in _V_INTERP_HALF_REGISTER_PARTS
+    )
+
+
+def _v_interp_p2_mixed_overlays(
+    instruction_name: str,
+    mnemonic: str,
+    semantic_tag: str,
+    op_sel_field: str,
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return tuple(
+        AmdgpuDescriptorOverlay(
+            descriptor_key=(f"amdgpu.{mnemonic}.p20_{p20_part}.result_{result_part}"),
+            instruction_name=instruction_name,
+            mnemonic=f"{mnemonic}_p20_{p20_part}_result_{result_part}",
+            encoding_name="ENC_VINTERP",
+            semantic_tag=semantic_tag,
+            schedule_class=_SCHEDULE_VALU,
+            operands=(
+                AmdgpuOperandOverlay(
+                    "VDST", _vgpr_result(register_part=result_register_part)
+                ),
+                AmdgpuOperandOverlay(
+                    "SRC0", _vgpr_operand("p20", register_part=p20_register_part)
+                ),
+                AmdgpuOperandOverlay("SRC1", _vgpr_operand("j")),
+                AmdgpuOperandOverlay("SRC2", _vgpr_operand("p10_result")),
+            ),
+            implicit_operands=(_implicit_m0_input(xml_operand_required=False),),
+            asm_forms=_asm(
+                native_assembly_mnemonic=mnemonic,
+                results=("dst",),
+                operands=("p20", "j", "p10_result", "m0"),
+                native_assembly_values=(
+                    _native_register_part("dst"),
+                    _native_register_part("p20"),
+                    _native_operand("j"),
+                    _native_operand("p10_result"),
+                    _native_modifier_literal("wait_exp:7"),
+                ),
+            ),
+            fixed_encoding_fields=(
+                ("WAIT_EXP", 7),
+                (op_sel_field, p20_op_sel | (result_op_sel << 3)),
+                ("CLAMP", 0),
+                ("NEG", 0),
+            ),
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        )
+        for p20_part, p20_register_part, p20_op_sel in _V_INTERP_HALF_REGISTER_PARTS
+        for (
+            result_part,
+            result_register_part,
+            result_op_sel,
+        ) in _V_INTERP_HALF_REGISTER_PARTS
+    )
+
+
+def _v_interp_overlays(
+    *, op_sel_field: str = "OP_SEL"
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return (
+        *_v_interp_f32_overlays(op_sel_field),
+        *_v_interp_p10_mixed_overlays(
+            "V_INTERP_P10_F16_F32",
+            "v_interp_p10_f16_f32",
+            "float.interpolation.p10.f16_f32",
+            op_sel_field,
+        ),
+        *_v_interp_p2_mixed_overlays(
+            "V_INTERP_P2_F16_F32",
+            "v_interp_p2_f16_f32",
+            "float.interpolation.p2.f16_f32",
+            op_sel_field,
+        ),
+        *_v_interp_p10_mixed_overlays(
+            "V_INTERP_P10_RTZ_F16_F32",
+            "v_interp_p10_rtz_f16_f32",
+            "float.interpolation.p10.rtz.f16_f32",
+            op_sel_field,
+        ),
+        *_v_interp_p2_mixed_overlays(
+            "V_INTERP_P2_RTZ_F16_F32",
+            "v_interp_p2_rtz_f16_f32",
+            "float.interpolation.p2.rtz.f16_f32",
+            op_sel_field,
+        ),
+    )
+
+
 _V_MIX_SOURCE_PARTS = ("f32", "f16lo", "f16hi")
 
 _V_MIX_HALF_RESULT_ACC_SIZE_REASON = "half-result-mix-ties-full-vgpr-accumulator"
@@ -6405,6 +6596,7 @@ __all__ = (
     "_v_fmaak_f32_overlay",
     "_v_fmaak_f16_overlay",
     "_v_fma_f32_overlay",
+    "_v_interp_overlays",
     "_v_fma_f64_overlay",
     "_v_fma_mix_f32_overlay",
     "_v_fma_mix_f32_overlays",

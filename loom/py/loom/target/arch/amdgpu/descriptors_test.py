@@ -44,6 +44,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _GFX12_TH_ATOMIC_RETURN_VALUE,
     _MUBUF_SOFFSET_INLINE_ZERO,
     _REG_EXEC,
+    _REG_M0,
     _REG_MODE,
     _REG_PART_SGPR_HIGH16,
     _REG_PART_SGPR_LOW16,
@@ -4047,6 +4048,122 @@ def test_fma_mix_f32_half_lane_descriptors_pin_modifier_fields() -> None:
         )
         assert not any(
             key.startswith(f"{descriptor_key_prefix}.") for key in cdna4_descriptors
+        )
+
+
+def test_vinterp_descriptors_cover_architectural_half_register_forms() -> None:
+    descriptors = {
+        descriptor.descriptor_key: descriptor for descriptor in _gfx11_core_overlays()
+    }
+    for phase in ("p10", "p2"):
+        descriptor = descriptors[f"amdgpu.v_interp_{phase}_f32"]
+        assert descriptor.instruction_name == f"V_INTERP_{phase.upper()}_F32"
+        assert dict(descriptor.fixed_encoding_fields) == {
+            "WAIT_EXP": 7,
+            "OP_SEL": 0,
+            "CLAMP": 0,
+            "NEG": 0,
+        }
+
+    for operation, source_name, source_shift in (
+        ("p10", "p0", 2),
+        ("p2", "result", 3),
+    ):
+        for rounding in ("", "rtz_"):
+            mnemonic = f"v_interp_{operation}_{rounding}f16_f32"
+            for first_part, first_register_part, first_op_sel in (
+                ("lo", _REG_PART_VGPR_LOW16, 0),
+                ("hi", _REG_PART_VGPR_HIGH16, 1),
+            ):
+                for second_part, second_register_part, second_op_sel in (
+                    ("lo", _REG_PART_VGPR_LOW16, 0),
+                    ("hi", _REG_PART_VGPR_HIGH16, 1),
+                ):
+                    descriptor = descriptors[
+                        f"amdgpu.{mnemonic}."
+                        f"{operation if operation == 'p10' else 'p20'}_{first_part}."
+                        f"{source_name}_{second_part}"
+                    ]
+                    if operation == "p10":
+                        assert descriptor.operands[
+                            1
+                        ].descriptor_operand.register_part == (first_register_part)
+                        assert descriptor.operands[
+                            3
+                        ].descriptor_operand.register_part == (second_register_part)
+                    else:
+                        assert descriptor.operands[
+                            0
+                        ].descriptor_operand.register_part == (second_register_part)
+                        assert descriptor.operands[
+                            1
+                        ].descriptor_operand.register_part == (first_register_part)
+                    assert dict(descriptor.fixed_encoding_fields)["OP_SEL"] == (
+                        first_op_sel | (second_op_sel << source_shift)
+                    )
+                    assert len(descriptor.implicit_operands) == 1
+                    m0_operand = descriptor.implicit_operands[0].descriptor_operand
+                    assert m0_operand is not None
+                    assert m0_operand.reg_alts[0].reg_class == _REG_M0
+                    assert OperandFlag.IMPLICIT in m0_operand.flags
+                    assert OperandFlag.STATE_READ in m0_operand.flags
+                    assert descriptor.asm_forms is not None
+                    assert descriptor.asm_forms[0].native_assembly_mnemonic == mnemonic
+                    native_values = descriptor.asm_forms[0].native_assembly_values
+                    assert native_values[-1] == NativeAsmValue(
+                        NativeAsmValueKind.MODIFIER_LITERAL,
+                        literal="wait_exp:7",
+                    )
+                    register_part_fields = (
+                        ("p10", "p0") if operation == "p10" else ("dst", "p20")
+                    )
+                    assert {
+                        value.field_name
+                        for value in native_values
+                        if value.kind is NativeAsmValueKind.REGISTER_PART
+                    } == set(register_part_fields)
+
+
+def test_vinterp_descriptors_follow_hardware_architecture_coverage() -> None:
+    expected_keys = {
+        "amdgpu.v_interp_p10_f32",
+        "amdgpu.v_interp_p2_f32",
+    }
+    for mnemonic, first_source_name, second_source_name in (
+        ("v_interp_p10_f16_f32", "p10", "p0"),
+        ("v_interp_p2_f16_f32", "p20", "result"),
+        ("v_interp_p10_rtz_f16_f32", "p10", "p0"),
+        ("v_interp_p2_rtz_f16_f32", "p20", "result"),
+    ):
+        expected_keys.update(
+            f"amdgpu.{mnemonic}.{first_source_name}_{first_part}."
+            f"{second_source_name}_{second_part}"
+            for first_part in ("lo", "hi")
+            for second_part in ("lo", "hi")
+        )
+
+    for overlays in (
+        _gfx11_core_overlays(),
+        _gfx117x_core_overlays(),
+        _gfx11_generic_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx12_generic_core_overlays(),
+    ):
+        assert {
+            overlay.descriptor_key
+            for overlay in overlays
+            if overlay.descriptor_key.startswith("amdgpu.v_interp_")
+        } == expected_keys
+
+    for overlays in (
+        _gfx125x_core_overlays(),
+        _gfx12_5_generic_core_overlays(),
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+    ):
+        assert not any(
+            overlay.descriptor_key.startswith("amdgpu.v_interp_")
+            for overlay in overlays
         )
 
 

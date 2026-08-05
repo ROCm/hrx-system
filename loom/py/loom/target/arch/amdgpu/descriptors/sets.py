@@ -1023,6 +1023,7 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         *_v_subrev_f32_overlays(),
         _v_fma_f32_overlay(),
         _v_fmaak_f32_overlay(),
+        *_v_interp_overlays(),
         _v_fmac_f32_overlay(),
         _v_fmamk_f32_overlay(),
         *_rdna_scalar_fma_overlays(),
@@ -1572,6 +1573,7 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         *_s_float_conversion_overlays(),
         _v_fma_f32_overlay(),
         _v_fmaak_f32_overlay(),
+        *_v_interp_overlays(op_sel_field="OPSEL"),
         _v_fmac_f32_overlay(),
         _v_fmamk_f32_overlay(),
         *_rdna_scalar_domain_fma_overlays(),
@@ -1941,7 +1943,9 @@ def _gfx125x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         *(
             overlay
             for overlay in _rdna4_core_overlays()
-            if not (overlay.semantic_tag or "").startswith("matrix.wmma.")
+            if not (overlay.semantic_tag or "").startswith(
+                ("float.interpolation.", "matrix.wmma.")
+            )
         ),
         _s_getreg_b32_cluster_workgroup_flat_id_overlay(),
         *_v_cvt_f16_packed8_byte_overlays("ocp"),

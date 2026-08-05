@@ -1,0 +1,91 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// VINTERP normally waits for pixel-interpolation parameter loads. Loom exposes
+// the in-register arithmetic forms with wait_exp:7 so compute kernels can use
+// the fixed quad-lane operations without a graphics-stage parameter ABI.
+
+// RUN: emit amdgpu-assembly @p10_f32 waits=none strategy=source fixed=%p10:physical_register:1:1 fixed=%i:physical_register:2:1 fixed=%p0:physical_register:3:1 fixed=%result:physical_register:0:1
+
+amdgpu.target<gfx1151> @target
+low.func.def target<amdgpu.rdna3_5.core>(@target) @p10_f32(%p10: reg<amdgpu.vgpr>, %i: reg<amdgpu.vgpr>, %p0: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>) asm {
+  %result = v_interp_p10_f32 %p10, %i, %p0, %m0
+  return
+}
+
+// ----
+  v_interp_p10_f32 v0, v1, v2, v3 wait_exp:7
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @p2_f32 waits=none strategy=source fixed=%p20:physical_register:1:1 fixed=%j:physical_register:2:1 fixed=%p10:physical_register:3:1 fixed=%result:physical_register:0:1
+
+amdgpu.target<gfx1151> @target
+low.func.def target<amdgpu.rdna3_5.core>(@target) @p2_f32(%p20: reg<amdgpu.vgpr>, %j: reg<amdgpu.vgpr>, %p10: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>) asm {
+  %result = v_interp_p2_f32 %p20, %j, %p10, %m0
+  return
+}
+
+// ----
+  v_interp_p2_f32 v0, v1, v2, v3 wait_exp:7
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @p10_f16_f32 waits=none strategy=source fixed=%p10:physical_register:1:1 fixed=%i:physical_register:2:1 fixed=%p0:physical_register:3:1 fixed=%result:physical_register:0:1
+
+amdgpu.target<gfx1151> @target
+low.func.def target<amdgpu.rdna3_5.core>(@target) @p10_f16_f32(%p10: reg<amdgpu.vgpr>, %i: reg<amdgpu.vgpr>, %p0: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>) asm {
+  %result = v_interp_p10_f16_f32_p10_lo_p0_hi %p10, %i, %p0, %m0
+  return
+}
+
+// ----
+  v_interp_p10_f16_f32 v0, v1.l, v2, v3.h wait_exp:7
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @p2_f16_f32 waits=none strategy=source fixed=%p20:physical_register:1:1 fixed=%j:physical_register:2:1 fixed=%p10:physical_register:3:1 fixed=%result:physical_register:0:1
+
+amdgpu.target<gfx1151> @target
+low.func.def target<amdgpu.rdna3_5.core>(@target) @p2_f16_f32(%p20: reg<amdgpu.vgpr>, %j: reg<amdgpu.vgpr>, %p10: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>) asm {
+  %result = v_interp_p2_f16_f32_p20_hi_result_lo %p20, %j, %p10, %m0
+  return
+}
+
+// ----
+  v_interp_p2_f16_f32 v0.l, v1.h, v2, v3 wait_exp:7
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @p10_rtz_f16_f32 waits=none strategy=source fixed=%p10:physical_register:1:1 fixed=%i:physical_register:2:1 fixed=%p0:physical_register:3:1 fixed=%result:physical_register:0:1
+
+amdgpu.target<gfx1151> @target
+low.func.def target<amdgpu.rdna3_5.core>(@target) @p10_rtz_f16_f32(%p10: reg<amdgpu.vgpr>, %i: reg<amdgpu.vgpr>, %p0: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>) asm {
+  %result = v_interp_p10_rtz_f16_f32_p10_hi_p0_hi %p10, %i, %p0, %m0
+  return
+}
+
+// ----
+  v_interp_p10_rtz_f16_f32 v0, v1.h, v2, v3.h wait_exp:7
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @p2_rtz_f16_f32 waits=none strategy=source fixed=%p20:physical_register:1:1 fixed=%j:physical_register:2:1 fixed=%p10:physical_register:3:1 fixed=%result:physical_register:0:1
+
+amdgpu.target<gfx1151> @target
+low.func.def target<amdgpu.rdna3_5.core>(@target) @p2_rtz_f16_f32(%p20: reg<amdgpu.vgpr>, %j: reg<amdgpu.vgpr>, %p10: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>) asm {
+  %result = v_interp_p2_rtz_f16_f32_p20_hi_result_hi %p20, %j, %p10, %m0
+  return
+}
+
+// ----
+  v_interp_p2_rtz_f16_f32 v0.h, v1.h, v2, v3 wait_exp:7
+  s_endpgm
