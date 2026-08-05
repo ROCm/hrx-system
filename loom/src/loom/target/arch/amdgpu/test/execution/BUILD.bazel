@@ -15,6 +15,7 @@ package(
 )
 
 exports_files([
+    "divergent_loop_carry.loom",
     "fragment_repack_bf16.loom",
     "fp8_encode.loom",
     "fp8_finite_storage_decode.loom",
@@ -112,6 +113,19 @@ _AMDGPU_EXECUTION_TEST_TAGS = [
     )
     for _case in _BEHAVIOR_QUALIFICATION_CASES
 ]
+
+iree_execution_test_suite(
+    name = "divergent_loop_carry_execution_test",
+    data = [
+        "divergent_loop_carry.loom",
+    ],
+    manifests = ["divergent_loop_carry.test.json"],
+    tags = _AMDGPU_EXECUTION_TEST_TAGS + ["manual"],
+    target_compatible_with = _AMDGPU_HAL_COMPATIBLE_WITH,
+    tools = {
+        "iree-test-loom": "//loom/src/loom/tools/iree-test-loom",
+    },
+)
 
 iree_execution_test_suite(
     name = "numeric_conversion_execution_test",
