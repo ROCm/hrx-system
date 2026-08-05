@@ -561,6 +561,12 @@ when 512 is the batch size, and `%c512` when the literal itself is the only
 meaning. Type suffixes disambiguate otherwise identical bare literals when
 needed, such as `%c0_i32` and `%c0_f32x4`.
 
+Type, shape, sign, and duplicate markers do not turn a literal into a role.
+Names such as `%i32_zero`, `%zero_scalar`, `%positive_zero`, `%zero_a`, and
+`%f16_ones` still read like declarations of the number itself. They use a
+semantic name when the use provides one, or the `%c<literal>` spelling when it
+does not.
+
 Literal equality does not imply semantic identity. Two constants whose value
 is 16 can remain separate as `%channels_per_group` and
 `%lane_partition_width`; merging them under `%c16` would discard information

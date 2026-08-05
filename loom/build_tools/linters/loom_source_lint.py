@@ -128,14 +128,16 @@ LOOM_CONSTANT_RESULT_PATTERN = re.compile(
     r"%(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
     r"[A-Za-z_][A-Za-z0-9_.]*\.constant\b"
 )
-# Type, domain, and unit suffixes only decorate a spelled literal; semantic
-# continuations such as zero_point and fourth_word_ordinal remain intact.
-LOOM_NUMBER_NAME_SUFFIX_PATTERN = re.compile(
-    r"_(?:"
-    r"(?:[su]?i\d+|bf\d+|f\d+)(?:x\d+|v)?"
-    r"|index|offset"
+# Type, domain, unit, and duplicate markers can decorate either side of a
+# spelled literal without giving it a program role. Semantic continuations
+# such as zero_point and fourth_word_ordinal remain intact.
+LOOM_NUMBER_NAME_DECORATOR_PATTERN = re.compile(
+    r"(?:"
+    r"(?:[su]?i\d+|(?:bf|fp|f)\d+)(?:x\d+|v)?"
+    r"|index|offset|scalars?|vectors?"
     r"|bytes?|bits?|elements?|lanes?|rows?|columns?|words?|values?"
-    r")$"
+    r"|all|[a-z]"
+    r")"
 )
 LOOM_NUMBER_WORDS = tuple(
     sorted(
@@ -179,6 +181,7 @@ LOOM_NUMBER_WORDS = tuple(
     )
 )
 LOOM_NUMBER_CONNECTOR = "and"
+LOOM_NUMBER_SIGN_PREFIXES = ("negative", "positive", "minus", "plus", "neg")
 LOOM_CONSTANT_NAME_MESSAGE = (
     "Loom constant SSA names must describe a program role or use %c<literal>"
 )
@@ -464,10 +467,10 @@ def _iter_checked_loom_files() -> list[Path]:
 def _is_spelled_number_sequence(text: str) -> bool:
     """Returns whether text can be segmented entirely into number words."""
 
-    if text.startswith("negative"):
-        text = text.removeprefix("negative")
-    elif text.startswith("minus"):
-        text = text.removeprefix("minus")
+    for prefix in LOOM_NUMBER_SIGN_PREFIXES:
+        if text.startswith(prefix):
+            text = text.removeprefix(prefix)
+            break
     if not text:
         return False
 
@@ -491,14 +494,39 @@ def _is_spelled_number_sequence(text: str) -> bool:
     return (len(text), True) in reachable
 
 
+def _is_spelled_number_or_plural(text: str) -> bool:
+    """Returns whether text is a spelled number or its English plural."""
+
+    if _is_spelled_number_sequence(text):
+        return True
+
+    singular_candidates: list[str] = []
+    if text.endswith("ies"):
+        singular_candidates.append(text[:-3] + "y")
+    if text.endswith("es"):
+        singular_candidates.append(text[:-2])
+    if text.endswith("s"):
+        singular_candidates.append(text[:-1])
+    return any(
+        _is_spelled_number_sequence(candidate) for candidate in singular_candidates
+    )
+
+
 def _is_spelled_number_constant_name(name: str) -> bool:
     """Returns whether name communicates only a spelled numeric literal."""
 
-    normalized_name = name.lower()
-    match = LOOM_NUMBER_NAME_SUFFIX_PATTERN.search(normalized_name)
-    if match:
-        normalized_name = normalized_name[: match.start()]
-    return _is_spelled_number_sequence(normalized_name.replace("_", ""))
+    tokens = [token for token in name.lower().split("_") if token]
+    while len(tokens) > 1:
+        stripped_decorator = False
+        if LOOM_NUMBER_NAME_DECORATOR_PATTERN.fullmatch(tokens[0]):
+            tokens.pop(0)
+            stripped_decorator = True
+        if len(tokens) > 1 and LOOM_NUMBER_NAME_DECORATOR_PATTERN.fullmatch(tokens[-1]):
+            tokens.pop()
+            stripped_decorator = True
+        if not stripped_decorator:
+            break
+    return _is_spelled_number_or_plural("".join(tokens))
 
 
 def _iter_loom_input_lines(path: Path, text: str) -> list[tuple[int, str]]:
@@ -980,6 +1008,31 @@ kernel.def @copy(%n: index) {
         (1,),
     )
     ok &= _expect_loom_constant_name_self_test(
+        "prefix and suffix decorators do not make numeric names semantic",
+        "loom/src/loom/test/self_test.loom",
+        (
+            "%i32_zero = scalar.constant 0 : i32\n"
+            "%zero_scalar = scalar.constant 0 : i32\n"
+            "%positive_zero = scalar.constant 0.0 : f32\n"
+            "%neg_one = scalar.constant -1 : i32\n"
+            "%all_ones = scalar.constant -1 : i32\n"
+            "%zero_a = scalar.constant 0 : i32\n"
+            "%f16_ones = vector.constant 1.0 : vector<4xf16>\n"
+        ),
+        (1, 2, 3, 4, 5, 6, 7),
+    )
+    ok &= _expect_loom_constant_name_self_test(
+        "plural English number names fail",
+        "loom/src/loom/test/self_test.loom",
+        (
+            "%ones = scalar.constant 1 : i32\n"
+            "%zeroes = vector.constant 0 : vector<4xi32>\n"
+            "%sixes = vector.constant 6 : vector<4xi32>\n"
+            "%twenties = vector.constant 20 : vector<4xi32>\n"
+        ),
+        (1, 2, 3, 4),
+    )
+    ok &= _expect_loom_constant_name_self_test(
         "English number connector and scale words fail",
         "loom/src/loom/test/self_test.loom",
         (
@@ -995,6 +1048,12 @@ kernel.def @copy(%n: index) {
             "%and = index.constant 15 : index\n"
             "%and_zero = index.constant 0 : index\n"
             "%zero_point = scalar.constant 128 : i32\n"
+            "%zero_exponent = scalar.constant 0 : i32\n"
+            "%two_pi = scalar.constant 6.283185 : f32\n"
+            "%positive_signed_zero = scalar.constant 0.0 : f32\n"
+            "%all_bits_set = scalar.constant -1 : i32\n"
+            "%f32_sign_threshold = scalar.constant 0.0 : f32\n"
+            "%nonzero = scalar.constant true : i1\n"
             "%fourth_word_ordinal = scalar.constant 4 : i32\n"
         ),
         (),
