@@ -127,7 +127,7 @@ envelope.
 | 4 | Direct decode gate/up and SwiGLU, with Q8_1 x4 publication only for Q4_K down layers: `qwen3_moe_routed_gate_up_swiglu_q4k_q8` and `qwen3_moe_routed_gate_up_swiglu_q4k_q8_1_x4_next_q8` | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` and `ggml/quantize_q8_1_x4.loom` | None |
 | 5 | Direct decode Q4_K/Q6_K down, route weighting, residual, and next RMSNorm/Q8_1 x4 publication: `qwen3_moe_routed_down_q4k_q8_1_x4_next_q8` and `qwen3_moe_routed_down_q6k_f32_wave64_next_q8` | `qwen3_moe/routed_down_q4k.loom` and `qwen3_moe/routed_down_q6k.loom` | None |
 
-The exact full-model Decode-513 layer is seven dispatches. After one initial
+The exact full-model Decode-513 layer is six dispatches. After one initial
 `qwen3_moe_attention_rmsnorm_quantize_q8_1_x4` producer from
 `qwen3_moe/attention_prepare_quantized.loom`, each layer issues the following
 cuts in order:
@@ -177,7 +177,7 @@ part of the quoted full-model route. In particular,
 `attention_qkv_same_format_prefill.loom`,
 `flash_attention_decode_f32_f16_wmma.loom`, and
 `flash_attention_decode_q128_f32_f16_wmma.loom` did not produce the current
-631-dispatch prefill or 341-dispatch Decode-513 measurements.
+631-dispatch prefill or 293-dispatch Decode-513 measurements.
 
 Full-model prefill records 631 dispatches. Layers 0 through 46 execute every
 stage over all 512 rows. Layer 47 executes attention over all rows so its cache
@@ -187,16 +187,16 @@ routed-down reduction with next-layer attention normalization and fuse expert
 assignment with partition publication. The terminal one-row feed-forward path
 retains the ordinary boundaries because it has no next full layer.
 
-Decode records 341 dispatches: two request-setup dispatches, one initial
-attention normalization/Q8_1 x4 producer, seven fused attention/feed-forward
+Decode records 293 dispatches: two request-setup dispatches, one initial
+attention normalization/Q8_1 x4 producer, six fused attention/feed-forward
 dispatches per layer, and two endpoint dispatches. Each Q/K/V dispatch also
 publishes RoPE and K/V cache results. Each routed-down dispatch publishes the
 normalized Q8_1 x4 row consumed by the following layer or vocabulary
-projection. The reusable dispatch-only command buffer has 341
-barrier-delimited segments and one terminal return; selected-token publication
-does not add a transfer operation. The final argmax dispatch stores the token
-into the existing device-local request input slot for continuation and mirrors
-it to host-visible observation storage for streaming and validation. The next
+projection. The reusable dispatch-only command buffer has 293 dispatches, 292
+explicit barriers, and one terminal return; selected-token publication does
+not add a transfer operation. The final argmax dispatch stores the token into
+the existing device-local request input slot for continuation and mirrors it
+to host-visible observation storage for streaming and validation. The next
 decode never consumes that host-visible copy.
 
 The endpoint stores 18,992 F32 partial logits and their 18,992 I32 vocabulary
