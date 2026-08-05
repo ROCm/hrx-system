@@ -19,6 +19,7 @@ iree_runtime_cc_library(
     hdrs = ["runtime.h"],
     deps = [
         "//runtime/src/iree/async",
+        "//runtime/src/iree/async/platform/posix",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",

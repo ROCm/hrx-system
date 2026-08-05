@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/async/frontier_tracker.h"
+#include "iree/async/platform/posix/api.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/parameter_index.h"
@@ -140,10 +141,14 @@ iree_status_t qwen_tooling_runtime_context_initialize_from_flags(
     out_context->jit_worker_count = (iree_host_size_t)FLAG_qwen_jit_workers;
   }
   if (iree_status_is_ok(status)) {
+    // Large cached parameter reads need bounded worker execution so page-cache
+    // copies proceed concurrently instead of serializing on one poll runner.
+    iree_async_proactor_pool_options_t proactor_pool_options =
+        iree_async_proactor_pool_options_default();
+    proactor_pool_options.proactor_create = iree_async_proactor_create_posix;
     status = iree_async_proactor_pool_create(
-        /*node_count=*/1, /*node_ids=*/NULL,
-        iree_async_proactor_pool_options_default(), host_allocator,
-        &out_context->proactor_pool);
+        /*node_count=*/1, /*node_ids=*/NULL, proactor_pool_options,
+        host_allocator, &out_context->proactor_pool);
   }
   if (iree_status_is_ok(status)) {
     status = iree_async_frontier_tracker_create(
