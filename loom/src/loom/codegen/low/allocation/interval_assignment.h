@@ -10,6 +10,7 @@
 #define LOOM_CODEGEN_LOW_ALLOCATION_INTERVAL_ASSIGNMENT_H_
 
 #include "iree/base/api.h"
+#include "iree/base/bitmap.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
@@ -57,6 +58,9 @@ typedef struct loom_low_allocation_interval_assignment_context_t {
   const loom_cfg_graph_t* function_cfg_graph;
   // Optional target residency model used for physical extent decisions.
   const struct loom_target_residency_model_t* residency_model;
+  // Borrowed bitmap indexed by module value ID. Set values require register
+  // storage throughout allocation.
+  iree_bitmap_t required_register_values;
 } loom_low_allocation_interval_assignment_context_t;
 
 typedef struct loom_low_allocation_interval_assignment_result_t {

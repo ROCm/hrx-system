@@ -169,6 +169,7 @@ iree_status_t loom_low_allocate_function(
             .schedule = options->schedule,
             .placement = &state.placement,
             .target_constraints = &state.target_constraints,
+            .required_register_values = options->required_register_values,
             .unit_liveness = &state.unit_liveness,
             .residency_model = options->residency_model,
             .storage_leases = &state.storage_leases,

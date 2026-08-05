@@ -76,7 +76,33 @@ typedef struct loom_amdgpu_spill_lowering_context_t {
   iree_diagnostic_emitter_t emitter;
   // Mutable result receiving emitted diagnostic counts.
   loom_amdgpu_spill_lowering_result_t* result;
+  // Scratch arena backing transient lowering state and result lists.
+  iree_arena_allocator_t* scratch_arena;
+  // Value IDs that the lowered traffic requires in registers.
+  loom_value_id_t* required_register_value_ids;
+  // Number of entries in |required_register_value_ids|.
+  iree_host_size_t required_register_value_count;
+  // Capacity of |required_register_value_ids|.
+  iree_host_size_t required_register_value_capacity;
 } loom_amdgpu_spill_lowering_context_t;
+
+static iree_status_t loom_amdgpu_spill_lowering_record_required_register_value(
+    loom_amdgpu_spill_lowering_context_t* context, loom_value_id_t value_id) {
+  const iree_host_size_t minimum_capacity =
+      context->required_register_value_count + 1;
+  if (minimum_capacity > context->required_register_value_capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        context->scratch_arena, context->required_register_value_count,
+        iree_max(minimum_capacity, 8u),
+        sizeof(*context->required_register_value_ids),
+        &context->required_register_value_capacity,
+        (void**)&context->required_register_value_ids));
+  }
+  context
+      ->required_register_value_ids[context->required_register_value_count++] =
+      value_id;
+  return iree_ok_status();
+}
 
 static const loom_low_descriptor_t* loom_amdgpu_spill_lowering_descriptor_ref(
     const loom_low_descriptor_set_t* descriptor_set,
@@ -995,6 +1021,7 @@ static iree_status_t loom_amdgpu_spill_lowering_initialize_context(
       .descriptor_set = descriptor_set,
       .emitter = emitter,
       .result = result,
+      .scratch_arena = scratch_arena,
   };
   out_context->sgpr_class_id = LOOM_AMDGPU_REG_CLASS_ID_SGPR;
   out_context->sgpr_unit_bytes =
@@ -1049,16 +1076,36 @@ iree_status_t loom_amdgpu_lower_spill_traffic(
   loom_rewriter_t rewriter = {0};
   IREE_RETURN_IF_ERROR(
       loom_rewriter_initialize(&rewriter, module, scratch_arena));
+  // This is terminal target lowering: no later structural spill layer can
+  // recursively spill its packet helpers. Preserve every created helper and
+  // every existing value consumed by a lowered spill store in registers.
+  const loom_value_id_t first_generated_value_id = module->values.count;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < op_count && iree_status_is_ok(status); ++i) {
     if (loom_low_spill_isa(ops[i])) {
-      status =
-          loom_amdgpu_spill_lowering_rewrite_spill(&context, &rewriter, ops[i]);
+      status = loom_amdgpu_spill_lowering_record_required_register_value(
+          &context, loom_low_spill_value(ops[i]));
+      if (iree_status_is_ok(status)) {
+        status = loom_amdgpu_spill_lowering_rewrite_spill(&context, &rewriter,
+                                                          ops[i]);
+      }
     } else if (loom_low_reload_isa(ops[i])) {
       status = loom_amdgpu_spill_lowering_rewrite_reload(&context, &rewriter,
                                                          ops[i]);
     }
   }
+  for (loom_value_id_t value_id = first_generated_value_id;
+       value_id < module->values.count && iree_status_is_ok(status);
+       ++value_id) {
+    status = loom_amdgpu_spill_lowering_record_required_register_value(
+        &context, value_id);
+  }
   loom_rewriter_deinitialize(&rewriter);
+  if (iree_status_is_ok(status)) {
+    out_result->required_register_value_ids =
+        context.required_register_value_ids;
+    out_result->required_register_value_count =
+        context.required_register_value_count;
+  }
   return status;
 }
