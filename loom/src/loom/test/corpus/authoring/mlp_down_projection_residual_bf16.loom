@@ -70,7 +70,7 @@ check.case public @mlp_down_projection_residual_case {
   %down_weight = check.generate.fill value(0.0) : tensor<[%rows]x18944xbf16>
   %residual = check.generate.iota offset(-1.0) step(0.00048828125) : tensor<[%rows]xf32>
   %output = check.generate.fill value(0.0) : tensor<[%rows]xf32>
-  func.call @mlp_down_projection_residual_bf16(%rows, %input, %down_weight, %residual, %output) : (index, tensor<18944xf32>, tensor<[%rows]x18944xbf16>, tensor<[%rows]xf32>, tensor<[%rows]xf32>)
+  kernel.launch @mlp_down_projection_residual_bf16[%rows](%rows, %input, %down_weight, %residual, %output) : [index](index, tensor<18944xf32>, tensor<[%rows]x18944xbf16>, tensor<[%rows]xf32>, tensor<[%rows]xf32>)
   check.expect.close actual(%output) expected(%residual) atol(0.0) rtol(0.0) nan(same) : tensor<[%rows]xf32>
   check.return
 }

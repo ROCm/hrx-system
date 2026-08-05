@@ -45,7 +45,7 @@ check.case public @weighted_expert_route_gather_distinct_case {
   %expert_payloads = check.generate.iota offset(0.0) step(1.0) : tensor<4x4xf32>
   %combined_payload = check.generate.fill value(-1.0) : tensor<4xf32>
   %expected = check.generate.iota offset(5.0) step(1.0) : tensor<4xf32>
-  func.call @weighted_expert_route_gather_f32(%route_ids, %route_weights, %expert_payloads, %combined_payload) : (tensor<2xi32>, tensor<2xf32>, tensor<4x4xf32>, tensor<4xf32>)
+  kernel.launch @weighted_expert_route_gather_f32[](%route_ids, %route_weights, %expert_payloads, %combined_payload) : [](tensor<2xi32>, tensor<2xf32>, tensor<4x4xf32>, tensor<4xf32>)
   check.expect.close actual(%combined_payload) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
   check.return
 }
@@ -56,7 +56,7 @@ check.case public @weighted_expert_route_gather_duplicate_case {
   %expert_payloads = check.generate.iota offset(0.0) step(1.0) : tensor<4x4xf32>
   %combined_payload = check.generate.fill value(-1.0) : tensor<4xf32>
   %expected = check.generate.iota offset(4.0) step(1.0) : tensor<4xf32>
-  func.call @weighted_expert_route_gather_f32(%route_ids, %route_weights, %expert_payloads, %combined_payload) : (tensor<2xi32>, tensor<2xf32>, tensor<4x4xf32>, tensor<4xf32>)
+  kernel.launch @weighted_expert_route_gather_f32[](%route_ids, %route_weights, %expert_payloads, %combined_payload) : [](tensor<2xi32>, tensor<2xf32>, tensor<4x4xf32>, tensor<4xf32>)
   check.expect.close actual(%combined_payload) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
   check.return
 }

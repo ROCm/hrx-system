@@ -88,7 +88,7 @@ check.case @case_q8_q4_signedness {
   %q8_signed_expected = check.generate.fill value(-1) : tensor<4xi32>
   %q4_unsigned_expected = check.generate.fill value(15) : tensor<8xi32>
   %q4_signed_expected = check.generate.fill value(-1) : tensor<8xi32>
-  func.call @q8_q4_unpack_signedness(%q8_packed, %q8_unsigned_output, %q8_signed_output, %q4_packed, %q4_unsigned_output, %q4_signed_output) : (tensor<1xi32>, tensor<4xi32>, tensor<4xi32>, tensor<1xi32>, tensor<8xi32>, tensor<8xi32>)
+  kernel.launch @q8_q4_unpack_signedness[](%q8_packed, %q8_unsigned_output, %q8_signed_output, %q4_packed, %q4_unsigned_output, %q4_signed_output) : [](tensor<1xi32>, tensor<4xi32>, tensor<4xi32>, tensor<1xi32>, tensor<8xi32>, tensor<8xi32>)
   check.expect.equal actual(%q8_unsigned_output) expected(%q8_unsigned_expected) : tensor<4xi32>
   check.expect.equal actual(%q8_signed_output) expected(%q8_signed_expected) : tensor<4xi32>
   check.expect.equal actual(%q4_unsigned_output) expected(%q4_unsigned_expected) : tensor<8xi32>
@@ -102,7 +102,7 @@ check.case @case_q8_q4_signedness {
 check.case @case_q8_mixed_dot4_signedness {
   %output = check.generate.fill value(0) : tensor<1xi32>
   %expected = check.generate.fill value(-1020) : tensor<1xi32>
-  func.call @q8_mixed_u8s8_dot4_all_ones(%output) : (tensor<1xi32>)
+  kernel.launch @q8_mixed_u8s8_dot4_all_ones[](%output) : [](tensor<1xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
   check.return
 }

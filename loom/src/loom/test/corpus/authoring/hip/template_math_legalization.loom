@@ -47,7 +47,7 @@ check.case @case_template_math_legalization {
   %vector_output = check.generate.fill value(0.0) : tensor<4xf32>
   %expected_scalar = check.generate.fill value(1.0) : tensor<1xf32>
   %expected_vector = check.generate.fill value(1.0) : tensor<4xf32>
-  func.call @template_math_legalization(%scalar_input, %vector_input, %scalar_output, %vector_output) : (tensor<1xf32>, tensor<4xf32>, tensor<1xf32>, tensor<4xf32>)
+  kernel.launch @template_math_legalization[](%scalar_input, %vector_input, %scalar_output, %vector_output) : [](tensor<1xf32>, tensor<4xf32>, tensor<1xf32>, tensor<4xf32>)
   check.expect.close actual(%scalar_output) expected(%expected_scalar) atol(0.0001) rtol(0.0001) nan(same) : tensor<1xf32>
   check.expect.close actual(%vector_output) expected(%expected_vector) atol(0.0001) rtol(0.0001) nan(same) : tensor<4xf32>
   check.return

@@ -52,7 +52,7 @@ check.case @quantized_projection_u8_scalar_128_case {
   %rhs = check.generate.fill value(2) : tensor<128x128xi8>
   %init = check.generate.fill value(5.0) : tensor<128x128xf32>
   %output = check.generate.fill value(0.0) : tensor<128x128xf32>
-  func.call @quantized_projection_u8_scalar_128(%lhs, %rhs, %init, %output) : (tensor<128x128xi8>, tensor<128x128xi8>, tensor<128x128xf32>, tensor<128x128xf32>)
+  kernel.launch @quantized_projection_u8_scalar_128[](%lhs, %rhs, %init, %output) : [](tensor<128x128xi8>, tensor<128x128xi8>, tensor<128x128xf32>, tensor<128x128xf32>)
   %expected = check.oracle.call<reference.matmul> {accumulator = "f32", lhs = "u8", result = "f32", rhs = "u8"} callee(@quantized_projection_u8_scalar_128) inputs(%lhs, %rhs, %init) : (tensor<128x128xi8>, tensor<128x128xi8>, tensor<128x128xf32>) -> (tensor<128x128xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(different) : tensor<128x128xf32>
   check.return

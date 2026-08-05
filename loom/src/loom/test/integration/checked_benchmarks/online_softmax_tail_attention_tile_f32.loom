@@ -91,7 +91,7 @@ check.case public @online_softmax_tail_attention_tile_f32_case {
   %new_acc = check.generate.fill value(-1.0) : tensor<4xf32>
   %expected_state = check.generate.iota offset(0.0) step(5.0) : tensor<2xf32>
   %expected_acc = check.generate.iota offset(112.0) step(4.0) : tensor<4xf32>
-  func.call @online_softmax_tail_attention_tile_f32(%valid_count, %old_state, %old_acc, %scores, %values, %new_state, %new_acc) : (i32, tensor<2xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4x4xf32>, tensor<2xf32>, tensor<4xf32>)
+  kernel.launch @online_softmax_tail_attention_tile_f32[](%valid_count, %old_state, %old_acc, %scores, %values, %new_state, %new_acc) : [](i32, tensor<2xf32>, tensor<4xf32>, tensor<4xf32>, tensor<4x4xf32>, tensor<2xf32>, tensor<4xf32>)
   check.expect.close actual(%new_state) expected(%expected_state) atol(0.0001) rtol(0.0001) nan(same) : tensor<2xf32>
   check.expect.close actual(%new_acc) expected(%expected_acc) atol(0.0001) rtol(0.0001) nan(same) : tensor<4xf32>
   check.return

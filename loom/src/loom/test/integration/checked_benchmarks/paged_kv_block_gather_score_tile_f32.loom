@@ -63,7 +63,7 @@ check.case public @paged_kv_block_gather_score_tile_page1_lane2_case {
   %payload_output = check.generate.fill value(-1.0) : tensor<4xf32>
   %expected_score = check.generate.fill value(50.0) : tensor<1xf32>
   %expected_payload = check.generate.iota offset(11.0) step(1.0) : tensor<4xf32>
-  func.call @paged_kv_block_gather_score_tile_f32(%block_id, %lane_start, %valid_count, %query, %page_table, %page_pool, %score_output, %payload_output) : (index, index, i32, tensor<4xf32>, tensor<2xi32>, tensor<16xf32>, tensor<1xf32>, tensor<4xf32>)
+  kernel.launch @paged_kv_block_gather_score_tile_f32[](%block_id, %lane_start, %valid_count, %query, %page_table, %page_pool, %score_output, %payload_output) : [](index, index, i32, tensor<4xf32>, tensor<2xi32>, tensor<16xf32>, tensor<1xf32>, tensor<4xf32>)
   check.expect.close actual(%score_output) expected(%expected_score) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
   check.expect.close actual(%payload_output) expected(%expected_payload) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
   check.return
@@ -80,7 +80,7 @@ check.case public @paged_kv_block_gather_score_tile_page0_lane1_case {
   %payload_output = check.generate.fill value(-1.0) : tensor<4xf32>
   %expected_score = check.generate.fill value(14.0) : tensor<1xf32>
   %expected_payload = check.generate.iota offset(2.0) step(1.0) : tensor<4xf32>
-  func.call @paged_kv_block_gather_score_tile_f32(%block_id, %lane_start, %valid_count, %query, %page_table, %page_pool, %score_output, %payload_output) : (index, index, i32, tensor<4xf32>, tensor<2xi32>, tensor<16xf32>, tensor<1xf32>, tensor<4xf32>)
+  kernel.launch @paged_kv_block_gather_score_tile_f32[](%block_id, %lane_start, %valid_count, %query, %page_table, %page_pool, %score_output, %payload_output) : [](index, index, i32, tensor<4xf32>, tensor<2xi32>, tensor<16xf32>, tensor<1xf32>, tensor<4xf32>)
   check.expect.close actual(%score_output) expected(%expected_score) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
   check.expect.close actual(%payload_output) expected(%expected_payload) atol(0.0) rtol(0.0) nan(same) : tensor<4xf32>
   check.return
@@ -96,7 +96,7 @@ check.case public @paged_kv_block_gather_score_tile_tail_case {
   %score_output = check.generate.fill value(-1.0) : tensor<1xf32>
   %payload_output = check.generate.fill value(-1.0) : tensor<4xf32>
   %expected_score = check.generate.fill value(42.0) : tensor<1xf32>
-  func.call @paged_kv_block_gather_score_tile_f32(%block_id, %lane_start, %valid_count, %query, %page_table, %page_pool, %score_output, %payload_output) : (index, index, i32, tensor<4xf32>, tensor<2xi32>, tensor<16xf32>, tensor<1xf32>, tensor<4xf32>)
+  kernel.launch @paged_kv_block_gather_score_tile_f32[](%block_id, %lane_start, %valid_count, %query, %page_table, %page_pool, %score_output, %payload_output) : [](index, index, i32, tensor<4xf32>, tensor<2xi32>, tensor<16xf32>, tensor<1xf32>, tensor<4xf32>)
   check.expect.close actual(%score_output) expected(%expected_score) atol(0.0) rtol(0.0) nan(same) : tensor<1xf32>
   check.return
 }

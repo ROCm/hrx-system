@@ -144,7 +144,7 @@ check.case public @paged_decode_attention_tile_tail_case {
   %new_acc = check.generate.fill value(-1.0) : tensor<4xf32>
   %expected_state = check.generate.iota offset(1.0) step(4.0) : tensor<2xf32>
   %expected_acc = check.generate.iota offset(208.0) step(4.0) : tensor<4xf32>
-  func.call @paged_decode_attention_tile_f32(%block_id, %lane_start, %valid_count, %old_state, %old_acc, %query, %page_table, %key_pool, %value_pool, %new_state, %new_acc) : (index, index, i32, tensor<2xf32>, tensor<4xf32>, tensor<4xf32>, tensor<2xi32>, tensor<64xf32>, tensor<64xf32>, tensor<2xf32>, tensor<4xf32>)
+  kernel.launch @paged_decode_attention_tile_f32[](%block_id, %lane_start, %valid_count, %old_state, %old_acc, %query, %page_table, %key_pool, %value_pool, %new_state, %new_acc) : [](index, index, i32, tensor<2xf32>, tensor<4xf32>, tensor<4xf32>, tensor<2xi32>, tensor<64xf32>, tensor<64xf32>, tensor<2xf32>, tensor<4xf32>)
   check.expect.close actual(%new_state) expected(%expected_state) atol(0.0001) rtol(0.0001) nan(same) : tensor<2xf32>
   check.expect.close actual(%new_acc) expected(%expected_acc) atol(0.0001) rtol(0.0001) nan(same) : tensor<4xf32>
   check.return

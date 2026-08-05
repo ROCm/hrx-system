@@ -145,7 +145,7 @@ kernel.def @shared_memory_cross_wave_i32_roundtrip_two_regions() {
 check.case @case_shared_memory_wave_i32_roundtrip {
   %output = check.generate.fill value(0) : tensor<32xi32>
   %expected = check.generate.iota offset(7) step(1) : tensor<32xi32>
-  func.call @shared_memory_wave_i32_roundtrip(%output) : (tensor<32xi32>)
+  kernel.launch @shared_memory_wave_i32_roundtrip[](%output) : [](tensor<32xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
   check.return
 }
@@ -153,7 +153,7 @@ check.case @case_shared_memory_wave_i32_roundtrip {
 check.case @case_shared_memory_wave_i32_roundtrip_static_offset {
   %output = check.generate.fill value(0) : tensor<32xi32>
   %expected = check.generate.iota offset(11) step(1) : tensor<32xi32>
-  func.call @shared_memory_wave_i32_roundtrip_static_offset(%output) : (tensor<32xi32>)
+  kernel.launch @shared_memory_wave_i32_roundtrip_static_offset[](%output) : [](tensor<32xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
   check.return
 }
@@ -161,7 +161,7 @@ check.case @case_shared_memory_wave_i32_roundtrip_static_offset {
 check.case @case_shared_memory_wave_i32_partial_lane_roundtrip {
   %output = check.generate.fill value(0) : tensor<32xi32>
   %expected = check.generate.iota offset(19) step(1) : tensor<32xi32>
-  func.call @shared_memory_wave_i32_partial_lane_roundtrip(%output) : (tensor<32xi32>)
+  kernel.launch @shared_memory_wave_i32_partial_lane_roundtrip[](%output) : [](tensor<32xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
   check.return
 }
@@ -170,7 +170,7 @@ check.case @case_shared_memory_cross_wave_i32_roundtrip_two_regions {
   %input = check.generate.iota offset(1) step(1) : tensor<256xi32>
   %output = check.generate.fill value(0) : tensor<256xi32>
   %expected = check.generate.iota offset(1) step(1) : tensor<256xi32>
-  func.call @shared_memory_cross_wave_i32_roundtrip_two_regions(%input, %output) : (tensor<256xi32>, tensor<256xi32>)
+  kernel.launch @shared_memory_cross_wave_i32_roundtrip_two_regions[](%input, %output) : [](tensor<256xi32>, tensor<256xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<256xi32>
   check.return
 }

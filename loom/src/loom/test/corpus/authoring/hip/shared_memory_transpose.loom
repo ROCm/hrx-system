@@ -58,7 +58,7 @@ check.case @case_shared_memory_tile_double_transpose {
   %input = check.generate.iota offset(1) step(1) : tensor<8x8xi32>
   %output = check.generate.fill value(0) : tensor<8x8xi32>
   %expected = check.generate.iota offset(1) step(1) : tensor<8x8xi32>
-  func.call @shared_memory_tile_double_transpose(%input, %output) : (tensor<8x8xi32>, tensor<8x8xi32>)
+  kernel.launch @shared_memory_tile_double_transpose[](%input, %output) : [](tensor<8x8xi32>, tensor<8x8xi32>)
   check.expect.equal actual(%output) expected(%expected) : tensor<8x8xi32>
   check.return
 }
