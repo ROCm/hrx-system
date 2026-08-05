@@ -44,6 +44,11 @@ token into device-local request input before signaling completion. The host
 reads a separate observation copy for text and EOS only; decode never waits on
 a host token upload.
 
+Startup enqueues asynchronous model residency immediately after runtime and
+device initialization. Tokenizer construction, prompt encoding, and program
+preparation then overlap that gather; explicit semaphore dependencies keep
+prefill from consuming model storage before residency completes.
+
 ```sh
 build_tools/bin/iree-bazel-run //experimental/qwen/binding/cli:qwen-cli -- \
   --device=amdgpu://0 \

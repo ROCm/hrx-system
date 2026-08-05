@@ -64,12 +64,12 @@ typedef struct qwen_generation_cli_timepoint_t {
 typedef struct qwen_generation_cli_statistics_t {
   // Process entry before flag parsing.
   iree_time_t process_start_ns;
-  // Tokenizer, prompt encoding, and decode-state setup completion.
-  iree_time_t prompt_ready_ns;
   // Device, provider, profiling, and request timeline setup completion.
   iree_time_t runtime_ready_ns;
   // Asynchronous model residency enqueue completion.
   iree_time_t model_enqueued_ns;
+  // Tokenizer, prompt encoding, and decode-state setup completion.
+  iree_time_t prompt_ready_ns;
   // Requested prefill and decode JIT/recording completion.
   iree_time_t programs_ready_ns;
   // Prefill issue submission completion.
@@ -105,17 +105,17 @@ static void qwen_generation_cli_print_statistics(
     const qwen_generation_cli_statistics_t* statistics) {
   if (!FLAG_qwen_print_timings) return;
   fprintf(stderr,
-          "Qwen timing: prompt_ms=%.3f runtime_ms=%.3f model_enqueue_ms=%.3f "
+          "Qwen timing: runtime_ms=%.3f model_enqueue_ms=%.3f prompt_ms=%.3f "
           "program_prepare_ms=%.3f request_submit_ms=%.3f "
           "submit_to_ready_ms=%.3f token_observe_ms=%.3f token_emit_ms=%.3f "
           "ttft_ms=%.3f total_ms=%.3f jit_workers=%" PRIhsz "\n",
           qwen_generation_cli_elapsed_ms(statistics->process_start_ns,
-                                         statistics->prompt_ready_ns),
-          qwen_generation_cli_elapsed_ms(statistics->prompt_ready_ns,
                                          statistics->runtime_ready_ns),
           qwen_generation_cli_elapsed_ms(statistics->runtime_ready_ns,
                                          statistics->model_enqueued_ns),
           qwen_generation_cli_elapsed_ms(statistics->model_enqueued_ns,
+                                         statistics->prompt_ready_ns),
+          qwen_generation_cli_elapsed_ms(statistics->prompt_ready_ns,
                                          statistics->programs_ready_ns),
           qwen_generation_cli_elapsed_ms(statistics->programs_ready_ns,
                                          statistics->prefill_submitted_ns),
@@ -160,11 +160,6 @@ static iree_status_t qwen_generation_cli_load_tokenizer(
     iree_string_view_t path, iree_allocator_t host_allocator,
     iree_tokenizer_t** out_tokenizer) {
   *out_tokenizer = NULL;
-  if (iree_string_view_is_empty(path)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "--tokenizer is required");
-  }
-
   iree_io_file_contents_t* file_contents = NULL;
   iree_status_t status = iree_io_file_contents_map(
       path, IREE_IO_FILE_ACCESS_READ, host_allocator, &file_contents);
@@ -182,11 +177,6 @@ static iree_status_t qwen_generation_cli_load_tokenizer(
 static iree_status_t qwen_generation_cli_build_chat_prompt(
     iree_string_view_t system_message, iree_string_view_t user_message,
     iree_string_builder_t* out_builder) {
-  if (iree_string_view_is_empty(user_message)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "--prompt is required and must not be empty");
-  }
-
   iree_status_t status = iree_ok_status();
   if (!iree_string_view_is_empty(system_message)) {
     status =
@@ -412,77 +402,30 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
         QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE,
         QWEN_PROGRAM_DECODE_CONTEXT_LIMIT);
   }
+  if (FLAG_tokenizer[0] == '\0') {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--tokenizer is required");
+  }
+  if (FLAG_prompt[0] == '\0') {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--prompt is required and must not be empty");
+  }
 
   qwen_generation_cli_statistics_t statistics = {
       .process_start_ns = process_start_ns,
   };
-  iree_status_t status = iree_ok_status();
-  iree_tokenizer_t* tokenizer = NULL;
-  status = qwen_generation_cli_load_tokenizer(
-      iree_make_cstring_view(FLAG_tokenizer), host_allocator, &tokenizer);
-
-  iree_string_builder_t chat_prompt_builder;
-  iree_string_builder_initialize(host_allocator, &chat_prompt_builder);
-  if (iree_status_is_ok(status)) {
-    status = qwen_generation_cli_build_chat_prompt(
-        iree_make_cstring_view(FLAG_system),
-        iree_make_cstring_view(FLAG_prompt), &chat_prompt_builder);
-  }
-
-  iree_tokenizer_token_id_t* prompt_token_ids = NULL;
-  iree_host_size_t prompt_token_count = 0;
-  if (iree_status_is_ok(status)) {
-    status = qwen_generation_cli_encode_prompt(
-        tokenizer, iree_string_builder_view(&chat_prompt_builder),
-        host_allocator, &prompt_token_ids, &prompt_token_count);
-  }
-
-  const iree_host_size_t max_tokens =
-      FLAG_max_tokens > 0 ? (iree_host_size_t)FLAG_max_tokens : 0;
+  const iree_host_size_t max_tokens = (iree_host_size_t)FLAG_max_tokens;
   const iree_host_size_t context_capacity =
-      FLAG_context_length > 0 ? (iree_host_size_t)FLAG_context_length : 0;
+      (iree_host_size_t)FLAG_context_length;
   const qwen_request_flags_t request_flags = FLAG_route_trace[0] != '\0'
                                                  ? QWEN_REQUEST_FLAG_ROUTE_TRACE
                                                  : QWEN_REQUEST_FLAG_NONE;
-  if (iree_status_is_ok(status) &&
-      (prompt_token_count > context_capacity ||
-       max_tokens - 1 > context_capacity - prompt_token_count)) {
-    status = iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "prompt has %" PRIhsz " tokens and generation requests %" PRIhsz
-        "; final decode context exceeds --context_length=%" PRIhsz,
-        prompt_token_count, max_tokens, context_capacity);
-  }
-
-  iree_host_size_t decode_state_storage_size = 0;
-  uint8_t* decode_state_storage = NULL;
-  iree_tokenizer_decode_state_t* decode_state = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_tokenizer_decode_state_calculate_size(
-        tokenizer, &decode_state_storage_size);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc(host_allocator, decode_state_storage_size,
-                                   (void**)&decode_state_storage);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_tokenizer_decode_state_initialize(
-        tokenizer, IREE_TOKENIZER_DECODE_FLAG_SKIP_SPECIAL_TOKENS,
-        iree_make_byte_span(decode_state_storage, decode_state_storage_size),
-        &decode_state);
-  }
-  if (iree_status_is_ok(status)) {
-    statistics.prompt_ready_ns = iree_time_now();
-    qwen_generation_cli_print_progress(&statistics, "prompt-ready",
-                                       statistics.prompt_ready_ns);
-  }
+  iree_status_t status = iree_ok_status();
 
   qwen_tooling_runtime_context_t runtime_context;
   memset(&runtime_context, 0, sizeof(runtime_context));
-  if (iree_status_is_ok(status)) {
-    status = qwen_tooling_runtime_context_initialize_from_flags(
-        host_allocator, &runtime_context);
-  }
+  status = qwen_tooling_runtime_context_initialize_from_flags(host_allocator,
+                                                              &runtime_context);
 
   // Generation profiling includes model residency and program preparation so a
   // single capture describes the complete text-to-text lifecycle.
@@ -532,6 +475,61 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
     statistics.model_enqueued_ns = iree_time_now();
     qwen_generation_cli_print_progress(&statistics, "model-enqueued",
                                        statistics.model_enqueued_ns);
+  }
+
+  iree_tokenizer_t* tokenizer = NULL;
+  if (iree_status_is_ok(status)) {
+    status = qwen_generation_cli_load_tokenizer(
+        iree_make_cstring_view(FLAG_tokenizer), host_allocator, &tokenizer);
+  }
+
+  iree_string_builder_t chat_prompt_builder;
+  iree_string_builder_initialize(host_allocator, &chat_prompt_builder);
+  if (iree_status_is_ok(status)) {
+    status = qwen_generation_cli_build_chat_prompt(
+        iree_make_cstring_view(FLAG_system),
+        iree_make_cstring_view(FLAG_prompt), &chat_prompt_builder);
+  }
+
+  iree_tokenizer_token_id_t* prompt_token_ids = NULL;
+  iree_host_size_t prompt_token_count = 0;
+  if (iree_status_is_ok(status)) {
+    status = qwen_generation_cli_encode_prompt(
+        tokenizer, iree_string_builder_view(&chat_prompt_builder),
+        host_allocator, &prompt_token_ids, &prompt_token_count);
+  }
+
+  if (iree_status_is_ok(status) &&
+      (prompt_token_count > context_capacity ||
+       max_tokens - 1 > context_capacity - prompt_token_count)) {
+    status = iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "prompt has %" PRIhsz " tokens and generation requests %" PRIhsz
+        "; final decode context exceeds --context_length=%" PRIhsz,
+        prompt_token_count, max_tokens, context_capacity);
+  }
+
+  iree_host_size_t decode_state_storage_size = 0;
+  uint8_t* decode_state_storage = NULL;
+  iree_tokenizer_decode_state_t* decode_state = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_tokenizer_decode_state_calculate_size(
+        tokenizer, &decode_state_storage_size);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc(host_allocator, decode_state_storage_size,
+                                   (void**)&decode_state_storage);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_tokenizer_decode_state_initialize(
+        tokenizer, IREE_TOKENIZER_DECODE_FLAG_SKIP_SPECIAL_TOKENS,
+        iree_make_byte_span(decode_state_storage, decode_state_storage_size),
+        &decode_state);
+  }
+  if (iree_status_is_ok(status)) {
+    statistics.prompt_ready_ns = iree_time_now();
+    qwen_generation_cli_print_progress(&statistics, "prompt-ready",
+                                       statistics.prompt_ready_ns);
   }
 
   qwen_program_t* prefill_program = NULL;
