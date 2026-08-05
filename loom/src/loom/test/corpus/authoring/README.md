@@ -554,6 +554,18 @@ sample values remain runtime inputs and do not alter the executable.
 
 ## Authoring Rules
 
+An SSA value name carries the value's program role. A constant named
+`%fivehundredtwelve` communicates no more than its literal and reads like
+`int fivehundredtwelve = 512;` in C. The authored spelling is `%batch_size`
+when 512 is the batch size, and `%c512` when the literal itself is the only
+meaning. Type suffixes disambiguate otherwise identical bare literals when
+needed, such as `%c0_i32` and `%c0_f32x4`.
+
+Literal equality does not imply semantic identity. Two constants whose value
+is 16 can remain separate as `%channels_per_group` and
+`%lane_partition_width`; merging them under `%c16` would discard information
+the source already has.
+
 `func.call` is an exact symbol reference. It is the right spelling when the
 caller wants one specific helper or declaration, as with
 `@q6_signed_pack_dot4i` and `@bf16_dot32`.
@@ -634,8 +646,9 @@ source hid storage materialization inside the matrix kernel.
 The authoring source linter keeps this reference surface aligned with those
 rules. It rejects redundant kernel-buffer memory-space assumes, sentinel-sized
 views, late `index.cast` byte-address conversions, and ggml-style `nb*` byte
-strides typed as `index`, because agents copy examples before they read design
-notes.
+strides typed as `index`. It also rejects English-spelled numeric constant
+names in favor of semantic roles or the `%c<literal>` convention, because
+agents copy examples before they read design notes.
 
 `check.case` owns correctness policy for a workload. It creates inputs, calls
 the unit under test, and states expectations. `check.benchmark<@case>` selects

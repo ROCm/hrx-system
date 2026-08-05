@@ -31,7 +31,8 @@ The authoring corpus is a user-facing reference surface. It rejects stale
 boundary-proof boilerplate that agents are likely to copy into generated
 kernels: redundant kernel-buffer memory-space assumes, sentinel-sized views,
 late index-to-offset byte-address casts, and ggml-style byte strides typed as
-logical indices.
+logical indices. Constant SSA names must carry a program role or use the
+numeric `%c<literal>` convention instead of spelling the literal in English.
 """
 
 from __future__ import annotations
@@ -110,6 +111,64 @@ AUTHORING_INDEX_TO_OFFSET_CAST_PATTERN = re.compile(
 )
 AUTHORING_BYTE_STRIDE_INDEX_PATTERN = re.compile(
     r"%nb(?:\d+|_[A-Za-z0-9_]*)?\b\s*:\s*index\b"
+)
+AUTHORING_CONSTANT_RESULT_PATTERN = re.compile(
+    r"%(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
+    r"[A-Za-z_][A-Za-z0-9_.]*\.constant\b"
+)
+# Type, domain, and unit suffixes only decorate a spelled literal; semantic
+# continuations such as zero_point and fourth_word_ordinal remain intact.
+AUTHORING_NUMBER_NAME_SUFFIX_PATTERN = re.compile(
+    r"_(?:"
+    r"(?:[su]?i\d+|bf\d+|f\d+)(?:x\d+|v)?"
+    r"|index|offset"
+    r"|bytes?|bits?|elements?|lanes?|rows?|columns?|words?|values?"
+    r")$"
+)
+AUTHORING_NUMBER_WORDS = tuple(
+    sorted(
+        (
+            "zero",
+            "one",
+            "two",
+            "three",
+            "four",
+            "five",
+            "six",
+            "seven",
+            "eight",
+            "nine",
+            "ten",
+            "eleven",
+            "twelve",
+            "thirteen",
+            "fourteen",
+            "fifteen",
+            "sixteen",
+            "seventeen",
+            "eighteen",
+            "nineteen",
+            "twenty",
+            "thirty",
+            "forty",
+            "fifty",
+            "sixty",
+            "seventy",
+            "eighty",
+            "ninety",
+            "hundred",
+            "thousand",
+            "million",
+            "billion",
+            "trillion",
+            "and",
+        ),
+        key=len,
+        reverse=True,
+    )
+)
+AUTHORING_CONSTANT_NAME_MESSAGE = (
+    "authoring constant SSA names must describe a program role or use %c<literal>"
 )
 
 
@@ -390,12 +449,58 @@ def _iter_authoring_loom_files() -> list[Path]:
     )
 
 
+def _is_spelled_number_sequence(text: str) -> bool:
+    """Returns whether text can be segmented entirely into number words."""
+
+    if text.startswith("negative"):
+        text = text.removeprefix("negative")
+    elif text.startswith("minus"):
+        text = text.removeprefix("minus")
+    if not text:
+        return False
+
+    reachable = [False] * (len(text) + 1)
+    reachable[0] = True
+    for start in range(len(text)):
+        if not reachable[start]:
+            continue
+        for word in AUTHORING_NUMBER_WORDS:
+            if text.startswith(word, start):
+                reachable[start + len(word)] = True
+    return reachable[-1]
+
+
+def _is_spelled_number_constant_name(name: str) -> bool:
+    """Returns whether name communicates only a spelled numeric literal."""
+
+    normalized_name = name.lower()
+    match = AUTHORING_NUMBER_NAME_SUFFIX_PATTERN.search(normalized_name)
+    if match:
+        normalized_name = normalized_name[: match.start()]
+    return _is_spelled_number_sequence(normalized_name.replace("_", ""))
+
+
 def _scan_authoring_text(path: Path, text: str) -> list[Finding]:
     findings: list[Finding] = []
     for line_number, line in enumerate(text.splitlines(), start=1):
         stripped_line = _strip_line_comments(line).strip()
         if not stripped_line:
             continue
+        for match in AUTHORING_CONSTANT_RESULT_PATTERN.finditer(stripped_line):
+            name = match.group("name")
+            if _is_spelled_number_constant_name(name):
+                findings.append(
+                    Finding(
+                        path=path,
+                        line=line_number,
+                        message=AUTHORING_CONSTANT_NAME_MESSAGE,
+                        context=(
+                            f"%{name} spells the literal in English; use a "
+                            "program-role name such as %batch_size, or %c512 "
+                            "when the literal itself is the only meaning"
+                        ),
+                    )
+                )
         if AUTHORING_MEMORY_SPACE_ASSUME_PATTERN.search(stripped_line):
             findings.append(
                 Finding(
@@ -659,12 +764,48 @@ kernel.def @copy(%n: index) {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%n: index, %input: buffer, %output: buffer) {
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<[%n]xf32, #dense>
+  %base = index.constant 0 : offset
+  %batch_size = index.constant 512 : index
+  %c2 = index.constant 2 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %zero_point = scalar.constant 128 : i32
+  %fourth_word_ordinal = scalar.constant 4 : i32
+  %input_view = buffer.view %input[%base] : buffer -> view<[%n]xf32, #dense>
+  test.use %batch_size, %c2, %c0_i32, %zero_point, %fourth_word_ordinal : index, index, i32, i32, i32
   kernel.return
 }
 """,
         (),
+    )
+    ok &= _expect_authoring_self_test(
+        "authoring simple English number name fails",
+        "%two = index.constant 2 : index\n",
+        (AUTHORING_CONSTANT_NAME_MESSAGE,),
+    )
+    ok &= _expect_authoring_self_test(
+        "authoring concatenated English number name fails",
+        "%fivehundredtwelve = index.constant 512 : index\n",
+        (AUTHORING_CONSTANT_NAME_MESSAGE,),
+    )
+    ok &= _expect_authoring_self_test(
+        "authoring underscored English number name fails",
+        "%thirty_two = index.constant 32 : index\n",
+        (AUTHORING_CONSTANT_NAME_MESSAGE,),
+    )
+    ok &= _expect_authoring_self_test(
+        "authoring type-suffixed English number name fails",
+        "%zero_f32x4 = vector.constant 0.0 : vector<4xf32>\n",
+        (AUTHORING_CONSTANT_NAME_MESSAGE,),
+    )
+    ok &= _expect_authoring_self_test(
+        "authoring unit-suffixed English number name fails",
+        "%four_bytes = index.constant 4 : offset\n",
+        (AUTHORING_CONSTANT_NAME_MESSAGE,),
+    )
+    ok &= _expect_authoring_self_test(
+        "authoring signed English number name fails",
+        "%negative_one = scalar.constant -1 : i32\n",
+        (AUTHORING_CONSTANT_NAME_MESSAGE,),
     )
     ok &= _expect_authoring_self_test(
         "authoring memory-space assume fails",
