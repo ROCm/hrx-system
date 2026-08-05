@@ -23,9 +23,9 @@ kernel.decl @qwen3_moe_rmsnorm_f32(%token_count: index) launch(%token_count: ind
 
 kernel.def target(@qwen3_moe_routed_down_next_norm_gfx11_wave32) @qwen3_moe_routed_down_weighted_reduce_next_rmsnorm_f32(%token_count: index) {
   %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
-  %one = index.constant 1 : index
-  %twofiftysix = index.constant 256 : index
-  kernel.launch.config workgroups(%token_capacity, %one, %one) workgroup_size(%twofiftysix, %one, %one) : index
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%token_capacity, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
 } launch(%token_count: index, %route_weights: buffer, %routed_output: buffer, %hidden_state: buffer, %next_norm_weight: buffer, %next_projection_input: buffer) {
   %route_count0 = config.get @qwen3_moe.routed_down.route_count : index
   %output_size0 = config.get @qwen3_moe.routed_down.output_size : index
@@ -41,33 +41,33 @@ kernel.def target(@qwen3_moe_routed_down_next_norm_gfx11_wave32) @qwen3_moe_rout
   %subgroup0 = kernel.subgroup.id : index
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
   %lane = kernel.subgroup.lane.id : index
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %eight = index.constant 8 : index
-  %channel = index.mul %workitem, %eight : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  %channel = index.mul %workitem, %c8 : index
   %scratch_bytes = index.constant 32 : offset
-  %zero_offset = index.constant 0 : offset
-  %zero_f32 = scalar.constant 0.0 : f32
-  %zero_f32x8 = vector.constant 0.0 : vector<8xf32>
+  %c0_offset = index.constant 0 : offset
+  %c0_f32 = scalar.constant 0.0 : f32
+  %c0_f32x8 = vector.constant 0.0 : vector<8xf32>
   %active_token = index.cmp ult, %token0, %bounded_token_count : index
-  %safe_token0 = scf.select %active_token, %token0, %zero : index
+  %safe_token0 = scf.select %active_token, %token0, %c0 : index
   %token, %launch_token_count = index.assume %safe_token0, %bounded_token_count [lt(%safe_token0, %bounded_token_count)] : index, index
   %hidden_size_i32 = index.cast %hidden_size : index to i32
   %hidden_size_f32 = scalar.sitofp %hidden_size_i32 : i32 to f32
   %assignment_count = index.mul %launch_token_count, %route_count : index
   %route_weights_noalias, %routed_output_noalias, %hidden_state_noalias, %next_norm_weight_noalias, %next_projection_input_noalias = buffer.assume.noalias %route_weights, %routed_output, %hidden_state, %next_norm_weight, %next_projection_input : buffer, buffer, buffer, buffer, buffer
-  %route_weights_view = buffer.view %route_weights_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%route_count]xf32, #dense>
-  %routed_output_view = buffer.view %routed_output_noalias[%zero_offset] : buffer -> view<[%assignment_count]x[%output_size]xf16, #dense>
-  %hidden_state_view = buffer.view %hidden_state_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%hidden_size]xf32, #dense>
-  %next_norm_weight_view = buffer.view %next_norm_weight_noalias[%zero_offset] : buffer -> view<[%hidden_size]xf32, #dense>
-  %next_projection_input_view = buffer.view %next_projection_input_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%hidden_size]xf32, #dense>
+  %route_weights_view = buffer.view %route_weights_noalias[%c0_offset] : buffer -> view<[%launch_token_count]x[%route_count]xf32, #dense>
+  %routed_output_view = buffer.view %routed_output_noalias[%c0_offset] : buffer -> view<[%assignment_count]x[%output_size]xf16, #dense>
+  %hidden_state_view = buffer.view %hidden_state_noalias[%c0_offset] : buffer -> view<[%launch_token_count]x[%hidden_size]xf32, #dense>
+  %next_norm_weight_view = buffer.view %next_norm_weight_noalias[%c0_offset] : buffer -> view<[%hidden_size]xf32, #dense>
+  %next_projection_input_view = buffer.view %next_projection_input_noalias[%c0_offset] : buffer -> view<[%launch_token_count]x[%hidden_size]xf32, #dense>
   %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_view = buffer.view %scratch[%zero_offset] : buffer -> view<8xf32, #dense>
+  %scratch_view = buffer.view %scratch[%c0_offset] : buffer -> view<8xf32, #dense>
 
   // The predicate depends only on the workgroup ID, so every workitem either
   // executes the complete barrier-bearing row reduction or skips it together.
   scf.if %active_token {
-    %weighted_sum = scf.for %route = [%zero to %route_count step %one](%sum = %zero_f32x8 : vector<8xf32>) -> (vector<8xf32>) unroll {
+    %weighted_sum = scf.for %route = [%c0 to %route_count step %c1](%sum = %c0_f32x8 : vector<8xf32>) -> (vector<8xf32>) unroll {
       %assignment = index.madd %token, %route_count, %route : index
       %routed_f16 = vector.load %routed_output_view[%assignment, %channel] : view<[%assignment_count]x[%output_size]xf16, #dense> -> vector<8xf16>
       %routed = vector.extf %routed_f16 : vector<8xf16> to vector<8xf32>
@@ -80,22 +80,22 @@ kernel.def target(@qwen3_moe_routed_down_next_norm_gfx11_wave32) @qwen3_moe_rout
     %residual = vector.load %hidden_state_view[%token, %channel] : view<[%launch_token_count]x[%hidden_size]xf32, #dense> -> vector<8xf32>
     %result = vector.addf %residual, %weighted_sum : vector<8xf32>
     %squares = vector.mulf<reassoc|nnan|ninf|nsz> %result, %result : vector<8xf32>
-    %thread_sum = vector.reduce<addf, reassoc|nnan|ninf|nsz> %squares, %zero_f32 : vector<8xf32>, f32
+    %thread_sum = vector.reduce<addf, reassoc|nnan|ninf|nsz> %squares, %c0_f32 : vector<8xf32>, f32
     %subgroup_sum = kernel.subgroup.reduce<addf> %thread_sum : f32
 
-    %is_subgroup_leader = index.cmp eq, %lane, %zero : index
+    %is_subgroup_leader = index.cmp eq, %lane, %c0 : index
     scf.if %is_subgroup_leader {
       view.store %subgroup_sum, %scratch_view[%subgroup] : f32, view<8xf32, #dense>
     }
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-    %is_reduction_subgroup = index.cmp eq, %subgroup, %zero : index
-    %is_reduction_lane = index.cmp ult, %lane, %eight : index
+    %is_reduction_subgroup = index.cmp eq, %subgroup, %c0 : index
+    %is_reduction_lane = index.cmp ult, %lane, %c8 : index
     %loads_subgroup_sum = scalar.andi %is_reduction_subgroup, %is_reduction_lane : i1
     %subgroup_partial = scf.if %loads_subgroup_sum -> (f32) {
       %value = view.load %scratch_view[%lane] : view<8xf32, #dense> -> f32
       scf.yield %value : f32
     } else {
-      scf.yield %zero_f32 : f32
+      scf.yield %c0_f32 : f32
     }
     %row_sum = kernel.subgroup.reduce<addf> %subgroup_partial : f32
     %writes_scale = scalar.andi %is_reduction_subgroup, %is_subgroup_leader : i1
@@ -103,11 +103,11 @@ kernel.def target(@qwen3_moe_routed_down_next_norm_gfx11_wave32) @qwen3_moe_rout
       %mean = scalar.divf<reassoc|nnan|ninf|nsz|arcp> %row_sum, %hidden_size_f32 : f32
       %biased_mean = scalar.addf<reassoc|nnan|ninf|nsz> %mean, %epsilon : f32
       %scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %biased_mean : f32
-      view.store %scale, %scratch_view[%zero] : f32, view<8xf32, #dense>
+      view.store %scale, %scratch_view[%c0] : f32, view<8xf32, #dense>
     }
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
 
-    %scale = view.load %scratch_view[%zero] : view<8xf32, #dense> -> f32
+    %scale = view.load %scratch_view[%c0] : view<8xf32, #dense> -> f32
     %scale_x8 = vector.splat %scale : vector<8xf32>
     %learned_weight = vector.load %next_norm_weight_view[%channel] : view<[%hidden_size]xf32, #dense> -> vector<8xf32>
     %normalized = vector.mulf<reassoc|nnan|ninf|nsz> %result, %scale_x8 : vector<8xf32>

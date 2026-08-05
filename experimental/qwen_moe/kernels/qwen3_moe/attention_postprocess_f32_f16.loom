@@ -66,17 +66,17 @@ func.template<qwen3_moe.attention.postprocess.head_body> device @qwen3_moe_atten
   %bounded_cache_row_count = index.assume %cache_row_count [range(%cache_row_count, 1, 1048576)] : index
   %query_size, %key_value_size, %head_size = index.assume %query_size0, %key_value_size0, %head_size0 [range(%query_size0, 1, 262144), range(%key_value_size0, 1, 262144), range(%head_size0, 4, 1024), mul(%head_size0, 4), mul(%query_size0, %head_size0), mul(%key_value_size0, %head_size0)] : index, index, index
   %channel0 = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : index
-  %two = index.constant 2 : index
-  %four = index.constant 4 : index
-  %zero_f32 = scalar.constant 0.0 : f32
-  %zero_offset = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c0_f32 = scalar.constant 0.0 : f32
+  %c0_offset = index.constant 0 : offset
   %token, %launch_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
-  %half_head_size = index.div %head_size, %two : index
-  %pair_packet_count = index.div %head_size, %four : index
+  %half_head_size = index.div %head_size, %c2 : index
+  %pair_packet_count = index.div %head_size, %c4 : index
   %query_head_count = index.div %query_size, %head_size : index
   %key_value_head_count = index.div %key_value_size, %head_size : index
-  %key_value_domain_count = index.mul %key_value_head_count, %two : index
+  %key_value_domain_count = index.mul %key_value_head_count, %c2 : index
   %head_domain_count = index.add %query_head_count, %key_value_domain_count : index
   %head_domain = index.assume %head_domain0 [lt(%head_domain0, %head_domain_count)] : index
   %key_domain_end = index.add %query_head_count, %key_value_head_count : index
@@ -87,23 +87,23 @@ func.template<qwen3_moe.attention.postprocess.head_body> device @qwen3_moe_atten
   %head_size_i32 = index.cast %head_size : index to i32
   %head_size_f32 = scalar.sitofp %head_size_i32 : i32 to f32
   %positions_noalias, %key_cache_indices_noalias, %value_cache_indices_noalias, %query_input_noalias, %key_input_noalias, %value_input_noalias, %query_norm_weight_noalias, %key_norm_weight_noalias, %inverse_frequencies_noalias, %query_output_noalias, %key_cache_noalias, %value_cache_noalias = buffer.assume.noalias %positions, %key_cache_indices, %value_cache_indices, %query_input, %key_input, %value_input, %query_norm_weight, %key_norm_weight, %inverse_frequencies, %query_output, %key_cache, %value_cache : buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer
-  %positions_view = buffer.view %positions_noalias[%zero_offset] : buffer -> view<[%launch_token_count]xi32, #dense>
-  %key_cache_indices_view = buffer.view %key_cache_indices_noalias[%zero_offset] : buffer -> view<[%launch_token_count]xi64, #dense>
-  %value_cache_indices_view = buffer.view %value_cache_indices_noalias[%zero_offset] : buffer -> view<[%launch_token_count]xi64, #dense>
-  %query_input_view = buffer.view %query_input_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%query_head_count]x[%head_size]xf32, #dense>
-  %key_input_view = buffer.view %key_input_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%key_value_head_count]x[%head_size]xf32, #dense>
-  %value_input_view = buffer.view %value_input_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%key_value_head_count]x[%head_size]xf32, #dense>
-  %query_norm_weight_view = buffer.view %query_norm_weight_noalias[%zero_offset] : buffer -> view<[%head_size]xf32, #dense>
-  %key_norm_weight_view = buffer.view %key_norm_weight_noalias[%zero_offset] : buffer -> view<[%head_size]xf32, #dense>
-  %inverse_frequencies_view = buffer.view %inverse_frequencies_noalias[%zero_offset] : buffer -> view<[%half_head_size]xf32, #dense>
-  %query_output_view = buffer.view %query_output_noalias[%zero_offset] : buffer -> view<[%launch_token_count]x[%query_head_count]x[%head_size]xf32, #dense>
-  %key_cache_words_view = buffer.view %key_cache_noalias[%zero_offset] : buffer -> view<[%bounded_cache_row_count]x[%key_value_head_count]x[%half_head_size]xi32, #dense>
-  %value_cache_words_view = buffer.view %value_cache_noalias[%zero_offset] : buffer -> view<[%bounded_cache_row_count]x[%key_value_head_count]x[%half_head_size]xi32, #dense>
+  %positions_view = buffer.view %positions_noalias[%c0_offset] : buffer -> view<[%launch_token_count]xi32, #dense>
+  %key_cache_indices_view = buffer.view %key_cache_indices_noalias[%c0_offset] : buffer -> view<[%launch_token_count]xi64, #dense>
+  %value_cache_indices_view = buffer.view %value_cache_indices_noalias[%c0_offset] : buffer -> view<[%launch_token_count]xi64, #dense>
+  %query_input_view = buffer.view %query_input_noalias[%c0_offset] : buffer -> view<[%launch_token_count]x[%query_head_count]x[%head_size]xf32, #dense>
+  %key_input_view = buffer.view %key_input_noalias[%c0_offset] : buffer -> view<[%launch_token_count]x[%key_value_head_count]x[%head_size]xf32, #dense>
+  %value_input_view = buffer.view %value_input_noalias[%c0_offset] : buffer -> view<[%launch_token_count]x[%key_value_head_count]x[%head_size]xf32, #dense>
+  %query_norm_weight_view = buffer.view %query_norm_weight_noalias[%c0_offset] : buffer -> view<[%head_size]xf32, #dense>
+  %key_norm_weight_view = buffer.view %key_norm_weight_noalias[%c0_offset] : buffer -> view<[%head_size]xf32, #dense>
+  %inverse_frequencies_view = buffer.view %inverse_frequencies_noalias[%c0_offset] : buffer -> view<[%half_head_size]xf32, #dense>
+  %query_output_view = buffer.view %query_output_noalias[%c0_offset] : buffer -> view<[%launch_token_count]x[%query_head_count]x[%head_size]xf32, #dense>
+  %key_cache_words_view = buffer.view %key_cache_noalias[%c0_offset] : buffer -> view<[%bounded_cache_row_count]x[%key_value_head_count]x[%half_head_size]xi32, #dense>
+  %value_cache_words_view = buffer.view %value_cache_noalias[%c0_offset] : buffer -> view<[%bounded_cache_row_count]x[%key_value_head_count]x[%half_head_size]xi32, #dense>
   %row_sum = scf.if %is_query_or_key -> (f32) {
     %partial_sum = scf.if %publish_output -> (f32) {
       %channel_sum = scf.if %active_channel -> (f32) {
         %channel = index.assume %channel0 [lt(%channel0, %pair_packet_count)] : index
-        %reduction_channel = index.mul %channel, %four : index
+        %reduction_channel = index.mul %channel, %c4 : index
         %reduction_values = scf.if %is_query -> (vector<4xf32>) {
           %query_values = vector.load %query_input_view[%token, %head_domain, %reduction_channel] : view<[%launch_token_count]x[%query_head_count]x[%head_size]xf32, #dense> -> vector<4xf32>
           scf.yield %query_values : vector<4xf32>
@@ -112,27 +112,27 @@ func.template<qwen3_moe.attention.postprocess.head_body> device @qwen3_moe_atten
           scf.yield %key_values : vector<4xf32>
         }
         %squares = vector.mulf<reassoc|nnan|ninf|nsz|contract> %reduction_values, %reduction_values : vector<4xf32>
-        %sum = vector.reduce<addf, reassoc|nnan|ninf|nsz> %squares, %zero_f32 : vector<4xf32>, f32
+        %sum = vector.reduce<addf, reassoc|nnan|ninf|nsz> %squares, %c0_f32 : vector<4xf32>, f32
         scf.yield %sum : f32
       } else {
-        scf.yield %zero_f32 : f32
+        scf.yield %c0_f32 : f32
       }
       scf.yield %channel_sum : f32
     } else {
-      scf.yield %zero_f32 : f32
+      scf.yield %c0_f32 : f32
     }
     %sum = kernel.workgroup.reduce<addf> %partial_sum : f32
     scf.yield %sum : f32
   } else {
-    scf.yield %zero_f32 : f32
+    scf.yield %c0_f32 : f32
   }
   scf.if %publish_output {
     scf.if %active_channel {
       %channel = index.assume %channel0 [lt(%channel0, %pair_packet_count)] : index
-      %pair_channel = index.mul %channel, %two : index
+      %pair_channel = index.mul %channel, %c2 : index
       %paired_channel = index.add %pair_channel, %half_head_size : index
       %paired_word = index.add %channel, %pair_packet_count : index
-      %reduction_channel = index.mul %channel, %four : index
+      %reduction_channel = index.mul %channel, %c4 : index
       scf.if %is_query {
         %low_values = vector.load %query_input_view[%token, %head_domain, %pair_channel] : view<[%launch_token_count]x[%query_head_count]x[%head_size]xf32, #dense> -> vector<2xf32>
         %high_values = vector.load %query_input_view[%token, %head_domain, %paired_channel] : view<[%launch_token_count]x[%query_head_count]x[%head_size]xf32, #dense> -> vector<2xf32>
@@ -185,23 +185,23 @@ kernel.def target(@qwen3_moe_attention_postprocess_gfx11_wave32) @qwen3_moe_atte
   %key_value_size = config.get @qwen3_moe.attention.key_value_size : index
   %head_size = config.get @qwen3_moe.attention.head_size : index
   %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %four = index.constant 4 : index
-  %pair_packet_count = index.div %head_size, %four : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %pair_packet_count = index.div %head_size, %c4 : index
   %query_head_count = index.div %query_size, %head_size : index
   %key_value_head_count = index.div %key_value_size, %head_size : index
-  %key_value_domain_count = index.mul %key_value_head_count, %two : index
+  %key_value_domain_count = index.mul %key_value_head_count, %c2 : index
   %head_domain_count = index.add %query_head_count, %key_value_domain_count : index
-  kernel.launch.config workgroups(%head_domain_count, %token_capacity, %one) workgroup_size(%pair_packet_count, %one, %one) : index
+  kernel.launch.config workgroups(%head_domain_count, %token_capacity, %c1) workgroup_size(%pair_packet_count, %c1, %c1) : index
 } launch(%token_count: index, %cache_row_count: index, %positions: buffer, %key_cache_indices: buffer, %value_cache_indices: buffer, %query_input: buffer, %key_input: buffer, %value_input: buffer, %query_norm_weight: buffer, %key_norm_weight: buffer, %inverse_frequencies: buffer, %query_output: buffer, %key_cache: buffer, %value_cache: buffer) {
   %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
   %head_domain = kernel.workgroup.id<x> : index
   %token0 = kernel.workgroup.id<y> : index
-  %zero = index.constant 0 : index
+  %c0 = index.constant 0 : index
   %valid_token = index.cmp ult, %token0, %bounded_token_count : index
-  %safe_token = scf.select %valid_token, %token0, %zero : index
+  %safe_token = scf.select %valid_token, %token0, %c0 : index
   func.apply<qwen3_moe.attention.postprocess.head_body>(%valid_token, %bounded_token_count, %cache_row_count, %head_domain, %safe_token, %positions, %key_cache_indices, %value_cache_indices, %query_input, %key_input, %value_input, %query_norm_weight, %key_norm_weight, %inverse_frequencies, %query_output, %key_cache, %value_cache) : (i1, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
