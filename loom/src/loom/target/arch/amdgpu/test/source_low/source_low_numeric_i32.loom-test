@@ -8,9 +8,9 @@ kernel.def target(@target) @i32_bitwise() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
   %loaded = vector.load %input_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
   %mask = vector.constant 15 : vector<1xi32>
   %masked = vector.andi %loaded, %mask : vector<1xi32>
@@ -44,9 +44,9 @@ kernel.def target(@target) @i32_shift() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
   %loaded = vector.load %input_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
   %shift = vector.constant 3 : vector<1xi32>
   %left = vector.shli %loaded, %shift : vector<1xi32>
@@ -83,9 +83,9 @@ kernel.def target(@target) @i32_negative_literal() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xi32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32, #dense>
   %loaded = vector.load %input_view[%lane] : view<64xi32, #dense> -> vector<1xi32>
   %mask = vector.constant -1 : vector<1xi32>
   %result = vector.xori %loaded, %mask : vector<1xi32>
@@ -114,9 +114,9 @@ kernel.def target(@target) @i32_scalarized() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero] : buffer -> view<64x4xi32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xi32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32, #dense>
   %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32, #dense> -> vector<4xi32>
   %lane0 = vector.extract %loaded[0] : vector<4xi32> -> i32
   %lane1 = vector.extract %loaded[1] : vector<4xi32> -> i32

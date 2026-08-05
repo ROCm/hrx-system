@@ -6,10 +6,10 @@ kernel.def @f32_arith() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>
-  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64xf32, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32, #dense>
   %lhs = vector.load %lhs_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
   %rhs = vector.load %rhs_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
   %sum = vector.addf %lhs, %rhs : vector<1xf32>
@@ -28,10 +28,10 @@ kernel.def @f32_fma() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>
-  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64xf32, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32, #dense>
   %lhs = vector.load %lhs_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
   %rhs = vector.load %rhs_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
   %bias = vector.constant 0.5 : vector<1xf32>
@@ -49,10 +49,10 @@ kernel.def @f32_arcp_div() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64x4xf32, #dense>
-  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64x4xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xf32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64x4xf32, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64x4xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf32, #dense>
   %lhs = vector.load %lhs_view[%lane, 0] : view<64x4xf32, #dense> -> vector<4xf32>
   %rhs = vector.load %rhs_view[%lane, 0] : view<64x4xf32, #dense> -> vector<4xf32>
   %quotient = vector.divf<nnan|ninf|nsz|arcp> %lhs, %rhs : vector<4xf32>
@@ -95,19 +95,19 @@ func.def @f32_vector_arcp_literal_dividend(%values: vector<4xf32>) -> (vector<4x
 // ====
 
 func.def @f32_guarded_arcp_reciprocal_scale(%amax: f32) -> (f32) {
-  %zero = scalar.constant 0.0 : f32
-  %one = scalar.constant 1.0 : f32
-  %one_over_127 = scalar.constant 0.007874015700000001 : f32
-  %scale = scalar.constant 127.0 : f32
-  %d = scalar.mulf<nnan|ninf|nsz|arcp> %amax, %one_over_127 : f32
+  %fallback_scale = scalar.constant 0.0 : f32
+  %reciprocal_numerator = scalar.constant 1.0 : f32
+  %inverse_scale_limit = scalar.constant 0.007874015700000001 : f32
+  %scale_limit = scalar.constant 127.0 : f32
+  %d = scalar.mulf<nnan|ninf|nsz|arcp> %amax, %inverse_scale_limit : f32
   %zero_for_cmp = scalar.subf %d, %d : f32
   %nonzero = scalar.cmpf one, %d, %zero_for_cmp : f32
   %d_inv = scf.if %nonzero -> (f32) {
-    %amax_inv = scalar.divf<nnan|ninf|nsz|arcp> %one, %amax : f32
-    %candidate = scalar.mulf<nnan|ninf|nsz|arcp> %amax_inv, %scale : f32
+    %amax_inv = scalar.divf<nnan|ninf|nsz|arcp> %reciprocal_numerator, %amax : f32
+    %candidate = scalar.mulf<nnan|ninf|nsz|arcp> %amax_inv, %scale_limit : f32
     scf.yield %candidate : f32
   } else {
-    scf.yield %zero : f32
+    scf.yield %fallback_scale : f32
   }
   func.return %d_inv : f32
 }
@@ -120,10 +120,10 @@ kernel.def @f32_exact_vector_div() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64xf32, #dense>
-  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64xf32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64xf32, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xf32, #dense>
   %lhs = vector.load %lhs_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
   %rhs = vector.load %rhs_view[%lane] : view<64xf32, #dense> -> vector<1xf32>
   %quotient = vector.divf %lhs, %rhs : vector<1xf32>
@@ -154,10 +154,10 @@ kernel.def @f32_scalarized() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %output: buffer) {
   %lane = kernel.workitem.id<x> : index
-  %zero = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_buffer[%zero] : buffer -> view<64x4xf32, #dense>
-  %rhs_view = buffer.view %rhs_buffer[%zero] : buffer -> view<64x4xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<64x4xf32, #dense>
+  %buffer_base = index.constant 0 : offset
+  %lhs_view = buffer.view %lhs_buffer[%buffer_base] : buffer -> view<64x4xf32, #dense>
+  %rhs_view = buffer.view %rhs_buffer[%buffer_base] : buffer -> view<64x4xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xf32, #dense>
   %lhs = vector.load %lhs_view[%lane, 0] : view<64x4xf32, #dense> -> vector<4xf32>
   %rhs = vector.load %rhs_view[%lane, 0] : view<64x4xf32, #dense> -> vector<4xf32>
   %lhs0 = vector.extract %lhs[0] : vector<4xf32> -> f32
@@ -209,8 +209,8 @@ func.def @f32_uniform_vector_binary(%lhs_buffer: buffer, %rhs_buffer: buffer) ->
   %sum = vector.addf %lhs, %rhs : vector<4xf32>
   %difference = vector.subf %lhs, %rhs : vector<4xf32>
   %combined = vector.addf %product, %sum : vector<4xf32>
-  %two = vector.constant 2.0 : vector<4xf32>
-  %scaled = vector.mulf %lhs, %two : vector<4xf32>
+  %scale_factor = vector.constant 2.0 : vector<4xf32>
+  %scaled = vector.mulf %lhs, %scale_factor : vector<4xf32>
   %with_difference = vector.addf %combined, %difference : vector<4xf32>
   %result = vector.addf %with_difference, %scaled : vector<4xf32>
   func.return %result : vector<4xf32>
@@ -234,9 +234,9 @@ func.def @f32_uniform_scalar_binary(%lhs_buffer: buffer, %rhs_buffer: buffer) ->
 // ====
 
 func.def @f32_inline_zero_arithmetic(%scalar: f32, %vector: vector<2xf32>) -> (f32, vector<2xf32>) {
-  %zero = scalar.constant 0.0 : f32
-  %scalar_result = scalar.mulf %scalar, %zero : f32
-  %zero_vector = vector.splat %zero : vector<2xf32>
+  %zero_factor = scalar.constant 0.0 : f32
+  %scalar_result = scalar.mulf %scalar, %zero_factor : f32
+  %zero_vector = vector.splat %zero_factor : vector<2xf32>
   %vector_result = vector.mulf %vector, %zero_vector : vector<2xf32>
   func.return %scalar_result, %vector_result : f32, vector<2xf32>
 }
@@ -283,11 +283,11 @@ kernel.def @f32_direct_arg_scale() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%output: buffer, %scale: f32) {
-  %zero_offset = index.constant 0 : offset
-  %zero_index = index.constant 0 : index
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<1xf32, #dense>
+  %output_base = index.constant 0 : offset
+  %output_element = index.constant 0 : index
+  %output_view = buffer.view %output[%output_base] : buffer -> view<1xf32, #dense>
   %unit = scalar.constant 1.0 : f32
   %scaled = scalar.mulf %unit, %scale : f32
-  view.store %scaled, %output_view[%zero_index] : f32, view<1xf32, #dense>
+  view.store %scaled, %output_view[%output_element] : f32, view<1xf32, #dense>
   kernel.return
 }
