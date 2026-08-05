@@ -1,7 +1,7 @@
 kernel.def export("scale") @scale() {
   %unit = index.constant 1 : index
-  %four = index.constant 4 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%four, %unit, %unit) : index
+  %workgroup_size = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
