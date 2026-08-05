@@ -10,6 +10,7 @@
 
 #include "loom/analysis/condition_facts.h"
 #include "loom/analysis/symbolic_expr.h"
+#include "loom/analysis/symbolic_expr_proof.h"
 #include "loom/ir/context.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"

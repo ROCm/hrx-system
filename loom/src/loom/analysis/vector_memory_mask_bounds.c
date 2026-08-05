@@ -6,6 +6,7 @@
 
 #include "loom/analysis/vector_memory_mask_bounds.h"
 
+#include "loom/analysis/symbolic_expr_proof.h"
 #include "loom/ops/vector/ops.h"
 
 static bool loom_vector_memory_mask_facts_exact_i64(loom_value_facts_t facts,

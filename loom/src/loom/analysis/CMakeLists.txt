@@ -851,8 +851,12 @@ loom_cc_library(
     symbolic_expr
   HDRS
     "symbolic_expr.h"
+    "symbolic_expr_proof.h"
   SRCS
     "symbolic_expr.c"
+    "symbolic_expr_proof.c"
+    "symbolic_value.c"
+    "symbolic_value.h"
   DEPS
     ::condition_facts
     ::integer_relation
@@ -987,6 +991,22 @@ loom_cc_test(
     symbolic_expr_test
   SRCS
     "symbolic_expr_test.cc"
+  DEPS
+    ::symbolic_expr
+    ::symbolic_expr_test_fixture
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::index
+    loom::ops::scalar
+    loom::ops::scf
+)
+
+loom_cc_test(
+  NAME
+    symbolic_expr_proof_test
+  SRCS
+    "symbolic_expr_proof_test.cc"
   DEPS
     ::condition_facts
     ::symbolic_expr

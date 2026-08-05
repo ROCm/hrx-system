@@ -14,6 +14,7 @@
 #include "loom/analysis/condition_facts.h"
 #include "loom/analysis/memory_root_bounds.h"
 #include "loom/analysis/symbolic_expr.h"
+#include "loom/analysis/symbolic_expr_proof.h"
 #include "loom/analysis/vector_memory_mask_bounds.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"

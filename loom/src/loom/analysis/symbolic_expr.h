@@ -26,7 +26,6 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/analysis/integer_relation.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/module.h"
@@ -40,8 +39,6 @@ extern "C" {
 #define LOOM_SYMBOLIC_EXPR_DEFAULT_TERM_LIMIT 64
 
 typedef struct loom_symbolic_expr_memo_entry_t loom_symbolic_expr_memo_entry_t;
-typedef struct loom_symbolic_expr_condition_fact_memo_entry_t
-    loom_symbolic_expr_condition_fact_memo_entry_t;
 typedef struct loom_condition_fact_set_t loom_condition_fact_set_t;
 
 // A single coefficient times an SSA value.
@@ -80,6 +77,19 @@ typedef struct loom_symbolic_expr_t {
   // Bitfield of loom_symbolic_expr_flag_bits_e.
   loom_symbolic_expr_flags_t flags;
 } loom_symbolic_expr_t;
+
+// Memoized condition-refined facts for one SSA value. This state is owned by
+// loom_symbolic_expr_context_t and retained across context resets.
+typedef struct loom_symbolic_expr_condition_fact_memo_entry_t {
+  // Memo state: zero is empty, one is visiting, and two is ready.
+  uint8_t state;
+
+  // Maximum producer depth represented by facts.
+  uint8_t depth;
+
+  // Cached facts when state is ready.
+  loom_value_facts_t facts;
+} loom_symbolic_expr_condition_fact_memo_entry_t;
 
 // Per-analysis state for symbolic expression queries.
 typedef struct loom_symbolic_expr_context_t {
@@ -120,42 +130,6 @@ typedef struct loom_symbolic_expr_context_t {
   // Recursive select-case proof depth, capped to keep proof work bounded.
   uint8_t condition_proof_depth;
 } loom_symbolic_expr_context_t;
-
-// Tri-state proof result for symbolic comparisons.
-typedef enum loom_symbolic_proof_result_e {
-  // The relation could not be proven either way.
-  LOOM_SYMBOLIC_PROOF_UNKNOWN = 0,
-
-  // The relation is proven true.
-  LOOM_SYMBOLIC_PROOF_TRUE = 1,
-
-  // The relation is proven false.
-  LOOM_SYMBOLIC_PROOF_FALSE = 2,
-} loom_symbolic_proof_result_t;
-
-// Compact replacement form for a symbolic value difference.
-typedef enum loom_symbolic_value_difference_kind_e {
-  // The difference is not representable as a single existing value or constant.
-  LOOM_SYMBOLIC_VALUE_DIFFERENCE_UNKNOWN = 0,
-
-  // The difference is the exact integer in |constant|.
-  LOOM_SYMBOLIC_VALUE_DIFFERENCE_CONSTANT = 1,
-
-  // The difference is the existing SSA value |value_id|.
-  LOOM_SYMBOLIC_VALUE_DIFFERENCE_VALUE = 2,
-} loom_symbolic_value_difference_kind_t;
-
-// Difference summary for left_value - right_value.
-typedef struct loom_symbolic_value_difference_t {
-  // Kind of replacement represented by this difference.
-  loom_symbolic_value_difference_kind_t kind;
-
-  // Exact integer when kind is LOOM_SYMBOLIC_VALUE_DIFFERENCE_CONSTANT.
-  int64_t constant;
-
-  // Existing SSA value when kind is LOOM_SYMBOLIC_VALUE_DIFFERENCE_VALUE.
-  loom_value_id_t value_id;
-} loom_symbolic_value_difference_t;
 
 static inline bool loom_symbolic_expr_is_linear(
     const loom_symbolic_expr_t* expression) {
@@ -217,36 +191,6 @@ iree_status_t loom_symbolic_expr_mul_i64(loom_symbolic_expr_context_t* context,
                                          const loom_symbolic_expr_t* expression,
                                          int64_t multiplier,
                                          loom_symbolic_expr_t* out_expression);
-
-// Attempts to prove left <= right. The implementation uses exact term
-// cancellation first and falls back to interval facts without allocating new
-// retained expression storage.
-iree_status_t loom_symbolic_expr_prove_le(
-    loom_symbolic_expr_context_t* context,
-    const loom_symbolic_expr_t* left_expression,
-    const loom_symbolic_expr_t* right_expression,
-    loom_symbolic_proof_result_t* out_result);
-
-// Simplifies left_value - right_value when the normalized difference is a
-// single existing value or an exact integer constant.
-iree_status_t loom_symbolic_expr_simplify_value_difference(
-    loom_symbolic_expr_context_t* context, loom_value_id_t left_value,
-    loom_value_id_t right_value,
-    loom_symbolic_value_difference_t* out_difference);
-
-// Attempts to prove an integer relation between two SSA values.
-iree_status_t loom_symbolic_expr_prove_value_relation(
-    loom_symbolic_expr_context_t* context,
-    loom_symbolic_integer_relation_t relation, loom_value_id_t left_value,
-    loom_value_id_t right_value, loom_symbolic_proof_result_t* out_result);
-
-// Attempts to prove an integer relation using only facts already active on
-// |context|. This does not enumerate hypothetical select outcomes, keeping the
-// query suitable for speculative canonicalization on large value graphs.
-iree_status_t loom_symbolic_expr_prove_value_relation_with_active_facts(
-    loom_symbolic_expr_context_t* context,
-    loom_symbolic_integer_relation_t relation, loom_value_id_t left_value,
-    loom_value_id_t right_value, loom_symbolic_proof_result_t* out_result);
 
 #ifdef __cplusplus
 }  // extern "C"

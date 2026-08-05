@@ -740,8 +740,16 @@ loom_cc_test(
 
 loom_cc_library(
     name = "symbolic_expr",
-    srcs = ["symbolic_expr.c"],
-    hdrs = ["symbolic_expr.h"],
+    srcs = [
+        "symbolic_expr.c",
+        "symbolic_expr_proof.c",
+        "symbolic_value.c",
+        "symbolic_value.h",
+    ],
+    hdrs = [
+        "symbolic_expr.h",
+        "symbolic_expr_proof.h",
+    ],
     deps = [
         ":condition_facts",
         ":integer_relation",
@@ -861,6 +869,21 @@ loom_cc_test(
 loom_cc_test(
     name = "symbolic_expr_test",
     srcs = ["symbolic_expr_test.cc"],
+    deps = [
+        ":symbolic_expr",
+        ":symbolic_expr_test_fixture",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "symbolic_expr_proof_test",
+    srcs = ["symbolic_expr_proof_test.cc"],
     deps = [
         ":condition_facts",
         ":symbolic_expr",

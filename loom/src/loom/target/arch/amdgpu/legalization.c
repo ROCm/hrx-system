@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/analysis/symbolic_expr.h"
+#include "loom/analysis/symbolic_expr_proof.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
