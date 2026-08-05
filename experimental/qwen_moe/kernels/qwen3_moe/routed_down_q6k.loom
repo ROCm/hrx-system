@@ -350,6 +350,105 @@ func.template<qwen3_moe.routed_down.q6k_f32.body> device @qwen3_moe_routed_down_
   func.return
 }
 
+// Decode schedule matching the Vulkan oracle's two adjacent output rows per
+// wave. Four wave64 subgroups publish eight channels per workgroup. Keeping the
+// route loop rolled prevents its eight iterations from multiplying the two-row
+// contraction's register pressure and instruction footprint.
+func.template<qwen3_moe.routed_down.q6k_f32.pair_body> device @qwen3_moe_routed_down_q6k_f32_pair_body(%token_count: index, %token: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index, %input: buffer, %route_ids: buffer, %route_weights: buffer, %weight: buffer, %output: buffer) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 1)] : index
+  %bounded_token, %body_token_count = index.assume %token, %bounded_token_count [lt(%token, %bounded_token_count)] : index, index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
+  %bounded_route_count = index.assume %route_count [range(%route_count, 1, 8)] : index
+  %bounded_route_id_stride = index.assume %route_id_stride [range(%route_id_stride, 1, 512)] : index
+  %bounded_expert_count = index.assume %expert_count [range(%expert_count, 1, 512)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 2, 4096)] : index
+  %pair_tile = kernel.workgroup.id<x> : index
+  %subgroup0 = kernel.subgroup.id : index
+  %lane0 = kernel.subgroup.lane.id : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %four = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %twofiftysix = index.constant 256 : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %zero_offset = index.constant 0 : offset
+  %scale_stage_bytes = index.constant 2048 : offset
+  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 3)] : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %pair_tile_base = index.mul %pair_tile, %four : index
+  %pair = index.add %pair_tile_base, %subgroup : index
+  %row00 = index.mul %pair, %two : index
+  %row0, %body_output_size = index.assume %row00, %bounded_output_size [lt(%row00, %bounded_output_size)] : index, index
+  %row1 = index.add %row0, %one : index
+  %row1_valid = index.cmp ult, %row1, %body_output_size : index
+  %safe_row1 = scf.select %row1_valid, %row1, %zero : index
+  %assignment_count = index.mul %body_token_count, %bounded_route_count : index
+  %q6_block_count = index.div %bounded_input_size, %twofiftysix : index
+  %cohort = index.div %lane, %sixteen : index
+  %scale_frame0 = index.mul %subgroup, %two : index
+  %scale_frame1 = index.add %scale_frame0, %one : index
+  %input_noalias, %route_id_noalias, %route_weight_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %route_ids, %route_weights, %weight, %output : buffer, buffer, buffer, buffer, buffer
+  %route_id_view = buffer.view %route_id_noalias[%zero_offset] : buffer -> view<[%body_token_count]x[%bounded_route_id_stride]xi32, #dense>
+  %route_weight_view = buffer.view %route_weight_noalias[%zero_offset] : buffer -> view<[%body_token_count]x[%bounded_route_count]xf32, #dense>
+  %output_view = buffer.view %output_noalias[%zero_offset] : buffer -> view<[%body_token_count]x[%body_output_size]xf32, #dense>
+  %scale_stage = buffer.alloca %scale_stage_bytes {base_alignment = 16, memory_space = workgroup} : buffer
+  %routed_sum0, %routed_sum1 = scf.for %route = [%zero to %bounded_route_count step %one](%route_acc0 = %zero_f32 : f32, %route_acc1 = %zero_f32 : f32) -> (f32, f32) {
+    %bounded_route, %body_route_count = index.assume %route, %bounded_route_count [lt(%route, %bounded_route_count)] : index, index
+    %route_for_stride, %body_route_id_stride = index.assume %bounded_route, %bounded_route_id_stride [lt(%bounded_route, %bounded_route_id_stride)] : index, index
+    %expert_i32 = view.load %route_id_view[%bounded_token, %route_for_stride] : view<[%body_token_count]x[%bounded_route_id_stride]xi32, #dense> -> i32
+    %route_weight = view.load %route_weight_view[%bounded_token, %bounded_route] : view<[%body_token_count]x[%bounded_route_count]xf32, #dense> -> f32
+    %expert0 = index.cast %expert_i32 : i32 to index
+    %expert1 = index.assume %expert0 [range(%expert0, 0, 511)] : index
+    %expert, %body_expert_count = index.assume %expert1, %bounded_expert_count [lt(%expert1, %bounded_expert_count)] : index, index
+    %expert_output_base = index.mul %expert, %body_output_size : index
+    %expert_row0 = index.add %expert_output_base, %row0 : index
+    %expert_row1 = index.add %expert_output_base, %safe_row1 : index
+    %input_row_base = index.mul %bounded_token, %body_route_count : index
+    %input_row = index.add %input_row_base, %bounded_route : index
+    %lane_sum0, %lane_sum1 = scf.for %block_base = [%zero to %q6_block_count step %four](%block_acc0 = %zero_f32 : f32, %block_acc1 = %zero_f32 : f32) -> (f32, f32) {
+      %block = index.add %block_base, %cohort : index
+      func.call @ggml_q6k_stage_f32_scales(%bounded_input_size, %expert_row0, %block, %eight, %scale_frame0, %lane, %weight_noalias, %scale_stage) : (index, index, index, index, index, index, buffer, buffer)
+      %input00, %input01, %input02, %input03 = func.call @ggml_q6k_load_f32_block(%assignment_count, %bounded_input_size, %input_row, %block, %lane, %input_noalias) : (index, index, index, index, index, buffer) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>)
+      %contribution0 = func.call @ggml_q6k_f32_block_row(%bounded_input_size, %expert_row0, %block, %eight, %scale_frame0, %lane, %weight_noalias, %scale_stage, %input00, %input01, %input02, %input03) : (index, index, index, index, index, index, buffer, buffer, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) -> (f32)
+      %contribution1 = scf.if %row1_valid -> (f32) {
+        func.call @ggml_q6k_stage_f32_scales(%bounded_input_size, %expert_row1, %block, %eight, %scale_frame1, %lane, %weight_noalias, %scale_stage) : (index, index, index, index, index, index, buffer, buffer)
+        // Reloading the shared activations lets the first row's vectors die
+        // before the second scale stage. Carrying them across that stage
+        // increases register pressure and is slower on gfx1151.
+        %input10, %input11, %input12, %input13 = func.call @ggml_q6k_load_f32_block(%assignment_count, %bounded_input_size, %input_row, %block, %lane, %input_noalias) : (index, index, index, index, index, buffer) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>)
+        %row1_contribution = func.call @ggml_q6k_f32_block_row(%bounded_input_size, %expert_row1, %block, %eight, %scale_frame1, %lane, %weight_noalias, %scale_stage, %input10, %input11, %input12, %input13) : (index, index, index, index, index, index, buffer, buffer, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) -> (f32)
+        scf.yield %row1_contribution : f32
+      } else {
+        scf.yield %zero_f32 : f32
+      }
+      %next0 = scalar.addf<reassoc|nnan|ninf|nsz> %block_acc0, %contribution0 : f32
+      %next1 = scalar.addf<reassoc|nnan|ninf|nsz> %block_acc1, %contribution1 : f32
+      scf.yield %next0, %next1 : f32, f32
+    }
+    %route_sum0 = kernel.subgroup.reduce<addf> %lane_sum0 : f32
+    %route_sum1 = kernel.subgroup.reduce<addf> %lane_sum1 : f32
+    %weighted0 = scalar.mulf<reassoc|nnan|ninf|nsz> %route_sum0, %route_weight : f32
+    %weighted1 = scalar.mulf<reassoc|nnan|ninf|nsz> %route_sum1, %route_weight : f32
+    %next0 = scalar.addf<reassoc|nnan|ninf|nsz> %route_acc0, %weighted0 : f32
+    %next1 = scalar.addf<reassoc|nnan|ninf|nsz> %route_acc1, %weighted1 : f32
+    scf.yield %next0, %next1 : f32, f32
+  }
+  %is_lane_zero = index.cmp eq, %lane, %zero : index
+  scf.if %is_lane_zero {
+    %residual0 = view.load %output_view[%bounded_token, %row0] : view<[%body_token_count]x[%body_output_size]xf32, #dense> -> f32
+    %result0 = scalar.addf %residual0, %routed_sum0 : f32
+    view.store %result0, %output_view[%bounded_token, %row0] : f32, view<[%body_token_count]x[%body_output_size]xf32, #dense>
+    scf.if %row1_valid {
+      %residual1 = view.load %output_view[%bounded_token, %row1] : view<[%body_token_count]x[%body_output_size]xf32, #dense> -> f32
+      %result1 = scalar.addf %residual1, %routed_sum1 : f32
+      view.store %result1, %output_view[%bounded_token, %row1] : f32, view<[%body_token_count]x[%body_output_size]xf32, #dense>
+    }
+  }
+  func.return
+}
+
 // Wave64 matches llama.cpp's Vulkan subgroup width and contracts four Q6_K
 // blocks per subgroup pass.
 kernel.def target(@qwen3_moe_routed_down_q6k_gfx11_wave64) @qwen3_moe_routed_down_q6k_f32_wave64(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index) {
@@ -386,16 +485,17 @@ kernel.def target(@qwen3_moe_routed_down_q6k_gfx11_wave64) @qwen3_moe_routed_dow
 }
 
 // Decode-only direct-F32 route that publishes the normalized Q8_1 x4 row
-// consumed by the next projection boundary. Each wave64 subgroup owns one of
-// four output channels, so the completion epilogue reduces four subgroup sums.
+// consumed by the next projection boundary. Each wave64 subgroup owns two
+// adjacent output channels, so four subgroups publish eight channels while the
+// completion epilogue still reduces four subgroup sums.
 kernel.def target(@qwen3_moe_routed_down_q6k_gfx11_wave64) @qwen3_moe_routed_down_q6k_f32_wave64_next_q8(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index) {
   %configured_output_size = config.get @qwen3_moe.routed_down.output_size : index
   %one = index.constant 1 : index
-  %three = index.constant 3 : index
-  %four = index.constant 4 : index
+  %seven = index.constant 7 : index
+  %eight = index.constant 8 : index
   %twofiftysix = index.constant 256 : index
-  %padded_output_size = index.add %configured_output_size, %three : index
-  %output_tiles = index.div %padded_output_size, %four : index
+  %padded_output_size = index.add %configured_output_size, %seven : index
+  %output_tiles = index.div %padded_output_size, %eight : index
   kernel.launch.config workgroups(%output_tiles, %one, %one) workgroup_size(%twofiftysix, %one, %one) : index
 } launch(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index, %input: buffer, %route_ids: buffer, %route_weights: buffer, %weight: buffer, %output: buffer, %norm_weight: buffer, %completion_counter: buffer, %next_q8_output: buffer) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 1)] : index
@@ -409,11 +509,10 @@ kernel.def target(@qwen3_moe_routed_down_q6k_gfx11_wave64) @qwen3_moe_routed_dow
   %bounded_expert_count, %configured_expert_count = index.assume %expert_count, %configured_expert_count0 [range(%expert_count, 1, 512), eq(%expert_count, %configured_expert_count0)] : index, index
   %bounded_output_size, %configured_output_size = index.assume %output_size, %configured_output_size0 [range(%output_size, 128, 4096), mul(%output_size, 128), eq(%output_size, %configured_output_size0)] : index, index
   %four = index.constant 4 : index
-  %publishes_output = scalar.constant true : i1
+  %eight = index.constant 8 : index
   %body_token = index.constant 0 : index
-  %scale_stage_bytes = index.constant 1024 : offset
-  func.apply<qwen3_moe.routed_down.q6k_f32.body>(%publishes_output, %four, %four, %scale_stage_bytes, %bounded_token_count, %body_token, %configured_input_size, %configured_route_count, %bounded_route_id_stride, %configured_expert_count, %configured_output_size, %input, %route_ids, %route_weights, %weight, %output) : (i1, index, index, offset, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
-  func.apply<qwen3_moe.routed_down.next_q8_completion>(%four, %four, %bounded_token_count, %configured_output_size, %output, %norm_weight, %completion_counter, %next_q8_output) : (index, index, index, index, buffer, buffer, buffer, buffer)
+  func.apply<qwen3_moe.routed_down.q6k_f32.pair_body>(%bounded_token_count, %body_token, %configured_input_size, %configured_route_count, %bounded_route_id_stride, %configured_expert_count, %configured_output_size, %input, %route_ids, %route_weights, %weight, %output) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer)
+  func.apply<qwen3_moe.routed_down.next_q8_completion>(%eight, %four, %bounded_token_count, %configured_output_size, %output, %norm_weight, %completion_counter, %next_q8_output) : (index, index, index, index, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -503,11 +602,10 @@ kernel.def target(@qwen3_moe_routed_down_q6k_gfx11_wave64) @qwen3_moe_rmsnorm_qu
   kernel.return
 }
 
-// The production hidden width requires all 512 direct-F32 output tiles to
-// arrive before normalization. Zero Q6_K scales preserve the known residual
-// row while still exercising every contraction workgroup. Compare fused Q8
-// publication with the same wave64 producer, then reuse the completion word so
-// stale completion state is observable.
+// The production hidden width requires every direct-F32 output tile to arrive
+// before normalization. Nonzero Q6_K data compares the paired-row producer
+// against the ordinary wave64 producer and standalone normalization, then
+// reuses the completion word so stale completion state is observable.
 check.case public @qwen3_moe_routed_down_q6k_f32_wave64_next_q8_differential_case {
   %token_count = check.literal value(1) : index
   %input_size = check.literal value(768) : index
@@ -518,7 +616,7 @@ check.case public @qwen3_moe_routed_down_q6k_f32_wave64_next_q8_differential_cas
   %input = check.generate.iota offset(-0.5) step(0.00016276041666666666) period(6144) : tensor<8x768xf32>
   %route_ids = check.generate.iota offset(0) step(1) period(8) : tensor<8xi32>
   %route_weights = check.generate.iota offset(0.027777777777777776) step(0.027777777777777776) : tensor<8xf32>
-  %weight = check.generate.fill value(0) : tensor<8x2048x3x210xi8>
+  %weight = check.generate.fill value(-86) : tensor<8x2048x3x210xi8>
   %norm_weight = check.generate.iota offset(-1.0) step(0.0009765625) : tensor<2048xf32>
   %expected_output = check.generate.iota offset(-0.5) step(0.00048828125) period(2048) : tensor<2048xf32>
   %actual_output0 = check.generate.iota offset(-0.5) step(0.00048828125) period(2048) : tensor<2048xf32>
@@ -528,6 +626,7 @@ check.case public @qwen3_moe_routed_down_q6k_f32_wave64_next_q8_differential_cas
   %actual_q8_1 = check.generate.fill value(1) : tensor<2304xi8>
   %completion_counter = check.generate.fill value(0) : tensor<1xi32>
   %expected_counter = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @qwen3_moe_routed_down_q6k_f32_wave64[%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size](%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %input, %route_ids, %route_weights, %weight, %expected_output) : [index, index, index, index, index, index](index, index, index, index, index, index, tensor<8x768xf32>, tensor<8xi32>, tensor<8xf32>, tensor<8x2048x3x210xi8>, tensor<2048xf32>)
   kernel.launch @qwen3_moe_rmsnorm_quantize_q8_1_x4_wave64_production_check[](%expected_output, %norm_weight, %expected_q8) : [](tensor<2048xf32>, tensor<2048xf32>, tensor<2304xi8>)
   kernel.launch @qwen3_moe_routed_down_q6k_f32_wave64_next_q8[%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size](%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %input, %route_ids, %route_weights, %weight, %actual_output0, %norm_weight, %completion_counter, %actual_q8_0) : [index, index, index, index, index, index](index, index, index, index, index, index, tensor<8x768xf32>, tensor<8xi32>, tensor<8xf32>, tensor<8x2048x3x210xi8>, tensor<2048xf32>, tensor<2048xf32>, tensor<1xi32>, tensor<2304xi8>)
   kernel.launch @qwen3_moe_routed_down_q6k_f32_wave64_next_q8[%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size](%token_count, %input_size, %route_count, %route_id_stride, %expert_count, %output_size, %input, %route_ids, %route_weights, %weight, %actual_output1, %norm_weight, %completion_counter, %actual_q8_1) : [index, index, index, index, index, index](index, index, index, index, index, index, tensor<8x768xf32>, tensor<8xi32>, tensor<8xf32>, tensor<8x2048x3x210xi8>, tensor<2048xf32>, tensor<2048xf32>, tensor<1xi32>, tensor<2304xi8>)
