@@ -154,6 +154,9 @@ static void loom_cfg_graph_write_edges(
               predecessor_write_positions[target_index]++;
           graph->predecessor_indices[predecessor_position] = block_index;
           graph->predecessor_edge_indices[predecessor_position] = edge_index;
+          if (target_index <= block_index) {
+            ++graph->backward_edge_count;
+          }
           ++edge_index;
         }
       }

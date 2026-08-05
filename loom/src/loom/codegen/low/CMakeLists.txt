@@ -202,6 +202,7 @@ loom_cc_library(
     loom::error::emitter
     loom::ir
     loom::util::cfg_graph
+    loom::util::cfg_loop
   PUBLIC
 )
 

@@ -279,6 +279,36 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    cfg_loop
+  HDRS
+    "cfg_loop.h"
+  SRCS
+    "cfg_loop.c"
+  DEPS
+    ::cfg_graph
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    cfg_loop_test
+  SRCS
+    "cfg_loop_test.cc"
+  DEPS
+    ::cfg_loop
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::cfg
+    loom::ops::op_defs
+    loom::ops::test
+)
+
+loom_cc_library(
+  NAME
     dominance
   HDRS
     "dominance.h"

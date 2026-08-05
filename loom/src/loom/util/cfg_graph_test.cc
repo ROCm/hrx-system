@@ -154,6 +154,7 @@ TEST_F(CfgGraphTest, BuildsSuccessorsAndPredecessorsForDiamond) {
   EXPECT_FALSE(graph.malformed);
   EXPECT_EQ(graph.block_count, 4u);
   EXPECT_EQ(graph.edge_count, 4u);
+  EXPECT_EQ(graph.backward_edge_count, 0u);
 
   loom_cfg_block_index_span_t entry_successors =
       loom_cfg_graph_successors(&graph, 0);

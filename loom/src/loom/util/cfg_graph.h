@@ -102,6 +102,10 @@ typedef struct loom_cfg_graph_t {
   iree_host_size_t block_count;
   // Number of valid in-region successor edges.
   iree_host_size_t edge_count;
+  // Number of edges whose target does not follow their source in region block
+  // order. This is a cheap rejection fact for loop analyses; a backward edge
+  // is not necessarily a semantic CFG backedge.
+  iree_host_size_t backward_edge_count;
   // True when malformed successor structure was seen while building the graph.
   bool malformed;
 } loom_cfg_graph_t;

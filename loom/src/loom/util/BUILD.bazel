@@ -240,6 +240,32 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "cfg_loop",
+    srcs = ["cfg_loop.c"],
+    hdrs = ["cfg_loop.h"],
+    deps = [
+        ":cfg_graph",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "cfg_loop_test",
+    srcs = ["cfg_loop_test.cc"],
+    deps = [
+        ":cfg_loop",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/test",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "dominance",
     srcs = ["dominance.c"],
     hdrs = ["dominance.h"],

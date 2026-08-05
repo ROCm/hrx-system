@@ -106,6 +106,7 @@ loom_cc_library(
         "//loom/src/loom/target:registers",
         "//loom/src/loom/target:residency",
         "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:cfg_loop",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:segmented_storage",
         "//loom/src/loom/util:stream",

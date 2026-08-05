@@ -212,6 +212,7 @@ loom_cc_library(
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/ir",
         "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:cfg_loop",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
