@@ -170,6 +170,25 @@ TEST(GgufFormatTest, RejectsOverflowingMetadataArrayLength) {
   iree_io_parameter_index_release(index);
 }
 
+TEST(GgufFormatTest, RejectsTruncatedTensorData) {
+  std::vector<uint8_t> file_contents = CopyTestFile("single.gguf");
+
+  static constexpr size_t kTensorDataOffset = 384;
+  ASSERT_GT(file_contents.size(), kTensorDataOffset);
+  file_contents.resize(kTensorDataOffset - 1);
+
+  iree_io_parameter_index_t* index = NULL;
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_create(iree_allocator_system(), &index));
+  iree_io_file_handle_t* file_handle = OpenTestFileContents(
+      iree_make_byte_span(file_contents.data(), file_contents.size()));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_io_parse_gguf_index(file_handle, index, iree_allocator_system()));
+  iree_io_file_handle_release(file_handle);
+  iree_io_parameter_index_release(index);
+}
+
 // Tests that GGUF version 2 parses. Other tests use version 3.
 TEST(GgufFormatTest, SingleTensorV2) {
   iree_io_parameter_index_t* index = NULL;

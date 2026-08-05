@@ -798,6 +798,12 @@ static iree_status_t iree_io_parse_gguf_index_from_memory(
   parser.tensor_data_offset = iree_align_uint64(
       (uint64_t)(tensor_info_contents.data - file_contents.data),
       parser.alignment);
+  if (parser.tensor_data_offset > file_contents.data_length) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "GGUF tensor data offset %" PRIu64 " exceeds file length %" PRIhsz,
+        parser.tensor_data_offset, file_contents.data_length);
+  }
   parser.tensor_data_size =
       file_contents.data_length - parser.tensor_data_offset;
 
