@@ -71,9 +71,24 @@ class LoomPresubmitTest(unittest.TestCase):
             "Generated builder stubs",
         )
 
+    def test_source_lint_is_project_owned_and_read_only(self):
+        with mock.patch.object(
+            self.presubmit, "run_command", return_value=True
+        ) as run_command:
+            self.assertTrue(self.presubmit.run_source_lint())
+
+        run_command.assert_called_once_with(
+            [
+                sys.executable,
+                "loom/build_tools/linters/loom_source_lint.py",
+            ],
+            "Loom source invariants",
+        )
+
     def test_generated_builder_drift_fails_presubmit(self):
         args = types.SimpleNamespace(
             files_from=None,
+            hygiene=True,
             lane="bazel",
             tests=True,
         )
@@ -82,17 +97,66 @@ class LoomPresubmitTest(unittest.TestCase):
                 self.presubmit, "run_generated_builder_check", return_value=False
             ) as generated_builder_check,
             mock.patch.object(
+                self.presubmit, "run_source_lint", return_value=True
+            ) as source_lint,
+            mock.patch.object(
                 self.presubmit, "run_bazel_tests", return_value=True
             ) as bazel_tests,
         ):
             self.assertEqual(self.presubmit.run_presubmit(args), 1)
 
         generated_builder_check.assert_called_once_with()
+        source_lint.assert_called_once_with()
+        bazel_tests.assert_called_once_with()
+
+    def test_source_lint_failure_fails_project_hygiene(self):
+        args = types.SimpleNamespace(
+            files_from=None,
+            hygiene=True,
+            lane="bazel",
+            tests=False,
+        )
+        with (
+            mock.patch.object(
+                self.presubmit, "run_generated_builder_check", return_value=True
+            ) as generated_builder_check,
+            mock.patch.object(
+                self.presubmit, "run_source_lint", return_value=False
+            ) as source_lint,
+            mock.patch.object(self.presubmit, "run_bazel_tests") as bazel_tests,
+        ):
+            self.assertEqual(self.presubmit.run_presubmit(args), 1)
+
+        generated_builder_check.assert_called_once_with()
+        source_lint.assert_called_once_with()
+        bazel_tests.assert_not_called()
+
+    def test_test_phase_does_not_repeat_hygiene_checks(self):
+        args = types.SimpleNamespace(
+            files_from=None,
+            hygiene=False,
+            lane="bazel",
+            tests=True,
+        )
+        with (
+            mock.patch.object(
+                self.presubmit, "run_generated_builder_check"
+            ) as generated_builder_check,
+            mock.patch.object(self.presubmit, "run_source_lint") as source_lint,
+            mock.patch.object(
+                self.presubmit, "run_bazel_tests", return_value=True
+            ) as bazel_tests,
+        ):
+            self.assertEqual(self.presubmit.run_presubmit(args), 0)
+
+        generated_builder_check.assert_not_called()
+        source_lint.assert_not_called()
         bazel_tests.assert_called_once_with()
 
     def test_main_rechecks_package_initializers_after_bazel_tests(self):
         args = types.SimpleNamespace(
             files_from=None,
+            hygiene=False,
             lane="bazel",
             tests=True,
         )
@@ -104,9 +168,6 @@ class LoomPresubmitTest(unittest.TestCase):
                 self.presubmit.NonEmptyTrackedFileSnapshot,
                 "capture_tracked_package_initializers",
                 return_value=snapshot,
-            ),
-            mock.patch.object(
-                self.presubmit, "run_generated_builder_check", return_value=True
             ),
             mock.patch.object(self.presubmit, "run_bazel_tests", return_value=True),
         ):

@@ -648,7 +648,9 @@ and to authored input sections in `.loom-test` files. Runner-owned expected
 sections remain generated test output; only `loom-check --update` changes them.
 The linter rejects English-spelled numeric constant names in favor of semantic
 roles or the `%c<literal>` convention, because agents copy examples before they
-read design notes.
+read design notes. Loom project hygiene runs this linter in normal precommit and
+CI flows, including root CI invocations that delegate project test suites to
+separate workflows.
 
 Additional authoring-corpus rules keep this reference surface aligned with the
 boundary contract. They reject redundant kernel-buffer memory-space assumes,

@@ -68,7 +68,7 @@ def selected_files(files_from: str | None) -> list[str]:
         return [line.strip() for line in file_list if line.strip()]
 
 
-def should_run_tests(files_from: str | None) -> bool:
+def should_run_presubmit(files_from: str | None) -> bool:
     paths = selected_files(files_from)
     if not paths:
         return files_from is None
@@ -86,6 +86,16 @@ def run_generated_builder_check() -> bool:
             "--check",
         ],
         "Generated builder stubs",
+    )
+
+
+def run_source_lint() -> bool:
+    return run_command(
+        [
+            sys.executable,
+            "loom/build_tools/linters/loom_source_lint.py",
+        ],
+        "Loom source invariants",
     )
 
 
@@ -132,18 +142,22 @@ def run_cmake_tests() -> bool:
 
 
 def run_presubmit(args: argparse.Namespace) -> int:
-    if not args.tests:
+    if not args.hygiene and not args.tests:
         return 0
-    if not should_run_tests(args.files_from):
+    if not should_run_presubmit(args.files_from):
         print("loom presubmit: no Loom-affecting files")
         return 0
-    ok = run_generated_builder_check()
-    if args.lane == "bazel":
-        ok = run_bazel_tests() and ok
-    elif args.lane == "cmake":
-        ok = run_cmake_tests() and ok
-    else:
-        raise ValueError(f"unknown lane: {args.lane}")
+    ok = True
+    if args.hygiene:
+        ok = run_generated_builder_check() and ok
+        ok = run_source_lint() and ok
+    if args.tests:
+        if args.lane == "bazel":
+            ok = run_bazel_tests() and ok
+        elif args.lane == "cmake":
+            ok = run_cmake_tests() and ok
+        else:
+            raise ValueError(f"unknown lane: {args.lane}")
     return 0 if ok else 1
 
 
