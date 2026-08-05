@@ -436,9 +436,9 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "allocation_rematerialization",
-    srcs = ["allocation_rematerialization.c"],
-    hdrs = ["allocation_rematerialization.h"],
+    name = "rematerialization",
+    srcs = ["rematerialization.c"],
+    hdrs = ["rematerialization.h"],
     deps = [
         ":allocation",
         ":descriptor_traits",
@@ -631,7 +631,6 @@ loom_cc_library(
         ":allocation",
         ":allocation_live_range_splitting",
         ":allocation_materialization",
-        ":allocation_rematerialization",
         ":diagnostics",
         ":function",
         ":function_model",
@@ -639,6 +638,7 @@ loom_cc_library(
         ":memory_access_ir",
         ":packet",
         ":planning_statistics",
+        ":rematerialization",
         ":storage_lease",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/error:emitter",

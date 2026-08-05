@@ -4,15 +4,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Allocation-pressure repair by descriptor-guided rematerialization.
+// Descriptor-guided value rematerialization and allocation-pressure repair.
 //
-// This layer is intentionally allocation-informed but not part of the
-// allocator: allocation reports the hard pressure failure, and this utility
-// mutates IR only when the failed or conflicting value is a pure descriptor
-// packet whose result explicitly opts in to rematerialization.
+// This layer mutates IR only when a pure descriptor packet explicitly opts its
+// result in to rematerialization. Allocation and scheduling retain the evidence
+// that selects a candidate; this utility owns cloning the producer near each
+// use and removing the original long-lived value.
 
-#ifndef LOOM_CODEGEN_LOW_ALLOCATION_REMATERIALIZATION_H_
-#define LOOM_CODEGEN_LOW_ALLOCATION_REMATERIALIZATION_H_
+#ifndef LOOM_CODEGEN_LOW_REMATERIALIZATION_H_
+#define LOOM_CODEGEN_LOW_REMATERIALIZATION_H_
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
@@ -33,16 +33,31 @@ typedef enum loom_low_allocation_rematerialization_trigger_e {
   LOOM_LOW_ALLOCATION_REMATERIALIZATION_TRIGGER_SPILL_PLAN = 2,
 } loom_low_allocation_rematerialization_trigger_t;
 
-typedef struct loom_low_allocation_rematerialization_result_t {
+typedef struct loom_low_value_rematerialization_result_t {
   // SSA value whose defining packet was rematerialized.
   loom_value_id_t value_id;
-  // Original allocation assignment associated with |value_id|, or UINT32_MAX.
-  uint32_t assignment_index;
   // Number of descriptor packet clones inserted near operand users.
   uint32_t cloned_packet_count;
   // Number of operand uses rewritten to cloned packet results.
   uint32_t rewritten_operand_count;
+} loom_low_value_rematerialization_result_t;
+
+typedef struct loom_low_allocation_rematerialization_result_t {
+  // Descriptor-guided value rematerialization performed by the repair.
+  loom_low_value_rematerialization_result_t value;
+  // Original allocation assignment associated with |value|, or UINT32_MAX.
+  uint32_t assignment_index;
 } loom_low_allocation_rematerialization_result_t;
+
+// Rematerializes a descriptor-backed SSA value near all of its uses.
+//
+// Returns OK with a zero result when |value_id| is not a safe rematerialization
+// candidate. When rewritten, callers must discard analyses of the old IR and
+// rebuild them before continuing.
+iree_status_t loom_low_rematerialize_value_uses(
+    loom_module_t* module, const loom_low_resolved_target_t* target,
+    loom_value_id_t value_id, iree_arena_allocator_t* arena,
+    loom_low_value_rematerialization_result_t* out_result);
 
 // Attempts to repair a terminal hard allocation failure by rematerializing a
 // descriptor-backed value whose live range creates unspillable pressure.
@@ -78,4 +93,4 @@ iree_status_t loom_low_allocation_rematerialization_emit_decision(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_CODEGEN_LOW_ALLOCATION_REMATERIALIZATION_H_
+#endif  // LOOM_CODEGEN_LOW_REMATERIALIZATION_H_

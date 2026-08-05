@@ -10,12 +10,12 @@
 
 #include "loom/codegen/low/addressability.h"
 #include "loom/codegen/low/allocation_live_range_splitting.h"
-#include "loom/codegen/low/allocation_rematerialization.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/memory_access_ir.h"
 #include "loom/codegen/low/packet.h"
+#include "loom/codegen/low/rematerialization.h"
 #include "loom/codegen/low/schedule/run.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ops/low/ops.h"
@@ -624,6 +624,24 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
       }
     }
     if (frame.schedule.error_count != 0) {
+      if (repair_iteration_count <
+              LOOM_LOW_EMISSION_FRAME_MAX_REPAIR_ITERATIONS &&
+          frame.schedule.failure.state_value_id != LOOM_VALUE_ID_INVALID) {
+        loom_low_value_rematerialization_result_t result = {0};
+        IREE_RETURN_IF_ERROR(loom_low_rematerialize_value_uses(
+            module, &frame.schedule.target,
+            frame.schedule.failure.state_value_id, scratch_arena, &result));
+        if (statistics != NULL) {
+          statistics->repair.rematerialized_operand_count +=
+              result.rewritten_operand_count;
+        }
+        if (result.rewritten_operand_count != 0) {
+          loom_low_emission_frame_advance_repair_iteration(
+              &repair_iteration_count, statistics);
+          restore_frame_before_build = true;
+          continue;
+        }
+      }
       if (frame_options->emitter.fn != NULL) {
         IREE_RETURN_IF_ERROR(loom_low_emission_frame_replay_diagnostics(
             module, low_func_op, frame_options,
@@ -641,9 +659,9 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
             module, &frame.allocation, scratch_arena, &result));
         if (statistics != NULL) {
           statistics->repair.rematerialized_operand_count +=
-              result.rewritten_operand_count;
+              result.value.rewritten_operand_count;
         }
-        if (result.rewritten_operand_count != 0) {
+        if (result.value.rewritten_operand_count != 0) {
           IREE_RETURN_IF_ERROR(
               loom_low_emission_frame_emit_rematerialization_decision(
                   frame_options, &frame.allocation,
@@ -741,9 +759,9 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
           module, &frame.allocation, scratch_arena, &rematerialization_result));
       if (statistics != NULL) {
         statistics->repair.rematerialized_operand_count +=
-            rematerialization_result.rewritten_operand_count;
+            rematerialization_result.value.rewritten_operand_count;
       }
-      if (rematerialization_result.rewritten_operand_count != 0) {
+      if (rematerialization_result.value.rewritten_operand_count != 0) {
         IREE_RETURN_IF_ERROR(
             loom_low_emission_frame_emit_rematerialization_decision(
                 frame_options, &frame.allocation,

@@ -11,10 +11,10 @@
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/allocation_live_range_splitting.h"
 #include "loom/codegen/low/allocation_materialization.h"
-#include "loom/codegen/low/allocation_rematerialization.h"
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
+#include "loom/codegen/low/rematerialization.h"
 #include "loom/ops/low/ops.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
@@ -457,7 +457,7 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
       loom_low_allocation_rematerialization_result_t result = {0};
       IREE_RETURN_IF_ERROR(loom_low_allocation_rematerialize_failure(
           module, &table, pass->arena, &result));
-      if (result.rewritten_operand_count != 0) {
+      if (result.value.rewritten_operand_count != 0) {
         IREE_RETURN_IF_ERROR(
             loom_low_materialize_allocation_emit_rematerialization(
                 pass, state, &table,
@@ -465,7 +465,8 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
                 &result));
         loom_low_materialize_allocation_statistics_t* statistics =
             loom_low_materialize_allocation_statistics(pass);
-        statistics->rematerializations += (int64_t)result.cloned_packet_count;
+        statistics->rematerializations +=
+            (int64_t)result.value.cloned_packet_count;
         loom_pass_mark_changed(pass);
         ++rematerialization_iteration_count;
         continue;
@@ -492,7 +493,7 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
           {0};
       IREE_RETURN_IF_ERROR(loom_low_allocation_rematerialize_spill_plan(
           module, &table, pass->arena, &rematerialization_result));
-      if (rematerialization_result.rewritten_operand_count != 0) {
+      if (rematerialization_result.value.rewritten_operand_count != 0) {
         IREE_RETURN_IF_ERROR(
             loom_low_materialize_allocation_emit_rematerialization(
                 pass, state, &table,
@@ -501,7 +502,7 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
         loom_low_materialize_allocation_statistics_t* statistics =
             loom_low_materialize_allocation_statistics(pass);
         statistics->rematerializations +=
-            (int64_t)rematerialization_result.cloned_packet_count;
+            (int64_t)rematerialization_result.value.cloned_packet_count;
         loom_pass_mark_changed(pass);
         ++rematerialization_iteration_count;
         continue;

@@ -113,6 +113,9 @@ typedef struct loom_low_schedule_failure_t {
   loom_low_schedule_dependency_kind_t dependency_kind;
   // Operand index for the representative edge, or UINT32_MAX.
   uint32_t operand_index;
+  // Architectural-state SSA value read across a clobber edge in the cycle, or
+  // LOOM_VALUE_ID_INVALID when the cycle has no explicit state-value witness.
+  loom_value_id_t state_value_id;
   // Inline same-block cycle node path. When non-empty, the last node has a
   // dependency edge back to the first node.
   uint32_t cycle_nodes[LOOM_LOW_SCHEDULE_FAILURE_CYCLE_NODE_CAPACITY];

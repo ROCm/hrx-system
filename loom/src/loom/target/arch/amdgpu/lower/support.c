@@ -2366,12 +2366,16 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
 
   const loom_value_t* value = loom_module_value(module, source_value_id);
   if (loom_value_is_block_arg(value)) {
-    if (loom_amdgpu_source_value_naturally_prefers_vgpr(module,
-                                                        source_value_id)) {
-      return true;
-    }
     const loom_block_t* block = loom_value_def_block(value);
     const uint16_t arg_index = loom_value_def_index(value);
+    if (loom_amdgpu_source_value_naturally_prefers_vgpr(module,
+                                                        source_value_id) ||
+        (loom_amdgpu_block_arg_has_cfg_predecessor(analysis, block,
+                                                   arg_index) &&
+         loom_amdgpu_source_value_has_vgpr_payload_use(
+             module, fact_table, view_regions, analysis, source_value_id))) {
+      return true;
+    }
     return loom_amdgpu_block_arg_merges_native_mask_diamond(
                module, analysis, block, arg_index, LOOM_VALUE_ID_INVALID) ||
            loom_amdgpu_block_arg_incoming_payload_prefers_vgpr(

@@ -1109,8 +1109,8 @@ typedef struct loom_amdgpu_workgroup_scan_plan_t {
   loom_kernel_subgroup_scan_direction_t direction;
   // 32-bit identity element bit pattern used by exclusive or cross-wave scans.
   uint32_t identity_bits;
-  // Exact subgroup width selected by the active target bundle.
-  uint32_t wavefront_size;
+  // Native cross-lane width used to partition workgroup scan staging.
+  uint32_t partition_wavefront_size;
   // Exact flattened workgroup size selected by launch configuration.
   uint32_t flat_workgroup_size;
 } loom_amdgpu_workgroup_scan_plan_t;
