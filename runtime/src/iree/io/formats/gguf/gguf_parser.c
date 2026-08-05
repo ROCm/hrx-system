@@ -49,6 +49,7 @@
 #define GGUF_MIN_VERSION 2
 #define GGUF_MAX_VERSION 3
 #define GGUF_DEFAULT_ALIGNMENT 32
+#define GGUF_ALIGNMENT_MULTIPLE 8u
 
 enum ggml_type_e {
   GGML_TYPE_F32 = 0,
@@ -450,6 +451,20 @@ typedef struct iree_io_gguf_parser_t {
   uint64_t tensor_data_size;
 } iree_io_gguf_parser_t;
 
+// Aligns |value| up to an arbitrary nonzero |alignment| while checking for
+// overflow.
+static bool iree_io_gguf_checked_align_u64(uint64_t value, uint32_t alignment,
+                                           uint64_t* out_aligned_value) {
+  const uint64_t remainder = value % alignment;
+  const uint64_t padding = remainder == 0 ? 0 : alignment - remainder;
+  return iree_checked_add_u64(value, padding, out_aligned_value);
+}
+
+// Returns the strongest power-of-two alignment guaranteed by |alignment|.
+static uint64_t iree_io_gguf_power_of_two_alignment(uint32_t alignment) {
+  return alignment & (~alignment + 1u);
+}
+
 static iree_status_t iree_io_gguf_calculate_storage_size(
     const gguf_tensor_info_t* tensor_info, uint64_t* out_storage_size) {
   *out_storage_size = 0;
@@ -689,6 +704,13 @@ static iree_status_t iree_io_gguf_parse_metadata(void* user_data,
           IREE_STATUS_INVALID_ARGUMENT,
           "general.alignment metadata value must be uint32");
     }
+    if (kv->value.uint32 == 0 ||
+        kv->value.uint32 % GGUF_ALIGNMENT_MULTIPLE != 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "general.alignment must be a nonzero multiple of %u (got %u)",
+          GGUF_ALIGNMENT_MULTIPLE, kv->value.uint32);
+    }
     parser->alignment = kv->value.uint32;
   }
   return iree_ok_status();
@@ -697,6 +719,12 @@ static iree_status_t iree_io_gguf_parse_metadata(void* user_data,
 static iree_status_t iree_io_gguf_append_tensor_info(
     void* user_data, const gguf_tensor_info_t* tensor_info) {
   iree_io_gguf_parser_t* parser = (iree_io_gguf_parser_t*)user_data;
+  if (tensor_info->offset % parser->alignment != 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "tensor offset %" PRIu64
+                            " is not aligned to %u bytes",
+                            tensor_info->offset, parser->alignment);
+  }
 
   // Unfortunately (I've said that a lot here?) the total size of the tensor is
   // not stored and as such we need to calculate it based on the metadata we
@@ -730,6 +758,8 @@ static iree_status_t iree_io_gguf_append_tensor_info(
                   {
                       .handle = parser->file_handle,
                       .offset = parser->tensor_data_offset + begin,
+                      .minimum_alignment = iree_io_gguf_power_of_two_alignment(
+                          parser->alignment),
                   },
           },
   };
@@ -795,9 +825,16 @@ static iree_status_t iree_io_parse_gguf_index_from_memory(
 
   // Calculate where the tensor data begins in the file. This respects the
   // default alignment or the general.alignment specified by the file.
-  parser.tensor_data_offset = iree_align_uint64(
-      (uint64_t)(tensor_info_contents.data - file_contents.data),
-      parser.alignment);
+  const uint64_t unaligned_tensor_data_offset =
+      (uint64_t)(tensor_info_contents.data - file_contents.data);
+  if (!iree_io_gguf_checked_align_u64(unaligned_tensor_data_offset,
+                                      parser.alignment,
+                                      &parser.tensor_data_offset)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "GGUF tensor data offset overflow aligning %" PRIu64
+                            " to %u bytes",
+                            unaligned_tensor_data_offset, parser.alignment);
+  }
   if (parser.tensor_data_offset > file_contents.data_length) {
     return iree_make_status(
         IREE_STATUS_OUT_OF_RANGE,
