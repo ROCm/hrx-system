@@ -142,8 +142,8 @@ func.def @q8_0_dense_activation_dot_folds() -> (i1) {
   %activation = vector.from_elements %a0, %a1, %a2, %a3 : vector<4xf32>
 
   %products = vector.mulf %decoded, %activation : vector<4xf32>
-  %zero = scalar.constant 0.0 : f32
-  %dot = vector.reduce<addf> %products, %zero : vector<4xf32>, f32
+  %dot_init = scalar.constant 0.0 : f32
+  %dot = vector.reduce<addf> %products, %dot_init : vector<4xf32>, f32
   %expected = scalar.constant 0.875 : f32
   %ok = scalar.cmpf oeq, %dot, %expected : f32
   func.return %ok : i1
@@ -195,9 +195,9 @@ func.def @q8_0_two_row_micro_gemv_folds() -> (f32, f32) {
 
   %row0_products = vector.mulf %row0_decoded, %activation : vector<4xf32>
   %row1_products = vector.mulf %row1_decoded, %activation : vector<4xf32>
-  %zero = scalar.constant 0.0 : f32
-  %row0_dot = vector.reduce<addf> %row0_products, %zero : vector<4xf32>, f32
-  %row1_dot = vector.reduce<addf> %row1_products, %zero : vector<4xf32>, f32
+  %dot_init = scalar.constant 0.0 : f32
+  %row0_dot = vector.reduce<addf> %row0_products, %dot_init : vector<4xf32>, f32
+  %row1_dot = vector.reduce<addf> %row1_products, %dot_init : vector<4xf32>, f32
   func.return %row0_dot, %row1_dot : f32, f32
 }
 // ----
@@ -233,8 +233,8 @@ func.def @q8_0_decoded_pair_dot_reference_folds() -> (f32) {
   %rhs_scale = vector.constant -0.25 : vector<1xf16>
   %lhs = vector.decode %lhs_payload using %schema {scale = %lhs_scale : vector<1xf16>} : vector<4xi8>, encoding<schema> -> vector<4xf32>
   %rhs = vector.decode %rhs_payload using %schema {scale = %rhs_scale : vector<1xf16>} : vector<4xi8>, encoding<schema> -> vector<4xf32>
-  %zero = scalar.constant 0.0 : f32
-  %dot = vector.dotf %lhs, %rhs, %zero : vector<4xf32>, vector<4xf32>, f32
+  %dot_init = scalar.constant 0.0 : f32
+  %dot = vector.dotf %lhs, %rhs, %dot_init : vector<4xf32>, vector<4xf32>, f32
   func.return %dot : f32
 }
 // ----
@@ -313,8 +313,8 @@ func.def @q8_0_decoded_dotf_keeps_strict_float_contract(%lhs_payload: vector<32x
   %schema = encoding.define #ggml_q8_0<block_elems=32, storage_bytes=34> : encoding<schema>
   %lhs = vector.decode %lhs_payload using %schema {scale = %lhs_scale : vector<1xf16>} : vector<32xi8>, encoding<schema> -> vector<32xf32>
   %rhs = vector.decode %rhs_payload using %schema {scale = %rhs_scale : vector<1xf16>} : vector<32xi8>, encoding<schema> -> vector<32xf32>
-  %zero = scalar.constant 0.0 : f32
-  %dot = vector.dotf %lhs, %rhs, %zero : vector<32xf32>, vector<32xf32>, f32
+  %dot_init = scalar.constant 0.0 : f32
+  %dot = vector.dotf %lhs, %rhs, %dot_init : vector<32xf32>, vector<32xf32>, f32
   func.return %dot : f32
 }
 // ----
@@ -331,8 +331,8 @@ func.def @q8_0_decoded_dotf_keeps_strict_float_contract(%lhs_payload: vector<32x
   %13 = vector.bitunpacks<8> %rhs_payload : vector<32xi8> -> vector<32xi32>
   %14 = vector.sitofp %13 : vector<32xi32> to vector<32xf32>
   %rhs = vector.mulf %14, %12 : vector<32xf32>
-  %zero = scalar.constant 0.0 : f32
-  %dot = vector.dotf %lhs, %rhs, %zero : vector<32xf32>, vector<32xf32>, f32
+  %dot_init = scalar.constant 0.0 : f32
+  %dot = vector.dotf %lhs, %rhs, %dot_init : vector<32xf32>, vector<32xf32>, f32
   func.return %dot : f32
 }
 
