@@ -28,8 +28,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f32_dot
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @f32_dotf_zero_seed(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (f32) {
-  %zero = scalar.constant 0.0 : f32
-  %dot = vector.dotf %lhs, %rhs, %zero : vector<4xf32>, vector<4xf32>, f32
+  %initial_accumulator = scalar.constant 0.0 : f32
+  %dot = vector.dotf %lhs, %rhs, %initial_accumulator : vector<4xf32>, vector<4xf32>, f32
   func.return %dot : f32
 }
 

@@ -125,15 +125,15 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @f16x4_i
 
 amdgpu.target<gfx11-generic> @target
 func.def target(@target) @bf16x8_insert_static_constant(%values: vector<8xbf16>) -> (vector<8xbf16>) {
-  %zero = scalar.constant 0.0 : bf16
-  %updated = vector.insert %zero into %values[5] : bf16, vector<8xbf16>
+  %replacement = scalar.constant 0.0 : bf16
+  %updated = vector.insert %replacement into %values[5] : bf16, vector<8xbf16>
   func.return %updated : vector<8xbf16>
 }
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @bf16x8_insert_static_constant(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
-  %zero = v_mov_b32 0
-  %7 = v_and_b32_lit %zero, 65535
+  %replacement = v_mov_b32 0
+  %7 = v_and_b32_lit %replacement, 65535
   %8 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %9 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %10 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>

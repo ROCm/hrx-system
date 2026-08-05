@@ -147,8 +147,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x2_to
 
 amdgpu.target<gfx11-generic> @target
 kernel.def target(@target) @uniform_global_i32_to_u8x4_bitunpack_store() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%values: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %index = index.constant 0 : index

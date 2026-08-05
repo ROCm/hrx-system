@@ -142,15 +142,15 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 func.def target(@target) @bf16x8_insert_static_constant(%values: vector<8xbf16>) -> (vector<8xbf16>) {
-  %zero = scalar.constant 0.0 : bf16
-  %updated = vector.insert %zero into %values[5] : bf16, vector<8xbf16>
+  %replacement = scalar.constant 0.0 : bf16
+  %updated = vector.insert %replacement into %values[5] : bf16, vector<8xbf16>
   func.return %updated : vector<8xbf16>
 }
 
 // ----
 low.func.def target<llvmir.generic.core>(@target) abi(object_function) @bf16x8_insert_static_constant(%values: reg<llvmir.bf16 x8>) -> (reg<llvmir.bf16 x8>) asm {
-  %zero = const.bf16 0
-  %updated = insert.v8bf16 %values, %zero, 5
+  %replacement = const.bf16 0
+  %updated = insert.v8bf16 %values, %replacement, 5
   return %updated
 }
 

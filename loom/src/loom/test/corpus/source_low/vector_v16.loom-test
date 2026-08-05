@@ -121,11 +121,11 @@ func.def @f32x16_dynamic_memory(%input: buffer, %output: buffer, %i: index) {
 // ====
 
 func.def @f32x16_index_add_memory(%input: buffer, %output: buffer, %i: index, %j: index) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %sum = index.add %i, %j : index
   %bounded_sum = index.assume %sum [range(%sum, 0, 16)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<32xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<32xf32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<32xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32xf32, #dense>
   %loaded = vector.load %input_view[%bounded_sum] : view<32xf32, #dense> -> vector<16xf32>
   vector.store %loaded, %output_view[%bounded_sum] : vector<16xf32>, view<32xf32, #dense>
   func.return
@@ -134,11 +134,11 @@ func.def @f32x16_index_add_memory(%input: buffer, %output: buffer, %i: index, %j
 // ====
 
 func.def @f32x16_index_madd_memory(%input: buffer, %output: buffer, %row: index, %stride: index, %col: index) {
-  %zero = index.constant 0 : offset
+  %buffer_base = index.constant 0 : offset
   %linear = index.madd %row, %stride, %col : index
   %bounded_linear = index.assume %linear [range(%linear, 0, 16)] : index
-  %input_view = buffer.view %input[%zero] : buffer -> view<32xf32, #dense>
-  %output_view = buffer.view %output[%zero] : buffer -> view<32xf32, #dense>
+  %input_view = buffer.view %input[%buffer_base] : buffer -> view<32xf32, #dense>
+  %output_view = buffer.view %output[%buffer_base] : buffer -> view<32xf32, #dense>
   %loaded = vector.load %input_view[%bounded_linear] : view<32xf32, #dense> -> vector<16xf32>
   vector.store %loaded, %output_view[%bounded_linear] : vector<16xf32>, view<32xf32, #dense>
   func.return

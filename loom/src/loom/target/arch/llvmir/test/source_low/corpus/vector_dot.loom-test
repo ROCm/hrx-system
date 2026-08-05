@@ -34,17 +34,17 @@ llvmir.target<object> @target {
   data_layout = "e-p:64:64-i64:64-n8:16:32:64-S128"
 }
 func.def target(@target) @f32_dotf_zero_seed(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (f32) {
-  %zero = scalar.constant 0.0 : f32
-  %dot = vector.dotf %lhs, %rhs, %zero : vector<4xf32>, vector<4xf32>, f32
+  %initial_accumulator = scalar.constant 0.0 : f32
+  %dot = vector.dotf %lhs, %rhs, %initial_accumulator : vector<4xf32>, vector<4xf32>, f32
   func.return %dot : f32
 }
 
 // ----
 low.func.def target<llvmir.generic.core>(@target) abi(object_function) @f32_dotf_zero_seed(%lhs: reg<llvmir.f32 x4>, %rhs: reg<llvmir.f32 x4>) -> (reg<llvmir.f32>) asm {
-  %zero = const.f32 0
+  %initial_accumulator = const.f32 0
   %21 = extract.v4f32 %lhs, 0
   %22 = extract.v4f32 %rhs, 0
-  %23 = fma.f32 %21, %22, %zero
+  %23 = fma.f32 %21, %22, %initial_accumulator
   %24 = extract.v4f32 %lhs, 1
   %25 = extract.v4f32 %rhs, 1
   %26 = fma.f32 %24, %25, %23
