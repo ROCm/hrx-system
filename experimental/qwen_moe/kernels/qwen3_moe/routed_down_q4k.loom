@@ -10,9 +10,9 @@
 // route-indexed [token, route, hidden] down-projection tensor.
 //
 // One wave owns one output channel and contracts all selected routes in
-// registers. The 32 lanes cover two Q4_K blocks per iteration. Qwen's K=768
-// down projection therefore has a deliberate half-wave tail on its third and
-// final block; inactive lanes never address a synthetic fourth block.
+// registers. Four eight-lane cohorts contract four independent routes while
+// walking every Q4_K block. Qwen's eight-route, three-block decode shape uses
+// all 32 lanes across two route batches without addressing synthetic blocks.
 target.decl @qwen3_moe_attention_prepare_gfx11_wave32
 
 config.decl @qwen3_moe.routed_down.input_size : %value: index where [range(%value, 256, 32768), mul(%value, 256)]
@@ -27,7 +27,7 @@ config.decl @qwen3_moe.workload.token_capacity : %value: index where [range(%val
 
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
-func.decl @qwen3_moe_q4k_q8_1_x4_paired_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32)
+func.decl @qwen3_moe_q4k_q8_1_x4_cohort_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %cohort_lane: index) -> (f32)
 
 kernel.decl @qwen3_moe_attention_rmsnorm_quantize_q8_1_x4(%token_count: index) launch(%token_count: index, %input: buffer, %weight: buffer, %q8_output: buffer)
 
@@ -46,6 +46,8 @@ func.template<qwen3_moe.routed_down.q4k_q8_1_x4.body> device @qwen3_moe_routed_d
   %lane = kernel.subgroup.lane.id : index
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
   %eight = index.constant 8 : index
   %onetwentyeight = index.constant 128 : index
   %onehundredfortyfour = index.constant 144 : index
@@ -55,6 +57,10 @@ func.template<qwen3_moe.routed_down.q4k_q8_1_x4.body> device @qwen3_moe_routed_d
   %zero_f32 = scalar.constant 0.0 : f32
   %zero_offset = index.constant 0 : offset
   %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
+  %cohort0 = index.div %lane, %eight : index
+  %cohort = index.assume %cohort0 [range(%cohort0, 0, 3)] : index
+  %cohort_lane0 = index.rem %lane, %eight : index
+  %cohort_lane = index.assume %cohort_lane0 [range(%cohort_lane0, 0, 7)] : index
   %channel_base = index.mul %channel_tile, %eight : index
   %channel = index.add %channel_base, %subgroup : index
   %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
@@ -64,6 +70,8 @@ func.template<qwen3_moe.routed_down.q4k_q8_1_x4.body> device @qwen3_moe_routed_d
   %weight_row_byte_count = index.mul %q4_block_count, %onehundredfortyfour : index
   %q8_group_count = index.div %bounded_input_size, %onetwentyeight : index
   %q8_row_byte_count = index.mul %q8_group_count, %onehundredfortyfour : index
+  %padded_route_count = index.add %bounded_route_count, %three : index
+  %route_batch_count = index.div %padded_route_count, %four : index
   %q8_noalias, %route_id_noalias, %route_weight_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %route_ids, %route_weights, %weight, %output : buffer, buffer, buffer, buffer, buffer
   %route_id_view = buffer.view %route_id_noalias[%zero_offset] : buffer -> view<[%body_token_count]x[%bounded_route_id_stride]xi32, #dense>
   %route_weight_view = buffer.view %route_weight_noalias[%zero_offset] : buffer -> view<[%body_token_count]x[%bounded_route_count]xf32, #dense>
@@ -83,23 +91,33 @@ func.template<qwen3_moe.routed_down.q4k_q8_1_x4.body> device @qwen3_moe_routed_d
   }
   %computes_channel = scalar.andi %publish_output, %valid_channel : i1
   %routed_lane_sum = scf.if %computes_channel -> (f32) {
-    %sum = scf.for %route = [%zero to %bounded_route_count step %one](%route_acc = %zero_f32 : f32) -> (f32) unroll {
-      %route_i32 = index.cast %route : index to i32
-      %expert_i32 = kernel.subgroup.broadcast %lane_expert_i32 from %route_i32 : i32, i32
-      %expert0 = index.cast %expert_i32 : i32 to index
-      %expert1 = index.assume %expert0 [range(%expert0, 0, 511)] : index
-      %expert, %weight_expert_count = index.assume %expert1, %bounded_expert_count [lt(%expert1, %bounded_expert_count)] : index, index
-      %expert_output_base = index.mul %expert, %bounded_output_size : index
-      %expert_channel = index.add %expert_output_base, %channel : index
-      %weight_row_byte_index = index.mul %expert_channel, %weight_row_byte_count : index
-      %weight_row_byte_base = index.scale %weight_row_byte_index, %one_byte : index, offset -> offset
-      %q8_row_base0 = index.mul %bounded_token, %bounded_route_count : index
-      %q8_row = index.add %q8_row_base0, %route : index
-      %q8_row_byte_index = index.mul %q8_row, %q8_row_byte_count : index
-      %q8_row_byte_base = index.scale %q8_row_byte_index, %one_byte : index, offset -> offset
-      %route_lane_sum = func.call @qwen3_moe_q4k_q8_1_x4_paired_row_lane(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
-      %route_weight = kernel.subgroup.broadcast %lane_route_weight from %route_i32 : f32, i32
-      %weighted_lane = scalar.mulf<reassoc|nnan|ninf|nsz> %route_lane_sum, %route_weight : f32
+    %sum = scf.for %route_batch = [%zero to %route_batch_count step %one](%route_acc = %zero_f32 : f32) -> (f32) unroll {
+      %route_batch_base = index.mul %route_batch, %four : index
+      %route0 = index.add %route_batch_base, %cohort : index
+      %route = index.assume %route0 [range(%route0, 0, 7)] : index
+      %active_route = index.cmp ult, %route, %bounded_route_count : index
+      %weighted_lane = scf.if %active_route -> (f32) {
+        %bounded_route, %body_route_count = index.assume %route, %bounded_route_count [lt(%route, %bounded_route_count)] : index, index
+        %route_i32 = index.cast %bounded_route : index to i32
+        %expert_i32 = kernel.subgroup.broadcast %lane_expert_i32 from %route_i32 : i32, i32
+        %expert0 = index.cast %expert_i32 : i32 to index
+        %expert1 = index.assume %expert0 [range(%expert0, 0, 511)] : index
+        %expert, %weight_expert_count = index.assume %expert1, %bounded_expert_count [lt(%expert1, %bounded_expert_count)] : index, index
+        %expert_output_base = index.mul %expert, %bounded_output_size : index
+        %expert_channel = index.add %expert_output_base, %channel : index
+        %weight_row_byte_index = index.mul %expert_channel, %weight_row_byte_count : index
+        %weight_row_byte_base = index.scale %weight_row_byte_index, %one_byte : index, offset -> offset
+        %q8_row_base0 = index.mul %bounded_token, %body_route_count : index
+        %q8_row = index.add %q8_row_base0, %bounded_route : index
+        %q8_row_byte_index = index.mul %q8_row, %q8_row_byte_count : index
+        %q8_row_byte_base = index.scale %q8_row_byte_index, %one_byte : index, offset -> offset
+        %route_lane_sum = func.call @qwen3_moe_q4k_q8_1_x4_cohort_row_lane(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %q8_noalias, %q8_row_byte_base, %cohort_lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
+        %route_weight = kernel.subgroup.broadcast %lane_route_weight from %route_i32 : f32, i32
+        %weighted = scalar.mulf<reassoc|nnan|ninf|nsz> %route_lane_sum, %route_weight : f32
+        scf.yield %weighted : f32
+      } else {
+        scf.yield %zero_f32 : f32
+      }
       %next = scalar.addf<reassoc|nnan|ninf|nsz> %route_acc, %weighted_lane : f32
       scf.yield %next : f32
     }
