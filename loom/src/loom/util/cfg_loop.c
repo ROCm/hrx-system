@@ -28,10 +28,13 @@ typedef struct loom_cfg_loop_build_interval_t {
 
 static bool loom_cfg_loop_find_candidate(
     const loom_cfg_graph_t* graph, uint16_t header_index,
+    iree_host_size_t* inout_reachable_backward_edge_count,
     loom_cfg_loop_interval_t* out_interval) {
   *out_interval = (loom_cfg_loop_interval_t){0};
   loom_cfg_edge_index_t entry_edge_index = LOOM_CFG_EDGE_INDEX_INVALID;
   loom_cfg_edge_index_t backedge_edge_index = LOOM_CFG_EDGE_INDEX_INVALID;
+  bool has_unique_entry_edge = true;
+  bool has_unique_backedge = true;
   const loom_cfg_edge_index_span_t predecessor_edges =
       loom_cfg_graph_predecessor_edges(graph, header_index);
   for (iree_host_size_t i = 0; i < predecessor_edges.count; ++i) {
@@ -42,14 +45,22 @@ static bool loom_cfg_loop_find_candidate(
       continue;
     }
     if (edge->source_block_index < header_index) {
-      if (entry_edge_index != LOOM_CFG_EDGE_INDEX_INVALID) return false;
-      entry_edge_index = edge_index;
+      if (entry_edge_index == LOOM_CFG_EDGE_INDEX_INVALID) {
+        entry_edge_index = edge_index;
+      } else {
+        has_unique_entry_edge = false;
+      }
     } else {
-      if (backedge_edge_index != LOOM_CFG_EDGE_INDEX_INVALID) return false;
-      backedge_edge_index = edge_index;
+      ++*inout_reachable_backward_edge_count;
+      if (backedge_edge_index == LOOM_CFG_EDGE_INDEX_INVALID) {
+        backedge_edge_index = edge_index;
+      } else {
+        has_unique_backedge = false;
+      }
     }
   }
-  if (entry_edge_index == LOOM_CFG_EDGE_INDEX_INVALID ||
+  if (!has_unique_entry_edge || !has_unique_backedge ||
+      entry_edge_index == LOOM_CFG_EDGE_INDEX_INVALID ||
       backedge_edge_index == LOOM_CFG_EDGE_INDEX_INVALID) {
     return false;
   }
@@ -58,16 +69,11 @@ static bool loom_cfg_loop_find_candidate(
       loom_cfg_graph_edge(graph, entry_edge_index);
   const loom_cfg_edge_info_t* backedge =
       loom_cfg_graph_edge(graph, backedge_edge_index);
-  const loom_cfg_block_index_span_t entry_successors =
-      loom_cfg_graph_successors(graph, entry_edge->source_block_index);
-  if (entry_successors.count != 1 || entry_edge->successor_index != 0) {
-    return false;
-  }
 
   *out_interval = (loom_cfg_loop_interval_t){
       .header_index = header_index,
       .latch_index = backedge->source_block_index,
-      .preheader_index = entry_edge->source_block_index,
+      .entry_predecessor_index = entry_edge->source_block_index,
       .parent_loop_index = LOOM_CFG_LOOP_NONE,
       .entry_edge_index = entry_edge_index,
       .backedge_edge_index = backedge_edge_index,
@@ -121,10 +127,12 @@ static iree_status_t loom_cfg_loop_forest_build_impl(
   }
 
   iree_host_size_t interval_count = 0;
+  iree_host_size_t reachable_backward_edge_count = 0;
   // Predecessor spans partition CFG edges, making discovery O(B+E).
   for (iree_host_size_t i = 0; i < graph->block_count; ++i) {
     loom_cfg_loop_interval_t interval = {0};
-    if (!loom_cfg_loop_find_candidate(graph, (uint16_t)i, &interval)) {
+    if (!loom_cfg_loop_find_candidate(
+            graph, (uint16_t)i, &reachable_backward_edge_count, &interval)) {
       continue;
     }
     IREE_ASSERT_LT(interval_count, candidate_capacity);
@@ -134,6 +142,7 @@ static iree_status_t loom_cfg_loop_forest_build_impl(
         .interval = interval,
     };
   }
+  out_forest->reachable_backward_edge_count = reachable_backward_edge_count;
   if (interval_count == 0) return iree_ok_status();
 
   uint32_t* innermost_loop_indices = NULL;
@@ -252,6 +261,7 @@ static iree_status_t loom_cfg_loop_forest_build_impl(
       .intervals = intervals,
       .innermost_loop_indices = retained_innermost_loop_indices,
       .interval_count = interval_count,
+      .reachable_backward_edge_count = reachable_backward_edge_count,
   };
   return iree_ok_status();
 }
@@ -278,4 +288,76 @@ iree_status_t loom_cfg_loop_forest_build(const loom_cfg_graph_t* graph,
       graph, &transient_arena, arena, out_forest);
   iree_arena_deinitialize(&transient_arena);
   return status;
+}
+
+bool loom_cfg_loop_forest_calculate_block_execution_counts(
+    const loom_cfg_loop_forest_t* forest, const uint64_t* trip_counts,
+    uint64_t* out_block_counts) {
+  IREE_ASSERT(forest->interval_count == 0 || trip_counts != NULL);
+
+  const loom_cfg_graph_t* graph = forest->graph;
+  for (iree_host_size_t i = 0; i < graph->block_count; ++i) {
+    const bool is_reachable =
+        graph->blocks == NULL ||
+        loom_cfg_graph_block_is_reachable(graph, (uint16_t)i);
+    out_block_counts[i] = is_reachable ? 1 : 0;
+    if (!is_reachable || forest->interval_count == 0) continue;
+    const uint32_t loop_index = forest->innermost_loop_indices[i];
+    if (loop_index != LOOM_CFG_LOOP_NONE &&
+        forest->intervals[loop_index].header_index != i &&
+        graph->blocks[i].successor_count > 1) {
+      return false;
+    }
+  }
+  if (forest->interval_count != forest->reachable_backward_edge_count) {
+    return false;
+  }
+  if (forest->interval_count == 0) {
+    return true;
+  }
+
+  // Use each loop header's output slot as its body execution count until all
+  // non-header blocks have consumed it below.
+  for (iree_host_size_t i = 0; i < forest->interval_count; ++i) {
+    const loom_cfg_loop_interval_t* interval = &forest->intervals[i];
+    if (!interval->is_canonical) return false;
+    const uint64_t parent_body_count =
+        interval->parent_loop_index == LOOM_CFG_LOOP_NONE
+            ? 1
+            : out_block_counts[forest->intervals[interval->parent_loop_index]
+                                   .header_index];
+    if (!iree_checked_mul_u64(parent_body_count, trip_counts[i],
+                              &out_block_counts[interval->header_index])) {
+      return false;
+    }
+  }
+
+  for (iree_host_size_t i = 0; i < graph->block_count; ++i) {
+    if (!loom_cfg_graph_block_is_reachable(graph, (uint16_t)i)) continue;
+    const uint32_t loop_index = forest->innermost_loop_indices[i];
+    if (loop_index == LOOM_CFG_LOOP_NONE ||
+        forest->intervals[loop_index].header_index == i) {
+      continue;
+    }
+    out_block_counts[i] =
+        out_block_counts[forest->intervals[loop_index].header_index];
+  }
+
+  // Children follow parents in interval order. Finalizing in reverse preserves
+  // each parent's temporary body count until all child headers consume it.
+  for (iree_host_size_t i = forest->interval_count; i > 0; --i) {
+    const loom_cfg_loop_interval_t* interval = &forest->intervals[i - 1];
+    const uint64_t parent_body_count =
+        interval->parent_loop_index == LOOM_CFG_LOOP_NONE
+            ? 1
+            : out_block_counts[forest->intervals[interval->parent_loop_index]
+                                   .header_index];
+    uint64_t header_trip_count = 0;
+    if (!iree_checked_add_u64(trip_counts[i - 1], 1, &header_trip_count) ||
+        !iree_checked_mul_u64(parent_body_count, header_trip_count,
+                              &out_block_counts[interval->header_index])) {
+      return false;
+    }
+  }
+  return true;
 }

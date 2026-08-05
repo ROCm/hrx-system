@@ -130,6 +130,7 @@ TEST_F(CfgLoopTest, AcyclicGraphHasEmptyForest) {
   EXPECT_EQ(graph.backward_edge_count, 0u);
   EXPECT_EQ(forest.graph, &graph);
   EXPECT_EQ(forest.interval_count, 0u);
+  EXPECT_EQ(forest.reachable_backward_edge_count, 0u);
   EXPECT_EQ(forest.intervals, nullptr);
   EXPECT_EQ(forest.innermost_loop_indices, nullptr);
 }
@@ -161,16 +162,17 @@ TEST_F(CfgLoopTest, BuildsNestedCanonicalIntervals) {
 
   ASSERT_EQ(graph.backward_edge_count, 2u);
   ASSERT_EQ(forest.interval_count, 2u);
+  EXPECT_EQ(forest.reachable_backward_edge_count, 2u);
   const loom_cfg_loop_interval_t& outer = forest.intervals[0];
   EXPECT_EQ(outer.header_index, 1u);
   EXPECT_EQ(outer.latch_index, 5u);
-  EXPECT_EQ(outer.preheader_index, 0u);
+  EXPECT_EQ(outer.entry_predecessor_index, 0u);
   EXPECT_EQ(outer.parent_loop_index, LOOM_CFG_LOOP_NONE);
   EXPECT_TRUE(outer.is_canonical);
   const loom_cfg_loop_interval_t& inner = forest.intervals[1];
   EXPECT_EQ(inner.header_index, 3u);
   EXPECT_EQ(inner.latch_index, 4u);
-  EXPECT_EQ(inner.preheader_index, 2u);
+  EXPECT_EQ(inner.entry_predecessor_index, 2u);
   EXPECT_EQ(inner.parent_loop_index, 0u);
   EXPECT_TRUE(inner.is_canonical);
 
@@ -182,6 +184,67 @@ TEST_F(CfgLoopTest, BuildsNestedCanonicalIntervals) {
   EXPECT_EQ(forest.innermost_loop_indices[4], 1u);
   EXPECT_EQ(forest.innermost_loop_indices[5], 0u);
   EXPECT_EQ(forest.innermost_loop_indices[6], LOOM_CFG_LOOP_NONE);
+
+  const uint64_t trip_counts[] = {4, 8};
+  uint64_t block_counts[7] = {0};
+  EXPECT_TRUE(loom_cfg_loop_forest_calculate_block_execution_counts(
+      &forest, trip_counts, block_counts));
+  EXPECT_EQ(block_counts[0], 1u);
+  EXPECT_EQ(block_counts[1], 5u);
+  EXPECT_EQ(block_counts[2], 4u);
+  EXPECT_EQ(block_counts[3], 36u);
+  EXPECT_EQ(block_counts[4], 32u);
+  EXPECT_EQ(block_counts[5], 4u);
+  EXPECT_EQ(block_counts[6], 1u);
+}
+
+TEST_F(CfgLoopTest, RetainsEntryPredecessorWithMultipleSuccessors) {
+  loom_block_t* entry = loom_region_entry_block(body_);
+  loom_block_t* header = AppendBlock();
+  loom_block_t* body = AppendBlock();
+  loom_block_t* exit = AppendBlock();
+
+  SetBlock(entry);
+  BuildConditionalBranch(header, exit);
+  SetBlock(header);
+  BuildConditionalBranch(body, exit);
+  SetBlock(body);
+  BuildBranch(header);
+
+  loom_cfg_graph_t graph = {0};
+  const loom_cfg_loop_forest_t forest = BuildForest(&graph);
+
+  ASSERT_EQ(forest.interval_count, 1u);
+  EXPECT_EQ(forest.reachable_backward_edge_count, 1u);
+  EXPECT_EQ(forest.intervals[0].entry_predecessor_index, 0u);
+  EXPECT_TRUE(forest.intervals[0].is_canonical);
+}
+
+TEST_F(CfgLoopTest, RejectsUnmodeledBranchingInsideLoop) {
+  loom_block_t* entry = loom_region_entry_block(body_);
+  loom_block_t* header = AppendBlock();
+  loom_block_t* body = AppendBlock();
+  loom_block_t* latch = AppendBlock();
+  loom_block_t* exit = AppendBlock();
+
+  SetBlock(entry);
+  BuildBranch(header);
+  SetBlock(header);
+  BuildConditionalBranch(body, exit);
+  SetBlock(body);
+  BuildConditionalBranch(latch, exit);
+  SetBlock(latch);
+  BuildBranch(header);
+
+  loom_cfg_graph_t graph = {0};
+  const loom_cfg_loop_forest_t forest = BuildForest(&graph);
+
+  ASSERT_EQ(forest.interval_count, 1u);
+  EXPECT_TRUE(forest.intervals[0].is_canonical);
+  const uint64_t trip_counts[] = {4};
+  uint64_t block_counts[5] = {0};
+  EXPECT_FALSE(loom_cfg_loop_forest_calculate_block_execution_counts(
+      &forest, trip_counts, block_counts));
 }
 
 TEST_F(CfgLoopTest, SideEntryInvalidatesOnlyInnerInterval) {
@@ -213,9 +276,15 @@ TEST_F(CfgLoopTest, SideEntryInvalidatesOnlyInnerInterval) {
   const loom_cfg_loop_forest_t forest = BuildForest(&graph);
 
   ASSERT_EQ(forest.interval_count, 2u);
+  EXPECT_EQ(forest.reachable_backward_edge_count, 2u);
   EXPECT_TRUE(forest.intervals[0].is_canonical);
   EXPECT_FALSE(forest.intervals[1].is_canonical);
   EXPECT_EQ(forest.intervals[1].parent_loop_index, 0u);
+
+  const uint64_t trip_counts[] = {4, 8};
+  uint64_t block_counts[8] = {0};
+  EXPECT_FALSE(loom_cfg_loop_forest_calculate_block_execution_counts(
+      &forest, trip_counts, block_counts));
 }
 
 }  // namespace

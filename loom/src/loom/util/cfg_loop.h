@@ -26,11 +26,11 @@ typedef struct loom_cfg_loop_interval_t {
   uint16_t header_index;
   // Dense block index of the unique backward-edge source.
   uint16_t latch_index;
-  // Dense block index of the dedicated entry predecessor.
-  uint16_t preheader_index;
+  // Dense block index of the unique entry predecessor.
+  uint16_t entry_predecessor_index;
   // Immediately enclosing interval, or LOOM_CFG_LOOP_NONE.
   uint32_t parent_loop_index;
-  // CFG edge entering the header from |preheader_index|.
+  // CFG edge entering the header from |entry_predecessor_index|.
   loom_cfg_edge_index_t entry_edge_index;
   // CFG edge entering the header from |latch_index|.
   loom_cfg_edge_index_t backedge_edge_index;
@@ -48,6 +48,8 @@ typedef struct loom_cfg_loop_forest_t {
   const uint32_t* innermost_loop_indices;
   // Number of entries in |intervals|.
   iree_host_size_t interval_count;
+  // Number of reachable CFG edges that return to the same or an earlier block.
+  iree_host_size_t reachable_backward_edge_count;
 } loom_cfg_loop_forest_t;
 
 // Builds canonical loop intervals for |graph| in |arena|.
@@ -60,6 +62,18 @@ typedef struct loom_cfg_loop_forest_t {
 iree_status_t loom_cfg_loop_forest_build(const loom_cfg_graph_t* graph,
                                          iree_arena_allocator_t* arena,
                                          loom_cfg_loop_forest_t* out_forest);
+
+// Expands one exact trip count per interval into block execution counts.
+//
+// Reachable blocks outside loops execute once. A loop header executes one more
+// time than its trip count, while other loop blocks execute once per trip.
+// Nested counts are multiplied. Returns false when the forest does not cover
+// every reachable backward edge, contains a noncanonical interval, has
+// unmodeled branching inside a loop, or a count overflows. Expansion takes
+// O(B+L) time and no additional storage.
+bool loom_cfg_loop_forest_calculate_block_execution_counts(
+    const loom_cfg_loop_forest_t* forest, const uint64_t* trip_counts,
+    uint64_t* out_block_counts);
 
 #ifdef __cplusplus
 }  // extern "C"

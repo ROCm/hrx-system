@@ -39,9 +39,14 @@ static bool loom_amdgpu_wait_loop_interval_is_supported(
       backedge->successor_index != 0) {
     return false;
   }
+  const loom_cfg_block_index_span_t entry_successors =
+      loom_cfg_graph_successors(graph, entry_edge->source_block_index);
+  if (entry_successors.count != 1 || entry_edge->successor_index != 0) {
+    return false;
+  }
 
   const loom_low_schedule_block_t* preheader =
-      &schedule->blocks[interval->preheader_index];
+      &schedule->blocks[interval->entry_predecessor_index];
   if (preheader->node_count == 0) return false;
   const uint32_t insertion_node =
       preheader->node_start + preheader->node_count - 1;
@@ -158,5 +163,5 @@ uint16_t loom_amdgpu_wait_loop_analysis_preheader(
       loop_index = ancestor_loop;
     }
   }
-  return forest->intervals[loop_index].preheader_index;
+  return forest->intervals[loop_index].entry_predecessor_index;
 }
