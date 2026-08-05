@@ -12,10 +12,10 @@ func.def @dense_view(%buffer: buffer, %offset: offset, %m: index) {
 
 // Scratch roots carry explicit memory-space and root-alignment facts.
 func.def @workgroup_scratch_view(%bytes: offset) {
-  %zero = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
   %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
-  %view = buffer.view %scratch[%zero] : buffer -> view<16xf32, %layout>
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, %layout>
   test.use %view : view<16xf32, %layout>
   func.return
 }

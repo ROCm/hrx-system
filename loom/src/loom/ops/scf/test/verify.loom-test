@@ -109,11 +109,11 @@ func.def @if_result_missing_else(%cond: i1, %a: i32) -> (i32) {
 // forwarding rule as scf.yield. The init view is tied to the init layout, while
 // the loop result view is tied to the sibling loop result layout.
 func.def @for_iter_arg_result_type_refs_forwarded_results(%n: index, %buffer: buffer, %offset: offset) {
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
+  %loop_begin = index.constant 0 : index
+  %loop_step = index.constant 1 : index
   %base_layout = encoding.layout.dense : encoding<layout>
   %base_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %base_layout>
-  %layout, %view = scf.for %i = [%zero to %n step %one](%layout_acc = %base_layout : encoding<layout>, %view_acc = %base_view : view<4xf32, %base_layout>) -> (encoding<layout>, view<4xf32, %layout>) {
+  %layout, %view = scf.for %i = [%loop_begin to %n step %loop_step](%layout_acc = %base_layout : encoding<layout>, %view_acc = %base_view : view<4xf32, %base_layout>) -> (encoding<layout>, view<4xf32, %layout>) {
     %next_layout = encoding.layout.dense : encoding<layout>
     %next_view = buffer.view %buffer[%offset] : buffer -> view<4xf32, %next_layout>
     scf.yield %next_layout, %next_view : encoding<layout>, view<4xf32, %next_layout>

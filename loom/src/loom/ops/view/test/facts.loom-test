@@ -32,12 +32,12 @@ func.def @buffer_arg_memory_space_unknown(%buffer: buffer) -> (i64) {
 kernel.def @kernel_buffer_arg_memory_space_global(%buffer: buffer) {
   %config_space = test.fact_buffer_memory_space %buffer : buffer -> i64
   %workgroups = index.cast %config_space : i64 to index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%workgroups, %one, %one) workgroup_size(%one, %one, %one) : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%buffer: buffer) {
-  %zero = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%zero] : buffer -> view<1xi64, %layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<1xi64, %layout>
   %body_space = test.fact_buffer_memory_space %buffer : buffer -> i64
   %view_space = test.fact_view_memory_space %view : view<1xi64, %layout> -> i64
   %sum = scalar.addi %body_space, %view_space : i64
@@ -47,12 +47,12 @@ kernel.def @kernel_buffer_arg_memory_space_global(%buffer: buffer) {
 // ----
 kernel.def @kernel_buffer_arg_memory_space_global(%buffer: buffer) {
   %workgroups = index.constant 1 : index
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%workgroups, %one, %one) workgroup_size(%one, %one, %one) : index
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroups, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%buffer: buffer) {
-  %zero = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %view = buffer.view %buffer[%zero] : buffer -> view<1xi64, %layout>
+  %view = buffer.view %buffer[%base] : buffer -> view<1xi64, %layout>
   %sum = scalar.constant 2 : i64
   view.store %sum, %view[0] : i64, view<1xi64, %layout>
   kernel.return
@@ -63,13 +63,13 @@ kernel.def @kernel_buffer_arg_memory_space_global(%buffer: buffer) {
 // Kernel ABI references and views are cluster-uniform. Derived views preserve
 // that scope until a lane-varying offset makes the addressed storage vary.
 kernel.def @kernel_reference_distribution(%buffer: buffer, %m: index) {
-  %one = index.constant 1 : index
-  %sixtyfour = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%sixtyfour, %one, %one) : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%buffer: buffer, %m: index) {
-  %zero = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %lane = kernel.workitem.id<x> : index
-  %source = buffer.view %buffer[%zero] : buffer -> view<[%m]xi32, #dense>
+  %source = buffer.view %buffer[%base] : buffer -> view<[%m]xi32, #dense>
   %refined = view.refine %source : view<[%m]xi32, #dense> -> view<64xi32, #dense>
   %lane_view = view.subview %refined[%lane] : view<64xi32, #dense> -> view<1xi32, #dense>
   %uniform_value = view.load %refined[0] : view<64xi32, #dense> -> i32
@@ -85,9 +85,9 @@ kernel.def @kernel_reference_distribution(%buffer: buffer, %m: index) {
 }
 // ----
 kernel.def @kernel_reference_distribution(%buffer: buffer, %m: index) {
-  %one = index.constant 1 : index
-  %sixtyfour = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%sixtyfour, %one, %one) : index
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%buffer: buffer, %m: index) {
   %buffer_uniform = scalar.constant true : i1
   %source_uniform = scalar.constant true : i1
@@ -106,10 +106,10 @@ kernel.def @kernel_reference_distribution(%buffer: buffer, %m: index) {
 // typed byte footprint.
 func.def @workgroup_alloca_reference() -> (i64, i64, i64, i64, i64) {
   %bytes = index.constant 256 : offset
-  %zero = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
   %scratch = buffer.alloca %bytes {base_alignment = 64, memory_space = workgroup} : buffer
-  %view = buffer.view %scratch[%zero] : buffer -> view<16xf32, %layout>
+  %view = buffer.view %scratch[%base] : buffer -> view<16xf32, %layout>
   %buffer_space = test.fact_buffer_memory_space %scratch : buffer -> i64
   %buffer_align = test.fact_buffer_min_alignment %scratch : buffer -> i64
   %view_space = test.fact_view_memory_space %view : view<16xf32, %layout> -> i64
@@ -277,10 +277,10 @@ func.def @assume_same_root_feeds_view_scope(%lhs: buffer, %rhs: buffer, %offset:
 // Subview/refine preserve the underlying root memory-space facts.
 func.def @subview_refine_preserves_memory_space() -> (i64, i64) {
   %bytes = index.constant 256 : offset
-  %zero = index.constant 0 : offset
+  %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
   %scratch = buffer.alloca %bytes {base_alignment = 128, memory_space = workgroup} : buffer
-  %source = buffer.view %scratch[%zero] : buffer -> view<16xf32, %layout>
+  %source = buffer.view %scratch[%base] : buffer -> view<16xf32, %layout>
   %sub = view.subview %source[4] : view<16xf32, %layout> -> view<8xf32, %layout>
   %refined = view.refine %sub : view<8xf32, %layout> -> view<4xf32, %layout>
   %space = test.fact_view_memory_space %refined : view<4xf32, %layout> -> i64
