@@ -29,17 +29,17 @@ func.def @fuses_independent_pure_loops(%n: index, %a: i32, %b: i32) -> (i32, i32
 // ====
 
 func.def @fuses_equal_constant_domains(%a: i32, %b: i32) -> (i32, i32) {
-  %zero_a = index.constant 0 : index
-  %zero_b = index.constant 0 : index
-  %four_a = index.constant 4 : index
-  %four_b = index.constant 4 : index
-  %one_a = index.constant 1 : index
-  %one_b = index.constant 1 : index
-  %sum_a = scf.for %i = [%zero_a to %four_a step %one_a](%acc = %a : i32) -> (i32) {
+  %loop_a_begin = index.constant 0 : index
+  %loop_b_begin = index.constant 0 : index
+  %loop_a_end = index.constant 4 : index
+  %loop_b_end = index.constant 4 : index
+  %loop_a_step = index.constant 1 : index
+  %loop_b_step = index.constant 1 : index
+  %sum_a = scf.for %i = [%loop_a_begin to %loop_a_end step %loop_a_step](%acc = %a : i32) -> (i32) {
     %next = test.addi %acc, %b : i32
     scf.yield %next : i32
   }
-  %sum_b = scf.for %j = [%zero_b to %four_b step %one_b](%acc = %b : i32) -> (i32) {
+  %sum_b = scf.for %j = [%loop_b_begin to %loop_b_end step %loop_b_step](%acc = %b : i32) -> (i32) {
     %next = test.addi %acc, %a : i32
     scf.yield %next : i32
   }
@@ -48,13 +48,13 @@ func.def @fuses_equal_constant_domains(%a: i32, %b: i32) -> (i32, i32) {
 
 // ----
 func.def @fuses_equal_constant_domains(%a: i32, %b: i32) -> (i32, i32) {
-  %zero_a = index.constant 0 : index
-  %zero_b = index.constant 0 : index
-  %four_a = index.constant 4 : index
-  %four_b = index.constant 4 : index
-  %one_a = index.constant 1 : index
-  %one_b = index.constant 1 : index
-  %sum_a, %sum_b = scf.for %18 = [%zero_a to %four_a step %one_a](%19 = %a : i32, %20 = %b : i32) -> (i32, i32) {
+  %loop_a_begin = index.constant 0 : index
+  %loop_b_begin = index.constant 0 : index
+  %loop_a_end = index.constant 4 : index
+  %loop_b_end = index.constant 4 : index
+  %loop_a_step = index.constant 1 : index
+  %loop_b_step = index.constant 1 : index
+  %sum_a, %sum_b = scf.for %18 = [%loop_a_begin to %loop_a_end step %loop_a_step](%19 = %a : i32, %20 = %b : i32) -> (i32, i32) {
     %next = test.addi %19, %b : i32
     %17 = test.addi %20, %a : i32
     scf.yield %next, %17 : i32, i32

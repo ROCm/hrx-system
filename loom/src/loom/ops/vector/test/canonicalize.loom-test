@@ -908,8 +908,8 @@ func.def @addi_uniform_constants_to_vector_constant() -> (vector<4xi32>) {
 
 // Dynamic vector shapes still use fact-driven integer identities.
 func.def @addi_dynamic_zero_identity(%n: index, %x: vector<[%n]xi32>) -> (vector<[%n]xi32>) {
-  %zero_scalar = scalar.constant 0 : i32
-  %zero = vector.splat %zero_scalar : vector<[%n]xi32>
+  %additive_identity_element = scalar.constant 0 : i32
+  %zero = vector.splat %additive_identity_element : vector<[%n]xi32>
   %r = vector.addi %x, %zero : vector<[%n]xi32>
   func.return %r : vector<[%n]xi32>
 }
@@ -1053,8 +1053,8 @@ func.def @shuffle_identity(%v: vector<4xf32>) -> (vector<4xf32>) {
 
 // Reducing identity lanes leaves the explicit accumulator unchanged.
 func.def @reduce_dynamic_zero_to_init(%n: index, %init: i32) -> (i32) {
-  %zero_scalar = scalar.constant 0 : i32
-  %zero = vector.splat %zero_scalar : vector<[%n]xi32>
+  %additive_identity_element = scalar.constant 0 : i32
+  %zero = vector.splat %additive_identity_element : vector<[%n]xi32>
   %r = vector.reduce<addi> %zero, %init : vector<[%n]xi32>, i32
   func.return %r : i32
 }
@@ -1067,8 +1067,8 @@ func.def @reduce_dynamic_zero_to_init(%n: index, %init: i32) -> (i32) {
 
 // Identity lanes preserve vector accumulators across dynamic reduced extents.
 func.def @reduce_axes_dynamic_zero_to_init(%n: index, %init: vector<2xi32>) -> (vector<2xi32>) {
-  %zero_scalar = scalar.constant 0 : i32
-  %zero = vector.splat %zero_scalar : vector<[%n]x2xi32>
+  %additive_identity_element = scalar.constant 0 : i32
+  %zero = vector.splat %additive_identity_element : vector<[%n]x2xi32>
   %r = vector.reduce.axes<addi> %zero, %init axes [0] : vector<[%n]x2xi32>, vector<2xi32>
   func.return %r : vector<2xi32>
 }

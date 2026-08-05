@@ -407,11 +407,11 @@ func.def @async_tensor_load_to_lds(%source_buffer: buffer, %byte_offset: offset)
   %base = index.constant 0 : offset
   %bytes = index.constant 16384 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %i32_zero = scalar.constant 0 : i32
-  %d0 = vector.splat %i32_zero : vector<4xi32>
-  %d1 = vector.splat %i32_zero : vector<8xi32>
-  %d2 = vector.splat %i32_zero : vector<4xi32>
-  %d3 = vector.splat %i32_zero : vector<4xi32>
+  %descriptor_fill_value = scalar.constant 0 : i32
+  %d0 = vector.splat %descriptor_fill_value : vector<4xi32>
+  %d1 = vector.splat %descriptor_fill_value : vector<8xi32>
+  %d2 = vector.splat %descriptor_fill_value : vector<4xi32>
+  %d3 = vector.splat %descriptor_fill_value : vector<4xi32>
   %desc = kernel.tensor.lds.descriptor dgroups(%d0, %d1, %d2, %d3) : vector<4xi32>, vector<8xi32>, vector<4xi32>, vector<4xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %source_buffer : buffer
   %source = buffer.view %global[%byte_offset] : buffer -> view<64x64xf32, %layout>
@@ -430,9 +430,9 @@ func.def @async_tensor_store_from_lds(%dest_buffer: buffer, %byte_offset: offset
   %base = index.constant 0 : offset
   %bytes = index.constant 16384 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %i32_zero = scalar.constant 0 : i32
-  %d0 = vector.splat %i32_zero : vector<4xi32>
-  %d1 = vector.splat %i32_zero : vector<8xi32>
+  %descriptor_fill_value = scalar.constant 0 : i32
+  %d0 = vector.splat %descriptor_fill_value : vector<4xi32>
+  %d1 = vector.splat %descriptor_fill_value : vector<8xi32>
   %desc = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
   %scratch = buffer.alloca %bytes {base_alignment = 256, memory_space = workgroup} : buffer
   %source = buffer.view %scratch[%base] : buffer -> view<64x64xf32, %layout>

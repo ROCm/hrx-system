@@ -309,8 +309,8 @@ func.def @structural_uniform_facts() -> (i32, i32, i32, i32) {
   %transposed = vector.transpose<[1, 0]> %c4 : vector<2x3xi32> -> vector<3x2xi32>
   %r1 = vector.extract %transposed[1, 0] : vector<3x2xi32> -> i32
   %c3 = scalar.constant 3 : i32
-  %threes = vector.constant 3 : vector<4xi32>
-  %inserted = vector.insert %c3 into %threes[2] : i32, vector<4xi32>
+  %uniform_elements = vector.constant 3 : vector<4xi32>
+  %inserted = vector.insert %c3 into %uniform_elements[2] : i32, vector<4xi32>
   %r2 = vector.extract %inserted[0] : vector<4xi32> -> i32
   %c1 = vector.constant 1.0 : vector<4xf32>
   %bits = vector.bitcast %c1 : vector<4xf32> to vector<4xi32>
@@ -550,10 +550,10 @@ func.def @activation_uniform_negative_tail() -> (i1, i1, i1, i1, i1, i1) {
   %f32_logistic_lane = vector.extract %f32_logistic[0] : vector<4xf32> -> f32
   %f32_silu_lane = vector.extract %f32_silu[1] : vector<4xf32> -> f32
   %f32_gelu_lane = vector.extract %f32_gelu[2] : vector<4xf32> -> f32
-  %f32_zero = scalar.constant 0.0 : f32
-  %f32_logistic_positive = scalar.cmpf ogt, %f32_logistic_lane, %f32_zero : f32
-  %f32_silu_negative = scalar.cmpf olt, %f32_silu_lane, %f32_zero : f32
-  %f32_gelu_negative = scalar.cmpf olt, %f32_gelu_lane, %f32_zero : f32
+  %f32_sign_threshold = scalar.constant 0.0 : f32
+  %f32_logistic_positive = scalar.cmpf ogt, %f32_logistic_lane, %f32_sign_threshold : f32
+  %f32_silu_negative = scalar.cmpf olt, %f32_silu_lane, %f32_sign_threshold : f32
+  %f32_gelu_negative = scalar.cmpf olt, %f32_gelu_lane, %f32_sign_threshold : f32
 
   %f64_input = vector.constant -710.0 : vector<4xf64>
   %f64_logistic = vector.logisticf %f64_input : vector<4xf64>
@@ -562,10 +562,10 @@ func.def @activation_uniform_negative_tail() -> (i1, i1, i1, i1, i1, i1) {
   %f64_logistic_lane = vector.extract %f64_logistic[0] : vector<4xf64> -> f64
   %f64_silu_lane = vector.extract %f64_silu[1] : vector<4xf64> -> f64
   %f64_gelu_lane = vector.extract %f64_gelu[2] : vector<4xf64> -> f64
-  %f64_zero = scalar.constant 0.0 : f64
-  %f64_logistic_positive = scalar.cmpf ogt, %f64_logistic_lane, %f64_zero : f64
-  %f64_silu_negative = scalar.cmpf olt, %f64_silu_lane, %f64_zero : f64
-  %f64_gelu_negative = scalar.cmpf olt, %f64_gelu_lane, %f64_zero : f64
+  %f64_sign_threshold = scalar.constant 0.0 : f64
+  %f64_logistic_positive = scalar.cmpf ogt, %f64_logistic_lane, %f64_sign_threshold : f64
+  %f64_silu_negative = scalar.cmpf olt, %f64_silu_lane, %f64_sign_threshold : f64
+  %f64_gelu_negative = scalar.cmpf olt, %f64_gelu_lane, %f64_sign_threshold : f64
   func.return %f32_logistic_positive, %f32_silu_negative, %f32_gelu_negative, %f64_logistic_positive, %f64_silu_negative, %f64_gelu_negative : i1, i1, i1, i1, i1, i1
 }
 // ----
@@ -1243,11 +1243,11 @@ func.def @dot4f8_small_static_lanes() -> (f32, f32) {
 
 // All template spellings decode the selected lhs/rhs field formats.
 func.def @dot4f8_all_kind_ones() -> (f32, f32, f32, f32) {
-  %fp8_ones = scalar.constant 0x38383838 : i32
-  %bf8_ones = scalar.constant 0x3c3c3c3c : i32
+  %fp8_unit_lane_word = scalar.constant 0x38383838 : i32
+  %bf8_unit_lane_word = scalar.constant 0x3c3c3c3c : i32
   %c0 = scalar.constant 0.0 : f32
-  %fp8 = vector.from_elements %fp8_ones : vector<1xi32>
-  %bf8 = vector.from_elements %bf8_ones : vector<1xi32>
+  %fp8 = vector.from_elements %fp8_unit_lane_word : vector<1xi32>
+  %bf8 = vector.from_elements %bf8_unit_lane_word : vector<1xi32>
   %acc = vector.from_elements %c0 : vector<1xf32>
   %r0v = vector.dot4f8<fp8bf8> %fp8, %bf8, %acc : vector<1xi32>, vector<1xf32>
   %r1v = vector.dot4f8<bf8fp8> %bf8, %fp8, %acc : vector<1xi32>, vector<1xf32>
