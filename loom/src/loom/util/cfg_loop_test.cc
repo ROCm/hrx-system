@@ -196,6 +196,24 @@ TEST_F(CfgLoopTest, BuildsNestedCanonicalIntervals) {
   EXPECT_EQ(block_counts[4], 32u);
   EXPECT_EQ(block_counts[5], 4u);
   EXPECT_EQ(block_counts[6], 1u);
+
+  const uint64_t zero_outer_trip_counts[] = {0, 8};
+  EXPECT_TRUE(loom_cfg_loop_forest_calculate_block_execution_counts(
+      &forest, zero_outer_trip_counts, block_counts));
+  EXPECT_EQ(block_counts[0], 1u);
+  EXPECT_EQ(block_counts[1], 1u);
+  EXPECT_EQ(block_counts[2], 0u);
+  EXPECT_EQ(block_counts[3], 0u);
+  EXPECT_EQ(block_counts[4], 0u);
+  EXPECT_EQ(block_counts[5], 0u);
+  EXPECT_EQ(block_counts[6], 1u);
+
+  const uint64_t header_overflow_trip_counts[] = {UINT64_MAX, 0};
+  EXPECT_FALSE(loom_cfg_loop_forest_calculate_block_execution_counts(
+      &forest, header_overflow_trip_counts, block_counts));
+  const uint64_t nested_overflow_trip_counts[] = {UINT64_MAX / 2 + 1, 2};
+  EXPECT_FALSE(loom_cfg_loop_forest_calculate_block_execution_counts(
+      &forest, nested_overflow_trip_counts, block_counts));
 }
 
 TEST_F(CfgLoopTest, RetainsEntryPredecessorWithMultipleSuccessors) {
@@ -245,6 +263,31 @@ TEST_F(CfgLoopTest, RejectsUnmodeledBranchingInsideLoop) {
   uint64_t block_counts[5] = {0};
   EXPECT_FALSE(loom_cfg_loop_forest_calculate_block_execution_counts(
       &forest, trip_counts, block_counts));
+}
+
+TEST_F(CfgLoopTest, RejectsUnrepresentedBackwardEdges) {
+  loom_block_t* entry = loom_region_entry_block(body_);
+  loom_block_t* header = AppendBlock();
+  loom_block_t* left_latch = AppendBlock();
+  loom_block_t* right_latch = AppendBlock();
+
+  SetBlock(entry);
+  BuildBranch(header);
+  SetBlock(header);
+  BuildConditionalBranch(left_latch, right_latch);
+  SetBlock(left_latch);
+  BuildBranch(header);
+  SetBlock(right_latch);
+  BuildBranch(header);
+
+  loom_cfg_graph_t graph = {0};
+  const loom_cfg_loop_forest_t forest = BuildForest(&graph);
+
+  EXPECT_EQ(forest.interval_count, 0u);
+  EXPECT_EQ(forest.reachable_backward_edge_count, 2u);
+  uint64_t block_counts[4] = {0};
+  EXPECT_FALSE(loom_cfg_loop_forest_calculate_block_execution_counts(
+      &forest, /*trip_counts=*/nullptr, block_counts));
 }
 
 TEST_F(CfgLoopTest, SideEntryInvalidatesOnlyInnerInterval) {

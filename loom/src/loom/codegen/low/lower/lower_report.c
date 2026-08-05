@@ -523,9 +523,6 @@ static iree_status_t loom_low_lower_memory_report_ensure_source_block_counts(
       &context->arena, body->block_count,
       sizeof(*context->lowering.source_block_execution_counts),
       (void**)&context->lowering.source_block_execution_counts));
-  for (uint16_t i = 0; i < body->block_count; ++i) {
-    context->lowering.source_block_execution_counts[i] = 1;
-  }
 
   loom_cfg_graph_t graph = {0};
   IREE_RETURN_IF_ERROR(
