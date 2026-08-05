@@ -62,7 +62,7 @@ permissions:
 jobs:
   linux_bazel_cpu:
     name: ${{ matrix.name }}
-    runs-on: aws-linux-scale-rocm-prod
+    runs-on: azure-linux-scale-rocm
     timeout-minutes: 45
     container:
       image: ${{ matrix.container_image }}
