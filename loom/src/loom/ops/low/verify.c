@@ -906,51 +906,54 @@ typedef struct loom_low_static_storage_reference_t {
   // Reserving op that owns the backing storage identity.
   const loom_op_t* reserve_op;
 
-  // Static byte offset from reserve_op to this storage handle.
-  int64_t byte_offset;
-
-  // Static byte length valid from byte_offset.
+  // Static byte length available through this storage handle.
   int64_t byte_length;
 } loom_low_static_storage_reference_t;
 
 static bool loom_low_try_resolve_storage_reference(
     const loom_module_t* module, loom_value_id_t storage_id,
     loom_low_static_storage_reference_t* out_reference) {
-  const loom_value_t* storage_value = loom_module_value(module, storage_id);
-  if (!storage_value || loom_value_is_block_arg(storage_value)) return false;
-  const loom_op_t* defining_op = loom_value_def_op(storage_value);
-  if (!defining_op) return false;
-  if (loom_low_storage_reserve_isa(defining_op)) {
-    int64_t byte_length = loom_low_storage_reserve_byte_length(defining_op);
-    if (byte_length <= 0) return false;
-    *out_reference = (loom_low_static_storage_reference_t){
-        .reserve_op = defining_op,
-        .byte_offset = 0,
-        .byte_length = byte_length,
-    };
-    return true;
-  }
-  if (!loom_low_storage_view_isa(defining_op)) return false;
+  int64_t resolved_byte_length = 0;
+  int64_t projection_offset = 0;
+  int64_t projection_byte_length = 0;
+  while (true) {
+    const loom_value_t* storage_value = loom_module_value(module, storage_id);
+    if (!storage_value || loom_value_is_block_arg(storage_value)) return false;
+    const loom_op_t* defining_op = loom_value_def_op(storage_value);
+    if (!defining_op) return false;
 
-  loom_low_static_storage_reference_t source_reference = {0};
-  if (!loom_low_try_resolve_storage_reference(
-          module, loom_low_storage_view_source(defining_op),
-          &source_reference)) {
-    return false;
+    const bool is_reserve = loom_low_storage_reserve_isa(defining_op);
+    int64_t available_byte_length = 0;
+    if (is_reserve) {
+      available_byte_length = loom_low_storage_reserve_byte_length(defining_op);
+    } else if (loom_low_storage_view_isa(defining_op)) {
+      available_byte_length = loom_low_storage_view_byte_length(defining_op);
+    } else {
+      return false;
+    }
+    if (available_byte_length <= 0) return false;
+
+    if (resolved_byte_length == 0) {
+      resolved_byte_length = available_byte_length;
+    } else if (projection_offset < 0 ||
+               projection_offset >= available_byte_length ||
+               projection_byte_length >
+                   available_byte_length - projection_offset) {
+      return false;
+    }
+
+    if (is_reserve) {
+      *out_reference = (loom_low_static_storage_reference_t){
+          .reserve_op = defining_op,
+          .byte_length = resolved_byte_length,
+      };
+      return true;
+    }
+
+    projection_offset = loom_low_storage_view_offset(defining_op);
+    projection_byte_length = available_byte_length;
+    storage_id = loom_low_storage_view_source(defining_op);
   }
-  int64_t offset = loom_low_storage_view_offset(defining_op);
-  int64_t byte_length = loom_low_storage_view_byte_length(defining_op);
-  if (offset < 0 || byte_length <= 0 ||
-      offset >= source_reference.byte_length ||
-      byte_length > source_reference.byte_length - offset) {
-    return false;
-  }
-  *out_reference = (loom_low_static_storage_reference_t){
-      .reserve_op = source_reference.reserve_op,
-      .byte_offset = source_reference.byte_offset + offset,
-      .byte_length = byte_length,
-  };
-  return true;
 }
 
 static iree_status_t loom_low_verify_storage_use(
