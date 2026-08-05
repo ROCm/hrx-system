@@ -33,6 +33,18 @@ iree_py_library(
     deps = [":registry_source"],
 )
 
+iree_py_library(
+    name = "vulkan_spirv_availability",
+    srcs = [
+        "vulkan_spirv_availability.py",
+        "vulkan_spirv_availability_model.py",
+    ],
+    deps = [
+        ":dependency_expression",
+        ":registry_source",
+    ],
+)
+
 iree_py_test(
     name = "dependency_expression_test",
     size = "small",
@@ -70,6 +82,30 @@ iree_py_test(
     deps = [":spirv_core_grammar"],
 )
 
+iree_py_test(
+    name = "vulkan_spirv_availability_test",
+    size = "small",
+    srcs = ["vulkan_spirv_availability_test.py"],
+    deps = [
+        ":dependency_expression",
+        ":registry_source",
+        ":vulkan_spirv_availability",
+    ],
+)
+
+iree_py_test(
+    name = "vulkan_spirv_availability_registry_test",
+    size = "small",
+    srcs = ["vulkan_spirv_availability_registry_test.py"],
+    args = ["$(location @vulkan_headers//:vulkan_xml_registry)"],
+    data = ["@vulkan_headers//:vulkan_xml_registry"],
+    tags = ["skip-bazel_to_cmake"],
+    deps = [
+        ":dependency_expression",
+        ":vulkan_spirv_availability",
+    ],
+)
+
 test_suite(
     name = "registry_tests",
     tests = [
@@ -77,5 +113,7 @@ test_suite(
         ":dependency_expression_test",
         ":spirv_core_grammar_registry_test",
         ":spirv_core_grammar_test",
+        ":vulkan_spirv_availability_registry_test",
+        ":vulkan_spirv_availability_test",
     ],
 )

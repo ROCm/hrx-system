@@ -29,6 +29,17 @@ iree_py_library(
     ::registry_source
 )
 
+iree_py_library(
+  NAME
+    vulkan_spirv_availability
+  SRCS
+    "vulkan_spirv_availability.py"
+    "vulkan_spirv_availability_model.py"
+  DEPS
+    ::dependency_expression
+    ::registry_source
+)
+
 iree_py_test(
   NAME
     dependency_expression_test
@@ -48,6 +59,19 @@ iree_py_test(
   DEPS
     ::registry_source
     ::spirv_core_grammar
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}"
+)
+
+iree_py_test(
+  NAME
+    vulkan_spirv_availability_test
+  SRCS
+    "vulkan_spirv_availability_test.py"
+  DEPS
+    ::dependency_expression
+    ::registry_source
+    ::vulkan_spirv_availability
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}"
 )
@@ -96,6 +120,19 @@ if(IREE_BUILD_TESTS AND _pinned_source_allowed AND
       "${_vulkan_xml_registry}"
     DEPS
       ::dependency_expression
+    PACKAGE_DIRS
+      "${PROJECT_SOURCE_DIR}"
+  )
+  iree_py_test(
+    NAME
+      vulkan_spirv_availability_registry_test
+    SRCS
+      "vulkan_spirv_availability_registry_test.py"
+    ARGS
+      "${_vulkan_xml_registry}"
+    DEPS
+      ::dependency_expression
+      ::vulkan_spirv_availability
     PACKAGE_DIRS
       "${PROJECT_SOURCE_DIR}"
   )
