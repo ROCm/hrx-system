@@ -282,7 +282,7 @@ kernel.
 | --- | --- | --- |
 | Runtime pure-tail row-by-row recording | `qwen3_moe/flash_attention_f32_f16_wmma.loom` | The canonical multirow specialization corrupts nonleading query rows when the context consists entirely of a key-tile tail. The same canonical kernel specialized for one query row is exact, so the command buffer temporarily records that specialization once per prompt row without introducing another Loom source. |
 | `token_embedding_q4k.loom` | Qwen-owned model endpoint | Fixed Q4_K GGUF row decoding into the 2048-wide F32 hidden layout. |
-| `attention_metadata_bringup_workaround.loom` | No corpus provider yet | Direct no-ring K/V indices, positions, and dense causal-mask construction from one context-base word. This is request-policy glue, not an assumption repair. |
+| `attention_metadata.loom` | Qwen-owned request endpoint | Direct no-ring K/V indices, positions, and dense causal-mask construction from one context-base word. |
 | `greedy_argmax_bringup_workaround.loom` | No corpus provider yet | Compact finalization over 18992 finite F32/I32 maximum pairs with lowest-token tie breaking. This is endpoint glue, not an assumption repair. |
 
 ## Building and inspecting

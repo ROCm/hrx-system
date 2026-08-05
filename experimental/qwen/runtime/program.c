@@ -1126,7 +1126,7 @@ static iree_status_t qwen_program_prepare_layer_executables(
 
   iree_status_t status = qwen_program_prepare_batch_append(
       batch, IREE_SV(QWEN_LOOM_SOURCE_ATTENTION_METADATA),
-      IREE_SV("qwen_attention_metadata_bringup_workaround"),
+      IREE_SV("qwen_attention_metadata"),
       attention_metadata_config_binding_list.count,
       attention_metadata_config_binding_list.bindings,
       IREE_ARRAYSIZE(attention_metadata_workload), attention_metadata_workload,

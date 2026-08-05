@@ -4,19 +4,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Temporary, non-sanctioned one-function kernel for Qwen bring-up. This is not
-// a metadata-kernel framework or a second Loom authoring path. The owned
-// runtime carries one compact context-base control word and needs positions,
-// separate K/V cache indices, and the dense causal-mask bit pattern derived on
-// device before attention begins. Delete this fork when the Qwen kernel corpus
-// provides the canonical producer.
+// Derives positions, separate K/V cache indices, and the dense causal-mask bit
+// pattern on device from the owned runtime's compact context-base control word.
 amdgpu.target<gfx11-generic> @qwen_attention_metadata_gfx11_wave64 {subgroup_size = 64}
 
 config.decl @qwen3_moe.workload.token_capacity : %value: index where [range(%value, 1, 2048)]
 
 config.decl @qwen.attention.metadata_context_capacity : %value: index where [range(%value, 1, 32768)]
 
-kernel.def target(@qwen_attention_metadata_gfx11_wave64) export("qwen_attention_metadata_bringup_workaround") @qwen_attention_metadata_bringup_workaround(%token_count: index, %context_capacity: index) {
+kernel.def target(@qwen_attention_metadata_gfx11_wave64) export("qwen_attention_metadata") @qwen_attention_metadata(%token_count: index, %context_capacity: index) {
   %token_capacity = config.get @qwen3_moe.workload.token_capacity : index
   %configured_context_capacity = config.get @qwen.attention.metadata_context_capacity : index
   %one = index.constant 1 : index
@@ -102,7 +98,7 @@ check.case public @qwen_attention_metadata_causal_and_nonzero_base_case {
   %expected_zero = check.generate.fill value(0) : tensor<1xi32>
   %expected_zero_indices = check.generate.fill value(0) : tensor<1xi64>
   %expected_zero_mask = check.generate.iota offset(0) step(-1024) : tensor<2xi16>
-  kernel.launch @qwen_attention_metadata_bringup_workaround[%one, %two](%one, %two, %zero_control, %zero_positions, %zero_key_indices, %zero_value_indices, %zero_mask) : [index, index](index, index, tensor<1xi32>, tensor<1xi32>, tensor<1xi64>, tensor<1xi64>, tensor<2xi16>)
+  kernel.launch @qwen_attention_metadata[%one, %two](%one, %two, %zero_control, %zero_positions, %zero_key_indices, %zero_value_indices, %zero_mask) : [index, index](index, index, tensor<1xi32>, tensor<1xi32>, tensor<1xi64>, tensor<1xi64>, tensor<2xi16>)
   check.expect.equal actual(%zero_positions) expected(%expected_zero) : tensor<1xi32>
   check.expect.equal actual(%zero_key_indices) expected(%expected_zero_indices) : tensor<1xi64>
   check.expect.equal actual(%zero_value_indices) expected(%expected_zero_indices) : tensor<1xi64>
@@ -115,7 +111,7 @@ check.case public @qwen_attention_metadata_causal_and_nonzero_base_case {
   %expected_nonzero = check.generate.fill value(4) : tensor<1xi32>
   %expected_nonzero_indices = check.generate.fill value(4) : tensor<1xi64>
   %expected_nonzero_mask = check.generate.fill value(0) : tensor<5xi16>
-  kernel.launch @qwen_attention_metadata_bringup_workaround[%one, %five](%one, %five, %nonzero_control, %nonzero_positions, %nonzero_key_indices, %nonzero_value_indices, %nonzero_mask) : [index, index](index, index, tensor<1xi32>, tensor<1xi32>, tensor<1xi64>, tensor<1xi64>, tensor<5xi16>)
+  kernel.launch @qwen_attention_metadata[%one, %five](%one, %five, %nonzero_control, %nonzero_positions, %nonzero_key_indices, %nonzero_value_indices, %nonzero_mask) : [index, index](index, index, tensor<1xi32>, tensor<1xi32>, tensor<1xi64>, tensor<1xi64>, tensor<5xi16>)
   check.expect.equal actual(%nonzero_positions) expected(%expected_nonzero) : tensor<1xi32>
   check.expect.equal actual(%nonzero_key_indices) expected(%expected_nonzero_indices) : tensor<1xi64>
   check.expect.equal actual(%nonzero_value_indices) expected(%expected_nonzero_indices) : tensor<1xi64>
@@ -132,7 +128,7 @@ check.case public @qwen_attention_metadata_benchmark_case {
   %attention_mask = check.generate.fill value(1) : tensor<[%token_count]x[%token_count]xi16>
   %expected_positions = check.generate.iota offset(0) step(1) : tensor<[%token_count]xi32>
   %expected_cache_indices = check.generate.iota offset(0) step(1) : tensor<[%token_count]xi64>
-  kernel.launch @qwen_attention_metadata_bringup_workaround[%token_count, %token_count](%token_count, %token_count, %control, %positions, %key_cache_indices, %value_cache_indices, %attention_mask) : [index, index](index, index, tensor<1xi32>, tensor<[%token_count]xi32>, tensor<[%token_count]xi64>, tensor<[%token_count]xi64>, tensor<[%token_count]x[%token_count]xi16>)
+  kernel.launch @qwen_attention_metadata[%token_count, %token_count](%token_count, %token_count, %control, %positions, %key_cache_indices, %value_cache_indices, %attention_mask) : [index, index](index, index, tensor<1xi32>, tensor<[%token_count]xi32>, tensor<[%token_count]xi64>, tensor<[%token_count]xi64>, tensor<[%token_count]x[%token_count]xi16>)
   check.expect.equal actual(%positions) expected(%expected_positions) : tensor<[%token_count]xi32>
   check.expect.equal actual(%key_cache_indices) expected(%expected_cache_indices) : tensor<[%token_count]xi64>
   check.expect.equal actual(%value_cache_indices) expected(%expected_cache_indices) : tensor<[%token_count]xi64>

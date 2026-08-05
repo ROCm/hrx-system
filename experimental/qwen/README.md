@@ -63,14 +63,12 @@ containing that active extent and currently bounds this scheme to 2048 rows.
 `--max_tokens` bounds generation; it does not change startup JIT or
 command-buffer preparation work.
 
-## Temporary bring-up workarounds
+## Qwen-owned endpoints and attention-tail workaround
 
-`kernels/attention_metadata_bringup_workaround.loom` is a temporary
-one-function device-state producer while the Qwen kernel corpus has no
-canonical attention-metadata kernel. It derives positions, separate K/V cache
-indices, and dense causal-mask bits from one compact context-base control word.
-It is not a kernel framework or a generator and must not accumulate alternate
-indexing policies. Delete it when the canonical producer lands.
+`kernels/attention_metadata.loom` owns request-specific device state that has no
+reusable provider in the shared Qwen kernel corpus. It derives positions,
+separate K/V cache indices, and dense causal-mask bits from one compact
+context-base control word.
 
 Pure-tail prompt attention currently uses a second, explicitly temporary
 runtime workaround: contexts below the 64-token key tile are recorded as one

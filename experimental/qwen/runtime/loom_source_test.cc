@@ -36,7 +36,7 @@ TEST(QwenLoomSourceTest, ResolvesEveryStableRuntimePath) {
       {
           QWEN_LOOM_SOURCE_ATTENTION_METADATA,
           "qwen_attention_metadata.loom",
-          "qwen_attention_metadata_bringup_workaround",
+          "qwen_attention_metadata",
       },
       {
           QWEN_LOOM_SOURCE_ATTENTION_PREPARE_QUANTIZED,
