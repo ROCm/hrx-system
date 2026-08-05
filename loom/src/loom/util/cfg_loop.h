@@ -38,10 +38,10 @@ typedef struct loom_cfg_loop_interval_t {
   bool is_canonical;
 } loom_cfg_loop_interval_t;
 
-// Immutable canonical loop forest derived from one CFG graph.
+// Immutable canonical loop forest derived from one CFG graph. The forest holds
+// no pointer to its parent graph so enclosing analysis records remain safely
+// movable; consumers supply the paired graph when graph facts are required.
 typedef struct loom_cfg_loop_forest_t {
-  // CFG graph whose block and edge indices are referenced by the forest.
-  const loom_cfg_graph_t* graph;
   // Loop intervals in increasing header-block order.
   const loom_cfg_loop_interval_t* intervals;
   // Innermost candidate interval per CFG block, or LOOM_CFG_LOOP_NONE.
@@ -67,13 +67,14 @@ iree_status_t loom_cfg_loop_forest_build(const loom_cfg_graph_t* graph,
 //
 // Reachable blocks outside loops execute once. A loop header executes one more
 // time than its trip count, while other loop blocks execute once per trip.
-// Nested counts are multiplied. Returns false when the forest does not cover
-// every reachable backward edge, contains a noncanonical interval, has
-// unmodeled branching inside a loop, or a count overflows. Expansion takes
-// O(B+L) time and no additional storage.
+// Nested counts are multiplied. |graph| is the immutable graph from which
+// |forest| was built. Returns false when the forest does not cover every
+// reachable backward edge, contains a noncanonical interval, has unmodeled
+// branching inside a loop, or a count overflows. Expansion takes O(B+L) time
+// and no additional storage.
 bool loom_cfg_loop_forest_calculate_block_execution_counts(
-    const loom_cfg_loop_forest_t* forest, const uint64_t* trip_counts,
-    uint64_t* out_block_counts);
+    const loom_cfg_loop_forest_t* forest, const loom_cfg_graph_t* graph,
+    const uint64_t* trip_counts, uint64_t* out_block_counts);
 
 #ifdef __cplusplus
 }  // extern "C"

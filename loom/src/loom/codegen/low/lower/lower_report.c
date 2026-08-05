@@ -549,7 +549,7 @@ static iree_status_t loom_low_lower_memory_report_ensure_source_block_counts(
   }
   context->lowering.source_block_execution_counts_exact =
       loom_cfg_loop_forest_calculate_block_execution_counts(
-          &loop_forest, trip_counts,
+          &loop_forest, &graph, trip_counts,
           context->lowering.source_block_execution_counts);
   return iree_ok_status();
 }

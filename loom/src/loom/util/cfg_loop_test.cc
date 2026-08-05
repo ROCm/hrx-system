@@ -128,7 +128,6 @@ TEST_F(CfgLoopTest, AcyclicGraphHasEmptyForest) {
   const loom_cfg_loop_forest_t forest = BuildForest(&graph);
 
   EXPECT_EQ(graph.backward_edge_count, 0u);
-  EXPECT_EQ(forest.graph, &graph);
   EXPECT_EQ(forest.interval_count, 0u);
   EXPECT_EQ(forest.reachable_backward_edge_count, 0u);
   EXPECT_EQ(forest.intervals, nullptr);
@@ -188,7 +187,7 @@ TEST_F(CfgLoopTest, BuildsNestedCanonicalIntervals) {
   const uint64_t trip_counts[] = {4, 8};
   uint64_t block_counts[7] = {0};
   EXPECT_TRUE(loom_cfg_loop_forest_calculate_block_execution_counts(
-      &forest, trip_counts, block_counts));
+      &forest, &graph, trip_counts, block_counts));
   EXPECT_EQ(block_counts[0], 1u);
   EXPECT_EQ(block_counts[1], 5u);
   EXPECT_EQ(block_counts[2], 4u);
@@ -199,7 +198,7 @@ TEST_F(CfgLoopTest, BuildsNestedCanonicalIntervals) {
 
   const uint64_t zero_outer_trip_counts[] = {0, 8};
   EXPECT_TRUE(loom_cfg_loop_forest_calculate_block_execution_counts(
-      &forest, zero_outer_trip_counts, block_counts));
+      &forest, &graph, zero_outer_trip_counts, block_counts));
   EXPECT_EQ(block_counts[0], 1u);
   EXPECT_EQ(block_counts[1], 1u);
   EXPECT_EQ(block_counts[2], 0u);
@@ -210,10 +209,10 @@ TEST_F(CfgLoopTest, BuildsNestedCanonicalIntervals) {
 
   const uint64_t header_overflow_trip_counts[] = {UINT64_MAX, 0};
   EXPECT_FALSE(loom_cfg_loop_forest_calculate_block_execution_counts(
-      &forest, header_overflow_trip_counts, block_counts));
+      &forest, &graph, header_overflow_trip_counts, block_counts));
   const uint64_t nested_overflow_trip_counts[] = {UINT64_MAX / 2 + 1, 2};
   EXPECT_FALSE(loom_cfg_loop_forest_calculate_block_execution_counts(
-      &forest, nested_overflow_trip_counts, block_counts));
+      &forest, &graph, nested_overflow_trip_counts, block_counts));
 }
 
 TEST_F(CfgLoopTest, RetainsEntryPredecessorWithMultipleSuccessors) {
@@ -262,7 +261,7 @@ TEST_F(CfgLoopTest, RejectsUnmodeledBranchingInsideLoop) {
   const uint64_t trip_counts[] = {4};
   uint64_t block_counts[5] = {0};
   EXPECT_FALSE(loom_cfg_loop_forest_calculate_block_execution_counts(
-      &forest, trip_counts, block_counts));
+      &forest, &graph, trip_counts, block_counts));
 }
 
 TEST_F(CfgLoopTest, RejectsUnrepresentedBackwardEdges) {
@@ -287,7 +286,7 @@ TEST_F(CfgLoopTest, RejectsUnrepresentedBackwardEdges) {
   EXPECT_EQ(forest.reachable_backward_edge_count, 2u);
   uint64_t block_counts[4] = {0};
   EXPECT_FALSE(loom_cfg_loop_forest_calculate_block_execution_counts(
-      &forest, /*trip_counts=*/nullptr, block_counts));
+      &forest, &graph, /*trip_counts=*/nullptr, block_counts));
 }
 
 TEST_F(CfgLoopTest, SideEntryInvalidatesOnlyInnerInterval) {
@@ -327,7 +326,7 @@ TEST_F(CfgLoopTest, SideEntryInvalidatesOnlyInnerInterval) {
   const uint64_t trip_counts[] = {4, 8};
   uint64_t block_counts[8] = {0};
   EXPECT_FALSE(loom_cfg_loop_forest_calculate_block_execution_counts(
-      &forest, trip_counts, block_counts));
+      &forest, &graph, trip_counts, block_counts));
 }
 
 }  // namespace

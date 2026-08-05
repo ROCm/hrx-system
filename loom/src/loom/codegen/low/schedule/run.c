@@ -1465,7 +1465,6 @@ iree_status_t loom_low_schedule_function(
         .resource_summaries = state.resource_summaries,
         .resource_summary_count = state.resource_summary_count,
     };
-    out_table->loop_forest.graph = &out_table->cfg_graph;
     loom_low_schedule_dependency_graph_move(&state.dependencies,
                                             &out_table->dependencies);
   }

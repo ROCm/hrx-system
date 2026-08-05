@@ -257,7 +257,6 @@ static iree_status_t loom_cfg_loop_forest_build_impl(
   memcpy(retained_innermost_loop_indices, innermost_loop_indices,
          graph->block_count * sizeof(*retained_innermost_loop_indices));
   *out_forest = (loom_cfg_loop_forest_t){
-      .graph = graph,
       .intervals = intervals,
       .innermost_loop_indices = retained_innermost_loop_indices,
       .interval_count = interval_count,
@@ -274,9 +273,7 @@ iree_status_t loom_cfg_loop_forest_build(const loom_cfg_graph_t* graph,
         IREE_STATUS_INVALID_ARGUMENT,
         "CFG loop forest build requires a graph, arena, and output forest");
   }
-  *out_forest = (loom_cfg_loop_forest_t){
-      .graph = graph,
-  };
+  *out_forest = (loom_cfg_loop_forest_t){0};
   if (graph->malformed || graph->block_count <= 1 || graph->blocks == NULL ||
       graph->backward_edge_count == 0) {
     return iree_ok_status();
@@ -291,11 +288,10 @@ iree_status_t loom_cfg_loop_forest_build(const loom_cfg_graph_t* graph,
 }
 
 bool loom_cfg_loop_forest_calculate_block_execution_counts(
-    const loom_cfg_loop_forest_t* forest, const uint64_t* trip_counts,
-    uint64_t* out_block_counts) {
+    const loom_cfg_loop_forest_t* forest, const loom_cfg_graph_t* graph,
+    const uint64_t* trip_counts, uint64_t* out_block_counts) {
   IREE_ASSERT(forest->interval_count == 0 || trip_counts != NULL);
 
-  const loom_cfg_graph_t* graph = forest->graph;
   for (iree_host_size_t i = 0; i < graph->block_count; ++i) {
     const bool is_reachable =
         graph->blocks == NULL ||

@@ -762,7 +762,7 @@ static iree_status_t loom_target_compile_report_low_block_multipliers(
     }
   }
   *out_exact = loom_cfg_loop_forest_calculate_block_execution_counts(
-      loop_forest, trip_counts, block_multipliers);
+      loop_forest, graph, trip_counts, block_multipliers);
   if (*out_exact) {
     *out_block_multipliers = block_multipliers;
   }
