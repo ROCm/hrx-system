@@ -302,6 +302,19 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn("-warnings-as-errors=*", command)
         self.assertEqual(command[-1], "runtime/src/iree/base/status.c")
 
+    def test_cmake_clang_tidy_plugin_configure_pins_matching_packages(self):
+        llvm_package_dir = Path("/opt/llvm/lib/cmake/llvm")
+
+        command = presubmit.cmake_clang_tidy_plugin_configure_command(
+            llvm_package_dir=llvm_package_dir
+        )
+
+        self.assertEqual(command[0], "cmake")
+        self.assertIn("-S", command)
+        self.assertIn("build_tools/clang_tidy", command)
+        self.assertIn(f"-DLLVM_DIR={llvm_package_dir}", command)
+        self.assertIn("-DClang_DIR=/opt/llvm/lib/cmake/clang", command)
+
     def test_cmake_generated_compile_inputs_command_uses_cmake_build(self):
         with mock.patch.object(presubmit, "clang_tidy_jobs", return_value=23):
             command = presubmit.cmake_generated_compile_inputs_command(
