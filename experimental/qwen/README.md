@@ -53,15 +53,15 @@ build_tools/bin/iree-bazel-run //experimental/qwen/binding/cli:qwen-cli -- \
   --max_tokens=16
 ```
 
-The bring-up generation lane prepares one decode program for the 64-row shape
-class containing the first continuation position. The active position lives
-only in device request control and advances at the greedy endpoint, so every
-position in that class reuses the same recorded command buffer. A later class
-is prepared lazily only when generation crosses a 64-row boundary. The
+The generation lane prepares an exact decode program for every 64-row shape
+class reachable within the requested output budget before it submits prefill.
+The active position lives only in device request control and advances at the
+greedy endpoint, so every position in one class reuses the same recorded
+command buffer without host-side compilation or recording between tokens. The
 canonical split decode-attention kernel binds the smallest 64-row capacity
-containing that active extent and currently bounds this scheme to 2048 rows.
-`--max_tokens` bounds generation; it does not change startup JIT or
-command-buffer preparation work.
+containing each active extent and currently bounds this scheme to 2048 rows.
+Additional classes requested by `--max_tokens` add cold preparation work while
+the asynchronous model gather is already in flight.
 
 ## Qwen-owned endpoints and attention-tail workaround
 

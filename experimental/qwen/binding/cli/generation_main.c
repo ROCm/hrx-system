@@ -70,7 +70,7 @@ typedef struct qwen_generation_cli_statistics_t {
   iree_time_t runtime_ready_ns;
   // Asynchronous model residency enqueue completion.
   iree_time_t model_enqueued_ns;
-  // Initial prefill and decode JIT/recording completion.
+  // Requested prefill and decode JIT/recording completion.
   iree_time_t programs_ready_ns;
   // Prefill issue submission completion.
   iree_time_t prefill_submitted_ns;
@@ -550,15 +550,19 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
         runtime_context.command_buffer_mode;
 
     iree_host_size_t program_count = 1;
-    iree_host_size_t initial_decode_class_ordinal = 0;
+    iree_host_size_t initial_decode_context_class = 0;
+    iree_host_size_t final_decode_context_class = 0;
     if (max_tokens > 1) {
-      const iree_host_size_t context_class =
+      initial_decode_context_class =
           qwen_program_decode_context_class(prompt_token_count);
-      initial_decode_class_ordinal =
-          context_class / QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE - 1;
+      const iree_host_size_t final_decode_context_base =
+          prompt_token_count + max_tokens - 2;
+      final_decode_context_class =
+          qwen_program_decode_context_class(final_decode_context_base);
       qwen_generation_cli_initialize_decode_program_options(
-          context_class, prompt_token_count, context_capacity, request_flags,
-          runtime_context.command_buffer_mode, &program_options[1]);
+          initial_decode_context_class, prompt_token_count, context_capacity,
+          request_flags, runtime_context.command_buffer_mode,
+          &program_options[1]);
       program_count = 2;
     }
 
@@ -568,8 +572,25 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
     if (iree_status_is_ok(status)) {
       prefill_program = programs[0];
       if (program_count == 2) {
-        decode_programs[initial_decode_class_ordinal] = programs[1];
+        const iree_host_size_t initial_class_ordinal =
+            initial_decode_context_class /
+                QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE -
+            1;
+        decode_programs[initial_class_ordinal] = programs[1];
       }
+    }
+    for (iree_host_size_t context_class =
+             initial_decode_context_class +
+             QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE;
+         context_class <= final_decode_context_class &&
+         iree_status_is_ok(status);
+         context_class += QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE) {
+      const iree_host_size_t class_ordinal =
+          context_class / QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE - 1;
+      status = qwen_generation_cli_prepare_decode_program(
+          model, context_class, prompt_token_count, context_capacity,
+          request_flags, runtime_context.command_buffer_mode, host_allocator,
+          &decode_programs[class_ordinal]);
     }
   }
   if (iree_status_is_ok(status)) {
@@ -693,13 +714,6 @@ static iree_status_t qwen_generation_cli_run(iree_time_t process_start_ns) {
         qwen_program_decode_context_class(decode_context_base);
     const iree_host_size_t class_ordinal =
         context_class / QWEN_PROGRAM_DECODE_CONTEXT_CLASS_SIZE - 1;
-    if (!decode_programs[class_ordinal]) {
-      status = qwen_generation_cli_prepare_decode_program(
-          model, context_class, prompt_token_count, context_capacity,
-          request_flags, runtime_context.command_buffer_mode, host_allocator,
-          &decode_programs[class_ordinal]);
-    }
-    if (!iree_status_is_ok(status)) break;
     status = qwen_program_issue(
         decode_programs[class_ordinal], request,
         qwen_generation_cli_timepoint_list(&issue_complete),
