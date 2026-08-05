@@ -246,13 +246,7 @@ kernel.def target(@qwen3_moe_batched_decode_gate_up_gfx11_wave32) @qwen3_moe_bat
   %up1_dot = kernel.subgroup.reduce<addf> %up1_acc : f32
   %lane_i32 = index.cast %lane : index to i32
   %is_lane_zero = scalar.cmpi eq, %lane_i32, %zero_i32 : i32
-  // Temporary compiler workaround: avoid carrying the early safe-index
-  // predicates across EXEC-mutating subgroup reductions. Re-derive them from
-  // the original and safe IDs until long-lived i1 values are materialized out
-  // of SCC by the AMDGPU scheduler.
-  %output_valid_channel = index.cmp eq, %channel0, %channel : index
-  %output_valid_descriptor = index.cmp eq, %descriptor_ordinal0, %descriptor_ordinal : index
-  %valid_channel_descriptor = scalar.andi %output_valid_channel, %output_valid_descriptor : i1
+  %valid_channel_descriptor = scalar.andi %valid_channel, %valid_descriptor : i1
   %writes_output = scalar.andi %valid_channel_descriptor, %is_lane_zero : i1
   scf.if %writes_output {
     %gate0_silu = scalar.siluf %gate0_dot : f32
