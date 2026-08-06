@@ -220,8 +220,25 @@ def print_type(
                 print_type(t, context, type_registry) for t in results
             )
             return f"({arg_strs}) -> ({result_strs})"
-        case RegisterType():
-            return repr(ir_type)
+        case RegisterType(
+            name=name,
+            descriptor_set_stable_id=descriptor_set_stable_id,
+            register_class_id=register_class_id,
+            unit_count=unit_count,
+            value_type=value_type,
+        ):
+            reg_class = (
+                name
+                if name is not None
+                else f"0x{descriptor_set_stable_id:x}:{register_class_id}"
+            )
+            unit_suffix = "" if unit_count == 1 else f" x{unit_count}"
+            value_suffix = (
+                ""
+                if value_type is None
+                else f" : {print_type(value_type, context, type_registry)}"
+            )
+            return f"reg<{reg_class}{unit_suffix}{value_suffix}>"
         case StorageType():
             return repr(ir_type)
         case NoneType():

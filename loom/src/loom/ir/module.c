@@ -2567,6 +2567,26 @@ static iree_status_t loom_module_clone_type_payload(loom_module_t* module,
       return iree_ok_status();
     }
 
+    case LOOM_TYPE_REGISTER: {
+      const loom_register_type_data_t* source_data =
+          loom_type_register_data(type);
+      if (!loom_type_register_has_value_type(type)) return iree_ok_status();
+      if (!source_data) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "register type has a NULL typed payload");
+      }
+
+      loom_register_type_data_t* cloned_data = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          &module->arena, sizeof(*cloned_data), (void**)&cloned_data));
+      cloned_data->carrier_payload0 = source_data->carrier_payload0;
+      cloned_data->carrier_payload1 = source_data->carrier_payload1;
+      IREE_RETURN_IF_ERROR(loom_module_clone_type_payload(
+          module, source_data->value_type, &cloned_data->value_type));
+      *out_type = loom_type_register_payload_with_value_type(cloned_data);
+      return iree_ok_status();
+    }
+
     default:
       break;
   }
@@ -2702,6 +2722,19 @@ static iree_status_t loom_module_intern_type_with_dependencies(
       }
       break;
     }
+    case LOOM_TYPE_REGISTER: {
+      const loom_type_t* value_type = loom_type_register_value_type(type);
+      if (!loom_type_register_has_value_type(type)) break;
+      if (!value_type) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "register type has a NULL typed payload");
+      }
+      loom_type_t interned_value_type = {0};
+      IREE_RETURN_IF_ERROR(loom_module_intern_type_with_dependencies(
+          module, *value_type, &interned_value_type,
+          /*out_type_id=*/NULL));
+      break;
+    }
     default:
       break;
   }
@@ -2782,6 +2815,21 @@ iree_status_t loom_module_intern_function_type(loom_module_t* module,
       out_interned_type, /*out_type_id=*/NULL);
 }
 
+iree_status_t loom_module_intern_register_type(loom_module_t* module,
+                                               uint64_t carrier_payload0,
+                                               uint64_t carrier_payload1,
+                                               loom_type_t value_type,
+                                               loom_type_t* out_interned_type) {
+  loom_register_type_data_t data = {
+      .carrier_payload0 = carrier_payload0,
+      .carrier_payload1 = carrier_payload1,
+      .value_type = value_type,
+  };
+  return loom_module_intern_type(
+      module, loom_type_register_payload_with_value_type(&data),
+      out_interned_type);
+}
+
 //===----------------------------------------------------------------------===//
 // Type-use replacement
 //===----------------------------------------------------------------------===//
@@ -2856,6 +2904,19 @@ static iree_status_t loom_module_replace_type_value_refs_impl(
       loom_type_t replaced_type = loom_type_dialect(
           loom_type_dialect_name_id(type), param_count, replaced_params);
       return loom_module_intern_type(module, replaced_type, out_type);
+    }
+
+    case LOOM_TYPE_REGISTER: {
+      const loom_type_t* value_type = loom_type_register_value_type(type);
+      if (!value_type) return iree_ok_status();
+      loom_type_t replaced_value_type = *value_type;
+      IREE_RETURN_IF_ERROR(loom_module_replace_type_value_refs_impl(
+          module, *value_type, old_id, new_id, &replaced_value_type,
+          out_changed));
+      if (!*out_changed) return iree_ok_status();
+      return loom_module_intern_register_type(
+          module, loom_type_register_payload0(type),
+          loom_type_register_payload1(type), replaced_value_type, out_type);
     }
 
     default:

@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from loom.format.bytecode.encoding import decode_varint
+from loom.format.bytecode.encoding import decode_varint, encode_varint
 from loom.format.bytecode.reader import BytecodeError, BytecodeReader, read_module
 from loom.format.bytecode.writer import (
     BYTECODE_TYPE_KIND_BY_IR_KIND,
@@ -90,12 +90,15 @@ def _roundtrip(module: Module) -> Module:
     return read_module(write_module(module))
 
 
-def _test_ptr_register_type(unit_count: int = 1) -> RegisterType:
+def _test_ptr_register_type(
+    unit_count: int = 1, value_type: Type | None = None
+) -> RegisterType:
     return RegisterType(
         _TEST_LOW_CORE_STABLE_ID,
         _TEST_PTR_REGISTER_CLASS_ID,
         unit_count,
         "test.ptr",
+        value_type,
     )
 
 
@@ -516,6 +519,94 @@ class TestMalformedTypeSection:
         with pytest.raises(BytecodeError, match="static encoding id out of range"):
             self._read_types(data)
 
+    def test_invalid_register_value_type_presence_is_rejected(self) -> None:
+        data = b"".join(
+            (
+                bytes(
+                    [
+                        2,  # type count
+                        BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.SCALAR],
+                        I32.kind.value,
+                        BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.REGISTER],
+                        1,  # descriptor-set stable ID
+                    ]
+                ),
+                encode_varint(1 << 16),  # class 0, one unit
+                bytes([2]),  # invalid has_value_type
+            )
+        )
+        with pytest.raises(BytecodeError, match="has_value_type must be 0 or 1"):
+            self._read_types(data)
+
+    def test_truncated_register_value_type_presence_is_rejected(self) -> None:
+        data = b"".join(
+            (
+                bytes(
+                    [
+                        1,  # type count
+                        BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.REGISTER],
+                        1,  # descriptor-set stable ID
+                    ]
+                ),
+                encode_varint(1 << 16),  # class 0, one unit
+            )
+        )
+        with pytest.raises(BytecodeError, match="presence is truncated"):
+            self._read_types(data)
+
+    def test_truncated_register_value_type_reference_is_rejected(self) -> None:
+        data = b"".join(
+            (
+                bytes(
+                    [
+                        1,  # type count
+                        BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.REGISTER],
+                        1,  # descriptor-set stable ID
+                    ]
+                ),
+                encode_varint(1 << 16),  # class 0, one unit
+                bytes([1]),  # value type present, but reference omitted
+            )
+        )
+        with pytest.raises(BytecodeError, match="value type reference"):
+            self._read_types(data)
+
+    def test_forward_register_value_type_reference_is_rejected(self) -> None:
+        data = b"".join(
+            (
+                bytes(
+                    [
+                        2,  # type count
+                        BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.SCALAR],
+                        I32.kind.value,
+                        BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.REGISTER],
+                        1,  # descriptor-set stable ID
+                    ]
+                ),
+                encode_varint(1 << 16),  # class 0, one unit
+                bytes([1, 1]),  # present, self-reference instead of prior type
+            )
+        )
+        with pytest.raises(BytecodeError, match="must refer to a prior type"):
+            self._read_types(data)
+
+    def test_register_payload_reserved_bits_are_rejected(self) -> None:
+        data = b"".join(
+            (
+                bytes(
+                    [
+                        1,  # type count
+                        BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.REGISTER],
+                        1,  # descriptor-set stable ID
+                    ]
+                ),
+                encode_varint((1 << 48) | (1 << 16)),
+                bytes([0]),  # no value type
+            )
+        )
+        with pytest.raises(BytecodeError, match="reserved bits"):
+            self._read_types(data)
+
 
 # ============================================================================
 # Module structure
@@ -775,6 +866,20 @@ class TestTypeRoundTrips:
 
     def test_register_type(self) -> None:
         t = _test_ptr_register_type(4)
+        assert self._roundtrip_type(t) == t
+
+    def test_register_scalar_value_type(self) -> None:
+        t = _test_ptr_register_type(value_type=I32)
+        assert self._roundtrip_type(t) == t
+
+    def test_register_vector_value_type(self) -> None:
+        vector_type = ShapedType(TypeKind.VECTOR, I32, (StaticDim(4),))
+        t = _test_ptr_register_type(4, vector_type)
+        assert self._roundtrip_type(t) == t
+
+    def test_register_dialect_value_type(self) -> None:
+        dialect_type = DialectType("vm.ref", (I32,))
+        t = _test_ptr_register_type(value_type=dialect_type)
         assert self._roundtrip_type(t) == t
 
     def test_buffer_type(self) -> None:

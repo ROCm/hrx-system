@@ -189,6 +189,27 @@ TEST_F(TypeRefinementTest, VectorEncodingCandidateConflicts) {
   EXPECT_TRUE(loom_type_equal(refined, current));
 }
 
+TEST_F(TypeRefinementTest, RegisterValueTypesRequireStructuralEquality) {
+  loom_type_t current_value_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(4), 0);
+  loom_type_t candidate_value_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32, loom_dim_pack_static(4), 0);
+  loom_register_type_data_t current_data = {42, 4, current_value_type};
+  loom_register_type_data_t candidate_data = {42, 4, candidate_value_type};
+  loom_type_t current =
+      loom_type_register_payload_with_value_type(&current_data);
+  loom_type_t candidate =
+      loom_type_register_payload_with_value_type(&candidate_data);
+
+  loom_type_t refined = {};
+  loom_type_refinement_result_t result = LOOM_TYPE_REFINEMENT_UNCHANGED;
+  IREE_ASSERT_OK(loom_type_refine_with_candidate(current, candidate, &arena_,
+                                                 &refined, &result));
+
+  EXPECT_EQ(result, LOOM_TYPE_REFINEMENT_CONFLICT);
+  EXPECT_TRUE(loom_type_equal(refined, current));
+}
+
 TEST_F(TypeRefinementTest, UnknownEncodingRoleNarrowsToConcreteRole) {
   loom_type_t current = loom_type_encoding();
   loom_type_t candidate =

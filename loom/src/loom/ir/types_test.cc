@@ -104,12 +104,77 @@ TEST(TypesTest, RegisterTypeEqualAndHashAreStructural) {
   loom_type_t different_payload1 = loom_type_register_payload(42, 8);
 
   EXPECT_TRUE(loom_type_is_register(first));
+  EXPECT_TRUE(loom_type_has_inline_dims(first));
+  EXPECT_FALSE(loom_type_register_has_value_type(first));
   EXPECT_EQ(loom_type_register_payload0(first), 42u);
   EXPECT_EQ(loom_type_register_payload1(first), 4u);
   EXPECT_TRUE(loom_type_equal(first, duplicate));
   EXPECT_EQ(loom_type_hash(first), loom_type_hash(duplicate));
   EXPECT_FALSE(loom_type_equal(first, different_payload0));
   EXPECT_FALSE(loom_type_equal(first, different_payload1));
+}
+
+typedef struct ValueRefCapture {
+  loom_value_id_t values[2];
+  iree_host_size_t count;
+} ValueRefCapture;
+
+static iree_status_t CaptureValueRef(loom_value_id_t value_id,
+                                     void* user_data) {
+  ValueRefCapture* capture = (ValueRefCapture*)user_data;
+  capture->values[capture->count++] = value_id;
+  return iree_ok_status();
+}
+
+TEST(TypesTest, RegisterValueTypeParticipatesInStructuralLifecycle) {
+  loom_type_t source_value_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_dynamic(7), 0);
+  loom_type_t duplicate_value_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_dynamic(7), 0);
+  loom_type_t target_value_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_dynamic(9), 0);
+  loom_type_t different_value_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32, loom_dim_pack_dynamic(7), 0);
+
+  loom_register_type_data_t source_data = {42, 4, source_value_type};
+  loom_register_type_data_t duplicate_data = {42, 4, duplicate_value_type};
+  loom_register_type_data_t target_data = {42, 4, target_value_type};
+  loom_register_type_data_t different_data = {42, 4, different_value_type};
+  loom_type_t source = loom_type_register_payload_with_value_type(&source_data);
+  loom_type_t duplicate =
+      loom_type_register_payload_with_value_type(&duplicate_data);
+  loom_type_t target = loom_type_register_payload_with_value_type(&target_data);
+  loom_type_t different =
+      loom_type_register_payload_with_value_type(&different_data);
+
+  EXPECT_TRUE(loom_type_register_has_value_type(source));
+  EXPECT_FALSE(loom_type_has_inline_dims(source));
+  ASSERT_NE(loom_type_register_value_type(source), nullptr);
+  EXPECT_TRUE(loom_type_equal(*loom_type_register_value_type(source),
+                              source_value_type));
+  EXPECT_EQ(loom_type_register_payload0(source), 42u);
+  EXPECT_EQ(loom_type_register_payload1(source), 4u);
+  EXPECT_TRUE(loom_type_equal(source, duplicate));
+  EXPECT_EQ(loom_type_hash(source), loom_type_hash(duplicate));
+  EXPECT_FALSE(loom_type_equal(source, different));
+  EXPECT_FALSE(loom_type_equal(source, loom_type_register_payload(42, 4)));
+
+  EXPECT_TRUE(loom_type_references_value(source, 7));
+  EXPECT_FALSE(loom_type_references_value(source, 9));
+  ValueRefCapture capture = {};
+  IREE_ASSERT_OK(loom_type_walk_value_refs(source, CaptureValueRef, &capture));
+  ASSERT_EQ(capture.count, 1u);
+  EXPECT_EQ(capture.values[0], 7u);
+
+  loom_value_id_t source_values[] = {7};
+  loom_value_id_t target_values[] = {9};
+  loom_type_value_remap_t remap = {
+      source_values,
+      target_values,
+      IREE_ARRAYSIZE(source_values),
+  };
+  EXPECT_TRUE(loom_type_equal_after_value_remap(source, target, &remap));
+  EXPECT_FALSE(loom_type_equal(source, target));
 }
 
 TEST(TypesTest, RegisterClassNamesMustBeNamespaceQualified) {

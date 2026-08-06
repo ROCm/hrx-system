@@ -115,9 +115,11 @@
 // arg/result types, so the embedded types are stored by value (24
 // bytes each), not interned.
 //
-// Register types reserve dims[0..1] as target-owned payload storage. Core IR
-// only stores and compares the payload structurally; target-low helpers
-// interpret the fields as a register-class identity plus contiguous unit count.
+// Register types without a value type reserve dims[0..1] as inline
+// target-owned payload storage. Register types with a value type use dims[0]
+// as a pointer to arena-owned loom_register_type_data_t. Core IR owns and
+// compares both forms structurally; target-low helpers interpret the carrier
+// payload fields as a register-class identity plus contiguous unit count.
 //
 // Type equality is structural: callers should use loom_type_equal() on the
 // by-value representation. The module type table deduplicates equal entries,
@@ -394,6 +396,22 @@ typedef struct loom_type_t {
 // Static assert: type must be exactly 24 bytes, no padding.
 static_assert(sizeof(loom_type_t) == 24, "loom_type_t must be 24 bytes");
 
+// Arena-owned payload for a register type carrying a semantic value type.
+// Stored via pointer in dims[0] of a non-inline LOOM_TYPE_REGISTER type.
+typedef struct loom_register_type_data_t {
+  // First target-owned carrier payload word.
+  uint64_t carrier_payload0;
+
+  // Second target-owned carrier payload word.
+  uint64_t carrier_payload1;
+
+  // Semantic type of the value carried by the physical register allocation.
+  loom_type_t value_type;
+} loom_register_type_data_t;
+
+static_assert(sizeof(loom_register_type_data_t) == 40,
+              "loom_register_type_data_t must be 40 bytes");
+
 // Arena-allocated overflow data for function types. Stored via pointer
 // in dims[0] of a LOOM_TYPE_FUNCTION loom_type_t. The types array
 // holds arg types followed by result types contiguously:
@@ -663,7 +681,8 @@ bool loom_type_static_element_count(loom_type_t type,
 // Shaped/pool types compare kind, element type, rank, dimensions, and
 // encoding. Function types compare argument/result type sequences
 // recursively. Dialect types compare the dialect type name and parameter
-// list recursively.
+// list recursively. Register types compare carrier payloads and an optional
+// semantic value type recursively.
 bool loom_type_equal(loom_type_t a, loom_type_t b);
 
 // Returns true if |source_type| equals |target_type| after applying |remap| to
@@ -690,9 +709,10 @@ typedef iree_status_t (*loom_type_value_ref_callback_t)(
 // Walks SSA value references embedded in |type|.
 //
 // This includes dynamic shape dimensions, dynamic pool sizes, SSA
-// encoding/layout attachments, and references in nested function or dialect
-// type parameters. References are reported in structural order and are not
-// deduplicated: a type that mentions the same value twice emits two callbacks.
+// encoding/layout attachments, and references in nested function, dialect, or
+// register value types. References are reported in structural order and are
+// not deduplicated: a type that mentions the same value twice emits two
+// callbacks.
 iree_status_t loom_type_walk_value_refs(loom_type_t type,
                                         loom_type_value_ref_callback_t callback,
                                         void* user_data);
@@ -763,8 +783,9 @@ static inline loom_type_t loom_type_buffer(void) {
   return type;
 }
 
-// Creates a target-owned low register payload type. Target code should prefer
-// loom/target/registers.h so core IR remains only the by-value storage owner.
+// Creates a target-owned low register payload type without a semantic value
+// type. Target code should prefer loom/target/registers.h so core IR remains
+// only the storage owner.
 static inline loom_type_t loom_type_register_payload(uint64_t payload0,
                                                      uint64_t payload1) {
   loom_type_t type = {0};
@@ -773,6 +794,18 @@ static inline loom_type_t loom_type_register_payload(uint64_t payload0,
       LOOM_TYPE_FLAG_INLINE_DIMS | LOOM_TYPE_FLAG_ALL_STATIC);
   type.dims[0] = payload0;
   type.dims[1] = payload1;
+  return type;
+}
+
+// Creates a target-owned low register payload type carrying a semantic value
+// type. |data| must outlive the returned type. Module interning recursively
+// copies the payload into module-owned storage.
+static inline loom_type_t loom_type_register_payload_with_value_type(
+    const loom_register_type_data_t* data) {
+  loom_type_t type = {0};
+  type.header = loom_type_make_raw_header(LOOM_TYPE_REGISTER, 0, 0,
+                                          LOOM_TYPE_FLAG_ALL_STATIC);
+  type.dims[0] = (uint64_t)(uintptr_t)data;
   return type;
 }
 
@@ -786,14 +819,41 @@ static inline loom_type_t loom_type_storage(loom_storage_space_t space) {
   return type;
 }
 
-// Returns the first target-owned register payload field.
-static inline uint64_t loom_type_register_payload0(loom_type_t type) {
-  return type.dims[0];
+// Returns true if |type| carries a semantic register value type.
+static inline bool loom_type_register_has_value_type(loom_type_t type) {
+  return loom_type_is_register(type) && !loom_type_has_inline_dims(type);
 }
 
-// Returns the second target-owned register payload field.
+// Returns the arena-owned data for a typed register, or NULL for an untyped
+// register.
+static inline const loom_register_type_data_t* loom_type_register_data(
+    loom_type_t type) {
+  return loom_type_register_has_value_type(type)
+             ? (const loom_register_type_data_t*)(uintptr_t)type.dims[0]
+             : NULL;
+}
+
+// Returns the first target-owned register carrier payload field.
+static inline uint64_t loom_type_register_payload0(loom_type_t type) {
+  if (IREE_LIKELY(loom_type_has_inline_dims(type))) return type.dims[0];
+  const loom_register_type_data_t* data =
+      (const loom_register_type_data_t*)(uintptr_t)type.dims[0];
+  return data->carrier_payload0;
+}
+
+// Returns the second target-owned register carrier payload field.
 static inline uint64_t loom_type_register_payload1(loom_type_t type) {
-  return type.dims[1];
+  if (IREE_LIKELY(loom_type_has_inline_dims(type))) return type.dims[1];
+  const loom_register_type_data_t* data =
+      (const loom_register_type_data_t*)(uintptr_t)type.dims[0];
+  return data->carrier_payload1;
+}
+
+// Returns the semantic value type carried by |type|, or NULL if absent.
+static inline const loom_type_t* loom_type_register_value_type(
+    loom_type_t type) {
+  const loom_register_type_data_t* data = loom_type_register_data(type);
+  return data ? &data->value_type : NULL;
 }
 
 // Creates a pool type with a single block_size dimension.

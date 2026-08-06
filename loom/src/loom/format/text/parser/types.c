@@ -924,8 +924,9 @@ static iree_status_t loom_parse_register_unit_suffix(loom_parser_t* parser,
 }
 
 // Parses a target-low register type. Called after the `reg` keyword has been
-// consumed. Grammar: reg<namespace.class> | reg<namespace.class xN>.
+// consumed. Grammar: reg<namespace.class [xN] [: value_type]>.
 static iree_status_t loom_parse_register_type(loom_parser_t* parser,
+                                              loom_type_parse_mode_t mode,
                                               loom_type_t* out_type) {
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LANGLE)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
@@ -939,11 +940,18 @@ static iree_status_t loom_parse_register_type(loom_parser_t* parser,
         parser, class_token, IREE_SV("namespace-qualified register class"));
   }
   uint32_t unit_count = 1;
-  if (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RANGLE)) {
+  if (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RANGLE) &&
+      !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_COLON)) {
     loom_token_t suffix_token = loom_token_none();
     LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BARE_IDENT, &suffix_token);
     IREE_RETURN_IF_ERROR(
         loom_parse_register_unit_suffix(parser, suffix_token, &unit_count));
+  }
+  loom_type_t value_type = loom_type_none();
+  bool has_value_type =
+      loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COLON);
+  if (has_value_type) {
+    IREE_RETURN_IF_ERROR(loom_parse_type(parser, mode, &value_type));
   }
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RANGLE, NULL);
 
@@ -963,6 +971,11 @@ static iree_status_t loom_parse_register_type(loom_parser_t* parser,
     return loom_parser_emit_unexpected_token(
         parser, class_token,
         IREE_SV("register class defined by the selected descriptor set"));
+  }
+  if (has_value_type) {
+    return loom_module_intern_register_type(
+        parser->module, loom_type_register_payload0(type),
+        loom_type_register_payload1(type), value_type, out_type);
   }
   return loom_module_intern_type(parser->module, type, out_type);
 }
@@ -1048,7 +1061,7 @@ iree_status_t loom_parse_type(loom_parser_t* parser,
     // "reg" keyword.
     if (iree_string_view_equal(token.text, IREE_SV("reg"))) {
       loom_tokenizer_next(&parser->tokenizer);
-      return loom_parse_register_type(parser, out_type);
+      return loom_parse_register_type(parser, mode, out_type);
     }
 
     bool matched_registered_type = false;

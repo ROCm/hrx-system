@@ -35,6 +35,7 @@ from loom.ir import (
     OFFSET,
     Block,
     CanonicalAttrDict,
+    DialectType,
     DynamicDim,
     DynamicEncoding,
     EncodingInstance,
@@ -126,12 +127,15 @@ def _module_with(*names_and_types: tuple[str, Type]) -> tuple[Module, list[int]]
     return module, value_ids
 
 
-def _test_ptr_register_type(unit_count: int = 1) -> RegisterType:
+def _test_ptr_register_type(
+    unit_count: int = 1, value_type: Type | None = None
+) -> RegisterType:
     return RegisterType(
         _TEST_LOW_CORE_STABLE_ID,
         _TEST_PTR_REGISTER_CLASS_ID,
         unit_count,
         "test.ptr",
+        value_type,
     )
 
 
@@ -286,6 +290,19 @@ class TestPrintType:
     def test_register_type(self) -> None:
         assert print_type(_test_ptr_register_type()) == "reg<test.ptr>"
         assert print_type(_test_ptr_register_type(4)) == "reg<test.ptr x4>"
+        assert (
+            print_type(_test_ptr_register_type(value_type=I32)) == "reg<test.ptr : i32>"
+        )
+        vector_type = ShapedType(TypeKind.VECTOR, I32, (StaticDim(4),))
+        assert (
+            print_type(_test_ptr_register_type(4, vector_type))
+            == "reg<test.ptr x4 : vector<4xi32>>"
+        )
+        dialect_type = DialectType("vm.ref", (I32,))
+        assert (
+            print_type(_test_ptr_register_type(value_type=dialect_type))
+            == "reg<test.ptr : vm.ref<i32>>"
+        )
 
     def test_dialect_type_opaque(self) -> None:
         from loom.ir import DialectType

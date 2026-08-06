@@ -1790,6 +1790,11 @@ static iree_status_t loom_bytecode_reader_read_types(
             loom_bytecode_reader_cursor_absolute_position(&cursor);
         IREE_RETURN_IF_ERROR(
             loom_bytecode_reader_read_uvarint(reader, &cursor, &payload1));
+        uint64_t has_value_type_offset =
+            loom_bytecode_reader_cursor_absolute_position(&cursor);
+        uint8_t has_value_type = 0;
+        IREE_RETURN_IF_ERROR(
+            loom_bytecode_reader_read_u8(reader, &cursor, &has_value_type));
         if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
         if (payload0 == 0) {
           return loom_bytecode_reader_emit_invalid_field(
@@ -1803,7 +1808,39 @@ static iree_status_t loom_bytecode_reader_read_types(
               IREE_SV("register_payload1"), payload1_offset,
               IREE_SV("register_unit_count_must_be_non_zero"));
         }
-        type = loom_type_register_payload(payload0, payload1);
+        if ((payload1 >> 48) != 0) {
+          return loom_bytecode_reader_emit_invalid_field(
+              reader, IREE_SV("TYPES"), IREE_SV("type"), type_index,
+              IREE_SV("register_payload1"), payload1_offset,
+              IREE_SV("register_payload_reserved_bits_must_be_zero"));
+        }
+        if (has_value_type > 1) {
+          return loom_bytecode_reader_emit_enum_value(
+              reader, IREE_SV("register_has_value_type"), has_value_type, 2,
+              has_value_type_offset);
+        }
+        if (has_value_type) {
+          uint64_t value_type_offset =
+              loom_bytecode_reader_cursor_absolute_position(&cursor);
+          uint64_t value_type_id = 0;
+          IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+              reader, &cursor, &value_type_id));
+          if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+          loom_type_t value_type = {0};
+          IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_type_ref_bounded(
+              reader, value_type_id, type_index, IREE_SV("register_value_type"),
+              value_type_offset, &value_type));
+          if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+          loom_register_type_data_t* register_data = NULL;
+          IREE_RETURN_IF_ERROR(iree_arena_allocate(
+              reader->arena, sizeof(*register_data), (void**)&register_data));
+          register_data->carrier_payload0 = payload0;
+          register_data->carrier_payload1 = payload1;
+          register_data->value_type = value_type;
+          type = loom_type_register_payload_with_value_type(register_data);
+        } else {
+          type = loom_type_register_payload(payload0, payload1);
+        }
         break;
       }
       case LOOM_TYPE_STORAGE: {

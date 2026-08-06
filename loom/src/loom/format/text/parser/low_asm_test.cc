@@ -258,6 +258,62 @@ TEST_F(LowAsmParserTest, ResolvesPacketIdentityPerFunctionContract) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmParserTest, ParsesStructuralRegisterValueTypes) {
+  loom_module_t* module = ParseOk(
+      "low.func.decl target<test.low.core> @typed("
+      "%arg: reg<test.i32 : i32>) -> "
+      "(reg<test.i32 x4 : vector<4xi32>>, "
+      "reg<test.ptr : kernel.async.token>)\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_block_t* module_block = loom_module_block(module);
+  ASSERT_EQ(module_block->op_count, 1u);
+  loom_op_t* function_op = loom_block_op(module_block, 0);
+  ASSERT_TRUE(loom_low_func_decl_isa(function_op));
+  loom_func_like_t function = loom_func_like_cast(module, function_op);
+
+  uint16_t argument_count = 0;
+  const loom_value_id_t* argument_ids =
+      loom_func_like_arg_ids(function, &argument_count);
+  ASSERT_EQ(argument_count, 1u);
+  loom_type_t argument_type = loom_module_value_type(module, argument_ids[0]);
+  ExpectTestLowCoreRegisterType(argument_type,
+                                TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, 1);
+  const loom_type_t* argument_value_type =
+      loom_type_register_value_type(argument_type);
+  ASSERT_NE(argument_value_type, nullptr);
+  EXPECT_TRUE(loom_type_equal(*argument_value_type,
+                              loom_type_scalar(LOOM_SCALAR_TYPE_I32)));
+
+  ASSERT_EQ(function_op->result_count, 2u);
+  loom_type_t result_type =
+      loom_module_value_type(module, loom_op_const_results(function_op)[0]);
+  ExpectTestLowCoreRegisterType(result_type,
+                                TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, 4);
+  const loom_type_t* result_value_type =
+      loom_type_register_value_type(result_type);
+  ASSERT_NE(result_value_type, nullptr);
+  EXPECT_TRUE(loom_type_equal(
+      *result_value_type,
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32,
+                          loom_dim_pack_static(4), 0)));
+
+  loom_type_t dialect_result_type =
+      loom_module_value_type(module, loom_op_const_results(function_op)[1]);
+  ExpectTestLowCoreRegisterType(dialect_result_type,
+                                TEST_LOW_CORE_REG_CLASS_ID_TEST_PTR, 1);
+  const loom_type_t* dialect_value_type =
+      loom_type_register_value_type(dialect_result_type);
+  ASSERT_NE(dialect_value_type, nullptr);
+  ASSERT_TRUE(loom_type_is_dialect(*dialect_value_type));
+  EXPECT_EQ(loom_type_dialect_param_count(*dialect_value_type), 0u);
+  EXPECT_TRUE(iree_string_view_equal(
+      module->strings.entries[loom_type_dialect_name_id(*dialect_value_type)],
+      IREE_SV("kernel.async.token")));
+
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmParserTest, BuildsCanonicalLowOps) {
   loom_module_t* module = ParseOk(
       "low.func.def target<test.low.core> @packet() -> "

@@ -523,17 +523,18 @@ class FunctionType:
 
 @dataclass(frozen=True, slots=True)
 class RegisterType:
-    """A target-low register value with compact descriptor identity.
+    """A target-low register value with physical and semantic identity.
 
-    Register types carry only physical allocation shape, not value semantics.
-    The op descriptor determines whether a register is interpreted as i32,
-    f32, v128, an address, or an instruction-specific packed payload.
+    The descriptor fields identify the physical register carrier. ``value_type``
+    preserves the optional source-level value semantics represented by that
+    carrier so target emitters do not have to recover them from op position.
     """
 
     descriptor_set_stable_id: int
     register_class_id: int
     unit_count: int = 1
     name: str | None = None
+    value_type: Type | None = None
 
     def __post_init__(self) -> None:
         if self.descriptor_set_stable_id < 1:
@@ -561,9 +562,9 @@ class RegisterType:
             if self.name is not None
             else f"0x{self.descriptor_set_stable_id:x}:{self.register_class_id}"
         )
-        if self.unit_count == 1:
-            return f"reg<{reg_class}>"
-        return f"reg<{reg_class} x{self.unit_count}>"
+        unit_suffix = "" if self.unit_count == 1 else f" x{self.unit_count}"
+        value_suffix = "" if self.value_type is None else f" : {self.value_type!r}"
+        return f"reg<{reg_class}{unit_suffix}{value_suffix}>"
 
 
 @dataclass(frozen=True, slots=True)

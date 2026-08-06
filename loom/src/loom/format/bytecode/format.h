@@ -62,7 +62,7 @@
 //
 //   offset  size  field
 //   0       4     magic: "LOOM" (0x4C 0x4F 0x4F 0x4D)
-//   4       1     format_version (currently 19)
+//   4       1     format_version (currently 20)
 //   5       1     location_mode (see loom_bytecode_location_mode_t)
 //   6       2     module_count
 //   8       4     file_string_pool_length (bytes)
@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 19
+#define LOOM_BYTECODE_FORMAT_VERSION 20
 
 // File-level source-location mode stored in the file header.
 enum loom_bytecode_location_mode_e {
@@ -351,7 +351,9 @@ typedef enum loom_bytecode_section_kind_e {
 //       (if static: [size: varint]) (block size in bytes))
 //     (REGISTER:
 //       [payload0: varint]          (target-owned register payload word)
-//       [payload1: varint]          (target-owned register payload word))
+//       [payload1: varint]          (target-owned register payload word)
+//       [has_value_type: byte]      (0 = absent, 1 = present)
+//       (if present: [value_type_index: varint]))
 //     (STORAGE:
 //       [space: byte]               (loom_bytecode_storage_space_t))
 

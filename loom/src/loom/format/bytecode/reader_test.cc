@@ -23,7 +23,6 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/test/ops.h"
-#include "loom/target/registers.h"
 
 namespace loom {
 namespace {
@@ -62,6 +61,13 @@ class ReaderTest : public ::testing::Test {
     size_t nested_dict_first_key = 0;
     // Byte offset of the second key inside the nested dict value.
     size_t nested_dict_second_key = 0;
+  };
+
+  struct RegisterTypeOffsets {
+    // Byte offset of the register value-type presence tag.
+    size_t has_value_type = 0;
+    // Byte offset of the register value-type table reference.
+    size_t value_type = 0;
   };
 
   void SetUp() override {
@@ -286,12 +292,20 @@ class ReaderTest : public ::testing::Test {
     return module;
   }
 
-  loom_module_t* CreateRegisterDeclModule() {
+  loom_module_t* CreateRegisterDeclModule(
+      uint64_t carrier_payload1 = (uint64_t)4 << 16) {
     loom_module_t* module = CreateModule("reader_register_decl");
-    loom_type_t reg_type =
-        loom_low_register_type(/*descriptor_set_stable_id=*/1,
-                               /*register_class_id=*/0, /*unit_count=*/4);
-    IREE_CHECK_OK(loom_module_intern_type(module, reg_type, &reg_type));
+    loom_type_t vector_type = loom_type_shaped_1d(
+        LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32, loom_dim_pack_static(4), 0);
+    loom_string_id_t value_type_name_id = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(loom_module_intern_string(module, IREE_SV("test.payload"),
+                                            &value_type_name_id));
+    loom_type_t value_type =
+        loom_type_dialect(value_type_name_id, 1, &vector_type);
+    loom_type_t reg_type = loom_type_none();
+    IREE_CHECK_OK(loom_module_intern_register_type(
+        module, /*carrier_payload0=*/1, carrier_payload1, value_type,
+        &reg_type));
 
     loom_builder_t builder;
     loom_builder_initialize(module, &module->arena, loom_module_block(module),
@@ -1038,6 +1052,38 @@ class ReaderTest : public ::testing::Test {
     IREE_CHECK_OK(loom_uvarint_decode(&cursor, &value));
     *offset += cursor.position;
     return value;
+  }
+
+  RegisterTypeOffsets ReadRegisterDeclTypeOffsets(
+      const std::vector<uint8_t>& bytes) {
+    size_t offset = SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_TYPES);
+    EXPECT_EQ(ReadUVarint(bytes, &offset), 4u);
+
+    EXPECT_EQ(bytes[offset++], LOOM_BYTECODE_TYPE_SCALAR);
+    offset += 1;  // Scalar element type.
+
+    EXPECT_EQ(bytes[offset++], LOOM_BYTECODE_TYPE_VECTOR);
+    offset += 1;                     // Vector element type.
+    EXPECT_EQ(bytes[offset++], 1u);  // Rank.
+    EXPECT_EQ(bytes[offset++], LOOM_BYTECODE_ENCODING_ATTACHMENT_NONE);
+    EXPECT_EQ(ReadUVarint(bytes, &offset), 0u);  // Encoding instance.
+    EXPECT_EQ(bytes[offset++], 0u);              // Static dimension.
+    EXPECT_EQ(ReadUVarint(bytes, &offset), 4u);  // Dimension size.
+
+    EXPECT_EQ(bytes[offset++], LOOM_BYTECODE_TYPE_DIALECT);
+    (void)ReadUVarint(bytes, &offset);           // Type-name string ID.
+    EXPECT_EQ(ReadUVarint(bytes, &offset), 1u);  // Parameter count.
+    EXPECT_EQ(ReadUVarint(bytes, &offset), 1u);  // Vector type reference.
+
+    EXPECT_EQ(bytes[offset++], LOOM_BYTECODE_TYPE_REGISTER);
+    EXPECT_EQ(ReadUVarint(bytes, &offset), 1u);                 // Payload 0.
+    EXPECT_EQ(ReadUVarint(bytes, &offset), (uint64_t)4 << 16);  // Payload 1.
+    RegisterTypeOffsets result;
+    result.has_value_type = offset++;
+    result.value_type = offset;
+    EXPECT_EQ(bytes[result.has_value_type], 1u);
+    EXPECT_EQ(ReadUVarint(bytes, &offset), 2u);
+    return result;
   }
 
   ValueDefOffsets ReadValueDefOffsets(const std::vector<uint8_t>& bytes,
@@ -2351,6 +2397,77 @@ TEST_F(ReaderTest, CanonicalRoundTripPreservesTypesAttrsAndPredicates) {
   loom_module_t* predicate_module = CreatePredicateFunctionModule();
   ExpectCanonicalBytecodeRoundTrip(predicate_module);
   loom_module_free(predicate_module);
+}
+
+TEST_F(ReaderTest, ReadsStructuralRegisterValueType) {
+  loom_module_t* source_module = CreateRegisterDeclModule();
+  auto bytes = WriteModule(source_module);
+
+  loom_module_t* read_module = nullptr;
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadModule(bytes, &read_module, &error_ids);
+  EXPECT_EQ(result.error_count, 0u);
+  EXPECT_TRUE(error_ids.empty());
+  ASSERT_NE(read_module, nullptr);
+
+  const loom_type_t* register_type = nullptr;
+  for (iree_host_size_t i = 0; i < read_module->types.count; ++i) {
+    if (loom_type_is_register(read_module->types.entries[i])) {
+      register_type = &read_module->types.entries[i];
+      break;
+    }
+  }
+  ASSERT_NE(register_type, nullptr);
+  EXPECT_EQ(loom_type_register_payload0(*register_type), 1u);
+  EXPECT_EQ(loom_type_register_payload1(*register_type), (uint64_t)4 << 16);
+  const loom_type_t* value_type = loom_type_register_value_type(*register_type);
+  ASSERT_NE(value_type, nullptr);
+  ASSERT_TRUE(loom_type_is_dialect(*value_type));
+  EXPECT_TRUE(iree_string_view_equal(
+      read_module->strings.entries[loom_type_dialect_name_id(*value_type)],
+      IREE_SV("test.payload")));
+  ASSERT_EQ(loom_type_dialect_param_count(*value_type), 1u);
+  EXPECT_TRUE(loom_type_equal(
+      loom_type_dialect_params(*value_type)[0],
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32,
+                          loom_dim_pack_static(4), 0)));
+
+  loom_module_free(read_module);
+  loom_module_free(source_module);
+}
+
+TEST_F(ReaderTest, RejectsInvalidRegisterValueTypePresence) {
+  loom_module_t* module = CreateRegisterDeclModule();
+  auto bytes = WriteModule(module);
+  RegisterTypeOffsets offsets = ReadRegisterDeclTypeOffsets(bytes);
+  bytes[offsets.has_value_type] = 2;
+
+  ExpectReadError(bytes, "ERR_BYTECODE_011");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsForwardRegisterValueTypeReference) {
+  loom_module_t* module = CreateRegisterDeclModule();
+  auto bytes = WriteModule(module);
+  RegisterTypeOffsets offsets = ReadRegisterDeclTypeOffsets(bytes);
+  ASSERT_EQ(bytes[offsets.value_type], 2u);
+  bytes[offsets.value_type] = 3;
+
+  ExpectReadError(bytes, "ERR_BYTECODE_012");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsRegisterPayloadReservedBits) {
+  loom_module_t* module =
+      CreateRegisterDeclModule(((uint64_t)1 << 48) | ((uint64_t)4 << 16));
+  auto bytes = WriteModule(module);
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
 }
 
 TEST_F(ReaderTest, CanonicalRoundTripPreservesLocations) {

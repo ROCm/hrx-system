@@ -324,7 +324,8 @@ iree_status_t loom_type_refine_with_candidate(
   }
 
   loom_type_kind_t kind = loom_type_kind(current_type);
-  if (kind == LOOM_TYPE_FUNCTION || kind == LOOM_TYPE_DIALECT) {
+  if (kind == LOOM_TYPE_FUNCTION || kind == LOOM_TYPE_DIALECT ||
+      kind == LOOM_TYPE_REGISTER) {
     *out_result = loom_type_equal(current_type, candidate_type)
                       ? LOOM_TYPE_REFINEMENT_UNCHANGED
                       : LOOM_TYPE_REFINEMENT_CONFLICT;

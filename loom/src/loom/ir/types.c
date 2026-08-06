@@ -170,6 +170,22 @@ bool loom_type_equal(loom_type_t a, loom_type_t b) {
              loom_type_sequence_equal(loom_type_dialect_params(a),
                                       loom_type_dialect_params(b), param_count);
     }
+    case LOOM_TYPE_REGISTER: {
+      const loom_register_type_data_t* a_data = loom_type_register_data(a);
+      const loom_register_type_data_t* b_data = loom_type_register_data(b);
+      if (loom_type_register_has_value_type(a)) {
+        if (!a_data || !b_data) return a_data == b_data;
+        if (a_data->carrier_payload0 != b_data->carrier_payload0 ||
+            a_data->carrier_payload1 != b_data->carrier_payload1) {
+          return false;
+        }
+        return loom_type_equal(a_data->value_type, b_data->value_type);
+      }
+      if (a.dims[0] != b.dims[0] || a.dims[1] != b.dims[1]) {
+        return false;
+      }
+      return true;
+    }
     default:
       break;
   }
@@ -283,6 +299,27 @@ bool loom_type_equal_after_value_remap(loom_type_t source_type,
                  loom_type_dialect_params(target_type), param_count, remap);
     }
 
+    case LOOM_TYPE_REGISTER: {
+      if (source_type.header != target_type.header ||
+          source_type.encoding_id != target_type.encoding_id ||
+          source_type.encoding_flags != target_type.encoding_flags) {
+        return false;
+      }
+      if (!loom_type_register_has_value_type(source_type)) {
+        return source_type.dims[0] == target_type.dims[0] &&
+               source_type.dims[1] == target_type.dims[1];
+      }
+      const loom_register_type_data_t* source_data =
+          loom_type_register_data(source_type);
+      const loom_register_type_data_t* target_data =
+          loom_type_register_data(target_type);
+      if (!source_data || !target_data) return source_data == target_data;
+      return source_data->carrier_payload0 == target_data->carrier_payload0 &&
+             source_data->carrier_payload1 == target_data->carrier_payload1 &&
+             loom_type_equal_after_value_remap(source_data->value_type,
+                                               target_data->value_type, remap);
+    }
+
     default:
       break;
   }
@@ -393,6 +430,13 @@ iree_status_t loom_type_walk_value_refs(loom_type_t type,
           loom_type_dialect_params(type), loom_type_dialect_param_count(type),
           callback, user_data);
 
+    case LOOM_TYPE_REGISTER: {
+      const loom_type_t* value_type = loom_type_register_value_type(type);
+      return value_type
+                 ? loom_type_walk_value_refs(*value_type, callback, user_data)
+                 : iree_ok_status();
+    }
+
     default:
       break;
   }
@@ -438,6 +482,11 @@ bool loom_type_references_value(loom_type_t type, loom_value_id_t value_id) {
       return loom_type_sequence_references_value(
           loom_type_dialect_params(type), loom_type_dialect_param_count(type),
           value_id);
+
+    case LOOM_TYPE_REGISTER: {
+      const loom_type_t* value_type = loom_type_register_value_type(type);
+      return value_type && loom_type_references_value(*value_type, value_id);
+    }
 
     default:
       break;
@@ -515,6 +564,17 @@ uint32_t loom_type_hash(loom_type_t type) {
       hash = loom_type_hash_mix_u32(hash, loom_type_dialect_name_id(type));
       return loom_type_hash_mix_sequence(hash, loom_type_dialect_params(type),
                                          loom_type_dialect_param_count(type));
+    case LOOM_TYPE_REGISTER: {
+      const loom_register_type_data_t* data = loom_type_register_data(type);
+      if (loom_type_register_has_value_type(type)) {
+        if (!data) return hash;
+        hash = loom_type_hash_mix_u64(hash, data->carrier_payload0);
+        hash = loom_type_hash_mix_u64(hash, data->carrier_payload1);
+        return loom_type_hash_mix_u32(hash, loom_type_hash(data->value_type));
+      }
+      hash = loom_type_hash_mix_u64(hash, type.dims[0]);
+      return loom_type_hash_mix_u64(hash, type.dims[1]);
+    }
     default:
       break;
   }

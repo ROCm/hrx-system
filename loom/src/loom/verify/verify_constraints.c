@@ -6,8 +6,6 @@
 
 #include "loom/verify/verify_constraints.h"
 
-#include <string.h>
-
 #include "loom/error/error_catalog.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/target/registers.h"
@@ -18,7 +16,7 @@ static bool loom_constraint_property_equals(
     loom_type_t a, loom_type_t b, loom_constraint_property_t property) {
   switch ((enum loom_constraint_property_e)property) {
     case LOOM_PROPERTY_TYPE:
-      return memcmp(&a, &b, sizeof(loom_type_t)) == 0;
+      return loom_type_equal(a, b);
     case LOOM_PROPERTY_KIND:
       return loom_type_kind(a) == loom_type_kind(b);
     case LOOM_PROPERTY_ELEMENT_TYPE:
