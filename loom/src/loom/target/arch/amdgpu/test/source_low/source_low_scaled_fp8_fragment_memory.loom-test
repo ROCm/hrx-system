@@ -3,9 +3,9 @@
 amdgpu.target<gfx1170> @target
 
 kernel.def target(@target) @scaled_fp8_rhs_bf16_wmma_fragment_memory() {
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %threads = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%input: buffer, %weight: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index
@@ -139,9 +139,9 @@ low.kernel.def target<amdgpu.rdna4m.core>(@target) workgroup_size(32, 1, 1) work
 amdgpu.target<gfx950> @target
 
 kernel.def target(@target) @scaled_fp8_rhs_bf16_fragment_memory() {
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %threads = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%weight: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %k = index.constant 16 : index
@@ -189,9 +189,9 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) workgroup_size(64, 1, 1) workg
 amdgpu.target<gfx1170> @target
 
 kernel.def target(@target) @scaled_bf8_rhs_bf16_wmma_fragment_memory() {
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %threads = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%input: buffer, %weight: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %m = index.constant 16 : index

@@ -3,9 +3,9 @@
 amdgpu.target<gfx1170> @target
 
 kernel.def target(@target) @report_scaled_fp8_rhs_fragment_memory() {
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %threads = index.constant 32 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%weight: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %k = index.constant 16 : index
