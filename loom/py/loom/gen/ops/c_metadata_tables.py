@@ -421,12 +421,12 @@ def generate_tables_c(
                 flags = " | ".join(flag_names) if flag_names else "0"
                 if attr_def.attr_type == "enum" and attr_def.enum_def:
                     enum_names = _enum_names_array_name(op, attr_def, shared_enums)
-                    enum_case_count = f"IREE_ARRAYSIZE({enum_names})"
+                    enum_max_value = f"(uint8_t)(IREE_ARRAYSIZE({enum_names}) - 1)"
                 else:
                     enum_names = "NULL"
-                    enum_case_count = "0"
+                    enum_max_value = "0"
                 symbol_ref = f"&{prefix}_{attr_def.name}_symbol_ref" if attr_def.symbol_ref is not None else "NULL"
-                lines.append(f"    {{{_bstring_expr(attr_def.name)}, {attr_kind}, {flags}, {enum_case_count}, {enum_names}, {symbol_ref}}},")
+                lines.append(f"    {{{_bstring_expr(attr_def.name)}, {attr_kind}, {flags}, {enum_max_value}, {enum_names}, {symbol_ref}}},")
             lines.append("};")
 
         # Region descriptors.

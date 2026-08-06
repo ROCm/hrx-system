@@ -946,8 +946,12 @@ class EnumDef:
         c_const_prefix: str | None = None,
         c_include: str | None = None,
     ) -> None:
+        if not name:
+            raise ValueError("EnumDef: name must be non-empty")
         object.__setattr__(self, "name", name)
         frozen_cases = tuple(cases)
+        if not frozen_cases:
+            raise ValueError(f"EnumDef '{name}': cases must be non-empty")
         object.__setattr__(self, "cases", frozen_cases)
         object.__setattr__(self, "doc", doc)
         object.__setattr__(self, "c_type", c_type)
@@ -963,6 +967,13 @@ class EnumDef:
         seen_keywords: set[str] = set()
         seen_values: set[int] = set()
         for case in frozen_cases:
+            if not case.keyword:
+                raise ValueError(f"EnumDef '{name}': case keyword must be non-empty")
+            if type(case.value) is not int or not 0 <= case.value <= 0xFF:
+                raise ValueError(
+                    f"EnumDef '{name}': case '{case.keyword}' value must be "
+                    f"an integer in [0, 255], got {case.value!r}"
+                )
             if case.keyword in seen_keywords:
                 raise ValueError(
                     f"EnumDef '{name}': duplicate keyword '{case.keyword}'"
@@ -970,7 +981,6 @@ class EnumDef:
             if case.value in seen_values:
                 raise ValueError(f"EnumDef '{name}': duplicate value {case.value}")
             seen_keywords.add(case.keyword)
-            seen_values.add(case.value)
             seen_values.add(case.value)
 
     @property

@@ -3314,9 +3314,11 @@ static iree_status_t loom_bytecode_reader_validate_func_enum(
         reader, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index, field_name,
         offset, IREE_SV("function_metadata_field_must_target_an_enum_attr"));
   }
-  if (descriptor->enum_case_count > 0 && value >= descriptor->enum_case_count) {
+  if (!iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM) &&
+      !loom_attr_descriptor_has_enum_case(descriptor, value)) {
     return loom_bytecode_reader_emit_enum_value(
-        reader, field_name, value, descriptor->enum_case_count, offset);
+        reader, field_name, value,
+        loom_attr_descriptor_enum_case_span(descriptor), offset);
   }
   return iree_ok_status();
 }

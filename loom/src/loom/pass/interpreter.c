@@ -649,12 +649,11 @@ static bool loom_pass_interpreter_attr_string_value_equal(
   if (actual_attr.kind == LOOM_ATTR_ENUM && descriptor &&
       descriptor->enum_case_names) {
     uint8_t enum_value = loom_attr_as_enum(actual_attr);
-    if (enum_value >= descriptor->enum_case_count) {
-      return false;
-    }
-    return iree_string_view_equal(
-        loom_bstring_view(descriptor->enum_case_names[enum_value]),
-        expected_string);
+    loom_bstring_t case_name =
+        loom_attr_descriptor_enum_case_name(descriptor, enum_value);
+    if (!case_name) return false;
+    return iree_string_view_equal(loom_bstring_view(case_name),
+                                  expected_string);
   }
   if (actual_attr.kind == LOOM_ATTR_SYMBOL) {
     iree_string_view_t symbol_name = loom_pass_interpreter_source_symbol_name(

@@ -854,6 +854,41 @@ TEST_F(ParserTest, AttrDictEmptyArrayPayloadIsCanonical) {
   loom_module_free(module);
 }
 
+TEST_F(ParserTest, AttrDictArrayPayloadMayExceedInlineParserCapacity) {
+  std::string source =
+      "%c = test.constant 0 : f32\n"
+      "%s = test.attrs %c {shape = [";
+  for (int64_t i = 0; i < 40; ++i) {
+    if (i > 0) source += ", ";
+    source += std::to_string(i);
+  }
+  source += "]} : f32\n";
+
+  loom_module_t* module = ParseOk(source.c_str());
+  if (!module) return;
+
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_NE(body, nullptr);
+  ASSERT_GE(body->op_count, 2u);
+  loom_op_t* attrs_op = loom_block_op(body, 1);
+  ASSERT_NE(attrs_op, nullptr);
+  ASSERT_TRUE(loom_test_attrs_isa(attrs_op));
+
+  loom_attribute_t dict_attr = loom_op_attrs(attrs_op)[0];
+  ASSERT_EQ(dict_attr.kind, LOOM_ATTR_DICT);
+  ASSERT_EQ(dict_attr.count, 1u);
+  loom_attribute_t array_attr = dict_attr.dict_entries[0].value;
+  ASSERT_EQ(array_attr.kind, LOOM_ATTR_I64_ARRAY);
+  ASSERT_EQ(array_attr.count, 40u);
+  ASSERT_NE(array_attr.i64_array, nullptr);
+  for (int64_t i = 0; i < 40; ++i) {
+    EXPECT_EQ(array_attr.i64_array[i], i);
+  }
+
+  EXPECT_NE(PrintModule(module).find("shape = [0, 1, 2, 3"), std::string::npos);
+  loom_module_free(module);
+}
+
 TEST_F(ParserTest, AttrDictSpecialFloatValuesRoundTrip) {
   std::string text = RoundTrip(
       "%c = test.constant 0 : f32\n"
@@ -1489,6 +1524,43 @@ TEST_F(ParserTest, SliceAllStatic) {
     EXPECT_NE(text.find("test.slice"), std::string::npos);
     loom_module_free(module);
   }
+}
+
+TEST_F(ParserTest, IndexListMayExceedInlineParserCapacity) {
+  std::string source =
+      "test.func @wide_update(%source: tile<1xf32>, "
+      "%target: tensor<1xf32>) -> (tensor<1xf32>) {\n"
+      "  %result = test.update %source, %target[";
+  for (int64_t i = 0; i < 40; ++i) {
+    if (i > 0) source += ", ";
+    source += std::to_string(i);
+  }
+  source +=
+      "] : tile<1xf32> -> (%target as tensor<1xf32>)\n"
+      "  test.yield %result : tensor<1xf32>\n"
+      "}\n";
+
+  loom_module_t* module = ParseOk(source.c_str());
+  if (!module) return;
+
+  loom_op_t* func_op = GetFirstFunctionOp(module);
+  ASSERT_NE(func_op, nullptr);
+  loom_block_t* body = GetEntryBlock(loom_op_regions(func_op)[0]);
+  ASSERT_NE(body, nullptr);
+  ASSERT_GE(body->op_count, 2u);
+  loom_op_t* update_op = loom_block_op(body, 0);
+  ASSERT_NE(update_op, nullptr);
+  ASSERT_TRUE(loom_test_update_isa(update_op));
+  loom_attribute_t static_offsets = loom_test_update_static_offsets(update_op);
+  ASSERT_EQ(static_offsets.kind, LOOM_ATTR_I64_ARRAY);
+  ASSERT_EQ(static_offsets.count, 40u);
+  ASSERT_NE(static_offsets.i64_array, nullptr);
+  for (int64_t i = 0; i < 40; ++i) {
+    EXPECT_EQ(static_offsets.i64_array[i], i);
+  }
+
+  EXPECT_NE(PrintModule(module).find("%target[0, 1, 2, 3"), std::string::npos);
+  loom_module_free(module);
 }
 
 //===----------------------------------------------------------------------===//

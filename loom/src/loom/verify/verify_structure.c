@@ -779,15 +779,14 @@ void loom_verify_type_constraints(loom_verify_state_t* state,
         loom_verify_emit_structured(state, op, LOOM_ERR_TYPE_005, params,
                                     IREE_ARRAYSIZE(params));
       }
-      if (attrs[i].kind == LOOM_ATTR_ENUM && descriptor->enum_case_count > 0 &&
+      if (attrs[i].kind == LOOM_ATTR_ENUM &&
           (descriptor->flags & LOOM_ATTR_OPEN_ENUM) == 0) {
         uint8_t case_index = (uint8_t)attrs[i].raw;
-        if (case_index >= descriptor->enum_case_count) {
+        if (!loom_attr_descriptor_has_enum_case(descriptor, case_index)) {
           loom_diagnostic_param_t params[] = {
               loom_verify_param_string_for_diagnostic_field(
                   attr_name, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, i),
               loom_param_u32(case_index),
-              loom_param_u32(descriptor->enum_case_count),
           };
           loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_010, params,
                                       IREE_ARRAYSIZE(params));

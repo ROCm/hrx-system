@@ -107,12 +107,13 @@ static bool loom_print_pipeline_enum_attr(const loom_op_t* op,
   const loom_attribute_t* attr =
       loom_print_pipeline_find_attr(op, vtable, attr_name, &descriptor);
   if (!attr || attr->kind != LOOM_ATTR_ENUM || !descriptor ||
-      descriptor->attr_kind != LOOM_ATTR_ENUM || !descriptor->enum_case_names ||
-      attr->raw >= descriptor->enum_case_count) {
+      descriptor->attr_kind != LOOM_ATTR_ENUM) {
     return false;
   }
-  *out_value =
-      loom_bstring_view(descriptor->enum_case_names[(uint8_t)attr->raw]);
+  loom_bstring_t case_name =
+      loom_attr_descriptor_enum_case_name(descriptor, (uint8_t)attr->raw);
+  if (!case_name) return false;
+  *out_value = loom_bstring_view(case_name);
   return true;
 }
 

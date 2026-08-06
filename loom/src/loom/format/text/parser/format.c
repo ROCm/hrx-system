@@ -50,7 +50,9 @@ static iree_status_t loom_parse_format_index_list(
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'['"));
   }
 
-  int64_t static_values[32];
+  int64_t inline_static_values[32];
+  int64_t* static_values = inline_static_values;
+  iree_host_size_t static_value_capacity = IREE_ARRAYSIZE(inline_static_values);
   uint16_t value_count = 0;
   uint16_t dynamic_value_count = 0;
   while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RBRACKET) &&
@@ -60,10 +62,16 @@ static iree_status_t loom_parse_format_index_list(
         break;
       }
     }
-    if (value_count >= 32) {
+    if (value_count == UINT16_MAX) {
       loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
       return loom_parser_emit_token_text_error(parser, LOOM_ERR_PARSE_004,
                                                peek);
+    }
+    if (value_count >= static_value_capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          &parser->parser_arena, value_count, (iree_host_size_t)value_count + 1,
+          sizeof(*static_values), &static_value_capacity,
+          (void**)&static_values));
     }
 
     if (loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_SSA_VALUE)) {
@@ -108,10 +116,13 @@ static iree_status_t loom_parse_format_index_list(
 
   // Build the static i64 array attribute.
   int64_t* arena_values = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&parser->module->arena,
-                                                 value_count, sizeof(int64_t),
-                                                 (void**)&arena_values));
-  memcpy(arena_values, static_values, value_count * sizeof(int64_t));
+  if (value_count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&parser->module->arena,
+                                                   value_count, sizeof(int64_t),
+                                                   (void**)&arena_values));
+    memcpy(arena_values, static_values,
+           (iree_host_size_t)value_count * sizeof(int64_t));
+  }
   loom_attribute_t attr = loom_attr_i64_array(arena_values, value_count);
   IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
       parsed, &parser->parser_arena, static_attr_index, attr));
@@ -270,7 +281,9 @@ static iree_status_t loom_parse_format_optional_group(
           present = false;
           if (peek.kind == LOOM_TOKEN_BARE_IDENT ||
               peek.kind == LOOM_TOKEN_OP_NAME) {
-            for (uint8_t c = 0; c < descriptor->enum_case_count; ++c) {
+            iree_host_size_t case_span =
+                loom_attr_descriptor_enum_case_span(descriptor);
+            for (iree_host_size_t c = 0; c < case_span; ++c) {
               if (descriptor->enum_case_names[c] &&
                   loom_bstring_equal(descriptor->enum_case_names[c],
                                      peek.text)) {

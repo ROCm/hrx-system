@@ -1090,13 +1090,10 @@ static iree_status_t loom_bytecode_get_enum_ordinal(
   }
   *out_ordinal = (uint8_t)attr.raw;
   if (!descriptor ||
-      iree_all_bits_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM) ||
-      descriptor->enum_case_count == 0) {
+      iree_all_bits_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
     return iree_ok_status();
   }
-  if (*out_ordinal >= descriptor->enum_case_count ||
-      (descriptor->enum_case_names &&
-       !descriptor->enum_case_names[*out_ordinal])) {
+  if (!loom_attr_descriptor_has_enum_case(descriptor, *out_ordinal)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "enum attribute value has no declared case");
   }
