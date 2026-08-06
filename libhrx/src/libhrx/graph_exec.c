@@ -536,38 +536,22 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
   }
 
   // Flush pending stream work before graph launch.
-  if (stream->has_pending_work) {
-    HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
-        z0, iree_hal_command_buffer_end(stream->pending_cb));
-    iree_hal_semaphore_list_t wait_list = {
-        .count = 1,
-        .semaphores = &stream->semaphore->hal_semaphore,
-        .payload_values = &stream->timepoint,
-    };
-    uint64_t next_value = stream->timepoint + 1;
-    iree_hal_semaphore_list_t signal_list = {
-        .count = 1,
-        .semaphores = &stream->semaphore->hal_semaphore,
-        .payload_values = &next_value,
-    };
-    HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
-        z0,
-        iree_hal_device_queue_execute(
-            stream->device->hal_device, IREE_HAL_QUEUE_AFFINITY_ANY, wait_list,
-            signal_list, stream->pending_cb,
-            iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE));
-    stream->timepoint = next_value;
-    stream->has_pending_work = false;
-    stream->pending_cb = NULL;
+  hrx_status_t flush_status = hrx_stream_flush(stream);
+  if (!hrx_status_is_ok(flush_status)) {
+    HRX_RETURN_AND_END_ZONE(z0, flush_status);
   }
 
-  for (uint32_t i = 0; i < exec->semaphore_count; i++) {
-    HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
-        z0, iree_hal_semaphore_query(exec->semaphores[i],
-                                     &exec->semaphore_base_values[i]));
-  }
-
+  // Multiple threads may launch the same executable. Serialize the semaphore
+  // query and advancement as one transaction so each launch observes the
+  // timeline values committed by the preceding launch.
   iree_slim_mutex_lock(&exec->mutex);
+
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0; iree_status_is_ok(status) && i < exec->semaphore_count;
+       i++) {
+    status = iree_hal_semaphore_query(exec->semaphores[i],
+                                      &exec->semaphore_base_values[i]);
+  }
 
   uint64_t stream_wait_value = stream->timepoint;
   uint64_t stream_signal_value = stream->timepoint + 1;
@@ -580,7 +564,6 @@ hrx_status_t hrx_graph_exec_launch(hrx_graph_exec_t exec, hrx_stream_t stream) {
     memcpy(new_base_values, exec->semaphore_base_values, base_values_size);
   }
 
-  iree_status_t status = iree_ok_status();
   iree_hal_device_t* hal_device = exec->device->hal_device;
   for (uint32_t block_index = 0;
        iree_status_is_ok(status) && block_index < exec->block_count;
