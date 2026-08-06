@@ -195,6 +195,7 @@ enum loom_ireevm_import_decl_build_flag_bits_e {
   LOOM_IREEVM_IMPORT_DECL_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_IREEVM_IMPORT_DECL_BUILD_FLAG_HAS_CC = 1u << 1,
   LOOM_IREEVM_IMPORT_DECL_BUILD_FLAG_HAS_PURITY = 1u << 2,
+  LOOM_IREEVM_IMPORT_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 3,
 };
 typedef uint32_t loom_ireevm_import_decl_build_flags_t;
 iree_status_t loom_ireevm_import_decl_build(

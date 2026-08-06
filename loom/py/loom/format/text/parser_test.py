@@ -56,6 +56,7 @@ from loom.ir import (
     EncodingInstance,
     EncodingRole,
     EncodingType,
+    EnumArrayAttr,
     FunctionType,
     GroupScope,
     GroupType,
@@ -1349,6 +1350,55 @@ class TestRoundTrip:
             "}\n"
         )
 
+    def test_enum_arrays_preserve_order_duplicates_and_open_values(self) -> None:
+        text = "test.enum_array_attrs [low, high, low] using [middle, <42>, middle]"
+        op = _parse_op(text)
+        assert op.attributes["required_values"] == EnumArrayAttr([1, 255, 1])
+        assert op.attributes["optional_values"] == EnumArrayAttr([7, 42, 7])
+        printed = _op_printer().print_operation(op, Module())
+        assert printed == text
+        assert _op_printer().print_operation(_parse_op(printed), Module()) == text
+
+    def test_optional_enum_array_distinguishes_empty_from_absent(self) -> None:
+        present = _parse_op("test.enum_array_attrs [] using []")
+        absent = _parse_op("test.enum_array_attrs []")
+
+        assert present.attributes["optional_values"] == EnumArrayAttr()
+        assert "optional_values" not in absent.attributes
+        assert _op_printer().print_operation(present, Module()) == (
+            "test.enum_array_attrs [] using []"
+        )
+        assert _op_printer().print_operation(absent, Module()) == (
+            "test.enum_array_attrs []"
+        )
+
+    def test_optional_named_dict_distinguishes_empty_from_absent(self) -> None:
+        present = _parse_op("test.enum_array_attrs [] {}")
+        absent = _parse_op("test.enum_array_attrs []")
+
+        assert len(present.attributes["dict"]) == 0
+        assert "dict" not in absent.attributes
+        assert _op_printer().print_operation(present, Module()) == (
+            "test.enum_array_attrs [] {}"
+        )
+        assert _op_printer().print_operation(absent, Module()) == (
+            "test.enum_array_attrs []"
+        )
+
+    def test_open_scalar_enum_raw_value_round_trips(self) -> None:
+        self._roundtrip_text("test.record <42> @target\n")
+
+    def test_closed_enum_array_rejects_raw_value(self) -> None:
+        with pytest.raises(ParseError, match="closed and does not admit raw values"):
+            _parse_op("test.enum_array_attrs [<42>]")
+
+    @pytest.mark.parametrize("value", [-1, 256])
+    def test_open_enum_array_rejects_value_outside_byte_domain(
+        self, value: int
+    ) -> None:
+        with pytest.raises(ParseError, match="outside the byte domain"):
+            _parse_op(f"test.enum_array_attrs [] using [<{value}>]")
+
     def test_operation_and_block_comments(self) -> None:
         self._roundtrip_text(
             "// top-level function\n"
@@ -1965,6 +2015,21 @@ class TestParsePredicates:
 
     def _parse_module(self, text: str) -> Module:
         return _op_parser().parse(text)
+
+    def test_optional_predicate_list_distinguishes_empty_from_absent(self) -> None:
+        present_text = "test.func @f() where [] {\n  test.yield\n}\n"
+        absent_text = "test.func @g() {\n  test.yield\n}\n"
+
+        present_module = self._parse_module(present_text)
+        absent_module = self._parse_module(absent_text)
+        present_op = present_module.symbols[0].op
+        absent_op = absent_module.symbols[0].op
+        assert present_op is not None
+        assert absent_op is not None
+        assert present_op.attributes["predicates"] == []
+        assert "predicates" not in absent_op.attributes
+        assert _op_printer().print_module(present_module) == present_text
+        assert _op_printer().print_module(absent_module) == absent_text
 
     def test_single_mul_predicate(self) -> None:
         """Parse a function with where [mul(%M, 16)]."""

@@ -274,7 +274,7 @@ TEST_F(CSETest, CanonicalAttrDictOrderDoesNotBlockCSE) {
   };
   loom_op_t* attrs0 = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, input,
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
       loom_make_named_attr_slice(label_first_entries,
                                  IREE_ARRAYSIZE(label_first_entries)),
       f32, LOOM_LOCATION_UNKNOWN, &attrs0));
@@ -286,7 +286,7 @@ TEST_F(CSETest, CanonicalAttrDictOrderDoesNotBlockCSE) {
   };
   loom_op_t* attrs1 = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, input,
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
       loom_make_named_attr_slice(axis_first_entries,
                                  IREE_ARRAYSIZE(axis_first_entries)),
       f32, LOOM_LOCATION_UNKNOWN, &attrs1));
@@ -314,7 +314,7 @@ TEST_F(CSETest, RewriterReplaceAttrDictBuildsFreshCanonicalDict) {
       &builder_, loom_region_entry_block(body_), f32, &input));
 
   loom_op_t* attrs_op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -367,7 +367,7 @@ TEST_F(CSETest, RewriterReplaceAttrDictRecordsTypeValueRefs) {
       &builder_, loom_region_entry_block(body_), f32, &input));
 
   loom_op_t* attrs_op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -421,7 +421,7 @@ TEST_F(CSETest, RewriterSetAttrRejectsMalformedDictAttr) {
       &builder_, loom_region_entry_block(body_), f32, &input));
 
   loom_op_t* attrs_op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -446,7 +446,7 @@ TEST_F(CSETest, RewriterSetAttrRejectsNonCanonicalDictAttrOrder) {
       &builder_, loom_region_entry_block(body_), f32, &input));
 
   loom_op_t* attrs_op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -486,7 +486,7 @@ TEST_F(CSETest, RewriterSetAttrRejectsDuplicateDictAttrKeys) {
       &builder_, loom_region_entry_block(body_), f32, &input));
 
   loom_op_t* attrs_op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &attrs_op));
 

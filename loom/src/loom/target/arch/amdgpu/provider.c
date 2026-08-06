@@ -62,7 +62,7 @@ static iree_status_t loom_amdgpu_provider_build_string_attr(
 static iree_status_t loom_amdgpu_provider_build_run_pass(
     loom_builder_t* builder, iree_string_view_t key) {
   loom_op_t* run_op = NULL;
-  return loom_pass_ir_build_run(builder, key, loom_named_attr_slice_empty(),
+  return loom_pass_ir_build_run(builder, 0, key, loom_named_attr_slice_empty(),
                                 &run_op);
 }
 
@@ -104,7 +104,8 @@ static iree_status_t loom_amdgpu_provider_contribute_pipeline(
 
   loom_op_t* where_op = NULL;
   return loom_pass_ir_build_where(
-      contribution->builder, IREE_SV("target"),
+      contribution->builder, LOOM_PASS_WHERE_BUILD_FLAG_HAS_ATTRS,
+      IREE_SV("target"),
       loom_make_named_attr_slice(attrs, IREE_ARRAYSIZE(attrs)), build_body,
       NULL, &where_op);
 }

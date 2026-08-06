@@ -85,6 +85,7 @@ from loom.ir import (
     DynamicEncoding,
     EncodingInstance,
     EncodingType,
+    EnumArrayAttr,
     FunctionType,
     GroupType,
     Module,
@@ -516,7 +517,24 @@ def _format_attr_value(value: Any, attr_def: AttrDef | None = None) -> str:
     String attributes print quoted. Everything else prints as literals.
     """
     if attr_def is not None and attr_def.attr_type == "enum":
-        return str(value)
+        return _format_enum_attr_value(value, attr_def)
+    if attr_def is not None and attr_def.attr_type == "enum_array":
+        if not isinstance(value, EnumArrayAttr):
+            raise TypeError(
+                f"enum-array attribute value must be EnumArrayAttr: {value!r}"
+            )
+        assert attr_def.enum_def is not None
+        keyword_by_value = {
+            case.value: case.keyword for case in attr_def.enum_def.cases
+        }
+        return (
+            "["
+            + ", ".join(
+                _format_enum_attr_value(element, attr_def, keyword_by_value)
+                for element in value
+            )
+            + "]"
+        )
     if attr_def is not None and attr_def.attr_type == "symbol":
         if not isinstance(value, str):
             raise TypeError(f"symbol attribute value must be a string: {value!r}")
@@ -541,6 +559,8 @@ def _format_attr_value(value: Any, attr_def: AttrDef | None = None) -> str:
         return "@" + str(value)
     if isinstance(value, bytes | bytearray):
         return f'bytes("{bytes(value).hex()}")'
+    if isinstance(value, EnumArrayAttr):
+        raise ValueError("enum arrays require a descriptor-backed operation field")
     if isinstance(value, str):
         return _format_string_literal(value)
     if isinstance(value, list | tuple):
@@ -552,6 +572,33 @@ def _format_attr_value(value: Any, attr_def: AttrDef | None = None) -> str:
     if isinstance(value, EncodingInstance):
         return _format_encoding_instance(value, use_alias=True)
     return str(value)
+
+
+def _format_enum_attr_value(
+    value: Any,
+    attr_def: AttrDef,
+    keyword_by_value: dict[int, str] | None = None,
+) -> str:
+    """Format one descriptor-backed enum keyword or raw open value."""
+    assert attr_def.enum_def is not None
+    if keyword_by_value is None:
+        keyword_by_value = {
+            case.value: case.keyword for case in attr_def.enum_def.cases
+        }
+    if isinstance(value, str):
+        if value not in attr_def.enum_def.keywords:
+            raise ValueError(f"unknown {attr_def.enum_def.name} keyword {value!r}")
+        return value
+    if type(value) is not int or not 0 <= value <= 0xFF:
+        raise ValueError(
+            f"{attr_def.enum_def.name} value must be a byte, got {value!r}"
+        )
+    keyword = keyword_by_value.get(value)
+    if keyword is not None:
+        return keyword
+    if not attr_def.open_enum:
+        raise ValueError(f"closed {attr_def.enum_def.name} enum has no value {value}")
+    return f"<{value}>"
 
 
 def _is_pipeline_printable_name(value: Any, *, allow_dot: bool) -> bool:
@@ -1382,10 +1429,8 @@ class Printer:
                         # Named dict attribute: read the dict value directly.
                         covered_attrs.add(dict_field)
                         dict_value = fields._op.attributes.get(dict_field)
-                        if isinstance(dict_value, Mapping) and dict_value:
-                            attr_str = self._format_named_dict(dict_value, op_decl)
-                            if attr_str:
-                                stream.emit(attr_str)
+                        if isinstance(dict_value, Mapping):
+                            stream.emit(self._format_named_dict(dict_value, op_decl))
                     elif hasattr(fields, "_op"):
                         # Legacy: uncovered attributes from the op's dict.
                         attr_str = self._format_attr_dict(
@@ -1529,9 +1574,9 @@ class Printer:
 
                 case PredicateList(field=name):
                     predicates = fields.attr(name) if hasattr(fields, "attr") else None
-                    if not predicates and hasattr(fields, "_op"):
-                        predicates = fields._op.attributes.get(name, [])
-                    if predicates:
+                    if predicates is None and hasattr(fields, "_op"):
+                        predicates = fields._op.attributes.get(name)
+                    if predicates is not None:
                         stream.emit(_format_predicate_list(predicates))
 
                 case OptionalGroup(elements=inner, anchor=anchor):
@@ -1918,8 +1963,6 @@ class Printer:
 
     def _format_named_dict(self, dict_value: Mapping[str, Any], op_decl: Op) -> str:
         """Format {key = value, ...} from a named dict attribute."""
-        if not dict_value:
-            return ""
         parts: list[str] = []
         for key, value in dict_value.items():
             parts.append(f"{key} = {_format_attr_value(value, None)}")

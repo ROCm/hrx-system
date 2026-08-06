@@ -79,6 +79,7 @@ from loom.ir import (
     DynamicDim,
     DynamicEncoding,
     EncodingInstance,
+    EnumArrayAttr,
     FileLocation,
     FunctionType,
     GroupScope,
@@ -1415,6 +1416,60 @@ class TestCrossFormatRoundTrip:
         assert loaded.values[body_arg_ids[0]].name == "arg"
         assert loaded.values[workload_arg_ids[0]].name == "arg"
         assert _roundtrip_text_through_bytecode(text) == text
+
+    def test_enum_arrays_survive_bytecode_with_presence_and_order(self) -> None:
+        text = (
+            "test.func @enum_arrays() {\n"
+            "  test.enum_array_attrs [low, high, low] "
+            "using [middle, <42>, middle]\n"
+            "  test.enum_array_attrs [] using []\n"
+            "  test.enum_array_attrs []\n"
+            "  test.yield\n"
+            "}\n"
+        )
+        loaded = _parse_write_read(text)
+        func_op = loaded.symbols[0].op
+        assert func_op is not None
+        body_ops = func_op.regions[0].blocks[0].ops
+        assert body_ops[0].attributes["required_values"] == EnumArrayAttr([1, 255, 1])
+        assert body_ops[0].attributes["optional_values"] == EnumArrayAttr([7, 42, 7])
+        assert body_ops[1].attributes["optional_values"] == EnumArrayAttr()
+        assert "optional_values" not in body_ops[2].attributes
+        assert _roundtrip_text_through_bytecode(text) == text
+
+    def test_empty_optional_aggregates_survive_bytecode(self) -> None:
+        text = (
+            "test.func @empty_predicates() where [] {\n"
+            "  test.enum_array_attrs [] {}\n"
+            "  test.yield\n"
+            "}\n"
+        )
+
+        loaded = _parse_write_read(text)
+        function = loaded.symbols[0].op
+        assert function is not None
+        assert loaded.symbols[0].flags == 0
+        assert function.attributes["predicates"] == []
+        enum_op = function.regions[0].blocks[0].ops[0]
+        assert len(enum_op.attributes["dict"]) == 0
+        assert _roundtrip_text_through_bytecode(text) == text
+
+    def test_enum_array_in_generic_dict_is_rejected(self) -> None:
+        module = Module(name="test")
+        operation = Operation(
+            name="test.attrs",
+            attributes={"dict": {"modes": EnumArrayAttr([1, 7])}},
+        )
+        body = Region(blocks=[Block(ops=[operation, Operation(name="test.yield")])])
+        function = Operation(
+            name="test.func",
+            attributes={"callee": "f"},
+            regions=[body],
+        )
+        module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DEF, op=function))
+
+        with pytest.raises(ValueError, match="descriptor-backed operation field"):
+            write_module(module)
 
     def test_record_symbol_survives_bytecode(self) -> None:
         text = 'test.record @target {arch = "gfx1100", lanes = 64}\n'

@@ -74,6 +74,26 @@ TEST(DialectTableHelpers, LookupSemanticsByDialectAndIndex) {
   EXPECT_EQ(out_of_range.contract_families, 0u);
 }
 
+TEST(AttributeHelpers, EnumArrayPreservesContentAndPresentEmpty) {
+  const uint8_t values[] = {1, 255, 1};
+  loom_attribute_t attr = loom_attr_enum_array(values, IREE_ARRAYSIZE(values));
+  loom_enum_array_t array = loom_attr_as_enum_array(attr);
+
+  EXPECT_EQ(array.values, values);
+  EXPECT_EQ(array.count, 3u);
+  EXPECT_TRUE(loom_attribute_equal(&attr, &attr));
+
+  loom_attribute_t same = loom_attr_enum_array(values, IREE_ARRAYSIZE(values));
+  EXPECT_TRUE(loom_attribute_equal(&attr, &same));
+  EXPECT_EQ(loom_attribute_hash(&attr), loom_attribute_hash(&same));
+
+  loom_attribute_t empty = loom_attr_enum_array(values, 0);
+  EXPECT_EQ(empty.kind, LOOM_ATTR_ENUM_ARRAY);
+  EXPECT_EQ(empty.enum_array, nullptr);
+  EXPECT_FALSE(loom_attr_is_absent(empty));
+  EXPECT_TRUE(loom_attr_is_absent(loom_attr_absent()));
+}
+
 TEST(MemoryAccessHelpers, OperandIndexIsPayload) {
   loom_op_t op = {};
   op.operand_count = 5;

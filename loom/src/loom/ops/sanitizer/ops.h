@@ -63,8 +63,13 @@ LOOM_DEFINE_VARIADIC_OPERANDS(loom_sanitizer_assert_access_indices, 1)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_sanitizer_assert_access_kind, 0, loom_sanitizer_assert_access_kind_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_sanitizer_assert_access_static_indices, 1)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_sanitizer_assert_access_static_extents, 2)
+enum loom_sanitizer_assert_access_build_flag_bits_e {
+  LOOM_SANITIZER_ASSERT_ACCESS_BUILD_FLAG_HAS_STATIC_EXTENTS = 1u << 0,
+};
+typedef uint32_t loom_sanitizer_assert_access_build_flags_t;
 iree_status_t loom_sanitizer_assert_access_build(
     loom_builder_t* builder,
+    loom_sanitizer_assert_access_build_flags_t build_flags,
     loom_sanitizer_assert_access_kind_t kind,
     loom_value_id_t view,
     const loom_value_id_t* indices,

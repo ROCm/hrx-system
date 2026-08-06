@@ -29,6 +29,7 @@ from loom.ir import (
     I32,
     INDEX,
     Block,
+    EnumArrayAttr,
     OpaqueLocation,
     ShapedType,
     StaticDim,
@@ -81,6 +82,35 @@ def test_dynamic_builder_constructs_binary_op_with_result_name() -> None:
     assert len(block.ops) == 1
     assert block.ops[0].name == "test.addi"
     assert block.ops[0].operands == [lhs.id, rhs.id]
+
+
+def test_dynamic_builder_resolves_enum_array_values_and_presence() -> None:
+    block, builder = _builder()
+
+    builder.test.enum_array_attrs(
+        required_values=["low", "high", "low"],
+        optional_values=["middle", 42],
+    )
+    builder.test.enum_array_attrs(
+        required_values=[],
+        optional_values=[],
+    )
+    builder.test.enum_array_attrs(required_values=["middle"])
+
+    first = block.ops[0].attributes
+    assert first["required_values"] == EnumArrayAttr([1, 255, 1])
+    assert first["optional_values"] == EnumArrayAttr([7, 42])
+    second = block.ops[1].attributes
+    assert second["required_values"] == EnumArrayAttr()
+    assert second["optional_values"] == EnumArrayAttr()
+    assert "optional_values" not in block.ops[2].attributes
+
+
+def test_dynamic_builder_rejects_undeclared_closed_enum_array_value() -> None:
+    _block, builder = _builder()
+
+    with pytest.raises(ValueError, match="undeclared value 42"):
+        builder.test.enum_array_attrs(required_values=[42])
 
 
 def test_dynamic_builder_records_segmented_operand_counts() -> None:

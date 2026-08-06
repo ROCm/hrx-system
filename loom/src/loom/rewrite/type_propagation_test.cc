@@ -176,7 +176,7 @@ TEST_F(TypePropagationTest, MayApplySkipsRefinableOpWithConcreteTypes) {
   loom_named_attr_slice_t empty_attrs = {0};
   loom_op_t* attrs_op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, loom_test_constant_result(source_op), empty_attrs, i32_type,
+      &builder_, 0, loom_test_constant_result(source_op), empty_attrs, i32_type,
       LOOM_LOCATION_UNKNOWN, &attrs_op));
 
   bool may_apply = true;
@@ -196,7 +196,7 @@ TEST_F(TypePropagationTest, MayApplyAcceptsRefinableOpWithDynamicTypes) {
   loom_named_attr_slice_t empty_attrs = {0};
   loom_op_t* attrs_op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, loom_test_constant_result(source_op), empty_attrs,
+      &builder_, 0, loom_test_constant_result(source_op), empty_attrs,
       dynamic_vector, LOOM_LOCATION_UNKNOWN, &attrs_op));
 
   bool may_apply = false;
@@ -241,7 +241,7 @@ TEST_F(TypePropagationTest, SameTypeNarrowsResult) {
   IREE_ASSERT_OK(BuildConstant(loom_attr_i64(0), static_vector, &source_op));
   loom_op_t* attrs_op = NULL;
   IREE_ASSERT_OK(
-      loom_test_attrs_build(&builder_, loom_test_constant_result(source_op),
+      loom_test_attrs_build(&builder_, 0, loom_test_constant_result(source_op),
                             (loom_named_attr_slice_t){0}, dynamic_vector,
                             LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -266,11 +266,11 @@ TEST_F(TypePropagationTest, SameTypeClosureVisitsOtherUsers) {
 
   loom_op_t* first_user = NULL;
   IREE_ASSERT_OK(
-      loom_test_attrs_build(&builder_, source, (loom_named_attr_slice_t){0},
+      loom_test_attrs_build(&builder_, 0, source, (loom_named_attr_slice_t){0},
                             static_vector, LOOM_LOCATION_UNKNOWN, &first_user));
   loom_op_t* second_user = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, source, (loom_named_attr_slice_t){0}, dynamic_vector,
+      &builder_, 0, source, (loom_named_attr_slice_t){0}, dynamic_vector,
       LOOM_LOCATION_UNKNOWN, &second_user));
 
   bool changed = false;
@@ -298,11 +298,11 @@ TEST_F(TypePropagationTest, SameTypeConflictRejectsTransaction) {
 
   loom_op_t* first_user = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, source, (loom_named_attr_slice_t){0}, static_vector_16,
+      &builder_, 0, source, (loom_named_attr_slice_t){0}, static_vector_16,
       LOOM_LOCATION_UNKNOWN, &first_user));
   loom_op_t* second_user = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, source, (loom_named_attr_slice_t){0}, static_vector_32,
+      &builder_, 0, source, (loom_named_attr_slice_t){0}, static_vector_32,
       LOOM_LOCATION_UNKNOWN, &second_user));
 
   bool changed = false;

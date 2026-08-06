@@ -39,6 +39,7 @@ from loom.ir import (
     DynamicDim,
     DynamicEncoding,
     EncodingInstance,
+    EnumArrayAttr,
     FileLocation,
     FunctionType,
     FusedLocation,
@@ -747,8 +748,7 @@ class TestPrintAttrDict:
             attributes={"dict": {}},
         )
         text = _printer().print_operation(op, module)
-        assert "{" not in text
-        assert text == "%r = test.attrs %x : f32"
+        assert text == "%r = test.attrs %x {} : f32"
 
     def test_no_dict_attr(self) -> None:
         module, [x, r] = _module_with(("x", F32), ("r", F32))
@@ -770,6 +770,18 @@ class TestPrintAttrDict:
             text
             == '%r = test.attrs %x {axis = 0, meta = {opt = 3, phase = "link"}} : f32'
         )
+
+    def test_enum_array_requires_descriptor_backed_field(self) -> None:
+        module, [x, r] = _module_with(("x", F32), ("r", F32))
+        op = Operation(
+            name="test.attrs",
+            operands=[x],
+            results=[r],
+            attributes={"dict": {"modes": EnumArrayAttr([1, 7])}},
+        )
+
+        with pytest.raises(ValueError, match="descriptor-backed operation field"):
+            _printer().print_operation(op, module)
 
 
 # ============================================================================

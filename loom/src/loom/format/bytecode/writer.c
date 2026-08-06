@@ -1090,15 +1090,37 @@ static iree_status_t loom_bytecode_get_enum_ordinal(
   }
   *out_ordinal = (uint8_t)attr.raw;
   if (!descriptor ||
-      iree_all_bits_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM) ||
-      descriptor->enum_case_count == 0) {
+      iree_all_bits_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
     return iree_ok_status();
   }
-  if (*out_ordinal >= descriptor->enum_case_count ||
-      (descriptor->enum_case_names &&
-       !descriptor->enum_case_names[*out_ordinal])) {
+  if (!loom_attr_descriptor_has_enum_case(descriptor, *out_ordinal)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "enum attribute value has no declared case");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_bytecode_get_enum_array(
+    loom_attribute_t attr, const loom_attr_descriptor_t* descriptor,
+    loom_enum_array_t* out_array) {
+  if (!descriptor || descriptor->attr_kind != LOOM_ATTR_ENUM_ARRAY) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "enum arrays require a descriptor-backed operation field");
+  }
+  if (attr.count > 0 && !attr.enum_array) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "enum array has nonzero count but NULL values");
+  }
+  *out_array = loom_attr_as_enum_array(attr);
+  if (iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < out_array->count; ++i) {
+    if (!loom_attr_descriptor_has_enum_case(descriptor, out_array->values[i])) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "enum array value has no declared case");
+    }
   }
   return iree_ok_status();
 }
@@ -1161,7 +1183,6 @@ static iree_status_t loom_bytecode_number_scoped_enum(
 static iree_status_t loom_bytecode_number_attr_value(
     loom_bytecode_numbering_t* numbering, loom_attribute_t attr,
     const loom_attr_descriptor_t* descriptor) {
-  (void)descriptor;
   uint32_t unused_id = 0;
   switch (attr.kind) {
     case LOOM_ATTR_STRING: {
@@ -1171,6 +1192,10 @@ static iree_status_t loom_bytecode_number_attr_value(
     }
     case LOOM_ATTR_ENUM: {
       break;
+    }
+    case LOOM_ATTR_ENUM_ARRAY: {
+      loom_enum_array_t unused_array = loom_enum_array_empty();
+      return loom_bytecode_get_enum_array(attr, descriptor, &unused_array);
     }
     case LOOM_ATTR_SCOPED_ENUM:
       return loom_bytecode_number_scoped_enum(numbering, attr);
@@ -2153,6 +2178,18 @@ static iree_status_t loom_bytecode_write_attr_value(
       IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, ordinal));
       break;
     }
+    case LOOM_ATTR_ENUM_ARRAY: {
+      loom_enum_array_t array = loom_enum_array_empty();
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_get_enum_array(attr, descriptor, &array));
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
+          writer, LOOM_BYTECODE_ATTR_ENUM_ARRAY));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_uvarint(writer, array.count));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write(writer, array.values, array.count));
+      break;
+    }
     case LOOM_ATTR_I64_ARRAY: {
       IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
           writer, LOOM_BYTECODE_ATTR_I64_ARRAY));
@@ -2362,6 +2399,20 @@ static iree_status_t loom_bytecode_emit_attr_value(
       IREE_RETURN_IF_ERROR(
           loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_ENUM));
       IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, ordinal));
+      break;
+    }
+    case LOOM_ATTR_ENUM_ARRAY: {
+      loom_enum_array_t array = loom_enum_array_empty();
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_get_enum_array(attr, descriptor, &array));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_ENUM_ARRAY));
+      IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, array.count));
+      if (array.count > 0) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
+            builder,
+            iree_make_string_view((const char*)array.values, array.count)));
+      }
       break;
     }
     case LOOM_ATTR_I64_ARRAY: {
@@ -3399,6 +3450,16 @@ static iree_status_t loom_bytecode_write_symbols_section(
     loom_bytecode_symbol_linkage_t linkage;
     IREE_RETURN_IF_ERROR(
         loom_bytecode_symbol_linkage(module, symbol, &linkage));
+    loom_symbol_kind_t metadata_kind = loom_symbol_bytecode_kind(symbol);
+    bool has_function_metadata =
+        loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
+        loom_symbol_kind_is_function_like(metadata_kind);
+    bool has_global_metadata =
+        loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_GLOBAL) ||
+        metadata_kind == LOOM_SYMBOL_GLOBAL;
+    bool has_record_metadata =
+        loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_RECORD) ||
+        metadata_kind == LOOM_SYMBOL_RECORD;
     uint64_t entry_offset = iree_string_builder_size(builder) - entries_start;
 
     // Track import/export offsets.
@@ -3449,6 +3510,16 @@ static iree_status_t loom_bytecode_write_symbols_section(
         bytecode_flags |= LOOM_BYTECODE_SYMBOL_FLAG_IMPORT_SYMBOL;
       }
     }
+    if (has_function_metadata && symbol->defining_op) {
+      loom_func_like_t func_like =
+          loom_func_like_cast(module, symbol->defining_op);
+      if (loom_func_like_isa(func_like) &&
+          func_like.vtable->predicates_attr_index != LOOM_ATTR_INDEX_NONE &&
+          !loom_attr_is_absent(loom_op_const_attrs(
+              func_like.op)[func_like.vtable->predicates_attr_index])) {
+        bytecode_flags |= LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES;
+      }
+    }
     IREE_RETURN_IF_ERROR(loom_bytecode_emit_u16_le(builder, bytecode_flags));
     if (linkage.is_import) {
       uint32_t import_module_string_id = 0;
@@ -3464,16 +3535,6 @@ static iree_status_t loom_bytecode_write_symbols_section(
     }
 
     // Function metadata.
-    loom_symbol_kind_t metadata_kind = loom_symbol_bytecode_kind(symbol);
-    bool has_function_metadata =
-        loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
-        loom_symbol_kind_is_function_like(metadata_kind);
-    bool has_global_metadata =
-        loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_GLOBAL) ||
-        metadata_kind == LOOM_SYMBOL_GLOBAL;
-    bool has_record_metadata =
-        loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_RECORD) ||
-        metadata_kind == LOOM_SYMBOL_RECORD;
     if (has_function_metadata && symbol->defining_op) {
       loom_func_like_t func_like =
           loom_func_like_cast(module, symbol->defining_op);

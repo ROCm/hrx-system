@@ -64,7 +64,7 @@ static iree_status_t loom_amdgpu_hal_binding_insert_kernarg_live_in(
   }
   loom_op_t* live_in_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_live_in_build(
-      &rewriter->builder, source_id, loom_make_named_attr_slice(NULL, 0),
+      &rewriter->builder, 0, source_id, loom_make_named_attr_slice(NULL, 0),
       sgpr_x2_type, function_op->location, &live_in_op));
   *out_value = loom_low_live_in_result(live_in_op);
   loom_string_id_t name_id = LOOM_STRING_ID_INVALID;

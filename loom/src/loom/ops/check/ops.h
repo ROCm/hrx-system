@@ -295,8 +295,13 @@ LOOM_DEFINE_VARIADIC_RESULTS(loom_check_oracle_call_results, 0)
 LOOM_DEFINE_ATTR_STRING(loom_check_oracle_call_provider, 0)
 LOOM_DEFINE_ATTR_DICT(loom_check_oracle_call_attrs, 1)
 LOOM_DEFINE_ATTR_SYMBOL(loom_check_oracle_call_callee, 2)
+enum loom_check_oracle_call_build_flag_bits_e {
+  LOOM_CHECK_ORACLE_CALL_BUILD_FLAG_HAS_ATTRS = 1u << 0,
+};
+typedef uint32_t loom_check_oracle_call_build_flags_t;
 iree_status_t loom_check_oracle_call_build(
     loom_builder_t* builder,
+    loom_check_oracle_call_build_flags_t build_flags,
     loom_string_id_t provider,
     loom_optional loom_named_attr_slice_t attrs,
     loom_symbol_ref_t callee,
@@ -374,8 +379,13 @@ LOOM_DEFINE_OPERAND(loom_check_expect_actual, 0)
 LOOM_DEFINE_OPERAND(loom_check_expect_expected, 1)
 LOOM_DEFINE_ATTR_STRING(loom_check_expect_provider, 0)
 LOOM_DEFINE_ATTR_DICT(loom_check_expect_attrs, 1)
+enum loom_check_expect_build_flag_bits_e {
+  LOOM_CHECK_EXPECT_BUILD_FLAG_HAS_ATTRS = 1u << 0,
+};
+typedef uint32_t loom_check_expect_build_flags_t;
 iree_status_t loom_check_expect_build(
     loom_builder_t* builder,
+    loom_check_expect_build_flags_t build_flags,
     loom_string_id_t provider,
     loom_value_id_t actual,
     loom_value_id_t expected,
@@ -388,8 +398,13 @@ iree_status_t loom_check_expect_build(
 LOOM_DEFINE_ISA(loom_check_expect_event_isa, LOOM_OP_CHECK_EXPECT_EVENT)
 LOOM_DEFINE_ATTR_STRING(loom_check_expect_event_provider, 0)
 LOOM_DEFINE_ATTR_DICT(loom_check_expect_event_attrs, 1)
+enum loom_check_expect_event_build_flag_bits_e {
+  LOOM_CHECK_EXPECT_EVENT_BUILD_FLAG_HAS_ATTRS = 1u << 0,
+};
+typedef uint32_t loom_check_expect_event_build_flags_t;
 iree_status_t loom_check_expect_event_build(
     loom_builder_t* builder,
+    loom_check_expect_event_build_flags_t build_flags,
     loom_string_id_t provider,
     loom_optional loom_named_attr_slice_t attrs,
     loom_location_id_t location,
@@ -403,6 +418,7 @@ LOOM_DEFINE_ATTR_SYMBOL(loom_check_benchmark_case_ref, 1)
 LOOM_DEFINE_ATTR_DICT(loom_check_benchmark_attrs, 2)
 enum loom_check_benchmark_build_flag_bits_e {
   LOOM_CHECK_BENCHMARK_BUILD_FLAG_HAS_BENCHMARK = 1u << 0,
+  LOOM_CHECK_BENCHMARK_BUILD_FLAG_HAS_ATTRS = 1u << 1,
 };
 typedef uint32_t loom_check_benchmark_build_flags_t;
 iree_status_t loom_check_benchmark_build(

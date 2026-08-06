@@ -46,7 +46,12 @@ def generate_ops_h(dialect_name: str, dialect_id: int, ops: Sequence[Op]) -> str
     lines.append("")
     lines.append('#include "loom/ops/op_defs.h"')
     enum_includes = sorted(
-        {attr_def.enum_def.c_include for op in ops for attr_def in op.attrs if attr_def.attr_type == "enum" and attr_def.enum_def is not None and attr_def.enum_def.c_include is not None}
+        {
+            attr_def.enum_def.c_include
+            for op in ops
+            for attr_def in op.attrs
+            if attr_def.attr_type in ("enum", "enum_array") and attr_def.enum_def is not None and attr_def.enum_def.c_include is not None
+        }
     )
     lines.extend(f'#include "{include}"' for include in enum_includes)
     lines.append("")
@@ -84,7 +89,7 @@ def generate_ops_h(dialect_name: str, dialect_id: int, ops: Sequence[Op]) -> str
     # multiple ops (e.g., CallingConv used by func.def, func.decl,
     # func.template, func.ukernel), emit it once with a dialect-level
     # name (loom_func_cc_t) instead of duplicating per-op.
-    open_enum_ids = {id(attr_def.enum_def) for op in ops for attr_def in op.attrs if (attr_def.attr_type == "enum" and attr_def.open_enum and attr_def.enum_def is not None)}
+    open_enum_ids = {id(attr_def.enum_def) for op in ops for attr_def in op.attrs if (attr_def.attr_type in ("enum", "enum_array") and attr_def.open_enum and attr_def.enum_def is not None)}
 
     # Emit shared enums first.
     for enum_id, (c_prefix, const_prefix, enum_def) in shared_enums.items():
@@ -108,7 +113,7 @@ def generate_ops_h(dialect_name: str, dialect_id: int, ops: Sequence[Op]) -> str
     emitted_enum_defs: set[str] = set()
     for op in ops:
         for attr_def in op.attrs:
-            if attr_def.attr_type != "enum" or attr_def.enum_def is None:
+            if attr_def.attr_type not in ("enum", "enum_array") or attr_def.enum_def is None:
                 continue
             if attr_def.enum_def.c_type is not None:
                 continue
@@ -208,6 +213,7 @@ def generate_ops_h(dialect_name: str, dialect_id: int, ops: Sequence[Op]) -> str
                 "dict": "LOOM_DEFINE_ATTR_DICT",
                 "encoding": "LOOM_DEFINE_ATTR_ENCODING",
                 "enum": "LOOM_DEFINE_ATTR_ENUM",
+                "enum_array": "LOOM_DEFINE_ATTR_ENUM_ARRAY",
                 "scoped_enum": "LOOM_DEFINE_ATTR_SCOPED_ENUM",
                 "symbol": "LOOM_DEFINE_ATTR_SYMBOL",
                 "type": "LOOM_DEFINE_ATTR_TYPE",

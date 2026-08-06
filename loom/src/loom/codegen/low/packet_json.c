@@ -360,6 +360,15 @@ static iree_status_t loom_low_packet_json_write_attr(
                                               attr->raw ? "true" : "false");
     case LOOM_ATTR_ENUM:
       return loom_output_stream_write_format(stream, "%" PRIu64, attr->raw);
+    case LOOM_ATTR_ENUM_ARRAY: {
+      loom_json_array_writer_t array;
+      IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        IREE_RETURN_IF_ERROR(
+            loom_json_array_write_uint64_element(&array, attr->enum_array[i]));
+      }
+      return loom_json_array_end(&array);
+    }
     case LOOM_ATTR_I64_ARRAY: {
       loom_json_array_writer_t array;
       IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));

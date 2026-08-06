@@ -38,6 +38,7 @@ from loom.ir import (
     DynamicEncoding,
     EncodingInstance,
     EncodingType,
+    EnumArrayAttr,
     FileLocation,
     FunctionType,
     FusedLocation,
@@ -131,6 +132,7 @@ ATTR_KIND_DICT = 9
 ATTR_KIND_ENCODING = 10
 ATTR_KIND_BYTES = 11
 ATTR_KIND_SCOPED_ENUM = 12
+ATTR_KIND_ENUM_ARRAY = 13
 
 # Type kind bytes. These must match loom_bytecode_type_kind_e, not just the
 # current Python enum spelling.
@@ -157,7 +159,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 20
+FORMAT_VERSION = 21
 PRODUCER = "loom-py"
 
 SYMBOL_FLAG_PUBLIC = 0x0001
@@ -166,6 +168,7 @@ SYMBOL_FLAG_IMPORT_SYMBOL = 0x0004
 SYMBOL_FLAG_RETAIN = 0x0008
 SYMBOL_FLAG_DECLARATION = 0x0010
 SYMBOL_FLAG_TEST_ONLY = 0x0020
+_SYMBOL_FLAG_PREDICATES = 0x0040
 
 
 # ============================================================================
@@ -1192,12 +1195,23 @@ class BytecodeWriter:
         attr_def: Any | None = None,
     ) -> None:
         """Write an attribute value with its kind byte."""
+        attr_type = getattr(attr_def, "attr_type", None)
+        if attr_type == "predicate_list":
+            if not isinstance(value, list) or not all(
+                isinstance(predicate, Predicate) for predicate in value
+            ):
+                raise TypeError(
+                    "predicate-list attribute value must be a list of Predicate "
+                    f"objects, got {value!r}"
+                )
+            buf.write_u8(ATTR_KIND_PREDICATE_LIST)
+            self._write_predicate_list(buf, value, value_numbers_by_name)
+            return
         # Check for predicate list attribute (list of Predicate objects).
         if isinstance(value, list) and value and isinstance(value[0], Predicate):
             buf.write_u8(ATTR_KIND_PREDICATE_LIST)
             self._write_predicate_list(buf, value, value_numbers_by_name)
             return
-        attr_type = getattr(attr_def, "attr_type", None)
         if attr_type == "symbol":
             if not isinstance(value, str):
                 raise TypeError(
@@ -1234,6 +1248,15 @@ class BytecodeWriter:
                     )
             buf.write_u8(ATTR_KIND_ENUM)
             buf.write_u8(value)
+            return
+        if attr_type == "enum_array":
+            if not isinstance(value, EnumArrayAttr):
+                raise TypeError(
+                    f"enum-array attribute value must be EnumArrayAttr, got {value!r}"
+                )
+            buf.write_u8(ATTR_KIND_ENUM_ARRAY)
+            buf.write_varint(len(value))
+            buf.write_bytes(bytes(value.values))
             return
         if attr_type == "scoped_enum":
             if not isinstance(value, str):
@@ -1279,6 +1302,8 @@ class BytecodeWriter:
             buf.write_u8(ATTR_KIND_BYTES)
             buf.write_varint(len(data))
             buf.write_bytes(data)
+        elif isinstance(value, EnumArrayAttr):
+            raise ValueError("enum arrays require a descriptor-backed operation field")
         elif isinstance(value, Mapping):
             buf.write_u8(ATTR_KIND_DICT)
             buf.write_varint(len(value))
@@ -1421,6 +1446,18 @@ class BytecodeWriter:
             ) | self._symbol_definition_flags(symbol.op)
             if symbol.source_symbol and symbol.source_symbol != symbol.name:
                 bytecode_flags |= SYMBOL_FLAG_IMPORT_SYMBOL
+            predicates_attr_name: str | None = None
+            if symbol.kind in FUNCTION_SYMBOL_KINDS:
+                func_like = func_like_interface_for_op(
+                    self._op_decls_by_name, symbol.op.name
+                )
+                if func_like is not None:
+                    predicates_attr_name = getattr(func_like, "predicates", None)
+            if (
+                predicates_attr_name is not None
+                and predicates_attr_name in symbol.op.attributes
+            ):
+                bytecode_flags |= _SYMBOL_FLAG_PREDICATES
             buf.write_u16_le(bytecode_flags)
 
             # Import metadata: source module and symbol for cross-module refs.
@@ -1487,7 +1524,11 @@ class BytecodeWriter:
                         buf.write_varint(tied.operand_index)
 
                 buf.write_varint(len(tied_results))
-                predicates = op.attributes.get("predicates", [])
+                predicates = (
+                    op.attributes.get(predicates_attr_name, [])
+                    if predicates_attr_name is not None
+                    else []
+                )
                 self._write_predicate_list(
                     buf,
                     predicates,

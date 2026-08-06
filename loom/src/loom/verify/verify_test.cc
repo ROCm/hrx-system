@@ -610,6 +610,81 @@ TEST_F(VerifyTest, ScopedEnumsRequireExplicitAttributeDescriptors) {
   ExpectU32Param(*entry, 2, LOOM_ATTR_ANY);
 }
 
+TEST_F(VerifyTest, EnumArraysRequireExplicitAttributeDescriptors) {
+  EnterTestFunc(nullptr, 0, nullptr);
+
+  const uint8_t values[] = {
+      LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW,
+  };
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &builder_, loom_attr_enum_array(values, (uint16_t)IREE_ARRAYSIZE(values)),
+      loom_type_scalar(LOOM_SCALAR_TYPE_I32), LOOM_LOCATION_UNKNOWN, &op));
+
+  TerminateFunc();
+  DiagnosticCapture capture;
+  auto result = VerifyStructured(&capture);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry =
+      FindDiagnostic(capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 5));
+  ASSERT_NE(entry, nullptr) << "Expected TYPE/005 attribute-kind diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "value");
+  ExpectU32Param(*entry, 1, LOOM_ATTR_ENUM_ARRAY);
+  ExpectU32Param(*entry, 2, LOOM_ATTR_ANY);
+}
+
+TEST_F(VerifyTest, EnumArraysPreserveValuesAndPresentEmpty) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  uint8_t required_values[] = {
+      LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW,
+      LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_HIGH,
+      LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW,
+  };
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_enum_array_attrs_build(
+      &builder_, LOOM_TEST_ENUM_ARRAY_ATTRS_BUILD_FLAG_HAS_OPTIONAL_VALUES,
+      loom_make_enum_array(required_values, IREE_ARRAYSIZE(required_values)),
+      loom_enum_array_empty(), loom_named_attr_slice_empty(),
+      LOOM_LOCATION_UNKNOWN, &op));
+  required_values[0] = 0;
+
+  loom_enum_array_t required = loom_test_enum_array_attrs_required_values(op);
+  EXPECT_EQ(required.count, 3u);
+  EXPECT_EQ(required.values[0], LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW);
+  EXPECT_EQ(required.values[1],
+            LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_HIGH);
+  EXPECT_EQ(required.values[2], LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW);
+  EXPECT_FALSE(loom_attr_is_absent(loom_op_attrs(op)[1]));
+  EXPECT_EQ(loom_op_attrs(op)[1].kind, LOOM_ATTR_ENUM_ARRAY);
+  EXPECT_EQ(loom_test_enum_array_attrs_optional_values(op).count, 0u);
+
+  TerminateFunc();
+  auto result = Verify();
+  EXPECT_EQ(result.error_count, 0u);
+}
+
+TEST_F(VerifyTest, ClosedEnumArrayRejectsUndeclaredValues) {
+  EnterTestFunc(nullptr, 0, nullptr);
+  const uint8_t required_values[] = {42};
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_enum_array_attrs_build(
+      &builder_, /*build_flags=*/0,
+      loom_make_enum_array(required_values, IREE_ARRAYSIZE(required_values)),
+      loom_enum_array_empty(), loom_named_attr_slice_empty(),
+      LOOM_LOCATION_UNKNOWN, &op));
+
+  TerminateFunc();
+  DiagnosticCapture capture;
+  auto result = VerifyStructured(&capture);
+  EXPECT_GT(result.error_count, 0u);
+  const CapturedDiagnostic* entry = FindDiagnostic(
+      capture, loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 10));
+  ASSERT_NE(entry, nullptr)
+      << "Expected STRUCTURE/010 undeclared-enum diagnostic";
+  EXPECT_EQ(GetStringParam(*entry, 0), "required_values");
+  ExpectU32Param(*entry, 1, 42u);
+}
+
 TEST_F(VerifyTest, RejectsPredicateArityMismatch) {
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_value_id_t argument = LOOM_VALUE_ID_INVALID;

@@ -339,6 +339,9 @@ class TestAttrDef:
         with _raises(ValueError, match="requires enum_def"):
             AttrDef("pred", "enum")  # Missing enum_def!
 
+        with _raises(ValueError, match="requires enum_def"):
+            AttrDef("modes", "enum_array")
+
     def test_all_valid_attr_types(self) -> None:
         """All documented attr_type values are accepted."""
         for attr_type in [
@@ -353,6 +356,11 @@ class TestAttrDef:
         ]:
             AttrDef("test", attr_type)  # Should not raise.
         AttrDef("test", "enum", enum_def=_cmpi_preds)  # enum needs enum_def.
+        AttrDef("test", "enum_array", enum_def=_cmpi_preds)
+
+    def test_open_enum_array(self) -> None:
+        attr = AttrDef("modes", "enum_array", enum_def=_cmpi_preds, open_enum=True)
+        assert attr.open_enum
 
     def test_scoped_enum_is_never_optional_or_defaulted(self) -> None:
         with _raises(ValueError, match="scoped_enum attributes are required"):
@@ -373,6 +381,31 @@ class TestEnumDef:
     def test_accepts_list(self) -> None:
         e = EnumDef("Test", [EnumCase("a", 0)])
         assert isinstance(e.cases, tuple)
+
+    def test_empty_name_rejected(self) -> None:
+        with _raises(ValueError, match="name must be non-empty"):
+            EnumDef("", [EnumCase("a", 0)])
+
+    def test_empty_cases_rejected(self) -> None:
+        with _raises(ValueError, match="cases must be non-empty"):
+            EnumDef("Bad", [])
+
+    def test_empty_keyword_rejected(self) -> None:
+        with _raises(ValueError, match="case keyword must be non-empty"):
+            EnumDef("Bad", [EnumCase("", 0)])
+
+    def test_value_domain_rejected(self) -> None:
+        for value in [False, -1, 256, "1"]:
+            with _raises(ValueError, match=r"integer in \[0, 255\]"):
+                EnumDef("Bad", [EnumCase("a", value)])  # type: ignore[arg-type]
+
+    def test_full_byte_domain_accepted(self) -> None:
+        e = EnumDef(
+            "Byte",
+            [EnumCase(f"v{i}", i) for i in range(256)],
+        )
+        assert len(e.cases) == 256
+        assert e.cases[-1].value == 255
 
     def test_duplicate_keyword_rejected(self) -> None:
         with _raises(ValueError, match="duplicate keyword 'eq'"):

@@ -971,15 +971,51 @@ iree_status_t loom_print_attr(loom_output_stream_t* stream,
                                               attr->raw ? "true" : "false");
     case LOOM_ATTR_ENUM: {
       uint8_t case_index = (uint8_t)attr->raw;
-      if (descriptor && descriptor->enum_case_names &&
-          case_index < descriptor->enum_case_count &&
-          descriptor->enum_case_names[case_index]) {
-        return loom_output_stream_write(
-            stream, loom_bstring_view(descriptor->enum_case_names[case_index]));
+      loom_bstring_t case_name =
+          loom_attr_descriptor_enum_case_name(descriptor, case_index);
+      if (case_name) {
+        return loom_output_stream_write(stream, loom_bstring_view(case_name));
       }
       char fallback[16];
       iree_snprintf(fallback, sizeof(fallback), "<%u>", case_index);
       return loom_output_stream_write_cstring(stream, fallback);
+    }
+    case LOOM_ATTR_ENUM_ARRAY: {
+      if (!descriptor || descriptor->attr_kind != LOOM_ATTR_ENUM_ARRAY ||
+          !descriptor->enum_case_names) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "printing an enum array requires a descriptor-backed operation "
+            "field");
+      }
+      if (attr->count > 0 && !attr->enum_array) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "ENUM_ARRAY attr has count %u but NULL values",
+                                attr->count);
+      }
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '['));
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        if (i > 0) {
+          IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ", "));
+        }
+        uint8_t value = attr->enum_array[i];
+        loom_bstring_t case_name =
+            loom_attr_descriptor_enum_case_name(descriptor, value);
+        if (case_name) {
+          IREE_RETURN_IF_ERROR(
+              loom_output_stream_write(stream, loom_bstring_view(case_name)));
+        } else if (iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
+          IREE_RETURN_IF_ERROR(
+              loom_output_stream_write_format(stream, "<%u>", (unsigned)value));
+        } else {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "closed enum-array field '%.*s' has no value %u",
+              (int)loom_attr_descriptor_name(descriptor).size,
+              loom_attr_descriptor_name(descriptor).data, (unsigned)value);
+        }
+      }
+      return loom_output_stream_write_char(stream, ']');
     }
     case LOOM_ATTR_SYMBOL: {
       loom_symbol_ref_t ref = attr->symbol;

@@ -98,6 +98,7 @@ __all__ = [
     "ATTR_TYPE_STRING",
     "ATTR_TYPE_BOOL",
     "ATTR_TYPE_ENUM",
+    "ATTR_TYPE_ENUM_ARRAY",
     "ATTR_TYPE_SCOPED_ENUM",
     "ATTR_TYPE_TYPE",
     "ATTR_TYPE_I64_ARRAY",
@@ -504,6 +505,7 @@ ATTR_TYPE_F64 = "f64"
 ATTR_TYPE_STRING = "string"
 ATTR_TYPE_BOOL = "bool"
 ATTR_TYPE_ENUM = "enum"
+ATTR_TYPE_ENUM_ARRAY = "enum_array"
 ATTR_TYPE_SCOPED_ENUM = "scoped_enum"
 ATTR_TYPE_TYPE = "type"
 ATTR_TYPE_I64_ARRAY = "i64_array"
@@ -522,6 +524,7 @@ _VALID_ATTR_TYPES = frozenset(
         ATTR_TYPE_STRING,
         ATTR_TYPE_BOOL,
         ATTR_TYPE_ENUM,
+        ATTR_TYPE_ENUM_ARRAY,
         ATTR_TYPE_SCOPED_ENUM,
         ATTR_TYPE_TYPE,
         ATTR_TYPE_I64_ARRAY,
@@ -760,13 +763,13 @@ class AttrDef:
           positional in the format spec).
     attr_type: The kind of attribute value. Must be one of the
         ATTR_TYPE_* constants: "i64", "f64", "string", "bool",
-        "enum", "scoped_enum", "type", "i64_array", "bytes", "encoding",
+        "enum", "enum_array", "scoped_enum", "type", "i64_array", "bytes", "encoding",
         "any". Scoped enums use a stable key at format boundaries and a dense
         ordinal interpreted by the enclosing representation contract in C IR.
     doc: Human-readable description.
     default: Default value (None = required, not optional).
-    enum_def: For enum attrs, the EnumDef describing valid values.
-        Required when attr_type is "enum".
+    enum_def: For enum and enum-array attrs, the EnumDef describing valid
+        values. Required for both kinds.
     optional: If True, this attribute may be absent.
     elide_default: If True, inline AttrDict text printing omits this
         zero/false scalar attribute when its value equals default, and parsing
@@ -792,17 +795,23 @@ class AttrDef:
                 f"AttrDef '{self.name}': invalid attr_type "
                 f"'{self.attr_type}', must be one of {sorted(_VALID_ATTR_TYPES)}"
             )
-        if self.attr_type == ATTR_TYPE_ENUM and self.enum_def is None:
+        if (
+            self.attr_type in (ATTR_TYPE_ENUM, ATTR_TYPE_ENUM_ARRAY)
+            and self.enum_def is None
+        ):
             raise ValueError(
-                f"AttrDef '{self.name}': attr_type='enum' requires enum_def"
+                f"AttrDef '{self.name}': {self.attr_type!r} requires enum_def"
             )
         if self.attr_type == ATTR_TYPE_FLAGS and self.enum_def is None:
             raise ValueError(
                 f"AttrDef '{self.name}': attr_type='flags' requires enum_def"
             )
-        if self.open_enum and self.attr_type != ATTR_TYPE_ENUM:
+        if self.open_enum and self.attr_type not in (
+            ATTR_TYPE_ENUM,
+            ATTR_TYPE_ENUM_ARRAY,
+        ):
             raise ValueError(
-                f"AttrDef '{self.name}': open_enum requires attr_type='enum'"
+                f"AttrDef '{self.name}': open_enum requires an enum attribute"
             )
         if self.attr_type == ATTR_TYPE_SCOPED_ENUM:
             if self.optional:
@@ -946,8 +955,12 @@ class EnumDef:
         c_const_prefix: str | None = None,
         c_include: str | None = None,
     ) -> None:
+        if not name:
+            raise ValueError("EnumDef: name must be non-empty")
         object.__setattr__(self, "name", name)
         frozen_cases = tuple(cases)
+        if not frozen_cases:
+            raise ValueError(f"EnumDef '{name}': cases must be non-empty")
         object.__setattr__(self, "cases", frozen_cases)
         object.__setattr__(self, "doc", doc)
         object.__setattr__(self, "c_type", c_type)
@@ -963,6 +976,13 @@ class EnumDef:
         seen_keywords: set[str] = set()
         seen_values: set[int] = set()
         for case in frozen_cases:
+            if not case.keyword:
+                raise ValueError(f"EnumDef '{name}': case keyword must be non-empty")
+            if type(case.value) is not int or not 0 <= case.value <= 0xFF:
+                raise ValueError(
+                    f"EnumDef '{name}': case '{case.keyword}' value must be "
+                    f"an integer in [0, 255], got {case.value!r}"
+                )
             if case.keyword in seen_keywords:
                 raise ValueError(
                     f"EnumDef '{name}': duplicate keyword '{case.keyword}'"
@@ -970,7 +990,6 @@ class EnumDef:
             if case.value in seen_values:
                 raise ValueError(f"EnumDef '{name}': duplicate value {case.value}")
             seen_keywords.add(case.keyword)
-            seen_values.add(case.value)
             seen_values.add(case.value)
 
     @property

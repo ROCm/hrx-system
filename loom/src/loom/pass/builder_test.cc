@@ -50,19 +50,20 @@ class PassBuilderTest : public ::testing::Test {
 
 static iree_status_t BuildOneRun(loom_builder_t* builder, void* user_data) {
   loom_op_t* run_op = nullptr;
-  return loom_pass_ir_build_run(
-      builder, IREE_SV("cse"), loom_make_named_attr_slice(nullptr, 0), &run_op);
+  return loom_pass_ir_build_run(builder, 0, IREE_SV("cse"),
+                                loom_make_named_attr_slice(nullptr, 0),
+                                &run_op);
 }
 
 static iree_status_t BuildWhereBody(loom_builder_t* builder, void* user_data) {
   loom_op_t* run_op = nullptr;
-  return loom_pass_ir_build_run(builder, IREE_SV("low-dce"),
+  return loom_pass_ir_build_run(builder, 0, IREE_SV("low-dce"),
                                 loom_named_attr_slice_empty(), &run_op);
 }
 
 static iree_status_t BuildRepeatBody(loom_builder_t* builder, void* user_data) {
   loom_op_t* run_op = nullptr;
-  return loom_pass_ir_build_run(builder, IREE_SV("canonicalize"),
+  return loom_pass_ir_build_run(builder, 0, IREE_SV("canonicalize"),
                                 loom_named_attr_slice_empty(), &run_op);
 }
 
@@ -81,7 +82,7 @@ static iree_status_t BuildForBody(loom_builder_t* builder, void* user_data) {
 
   loom_op_t* where_op = nullptr;
   IREE_RETURN_IF_ERROR(loom_pass_ir_build_where(
-      builder, IREE_SV("name"),
+      builder, LOOM_PASS_WHERE_BUILD_FLAG_HAS_ATTRS, IREE_SV("name"),
       loom_make_named_attr_slice(attrs, IREE_ARRAYSIZE(attrs)), BuildWhereBody,
       nullptr, &where_op));
 

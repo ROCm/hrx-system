@@ -1056,3 +1056,11 @@ class TestBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
+    def enum_array_attrs(
+        self,
+        *,
+        required_values: Sequence[str | int],
+        optional_values: Sequence[str | int] | None = ...,
+        dict: Mapping[str, Any] | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...

@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from loom.dialect.test.defs import test_enum_array_attrs
 from loom.format.bytecode.encoding import decode_varint, encode_varint
 from loom.format.bytecode.reader import BytecodeError, BytecodeReader, read_module
 from loom.format.bytecode.writer import (
@@ -26,6 +27,7 @@ from loom.format.bytecode.writer import (
     SECTION_ENCODINGS,
     SECTION_IR,
     SECTION_LOCATIONS,
+    SECTION_SYMBOLS,
     write_module,
 )
 from loom.ir import (
@@ -47,12 +49,15 @@ from loom.ir import (
     DynamicDim,
     DynamicEncoding,
     EncodingInstance,
+    EnumArrayAttr,
     FileLocation,
     FunctionType,
     GroupScope,
     GroupType,
     Module,
     Operation,
+    Predicate,
+    PredicateArg,
     Region,
     RegisterType,
     ScalarType,
@@ -72,6 +77,8 @@ from loom.ir import (
 )
 from loom.stable_id import stable_id_from_string
 from loom.target.test.descriptors import TEST_LOW_CORE_DESCRIPTOR_SET
+
+_SYMBOL_FLAG_PREDICATES = 1 << 6
 
 _TEST_LOW_CORE_STABLE_ID = stable_id_from_string(TEST_LOW_CORE_DESCRIPTOR_SET.key)
 _TEST_PTR_REGISTER_CLASS_ID = next(
@@ -262,6 +269,22 @@ def _single_op_offset(data: bytes | bytearray) -> int:
     return offset
 
 
+def _first_symbol_flags_offset(data: bytes | bytearray) -> int:
+    """Return the absolute flags offset of the first symbol entry."""
+    module_offset, _module_length = _module_range(data)
+    _entry_offset, section_offset, _section_length = _find_section_entry(
+        data, SECTION_SYMBOLS
+    )
+    offset = module_offset + section_offset
+    symbol_count, offset = decode_varint(data, offset)
+    assert symbol_count > 0
+    import_count, offset = decode_varint(data, offset)
+    export_count, offset = decode_varint(data, offset)
+    offset += (import_count + export_count) * 8
+    _name_id, offset = decode_varint(data, offset)
+    return offset + 2
+
+
 def _make_encoding_alias_module() -> Module:
     """Return a module with one aliased encoding instance."""
     enc = EncodingInstance(name="q8_0", alias="enc", params=(("block", 32),))
@@ -282,6 +305,26 @@ def _make_encoding_alias_module() -> Module:
             ),
         )
     )
+    return module
+
+
+def _make_predicate_function_module() -> Module:
+    """Return a declaration carrying one function predicate."""
+    module = Module(name="test")
+    argument_id = module.add_value(Value(name="M", type=INDEX))
+    predicate = Predicate(
+        kind="mul",
+        args=(
+            PredicateArg(tag="value", value="M"),
+            PredicateArg(tag="const", value=16),
+        ),
+    )
+    operation = Operation(
+        name="func.decl",
+        operands=[argument_id],
+        attributes={"callee": "f", "predicates": [predicate]},
+    )
+    module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DECL, op=operation))
     return module
 
 
@@ -397,6 +440,28 @@ class TestMalformedLocationMode:
         struct.pack_into("<H", data, locations_entry_offset, 0xFF)
 
         with pytest.raises(BytecodeError, match="source locations"):
+            read_module(bytes(data))
+
+
+class TestMalformedSymbolSection:
+    def test_predicates_flag_on_nonfunction_symbol_is_rejected(self) -> None:
+        data = bytearray(write_module(_make_single_op_body_module()))
+        flags_offset = _first_symbol_flags_offset(data)
+        data[flags_offset - 2] = SymbolKind.GLOBAL.value
+        flags = struct.unpack_from("<H", data, flags_offset)[0]
+        struct.pack_into("<H", data, flags_offset, flags | _SYMBOL_FLAG_PREDICATES)
+
+        with pytest.raises(BytecodeError, match="requires a function symbol"):
+            read_module(bytes(data))
+
+    def test_nonempty_predicates_without_flag_are_rejected(self) -> None:
+        data = bytearray(write_module(_make_predicate_function_module()))
+        flags_offset = _first_symbol_flags_offset(data)
+        flags = struct.unpack_from("<H", data, flags_offset)[0]
+        assert flags & _SYMBOL_FLAG_PREDICATES
+        struct.pack_into("<H", data, flags_offset, flags & ~_SYMBOL_FLAG_PREDICATES)
+
+        with pytest.raises(BytecodeError, match="nonempty function predicate"):
             read_module(bytes(data))
 
 
@@ -1590,6 +1655,47 @@ class TestMalformedDictAttributeWireOrder:
         data = bytes([9, 1, 1, 9, 2, 2, 0, 0, 2, 0, 2])
         with pytest.raises(BytecodeError, match="duplicate dict attr key"):
             self._read_dict_value(["", "meta", "axis"], data)
+
+
+class TestEnumArrayAttributeWireFormat:
+    def _read_enum_array(self, data: bytes) -> tuple[EnumArrayAttr, int]:
+        reader = BytecodeReader(b"", op_decls=[test_enum_array_attrs])
+        attr_def = reader._attr_def_for_op_attr(
+            "test.enum_array_attrs", "required_values"
+        )
+        value, offset = reader._read_attr_value(data, 0, attr_def=attr_def)
+        assert isinstance(value, EnumArrayAttr)
+        return value, offset
+
+    def test_reads_ordered_duplicate_values(self) -> None:
+        value, offset = self._read_enum_array(bytes([13, 3, 1, 255, 1]))
+
+        assert value == EnumArrayAttr([1, 255, 1])
+        assert offset == 5
+
+    def test_rejects_oversized_array(self) -> None:
+        data = bytes([13]) + encode_varint(0x10000)
+
+        with pytest.raises(BytecodeError, match="exceeds UINT16_MAX"):
+            self._read_enum_array(data)
+
+    def test_rejects_truncated_array(self) -> None:
+        with pytest.raises(BytecodeError, match="exceeds payload size"):
+            self._read_enum_array(bytes([13, 3, 1]))
+
+    def test_rejects_array_without_field_descriptor(self) -> None:
+        reader = BytecodeReader(b"")
+
+        with pytest.raises(BytecodeError, match="descriptor-backed"):
+            reader._read_attr_value(bytes([13, 0]), 0)
+
+    def test_rejects_array_nested_in_generic_dict(self) -> None:
+        reader = BytecodeReader(b"")
+        reader._strings = ["", "values"]
+        data = bytes([9, 1, 1, 13, 0])
+
+        with pytest.raises(BytecodeError, match="descriptor-backed"):
+            reader._read_attr_value(data, 0)
 
 
 # ============================================================================

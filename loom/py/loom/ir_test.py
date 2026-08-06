@@ -43,6 +43,7 @@ from loom.ir import (
     EncodingInstance,
     EncodingRole,
     EncodingType,
+    EnumArrayAttr,
     FileLocation,
     FunctionType,
     FusedLocation,
@@ -687,6 +688,23 @@ class TestOperations:
         assert list(op.attributes.items()) == [("axis", 0), ("combine", "add")]
         assert op.attributes["axis"] == 0
         assert op.attributes["combine"] == "add"
+
+    def test_enum_array_attribute_preserves_stable_values(self) -> None:
+        values = EnumArrayAttr([1, 255, 1])
+        op = Operation(
+            kind=4,
+            name="test.enum_array_attrs",
+            attributes={"required_values": values},
+        )
+
+        assert op.attributes["required_values"] is values
+        assert values.values == (1, 255, 1)
+        assert len(EnumArrayAttr()) == 0
+
+    def test_enum_array_attribute_rejects_invalid_values(self) -> None:
+        for values in ([False], [-1], [256], ["low"]):
+            with pytest.raises(ValueError, match="enum array element"):
+                EnumArrayAttr(values)  # type: ignore[arg-type]
 
     def test_op_with_nested_canonical_attr_dict(self) -> None:
         op = Operation(

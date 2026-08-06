@@ -95,6 +95,9 @@ enum loom_func_def_build_flag_bits_e {
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_TARGET = 1u << 6,
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_ABI = 1u << 7,
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 8,
+  LOOM_FUNC_DEF_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 9,
+  LOOM_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 10,
+  LOOM_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 11,
 };
 typedef uint32_t loom_func_def_build_flags_t;
 iree_status_t loom_func_def_build(
@@ -158,6 +161,9 @@ enum loom_func_decl_build_flag_bits_e {
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_TARGET = 1u << 8,
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_ABI = 1u << 9,
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 10,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 11,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 12,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 13,
 };
 typedef uint32_t loom_func_decl_build_flags_t;
 iree_status_t loom_func_decl_build(
@@ -218,6 +224,7 @@ enum loom_func_template_build_flag_bits_e {
   LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 5,
   LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_TARGET = 1u << 6,
   LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_PRIORITY = 1u << 7,
+  LOOM_FUNC_TEMPLATE_BUILD_FLAG_HAS_PREDICATES = 1u << 8,
 };
 typedef uint32_t loom_func_template_build_flags_t;
 iree_status_t loom_func_template_build(
@@ -269,6 +276,7 @@ enum loom_func_ukernel_build_flag_bits_e {
   LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_INLINE_POLICY = 1u << 5,
   LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_TARGET = 1u << 6,
   LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_PRIORITY = 1u << 7,
+  LOOM_FUNC_UKERNEL_BUILD_FLAG_HAS_PREDICATES = 1u << 8,
 };
 typedef uint32_t loom_func_ukernel_build_flags_t;
 iree_status_t loom_func_ukernel_build(

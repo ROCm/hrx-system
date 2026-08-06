@@ -23,10 +23,11 @@ from loom.builder_model import (
     signatures_for_ops,
 )
 from loom.builtin_types import ALL_BUILTIN_TYPES
-from loom.dsl import Op, TypeDef
+from loom.dsl import ATTR_TYPE_ENUM_ARRAY, AttrDef, Op, TypeDef
 from loom.fields import compute_layout
 from loom.ir import (
     Block,
+    EnumArrayAttr,
     Module,
     Region,
     Type,
@@ -197,6 +198,13 @@ class OpCallable:
             match param.kind:
                 case BuilderParamKind.ATTR:
                     if value is not None:
+                        if (
+                            param.attr_def is not None
+                            and param.attr_def.attr_type == ATTR_TYPE_ENUM_ARRAY
+                        ):
+                            value = _normalize_enum_array_attr(
+                                op.name, param.attr_def, value
+                            )
                         attributes[param.name] = value
                 case BuilderParamKind.STABLE_KEY_REF:
                     if value is not None:
@@ -420,6 +428,48 @@ def _default_value(param: BuilderParam) -> Any:
             return []
         case _:
             return None
+
+
+def _normalize_enum_array_attr(
+    op_name: str, attr_def: AttrDef, value: Any
+) -> EnumArrayAttr:
+    """Resolves symbolic enum-array builder values to stable byte values."""
+    if isinstance(value, EnumArrayAttr):
+        values = value.values
+    else:
+        if isinstance(value, str) or not isinstance(value, Iterable):
+            raise TypeError(
+                f"{op_name}: enum array '{attr_def.name}' must be an iterable "
+                "of enum keywords or byte values"
+            )
+        values = tuple(value)
+
+    assert attr_def.enum_def is not None
+    value_by_keyword = {case.keyword: case.value for case in attr_def.enum_def.cases}
+    declared_values = frozenset(value_by_keyword.values())
+    normalized_values: list[int] = []
+    for index, element in enumerate(values):
+        if isinstance(element, str):
+            stable_value = value_by_keyword.get(element)
+            if stable_value is None:
+                raise ValueError(
+                    f"{op_name}: enum array '{attr_def.name}' element {index} "
+                    f"has unknown keyword {element!r}"
+                )
+        elif type(element) is int and 0 <= element <= 0xFF:
+            stable_value = element
+            if not attr_def.open_enum and stable_value not in declared_values:
+                raise ValueError(
+                    f"{op_name}: enum array '{attr_def.name}' element {index} "
+                    f"has undeclared value {stable_value}"
+                )
+        else:
+            raise TypeError(
+                f"{op_name}: enum array '{attr_def.name}' element {index} "
+                f"must be an enum keyword or byte value, got {element!r}"
+            )
+        normalized_values.append(stable_value)
+    return EnumArrayAttr(normalized_values)
 
 
 def _normalize_result_names(

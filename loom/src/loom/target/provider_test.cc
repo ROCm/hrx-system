@@ -59,7 +59,7 @@ static iree_status_t ContributeMaterialization(
     return iree_ok_status();
   }
   loom_op_t* run_op = nullptr;
-  return loom_pass_ir_build_run(contribution->builder,
+  return loom_pass_ir_build_run(contribution->builder, 0,
                                 IREE_SV("target-materialize"),
                                 loom_named_attr_slice_empty(), &run_op);
 }
@@ -71,7 +71,7 @@ static iree_status_t ContributePreparation(
     return iree_ok_status();
   }
   loom_op_t* run_op = nullptr;
-  return loom_pass_ir_build_run(contribution->builder,
+  return loom_pass_ir_build_run(contribution->builder, 0,
                                 IREE_SV("target-prepare"),
                                 loom_named_attr_slice_empty(), &run_op);
 }
@@ -89,7 +89,7 @@ static iree_status_t BuildContributedPipeline(loom_builder_t* builder,
       loom_pass_environment_empty(), builder));
   loom_op_t* run_op = nullptr;
   IREE_RETURN_IF_ERROR(
-      loom_pass_ir_build_run(builder, IREE_SV("driver-cleanup"),
+      loom_pass_ir_build_run(builder, 0, IREE_SV("driver-cleanup"),
                              loom_named_attr_slice_empty(), &run_op));
   return loom_target_environment_contribute_pipeline(
       data->environment, LOOM_TARGET_PIPELINE_PHASE_TARGET_LOW_PREPARATION,

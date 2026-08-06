@@ -134,20 +134,18 @@ ERR_STRUCTURE_009 = ErrorDef(
     ),
 )
 
-# ERR_STRUCTURE_010: Enum attribute value out of range.
+# ERR_STRUCTURE_010: Undeclared enum attribute value.
 ERR_STRUCTURE_010 = ErrorDef(
     domain=ErrorDomain.STRUCTURE,
     code=10,
     severity=Severity.ERROR,
-    summary="Enum attribute value out of range.",
-    message="attribute '{attr_name}' has enum value {actual_value}, "
-    "but only {enum_case_count} values are defined",
+    summary="Undeclared enum attribute value.",
+    message="attribute '{attr_name}' has undeclared enum value {actual_value}",
     params=(
         ErrorParam("attr_name", ParamKind.STRING),
         ErrorParam("actual_value", ParamKind.U32),
-        ErrorParam("enum_case_count", ParamKind.U32),
     ),
-    fix_hint="'{attr_name}' must have a value in range [0, {enum_case_count})",
+    fix_hint="'{attr_name}' must use one of its declared enum values",
 )
 
 # ERR_STRUCTURE_011: Non-symbol op at module level.
@@ -649,6 +647,27 @@ ERR_STRUCTURE_039 = ErrorDef(
     ),
 )
 
+# ERR_STRUCTURE_040: Aggregate attribute count and payload disagree.
+ERR_STRUCTURE_040 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=40,
+    severity=Severity.ERROR,
+    summary="Aggregate attribute count and payload disagree.",
+    message=(
+        "attribute '{attr_name}' has {element_count} elements and payload "
+        "presence {payload_present}"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("element_count", ParamKind.U32),
+        ErrorParam("payload_present", ParamKind.BOOL),
+    ),
+    fix_hint=(
+        "Use a non-null payload for a non-empty aggregate and a null payload "
+        "for an empty aggregate"
+    ),
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -688,4 +707,5 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_036,
     ERR_STRUCTURE_038,
     ERR_STRUCTURE_039,
+    ERR_STRUCTURE_040,
 )

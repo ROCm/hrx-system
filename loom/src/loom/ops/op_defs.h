@@ -1005,13 +1005,36 @@ typedef struct loom_attr_descriptor_t {
   loom_attr_kind_t attr_kind;
   // Attribute structural flags such as optional.
   loom_attr_flags_t flags;
-  // Number of enum keyword slots in |enum_case_names|.
-  uint8_t enum_case_count;
+  // Largest valid index in |enum_case_names|, or 0 when the table is NULL.
+  uint8_t enum_max_value;
   // Dense enum value to keyword table, or NULL for non-enum attrs.
   const loom_bstring_t* enum_case_names;
   // Expected symbol target contract, or NULL for non-symbol-reference attrs.
   const loom_symbol_reference_descriptor_t* symbol_ref;
 } loom_attr_descriptor_t;
+
+// Returns the number of sparse enum keyword slots owned by |descriptor|.
+static inline iree_host_size_t loom_attr_descriptor_enum_case_span(
+    const loom_attr_descriptor_t* descriptor) {
+  return descriptor && descriptor->enum_case_names
+             ? (iree_host_size_t)descriptor->enum_max_value + 1
+             : 0;
+}
+
+// Returns the keyword for |value| or NULL when the value is not declared.
+static inline loom_bstring_t loom_attr_descriptor_enum_case_name(
+    const loom_attr_descriptor_t* descriptor, uint8_t value) {
+  return descriptor && descriptor->enum_case_names &&
+                 value <= descriptor->enum_max_value
+             ? descriptor->enum_case_names[value]
+             : NULL;
+}
+
+// Returns true when |value| is declared by |descriptor|.
+static inline bool loom_attr_descriptor_has_enum_case(
+    const loom_attr_descriptor_t* descriptor, uint8_t value) {
+  return loom_attr_descriptor_enum_case_name(descriptor, value) != NULL;
+}
 
 // Returns the attribute name as a string view.
 static inline iree_string_view_t loom_attr_descriptor_name(
@@ -1856,6 +1879,13 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
     return (enum_type)loom_attr_as_enum(loom_op_attrs(op)[(index)]); \
   }
 
+// Defines a function that reads an enum array attribute by index.
+#define LOOM_DEFINE_ATTR_ENUM_ARRAY(func_name, index)              \
+  enum { func_name##_ATTR_INDEX = (index) };                       \
+  static inline loom_enum_array_t func_name(const loom_op_t* op) { \
+    return loom_attr_as_enum_array(loom_op_attrs(op)[(index)]);    \
+  }
+
 // Defines a function that reads a representation-scoped enum by index.
 #define LOOM_DEFINE_ATTR_SCOPED_ENUM(func_name, index)           \
   enum { func_name##_ATTR_INDEX = (index) };                     \
@@ -2102,6 +2132,11 @@ iree_status_t loom_builder_copy_i64_array_attr_storage(loom_builder_t* builder,
                                                        iree_host_size_t count,
                                                        iree_string_view_t label,
                                                        int64_t** out_storage);
+
+// Copies an enum-array attribute payload into the builder arena.
+iree_status_t loom_builder_copy_enum_array_attr_storage(
+    loom_builder_t* builder, loom_enum_array_t values, iree_string_view_t label,
+    const uint8_t** out_storage);
 
 // Copies a predicate-list attribute payload into the builder arena.
 iree_status_t loom_builder_copy_predicate_list_attr_storage(

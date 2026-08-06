@@ -61,8 +61,10 @@ static iree_status_t loom_parse_i64_array_attr(loom_parser_t* parser,
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'['"));
   }
 
-  int64_t stack_values[32];
-  uint16_t count = 0;
+  int64_t inline_values[32];
+  int64_t* values = inline_values;
+  iree_host_size_t capacity = IREE_ARRAYSIZE(inline_values);
+  iree_host_size_t count = 0;
   while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RBRACKET) &&
          !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
     if (count > 0) {
@@ -72,9 +74,14 @@ static iree_status_t loom_parse_i64_array_attr(loom_parser_t* parser,
     }
     loom_token_t token = loom_token_none();
     LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_INTEGER, &token);
-    if (count >= IREE_ARRAYSIZE(stack_values)) {
+    if (count == UINT16_MAX) {
       return loom_parser_emit_token_text_error(parser, LOOM_ERR_PARSE_004,
                                                token);
+    }
+    if (count >= capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(&parser->parser_arena, count,
+                                                 count + 1, sizeof(*values),
+                                                 &capacity, (void**)&values));
     }
     int64_t value = 0;
     if (!iree_string_view_atoi_int64(token.text, &value)) {
@@ -84,7 +91,7 @@ static iree_status_t loom_parse_i64_array_attr(loom_parser_t* parser,
       return loom_parser_emit(parser, LOOM_ERR_PARSE_015, params,
                               IREE_ARRAYSIZE(params), token);
     }
-    stack_values[count++] = value;
+    values[count++] = value;
   }
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RBRACKET)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
@@ -95,9 +102,112 @@ static iree_status_t loom_parse_i64_array_attr(loom_parser_t* parser,
   if (count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         &parser->module->arena, count, sizeof(int64_t), (void**)&arena_values));
-    memcpy(arena_values, stack_values, count * sizeof(int64_t));
+    memcpy(arena_values, values, count * sizeof(int64_t));
   }
-  *out_attr = loom_attr_i64_array(arena_values, count);
+  *out_attr = loom_attr_i64_array(arena_values, (uint16_t)count);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_parse_enum_attr_value(
+    loom_parser_t* parser, const loom_attr_descriptor_t* descriptor,
+    uint8_t* out_value) {
+  loom_token_t token = loom_tokenizer_peek(&parser->tokenizer);
+  if (token.kind == LOOM_TOKEN_LANGLE) {
+    loom_token_t opening_token = token;
+    (void)loom_tokenizer_next(&parser->tokenizer);
+    LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_INTEGER, &token);
+    uint32_t value = 0;
+    bool value_in_range =
+        iree_string_view_atoi_uint32(token.text, &value) && value <= UINT8_MAX;
+    LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RANGLE, NULL);
+    if (!iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
+      *out_value = 0;
+      return loom_parser_emit_unexpected_token(
+          parser, opening_token, IREE_SV("a declared enum keyword"));
+    }
+    if (!value_in_range) {
+      *out_value = 0;
+      return loom_parser_emit_unexpected_token(
+          parser, token, IREE_SV("an integer in [0, 255]"));
+    }
+    *out_value = (uint8_t)value;
+    return iree_ok_status();
+  }
+
+  if (token.kind != LOOM_TOKEN_BARE_IDENT && token.kind != LOOM_TOKEN_OP_NAME) {
+    return loom_parser_emit_unexpected_token(parser, token,
+                                             IREE_SV("enum keyword"));
+  }
+  (void)loom_tokenizer_next(&parser->tokenizer);
+  if (!descriptor->enum_case_names) {
+    IREE_ASSERT_UNREACHABLE("enum attribute has no case name table");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+  iree_host_size_t case_span = loom_attr_descriptor_enum_case_span(descriptor);
+  for (iree_host_size_t i = 0; i < case_span; ++i) {
+    if (descriptor->enum_case_names[i] &&
+        loom_bstring_equal(descriptor->enum_case_names[i], token.text)) {
+      *out_value = (uint8_t)i;
+      return iree_ok_status();
+    }
+  }
+
+  iree_string_view_t enum_name = descriptor->name
+                                     ? loom_attr_descriptor_name(descriptor)
+                                     : IREE_SV("enum");
+  loom_diagnostic_param_t params[] = {
+      loom_param_string(enum_name),
+      loom_param_string(token.text),
+  };
+  return loom_parser_emit(parser, LOOM_ERR_PARSE_017, params,
+                          IREE_ARRAYSIZE(params), token);
+}
+
+static iree_status_t loom_parse_enum_array_attr(
+    loom_parser_t* parser, const loom_attr_descriptor_t* descriptor,
+    loom_attribute_t* out_attr) {
+  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LBRACKET)) {
+    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+    return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'['"));
+  }
+
+  uint8_t inline_values[32];
+  uint8_t* values = inline_values;
+  iree_host_size_t capacity = IREE_ARRAYSIZE(inline_values);
+  iree_host_size_t count = 0;
+  while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RBRACKET) &&
+         !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
+    if (count > 0 &&
+        !loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
+      break;
+    }
+    if (count == UINT16_MAX) {
+      loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+      return loom_parser_emit_unexpected_token(
+          parser, peek, IREE_SV("at most 65535 enum values"));
+    }
+    if (count >= capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(&parser->parser_arena, count,
+                                                 count + 1, sizeof(*values),
+                                                 &capacity, (void**)&values));
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_parse_enum_attr_value(parser, descriptor, &values[count]));
+    ++count;
+  }
+  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RBRACKET)) {
+    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+    return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("']'"));
+  }
+
+  uint8_t* arena_values = NULL;
+  if (count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&parser->module->arena,
+                                                   count, sizeof(*arena_values),
+                                                   (void**)&arena_values));
+    memcpy(arena_values, values, count * sizeof(*arena_values));
+  }
+  *out_attr = loom_attr_enum_array(arena_values, (uint16_t)count);
   return iree_ok_status();
 }
 
@@ -225,37 +335,14 @@ iree_status_t loom_parse_attr_value(loom_parser_t* parser,
       return loom_parse_symbol_ref_attr(parser, out_attr);
     }
     case LOOM_ATTR_ENUM: {
-      loom_token_t token = loom_tokenizer_peek(&parser->tokenizer);
-      if (token.kind != LOOM_TOKEN_BARE_IDENT &&
-          token.kind != LOOM_TOKEN_OP_NAME) {
-        return loom_parser_emit_unexpected_token(parser, token,
-                                                 IREE_SV("identifier"));
-      }
-      (void)loom_tokenizer_next(&parser->tokenizer);
-      // Look up the enum case name.
-      if (!descriptor->enum_case_names) {
-        IREE_ASSERT_UNREACHABLE("enum attribute has no case name table");
-        IREE_BUILTIN_UNREACHABLE();
-      }
-      // Linear scan through case names. Enum case lists are short.
-      for (uint8_t i = 0; i < descriptor->enum_case_count; ++i) {
-        if (descriptor->enum_case_names[i] &&
-            loom_bstring_equal(descriptor->enum_case_names[i], token.text)) {
-          *out_attr = loom_attr_enum(i);
-          return iree_ok_status();
-        }
-      }
-      {
-        iree_string_view_t enum_name =
-            descriptor->name ? loom_attr_descriptor_name(descriptor)
-                             : IREE_SV("enum");
-        loom_diagnostic_param_t params[] = {
-            loom_param_string(enum_name),
-            loom_param_string(token.text),
-        };
-        return loom_parser_emit(parser, LOOM_ERR_PARSE_017, params,
-                                IREE_ARRAYSIZE(params), token);
-      }
+      uint8_t value = 0;
+      IREE_RETURN_IF_ERROR(
+          loom_parse_enum_attr_value(parser, descriptor, &value));
+      *out_attr = loom_attr_enum(value);
+      return iree_ok_status();
+    }
+    case LOOM_ATTR_ENUM_ARRAY: {
+      return loom_parse_enum_array_attr(parser, descriptor, out_attr);
     }
     case LOOM_ATTR_I64_ARRAY: {
       return loom_parse_i64_array_attr(parser, out_attr);

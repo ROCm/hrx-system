@@ -64,6 +64,8 @@ typedef struct loom_pass_program_attr_value_t {
     uint8_t enum_value;
     // Program-owned array payload for LOOM_ATTR_I64_ARRAY.
     const int64_t* i64_array;
+    // Program-owned stable value payload for LOOM_ATTR_ENUM_ARRAY.
+    const uint8_t* enum_array;
     // Source-module symbol reference payload for LOOM_ATTR_SYMBOL.
     loom_symbol_ref_t symbol_value;
     // Source-module type table index for LOOM_ATTR_TYPE.

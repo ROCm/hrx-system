@@ -185,9 +185,9 @@ static iree_status_t loom_amdgpu_cluster_preamble_emit_sgpr_live_in(
   IREE_RETURN_IF_ERROR(loom_amdgpu_intern(context, source, &source_id));
   loom_op_t* live_in_op = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_low_live_in_build(loom_low_lower_context_builder(context), source_id,
-                             loom_make_named_attr_slice(NULL, 0), sgpr_type,
-                             source_op->location, &live_in_op));
+      loom_low_live_in_build(loom_low_lower_context_builder(context), 0,
+                             source_id, loom_make_named_attr_slice(NULL, 0),
+                             sgpr_type, source_op->location, &live_in_op));
   *out_low_value_id = loom_low_live_in_result(live_in_op);
   return iree_ok_status();
 }

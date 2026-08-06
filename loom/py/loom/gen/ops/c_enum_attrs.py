@@ -33,7 +33,7 @@ def collect_shared_enums(
     usage: dict[int, list[tuple[Op, AttrDef]]] = defaultdict(list)
     for op in ops:
         for attr_def in op.attrs:
-            if attr_def.attr_type == "enum" and attr_def.enum_def is not None:
+            if attr_def.attr_type in ("enum", "enum_array") and attr_def.enum_def is not None:
                 if attr_def.enum_def.c_type is not None:
                     continue
                 usage[id(attr_def.enum_def)].append((op, attr_def))

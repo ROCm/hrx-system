@@ -227,11 +227,12 @@ static iree_status_t loom_pipeline_set_enum_attr(loom_parser_t* parser,
         (int)loom_op_vtable_name(vtable).size, loom_op_vtable_name(vtable).data,
         (int)attr_name.size, attr_name.data);
   }
-  for (uint8_t i = 0; i < descriptor->enum_case_count; ++i) {
-    if (iree_string_view_equal(
-            value_token.text,
-            loom_bstring_view(descriptor->enum_case_names[i]))) {
-      loom_op_attrs(op)[attr_index] = loom_attr_enum(i);
+  iree_host_size_t case_span = loom_attr_descriptor_enum_case_span(descriptor);
+  for (iree_host_size_t i = 0; i < case_span; ++i) {
+    loom_bstring_t case_name = descriptor->enum_case_names[i];
+    if (case_name && iree_string_view_equal(value_token.text,
+                                            loom_bstring_view(case_name))) {
+      loom_op_attrs(op)[attr_index] = loom_attr_enum((uint8_t)i);
       return iree_ok_status();
     }
   }

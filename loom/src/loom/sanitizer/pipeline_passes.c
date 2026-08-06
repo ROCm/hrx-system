@@ -681,10 +681,14 @@ static iree_status_t loom_sanitizer_build_access_assertion(
   };
   IREE_RETURN_IF_ERROR(loom_sanitizer_make_site_location(
       module, source_location, &payload, &site_location));
+  const loom_sanitizer_assert_access_build_flags_t build_flags =
+      loom_attr_is_absent(static_extents)
+          ? 0
+          : LOOM_SANITIZER_ASSERT_ACCESS_BUILD_FLAG_HAS_STATIC_EXTENTS;
   return loom_sanitizer_assert_access_build(
-      &rewriter->builder, kind, view, indices.values, indices.count,
-      static_indices.i64_array, static_indices.count, static_extents.i64_array,
-      static_extents.count, site_location, out_op);
+      &rewriter->builder, build_flags, kind, view, indices.values,
+      indices.count, static_indices.i64_array, static_indices.count,
+      static_extents.i64_array, static_extents.count, site_location, out_op);
 }
 
 static loom_sanitizer_assert_accesses_kind_t

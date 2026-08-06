@@ -15,10 +15,11 @@ from pathlib import Path
 
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.low import ALL_LOW_OPS
+from loom.dialect.test import ALL_TEST_OPS
 from loom.format.bytecode.reader import read_module
 from loom.format.bytecode.writer import write_module
 from loom.format.text.parser import Parser
-from loom.ir import Module, RegisterType
+from loom.ir import EnumArrayAttr, Module, RegisterType
 
 
 def _run_loom_format(arguments: list[object]) -> subprocess.CompletedProcess[str]:
@@ -38,11 +39,17 @@ def _run_loom_format(arguments: list[object]) -> subprocess.CompletedProcess[str
 def _typed_register_module() -> tuple[Module, RegisterType]:
     parser = Parser()
     parser.register_ops(ALL_LOW_OPS)
+    parser.register_ops(ALL_TEST_OPS)
     parser.register_types(ALL_BUILTIN_TYPES)
     module = parser.parse(
         "low.func.decl target<test.low.core> "
         "@typed_identity(%arg: reg<test.ptr : vector<4xi16>>) -> "
         "(reg<test.ptr : vector<4xi16>>)\n"
+        "test.func @enum_arrays() {\n"
+        "  test.enum_array_attrs [low, high, low] "
+        "using [middle, <42>, middle]\n"
+        "  test.yield\n"
+        "}\n"
     )
     register_types = [
         value.type for value in module.values if isinstance(value.type, RegisterType)
@@ -78,6 +85,16 @@ def main() -> None:
             raise AssertionError(
                 "Python reader did not recover the C-written structural register type"
             )
+        enum_function = next(
+            symbol.op for symbol in loaded.symbols if symbol.name == "enum_arrays"
+        )
+        if enum_function is None:
+            raise AssertionError("Python reader did not recover enum_arrays")
+        enum_op = enum_function.regions[0].blocks[0].ops[0]
+        if enum_op.attributes["required_values"] != EnumArrayAttr([1, 255, 1]):
+            raise AssertionError("required enum array did not survive C bytecode")
+        if enum_op.attributes["optional_values"] != EnumArrayAttr([7, 42, 7]):
+            raise AssertionError("open enum array did not survive C bytecode")
 
 
 if __name__ == "__main__":

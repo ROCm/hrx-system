@@ -158,6 +158,7 @@ enum loom_kernel_def_build_flag_bits_e {
   LOOM_KERNEL_DEF_BUILD_FLAG_HAS_TARGET = 1u << 1,
   LOOM_KERNEL_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 2,
   LOOM_KERNEL_DEF_BUILD_FLAG_HAS_EXPORT_LINKAGE = 1u << 3,
+  LOOM_KERNEL_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 4,
 };
 typedef uint32_t loom_kernel_def_build_flags_t;
 iree_status_t loom_kernel_def_build(
@@ -1106,6 +1107,7 @@ enum loom_kernel_decl_build_flag_bits_e {
   LOOM_KERNEL_DECL_BUILD_FLAG_HAS_TARGET = 1u << 1,
   LOOM_KERNEL_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 2,
   LOOM_KERNEL_DECL_BUILD_FLAG_HAS_EXPORT_LINKAGE = 1u << 3,
+  LOOM_KERNEL_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 4,
 };
 typedef uint32_t loom_kernel_decl_build_flags_t;
 iree_status_t loom_kernel_decl_build(

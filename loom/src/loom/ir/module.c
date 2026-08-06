@@ -1995,6 +1995,10 @@ static iree_status_t loom_module_canonicalize_non_dict_attr_value(
     case LOOM_ATTR_I64_ARRAY:
       return loom_module_canonicalize_attr_dict_i64_array_value(module, value,
                                                                 out_value);
+    case LOOM_ATTR_ENUM_ARRAY:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "enum array attributes require a descriptor-backed operation field");
     case LOOM_ATTR_PREDICATE_LIST:
       return loom_module_canonicalize_attr_dict_predicate_list_value(
           module, value, out_value);
@@ -2298,6 +2302,10 @@ static iree_status_t loom_module_verify_non_dict_attr_value(
       return iree_ok_status();
     case LOOM_ATTR_I64_ARRAY:
       return loom_module_verify_canonical_attr_dict_i64_array_value(value);
+    case LOOM_ATTR_ENUM_ARRAY:
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "enum array attributes require a descriptor-backed operation field");
     case LOOM_ATTR_PREDICATE_LIST:
       return loom_module_verify_canonical_attr_dict_predicate_list_value(value);
     case LOOM_ATTR_DICT:

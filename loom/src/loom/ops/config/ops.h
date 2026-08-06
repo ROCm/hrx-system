@@ -31,8 +31,13 @@ LOOM_DEFINE_ISA(loom_config_decl_isa, LOOM_OP_CONFIG_DECL)
 LOOM_DEFINE_RESULT(loom_config_decl_type, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_config_decl_symbol, 0)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_config_decl_predicates, 1)
+enum loom_config_decl_build_flag_bits_e {
+  LOOM_CONFIG_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 0,
+};
+typedef uint32_t loom_config_decl_build_flags_t;
 iree_status_t loom_config_decl_build(
     loom_builder_t* builder,
+    loom_config_decl_build_flags_t build_flags,
     loom_symbol_ref_t symbol,
     loom_type_t result_type,
     const loom_tied_result_t* tied_results,

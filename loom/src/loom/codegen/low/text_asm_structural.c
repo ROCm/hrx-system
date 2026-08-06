@@ -332,10 +332,12 @@ static iree_status_t loom_low_descriptor_text_asm_build_copy(
 
 iree_status_t loom_low_descriptor_text_asm_build_structural(
     const loom_text_low_asm_environment_state_t* state, loom_builder_t* builder,
-    loom_text_low_asm_structural_kind_t kind, iree_string_view_t key,
-    const loom_value_id_t* operands, iree_host_size_t operand_count,
-    loom_named_attr_slice_t attributes, int64_t offset, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op) {
+    loom_text_low_asm_structural_kind_t kind,
+    loom_text_low_asm_structural_build_flags_t build_flags,
+    iree_string_view_t key, const loom_value_id_t* operands,
+    iree_host_size_t operand_count, loom_named_attr_slice_t attributes,
+    int64_t offset, loom_type_t result_type, loom_location_id_t location,
+    loom_op_t** out_op) {
   (void)state;
   switch (kind) {
     case LOOM_TEXT_LOW_ASM_STRUCTURAL_RESOURCE:
@@ -353,8 +355,14 @@ iree_status_t loom_low_descriptor_text_asm_build_structural(
       loom_string_id_t source = LOOM_STRING_ID_INVALID;
       IREE_RETURN_IF_ERROR(
           loom_module_intern_string(builder->module, key, &source));
-      return loom_low_live_in_build(builder, source, attributes, result_type,
-                                    location, out_op);
+      const loom_low_live_in_build_flags_t live_in_build_flags =
+          iree_any_bit_set(
+              build_flags,
+              LOOM_TEXT_LOW_ASM_STRUCTURAL_BUILD_FLAG_HAS_ATTRIBUTES)
+              ? LOOM_LOW_LIVE_IN_BUILD_FLAG_HAS_ATTRS
+              : 0;
+      return loom_low_live_in_build(builder, live_in_build_flags, source,
+                                    attributes, result_type, location, out_op);
     }
     case LOOM_TEXT_LOW_ASM_STRUCTURAL_CONCAT:
       return loom_low_concat_build(builder, operands, operand_count,
@@ -470,6 +478,11 @@ static iree_status_t loom_low_descriptor_text_asm_describe_live_in(
       .kind = LOOM_TEXT_LOW_ASM_STATEMENT_STRUCTURAL,
       .op = op,
       .structural_kind = LOOM_TEXT_LOW_ASM_STRUCTURAL_LIVE_IN,
+      .structural_build_flags =
+          loom_attr_is_absent(
+              loom_op_attrs(op)[loom_low_live_in_attrs_ATTR_INDEX])
+              ? 0
+              : LOOM_TEXT_LOW_ASM_STRUCTURAL_BUILD_FLAG_HAS_ATTRIBUTES,
       .structural_key = module->strings.entries[source_id],
       .results = loom_op_const_results(op),
       .result_count = 1,

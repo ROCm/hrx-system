@@ -121,6 +121,7 @@ _C_ATTR_TYPE_MAP: dict[str, str] = {
     "string": "loom_string_id_t",
     "bool": "bool",
     "enum": "uint8_t",
+    "enum_array": "loom_enum_array_t",
     "symbol": "loom_symbol_ref_t",
     "i64_array": "const int64_t*",
     "bytes": "iree_const_byte_span_t",
@@ -154,9 +155,21 @@ _BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
         "string",
         "bool",
         "enum",
+        "enum_array",
         "symbol",
+        "i64_array",
+        "bytes",
         "type",
         "encoding",
+        "dict",
+    }
+)
+
+_TRAILING_BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
+    {
+        "i64_array",
+        "bytes",
+        "dict",
     }
 )
 
@@ -661,6 +674,8 @@ def optional_param_uses_build_flag(param: dict[str, object]) -> bool:
         return True
     if param["kind"] == "auto_region":
         return True
+    if param["kind"] == "predicate_list":
+        return True
     if param["kind"] != "attr":
         return False
     return param.get("attr_type") in _BUILD_FLAG_OPTIONAL_ATTR_TYPES
@@ -668,7 +683,18 @@ def optional_param_uses_build_flag(param: dict[str, object]) -> bool:
 
 def build_flag_params(params: list[dict[str, object]]) -> list[dict[str, object]]:
     """Returns optional builder parameters controlled by build_flags."""
-    return [param for param in params if optional_param_uses_build_flag(param)]
+    flagged_params = [param for param in params if optional_param_uses_build_flag(param)]
+    existing_params: list[dict[str, object]] = []
+    aggregate_params: list[dict[str, object]] = []
+    for param in flagged_params:
+        is_aggregate = param["kind"] == "predicate_list" or (param["kind"] == "attr" and param.get("attr_type") in _TRAILING_BUILD_FLAG_OPTIONAL_ATTR_TYPES)
+        # Newly flag-controlled aggregates trail fields with established public
+        # bit ordinals so enabling explicit presence does not renumber them.
+        if is_aggregate:
+            aggregate_params.append(param)
+        else:
+            existing_params.append(param)
+    return existing_params + aggregate_params
 
 
 def build_flags_type_name(prefix: str) -> str:
