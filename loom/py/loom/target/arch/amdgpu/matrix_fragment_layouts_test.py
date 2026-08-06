@@ -165,11 +165,34 @@ def test_compressed_reduction_layout_separates_storage_and_logical_k() -> None:
             payload_element_count=16,
             axes=(*dense.rhs.axes[:3], replace(rhs_reduction, element_count=16)),
         ),
+        family="smfmac",
     )
 
     validate_matrix_fragment_layout(sparse)
     assert role_coordinate(sparse, sparse.lhs, 0, 0) is None
     assert role_coordinate(sparse, sparse.rhs, 0, 0) == (None, None, 0, 0)
+
+
+def test_rdna4m_wave64_iu4_layouts_model_ignored_upper_lanes() -> None:
+    dense_iu4 = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["rdna4_wmma_i32_16x16x16_iu4_w64"]
+    dense_f16 = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY["rdna4_wmma_f32_16x16x16_f16_w64"]
+    sparse_iu4 = AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY[
+        "rdna4_swmmac_32bit_16x16x32_packed4_w64"
+    ]
+
+    assert role_coordinate(dense_iu4, dense_iu4.lhs, 0, 0) == role_coordinate(
+        dense_iu4, dense_iu4.lhs, 32, 0
+    )
+    assert role_coordinate(dense_iu4, dense_iu4.rhs, 0, 0) == role_coordinate(
+        dense_iu4, dense_iu4.rhs, 32, 0
+    )
+    assert role_coordinate(dense_f16, dense_f16.lhs, 0, 0) != role_coordinate(
+        dense_f16, dense_f16.lhs, 32, 0
+    )
+    assert sparse_iu4.lhs.axes == dense_iu4.lhs.axes
+    assert role_coordinate(sparse_iu4, sparse_iu4.rhs, 0, 0) != role_coordinate(
+        sparse_iu4, sparse_iu4.rhs, 32, 0
+    )
 
 
 def test_validation_rejects_noncompressing_reduction_group() -> None:

@@ -151,6 +151,20 @@ def test_descriptor_set_isa_xml_validation_rejects_mismatched_architecture() -> 
         )
 
 
+def test_rdna4m_processors_publish_gfx12_matrix_contracts() -> None:
+    processors = {
+        info.processor: info
+        for info in AMDGPU_PROCESSOR_INFOS
+        if info.processor in ("gfx1170", "gfx1171", "gfx1172")
+    }
+
+    assert set(processors) == {"gfx1170", "gfx1171", "gfx1172"}
+    assert all(
+        info.features.matrix == AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12
+        for info in processors.values()
+    )
+
+
 def test_descriptor_set_generator_target_lookup_rejects_unknown_target() -> None:
     with _raises_value_error("unknown AMDGPU descriptor generator target"):
         amdgpu_descriptor_set_info_by_generator_target("gfx999")

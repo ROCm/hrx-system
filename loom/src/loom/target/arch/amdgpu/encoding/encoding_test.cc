@@ -536,6 +536,46 @@ TEST(AmdgpuEncodingTest, PacksRdna4mFp8DotWords) {
   }
 }
 
+TEST(AmdgpuEncodingTest, PacksRdna4mMatrixWords) {
+  LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
+      table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4M, "amdgpu.rdna4m.core");
+  const loom_amdgpu_encoding_field_value_t wmma_field_values[] = {
+      {LOOM_AMDGPU_ENCODING_FIELD_VDST, {}, 8},
+      {LOOM_AMDGPU_ENCODING_FIELD_SRC0, {}, 0x100},
+      {LOOM_AMDGPU_ENCODING_FIELD_SRC1, {}, 0x104},
+      {LOOM_AMDGPU_ENCODING_FIELD_SRC2, {}, 0x108},
+      {LOOM_AMDGPU_ENCODING_FIELD_OP_SEL_HI, {}, 0x7},
+  };
+  for (uint16_t opcode = 0x40; opcode <= 0x4A; ++opcode) {
+    loom_amdgpu_encoding_packet_t packet = {};
+    IREE_ASSERT_OK(loom_amdgpu_encoding_pack(
+        table, LOOM_AMDGPU_ENCODING_FORMAT_VOP3P, opcode, wmma_field_values,
+        IREE_ARRAYSIZE(wmma_field_values), &packet));
+    ASSERT_EQ(packet.word_count, 2u);
+    EXPECT_EQ(packet.words[0],
+              UINT32_C(0xcc004008) | (static_cast<uint32_t>(opcode) << 16));
+    EXPECT_EQ(packet.words[1], UINT32_C(0x1c220900));
+  }
+
+  const loom_amdgpu_encoding_field_value_t swmmac_field_values[] = {
+      {LOOM_AMDGPU_ENCODING_FIELD_VDST, {}, 12},
+      {LOOM_AMDGPU_ENCODING_FIELD_SRC0, {}, 0x100},
+      {LOOM_AMDGPU_ENCODING_FIELD_SRC1, {}, 0x104},
+      {LOOM_AMDGPU_ENCODING_FIELD_SRC2, {}, 0x114},
+      {LOOM_AMDGPU_ENCODING_FIELD_OP_SEL_HI, {}, 0x7},
+  };
+  for (uint16_t opcode = 0x50; opcode <= 0x5A; ++opcode) {
+    loom_amdgpu_encoding_packet_t packet = {};
+    IREE_ASSERT_OK(loom_amdgpu_encoding_pack(
+        table, LOOM_AMDGPU_ENCODING_FORMAT_VOP3P, opcode, swmmac_field_values,
+        IREE_ARRAYSIZE(swmmac_field_values), &packet));
+    ASSERT_EQ(packet.word_count, 2u);
+    EXPECT_EQ(packet.words[0],
+              UINT32_C(0xcc00400c) | (static_cast<uint32_t>(opcode) << 16));
+    EXPECT_EQ(packet.words[1], UINT32_C(0x1c520900));
+  }
+}
+
 TEST(AmdgpuEncodingTest, PacksGfx125XVNop) {
   LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
       table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA4_GFX125X,

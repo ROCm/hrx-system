@@ -1496,6 +1496,116 @@ def _gfx11_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
+def _gfx12_wmma_16x16_overlays(
+    *, wave_size: int, op_sel_hi_field: str
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    if wave_size not in (32, 64):
+        raise ValueError(f"unsupported WMMA wave size {wave_size}")
+    unit_divisor = wave_size // 32
+    descriptor_key_suffix = ".w64" if wave_size == 64 else ""
+    low_mnemonic_suffix = "_w64" if wave_size == 64 else ""
+
+    def units(wave32_units: int) -> int:
+        return max(1, wave32_units // unit_divisor)
+
+    def size_exception_reason(wave32_units: int) -> str | None:
+        return (
+            _GFX12_WAVE64_MATRIX_OPERAND_SIZE_REASON
+            if units(wave32_units) != wave32_units
+            else None
+        )
+
+    overlays = (
+        _v_wmma_f32_16x16x16_f16_overlay(
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            input_units=units(4),
+            accumulator_units=units(8),
+            input_size_exception_reason=size_exception_reason(4),
+            accumulator_size_exception_reason=size_exception_reason(8),
+            op_sel_hi_field=op_sel_hi_field,
+        ),
+        _v_wmma_f32_16x16x16_bf16_overlay(
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            input_units=units(4),
+            accumulator_units=units(8),
+            input_size_exception_reason=size_exception_reason(4),
+            accumulator_size_exception_reason=size_exception_reason(8),
+            op_sel_hi_field=op_sel_hi_field,
+        ),
+        _v_wmma_f16_16x16x16_f16_overlay(
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            input_units=units(4),
+            accumulator_units=units(4),
+            input_size_exception_reason=size_exception_reason(4),
+            accumulator_size_exception_reason=size_exception_reason(4),
+            op_sel_hi_field=op_sel_hi_field,
+        ),
+        _v_wmma_bf16_16x16x16_bf16_overlay(
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            input_units=units(4),
+            accumulator_units=units(4),
+            input_size_exception_reason=size_exception_reason(4),
+            accumulator_size_exception_reason=size_exception_reason(4),
+            op_sel_hi_field=op_sel_hi_field,
+        ),
+        _v_wmma_i32_16x16x16_iu8_overlay(
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            operand_units=units(2),
+            accumulator_units=units(8),
+            operand_size_exception_reason=size_exception_reason(2),
+            accumulator_size_exception_reason=size_exception_reason(8),
+            op_sel_hi_field=op_sel_hi_field,
+        ),
+        _v_wmma_i32_16x16x16_iu4_overlay(
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            operand_units=units(1),
+            accumulator_units=units(8),
+            operand_size_exception_reason=size_exception_reason(1),
+            accumulator_size_exception_reason=size_exception_reason(8),
+            op_sel_hi_field=op_sel_hi_field,
+        ),
+        *(
+            _v_wmma_f32_16x16x16_packed8_overlay(
+                lhs_type=lhs_type,
+                rhs_type=rhs_type,
+                descriptor_key_suffix=descriptor_key_suffix,
+                low_mnemonic_suffix=low_mnemonic_suffix,
+                input_units=units(2),
+                accumulator_units=units(8),
+                input_size_exception_reason=size_exception_reason(2),
+                accumulator_size_exception_reason=size_exception_reason(8),
+                op_sel_hi_field=op_sel_hi_field,
+            )
+            for lhs_type, rhs_type in (
+                ("fp8", "fp8"),
+                ("fp8", "bf8"),
+                ("bf8", "fp8"),
+                ("bf8", "bf8"),
+            )
+        ),
+        _v_wmma_i32_16x16x32_iu4_overlay(
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            operand_units=units(2),
+            accumulator_units=units(8),
+            operand_size_exception_reason=size_exception_reason(2),
+            accumulator_size_exception_reason=size_exception_reason(8),
+            op_sel_hi_field=op_sel_hi_field,
+        ),
+    )
+    return tuple(
+        variant
+        for overlay in overlays
+        for variant in _with_zero_accumulator_form(overlay)
+    )
+
+
 def _rdna4m_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *(
@@ -1514,6 +1624,10 @@ def _rdna4m_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
                 ("bf8", "bf8"),
             )
         ),
+        *_gfx12_wmma_16x16_overlays(wave_size=32, op_sel_hi_field="OP_SEL_HI"),
+        *_gfx12_wmma_16x16_overlays(wave_size=64, op_sel_hi_field="OP_SEL_HI"),
+        *_v_swmmac_16x16_overlays(wave_size=32, op_sel_hi_field="OP_SEL_HI"),
+        *_v_swmmac_16x16_overlays(wave_size=64, op_sel_hi_field="OP_SEL_HI"),
     )
 
 
@@ -1896,46 +2010,10 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_dot4_f32_packed8_overlay(
             lhs_type="bf8", rhs_type="bf8", op_sel_hi_field="OPSEL_HI"
         ),
-        *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_f16_overlay(op_sel_hi_field="OPSEL_HI")
-        ),
-        *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_bf16_overlay(op_sel_hi_field="OPSEL_HI")
-        ),
-        *_with_zero_accumulator_form(
-            _v_wmma_f16_16x16x16_f16_overlay(op_sel_hi_field="OPSEL_HI")
-        ),
-        *_with_zero_accumulator_form(
-            _v_wmma_bf16_16x16x16_bf16_overlay(op_sel_hi_field="OPSEL_HI")
-        ),
-        *_with_zero_accumulator_form(
-            _v_wmma_i32_16x16x16_iu8_overlay(op_sel_hi_field="OPSEL_HI")
-        ),
-        *_with_zero_accumulator_form(
-            _v_wmma_i32_16x16x16_iu4_overlay(op_sel_hi_field="OPSEL_HI")
-        ),
-        *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(
-                lhs_type="fp8", rhs_type="fp8", op_sel_hi_field="OPSEL_HI"
-            )
-        ),
-        *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(
-                lhs_type="fp8", rhs_type="bf8", op_sel_hi_field="OPSEL_HI"
-            )
-        ),
-        *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(
-                lhs_type="bf8", rhs_type="fp8", op_sel_hi_field="OPSEL_HI"
-            )
-        ),
-        *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(
-                lhs_type="bf8", rhs_type="bf8", op_sel_hi_field="OPSEL_HI"
-            )
-        ),
-        *_with_zero_accumulator_form(_v_wmma_i32_16x16x32_iu4_overlay()),
-        *_rdna4_swmmac_overlays(),
+        *_gfx12_wmma_16x16_overlays(wave_size=32, op_sel_hi_field="OPSEL_HI"),
+        *_gfx12_wmma_16x16_overlays(wave_size=64, op_sel_hi_field="OPSEL_HI"),
+        *_v_swmmac_16x16_overlays(wave_size=32, op_sel_hi_field="OPSEL_HI"),
+        *_v_swmmac_16x16_overlays(wave_size=64, op_sel_hi_field="OPSEL_HI"),
         _s_barrier_signal_all_overlay(),
         _s_barrier_wait_all_overlay(),
         _s_sendmsg_overlay(),

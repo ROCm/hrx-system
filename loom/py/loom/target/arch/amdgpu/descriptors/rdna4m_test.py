@@ -6,12 +6,26 @@
 
 from __future__ import annotations
 
+from loom.target.arch.amdgpu.descriptors.common import (
+    _RESOURCE_SWMMAC,
+    _RESOURCE_VALU,
+    _RESOURCE_WMMA,
+    _SCHEDULE_SWMMAC,
+    _SCHEDULE_WMMA,
+)
 from loom.target.arch.amdgpu.descriptors.rdna4m import (
+    _AMDGPU_RDNA4M_CORE_DESCRIPTOR_SET_BASE,
     _RDNA4M_SUPPLEMENTAL_FP8_INSTRUCTIONS,
+    _RDNA4M_SUPPLEMENTAL_MATRIX_INSTRUCTIONS,
 )
 from loom.target.arch.amdgpu.descriptors.sets import (
     _gfx115x_core_overlays,
     _rdna4m_core_overlays,
+)
+from loom.target.low_descriptors import (
+    IssueUse,
+    LatencyKind,
+    ModelQuality,
 )
 
 
@@ -113,3 +127,185 @@ def test_rdna4m_packed_fp8_dots_pin_no_op_modifiers() -> None:
             assert descriptors[descriptor_key].fixed_encoding_fields == (
                 ("OP_SEL_HI", 0x7),
             )
+
+
+def test_rdna4m_matrix_manifest_matches_llvm_mc_opcodes() -> None:
+    opcodes = {
+        instruction.name: instruction.encodings[0].opcode
+        for instruction in _RDNA4M_SUPPLEMENTAL_MATRIX_INSTRUCTIONS
+    }
+
+    assert opcodes == {
+        "V_WMMA_F32_16X16X16_F16": 0x40,
+        "V_WMMA_F32_16X16X16_BF16": 0x41,
+        "V_WMMA_F16_16X16X16_F16": 0x42,
+        "V_WMMA_BF16_16X16X16_BF16": 0x43,
+        "V_WMMA_I32_16X16X16_IU8": 0x44,
+        "V_WMMA_I32_16X16X16_IU4": 0x45,
+        "V_WMMA_F32_16X16X16_FP8_FP8": 0x46,
+        "V_WMMA_F32_16X16X16_FP8_BF8": 0x47,
+        "V_WMMA_F32_16X16X16_BF8_FP8": 0x48,
+        "V_WMMA_F32_16X16X16_BF8_BF8": 0x49,
+        "V_WMMA_I32_16X16X32_IU4": 0x4A,
+        "V_SWMMAC_F32_16X16X32_F16": 0x50,
+        "V_SWMMAC_F32_16X16X32_BF16": 0x51,
+        "V_SWMMAC_F16_16X16X32_F16": 0x52,
+        "V_SWMMAC_BF16_16X16X32_BF16": 0x53,
+        "V_SWMMAC_I32_16X16X32_IU8": 0x54,
+        "V_SWMMAC_I32_16X16X32_IU4": 0x55,
+        "V_SWMMAC_I32_16X16X64_IU4": 0x56,
+        "V_SWMMAC_F32_16X16X32_FP8_FP8": 0x57,
+        "V_SWMMAC_F32_16X16X32_FP8_BF8": 0x58,
+        "V_SWMMAC_F32_16X16X32_BF8_FP8": 0x59,
+        "V_SWMMAC_F32_16X16X32_BF8_BF8": 0x5A,
+    }
+
+
+def test_rdna4m_matrix_manifest_models_register_shapes() -> None:
+    encodings = {
+        instruction.name: instruction.encodings[0]
+        for instruction in _RDNA4M_SUPPLEMENTAL_MATRIX_INSTRUCTIONS
+    }
+
+    def operand_shapes(
+        instruction_name: str,
+    ) -> tuple[tuple[str | None, str | None, str, int, bool, bool], ...]:
+        return tuple(
+            (
+                operand.field_name,
+                operand.data_format_name,
+                operand.operand_type,
+                operand.size_bits,
+                operand.is_input,
+                operand.is_output,
+            )
+            for operand in encodings[instruction_name].operands
+        )
+
+    assert operand_shapes("V_WMMA_F32_16X16X16_FP8_BF8") == (
+        ("VDST", "FMT_WMMA_DC_16X16_F32", "OPR_VGPR", 256, False, True),
+        ("SRC0", "FMT_WMMA_AB_16X16_FP8", "OPR_SRC_VGPR", 64, True, False),
+        ("SRC1", "FMT_WMMA_AB_16X16_BF8", "OPR_SRC_VGPR", 64, True, False),
+        (
+            "SRC2",
+            "FMT_WMMA_DC_16X16_F32",
+            "OPR_SRC_VGPR_OR_INLINE",
+            256,
+            True,
+            False,
+        ),
+    )
+    assert operand_shapes("V_WMMA_I32_16X16X32_IU4") == (
+        ("VDST", "FMT_WMMA_DC_16X16_I32", "OPR_VGPR", 256, False, True),
+        ("SRC0", "FMT_WMMA_AB_16X32_IU4", "OPR_SRC_VGPR", 64, True, False),
+        ("SRC1", "FMT_WMMA_AB_16X32_IU4", "OPR_SRC_VGPR", 64, True, False),
+        (
+            "SRC2",
+            "FMT_WMMA_DC_16X16_I32",
+            "OPR_SRC_VGPR_OR_INLINE",
+            256,
+            True,
+            False,
+        ),
+    )
+    assert operand_shapes("V_SWMMAC_F16_16X16X32_F16") == (
+        ("VDST", "FMT_WMMA_DC_16X16_F16", "OPR_VGPR", 128, False, True),
+        ("SRC0", "FMT_WMMA_AB_16X16_F16", "OPR_SRC_VGPR", 128, True, False),
+        ("SRC1", "FMT_WMMA_AB_16X32_F16", "OPR_SRC_VGPR", 256, True, False),
+        ("SRC2", "FMT_WMMA_INDEX_SET", "OPR_SRC_VGPR", 32, True, False),
+    )
+    assert operand_shapes("V_SWMMAC_I32_16X16X64_IU4") == (
+        ("VDST", "FMT_WMMA_DC_16X16_I32", "OPR_VGPR", 256, False, True),
+        ("SRC0", "FMT_WMMA_AB_16X32_IU4", "OPR_SRC_VGPR", 64, True, False),
+        ("SRC1", "FMT_WMMA_AB_16X64_IU4", "OPR_SRC_VGPR", 128, True, False),
+        ("SRC2", "FMT_WMMA_INDEX_SET", "OPR_SRC_VGPR", 32, True, False),
+    )
+
+
+def test_rdna4m_matrix_descriptors_cover_manifest_and_architecture_delta() -> None:
+    matrix_instruction_names = {
+        instruction.name for instruction in _RDNA4M_SUPPLEMENTAL_MATRIX_INSTRUCTIONS
+    }
+    rdna4m_instruction_names = {
+        overlay.instruction_name for overlay in _rdna4m_core_overlays()
+    }
+    rdna35_instruction_names = {
+        overlay.instruction_name for overlay in _gfx115x_core_overlays()
+    }
+
+    assert matrix_instruction_names <= rdna4m_instruction_names
+    assert matrix_instruction_names - rdna35_instruction_names == {
+        "V_WMMA_F32_16X16X16_FP8_FP8",
+        "V_WMMA_F32_16X16X16_FP8_BF8",
+        "V_WMMA_F32_16X16X16_BF8_FP8",
+        "V_WMMA_F32_16X16X16_BF8_BF8",
+        "V_WMMA_I32_16X16X32_IU4",
+        "V_SWMMAC_F32_16X16X32_F16",
+        "V_SWMMAC_F32_16X16X32_BF16",
+        "V_SWMMAC_F16_16X16X32_F16",
+        "V_SWMMAC_BF16_16X16X32_BF16",
+        "V_SWMMAC_I32_16X16X32_IU8",
+        "V_SWMMAC_I32_16X16X32_IU4",
+        "V_SWMMAC_I32_16X16X64_IU4",
+        "V_SWMMAC_F32_16X16X32_FP8_FP8",
+        "V_SWMMAC_F32_16X16X32_FP8_BF8",
+        "V_SWMMAC_F32_16X16X32_BF8_FP8",
+        "V_SWMMAC_F32_16X16X32_BF8_BF8",
+    }
+
+
+def test_rdna4m_wave64_matrix_descriptors_model_half_width_abi() -> None:
+    matrix_instruction_names = {
+        instruction.name for instruction in _RDNA4M_SUPPLEMENTAL_MATRIX_INSTRUCTIONS
+    }
+    descriptors = {
+        overlay.descriptor_key: overlay
+        for overlay in _rdna4m_core_overlays()
+        if overlay.instruction_name in matrix_instruction_names
+    }
+    wave32_descriptors = {
+        key: descriptor
+        for key, descriptor in descriptors.items()
+        if not key.endswith(".acc_zero") and ".w64" not in key
+    }
+
+    assert len(wave32_descriptors) == len(matrix_instruction_names)
+    for descriptor_key, wave32_descriptor in wave32_descriptors.items():
+        wave64_descriptor = descriptors[f"{descriptor_key}.w64"]
+        assert wave64_descriptor.mnemonic == f"{wave32_descriptor.mnemonic}_w64"
+        assert wave64_descriptor.asm_forms is not None
+        assert wave64_descriptor.asm_forms[0].native_assembly_mnemonic == (
+            wave32_descriptor.mnemonic
+        )
+        for wave32_operand, wave64_operand in zip(
+            wave32_descriptor.operands,
+            wave64_descriptor.operands,
+            strict=True,
+        ):
+            wave32_units = wave32_operand.descriptor_operand.unit_count
+            wave64_units = wave64_operand.descriptor_operand.unit_count
+            assert wave64_units == max(1, wave32_units // 2)
+            assert (wave64_operand.size_exception_reason is not None) == (
+                wave64_units != wave32_units
+            )
+
+
+def test_rdna4m_matrix_schedule_matches_llvm_gfx11_model() -> None:
+    schedule_classes = {
+        schedule_class.name: schedule_class
+        for schedule_class in _AMDGPU_RDNA4M_CORE_DESCRIPTOR_SET_BASE.schedule_classes
+    }
+
+    for schedule_class_name, matrix_resource_name in (
+        (_SCHEDULE_WMMA, _RESOURCE_WMMA),
+        (_SCHEDULE_SWMMAC, _RESOURCE_SWMMAC),
+    ):
+        schedule_class = schedule_classes[schedule_class_name]
+        assert schedule_class.latency_kind is LatencyKind.ESTIMATE
+        assert schedule_class.latency_cycles == 5
+        assert schedule_class.schedule_distance_cycles == 0
+        assert schedule_class.issue_uses == (
+            IssueUse(_RESOURCE_VALU, cycles=1, units=1),
+            IssueUse(matrix_resource_name, cycles=1, units=1),
+        )
+        assert schedule_class.model_quality is ModelQuality.ESTIMATED

@@ -922,14 +922,12 @@ TEST(MatrixContractTest, SparseDescriptorsCarryCompressedFragmentLayouts) {
     ASSERT_TRUE(descriptor->family == LOOM_AMDGPU_MATRIX_FAMILY_SMFMAC ||
                 descriptor->family == LOOM_AMDGPU_MATRIX_FAMILY_SWMMAC)
         << ToString(descriptor->name);
-    const uint32_t expected_wave_size =
-        descriptor->family == LOOM_AMDGPU_MATRIX_FAMILY_SMFMAC ? 64 : 32;
-    const loom_amdgpu_matrix_wave_size_bits_t expected_wave_size_bits =
-        expected_wave_size == 64 ? LOOM_AMDGPU_MATRIX_WAVE_SIZE_64
-                                 : LOOM_AMDGPU_MATRIX_WAVE_SIZE_32;
-    EXPECT_EQ(layout->wave_size, expected_wave_size)
+    ASSERT_TRUE(descriptor->wave_size_bits == LOOM_AMDGPU_MATRIX_WAVE_SIZE_32 ||
+                descriptor->wave_size_bits == LOOM_AMDGPU_MATRIX_WAVE_SIZE_64)
         << ToString(descriptor->name);
-    EXPECT_EQ(descriptor->wave_size_bits, expected_wave_size_bits)
+    const uint32_t descriptor_wave_size =
+        descriptor->wave_size_bits == LOOM_AMDGPU_MATRIX_WAVE_SIZE_64 ? 64 : 32;
+    EXPECT_EQ(layout->wave_size, descriptor_wave_size)
         << ToString(descriptor->name);
     EXPECT_EQ(layout->tile_shape.result_row_count,
               descriptor->tile_shape.result_row_count)
