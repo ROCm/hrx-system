@@ -42,6 +42,25 @@
       }
     },
     {
+      "name": "runs spirv vulkan native vector structure",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/spirv_vulkan_hal_actual.loom",
+          "--case=@ordinary_vector_structure_i32_case",
+          "--device=vulkan",
+          "--vulkan_validation_layers=false"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"format\":\"loom.test.v0\"",
+          "\"case\":\"ordinary_vector_structure_i32_case\"",
+          "\"passed\":true"
+        ]
+      }
+    },
+    {
       "name": "runs ordered spirv vulkan A/B/A dispatch sequence",
       "run": {
         "tool": "iree-test-loom",
