@@ -13,7 +13,7 @@
 // by dense and routed projections; prefill schedules can reuse the inline
 // packed-row primitive while staging weights across multiple activation rows.
 // The shared packer is linked beside this module.
-amdgpu.target<gfx11-generic> @ggml_q6k_q8_gfx11_wave64 {subgroup_size = 64}
+amdgpu.target<gfx1151> @ggml_q6k_q8_gfx1151_wave64 {subgroup_size = 64}
 
 config.decl @ggml.linear_q6k_q8_1_x4.token_capacity : %value: index where [range(%value, 1, 2048)]
 
@@ -298,7 +298,7 @@ func.template<ggml.linear_q6k_q8_1_x4.body> device @ggml_linear_q6k_q8_1_x4_body
 // Dense raw-layout baseline. A 256-thread workgroup carries eight independent
 // wave32 output rows so decode launches enough waves without duplicating Q6_K
 // decoding within a row.
-kernel.def @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
+kernel.def export("ggml_linear_q6k_q8_1_x4") @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
   %token_capacity = config.get @ggml.linear_q6k_q8_1_x4.token_capacity : index
   %output_capacity = config.get @ggml.linear_q6k_q8_1_x4.output_capacity : index
   %c8 = index.constant 8 : index
@@ -337,7 +337,7 @@ kernel.def @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %ou
 
 // Wave64 vocabulary schedule matching llama.cpp Vulkan's one-row workgroup and
 // four-block concurrency on AMD targets with native wave64 execution.
-kernel.def target(@ggml_q6k_q8_gfx11_wave64) @ggml_linear_q6k_q8_1_x4_wave64_block4(%token_count: index, %input_size: index, %output_size: index) {
+kernel.def target(@ggml_q6k_q8_gfx1151_wave64) export("ggml_linear_q6k_q8_1_x4") @ggml_linear_q6k_q8_1_x4_wave64_block4(%token_count: index, %input_size: index, %output_size: index) {
   %token_capacity = config.get @ggml.linear_q6k_q8_1_x4.token_capacity : index
   %output_capacity = config.get @ggml.linear_q6k_q8_1_x4.output_capacity : index
   %c1 = index.constant 1 : index
@@ -401,13 +401,27 @@ check.case public @ggml_linear_q6k_q8_1_x4_nonzero_tail_case {
   %q8_input = check.generate.fill value(0) : tensor<2x2304xi8>
   %weight = check.generate.fill value(-86) : tensor<9x8x210xi8>
   %output = check.generate.fill value(0.0) : tensor<2x9xf32>
-  %wave64_output = check.generate.fill value(0.0) : tensor<2x9xf32>
   %expected = check.generate.fill value(358.1715087890625) : tensor<2x9xf32>
   kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %input_size](%token_count, %input_size, %input, %q8_input) : [index, index](index, index, tensor<2x2048xf32>, tensor<2x2304xi8>)
   kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %q8_input, %weight, %output) : [index, index, index](index, index, index, tensor<2x2304xi8>, tensor<9x8x210xi8>, tensor<2x9xf32>)
-  kernel.launch @ggml_linear_q6k_q8_1_x4_wave64_block4[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %q8_input, %weight, %wave64_output) : [index, index, index](index, index, index, tensor<2x2304xi8>, tensor<9x8x210xi8>, tensor<2x9xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.25) rtol(9.9999999999999995e-07) nan(same) : tensor<2x9xf32>
-  check.expect.close actual(%wave64_output) expected(%expected) atol(0.25) rtol(9.9999999999999995e-07) nan(same) : tensor<2x9xf32>
+  check.return
+}
+
+// The gfx1151 schedule has an exact target requirement, so its nonzero packed
+// data case remains independently selectable from the generic gfx11 case.
+check.case public @ggml_linear_q6k_q8_1_x4_wave64_block4_nonzero_tail_case {
+  %token_count = check.literal value(2) : index
+  %input_size = check.literal value(2048) : index
+  %output_size = check.literal value(9) : index
+  %input = check.generate.fill value(0.00390625) : tensor<2x2048xf32>
+  %q8_input = check.generate.fill value(0) : tensor<2x2304xi8>
+  %weight = check.generate.fill value(-86) : tensor<9x8x210xi8>
+  %output = check.generate.fill value(0.0) : tensor<2x9xf32>
+  %expected = check.generate.fill value(358.1715087890625) : tensor<2x9xf32>
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %input_size](%token_count, %input_size, %input, %q8_input) : [index, index](index, index, tensor<2x2048xf32>, tensor<2x2304xi8>)
+  kernel.launch @ggml_linear_q6k_q8_1_x4_wave64_block4[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %q8_input, %weight, %output) : [index, index, index](index, index, index, tensor<2x2304xi8>, tensor<9x8x210xi8>, tensor<2x9xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.25) rtol(9.9999999999999995e-07) nan(same) : tensor<2x9xf32>
   check.return
 }
 
