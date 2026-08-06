@@ -114,6 +114,36 @@ TEST_F(GraphBufferTest, DependentFillThenCopyProducesExpectedContents) {
   hrx_graph_release(graph);
 }
 
+TEST_F(GraphBufferTest, LaunchFlushesPendingStreamWorkBeforeGraphCommands) {
+  const uint8_t pattern = 0x5Au;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_fill_buffer(
+      stream_, source_, 0, 64, &pattern, sizeof(pattern))));
+
+  hrx_graph_t graph = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph)));
+  const hrx_graph_copy_buffer_node_attrs_t copy_attrs = {
+      /*.src=*/{source_, 0, 64},
+      /*.dst=*/{destination_, 0, 64},
+  };
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_add_copy_buffer_node(graph, nullptr, 0, &copy_attrs, nullptr)));
+
+  hrx_graph_exec_t executable = nullptr;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_instantiate(graph, 0, &executable)));
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_graph_exec_launch(executable, stream_)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+
+  uint8_t contents[64] = {};
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h(
+      device_, destination_, 0, contents, sizeof(contents))));
+  for (uint8_t value : contents) EXPECT_EQ(value, pattern);
+
+  hrx_graph_exec_release(executable);
+  hrx_graph_release(graph);
+}
+
 TEST_F(GraphBufferTest, AddedDependencyOrdersFillBeforeCopy) {
   hrx_graph_t graph = nullptr;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_create(device_, 0, &graph)));
