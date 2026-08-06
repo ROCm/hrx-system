@@ -1481,6 +1481,7 @@ def _gfx115x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         *_rdna_scalar_domain_fma_overlays(),
         *_rdna35_dpp16_f32_uniform_rhs_overlays(),
         *_rdna35_dpp8_f32_uniform_rhs_overlays(),
+        *_rdna35_dpp_integer_compare_uniform_rhs_overlays(),
     )
 
 
@@ -1638,27 +1639,27 @@ def _rdna4m_minmax_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         ),
         *(
             overlay
-            for operation, instruction_name, mnemonic, semantic in (
-                ("min", "V_MIN_NUM_F32", "v_min_num_f32", "minnum"),
-                ("max", "V_MAX_NUM_F32", "v_max_num_f32", "maxnum"),
+            for operation, instruction_name, semantic in (
+                ("min", "V_MIN_NUM_F32", "minnum"),
+                ("max", "V_MAX_NUM_F32", "maxnum"),
             )
             for overlay in _v_binary_f32_dpp16_uniform_rhs_overlays(
                 operation=operation,
                 instruction_name=instruction_name,
-                mnemonic=mnemonic,
+                low_mnemonic=f"v_{operation}_f32",
                 semantic=semantic,
             )
         ),
         *(
             overlay
-            for operation, instruction_name, mnemonic, semantic in (
-                ("min", "V_MIN_NUM_F32", "v_min_num_f32", "minnum"),
-                ("max", "V_MAX_NUM_F32", "v_max_num_f32", "maxnum"),
+            for operation, instruction_name, semantic in (
+                ("min", "V_MIN_NUM_F32", "minnum"),
+                ("max", "V_MAX_NUM_F32", "maxnum"),
             )
             for overlay in _v_binary_f32_dpp8_uniform_rhs_overlays(
                 operation=operation,
                 instruction_name=instruction_name,
-                mnemonic=mnemonic,
+                low_mnemonic=f"v_{operation}_f32",
                 semantic=semantic,
             )
         ),
