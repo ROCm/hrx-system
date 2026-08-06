@@ -15,7 +15,6 @@
 #define LOOM_ANALYSIS_VECTOR_MEMORY_FOOTPRINT_H_
 
 #include "iree/base/api.h"
-#include "iree/base/internal/arena.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 #include "loom/util/fact_table.h"
@@ -25,8 +24,6 @@ extern "C" {
 #endif
 
 typedef struct loom_vector_memory_footprint_options_t {
-  // Scratch arena used for symbolic expressions.
-  iree_arena_allocator_t* arena;
   // Caller-owned value facts for |function|.
   const loom_value_fact_table_t* fact_table;
   // Structured diagnostic emitter for user footprint proof failures.

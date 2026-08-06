@@ -3465,7 +3465,6 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
   loom_vector_memory_footprint_result_t footprint_result = {0};
   if (iree_status_is_ok(status)) {
     const loom_vector_memory_footprint_options_t footprint_options = {
-        .arena = &context.arena,
         .fact_table = context.lowering.fact_table,
         .emitter = options->emitter,
         .max_errors = options->max_errors,
@@ -3485,7 +3484,6 @@ iree_status_t loom_low_lower_function(loom_module_t* module,
   loom_kernel_async_legality_result_t async_legality_result = {0};
   if (iree_status_is_ok(status)) {
     loom_kernel_async_legality_options_t async_legality_options = {
-        .arena = &context.arena,
         .fact_table = context.lowering.fact_table,
         .value_domain = &context.lowering.value_domain,
         .emitter = options->emitter,

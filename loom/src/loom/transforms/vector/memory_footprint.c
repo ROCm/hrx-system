@@ -66,7 +66,6 @@ iree_status_t loom_vector_memory_footprint_run(loom_pass_t* pass,
 
   loom_vector_memory_footprint_result_t result = {0};
   const loom_vector_memory_footprint_options_t options = {
-      .arena = pass->arena,
       .fact_table = fact_table,
       .emitter = pass->diagnostic_emitter,
   };
