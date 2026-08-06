@@ -350,17 +350,17 @@ iree_status_t loom_spirv_emit_type_cooperative_matrix(
   IREE_RETURN_IF_ERROR(loom_spirv_emit_type_scalar(
       context, value_type.scalar_type, &component_type_id));
   uint32_t scope_id = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_spirv_emit_u32_constant(context, value_type.scope, &scope_id));
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_u32_constant(
+      context, value_type.cooperative_matrix.scope, &scope_id));
   uint32_t rows_id = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_spirv_emit_u32_constant(context, value_type.rows, &rows_id));
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_u32_constant(
+      context, value_type.cooperative_matrix.rows, &rows_id));
   uint32_t columns_id = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_spirv_emit_u32_constant(context, value_type.columns, &columns_id));
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_u32_constant(
+      context, value_type.cooperative_matrix.columns, &columns_id));
   uint32_t use_id = 0;
   IREE_RETURN_IF_ERROR(loom_spirv_emit_u32_constant(
-      context, value_type.cooperative_matrix_use, &use_id));
+      context, value_type.cooperative_matrix.use, &use_id));
   const loom_spirv_type_key_t key = {
       .kind = LOOM_SPIRV_TYPE_KEY_COOPERATIVE_MATRIX,
       .operand_count = 5,
@@ -850,6 +850,20 @@ iree_status_t loom_spirv_emit_type_id_for_value_type(
     case LOOM_SPIRV_VALUE_CLASS_SCALAR:
       return loom_spirv_emit_type_scalar(context, type.scalar_type,
                                          out_type_id);
+    case LOOM_SPIRV_VALUE_CLASS_VECTOR: {
+      uint32_t component_type_id = 0;
+      IREE_RETURN_IF_ERROR(loom_spirv_emit_type_scalar(
+          context, type.scalar_type, &component_type_id));
+      return loom_spirv_emit_type_vector(context, component_type_id,
+                                         type.vector.lane_count, out_type_id);
+    }
+    case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR: {
+      uint32_t component_type_id = 0;
+      IREE_RETURN_IF_ERROR(
+          loom_spirv_emit_type_bool(context, &component_type_id));
+      return loom_spirv_emit_type_vector(context, component_type_id,
+                                         type.vector.lane_count, out_type_id);
+    }
     case LOOM_SPIRV_VALUE_CLASS_BOOL:
       return loom_spirv_emit_type_bool(context, out_type_id);
     case LOOM_SPIRV_VALUE_CLASS_OFFSET64:

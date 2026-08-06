@@ -41,6 +41,7 @@ iree_py_library(
         ":builtins",
         ":cooperative_matrix",
         ":features",
+        ":ordinary_vector",
         ":scalar_alu",
         ":scalar_constant",
         ":scalar_conversion",
@@ -81,6 +82,33 @@ iree_py_library(
     ],
     deps = [
         "//loom/py/loom/target/arch:package",
+    ],
+)
+
+iree_py_library(
+    name = "ordinary_vector",
+    srcs = [
+        "__init__.py",
+        "ordinary_vector.py",
+    ],
+    deps = [
+        ":features",
+        ":scalar_alu",
+        ":scalar_constant",
+    ],
+)
+
+iree_py_test(
+    name = "ordinary_vector_test",
+    size = "small",
+    srcs = [
+        "ordinary_vector_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.spirv.ordinary_vector_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":ordinary_vector",
     ],
 )
 

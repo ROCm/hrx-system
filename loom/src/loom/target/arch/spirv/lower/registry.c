@@ -46,7 +46,8 @@ static iree_status_t loom_spirv_make_typed_register_type(
 
 static bool loom_spirv_source_type_is_id(loom_type_t type) {
   loom_spirv_value_type_t value_type = {0};
-  return loom_spirv_value_type_from_loom_type(type, &value_type);
+  return loom_type_is_scalar(type) &&
+         loom_spirv_value_type_from_loom_type(type, &value_type);
 }
 
 static bool loom_spirv_source_type_is_offset64(loom_type_t type) {

@@ -41,26 +41,44 @@ typedef enum loom_spirv_value_class_e {
   LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP = 7,
   // Workgroup array pointer with a concrete scalar element type.
   LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY = 8,
+  // Ordinary numeric vector SSA ID with a component type and lane count.
+  LOOM_SPIRV_VALUE_CLASS_VECTOR = 9,
+  // Ordinary Boolean vector SSA ID with a lane count.
+  LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR = 10,
 } loom_spirv_value_class_t;
 
 typedef struct loom_spirv_value_type_t {
   // Target-local value class consumed by lowering and emission.
   loom_spirv_value_class_t value_class;
-  // Scalar component type for scalar, pointer, and cooperative matrix classes.
+  // Scalar component type for scalar, numeric vector, pointer, and cooperative
+  // matrix classes.
   loom_spirv_scalar_type_t scalar_type;
-  // Cooperative matrix row count.
-  uint16_t rows;
-  // Cooperative matrix column count.
-  uint16_t columns;
-  // Cooperative matrix scope operand.
-  loom_spirv_scope_t scope;
-  // Cooperative matrix use operand.
-  loom_spirv_cooperative_matrix_use_t cooperative_matrix_use;
+  union {
+    // Ordinary-vector shape metadata.
+    struct {
+      // Number of vector components.
+      uint16_t lane_count;
+    } vector;
+    // Cooperative-matrix shape and use metadata.
+    struct {
+      // Cooperative matrix row count.
+      uint16_t rows;
+      // Cooperative matrix column count.
+      uint16_t columns;
+      // Cooperative matrix scope operand.
+      loom_spirv_scope_t scope;
+      // Cooperative matrix use operand.
+      loom_spirv_cooperative_matrix_use_t use;
+    } cooperative_matrix;
+  };
 } loom_spirv_value_type_t;
 
-// Maps a public Loom scalar type to its canonical SPIR-V value type. Returns
-// false for types that need target-specific aggregate semantics or have no
-// logical SPIR-V representation.
+static_assert(sizeof(loom_spirv_value_type_t) == 20,
+              "SPIR-V value types must remain compact");
+
+// Maps a public Loom scalar or native ordinary-vector type to its canonical
+// SPIR-V value type. Returns false for types that need other target-specific
+// aggregate semantics or have no logical SPIR-V representation.
 bool loom_spirv_value_type_from_loom_type(
     loom_type_t type, loom_spirv_value_type_t* out_value_type);
 
@@ -93,6 +111,9 @@ static inline bool loom_spirv_abi_value_type_encode(
     case LOOM_SPIRV_VALUE_CLASS_BOOL:
       *out_code = LOOM_SPIRV_ABI_VALUE_TYPE_BOOL;
       return true;
+    case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+    case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR:
+      return false;
     case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
     case LOOM_SPIRV_VALUE_CLASS_OFFSET64:
     case LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS:
@@ -151,10 +172,17 @@ static inline bool loom_spirv_value_type_equal(loom_spirv_value_type_t lhs,
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
       return lhs.scalar_type == rhs.scalar_type;
+    case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+      return lhs.scalar_type == rhs.scalar_type &&
+             lhs.vector.lane_count == rhs.vector.lane_count;
+    case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR:
+      return lhs.vector.lane_count == rhs.vector.lane_count;
     case LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX:
-      return lhs.scalar_type == rhs.scalar_type && lhs.rows == rhs.rows &&
-             lhs.columns == rhs.columns && lhs.scope == rhs.scope &&
-             lhs.cooperative_matrix_use == rhs.cooperative_matrix_use;
+      return lhs.scalar_type == rhs.scalar_type &&
+             lhs.cooperative_matrix.rows == rhs.cooperative_matrix.rows &&
+             lhs.cooperative_matrix.columns == rhs.cooperative_matrix.columns &&
+             lhs.cooperative_matrix.scope == rhs.cooperative_matrix.scope &&
+             lhs.cooperative_matrix.use == rhs.cooperative_matrix.use;
     case LOOM_SPIRV_VALUE_CLASS_OFFSET64:
     case LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS:
     case LOOM_SPIRV_VALUE_CLASS_BOOL:

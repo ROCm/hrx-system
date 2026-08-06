@@ -447,6 +447,8 @@ static iree_status_t loom_spirv_module_abi_slot_type_info(
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
     case LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX:
+    case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+    case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR:
     case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
       break;
   }
@@ -518,6 +520,8 @@ static uint8_t loom_spirv_module_abi_slot_constant_word_count(
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
     case LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX:
+    case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+    case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR:
     case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
       break;
   }
@@ -609,6 +613,8 @@ static iree_status_t loom_spirv_module_abi_build_raw_bda_plan(
       case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
       case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
       case LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX:
+      case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+      case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR:
       case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
         IREE_CHECK_UNREACHABLE("verified SPIR-V raw-BDA direct ABI value");
         break;
@@ -926,6 +932,8 @@ static iree_status_t loom_spirv_module_abi_materialize_bda_arg(
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
     case LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX:
+    case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+    case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR:
     case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
       break;
   }

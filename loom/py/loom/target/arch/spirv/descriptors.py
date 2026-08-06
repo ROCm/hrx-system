@@ -19,6 +19,13 @@ from loom.target.arch.spirv.cooperative_matrix import (
     CooperativeMatrixCase,
     cooperative_matrix_descriptor_key,
 )
+from loom.target.arch.spirv.ordinary_vector import (
+    ORDINARY_VECTOR_INSTRUCTIONS,
+    OrdinaryVectorComponentKind,
+    OrdinaryVectorComponentType,
+    OrdinaryVectorInstruction,
+    OrdinaryVectorInstructionType,
+)
 from loom.target.arch.spirv.scalar_alu import (
     BOOLEAN_BINARY_OPERATIONS,
     BOOLEAN_CONSTANTS,
@@ -390,6 +397,68 @@ def _unary_typed_descriptor(
         operands=operands,
         feature_mask_words=(feature_bits,) if feature_bits else (),
         asm_forms=_asm(results=("dst",), operands=("input",)),
+        schedule_class=_SCHEDULE_ALU,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _ordinary_vector_result(
+    value_type: OrdinaryVectorInstructionType,
+) -> Operand:
+    if (
+        isinstance(value_type, OrdinaryVectorComponentType)
+        and value_type.kind == OrdinaryVectorComponentKind.OFFSET
+    ):
+        return _offset64_result()
+    return _id_result()
+
+
+def _ordinary_vector_operand(
+    field_name: str,
+    value_type: OrdinaryVectorInstructionType,
+) -> Operand:
+    if (
+        isinstance(value_type, OrdinaryVectorComponentType)
+        and value_type.kind == OrdinaryVectorComponentKind.OFFSET
+    ):
+        return _offset64_operand(field_name)
+    return _id_operand(field_name)
+
+
+def _ordinary_vector_descriptor(row: OrdinaryVectorInstruction) -> Descriptor:
+    has_component_index = row.component_index_maximum is not None
+    immediates = (
+        (
+            Immediate(
+                "component_index",
+                ImmediateKind.UNSIGNED,
+                bit_width=32,
+                unsigned_max=row.component_index_maximum,
+            ),
+        )
+        if has_component_index
+        else ()
+    )
+    return Descriptor(
+        key=row.key,
+        mnemonic=row.mnemonic,
+        semantic_tag=row.key,
+        operands=(
+            _ordinary_vector_result(row.result_type),
+            *(
+                _ordinary_vector_operand(name, operand_type)
+                for name, operand_type in zip(
+                    row.operand_names, row.operand_types, strict=True
+                )
+            ),
+        ),
+        immediates=immediates,
+        feature_mask_words=(row.feature_bits,) if row.feature_bits else (),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=row.operand_names,
+            immediates=("component_index",) if has_component_index else (),
+        ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -1116,6 +1185,7 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
         ),
         *_scalar_binary_descriptors(),
         *_conversion_descriptors(),
+        *(_ordinary_vector_descriptor(row) for row in ORDINARY_VECTOR_INSTRUCTIONS),
         _coordinate_copy_descriptor(),
         _ternary_same_type_descriptor(
             key="spirv.op_imul_add.i32",

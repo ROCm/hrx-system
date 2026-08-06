@@ -38,6 +38,7 @@ iree_py_library(
     loom::py::loom::target::arch::spirv::builtins
     loom::py::loom::target::arch::spirv::cooperative_matrix
     loom::py::loom::target::arch::spirv::features
+    loom::py::loom::target::arch::spirv::ordinary_vector
     loom::py::loom::target::arch::spirv::scalar_alu
     loom::py::loom::target::arch::spirv::scalar_constant
     loom::py::loom::target::arch::spirv::scalar_conversion
@@ -75,6 +76,38 @@ iree_py_library(
     "features.py"
   DEPS
     loom::py::loom::target::arch::package
+)
+
+iree_py_library(
+  NAME
+    ordinary_vector
+  SRCS
+    "__init__.py"
+    "ordinary_vector.py"
+  DEPS
+    loom::py::loom::target::arch::spirv::features
+    loom::py::loom::target::arch::spirv::scalar_alu
+    loom::py::loom::target::arch::spirv::scalar_constant
+)
+
+iree_py_test(
+  NAME
+    ordinary_vector_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
+  SRCS
+    "ordinary_vector_test.py"
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.spirv.ordinary_vector_test"
+  DEPS
+    loom::py::loom::target::arch::spirv::ordinary_vector
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
 
 iree_py_library(

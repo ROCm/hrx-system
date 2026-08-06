@@ -22,6 +22,11 @@ from loom.gen.target.arch.spirv.spirv_packet_rows import (
 from loom.target.arch.spirv.builtins import BUILTIN_DIMENSIONS, BUILTIN_INDEX_QUERIES
 from loom.target.arch.spirv.cooperative_matrix import cooperative_matrix_descriptor_key
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
+from loom.target.arch.spirv.ordinary_vector import (
+    ORDINARY_VECTOR_INSTRUCTIONS,
+    ORDINARY_VECTOR_TYPES,
+    OrdinaryVectorComponentKind,
+)
 from loom.target.arch.spirv.scalar_alu import (
     BOOLEAN_BINARY_OPERATIONS,
     BOOLEAN_CONSTANTS,
@@ -98,6 +103,32 @@ def test_validation_preserves_the_deliberate_packetless_descriptor() -> None:
     _expect_row_validation_error(
         rows_with_packetless_descriptor,
         "SPIR-V packetless descriptors must not have packet rows: spirv.op_variable.function.ptr",
+    )
+
+
+def test_validation_rejects_rows_exceeding_packet_operand_maximum() -> None:
+    rows = _packet_rows()
+    rows_with_five_operands = (
+        replace(rows[0], operand_types=("value",) * 5),
+        *rows[1:],
+    )
+
+    _expect_row_validation_error(
+        rows_with_five_operands,
+        "SPIR-V packet rows exceed the 4-operand maximum: spirv.op_constant_false.bool",
+    )
+
+
+def test_validation_rejects_heterogeneous_four_operand_types() -> None:
+    rows = _packet_rows()
+    rows_with_unencodable_types = (
+        replace(rows[0], operand_types=("first", "second", "third", "fourth")),
+        *rows[1:],
+    )
+
+    _expect_row_validation_error(
+        rows_with_unencodable_types,
+        "SPIR-V packet rows exceed the operand-type capacity without a repeated type: spirv.op_constant_false.bool",
     )
 
 
@@ -506,6 +537,88 @@ def test_generation_emits_scalar_conversion_rows() -> None:
     assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_F_CONVERT_F32_F16" in tables
     assert "SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_BITCAST_I32_F32" in tables
     assert "LOOM_SPIRV_PACKET_FORM_UNARY_TYPED" in tables
+
+
+def test_generation_emits_complete_ordinary_vector_structural_matrix() -> None:
+    tables = generate_tables()
+    packet_rows_by_key = {row.descriptor_key: row for row in _packet_rows() if row.descriptor_key in {instruction.key for instruction in ORDINARY_VECTOR_INSTRUCTIONS}}
+
+    assert len(ORDINARY_VECTOR_TYPES) == 30
+    assert len(ORDINARY_VECTOR_INSTRUCTIONS) == 120
+    assert len(packet_rows_by_key) == len(ORDINARY_VECTOR_INSTRUCTIONS)
+    assert ('static_assert(LOOM_SPIRV_PACKET_MAX_OPERAND_COUNT == 4, "generated packet operand maximum");') in tables
+    assert ('static_assert(LOOM_SPIRV_PACKET_OPERAND_TYPE_CAPACITY == 3, "generated packet operand-type capacity");') in tables
+    assert "operand_type_count" not in tables
+
+    for vector_type in ORDINARY_VECTOR_TYPES:
+        component_type = vector_type.component_type
+        construct_key = f"spirv.op_composite_construct.{vector_type.suffix}"
+        extract_key = f"spirv.op_composite_extract.{vector_type.suffix}.{component_type.suffix}"
+        insert_key = f"spirv.op_composite_insert.{component_type.suffix}.{vector_type.suffix}"
+        select_key = f"spirv.op_select.{vector_type.suffix}"
+
+        construct = _generated_row(tables, construct_key)
+        assert "LOOM_SPIRV_OP_COMPOSITE_CONSTRUCT" in construct
+        assert "LOOM_SPIRV_PACKET_FORM_COMPOSITE_CONSTRUCT" in construct
+        assert component_type.vector_value_class in construct
+        assert component_type.scalar_value_class in construct
+        assert f".lane_count = {vector_type.lane_count}" in construct
+        assert f".operand_count = {vector_type.lane_count}" in construct
+
+        extract = _generated_row(tables, extract_key)
+        assert "LOOM_SPIRV_OP_COMPOSITE_EXTRACT" in extract
+        assert "LOOM_SPIRV_PACKET_FORM_COMPOSITE_EXTRACT" in extract
+        assert ".operand_count = 1" in extract
+        assert ".immediate_index = 0" in extract
+
+        insert = _generated_row(tables, insert_key)
+        assert "LOOM_SPIRV_OP_COMPOSITE_INSERT" in insert
+        assert "LOOM_SPIRV_PACKET_FORM_COMPOSITE_INSERT" in insert
+        assert ".operand_count = 2" in insert
+        assert ".immediate_index = 0" in insert
+
+        select = _generated_row(tables, select_key)
+        assert "LOOM_SPIRV_OP_SELECT" in select
+        assert "LOOM_SPIRV_PACKET_FORM_SELECT" in select
+        assert "LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR" in select
+        assert ".operand_count = 3" in select
+
+        expected_features = (component_type.feature_bits,) if component_type.feature_bits else ()
+        for descriptor_key in (construct_key, extract_key, insert_key, select_key):
+            assert _descriptor(descriptor_key).feature_mask_words == expected_features
+
+        component_index_maximum = vector_type.lane_count - 1
+        for descriptor_key in (extract_key, insert_key):
+            descriptor = _descriptor(descriptor_key)
+            assert len(descriptor.immediates) == 1
+            assert descriptor.immediates[0].unsigned_max == component_index_maximum
+
+        if component_type.kind == OrdinaryVectorComponentKind.OFFSET:
+            construct_registers = tuple(operand.reg_alts[0].reg_class for operand in _descriptor(construct_key).operands)
+            extract_registers = tuple(operand.reg_alts[0].reg_class for operand in _descriptor(extract_key).operands)
+            insert_registers = tuple(operand.reg_alts[0].reg_class for operand in _descriptor(insert_key).operands)
+            assert construct_registers == (
+                "spirv.id",
+                *(("spirv.offset64",) * vector_type.lane_count),
+            )
+            assert extract_registers == ("spirv.offset64", "spirv.id")
+            assert insert_registers == (
+                "spirv.id",
+                "spirv.offset64",
+                "spirv.id",
+            )
+
+
+def test_generation_compacts_only_repeated_four_operand_types() -> None:
+    packet_rows_by_key = {row.descriptor_key: row for row in _packet_rows()}
+
+    for vector_type in ORDINARY_VECTOR_TYPES:
+        construct = packet_rows_by_key[f"spirv.op_composite_construct.{vector_type.suffix}"]
+        assert len(construct.operand_types) == vector_type.lane_count
+        if vector_type.lane_count == 4:
+            assert construct.encoded_operand_types() == construct.operand_types[:1]
+        else:
+            assert construct.encoded_operand_types() == construct.operand_types
 
 
 def test_generation_emits_complete_address_conversion_rows() -> None:
