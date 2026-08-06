@@ -358,22 +358,24 @@ typedef struct iree_hal_queue_pool_backend_t {
 // Returns a host call bound to the given function pointer and user data.
 static inline iree_hal_host_call_t iree_hal_make_host_call(
     iree_hal_host_call_fn_t fn, void* user_data) {
-  return (iree_hal_host_call_t){
-      .fn = fn,
-      .user_data = user_data,
-      .resource = NULL,
+  iree_hal_host_call_t call = {
+      /*.fn=*/fn,
+      /*.user_data=*/user_data,
+      /*.resource=*/NULL,
   };
+  return call;
 }
 
 // Returns a host call whose callback state is retained by |resource|.
 static inline iree_hal_host_call_t iree_hal_make_host_call_with_resource(
     iree_hal_host_call_fn_t fn, void* user_data,
     iree_hal_resource_t* resource) {
-  return (iree_hal_host_call_t){
-      .fn = fn,
-      .user_data = user_data,
-      .resource = resource,
+  iree_hal_host_call_t call = {
+      /*.fn=*/fn,
+      /*.user_data=*/user_data,
+      /*.resource=*/resource,
   };
+  return call;
 }
 
 // Bitfield specifying flags controlling an execution operation.
