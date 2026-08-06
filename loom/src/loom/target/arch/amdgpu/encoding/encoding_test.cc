@@ -743,6 +743,25 @@ TEST(AmdgpuEncodingTest, NamesDppFormats) {
       loom_amdgpu_encoding_format_name(LOOM_AMDGPU_ENCODING_FORMAT_VOP1_DPP16),
       IREE_SV("vop1_dpp16")));
   EXPECT_TRUE(iree_string_view_equal(
+      loom_amdgpu_encoding_format_name(LOOM_AMDGPU_ENCODING_FORMAT_VOP1_DPP8),
+      IREE_SV("vop1_dpp8")));
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_amdgpu_encoding_format_name(LOOM_AMDGPU_ENCODING_FORMAT_VOP2_DPP8),
+      IREE_SV("vop2_dpp8")));
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_amdgpu_encoding_format_name(LOOM_AMDGPU_ENCODING_FORMAT_VOP3P_DPP8),
+      IREE_SV("vop3p_dpp8")));
+  EXPECT_TRUE(
+      iree_string_view_equal(loom_amdgpu_encoding_format_name(
+                                 LOOM_AMDGPU_ENCODING_FORMAT_VOP3_SDST_DPP8),
+                             IREE_SV("vop3_sdst_dpp8")));
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_amdgpu_encoding_format_name(LOOM_AMDGPU_ENCODING_FORMAT_VOP3_DPP8),
+      IREE_SV("vop3_dpp8")));
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_amdgpu_encoding_format_name(LOOM_AMDGPU_ENCODING_FORMAT_VOPC_DPP8),
+      IREE_SV("vopc_dpp8")));
+  EXPECT_TRUE(iree_string_view_equal(
       loom_amdgpu_encoding_format_name(LOOM_AMDGPU_ENCODING_FORMAT_VOP1_SDWA),
       IREE_SV("vop1_sdwa")));
 }
@@ -796,6 +815,35 @@ TEST(AmdgpuEncodingTest, PacksRdna3VMovB32Dpp16LaneControl) {
   EXPECT_EQ(packet.bit_count, 64u);
   EXPECT_EQ(packet.words[0], UINT32_C(0x7e0202fa));
   EXPECT_EQ(packet.words[1], UINT32_C(0xff094002));
+}
+
+TEST(AmdgpuEncodingTest, PacksRdna35VAddF32Dpp8LaneSelectors) {
+  LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
+      table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3_5, "amdgpu.rdna3_5.core");
+  const loom_amdgpu_encoding_field_value_t field_values[] = {
+      {LOOM_AMDGPU_ENCODING_FIELD_VDST, {}, 5},
+      {LOOM_AMDGPU_ENCODING_FIELD_SRC0, {}, 233},
+      {LOOM_AMDGPU_ENCODING_FIELD_VSRC0, {}, 1},
+      {LOOM_AMDGPU_ENCODING_FIELD_SRC1, {}, 2},
+      {LOOM_AMDGPU_ENCODING_FIELD_LANE_SEL_0, {}, 7},
+      {LOOM_AMDGPU_ENCODING_FIELD_LANE_SEL_1, {}, 6},
+      {LOOM_AMDGPU_ENCODING_FIELD_LANE_SEL_2, {}, 5},
+      {LOOM_AMDGPU_ENCODING_FIELD_LANE_SEL_3, {}, 4},
+      {LOOM_AMDGPU_ENCODING_FIELD_LANE_SEL_4, {}, 3},
+      {LOOM_AMDGPU_ENCODING_FIELD_LANE_SEL_5, {}, 2},
+      {LOOM_AMDGPU_ENCODING_FIELD_LANE_SEL_6, {}, 1},
+      {LOOM_AMDGPU_ENCODING_FIELD_LANE_SEL_7, {}, 0},
+  };
+  loom_amdgpu_encoding_packet_t packet = {};
+  IREE_ASSERT_OK(loom_amdgpu_encoding_pack(
+      table, LOOM_AMDGPU_ENCODING_FORMAT_VOP3_DPP8, /*opcode=*/0x103,
+      field_values, IREE_ARRAYSIZE(field_values), &packet));
+  EXPECT_EQ(packet.word_count, 3u);
+  EXPECT_EQ(packet.bit_count, 96u);
+  EXPECT_EQ(packet.words[0], UINT32_C(0xd5030005));
+  // The unused SRC2 field remains inline zero instead of naming a VGPR.
+  EXPECT_EQ(packet.words[1], UINT32_C(0x020004e9));
+  EXPECT_EQ(packet.words[2], UINT32_C(0x05397701));
 }
 
 TEST(AmdgpuEncodingTest, PacksCdna4VMovB32DppLaneControl) {

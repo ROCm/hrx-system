@@ -40,6 +40,8 @@ typedef enum loom_amdgpu_native_asm_immediate_format_e {
   LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL = 9,
   // Target-format ID for a required named integer modifier.
   LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64 = 10,
+  // Packed eight-lane DPP selector tuple.
+  LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP8 = 11,
 } loom_amdgpu_native_asm_immediate_format_t;
 
 typedef enum loom_amdgpu_register_part_mask_e {
@@ -794,6 +796,21 @@ static iree_status_t loom_amdgpu_append_packet_immediate_dpp_control(
   return loom_amdgpu_append_dpp_control(context, (uint16_t)value);
 }
 
+static iree_status_t loom_amdgpu_append_packet_immediate_dpp8(
+    const loom_native_assembly_packet_context_t* context,
+    uint16_t descriptor_immediate_index) {
+  int64_t value = 0;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_read_packet_immediate_by_index_i64(
+      context, descriptor_immediate_index, &value));
+  IREE_ASSERT(value >= 0 && value <= 0xFFFFFF);
+  return iree_string_builder_append_format(
+      context->builder, "dpp8:[%u,%u,%u,%u,%u,%u,%u,%u]",
+      (unsigned)((value >> 0) & 0x7), (unsigned)((value >> 3) & 0x7),
+      (unsigned)((value >> 6) & 0x7), (unsigned)((value >> 9) & 0x7),
+      (unsigned)((value >> 12) & 0x7), (unsigned)((value >> 15) & 0x7),
+      (unsigned)((value >> 18) & 0x7), (unsigned)((value >> 21) & 0x7));
+}
+
 static iree_status_t loom_amdgpu_append_packet_immediate_dpp_bank_mask(
     const loom_native_assembly_packet_context_t* context,
     uint16_t descriptor_immediate_index) {
@@ -1205,6 +1222,9 @@ static iree_status_t loom_amdgpu_append_native_asm_form_value(
         case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL:
           return loom_amdgpu_append_packet_immediate_dpp_control(context,
                                                                  value->index);
+        case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP8:
+          return loom_amdgpu_append_packet_immediate_dpp8(context,
+                                                          value->index);
         case LOOM_AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK:
           return loom_amdgpu_append_packet_immediate_dpp_bank_mask(
               context, value->index);

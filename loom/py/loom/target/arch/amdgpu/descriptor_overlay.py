@@ -302,6 +302,31 @@ def _materialize_immediates(
         ) from exc
 
 
+def _mapped_immediate_field_names(
+    overlay: AmdgpuDescriptorOverlay,
+) -> tuple[str, ...]:
+    if overlay.immediate_fields:
+        return overlay.immediate_fields
+    field_names: list[str] = []
+    for immediate in overlay.immediates:
+        field_ids = (
+            (immediate.encoding_field_id,) if immediate.encoding_field_id else ()
+        ) + tuple(
+            encoding_slice.encoding_field_id
+            for encoding_slice in immediate.encoding_slices
+        )
+        try:
+            field_names.extend(
+                amdgpu_encoding_field_name(field_id) for field_id in field_ids
+            )
+        except KeyError as exc:
+            raise AmdgpuDescriptorOverlayError(
+                f"descriptor overlay '{overlay.descriptor_key}' immediate "
+                f"'{immediate.field_name}' references unmapped encoding field"
+            ) from exc
+    return tuple(field_names)
+
+
 def _materialize_encoding_field_values(
     spec: AmdgpuIsaFactSource,
     overlay: AmdgpuDescriptorOverlay,
@@ -564,7 +589,7 @@ def _validate_operand_overlay(
             )
         covered_fields.add(ignored_operand.xml_field_name)
 
-    for immediate_field in overlay.immediate_fields:
+    for immediate_field in _mapped_immediate_field_names(overlay):
         xml_operand = xml_operands.get(immediate_field)
         if xml_operand is not None:
             if not xml_operand.is_input or xml_operand.is_output:
@@ -869,7 +894,7 @@ def _validate_unique_overlay_fields(overlay: AmdgpuDescriptorOverlay) -> None:
                 "operands"
             )
         covered_fields.add(ignored_operand.xml_field_name)
-    for immediate_field in overlay.immediate_fields:
+    for immediate_field in _mapped_immediate_field_names(overlay):
         if immediate_field in covered_fields:
             raise AmdgpuDescriptorOverlayError(
                 f"descriptor overlay '{overlay.descriptor_key}' repeats XML field "

@@ -215,6 +215,12 @@ iree_string_view_t loom_amdgpu_encoding_format_name(uint16_t encoding_format) {
       return IREE_SV("vop2");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP2_LITERAL:
       return IREE_SV("vop2_literal");
+    case LOOM_AMDGPU_ENCODING_FORMAT_VOP2_DPP:
+      return IREE_SV("vop2_dpp");
+    case LOOM_AMDGPU_ENCODING_FORMAT_VOP2_DPP16:
+      return IREE_SV("vop2_dpp16");
+    case LOOM_AMDGPU_ENCODING_FORMAT_VOP2_DPP8:
+      return IREE_SV("vop2_dpp8");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP3:
       return IREE_SV("vop3");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP3P:
@@ -255,6 +261,8 @@ iree_string_view_t loom_amdgpu_encoding_format_name(uint16_t encoding_format) {
       return IREE_SV("vop1_dpp");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP1_DPP16:
       return IREE_SV("vop1_dpp16");
+    case LOOM_AMDGPU_ENCODING_FORMAT_VOP1_DPP8:
+      return IREE_SV("vop1_dpp8");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP1_SDWA:
       return IREE_SV("vop1_sdwa");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP3P_LITERAL:
@@ -263,18 +271,26 @@ iree_string_view_t loom_amdgpu_encoding_format_name(uint16_t encoding_format) {
       return IREE_SV("vop3p_mfma");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP3P_DPP16:
       return IREE_SV("vop3p_dpp16");
+    case LOOM_AMDGPU_ENCODING_FORMAT_VOP3P_DPP8:
+      return IREE_SV("vop3p_dpp8");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP3_LITERAL:
       return IREE_SV("vop3_literal");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP3_DPP16:
       return IREE_SV("vop3_dpp16");
+    case LOOM_AMDGPU_ENCODING_FORMAT_VOP3_DPP8:
+      return IREE_SV("vop3_dpp8");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP3_SDST:
       return IREE_SV("vop3_sdst");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP3_SDST_LITERAL:
       return IREE_SV("vop3_sdst_literal");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOP3_SDST_DPP16:
       return IREE_SV("vop3_sdst_dpp16");
+    case LOOM_AMDGPU_ENCODING_FORMAT_VOP3_SDST_DPP8:
+      return IREE_SV("vop3_sdst_dpp8");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOPC_DPP16:
       return IREE_SV("vopc_dpp16");
+    case LOOM_AMDGPU_ENCODING_FORMAT_VOPC_DPP8:
+      return IREE_SV("vopc_dpp8");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOPDXY:
       return IREE_SV("vopdxy");
     case LOOM_AMDGPU_ENCODING_FORMAT_VOPDXY_LITERAL:

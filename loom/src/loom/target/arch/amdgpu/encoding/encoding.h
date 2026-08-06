@@ -122,12 +122,16 @@ typedef enum loom_amdgpu_encoding_format_e {
   LOOM_AMDGPU_ENCODING_FORMAT_VOP1_DPP = 43,
   // Vector one-source 32-bit instruction format with DPP16 lane control.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP1_DPP16 = 44,
+  // Vector one-source 32-bit instruction format with DPP8 lane selectors.
+  LOOM_AMDGPU_ENCODING_FORMAT_VOP1_DPP8 = 45,
   // Vector one-source 32-bit instruction format with CDNA SDWA modifiers.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP1_SDWA = 46,
   // Vector two-source instruction format with legacy DPP lane control.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP2_DPP = 47,
   // Vector two-source instruction format with DPP16 lane control.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP2_DPP16 = 48,
+  // Vector two-source instruction format with DPP8 lane selectors.
+  LOOM_AMDGPU_ENCODING_FORMAT_VOP2_DPP8 = 49,
   // Packed vector three-source 96-bit instruction format with mandatory
   // literal.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP3P_LITERAL = 52,
@@ -135,18 +139,26 @@ typedef enum loom_amdgpu_encoding_format_e {
   LOOM_AMDGPU_ENCODING_FORMAT_VOP3P_MFMA = 53,
   // Packed vector three-source instruction format with DPP16 lane control.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP3P_DPP16 = 54,
+  // Packed vector three-source instruction format with DPP8 lane selectors.
+  LOOM_AMDGPU_ENCODING_FORMAT_VOP3P_DPP8 = 55,
   // Vector three-source 64-bit instruction format with mandatory literal.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP3_LITERAL = 56,
   // Vector three-source instruction format with DPP16 lane control.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP3_DPP16 = 61,
+  // Vector three-source instruction format with DPP8 lane selectors.
+  LOOM_AMDGPU_ENCODING_FORMAT_VOP3_DPP8 = 62,
   // Vector three-source 64-bit instruction format with scalar carry result.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP3_SDST = 57,
   // VOP3 scalar-destination form with a mandatory literal payload.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP3_SDST_LITERAL = 58,
   // VOP3 scalar-destination form with DPP16 lane control.
   LOOM_AMDGPU_ENCODING_FORMAT_VOP3_SDST_DPP16 = 59,
+  // VOP3 scalar-destination form with DPP8 lane selectors.
+  LOOM_AMDGPU_ENCODING_FORMAT_VOP3_SDST_DPP8 = 60,
   // Vector compare instruction format with DPP16 lane control.
   LOOM_AMDGPU_ENCODING_FORMAT_VOPC_DPP16 = 64,
+  // Vector compare instruction format with DPP8 lane selectors.
+  LOOM_AMDGPU_ENCODING_FORMAT_VOPC_DPP8 = 65,
   // Wave32 dual-VALU packet format without a literal payload.
   LOOM_AMDGPU_ENCODING_FORMAT_VOPDXY = 67,
   // Wave32 dual-VALU packet format with a shared literal payload.
