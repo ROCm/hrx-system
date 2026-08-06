@@ -477,6 +477,8 @@ kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_
   %result_stage_bytes = index.constant 4096 : offset
   %c0_i32 = scalar.constant 0 : i32
   %cn1_i32 = scalar.constant -1 : i32
+  %c0_i32x1 = vector.constant 0 : vector<1xi32>
+  %c0_i32x4 = vector.constant 0 : vector<4xi32>
   %c0_f16x4 = vector.constant 0.0 : vector<4xf16>
   %zero_accumulator = vector.constant 0.0 : vector<16xf16>
   %m = index.constant 16 : index
@@ -564,75 +566,130 @@ kernel.def target(@qwen3_moe_gfx11_wave32) @qwen3_moe_routed_gate_up_swiglu_q4k_
     %init_gate = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<16xf16>
     %init_up = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<16xf16>
     %gate_result, %up_result = scf.for %q4_block = [%c0 to %q4_block_count step %c1](%block_gate = %init_gate : vector<16xf16>, %block_up = %init_up : vector<16xf16>) -> (vector<16xf16>, vector<16xf16>) {
-      %next_block_gate, %next_block_up = scf.for %q4_group = [%c0 to %c8 step %c1](%group_gate = %block_gate : vector<16xf16>, %group_up = %block_up : vector<16xf16>) -> (vector<16xf16>, vector<16xf16>) {
-        %block_k_base = index.mul %q4_block, %c256 : index
-        %group_k_add = index.mul %q4_group, %c32 : index
-        %k_origin = index.add %block_k_base, %group_k_add : index
-        scf.for %row_offset = [%c0 to %c64 step %c32] unroll {
-          %local_row0 = index.add %load_row, %row_offset : index
-          %local_row = index.assume %local_row0 [range(%local_row0, 0, 63)] : index
-          %channel = index.add %channel_tile_base, %local_row : index
-          %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
-          %gate_values = scf.if %valid_channel -> (vector<4xf16>) {
-            %channel_byte_add = index.mul %channel, %weight_row_bytes : index
-            %row_byte_index = index.add %expert_byte_base, %channel_byte_add : index
-            %row_byte_base = index.cast %row_byte_index : index to offset
-            %decoded = func.call @qwen3_moe_q4k_wmma_vector4(%gate_weight_noalias, %row_byte_base, %q4_block, %q4_group, %load_packet) : (buffer, offset, index, index, index) -> (vector<4xf16>)
-            scf.yield %decoded : vector<4xf16>
-          } else {
-            scf.yield %c0_f16x4 : vector<4xf16>
-          }
-          vector.store %gate_values, %weight_stage_view[%local_row, %load_k] : vector<4xf16>, view<64x40xf16, #dense>
-        }
-        %assignment_i32 = view.load %route_stage_view[%load_row] : view<32xi32, #dense> -> i32
-        %valid_assignment = scalar.cmpi sge, %assignment_i32, %c0_i32 : i32
-        %activation_values = scf.if %valid_assignment -> (vector<4xf16>) {
-          %assignment0 = index.cast %assignment_i32 : i32 to index
-          %assignment = index.assume %assignment0 [range(%assignment0, 0, 16383)] : index
-          %bounded_assignment, %bounded_assignment_count = index.assume %assignment, %assignment_count [lt(%assignment, %assignment_count)] : index, index
-          %token0 = index.div %bounded_assignment, %bounded_route_count : index
-          %token, %input_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
-          %input_k = index.add %k_origin, %load_k : index
-          %loaded = vector.load %input_view[%token, %input_k] : view<[%bounded_token_count]x[%input_size]xf32, #dense> -> vector<4xf32>
-          %converted = vector.fptrunc %loaded : vector<4xf32> to vector<4xf16>
-          scf.yield %converted : vector<4xf16>
+      // Two lanes cover the 64 output rows owned by one load packet. Retain
+      // both projection headers across the complete eight-group block.
+      %gate_header0, %gate_header1, %up_header0, %up_header1 = scf.for %header_row_offset = [%c0 to %c64 step %c32](%prior_gate_header0 = %c0_i32x4 : vector<4xi32>, %prior_gate_header1 = %c0_i32x4 : vector<4xi32>, %prior_up_header0 = %c0_i32x4 : vector<4xi32>, %prior_up_header1 = %c0_i32x4 : vector<4xi32>) -> (vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>) unroll {
+        %header_local_row0 = index.add %load_row, %header_row_offset : index
+        %header_local_row = index.assume %header_local_row0 [range(%header_local_row0, 0, 63)] : index
+        %header_channel = index.add %channel_tile_base, %header_local_row : index
+        %valid_header_channel = index.cmp ult, %header_channel, %bounded_output_size : index
+        %loaded_gate_header, %loaded_up_header = scf.if %valid_header_channel -> (vector<4xi32>, vector<4xi32>) {
+          %header_channel_byte_add = index.mul %header_channel, %weight_row_bytes : index
+          %header_row_byte_index = index.add %expert_byte_base, %header_channel_byte_add : index
+          %header_row_byte_base = index.cast %header_row_byte_index : index to offset
+          %gate_header = func.call @qwen3_moe_q4k_wmma_load_header(%gate_weight_noalias, %header_row_byte_base, %q4_block) : (buffer, offset, index) -> (vector<4xi32>)
+          %up_header = func.call @qwen3_moe_q4k_wmma_load_header(%up_weight_noalias, %header_row_byte_base, %q4_block) : (buffer, offset, index) -> (vector<4xi32>)
+          scf.yield %gate_header, %up_header : vector<4xi32>, vector<4xi32>
         } else {
-          scf.yield %c0_f16x4 : vector<4xf16>
+          scf.yield %c0_i32x4, %c0_i32x4 : vector<4xi32>, vector<4xi32>
         }
-        vector.store %activation_values, %activation_stage_physical_view[%load_row, %load_k] : vector<4xf16>, view<32x40xf16, #dense>
-        kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-        %gate_next = scf.for %k_half = [%c0 to %c32 step %c16](%half_gate = %group_gate : vector<16xf16>) -> (vector<16xf16>) unroll {
-          %lhs = vector.fragment.load<lhs> %weight_stage_view[%subgroup_channel_add, %k_half] shape [%m, %k] : view<64x40xf16, #dense> -> vector<16xf16>
-          %rhs = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %subgroup_route_add] shape [%k, %n] : view<32x32xf16, %activation_fragment_layout> -> vector<16xf16>
-          %next = vector.mma %lhs, %rhs, %half_gate : vector<16xf16>, vector<16xf16>, vector<16xf16>
-          scf.yield %next : vector<16xf16>
+        %updates_header0 = index.cmp eq, %header_row_offset, %c0 : index
+        %next_gate_header0 = scf.select %updates_header0, %loaded_gate_header, %prior_gate_header0 : vector<4xi32>
+        %next_gate_header1 = scf.select %updates_header0, %prior_gate_header1, %loaded_gate_header : vector<4xi32>
+        %next_up_header0 = scf.select %updates_header0, %loaded_up_header, %prior_up_header0 : vector<4xi32>
+        %next_up_header1 = scf.select %updates_header0, %prior_up_header1, %loaded_up_header : vector<4xi32>
+        scf.yield %next_gate_header0, %next_gate_header1, %next_up_header0, %next_up_header1 : vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>
+      }
+      %next_block_gate, %next_block_up = scf.for %q4_group_pair = [%c0 to %c4 step %c1](%pair_gate_acc = %block_gate : vector<16xf16>, %pair_up_acc = %block_up : vector<16xf16>) -> (vector<16xf16>, vector<16xf16>) {
+        // Each code word supplies the low and high nibbles for one adjacent
+        // group pair. Retain both projections' words for exactly those uses.
+        %gate_q_word0, %gate_q_word1, %up_q_word0, %up_q_word1 = scf.for %code_row_offset = [%c0 to %c64 step %c32](%prior_gate_q_word0 = %c0_i32x1 : vector<1xi32>, %prior_gate_q_word1 = %c0_i32x1 : vector<1xi32>, %prior_up_q_word0 = %c0_i32x1 : vector<1xi32>, %prior_up_q_word1 = %c0_i32x1 : vector<1xi32>) -> (vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>) unroll {
+          %code_local_row0 = index.add %load_row, %code_row_offset : index
+          %code_local_row = index.assume %code_local_row0 [range(%code_local_row0, 0, 63)] : index
+          %code_channel = index.add %channel_tile_base, %code_local_row : index
+          %valid_code_channel = index.cmp ult, %code_channel, %bounded_output_size : index
+          %loaded_gate_q_word, %loaded_up_q_word = scf.if %valid_code_channel -> (vector<1xi32>, vector<1xi32>) {
+            %bounded_q4_group_pair = index.assume %q4_group_pair [range(%q4_group_pair, 0, 3)] : index
+            %code_channel_byte_add = index.mul %code_channel, %weight_row_bytes : index
+            %code_row_byte_index = index.add %expert_byte_base, %code_channel_byte_add : index
+            %code_row_byte_base = index.cast %code_row_byte_index : index to offset
+            %gate_q_word = func.call @qwen3_moe_q4k_wmma_load_code(%gate_weight_noalias, %code_row_byte_base, %q4_block, %bounded_q4_group_pair, %load_packet) : (buffer, offset, index, index, index) -> (vector<1xi32>)
+            %up_q_word = func.call @qwen3_moe_q4k_wmma_load_code(%up_weight_noalias, %code_row_byte_base, %q4_block, %bounded_q4_group_pair, %load_packet) : (buffer, offset, index, index, index) -> (vector<1xi32>)
+            scf.yield %gate_q_word, %up_q_word : vector<1xi32>, vector<1xi32>
+          } else {
+            scf.yield %c0_i32x1, %c0_i32x1 : vector<1xi32>, vector<1xi32>
+          }
+          %updates_q_word0 = index.cmp eq, %code_row_offset, %c0 : index
+          %next_gate_q_word0 = scf.select %updates_q_word0, %loaded_gate_q_word, %prior_gate_q_word0 : vector<1xi32>
+          %next_gate_q_word1 = scf.select %updates_q_word0, %prior_gate_q_word1, %loaded_gate_q_word : vector<1xi32>
+          %next_up_q_word0 = scf.select %updates_q_word0, %loaded_up_q_word, %prior_up_q_word0 : vector<1xi32>
+          %next_up_q_word1 = scf.select %updates_q_word0, %prior_up_q_word1, %loaded_up_q_word : vector<1xi32>
+          scf.yield %next_gate_q_word0, %next_gate_q_word1, %next_up_q_word0, %next_up_q_word1 : vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>
         }
-        kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-        scf.for %row_offset = [%c0 to %c64 step %c32] unroll {
-          %local_row0 = index.add %load_row, %row_offset : index
-          %local_row = index.assume %local_row0 [range(%local_row0, 0, 63)] : index
-          %channel = index.add %channel_tile_base, %local_row : index
-          %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
-          %up_values = scf.if %valid_channel -> (vector<4xf16>) {
-            %channel_byte_add = index.mul %channel, %weight_row_bytes : index
-            %row_byte_index = index.add %expert_byte_base, %channel_byte_add : index
-            %row_byte_base = index.cast %row_byte_index : index to offset
-            %decoded = func.call @qwen3_moe_q4k_wmma_vector4(%up_weight_noalias, %row_byte_base, %q4_block, %q4_group, %load_packet) : (buffer, offset, index, index, index) -> (vector<4xf16>)
-            scf.yield %decoded : vector<4xf16>
+        %next_pair_gate, %next_pair_up = scf.for %group_within_pair = [%c0 to %c2 step %c1](%group_gate = %pair_gate_acc : vector<16xf16>, %group_up = %pair_up_acc : vector<16xf16>) -> (vector<16xf16>, vector<16xf16>) {
+          %q4_group_base = index.mul %q4_group_pair, %c2 : index
+          %q4_group0 = index.add %q4_group_base, %group_within_pair : index
+          %q4_group = index.assume %q4_group0 [range(%q4_group0, 0, 7)] : index
+          %block_k_base = index.mul %q4_block, %c256 : index
+          %group_k_add = index.mul %q4_group, %c32 : index
+          %k_origin = index.add %block_k_base, %group_k_add : index
+          scf.for %row_offset = [%c0 to %c64 step %c32] unroll {
+            %local_row0 = index.add %load_row, %row_offset : index
+            %local_row = index.assume %local_row0 [range(%local_row0, 0, 63)] : index
+            %selects_first_row = index.cmp eq, %row_offset, %c0 : index
+            %selected_gate_header = scf.select %selects_first_row, %gate_header0, %gate_header1 : vector<4xi32>
+            %selected_gate_q_word = scf.select %selects_first_row, %gate_q_word0, %gate_q_word1 : vector<1xi32>
+            %channel = index.add %channel_tile_base, %local_row : index
+            %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
+            %gate_values = scf.if %valid_channel -> (vector<4xf16>) {
+              %decoded = func.call @qwen3_moe_q4k_wmma_vector4_from_header_code(%q4_group, %selected_gate_header, %selected_gate_q_word) : (index, vector<4xi32>, vector<1xi32>) -> (vector<4xf16>)
+              scf.yield %decoded : vector<4xf16>
+            } else {
+              scf.yield %c0_f16x4 : vector<4xf16>
+            }
+            vector.store %gate_values, %weight_stage_view[%local_row, %load_k] : vector<4xf16>, view<64x40xf16, #dense>
+          }
+          %assignment_i32 = view.load %route_stage_view[%load_row] : view<32xi32, #dense> -> i32
+          %valid_assignment = scalar.cmpi sge, %assignment_i32, %c0_i32 : i32
+          %activation_values = scf.if %valid_assignment -> (vector<4xf16>) {
+            %assignment0 = index.cast %assignment_i32 : i32 to index
+            %assignment = index.assume %assignment0 [range(%assignment0, 0, 16383)] : index
+            %bounded_assignment, %bounded_assignment_count = index.assume %assignment, %assignment_count [lt(%assignment, %assignment_count)] : index, index
+            %token0 = index.div %bounded_assignment, %bounded_route_count : index
+            %token, %input_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
+            %input_k = index.add %k_origin, %load_k : index
+            %loaded = vector.load %input_view[%token, %input_k] : view<[%bounded_token_count]x[%input_size]xf32, #dense> -> vector<4xf32>
+            %converted = vector.fptrunc %loaded : vector<4xf32> to vector<4xf16>
+            scf.yield %converted : vector<4xf16>
           } else {
             scf.yield %c0_f16x4 : vector<4xf16>
           }
-          vector.store %up_values, %weight_stage_view[%local_row, %load_k] : vector<4xf16>, view<64x40xf16, #dense>
+          vector.store %activation_values, %activation_stage_physical_view[%load_row, %load_k] : vector<4xf16>, view<32x40xf16, #dense>
+          kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+          %gate_next = scf.for %k_half = [%c0 to %c32 step %c16](%half_gate = %group_gate : vector<16xf16>) -> (vector<16xf16>) unroll {
+            %lhs = vector.fragment.load<lhs> %weight_stage_view[%subgroup_channel_add, %k_half] shape [%m, %k] : view<64x40xf16, #dense> -> vector<16xf16>
+            %rhs = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %subgroup_route_add] shape [%k, %n] : view<32x32xf16, %activation_fragment_layout> -> vector<16xf16>
+            %next = vector.mma %lhs, %rhs, %half_gate : vector<16xf16>, vector<16xf16>, vector<16xf16>
+            scf.yield %next : vector<16xf16>
+          }
+          kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+          scf.for %row_offset = [%c0 to %c64 step %c32] unroll {
+            %local_row0 = index.add %load_row, %row_offset : index
+            %local_row = index.assume %local_row0 [range(%local_row0, 0, 63)] : index
+            %selects_first_row = index.cmp eq, %row_offset, %c0 : index
+            %selected_up_header = scf.select %selects_first_row, %up_header0, %up_header1 : vector<4xi32>
+            %selected_up_q_word = scf.select %selects_first_row, %up_q_word0, %up_q_word1 : vector<1xi32>
+            %channel = index.add %channel_tile_base, %local_row : index
+            %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
+            %up_values = scf.if %valid_channel -> (vector<4xf16>) {
+              %decoded = func.call @qwen3_moe_q4k_wmma_vector4_from_header_code(%q4_group, %selected_up_header, %selected_up_q_word) : (index, vector<4xi32>, vector<1xi32>) -> (vector<4xf16>)
+              scf.yield %decoded : vector<4xf16>
+            } else {
+              scf.yield %c0_f16x4 : vector<4xf16>
+            }
+            vector.store %up_values, %weight_stage_view[%local_row, %load_k] : vector<4xf16>, view<64x40xf16, #dense>
+          }
+          kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+          %up_next = scf.for %k_half = [%c0 to %c32 step %c16](%half_up = %group_up : vector<16xf16>) -> (vector<16xf16>) unroll {
+            %lhs = vector.fragment.load<lhs> %weight_stage_view[%subgroup_channel_add, %k_half] shape [%m, %k] : view<64x40xf16, #dense> -> vector<16xf16>
+            %rhs = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %subgroup_route_add] shape [%k, %n] : view<32x32xf16, %activation_fragment_layout> -> vector<16xf16>
+            %next = vector.mma %lhs, %rhs, %half_up : vector<16xf16>, vector<16xf16>, vector<16xf16>
+            scf.yield %next : vector<16xf16>
+          }
+          kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
+          scf.yield %gate_next, %up_next : vector<16xf16>, vector<16xf16>
         }
-        kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-        %up_next = scf.for %k_half = [%c0 to %c32 step %c16](%half_up = %group_up : vector<16xf16>) -> (vector<16xf16>) unroll {
-          %lhs = vector.fragment.load<lhs> %weight_stage_view[%subgroup_channel_add, %k_half] shape [%m, %k] : view<64x40xf16, #dense> -> vector<16xf16>
-          %rhs = vector.fragment.load<rhs> %activation_fragment_view[%k_half, %subgroup_route_add] shape [%k, %n] : view<32x32xf16, %activation_fragment_layout> -> vector<16xf16>
-          %next = vector.mma %lhs, %rhs, %half_up : vector<16xf16>, vector<16xf16>, vector<16xf16>
-          scf.yield %next : vector<16xf16>
-        }
-        kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-        scf.yield %gate_next, %up_next : vector<16xf16>, vector<16xf16>
+        scf.yield %next_pair_gate, %next_pair_up : vector<16xf16>, vector<16xf16>
       }
       scf.yield %next_block_gate, %next_block_up : vector<16xf16>, vector<16xf16>
     }
