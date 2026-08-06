@@ -38,6 +38,7 @@ from .matrix import *
 from .memory import *
 from .rdna3 import *
 from .rdna4 import *
+from .rdna4m import *
 from .scalar_float import *
 from .workgroup import *
 
@@ -1470,7 +1471,7 @@ def _gfx11_core_overlay_descriptors(
     )
 
 
-def _gfx117x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+def _gfx115x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return (
         *_gfx11_core_overlays(),
         *_s_float_arithmetic_overlays(),
@@ -1480,18 +1481,34 @@ def _gfx117x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     )
 
 
-def _gfx117x_core_overlay_descriptors(
+def _gfx115x_core_overlay_descriptors(
     spec: AmdgpuIsaFactSource,
 ) -> tuple[Descriptor, ...]:
     return _with_execution_mask_state_reads(
-        materialize_amdgpu_descriptor_overlays(spec, _gfx117x_core_overlays())
+        materialize_amdgpu_descriptor_overlays(spec, _gfx115x_core_overlays())
     )
 
 
 def _gfx11_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return _amdgpu_descriptor_overlay_intersection(
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
+    )
+
+
+def _rdna4m_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return tuple(
+        overlay
+        for overlay in _gfx115x_core_overlays()
+        if not (overlay.semantic_tag or "").startswith("matrix.")
+    )
+
+
+def _rdna4m_core_overlay_descriptors(
+    spec: AmdgpuIsaFactSource,
+) -> tuple[Descriptor, ...]:
+    return _with_execution_mask_state_reads(
+        materialize_amdgpu_descriptor_overlays(spec, _rdna4m_core_overlays())
     )
 
 
@@ -2425,6 +2442,7 @@ def _amdgpu_core_descriptor_set_bases() -> tuple[DescriptorSet, ...]:
         _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE,
+        _AMDGPU_RDNA4M_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_RDNA4_GFX1251_CORE_DESCRIPTOR_SET_BASE,
@@ -2442,7 +2460,8 @@ def _amdgpu_descriptor_ref_key_set() -> set[str]:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
+        _rdna4m_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -2459,6 +2478,7 @@ __all__ = (
     "_AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE",
+    "_AMDGPU_RDNA4M_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA4_GFX1251_CORE_DESCRIPTOR_SET_BASE",
@@ -2471,8 +2491,8 @@ __all__ = (
     "_gfx11_core_overlays",
     "_gfx11_generic_core_overlay_descriptors",
     "_gfx11_generic_core_overlays",
-    "_gfx117x_core_overlay_descriptors",
-    "_gfx117x_core_overlays",
+    "_gfx115x_core_overlay_descriptors",
+    "_gfx115x_core_overlays",
     "_gfx12_5_generic_core_overlay_descriptors",
     "_gfx12_5_generic_core_overlays",
     "_gfx125x_core_overlay_descriptors",
@@ -2481,6 +2501,8 @@ __all__ = (
     "_gfx1251_core_overlay_descriptors",
     "_gfx12_core_overlay_descriptors",
     "_gfx12_core_overlays",
+    "_rdna4m_core_overlay_descriptors",
+    "_rdna4m_core_overlays",
     "_gfx12_generic_core_overlay_descriptors",
     "_gfx12_generic_core_overlays",
     "_gfx940_core_overlay_descriptors",

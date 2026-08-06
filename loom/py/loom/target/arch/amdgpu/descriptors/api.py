@@ -1470,8 +1470,14 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
     ),
     "rdna3_5": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE,
-        overlay_rows=_gfx117x_core_overlays,
-        overlay_descriptors=_gfx117x_core_overlay_descriptors,
+        overlay_rows=_gfx115x_core_overlays,
+        overlay_descriptors=_gfx115x_core_overlay_descriptors,
+        extra_descriptors=(_s_delay_alu_descriptor(),),
+    ),
+    "rdna4m": _AmdgpuCoreDescriptorSetBuilder(
+        base=_AMDGPU_RDNA4M_CORE_DESCRIPTOR_SET_BASE,
+        overlay_rows=_rdna4m_core_overlays,
+        overlay_descriptors=_rdna4m_core_overlay_descriptors,
         extra_descriptors=(_s_delay_alu_descriptor(),),
     ),
     "rdna4": _AmdgpuCoreDescriptorSetBuilder(

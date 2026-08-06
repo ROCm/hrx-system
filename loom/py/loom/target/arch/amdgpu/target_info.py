@@ -1092,7 +1092,7 @@ def cdna3_processor_info(
     )
 
 
-def gfx117x_processor_info(
+def gfx115x_processor_info(
     processor: str,
     elf_machine_flags: int,
     *,
@@ -1112,6 +1112,21 @@ def gfx117x_processor_info(
             | AMDGPU_PROCESSOR_SCHEDULING_VMEM_RESULT_WRITES_IN_ORDER
         ),
         occupancy=occupancy,
+    )
+
+
+def rdna4m_processor_info(
+    processor: str,
+    elf_machine_flags: int,
+) -> AmdgpuProcessorInfo:
+    return processor_info(
+        processor=processor,
+        flags=AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,
+        descriptor_set_key="amdgpu.rdna4m.core",
+        elf_machine_flags=elf_machine_flags,
+        default_wavefront_size=32,
+        kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA3_GFX11,
+        occupancy=AMDGPU_OCCUPANCY_RDNA_1024,
     )
 
 
@@ -1239,6 +1254,16 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
     AmdgpuDescriptorSetInfo(
         generator_target="rdna3_5",
         key="amdgpu.rdna3_5.core",
+        isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA3_5,),
+        flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_SCALAR_FLOAT,
+        buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE48_UNIFIED,
+        vector_memory=AmdgpuDescriptorSetVectorMemoryInfo(
+            cache_policy_encoding=AMDGPU_VECTOR_MEMORY_CACHE_POLICY_ENCODING_GFX9_11_GLC_SLC_DLC,
+        ),
+    ),
+    AmdgpuDescriptorSetInfo(
+        generator_target="rdna4m",
+        key="amdgpu.rdna4m.core",
         isa_infos=(AMDGPU_DESCRIPTOR_SET_ISA_RDNA3_5,),
         flags=AMDGPU_DESCRIPTOR_SET_INFO_FLAGS_RDNA_SCALAR_FLOAT,
         buffer_resource=AMDGPU_BUFFER_RESOURCE_INFO_BASE48_UNIFIED,
@@ -1426,13 +1451,13 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         elf_machine_flags=0x044,
         scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_VALU_TRANS_USE_DEPCTR,
     ),
-    gfx117x_processor_info("gfx1150", 0x043),
-    gfx117x_processor_info("gfx1151", 0x04A, occupancy=AMDGPU_OCCUPANCY_RDNA_1536),
-    gfx117x_processor_info("gfx1152", 0x055),
-    gfx117x_processor_info("gfx1153", 0x058),
-    gfx117x_processor_info("gfx1170", 0x05D),
-    gfx117x_processor_info("gfx1171", 0x05E),
-    gfx117x_processor_info("gfx1172", 0x05C),
+    gfx115x_processor_info("gfx1150", 0x043),
+    gfx115x_processor_info("gfx1151", 0x04A, occupancy=AMDGPU_OCCUPANCY_RDNA_1536),
+    gfx115x_processor_info("gfx1152", 0x055),
+    gfx115x_processor_info("gfx1153", 0x058),
+    rdna4m_processor_info("gfx1170", 0x05D),
+    rdna4m_processor_info("gfx1171", 0x05E),
+    rdna4m_processor_info("gfx1172", 0x05C),
     rdna4_processor_info("gfx1200", 0x048),
     rdna4_processor_info("gfx1201", 0x04E),
     gfx125x_processor_info(
@@ -1637,19 +1662,20 @@ AMDGPU_TARGET_INFOS: tuple[AmdgpuTargetInfo, ...] = (
         target="gfx1170",
         processor="gfx1170",
         enum_value=18,
-        doc="RDNA 3.5 gfx1170 target row.",
+        doc="RDNA 4m gfx1170 target row.",
+        default_for_descriptor_set=True,
     ),
     AmdgpuTargetInfo(
         target="gfx1171",
         processor="gfx1171",
         enum_value=19,
-        doc="RDNA 3.5 gfx1171 target row.",
+        doc="RDNA 4m gfx1171 target row.",
     ),
     AmdgpuTargetInfo(
         target="gfx1172",
         processor="gfx1172",
         enum_value=20,
-        doc="RDNA 3.5 gfx1172 target row.",
+        doc="RDNA 4m gfx1172 target row.",
     ),
     AmdgpuTargetInfo(
         target="gfx1201",

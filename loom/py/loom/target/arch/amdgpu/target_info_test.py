@@ -111,6 +111,7 @@ def test_native_scalar_float_arithmetic_is_scoped_to_rdna35_and_newer() -> None:
     }
     assert flagged_generator_targets == {
         "rdna3_5",
+        "rdna4m",
         "rdna4",
         "rdna4_gfx1250_a0",
         "rdna4_gfx1251",
@@ -513,9 +514,24 @@ def test_rdna3_5_processors_use_gfx11_matrix_shapes() -> None:
         for info in AMDGPU_PROCESSOR_INFOS
         if info.descriptor_set.key == descriptor_set.key
     )
-    assert processors
+    assert {processor.processor for processor in processors} == {
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153",
+    }
     for processor in processors:
         assert processor.features.matrix == AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11
+
+
+def test_rdna4m_processors_use_distinct_descriptor_contract() -> None:
+    descriptor_set = amdgpu_descriptor_set_info_by_generator_target("rdna4m")
+    processors = {
+        info.processor
+        for info in AMDGPU_PROCESSOR_INFOS
+        if info.descriptor_set.key == descriptor_set.key
+    }
+    assert processors == {"gfx1170", "gfx1171", "gfx1172"}
 
 
 def test_processor_rows_cover_canonical_code_object_relation() -> None:

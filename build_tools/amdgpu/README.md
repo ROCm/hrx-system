@@ -50,9 +50,9 @@ The current generic-family map is:
 | `gfx12` RDNA | `gfx1200`, `gfx1201` | `gfx12-generic` |
 | `gfx12.5` RDNA | `gfx1250`, `gfx1251` | `gfx12-5-generic` |
 
-`gfx11.7` processors are available as explicit exact selectors, but they are
-not folded into `gfx11-generic` because LLVM models them as separate processors
-outside the `gfx11-generic` compatibility set today. `gfx12-5-generic` is
+`gfx11.7` processors are not folded into `gfx11-generic` because LLVM models
+them as a separate compatible family that the pinned device toolchain does not
+yet expose. `gfx12-5-generic` is
 available as an explicit selector, but consumers decide whether it belongs in
 their default checked-in artifact sets. The `device-binary` expansion also
 includes `gfx1250-a0` because the generic gfx12.5 artifact is B0-qualified and

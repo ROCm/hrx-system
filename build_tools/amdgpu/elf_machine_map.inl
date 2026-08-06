@@ -67,4 +67,5 @@ IREE_AMDGPU_ELF_MACHINE_TARGET(0x05cu, "gfx1172", false, false)
 IREE_AMDGPU_ELF_MACHINE_TARGET(0x05du, "gfx1170", false, false)
 IREE_AMDGPU_ELF_MACHINE_TARGET(0x05eu, "gfx1171", false, false)
 IREE_AMDGPU_ELF_MACHINE_TARGET(0x05fu, "gfx9-4-generic", true, true)
+IREE_AMDGPU_ELF_MACHINE_TARGET(0x062u, "gfx11-7-generic", false, false)
 #endif  // IREE_AMDGPU_ELF_MACHINE_TARGET

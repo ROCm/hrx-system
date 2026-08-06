@@ -115,7 +115,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _gfx12_5_generic_core_overlays,
     _gfx12_core_overlays,
     _gfx12_generic_core_overlays,
-    _gfx117x_core_overlays,
+    _gfx115x_core_overlays,
     _gfx125x_core_overlays,
     _gfx125x_reg_classes,
     _gfx940_core_overlays,
@@ -248,8 +248,8 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
         == gfx9_4_base_intersection
     )
 
-    gfx117x_overlays = {
-        overlay.descriptor_key: overlay for overlay in _gfx117x_core_overlays()
+    gfx115x_overlays = {
+        overlay.descriptor_key: overlay for overlay in _gfx115x_core_overlays()
     }
     gfx950_overlays = {
         overlay.descriptor_key: overlay for overlay in _gfx950_core_overlays()
@@ -277,7 +277,7 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
     assert _gfx11_generic_core_overlays() == tuple(
         overlay
         for overlay in _gfx11_core_overlays()
-        if gfx117x_overlays.get(overlay.descriptor_key) == overlay
+        if gfx115x_overlays.get(overlay.descriptor_key) == overlay
     )
     assert _gfx12_generic_core_overlays() == _gfx12_core_overlays()
     gfx125x_overlays = _gfx125x_core_overlays()
@@ -999,7 +999,7 @@ def test_scalar_compare_descriptors_use_scc_branch_schedule_class() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1075,7 +1075,7 @@ def test_div_fmas_low_asm_preserves_vcc_scale_mask_operand() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1103,7 +1103,7 @@ def test_div_scale_low_asm_writes_architectural_vcc_scale_mask() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1138,7 +1138,7 @@ def test_scalar_scc_compare_results_are_rematerializable() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1176,7 +1176,7 @@ def test_v_mov_b32_literal_results_are_rematerializable() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1199,7 +1199,7 @@ def test_pure_vop2_f32_results_are_rematerializable() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1294,7 +1294,7 @@ def test_pure_integer_valu_results_are_rematerializable() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1340,7 +1340,7 @@ def test_integer_binary_src0_accepts_scalar_or_vector_registers() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1381,7 +1381,7 @@ def test_full_width_conversion_results_are_rematerializable() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1463,7 +1463,7 @@ def test_scc_free_scalar_integer_results_are_rematerializable() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1506,7 +1506,7 @@ def test_f32_to_f16_convert_results_use_d16_low_window() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1731,6 +1731,7 @@ def test_s_delay_alu_descriptor_is_exposed_on_rdna_families() -> None:
         "gfx12_5_generic",
         "rdna3",
         "rdna3_5",
+        "rdna4m",
         "rdna4",
         "rdna4_gfx1250_a0",
         "rdna4_gfx1251",
@@ -2829,7 +2830,7 @@ def test_vop3_shift_immediate_is_constrained_to_inline_source_selector() -> None
 def test_vop3_mixed_inline_literal_immediates_name_both_encoding_fields() -> None:
     for overlays in (
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -2940,7 +2941,7 @@ def test_cdna_excludes_unsupported_vop3_literal_integer_forms() -> None:
         )
     for overlays in (
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
     ):
         assert unsupported_keys.issubset(overlay.descriptor_key for overlay in overlays)
@@ -2951,7 +2952,7 @@ def test_sop2_bfe_literal_forms_fix_control_to_literal_source() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -3046,7 +3047,7 @@ def test_scalar_f16_fma_descriptor_families_are_arch_specific() -> None:
 
     for descriptor_set in (
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -3187,7 +3188,7 @@ def test_scalar_domain_fma_descriptors_are_arch_specific() -> None:
         assert not scalar_domain_keys & descriptors.keys()
 
     for descriptor_set in (
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -3224,7 +3225,7 @@ def test_scalar_float_arithmetic_descriptors_are_arch_specific() -> None:
         assert not scalar_float_keys & descriptor_keys
 
     for descriptor_set in (
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -3266,7 +3267,7 @@ def test_scalar_float_conversion_descriptors_are_arch_specific() -> None:
         assert not expected_register_parts.keys() & descriptor_keys
 
     for descriptor_set in (
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -3323,7 +3324,7 @@ def test_scalar_float_compare_descriptors_are_arch_specific() -> None:
         assert not scalar_float_compare_keys & descriptor_keys
 
     for descriptor_set in (
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -3350,7 +3351,7 @@ def test_scalar_float_compare_descriptors_are_arch_specific() -> None:
 
 def test_scalar_domain_fma_descriptors_pin_sgpr_contracts() -> None:
     for descriptor_set in (
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -4144,7 +4145,7 @@ def test_vinterp_descriptors_follow_hardware_architecture_coverage() -> None:
 
     for overlays in (
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx11_generic_core_overlays(),
         _gfx12_core_overlays(),
         _gfx12_generic_core_overlays(),
