@@ -66,6 +66,18 @@ class OrdinaryVectorComponentType:
             return "LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR"
         return "LOOM_SPIRV_VALUE_CLASS_VECTOR"
 
+    @property
+    def signed_minimum(self) -> int:
+        if self.kind != OrdinaryVectorComponentKind.SIGNED_INTEGER:
+            raise ValueError(f"{self.suffix} is not a signed integer component")
+        return -(2 ** (self.bit_width - 1))
+
+    @property
+    def signed_maximum(self) -> int:
+        if self.kind != OrdinaryVectorComponentKind.SIGNED_INTEGER:
+            raise ValueError(f"{self.suffix} is not a signed integer component")
+        return (2 ** (self.bit_width - 1)) - 1
+
 
 _SIGNED_INTEGER_COMPONENTS = tuple(
     OrdinaryVectorComponentType(

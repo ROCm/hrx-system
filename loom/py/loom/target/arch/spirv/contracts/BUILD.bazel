@@ -17,6 +17,7 @@ iree_py_library(
         "__init__.py",
         "index.py",
         "logical_core.py",
+        "ordinary_vector.py",
     ],
     deps = [
         "//loom/py/loom:core",
@@ -31,11 +32,25 @@ iree_py_library(
         "//loom/py/loom/target/arch/spirv:builtins",
         "//loom/py/loom/target/arch/spirv:cooperative_matrix",
         "//loom/py/loom/target/arch/spirv:descriptors",
+        "//loom/py/loom/target/arch/spirv:ordinary_vector",
         "//loom/py/loom/target/arch/spirv:scalar_alu",
         "//loom/py/loom/target/arch/spirv:scalar_constant",
         "//loom/py/loom/target/arch/spirv:scalar_conversion",
         "//loom/py/loom/target/arch/spirv:scalar_memory",
         "//loom/py/loom/target/contracts",
+    ],
+)
+
+iree_py_test(
+    name = "ordinary_vector_test",
+    srcs = [
+        "ordinary_vector_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.spirv.contracts.ordinary_vector_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":contracts",
     ],
 )
 

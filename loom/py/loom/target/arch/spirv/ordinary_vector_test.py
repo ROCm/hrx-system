@@ -128,6 +128,33 @@ def test_component_invariants_reject_invalid_records() -> None:
     assert bool_component.bit_width == 1
 
 
+def test_signed_component_ranges_cover_each_integer_width() -> None:
+    integer_components = tuple(
+        component
+        for component in ORDINARY_VECTOR_COMPONENT_TYPES
+        if component.kind == OrdinaryVectorComponentKind.SIGNED_INTEGER
+    )
+    assert {
+        component.suffix: (component.signed_minimum, component.signed_maximum)
+        for component in integer_components
+    } == {
+        "i8": (-128, 127),
+        "i16": (-32768, 32767),
+        "i32": (-(2**31), (2**31) - 1),
+        "i64": (-(2**63), (2**63) - 1),
+    }
+
+    f32_component = next(
+        component
+        for component in ORDINARY_VECTOR_COMPONENT_TYPES
+        if component.suffix == "f32"
+    )
+    with pytest.raises(ValueError, match="not a signed integer component"):
+        _ = f32_component.signed_minimum
+    with pytest.raises(ValueError, match="not a signed integer component"):
+        _ = f32_component.signed_maximum
+
+
 def test_lane_invariants_reject_non_native_counts() -> None:
     f32_component = next(
         component

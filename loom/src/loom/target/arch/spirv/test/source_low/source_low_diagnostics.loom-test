@@ -343,3 +343,44 @@ func.def target(@target) @index_shift_requires_u5_amount(%input: index, %amount0
   %result = index.shrui %input, %amount : index
   func.return %result : index
 }
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @ordinary_vector_rejects_five_lanes() -> (vector<5xi32>) {
+  // ERROR@+1: TARGET/002 {field_name="result", actual_type="vector<5xi32>"}
+  %value = vector.constant 0 : vector<5xi32>
+  func.return %value : vector<5xi32>
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @ordinary_vector_rejects_rank_two(%a: i32, %b: i32, %c: i32, %d: i32) -> (vector<2x2xi32>) {
+  // ERROR@+1: TARGET/002 {field_name="result", actual_type="vector<2x2xi32>"}
+  %value = vector.from_elements %a, %b, %c, %d : vector<2x2xi32>
+  func.return %value : vector<2x2xi32>
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @ordinary_vector_rejects_dynamic_extract(%a: i32, %b: i32, %c: i32, %d: i32, %lane: index) -> (i32) {
+  %value = vector.from_elements %a, %b, %c, %d : vector<4xi32>
+  // ERROR@+1: TARGET/004 {subject_role="operand_segment", subject_name="indices", constraint_key="operand_segment_count", expected_count="0"}
+  %result = vector.extract %value[%lane] : vector<4xi32> -> i32
+  func.return %result : i32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @ordinary_vector_rejects_direct_target_result(%a: i32, %b: i32, %c: i32, %d: i32) -> (vector<4xi32>) {
+  %value = vector.from_elements %a, %b, %c, %d : vector<4xi32>
+  // ERROR@+1: TARGET/033 {field_name="source", actual_type="vector<4xi32>"}
+  func.return %value : vector<4xi32>
+}

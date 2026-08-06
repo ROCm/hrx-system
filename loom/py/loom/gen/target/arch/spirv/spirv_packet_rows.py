@@ -61,6 +61,7 @@ from loom.target.arch.spirv.scalar_alu import (  # noqa: E402
     ScalarBinaryOperation,
 )
 from loom.target.arch.spirv.scalar_constant import (  # noqa: E402
+    BFLOAT16_CONSTANT_TYPE,
     FLOAT_CONSTANT_TYPES,
     FloatConstantType,
 )
@@ -767,6 +768,20 @@ def _select_rows() -> list[_PacketRow]:
         )
         for scalar in SCALAR_ALU_TYPES
     ]
+    bf16_value = _value_type(
+        "LOOM_SPIRV_VALUE_CLASS_SCALAR",
+        BFLOAT16_CONSTANT_TYPE.scalar_enum,
+    )
+    rows.append(
+        _PacketRow(
+            "spirv.op_select.bf16",
+            opcode="LOOM_SPIRV_OP_SELECT",
+            form="LOOM_SPIRV_PACKET_FORM_SELECT",
+            result_type=bf16_value,
+            operand_types=(bool_value, bf16_value, bf16_value),
+            result_count=1,
+        )
+    )
     rows.append(
         _PacketRow(
             "spirv.op_select.bool",

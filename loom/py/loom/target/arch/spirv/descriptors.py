@@ -48,6 +48,7 @@ from loom.target.arch.spirv.scalar_alu import (
     ScalarBinaryOperation,
 )
 from loom.target.arch.spirv.scalar_constant import (
+    BFLOAT16_CONSTANT_TYPE,
     FLOAT_CONSTANT_TYPES,
     FloatConstantType,
 )
@@ -1031,6 +1032,19 @@ def _select_descriptors() -> tuple[Descriptor, ...]:
         )
         for scalar in SCALAR_ALU_TYPES
     ]
+    descriptors.append(
+        _select_descriptor(
+            key="spirv.op_select.bf16",
+            mnemonic="OpSelect.bf16",
+            operands=(
+                _id_result(),
+                _id_operand("condition"),
+                _id_operand("true_value"),
+                _id_operand("false_value"),
+            ),
+            feature_bits=BFLOAT16_CONSTANT_TYPE.feature_bits,
+        )
+    )
     descriptors.append(
         _select_descriptor(
             key="spirv.op_select.bool",

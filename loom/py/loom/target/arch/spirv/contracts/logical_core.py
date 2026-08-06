@@ -37,6 +37,9 @@ from loom.target.arch.spirv.contracts.index import (
     SPIRV_INDEX_CONVERSION_RULES,
     SPIRV_INDEX_NUMERIC_RULES,
 )
+from loom.target.arch.spirv.contracts.ordinary_vector import (
+    SPIRV_ORDINARY_VECTOR_CONTRACT_CASES,
+)
 from loom.target.arch.spirv.cooperative_matrix import (
     COOPERATIVE_MATRIX_CASES,
     CooperativeMatrixCase,
@@ -1319,6 +1322,7 @@ def _select_rules() -> tuple[DescriptorRule, ...]:
         _select_rule(_scalar_type_pattern(scalar), f"spirv.op_select.{scalar.suffix}")
         for scalar in SCALAR_ALU_TYPES
     ]
+    rules.append(_select_rule(Scalar("bf16"), "spirv.op_select.bf16"))
     rules.append(_select_rule(_I1, "spirv.op_select.bool"))
     return tuple(rules)
 
@@ -1350,6 +1354,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *_builtin_index_rules(),
         *_conversion_rules(),
         *_scalar_binary_rules(),
+        *SPIRV_ORDINARY_VECTOR_CONTRACT_CASES,
         *_compare_rules(),
         *_select_rules(),
         *_storage_buffer_rules(),
