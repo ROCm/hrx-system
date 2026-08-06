@@ -595,6 +595,14 @@ def _coordinate_unary_rows() -> list[_PacketRow]:
     )
     return [
         _PacketRow(
+            "spirv.op_copy_object.i32",
+            opcode="LOOM_SPIRV_OP_COPY_OBJECT",
+            form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
+            result_type=i32_value,
+            operand_types=(i32_value,),
+            result_count=1,
+        ),
+        _PacketRow(
             "spirv.op_bit_count.i32",
             opcode="LOOM_SPIRV_OP_BIT_COUNT",
             form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",

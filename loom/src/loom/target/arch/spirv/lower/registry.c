@@ -37,38 +37,21 @@ static iree_status_t loom_spirv_make_register_type(
                                            out_type);
 }
 
+static iree_status_t loom_spirv_make_typed_register_type(
+    loom_low_lower_context_t* context, uint16_t register_class_id,
+    loom_type_t value_type, loom_type_t* out_type) {
+  return loom_low_lower_make_typed_register_type(context, register_class_id, 1,
+                                                 value_type, out_type);
+}
+
 static bool loom_spirv_source_type_is_id(loom_type_t type) {
-  if (!loom_type_is_scalar(type)) {
-    return false;
-  }
-  const loom_scalar_type_t scalar_type = loom_type_element_type(type);
-  return scalar_type == LOOM_SCALAR_TYPE_I1 ||
-         scalar_type == LOOM_SCALAR_TYPE_I32 ||
-         scalar_type == LOOM_SCALAR_TYPE_INDEX;
+  loom_spirv_value_type_t value_type = {0};
+  return loom_spirv_value_type_from_loom_type(type, &value_type);
 }
 
 static bool loom_spirv_source_type_is_offset64(loom_type_t type) {
   return loom_type_is_scalar(type) &&
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_OFFSET;
-}
-
-static bool loom_spirv_source_type_is_storage_scalar(loom_type_t type) {
-  if (!loom_type_is_scalar(type)) {
-    return false;
-  }
-  switch (loom_type_element_type(type)) {
-    case LOOM_SCALAR_TYPE_I8:
-    case LOOM_SCALAR_TYPE_I16:
-    case LOOM_SCALAR_TYPE_I32:
-    case LOOM_SCALAR_TYPE_I64:
-    case LOOM_SCALAR_TYPE_F16:
-    case LOOM_SCALAR_TYPE_BF16:
-    case LOOM_SCALAR_TYPE_F32:
-    case LOOM_SCALAR_TYPE_F64:
-      return true;
-    default:
-      return false;
-  }
 }
 
 static bool loom_spirv_low_type_is_id_register(loom_type_t type) {
@@ -86,16 +69,12 @@ static iree_status_t loom_spirv_map_type(void* user_data,
                                          loom_type_t* out_low_type) {
   (void)user_data;
   if (loom_spirv_source_type_is_id(source_type)) {
-    return loom_spirv_make_register_type(
-        context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, out_low_type);
+    return loom_spirv_make_typed_register_type(
+        context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, source_type, out_low_type);
   }
   if (loom_spirv_source_type_is_offset64(source_type)) {
     return loom_spirv_make_register_type(
         context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_OFFSET64, out_low_type);
-  }
-  if (loom_spirv_source_type_is_storage_scalar(source_type)) {
-    return loom_spirv_make_register_type(
-        context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, out_low_type);
   }
   if (loom_type_is_buffer(source_type) || loom_type_is_view(source_type)) {
     return loom_spirv_make_register_type(

@@ -463,6 +463,10 @@ def test_generation_emits_integer_compare_and_select_rows() -> None:
 def test_generation_emits_complete_index_numeric_primitives() -> None:
     tables = generate_tables()
 
+    coordinate_copy = _generated_row(tables, "spirv.op_copy_object.i32")
+    assert "LOOM_SPIRV_OP_COPY_OBJECT" in coordinate_copy
+    assert coordinate_copy.count("LOOM_SPIRV_SCALAR_TYPE_S32") == 2
+
     offset_multiply = _generated_row(tables, "spirv.op_imul.offset64")
     assert "LOOM_SPIRV_OP_I_MUL" in offset_multiply
     assert offset_multiply.count("LOOM_SPIRV_SCALAR_TYPE_U64") == 3

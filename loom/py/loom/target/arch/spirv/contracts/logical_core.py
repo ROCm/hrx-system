@@ -77,6 +77,7 @@ from loom.target.contracts import (
     ContractFragment,
     DescriptorEmitForm,
     DescriptorMatrixRule,
+    DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
     Guard,
@@ -91,6 +92,7 @@ from loom.target.contracts import (
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
     SourceMemoryRootKind,
+    SourceValueKind,
     TypePattern,
     ValueAliasRule,
     ValueElideRule,
@@ -301,11 +303,14 @@ def _integer_view_emit(
     input_ref: ValueRef,
     output_ref: ValueRef,
 ) -> EmitDescriptorOp:
+    result_type_binding: ResultTypeBinding = Scalar(result_type.source_type)
+    if output_ref.kind == SourceValueKind.TEMPORARY:
+        result_type_binding = DescriptorResultType()
     return _descriptor_emit(
         descriptor=_descriptor(_integer_view_key(source_type, result_type)),
         operands={"input": input_ref},
         results={"dst": output_ref},
-        result_types={"dst": Scalar(result_type.source_type)},
+        result_types={"dst": result_type_binding},
     )
 
 
@@ -344,7 +349,7 @@ def _unsigned_binary_rule(
                     "rhs": ValueRef.temporary("unsigned_rhs"),
                 },
                 results={"dst": ValueRef.temporary("unsigned_result")},
-                result_types={"dst": Scalar(scalar_pair.source_type)},
+                result_types={"dst": DescriptorResultType()},
             ),
             _integer_view_emit(
                 source_type=scalar_pair.unsigned,
@@ -381,7 +386,7 @@ def _unsigned_conversion_rule(row: ScalarConversion) -> DescriptorRule:
                     descriptor=descriptor,
                     operands={"input": ValueRef.temporary("unsigned_input")},
                     results={"dst": ValueRef.temporary("unsigned_result")},
-                    result_types={"dst": Scalar(result_pair.source_type)},
+                    result_types={"dst": DescriptorResultType()},
                 ),
                 _integer_view_emit(
                     source_type=result_pair.unsigned,
@@ -430,7 +435,7 @@ def _unsigned_conversion_rule(row: ScalarConversion) -> DescriptorRule:
                     descriptor=descriptor,
                     operands={"input": ValueRef.operand("input")},
                     results={"dst": ValueRef.temporary("unsigned_result")},
-                    result_types={"dst": Scalar(result_pair.source_type)},
+                    result_types={"dst": DescriptorResultType()},
                 ),
                 _integer_view_emit(
                     source_type=result_pair.unsigned,

@@ -17,14 +17,14 @@ func.def target(@target) @spirv_workgroup_storage_i32_roundtrip(%value: i32, %in
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_workgroup_storage_i32_roundtrip(%value: reg<spirv.id>, %bounded_index: reg<spirv.id>) -> (reg<spirv.id>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_workgroup_storage_i32_roundtrip(%value: reg<spirv.id : i32>, %bounded_index: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
   %scratch = storage {byte_alignment = 4, byte_length = 16} : low.storage<workgroup>
   %scratch_view = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
   %18 = OpAccessChain.workgroup.i32.element_index %scratch_view, %bounded_index
   OpStore.workgroup.i32 %18, %value
   OpControlBarrier.workgroup.workgroup.acq_rel
   %19 = OpAccessChain.workgroup.i32.element_index %scratch_view, %bounded_index
-  %loaded = OpLoad.workgroup.i32 %19
+  %loaded = OpLoad.workgroup.i32 %19 : reg<spirv.id : i32>
   return %loaded
 }
 
@@ -46,7 +46,7 @@ func.def target(@target) @spirv_bounded_dynamic_workgroup_storage(%value: i32, %
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 0], spirv_result_value_types = [23]}) @spirv_bounded_dynamic_workgroup_storage(%value: reg<spirv.id>, %byte_length: reg<spirv.offset64>) -> (reg<spirv.id>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 0], spirv_result_value_types = [23]}) @spirv_bounded_dynamic_workgroup_storage(%value: reg<spirv.id : i32>, %byte_length: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
   %scratch = storage {byte_alignment = 4, byte_length = 8192} : low.storage<workgroup>
   %scratch_view = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
   %13 = OpConstant.i32 0
@@ -55,6 +55,6 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
   OpControlBarrier.workgroup.workgroup.acq_rel
   %15 = OpConstant.i32 0
   %16 = OpAccessChain.workgroup.i32.element_index %scratch_view, %15
-  %loaded = OpLoad.workgroup.i32 %16
+  %loaded = OpLoad.workgroup.i32 %16 : reg<spirv.id : i32>
   return %loaded
 }

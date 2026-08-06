@@ -3,7 +3,7 @@
 
 spirv.target<vulkan1_3> @target {contract_feature_bits = 37374}
 
-func.def target(@target) @index_address_conversions(%flag: i1, %i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %coordinate0: index, %byte_offset0: offset) -> (index, offset, i1, i1, offset, offset, offset, offset, offset, i8, i16, i32, i64, index) {
+func.def target(@target) @index_address_conversions(%flag: i1, %i8: i8, %i16: i16, %i32: i32, %i64_raw: i64, %coordinate0: index, %byte_offset0: offset) -> (index, offset, i1, i1, offset, offset, offset, offset, offset, i8, i16, i32, i64, index, index, i32) {
   %i64 = scalar.assume %i64_raw [range(%i64_raw, 0, 2147483647)] : i64
   %coordinate, %byte_offset = index.assume %coordinate0, %byte_offset0 [range(%coordinate0, 0, 2147483647), range(%byte_offset0, 0, 2147483647)] : index, offset
   %flag_index = index.cast %flag : i1 to index
@@ -20,7 +20,9 @@ func.def target(@target) @index_address_conversions(%flag: i1, %i8: i8, %i16: i1
   %to_i32 = index.cast %byte_offset : offset to i32
   %to_i64 = index.cast %byte_offset : offset to i64
   %to_index = index.cast %byte_offset : offset to index
-  func.return %flag_index, %flag_offset, %index_low_bit, %offset_low_bit, %from_index, %from_i8, %from_i16, %from_i32, %from_i64, %to_i8, %to_i16, %to_i32, %to_i64, %to_index : index, offset, i1, i1, offset, offset, offset, offset, offset, i8, i16, i32, i64, index
+  %index_from_i32 = index.cast %i32 : i32 to index
+  %i32_from_index = index.cast %coordinate : index to i32
+  func.return %flag_index, %flag_offset, %index_low_bit, %offset_low_bit, %from_index, %from_i8, %from_i16, %from_i32, %from_i64, %to_i8, %to_i16, %to_i32, %to_i64, %to_index, %index_from_i32, %i32_from_index : index, offset, i1, i1, offset, offset, offset, offset, offset, i8, i16, i32, i64, index, index, i32
 }
 
 // ----
@@ -62,7 +64,11 @@ func.def target(@target) @index_address_conversions(%flag: i1, %i8: i8, %i16: i1
                OpName %from_i64 "from_i64"
                OpName %to_i8 "to_i8"
                OpName %to_i16 "to_i16"
+               OpName %to_i32 "to_i32"
                OpName %to_i64 "to_i64"
+               OpName %to_index "to_index"
+               OpName %index_from_i32 "index_from_i32"
+               OpName %i32_from_index "i32_from_index"
                OpMemberDecorate %_struct_6 0 Offset 0
                OpDecorate %_struct_6 Block
                OpDecorate %4 DescriptorSet 0
@@ -115,6 +121,10 @@ func.def target(@target) @index_address_conversions(%flag: i1, %i8: i8, %i16: i1
                OpDecorate %43 Binding 19
                OpDecorate %44 DescriptorSet 0
                OpDecorate %44 Binding 20
+               OpDecorate %45 DescriptorSet 0
+               OpDecorate %45 Binding 21
+               OpDecorate %46 DescriptorSet 0
+               OpDecorate %46 Binding 22
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
        %bool = OpTypeBool
@@ -158,8 +168,10 @@ func.def target(@target) @index_address_conversions(%flag: i1, %i8: i8, %i16: i1
          %42 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
          %43 = OpVariable %_ptr_StorageBuffer__struct_22 StorageBuffer
          %44 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+         %45 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
+         %46 = OpVariable %_ptr_StorageBuffer__struct_6 StorageBuffer
        %void = OpTypeVoid
-         %46 = OpTypeFunction %void
+         %48 = OpTypeFunction %void
       %int_1 = OpConstant %int 1
     %int_0_0 = OpConstant %int 0
     %ulong_1 = OpConstant %ulong 1
@@ -168,74 +180,82 @@ func.def target(@target) @index_address_conversions(%flag: i1, %i8: i8, %i16: i1
       %uchar = OpTypeInt 8 0
      %ushort = OpTypeInt 16 0
     %int_1_0 = OpConstant %int 1
-%index_address_conversions = OpFunction %void None %46
-         %47 = OpLabel
-         %48 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
-         %49 = OpLoad %int %48 Aligned 4
-       %flag = OpINotEqual %bool %49 %int_0
-         %51 = OpAccessChain %_ptr_StorageBuffer_char %9 %int_0
-         %i8 = OpLoad %char %51 Aligned 1
-         %53 = OpAccessChain %_ptr_StorageBuffer_short %14 %int_0
-        %i16 = OpLoad %short %53 Aligned 2
-         %55 = OpAccessChain %_ptr_StorageBuffer_int %19 %int_0
-        %i32 = OpLoad %int %55 Aligned 4
-         %57 = OpAccessChain %_ptr_StorageBuffer_long %20 %int_0
-        %i64 = OpLoad %long %57 Aligned 8
-         %59 = OpAccessChain %_ptr_StorageBuffer_int %25 %int_0
- %coordinate = OpLoad %int %59 Aligned 4
-         %61 = OpAccessChain %_ptr_StorageBuffer_ulong %26 %int_0
-%byte_offset = OpLoad %ulong %61 Aligned 8
+%index_address_conversions = OpFunction %void None %48
+         %49 = OpLabel
+         %50 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+         %51 = OpLoad %int %50 Aligned 4
+       %flag = OpINotEqual %bool %51 %int_0
+         %53 = OpAccessChain %_ptr_StorageBuffer_char %9 %int_0
+         %i8 = OpLoad %char %53 Aligned 1
+         %55 = OpAccessChain %_ptr_StorageBuffer_short %14 %int_0
+        %i16 = OpLoad %short %55 Aligned 2
+         %57 = OpAccessChain %_ptr_StorageBuffer_int %19 %int_0
+        %i32 = OpLoad %int %57 Aligned 4
+         %59 = OpAccessChain %_ptr_StorageBuffer_long %20 %int_0
+        %i64 = OpLoad %long %59 Aligned 8
+         %61 = OpAccessChain %_ptr_StorageBuffer_int %25 %int_0
+ %coordinate = OpLoad %int %61 Aligned 4
+         %63 = OpAccessChain %_ptr_StorageBuffer_ulong %26 %int_0
+%byte_offset = OpLoad %ulong %63 Aligned 8
  %flag_index = OpSelect %int %flag %int_1 %int_0_0
 %flag_offset = OpSelect %ulong %flag %ulong_1 %ulong_0
-         %69 = OpBitwiseAnd %int %coordinate %int_1
-%index_low_bit = OpINotEqual %bool %69 %int_0_0
-         %72 = OpUConvert %uint %byte_offset
-         %73 = OpBitcast %int %72
-         %74 = OpBitwiseAnd %int %73 %int_1
-%offset_low_bit = OpINotEqual %bool %74 %int_0_0
-         %76 = OpBitcast %uint %coordinate
- %from_index = OpUConvert %ulong %76
-         %79 = OpBitcast %uchar %i8
-    %from_i8 = OpUConvert %ulong %79
-         %82 = OpBitcast %ushort %i16
-   %from_i16 = OpUConvert %ulong %82
-         %84 = OpBitcast %uint %i32
-   %from_i32 = OpUConvert %ulong %84
+         %71 = OpBitwiseAnd %int %coordinate %int_1
+%index_low_bit = OpINotEqual %bool %71 %int_0_0
+         %74 = OpUConvert %uint %byte_offset
+         %75 = OpBitcast %int %74
+         %76 = OpBitwiseAnd %int %75 %int_1
+%offset_low_bit = OpINotEqual %bool %76 %int_0_0
+         %78 = OpBitcast %uint %coordinate
+ %from_index = OpUConvert %ulong %78
+         %81 = OpBitcast %uchar %i8
+    %from_i8 = OpUConvert %ulong %81
+         %84 = OpBitcast %ushort %i16
+   %from_i16 = OpUConvert %ulong %84
+         %86 = OpBitcast %uint %i32
+   %from_i32 = OpUConvert %ulong %86
    %from_i64 = OpBitcast %ulong %i64
-         %87 = OpUConvert %uchar %byte_offset
-      %to_i8 = OpBitcast %char %87
-         %89 = OpUConvert %ushort %byte_offset
-     %to_i16 = OpBitcast %short %89
+         %89 = OpUConvert %uchar %byte_offset
+      %to_i8 = OpBitcast %char %89
+         %91 = OpUConvert %ushort %byte_offset
+     %to_i16 = OpBitcast %short %91
+     %to_i32 = OpBitcast %int %74
      %to_i64 = OpBitcast %long %byte_offset
-         %92 = OpAccessChain %_ptr_StorageBuffer_int %31 %int_0
-               OpStore %92 %flag_index Aligned 4
-         %93 = OpAccessChain %_ptr_StorageBuffer_ulong %32 %int_0
-               OpStore %93 %flag_offset Aligned 8
-         %95 = OpSelect %int %index_low_bit %int_1_0 %int_0
-         %96 = OpAccessChain %_ptr_StorageBuffer_int %33 %int_0
-               OpStore %96 %95 Aligned 4
-         %97 = OpSelect %int %offset_low_bit %int_1_0 %int_0
-         %98 = OpAccessChain %_ptr_StorageBuffer_int %34 %int_0
-               OpStore %98 %97 Aligned 4
-         %99 = OpAccessChain %_ptr_StorageBuffer_ulong %35 %int_0
-               OpStore %99 %from_index Aligned 8
-        %100 = OpAccessChain %_ptr_StorageBuffer_ulong %36 %int_0
-               OpStore %100 %from_i8 Aligned 8
-        %101 = OpAccessChain %_ptr_StorageBuffer_ulong %37 %int_0
-               OpStore %101 %from_i16 Aligned 8
-        %102 = OpAccessChain %_ptr_StorageBuffer_ulong %38 %int_0
-               OpStore %102 %from_i32 Aligned 8
-        %103 = OpAccessChain %_ptr_StorageBuffer_ulong %39 %int_0
-               OpStore %103 %from_i64 Aligned 8
-        %104 = OpAccessChain %_ptr_StorageBuffer_char %40 %int_0
-               OpStore %104 %to_i8 Aligned 1
-        %105 = OpAccessChain %_ptr_StorageBuffer_short %41 %int_0
-               OpStore %105 %to_i16 Aligned 2
-        %106 = OpAccessChain %_ptr_StorageBuffer_int %42 %int_0
-               OpStore %106 %73 Aligned 4
-        %107 = OpAccessChain %_ptr_StorageBuffer_long %43 %int_0
-               OpStore %107 %to_i64 Aligned 8
-        %108 = OpAccessChain %_ptr_StorageBuffer_int %44 %int_0
-               OpStore %108 %73 Aligned 4
+   %to_index = OpBitcast %int %74
+%index_from_i32 = OpCopyObject %int %i32
+%i32_from_index = OpCopyObject %int %coordinate
+         %98 = OpAccessChain %_ptr_StorageBuffer_int %31 %int_0
+               OpStore %98 %flag_index Aligned 4
+         %99 = OpAccessChain %_ptr_StorageBuffer_ulong %32 %int_0
+               OpStore %99 %flag_offset Aligned 8
+        %101 = OpSelect %int %index_low_bit %int_1_0 %int_0
+        %102 = OpAccessChain %_ptr_StorageBuffer_int %33 %int_0
+               OpStore %102 %101 Aligned 4
+        %103 = OpSelect %int %offset_low_bit %int_1_0 %int_0
+        %104 = OpAccessChain %_ptr_StorageBuffer_int %34 %int_0
+               OpStore %104 %103 Aligned 4
+        %105 = OpAccessChain %_ptr_StorageBuffer_ulong %35 %int_0
+               OpStore %105 %from_index Aligned 8
+        %106 = OpAccessChain %_ptr_StorageBuffer_ulong %36 %int_0
+               OpStore %106 %from_i8 Aligned 8
+        %107 = OpAccessChain %_ptr_StorageBuffer_ulong %37 %int_0
+               OpStore %107 %from_i16 Aligned 8
+        %108 = OpAccessChain %_ptr_StorageBuffer_ulong %38 %int_0
+               OpStore %108 %from_i32 Aligned 8
+        %109 = OpAccessChain %_ptr_StorageBuffer_ulong %39 %int_0
+               OpStore %109 %from_i64 Aligned 8
+        %110 = OpAccessChain %_ptr_StorageBuffer_char %40 %int_0
+               OpStore %110 %to_i8 Aligned 1
+        %111 = OpAccessChain %_ptr_StorageBuffer_short %41 %int_0
+               OpStore %111 %to_i16 Aligned 2
+        %112 = OpAccessChain %_ptr_StorageBuffer_int %42 %int_0
+               OpStore %112 %to_i32 Aligned 4
+        %113 = OpAccessChain %_ptr_StorageBuffer_long %43 %int_0
+               OpStore %113 %to_i64 Aligned 8
+        %114 = OpAccessChain %_ptr_StorageBuffer_int %44 %int_0
+               OpStore %114 %to_index Aligned 4
+        %115 = OpAccessChain %_ptr_StorageBuffer_int %45 %int_0
+               OpStore %115 %index_from_i32 Aligned 4
+        %116 = OpAccessChain %_ptr_StorageBuffer_int %46 %int_0
+               OpStore %116 %i32_from_index Aligned 4
                OpReturn
                OpFunctionEnd

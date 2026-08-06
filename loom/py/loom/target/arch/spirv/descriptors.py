@@ -322,6 +322,16 @@ def _builtin_index_descriptors() -> tuple[Descriptor, ...]:
     )
 
 
+def _coordinate_copy_descriptor() -> Descriptor:
+    key = "spirv.op_copy_object.i32"
+    return _unary_typed_descriptor(
+        key=key,
+        mnemonic="OpCopyObject.i32",
+        semantic_tag=key,
+        operands=(_id_result(), _id_operand("input")),
+    )
+
+
 def _conversion_descriptors() -> tuple[Descriptor, ...]:
     return (
         *(tuple(_conversion_descriptor(row) for row in LOW_SCALAR_CONVERSIONS)),
@@ -1075,6 +1085,7 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
         ),
         *_scalar_binary_descriptors(),
         *_conversion_descriptors(),
+        _coordinate_copy_descriptor(),
         _ternary_same_type_descriptor(
             key="spirv.op_imul_add.i32",
             mnemonic="OpIMulAdd",
