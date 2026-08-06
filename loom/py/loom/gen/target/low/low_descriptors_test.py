@@ -19,10 +19,12 @@ from loom.gen.target.low.low_descriptors import (
     generate_descriptor_set,
     generate_descriptor_set_shared_source,
 )
+from loom.ir import ScalarTypeKind
 from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_ENCODING_ID_NONE,
     AsmForm,
     AsmImmediate,
+    AsmResultValueType,
     Constraint,
     ConstraintKind,
     Descriptor,
@@ -1097,6 +1099,7 @@ def test_shared_source_emits_prefix_view_local_asm_forms() -> None:
                 mnemonic="storage.add.i32",
                 results=("dst",),
                 operands=("lhs", "rhs"),
+                result_value_types=(AsmResultValueType(ScalarTypeKind.I32),),
             ),
         ),
     )
@@ -1107,6 +1110,7 @@ def test_shared_source_emits_prefix_view_local_asm_forms() -> None:
                 mnemonic="add.i32",
                 results=("dst",),
                 operands=("lhs", "rhs"),
+                result_value_types=(AsmResultValueType(ScalarTypeKind.I32),),
             ),
         ),
     )
@@ -1134,6 +1138,9 @@ def test_shared_source_emits_prefix_view_local_asm_forms() -> None:
     assert "static const loom_low_asm_form_t kTestLowViewCoreAsmForms[]" in source
     assert ".descriptors = kTestLowViewCoreDescriptors," in source
     assert ".asm_forms = kTestLowViewCoreAsmForms," in source
+    assert source.count(".kind = LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR,") == 2
+    assert ".result_value_type_start = 0," in source
+    assert ".result_value_type_start = 1," in source
 
 
 def test_shared_source_compares_derived_descriptor_projections() -> None:
@@ -1382,6 +1389,148 @@ def test_generator_rejects_asm_form_result_with_operand_role() -> None:
     with pytest.raises(
         ValueError,
         match=re.escape("descriptor 'test.add.i32' asm form 'test.add.i32' result field 'lhs' names a non-result operand"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_generator_emits_exact_asm_result_value_type() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        asm_forms=(
+            AsmForm(
+                results=("dst",),
+                operands=("lhs", "rhs"),
+                result_value_types=(AsmResultValueType(ScalarTypeKind.I32, vector_lane_count=4),),
+            ),
+        ),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert compiled.asm_forms[0].result_value_type_start == 0
+    assert compiled.asm_result_value_types == [AsmResultValueType(ScalarTypeKind.I32, vector_lane_count=4)]
+    assert "static const loom_low_asm_result_value_type_t kTestLowCoreAsmResultValueTypes[]" in generated.source
+    assert ".kind = LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_VECTOR," in generated.source
+    assert ".element_type = LOOM_SCALAR_TYPE_I32," in generated.source
+    assert ".vector_lane_count = 4," in generated.source
+    assert ".result_value_type_start = 0," in generated.source
+    assert ".asm_result_value_types = kTestLowCoreAsmResultValueTypes," in generated.source
+
+
+def test_generator_emits_partial_multi_result_value_type_recipe() -> None:
+    base = TEST_LOW_ADD_I32_DESCRIPTOR
+    descriptor = replace(
+        base,
+        operands=(
+            base.operands[0],
+            replace(base.operands[0], field_name="carry"),
+            *base.operands[1:],
+        ),
+        asm_forms=(
+            AsmForm(
+                results=("dst", "carry"),
+                operands=("lhs", "rhs"),
+                result_value_types=(
+                    AsmResultValueType(ScalarTypeKind.I32),
+                    None,
+                ),
+            ),
+        ),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert compiled.asm_result_value_types == [
+        AsmResultValueType(ScalarTypeKind.I32),
+        None,
+    ]
+    assert ".kind = LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR," in generated.source
+    assert ".kind = LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_NONE," in generated.source
+
+
+def test_generator_rejects_misaligned_asm_result_value_types() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        asm_forms=(
+            AsmForm(
+                results=("dst",),
+                operands=("lhs", "rhs"),
+                result_value_types=(
+                    AsmResultValueType(ScalarTypeKind.I32),
+                    AsmResultValueType(ScalarTypeKind.I32),
+                ),
+            ),
+        ),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' asm form 'test.add.i32' has 2 result value types for 1 results"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_generator_rejects_empty_asm_result_value_type_recipe() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        asm_forms=(
+            AsmForm(
+                results=("dst",),
+                operands=("lhs", "rhs"),
+                result_value_types=(None,),
+            ),
+        ),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' asm form 'test.add.i32' has an empty result value type recipe"),
+    ):
+        generate_descriptor_set(descriptor_set)
+
+
+@pytest.mark.parametrize("lane_count", [-1, 2**16])
+def test_asm_result_value_type_rejects_lane_count_outside_u16(
+    lane_count: int,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="asm result vector lane count must fit u16",
+    ):
+        AsmResultValueType(ScalarTypeKind.I32, lane_count)
+
+
+def test_asm_result_value_type_requires_scalar_type_kind() -> None:
+    with pytest.raises(
+        ValueError,
+        match="asm result element type must be a ScalarTypeKind",
+    ):
+        AsmResultValueType(5)  # type: ignore[arg-type]
+
+
+def test_generator_rejects_exact_type_for_tied_asm_result() -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        constraints=(Constraint(ConstraintKind.TIED, 0, 1),),
+        asm_forms=(
+            AsmForm(
+                results=("dst",),
+                operands=("lhs", "rhs"),
+                result_value_types=(AsmResultValueType(ScalarTypeKind.I32),),
+            ),
+        ),
+    )
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor 'test.add.i32' asm form 'test.add.i32' result 0 is operand-inferred and must use the exact operand type"),
     ):
         generate_descriptor_set(descriptor_set)
 

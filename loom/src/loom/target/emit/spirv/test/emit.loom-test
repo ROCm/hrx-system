@@ -1390,7 +1390,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target) workgroup_size(1, 1, 1) @
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_i32_arithmetic(%lhs: reg<spirv.id>, %rhs: reg<spirv.id>) -> (reg<spirv.id>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_i32_arithmetic(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %bias = OpConstant.i32 7
   %sum = OpIAdd %lhs, %rhs
   %difference = OpISub %sum, %bias
@@ -1467,10 +1467,10 @@ low.func.def target<spirv.logical.core>(@target_scalar_payloads) abi(shader_entr
 }
 
 low.func.def target<spirv.logical.core>(@target_scalar_payloads) abi(shader_entry_point) @spirv_scalar_float_constants() asm {
-  %f16 = OpConstant.f16 48640 : reg<spirv.id : f16>
-  %bf16 = OpConstant.bf16 16320 : reg<spirv.id : bf16>
-  %f32 = OpConstant.f32 1078984704 : reg<spirv.id : f32>
-  %f64 = OpConstant.f64 -4629700416936869888 : reg<spirv.id : f64>
+  %f16 = OpConstant.f16 48640
+  %bf16 = OpConstant.bf16 16320
+  %f32 = OpConstant.f32 1078984704
+  %f64 = OpConstant.f64 -4629700416936869888
   return
 }
 
@@ -1676,7 +1676,7 @@ low.func.def target<spirv.logical.core>(@target_scalar_payloads) abi(shader_entr
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [23]}) @spirv_storage_buffer_i32_roundtrip(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [23]}) @spirv_storage_buffer_i32_roundtrip(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
   %input_view = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %byte_offset
   %loaded = OpLoad.storage_buffer.i32 %input_view
   %incremented = OpIAdd %loaded, %loaded

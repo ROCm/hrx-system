@@ -314,6 +314,34 @@ TEST_F(LowAsmParserTest, ParsesStructuralRegisterValueTypes) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmParserTest, InfersExactSemanticResultValueType) {
+  loom_module_t* module = ParseOk(
+      "low.func.def target<test.low.core> @typed_packet("
+      "%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> "
+      "(reg<test.i32 : i32>) asm {\n"
+      "  %result = OpIAdd %lhs, %rhs\n"
+      "  return %result\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_op_t* function_op = loom_block_op(loom_module_block(module), 0);
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
+  loom_block_t* entry = GetEntryBlock(loom_low_func_def_body(function_op));
+  ASSERT_NE(entry, nullptr);
+  loom_op_t* packet_op = loom_block_op(entry, 0);
+  ASSERT_TRUE(loom_low_op_isa(packet_op));
+  loom_type_t result_type =
+      loom_module_value_type(module, loom_low_op_results(packet_op).values[0]);
+  ExpectTestLowCoreRegisterType(result_type,
+                                TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, 1);
+  const loom_type_t* value_type = loom_type_register_value_type(result_type);
+  ASSERT_NE(value_type, nullptr);
+  EXPECT_TRUE(
+      loom_type_equal(*value_type, loom_type_scalar(LOOM_SCALAR_TYPE_I32)));
+
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmParserTest, BuildsCanonicalLowOps) {
   loom_module_t* module = ParseOk(
       "low.func.def target<test.low.core> @packet() -> "

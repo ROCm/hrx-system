@@ -26,6 +26,7 @@ from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_ENCODING_ID_NONE,
     LOW_DESCRIPTOR_SET_ORDINAL_NONE,
     AsmForm,
+    AsmResultValueType,
     Constraint,
     ConstraintKind,
     Descriptor,
@@ -506,6 +507,16 @@ def _compile_asm_form(
             raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' result field '{field_name}' names a non-result operand")
         result_indices.append(operand_index)
 
+    if asm_form.result_value_types:
+        if len(asm_form.result_value_types) != len(result_indices):
+            raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' has {len(asm_form.result_value_types)} result value types for {len(result_indices)} results")
+        if not any(value_type is not None for value_type in asm_form.result_value_types):
+            raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' has an empty result value type recipe")
+        operand_inferred_result_indices = {constraint.lhs_operand_index for constraint in descriptor.constraints if constraint.kind in (ConstraintKind.TIED, ConstraintKind.DESTRUCTIVE)}
+        for result_index, (operand_index, value_type) in enumerate(zip(result_indices, asm_form.result_value_types, strict=True)):
+            if value_type is not None and operand_index in operand_inferred_result_indices:
+                raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' result {result_index} is operand-inferred and must use the exact operand type")
+
     packet_operand_roles = {
         OperandRole.OPERAND,
         OperandRole.PREDICATE,
@@ -572,6 +583,7 @@ def _compile_asm_form(
         native_assembly_mnemonic=native_assembly_mnemonic,
         result_indices=tuple(result_indices),
         operand_indices=tuple(operand_order),
+        result_value_types=asm_form.result_value_types,
         immediates=tuple(immediate_order),
         native_assembly_values=tuple(native_assembly_values),
     )
@@ -782,12 +794,16 @@ def compile_asm_forms_for_descriptors(
 def append_asm_form_table_spans(
     asm_forms: Sequence[CompiledAsmForm],
     asm_operand_indices: list[int],
+    asm_result_value_types: list[AsmResultValueType | None],
     asm_immediates: list[CompiledAsmImmediate],
     native_asm_values: list[CompiledNativeAsmValue],
 ) -> None:
     for asm_form in asm_forms:
         asm_form.result_index_start = len(asm_operand_indices)
         asm_operand_indices.extend(asm_form.result_indices)
+        if asm_form.result_value_types:
+            asm_form.result_value_type_start = len(asm_result_value_types)
+            asm_result_value_types.extend(asm_form.result_value_types)
         asm_form.operand_index_start = len(asm_operand_indices)
         asm_operand_indices.extend(asm_form.operand_indices)
         asm_form.immediate_start = len(asm_immediates)
@@ -1077,11 +1093,13 @@ def compile_descriptor_set(
             canonical_asm_form_ordinals[descriptor_ordinal] = None
 
     asm_operand_indices: list[int] = []
+    asm_result_value_types: list[AsmResultValueType | None] = []
     asm_immediates: list[CompiledAsmImmediate] = []
     native_asm_values: list[CompiledNativeAsmValue] = []
     append_asm_form_table_spans(
         asm_forms,
         asm_operand_indices,
+        asm_result_value_types,
         asm_immediates,
         native_asm_values,
     )
@@ -1289,6 +1307,7 @@ def compile_descriptor_set(
         canonical_asm_form_ordinals=canonical_asm_form_ordinals,
         asm_forms=asm_forms,
         asm_operand_indices=asm_operand_indices,
+        asm_result_value_types=asm_result_value_types,
         asm_immediates=asm_immediates,
         native_asm_values=native_asm_values,
         schedule_rows=schedule_rows,

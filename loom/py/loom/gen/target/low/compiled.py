@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from loom.gen.support.string_pool import CStringPool
 from loom.target.low_descriptors import (
+    AsmResultValueType,
     Constraint,
     Descriptor,
     DescriptorSet,
@@ -97,6 +98,7 @@ class CompiledDescriptorSet:
     canonical_asm_form_ordinals: list[int | None]
     asm_forms: list[CompiledAsmForm]
     asm_operand_indices: list[int]
+    asm_result_value_types: list[AsmResultValueType | None]
     asm_immediates: list[CompiledAsmImmediate]
     native_asm_values: list[CompiledNativeAsmValue]
     schedule_rows: list[dict[str, int]]
@@ -149,9 +151,11 @@ class CompiledAsmForm:
     native_assembly_mnemonic: str | None
     result_indices: tuple[int, ...]
     operand_indices: tuple[int, ...]
+    result_value_types: tuple[AsmResultValueType | None, ...]
     immediates: tuple[CompiledAsmImmediate, ...]
     native_assembly_values: tuple[CompiledNativeAsmValue, ...]
     result_index_start: int = 0
+    result_value_type_start: int | None = None
     operand_index_start: int = 0
     immediate_start: int = 0
     native_assembly_value_start: int = 0

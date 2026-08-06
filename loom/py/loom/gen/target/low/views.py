@@ -195,6 +195,7 @@ def _compile_view_asm_forms(
     compiler.append_asm_form_table_spans(
         asm_forms,
         compiled.asm_operand_indices,
+        compiled.asm_result_value_types,
         compiled.asm_immediates,
         compiled.native_asm_values,
     )

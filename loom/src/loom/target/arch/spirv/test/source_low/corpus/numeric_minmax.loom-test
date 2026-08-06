@@ -75,9 +75,9 @@ func.def target(@target) @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (inde
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @index_minmax_sgpr(%lhs: reg<spirv.id : index>, %rhs: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
-  %11 = OpSLessThan %lhs, %rhs : reg<spirv.id : i1>
+  %11 = OpSLessThan %lhs, %rhs
   %min = OpSelect %11, %lhs, %rhs : reg<spirv.id : index>
-  %13 = OpSGreaterThan %lhs, %rhs : reg<spirv.id : i1>
+  %13 = OpSGreaterThan %lhs, %rhs
   %max = OpSelect %13, %lhs, %rhs : reg<spirv.id : index>
   %sum = OpIAdd %min, %max : reg<spirv.id : index>
   return %sum
@@ -94,8 +94,8 @@ func.def target(@target) @scf_select_sgpr(%lhs: i32, %rhs: i32, %a: i32, %b: i32
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23, 23], spirv_result_value_types = [23]}) @scf_select_sgpr(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %a: reg<spirv.id : i32>, %b: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
-  %cond = OpSLessThan %lhs, %rhs : reg<spirv.id : i1>
-  %selected = OpSelect %cond, %a, %b : reg<spirv.id : i32>
+  %cond = OpSLessThan %lhs, %rhs
+  %selected = OpSelect %cond, %a, %b
   return %selected
 }
 
@@ -110,8 +110,8 @@ func.def target(@target) @scf_select_i64_sgpr(%lhs: i32, %rhs: i32, %a: i64, %b:
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 24, 24], spirv_result_value_types = [24]}) @scf_select_i64_sgpr(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %a: reg<spirv.id : i64>, %b: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
-  %cond = OpSLessThan %lhs, %rhs : reg<spirv.id : i1>
-  %selected = OpSelect.i64 %cond, %a, %b : reg<spirv.id : i64>
+  %cond = OpSLessThan %lhs, %rhs
+  %selected = OpSelect.i64 %cond, %a, %b
   return %selected
 }
 
@@ -134,16 +134,16 @@ func.def target(@target) @scf_select_q6_nibble_i8(%code: i32, %use_high: i32) ->
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [21]}) @scf_select_q6_nibble_i8(%code: reg<spirv.id : i32>, %use_high: reg<spirv.id : i32>) -> (reg<spirv.id : i8>) asm {
-  %low_selector = OpConstant.i32 0 : reg<spirv.id : i32>
-  %nibble_shift = OpConstant.i32 4 : reg<spirv.id : i32>
-  %mask = OpConstant.i32 15 : reg<spirv.id : i32>
-  %high_shifted = OpShiftRightLogical %code, %nibble_shift : reg<spirv.id : i32>
-  %low_i32 = OpBitwiseAnd %code, %mask : reg<spirv.id : i32>
-  %high_i32 = OpBitwiseAnd %high_shifted, %mask : reg<spirv.id : i32>
-  %low = OpSConvert.i32.i8 %low_i32 : reg<spirv.id : i8>
-  %high = OpSConvert.i32.i8 %high_i32 : reg<spirv.id : i8>
-  %cond = OpINotEqual %use_high, %low_selector : reg<spirv.id : i1>
-  %selected = OpSelect.i8 %cond, %high, %low : reg<spirv.id : i8>
+  %low_selector = OpConstant.i32 0
+  %nibble_shift = OpConstant.i32 4
+  %mask = OpConstant.i32 15
+  %high_shifted = OpShiftRightLogical %code, %nibble_shift
+  %low_i32 = OpBitwiseAnd %code, %mask
+  %high_i32 = OpBitwiseAnd %high_shifted, %mask
+  %low = OpSConvert.i32.i8 %low_i32
+  %high = OpSConvert.i32.i8 %high_i32
+  %cond = OpINotEqual %use_high, %low_selector
+  %selected = OpSelect.i8 %cond, %high, %low
   return %selected
 }
 
@@ -163,13 +163,13 @@ func.def target(@target) @scf_select_scale_piece_i16(%packed: i32, %use_high: i3
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [22]}) @scf_select_scale_piece_i16(%packed: reg<spirv.id : i32>, %use_high: reg<spirv.id : i32>) -> (reg<spirv.id : i16>) asm {
-  %low_selector = OpConstant.i32 0 : reg<spirv.id : i32>
-  %halfword_shift = OpConstant.i32 16 : reg<spirv.id : i32>
-  %low = OpSConvert.i32.i16 %packed : reg<spirv.id : i16>
-  %high_shifted = OpShiftRightLogical %packed, %halfword_shift : reg<spirv.id : i32>
-  %high = OpSConvert.i32.i16 %high_shifted : reg<spirv.id : i16>
-  %cond = OpINotEqual %use_high, %low_selector : reg<spirv.id : i1>
-  %selected = OpSelect.i16 %cond, %high, %low : reg<spirv.id : i16>
+  %low_selector = OpConstant.i32 0
+  %halfword_shift = OpConstant.i32 16
+  %low = OpSConvert.i32.i16 %packed
+  %high_shifted = OpShiftRightLogical %packed, %halfword_shift
+  %high = OpSConvert.i32.i16 %high_shifted
+  %cond = OpINotEqual %use_high, %low_selector
+  %selected = OpSelect.i16 %cond, %high, %low
   return %selected
 }
 
@@ -407,12 +407,12 @@ func.def target(@target) @scf_select_i1_scc_condition(%lhs: i32, %rhs: i32, %alt
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23, 18, 18], spirv_result_value_types = [18]}) @scf_select_i1_scc_condition(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %alt: reg<spirv.id : i32>, %true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
-  %inactive_condition = OpConstant.i32 0 : reg<spirv.id : i32>
-  %condition = OpSLessThan %lhs, %rhs : reg<spirv.id : i1>
-  %lhs_nonzero = OpINotEqual %lhs, %inactive_condition : reg<spirv.id : i1>
-  %alt_nonzero = OpINotEqual %alt, %inactive_condition : reg<spirv.id : i1>
-  %selected_condition = OpSelect.bool %condition, %lhs_nonzero, %alt_nonzero : reg<spirv.id : i1>
-  %result = OpSelect.f32 %selected_condition, %true_value, %false_value : reg<spirv.id : f32>
+  %inactive_condition = OpConstant.i32 0
+  %condition = OpSLessThan %lhs, %rhs
+  %lhs_nonzero = OpINotEqual %lhs, %inactive_condition
+  %alt_nonzero = OpINotEqual %alt, %inactive_condition
+  %selected_condition = OpSelect.bool %condition, %lhs_nonzero, %alt_nonzero
+  %result = OpSelect.f32 %selected_condition, %true_value, %false_value
   return %result
 }
 

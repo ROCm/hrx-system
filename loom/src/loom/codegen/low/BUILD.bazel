@@ -50,6 +50,7 @@ loom_cc_library(
     hdrs = ["descriptors.h"],
     visibility = _LOW_DESCRIPTOR_VISIBILITY,
     deps = [
+        "//loom/src/loom/ir",
         "//loom/src/loom/target:types",
         "//loom/src/loom/util:bstring",
         "//loom/src/loom/util:stable_id",

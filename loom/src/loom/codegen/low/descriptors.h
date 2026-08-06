@@ -17,6 +17,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/string_builder.h"
+#include "loom/ir/scalar_type.h"
 #include "loom/target/types.h"
 #include "loom/util/bstring.h"
 
@@ -25,7 +26,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 32u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 33u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -44,6 +45,9 @@ extern "C" {
 
 // Sentinel for absent asm-form ordinals.
 #define LOOM_LOW_ASM_FORM_ORDINAL_NONE UINT32_MAX
+
+// Sentinel for asm forms without exact semantic result value types.
+#define LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE UINT32_MAX
 
 // Sentinel used before verification; verified descriptors must name a class.
 #define LOOM_LOW_SCHEDULE_CLASS_NONE UINT16_MAX
@@ -943,6 +947,29 @@ typedef struct loom_low_native_asm_value_t {
   loom_bstring_table_offset_t literal_string_offset;
 } loom_low_native_asm_value_t;
 
+enum loom_low_asm_result_value_type_kind_e {
+  // No exact semantic type is inferred for this result.
+  LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_NONE = 0,
+  // Scalar semantic result type.
+  LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR = 1,
+  // Static rank-1 vector semantic result type.
+  LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_VECTOR = 2,
+};
+typedef uint8_t loom_low_asm_result_value_type_kind_t;
+
+// Exact semantic value type reconstructed for one target-asm result.
+typedef struct loom_low_asm_result_value_type_t {
+  // Shape category of the inferred semantic value type.
+  loom_low_asm_result_value_type_kind_t kind;
+  // Scalar type or vector element type.
+  loom_scalar_type_t element_type;
+  // Static vector lane count, or zero for scalar and absent rows.
+  uint16_t vector_lane_count;
+} loom_low_asm_result_value_type_t;
+
+static_assert(sizeof(loom_low_asm_result_value_type_t) == 4,
+              "loom_low_asm_result_value_type_t must be 4 bytes");
+
 typedef struct loom_low_asm_form_t {
   // String-table offset for the unqualified asm mnemonic.
   loom_bstring_table_offset_t mnemonic_string_offset;
@@ -952,21 +979,26 @@ typedef struct loom_low_asm_form_t {
   uint32_t descriptor_ordinal;
   // First descriptor-local result operand index in asm_operand_indices.
   uint32_t result_operand_index_start;
-  // Number of result operand indices for this asm form.
-  uint16_t result_operand_index_count;
+  // First exact semantic result row, or START_NONE when none are declared.
+  uint32_t result_value_type_start;
   // First descriptor-local input operand index in asm_operand_indices.
   uint32_t operand_index_start;
-  // Number of input operand indices for this asm form.
-  uint16_t operand_index_count;
   // First immediate spelling row for this asm form.
   uint32_t immediate_start;
-  // Number of immediate spelling rows for this asm form.
-  uint16_t immediate_count;
   // First native assembly value row for this asm form.
   uint32_t native_assembly_value_start;
+  // Number of result operand indices for this asm form.
+  uint16_t result_operand_index_count;
+  // Number of input operand indices for this asm form.
+  uint16_t operand_index_count;
+  // Number of immediate spelling rows for this asm form.
+  uint16_t immediate_count;
   // Number of native assembly value rows for this asm form.
   uint16_t native_assembly_value_count;
 } loom_low_asm_form_t;
+
+static_assert(sizeof(loom_low_asm_form_t) == 40,
+              "loom_low_asm_form_t must be 40 bytes");
 
 typedef struct loom_low_descriptor_set_t {
   // Descriptor table ABI version.
@@ -1009,6 +1041,10 @@ typedef struct loom_low_descriptor_set_t {
   const uint16_t* asm_operand_indices;
   // Number of descriptor-local operand index rows owned by this set.
   uint32_t asm_operand_index_count;
+  // Packed exact semantic result rows referenced by asm forms.
+  const loom_low_asm_result_value_type_t* asm_result_value_types;
+  // Number of exact semantic result rows owned by this set.
+  uint32_t asm_result_value_type_count;
   // Packed immediate spelling rows referenced by asm forms.
   const loom_low_asm_immediate_t* asm_immediates;
   // Number of immediate spelling rows owned by this set.

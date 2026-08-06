@@ -17,13 +17,13 @@ func.def target(@target) @scalar_i32_uniform_sgpr(%lhs: i32, %rhs: i32, %shift: 
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23], spirv_result_value_types = [23]}) @scalar_i32_uniform_sgpr(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %shift: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
-  %product = OpIMul %lhs, %rhs : reg<spirv.id : i32>
-  %and = OpBitwiseAnd %product, %lhs : reg<spirv.id : i32>
-  %or = OpBitwiseOr %and, %rhs : reg<spirv.id : i32>
-  %xor = OpBitwiseXor %or, %lhs : reg<spirv.id : i32>
-  %shl = OpShiftLeftLogical %xor, %shift : reg<spirv.id : i32>
-  %ashr = OpShiftRightArithmetic %shl, %shift : reg<spirv.id : i32>
-  %lshr = OpShiftRightLogical %ashr, %shift : reg<spirv.id : i32>
+  %product = OpIMul %lhs, %rhs
+  %and = OpBitwiseAnd %product, %lhs
+  %or = OpBitwiseOr %and, %rhs
+  %xor = OpBitwiseXor %or, %lhs
+  %shl = OpShiftLeftLogical %xor, %shift
+  %ashr = OpShiftRightArithmetic %shl, %shift
+  %lshr = OpShiftRightLogical %ashr, %shift
   return %lshr
 }
 
@@ -49,7 +49,7 @@ func.def target(@target) @scalar_i32_compare_scc(%lhs: i32, %rhs: i32) -> (i1) {
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [1]}) @scalar_i32_compare_scc(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>) -> (reg<spirv.id : i1>) asm {
-  %cmp = OpSLessThan %lhs, %rhs : reg<spirv.id : i1>
+  %cmp = OpSLessThan %lhs, %rhs
   return %cmp
 }
 
@@ -64,8 +64,8 @@ func.def target(@target) @scalar_i1_constants_scc() -> (i1, i1) {
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [1, 1]}) @scalar_i1_constants_scc() -> (reg<spirv.id : i1>, reg<spirv.id : i1>) asm {
-  %true = OpConstantTrue.bool : reg<spirv.id : i1>
-  %false = OpConstantFalse.bool : reg<spirv.id : i1>
+  %true = OpConstantTrue.bool
+  %false = OpConstantFalse.bool
   return %true, %false
 }
 
@@ -84,11 +84,11 @@ func.def target(@target) @scalar_i1_bitwise_scc(%lhs: i32, %rhs: i32) -> (i1) {
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [1]}) @scalar_i1_bitwise_scc(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>) -> (reg<spirv.id : i1>) asm {
-  %inactive_condition = OpConstant.i32 0 : reg<spirv.id : i32>
-  %lhs_nonzero = OpINotEqual %lhs, %inactive_condition : reg<spirv.id : i1>
-  %rhs_nonzero = OpINotEqual %rhs, %inactive_condition : reg<spirv.id : i1>
-  %both_nonzero = OpLogicalAnd.bool %lhs_nonzero, %rhs_nonzero : reg<spirv.id : i1>
-  %either_nonzero = OpLogicalOr.bool %lhs_nonzero, %rhs_nonzero : reg<spirv.id : i1>
-  %one_nonzero = OpLogicalNotEqual.bool %both_nonzero, %either_nonzero : reg<spirv.id : i1>
+  %inactive_condition = OpConstant.i32 0
+  %lhs_nonzero = OpINotEqual %lhs, %inactive_condition
+  %rhs_nonzero = OpINotEqual %rhs, %inactive_condition
+  %both_nonzero = OpLogicalAnd.bool %lhs_nonzero, %rhs_nonzero
+  %either_nonzero = OpLogicalOr.bool %lhs_nonzero, %rhs_nonzero
+  %one_nonzero = OpLogicalNotEqual.bool %both_nonzero, %either_nonzero
   return %one_nonzero
 }

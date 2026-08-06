@@ -47,8 +47,7 @@ static iree_status_t loom_spirv_make_typed_register_type(
 
 static bool loom_spirv_source_type_is_id(loom_type_t type) {
   loom_spirv_value_type_t value_type = {0};
-  return loom_type_is_scalar(type) &&
-         loom_spirv_value_type_from_loom_type(type, &value_type);
+  return loom_spirv_value_type_from_loom_type(type, &value_type);
 }
 
 static bool loom_spirv_source_type_is_offset64(loom_type_t type) {
@@ -86,6 +85,13 @@ static iree_status_t loom_spirv_map_type(void* user_data,
     return loom_spirv_make_typed_register_type(
         context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, source_type, out_low_type);
   }
+  if (loom_type_is_vector(source_type) && loom_type_rank(source_type) == 1 &&
+      !loom_type_dim_is_dynamic_at(source_type, 0) &&
+      loom_type_dim_static_size_at(source_type, 0) == 1) {
+    return loom_spirv_map_type(
+        user_data, context, source_op,
+        loom_type_scalar(loom_type_element_type(source_type)), out_low_type);
+  }
   if (loom_spirv_source_type_is_offset64(source_type)) {
     return loom_spirv_make_register_type(
         context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_OFFSET64, out_low_type);
@@ -115,24 +121,6 @@ static iree_status_t loom_spirv_map_value(void* user_data,
       return loom_spirv_make_register_type(
           context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, out_low_type);
     }
-    if (loom_type_rank(source_type) == 1 &&
-        !loom_type_dim_is_dynamic_at(source_type, 0)) {
-      const int64_t lane_count = loom_type_dim_static_size_at(source_type, 0);
-      if (lane_count == 1) {
-        return loom_spirv_map_type(
-            user_data, context, source_op,
-            loom_type_scalar(loom_type_element_type(source_type)),
-            out_low_type);
-      }
-      loom_spirv_value_type_t value_type = {0};
-      if (loom_spirv_value_type_from_loom_type(source_type, &value_type)) {
-        return loom_spirv_make_typed_register_type(
-            context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, source_type,
-            out_low_type);
-      }
-    }
-    return loom_low_lower_emit_source_type_unsupported(
-        context, source_op, IREE_SV("source"), source_type);
   }
   return loom_spirv_map_type(user_data, context, source_op, source_type,
                              out_low_type);
@@ -181,6 +169,10 @@ static iree_status_t loom_spirv_map_argument(
         .resource_source_type = resource_source_type,
     };
     return iree_ok_status();
+  }
+  if (loom_type_is_vector(source_type)) {
+    return loom_low_lower_emit_source_type_unsupported(
+        context, source_function_op, IREE_SV("argument"), source_type);
   }
 
   *out_argument = (loom_low_lower_abi_argument_t){

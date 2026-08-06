@@ -19,6 +19,7 @@ loom_cc_library(
     "descriptors_enums.c"
   DEPS
     iree::base
+    loom::ir
     loom::target::types
     loom::util::bstring
     loom::util::stable_id

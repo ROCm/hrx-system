@@ -191,6 +191,22 @@ TEST_F(LowAsmPrinterTest, PreservesSemanticRegisterResultTypes) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmPrinterTest, ElidesOnlyExactSemanticResultValueType) {
+  const char* source =
+      "low.func.def target<test.low.core> @typed_packet("
+      "%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> "
+      "(reg<test.i32 : i32>, reg<test.i32>, reg<test.i32 : f32>) asm {\n"
+      "  %typed = OpIAdd %lhs, %rhs\n"
+      "  %carrier = OpIAdd %lhs, %rhs : reg<test.i32>\n"
+      "  %alternate = OpIAdd %lhs, %rhs : reg<test.i32 : f32>\n"
+      "  return %typed, %carrier, %alternate\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module), source);
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmPrinterTest, PrintsZeroImmediateConstAndOperandlessOp) {
   const char* source =
       "low.func.def target<test.low.core> @zero_immediate() -> "

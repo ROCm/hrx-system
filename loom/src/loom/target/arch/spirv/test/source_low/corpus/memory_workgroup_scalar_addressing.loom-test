@@ -17,13 +17,13 @@ func.def target(@target) @workgroup_static_rank2_i32(%value: i32) -> (i32) {
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23], spirv_result_value_types = [23]}) @workgroup_static_rank2_i32(%value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %scratch = storage {byte_alignment = 4, byte_length = 256} : low.storage<workgroup>
   %scratch_view = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
-  %13 = OpConstant.i32 21
+  %13 = OpConstant.i32 21 : reg<spirv.id : index>
   %14 = OpAccessChain.workgroup.i32.element_index %scratch_view, %13
   OpStore.workgroup.i32 %14, %value
   OpControlBarrier.workgroup.workgroup.acq_rel
-  %15 = OpConstant.i32 21
+  %15 = OpConstant.i32 21 : reg<spirv.id : index>
   %16 = OpAccessChain.workgroup.i32.element_index %scratch_view, %15
-  %loaded = OpLoad.workgroup.i32 %16 : reg<spirv.id : i32>
+  %loaded = OpLoad.workgroup.i32 %16
   return %loaded
 }
 
@@ -55,7 +55,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
   OpControlBarrier.workgroup.workgroup.acq_rel
   %23 = OpIAdd %base_element_bounded, %element_bounded : reg<spirv.id : index>
   %24 = OpAccessChain.workgroup.i32.element_index %scratch_view, %23
-  %loaded = OpLoad.workgroup.i32 %24 : reg<spirv.id : i32>
+  %loaded = OpLoad.workgroup.i32 %24
   return %loaded
 }
 
@@ -88,7 +88,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
   %23 = OpIMul %row_bounded, %column_count_bounded : reg<spirv.id : index>
   %24 = OpIAdd %23, %column_bounded : reg<spirv.id : index>
   %25 = OpAccessChain.workgroup.i32.element_index %scratch_view, %24
-  %loaded = OpLoad.workgroup.i32 %25 : reg<spirv.id : i32>
+  %loaded = OpLoad.workgroup.i32 %25
   return %loaded
 }
 
@@ -113,15 +113,15 @@ func.def target(@target) @workgroup_subview_refine_i32(%value: i32, %element: in
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @workgroup_subview_refine_i32(%value: reg<spirv.id : i32>, %element_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
   %scratch = storage {byte_alignment = 4, byte_length = 64} : low.storage<workgroup>
   %scratch_refined = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
-  %16 = OpConstant.i32 3
+  %16 = OpConstant.i32 3 : reg<spirv.id : index>
   %17 = OpIAdd %element_bounded, %16 : reg<spirv.id : index>
   %18 = OpAccessChain.workgroup.i32.element_index %scratch_refined, %17
   OpStore.workgroup.i32 %18, %value
   OpControlBarrier.workgroup.workgroup.acq_rel
-  %19 = OpConstant.i32 3
+  %19 = OpConstant.i32 3 : reg<spirv.id : index>
   %20 = OpIAdd %element_bounded, %19 : reg<spirv.id : index>
   %21 = OpAccessChain.workgroup.i32.element_index %scratch_refined, %20
-  %loaded = OpLoad.workgroup.i32 %21 : reg<spirv.id : i32>
+  %loaded = OpLoad.workgroup.i32 %21
   return %loaded
 }
 
@@ -161,7 +161,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
   %view_i16 = storage_address %scratch_i16 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i16>
   %view_i32 = storage_address %scratch_i32 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
   %view_i64 = storage_address %scratch_i64 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i64>
-  %38 = OpConstant.i32 1
+  %38 = OpConstant.i32 1 : reg<spirv.id : index>
   %39 = OpAccessChain.workgroup.i8.element_index %view_i8, %38
   OpStore.workgroup.i8 %39, %value_i8
   %41 = OpAccessChain.workgroup.i16.element_index %view_i16, %38
@@ -171,15 +171,15 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
   %45 = OpAccessChain.workgroup.i64.element_index %view_i64, %38
   OpStore.workgroup.i64 %45, %value_i64
   OpControlBarrier.workgroup.workgroup.acq_rel
-  %46 = OpConstant.i32 1
+  %46 = OpConstant.i32 1 : reg<spirv.id : index>
   %47 = OpAccessChain.workgroup.i8.element_index %view_i8, %46
-  %loaded_i8 = OpLoad.workgroup.i8 %47 : reg<spirv.id : i8>
+  %loaded_i8 = OpLoad.workgroup.i8 %47
   %50 = OpAccessChain.workgroup.i16.element_index %view_i16, %46
-  %loaded_i16 = OpLoad.workgroup.i16 %50 : reg<spirv.id : i16>
+  %loaded_i16 = OpLoad.workgroup.i16 %50
   %53 = OpAccessChain.workgroup.i32.element_index %view_i32, %46
-  %loaded_i32 = OpLoad.workgroup.i32 %53 : reg<spirv.id : i32>
+  %loaded_i32 = OpLoad.workgroup.i32 %53
   %56 = OpAccessChain.workgroup.i64.element_index %view_i64, %46
-  %loaded_i64 = OpLoad.workgroup.i64 %56 : reg<spirv.id : i64>
+  %loaded_i64 = OpLoad.workgroup.i64 %56
   return %loaded_i8, %loaded_i16, %loaded_i32, %loaded_i64
 }
 
@@ -219,7 +219,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
   %view_bf16 = storage_address %scratch_bf16 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.bf16>
   %view_f32 = storage_address %scratch_f32 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.f32>
   %view_f64 = storage_address %scratch_f64 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.f64>
-  %38 = OpConstant.i32 1
+  %38 = OpConstant.i32 1 : reg<spirv.id : index>
   %39 = OpAccessChain.workgroup.f16.element_index %view_f16, %38
   OpStore.workgroup.f16 %39, %value_f16
   %41 = OpAccessChain.workgroup.bf16.element_index %view_bf16, %38
@@ -229,14 +229,14 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
   %45 = OpAccessChain.workgroup.f64.element_index %view_f64, %38
   OpStore.workgroup.f64 %45, %value_f64
   OpControlBarrier.workgroup.workgroup.acq_rel
-  %46 = OpConstant.i32 1
+  %46 = OpConstant.i32 1 : reg<spirv.id : index>
   %47 = OpAccessChain.workgroup.f16.element_index %view_f16, %46
-  %loaded_f16 = OpLoad.workgroup.f16 %47 : reg<spirv.id : f16>
+  %loaded_f16 = OpLoad.workgroup.f16 %47
   %50 = OpAccessChain.workgroup.bf16.element_index %view_bf16, %46
-  %loaded_bf16 = OpLoad.workgroup.bf16 %50 : reg<spirv.id : bf16>
+  %loaded_bf16 = OpLoad.workgroup.bf16 %50
   %53 = OpAccessChain.workgroup.f32.element_index %view_f32, %46
-  %loaded_f32 = OpLoad.workgroup.f32 %53 : reg<spirv.id : f32>
+  %loaded_f32 = OpLoad.workgroup.f32 %53
   %56 = OpAccessChain.workgroup.f64.element_index %view_f64, %46
-  %loaded_f64 = OpLoad.workgroup.f64 %56 : reg<spirv.id : f64>
+  %loaded_f64 = OpLoad.workgroup.f64 %56
   return %loaded_f16, %loaded_bf16, %loaded_f32, %loaded_f64
 }

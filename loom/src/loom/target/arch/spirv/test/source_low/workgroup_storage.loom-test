@@ -24,7 +24,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
   OpStore.workgroup.i32 %18, %value
   OpControlBarrier.workgroup.workgroup.acq_rel
   %19 = OpAccessChain.workgroup.i32.element_index %scratch_view, %bounded_index
-  %loaded = OpLoad.workgroup.i32 %19 : reg<spirv.id : i32>
+  %loaded = OpLoad.workgroup.i32 %19
   return %loaded
 }
 
@@ -49,12 +49,12 @@ func.def target(@target) @spirv_bounded_dynamic_workgroup_storage(%value: i32, %
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 0], spirv_result_value_types = [23]}) @spirv_bounded_dynamic_workgroup_storage(%value: reg<spirv.id : i32>, %byte_length: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
   %scratch = storage {byte_alignment = 4, byte_length = 8192} : low.storage<workgroup>
   %scratch_view = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
-  %13 = OpConstant.i32 0
+  %13 = OpConstant.i32 0 : reg<spirv.id : index>
   %14 = OpAccessChain.workgroup.i32.element_index %scratch_view, %13
   OpStore.workgroup.i32 %14, %value
   OpControlBarrier.workgroup.workgroup.acq_rel
-  %15 = OpConstant.i32 0
+  %15 = OpConstant.i32 0 : reg<spirv.id : index>
   %16 = OpAccessChain.workgroup.i32.element_index %scratch_view, %15
-  %loaded = OpLoad.workgroup.i32 %16 : reg<spirv.id : i32>
+  %loaded = OpLoad.workgroup.i32 %16
   return %loaded
 }

@@ -561,15 +561,6 @@ static iree_status_t loom_low_descriptor_text_asm_format_expected_result_types(
   return status;
 }
 
-static iree_status_t loom_low_descriptor_text_asm_make_register_type(
-    loom_module_t* module, const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_operand_t* operand, uint16_t reg_class_id,
-    loom_type_t* out_type) {
-  loom_type_t type = loom_low_register_type(descriptor_set->stable_id,
-                                            reg_class_id, operand->unit_count);
-  return loom_module_intern_type(module, type, out_type);
-}
-
 static iree_status_t loom_low_descriptor_text_asm_find_single_register_alt(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_operand_t* operand, bool* out_found, bool* out_ambiguous,
@@ -603,6 +594,63 @@ static iree_status_t loom_low_descriptor_text_asm_find_single_register_alt(
     *out_reg_class_id = alternative->reg_class_id;
   }
   return iree_ok_status();
+}
+
+static const loom_low_asm_result_value_type_t*
+loom_low_descriptor_text_asm_result_value_type(
+    const loom_text_low_asm_packet_descriptor_t* packet,
+    uint16_t result_index) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_descriptor_text_asm_descriptor_set(packet->descriptor_set);
+  const loom_low_asm_form_t* asm_form =
+      loom_low_descriptor_text_asm_form(packet->form);
+  if (asm_form->result_value_type_start ==
+      LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE) {
+    return NULL;
+  }
+  const uint32_t value_type_index =
+      asm_form->result_value_type_start + result_index;
+  const loom_low_asm_result_value_type_t* value_type =
+      &descriptor_set->asm_result_value_types[value_type_index];
+  return value_type->kind == LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_NONE
+             ? NULL
+             : value_type;
+}
+
+static loom_type_t loom_low_descriptor_text_asm_make_inferred_register_type(
+    const loom_text_low_asm_packet_descriptor_t* packet, uint16_t result_index,
+    const loom_low_operand_t* operand, uint16_t reg_class_id,
+    loom_register_type_data_t* out_register_data) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_low_descriptor_text_asm_descriptor_set(packet->descriptor_set);
+  const loom_low_asm_result_value_type_t* value_type =
+      loom_low_descriptor_text_asm_result_value_type(packet, result_index);
+  if (value_type == NULL) {
+    return loom_low_register_type(descriptor_set->stable_id, reg_class_id,
+                                  operand->unit_count);
+  }
+
+  loom_type_t semantic_type = loom_type_none();
+  switch (value_type->kind) {
+    case LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR:
+      semantic_type = loom_type_scalar(value_type->element_type);
+      break;
+    case LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_VECTOR:
+      semantic_type = loom_type_shaped_1d(
+          LOOM_TYPE_VECTOR, value_type->element_type,
+          loom_dim_pack_static(value_type->vector_lane_count), 0);
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE("verified asm result value type kind");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+  *out_register_data = (loom_register_type_data_t){
+      .carrier_payload0 = descriptor_set->stable_id,
+      .carrier_payload1 = loom_low_register_type_pack_payload1(
+          reg_class_id, operand->unit_count),
+      .value_type = semantic_type,
+  };
+  return loom_type_register_payload_with_value_type(out_register_data);
 }
 
 static iree_status_t loom_low_descriptor_text_asm_result_accepts_type(
@@ -701,8 +749,11 @@ static iree_status_t loom_low_descriptor_text_asm_infer_result_type(
         out_diagnostic_detail);
   }
 
-  return loom_low_descriptor_text_asm_make_register_type(
-      module, descriptor_set, operand, reg_class_id, out_type);
+  loom_register_type_data_t register_data = {0};
+  loom_type_t inferred_type =
+      loom_low_descriptor_text_asm_make_inferred_register_type(
+          packet, result_index, operand, reg_class_id, &register_data);
+  return loom_module_intern_type(module, inferred_type, out_type);
 }
 
 static iree_status_t loom_low_descriptor_text_asm_validate_result_type(
@@ -799,19 +850,19 @@ loom_low_descriptor_text_asm_result_type_annotation_required(
     return iree_ok_status();
   }
 
-  // The descriptor's carrier alternatives cannot reconstruct a semantic
-  // value type. Keep the annotation unless an exact tied operand supplied the
-  // complete register type above.
-  if (loom_type_register_has_value_type(type)) {
-    return iree_ok_status();
-  }
-
   bool found = false;
   bool ambiguous = false;
   uint16_t reg_class_id = LOOM_LOW_REG_CLASS_NONE;
   IREE_RETURN_IF_ERROR(loom_low_descriptor_text_asm_find_single_register_alt(
       descriptor_set, operand, &found, &ambiguous, &reg_class_id));
-  *out_required = !found || ambiguous;
+  if (!found || ambiguous) {
+    return iree_ok_status();
+  }
+  loom_register_type_data_t register_data = {0};
+  loom_type_t inferred_type =
+      loom_low_descriptor_text_asm_make_inferred_register_type(
+          packet, result_index, operand, reg_class_id, &register_data);
+  *out_required = !loom_type_equal(type, inferred_type);
   return iree_ok_status();
 }
 

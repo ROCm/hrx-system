@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from loom.ir import parse_scalar_type_kind
 from loom.target.arch.spirv.builtins import (
     BUILTIN_DIMENSIONS,
     BUILTIN_INDEX_QUERIES,
@@ -25,6 +26,7 @@ from loom.target.arch.spirv.ordinary_vector import (
     OrdinaryVectorComponentType,
     OrdinaryVectorInstruction,
     OrdinaryVectorInstructionType,
+    OrdinaryVectorType,
 )
 from loom.target.arch.spirv.ordinary_vector_integer import (
     ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
@@ -43,6 +45,7 @@ from loom.target.arch.spirv.scalar_alu import (
     SIGNED_INTEGER_COMPARE_PREDICATES,
     SIGNED_INTEGER_SCALAR_ALU_TYPES,
     UNSIGNED_INTEGER_BINARY_OPERATIONS,
+    UNSIGNED_INTEGER_SCALAR_ALU_TYPES,
     UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES,
     BooleanConstant,
     IntegerAluTypePair,
@@ -68,6 +71,7 @@ from loom.target.arch.spirv.scalar_memory import (
 from loom.target.low_descriptors import (
     AsmForm,
     AsmImmediate,
+    AsmResultValueType,
     Descriptor,
     DescriptorFlag,
     DescriptorOpKind,
@@ -149,14 +153,37 @@ def _asm(
     results: tuple[str, ...] = (),
     operands: tuple[str, ...] = (),
     immediates: tuple[str, ...] = (),
+    result_value_types: tuple[AsmResultValueType | None, ...] = (),
 ) -> tuple[AsmForm, ...]:
     return (
         AsmForm(
             results=results,
             operands=operands,
             immediates=tuple(AsmImmediate(field_name) for field_name in immediates),
+            result_value_types=result_value_types,
         ),
     )
+
+
+def _scalar_result_value_type(source_type: str) -> AsmResultValueType:
+    element_type = parse_scalar_type_kind(source_type)
+    if element_type is None:
+        raise ValueError(f"unknown Loom scalar result type '{source_type}'")
+    return AsmResultValueType(element_type)
+
+
+def _scalar_alu_result_value_type(
+    scalar: ScalarAluType,
+) -> AsmResultValueType | None:
+    if scalar in UNSIGNED_INTEGER_SCALAR_ALU_TYPES:
+        return None
+    return _scalar_result_value_type(scalar.source_type)
+
+
+def _single_result_value_types(
+    result_value_type: AsmResultValueType | None,
+) -> tuple[AsmResultValueType, ...]:
+    return () if result_value_type is None else (result_value_type,)
 
 
 def _id_result(field_name: str = "dst") -> Operand:
@@ -232,6 +259,7 @@ def _binary_same_type_descriptor(
     mnemonic: str,
     semantic_tag: str,
     operands: tuple[Operand, Operand, Operand],
+    result_value_type: AsmResultValueType | None,
     feature_bits: int = 0,
 ) -> Descriptor:
     return Descriptor(
@@ -240,7 +268,11 @@ def _binary_same_type_descriptor(
         semantic_tag=semantic_tag,
         operands=operands,
         feature_mask_words=(feature_bits,) if feature_bits else (),
-        asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=("lhs", "rhs"),
+            result_value_types=_single_result_value_types(result_value_type),
+        ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -263,7 +295,11 @@ def _compare_descriptor(
         semantic_tag=key,
         operands=operands,
         feature_mask_words=(scalar.feature_bits,) if scalar.feature_bits else (),
-        asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=("lhs", "rhs"),
+            result_value_types=(_scalar_result_value_type("i1"),),
+        ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -274,6 +310,7 @@ def _select_descriptor(
     key: str,
     mnemonic: str,
     operands: tuple[Operand, Operand, Operand, Operand],
+    result_value_type: AsmResultValueType | None,
     feature_bits: int = 0,
 ) -> Descriptor:
     return Descriptor(
@@ -285,6 +322,7 @@ def _select_descriptor(
         asm_forms=_asm(
             results=("dst",),
             operands=("condition", "true_value", "false_value"),
+            result_value_types=_single_result_value_types(result_value_type),
         ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -292,26 +330,36 @@ def _select_descriptor(
 
 
 def _conversion_descriptor(row: ScalarConversion) -> Descriptor:
+    result_value_type = _scalar_alu_result_value_type(row.result_type)
     return Descriptor(
         key=row.key,
         mnemonic=row.display_mnemonic,
         semantic_tag=row.key,
         operands=(_id_result(), _id_operand("input")),
         feature_mask_words=(row.feature_bits,) if row.feature_bits else (),
-        asm_forms=_asm(results=("dst",), operands=("input",)),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=("input",),
+            result_value_types=_single_result_value_types(result_value_type),
+        ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
 
 def _integer_value_view_descriptor(row: IntegerValueViewConversion) -> Descriptor:
+    result_value_type = _scalar_alu_result_value_type(row.result_type)
     return Descriptor(
         key=row.key,
         mnemonic=row.display_mnemonic,
         semantic_tag=row.key,
         operands=(_id_result(), _id_operand("input")),
         feature_mask_words=(row.feature_bits,) if row.feature_bits else (),
-        asm_forms=_asm(results=("dst",), operands=("input",)),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=("input",),
+            result_value_types=_single_result_value_types(result_value_type),
+        ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -328,7 +376,10 @@ def _builtin_index_descriptor(
         mnemonic=f"OpLoadBuiltin.{mnemonic_suffix}.{dimension}",
         semantic_tag=key,
         operands=(_id_result(),),
-        asm_forms=_asm(results=("dst",)),
+        asm_forms=_asm(
+            results=("dst",),
+            result_value_types=(_scalar_result_value_type("index"),),
+        ),
         schedule_class=_SCHEDULE_LOAD,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -353,6 +404,7 @@ def _coordinate_copy_descriptor() -> Descriptor:
         mnemonic="OpCopyObject.i32",
         semantic_tag=key,
         operands=(_id_result(), _id_operand("input")),
+        result_value_type=_scalar_result_value_type("i32"),
     )
 
 
@@ -374,13 +426,18 @@ def _ternary_same_type_descriptor(
     mnemonic: str,
     semantic_tag: str,
     operands: tuple[Operand, Operand, Operand, Operand],
+    result_value_type: AsmResultValueType,
 ) -> Descriptor:
     return Descriptor(
         key=key,
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
         operands=operands,
-        asm_forms=_asm(results=("dst",), operands=("a", "b", "c")),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=("a", "b", "c"),
+            result_value_types=(result_value_type,),
+        ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -392,6 +449,7 @@ def _unary_typed_descriptor(
     mnemonic: str,
     semantic_tag: str,
     operands: tuple[Operand, Operand],
+    result_value_type: AsmResultValueType | None,
     feature_bits: int = 0,
 ) -> Descriptor:
     return Descriptor(
@@ -400,7 +458,11 @@ def _unary_typed_descriptor(
         semantic_tag=semantic_tag,
         operands=operands,
         feature_mask_words=(feature_bits,) if feature_bits else (),
-        asm_forms=_asm(results=("dst",), operands=("input",)),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=("input",),
+            result_value_types=_single_result_value_types(result_value_type),
+        ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -429,8 +491,37 @@ def _ordinary_vector_operand(
     return _id_operand(field_name)
 
 
+def _ordinary_vector_result_value_type(
+    value_type: OrdinaryVectorInstructionType,
+) -> AsmResultValueType | None:
+    component_type = (
+        value_type.component_type
+        if isinstance(value_type, OrdinaryVectorType)
+        else value_type
+    )
+    if not component_type.source_types:
+        return None
+    if (
+        isinstance(value_type, OrdinaryVectorComponentType)
+        and component_type.kind == OrdinaryVectorComponentKind.OFFSET
+    ):
+        return None
+    source_type = component_type.source_types[0]
+    element_type = parse_scalar_type_kind(source_type)
+    if element_type is None:
+        raise ValueError(
+            f"ordinary-vector component '{component_type.suffix}' has unknown "
+            f"Loom source type '{source_type}'"
+        )
+    lane_count = (
+        value_type.lane_count if isinstance(value_type, OrdinaryVectorType) else 0
+    )
+    return AsmResultValueType(element_type, vector_lane_count=lane_count)
+
+
 def _ordinary_vector_descriptor(row: OrdinaryVectorInstruction) -> Descriptor:
     has_component_index = row.component_index_maximum is not None
+    result_value_type = _ordinary_vector_result_value_type(row.result_type)
     immediates = (
         (
             Immediate(
@@ -462,6 +553,9 @@ def _ordinary_vector_descriptor(row: OrdinaryVectorInstruction) -> Descriptor:
             results=("dst",),
             operands=row.operand_names,
             immediates=("component_index",) if has_component_index else (),
+            result_value_types=(
+                (result_value_type,) if result_value_type is not None else ()
+            ),
         ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -488,6 +582,7 @@ def _address_conversion_descriptors() -> tuple[Descriptor, ...]:
                 mnemonic=f"{to_offset_mnemonic}.{suffix}.offset64",
                 semantic_tag=f"spirv.op_{to_offset_opcode}.{suffix}.offset64",
                 operands=(_offset64_result(), _id_operand("input")),
+                result_value_type=None,
                 feature_bits=feature_bits,
             )
         )
@@ -504,6 +599,7 @@ def _address_conversion_descriptors() -> tuple[Descriptor, ...]:
                 mnemonic=f"{from_offset_mnemonic}.offset64.{suffix}",
                 semantic_tag=f"spirv.op_{from_offset_opcode}.offset64.{suffix}",
                 operands=(_id_result(), _offset64_operand("input")),
+                result_value_type=_scalar_alu_result_value_type(scalar),
                 feature_bits=feature_bits,
             )
         )
@@ -570,6 +666,11 @@ def _ptr_access_chain_storage_buffer_descriptor(
 
 
 def _load_storage_buffer_descriptor(scalar: StorageBufferScalar) -> Descriptor:
+    result_value_type = (
+        _scalar_result_value_type(scalar.source_type)
+        if scalar.source_rule_enabled
+        else None
+    )
     return Descriptor(
         key=f"spirv.op_load.storage_buffer.{scalar.suffix}",
         mnemonic=f"OpLoad.storage_buffer.{scalar.suffix}",
@@ -577,7 +678,11 @@ def _load_storage_buffer_descriptor(scalar: StorageBufferScalar) -> Descriptor:
         operands=(_id_result(), _ptr_storage_buffer_operand("ptr")),
         effects=(_storage_buffer_effect(EffectKind.READ, scalar),),
         feature_mask_words=(scalar.feature_bits,) if scalar.feature_bits else (),
-        asm_forms=_asm(results=("dst",), operands=("ptr",)),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=("ptr",),
+            result_value_types=_single_result_value_types(result_value_type),
+        ),
         schedule_class=_SCHEDULE_LOAD,
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
@@ -627,6 +732,11 @@ def _access_chain_workgroup_descriptor(
 
 
 def _load_workgroup_descriptor(scalar: StorageBufferScalar) -> Descriptor:
+    result_value_type = (
+        _scalar_result_value_type(scalar.source_type)
+        if scalar.source_rule_enabled
+        else None
+    )
     return Descriptor(
         key=f"spirv.op_load.workgroup.{scalar.suffix}",
         mnemonic=f"OpLoad.workgroup.{scalar.suffix}",
@@ -634,7 +744,11 @@ def _load_workgroup_descriptor(scalar: StorageBufferScalar) -> Descriptor:
         operands=(_id_result(), _ptr_workgroup_scalar_operand(scalar, "ptr")),
         effects=(_workgroup_effect(EffectKind.READ, scalar),),
         feature_mask_words=(scalar.feature_bits,) if scalar.feature_bits else (),
-        asm_forms=_asm(results=("dst",), operands=("ptr",)),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=("ptr",),
+            result_value_types=_single_result_value_types(result_value_type),
+        ),
         schedule_class=_SCHEDULE_LOAD,
         flags=(DescriptorFlag.SIDE_EFFECTING,),
     )
@@ -882,6 +996,7 @@ def _scalar_binary_descriptor(
         mnemonic=mnemonic,
         semantic_tag=key,
         operands=(_id_result(), _id_operand("lhs"), _id_operand("rhs")),
+        result_value_type=_scalar_alu_result_value_type(scalar),
         feature_bits=scalar.feature_bits,
     )
 
@@ -898,7 +1013,11 @@ def _integer_constant_descriptor(scalar_pair: IntegerAluTypePair) -> Descriptor:
         op_kind=DescriptorOpKind.CONST,
         immediates=(immediate,),
         feature_mask_words=(scalar.feature_bits,) if scalar.feature_bits else (),
-        asm_forms=_asm(results=("dst",), immediates=(immediate.field_name,)),
+        asm_forms=_asm(
+            results=("dst",),
+            immediates=(immediate.field_name,),
+            result_value_types=(_scalar_result_value_type(scalar_pair.source_type),),
+        ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -915,7 +1034,11 @@ def _float_constant_descriptor(scalar: FloatConstantType) -> Descriptor:
         op_kind=DescriptorOpKind.CONST,
         immediates=(immediate,),
         feature_mask_words=(scalar.feature_bits,) if scalar.feature_bits else (),
-        asm_forms=_asm(results=("dst",), immediates=(immediate.field_name,)),
+        asm_forms=_asm(
+            results=("dst",),
+            immediates=(immediate.field_name,),
+            result_value_types=(_scalar_result_value_type(scalar.source_type),),
+        ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -929,7 +1052,10 @@ def _boolean_constant_descriptor(row: BooleanConstant) -> Descriptor:
         semantic_tag=key,
         operands=(_id_result(),),
         op_kind=DescriptorOpKind.CONST,
-        asm_forms=_asm(results=("dst",)),
+        asm_forms=_asm(
+            results=("dst",),
+            result_value_types=(_scalar_result_value_type("i1"),),
+        ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -942,6 +1068,7 @@ def _boolean_binary_descriptor(operation: ScalarBinaryOperation) -> Descriptor:
         mnemonic=f"{operation.mnemonic}.bool",
         semantic_tag=key,
         operands=(_id_result(), _id_operand("lhs"), _id_operand("rhs")),
+        result_value_type=_scalar_result_value_type("i1"),
     )
 
 
@@ -1031,6 +1158,7 @@ def _select_descriptors() -> tuple[Descriptor, ...]:
                 _id_operand("true_value"),
                 _id_operand("false_value"),
             ),
+            result_value_type=_scalar_alu_result_value_type(scalar),
             feature_bits=scalar.feature_bits,
         )
         for scalar in SCALAR_ALU_TYPES
@@ -1045,6 +1173,7 @@ def _select_descriptors() -> tuple[Descriptor, ...]:
                 _id_operand("true_value"),
                 _id_operand("false_value"),
             ),
+            result_value_type=_scalar_result_value_type("bf16"),
             feature_bits=BFLOAT16_CONSTANT_TYPE.feature_bits,
         )
     )
@@ -1058,6 +1187,7 @@ def _select_descriptors() -> tuple[Descriptor, ...]:
                 _id_operand("true_value"),
                 _id_operand("false_value"),
             ),
+            result_value_type=_scalar_result_value_type("i1"),
         )
     )
     descriptors.append(
@@ -1070,6 +1200,7 @@ def _select_descriptors() -> tuple[Descriptor, ...]:
                 _offset64_operand("true_value"),
                 _offset64_operand("false_value"),
             ),
+            result_value_type=None,
         )
     )
     return tuple(descriptors)
@@ -1218,6 +1349,7 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
                 _id_operand("b"),
                 _id_operand("c"),
             ),
+            result_value_type=_scalar_result_value_type("i32"),
         ),
         _binary_same_type_descriptor(
             key="spirv.op_iadd.offset64",
@@ -1228,6 +1360,7 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
                 _offset64_operand("lhs"),
                 _offset64_operand("rhs"),
             ),
+            result_value_type=None,
         ),
         _binary_same_type_descriptor(
             key="spirv.op_isub.offset64",
@@ -1238,6 +1371,7 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
                 _offset64_operand("lhs"),
                 _offset64_operand("rhs"),
             ),
+            result_value_type=None,
         ),
         _binary_same_type_descriptor(
             key="spirv.op_imul.offset64",
@@ -1248,12 +1382,14 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
                 _offset64_operand("lhs"),
                 _offset64_operand("rhs"),
             ),
+            result_value_type=None,
         ),
         _unary_typed_descriptor(
             key="spirv.op_bit_count.i32",
             mnemonic="OpBitCount",
             semantic_tag="spirv.op_bit_count.i32",
             operands=(_id_result(), _id_operand("input")),
+            result_value_type=_scalar_result_value_type("i32"),
         ),
         *_address_conversion_descriptors(),
         *_builtin_index_descriptors(),
