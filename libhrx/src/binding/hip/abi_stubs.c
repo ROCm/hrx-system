@@ -586,10 +586,12 @@ HIPAPI hipError_t hipDestroyExternalSemaphore(hipExternalSemaphore_t extSem) {
 
 HIPAPI hipError_t hipDeviceComputeCapability(int* major, int* minor,
                                              hipDevice_t device) {
-  (void)major;
-  (void)minor;
-  (void)device;
-  return hipErrorNotSupported;
+  if (!major || !minor) return hipErrorInvalidValue;
+  hipError_t result = hipDeviceGetAttribute(
+      major, hipDeviceAttributeComputeCapabilityMajor, device);
+  if (result != hipSuccess) return result;
+  return hipDeviceGetAttribute(minor, hipDeviceAttributeComputeCapabilityMinor,
+                               device);
 }
 
 HIPAPI hipError_t hipDeviceGetTexture1DLinearMaxWidth(
@@ -1401,12 +1403,6 @@ HIPAPI hipError_t hipModuleLaunchCooperativeKernelMultiDevice(
 HIPAPI hipError_t hipProfilerStart(void) { return hipErrorNotSupported; }
 
 HIPAPI hipError_t hipProfilerStop(void) { return hipErrorNotSupported; }
-
-HIPAPI hipError_t hipSetValidDevices(int* device_arr, int len) {
-  (void)device_arr;
-  (void)len;
-  return hipErrorNotSupported;
-}
 
 HIPAPI hipError_t hipSetupArgument(const void* arg, size_t size,
                                    size_t offset) {
