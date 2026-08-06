@@ -507,6 +507,145 @@ static iree_status_t loom_vector_make_accumulator_join_fragment(
   return iree_ok_status();
 }
 
+typedef enum loom_vector_aggregate_fact_kind_e {
+  LOOM_VECTOR_AGGREGATE_FACT_NONE = 0,
+  LOOM_VECTOR_AGGREGATE_FACT_UNIFORM = 1,
+  LOOM_VECTOR_AGGREGATE_FACT_SMALL_STATIC_LANES = 2,
+} loom_vector_aggregate_fact_kind_t;
+
+static loom_vector_aggregate_fact_kind_t loom_vector_query_aggregate_extension(
+    const loom_fact_context_t* context, loom_value_facts_t facts,
+    loom_value_facts_t* out_uniform_element,
+    loom_value_fact_small_static_lanes_t* out_small_static_lanes) {
+  loom_value_fact_uniform_element_t uniform = {0};
+  if (loom_value_facts_query_uniform_element(context, facts, &uniform)) {
+    *out_uniform_element = uniform.element;
+    return LOOM_VECTOR_AGGREGATE_FACT_UNIFORM;
+  }
+  if (loom_value_facts_query_small_static_lanes(context, facts,
+                                                out_small_static_lanes)) {
+    return LOOM_VECTOR_AGGREGATE_FACT_SMALL_STATIC_LANES;
+  }
+  return LOOM_VECTOR_AGGREGATE_FACT_NONE;
+}
+
+static iree_status_t loom_vector_try_join_aggregate_extensions(
+    loom_value_fact_table_t* target, const loom_value_fact_table_t* lhs_table,
+    loom_value_facts_t lhs, const loom_value_fact_table_t* rhs_table,
+    loom_value_facts_t rhs, loom_value_facts_t* inout_facts,
+    bool* out_handled) {
+  loom_value_facts_t lhs_uniform = loom_value_facts_unknown();
+  loom_value_facts_t rhs_uniform = loom_value_facts_unknown();
+  loom_value_fact_small_static_lanes_t lhs_lanes = {0};
+  loom_value_fact_small_static_lanes_t rhs_lanes = {0};
+  const loom_vector_aggregate_fact_kind_t lhs_kind =
+      loom_vector_query_aggregate_extension(&lhs_table->context, lhs,
+                                            &lhs_uniform, &lhs_lanes);
+  const loom_vector_aggregate_fact_kind_t rhs_kind =
+      loom_vector_query_aggregate_extension(&rhs_table->context, rhs,
+                                            &rhs_uniform, &rhs_lanes);
+  *out_handled = lhs_kind != LOOM_VECTOR_AGGREGATE_FACT_NONE ||
+                 rhs_kind != LOOM_VECTOR_AGGREGATE_FACT_NONE;
+  if (!*out_handled) return iree_ok_status();
+  if (lhs_kind == LOOM_VECTOR_AGGREGATE_FACT_NONE ||
+      rhs_kind == LOOM_VECTOR_AGGREGATE_FACT_NONE) {
+    return iree_ok_status();
+  }
+
+  if (lhs_kind == LOOM_VECTOR_AGGREGATE_FACT_UNIFORM &&
+      rhs_kind == LOOM_VECTOR_AGGREGATE_FACT_UNIFORM) {
+    loom_value_facts_t element = loom_value_facts_unknown();
+    loom_value_facts_meet(&lhs_uniform, &rhs_uniform, &element);
+    loom_value_facts_t extension = loom_value_facts_unknown();
+    IREE_RETURN_IF_ERROR(loom_value_facts_make_uniform_element(
+        &target->context, element, &extension));
+    inout_facts->extension_id = extension.extension_id;
+    return iree_ok_status();
+  }
+
+  if (lhs_kind == LOOM_VECTOR_AGGREGATE_FACT_SMALL_STATIC_LANES &&
+      rhs_kind == LOOM_VECTOR_AGGREGATE_FACT_SMALL_STATIC_LANES &&
+      lhs_lanes.count != rhs_lanes.count) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t lane_count =
+      lhs_kind == LOOM_VECTOR_AGGREGATE_FACT_SMALL_STATIC_LANES
+          ? lhs_lanes.count
+          : rhs_lanes.count;
+
+  loom_value_facts_t joined_lanes[LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT] = {
+      {0}};
+  for (iree_host_size_t i = 0; i < lane_count; ++i) {
+    const loom_value_facts_t lhs_lane =
+        lhs_kind == LOOM_VECTOR_AGGREGATE_FACT_UNIFORM ? lhs_uniform
+                                                       : lhs_lanes.lanes[i];
+    const loom_value_facts_t rhs_lane =
+        rhs_kind == LOOM_VECTOR_AGGREGATE_FACT_UNIFORM ? rhs_uniform
+                                                       : rhs_lanes.lanes[i];
+    loom_value_facts_meet(&lhs_lane, &rhs_lane, &joined_lanes[i]);
+  }
+  loom_value_fact_small_static_lanes_t joined = {
+      .lanes = joined_lanes,
+      .count = lane_count,
+  };
+  loom_value_facts_t extension = loom_value_facts_unknown();
+  IREE_RETURN_IF_ERROR(loom_value_facts_make_small_static_lanes(
+      &target->context, joined, &extension));
+  inout_facts->extension_id = extension.extension_id;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vector_try_join_iota_extensions(
+    loom_value_fact_table_t* target, const loom_value_fact_table_t* lhs_table,
+    loom_value_facts_t lhs, const loom_value_fact_table_t* rhs_table,
+    loom_value_facts_t rhs, loom_value_facts_t* inout_facts,
+    bool* out_handled) {
+  loom_value_fact_vector_iota_t lhs_iota = {0};
+  loom_value_fact_vector_iota_t rhs_iota = {0};
+  const bool lhs_has_iota =
+      loom_value_facts_query_vector_iota(&lhs_table->context, lhs, &lhs_iota);
+  const bool rhs_has_iota =
+      loom_value_facts_query_vector_iota(&rhs_table->context, rhs, &rhs_iota);
+  *out_handled = lhs_has_iota || rhs_has_iota;
+  if (!lhs_has_iota || !rhs_has_iota) return iree_ok_status();
+
+  loom_value_fact_vector_iota_t joined = {0};
+  loom_value_facts_meet(&lhs_iota.base, &rhs_iota.base, &joined.base);
+  loom_value_facts_meet(&lhs_iota.step, &rhs_iota.step, &joined.step);
+  loom_value_facts_t extension = loom_value_facts_unknown();
+  IREE_RETURN_IF_ERROR(
+      loom_value_facts_make_vector_iota(&target->context, joined, &extension));
+  inout_facts->extension_id = extension.extension_id;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vector_try_join_prefix_mask_extensions(
+    loom_value_fact_table_t* target, const loom_value_fact_table_t* lhs_table,
+    loom_value_facts_t lhs, const loom_value_fact_table_t* rhs_table,
+    loom_value_facts_t rhs, loom_value_facts_t* inout_facts,
+    bool* out_handled) {
+  loom_value_fact_vector_prefix_mask_t lhs_mask = {0};
+  loom_value_fact_vector_prefix_mask_t rhs_mask = {0};
+  const bool lhs_has_mask = loom_value_facts_query_vector_prefix_mask(
+      &lhs_table->context, lhs, &lhs_mask);
+  const bool rhs_has_mask = loom_value_facts_query_vector_prefix_mask(
+      &rhs_table->context, rhs, &rhs_mask);
+  *out_handled = lhs_has_mask || rhs_has_mask;
+  if (!lhs_has_mask || !rhs_has_mask) return iree_ok_status();
+
+  loom_value_fact_vector_prefix_mask_t joined = {0};
+  loom_value_facts_meet(&lhs_mask.lower_bound, &rhs_mask.lower_bound,
+                        &joined.lower_bound);
+  loom_value_facts_meet(&lhs_mask.upper_bound, &rhs_mask.upper_bound,
+                        &joined.upper_bound);
+  loom_value_facts_meet(&lhs_mask.step, &rhs_mask.step, &joined.step);
+  loom_value_facts_t extension = loom_value_facts_unknown();
+  IREE_RETURN_IF_ERROR(loom_value_facts_make_vector_prefix_mask(
+      &target->context, joined, &extension));
+  inout_facts->extension_id = extension.extension_id;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vector_join_fragment_extension(
     loom_value_fact_table_t* target, const loom_value_fact_table_t* lhs_table,
     loom_value_facts_t lhs, const loom_value_fact_table_t* rhs_table,
@@ -531,6 +670,29 @@ static iree_status_t loom_vector_join_fragment_extension(
       &target->context, lhs_fragment, rhs_fragment, inout_facts);
 }
 
+static iree_status_t loom_vector_join_extension(
+    loom_value_fact_table_t* target, const loom_value_fact_table_t* lhs_table,
+    loom_value_facts_t lhs, const loom_value_fact_table_t* rhs_table,
+    loom_value_facts_t rhs, loom_value_facts_t* inout_facts) {
+  if (loom_value_fact_table_extensions_equal(lhs_table, lhs, rhs_table, rhs)) {
+    return loom_vector_clone_equal_extension(target, lhs_table, lhs,
+                                             inout_facts);
+  }
+
+  bool handled = false;
+  IREE_RETURN_IF_ERROR(loom_vector_try_join_aggregate_extensions(
+      target, lhs_table, lhs, rhs_table, rhs, inout_facts, &handled));
+  if (handled) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_vector_try_join_iota_extensions(
+      target, lhs_table, lhs, rhs_table, rhs, inout_facts, &handled));
+  if (handled) return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_vector_try_join_prefix_mask_extensions(
+      target, lhs_table, lhs, rhs_table, rhs, inout_facts, &handled));
+  if (handled) return iree_ok_status();
+  return loom_vector_join_fragment_extension(target, lhs_table, lhs, rhs_table,
+                                             rhs, inout_facts);
+}
+
 static iree_status_t loom_vector_meet_extension(
     const loom_value_fact_domain_t* domain, const loom_module_t* module,
     loom_type_t type, loom_value_fact_table_t* target,
@@ -540,8 +702,8 @@ static iree_status_t loom_vector_meet_extension(
   (void)domain;
   (void)module;
   (void)type;
-  return loom_vector_join_fragment_extension(target, lhs_table, lhs, rhs_table,
-                                             rhs, inout_facts);
+  return loom_vector_join_extension(target, lhs_table, lhs, rhs_table, rhs,
+                                    inout_facts);
 }
 
 static iree_status_t loom_vector_widen_extension(
@@ -554,6 +716,10 @@ static iree_status_t loom_vector_widen_extension(
   (void)module;
   (void)type;
   (void)iteration;
+  // The generic solver calls this only after its two precise meet iterations.
+  // Stable extensions still clone below, and matrix fragment roles form a
+  // finite join. Aggregate component ranges can otherwise expand on every
+  // backedge, so changing aggregate summaries deliberately degrade here.
   return loom_vector_join_fragment_extension(target, previous_table, previous,
                                              next_table, next, inout_facts);
 }

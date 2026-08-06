@@ -1357,6 +1357,352 @@ func.def @prefix_mask_summary_fact(%n: index) -> (i1) {
 
 // ====
 
+// CFG joins preserve the conservative scalar fact shared by two uniform
+// vector summaries.
+func.def @cfg_join_uniform_vector_facts(%condition: i1) -> (i64, i64) {
+  %c2 = scalar.constant 2 : i32
+  %c6 = scalar.constant 6 : i32
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  %left_value = vector.splat %c2 : vector<4xi32>
+  cfg.br ^join(%left_value: vector<4xi32>)
+^right:
+  %right_value = vector.splat %c6 : vector<4xi32>
+  cfg.br ^join(%right_value: vector<4xi32>)
+^join(%value: vector<4xi32>):
+  %lane = vector.extract %value[2] : vector<4xi32> -> i32
+  %lo = test.fact_range_lo %lane : i32 -> i64
+  %hi = test.fact_range_hi %lane : i32 -> i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+func.def @cfg_join_uniform_vector_facts(%condition: i1) -> (i64, i64) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  %left_value = vector.constant 2 : vector<4xi32>
+  cfg.br ^join(%left_value: vector<4xi32>)
+^right:
+  %right_value = vector.constant 6 : vector<4xi32>
+  cfg.br ^join(%right_value: vector<4xi32>)
+^join(%value: vector<4xi32>):
+  %lo = scalar.constant 2 : i64
+  %hi = scalar.constant 6 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
+// Small static summaries meet corresponding lanes instead of flattening the
+// whole vector to one aggregate scalar range.
+func.def @cfg_join_small_static_lane_facts(%condition: i1) -> (i64, i64, i64, i64) {
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c3 = scalar.constant 3 : i32
+  %c4 = scalar.constant 4 : i32
+  %c5 = scalar.constant 5 : i32
+  %c7 = scalar.constant 7 : i32
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  %left_value = vector.from_elements %c1, %c2, %c3, %c4 : vector<4xi32>
+  cfg.br ^join(%left_value: vector<4xi32>)
+^right:
+  %right_value = vector.from_elements %c5, %c2, %c7, %c4 : vector<4xi32>
+  cfg.br ^join(%right_value: vector<4xi32>)
+^join(%value: vector<4xi32>):
+  %lane0 = vector.extract %value[0] : vector<4xi32> -> i32
+  %lane2 = vector.extract %value[2] : vector<4xi32> -> i32
+  %lane0_lo = test.fact_range_lo %lane0 : i32 -> i64
+  %lane0_hi = test.fact_range_hi %lane0 : i32 -> i64
+  %lane2_lo = test.fact_range_lo %lane2 : i32 -> i64
+  %lane2_hi = test.fact_range_hi %lane2 : i32 -> i64
+  func.return %lane0_lo, %lane0_hi, %lane2_lo, %lane2_hi : i64, i64, i64, i64
+}
+
+// ----
+func.def @cfg_join_small_static_lane_facts(%condition: i1) -> (i64, i64, i64, i64) {
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c3 = scalar.constant 3 : i32
+  %c4 = scalar.constant 4 : i32
+  %c5 = scalar.constant 5 : i32
+  %c7 = scalar.constant 7 : i32
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  %left_value = vector.from_elements %c1, %c2, %c3, %c4 : vector<4xi32>
+  cfg.br ^join(%left_value: vector<4xi32>)
+^right:
+  %right_value = vector.from_elements %c5, %c2, %c7, %c4 : vector<4xi32>
+  cfg.br ^join(%right_value: vector<4xi32>)
+^join(%value: vector<4xi32>):
+  %lane0_lo = scalar.constant 1 : i64
+  %lane0_hi = scalar.constant 5 : i64
+  %lane2_lo = scalar.constant 3 : i64
+  %lane2_hi = scalar.constant 7 : i64
+  func.return %lane0_lo, %lane0_hi, %lane2_lo, %lane2_hi : i64, i64, i64, i64
+}
+
+// ====
+
+// A uniform summary can meet a bounded per-lane summary without discarding
+// lanes whose fact remains exact.
+func.def @cfg_join_uniform_and_small_static_facts(%condition: i1) -> (i64, i64, i64, i64) {
+  %c2 = scalar.constant 2 : i32
+  %c4 = scalar.constant 4 : i32
+  %c8 = scalar.constant 8 : i32
+  cfg.cond_br %condition, ^uniform, ^lanes
+^uniform:
+  %uniform_value = vector.splat %c4 : vector<4xi32>
+  cfg.br ^join(%uniform_value: vector<4xi32>)
+^lanes:
+  %lane_value = vector.from_elements %c2, %c4, %c8, %c4 : vector<4xi32>
+  cfg.br ^join(%lane_value: vector<4xi32>)
+^join(%value: vector<4xi32>):
+  %lane0 = vector.extract %value[0] : vector<4xi32> -> i32
+  %lane1 = vector.extract %value[1] : vector<4xi32> -> i32
+  %lane0_lo = test.fact_range_lo %lane0 : i32 -> i64
+  %lane0_hi = test.fact_range_hi %lane0 : i32 -> i64
+  %lane1_lo = test.fact_range_lo %lane1 : i32 -> i64
+  %lane1_hi = test.fact_range_hi %lane1 : i32 -> i64
+  func.return %lane0_lo, %lane0_hi, %lane1_lo, %lane1_hi : i64, i64, i64, i64
+}
+
+// ----
+func.def @cfg_join_uniform_and_small_static_facts(%condition: i1) -> (i64, i64, i64, i64) {
+  %c2 = scalar.constant 2 : i32
+  %c4 = scalar.constant 4 : i32
+  %c8 = scalar.constant 8 : i32
+  cfg.cond_br %condition, ^uniform, ^lanes
+^uniform:
+  %uniform_value = vector.constant 4 : vector<4xi32>
+  cfg.br ^join(%uniform_value: vector<4xi32>)
+^lanes:
+  %lane_value = vector.from_elements %c2, %c4, %c8, %c4 : vector<4xi32>
+  cfg.br ^join(%lane_value: vector<4xi32>)
+^join(%value: vector<4xi32>):
+  %lane0_lo = scalar.constant 2 : i64
+  %lane0_hi = scalar.constant 4 : i64
+  %lane1_lo = scalar.constant 4 : i64
+  %lane1_hi = scalar.constant 4 : i64
+  func.return %lane0_lo, %lane0_hi, %lane1_lo, %lane1_hi : i64, i64, i64, i64
+}
+
+// ====
+
+// Structured branch results use the same type-owned extension join as CFG
+// block arguments. Side effects keep both regions present so this crosses the
+// generic RegionBranch summary path.
+func.def @region_branch_join_uniform_and_small_static_facts(%condition: i1) -> (i64, i64, i64, i64) {
+  %c2 = scalar.constant 2 : i32
+  %c4 = scalar.constant 4 : i32
+  %c8 = scalar.constant 8 : i32
+  %value = scf.if %condition -> (vector<4xi32>) {
+    %uniform_value = vector.splat %c4 : vector<4xi32>
+    test.use %uniform_value : vector<4xi32>
+    scf.yield %uniform_value : vector<4xi32>
+  } else {
+    %lane_value = vector.from_elements %c2, %c4, %c8, %c4 : vector<4xi32>
+    test.use %lane_value : vector<4xi32>
+    scf.yield %lane_value : vector<4xi32>
+  }
+  %lane0 = vector.extract %value[0] : vector<4xi32> -> i32
+  %lane1 = vector.extract %value[1] : vector<4xi32> -> i32
+  %lane0_lo = test.fact_range_lo %lane0 : i32 -> i64
+  %lane0_hi = test.fact_range_hi %lane0 : i32 -> i64
+  %lane1_lo = test.fact_range_lo %lane1 : i32 -> i64
+  %lane1_hi = test.fact_range_hi %lane1 : i32 -> i64
+  func.return %lane0_lo, %lane0_hi, %lane1_lo, %lane1_hi : i64, i64, i64, i64
+}
+
+// ----
+func.def @region_branch_join_uniform_and_small_static_facts(%condition: i1) -> (i64, i64, i64, i64) {
+  %c2 = scalar.constant 2 : i32
+  %c4 = scalar.constant 4 : i32
+  %c8 = scalar.constant 8 : i32
+  scf.if %condition {
+    %uniform_value = vector.constant 4 : vector<4xi32>
+    test.use %uniform_value : vector<4xi32>
+  } else {
+    %lane_value = vector.from_elements %c2, %c4, %c8, %c4 : vector<4xi32>
+    test.use %lane_value : vector<4xi32>
+  }
+  %lane0_lo = scalar.constant 2 : i64
+  %lane0_hi = scalar.constant 4 : i64
+  %lane1_lo = scalar.constant 4 : i64
+  %lane1_hi = scalar.constant 4 : i64
+  func.return %lane0_lo, %lane0_hi, %lane1_lo, %lane1_hi : i64, i64, i64, i64
+}
+
+// ====
+
+// Iota summaries with compatible structure retain that structure while their
+// differing bases meet conservatively.
+func.def @cfg_join_iota_summaries(%condition: i1, %n: index) -> (i1) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  %left_value = vector.iota %c0 step %c1 : vector<[%n]xindex>
+  cfg.br ^join(%left_value: vector<[%n]xindex>)
+^right:
+  %right_value = vector.iota %c4 step %c1 : vector<[%n]xindex>
+  cfg.br ^join(%right_value: vector<[%n]xindex>)
+^join(%value: vector<[%n]xindex>):
+  %is_iota = test.fact_is_vector_iota %value : vector<[%n]xindex> -> i1
+  func.return %is_iota : i1
+}
+
+// ----
+func.def @cfg_join_iota_summaries(%condition: i1, %n: index) -> (i1) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  %left_value = vector.iota %c0 step %c1 : vector<[%n]xindex>
+  cfg.br ^join(%left_value: vector<[%n]xindex>)
+^right:
+  %right_value = vector.iota %c4 step %c1 : vector<[%n]xindex>
+  cfg.br ^join(%right_value: vector<[%n]xindex>)
+^join(%value: vector<[%n]xindex>):
+  %is_iota = scalar.constant true : i1
+  func.return %is_iota : i1
+}
+
+// ====
+
+// Prefix-mask summaries preserve their structural family across a CFG join.
+func.def @cfg_join_prefix_mask_summaries(%condition: i1, %n: index) -> (i1) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  %left_value = vector.mask.range [%c0 to %n step %c1] : index -> vector<[%n]xi1>
+  cfg.br ^join(%left_value: vector<[%n]xi1>)
+^right:
+  %right_value = vector.mask.range [%c1 to %n step %c1] : index -> vector<[%n]xi1>
+  cfg.br ^join(%right_value: vector<[%n]xi1>)
+^join(%value: vector<[%n]xi1>):
+  %is_mask = test.fact_is_vector_prefix_mask %value : vector<[%n]xi1> -> i1
+  func.return %is_mask : i1
+}
+
+// ----
+func.def @cfg_join_prefix_mask_summaries(%condition: i1, %n: index) -> (i1) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  %left_value = vector.mask.range [%c0 to %n step %c1] : index -> vector<[%n]xi1>
+  cfg.br ^join(%left_value: vector<[%n]xi1>)
+^right:
+  %right_value = vector.mask.range [%c1 to %n step %c1] : index -> vector<[%n]xi1>
+  cfg.br ^join(%right_value: vector<[%n]xi1>)
+^join(%value: vector<[%n]xi1>):
+  %is_mask = scalar.constant true : i1
+  func.return %is_mask : i1
+}
+
+// ====
+
+// Structurally different extension families have no shared vector summary.
+func.def @cfg_join_incompatible_vector_summaries(%condition: i1, %n: index) -> (i1) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  cfg.cond_br %condition, ^iota, ^uniform
+^iota:
+  %iota_value = vector.iota %c0 step %c1 : vector<[%n]xindex>
+  cfg.br ^join(%iota_value: vector<[%n]xindex>)
+^uniform:
+  %uniform_value = vector.splat %c0 : vector<[%n]xindex>
+  cfg.br ^join(%uniform_value: vector<[%n]xindex>)
+^join(%value: vector<[%n]xindex>):
+  %is_iota = test.fact_is_vector_iota %value : vector<[%n]xindex> -> i1
+  func.return %is_iota : i1
+}
+
+// ----
+func.def @cfg_join_incompatible_vector_summaries(%condition: i1, %n: index) -> (i1) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  cfg.cond_br %condition, ^iota, ^uniform
+^iota:
+  %iota_value = vector.iota %c0 step %c1 : vector<[%n]xindex>
+  cfg.br ^join(%iota_value: vector<[%n]xindex>)
+^uniform:
+  %uniform_value = vector.constant 0 : vector<[%n]xindex>
+  cfg.br ^join(%uniform_value: vector<[%n]xindex>)
+^join(%value: vector<[%n]xindex>):
+  %is_iota = scalar.constant false : i1
+  func.return %is_iota : i1
+}
+
+// ====
+
+// A loop summary stabilizes a bounded per-lane join between its zero-trip
+// initial value and invariant backedge value.
+func.def @loop_join_small_static_lane_facts(%n: index) -> (i64, i64, i64, i64) {
+  %c0 = index.constant 0 : index
+  %n2 = index.assume %n [range(%n, 0, 4)] : index
+  %c1 = index.constant 1 : index
+  %v0 = scalar.constant 0 : i32
+  %v4 = scalar.constant 4 : i32
+  %v6 = scalar.constant 6 : i32
+  %v10 = scalar.constant 10 : i32
+  %initial = vector.from_elements %v0, %v10 : vector<2xi32>
+  %backedge = vector.from_elements %v4, %v6 : vector<2xi32>
+  %result = scf.for %iv = [%c0 to %n2 step %c1](%carried = %initial : vector<2xi32>) -> (vector<2xi32>) {
+    scf.yield %backedge : vector<2xi32>
+  }
+  %lane0 = vector.extract %result[0] : vector<2xi32> -> i32
+  %lane1 = vector.extract %result[1] : vector<2xi32> -> i32
+  %lane0_lo = test.fact_range_lo %lane0 : i32 -> i64
+  %lane0_hi = test.fact_range_hi %lane0 : i32 -> i64
+  %lane1_lo = test.fact_range_lo %lane1 : i32 -> i64
+  %lane1_hi = test.fact_range_hi %lane1 : i32 -> i64
+  func.return %lane0_lo, %lane0_hi, %lane1_lo, %lane1_hi : i64, i64, i64, i64
+}
+
+// ----
+func.def @loop_join_small_static_lane_facts(%n: index) -> (i64, i64, i64, i64) {
+  %lane0_lo = scalar.constant 0 : i64
+  %lane0_hi = scalar.constant 4 : i64
+  %lane1_lo = scalar.constant 6 : i64
+  %lane1_hi = scalar.constant 10 : i64
+  func.return %lane0_lo, %lane0_hi, %lane1_lo, %lane1_hi : i64, i64, i64, i64
+}
+
+// ====
+
+// A changing aggregate reaches the solver's late widening boundary and drops
+// per-lane detail instead of growing an unbounded sequence of range summaries.
+func.def @loop_widens_changing_small_static_lane_facts(%n: index) -> (i64, i64) {
+  %c0 = index.constant 0 : index
+  %n2 = index.assume %n [range(%n, 1, 8)] : index
+  %c1 = index.constant 1 : index
+  %v0 = scalar.constant 0 : i32
+  %initial = vector.from_elements %v0, %v0 : vector<2xi32>
+  %increment = vector.constant 1 : vector<2xi32>
+  %result = scf.for %iv = [%c0 to %n2 step %c1](%carried = %initial : vector<2xi32>) -> (vector<2xi32>) {
+    %next = vector.addi %carried, %increment : vector<2xi32>
+    scf.yield %next : vector<2xi32>
+  }
+  %lane = vector.extract %result[0] : vector<2xi32> -> i32
+  %lo = test.fact_range_lo %lane : i32 -> i64
+  %hi = test.fact_range_hi %lane : i32 -> i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ----
+func.def @loop_widens_changing_small_static_lane_facts(%n: index) -> (i64, i64) {
+  %lo = scalar.constant -9223372036854775808 : i64
+  %hi = scalar.constant 9223372036854775807 : i64
+  func.return %lo, %hi : i64, i64
+}
+
+// ====
+
 // Finite-number FP8 scalar types publish no-infinity facts even without a
 // physical-storage schema.
 func.def @f8e4m3_type_vector_load_content(%buffer: buffer) -> (i1, i1) {
