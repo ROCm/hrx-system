@@ -5985,14 +5985,50 @@ def _v_cmp_i32_source0_inline_vcc_overlay(
     )
 
 
+def _v_cmp_i32_source1_inline_vcc_overlay(
+    *, predicate: str, instruction_suffix: str, semantic_suffix: str
+) -> AmdgpuDescriptorOverlay:
+    instruction_predicate = instruction_suffix.lower()
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=f"amdgpu.v_cmp_{predicate}_i32.src1_inline_vcc",
+        instruction_name=f"V_CMP_{instruction_suffix}_I32",
+        mnemonic=f"v_cmp_{instruction_predicate}_i32",
+        encoding_name="ENC_VOPC",
+        semantic_tag=f"cmp.i32.{semantic_suffix}",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(AmdgpuOperandOverlay("VSRC1", _vgpr_operand("lhs")),),
+        implicit_operands=(_vcc_output(_vcc_result("mask"), operand_type="OPR_VCC"),),
+        asm_forms=_asm(
+            mnemonic=f"v_cmp_{instruction_predicate}_i32_src1_inline_vcc",
+            native_assembly_mnemonic=f"v_cmp_{instruction_predicate}_i32",
+            results=("mask",),
+            operands=("lhs",),
+            immediates=("rhs",),
+            named_immediates=True,
+            native_assembly_values=(
+                _native_result("mask"),
+                _native_i64_immediate("rhs"),
+                _native_operand("lhs"),
+            ),
+        ),
+        immediate_fields=("SRC0",),
+        immediates=(_source_inline_u32_immediate("rhs"),),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _v_cmp_i32_equality_vcc_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return tuple(
-        _v_cmp_i32_source0_inline_vcc_overlay(
+        overlay_builder(
             predicate=predicate,
             instruction_suffix=instruction_suffix,
             semantic_suffix=predicate,
         )
         for predicate, instruction_suffix in (("eq", "EQ"), ("ne", "NE"))
+        for overlay_builder in (
+            _v_cmp_i32_source0_inline_vcc_overlay,
+            _v_cmp_i32_source1_inline_vcc_overlay,
+        )
     )
 
 
@@ -6343,6 +6379,115 @@ def _v_cndmask_b32_literal_inline_overlay(
     )
 
 
+def _v_cndmask_b32_vcc_overlay(
+    *,
+    include_literal_form: bool = True,
+) -> AmdgpuDescriptorOverlay:
+    operand_forms = [
+        _literal_operand_form(
+            replacement_descriptor="amdgpu.v_cndmask_b32.src0_inline_vcc",
+            source_operand="false_value",
+            immediate_field="false_value",
+        )
+    ]
+    if include_literal_form:
+        operand_forms.append(
+            _literal_operand_form(
+                replacement_descriptor="amdgpu.v_cndmask_b32.src0_lit_vcc",
+                source_operand="false_value",
+            )
+        )
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_cndmask_b32.vcc",
+        instruction_name="V_CNDMASK_B32",
+        mnemonic="v_cndmask_b32",
+        encoding_name="ENC_VOP2",
+        semantic_tag="select.mask.b32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("false_value")),
+            AmdgpuOperandOverlay("VSRC1", _vgpr_operand("true_value")),
+        ),
+        implicit_operands=(_vcc_input(_vcc_predicate("mask")),),
+        operand_forms=tuple(operand_forms),
+        asm_forms=_asm(
+            mnemonic="v_cndmask_b32_vcc",
+            native_assembly_mnemonic="v_cndmask_b32",
+            results=("dst",),
+            operands=("false_value", "true_value", "mask"),
+        ),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_cndmask_b32_src0_inline_vcc_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_cndmask_b32.src0_inline_vcc",
+        instruction_name="V_CNDMASK_B32",
+        mnemonic="v_cndmask_b32",
+        encoding_name="ENC_VOP2",
+        semantic_tag="select.mask.b32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("VSRC1", _vgpr_operand("true_value")),
+        ),
+        implicit_operands=(_vcc_input(_vcc_predicate("mask")),),
+        asm_forms=_asm(
+            mnemonic="v_cndmask_b32_src0_inline_vcc",
+            native_assembly_mnemonic="v_cndmask_b32",
+            results=("dst",),
+            operands=("true_value", "mask"),
+            immediates=("false_value",),
+            named_immediates=True,
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_i64_immediate("false_value"),
+                _native_operand("true_value"),
+                _native_operand("mask"),
+            ),
+        ),
+        immediate_fields=("SRC0",),
+        immediates=(_source_inline_u32_immediate("false_value"),),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_cndmask_b32_src0_literal_vcc_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_cndmask_b32.src0_lit_vcc",
+        instruction_name="V_CNDMASK_B32",
+        mnemonic="v_cndmask_b32",
+        encoding_name="VOP2_INST_LITERAL",
+        encoding_condition="has_lit",
+        semantic_tag="select.mask.b32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("VSRC1", _vgpr_operand("true_value")),
+        ),
+        implicit_operands=(_vcc_input(_vcc_predicate("mask")),),
+        asm_forms=_asm(
+            mnemonic="v_cndmask_b32_src0_lit_vcc",
+            native_assembly_mnemonic="v_cndmask_b32",
+            results=("dst",),
+            operands=("true_value", "mask"),
+            immediates=("imm32",),
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_i64_immediate("imm32"),
+                _native_operand("true_value"),
+                _native_operand("mask"),
+            ),
+        ),
+        immediate_fields=("LITERAL",),
+        immediates=(_LITERAL_U32_IMMEDIATE,),
+        fixed_encoding_fields=(("SRC0", _predefined("SRC_LITERAL", "OPR_SRC")),),
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _v_cndmask_b32_overlays(
     *,
     include_literal_forms: bool = True,
@@ -6351,6 +6496,8 @@ def _v_cndmask_b32_overlays(
         _v_cndmask_b32_overlay(include_literal_forms=include_literal_forms),
         _v_cndmask_b32_source_inline_overlay("src0"),
         _v_cndmask_b32_source_inline_overlay("src1"),
+        _v_cndmask_b32_vcc_overlay(include_literal_form=include_literal_forms),
+        _v_cndmask_b32_src0_inline_vcc_overlay(),
     )
     if not include_literal_forms:
         return overlays
@@ -6360,6 +6507,7 @@ def _v_cndmask_b32_overlays(
         _v_cndmask_b32_source_literal_overlay("src1"),
         _v_cndmask_b32_literal_inline_overlay("src0"),
         _v_cndmask_b32_literal_inline_overlay("src1"),
+        _v_cndmask_b32_src0_literal_vcc_overlay(),
     )
 
 
@@ -6724,6 +6872,7 @@ __all__ = (
     "_v_cmp_i32_overlay",
     "_v_cmp_i32_equality_vcc_overlays",
     "_v_cmp_i32_source0_inline_vcc_overlay",
+    "_v_cmp_i32_source1_inline_vcc_overlay",
     "_v_cmp_i32_source_overlays",
     "_v_cmp_inline_operand_forms",
     "_v_cmp_overlays",
@@ -6739,8 +6888,11 @@ __all__ = (
     "_v_cndmask_b32_dpp16_overlay",
     "_v_cndmask_b32_dpp_legacy_overlay",
     "_v_cndmask_b32_dpp_overlay",
+    "_v_cndmask_b32_src0_inline_vcc_overlay",
+    "_v_cndmask_b32_src0_literal_vcc_overlay",
     "_v_cndmask_b32_source_inline_overlay",
     "_v_cndmask_b32_source_literal_overlay",
+    "_v_cndmask_b32_vcc_overlay",
     "_v_cvt_f16_f32_overlay",
     "_v_cvt_f32_f16_overlay",
     "_v_cvt_f32_i32_overlay",

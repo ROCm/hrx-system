@@ -64,3 +64,25 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_vcc_dpp_fanout(
   global_store_b32 v3, v2, s[0:1] offset:8
   s_wait_storecnt storecnt(0)
   s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1250_vcc_compact_forms
+
+amdgpu.target<gfx1250> @target
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @gfx1250_vcc_compact_forms(%lane: reg<amdgpu.vgpr>, %true_value: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
+  %mask = v_cmp_eq_i32_src1_inline_vcc %lane {rhs = 0}
+  %inline = v_cndmask_b32_src0_inline_vcc %true_value, %mask {false_value = 0}
+  %literal = v_cndmask_b32_src0_lit_vcc %inline, %mask, 305419896
+  global_store_b32_saddr %lane, %literal, %output
+  return
+}
+
+// ----
+  v_cmp_eq_i32 vcc, 0, v1
+  v_cndmask_b32 v0, 0, v0, vcc
+  s_delay_alu instid0(VALU_DEP_1)
+  v_cndmask_b32 v0, 305419896, v0, vcc
+  global_store_b32 v1, v0, s[0:1] offset:0
+  s_wait_storecnt storecnt(0)
+  s_endpgm
