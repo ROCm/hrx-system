@@ -118,7 +118,7 @@ struct loom_pass_value_fact_owner_t {
   // Arena for scope-local extension payloads and inference scratch.
   iree_arena_allocator_t transient_arena;
   // Module whose value table is addressed by table entries.
-  loom_module_t* module;
+  const loom_module_t* module;
   // Reusable value-id-addressed fact table.
   loom_value_fact_table_t table;
   // Active populated fact scope, or NONE when table entries are not valid.
@@ -147,14 +147,14 @@ void loom_pass_value_fact_owner_invalidate(loom_pass_value_fact_owner_t* owner);
 // maintain facts while they mutate IR. If population fails, the caller must
 // invalidate the owner before returning the failure.
 iree_status_t loom_pass_value_fact_owner_prepare(
-    loom_pass_value_fact_owner_t* owner, loom_module_t* module,
+    loom_pass_value_fact_owner_t* owner, const loom_module_t* module,
     loom_pass_value_fact_scope_t scope, loom_value_fact_table_t** out_table);
 
 // Acquires computed facts for |scope|. The returned table is borrowed and
 // remains valid until the owner is invalidated, prepared or acquired for
 // another scope, or deinitialized.
 iree_status_t loom_pass_value_fact_owner_acquire(
-    loom_pass_value_fact_owner_t* owner, loom_module_t* module,
+    loom_pass_value_fact_owner_t* owner, const loom_module_t* module,
     loom_pass_value_fact_scope_t scope, loom_value_fact_table_t** out_table);
 
 // Prepares scoped fact storage through a pass invocation.

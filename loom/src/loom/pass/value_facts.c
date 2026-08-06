@@ -56,7 +56,7 @@ static iree_status_t loom_pass_value_fact_scope_validate(
 }
 
 static iree_status_t loom_pass_value_fact_owner_ensure_table(
-    loom_pass_value_fact_owner_t* owner, loom_module_t* module) {
+    loom_pass_value_fact_owner_t* owner, const loom_module_t* module) {
   iree_host_size_t capacity = loom_value_table_capacity(&module->values);
   if (iree_any_bit_set(owner->flags,
                        LOOM_PASS_VALUE_FACT_OWNER_FLAG_TABLE_INITIALIZED) &&
@@ -77,7 +77,7 @@ static iree_status_t loom_pass_value_fact_owner_ensure_table(
 }
 
 static iree_status_t loom_pass_value_fact_owner_compute_module(
-    loom_pass_value_fact_owner_t* owner, loom_module_t* module) {
+    loom_pass_value_fact_owner_t* owner, const loom_module_t* module) {
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
     loom_symbol_t* symbol = &module->symbols.entries[i];
     if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE)) {
@@ -125,7 +125,7 @@ void loom_pass_value_fact_owner_invalidate(
 }
 
 iree_status_t loom_pass_value_fact_owner_prepare(
-    loom_pass_value_fact_owner_t* owner, loom_module_t* module,
+    loom_pass_value_fact_owner_t* owner, const loom_module_t* module,
     loom_pass_value_fact_scope_t scope, loom_value_fact_table_t** out_table) {
   *out_table = NULL;
 
@@ -138,7 +138,7 @@ iree_status_t loom_pass_value_fact_owner_prepare(
 }
 
 iree_status_t loom_pass_value_fact_owner_acquire(
-    loom_pass_value_fact_owner_t* owner, loom_module_t* module,
+    loom_pass_value_fact_owner_t* owner, const loom_module_t* module,
     loom_pass_value_fact_scope_t scope, loom_value_fact_table_t** out_table) {
   *out_table = NULL;
 

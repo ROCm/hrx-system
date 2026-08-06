@@ -249,7 +249,7 @@ iree_status_t loom_kernel_launch_config_try_evaluate_direct(
 }
 
 iree_status_t loom_kernel_launch_config_evaluate(
-    loom_module_t* module, iree_arena_block_pool_t* block_pool,
+    const loom_module_t* module, iree_arena_block_pool_t* block_pool,
     const loom_kernel_launch_config_options_t* options,
     loom_kernel_launch_config_t* out_config) {
   if (!module || !block_pool || !options || !out_config) {
