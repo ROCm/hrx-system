@@ -78,7 +78,7 @@ static iree_status_t loom_amdgpu_memory_bank_service_control_uniformity(
     loom_control_uniformity_info_initialize(
         loom_low_lower_context_module(context),
         loom_low_lower_context_fact_table(context),
-        loom_low_lower_context_scratch_arena(context),
+        loom_low_lower_context_function_arena(context),
         &state->control_uniformity);
   }
   *out_control_uniformity = &state->control_uniformity;

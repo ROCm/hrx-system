@@ -309,7 +309,7 @@ static iree_status_t loom_low_lower_rule_emit_state_initialize(
   if (rule->temporary_count == 0) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, rule->temporary_count, sizeof(*out_state->temporaries),
       (void**)&out_state->temporaries));
   for (uint16_t i = 0; i < rule->temporary_count; ++i) {
@@ -1694,7 +1694,7 @@ static iree_status_t loom_low_lower_rule_descriptor_maps_initialize(
   }
 
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      &context->arena, rule_sets.count,
+      &context->function_arena, rule_sets.count,
       sizeof(*context->lowering.rule_descriptor_maps),
       (void**)&context->lowering.rule_descriptor_maps));
   context->lowering.rule_descriptor_map_count = rule_sets.count;
@@ -1714,8 +1714,8 @@ static iree_status_t loom_low_lower_rule_descriptor_maps_initialize(
     IREE_ASSERT(rule_set->descriptor_refs != NULL);
     const loom_low_descriptor_t** descriptors = NULL;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        &context->arena, rule_set->descriptor_ref_count, sizeof(*descriptors),
-        (void**)&descriptors));
+        &context->function_arena, rule_set->descriptor_ref_count,
+        sizeof(*descriptors), (void**)&descriptors));
     map->descriptors = descriptors;
     for (uint16_t j = 0; j < rule_set->descriptor_ref_count; ++j) {
       descriptors[j] = NULL;
@@ -1761,8 +1761,8 @@ loom_low_lower_rule_symbolic_expr_context_from_lowering(
   if (!lowering->expression_context_initialized ||
       lowering->expression_context_fact_table != fact_table) {
     loom_symbolic_expr_context_initialize(
-        loom_low_lower_context_module(context), fact_table, &context->arena,
-        &lowering->expression_context);
+        loom_low_lower_context_module(context), fact_table,
+        &context->function_arena, &lowering->expression_context);
     lowering->expression_context_fact_table = fact_table;
     lowering->expression_context_initialized = true;
   }
@@ -2027,7 +2027,7 @@ iree_status_t loom_low_lower_rule_set_resolve_emit_program(
   }
 
   loom_low_lower_resolved_emit_t* resolved_emits = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, rule->emit_count, sizeof(*resolved_emits),
       (void**)&resolved_emits));
   loom_low_lower_rule_match_context_t match_context;
@@ -2062,7 +2062,7 @@ static iree_status_t loom_low_lower_rule_build_attrs(
   }
   const loom_attribute_t* source_attrs = loom_op_const_attrs(source_op);
   loom_named_attr_t* attrs = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, emit->attr_copy_count, sizeof(*attrs), (void**)&attrs));
   for (uint16_t i = 0; i < emit->attr_copy_count; ++i) {
     uint16_t attr_copy_index = (uint16_t)(emit->attr_copy_start + i);
@@ -2473,7 +2473,7 @@ static iree_status_t loom_low_lower_rule_build_low_operands(
     return iree_ok_status();
   }
   loom_value_id_t* low_operands = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, emit->operand_ref_count, sizeof(*low_operands),
       (void**)&low_operands));
   for (uint16_t i = 0; i < emit->operand_ref_count; ++i) {
@@ -2543,7 +2543,7 @@ static iree_status_t loom_low_lower_rule_build_result_types(
       emit->flags, LOOM_LOW_LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE);
   IREE_ASSERT_FALSE(use_type_patterns && use_descriptor_types);
   loom_type_t* result_types = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, emit->result_ref_count, sizeof(*result_types),
       (void**)&result_types));
   for (uint16_t i = 0; i < emit->result_ref_count; ++i) {
@@ -2883,7 +2883,7 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_first_lane(
   IREE_ASSERT_EQ(loom_low_register_type_unit_count(result_types[0]), 1);
 
   loom_value_id_t* lane_operands = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, emit->operand_ref_count, sizeof(*lane_operands),
       (void**)&lane_operands));
   for (uint16_t i = 0; i < emit->operand_ref_count; ++i) {
@@ -2972,11 +2972,11 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane(
   IREE_ASSERT_GT(lane_count, 0);
 
   loom_type_t* lane_result_types = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, emit->result_ref_count, sizeof(*lane_result_types),
       (void**)&lane_result_types));
   loom_type_t* aggregate_result_types = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, emit->result_ref_count, sizeof(*aggregate_result_types),
       (void**)&aggregate_result_types));
   for (uint16_t i = 0; i < emit->result_ref_count; ++i) {
@@ -3026,11 +3026,11 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane(
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_build_attrs(
       context, rule_set, source_op, emit, NULL, &attrs));
   loom_value_id_t* lane_operands = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, emit->operand_ref_count, sizeof(*lane_operands),
       (void**)&lane_operands));
   loom_value_id_t* lane_results = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, emit->result_ref_count * lane_count, sizeof(*lane_results),
       (void**)&lane_results));
   for (uint32_t lane_index = 0; lane_index < lane_count; ++lane_index) {
@@ -3065,7 +3065,7 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane(
   }
 
   loom_value_id_t* low_results = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, emit->result_ref_count, sizeof(*low_results),
       (void**)&low_results));
   for (uint16_t result_index = 0; result_index < emit->result_ref_count;
@@ -3162,14 +3162,14 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane_sequence(
   IREE_ASSERT_EQ(final_emit->result_ref_count, 1);
 
   loom_type_t* result_types = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, rule->emit_count, sizeof(*result_types), (void**)&result_types));
   loom_type_t* lane_result_types = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, rule->emit_count, sizeof(*lane_result_types),
       (void**)&lane_result_types));
   loom_named_attr_slice_t* attrs = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, rule->emit_count, sizeof(*attrs), (void**)&attrs));
   uint16_t max_operand_ref_count = 0;
   for (uint16_t emit_ordinal = 0; emit_ordinal < rule->emit_count;
@@ -3220,12 +3220,12 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane_sequence(
 
   loom_value_id_t* lane_operands = NULL;
   if (max_operand_ref_count != 0) {
-    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
         context, max_operand_ref_count, sizeof(*lane_operands),
         (void**)&lane_operands));
   }
   loom_value_id_t* lane_results = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, lane_count, sizeof(*lane_results), (void**)&lane_results));
 
   for (uint32_t lane_index = 0; lane_index < lane_count; ++lane_index) {
@@ -3348,7 +3348,7 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_accumulate_lanes(
   }
 
   loom_value_id_t* lane_operands = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, emit->operand_ref_count, sizeof(*lane_operands),
       (void**)&lane_operands));
   if (balanced_tree) {
@@ -3359,7 +3359,7 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_accumulate_lanes(
                                     ? lane_count
                                     : (uint32_t)(lane_count + 1);
     loom_value_id_t* lane_terms = NULL;
-    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
         context, term_count, sizeof(*lane_terms), (void**)&lane_terms));
     uint32_t term_index = 0;
     lane_terms[term_index++] = accumulator;

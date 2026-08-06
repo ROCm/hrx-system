@@ -134,7 +134,7 @@ static iree_status_t loom_low_lower_memory_expr_ensure_capacity(
   }
   void* entries = context->lowering.memory_expr_entries;
   IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-      &context->arena, context->lowering.memory_expr_entry_capacity,
+      &context->function_arena, context->lowering.memory_expr_entry_capacity,
       minimum_capacity, sizeof(*context->lowering.memory_expr_entries),
       &context->lowering.memory_expr_entry_capacity, &entries));
   context->lowering.memory_expr_entries =
@@ -508,36 +508,23 @@ static bool loom_low_lower_memory_report_try_counted_cfg_loop(
   return lower_ok && step_ok && upper_ok && trip_ok;
 }
 
-static iree_status_t loom_low_lower_memory_report_ensure_source_block_counts(
-    loom_low_lower_context_t* context) {
-  if (context->lowering.source_block_execution_counts_initialized) {
-    return iree_ok_status();
-  }
-  context->lowering.source_block_execution_counts_initialized = true;
-  context->lowering.source_block_execution_counts_exact = true;
-  loom_region_t* body = loom_func_like_body(context->source_function);
-  if (body == NULL || body->block_count == 0) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      &context->arena, body->block_count,
-      sizeof(*context->lowering.source_block_execution_counts),
-      (void**)&context->lowering.source_block_execution_counts));
-
+static iree_status_t loom_low_lower_memory_report_calculate_source_block_counts(
+    loom_low_lower_context_t* context, loom_region_t* body,
+    iree_arena_allocator_t* analysis_arena) {
   loom_cfg_graph_t graph = {0};
   IREE_RETURN_IF_ERROR(
-      loom_cfg_graph_build(context->module, body, &context->arena, &graph));
+      loom_cfg_graph_build(context->module, body, analysis_arena, &graph));
   if (graph.malformed || graph.block_count != body->block_count) {
     context->lowering.source_block_execution_counts_exact = false;
     return iree_ok_status();
   }
   loom_cfg_loop_forest_t loop_forest = {0};
   IREE_RETURN_IF_ERROR(
-      loom_cfg_loop_forest_build(&graph, &context->arena, &loop_forest));
+      loom_cfg_loop_forest_build(&graph, analysis_arena, &loop_forest));
   uint64_t* trip_counts = NULL;
   if (loop_forest.interval_count > 0) {
     IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(&context->arena, loop_forest.interval_count,
+        iree_arena_allocate_array(analysis_arena, loop_forest.interval_count,
                                   sizeof(*trip_counts), (void**)&trip_counts));
   }
   for (iree_host_size_t i = 0; i < loop_forest.interval_count; ++i) {
@@ -552,6 +539,31 @@ static iree_status_t loom_low_lower_memory_report_ensure_source_block_counts(
           &loop_forest, &graph, trip_counts,
           context->lowering.source_block_execution_counts);
   return iree_ok_status();
+}
+
+static iree_status_t loom_low_lower_memory_report_ensure_source_block_counts(
+    loom_low_lower_context_t* context) {
+  if (context->lowering.source_block_execution_counts_initialized) {
+    return iree_ok_status();
+  }
+  context->lowering.source_block_execution_counts_initialized = true;
+  context->lowering.source_block_execution_counts_exact = true;
+  loom_region_t* body = loom_func_like_body(context->source_function);
+  if (body == NULL || body->block_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      &context->function_arena, body->block_count,
+      sizeof(*context->lowering.source_block_execution_counts),
+      (void**)&context->lowering.source_block_execution_counts));
+
+  iree_arena_allocator_t analysis_arena;
+  iree_arena_initialize(context->module->arena.block_pool, &analysis_arena);
+  iree_status_t status =
+      loom_low_lower_memory_report_calculate_source_block_counts(
+          context, body, &analysis_arena);
+  iree_arena_deinitialize(&analysis_arena);
+  return status;
 }
 
 static const loom_block_t* loom_low_lower_source_op_function_block(

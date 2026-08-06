@@ -634,15 +634,15 @@ static iree_status_t loom_amdgpu_analyze_then_masked_region(
   const iree_host_size_t edge_capacity =
       loom_amdgpu_successor_edge_count(source_body);
   loom_amdgpu_region_exit_edge_t* exit_edges = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, edge_capacity, sizeof(*exit_edges), (void**)&exit_edges));
 
   uint8_t* in_region = NULL;
   uint16_t* stack = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, source_body->block_count, sizeof(*in_region),
       (void**)&in_region));
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, source_body->block_count, sizeof(*stack), (void**)&stack));
   memset(in_region, 0,
          (iree_host_size_t)source_body->block_count * sizeof(*in_region));
@@ -1245,15 +1245,15 @@ static iree_status_t loom_amdgpu_try_prepare_divergent_loop(
   const iree_host_size_t edge_capacity =
       loom_amdgpu_successor_edge_count(source_body);
   loom_amdgpu_region_exit_edge_t* body_exit_edges = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, edge_capacity, sizeof(*body_exit_edges),
       (void**)&body_exit_edges));
   uint8_t* body_contains_block = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, source_body->block_count, sizeof(*body_contains_block),
       (void**)&body_contains_block));
   uint16_t* stack = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, source_body->block_count, sizeof(*stack), (void**)&stack));
 
   loom_amdgpu_bounded_region_t body_region = {0};
@@ -1332,23 +1332,23 @@ static iree_status_t loom_amdgpu_prepare_exec_mask_branch(
   const iree_host_size_t edge_capacity =
       loom_amdgpu_successor_edge_count(source_body);
   loom_amdgpu_region_exit_edge_t* true_exit_edges = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, edge_capacity, sizeof(*true_exit_edges),
       (void**)&true_exit_edges));
   loom_amdgpu_region_exit_edge_t* false_exit_edges = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, edge_capacity, sizeof(*false_exit_edges),
       (void**)&false_exit_edges));
   uint8_t* true_contains_block = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, source_body->block_count, sizeof(*true_contains_block),
       (void**)&true_contains_block));
   uint8_t* false_contains_block = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, source_body->block_count, sizeof(*false_contains_block),
       (void**)&false_contains_block));
   uint16_t* stack = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, source_body->block_count, sizeof(*stack), (void**)&stack));
   loom_amdgpu_bounded_region_t true_region = {0};
   loom_amdgpu_bounded_region_t false_region = {0};
@@ -1748,7 +1748,7 @@ static iree_status_t loom_amdgpu_emit_masked_merge_restore_block(
   IREE_ASSERT_EQ(false_args.count, plan->merge_restore_dest->arg_count);
   loom_value_id_t* merged_args = NULL;
   if (iree_status_is_ok(status)) {
-    status = loom_low_lower_allocate_scratch_array(
+    status = loom_low_lower_allocate_emission_array(
         context, false_args.count, sizeof(*merged_args), (void**)&merged_args);
   }
   loom_value_id_t* low_false_args = NULL;
@@ -1803,7 +1803,7 @@ static iree_status_t loom_amdgpu_emit_if_else_merge_restore_block(
   IREE_ASSERT_EQ(arg_count, plan->merge_restore_dest->arg_count);
   loom_value_id_t* merged_args = NULL;
   if (iree_status_is_ok(status)) {
-    status = loom_low_lower_allocate_scratch_array(
+    status = loom_low_lower_allocate_emission_array(
         context, arg_count, sizeof(*merged_args), (void**)&merged_args);
   }
   loom_module_t* module = loom_low_lower_context_module(context);
@@ -1852,12 +1852,12 @@ static iree_status_t loom_amdgpu_emit_no_true_else_entry_block(
   const uint16_t arg_count = plan->if_else_merge_arg_count;
   loom_value_id_t* zero_args = NULL;
   if (iree_status_is_ok(status)) {
-    status = loom_low_lower_allocate_scratch_array(
+    status = loom_low_lower_allocate_emission_array(
         context, arg_count, sizeof(*zero_args), (void**)&zero_args);
   }
   loom_amdgpu_zero_placeholder_t* placeholders = NULL;
   if (iree_status_is_ok(status)) {
-    status = loom_low_lower_allocate_scratch_array(
+    status = loom_low_lower_allocate_emission_array(
         context, arg_count, sizeof(*placeholders), (void**)&placeholders);
   }
   uint16_t placeholder_count = 0;

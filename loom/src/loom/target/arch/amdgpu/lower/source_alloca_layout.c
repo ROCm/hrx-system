@@ -472,7 +472,7 @@ iree_status_t loom_amdgpu_source_alloca_layout_for_lower_context(
       loom_low_lower_context_source_function(context);
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_initialize_for_inputs(
       loom_low_lower_context_module(context), fact_table, value_domain,
-      loom_low_lower_context_scratch_arena(context), source_function, layout));
+      loom_low_lower_context_function_arena(context), source_function, layout));
   *out_layout = layout;
   return iree_ok_status();
 }
