@@ -444,7 +444,7 @@ static const uint8_t
   [same_op_reason_value] = (uint8_t)((info_index_value) + 1),
 
 static const uint8_t kVopdComponentInfoIndexBySameOpReason
-    [LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_DOT2_F32_BF16 + 1] = {
+    [LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_CNDMASK_B32 + 1] = {
 #include "loom/target/arch/amdgpu/descriptors/vopd_component_rules.inl"
 };
 
@@ -1492,14 +1492,15 @@ static bool loom_amdgpu_vopd_read_literal_fma_component(
   return true;
 }
 
-static bool loom_amdgpu_vopd_read_binary_vgpr_component(
+static bool loom_amdgpu_vopd_read_binary_vgpr_component_with_operand_count(
     const loom_amdgpu_vopd_plan_builder_t* builder,
     const loom_low_packet_view_t* packet,
+    iree_host_size_t expected_operand_count,
     loom_amdgpu_vopd_candidate_component_t* out_component) {
   *out_component = (loom_amdgpu_vopd_candidate_component_t){0};
 
   const loom_op_t* op = packet->node->op;
-  if (op->result_count != 1 || op->operand_count != 2 ||
+  if (op->result_count != 1 || op->operand_count != expected_operand_count ||
       packet->descriptor->immediate_count != 0) {
     return false;
   }
@@ -1524,6 +1525,22 @@ static bool loom_amdgpu_vopd_read_binary_vgpr_component(
     return false;
   }
   return true;
+}
+
+static bool loom_amdgpu_vopd_read_binary_vgpr_component(
+    const loom_amdgpu_vopd_plan_builder_t* builder,
+    const loom_low_packet_view_t* packet,
+    loom_amdgpu_vopd_candidate_component_t* out_component) {
+  return loom_amdgpu_vopd_read_binary_vgpr_component_with_operand_count(
+      builder, packet, 2, out_component);
+}
+
+static bool loom_amdgpu_vopd_read_cndmask_vcc_component(
+    const loom_amdgpu_vopd_plan_builder_t* builder,
+    const loom_low_packet_view_t* packet,
+    loom_amdgpu_vopd_candidate_component_t* out_component) {
+  return loom_amdgpu_vopd_read_binary_vgpr_component_with_operand_count(
+      builder, packet, 3, out_component);
 }
 
 static bool loom_amdgpu_vopd_read_inline_mov_component(
@@ -1623,6 +1640,10 @@ static bool loom_amdgpu_vopd_read_component(
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_REGISTER_MOV:
       eligible = loom_amdgpu_vopd_read_register_mov_component(builder, packet,
                                                               out_component);
+      break;
+    case LOOM_AMDGPU_VOPD_COMPONENT_FORM_CNDMASK_VCC:
+      eligible = loom_amdgpu_vopd_read_cndmask_vcc_component(builder, packet,
+                                                             out_component);
       break;
     default:
       IREE_ASSERT_UNREACHABLE("AMDGPU VOPD component rule has unknown form");

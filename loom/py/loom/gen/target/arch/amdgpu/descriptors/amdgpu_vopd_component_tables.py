@@ -54,6 +54,7 @@ _DESCRIPTOR_SET_GROUP_GFX11_GFX12 = "gfx11_gfx12"
 _DESCRIPTOR_SET_GROUP_RDNA4_GFX125X = "rdna4_gfx125x"
 
 _FORM_BINARY_VGPR = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR"
+_FORM_CNDMASK_VCC = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_CNDMASK_VCC"
 _FORM_FMAAK_LITERAL = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_FMAAK_LITERAL"
 _FORM_FMAMK_LITERAL = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_FMAMK_LITERAL"
 _FORM_INLINE_MOV = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_INLINE_MOV"
@@ -383,6 +384,12 @@ def _component_definitions() -> tuple[_VopdComponentDefinition, ...]:
             descriptor_affinity_eligible=False,
         ),
         _component(
+            "cndmask_b32",
+            9,
+            descriptor_key="amdgpu.v_cndmask_b32.vcc",
+            form=_FORM_CNDMASK_VCC,
+        ),
+        _component(
             "max_f32",
             10,
             numeric_minmax_mnemonic="v_dual_max_num_f32",
@@ -706,6 +713,7 @@ def _component_source_operand_index(
         return src0_index if source_mask == _SOURCE_SRC0 else vsrc1_index
     if component.form in (
         _FORM_BINARY_VGPR,
+        _FORM_CNDMASK_VCC,
         _FORM_FMAAK_LITERAL,
         _FORM_FMAMK_LITERAL,
     ):
@@ -724,6 +732,8 @@ def _component_operand_count(component: _VopdComponentDefinition) -> int:
         _FORM_FMAMK_LITERAL,
     ):
         return 2
+    if component.form == _FORM_CNDMASK_VCC:
+        return 3
     if component.form == _FORM_INLINE_MOV:
         return 0
     if component.form == _FORM_REGISTER_MOV:

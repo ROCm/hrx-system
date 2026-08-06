@@ -3206,6 +3206,9 @@ static iree_status_t loom_amdgpu_append_vopd_component(
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_REGISTER_MOV:
       return loom_amdgpu_append_vopd_register_mov_component(context, component,
                                                             mnemonic);
+    case LOOM_AMDGPU_VOPD_COMPONENT_FORM_CNDMASK_VCC:
+      return loom_amdgpu_append_vopd_binary_component(context, component,
+                                                      mnemonic);
     default:
       IREE_ASSERT_UNREACHABLE(
           "AMDGPU VOPD component metadata must use a known form");

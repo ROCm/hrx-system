@@ -47,6 +47,8 @@ extern "C" {
 #define LOOM_AMDGPU_VOPD_OP_SUBREV_F32 UINT16_C(6)
 // Component opcode for v_mov_b32 in a VOPD X/Y slot.
 #define LOOM_AMDGPU_VOPD_OP_MOV_B32 UINT16_C(8)
+// Component opcode for v_cndmask_b32 in a VOPD X/Y slot.
+#define LOOM_AMDGPU_VOPD_OP_CNDMASK_B32 UINT16_C(9)
 // Component opcode for v_max_f32 in a VOPD X/Y slot.
 #define LOOM_AMDGPU_VOPD_OP_MAX_F32 UINT16_C(10)
 // Component opcode for v_min_f32 in a VOPD X/Y slot.
@@ -112,6 +114,9 @@ typedef enum loom_amdgpu_vopd_pair_reason_e {
   // Two independent v_dot2_f32_bf16 packets were fused into
   // v_dual_dot2acc_f32_bf16.
   LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_DOT2_F32_BF16 = 13,
+  // Two independent v_cndmask_b32 packets were fused into
+  // v_dual_cndmask_b32.
+  LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_CNDMASK_B32 = 14,
 } loom_amdgpu_vopd_pair_reason_t;
 
 typedef enum loom_amdgpu_vopd_component_form_e {
@@ -127,6 +132,8 @@ typedef enum loom_amdgpu_vopd_component_form_e {
   LOOM_AMDGPU_VOPD_COMPONENT_FORM_INLINE_MOV = 4,
   // Register-source move component form.
   LOOM_AMDGPU_VOPD_COMPONENT_FORM_REGISTER_MOV = 5,
+  // Two-source conditional select with an unencoded VCC predicate operand.
+  LOOM_AMDGPU_VOPD_COMPONENT_FORM_CNDMASK_VCC = 6,
 } loom_amdgpu_vopd_component_form_t;
 
 typedef enum loom_amdgpu_vopd_component_lane_bits_e {
