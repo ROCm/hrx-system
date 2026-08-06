@@ -42,7 +42,6 @@ from loom.ir import (
     FileLocation,
     FunctionType,
     FusedLocation,
-    GroupType,
     Module,
     NoneType,
     OpaqueLocation,
@@ -68,7 +67,6 @@ _IR_TYPE_CLASSES = (
     ScalarType,
     ShapedType,
     BufferType,
-    GroupType,
     FunctionType,
     RegisterType,
     StorageType,
@@ -141,7 +139,6 @@ BYTECODE_TYPE_KIND_BY_IR_KIND: dict[TypeKind, int] = {
     TypeKind.SCALAR: 1,
     TypeKind.TILE: 2,
     TypeKind.TENSOR: 3,
-    TypeKind.GROUP: 4,
     TypeKind.FUNCTION: 5,
     TypeKind.DIALECT: 6,
     TypeKind.ENCODING: 7,
@@ -634,8 +631,6 @@ class BytecodeWriter:
                     self._number_type(t)
                 for t in results:
                     self._number_type(t)
-            case GroupType():
-                pass  # Group scope is a byte, not a string.
             case DialectType(name=name, params=params):
                 self._ctx.intern_string(name)
                 for p in params:
@@ -794,9 +789,6 @@ class BytecodeWriter:
                             buf.write_varint(size)
                         case DynamicDim():
                             buf.write_u8(1)  # is_dynamic = true
-            case GroupType(scope=scope):
-                buf.write_u8(BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.GROUP])
-                buf.write_u8(scope.value)
             case FunctionType(arg_types=args, result_types=results):
                 buf.write_u8(BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.FUNCTION])
                 buf.write_varint(len(args))

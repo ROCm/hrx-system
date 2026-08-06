@@ -172,22 +172,6 @@ TEST(PrintType, View1D) {
 
 TEST(PrintType, Buffer) { EXPECT_EQ(print_type(loom_type_buffer()), "buffer"); }
 
-TEST(PrintType, GroupWorkgroup) {
-  loom_type_t type;
-  memset(&type, 0, sizeof(type));
-  type.header = loom_type_make_raw_header(LOOM_TYPE_GROUP,
-                                          LOOM_GROUP_SCOPE_WORKGROUP, 0, 0);
-  EXPECT_EQ(print_type(type), "group<workgroup>");
-}
-
-TEST(PrintType, GroupSubgroup) {
-  loom_type_t type;
-  memset(&type, 0, sizeof(type));
-  type.header = loom_type_make_raw_header(LOOM_TYPE_GROUP,
-                                          LOOM_GROUP_SCOPE_SUBGROUP, 0, 0);
-  EXPECT_EQ(print_type(type), "group<subgroup>");
-}
-
 TEST(PrintType, NoneType) {
   loom_type_t type;
   memset(&type, 0, sizeof(type));

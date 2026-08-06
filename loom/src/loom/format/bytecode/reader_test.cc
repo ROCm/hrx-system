@@ -2578,6 +2578,18 @@ TEST_F(ReaderTest, ReadsStructuralRegisterValueType) {
   loom_module_free(source_module);
 }
 
+TEST_F(ReaderTest, RejectsUnassignedTypeKind) {
+  loom_module_t* module = CreateFunctionModule();
+  auto bytes = WriteModule(module);
+  size_t offset = SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_TYPES);
+  ASSERT_GT(ReadUVarint(bytes, &offset), 0u);
+  bytes[offset] = 4;
+
+  ExpectReadError(bytes, "ERR_BYTECODE_004");
+
+  loom_module_free(module);
+}
+
 TEST_F(ReaderTest, RejectsInvalidRegisterValueTypePresence) {
   loom_module_t* module = CreateRegisterDeclModule();
   auto bytes = WriteModule(module);

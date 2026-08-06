@@ -87,7 +87,6 @@ from loom.ir import (
     EncodingType,
     EnumArrayAttr,
     FunctionType,
-    GroupType,
     Module,
     NoneType,
     Operation,
@@ -110,7 +109,6 @@ _IR_TYPE_CLASSES = (
     ScalarType,
     ShapedType,
     BufferType,
-    GroupType,
     FunctionType,
     RegisterType,
     StorageType,
@@ -213,8 +211,6 @@ def print_type(
             return "buffer"
         case PoolType():
             return _print_pool_type(ir_type, context)
-        case GroupType(scope=scope):
-            return f"group<{scope.text}>"
         case FunctionType(arg_types=args, result_types=results):
             arg_strs = ", ".join(print_type(t, context, type_registry) for t in args)
             result_strs = ", ".join(

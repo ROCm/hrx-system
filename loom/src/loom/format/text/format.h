@@ -296,12 +296,6 @@
 //   pool<65536>         Static 64KB blocks.
 //   pool<[%BS]>         Dynamic block size.
 //
-// --- Group types ---
-//
-// group-type ::= 'group' '<' identifier '>'
-//
-// Example: group<workgroup>
-//
 // --- Function types ---
 //
 // function-type ::= '(' type-list ')' '->' '(' type-list ')'

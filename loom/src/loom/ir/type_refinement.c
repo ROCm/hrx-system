@@ -19,7 +19,6 @@ static bool loom_type_refinement_has_element_or_role(loom_type_t type) {
     case LOOM_TYPE_TENSOR:
     case LOOM_TYPE_VECTOR:
     case LOOM_TYPE_VIEW:
-    case LOOM_TYPE_GROUP:
     case LOOM_TYPE_ENCODING:
       return true;
     default:

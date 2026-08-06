@@ -195,8 +195,6 @@ iree_status_t loom_type_format_minimal(loom_type_t type, void* user_data,
       return loom_output_stream_write_cstring(stream, "reg<...>");
     case LOOM_TYPE_STORAGE:
       return loom_output_stream_write_cstring(stream, "low.storage<...>");
-    case LOOM_TYPE_GROUP:
-      return loom_output_stream_write_cstring(stream, "group<...>");
     case LOOM_TYPE_FUNCTION:
       return loom_output_stream_write_cstring(stream, "(...) -> (...)");
     case LOOM_TYPE_DIALECT:

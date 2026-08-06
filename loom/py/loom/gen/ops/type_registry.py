@@ -34,7 +34,6 @@ _IR_KIND_MAP: dict[str, str] = {
     "buffer": "LOOM_TYPE_BUFFER",
     "storage": "LOOM_TYPE_STORAGE",
     "pool": "LOOM_TYPE_POOL",
-    "group": "LOOM_TYPE_GROUP",
     "dialect": "LOOM_TYPE_DIALECT",
 }
 
@@ -226,7 +225,7 @@ def generate_type_registry(
     header.append("  LOOM_TYPE_FMT_SCALAR = 1,      // Element type keyword: f32, i8.")
     header.append("  LOOM_TYPE_FMT_ENCODING = 2,    // Encoding ref: #q8_0 or %enc.")
     header.append("  LOOM_TYPE_FMT_TYPE = 3,         // Recursive type: vm.ref<T>.")
-    header.append("  LOOM_TYPE_FMT_ATTR = 4,         // Bare identifier: group<workgroup>.")
+    header.append("  LOOM_TYPE_FMT_ATTR = 4,         // Bare identifier attribute.")
     header.append("  LOOM_TYPE_FMT_KEYWORD = 5,      // Literal punctuation/word.")
     header.append("  LOOM_TYPE_FMT_OPTIONAL = 6,     // Conditional elements.")
     header.append("  LOOM_TYPE_FMT_GLUE = 7,         // Suppress space.")

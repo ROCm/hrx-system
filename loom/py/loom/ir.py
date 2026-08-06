@@ -51,9 +51,6 @@ __all__ = [
     "ShapedType",
     "BufferType",
     "BUFFER_TYPE",
-    "GroupScope",
-    "GROUP_SCOPE_BY_NAME",
-    "GroupType",
     "StorageSpace",
     "STORAGE_SPACE_BY_NAME",
     "StorageType",
@@ -241,7 +238,6 @@ class TypeKind(IntEnum):
     SCALAR = 1
     TILE = 2
     TENSOR = 3
-    GROUP = 4
     FUNCTION = 5
     DIALECT = 6
     ENCODING = 7
@@ -425,43 +421,6 @@ class BufferType:
 BUFFER_TYPE = BufferType()
 
 
-class GroupScope(IntEnum):
-    """Group scope kind. Must match loom_group_scope_t in types.h."""
-
-    WORKGROUP = 0
-    SUBGROUP = 1
-
-    @property
-    def text(self) -> str:
-        """The canonical text representation for printing."""
-        return _GROUP_SCOPE_NAMES[self]
-
-
-_GROUP_SCOPE_NAMES: dict[GroupScope, str] = {
-    GroupScope.WORKGROUP: "workgroup",
-    GroupScope.SUBGROUP: "subgroup",
-}
-
-# Reverse mapping for parsing: "workgroup" -> GroupScope.WORKGROUP.
-GROUP_SCOPE_BY_NAME: dict[str, GroupScope] = {
-    name: scope for scope, name in _GROUP_SCOPE_NAMES.items()
-}
-
-
-@dataclass(frozen=True, slots=True)
-class GroupType:
-    """A group type: group<scope>."""
-
-    scope: GroupScope
-
-    @property
-    def type_kind(self) -> TypeKind:
-        return TypeKind.GROUP
-
-    def __repr__(self) -> str:
-        return f"group<{self.scope.text}>"
-
-
 class StorageSpace(IntEnum):
     """Function-local byte storage space. Must match loom_storage_space_t."""
 
@@ -573,7 +532,7 @@ class DialectType:
     """A dialect-defined type (hal.buffer, vm.ref<T>, etc.).
 
     Catch-all for types defined by dialects outside the built-in set.
-    Built-in types (ScalarType, ShapedType, GroupType, FunctionType)
+    Built-in types (ScalarType, ShapedType, FunctionType)
     keep their specific dataclasses for performance and ergonomics.
     Dialect types use DialectType with the TypeDef driving print/parse.
 
@@ -713,7 +672,6 @@ type Type = (
     ScalarType
     | ShapedType
     | BufferType
-    | GroupType
     | StorageType
     | FunctionType
     | RegisterType

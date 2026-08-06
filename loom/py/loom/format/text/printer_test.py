@@ -43,8 +43,6 @@ from loom.ir import (
     FileLocation,
     FunctionType,
     FusedLocation,
-    GroupScope,
-    GroupType,
     Module,
     OpaqueLocation,
     Operation,
@@ -269,9 +267,6 @@ class TestPrintType:
         """Type without encoding has no suffix."""
         t = ShapedType(TypeKind.TILE, I8, (StaticDim(256),))
         assert print_type(t) == "tile<256xi8>"
-
-    def test_group_type(self) -> None:
-        assert print_type(GroupType(GroupScope.WORKGROUP)) == "group<workgroup>"
 
     def test_function_type(self) -> None:
         ft = FunctionType((F32, I32), (F32,))

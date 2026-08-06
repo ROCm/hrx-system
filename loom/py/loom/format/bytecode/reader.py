@@ -64,8 +64,6 @@ from loom.ir import (
     FileLocation,
     FunctionType,
     FusedLocation,
-    GroupScope,
-    GroupType,
     Module,
     OpaqueLocation,
     Operation,
@@ -594,16 +592,6 @@ class BytecodeReader:
                         )
                     except ValueError as err:
                         raise BytecodeError(str(err)) from err
-                case TypeKind.GROUP:
-                    scope_byte = data[offset]
-                    offset += 1
-                    try:
-                        scope = GroupScope(scope_byte)
-                    except ValueError as err:
-                        raise BytecodeError(
-                            f"unknown group scope byte: {scope_byte}"
-                        ) from err
-                    ir_type = GroupType(scope)
                 case TypeKind.FUNCTION:
                     arg_count, offset = decode_varint(data, offset)
                     result_count, offset = decode_varint(data, offset)

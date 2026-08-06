@@ -82,7 +82,6 @@ from loom.ir import (
     ENCODING_STORAGE_TYPE,
     ENCODING_TRANSFORM_TYPE,
     ENCODING_TYPE,
-    GROUP_SCOPE_BY_NAME,
     I1,
     INDEX,
     LOCATION_TAG_SANITIZER_SITE,
@@ -105,7 +104,6 @@ from loom.ir import (
     FileLocation,
     FunctionType,
     FusedLocation,
-    GroupType,
     Module,
     OpaqueLocation,
     Operation,
@@ -1022,13 +1020,6 @@ def _parse_type_interior(
     walk_type_format(type_def.format)
 
     # Dispatch based on ir_kind.
-    if type_def.ir_kind == "group" and "scope" in parsed_attrs:
-        scope_name = parsed_attrs["scope"]
-        group_scope = GROUP_SCOPE_BY_NAME.get(scope_name)
-        if group_scope is None:
-            raise ParseError(f"unknown group scope '{scope_name}'", location, filename)
-        return GroupType(group_scope), {}
-
     if type_def.ir_kind == "storage" and "space" in parsed_attrs:
         space_name = parsed_attrs["space"]
         storage_space = STORAGE_SPACE_BY_NAME.get(space_name)

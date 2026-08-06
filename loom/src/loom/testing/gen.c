@@ -431,7 +431,7 @@ loom_value_id_t loom_test_gen_values_pick_for_constraint(
       break;
   }
   // General path: scan all values for those satisfying the constraint.
-  // This handles SCALAR, VECTOR, TILE, TENSOR, POOL, GROUP, ENCODING, and any
+  // This handles SCALAR, VECTOR, TILE, TENSOR, POOL, ENCODING, and any
   // future constraints without needing per-constraint bucket infrastructure.
   uint16_t candidates[LOOM_TEST_GEN_VALUES_MAX_CAPACITY];
   uint16_t candidate_count = 0;

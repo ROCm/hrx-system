@@ -547,19 +547,6 @@ static iree_status_t loom_text_print_type_impl(
       IREE_RETURN_IF_ERROR(loom_print_shaped_interior(stream, type, module));
       return loom_output_stream_write_cstring(stream, ">");
     }
-    case LOOM_TYPE_GROUP: {
-      const char* scope_name =
-          loom_group_scope_name(loom_type_group_scope(type));
-      if (!scope_name) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "unknown group scope %d",
-                                (int)loom_type_group_scope(type));
-      }
-      IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "group<"));
-      IREE_RETURN_IF_ERROR(
-          loom_output_stream_write_cstring(stream, scope_name));
-      return loom_output_stream_write_cstring(stream, ">");
-    }
     case LOOM_TYPE_DIALECT: {
       loom_string_id_t name_id = loom_type_dialect_name_id(type);
       if (module && name_id < module->strings.count) {

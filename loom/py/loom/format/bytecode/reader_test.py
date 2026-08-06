@@ -52,8 +52,6 @@ from loom.ir import (
     EnumArrayAttr,
     FileLocation,
     FunctionType,
-    GroupScope,
-    GroupType,
     Module,
     Operation,
     Predicate,
@@ -526,6 +524,10 @@ class TestMalformedTypeSection:
         reader._read_types_section((0, data))
         return reader._types
 
+    def test_unassigned_kind_is_rejected(self) -> None:
+        with pytest.raises(BytecodeError, match="unknown type kind: 4"):
+            self._read_types(bytes([1, 4]))
+
     def test_vector_rank_zero_is_rejected(self) -> None:
         data = bytes(
             [
@@ -869,17 +871,6 @@ class TestTypeRoundTrips:
         assert isinstance(loaded, ShapedType)
         assert isinstance(loaded.encoding, EncodingInstance)
         assert loaded.encoding.params == (("block", 32), ("group", 128))
-
-    # Group type.
-    def test_group_workgroup(self) -> None:
-        assert self._roundtrip_type(GroupType(GroupScope.WORKGROUP)) == GroupType(
-            GroupScope.WORKGROUP
-        )
-
-    def test_group_subgroup(self) -> None:
-        assert self._roundtrip_type(GroupType(GroupScope.SUBGROUP)) == GroupType(
-            GroupScope.SUBGROUP
-        )
 
     # Function type.
     def test_function_type(self) -> None:

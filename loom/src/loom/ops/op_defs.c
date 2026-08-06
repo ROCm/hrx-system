@@ -29,7 +29,6 @@ const char* loom_type_constraint_name(loom_type_constraint_t constraint) {
       [LOOM_TYPE_CONSTRAINT_OFFSET] = "offset",
       [LOOM_TYPE_CONSTRAINT_ADDRESS] = "address",
       [LOOM_TYPE_CONSTRAINT_ANY] = "any",
-      [LOOM_TYPE_CONSTRAINT_GROUP] = "group",
       [LOOM_TYPE_CONSTRAINT_ANY_ENCODING] = "encoding",
       [LOOM_TYPE_CONSTRAINT_POOL] = "pool",
       [LOOM_TYPE_CONSTRAINT_REGISTER] = "register",
@@ -126,8 +125,6 @@ bool loom_type_satisfies_constraint(loom_type_t type,
       return scalar_type != LOOM_SCALAR_TYPE_I1 &&
              loom_scalar_type_is_integer(scalar_type);
     }
-    case LOOM_TYPE_CONSTRAINT_GROUP:
-      return loom_type_kind(type) == LOOM_TYPE_GROUP;
     case LOOM_TYPE_CONSTRAINT_ANY_ENCODING:
       return loom_type_is_encoding(type);
     case LOOM_TYPE_CONSTRAINT_ENCODING_LAYOUT:

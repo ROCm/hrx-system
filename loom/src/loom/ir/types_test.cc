@@ -254,6 +254,10 @@ TEST(TypesTest, EncodingRoleIsStructural) {
   EXPECT_FALSE(loom_type_equal(layout, schema));
 }
 
+TEST(TypesTest, UnassignedTypeKindIsInvalid) {
+  EXPECT_FALSE(loom_type_kind_is_valid((loom_type_kind_t)4));
+}
+
 TEST(TypesTest, InvalidKindEqualityAndHashDoNotInterpretPayload) {
   loom_type_t first = {0};
   first.header =

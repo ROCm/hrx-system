@@ -9,9 +9,8 @@
 These TypeDefs define the textual format for the core loom types.
 Scalar types (f32, i32, index) and the first-class ``encoding`` SSA
 type are keywords, not TypeDefs. Core named types such as tile<...>,
-tensor<...>, vector<...>, view<...>, bare buffer, pool<...>, and
-group<...>, plus dotted dialect types such as hal.buffer and vm.ref<...>,
-are TypeDefs.
+tensor<...>, vector<...>, view<...>, bare buffer, and pool<...>, plus dotted
+dialect types such as hal.buffer and vm.ref<...>, are TypeDefs.
 
 Dialect-specific types are declared in their respective dialect files
 (e.g., dialect/hal/, dialect/vm/) using the same TypeDef pattern.
@@ -46,8 +45,6 @@ __all__ = [
     "buffer_type",
     # Pool type.
     "pool_type",
-    # Group type.
-    "group_type",
     # Storage type.
     "storage_type",
 ]
@@ -168,18 +165,6 @@ pool_type = TypeDef(
 )
 
 # ============================================================================
-# group<scope> — barrier scoping
-# ============================================================================
-
-group_type = TypeDef(
-    name="group",
-    doc="Barrier scoping type.",
-    ir_kind="group",
-    params=[TypeParam("scope", ANY)],
-    format=[Attr("scope")],
-)
-
-# ============================================================================
 # low.storage<space> — function-local byte storage
 # ============================================================================
 
@@ -203,6 +188,5 @@ ALL_BUILTIN_TYPES: tuple[TypeDef, ...] = (
     view_type,
     buffer_type,
     pool_type,
-    group_type,
     storage_type,
 )

@@ -16,7 +16,6 @@
 //   Register types:  reg<amdgpu.vgpr x4> (target-owned low payload)
 //   Buffer types:    buffer               (opaque storage identity)
 //   View types:      view<[%M]xf32, %layout> (typed buffer projection)
-//   Group types:     group<scope>         (barrier scoping)
 //   Storage types:   low.storage<workgroup> (function-local byte storage)
 //   Function types:  (f32, i32) -> (f64)  (callable signatures)
 //
@@ -235,11 +234,11 @@ typedef uint64_t loom_overflow_dim_t;
 // these constants append-only and map values explicitly in the bytecode
 // reader/writer when the wire format diverges.
 enum loom_type_kind_e {
-  LOOM_TYPE_NONE = 0,       // Absence of a type (no-result ops).
-  LOOM_TYPE_SCALAR = 1,     // f32, i8, index, etc.
-  LOOM_TYPE_TILE = 2,       // tile<[%M]x4xf32>
-  LOOM_TYPE_TENSOR = 3,     // tensor<[%M]xf32>
-  LOOM_TYPE_GROUP = 4,      // group<scope>
+  LOOM_TYPE_NONE = 0,    // Absence of a type (no-result ops).
+  LOOM_TYPE_SCALAR = 1,  // f32, i8, index, etc.
+  LOOM_TYPE_TILE = 2,    // tile<[%M]x4xf32>
+  LOOM_TYPE_TENSOR = 3,  // tensor<[%M]xf32>
+  // Value 4 is intentionally unassigned and must not be reused.
   LOOM_TYPE_FUNCTION = 5,   // (types) -> (types)
   LOOM_TYPE_DIALECT = 6,    // hal.buffer, vm.ref<T>, etc.
   LOOM_TYPE_ENCODING = 7,   // encoding<role> (first-class SSA encoding value)
@@ -254,24 +253,11 @@ enum loom_type_kind_e {
 
 typedef uint8_t loom_type_kind_t;
 
-// Returns true if |kind| names a real type kind. The LOOM_TYPE_COUNT_
-// sentinel is not a type and must not be serialized or interpreted.
+// Returns true if |kind| names a real type kind. Unassigned values and the
+// LOOM_TYPE_COUNT_ sentinel must not be serialized or interpreted.
 static inline bool loom_type_kind_is_valid(loom_type_kind_t kind) {
-  return (uint32_t)kind < LOOM_TYPE_COUNT_;
+  return (uint32_t)kind < LOOM_TYPE_COUNT_ && kind != 4;
 }
-
-// Group scope kind. Stored in the element_type byte of the type header
-// for LOOM_TYPE_GROUP (that byte is unused for non-shaped types).
-enum loom_group_scope_e {
-  LOOM_GROUP_SCOPE_WORKGROUP = 0,
-  LOOM_GROUP_SCOPE_SUBGROUP = 1,
-  LOOM_GROUP_SCOPE_COUNT_,
-};
-// Raw group-scope storage.
-typedef uint8_t loom_group_scope_t;
-
-// Returns the name string for a group scope kind, or NULL if invalid.
-const char* loom_group_scope_name(loom_group_scope_t scope);
 
 // Semantic encoding role. Stored in the element_type byte of the type header
 // for LOOM_TYPE_ENCODING.
@@ -369,9 +355,8 @@ typedef uint16_t loom_encoding_flags_t;
 typedef struct loom_type_t {
   // Packed header:
   //   [0:7]   loom_type_kind_t
-  //   [8:15]  loom_scalar_type_t (shaped types), loom_group_scope_t (group),
-  //           loom_encoding_role_t (encoding), or loom_storage_space_t
-  //           (storage)
+  //   [8:15]  loom_scalar_type_t (shaped types), loom_encoding_role_t
+  //           (encoding), or loom_storage_space_t (storage)
   //   [16:19] rank (0-LOOM_TYPE_MAX_RANK for shaped types, 0 otherwise)
   //   [20:23] loom_type_flags_e (inline_dims, all_static)
   //   [24:31] reserved
@@ -454,12 +439,6 @@ static inline bool loom_type_has_inline_dims(loom_type_t type) {
 
 static inline bool loom_type_is_all_static(loom_type_t type) {
   return (loom_type_flags(type) & LOOM_TYPE_FLAG_ALL_STATIC) != 0;
-}
-
-// Returns the group scope for a type. Only valid when kind == LOOM_TYPE_GROUP.
-// The scope is stored in the element_type byte of the header.
-static inline loom_group_scope_t loom_type_group_scope(loom_type_t type) {
-  return (loom_group_scope_t)((type.header >> 8) & 0xFF);
 }
 
 // Returns the role for an encoding type. Only valid when
