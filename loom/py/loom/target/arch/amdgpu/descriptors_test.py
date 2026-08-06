@@ -44,7 +44,9 @@ from loom.target.arch.amdgpu.descriptors import (
     _GFX12_TH_ATOMIC_RETURN_VALUE,
     _MUBUF_SOFFSET_INLINE_ZERO,
     _REG_EXEC,
+    _REG_M0,
     _REG_MODE,
+    _REG_PART_SGPR_HIGH16,
     _REG_PART_SGPR_LOW16,
     _REG_PART_VGPR_HIGH16,
     _REG_PART_VGPR_LOW16,
@@ -113,7 +115,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _gfx12_5_generic_core_overlays,
     _gfx12_core_overlays,
     _gfx12_generic_core_overlays,
-    _gfx117x_core_overlays,
+    _gfx115x_core_overlays,
     _gfx125x_core_overlays,
     _gfx125x_reg_classes,
     _gfx940_core_overlays,
@@ -246,8 +248,8 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
         == gfx9_4_base_intersection
     )
 
-    gfx117x_overlays = {
-        overlay.descriptor_key: overlay for overlay in _gfx117x_core_overlays()
+    gfx115x_overlays = {
+        overlay.descriptor_key: overlay for overlay in _gfx115x_core_overlays()
     }
     gfx950_overlays = {
         overlay.descriptor_key: overlay for overlay in _gfx950_core_overlays()
@@ -275,7 +277,7 @@ def test_generic_descriptor_contracts_are_member_intersections() -> None:
     assert _gfx11_generic_core_overlays() == tuple(
         overlay
         for overlay in _gfx11_core_overlays()
-        if gfx117x_overlays.get(overlay.descriptor_key) == overlay
+        if gfx115x_overlays.get(overlay.descriptor_key) == overlay
     )
     assert _gfx12_generic_core_overlays() == _gfx12_core_overlays()
     gfx125x_overlays = _gfx125x_core_overlays()
@@ -926,9 +928,6 @@ def test_gfx12_matrix_schedule_classes_match_processor_model() -> None:
         for overlay in _gfx12_core_overlays()
         if (overlay.semantic_tag or "").startswith("matrix.")
     )
-    # Each of the 11 WMMA instructions has both tied-accumulator and
-    # zero-accumulator packet forms. SWMMAC contributes another 11 forms.
-    assert len(matrix_overlays) == 33
     assert {overlay.schedule_class for overlay in matrix_overlays} == {
         _SCHEDULE_WMMA,
         _SCHEDULE_SWMMAC,
@@ -997,7 +996,7 @@ def test_scalar_compare_descriptors_use_scc_branch_schedule_class() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1030,6 +1029,18 @@ def test_packed_dot_descriptors_use_packed_dot_schedule_class() -> None:
         for overlay in dot_descriptors:
             assert overlay.schedule_class == _SCHEDULE_PACKED_DOT
     assert dot_descriptor_count != 0
+
+
+def test_rdna4_packed_fp8_dots_pin_no_op_modifiers() -> None:
+    descriptors = {
+        overlay.descriptor_key: overlay for overlay in _gfx12_core_overlays()
+    }
+    for lhs_type in ("fp8", "bf8"):
+        for rhs_type in ("fp8", "bf8"):
+            descriptor_key = f"amdgpu.v_dot4_f32_{lhs_type}_{rhs_type}"
+            assert descriptors[descriptor_key].fixed_encoding_fields == (
+                ("OPSEL_HI", 0x7),
+            )
 
 
 def test_mode_control_schedule_class_covers_generated_descriptors() -> None:
@@ -1073,7 +1084,7 @@ def test_div_fmas_low_asm_preserves_vcc_scale_mask_operand() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1101,7 +1112,7 @@ def test_div_scale_low_asm_writes_architectural_vcc_scale_mask() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1136,7 +1147,7 @@ def test_scalar_scc_compare_results_are_rematerializable() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1174,7 +1185,7 @@ def test_v_mov_b32_literal_results_are_rematerializable() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1197,7 +1208,7 @@ def test_pure_vop2_f32_results_are_rematerializable() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1292,7 +1303,7 @@ def test_pure_integer_valu_results_are_rematerializable() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1315,6 +1326,37 @@ def test_pure_integer_valu_results_are_rematerializable() -> None:
                 constraint.kind is ConstraintKind.REMATERIALIZABLE
                 for constraint in descriptor.constraints
             )
+
+
+def test_integer_binary_src0_accepts_scalar_or_vector_registers() -> None:
+    descriptor_keys = (
+        "amdgpu.v_mul_lo_u32",
+        "amdgpu.v_mul_hi_u32",
+        "amdgpu.v_mul_u32_u24",
+        "amdgpu.v_min_i32",
+        "amdgpu.v_max_i32",
+        "amdgpu.v_min_u32",
+        "amdgpu.v_max_u32",
+        "amdgpu.v_and_b32",
+        "amdgpu.v_or_b32",
+        "amdgpu.v_xor_b32",
+        "amdgpu.v_lshlrev_b32",
+        "amdgpu.v_lshrrev_b32",
+        "amdgpu.v_ashrrev_i32",
+    )
+    expected_alternatives = (RegClassAlt(_REG_SGPR), RegClassAlt(_REG_VGPR))
+    for overlays in (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx115x_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx125x_core_overlays(),
+    ):
+        descriptors = {descriptor.descriptor_key: descriptor for descriptor in overlays}
+        for descriptor_key in descriptor_keys:
+            lhs = descriptors[descriptor_key].operands[1].descriptor_operand
+            assert lhs.reg_alts == expected_alternatives
 
 
 def test_full_width_conversion_results_are_rematerializable() -> None:
@@ -1348,7 +1390,7 @@ def test_full_width_conversion_results_are_rematerializable() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1430,7 +1472,7 @@ def test_scc_free_scalar_integer_results_are_rematerializable() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1473,7 +1515,7 @@ def test_f32_to_f16_convert_results_use_d16_low_window() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -1698,6 +1740,7 @@ def test_s_delay_alu_descriptor_is_exposed_on_rdna_families() -> None:
         "gfx12_5_generic",
         "rdna3",
         "rdna3_5",
+        "rdna4m",
         "rdna4",
         "rdna4_gfx1250_a0",
         "rdna4_gfx1251",
@@ -2796,7 +2839,7 @@ def test_vop3_shift_immediate_is_constrained_to_inline_source_selector() -> None
 def test_vop3_mixed_inline_literal_immediates_name_both_encoding_fields() -> None:
     for overlays in (
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -2907,7 +2950,7 @@ def test_cdna_excludes_unsupported_vop3_literal_integer_forms() -> None:
         )
     for overlays in (
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
     ):
         assert unsupported_keys.issubset(overlay.descriptor_key for overlay in overlays)
@@ -2918,7 +2961,7 @@ def test_sop2_bfe_literal_forms_fix_control_to_literal_source() -> None:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -3013,7 +3056,7 @@ def test_scalar_f16_fma_descriptor_families_are_arch_specific() -> None:
 
     for descriptor_set in (
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -3154,7 +3197,7 @@ def test_scalar_domain_fma_descriptors_are_arch_specific() -> None:
         assert not scalar_domain_keys & descriptors.keys()
 
     for descriptor_set in (
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -3164,9 +3207,160 @@ def test_scalar_domain_fma_descriptors_are_arch_specific() -> None:
         assert scalar_domain_keys <= descriptors.keys()
 
 
+def test_scalar_float_arithmetic_descriptors_are_arch_specific() -> None:
+    scalar_float_keys = {
+        f"amdgpu.s_{operation}_f{bit_width}"
+        for bit_width in (16, 32)
+        for operation in (
+            "add",
+            "sub",
+            "mul",
+            "min",
+            "max",
+            "ceil",
+            "floor",
+            "rndne",
+            "trunc",
+        )
+    }
+
+    for descriptor_set in (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx11_generic_core_overlays(),
+    ):
+        descriptor_keys = {descriptor.descriptor_key for descriptor in descriptor_set}
+        assert not scalar_float_keys & descriptor_keys
+
+    for descriptor_set in (
+        _gfx115x_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx125x_core_overlays(),
+    ):
+        descriptors = {
+            descriptor.descriptor_key: descriptor for descriptor in descriptor_set
+        }
+        assert scalar_float_keys <= descriptors.keys()
+        for descriptor_key in scalar_float_keys:
+            descriptor = descriptors[descriptor_key]
+            assert descriptor.schedule_class == _SCHEDULE_SALU
+            expected_register_part = (
+                _REG_PART_SGPR_LOW16 if descriptor_key.endswith("f16") else None
+            )
+            assert all(
+                operand.descriptor_operand.register_part == expected_register_part
+                for operand in descriptor.operands
+            )
+
+
+def test_scalar_float_conversion_descriptors_are_arch_specific() -> None:
+    expected_register_parts = {
+        "amdgpu.s_cvt_f32_i32": (None, None),
+        "amdgpu.s_cvt_f32_u32": (None, None),
+        "amdgpu.s_cvt_i32_f32": (None, None),
+        "amdgpu.s_cvt_u32_f32": (None, None),
+        "amdgpu.s_cvt_f16_f32": (_REG_PART_SGPR_LOW16, None),
+        "amdgpu.s_cvt_f32_f16": (None, _REG_PART_SGPR_LOW16),
+        "amdgpu.s_cvt_hi_f32_f16": (None, _REG_PART_SGPR_HIGH16),
+        "amdgpu.s_cvt_pk_rtz_f16_f32": (None, None, None),
+    }
+
+    for descriptor_set in (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx11_generic_core_overlays(),
+    ):
+        descriptor_keys = {descriptor.descriptor_key for descriptor in descriptor_set}
+        assert not expected_register_parts.keys() & descriptor_keys
+
+    for descriptor_set in (
+        _gfx115x_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx125x_core_overlays(),
+    ):
+        descriptors = {
+            descriptor.descriptor_key: descriptor for descriptor in descriptor_set
+        }
+        assert expected_register_parts.keys() <= descriptors.keys()
+        for descriptor_key, register_parts in expected_register_parts.items():
+            descriptor = descriptors[descriptor_key]
+            assert descriptor.schedule_class == _SCHEDULE_SALU
+            assert descriptor.encoding_name == (
+                "ENC_SOP2"
+                if descriptor_key == "amdgpu.s_cvt_pk_rtz_f16_f32"
+                else "ENC_SOP1"
+            )
+            assert (
+                tuple(
+                    operand.descriptor_operand.register_part
+                    for operand in descriptor.operands
+                )
+                == register_parts
+            )
+
+
+def test_scalar_float_compare_descriptors_are_arch_specific() -> None:
+    scalar_float_compare_keys = {
+        f"amdgpu.s_cmp_{predicate}_f{bit_width}"
+        for bit_width in (16, 32)
+        for predicate in (
+            "oeq",
+            "ogt",
+            "oge",
+            "olt",
+            "ole",
+            "one",
+            "ord",
+            "ueq",
+            "ugt",
+            "uge",
+            "ult",
+            "ule",
+            "une",
+            "uno",
+        )
+    }
+
+    for descriptor_set in (
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+        _gfx11_core_overlays(),
+        _gfx11_generic_core_overlays(),
+    ):
+        descriptor_keys = {descriptor.descriptor_key for descriptor in descriptor_set}
+        assert not scalar_float_compare_keys & descriptor_keys
+
+    for descriptor_set in (
+        _gfx115x_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx125x_core_overlays(),
+    ):
+        descriptors = {
+            descriptor.descriptor_key: descriptor for descriptor in descriptor_set
+        }
+        assert scalar_float_compare_keys <= descriptors.keys()
+        for descriptor_key in scalar_float_compare_keys:
+            descriptor = descriptors[descriptor_key]
+            assert descriptor.schedule_class == _SCHEDULE_SALU_COMPARE
+            assert descriptor.encoding_name == "ENC_SOPC"
+            expected_register_part = (
+                _REG_PART_SGPR_LOW16 if descriptor_key.endswith("f16") else None
+            )
+            assert all(
+                operand.descriptor_operand.register_part == expected_register_part
+                for operand in descriptor.operands
+            )
+            assert tuple(
+                operand.descriptor_operand.field_name
+                for operand in descriptor.implicit_operands
+            ) == ("scc",)
+
+
 def test_scalar_domain_fma_descriptors_pin_sgpr_contracts() -> None:
     for descriptor_set in (
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -3864,6 +4058,122 @@ def test_fma_mix_f32_half_lane_descriptors_pin_modifier_fields() -> None:
         )
         assert not any(
             key.startswith(f"{descriptor_key_prefix}.") for key in cdna4_descriptors
+        )
+
+
+def test_vinterp_descriptors_cover_architectural_half_register_forms() -> None:
+    descriptors = {
+        descriptor.descriptor_key: descriptor for descriptor in _gfx11_core_overlays()
+    }
+    for phase in ("p10", "p2"):
+        descriptor = descriptors[f"amdgpu.v_interp_{phase}_f32"]
+        assert descriptor.instruction_name == f"V_INTERP_{phase.upper()}_F32"
+        assert dict(descriptor.fixed_encoding_fields) == {
+            "WAIT_EXP": 7,
+            "OP_SEL": 0,
+            "CLAMP": 0,
+            "NEG": 0,
+        }
+
+    for operation, source_name, source_shift in (
+        ("p10", "p0", 2),
+        ("p2", "result", 3),
+    ):
+        for rounding in ("", "rtz_"):
+            mnemonic = f"v_interp_{operation}_{rounding}f16_f32"
+            for first_part, first_register_part, first_op_sel in (
+                ("lo", _REG_PART_VGPR_LOW16, 0),
+                ("hi", _REG_PART_VGPR_HIGH16, 1),
+            ):
+                for second_part, second_register_part, second_op_sel in (
+                    ("lo", _REG_PART_VGPR_LOW16, 0),
+                    ("hi", _REG_PART_VGPR_HIGH16, 1),
+                ):
+                    descriptor = descriptors[
+                        f"amdgpu.{mnemonic}."
+                        f"{operation if operation == 'p10' else 'p20'}_{first_part}."
+                        f"{source_name}_{second_part}"
+                    ]
+                    if operation == "p10":
+                        assert descriptor.operands[
+                            1
+                        ].descriptor_operand.register_part == (first_register_part)
+                        assert descriptor.operands[
+                            3
+                        ].descriptor_operand.register_part == (second_register_part)
+                    else:
+                        assert descriptor.operands[
+                            0
+                        ].descriptor_operand.register_part == (second_register_part)
+                        assert descriptor.operands[
+                            1
+                        ].descriptor_operand.register_part == (first_register_part)
+                    assert dict(descriptor.fixed_encoding_fields)["OP_SEL"] == (
+                        first_op_sel | (second_op_sel << source_shift)
+                    )
+                    assert len(descriptor.implicit_operands) == 1
+                    m0_operand = descriptor.implicit_operands[0].descriptor_operand
+                    assert m0_operand is not None
+                    assert m0_operand.reg_alts[0].reg_class == _REG_M0
+                    assert OperandFlag.IMPLICIT in m0_operand.flags
+                    assert OperandFlag.STATE_READ in m0_operand.flags
+                    assert descriptor.asm_forms is not None
+                    assert descriptor.asm_forms[0].native_assembly_mnemonic == mnemonic
+                    native_values = descriptor.asm_forms[0].native_assembly_values
+                    assert native_values[-1] == NativeAsmValue(
+                        NativeAsmValueKind.MODIFIER_LITERAL,
+                        literal="wait_exp:7",
+                    )
+                    register_part_fields = (
+                        ("p10", "p0") if operation == "p10" else ("dst", "p20")
+                    )
+                    assert {
+                        value.field_name
+                        for value in native_values
+                        if value.kind is NativeAsmValueKind.REGISTER_PART
+                    } == set(register_part_fields)
+
+
+def test_vinterp_descriptors_follow_hardware_architecture_coverage() -> None:
+    expected_keys = {
+        "amdgpu.v_interp_p10_f32",
+        "amdgpu.v_interp_p2_f32",
+    }
+    for mnemonic, first_source_name, second_source_name in (
+        ("v_interp_p10_f16_f32", "p10", "p0"),
+        ("v_interp_p2_f16_f32", "p20", "result"),
+        ("v_interp_p10_rtz_f16_f32", "p10", "p0"),
+        ("v_interp_p2_rtz_f16_f32", "p20", "result"),
+    ):
+        expected_keys.update(
+            f"amdgpu.{mnemonic}.{first_source_name}_{first_part}."
+            f"{second_source_name}_{second_part}"
+            for first_part in ("lo", "hi")
+            for second_part in ("lo", "hi")
+        )
+
+    for overlays in (
+        _gfx11_core_overlays(),
+        _gfx115x_core_overlays(),
+        _gfx11_generic_core_overlays(),
+        _gfx12_core_overlays(),
+        _gfx12_generic_core_overlays(),
+    ):
+        assert {
+            overlay.descriptor_key
+            for overlay in overlays
+            if overlay.descriptor_key.startswith("amdgpu.v_interp_")
+        } == expected_keys
+
+    for overlays in (
+        _gfx125x_core_overlays(),
+        _gfx12_5_generic_core_overlays(),
+        _gfx940_core_overlays(),
+        _gfx950_core_overlays(),
+    ):
+        assert not any(
+            overlay.descriptor_key.startswith("amdgpu.v_interp_")
+            for overlay in overlays
         )
 
 

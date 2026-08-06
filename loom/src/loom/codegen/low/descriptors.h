@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 31u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 32u
 
 // Sentinel for absent string-table offsets.
 #define LOOM_LOW_STRING_OFFSET_NONE LOOM_BSTRING_TABLE_OFFSET_NONE
@@ -924,6 +924,10 @@ typedef enum loom_low_native_asm_value_kind_e {
   LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_UNSIGNED_HEX = 5,
   // Descriptor-local immediate printed by a target-owned native format.
   LOOM_LOW_NATIVE_ASM_VALUE_KIND_IMMEDIATE_TARGET_FORMAT = 6,
+  // Descriptor operand printed with its target register-part spelling.
+  LOOM_LOW_NATIVE_ASM_VALUE_KIND_REGISTER_PART = 7,
+  // Fixed native assembly modifier separated by whitespace.
+  LOOM_LOW_NATIVE_ASM_VALUE_KIND_MODIFIER_LITERAL = 8,
 } loom_low_native_asm_value_kind_t;
 
 typedef struct loom_low_native_asm_value_t {

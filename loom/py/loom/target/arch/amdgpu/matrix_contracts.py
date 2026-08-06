@@ -187,6 +187,234 @@ def _cdna4_mfma_f8f6f4_contracts(
     )
 
 
+_GFX12_WMMA_WAVE64_CONTRACT_ROWS = (
+    (
+        "wmma.f32.16x16x16.f16.gfx12",
+        (),
+        (16, 16, 16),
+        ("f16", 2, 4),
+        ("f16", 2, 4),
+        ("f32", 4, 4),
+        "rdna4_wmma_f32_16x16x16_f16_w64",
+    ),
+    (
+        "wmma.f32.16x16x16.bf16.gfx12",
+        (),
+        (16, 16, 16),
+        ("bf16", 2, 4),
+        ("bf16", 2, 4),
+        ("f32", 4, 4),
+        "rdna4_wmma_f32_16x16x16_bf16_w64",
+    ),
+    (
+        "wmma.f16.16x16x16.f16.gfx12",
+        (),
+        (16, 16, 16),
+        ("f16", 2, 4),
+        ("f16", 2, 4),
+        ("f16", 2, 4),
+        "rdna4_wmma_f16_16x16x16_f16_w64",
+    ),
+    (
+        "wmma.bf16.16x16x16.bf16.gfx12",
+        (),
+        (16, 16, 16),
+        ("bf16", 2, 4),
+        ("bf16", 2, 4),
+        ("bf16", 2, 4),
+        "rdna4_wmma_bf16_16x16x16_bf16_w64",
+    ),
+    (
+        "wmma.i32.16x16x16.iu8.gfx12",
+        ("sign_select", "clamp"),
+        (16, 16, 16),
+        ("iu8", 1, 4),
+        ("iu8", 1, 4),
+        ("i32", 4, 4),
+        "rdna4_wmma_i32_16x16x16_iu8_w64",
+    ),
+    (
+        "wmma.i32.16x16x16.iu4.gfx12",
+        ("sign_select", "clamp"),
+        (16, 16, 16),
+        ("iu4", 1, 8),
+        ("iu4", 1, 8),
+        ("i32", 4, 4),
+        "rdna4_wmma_i32_16x16x16_iu4_w64",
+    ),
+    *(
+        (
+            f"wmma.f32.16x16x16.{lhs_type}.{rhs_type}",
+            (),
+            (16, 16, 16),
+            (lhs_type, 1, 4),
+            (rhs_type, 1, 4),
+            ("f32", 4, 4),
+            "rdna4_wmma_f32_16x16x16_packed8_w64",
+        )
+        for lhs_type, rhs_type in (
+            ("fp8", "fp8"),
+            ("fp8", "bf8"),
+            ("bf8", "fp8"),
+            ("bf8", "bf8"),
+        )
+    ),
+    (
+        "wmma.i32.16x16x32.iu4",
+        ("sign_select", "clamp"),
+        (16, 16, 32),
+        ("iu4", 1, 8),
+        ("iu4", 1, 8),
+        ("i32", 4, 4),
+        "rdna4_wmma_i32_16x16x32_iu4_w64",
+    ),
+)
+
+
+def _gfx12_wmma_wave64_contracts() -> tuple[AmdgpuMatrixContract, ...]:
+    return tuple(
+        AmdgpuMatrixContract(
+            name=f"{name}.w64",
+            family="wmma",
+            features=("wmma_gfx12",),
+            flags=flags,
+            tile_shape=tile_shape,
+            lhs=payload(*lhs_payload),
+            rhs=payload(*rhs_payload),
+            accumulator=payload(*result_payload),
+            result=payload(*result_payload),
+            scale_kind="none",
+            wave_size="64",
+            intrinsic_name=f"llvm.amdgcn.{name.removesuffix('.gfx12')}",
+            semantic_tag=f"matrix.{name.removesuffix('.gfx12')}",
+            fragment_layout=fragment_layout,
+        )
+        for (
+            name,
+            flags,
+            tile_shape,
+            lhs_payload,
+            rhs_payload,
+            result_payload,
+            fragment_layout,
+        ) in _GFX12_WMMA_WAVE64_CONTRACT_ROWS
+    )
+
+
+_GFX12_SWMMAC_WAVE64_CONTRACT_ROWS = (
+    (
+        "swmmac.f32.16x16x32.f16",
+        ("sparse",),
+        (16, 16, 32),
+        ("f16", 2, 4),
+        ("f16", 4, 8),
+        ("f32", 4, 4),
+        "rdna4_swmmac_32bit_16x16x32_packed16_w64",
+    ),
+    (
+        "swmmac.f32.16x16x32.bf16",
+        ("sparse",),
+        (16, 16, 32),
+        ("bf16", 2, 4),
+        ("bf16", 4, 8),
+        ("f32", 4, 4),
+        "rdna4_swmmac_32bit_16x16x32_packed16_w64",
+    ),
+    (
+        "swmmac.f16.16x16x32.f16",
+        ("sparse",),
+        (16, 16, 32),
+        ("f16", 2, 4),
+        ("f16", 4, 8),
+        ("f16", 2, 4),
+        "rdna4_swmmac_16bit_16x16x32_packed16_w64",
+    ),
+    (
+        "swmmac.bf16.16x16x32.bf16",
+        ("sparse",),
+        (16, 16, 32),
+        ("bf16", 2, 4),
+        ("bf16", 4, 8),
+        ("bf16", 2, 4),
+        "rdna4_swmmac_16bit_16x16x32_packed16_w64",
+    ),
+    (
+        "swmmac.i32.16x16x32.iu8",
+        ("sparse", "sign_select", "clamp"),
+        (16, 16, 32),
+        ("iu8", 1, 4),
+        ("iu8", 2, 8),
+        ("i32", 4, 4),
+        "rdna4_swmmac_32bit_16x16x32_packed8_w64",
+    ),
+    (
+        "swmmac.i32.16x16x32.iu4",
+        ("sparse", "sign_select", "clamp"),
+        (16, 16, 32),
+        ("iu4", 1, 8),
+        ("iu4", 1, 8),
+        ("i32", 4, 4),
+        "rdna4_swmmac_32bit_16x16x32_packed4_w64",
+    ),
+    (
+        "swmmac.i32.16x16x64.iu4",
+        ("sparse", "sign_select", "clamp"),
+        (16, 16, 64),
+        ("iu4", 1, 8),
+        ("iu4", 2, 16),
+        ("i32", 4, 4),
+        "rdna4_swmmac_32bit_16x16x64_packed4_w64",
+    ),
+    *(
+        (
+            f"swmmac.f32.16x16x32.{lhs_type}.{rhs_type}",
+            ("sparse",),
+            (16, 16, 32),
+            (lhs_type, 1, 4),
+            (rhs_type, 2, 8),
+            ("f32", 4, 4),
+            "rdna4_swmmac_32bit_16x16x32_packed8_w64",
+        )
+        for lhs_type, rhs_type in (
+            ("fp8", "fp8"),
+            ("fp8", "bf8"),
+            ("bf8", "fp8"),
+            ("bf8", "bf8"),
+        )
+    ),
+)
+
+
+def _gfx12_swmmac_wave64_contracts() -> tuple[AmdgpuMatrixContract, ...]:
+    return tuple(
+        AmdgpuMatrixContract(
+            name=f"{name}.w64",
+            family="swmmac",
+            features=("swmmac_gfx12",),
+            flags=flags,
+            tile_shape=tile_shape,
+            lhs=payload(*lhs_payload),
+            rhs=payload(*rhs_payload),
+            accumulator=payload(*result_payload),
+            result=payload(*result_payload),
+            scale_kind="none",
+            wave_size="64",
+            intrinsic_name=f"llvm.amdgcn.{name}",
+            semantic_tag=f"matrix.{name}",
+            fragment_layout=fragment_layout,
+        )
+        for (
+            name,
+            flags,
+            tile_shape,
+            lhs_payload,
+            rhs_payload,
+            result_payload,
+            fragment_layout,
+        ) in _GFX12_SWMMAC_WAVE64_CONTRACT_ROWS
+    )
+
+
 _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
     AmdgpuMatrixContract(
         name="mfma.f32.16x16x1.f32",
@@ -1979,6 +2207,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        wave_size="32",
         fragment_layout="rdna4_wmma_f32_16x16x16_packed8",
     ),
     AmdgpuMatrixContract(
@@ -1992,6 +2221,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        wave_size="32",
         fragment_layout="rdna4_wmma_f32_16x16x16_packed8",
     ),
     AmdgpuMatrixContract(
@@ -2005,6 +2235,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        wave_size="32",
         fragment_layout="rdna4_wmma_f32_16x16x16_packed8",
     ),
     AmdgpuMatrixContract(
@@ -2018,6 +2249,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("f32", 8, 8),
         result=payload("f32", 8, 8),
         scale_kind="none",
+        wave_size="32",
         fragment_layout="rdna4_wmma_f32_16x16x16_packed8",
     ),
     AmdgpuMatrixContract(
@@ -2134,6 +2366,7 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         accumulator=payload("i32", 8, 8),
         result=payload("i32", 8, 8),
         scale_kind="none",
+        wave_size="32",
         fragment_layout="rdna4_wmma_i32_16x16x32_iu4",
     ),
     AmdgpuMatrixContract(
@@ -2149,6 +2382,8 @@ _AMDGPU_MATRIX_CONTRACT_ROWS: tuple[AmdgpuMatrixContract, ...] = (
         scale_kind="none",
         fragment_layout="rdna4_wmma_i32_16x16x64_iu8",
     ),
+    *_gfx12_wmma_wave64_contracts(),
+    *_gfx12_swmmac_wave64_contracts(),
 )
 
 
@@ -2173,17 +2408,20 @@ def _complete_sparse_fragment_layout(
     if "sparse" not in contract.flags:
         return contract
 
-    wave_size_by_family = {"smfmac": 64, "swmmac": 32}
-    wave_size = wave_size_by_family.get(contract.family)
-    if wave_size is None:
+    default_wave_size_by_family = {"smfmac": 64, "swmmac": 32}
+    default_wave_size = default_wave_size_by_family.get(contract.family)
+    if default_wave_size is None:
         raise ValueError(
             f"sparse AMDGPU matrix contract '{contract.name}' has "
             f"unsupported family '{contract.family}'"
         )
-    if contract.wave_size not in ("any", str(wave_size)):
+    wave_size = (
+        default_wave_size if contract.wave_size == "any" else int(contract.wave_size)
+    )
+    if wave_size not in (32, 64):
         raise ValueError(
             f"sparse AMDGPU matrix contract '{contract.name}' has wave size "
-            f"{contract.wave_size}, expected {wave_size}"
+            f"{contract.wave_size}"
         )
 
     contract_payloads = (
@@ -2196,6 +2434,7 @@ def _complete_sparse_fragment_layout(
         layout
         for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS
         if layout.wave_size == wave_size
+        and layout.family == contract.family
         and layout.tile_shape == (contract.block_count, *contract.tile_shape)
         and layout.lhs.reduction_group == MatrixFragmentReductionGroup(2, 4)
         and layout.rhs.reduction_group is None

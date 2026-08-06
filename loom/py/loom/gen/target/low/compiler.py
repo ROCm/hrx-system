@@ -607,7 +607,10 @@ def _compile_native_asm_value(
         if target_format_id != 0:
             raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native value {value_ordinal} unexpectedly specifies a target format")
 
-    if kind is NativeAsmValueKind.LITERAL:
+    if kind in (
+        NativeAsmValueKind.LITERAL,
+        NativeAsmValueKind.MODIFIER_LITERAL,
+    ):
         if field_name is not None:
             raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native literal value {value_ordinal} unexpectedly names field '{field_name}'")
         if literal is None or literal == "":
@@ -628,6 +631,26 @@ def _compile_native_asm_value(
                 literal,
             ),
             literal=literal,
+        )
+
+    if kind is NativeAsmValueKind.REGISTER_PART:
+        reject_literal_and_bit_width()
+        name = require_field_name()
+        operand_index = operand_indices.get(name)
+        if operand_index is None:
+            raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native register-part value references unknown operand field '{name}'")
+        operand = descriptor.operands[operand_index]
+        if operand.role is not OperandRole.RESULT and operand.role not in packet_operand_roles:
+            raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native register-part field '{name}' does not name a result or explicit packet operand")
+        if operand.register_part is None:
+            raise ValueError(f"descriptor '{descriptor.key}' asm form '{mnemonic}' native register-part field '{name}' names a full-register operand")
+        return CompiledNativeAsmValue(
+            kind=kind,
+            index=operand_index,
+            bit_width=0,
+            target_format_id=0,
+            literal_label=None,
+            literal=None,
         )
 
     if kind is NativeAsmValueKind.RESULT:

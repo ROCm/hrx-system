@@ -47,6 +47,8 @@ extern "C" {
 #define LOOM_AMDGPU_VOPD_OP_SUBREV_F32 UINT16_C(6)
 // Component opcode for v_mov_b32 in a VOPD X/Y slot.
 #define LOOM_AMDGPU_VOPD_OP_MOV_B32 UINT16_C(8)
+// Component opcode for v_cndmask_b32 in a VOPD X/Y slot.
+#define LOOM_AMDGPU_VOPD_OP_CNDMASK_B32 UINT16_C(9)
 // Component opcode for v_max_f32 in a VOPD X/Y slot.
 #define LOOM_AMDGPU_VOPD_OP_MAX_F32 UINT16_C(10)
 // Component opcode for v_min_f32 in a VOPD X/Y slot.
@@ -96,8 +98,7 @@ typedef enum loom_amdgpu_vopd_pair_reason_e {
   LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_ADD_F32 = 5,
   // Two independent v_sub_f32 packets were fused into v_dual_sub_f32.
   LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_SUB_F32 = 6,
-  // Two independent inline-source v_mov_b32 packets were fused into
-  // v_dual_mov_b32.
+  // Two independent v_mov_b32 packets were fused into v_dual_mov_b32.
   LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_MOV_B32 = 7,
   // Two independent v_max_f32 packets were fused into v_dual_max_f32.
   LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_MAX_F32 = 8,
@@ -113,6 +114,9 @@ typedef enum loom_amdgpu_vopd_pair_reason_e {
   // Two independent v_dot2_f32_bf16 packets were fused into
   // v_dual_dot2acc_f32_bf16.
   LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_DOT2_F32_BF16 = 13,
+  // Two independent v_cndmask_b32 packets were fused into
+  // v_dual_cndmask_b32.
+  LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_CNDMASK_B32 = 14,
 } loom_amdgpu_vopd_pair_reason_t;
 
 typedef enum loom_amdgpu_vopd_component_form_e {
@@ -126,29 +130,11 @@ typedef enum loom_amdgpu_vopd_component_form_e {
   LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR = 3,
   // Inline-source move component form.
   LOOM_AMDGPU_VOPD_COMPONENT_FORM_INLINE_MOV = 4,
+  // Register-source move component form.
+  LOOM_AMDGPU_VOPD_COMPONENT_FORM_REGISTER_MOV = 5,
+  // Two-source conditional select with an unencoded VCC predicate operand.
+  LOOM_AMDGPU_VOPD_COMPONENT_FORM_CNDMASK_VCC = 6,
 } loom_amdgpu_vopd_component_form_t;
-
-typedef enum loom_amdgpu_vopd_component_source_bits_e {
-  // Component has no register source operands.
-  LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_NONE = 0u,
-  // Component source 0 is a VGPR and participates in VOPD constraints.
-  LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_SRC0 = 1u << 0,
-  // Component source 1 is a VGPR and participates in VOPD constraints.
-  LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_VSRC1 = 1u << 1,
-  // Component has both VOPD source operands modeled as VGPRs.
-  LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY =
-      LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_SRC0 |
-      LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_VSRC1,
-} loom_amdgpu_vopd_component_source_bits_t;
-typedef uint8_t loom_amdgpu_vopd_component_source_mask_t;
-
-typedef enum loom_amdgpu_vopd_component_flag_bits_e {
-  // Component has no additional planning capabilities.
-  LOOM_AMDGPU_VOPD_COMPONENT_FLAG_NONE = 0u,
-  // SRC0 and VSRC1 may be exchanged without changing component semantics.
-  LOOM_AMDGPU_VOPD_COMPONENT_FLAG_COMMUTABLE_SOURCES = 1u << 0,
-} loom_amdgpu_vopd_component_flag_bits_t;
-typedef uint8_t loom_amdgpu_vopd_component_flags_t;
 
 typedef enum loom_amdgpu_vopd_component_lane_bits_e {
   // Component may not occupy either VOPD lane.
@@ -177,16 +163,6 @@ typedef enum loom_amdgpu_vopd_component_pair_bits_e {
 } loom_amdgpu_vopd_component_pair_bits_t;
 typedef uint8_t loom_amdgpu_vopd_component_pair_mask_t;
 
-// Operand layout for VOPD component forms whose sources are row-defined.
-typedef struct loom_amdgpu_vopd_component_operand_layout_t {
-  // Operand index of the accumulator tied to the result register.
-  uint8_t accumulator_index;
-  // Operand index of the source encoded in the VOPD SRC0 field.
-  uint8_t src0_index;
-  // Operand index of the source encoded in the VOPD VSRC1 field.
-  uint8_t vsrc1_index;
-} loom_amdgpu_vopd_component_operand_layout_t;
-
 // Descriptor-independent facts for one native VOPD component opcode.
 typedef struct loom_amdgpu_vopd_component_info_t {
   // VOPD operation id encoded in this component slot.
@@ -201,18 +177,10 @@ typedef struct loom_amdgpu_vopd_component_info_t {
   iree_string_view_t assembly_mnemonic;
   // Numeric-minimum/maximum mnemonic, or empty to use assembly_mnemonic.
   iree_string_view_t numeric_minmax_mnemonic;
-  // Operand/register form shared by planning, assembly, and encoding.
-  loom_amdgpu_vopd_component_form_t form;
-  // Operand indexes interpreted by forms with row-defined source layout.
-  loom_amdgpu_vopd_component_operand_layout_t operands;
   // VOPD lanes this component opcode may occupy.
   loom_amdgpu_vopd_component_lane_mask_t lane_mask;
   // Pairing modes this component opcode may participate in.
   loom_amdgpu_vopd_component_pair_mask_t pairing_mask;
-  // Source operand slots that contain real VGPRs.
-  loom_amdgpu_vopd_component_source_mask_t source_register_mask;
-  // Descriptor-derived component planning capabilities.
-  loom_amdgpu_vopd_component_flags_t flags;
 } loom_amdgpu_vopd_component_info_t;
 
 typedef enum loom_amdgpu_vopd_rejection_reason_e {
@@ -290,6 +258,8 @@ typedef struct loom_amdgpu_vopd_rejection_component_t {
 typedef struct loom_amdgpu_vopd_component_t {
   // VOPD operation id encoded in this component slot.
   uint16_t op;
+  // Operand/register form selected by the source descriptor rule.
+  loom_amdgpu_vopd_component_form_t form;
   // Destination VGPR encoded in this component slot.
   uint16_t vdst;
   // First explicit source VGPR, or zero when the component has no VGPR SRC0.

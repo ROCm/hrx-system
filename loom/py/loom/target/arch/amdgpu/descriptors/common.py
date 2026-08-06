@@ -40,20 +40,26 @@ from loom.target.arch.amdgpu.encoding import (
     AMDGPU_ENCODING_FORMAT_VGLOBAL,
     AMDGPU_ENCODING_FORMAT_VOP1,
     AMDGPU_ENCODING_FORMAT_VOP1_DPP,
+    AMDGPU_ENCODING_FORMAT_VOP1_DPP8,
     AMDGPU_ENCODING_FORMAT_VOP1_DPP16,
     AMDGPU_ENCODING_FORMAT_VOP1_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP1_SDWA,
     AMDGPU_ENCODING_FORMAT_VOP2,
     AMDGPU_ENCODING_FORMAT_VOP2_DPP,
+    AMDGPU_ENCODING_FORMAT_VOP2_DPP8,
     AMDGPU_ENCODING_FORMAT_VOP2_DPP16,
     AMDGPU_ENCODING_FORMAT_VOP2_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP3,
+    AMDGPU_ENCODING_FORMAT_VOP3_DPP8,
     AMDGPU_ENCODING_FORMAT_VOP3_DPP16,
     AMDGPU_ENCODING_FORMAT_VOP3_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP3_SDST,
+    AMDGPU_ENCODING_FORMAT_VOP3_SDST_DPP8,
     AMDGPU_ENCODING_FORMAT_VOP3P,
+    AMDGPU_ENCODING_FORMAT_VOP3P_DPP8,
     AMDGPU_ENCODING_FORMAT_VOP3P_LITERAL,
     AMDGPU_ENCODING_FORMAT_VOP3PX2,
+    AMDGPU_ENCODING_FORMAT_VOPC_DPP8,
     AMDGPU_ENCODING_FORMAT_VSCRATCH,
     amdgpu_encoding_field_id,
     amdgpu_encoding_field_name,
@@ -142,6 +148,7 @@ AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_FLAG = 7
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE = 8
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL = 9
 AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_REQUIRED_NAMED_I64 = 10
+AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP8 = 11
 
 _REG_SGPR = "amdgpu.sgpr"
 _REG_VGPR = "amdgpu.vgpr"
@@ -369,6 +376,22 @@ _AMDGPU_DESCRIPTOR_PUBLIC_HEADER_DIR = "loom/target/arch/amdgpu/descriptors"
 _AMDGPU_INLINE_F32_ENUM_DOMAIN_NAME = "amdgpu.source_inline_f32"
 _AMDGPU_INLINE_U32_16_ENUM_DOMAIN_NAME = "amdgpu.source_inline_u32_16"
 
+_AMDGPU_SOURCE_INLINE_F32_NAMED_VALUES = (
+    ("f32_0_0", 0.0),
+    ("f32_0_5", 0.5),
+    ("f32_n0_5", -0.5),
+    ("f32_1_0", 1.0),
+    ("f32_n1_0", -1.0),
+    ("f32_2_0", 2.0),
+    ("f32_n2_0", -2.0),
+    ("f32_4_0", 4.0),
+    ("f32_n4_0", -4.0),
+    ("f32_inv_2pi", 0.15915494),
+)
+AMDGPU_SOURCE_INLINE_F32_VALUES = tuple(
+    value for _, value in _AMDGPU_SOURCE_INLINE_F32_NAMED_VALUES
+)
+
 
 def _f32_bits(value: float) -> int:
     return int(struct.unpack("<I", struct.pack("<f", value))[0])
@@ -376,17 +399,9 @@ def _f32_bits(value: float) -> int:
 
 _AMDGPU_SOURCE_INLINE_F32_ENUM_DOMAIN = EnumDomain(
     _AMDGPU_INLINE_F32_ENUM_DOMAIN_NAME,
-    values=(
-        EnumValue("f32_0_0", _f32_bits(0.0)),
-        EnumValue("f32_0_5", _f32_bits(0.5)),
-        EnumValue("f32_n0_5", _f32_bits(-0.5)),
-        EnumValue("f32_1_0", _f32_bits(1.0)),
-        EnumValue("f32_n1_0", _f32_bits(-1.0)),
-        EnumValue("f32_2_0", _f32_bits(2.0)),
-        EnumValue("f32_n2_0", _f32_bits(-2.0)),
-        EnumValue("f32_4_0", _f32_bits(4.0)),
-        EnumValue("f32_n4_0", _f32_bits(-4.0)),
-        EnumValue("f32_inv_2pi", _f32_bits(0.15915494)),
+    values=tuple(
+        EnumValue(name, _f32_bits(value))
+        for name, value in _AMDGPU_SOURCE_INLINE_F32_NAMED_VALUES
     ),
 )
 _AMDGPU_SOURCE_INLINE_U32_16_ENUM_DOMAIN = EnumDomain(
@@ -1068,8 +1083,16 @@ def _native_operand(field_name: str) -> NativeAsmValue:
     return NativeAsmValue(NativeAsmValueKind.OPERAND, field_name=field_name)
 
 
+def _native_register_part(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(NativeAsmValueKind.REGISTER_PART, field_name=field_name)
+
+
 def _native_literal(spelling: str) -> NativeAsmValue:
     return NativeAsmValue(NativeAsmValueKind.LITERAL, literal=spelling)
+
+
+def _native_modifier_literal(spelling: str) -> NativeAsmValue:
+    return NativeAsmValue(NativeAsmValueKind.MODIFIER_LITERAL, literal=spelling)
 
 
 def _native_i64_immediate(field_name: str) -> NativeAsmValue:
@@ -1105,6 +1128,14 @@ def _native_amdgpu_dpp_ctrl_immediate(field_name: str) -> NativeAsmValue:
         NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
         field_name=field_name,
         target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL,
+    )
+
+
+def _native_amdgpu_dpp8_immediate(field_name: str) -> NativeAsmValue:
+    return NativeAsmValue(
+        NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT,
+        field_name=field_name,
+        target_format_id=AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP8,
     )
 
 
@@ -1633,6 +1664,33 @@ _U32_IMMEDIATE = _u32_immediate()
 _SOURCE_INLINE_U32_IMMEDIATE = _source_inline_u32_immediate()
 _SOURCE_INLINE_U32_16_IMMEDIATE = _source_inline_u32_16_immediate()
 _SOURCE_INLINE_F32_IMMEDIATE = _source_inline_f32_immediate()
+
+_DPP_CTRL_IMMEDIATE = Immediate(
+    "dpp_ctrl",
+    ImmediateKind.UNSIGNED,
+    bit_width=9,
+    unsigned_max=0x1FF,
+)
+
+_DPP8_IMMEDIATE = Immediate(
+    "dpp8",
+    ImmediateKind.UNSIGNED,
+    bit_width=24,
+    encoding_slices=tuple(
+        ImmediateEncodingSlice(
+            amdgpu_encoding_field_id(f"LANE_SEL_{lane}"), lane * 3, 3
+        )
+        for lane in range(8)
+    ),
+    unsigned_max=0xFFFFFF,
+)
+
+_DPP_BANK_MASK_IMMEDIATE = Immediate(
+    "bank_mask",
+    ImmediateKind.UNSIGNED,
+    bit_width=4,
+    unsigned_max=0xF,
+)
 
 _LITERAL_U32_IMMEDIATE = replace(
     _U32_IMMEDIATE, encoding_field_id=amdgpu_encoding_field_id("LITERAL")
@@ -2997,6 +3055,7 @@ def _implicit_m0_input(
 
 
 __all__ = (
+    "AMDGPU_SOURCE_INLINE_F32_VALUES",
     "_AmdgpuMatrixTiming",
     "AMDGPU_ATOMIC_DESCRIPTOR_CATEGORY",
     "AMDGPU_CACHE_DESCRIPTOR_CATEGORY",
@@ -3018,19 +3077,25 @@ __all__ = (
     "AMDGPU_ENCODING_FORMAT_VOP1",
     "AMDGPU_ENCODING_FORMAT_VOP1_DPP",
     "AMDGPU_ENCODING_FORMAT_VOP1_DPP16",
+    "AMDGPU_ENCODING_FORMAT_VOP1_DPP8",
     "AMDGPU_ENCODING_FORMAT_VOP1_LITERAL",
     "AMDGPU_ENCODING_FORMAT_VOP1_SDWA",
     "AMDGPU_ENCODING_FORMAT_VOP2",
     "AMDGPU_ENCODING_FORMAT_VOP2_DPP",
     "AMDGPU_ENCODING_FORMAT_VOP2_DPP16",
+    "AMDGPU_ENCODING_FORMAT_VOP2_DPP8",
     "AMDGPU_ENCODING_FORMAT_VOP2_LITERAL",
     "AMDGPU_ENCODING_FORMAT_VOP3",
     "AMDGPU_ENCODING_FORMAT_VOP3_DPP16",
+    "AMDGPU_ENCODING_FORMAT_VOP3_DPP8",
     "AMDGPU_ENCODING_FORMAT_VOP3_LITERAL",
+    "AMDGPU_ENCODING_FORMAT_VOP3_SDST",
+    "AMDGPU_ENCODING_FORMAT_VOP3_SDST_DPP8",
     "AMDGPU_ENCODING_FORMAT_VOP3P",
+    "AMDGPU_ENCODING_FORMAT_VOP3P_DPP8",
     "AMDGPU_ENCODING_FORMAT_VOP3P_LITERAL",
     "AMDGPU_ENCODING_FORMAT_VOP3PX2",
-    "AMDGPU_ENCODING_FORMAT_VOP3_SDST",
+    "AMDGPU_ENCODING_FORMAT_VOPC_DPP8",
     "AMDGPU_ENCODING_FORMAT_VSCRATCH",
     "AMDGPU_MATRIX_DESCRIPTOR_CATEGORY",
     "AMDGPU_MEMORY_DESCRIPTOR_CATEGORY",
@@ -3038,6 +3103,7 @@ __all__ = (
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DELAY_ALU",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_BANK_MASK",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP_CTRL",
+    "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_DPP8",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_LOAD_TEMPORAL",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_GFX12_SCOPE",
     "AMDGPU_NATIVE_ASM_IMMEDIATE_FORMAT_NAMED_BIT_LIST",
@@ -3163,6 +3229,9 @@ __all__ = (
     "_D16_PARTIAL_REGISTER_ADDRESSABLE_UNIT_COUNT",
     "_D16_PARTIAL_REGISTER_SIZE_REASON",
     "_DEPCTR_IMMEDIATE",
+    "_DPP_BANK_MASK_IMMEDIATE",
+    "_DPP_CTRL_IMMEDIATE",
+    "_DPP8_IMMEDIATE",
     "_DESTRUCTIVE_ACCUMULATOR_CONSTRAINTS",
     "_DESTRUCTIVE_BUFFER_ATOMIC_CONSTRAINTS",
     "_DSCNT_IMMEDIATE",
@@ -3424,6 +3493,7 @@ __all__ = (
     "_memory_asm_immediate_names",
     "_mubuf_vaddr_operand",
     "_native_amdgpu_dpp_ctrl_immediate",
+    "_native_amdgpu_dpp8_immediate",
     "_native_amdgpu_dpp_bank_mask_immediate",
     "_native_amdgpu_gfx12_load_temporal_immediate",
     "_native_amdgpu_gfx12_scope_immediate",
@@ -3435,7 +3505,9 @@ __all__ = (
     "_native_amdgpu_delay_alu_immediate",
     "_native_amdgpu_scale_sel_immediate",
     "_native_literal",
+    "_native_modifier_literal",
     "_native_operand",
+    "_native_register_part",
     "_native_result",
     "_native_unsigned_hex_immediate",
     "_named_offset_immediate",

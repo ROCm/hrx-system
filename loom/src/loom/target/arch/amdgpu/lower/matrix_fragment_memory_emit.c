@@ -784,7 +784,13 @@ void loom_amdgpu_mark_fragment_memory_plan_storage_demands(
     }
   }
 
-  if (plan->operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD) return;
+  if (plan->operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD) {
+    if (plan->fp8_load_scale_source != LOOM_VALUE_ID_INVALID) {
+      loom_low_lower_require_source_value_storage(context,
+                                                  plan->fp8_load_scale_source);
+    }
+    return;
+  }
   if (plan->operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE) {
     if (plan->narrowed_result_packed_source != LOOM_VALUE_ID_INVALID) {
       loom_low_lower_require_source_value_storage(

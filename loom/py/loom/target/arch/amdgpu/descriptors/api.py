@@ -28,6 +28,9 @@ from loom.target.arch.amdgpu.encoding import (
 )
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_ARITHMETIC,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_COMPARE,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_CONVERSION,
     AMDGPU_MATRIX_COEXECUTION_PROFILE_NONE,
     AMDGPU_MATRIX_COEXECUTION_RULES_BY_PROFILE,
     AMDGPU_MATRIX_COEXECUTION_SOURCE_INFOS,
@@ -266,8 +269,12 @@ def _validate_native_asm_values(descriptor_set: DescriptorSet) -> None:
             saw_named_modifier = False
             for value in form.native_assembly_values:
                 is_named_modifier = (
-                    value.kind is NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT
-                    and value.target_format_id in _NAMED_NATIVE_ASM_IMMEDIATE_FORMAT_IDS
+                    value.kind is NativeAsmValueKind.MODIFIER_LITERAL
+                    or (
+                        value.kind is NativeAsmValueKind.IMMEDIATE_TARGET_FORMAT
+                        and value.target_format_id
+                        in _NAMED_NATIVE_ASM_IMMEDIATE_FORMAT_IDS
+                    )
                 )
                 if not is_named_modifier:
                     if saw_named_modifier:
@@ -277,6 +284,8 @@ def _validate_native_asm_values(descriptor_set: DescriptorSet) -> None:
                         )
                     continue
                 saw_named_modifier = True
+                if value.kind is NativeAsmValueKind.MODIFIER_LITERAL:
+                    continue
                 immediate = immediate_by_name.get(value.field_name)
                 if immediate is None:
                     raise ValueError(
@@ -340,6 +349,83 @@ _NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS = frozenset(
     )
 )
 
+_NATIVE_SCALAR_FLOAT_ARITHMETIC_DESCRIPTOR_KEYS = frozenset(
+    f"amdgpu.s_{operation}_f{bit_width}"
+    for bit_width in (16, 32)
+    for operation in (
+        "add",
+        "sub",
+        "mul",
+        "min",
+        "max",
+        "ceil",
+        "floor",
+        "rndne",
+        "trunc",
+    )
+)
+
+_NATIVE_SCALAR_FLOAT_CONVERSION_DESCRIPTOR_KEYS = frozenset(
+    f"amdgpu.s_cvt_{operation}"
+    for operation in (
+        "f16_f32",
+        "f32_f16",
+        "f32_i32",
+        "f32_u32",
+        "hi_f32_f16",
+        "i32_f32",
+        "pk_rtz_f16_f32",
+        "u32_f32",
+    )
+)
+
+_NATIVE_SCALAR_FLOAT_COMPARE_DESCRIPTOR_KEYS = frozenset(
+    f"amdgpu.s_cmp_{predicate}_f{bit_width}"
+    for bit_width in (16, 32)
+    for predicate in (
+        "oeq",
+        "ogt",
+        "oge",
+        "olt",
+        "ole",
+        "one",
+        "ord",
+        "ueq",
+        "ugt",
+        "uge",
+        "ult",
+        "ule",
+        "une",
+        "uno",
+    )
+)
+
+
+def _validate_descriptor_family_capability(
+    *,
+    generator_target: str,
+    descriptor_keys: frozenset[str],
+    family_descriptor_keys: frozenset[str],
+    capability_name: str,
+    declares_capability: bool,
+) -> None:
+    present_keys = descriptor_keys & family_descriptor_keys
+    if present_keys and present_keys != family_descriptor_keys:
+        missing_keys = sorted(family_descriptor_keys - present_keys)
+        raise ValueError(
+            f"AMDGPU descriptor target '{generator_target}' has an incomplete "
+            f"{capability_name} family; missing: {', '.join(missing_keys)}"
+        )
+    has_capability = present_keys == family_descriptor_keys
+    if declares_capability != has_capability:
+        declared_state = "declares" if declares_capability else "omits"
+        actual_state = "provides" if has_capability else "omits"
+        raise ValueError(
+            f"AMDGPU descriptor target '{generator_target}' {declared_state} "
+            f"{capability_name} capability but its descriptor set "
+            f"{actual_state} the instruction family"
+        )
+
 
 def _validate_descriptor_set_info_capabilities(
     generator_target: str, descriptor_set: DescriptorSet
@@ -348,32 +434,42 @@ def _validate_descriptor_set_info_capabilities(
     descriptor_keys = frozenset(
         descriptor.key for descriptor in descriptor_set.descriptors
     )
-    present_keys = descriptor_keys & _NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS
-    declares_native_packed_bf16_arithmetic = bool(
-        info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC
+    _validate_descriptor_family_capability(
+        generator_target=generator_target,
+        descriptor_keys=descriptor_keys,
+        family_descriptor_keys=_NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS,
+        capability_name="native packed BF16 arithmetic",
+        declares_capability=bool(
+            info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_PACKED_BF16_ARITHMETIC
+        ),
     )
-    if present_keys and present_keys != _NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS:
-        missing_keys = sorted(
-            _NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS - present_keys
-        )
-        raise ValueError(
-            f"AMDGPU descriptor target '{generator_target}' has an incomplete "
-            "native packed BF16 arithmetic family; missing: "
-            f"{', '.join(missing_keys)}"
-        )
-    has_native_packed_bf16_arithmetic = (
-        present_keys == _NATIVE_PACKED_BF16_ARITHMETIC_DESCRIPTOR_KEYS
+    _validate_descriptor_family_capability(
+        generator_target=generator_target,
+        descriptor_keys=descriptor_keys,
+        family_descriptor_keys=_NATIVE_SCALAR_FLOAT_COMPARE_DESCRIPTOR_KEYS,
+        capability_name="native scalar floating-point comparison",
+        declares_capability=bool(
+            info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_COMPARE
+        ),
     )
-    if declares_native_packed_bf16_arithmetic != has_native_packed_bf16_arithmetic:
-        declared_state = (
-            "declares" if declares_native_packed_bf16_arithmetic else "omits"
-        )
-        actual_state = "provides" if has_native_packed_bf16_arithmetic else "omits"
-        raise ValueError(
-            f"AMDGPU descriptor target '{generator_target}' {declared_state} "
-            "native packed BF16 arithmetic capability but its descriptor set "
-            f"{actual_state} the instruction family"
-        )
+    _validate_descriptor_family_capability(
+        generator_target=generator_target,
+        descriptor_keys=descriptor_keys,
+        family_descriptor_keys=_NATIVE_SCALAR_FLOAT_CONVERSION_DESCRIPTOR_KEYS,
+        capability_name="native scalar floating-point conversion",
+        declares_capability=bool(
+            info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_CONVERSION
+        ),
+    )
+    _validate_descriptor_family_capability(
+        generator_target=generator_target,
+        descriptor_keys=descriptor_keys,
+        family_descriptor_keys=_NATIVE_SCALAR_FLOAT_ARITHMETIC_DESCRIPTOR_KEYS,
+        capability_name="native scalar floating-point arithmetic",
+        declares_capability=bool(
+            info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_ARITHMETIC
+        ),
+    )
 
 
 def _validate_matrix_coexecution_profile_coverage(
@@ -1374,8 +1470,14 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
     ),
     "rdna3_5": _AmdgpuCoreDescriptorSetBuilder(
         base=_AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE,
-        overlay_rows=_gfx117x_core_overlays,
-        overlay_descriptors=_gfx117x_core_overlay_descriptors,
+        overlay_rows=_gfx115x_core_overlays,
+        overlay_descriptors=_gfx115x_core_overlay_descriptors,
+        extra_descriptors=(_s_delay_alu_descriptor(),),
+    ),
+    "rdna4m": _AmdgpuCoreDescriptorSetBuilder(
+        base=_AMDGPU_RDNA4M_CORE_DESCRIPTOR_SET_BASE,
+        overlay_rows=_rdna4m_core_overlays,
+        overlay_descriptors=_rdna4m_core_overlay_descriptors,
         extra_descriptors=(_s_delay_alu_descriptor(),),
     ),
     "rdna4": _AmdgpuCoreDescriptorSetBuilder(

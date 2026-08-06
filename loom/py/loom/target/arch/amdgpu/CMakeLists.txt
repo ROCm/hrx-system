@@ -192,7 +192,10 @@ iree_py_library(
     "descriptors/matrix_schedule.py"
     "descriptors/memory.py"
     "descriptors/rdna3.py"
+    "descriptors/rdna35.py"
     "descriptors/rdna4.py"
+    "descriptors/rdna4m.py"
+    "descriptors/scalar_float.py"
     "descriptors/sets.py"
     "descriptors/tensor.py"
     "descriptors/workgroup.py"
@@ -235,7 +238,9 @@ iree_py_test(
     "../../../tools/pytest_style_runner.py"
   SRCS
     "descriptor_overlay_test.py"
+    "descriptors/rdna35_test.py"
     "descriptors/rdna4_test.py"
+    "descriptors/rdna4m_test.py"
     "descriptors_test.py"
     "isa_xml_test.py"
     "low_aliases_test.py"
@@ -243,6 +248,8 @@ iree_py_test(
   ARGS
     "loom.target.arch.amdgpu.descriptor_overlay_test"
     "loom.target.arch.amdgpu.descriptors.rdna4_test"
+    "loom.target.arch.amdgpu.descriptors.rdna35_test"
+    "loom.target.arch.amdgpu.descriptors.rdna4m_test"
     "loom.target.arch.amdgpu.descriptors_test"
     "loom.target.arch.amdgpu.low_aliases_test"
   DEPS

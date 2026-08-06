@@ -43,6 +43,8 @@ _DESCRIPTOR_SET_RDNA3 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdn
 
 _DESCRIPTOR_SET_RDNA3_5 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna3_5.core"]
 
+_DESCRIPTOR_SET_RDNA4M = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4m.core"]
+
 _DESCRIPTOR_SET_RDNA4 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4.core"]
 
 _DESCRIPTOR_SET_RDNA4_GFX1250_A0 = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna4.gfx1250_a0.core"]
@@ -84,6 +86,10 @@ _AMDGPU_TARGET_REF_ARGS = {
     ],
     _DESCRIPTOR_SET_RDNA3_5: [
         "--descriptor-set=amdgpu.rdna3_5.core",
+        "--isa-xml=rdna3_5:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
+    ],
+    _DESCRIPTOR_SET_RDNA4M: [
+        "--descriptor-set=amdgpu.rdna4m.core",
         "--isa-xml=rdna3_5:$(rootpath @amdgpu_isa_xml//:amdgpu_isa_rdna3_5.xml)",
     ],
     _DESCRIPTOR_SET_RDNA4: [

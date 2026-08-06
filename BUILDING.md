@@ -289,8 +289,9 @@ processor Loom currently supports:
 | `amdgpu.cdna4.core` | `gfx950` |
 | `amdgpu.gfx9_4.generic.core` | `gfx9-4-generic` |
 | `amdgpu.rdna3.core` | `gfx1100`, `gfx1101`, `gfx1102`, `gfx1103` |
-| `amdgpu.rdna3_5.core` | `gfx1150`, `gfx1151`, `gfx1152`, `gfx1153`, `gfx1170`, `gfx1171`, `gfx1172` |
+| `amdgpu.rdna3_5.core` | `gfx1150`, `gfx1151`, `gfx1152`, `gfx1153` |
 | `amdgpu.gfx11.generic.core` | `gfx11-generic` |
+| `amdgpu.rdna4m.core` | `gfx1170`, `gfx1171`, `gfx1172` |
 | `amdgpu.rdna4.core` | `gfx1200`, `gfx1201` |
 | `amdgpu.gfx12.generic.core` | `gfx12-generic` |
 | `amdgpu.rdna4.gfx125x.core` | `gfx1250`, `gfx1251` |
@@ -303,7 +304,8 @@ match, but it never selects that exact contract as an implementation alias.
 `gfx11-generic` is the common GFX11 surface validated against both the RDNA 3
 and RDNA 3.5 ISA descriptions, and its code objects cover `gfx1100`-`gfx1103`
 and `gfx1150`-`gfx1153`. The `gfx1170`-`gfx1172` targets remain exact-only
-because they are outside LLVM's `gfx11-generic` compatibility set.
+because the pinned device toolchain does not yet expose LLVM's distinct
+`gfx11-7-generic` code-object target.
 `gfx9-4-generic` is the common CDNA 3/CDNA 4 surface for `gfx940`, `gfx941`,
 `gfx942`, and `gfx950`; its instruction, matrix, resource, scheduling, ABI,
 limit, and occupancy facts are portable member intersections.

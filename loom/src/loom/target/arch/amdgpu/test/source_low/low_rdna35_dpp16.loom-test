@@ -1,0 +1,49 @@
+// RUN: emit amdgpu-assembly @gfx1151_dpp16_uniform_rhs waits=none
+
+amdgpu.target<gfx1151> @target
+low.func.def target<amdgpu.rdna3_5.core>(@target) @gfx1151_dpp16_uniform_rhs(%crosslane: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.sgpr>) asm {
+  %add_sgpr = v_add_f32_dpp16_sgpr %crosslane, %rhs {dpp_ctrl = 177}
+  %add_inline = v_add_f32_dpp16_src1_inline %add_sgpr {rhs = 1065353216, dpp_ctrl = 177}
+  %sub_sgpr = v_sub_f32_dpp16_sgpr %add_inline, %rhs {dpp_ctrl = 78}
+  %sub_inline = v_sub_f32_dpp16_src1_inline %sub_sgpr {rhs = 1073741824, dpp_ctrl = 78}
+  %mul_sgpr = v_mul_f32_dpp16_sgpr %sub_inline, %rhs {dpp_ctrl = 177}
+  %mul_inline = v_mul_f32_dpp16_src1_inline %mul_sgpr {rhs = 1056964608, dpp_ctrl = 177}
+  %min_sgpr = v_min_f32_dpp16_sgpr %mul_inline, %rhs {dpp_ctrl = 78}
+  %min_inline = v_min_f32_dpp16_src1_inline %min_sgpr {rhs = 3212836864, dpp_ctrl = 78}
+  %max_sgpr = v_max_f32_dpp16_sgpr %min_inline, %rhs {dpp_ctrl = 177}
+  %max_inline = v_max_f32_dpp16_src1_inline %max_sgpr {rhs = 1082130432, dpp_ctrl = 177}
+  return
+}
+
+// ----
+  v_add_f32_e64_dpp v0, v0, s0, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_add_f32_e64_dpp v0, v0, 1065353216, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_sub_f32_e64_dpp v0, v0, s0, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_sub_f32_e64_dpp v0, v0, 1073741824, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_mul_f32_e64_dpp v0, v0, s0, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_mul_f32_e64_dpp v0, v0, 1056964608, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_min_f32_e64_dpp v0, v0, s0, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_min_f32_e64_dpp v0, v0, 3212836864, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_max_f32_e64_dpp v0, v0, s0, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_max_f32_e64_dpp v0, v0, 1082130432, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx1170_dpp16_uniform_rhs waits=none
+
+amdgpu.target<gfx1170> @target
+low.func.def target<amdgpu.rdna4m.core>(@target) @gfx1170_dpp16_uniform_rhs(%crosslane: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.sgpr>) asm {
+  %min_sgpr = v_min_f32_dpp16_sgpr %crosslane, %rhs {dpp_ctrl = 177}
+  %min_inline = v_min_f32_dpp16_src1_inline %min_sgpr {rhs = 3212836864, dpp_ctrl = 177}
+  %max_sgpr = v_max_f32_dpp16_sgpr %min_inline, %rhs {dpp_ctrl = 78}
+  %max_inline = v_max_f32_dpp16_src1_inline %max_sgpr {rhs = 1082130432, dpp_ctrl = 78}
+  return
+}
+
+// ----
+  v_min_num_f32_e64_dpp v0, v0, s0, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_min_num_f32_e64_dpp v0, v0, 3212836864, quad_perm:[1,0,3,2], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_max_num_f32_e64_dpp v0, v0, s0, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  v_max_num_f32_e64_dpp v0, v0, 1082130432, quad_perm:[2,3,0,1], row_mask:0xf, bank_mask:0xf, bound_ctrl:1
+  s_endpgm

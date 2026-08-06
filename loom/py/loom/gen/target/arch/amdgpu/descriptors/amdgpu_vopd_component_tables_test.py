@@ -28,6 +28,7 @@ def test_vopd_descriptor_set_groups_follow_target_info() -> None:
         "amdgpu.rdna4.gfx1250_a0.core",
         "amdgpu.rdna4.gfx1251.core",
         "amdgpu.rdna4.gfx125x.core",
+        "amdgpu.rdna4m.core",
     )
     assert amdgpu_vopd_component_tables._descriptor_set_keys_for_group(
         amdgpu_vopd_component_tables._DESCRIPTOR_SET_GROUP_GFX11_GFX12,
@@ -38,6 +39,7 @@ def test_vopd_descriptor_set_groups_follow_target_info() -> None:
         "amdgpu.rdna3.core",
         "amdgpu.rdna3_5.core",
         "amdgpu.rdna4.core",
+        "amdgpu.rdna4m.core",
     )
     assert amdgpu_vopd_component_tables._descriptor_set_keys_for_group(
         amdgpu_vopd_component_tables._DESCRIPTOR_SET_GROUP_RDNA4_GFX125X,
@@ -56,10 +58,14 @@ def test_vopd_component_rows_have_unique_descriptor_keys() -> None:
     assert len(descriptor_keys) == len(set(descriptor_keys))
 
 
-def test_vopd_component_rows_have_unique_opcodes() -> None:
+def test_vopd_component_source_forms_share_canonical_native_info() -> None:
     components = amdgpu_vopd_component_tables._component_definitions()
-    op_values = [component.op_value for component in components]
-    assert len(op_values) == len(set(op_values))
+    move_components = tuple(component for component in components if component.op_value == 8)
+    assert tuple(component.descriptor_key for component in move_components) == (
+        "amdgpu.v_mov_b32",
+        "amdgpu.v_mov_b32_copy",
+    )
+    assert len({amdgpu_vopd_component_tables._component_info_key(component) for component in move_components}) == 1
 
 
 def test_vopd_component_fragment_is_data_only() -> None:
@@ -111,6 +117,7 @@ def test_vopd_component_fragment_is_data_only() -> None:
     )
     fragment = "\n".join(fragments)
 
+    assert "LOOM_AMDGPU_VOPD_COMPONENT_INFO_RULE(" in fragment
     assert "LOOM_AMDGPU_VOPD_COMPONENT_RULE(" in fragment
     assert "LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(" in fragment
     assert "LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP_RANGE(" in fragment
@@ -198,8 +205,8 @@ def test_vopd_pair_placement_guides_one_commutable_orientation() -> None:
     recipe = amdgpu_vopd_component_tables._pair_placement_recipe(
         component,
         component,
-        amdgpu_vopd_component_tables._COMPONENT_FLAG_COMMUTABLE_SOURCES,
-        amdgpu_vopd_component_tables._COMPONENT_FLAG_COMMUTABLE_SOURCES,
+        frozenset({amdgpu_vopd_component_tables._COMPONENT_FLAG_COMMUTABLE_SOURCES}),
+        frozenset({amdgpu_vopd_component_tables._COMPONENT_FLAG_COMMUTABLE_SOURCES}),
     )
 
     assert len(recipe.alternatives) == 2
@@ -226,6 +233,25 @@ def test_vopd_pair_placement_guides_one_commutable_orientation() -> None:
             1,
         ),
     )
+
+
+def test_vopd_polymorphic_move_is_not_a_descriptor_affinity() -> None:
+    component = next(component for component in amdgpu_vopd_component_tables._component_definitions() if component.descriptor_key == "amdgpu.v_mov_b32_copy")
+    rule = amdgpu_vopd_component_tables._VopdComponentRule(
+        component=component,
+        descriptor_set_keys=("amdgpu.rdna3.core",),
+    )
+    placement_recipes: list[amdgpu_vopd_component_tables._VopdPairPlacementRecipe] = []
+
+    rows = amdgpu_vopd_component_tables._pair_affinity_rows_for_set(
+        (rule,),
+        (1,),
+        placement_recipes,
+        {},
+    )
+
+    assert rows == ()
+    assert placement_recipes == []
 
 
 def test_vopd_pair_placement_rejects_component_value_out_of_bounds() -> None:

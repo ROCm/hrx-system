@@ -242,6 +242,19 @@ def test_generation_resolves_gfx12_wmma_abi_shape_variants() -> None:
     assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X16_IU4" in iu4
 
 
+def test_generation_resolves_gfx12_wave64_matrix_abi_shape_variants() -> None:
+    fp8_bf8 = _contract_initializer(_contract("wmma.f32.16x16x16.fp8.bf8.w64"))
+    iu4 = _contract_initializer(_contract("wmma.i32.16x16x16.iu4.gfx12.w64"))
+    swmmac = _contract_initializer(_contract("swmmac.f32.16x16x32.f16.w64"))
+
+    assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_F32_16X16X16_FP8_BF8_W64" in fp8_bf8
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_F32_16X16X16_PACKED8_W64" in fp8_bf8
+    assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_WMMA_I32_16X16X16_IU4_W64" in iu4
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_WMMA_I32_16X16X16_IU4_W64" in iu4
+    assert ".low_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_V_SWMMAC_F32_16X16X32_F16_W64" in swmmac
+    assert ".fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_RDNA4_SWMMAC_32BIT_16X16X32_PACKED16_W64" in swmmac
+
+
 def test_generation_resolves_gfx1250_wmma_f32_fragment_layouts() -> None:
     f32 = _contract_initializer(_contract("wmma.f32.16x16x4.f32"))
     f16 = _contract_initializer(_contract("wmma.f32.16x16x32.f16"))

@@ -38,6 +38,7 @@ from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
 )
 from loom.target.arch.amdgpu.names import amdgpu_c_identifier_fragment  # noqa: E402
 from loom.target.arch.amdgpu.target_info import (  # noqa: E402
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_DUAL_MOV_SRC2_CACHE,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_PACKETIZATION,
     AmdgpuDescriptorSetInfo,
     amdgpu_descriptor_set_ordinal,
@@ -53,13 +54,17 @@ _DESCRIPTOR_SET_GROUP_GFX11_GFX12 = "gfx11_gfx12"
 _DESCRIPTOR_SET_GROUP_RDNA4_GFX125X = "rdna4_gfx125x"
 
 _FORM_BINARY_VGPR = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_BINARY_VGPR"
+_FORM_CNDMASK_VCC = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_CNDMASK_VCC"
 _FORM_FMAAK_LITERAL = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_FMAAK_LITERAL"
 _FORM_FMAMK_LITERAL = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_FMAMK_LITERAL"
 _FORM_INLINE_MOV = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_INLINE_MOV"
+_FORM_REGISTER_MOV = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_REGISTER_MOV"
 _FORM_TIED_ACCUMULATE = "LOOM_AMDGPU_VOPD_COMPONENT_FORM_TIED_ACCUMULATE"
 
 _COMPONENT_FLAG_NONE = "LOOM_AMDGPU_VOPD_COMPONENT_FLAG_NONE"
 _COMPONENT_FLAG_COMMUTABLE_SOURCES = "LOOM_AMDGPU_VOPD_COMPONENT_FLAG_COMMUTABLE_SOURCES"
+_COMPONENT_FLAG_DUAL_MOV_SRC2_CACHE = "LOOM_AMDGPU_VOPD_COMPONENT_FLAG_DUAL_MOV_SRC2_CACHE"
+_COMPONENT_FLAGS_NONE: frozenset[str] = frozenset()
 
 _LANE_XY = "LOOM_AMDGPU_VOPD_COMPONENT_LANE_XY"
 _LANE_X = "LOOM_AMDGPU_VOPD_COMPONENT_LANE_X"
@@ -97,6 +102,7 @@ class _VopdComponentDefinition:
     lane_mask: str
     pairing_mask: str
     source_register_mask: str
+    descriptor_affinity_eligible: bool = True
     same_op_reason: str = "LOOM_AMDGPU_VOPD_PAIR_REASON_UNKNOWN"
     same_op_reason_name: str = ""
     numeric_minmax_mnemonic: str = ""
@@ -109,7 +115,7 @@ class _VopdComponentDefinition:
 class _VopdComponentRule:
     component: _VopdComponentDefinition
     descriptor_set_keys: tuple[str, ...]
-    flags: str = _COMPONENT_FLAG_NONE
+    flags: frozenset[str] = _COMPONENT_FLAGS_NONE
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,7 +214,7 @@ def _descriptor_set_keys_for_group(group: str, descriptor_set_infos: Sequence[Am
     if group == _DESCRIPTOR_SET_GROUP_RDNA_VOPD:
         return tuple(info.key for info in descriptor_set_infos if _descriptor_set_supports_vopd(info))
     if group == _DESCRIPTOR_SET_GROUP_GFX11_GFX12:
-        return select({"rdna3", "rdna3_5", "rdna4"})
+        return select({"rdna3", "rdna3_5", "rdna4m", "rdna4"})
     if group == _DESCRIPTOR_SET_GROUP_RDNA4_GFX125X:
         return select(
             {
@@ -320,6 +326,7 @@ def _component(
     lane_mask: str = _LANE_XY,
     pairing_mask: str = _PAIR_ANY,
     source_register_mask: str = _SOURCE_BINARY,
+    descriptor_affinity_eligible: bool = True,
     operand_layout: tuple[int, int, int] = (0, 0, 0),
     xml_instruction_name: str | None | object = _XML_INSTRUCTION_DERIVED,
     xml_instruction_names_by_isa_key: tuple[tuple[str, str], ...] = (),
@@ -349,6 +356,7 @@ def _component(
         lane_mask=lane_mask,
         pairing_mask=pairing_mask,
         source_register_mask=source_register_mask,
+        descriptor_affinity_eligible=descriptor_affinity_eligible,
         same_op_reason=same_op_reason,
         same_op_reason_name=same_op_reason_name,
         operand_layout=operand_layout,
@@ -367,6 +375,20 @@ def _component_definitions() -> tuple[_VopdComponentDefinition, ...]:
         _component("sub_f32", 5),
         _component("subrev_f32", 6),
         _component("mov_b32", 8, form=_FORM_INLINE_MOV, source_register_mask=_SOURCE_NONE),
+        _component(
+            "mov_b32",
+            8,
+            descriptor_key="amdgpu.v_mov_b32_copy",
+            form=_FORM_REGISTER_MOV,
+            source_register_mask=_SOURCE_SRC0,
+            descriptor_affinity_eligible=False,
+        ),
+        _component(
+            "cndmask_b32",
+            9,
+            descriptor_key="amdgpu.v_cndmask_b32.vcc",
+            form=_FORM_CNDMASK_VCC,
+        ),
         _component(
             "max_f32",
             10,
@@ -536,29 +558,90 @@ def _descriptor_commutes_packet_operands(
     )
 
 
-def _component_flags_for_descriptors(
+def _component_flags_for_descriptor_set(
     component: _VopdComponentDefinition,
-    descriptor_set_keys: Sequence[str],
+    descriptor_set_key: str,
+    descriptor_set_info: AmdgpuDescriptorSetInfo,
     descriptors_by_set_key: Mapping[str, Mapping[str, Descriptor]],
-) -> str:
-    if component.source_register_mask != _SOURCE_BINARY:
-        return _COMPONENT_FLAG_NONE
-    src0_index = _component_source_operand_index(component, _SOURCE_SRC0)
-    vsrc1_index = _component_source_operand_index(component, _SOURCE_VSRC1)
-    commutable_by_set = {
-        descriptor_set_key: _descriptor_commutes_packet_operands(
+) -> frozenset[str]:
+    flags: set[str] = set()
+    if component.source_register_mask == _SOURCE_BINARY:
+        src0_index = _component_source_operand_index(component, _SOURCE_SRC0)
+        vsrc1_index = _component_source_operand_index(component, _SOURCE_VSRC1)
+        if _descriptor_commutes_packet_operands(
             descriptors_by_set_key[descriptor_set_key][component.descriptor_key],
             src0_index,
             vsrc1_index,
+        ):
+            flags.add(_COMPONENT_FLAG_COMMUTABLE_SOURCES)
+    if component.form == _FORM_REGISTER_MOV and descriptor_set_info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_DUAL_MOV_SRC2_CACHE:
+        flags.add(_COMPONENT_FLAG_DUAL_MOV_SRC2_CACHE)
+    return frozenset(flags)
+
+
+def _component_rules(
+    component: _VopdComponentDefinition,
+    descriptor_set_keys: Sequence[str],
+    descriptor_set_infos_by_key: Mapping[str, AmdgpuDescriptorSetInfo],
+    descriptors_by_set_key: Mapping[str, Mapping[str, Descriptor]],
+) -> tuple[_VopdComponentRule, ...]:
+    descriptor_set_keys_by_flags: dict[frozenset[str], list[str]] = {}
+    for descriptor_set_key in descriptor_set_keys:
+        flags = _component_flags_for_descriptor_set(
+            component,
+            descriptor_set_key,
+            descriptor_set_infos_by_key[descriptor_set_key],
+            descriptors_by_set_key,
         )
-        for descriptor_set_key in descriptor_set_keys
-    }
-    if len(set(commutable_by_set.values())) != 1:
-        contracts = ", ".join(f"{descriptor_set_key}={commutable}" for descriptor_set_key, commutable in commutable_by_set.items())
-        raise ValueError(f"AMDGPU VOPD component '{component.descriptor_key}' has target-dependent commutability ({contracts})")
-    if next(iter(commutable_by_set.values())):
-        return _COMPONENT_FLAG_COMMUTABLE_SOURCES
-    return _COMPONENT_FLAG_NONE
+        descriptor_set_keys_by_flags.setdefault(flags, []).append(descriptor_set_key)
+    return tuple(
+        _VopdComponentRule(
+            component=component,
+            descriptor_set_keys=tuple(group_descriptor_set_keys),
+            flags=flags,
+        )
+        for flags, group_descriptor_set_keys in descriptor_set_keys_by_flags.items()
+    )
+
+
+def _component_info_key(
+    component: _VopdComponentDefinition,
+) -> tuple[object, ...]:
+    return (
+        component.op,
+        component.op_value,
+        component.op_name,
+        component.same_op_reason,
+        component.same_op_reason_name,
+        component.assembly_mnemonic,
+        component.numeric_minmax_mnemonic,
+        component.lane_mask,
+        component.pairing_mask,
+    )
+
+
+def _canonical_component_infos(
+    rules: Sequence[_VopdComponentRule],
+) -> tuple[tuple[_VopdComponentDefinition, ...], dict[int, int]]:
+    components: list[_VopdComponentDefinition] = []
+    info_index_by_op_value: dict[int, int] = {}
+    for rule in rules:
+        component = rule.component
+        info_index = info_index_by_op_value.get(component.op_value)
+        if info_index is None:
+            info_index_by_op_value[component.op_value] = len(components)
+            components.append(component)
+            continue
+        canonical_component = components[info_index]
+        if _component_info_key(component) != _component_info_key(canonical_component):
+            raise ValueError(f"AMDGPU VOPD opcode {component.op_value} has inconsistent native facts in '{canonical_component.descriptor_key}' and '{component.descriptor_key}'")
+    return tuple(components), info_index_by_op_value
+
+
+def _component_flags_initializer(flags: frozenset[str]) -> str:
+    if not flags:
+        return _COMPONENT_FLAG_NONE
+    return " | ".join(sorted(flags))
 
 
 def _descriptor_lookup_rows_for_set(
@@ -630,10 +713,13 @@ def _component_source_operand_index(
         return src0_index if source_mask == _SOURCE_SRC0 else vsrc1_index
     if component.form in (
         _FORM_BINARY_VGPR,
+        _FORM_CNDMASK_VCC,
         _FORM_FMAAK_LITERAL,
         _FORM_FMAMK_LITERAL,
     ):
         return 0 if source_mask == _SOURCE_SRC0 else 1
+    if component.form == _FORM_REGISTER_MOV:
+        return 0
     raise ValueError(f"AMDGPU VOPD component '{component.descriptor_key}' has unsupported source form '{component.form}'")
 
 
@@ -646,8 +732,12 @@ def _component_operand_count(component: _VopdComponentDefinition) -> int:
         _FORM_FMAMK_LITERAL,
     ):
         return 2
+    if component.form == _FORM_CNDMASK_VCC:
+        return 3
     if component.form == _FORM_INLINE_MOV:
         return 0
+    if component.form == _FORM_REGISTER_MOV:
+        return 1
     raise ValueError(f"AMDGPU VOPD component '{component.descriptor_key}' has unsupported operand form '{component.form}'")
 
 
@@ -686,12 +776,10 @@ def _placement_source_ref(
 
 def _source_mask_for_component_orientation(
     source_mask: str,
-    component_flags: str,
+    component_flags: frozenset[str],
 ) -> str:
-    if component_flags == _COMPONENT_FLAG_NONE:
+    if _COMPONENT_FLAG_COMMUTABLE_SOURCES not in component_flags:
         return source_mask
-    if component_flags != _COMPONENT_FLAG_COMMUTABLE_SOURCES:
-        raise ValueError(f"unsupported AMDGPU VOPD component flags '{component_flags}'")
     if source_mask == _SOURCE_SRC0:
         return _SOURCE_VSRC1
     if source_mask == _SOURCE_VSRC1:
@@ -699,19 +787,30 @@ def _source_mask_for_component_orientation(
     raise ValueError(f"unsupported AMDGPU VOPD source mask '{source_mask}'")
 
 
-def _component_sources_are_commutable(component_flags: str) -> bool:
-    if component_flags == _COMPONENT_FLAG_NONE:
-        return False
-    if component_flags == _COMPONENT_FLAG_COMMUTABLE_SOURCES:
+def _component_sources_are_commutable(
+    component_flags: frozenset[str],
+) -> bool:
+    return _COMPONENT_FLAG_COMMUTABLE_SOURCES in component_flags
+
+
+def _components_share_source_cache(
+    first_component: _VopdComponentDefinition,
+    second_component: _VopdComponentDefinition,
+    source_mask: str,
+    first_component_flags: frozenset[str],
+    second_component_flags: frozenset[str],
+) -> bool:
+    if source_mask != _SOURCE_SRC0:
         return True
-    raise ValueError(f"unsupported AMDGPU VOPD component flags '{component_flags}'")
+    has_separate_caches = _COMPONENT_FLAG_DUAL_MOV_SRC2_CACHE in first_component_flags and _COMPONENT_FLAG_DUAL_MOV_SRC2_CACHE in second_component_flags
+    return not (has_separate_caches and first_component.op_value == second_component.op_value)
 
 
 def _pair_placement_relations(
     first_component: _VopdComponentDefinition,
     second_component: _VopdComponentDefinition,
-    first_component_flags: str,
-    second_component_flags: str,
+    first_component_flags: frozenset[str],
+    second_component_flags: frozenset[str],
 ) -> tuple[_VopdPairPlacementRelation, ...]:
     first_result = _placement_result_ref(_PLACEMENT_COMPONENT_FIRST)
     second_result = _placement_result_ref(_PLACEMENT_COMPONENT_SECOND)
@@ -737,7 +836,17 @@ def _pair_placement_relations(
             second_component,
             second_source_mask,
         )
-        if first_has_source and second_has_source:
+        if (
+            first_has_source
+            and second_has_source
+            and _components_share_source_cache(
+                first_component,
+                second_component,
+                source_mask,
+                first_component_flags,
+                second_component_flags,
+            )
+        ):
             relations.append(
                 _VopdPairPlacementRelation(
                     result=_placement_source_ref(
@@ -786,14 +895,16 @@ def _pair_placement_relations(
 def _pair_placement_recipe(
     first_component: _VopdComponentDefinition,
     second_component: _VopdComponentDefinition,
-    first_component_flags: str = _COMPONENT_FLAG_NONE,
-    second_component_flags: str = _COMPONENT_FLAG_NONE,
+    first_component_flags: frozenset[str] = _COMPONENT_FLAGS_NONE,
+    second_component_flags: frozenset[str] = _COMPONENT_FLAGS_NONE,
 ) -> _VopdPairPlacementRecipe:
+    first_aligned_flags = first_component_flags - {_COMPONENT_FLAG_COMMUTABLE_SOURCES}
+    second_aligned_flags = second_component_flags - {_COMPONENT_FLAG_COMMUTABLE_SOURCES}
     aligned_relations = _pair_placement_relations(
         first_component,
         second_component,
-        _COMPONENT_FLAG_NONE,
-        _COMPONENT_FLAG_NONE,
+        first_aligned_flags,
+        second_aligned_flags,
     )
     alternatives = [aligned_relations]
     first_sources_are_commutable = _component_sources_are_commutable(first_component_flags)
@@ -802,15 +913,15 @@ def _pair_placement_recipe(
         crossed_relations = _pair_placement_relations(
             first_component,
             second_component,
-            _COMPONENT_FLAG_COMMUTABLE_SOURCES,
-            _COMPONENT_FLAG_NONE,
+            first_component_flags,
+            second_aligned_flags,
         )
     elif second_sources_are_commutable:
         crossed_relations = _pair_placement_relations(
             first_component,
             second_component,
-            _COMPONENT_FLAG_NONE,
-            _COMPONENT_FLAG_COMMUTABLE_SOURCES,
+            first_aligned_flags,
+            second_component_flags,
         )
     else:
         crossed_relations = aligned_relations
@@ -830,10 +941,14 @@ def _pair_affinity_rows_for_set(
         if first_rule_index_plus_one == 0:
             continue
         first_rule = rules[first_rule_index_plus_one - 1]
+        if not first_rule.component.descriptor_affinity_eligible:
+            continue
         for second_ordinal, second_rule_index_plus_one in enumerate(descriptor_lookup_rows):
             if second_rule_index_plus_one == 0:
                 continue
             second_rule = rules[second_rule_index_plus_one - 1]
+            if not second_rule.component.descriptor_affinity_eligible:
+                continue
             if not _components_can_pair(first_rule.component, second_rule.component):
                 continue
             placement_recipe = _pair_placement_recipe(
@@ -859,6 +974,14 @@ def _pair_affinity_rows_for_set(
 
 
 def _validate_vopd_component_tables(tables: _VopdComponentTables) -> None:
+    component_infos, _ = _canonical_component_infos(tables.rules)
+    reason_ops: dict[str, int] = {}
+    for component in component_infos:
+        if component.same_op_reason == _PAIR_REASON_UNKNOWN:
+            continue
+        existing_op = reason_ops.setdefault(component.same_op_reason, component.op_value)
+        if existing_op != component.op_value:
+            raise ValueError(f"AMDGPU VOPD pair reason '{component.same_op_reason}' maps to opcodes {existing_op} and {component.op_value}")
     rule_count = len(tables.rules)
     lookup_count = len(tables.descriptor_lookup_rows)
     lookup_ranges_by_set_key = {row.descriptor_set_key: row for row in tables.descriptor_lookup_ranges}
@@ -1030,15 +1153,12 @@ def _materialize_vopd_component_tables(
             descriptors_by_set_key,
             isa_specs,
         )
-        rules.append(
-            _VopdComponentRule(
-                component=component,
-                descriptor_set_keys=descriptor_set_keys,
-                flags=_component_flags_for_descriptors(
-                    component,
-                    descriptor_set_keys,
-                    descriptors_by_set_key,
-                ),
+        rules.extend(
+            _component_rules(
+                component,
+                descriptor_set_keys,
+                infos_by_key,
+                descriptors_by_set_key,
             )
         )
 
@@ -1112,32 +1232,47 @@ def _generated_header() -> list[str]:
     ]
 
 
-def _component_rule_initializer(index: int, rule: _VopdComponentRule) -> str:
+def _component_info_initializer(
+    index: int,
+    component: _VopdComponentDefinition,
+) -> str:
+    return "\n".join(
+        [
+            "LOOM_AMDGPU_VOPD_COMPONENT_INFO_RULE(",
+            f"    {index}, {component.op}, {component.same_op_reason},",
+            f"    {_c_string_arg(component.op_name)},",
+            f"    {_c_string_arg(component.same_op_reason_name)},",
+            f"    {_c_string_arg(component.assembly_mnemonic)},",
+            f"    {_c_string_arg(component.numeric_minmax_mnemonic)},",
+            f"    {component.lane_mask}, {component.pairing_mask})",
+        ]
+    )
+
+
+def _component_rule_initializer(
+    index: int,
+    info_index: int,
+    rule: _VopdComponentRule,
+) -> str:
     component = rule.component
     accumulator_index, src0_index, vsrc1_index = component.operand_layout
     return "\n".join(
         [
             "LOOM_AMDGPU_VOPD_COMPONENT_RULE(",
-            f"    {index},",
-            f"    {component.op}, {component.same_op_reason},",
-            f"    {_c_string_arg(component.op_name)},",
-            f"    {_c_string_arg(component.same_op_reason_name)},",
-            f"    {_c_string_arg(component.assembly_mnemonic)},",
-            f"    {_c_string_arg(component.numeric_minmax_mnemonic)},",
+            f"    {index}, {info_index},",
             f"    {component.form},",
             f"    {accumulator_index}, {src0_index}, {vsrc1_index},",
-            f"    {component.lane_mask}, {component.pairing_mask},",
-            f"    {component.source_register_mask}, {rule.flags})",
+            f"    {component.source_register_mask},",
+            f"    {_component_flags_initializer(rule.flags)})",
         ]
     )
 
 
 def _component_reason_initializer(
     index: int,
-    rule: _VopdComponentRule,
+    component: _VopdComponentDefinition,
 ) -> str | None:
-    component = rule.component
-    if component.same_op_reason == "LOOM_AMDGPU_VOPD_PAIR_REASON_UNKNOWN":
+    if component.same_op_reason == _PAIR_REASON_UNKNOWN:
         return None
     return "\n".join(
         [
@@ -1215,12 +1350,21 @@ def _pair_placement_relation_initializer(
 
 
 def _emit_component_rules(tables: _VopdComponentTables) -> str:
-    reason_initializers = [initializer for index, rule in enumerate(tables.rules) if (initializer := _component_reason_initializer(index, rule)) is not None]
+    component_infos, info_index_by_op_value = _canonical_component_infos(tables.rules)
+    reason_initializers = [initializer for index, component in enumerate(component_infos) if (initializer := _component_reason_initializer(index, component)) is not None]
     return (
         "\n".join(
             [
                 *_generated_header(),
-                *(_component_rule_initializer(index, rule) for index, rule in enumerate(tables.rules)),
+                *(_component_info_initializer(index, component) for index, component in enumerate(component_infos)),
+                *(
+                    _component_rule_initializer(
+                        index,
+                        info_index_by_op_value[rule.component.op_value],
+                        rule,
+                    )
+                    for index, rule in enumerate(tables.rules)
+                ),
                 *reason_initializers,
             ]
         )

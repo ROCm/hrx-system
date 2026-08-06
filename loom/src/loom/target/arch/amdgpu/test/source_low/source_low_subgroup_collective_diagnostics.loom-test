@@ -420,28 +420,6 @@ kernel.def target(@target) @subgroup_shuffle_wave64_native_width_rejected() {
 // ====
 
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
-kernel.def target(@target) @subgroup_reduce_wave64_leader_publication_rejected() {
-  %c1 = index.constant 1 : index
-  %c64 = index.constant 64 : index
-  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
-} launch(%output: buffer) {
-  %lane = kernel.subgroup.lane.id : index
-  %leader_lane = index.constant 0 : index
-  %output_base = index.constant 0 : offset
-  %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32, #dense>
-  %value = scalar.constant 1 : i32
-  // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_reduce.native_width.scalar_broadcast"}
-  %sum = kernel.subgroup.reduce<addi> %value : i32
-  %is_leader_lane = index.cmp eq, %lane, %leader_lane : index
-  scf.if %is_leader_lane {
-    view.store %sum, %output_view[%leader_lane] : i32, view<1xi32, #dense>
-  }
-  kernel.return
-}
-
-// ====
-
-amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 kernel.def target(@target) @subgroup_scan_wave64_native_width_rejected() {
   %c1 = index.constant 1 : index
   %c64 = index.constant 64 : index

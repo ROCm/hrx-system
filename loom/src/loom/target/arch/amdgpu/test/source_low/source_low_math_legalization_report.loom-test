@@ -15,7 +15,7 @@ COMPILE-REPORT: math_legalization[0] function=report_scalar_round_away_recipe so
 COMPILE-REPORT: source_low[0] function=report_scalar_round_away_recipe source_op=scalar.constant selection=plan emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_scalar_round_away_recipe source_op=scalar.constant selection=plan emitted_ops=1
 COMPILE-REPORT: source_low[2] function=report_scalar_round_away_recipe source_op=scalar.absf selection=rule descriptor_key=amdgpu.v_and_b32.lit descriptor_semantic_tag=integer.and.u32 emitted_ops=1
-COMPILE-REPORT: source_low[3] function=report_scalar_round_away_recipe source_op=scalar.cmpf selection=plan emitted_ops=1
+COMPILE-REPORT: source_low[3] function=report_scalar_round_away_recipe source_op=scalar.cmpf selection=rule descriptor_key=amdgpu.v_cmp_olt_f32 descriptor_semantic_tag=cmp.f32.olt emitted_ops=1
 COMPILE-REPORT: source_low[4] function=report_scalar_round_away_recipe source_op=scalar.addf selection=rule descriptor_key=amdgpu.v_add_f32.src0_inline descriptor_semantic_tag=float.add.f32 emitted_ops=1
 COMPILE-REPORT: source_low[5] function=report_scalar_round_away_recipe source_op=scalar.truncf selection=rule descriptor_key=amdgpu.v_trunc_f32 descriptor_semantic_tag=float.trunc.f32 emitted_ops=1
 COMPILE-REPORT: source_low[6] function=report_scalar_round_away_recipe source_op=scalar.copysignf selection=rule descriptor_key=amdgpu.v_bfi_b32.src0_lit descriptor_semantic_tag=integer.bitfield.insert.u32 emitted_ops=1

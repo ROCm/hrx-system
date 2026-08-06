@@ -38,6 +38,9 @@ from .matrix import *
 from .memory import *
 from .rdna3 import *
 from .rdna4 import *
+from .rdna4m import *
+from .rdna35 import *
+from .scalar_float import *
 from .workgroup import *
 
 _CDNA_DWORD_MEMORY_INSTRUCTION_SUFFIXES = (
@@ -1022,6 +1025,7 @@ def _gfx11_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         *_v_subrev_f32_overlays(),
         _v_fma_f32_overlay(),
         _v_fmaak_f32_overlay(),
+        *_v_interp_overlays(),
         _v_fmac_f32_overlay(),
         _v_fmamk_f32_overlay(),
         *_rdna_scalar_fma_overlays(),
@@ -1468,22 +1472,302 @@ def _gfx11_core_overlay_descriptors(
     )
 
 
-def _gfx117x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
-    return (*_gfx11_core_overlays(), *_rdna_scalar_domain_fma_overlays())
+def _gfx115x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    return (
+        *_gfx11_core_overlays(),
+        *_s_float_arithmetic_overlays(),
+        *_s_float_compare_overlays(),
+        *_s_float_conversion_overlays(),
+        *_rdna_scalar_domain_fma_overlays(),
+        *_rdna35_dpp16_f32_uniform_rhs_overlays(),
+        *_rdna35_dpp8_f32_uniform_rhs_overlays(),
+        *_rdna35_dpp_integer_compare_uniform_rhs_overlays(),
+    )
 
 
-def _gfx117x_core_overlay_descriptors(
+def _gfx115x_core_overlay_descriptors(
     spec: AmdgpuIsaFactSource,
 ) -> tuple[Descriptor, ...]:
     return _with_execution_mask_state_reads(
-        materialize_amdgpu_descriptor_overlays(spec, _gfx117x_core_overlays())
+        materialize_amdgpu_descriptor_overlays(spec, _gfx115x_core_overlays())
     )
 
 
 def _gfx11_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
     return _amdgpu_descriptor_overlay_intersection(
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
+    )
+
+
+def _gfx12_wmma_16x16_overlays(
+    *, wave_size: int, op_sel_hi_field: str
+) -> tuple[AmdgpuDescriptorOverlay, ...]:
+    if wave_size not in (32, 64):
+        raise ValueError(f"unsupported WMMA wave size {wave_size}")
+    unit_divisor = wave_size // 32
+    descriptor_key_suffix = ".w64" if wave_size == 64 else ""
+    low_mnemonic_suffix = "_w64" if wave_size == 64 else ""
+
+    def units(wave32_units: int) -> int:
+        return max(1, wave32_units // unit_divisor)
+
+    def size_exception_reason(wave32_units: int) -> str | None:
+        return (
+            _GFX12_WAVE64_MATRIX_OPERAND_SIZE_REASON
+            if units(wave32_units) != wave32_units
+            else None
+        )
+
+    overlays = (
+        _v_wmma_f32_16x16x16_f16_overlay(
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            input_units=units(4),
+            accumulator_units=units(8),
+            input_size_exception_reason=size_exception_reason(4),
+            accumulator_size_exception_reason=size_exception_reason(8),
+            op_sel_hi_field=op_sel_hi_field,
+        ),
+        _v_wmma_f32_16x16x16_bf16_overlay(
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            input_units=units(4),
+            accumulator_units=units(8),
+            input_size_exception_reason=size_exception_reason(4),
+            accumulator_size_exception_reason=size_exception_reason(8),
+            op_sel_hi_field=op_sel_hi_field,
+        ),
+        _v_wmma_f16_16x16x16_f16_overlay(
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            input_units=units(4),
+            accumulator_units=units(4),
+            input_size_exception_reason=size_exception_reason(4),
+            accumulator_size_exception_reason=size_exception_reason(4),
+            op_sel_hi_field=op_sel_hi_field,
+        ),
+        _v_wmma_bf16_16x16x16_bf16_overlay(
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            input_units=units(4),
+            accumulator_units=units(4),
+            input_size_exception_reason=size_exception_reason(4),
+            accumulator_size_exception_reason=size_exception_reason(4),
+            op_sel_hi_field=op_sel_hi_field,
+        ),
+        _v_wmma_i32_16x16x16_iu8_overlay(
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            operand_units=units(2),
+            accumulator_units=units(8),
+            operand_size_exception_reason=size_exception_reason(2),
+            accumulator_size_exception_reason=size_exception_reason(8),
+            op_sel_hi_field=op_sel_hi_field,
+        ),
+        _v_wmma_i32_16x16x16_iu4_overlay(
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            operand_units=units(1),
+            accumulator_units=units(8),
+            operand_size_exception_reason=size_exception_reason(1),
+            accumulator_size_exception_reason=size_exception_reason(8),
+            op_sel_hi_field=op_sel_hi_field,
+        ),
+        *(
+            _v_wmma_f32_16x16x16_packed8_overlay(
+                lhs_type=lhs_type,
+                rhs_type=rhs_type,
+                descriptor_key_suffix=descriptor_key_suffix,
+                low_mnemonic_suffix=low_mnemonic_suffix,
+                input_units=units(2),
+                accumulator_units=units(8),
+                input_size_exception_reason=size_exception_reason(2),
+                accumulator_size_exception_reason=size_exception_reason(8),
+                op_sel_hi_field=op_sel_hi_field,
+            )
+            for lhs_type, rhs_type in (
+                ("fp8", "fp8"),
+                ("fp8", "bf8"),
+                ("bf8", "fp8"),
+                ("bf8", "bf8"),
+            )
+        ),
+        _v_wmma_i32_16x16x32_iu4_overlay(
+            descriptor_key_suffix=descriptor_key_suffix,
+            low_mnemonic_suffix=low_mnemonic_suffix,
+            operand_units=units(2),
+            accumulator_units=units(8),
+            operand_size_exception_reason=size_exception_reason(2),
+            accumulator_size_exception_reason=size_exception_reason(8),
+            op_sel_hi_field=op_sel_hi_field,
+        ),
+    )
+    return tuple(
+        variant
+        for overlay in overlays
+        for variant in _with_zero_accumulator_form(overlay)
+    )
+
+
+def _rdna4m_minmax_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    numeric_f32_overlays = (
+        _v_min_f32_overlay(instruction_name="V_MIN_NUM_F32", mnemonic="v_min_num_f32"),
+        _v_min_f32_literal_overlay(
+            instruction_name="V_MIN_NUM_F32", mnemonic="v_min_num_f32"
+        ),
+        _v_min_f32_src0_inline_overlay(
+            instruction_name="V_MIN_NUM_F32", mnemonic="v_min_num_f32"
+        ),
+        _v_max_f32_overlay(instruction_name="V_MAX_NUM_F32", mnemonic="v_max_num_f32"),
+        _v_max_f32_literal_overlay(
+            instruction_name="V_MAX_NUM_F32", mnemonic="v_max_num_f32"
+        ),
+        _v_max_f32_src0_inline_overlay(
+            instruction_name="V_MAX_NUM_F32", mnemonic="v_max_num_f32"
+        ),
+        *(
+            _v_binary_f32_dpp_overlay(
+                descriptor_key=f"amdgpu.v_{operation}_f32.dpp16",
+                instruction_name=f"V_{operation.upper()}_NUM_F32",
+                mnemonic=f"v_{operation}_num_f32",
+                semantic_tag=f"float.{semantic}.f32",
+                encoding_name="VOP2_VOP_DPP16",
+                encoding_condition="has_dpp16",
+            )
+            for operation, semantic in (("min", "minnum"), ("max", "maxnum"))
+        ),
+        *(
+            overlay
+            for operation, instruction_name, semantic in (
+                ("min", "V_MIN_NUM_F32", "minnum"),
+                ("max", "V_MAX_NUM_F32", "maxnum"),
+            )
+            for overlay in _v_binary_f32_dpp16_uniform_rhs_overlays(
+                operation=operation,
+                instruction_name=instruction_name,
+                low_mnemonic=f"v_{operation}_f32",
+                semantic=semantic,
+            )
+        ),
+        *(
+            overlay
+            for operation, instruction_name, semantic in (
+                ("min", "V_MIN_NUM_F32", "minnum"),
+                ("max", "V_MAX_NUM_F32", "maxnum"),
+            )
+            for overlay in _v_binary_f32_dpp8_uniform_rhs_overlays(
+                operation=operation,
+                instruction_name=instruction_name,
+                low_mnemonic=f"v_{operation}_f32",
+                semantic=semantic,
+            )
+        ),
+    )
+    numeric_scalar_overlays = (
+        *(
+            _v_commutative_binary_f16_overlay(
+                descriptor_key=f"amdgpu.v_{operation}_f16",
+                instruction_name=f"V_{operation.upper()}_NUM_F16",
+                mnemonic=f"v_{operation}_num_f16",
+                semantic_tag=f"float.{semantic}.f16",
+            )
+            for operation, semantic in (("min", "minnum"), ("max", "maxnum"))
+        ),
+        *(
+            _v_commutative_binary_vop3_float_overlay(
+                descriptor_key=f"amdgpu.v_{operation}_f64",
+                instruction_name=f"V_{operation.upper()}_NUM_F64",
+                mnemonic=f"v_{operation}_num_f64",
+                semantic_tag=f"float.{semantic}.f64",
+                element_bit_width=64,
+            )
+            for operation, semantic in (("min", "minnum"), ("max", "maxnum"))
+        ),
+    )
+    ieee_scalar_overlays = tuple(
+        _v_commutative_binary_vop3_float_overlay(
+            descriptor_key=f"amdgpu.v_{operation}_{type_suffix}",
+            instruction_name=f"V_{operation.upper()}_{type_suffix.upper()}",
+            mnemonic=f"v_{operation}_{type_suffix}",
+            semantic_tag=f"float.{operation}.{type_suffix}",
+            element_bit_width=element_bit_width,
+        )
+        for type_suffix, element_bit_width in (("f16", 16), ("f32", 32), ("f64", 64))
+        for operation in ("minimum", "maximum")
+    )
+    ternary_overlays = tuple(
+        _v_ternary_float_overlay(
+            descriptor_key=f"amdgpu.v_{operation}_{type_suffix}",
+            instruction_name=f"V_{operation.upper()}_{type_suffix.upper()}",
+            mnemonic=f"v_{operation}_{type_suffix}",
+            semantic_tag=f"float.{operation}.{type_suffix}",
+            element_bit_width=element_bit_width,
+        )
+        for type_suffix, element_bit_width in (("f16", 16), ("f32", 32))
+        for operation in (
+            "min3_num",
+            "max3_num",
+            "med3_num",
+            "minmax_num",
+            "maxmin_num",
+            "minimum3",
+            "maximum3",
+            "minimummaximum",
+            "maximumminimum",
+        )
+    )
+    return (
+        *numeric_f32_overlays,
+        *numeric_scalar_overlays,
+        _v_pk_minnum_f16_overlay(
+            instruction_name="V_PK_MIN_NUM_F16", mnemonic="v_pk_min_num_f16"
+        ),
+        _v_pk_maxnum_f16_overlay(
+            instruction_name="V_PK_MAX_NUM_F16", mnemonic="v_pk_max_num_f16"
+        ),
+        *ieee_scalar_overlays,
+        _v_pk_minimum_f16_overlay(),
+        _v_pk_maximum_f16_overlay(),
+        *ternary_overlays,
+    )
+
+
+def _rdna4m_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    minmax_overlays = _rdna4m_minmax_overlays()
+    minmax_descriptor_keys = {overlay.descriptor_key for overlay in minmax_overlays}
+    return (
+        *(
+            overlay
+            for overlay in _gfx115x_core_overlays()
+            if not (overlay.semantic_tag or "").startswith("matrix.")
+            and overlay.descriptor_key not in minmax_descriptor_keys
+        ),
+        *minmax_overlays,
+        *_v_cvt_f32_packed8_selection_overlays("ocp", op_sel_field="OP_SEL"),
+        *_v_cvt_pk_packed8_from_f32_overlays("ocp", op_sel_field="OP_SEL"),
+        *(
+            _v_dot4_f32_packed8_overlay(lhs_type=lhs_type, rhs_type=rhs_type)
+            for lhs_type, rhs_type in (
+                ("fp8", "bf8"),
+                ("bf8", "fp8"),
+                ("fp8", "fp8"),
+                ("bf8", "bf8"),
+            )
+        ),
+        *_gfx12_wmma_16x16_overlays(wave_size=32, op_sel_hi_field="OP_SEL_HI"),
+        *_gfx12_wmma_16x16_overlays(wave_size=64, op_sel_hi_field="OP_SEL_HI"),
+        *_v_swmmac_16x16_overlays(wave_size=32, op_sel_hi_field="OP_SEL_HI"),
+        *_v_swmmac_16x16_overlays(wave_size=64, op_sel_hi_field="OP_SEL_HI"),
+    )
+
+
+def _rdna4m_core_overlay_descriptors(
+    spec: AmdgpuIsaFactSource,
+) -> tuple[Descriptor, ...]:
+    spec = _rdna4m_spec_with_supplemental_instruction_facts(spec)
+    return _with_execution_mask_state_reads(
+        materialize_amdgpu_descriptor_overlays(spec, _rdna4m_core_overlays())
     )
 
 
@@ -1560,8 +1844,12 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         ),
         *_v_binary_f32_dpp16_overlays(),
         *_v_subrev_f32_overlays(),
+        *_s_float_arithmetic_overlays(),
+        *_s_float_compare_overlays(),
+        *_s_float_conversion_overlays(),
         _v_fma_f32_overlay(),
         _v_fmaak_f32_overlay(),
+        *_v_interp_overlays(op_sel_field="OPSEL"),
         _v_fmac_f32_overlay(),
         _v_fmamk_f32_overlay(),
         *_rdna_scalar_domain_fma_overlays(),
@@ -1603,7 +1891,7 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_div_fixup_f32_overlay(),
         _v_cvt_f32_f16_overlay(encoding_name="ENC_VOP3"),
         _v_cvt_f16_f32_overlay(),
-        *_v_cvt_f32_packed8_overlays("ocp"),
+        *_v_cvt_f32_packed8_selection_overlays("ocp", op_sel_field="OPSEL"),
         *_v_cvt_pk_packed8_from_f32_overlays(
             "ocp",
             op_sel_field="OPSEL",
@@ -1841,50 +2129,22 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             op_sel_hi_field="OPSEL_HI", lhs_signed=False, rhs_signed=True
         ),
         _v_dot8_u32_u4_overlay(op_sel_hi_field="OPSEL_HI"),
-        _v_dot4_f32_packed8_overlay(lhs_type="fp8", rhs_type="bf8"),
-        _v_dot4_f32_packed8_overlay(lhs_type="bf8", rhs_type="fp8"),
-        _v_dot4_f32_packed8_overlay(lhs_type="fp8", rhs_type="fp8"),
-        _v_dot4_f32_packed8_overlay(lhs_type="bf8", rhs_type="bf8"),
-        *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_f16_overlay(op_sel_hi_field="OPSEL_HI")
+        _v_dot4_f32_packed8_overlay(
+            lhs_type="fp8", rhs_type="bf8", op_sel_hi_field="OPSEL_HI"
         ),
-        *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_bf16_overlay(op_sel_hi_field="OPSEL_HI")
+        _v_dot4_f32_packed8_overlay(
+            lhs_type="bf8", rhs_type="fp8", op_sel_hi_field="OPSEL_HI"
         ),
-        *_with_zero_accumulator_form(
-            _v_wmma_f16_16x16x16_f16_overlay(op_sel_hi_field="OPSEL_HI")
+        _v_dot4_f32_packed8_overlay(
+            lhs_type="fp8", rhs_type="fp8", op_sel_hi_field="OPSEL_HI"
         ),
-        *_with_zero_accumulator_form(
-            _v_wmma_bf16_16x16x16_bf16_overlay(op_sel_hi_field="OPSEL_HI")
+        _v_dot4_f32_packed8_overlay(
+            lhs_type="bf8", rhs_type="bf8", op_sel_hi_field="OPSEL_HI"
         ),
-        *_with_zero_accumulator_form(
-            _v_wmma_i32_16x16x16_iu8_overlay(op_sel_hi_field="OPSEL_HI")
-        ),
-        *_with_zero_accumulator_form(
-            _v_wmma_i32_16x16x16_iu4_overlay(op_sel_hi_field="OPSEL_HI")
-        ),
-        *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(
-                lhs_type="fp8", rhs_type="fp8", op_sel_hi_field="OPSEL_HI"
-            )
-        ),
-        *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(
-                lhs_type="fp8", rhs_type="bf8", op_sel_hi_field="OPSEL_HI"
-            )
-        ),
-        *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(
-                lhs_type="bf8", rhs_type="fp8", op_sel_hi_field="OPSEL_HI"
-            )
-        ),
-        *_with_zero_accumulator_form(
-            _v_wmma_f32_16x16x16_packed8_overlay(
-                lhs_type="bf8", rhs_type="bf8", op_sel_hi_field="OPSEL_HI"
-            )
-        ),
-        *_with_zero_accumulator_form(_v_wmma_i32_16x16x32_iu4_overlay()),
-        *_rdna4_swmmac_overlays(),
+        *_gfx12_wmma_16x16_overlays(wave_size=32, op_sel_hi_field="OPSEL_HI"),
+        *_gfx12_wmma_16x16_overlays(wave_size=64, op_sel_hi_field="OPSEL_HI"),
+        *_v_swmmac_16x16_overlays(wave_size=32, op_sel_hi_field="OPSEL_HI"),
+        *_v_swmmac_16x16_overlays(wave_size=64, op_sel_hi_field="OPSEL_HI"),
         _s_barrier_signal_all_overlay(),
         _s_barrier_wait_all_overlay(),
         _s_sendmsg_overlay(),
@@ -1931,7 +2191,9 @@ def _gfx125x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         *(
             overlay
             for overlay in _rdna4_core_overlays()
-            if not (overlay.semantic_tag or "").startswith("matrix.wmma.")
+            if not (overlay.semantic_tag or "").startswith(
+                ("float.interpolation.", "matrix.wmma.")
+            )
         ),
         _s_getreg_b32_cluster_workgroup_flat_id_overlay(),
         *_v_cvt_f16_packed8_byte_overlays("ocp"),
@@ -2411,6 +2673,7 @@ def _amdgpu_core_descriptor_set_bases() -> tuple[DescriptorSet, ...]:
         _AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE,
+        _AMDGPU_RDNA4M_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE,
         _AMDGPU_RDNA4_GFX1251_CORE_DESCRIPTOR_SET_BASE,
@@ -2428,7 +2691,8 @@ def _amdgpu_descriptor_ref_key_set() -> set[str]:
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
+        _rdna4m_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     ):
@@ -2445,6 +2709,7 @@ __all__ = (
     "_AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA3_5_CORE_DESCRIPTOR_SET_BASE",
+    "_AMDGPU_RDNA4M_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA4_GFX1250_A0_CORE_DESCRIPTOR_SET_BASE",
     "_AMDGPU_RDNA4_GFX1251_CORE_DESCRIPTOR_SET_BASE",
@@ -2457,8 +2722,8 @@ __all__ = (
     "_gfx11_core_overlays",
     "_gfx11_generic_core_overlay_descriptors",
     "_gfx11_generic_core_overlays",
-    "_gfx117x_core_overlay_descriptors",
-    "_gfx117x_core_overlays",
+    "_gfx115x_core_overlay_descriptors",
+    "_gfx115x_core_overlays",
     "_gfx12_5_generic_core_overlay_descriptors",
     "_gfx12_5_generic_core_overlays",
     "_gfx125x_core_overlay_descriptors",
@@ -2467,6 +2732,9 @@ __all__ = (
     "_gfx1251_core_overlay_descriptors",
     "_gfx12_core_overlay_descriptors",
     "_gfx12_core_overlays",
+    "_rdna4m_core_overlay_descriptors",
+    "_rdna4m_core_overlays",
+    "_rdna4m_minmax_overlays",
     "_gfx12_generic_core_overlay_descriptors",
     "_gfx12_generic_core_overlays",
     "_gfx940_core_overlay_descriptors",

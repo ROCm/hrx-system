@@ -124,6 +124,7 @@ ELF_MACHINE_PROCESSORS = (
     (0x05D, "gfx1170"),
     (0x05E, "gfx1171"),
     (0x05F, "gfx9-4-generic"),
+    (0x062, "gfx11-7-generic"),
 )
 
 # Feature support for ELF machine processors that are not exact build targets.

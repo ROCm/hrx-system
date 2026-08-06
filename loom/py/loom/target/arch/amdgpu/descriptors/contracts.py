@@ -15,6 +15,7 @@ from .alu import *
 from .categories import *
 from .common import *
 from .matrix import *
+from .scalar_float import *
 from .sets import *
 
 
@@ -46,6 +47,9 @@ _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS: dict[
     "amdgpu.s_min_u32": _s_min_u32_overlay,
     "amdgpu.s_max_u32": _s_max_u32_overlay,
     "amdgpu.s_cselect_b32": _s_cselect_b32_overlay,
+    **_contract_overlay_builders_from_overlays(_s_float_arithmetic_overlays()),
+    **_contract_overlay_builders_from_overlays(_s_float_compare_overlays()),
+    **_contract_overlay_builders_from_overlays(_s_float_conversion_overlays()),
     "amdgpu.v_mov_b32": _v_mov_b32_literal_overlay,
     "amdgpu.v_add_u32": lambda: _v_add_u32_overlay("V_ADD_NC_U32"),
     "amdgpu.v_add_u32.src0_inline": lambda: _v_add_u32_src0_inline_overlay(
@@ -181,11 +185,14 @@ _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS: dict[
     ),
     **_contract_overlay_builders_from_overlays(_integer_bit_count_overlays()),
     **_contract_overlay_builders_from_overlays(_integer_bitwise_shift_overlays()),
-    **_contract_overlay_builders_from_overlays(_v_cvt_f32_packed8_overlays("ocp")),
+    **_contract_overlay_builders_from_overlays(
+        _v_cvt_f32_packed8_selection_overlays("ocp", op_sel_field="OPSEL")
+    ),
     **_contract_overlay_builders_from_overlays(_v_cvt_f16_packed8_byte_overlays("ocp")),
     **_contract_overlay_builders_from_overlays(_s_cmp_i32_overlays()),
     **_contract_overlay_builders_from_overlays(_s_cmp_u64_overlays()),
     **_contract_overlay_builders_from_overlays(_v_cmp_overlays()),
+    **_contract_overlay_builders_from_overlays(_rdna4m_minmax_overlays()),
 }
 
 

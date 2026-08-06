@@ -9,7 +9,7 @@ from __future__ import annotations
 from loom.target.arch.amdgpu.descriptors import (
     _gfx11_core_overlays,
     _gfx12_core_overlays,
-    _gfx117x_core_overlays,
+    _gfx115x_core_overlays,
     _gfx125x_core_overlays,
     _gfx940_core_overlays,
     _gfx950_core_overlays,
@@ -25,7 +25,7 @@ def _amdgpu_core_overlay_sets():
         _gfx940_core_overlays(),
         _gfx950_core_overlays(),
         _gfx11_core_overlays(),
-        _gfx117x_core_overlays(),
+        _gfx115x_core_overlays(),
         _gfx12_core_overlays(),
         _gfx125x_core_overlays(),
     )

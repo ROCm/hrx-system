@@ -89,6 +89,7 @@ class AmdgpuMatrixFragmentLayout:
     rhs: MatrixFragmentRoleLayout
     accumulator: MatrixFragmentRoleLayout
     result: MatrixFragmentRoleLayout
+    family: str | None = None
 
     @property
     def c_kind(self) -> str:
@@ -150,9 +151,29 @@ def _single_tile_layout(
     result_payload_element_count: int,
     result_element_bit_count: int = 32,
     lhs_reduction_group: MatrixFragmentReductionGroup | None = None,
+    lhs_lane_replication: int = 1,
+    rhs_lane_replication: int = 1,
+    family: str | None = None,
 ) -> AmdgpuMatrixFragmentLayout:
-    row_thread_count = wave_size // row_count
-    column_thread_count = wave_size // column_count
+    if wave_size % lhs_lane_replication != 0 or wave_size % rhs_lane_replication != 0:
+        raise ValueError(
+            f"matrix fragment layout '{key}' has a lane replication that "
+            f"does not divide wave size {wave_size}"
+        )
+    lhs_wave_size = wave_size // lhs_lane_replication
+    rhs_wave_size = wave_size // rhs_lane_replication
+    if (
+        lhs_wave_size % row_count != 0
+        or rhs_wave_size % column_count != 0
+        or wave_size % column_count != 0
+    ):
+        raise ValueError(
+            f"matrix fragment layout '{key}' cannot factor wave size "
+            f"{wave_size} over its tile"
+        )
+    lhs_row_thread_count = lhs_wave_size // row_count
+    rhs_column_thread_count = rhs_wave_size // column_count
+    result_column_thread_count = wave_size // column_count
     lhs = _role(
         "lhs",
         lhs_payload_element_count,
@@ -160,7 +181,7 @@ def _single_tile_layout(
         _axes(
             row=_axis(thread=row_count),
             reduction=_axis(
-                thread=row_thread_count,
+                thread=lhs_row_thread_count,
                 stride=row_count,
                 element=lhs_payload_element_count,
             ),
@@ -174,7 +195,7 @@ def _single_tile_layout(
         _axes(
             column=_axis(thread=column_count),
             reduction=_axis(
-                thread=column_thread_count,
+                thread=rhs_column_thread_count,
                 stride=column_count,
                 element=rhs_payload_element_count,
             ),
@@ -182,7 +203,7 @@ def _single_tile_layout(
     )
     result_axes = _axes(
         row=_axis(
-            thread=column_thread_count,
+            thread=result_column_thread_count,
             stride=column_count,
             element=result_payload_element_count,
         ),
@@ -206,6 +227,7 @@ def _single_tile_layout(
             result_element_bit_count,
             result_axes,
         ),
+        family=family,
     )
 
 
@@ -586,6 +608,17 @@ def validate_matrix_fragment_layout(layout: AmdgpuMatrixFragmentLayout) -> None:
                 f"occupies the {expected_role} slot"
             )
         _validate_role(layout, role)
+    is_sparse = any(role.reduction_group is not None for role in layout_roles(layout))
+    if is_sparse and layout.family not in ("smfmac", "swmmac"):
+        raise ValueError(
+            f"sparse matrix fragment layout '{layout.key}' has invalid "
+            f"family '{layout.family}'"
+        )
+    if not is_sparse and layout.family is not None:
+        raise ValueError(
+            f"dense matrix fragment layout '{layout.key}' names family "
+            f"'{layout.family}'"
+        )
 
 
 def layout_roles(
@@ -953,6 +986,41 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
     ),
     *(
         _single_tile_layout(
+            key,
+            wave_size=64,
+            row_count=16,
+            column_count=16,
+            reduction_count=reduction_count,
+            lhs_payload_element_count=source_payload_element_count,
+            rhs_payload_element_count=source_payload_element_count,
+            lhs_element_bit_count=source_element_bit_count,
+            rhs_element_bit_count=source_element_bit_count,
+            result_payload_element_count=result_payload_element_count,
+            result_element_bit_count=result_element_bit_count,
+            lhs_lane_replication=lane_replication,
+            rhs_lane_replication=lane_replication,
+        )
+        for (
+            key,
+            reduction_count,
+            source_payload_element_count,
+            source_element_bit_count,
+            result_payload_element_count,
+            result_element_bit_count,
+            lane_replication,
+        ) in (
+            ("rdna4_wmma_f32_16x16x16_f16_w64", 16, 4, 16, 4, 32, 1),
+            ("rdna4_wmma_f32_16x16x16_bf16_w64", 16, 4, 16, 4, 32, 1),
+            ("rdna4_wmma_f16_16x16x16_f16_w64", 16, 4, 16, 4, 16, 1),
+            ("rdna4_wmma_bf16_16x16x16_bf16_w64", 16, 4, 16, 4, 16, 1),
+            ("rdna4_wmma_f32_16x16x16_packed8_w64", 16, 4, 8, 4, 32, 1),
+            ("rdna4_wmma_i32_16x16x16_iu8_w64", 16, 4, 8, 4, 32, 1),
+            ("rdna4_wmma_i32_16x16x16_iu4_w64", 16, 8, 4, 4, 32, 2),
+            ("rdna4_wmma_i32_16x16x32_iu4_w64", 32, 8, 4, 4, 32, 1),
+        )
+    ),
+    *(
+        _single_tile_layout(
             (f"gfx125x_wmma_f32_16x16x128_{lhs_format.token}_{rhs_format.token}"),
             wave_size=32,
             row_count=16,
@@ -1017,8 +1085,10 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
             result_payload_element_count=result_payload_element_count,
             result_element_bit_count=result_element_bit_count,
             lhs_reduction_group=_STRUCTURED_2_TO_4_REDUCTION_GROUP,
+            family=family,
         )
         for (
+            family,
             key,
             wave_size,
             row_count,
@@ -1030,20 +1100,177 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
             result_payload_element_count,
             result_element_bit_count,
         ) in (
-            ("cdna_smfmac_32bit_16x16x32_packed16", 64, 16, 16, 32, 4, 8, 16, 4, 32),
-            ("cdna_smfmac_32bit_16x16x64_packed8", 64, 16, 16, 64, 8, 16, 8, 4, 32),
-            ("cdna_smfmac_32bit_16x16x64_packed16", 64, 16, 16, 64, 8, 16, 16, 4, 32),
-            ("cdna_smfmac_32bit_16x16x128_packed8", 64, 16, 16, 128, 16, 32, 8, 4, 32),
-            ("cdna_smfmac_32bit_32x32x16_packed16", 64, 32, 32, 16, 4, 8, 16, 16, 32),
-            ("cdna_smfmac_32bit_32x32x32_packed8", 64, 32, 32, 32, 8, 16, 8, 16, 32),
-            ("cdna_smfmac_32bit_32x32x32_packed16", 64, 32, 32, 32, 8, 16, 16, 16, 32),
-            ("cdna_smfmac_32bit_32x32x64_packed8", 64, 32, 32, 64, 16, 32, 8, 16, 32),
-            ("rdna4_swmmac_32bit_16x16x32_packed16", 32, 16, 16, 32, 8, 16, 16, 8, 32),
-            ("rdna4_swmmac_16bit_16x16x32_packed16", 32, 16, 16, 32, 8, 16, 16, 8, 16),
-            ("rdna4_swmmac_32bit_16x16x32_packed8", 32, 16, 16, 32, 8, 16, 8, 8, 32),
-            ("rdna4_swmmac_32bit_16x16x32_packed4", 32, 16, 16, 32, 8, 16, 4, 8, 32),
-            ("rdna4_swmmac_32bit_16x16x64_packed4", 32, 16, 16, 64, 16, 32, 4, 8, 32),
             (
+                "smfmac",
+                "cdna_smfmac_32bit_16x16x32_packed16",
+                64,
+                16,
+                16,
+                32,
+                4,
+                8,
+                16,
+                4,
+                32,
+            ),
+            (
+                "smfmac",
+                "cdna_smfmac_32bit_16x16x64_packed8",
+                64,
+                16,
+                16,
+                64,
+                8,
+                16,
+                8,
+                4,
+                32,
+            ),
+            (
+                "smfmac",
+                "cdna_smfmac_32bit_16x16x64_packed16",
+                64,
+                16,
+                16,
+                64,
+                8,
+                16,
+                16,
+                4,
+                32,
+            ),
+            (
+                "smfmac",
+                "cdna_smfmac_32bit_16x16x128_packed8",
+                64,
+                16,
+                16,
+                128,
+                16,
+                32,
+                8,
+                4,
+                32,
+            ),
+            (
+                "smfmac",
+                "cdna_smfmac_32bit_32x32x16_packed16",
+                64,
+                32,
+                32,
+                16,
+                4,
+                8,
+                16,
+                16,
+                32,
+            ),
+            (
+                "smfmac",
+                "cdna_smfmac_32bit_32x32x32_packed8",
+                64,
+                32,
+                32,
+                32,
+                8,
+                16,
+                8,
+                16,
+                32,
+            ),
+            (
+                "smfmac",
+                "cdna_smfmac_32bit_32x32x32_packed16",
+                64,
+                32,
+                32,
+                32,
+                8,
+                16,
+                16,
+                16,
+                32,
+            ),
+            (
+                "smfmac",
+                "cdna_smfmac_32bit_32x32x64_packed8",
+                64,
+                32,
+                32,
+                64,
+                16,
+                32,
+                8,
+                16,
+                32,
+            ),
+            (
+                "swmmac",
+                "rdna4_swmmac_32bit_16x16x32_packed16",
+                32,
+                16,
+                16,
+                32,
+                8,
+                16,
+                16,
+                8,
+                32,
+            ),
+            (
+                "swmmac",
+                "rdna4_swmmac_16bit_16x16x32_packed16",
+                32,
+                16,
+                16,
+                32,
+                8,
+                16,
+                16,
+                8,
+                16,
+            ),
+            (
+                "swmmac",
+                "rdna4_swmmac_32bit_16x16x32_packed8",
+                32,
+                16,
+                16,
+                32,
+                8,
+                16,
+                8,
+                8,
+                32,
+            ),
+            (
+                "swmmac",
+                "rdna4_swmmac_32bit_16x16x32_packed4",
+                32,
+                16,
+                16,
+                32,
+                8,
+                16,
+                4,
+                8,
+                32,
+            ),
+            (
+                "swmmac",
+                "rdna4_swmmac_32bit_16x16x64_packed4",
+                32,
+                16,
+                16,
+                64,
+                16,
+                32,
+                4,
+                8,
+                32,
+            ),
+            (
+                "swmmac",
                 "gfx1250_swmmac_32bit_16x16x64_packed16",
                 32,
                 16,
@@ -1056,6 +1283,7 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
                 32,
             ),
             (
+                "swmmac",
                 "gfx1250_swmmac_16bit_16x16x64_packed16",
                 32,
                 16,
@@ -1068,6 +1296,7 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
                 16,
             ),
             (
+                "swmmac",
                 "gfx1250_swmmac_32bit_16x16x128_packed8",
                 32,
                 16,
@@ -1080,6 +1309,7 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
                 32,
             ),
             (
+                "swmmac",
                 "gfx1250_swmmac_16bit_16x16x128_packed8",
                 32,
                 16,
@@ -1091,6 +1321,40 @@ AMDGPU_MATRIX_FRAGMENT_LAYOUTS: tuple[AmdgpuMatrixFragmentLayout, ...] = (
                 8,
                 16,
             ),
+        )
+    ),
+    *(
+        _single_tile_layout(
+            key,
+            wave_size=64,
+            row_count=16,
+            column_count=16,
+            reduction_count=reduction_count,
+            lhs_payload_element_count=lhs_payload_element_count,
+            rhs_payload_element_count=rhs_payload_element_count,
+            lhs_element_bit_count=source_element_bit_count,
+            rhs_element_bit_count=source_element_bit_count,
+            result_payload_element_count=result_payload_element_count,
+            result_element_bit_count=result_element_bit_count,
+            lhs_reduction_group=_STRUCTURED_2_TO_4_REDUCTION_GROUP,
+            lhs_lane_replication=lhs_lane_replication,
+            family="swmmac",
+        )
+        for (
+            key,
+            reduction_count,
+            lhs_payload_element_count,
+            rhs_payload_element_count,
+            source_element_bit_count,
+            result_payload_element_count,
+            result_element_bit_count,
+            lhs_lane_replication,
+        ) in (
+            ("rdna4_swmmac_32bit_16x16x32_packed16_w64", 32, 4, 8, 16, 4, 32, 1),
+            ("rdna4_swmmac_16bit_16x16x32_packed16_w64", 32, 4, 8, 16, 4, 16, 1),
+            ("rdna4_swmmac_32bit_16x16x32_packed8_w64", 32, 4, 8, 8, 4, 32, 1),
+            ("rdna4_swmmac_32bit_16x16x32_packed4_w64", 32, 8, 8, 4, 4, 32, 2),
+            ("rdna4_swmmac_32bit_16x16x64_packed4_w64", 64, 8, 16, 4, 4, 32, 1),
         )
     ),
 )

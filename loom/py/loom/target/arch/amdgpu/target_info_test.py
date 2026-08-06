@@ -23,6 +23,11 @@ from loom.target.arch.amdgpu.lds_bank_service import (
 )
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_OCP_FP8_NONCANONICAL_NAN,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_ARITHMETIC,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_COMPARE,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_CONVERSION,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_DUAL_MOV_SRC2_CACHE,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS,
     AMDGPU_DESCRIPTOR_SET_INFOS,
     AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS,
     AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT,
@@ -36,6 +41,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
     AMDGPU_MATRIX_FEATURES_BY_PROFILE,
     AMDGPU_PROCESSOR_INFOS,
+    AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
     AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE,
     AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC,
     AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
@@ -100,6 +106,72 @@ def test_noncanonical_native_fp8_nan_is_scoped_to_gfx12_descriptor_sets() -> Non
     assert flagged_generator_targets == {"rdna4", "gfx12_generic"}
 
 
+def test_native_scalar_float_arithmetic_is_scoped_to_rdna35_and_newer() -> None:
+    flagged_generator_targets = {
+        info.generator_target
+        for info in AMDGPU_DESCRIPTOR_SET_INFOS
+        if info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_ARITHMETIC
+    }
+    assert flagged_generator_targets == {
+        "rdna3_5",
+        "rdna4m",
+        "rdna4",
+        "rdna4_gfx1250_a0",
+        "rdna4_gfx1251",
+        "rdna4_gfx125x",
+        "gfx12_generic",
+        "gfx12_5_generic",
+    }
+
+    conversion_generator_targets = {
+        info.generator_target
+        for info in AMDGPU_DESCRIPTOR_SET_INFOS
+        if info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_CONVERSION
+    }
+    assert conversion_generator_targets == flagged_generator_targets
+
+    compare_generator_targets = {
+        info.generator_target
+        for info in AMDGPU_DESCRIPTOR_SET_INFOS
+        if info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_COMPARE
+    }
+    assert compare_generator_targets == flagged_generator_targets
+
+
+def test_numeric_minmax_mnemonics_are_scoped_to_rdna4_and_newer() -> None:
+    flagged_generator_targets = {
+        info.generator_target
+        for info in AMDGPU_DESCRIPTOR_SET_INFOS
+        if info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS
+    }
+    assert flagged_generator_targets == {
+        "rdna4m",
+        "rdna4",
+        "rdna4_gfx1250_a0",
+        "rdna4_gfx1251",
+        "rdna4_gfx125x",
+        "gfx12_generic",
+        "gfx12_5_generic",
+    }
+
+
+def test_vopd_dual_move_src2_cache_is_scoped_to_gfx117x_and_newer() -> None:
+    flagged_generator_targets = {
+        info.generator_target
+        for info in AMDGPU_DESCRIPTOR_SET_INFOS
+        if info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_DUAL_MOV_SRC2_CACHE
+    }
+    assert flagged_generator_targets == {
+        "rdna4m",
+        "rdna4",
+        "rdna4_gfx1250_a0",
+        "rdna4_gfx1251",
+        "rdna4_gfx125x",
+        "gfx12_generic",
+        "gfx12_5_generic",
+    }
+
+
 def test_descriptor_set_isa_xml_validation_rejects_mismatched_architecture() -> None:
     spec = _IsaArchitecture(
         source_name="rdna4.xml",
@@ -114,6 +186,34 @@ def test_descriptor_set_isa_xml_validation_rejects_mismatched_architecture() -> 
         validate_amdgpu_descriptor_set_isa_xml(
             amdgpu_descriptor_set_info_by_generator_target("rdna3"), spec
         )
+
+
+def test_rdna4m_processors_publish_gfx12_matrix_contracts() -> None:
+    processors = {
+        info.processor: info
+        for info in AMDGPU_PROCESSOR_INFOS
+        if info.processor in ("gfx1170", "gfx1171", "gfx1172")
+    }
+
+    assert set(processors) == {"gfx1170", "gfx1171", "gfx1172"}
+    assert all(
+        info.features.matrix == AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12
+        for info in processors.values()
+    )
+
+
+def test_rdna4m_processors_publish_delay_alu_scheduling() -> None:
+    processors = {
+        info.processor: info
+        for info in AMDGPU_PROCESSOR_INFOS
+        if info.processor in ("gfx1170", "gfx1171", "gfx1172")
+    }
+
+    assert set(processors) == {"gfx1170", "gfx1171", "gfx1172"}
+    assert all(
+        info.features.scheduling == AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU
+        for info in processors.values()
+    )
 
 
 def test_descriptor_set_generator_target_lookup_rejects_unknown_target() -> None:
@@ -479,9 +579,24 @@ def test_rdna3_5_processors_use_gfx11_matrix_shapes() -> None:
         for info in AMDGPU_PROCESSOR_INFOS
         if info.descriptor_set.key == descriptor_set.key
     )
-    assert processors
+    assert {processor.processor for processor in processors} == {
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153",
+    }
     for processor in processors:
         assert processor.features.matrix == AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11
+
+
+def test_rdna4m_processors_use_distinct_descriptor_contract() -> None:
+    descriptor_set = amdgpu_descriptor_set_info_by_generator_target("rdna4m")
+    processors = {
+        info.processor
+        for info in AMDGPU_PROCESSOR_INFOS
+        if info.descriptor_set.key == descriptor_set.key
+    }
+    assert processors == {"gfx1170", "gfx1171", "gfx1172"}
 
 
 def test_processor_rows_cover_canonical_code_object_relation() -> None:

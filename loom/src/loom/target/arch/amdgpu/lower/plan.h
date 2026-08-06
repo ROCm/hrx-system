@@ -1273,14 +1273,10 @@ typedef enum loom_amdgpu_fragment_memory_packet_flag_bits_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_EXACT_BF16_VIA_F16 = 1u << 20,
   // FP8 load payloads are decoded with native packed FP8-to-F32 conversion.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_F32_PAIR = 1u << 2,
-  // FP8 load payloads are decoded with native scale-f32 BF16 conversion using
-  // an identity scale operand.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_IDENTITY_SCALEF32_BF16_PAIR =
-      1u << 12,
-  // FP8 load payloads are decoded with native scale-f32 F16 conversion using
-  // an identity scale operand.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_IDENTITY_SCALEF32_F16_PAIR =
-      1u << 14,
+  // FP8 load payloads use native scale-f32 BF16 conversion.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_SCALEF32_BF16_PAIR = 1u << 12,
+  // FP8 load payloads use native scale-f32 F16 conversion.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_SCALEF32_F16_PAIR = 1u << 14,
   // FP8 load payloads are decoded with native E8M0 scale-pk8 BF16 conversion
   // using a packed identity scale operand.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_IDENTITY_E8M0_PK8_BF16 = 1u << 17,
@@ -1414,6 +1410,8 @@ typedef struct loom_amdgpu_fragment_memory_plan_t {
   loom_low_source_memory_access_plan_t source;
   // Source store payload or load result SSA value.
   loom_value_id_t payload;
+  // Optional F32 scale applied while decoding an FP8 load payload.
+  loom_value_id_t fp8_load_scale_source;
   // Per-axis byte strides selected from the view layout.
   uint32_t axis_byte_strides[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK];
   // Rank of the typed view.
