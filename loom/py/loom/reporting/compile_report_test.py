@@ -173,6 +173,7 @@ def _set_target_capabilities(
     *,
     processor: str,
     descriptor_set: str,
+    matrix_features: tuple[str, ...] = (),
 ) -> None:
     rows = [
         {
@@ -203,6 +204,18 @@ def _set_target_capabilities(
             "value_u64": 64,
         },
     ]
+    for matrix_feature in matrix_features:
+        rows.append(
+            {
+                "index": len(rows),
+                "function": "routed_linear",
+                "target_family": "AMDGPU",
+                "namespace": "amdgpu.matrix_feature",
+                "key": matrix_feature,
+                "value_kind": "bool",
+                "value_bool": True,
+            }
+        )
     report["target_capability_rows"] = {"count": len(rows), "rows": rows}
 
 
@@ -360,6 +373,7 @@ def test_target_comparison_diffs_selected_capabilities() -> None:
         baseline_report,
         processor="gfx1100",
         descriptor_set="amdgpu.rdna3.core",
+        matrix_features=("wmma-gfx11",),
     )
     baseline = parse_compile_report(baseline_report, source="baseline.json")
     candidate_report = _compile_report()
@@ -368,13 +382,14 @@ def test_target_comparison_diffs_selected_capabilities() -> None:
         candidate_report,
         processor="gfx1151",
         descriptor_set="amdgpu.rdna3_5.core",
+        matrix_features=("wmma-gfx12", "swmmac-gfx12"),
     )
     candidate = parse_compile_report(candidate_report, source="candidate.json")
 
     capability_diff = build_target_capability_diff(baseline, candidate)
 
     assert capability_diff is not None
-    assert capability_diff["changed_count"] == 2
+    assert capability_diff["changed_count"] == 5
     assert capability_diff["unchanged_count"] == 1
     assert capability_diff["rows"][0]["identity"]["key"] == "descriptor_set"
     assert capability_diff["rows"][0]["baseline"] == {
@@ -382,11 +397,27 @@ def test_target_comparison_diffs_selected_capabilities() -> None:
         "value": "amdgpu.rdna3.core",
     }
     assert capability_diff["rows"][1]["identity"]["key"] == "processor"
+    assert capability_diff["rows"][2] == {
+        "identity": {
+            "namespace": "amdgpu.matrix_feature",
+            "key": "swmmac-gfx12",
+            "function": "routed_linear",
+            "target_family": "AMDGPU",
+        },
+        "status": "added",
+        "candidate": {"kind": "bool", "value": True},
+    }
+    assert capability_diff["rows"][3]["identity"]["key"] == "wmma-gfx11"
+    assert capability_diff["rows"][3]["status"] == "removed"
+    assert capability_diff["rows"][4]["identity"]["key"] == "wmma-gfx12"
+    assert capability_diff["rows"][4]["status"] == "added"
     lines: list[str] = []
     append_target_capability_diff_text(lines, capability_diff)
     text = "\n".join(lines)
-    assert "rows: 2 changed, 1 unchanged" in text
+    assert "rows: 5 changed, 1 unchanged" in text
     assert "'amdgpu.rdna3.core' -> 'amdgpu.rdna3_5.core'" in text
+    assert "amdgpu.matrix_feature.wmma-gfx11: removed true" in text
+    assert "amdgpu.matrix_feature.wmma-gfx12: added true" in text
 
     view = build_compile_report_diff(
         baseline,

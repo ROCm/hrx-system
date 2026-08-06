@@ -335,6 +335,8 @@ loom_amdgpu_hal_kernel_library_record_matrix_feature_capabilities(
 
   const iree_host_size_t feature_count =
       loom_amdgpu_matrix_feature_info_count();
+  const iree_string_view_t matrix_feature_namespace_name =
+      IREE_SV("amdgpu.matrix_feature");
   for (iree_host_size_t i = 0; i < feature_count; ++i) {
     const loom_amdgpu_matrix_feature_info_t* feature_info =
         loom_amdgpu_matrix_feature_info_at(i);
@@ -343,9 +345,9 @@ loom_amdgpu_hal_kernel_library_record_matrix_feature_capabilities(
       continue;
     }
     IREE_RETURN_IF_ERROR(
-        loom_amdgpu_hal_kernel_library_record_target_capability_string(
-            report, function_name, namespace_name, IREE_SV("matrix_feature"),
-            feature_info->name));
+        loom_amdgpu_hal_kernel_library_record_target_capability_bool(
+            report, function_name, matrix_feature_namespace_name,
+            feature_info->name, true));
   }
   return iree_ok_status();
 }
