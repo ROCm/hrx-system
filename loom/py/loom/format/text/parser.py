@@ -1253,6 +1253,7 @@ class Parser:
         self._scope: NameScope = NameScope()
         self._module: Module = Module()
         self._tokenizer: Tokenizer = Tokenizer("")
+        self._implicit_source_id: int | None = None
         self._encoding_aliases: dict[str, EncodingInstance] = {}
         self._known_encodings: set[str] = set()
         self._reserved_result_names: list[str] = []
@@ -1292,6 +1293,9 @@ class Parser:
         global _CURRENT_ALIASES, _CURRENT_KNOWN_ENCODINGS
         self._tokenizer = Tokenizer(source, filename)
         self._module = Module()
+        self._implicit_source_id = (
+            self._find_or_add_source(filename) if filename else None
+        )
         self._scope = NameScope()
         self._encoding_aliases = {}
         _CURRENT_ALIASES = self._encoding_aliases
@@ -1664,6 +1668,7 @@ class Parser:
         """Parse a single operation from text. Convenience for testing."""
         self._tokenizer = Tokenizer(text)
         self._module = module if module is not None else Module()
+        self._implicit_source_id = self._find_or_add_source(self._tokenizer._filename)
         self._scope = scope if scope is not None else NameScope()
         op = self._parse_operation()
         op_decl = self._op_registry.get(op.name)
@@ -1802,15 +1807,7 @@ class Parser:
         # 5. Build Operation.
         # Default location: implicit source position from tokenizer.
         end_loc = tok.current_location()
-        location_id = self._module.add_location(
-            FileLocation(
-                source_id=0,
-                start_line=start_loc.line,
-                start_col=start_loc.column,
-                end_line=end_loc.line,
-                end_col=end_loc.column,
-            )
-        )
+        location_id = self._add_implicit_location(start_loc, end_loc)
 
         # Explicit location annotation overrides the implicit one.
         if tok.at(TokenKind.BARE_IDENT) and tok.peek().text == "loc":
@@ -1906,6 +1903,20 @@ class Parser:
         source_id = len(self._module.sources)
         self._module.sources.append(name)
         return source_id
+
+    def _add_implicit_location(self, start: SourceLocation, end: SourceLocation) -> int:
+        """Adds a source-backed implicit location, or returns unknown."""
+        if self._implicit_source_id is None:
+            return 0
+        return self._module.add_location(
+            FileLocation(
+                source_id=self._implicit_source_id,
+                start_line=start.line,
+                start_col=start.column,
+                end_line=end.line,
+                end_col=end.column,
+            )
+        )
 
     def _parse_file_location(self) -> int:
         """Parse "source":start_line:start_col to end_line:end_col.
@@ -3394,15 +3405,7 @@ class Parser:
         start_loc: SourceLocation,
     ) -> Operation:
         end_loc = self._tokenizer.current_location()
-        location_id = self._module.add_location(
-            FileLocation(
-                source_id=0,
-                start_line=start_loc.line,
-                start_col=start_loc.column,
-                end_line=end_loc.line,
-                end_col=end_loc.column,
-            )
-        )
+        location_id = self._add_implicit_location(start_loc, end_loc)
         op = Operation(
             name=name,
             attributes=attributes,

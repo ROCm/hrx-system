@@ -2385,8 +2385,31 @@ class TestLocationParsing:
         loc = module.locations.get(op.location_id)
         # Implicit locations are FileLocations derived from the source text.
         assert isinstance(loc, FileLocation)
-        # source_id is 0 (the default for implicit locations).
         assert loc.source_id == 0
+        assert module.sources[loc.source_id] == "<input>"
+
+    def test_module_parser_registers_implicit_location_source(self) -> None:
+        from loom.ir import FileLocation
+
+        module = _op_parser().parse(
+            "test.decl @identity(%arg: i32) -> (i32)\n",
+            filename="model.loom",
+        )
+        op = module.symbols[0].op
+        assert op is not None
+        loc = module.locations.get(op.location_id)
+        assert isinstance(loc, FileLocation)
+        assert module.sources[loc.source_id] == "model.loom"
+
+    def test_empty_filename_omits_implicit_location(self) -> None:
+        module = _op_parser().parse(
+            "test.decl @identity(%arg: i32) -> (i32)\n",
+            filename="",
+        )
+        op = module.symbols[0].op
+        assert op is not None
+        assert op.location_id == 0
+        assert module.sources == []
 
 
 # ============================================================================
