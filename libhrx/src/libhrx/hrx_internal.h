@@ -623,6 +623,8 @@ typedef struct hrx_gpu_state_t {
   int device_count;
   bool initialized;
   iree_hal_driver_t* driver;
+  // Hidden all-GPU logical device used to import process-wide host memory.
+  iree_hal_device_t* shared_memory_device;
 } hrx_gpu_state_t;
 
 typedef struct hrx_shared_state_t {

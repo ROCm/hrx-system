@@ -102,6 +102,16 @@ static inline iree_hal_device_t* hrx_device_hal(hrx_device_t dev) {
   return dev ? dev->hal_device : NULL;
 }
 
+// Returns the allocator whose logical topology contains every visible GPU.
+// Host-backed pointers imported through this allocator are pinned for all GPU
+// agents and can therefore remain valid across HIP device switches.
+static inline iree_hal_allocator_t* hrx_gpu_shared_memory_hal_allocator(void) {
+  hrx_gpu_state_t* gpu_state = hrx_get_gpu_state();
+  return gpu_state && gpu_state->shared_memory_device
+             ? iree_hal_device_allocator(gpu_state->shared_memory_device)
+             : NULL;
+}
+
 // Get the system allocator as iree_allocator_t (shares mimalloc heap).
 static inline iree_allocator_t hrx_system_iree_allocator(void) {
   return hrx_to_iree_allocator(hrx_host_allocator_system());

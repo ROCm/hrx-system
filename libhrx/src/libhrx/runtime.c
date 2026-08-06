@@ -558,6 +558,11 @@ static void hrx_gpu_release_created_devices(int count) {
   }
 }
 
+static void hrx_gpu_release_shared_memory_device(void) {
+  iree_hal_device_release(g_gpu.shared_memory_device);
+  g_gpu.shared_memory_device = NULL;
+}
+
 static void hrx_debug_print_iree_status(const char* label,
                                         const iree_status_t status) {
   if (!hrx_gpu_debug_enabled() || iree_status_is_ok(status)) return;
@@ -777,8 +782,14 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
   // represents all visible GPUs as one logical device, then one entry per
   // physical device. HRX exposes physical devices to callers.
   int physical_count = 0;
+  iree_host_size_t shared_device_info_index = IREE_HOST_SIZE_MAX;
   for (iree_host_size_t i = 0; i < device_info_count; ++i) {
-    if (device_infos[i].path.size == 0) continue;
+    if (device_infos[i].path.size == 0) {
+      if (shared_device_info_index == IREE_HOST_SIZE_MAX) {
+        shared_device_info_index = i;
+      }
+      continue;
+    }
     physical_count++;
   }
   if (physical_count == 0) {
@@ -823,6 +834,39 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
     }
   }
 
+  // A physical-device HAL instance only grants imported host memory to that
+  // device's agents. Retain the driver's all-visible logical device when more
+  // than one physical GPU is exposed so process-wide HIP host and managed
+  // pointers can be pinned once for every visible GPU. This device owns only
+  // shared-memory imports; HIP dispatch continues through physical devices.
+  if (physical_count > 1) {
+    if (shared_device_info_index == IREE_HOST_SIZE_MAX) {
+      iree_hal_profile_sink_release(profile_sink);
+      iree_allocator_free(alloc, device_infos);
+      iree_hal_driver_release(driver);
+      hrx_release_shared_state();
+      return hrx_make_status(
+          HRX_STATUS_UNAVAILABLE,
+          "GPU driver did not expose an all-visible logical device");
+    }
+    iree_hal_device_create_params_t shared_create_params = create_params;
+    shared_create_params.next = NULL;
+    shared_create_params.event_sink = iree_hal_device_event_sink_discard();
+    shared_create_params.runtime_features =
+        IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_NONE;
+    iree_status = iree_hal_driver_create_device_by_ordinal(
+        driver, shared_device_info_index, /*param_count=*/0, /*params=*/NULL,
+        &shared_create_params, alloc, &g_gpu.shared_memory_device);
+    hrx_debug_print_iree_status("create shared-memory device", iree_status);
+    if (!iree_status_is_ok(iree_status)) {
+      iree_hal_profile_sink_release(profile_sink);
+      iree_allocator_free(alloc, device_infos);
+      iree_hal_driver_release(driver);
+      hrx_release_shared_state();
+      return hrx_status_from_iree(iree_status);
+    }
+  }
+
   int created_count = 0;
   for (iree_host_size_t info_index = 0;
        info_index < device_info_count && created_count < count; ++info_index) {
@@ -835,6 +879,7 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
     hrx_debug_print_iree_status("create device by ordinal", iree_status);
     if (!iree_status_is_ok(iree_status)) {
       hrx_gpu_release_created_devices(created_count);
+      hrx_gpu_release_shared_memory_device();
       iree_hal_profile_sink_release(profile_sink);
       iree_allocator_free(alloc, device_infos);
       iree_hal_driver_release(driver);
@@ -848,6 +893,7 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
     if (!iree_status_is_ok(iree_status)) {
       iree_hal_device_release(hal_device);
       hrx_gpu_release_created_devices(created_count);
+      hrx_gpu_release_shared_memory_device();
       iree_hal_profile_sink_release(profile_sink);
       iree_allocator_free(alloc, device_infos);
       iree_hal_driver_release(driver);
@@ -879,6 +925,7 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
     if (!iree_status_is_ok(iree_status)) {
       hrx_device_release(dev);
       hrx_gpu_release_created_devices(created_count);
+      hrx_gpu_release_shared_memory_device();
       iree_hal_profile_sink_release(profile_sink);
       iree_allocator_free(alloc, device_infos);
       iree_hal_driver_release(driver);
@@ -891,6 +938,7 @@ hrx_status_t hrx_gpu_initialize_with_device_extensions(
     if (!iree_status_is_ok(iree_status)) {
       hrx_device_release(dev);
       hrx_gpu_release_created_devices(created_count);
+      hrx_gpu_release_shared_memory_device();
       iree_hal_profile_sink_release(profile_sink);
       iree_allocator_free(alloc, device_infos);
       iree_hal_driver_release(driver);
@@ -927,6 +975,7 @@ hrx_status_t hrx_gpu_shutdown(void) {
     iree_arena_block_pool_deinitialize(&g_gpu.devices[i].block_pool);
     hrx_device_release(&g_gpu.devices[i]);
   }
+  hrx_gpu_release_shared_memory_device();
   iree_hal_driver_release(g_gpu.driver);
   g_gpu.driver = NULL;
 

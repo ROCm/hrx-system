@@ -1408,6 +1408,15 @@ iree_hal_streaming_memory_allocate_owned_host_import_with_context_mode(
       context->host_allocator, allocation_size, host_alignment,
       /*offset=*/0, &host_ptr);
 
+  // Managed and host allocations are process-wide HIP pointers. On a
+  // multi-GPU process they must be imported through the all-visible logical
+  // device so the pin operation grants every GPU agent access to the same VA.
+  // A single-GPU process has no separate shared-memory device and can use the
+  // context allocator directly.
+  iree_hal_allocator_t* import_allocator =
+      hrx_gpu_shared_memory_hal_allocator();
+  if (!import_allocator) import_allocator = context->device_allocator;
+
   iree_hal_buffer_t* buffer = NULL;
   if (iree_status_is_ok(status)) {
     iree_hal_buffer_params_t params = {
@@ -1425,7 +1434,7 @@ iree_hal_streaming_memory_allocate_owned_host_import_with_context_mode(
         .handle.host_allocation.ptr = host_ptr,
     };
     status = iree_hal_allocator_import_buffer(
-        context->device_allocator, params, &external_buffer,
+        import_allocator, params, &external_buffer,
         iree_hal_buffer_release_callback_null(), &buffer);
   }
 
@@ -1699,9 +1708,12 @@ iree_status_t iree_hal_streaming_memory_register_host(
       .handle.host_allocation.ptr = ptr,
   };
   iree_hal_buffer_t* buffer = NULL;
+  iree_hal_allocator_t* import_allocator =
+      hrx_gpu_shared_memory_hal_allocator();
+  if (!import_allocator) import_allocator = context->device_allocator;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_allocator_import_buffer(
-              context->device_allocator, params, &external_buffer,
+              import_allocator, params, &external_buffer,
               iree_hal_buffer_release_callback_null(), &buffer));
 
   iree_hal_streaming_buffer_t* wrapper = NULL;
