@@ -931,15 +931,16 @@ iree_status_t loom_value_fact_table_clone_defined_facts(
     loom_value_fact_table_t* target, const loom_value_fact_table_t* source,
     const loom_module_t* module);
 
-// Computes facts for a single op by calling its vtable fact inference function.
-// Gathers operand facts from the table, calls the callback, and defines result
-// facts. No-op if the op has no inference function.
+// Computes facts for a single op. Ordinary ops call their vtable fact inference
+// function; LoopLike and RegionBranch ops visit their nested regions and
+// summarize the values returned to the parent results. Ops without either form
+// of fact inference define their results with unknown facts.
 iree_status_t loom_value_fact_table_compute_op(loom_value_fact_table_t* table,
                                                const loom_module_t* module,
                                                const loom_op_t* op);
 
 // Computes facts for a single op and reports whether any result facts changed
-// relative to the table's previous entries. No-op ops report false.
+// relative to the table's previous entries.
 iree_status_t loom_value_fact_table_compute_op_and_report(
     loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_op_t* op, bool* out_changed);
