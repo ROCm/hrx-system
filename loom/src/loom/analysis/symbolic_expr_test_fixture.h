@@ -94,6 +94,14 @@ class SymbolicExprTest : public ::testing::Test {
     return op;
   }
 
+  loom_value_id_t BuildScalarAndI(loom_value_id_t lhs, loom_value_id_t rhs) {
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(loom_scalar_andi_build(&builder_, lhs, rhs,
+                                         loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+                                         LOOM_LOCATION_UNKNOWN, &op));
+    return loom_scalar_andi_result(op);
+  }
+
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t analysis_arena_;
   loom_context_t context_;
