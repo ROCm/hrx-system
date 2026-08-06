@@ -79,8 +79,8 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
-    name = "loom_jit_rmsnorm_test",
-    srcs = ["loom_jit_rmsnorm_test.cc"],
+    name = "loom_jit_amdgpu_test",
+    srcs = ["loom_jit_amdgpu_test.cc"],
     sanitizer_suppressions = rocm_suppressions,
     tags = [
         "iree-run-requirement=runtime.resource.amd_gpu",

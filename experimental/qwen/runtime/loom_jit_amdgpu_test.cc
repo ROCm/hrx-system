@@ -248,6 +248,92 @@ static iree_status_t CompareF32Buffers(iree_hal_device_t* device,
   return iree_ok_status();
 }
 
+static iree_status_t PrepareTargetSpecializedRouter() {
+  const char* device_uri_environment = std::getenv("QWEN_DEVICE_URI");
+  const iree_string_view_t device_uri =
+      device_uri_environment ? iree_make_cstring_view(device_uri_environment)
+                             : IREE_SV("amdgpu://0");
+
+  ProactorPoolPtr proactor_pool;
+  FrontierTrackerPtr frontier_tracker;
+  DeviceGroupPtr device_group;
+  DevicePtr device;
+  IREE_RETURN_IF_ERROR(CreateLiveDevice(
+      device_uri, &proactor_pool, &frontier_tracker, &device, &device_group));
+
+  qwen_loom_jit_t* jit = nullptr;
+  const qwen_loom_jit_options_t jit_options = {
+      .structure_size = sizeof(jit_options),
+      .next = nullptr,
+      .device = device.get(),
+      .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+      .entry_limit = 1,
+      .worker_count = 1,
+      .sanitizer_checks = 0,
+  };
+  IREE_RETURN_IF_ERROR(
+      qwen_loom_jit_create(&jit_options, iree_allocator_system(), &jit));
+  JitPtr jit_ptr(jit);
+
+  qwen_loom_source_module_t source_module;
+  IREE_RETURN_IF_ERROR(qwen_loom_source_lookup(
+      IREE_SV(QWEN_LOOM_SOURCE_ROUTER_PROJECTION_TOP8_FUSED_F32),
+      &source_module));
+  const qwen_loom_config_binding_t config_bindings[] = {
+      {
+          .key = IREE_SV("qwen3_moe.model.hidden_size"),
+          .value = IREE_SV("2048"),
+      },
+      {
+          .key = IREE_SV("qwen3_moe.router.expert_count"),
+          .value = IREE_SV("128"),
+      },
+      {
+          .key = IREE_SV("qwen3_moe.router.route_count"),
+          .value = IREE_SV("8"),
+      },
+  };
+  const int64_t workload_arguments[] = {1, 8};
+  const qwen_loom_jit_prepare_options_t prepare_options = {
+      .structure_size = sizeof(prepare_options),
+      .next = nullptr,
+      .source_module = &source_module,
+      .function_name =
+          IREE_SV("qwen3_moe_router_projection_top8_fused_decode_f32"),
+      .config_binding_count = IREE_ARRAYSIZE(config_bindings),
+      .config_bindings = config_bindings,
+      .workload_argument_count = IREE_ARRAYSIZE(workload_arguments),
+      .workload_arguments = workload_arguments,
+  };
+  qwen_loom_executable_t* executable = nullptr;
+  IREE_RETURN_IF_ERROR(
+      qwen_loom_jit_prepare(jit_ptr.get(), &prepare_options, &executable));
+  ExecutablePtr executable_ptr(executable);
+
+  const iree_hal_dispatch_config_t dispatch_config =
+      qwen_loom_executable_dispatch_config(executable_ptr.get());
+  iree_hal_executable_function_info_t function_info;
+  IREE_RETURN_IF_ERROR(iree_hal_executable_function_info(
+      qwen_loom_executable_hal_executable(executable_ptr.get()),
+      qwen_loom_executable_function(executable_ptr.get()), &function_info));
+  const bool has_supported_router_grid =
+      dispatch_config.workgroup_count[0] == 32 ||
+      dispatch_config.workgroup_count[0] == 64;
+  if (!has_supported_router_grid || dispatch_config.workgroup_count[1] != 1 ||
+      dispatch_config.workgroup_count[2] != 1 ||
+      dispatch_config.workgroup_size[0] != 0 ||
+      dispatch_config.workgroup_size[1] != 0 ||
+      dispatch_config.workgroup_size[2] != 0 ||
+      function_info.workgroup_size[0] != 64 ||
+      function_info.workgroup_size[1] != 1 ||
+      function_info.workgroup_size[2] != 1) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "target-specialized router resolved unexpected launch geometry");
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t RunRmsnormFixture(const std::string& fixture_directory) {
   const char* device_uri_environment = std::getenv("QWEN_DEVICE_URI");
   const iree_string_view_t device_uri =
@@ -477,7 +563,7 @@ static iree_status_t RunRmsnormFixture(const std::string& fixture_directory) {
                            expected_buffer);
 }
 
-TEST(QwenLoomJitRmsnormTest,
+TEST(QwenLoomJitAmdgpuTest,
      CompilesCachesAndExecutesPrefill512FixtureWithAccessSanitizer) {
   const char* fixture_directory = std::getenv("QWEN_RMSNORM_FIXTURE_DIR");
   if (!fixture_directory) {
@@ -485,6 +571,11 @@ TEST(QwenLoomJitRmsnormTest,
         << "QWEN_RMSNORM_FIXTURE_DIR must name the layer0 fixture directory";
   }
   IREE_ASSERT_OK(RunRmsnormFixture(fixture_directory));
+}
+
+TEST(QwenLoomJitAmdgpuTest,
+     UsesOneTargetSpecializationForLaunchAndCompilation) {
+  IREE_ASSERT_OK(PrepareTargetSpecializedRouter());
 }
 
 }  // namespace

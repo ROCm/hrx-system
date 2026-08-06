@@ -785,6 +785,34 @@ typedef struct qwen_loom_jit_linked_code_group_t {
   loomc_string_view_t root_symbol;
 } qwen_loom_jit_linked_code_group_t;
 
+typedef struct qwen_loom_jit_target_specialization_t {
+  // Exact linked root and device profile shared by launch evaluation and
+  // device compilation.
+  loomc_target_specialization_t row;
+  // Option extension borrowing |row| for one synchronous Loom invocation.
+  loomc_target_specialization_options_t options;
+} qwen_loom_jit_target_specialization_t;
+
+static void qwen_loom_jit_target_specialization_initialize(
+    qwen_loom_jit_t* jit, const qwen_loom_jit_linked_code_group_t* linked_group,
+    qwen_loom_jit_target_specialization_t* out_specialization) {
+  *out_specialization = (qwen_loom_jit_target_specialization_t){
+      .row =
+          {
+              .function_symbol = linked_group->root_symbol,
+              .target_profile = jit->target_profile,
+          },
+      .options =
+          {
+              .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+              .structure_size = sizeof(out_specialization->options),
+              .next = NULL,
+              .specialization_count = 1,
+          },
+  };
+  out_specialization->options.specializations = &out_specialization->row;
+}
+
 static void qwen_loom_jit_linked_code_group_deinitialize(
     qwen_loom_jit_linked_code_group_t* linked_group) {
   loomc_module_release(linked_group->module);
@@ -911,10 +939,13 @@ static iree_status_t qwen_loom_jit_evaluate_dispatch_config(
     const qwen_loom_jit_linked_code_group_t* linked_group,
     const qwen_loom_jit_prepare_options_t* options,
     iree_hal_dispatch_config_t* out_dispatch_config) {
+  qwen_loom_jit_target_specialization_t target_specialization;
+  qwen_loom_jit_target_specialization_initialize(jit, linked_group,
+                                                 &target_specialization);
   const loomc_launch_config_eval_options_t launch_options = {
       .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG_EVAL_OPTIONS,
       .structure_size = sizeof(launch_options),
-      .next = NULL,
+      .next = &target_specialization.options,
       .function_symbol = linked_group->root_symbol,
       .config = {0},
       .workload_arguments = options->workload_arguments,
@@ -959,21 +990,13 @@ static iree_status_t qwen_loom_jit_compile_code_group(
   iree_hal_executable_t* hal_executable = NULL;
   iree_hal_executable_function_t function = {0};
 
-  const loomc_target_specialization_t specialization = {
-      .function_symbol = linked_group->root_symbol,
-      .target_profile = jit->target_profile,
-  };
-  const loomc_target_specialization_options_t target_options = {
-      .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-      .structure_size = sizeof(target_options),
-      .next = NULL,
-      .specializations = &specialization,
-      .specialization_count = 1,
-  };
+  qwen_loom_jit_target_specialization_t target_specialization;
+  qwen_loom_jit_target_specialization_initialize(jit, linked_group,
+                                                 &target_specialization);
   const loomc_compile_options_t compile_options = {
       .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
       .structure_size = sizeof(compile_options),
-      .next = &target_options,
+      .next = &target_specialization.options,
       .module_name =
           loomc_string_view_from_iree(options->source_module->module_path),
       .artifact_flags = 0,
