@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from loom.ir import parse_scalar_type_kind
 from loom.target.arch.spirv.builtins import (
     BUILTIN_DIMENSIONS,
     BUILTIN_INDEX_QUERIES,
@@ -25,6 +26,7 @@ from loom.target.arch.spirv.ordinary_vector import (
     OrdinaryVectorComponentType,
     OrdinaryVectorInstruction,
     OrdinaryVectorInstructionType,
+    OrdinaryVectorType,
 )
 from loom.target.arch.spirv.ordinary_vector_integer import (
     ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
@@ -68,6 +70,7 @@ from loom.target.arch.spirv.scalar_memory import (
 from loom.target.low_descriptors import (
     AsmForm,
     AsmImmediate,
+    AsmResultValueType,
     Descriptor,
     DescriptorFlag,
     DescriptorOpKind,
@@ -149,12 +152,14 @@ def _asm(
     results: tuple[str, ...] = (),
     operands: tuple[str, ...] = (),
     immediates: tuple[str, ...] = (),
+    result_value_types: tuple[AsmResultValueType | None, ...] = (),
 ) -> tuple[AsmForm, ...]:
     return (
         AsmForm(
             results=results,
             operands=operands,
             immediates=tuple(AsmImmediate(field_name) for field_name in immediates),
+            result_value_types=result_value_types,
         ),
     )
 
@@ -429,8 +434,37 @@ def _ordinary_vector_operand(
     return _id_operand(field_name)
 
 
+def _ordinary_vector_result_value_type(
+    value_type: OrdinaryVectorInstructionType,
+) -> AsmResultValueType | None:
+    component_type = (
+        value_type.component_type
+        if isinstance(value_type, OrdinaryVectorType)
+        else value_type
+    )
+    if not component_type.source_types:
+        return None
+    if (
+        isinstance(value_type, OrdinaryVectorComponentType)
+        and component_type.kind == OrdinaryVectorComponentKind.OFFSET
+    ):
+        return None
+    source_type = component_type.source_types[0]
+    element_type = parse_scalar_type_kind(source_type)
+    if element_type is None:
+        raise ValueError(
+            f"ordinary-vector component '{component_type.suffix}' has unknown "
+            f"Loom source type '{source_type}'"
+        )
+    lane_count = (
+        value_type.lane_count if isinstance(value_type, OrdinaryVectorType) else 0
+    )
+    return AsmResultValueType(element_type, vector_lane_count=lane_count)
+
+
 def _ordinary_vector_descriptor(row: OrdinaryVectorInstruction) -> Descriptor:
     has_component_index = row.component_index_maximum is not None
+    result_value_type = _ordinary_vector_result_value_type(row.result_type)
     immediates = (
         (
             Immediate(
@@ -462,6 +496,9 @@ def _ordinary_vector_descriptor(row: OrdinaryVectorInstruction) -> Descriptor:
             results=("dst",),
             operands=row.operand_names,
             immediates=("component_index",) if has_component_index else (),
+            result_value_types=(
+                (result_value_type,) if result_value_type is not None else ()
+            ),
         ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),

@@ -13,14 +13,14 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @ordina
   %seven = OpConstant.i32 7 : reg<spirv.id : i32>
   %eight = OpConstant.i32 8 : reg<spirv.id : i32>
   %replacement = OpConstant.i32 9 : reg<spirv.id : i32>
-  %values = OpCompositeConstruct.v4i32 %one, %two, %three, %four : reg<spirv.id : vector<4xi32>>
-  %alternates = OpCompositeConstruct.v4i32 %five, %six, %seven, %eight : reg<spirv.id : vector<4xi32>>
+  %values = OpCompositeConstruct.v4i32 %one, %two, %three, %four
+  %alternates = OpCompositeConstruct.v4i32 %five, %six, %seven, %eight
   %true = OpConstantTrue.bool : reg<spirv.id : i1>
   %false = OpConstantFalse.bool : reg<spirv.id : i1>
-  %mask = OpCompositeConstruct.v4bool %true, %false, %true, %false : reg<spirv.id : vector<4xi1>>
-  %selected = OpSelect.v4i32 %mask, %values, %alternates : reg<spirv.id : vector<4xi32>>
-  %inserted = OpCompositeInsert.i32.v4i32 %replacement, %selected, 2 : reg<spirv.id : vector<4xi32>>
-  %extracted = OpCompositeExtract.v4i32.i32 %inserted, 2 : reg<spirv.id : i32>
+  %mask = OpCompositeConstruct.v4bool %true, %false, %true, %false
+  %selected = OpSelect.v4i32 %mask, %values, %alternates
+  %inserted = OpCompositeInsert.i32.v4i32 %replacement, %selected, 2
+  %extracted = OpCompositeExtract.v4i32.i32 %inserted, 2
   %condition = OpIEqual %extracted, %replacement : reg<spirv.id : i1>
   low.scf.if %condition {
     OpControlBarrier.workgroup.workgroup.acq_rel

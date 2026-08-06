@@ -65,12 +65,12 @@ low.kernel.def target<spirv.logical.core>(@target) workgroup_size(1, 1, 1) workg
   %d = OpLoad.storage_buffer.i32 %46 : reg<spirv.id : i32>
   %condition = OpSGreaterThan %a, %b : reg<spirv.id : i1>
   %singleton_constant_value = OpConstant.i32 10 : reg<spirv.id : i32>
-  %from = OpCompositeConstruct.v4i32 %a, %b, %c, %d : reg<spirv.id : vector<4xi32>>
+  %from = OpCompositeConstruct.v4i32 %a, %b, %c, %d
   %51 = OpConstant.i32 10
-  %constant = OpCompositeConstruct.v4i32 %51, %51, %51, %51 : reg<spirv.id : vector<4xi32>>
-  %splat = OpCompositeConstruct.v4i32 %a, %a, %a, %a : reg<spirv.id : vector<4xi32>>
-  %54 = OpCompositeConstruct.v4bool %condition, %condition, %condition, %condition
-  %candidate = OpSelect.v4i32 %54, %from, %constant : reg<spirv.id : vector<4xi32>>
+  %constant = OpCompositeConstruct.v4i32 %51, %51, %51, %51
+  %splat = OpCompositeConstruct.v4i32 %a, %a, %a, %a
+  %54 = OpCompositeConstruct.v4bool %condition, %condition, %condition, %condition : reg<spirv.id>
+  %candidate = OpSelect.v4i32 %54, %from, %constant
   %selected = low.scf.if %condition -> (reg<spirv.id : vector<4xi32>>) {
     %58 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %36
     OpStore.storage_buffer.i32 %58, %a
@@ -80,12 +80,12 @@ low.kernel.def target<spirv.logical.core>(@target) workgroup_size(1, 1, 1) workg
     OpStore.storage_buffer.i32 %60, %b
     low.scf.yield %splat : reg<spirv.id : vector<4xi32>>
   }
-  %inserted = OpCompositeInsert.i32.v4i32 %singleton_constant_value, %selected, 2 : reg<spirv.id : vector<4xi32>>
-  %final = OpSelect.v4i32 %54, %selected, %inserted : reg<spirv.id : vector<4xi32>>
-  %result0 = OpCompositeExtract.v4i32.i32 %final, 0 : reg<spirv.id : i32>
-  %result1 = OpCompositeExtract.v4i32.i32 %final, 1 : reg<spirv.id : i32>
-  %result2 = OpCompositeExtract.v4i32.i32 %final, 2 : reg<spirv.id : i32>
-  %result3 = OpCompositeExtract.v4i32.i32 %final, 3 : reg<spirv.id : i32>
+  %inserted = OpCompositeInsert.i32.v4i32 %singleton_constant_value, %selected, 2
+  %final = OpSelect.v4i32 %54, %selected, %inserted
+  %result0 = OpCompositeExtract.v4i32.i32 %final, 0
+  %result1 = OpCompositeExtract.v4i32.i32 %final, 1
+  %result2 = OpCompositeExtract.v4i32.i32 %final, 2
+  %result3 = OpCompositeExtract.v4i32.i32 %final, 3
   %69 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %36
   OpStore.storage_buffer.i32 %69, %result0
   %71 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %39
