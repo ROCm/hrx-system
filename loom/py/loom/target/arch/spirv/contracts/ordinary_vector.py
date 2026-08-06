@@ -23,7 +23,6 @@ from loom.target.contracts import (
     AttrProject,
     ContractCase,
     DescriptorEmitForm,
-    DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
     Guard,
@@ -346,7 +345,7 @@ def _select_rule(vector_type: OrdinaryVectorType) -> DescriptorRule:
                     for lane_index in range(vector_type.lane_count)
                 },
                 results={"dst": vector_condition},
-                result_types={"dst": DescriptorResultType()},
+                result_types={"dst": _vector_pattern(condition_vector_type)},
             ),
             _emit(
                 descriptor,
@@ -486,7 +485,7 @@ def _constant_rule(
             _emit(
                 scalar_descriptor,
                 results={"dst": temporary},
-                result_types={"dst": DescriptorResultType()},
+                result_types={"dst": Scalar(component_type.source_types[0])},
                 immediates=_constant_immediates(component_type),
                 form=DescriptorEmitForm.CONST,
             ),

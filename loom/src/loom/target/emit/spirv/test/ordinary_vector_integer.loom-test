@@ -4,14 +4,14 @@
 spirv.target<vulkan1_3> @target
 
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @ordinary_vector_integer() asm {
-  %one = OpConstant.i32 1 : reg<spirv.id : i32>
-  %two = OpConstant.i32 2 : reg<spirv.id : i32>
-  %three = OpConstant.i32 3 : reg<spirv.id : i32>
-  %four = OpConstant.i32 4 : reg<spirv.id : i32>
-  %five = OpConstant.i32 5 : reg<spirv.id : i32>
-  %six = OpConstant.i32 6 : reg<spirv.id : i32>
-  %seven = OpConstant.i32 7 : reg<spirv.id : i32>
-  %eight = OpConstant.i32 8 : reg<spirv.id : i32>
+  %one = OpConstant.i32 1
+  %two = OpConstant.i32 2
+  %three = OpConstant.i32 3
+  %four = OpConstant.i32 4
+  %five = OpConstant.i32 5
+  %six = OpConstant.i32 6
+  %seven = OpConstant.i32 7
+  %eight = OpConstant.i32 8
   %lhs = OpCompositeConstruct.v4i32 %five, %six, %seven, %eight
   %rhs = OpCompositeConstruct.v4i32 %one, %two, %three, %four
   %add = OpIAdd.v4i32 %lhs, %rhs
@@ -26,10 +26,10 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @ordina
   %ashr = OpShiftRightArithmetic.v4i32 %shl, %rhs
   %lshr = OpShiftRightLogical.v4i32 %ashr, %rhs
 
-  %lhs_unsigned = OpBitcast.v4i32.v4u32 %lshr : reg<spirv.id : vector<4xi32>>
-  %rhs_unsigned = OpBitcast.v4i32.v4u32 %rhs : reg<spirv.id : vector<4xi32>>
-  %udiv = OpUDiv.v4u32 %lhs_unsigned, %rhs_unsigned : reg<spirv.id : vector<4xi32>>
-  %umod = OpUMod.v4u32 %udiv, %rhs_unsigned : reg<spirv.id : vector<4xi32>>
+  %lhs_unsigned = OpBitcast.v4i32.v4u32 %lshr
+  %rhs_unsigned = OpBitcast.v4i32.v4u32 %rhs
+  %udiv = OpUDiv.v4u32 %lhs_unsigned, %rhs_unsigned
+  %umod = OpUMod.v4u32 %udiv, %rhs_unsigned
   %signed_again = OpBitcast.v4u32.v4i32 %umod
 
   %eq = OpIEqual.v4i32 %signed_again, %rhs
@@ -59,17 +59,17 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @ordina
   %sub3 = OpISub.v3i32 %lhs3, %rhs3
   %extract3 = OpCompositeExtract.v3i32.i32 %sub3, 0
 
-  %one64 = OpConstant.i64 1 : reg<spirv.id : i64>
-  %two64 = OpConstant.i64 2 : reg<spirv.id : i64>
+  %one64 = OpConstant.i64 1
+  %two64 = OpConstant.i64 2
   %lhs64 = OpCompositeConstruct.v2i64 %one64, %two64
   %rhs64 = OpCompositeConstruct.v2i64 %two64, %one64
   %add64 = OpIAdd.v2i64 %lhs64, %rhs64
   %eq64 = OpIEqual.v2i64 %add64, %lhs64
   %condition64 = OpCompositeExtract.v2bool.bool %eq64, 0
-  %combined_condition = OpLogicalOr.bool %condition, %condition64 : reg<spirv.id : i1>
-  %used = OpIAdd %extract3, %one : reg<spirv.id : i32>
-  %used_condition = OpIEqual %used, %two : reg<spirv.id : i1>
-  %final_condition = OpLogicalOr.bool %combined_condition, %used_condition : reg<spirv.id : i1>
+  %combined_condition = OpLogicalOr.bool %condition, %condition64
+  %used = OpIAdd %extract3, %one
+  %used_condition = OpIEqual %used, %two
+  %final_condition = OpLogicalOr.bool %combined_condition, %used_condition
   low.scf.if %final_condition {
     OpControlBarrier.workgroup.workgroup.acq_rel
   }

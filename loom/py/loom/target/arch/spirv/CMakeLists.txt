@@ -60,10 +60,17 @@ iree_py_test(
   ARGS
     "loom.target.arch.spirv.descriptors_test"
   DEPS
+    loom::py::loom::target::arch::spirv::builtins
+    loom::py::loom::target::arch::spirv::cooperative_matrix
     loom::py::loom::target::arch::spirv::descriptors
     loom::py::loom::target::arch::spirv::ordinary_vector
     loom::py::loom::target::arch::spirv::ordinary_vector_integer
+    loom::py::loom::target::arch::spirv::scalar_alu
+    loom::py::loom::target::arch::spirv::scalar_constant
+    loom::py::loom::target::arch::spirv::scalar_conversion
+    loom::py::loom::target::arch::spirv::scalar_memory
     loom::py::loom::core
+    loom::py::loom::target::low_descriptors
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"
     "${PROJECT_BINARY_DIR}/loom/py"

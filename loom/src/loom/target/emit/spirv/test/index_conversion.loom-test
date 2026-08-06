@@ -64,7 +64,6 @@ func.def target(@target) @index_address_conversions(%flag: i1, %i8: i8, %i16: i1
                OpName %from_i64 "from_i64"
                OpName %to_i8 "to_i8"
                OpName %to_i16 "to_i16"
-               OpName %to_i32 "to_i32"
                OpName %to_i64 "to_i64"
                OpName %to_index "to_index"
                OpName %index_from_i32 "index_from_i32"
@@ -218,44 +217,43 @@ func.def target(@target) @index_address_conversions(%flag: i1, %i8: i8, %i16: i1
       %to_i8 = OpBitcast %char %89
          %91 = OpUConvert %ushort %byte_offset
      %to_i16 = OpBitcast %short %91
-     %to_i32 = OpBitcast %int %74
      %to_i64 = OpBitcast %long %byte_offset
    %to_index = OpBitcast %int %74
 %index_from_i32 = OpCopyObject %int %i32
 %i32_from_index = OpCopyObject %int %coordinate
-         %98 = OpAccessChain %_ptr_StorageBuffer_int %31 %int_0
-               OpStore %98 %flag_index Aligned 4
-         %99 = OpAccessChain %_ptr_StorageBuffer_ulong %32 %int_0
-               OpStore %99 %flag_offset Aligned 8
-        %101 = OpSelect %int %index_low_bit %int_1_0 %int_0
-        %102 = OpAccessChain %_ptr_StorageBuffer_int %33 %int_0
-               OpStore %102 %101 Aligned 4
-        %103 = OpSelect %int %offset_low_bit %int_1_0 %int_0
-        %104 = OpAccessChain %_ptr_StorageBuffer_int %34 %int_0
-               OpStore %104 %103 Aligned 4
-        %105 = OpAccessChain %_ptr_StorageBuffer_ulong %35 %int_0
-               OpStore %105 %from_index Aligned 8
-        %106 = OpAccessChain %_ptr_StorageBuffer_ulong %36 %int_0
-               OpStore %106 %from_i8 Aligned 8
-        %107 = OpAccessChain %_ptr_StorageBuffer_ulong %37 %int_0
-               OpStore %107 %from_i16 Aligned 8
-        %108 = OpAccessChain %_ptr_StorageBuffer_ulong %38 %int_0
-               OpStore %108 %from_i32 Aligned 8
-        %109 = OpAccessChain %_ptr_StorageBuffer_ulong %39 %int_0
-               OpStore %109 %from_i64 Aligned 8
-        %110 = OpAccessChain %_ptr_StorageBuffer_char %40 %int_0
-               OpStore %110 %to_i8 Aligned 1
-        %111 = OpAccessChain %_ptr_StorageBuffer_short %41 %int_0
-               OpStore %111 %to_i16 Aligned 2
-        %112 = OpAccessChain %_ptr_StorageBuffer_int %42 %int_0
-               OpStore %112 %to_i32 Aligned 4
-        %113 = OpAccessChain %_ptr_StorageBuffer_long %43 %int_0
-               OpStore %113 %to_i64 Aligned 8
-        %114 = OpAccessChain %_ptr_StorageBuffer_int %44 %int_0
-               OpStore %114 %to_index Aligned 4
-        %115 = OpAccessChain %_ptr_StorageBuffer_int %45 %int_0
-               OpStore %115 %index_from_i32 Aligned 4
-        %116 = OpAccessChain %_ptr_StorageBuffer_int %46 %int_0
-               OpStore %116 %i32_from_index Aligned 4
+         %97 = OpAccessChain %_ptr_StorageBuffer_int %31 %int_0
+               OpStore %97 %flag_index Aligned 4
+         %98 = OpAccessChain %_ptr_StorageBuffer_ulong %32 %int_0
+               OpStore %98 %flag_offset Aligned 8
+        %100 = OpSelect %int %index_low_bit %int_1_0 %int_0
+        %101 = OpAccessChain %_ptr_StorageBuffer_int %33 %int_0
+               OpStore %101 %100 Aligned 4
+        %102 = OpSelect %int %offset_low_bit %int_1_0 %int_0
+        %103 = OpAccessChain %_ptr_StorageBuffer_int %34 %int_0
+               OpStore %103 %102 Aligned 4
+        %104 = OpAccessChain %_ptr_StorageBuffer_ulong %35 %int_0
+               OpStore %104 %from_index Aligned 8
+        %105 = OpAccessChain %_ptr_StorageBuffer_ulong %36 %int_0
+               OpStore %105 %from_i8 Aligned 8
+        %106 = OpAccessChain %_ptr_StorageBuffer_ulong %37 %int_0
+               OpStore %106 %from_i16 Aligned 8
+        %107 = OpAccessChain %_ptr_StorageBuffer_ulong %38 %int_0
+               OpStore %107 %from_i32 Aligned 8
+        %108 = OpAccessChain %_ptr_StorageBuffer_ulong %39 %int_0
+               OpStore %108 %from_i64 Aligned 8
+        %109 = OpAccessChain %_ptr_StorageBuffer_char %40 %int_0
+               OpStore %109 %to_i8 Aligned 1
+        %110 = OpAccessChain %_ptr_StorageBuffer_short %41 %int_0
+               OpStore %110 %to_i16 Aligned 2
+        %111 = OpAccessChain %_ptr_StorageBuffer_int %42 %int_0
+               OpStore %111 %75 Aligned 4
+        %112 = OpAccessChain %_ptr_StorageBuffer_long %43 %int_0
+               OpStore %112 %to_i64 Aligned 8
+        %113 = OpAccessChain %_ptr_StorageBuffer_int %44 %int_0
+               OpStore %113 %to_index Aligned 4
+        %114 = OpAccessChain %_ptr_StorageBuffer_int %45 %int_0
+               OpStore %114 %index_from_i32 Aligned 4
+        %115 = OpAccessChain %_ptr_StorageBuffer_int %46 %int_0
+               OpStore %115 %i32_from_index Aligned 4
                OpReturn
                OpFunctionEnd

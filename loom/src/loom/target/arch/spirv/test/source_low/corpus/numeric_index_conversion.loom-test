@@ -49,12 +49,12 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
   %21 = OpConstant.offset64 1
   %22 = OpConstant.offset64 0
   %flag_offset = OpSelect.offset64 %flag, %21, %22
-  %25 = OpBitwiseAnd %coordinate, %18 : reg<spirv.id : i32>
-  %index_low_bit = OpINotEqual %25, %19 : reg<spirv.id : i1>
+  %25 = OpBitwiseAnd %coordinate, %18
+  %index_low_bit = OpINotEqual %25, %19
   %28 = OpUConvert.offset64.u32 %byte_offset
   %29 = OpBitcast.u32.i32 %28
-  %31 = OpBitwiseAnd %29, %18 : reg<spirv.id : i32>
-  %offset_low_bit = OpINotEqual %31, %19 : reg<spirv.id : i1>
+  %31 = OpBitwiseAnd %29, %18
+  %offset_low_bit = OpINotEqual %31, %19
   return %flag_index, %flag_offset, %index_low_bit, %offset_low_bit
 }
 
@@ -80,10 +80,10 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
   %from_i16 = OpSConvert.i16.i32 %i16 : reg<spirv.id : index>
   %from_i32 = OpCopyObject.i32 %i32 : reg<spirv.id : index>
   %from_i64 = OpSConvert.i64.i32 %i64 : reg<spirv.id : index>
-  %to_i8 = OpSConvert.i32.i8 %coordinate : reg<spirv.id : i8>
-  %to_i16 = OpSConvert.i32.i16 %coordinate : reg<spirv.id : i16>
-  %to_i32 = OpCopyObject.i32 %coordinate : reg<spirv.id : i32>
-  %to_i64 = OpSConvert.i32.i64 %coordinate : reg<spirv.id : i64>
+  %to_i8 = OpSConvert.i32.i8 %coordinate
+  %to_i16 = OpSConvert.i32.i16 %coordinate
+  %to_i32 = OpCopyObject.i32 %coordinate
+  %to_i64 = OpSConvert.i32.i64 %coordinate
   return %from_i8, %from_i16, %from_i32, %from_i64, %to_i8, %to_i16, %to_i32, %to_i64
 }
 
@@ -113,12 +113,12 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
   %from_i32 = OpUConvert.u32.offset64 %39
   %from_i64 = OpBitcast.i64.offset64 %i64
   %42 = OpUConvert.offset64.u8 %byte_offset
-  %to_i8 = OpBitcast.u8.i8 %42 : reg<spirv.id : i8>
+  %to_i8 = OpBitcast.u8.i8 %42
   %44 = OpUConvert.offset64.u16 %byte_offset
-  %to_i16 = OpBitcast.u16.i16 %44 : reg<spirv.id : i16>
+  %to_i16 = OpBitcast.u16.i16 %44
   %46 = OpUConvert.offset64.u32 %byte_offset
-  %to_i32 = OpBitcast.u32.i32 %46 : reg<spirv.id : i32>
-  %to_i64 = OpBitcast.offset64.i64 %byte_offset : reg<spirv.id : i64>
+  %to_i32 = OpBitcast.u32.i32 %46
+  %to_i64 = OpBitcast.offset64.i64 %byte_offset
   return %from_i8, %from_i16, %from_i32, %from_i64, %to_i8, %to_i16, %to_i32, %to_i64
 }
 

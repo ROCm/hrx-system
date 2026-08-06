@@ -29,7 +29,6 @@ from loom.target.contracts import (
     OrdinalValueAliasRule,
     ResultTypeBinding,
     Scalar,
-    SourceValueKind,
     TypePattern,
     ValueAliasRule,
     ValueRef,
@@ -215,16 +214,13 @@ def _integer_view_emit(
     descriptor_key: str,
     input_ref: ValueRef,
     output_ref: ValueRef,
-    result_type: TypePattern,
+    result_type: ResultTypeBinding,
 ) -> EmitDescriptorOp:
-    result_type_binding: ResultTypeBinding = result_type
-    if output_ref.kind == SourceValueKind.TEMPORARY:
-        result_type_binding = DescriptorResultType()
     return _emit(
         _descriptor(descriptor_key),
         operands={"input": input_ref},
         results={"dst": output_ref},
-        result_types={"dst": result_type_binding},
+        result_types={"dst": result_type},
     )
 
 
@@ -445,7 +441,7 @@ def _payload_offset_cast_rules() -> tuple[DescriptorRule, ...]:
                         f"spirv.op_bitcast.{signed_suffix}.{unsigned_suffix}",
                         ValueRef.operand("input"),
                         ValueRef.temporary("unsigned_input"),
-                        payload_type,
+                        DescriptorResultType(),
                     ),
                     _emit(
                         to_offset,
@@ -515,7 +511,7 @@ def _address_cast_rules() -> tuple[DescriptorRule | ValueAliasRule, ...]:
                     "spirv.op_bitcast.i32.u32",
                     ValueRef.operand("input"),
                     ValueRef.temporary("unsigned_input"),
-                    _INDEX,
+                    DescriptorResultType(),
                 ),
                 _emit(
                     to_offset,
@@ -653,7 +649,7 @@ def _index_scale_rule() -> DescriptorRule:
                 "spirv.op_bitcast.i32.u32",
                 ValueRef.operand("index"),
                 ValueRef.temporary("unsigned_index"),
-                _INDEX,
+                DescriptorResultType(),
             ),
             _emit(
                 _descriptor("spirv.op_uconvert.u32.offset64"),
@@ -711,13 +707,13 @@ def _index_unsigned_binary_rule(
                 "spirv.op_bitcast.i32.u32",
                 ValueRef.operand("lhs"),
                 ValueRef.temporary("unsigned_lhs"),
-                _INDEX,
+                DescriptorResultType(),
             ),
             _integer_view_emit(
                 "spirv.op_bitcast.i32.u32",
                 ValueRef.operand("rhs"),
                 ValueRef.temporary("unsigned_rhs"),
-                _INDEX,
+                DescriptorResultType(),
             ),
             _emit(
                 descriptor,
@@ -1043,13 +1039,13 @@ def _index_compare_rule(predicate: IntegerComparePredicate) -> DescriptorRule:
                 "spirv.op_bitcast.i32.u32",
                 ValueRef.operand("lhs"),
                 ValueRef.temporary("unsigned_lhs"),
-                _INDEX,
+                DescriptorResultType(),
             ),
             _integer_view_emit(
                 "spirv.op_bitcast.i32.u32",
                 ValueRef.operand("rhs"),
                 ValueRef.temporary("unsigned_rhs"),
-                _INDEX,
+                DescriptorResultType(),
             ),
             _emit(
                 descriptor,

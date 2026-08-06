@@ -63,10 +63,17 @@ iree_py_test(
     args = ["loom.target.arch.spirv.descriptors_test"],
     main = "pytest_style_runner.py",
     deps = [
+        ":builtins",
+        ":cooperative_matrix",
         ":descriptors",
         ":ordinary_vector",
         ":ordinary_vector_integer",
+        ":scalar_alu",
+        ":scalar_constant",
+        ":scalar_conversion",
+        ":scalar_memory",
         "//loom/py/loom:core",
+        "//loom/py/loom/target:low_descriptors",
     ],
 )
 

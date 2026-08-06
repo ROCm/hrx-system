@@ -15,14 +15,15 @@ from loom.target.arch.spirv.contracts.ordinary_vector import (
     SPIRV_ORDINARY_VECTOR_CONTRACT_CASES,
 )
 from loom.target.arch.spirv.ordinary_vector import (
+    NATIVE_ORDINARY_VECTOR_LANE_COUNTS,
     ORDINARY_VECTOR_COMPONENT_TYPES,
     ORDINARY_VECTOR_TYPES,
     OrdinaryVectorComponentKind,
 )
 from loom.target.contracts import (
-    DescriptorResultType,
     DescriptorRule,
     SourceValueKind,
+    TypePattern,
     ValueAliasRule,
 )
 
@@ -105,8 +106,8 @@ def test_vector_contract_is_bound_into_the_shipping_fragment() -> None:
     )
 
 
-def test_target_private_results_take_descriptor_owned_types() -> None:
-    temporary_count = 0
+def test_synthesized_results_preserve_exact_source_types() -> None:
+    actual_types: Counter[tuple[str, str, TypePattern]] = Counter()
     for contract_case in SPIRV_ORDINARY_VECTOR_CONTRACT_CASES:
         if not isinstance(contract_case, DescriptorRule):
             continue
@@ -114,12 +115,40 @@ def test_target_private_results_take_descriptor_owned_types() -> None:
             for descriptor_field, result in emit.results.items():
                 if result.kind != SourceValueKind.TEMPORARY:
                     continue
-                temporary_count += 1
                 assert emit.result_types is not None
-                assert isinstance(
-                    emit.result_types[descriptor_field], DescriptorResultType
+                result_type = emit.result_types[descriptor_field]
+                assert isinstance(result_type, TypePattern)
+                actual_types[(emit.descriptor.key, descriptor_field, result_type)] += 1
+
+    expected_types: Counter[tuple[str, str, TypePattern]] = Counter()
+    for vector_type in ORDINARY_VECTOR_TYPES:
+        expected_types[
+            (
+                f"spirv.op_composite_construct.v{vector_type.lane_count}bool",
+                "dst",
+                TypePattern.vector("i1", lanes=vector_type.lane_count),
+            )
+        ] += 1
+    for component_type in ORDINARY_VECTOR_COMPONENT_TYPES:
+        if component_type.kind == OrdinaryVectorComponentKind.BOOLEAN:
+            descriptor_keys = (
+                "spirv.op_constant_false.bool",
+                "spirv.op_constant_true.bool",
+            )
+        elif component_type.kind == OrdinaryVectorComponentKind.OFFSET:
+            descriptor_keys = ("spirv.op_constant.offset64",)
+        else:
+            descriptor_keys = (f"spirv.op_constant.{component_type.suffix}",)
+        for descriptor_key in descriptor_keys:
+            expected_types[
+                (
+                    descriptor_key,
+                    "dst",
+                    TypePattern.scalar(component_type.source_types[0]),
                 )
-    assert temporary_count == 63
+            ] += len(NATIVE_ORDINARY_VECTOR_LANE_COUNTS)
+
+    assert actual_types == expected_types
 
 
 def test_vector_contract_contains_no_arithmetic_or_conversion_rows() -> None:

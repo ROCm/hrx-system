@@ -2,7 +2,7 @@
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_iadd_ids_allocate_logical_ids(%lhs: reg<spirv.id>, %rhs: reg<spirv.id>) -> (reg<spirv.id>) asm {
+low.func.def target<spirv.logical.core>(@target) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_iadd_ids_allocate_logical_ids(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %sum = OpIAdd %lhs, %rhs
   return %sum
 }
@@ -91,7 +91,7 @@ low.func.def target<spirv.logical.core>(@target) abi_layout({spirv_result_value_
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) abi_layout({spirv_result_value_types = [23]}) @spirv_storage_buffer_load_store(%base: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id>) asm {
+low.func.def target<spirv.logical.core>(@target) abi_layout({spirv_result_value_types = [23]}) @spirv_storage_buffer_load_store(%base: reg<spirv.ptr.storage_buffer>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
   %ptr = OpPtrAccessChain.storage_buffer.i32.byte_offset %base, %byte_offset
   %loaded = OpLoad.storage_buffer.i32 %ptr
   OpStore.storage_buffer.i32 %ptr, %loaded
@@ -118,7 +118,7 @@ classes:
 
 spirv.target<vulkan1_3> @target
 
-low.func.def target<spirv.logical.core>(@target) abi_layout({spirv_result_value_types = [23]}) @spirv_storage_buffer_bda_addressing(%base: reg<spirv.ptr.storage_buffer>, %row: reg<spirv.offset64>, %column: reg<spirv.offset64>) -> (reg<spirv.id>) asm {
+low.func.def target<spirv.logical.core>(@target) abi_layout({spirv_result_value_types = [23]}) @spirv_storage_buffer_bda_addressing(%base: reg<spirv.ptr.storage_buffer>, %row: reg<spirv.offset64>, %column: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
   %byte_offset = OpIAdd.offset64 %row, %column
   %ptr = OpPtrAccessChain.storage_buffer.i32.byte_offset %base, %byte_offset
   %loaded = OpLoad.storage_buffer.i32 %ptr

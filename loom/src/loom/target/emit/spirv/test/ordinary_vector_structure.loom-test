@@ -4,24 +4,24 @@
 spirv.target<vulkan1_3> @target
 
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @ordinary_vector_structure() asm {
-  %one = OpConstant.i32 1 : reg<spirv.id : i32>
-  %two = OpConstant.i32 2 : reg<spirv.id : i32>
-  %three = OpConstant.i32 3 : reg<spirv.id : i32>
-  %four = OpConstant.i32 4 : reg<spirv.id : i32>
-  %five = OpConstant.i32 5 : reg<spirv.id : i32>
-  %six = OpConstant.i32 6 : reg<spirv.id : i32>
-  %seven = OpConstant.i32 7 : reg<spirv.id : i32>
-  %eight = OpConstant.i32 8 : reg<spirv.id : i32>
-  %replacement = OpConstant.i32 9 : reg<spirv.id : i32>
+  %one = OpConstant.i32 1
+  %two = OpConstant.i32 2
+  %three = OpConstant.i32 3
+  %four = OpConstant.i32 4
+  %five = OpConstant.i32 5
+  %six = OpConstant.i32 6
+  %seven = OpConstant.i32 7
+  %eight = OpConstant.i32 8
+  %replacement = OpConstant.i32 9
   %values = OpCompositeConstruct.v4i32 %one, %two, %three, %four
   %alternates = OpCompositeConstruct.v4i32 %five, %six, %seven, %eight
-  %true = OpConstantTrue.bool : reg<spirv.id : i1>
-  %false = OpConstantFalse.bool : reg<spirv.id : i1>
+  %true = OpConstantTrue.bool
+  %false = OpConstantFalse.bool
   %mask = OpCompositeConstruct.v4bool %true, %false, %true, %false
   %selected = OpSelect.v4i32 %mask, %values, %alternates
   %inserted = OpCompositeInsert.i32.v4i32 %replacement, %selected, 2
   %extracted = OpCompositeExtract.v4i32.i32 %inserted, 2
-  %condition = OpIEqual %extracted, %replacement : reg<spirv.id : i1>
+  %condition = OpIEqual %extracted, %replacement
   low.scf.if %condition {
     OpControlBarrier.workgroup.workgroup.acq_rel
   }

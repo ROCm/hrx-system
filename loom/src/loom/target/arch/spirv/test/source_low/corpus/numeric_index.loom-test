@@ -27,9 +27,9 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_lay
   %div = OpBitcast.u32.i32 %40 : reg<spirv.id : index>
   %44 = OpUMod.u32 %38, %39
   %rem = OpBitcast.u32.i32 %44 : reg<spirv.id : index>
-  %46 = OpSLessThan %lhs, %rhs : reg<spirv.id : i1>
+  %46 = OpSLessThan %lhs, %rhs
   %min = OpSelect %46, %lhs, %rhs : reg<spirv.id : index>
-  %48 = OpSGreaterThan %lhs, %rhs : reg<spirv.id : i1>
+  %48 = OpSGreaterThan %lhs, %rhs
   %max = OpSelect %48, %lhs, %rhs : reg<spirv.id : index>
   %madd = OpIMulAdd %lhs, %rhs, %sub : reg<spirv.id : index>
   %52 = OpUConvert.u32.offset64 %38
@@ -134,18 +134,18 @@ func.def target(@target) @index_compare_select(%lhs: index, %rhs: index) -> (i1,
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 23]}) @index_compare_select(%lhs: reg<spirv.id : index>, %rhs: reg<spirv.id : index>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : index>) asm {
-  %eq = OpIEqual %lhs, %rhs : reg<spirv.id : i1>
-  %ne = OpINotEqual %lhs, %rhs : reg<spirv.id : i1>
-  %slt = OpSLessThan %lhs, %rhs : reg<spirv.id : i1>
-  %sle = OpSLessThanEqual %lhs, %rhs : reg<spirv.id : i1>
-  %sgt = OpSGreaterThan %lhs, %rhs : reg<spirv.id : i1>
-  %sge = OpSGreaterThanEqual %lhs, %rhs : reg<spirv.id : i1>
+  %eq = OpIEqual %lhs, %rhs
+  %ne = OpINotEqual %lhs, %rhs
+  %slt = OpSLessThan %lhs, %rhs
+  %sle = OpSLessThanEqual %lhs, %rhs
+  %sgt = OpSGreaterThan %lhs, %rhs
+  %sge = OpSGreaterThanEqual %lhs, %rhs
   %43 = OpBitcast.i32.u32 %lhs
   %44 = OpBitcast.i32.u32 %rhs
-  %ult = OpULessThan.u32 %43, %44 : reg<spirv.id : i1>
-  %ule = OpULessThanEqual.u32 %43, %44 : reg<spirv.id : i1>
-  %ugt = OpUGreaterThan.u32 %43, %44 : reg<spirv.id : i1>
-  %uge = OpUGreaterThanEqual.u32 %43, %44 : reg<spirv.id : i1>
+  %ult = OpULessThan.u32 %43, %44
+  %ule = OpULessThanEqual.u32 %43, %44
+  %ugt = OpUGreaterThan.u32 %43, %44
+  %uge = OpUGreaterThanEqual.u32 %43, %44
   %selected = OpSelect %ult, %lhs, %rhs : reg<spirv.id : index>
   return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected
 }
@@ -170,18 +170,18 @@ func.def target(@target) @offset_compare_select(%lhs: offset, %rhs: offset) -> (
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0]}) @offset_compare_select(%lhs: reg<spirv.offset64>, %rhs: reg<spirv.offset64>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.offset64>) asm {
-  %eq = OpIEqual.offset64 %lhs, %rhs : reg<spirv.id : i1>
-  %ne = OpINotEqual.offset64 %lhs, %rhs : reg<spirv.id : i1>
+  %eq = OpIEqual.offset64 %lhs, %rhs
+  %ne = OpINotEqual.offset64 %lhs, %rhs
   %39 = OpBitcast.offset64.i64 %lhs
   %40 = OpBitcast.offset64.i64 %rhs
-  %slt = OpSLessThan.i64 %39, %40 : reg<spirv.id : i1>
-  %sle = OpSLessThanEqual.i64 %39, %40 : reg<spirv.id : i1>
-  %sgt = OpSGreaterThan.i64 %39, %40 : reg<spirv.id : i1>
-  %sge = OpSGreaterThanEqual.i64 %39, %40 : reg<spirv.id : i1>
-  %ult = OpULessThan.offset64 %lhs, %rhs : reg<spirv.id : i1>
-  %ule = OpULessThanEqual.offset64 %lhs, %rhs : reg<spirv.id : i1>
-  %ugt = OpUGreaterThan.offset64 %lhs, %rhs : reg<spirv.id : i1>
-  %uge = OpUGreaterThanEqual.offset64 %lhs, %rhs : reg<spirv.id : i1>
+  %slt = OpSLessThan.i64 %39, %40
+  %sle = OpSLessThanEqual.i64 %39, %40
+  %sgt = OpSGreaterThan.i64 %39, %40
+  %sge = OpSGreaterThanEqual.i64 %39, %40
+  %ult = OpULessThan.offset64 %lhs, %rhs
+  %ule = OpULessThanEqual.offset64 %lhs, %rhs
+  %ugt = OpUGreaterThan.offset64 %lhs, %rhs
+  %uge = OpUGreaterThanEqual.offset64 %lhs, %rhs
   %selected = OpSelect.offset64 %ult, %lhs, %rhs
   return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected
 }
