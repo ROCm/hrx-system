@@ -26,6 +26,13 @@ iree_status_t loom_low_build_register_type(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id,
     uint32_t unit_count, loom_type_t* out_type);
 
+// Creates a reg<... : value_type> selected by descriptor-set register-class
+// ID and interns its recursively structural value type into |module|.
+iree_status_t loom_low_build_typed_register_type(
+    loom_module_t* module, const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t reg_class_id, uint32_t unit_count, loom_type_t value_type,
+    loom_type_t* out_type);
+
 // Builds the register type for a descriptor's first implicit resource operand.
 // The descriptor must provide at least one non-immediate register-class form.
 iree_status_t loom_low_build_descriptor_implicit_resource_type(

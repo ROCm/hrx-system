@@ -833,7 +833,7 @@ iree_status_t loom_amdgpu_bind_register_u32_lane_constants(
   IREE_ASSERT(loom_low_type_is_register(result_type));
   IREE_ASSERT_EQ(loom_low_register_type_unit_count(result_type), lane_count);
   const loom_type_t lane_type =
-      loom_low_register_type_with_unit_count(result_type, 1);
+      loom_low_register_carrier_type_with_unit_count(result_type, 1);
 
   loom_value_id_t low_lane_values[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
   for (uint32_t i = 0; i < lane_count; ++i) {

@@ -106,6 +106,20 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "builder_test",
+    srcs = ["builder_test.cc"],
+    deps = [
+        ":builder",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/test:descriptors",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "requirements",
     testonly = True,

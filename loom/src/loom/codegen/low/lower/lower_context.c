@@ -14,6 +14,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/registers.h"
 
 static iree_string_view_t loom_low_lower_nonempty(
     iree_string_view_t value, iree_string_view_t placeholder) {
@@ -109,6 +110,18 @@ iree_status_t loom_low_lower_emit_source_type_unsupported(
   };
   return loom_low_lower_emit_target_context_error(
       context, source_op, LOOM_ERR_TARGET_033, params, IREE_ARRAYSIZE(params));
+}
+
+iree_status_t loom_low_lower_emit_register_width_relation_unsupported(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_type_t actual_type, uint32_t result_unit_count) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_type(actual_type),
+      loom_param_u32(loom_low_register_type_unit_count(actual_type)),
+      loom_param_u32(result_unit_count),
+  };
+  return loom_low_lower_emit_target_context_error(
+      context, source_op, LOOM_ERR_TARGET_066, params, IREE_ARRAYSIZE(params));
 }
 
 iree_status_t loom_low_lower_emit_branch_constraint(
@@ -810,6 +823,14 @@ iree_status_t loom_low_lower_make_register_type(
     uint32_t unit_count, loom_type_t* out_type) {
   return loom_low_build_register_type(context->descriptor_set, reg_class_id,
                                       unit_count, out_type);
+}
+
+iree_status_t loom_low_lower_make_typed_register_type(
+    loom_low_lower_context_t* context, uint16_t reg_class_id,
+    uint32_t unit_count, loom_type_t value_type, loom_type_t* out_type) {
+  return loom_low_build_typed_register_type(
+      loom_low_lower_context_module(context), context->descriptor_set,
+      reg_class_id, unit_count, value_type, out_type);
 }
 
 iree_status_t loom_low_lower_emit_resolved_descriptor_op(

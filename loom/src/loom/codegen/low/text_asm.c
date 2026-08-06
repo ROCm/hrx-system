@@ -799,6 +799,13 @@ loom_low_descriptor_text_asm_result_type_annotation_required(
     return iree_ok_status();
   }
 
+  // The descriptor's carrier alternatives cannot reconstruct a semantic
+  // value type. Keep the annotation unless an exact tied operand supplied the
+  // complete register type above.
+  if (loom_type_register_has_value_type(type)) {
+    return iree_ok_status();
+  }
+
   bool found = false;
   bool ambiguous = false;
   uint16_t reg_class_id = LOOM_LOW_REG_CLASS_NONE;

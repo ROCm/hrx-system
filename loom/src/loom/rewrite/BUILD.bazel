@@ -154,6 +154,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:type_refinement",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/target:registers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

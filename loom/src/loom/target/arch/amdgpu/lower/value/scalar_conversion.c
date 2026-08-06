@@ -576,7 +576,7 @@ static iree_status_t loom_amdgpu_bind_register64_lanes(
     IREE_BUILTIN_UNREACHABLE();
   }
   const loom_type_t result_type =
-      loom_low_register_type_with_unit_count(low_type, 2);
+      loom_low_register_carrier_type_with_unit_count(low_type, 2);
   const loom_value_id_t lanes[] = {
       low_bits,
       high_bits,

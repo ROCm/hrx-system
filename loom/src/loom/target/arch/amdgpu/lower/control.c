@@ -225,9 +225,9 @@ static iree_status_t loom_amdgpu_materialize_uniform_vgpr_address_as_sgpr(
   IREE_ASSERT_GE(register_count, 1);
   IREE_ASSERT_LE(register_count, 2);
   const loom_type_t vgpr_type =
-      loom_low_register_type_with_unit_count(actual_type, 1);
+      loom_low_register_carrier_type_with_unit_count(actual_type, 1);
   const loom_type_t sgpr_type =
-      loom_low_register_type_with_unit_count(required_low_type, 1);
+      loom_low_register_carrier_type_with_unit_count(required_low_type, 1);
   // Address scalars contain at most two 32-bit register units.
   loom_value_id_t sgpr_registers[2] = {
       LOOM_VALUE_ID_INVALID,
@@ -251,7 +251,8 @@ static iree_status_t loom_amdgpu_materialize_uniform_vgpr_address_as_sgpr(
   }
 
   const loom_type_t result_type =
-      loom_low_register_type_with_unit_count(required_low_type, register_count);
+      loom_low_register_carrier_type_with_unit_count(required_low_type,
+                                                     register_count);
   return loom_amdgpu_build_low_register_range(context, source_op,
                                               sgpr_registers, register_count,
                                               result_type, out_low_value_id);
@@ -321,7 +322,7 @@ static iree_status_t loom_amdgpu_materialize_branch_address(
   }
 
   loom_type_t lane_type =
-      loom_low_register_type_with_unit_count(required_low_type, 1);
+      loom_low_register_carrier_type_with_unit_count(required_low_type, 1);
   loom_value_id_t high_zero = LOOM_VALUE_ID_INVALID;
   const uint16_t zero_descriptor = requires_vgpr
                                        ? LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32
@@ -1478,7 +1479,8 @@ static iree_status_t loom_amdgpu_emit_zero_vgpr_value(
     return loom_low_lower_emit_branch_constraint(
         context, source_op, IREE_SV("masked_region_merge_vgpr_values"));
   }
-  loom_type_t lane_type = loom_low_register_type_with_unit_count(value_type, 1);
+  loom_type_t lane_type =
+      loom_low_register_carrier_type_with_unit_count(value_type, 1);
   if (lane_count == 1) {
     return loom_amdgpu_emit_const_u32(context, source_op,
                                       LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 0,
@@ -1505,7 +1507,8 @@ static iree_status_t loom_amdgpu_emit_zero_native_i1_mask(
     return loom_low_lower_emit_branch_constraint(
         context, source_op, IREE_SV("masked_region_merge_vgpr_values"));
   }
-  loom_type_t lane_type = loom_low_register_type_with_unit_count(value_type, 1);
+  loom_type_t lane_type =
+      loom_low_register_carrier_type_with_unit_count(value_type, 1);
   loom_value_id_t zero_lane = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
       context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32, 0, lane_type,
@@ -1686,7 +1689,8 @@ static iree_status_t loom_amdgpu_emit_masked_merge_value(
     return loom_low_lower_emit_branch_constraint(
         context, source_op, IREE_SV("masked_region_merge_vgpr_values"));
   }
-  loom_type_t lane_type = loom_low_register_type_with_unit_count(value_type, 1);
+  loom_type_t lane_type =
+      loom_low_register_carrier_type_with_unit_count(value_type, 1);
   if (lane_count == 1) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32(
         context, source_op, low_false_value, &low_false_value));

@@ -173,6 +173,7 @@ loom_cc_library(
     loom::ir
     loom::ir::type_refinement
     loom::ops::op_defs
+    loom::target::registers
   PUBLIC
 )
 

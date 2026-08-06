@@ -13,6 +13,7 @@
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 #include "loom/ir/type_refinement.h"
+#include "loom/target/registers.h"
 
 #define LOOM_TYPE_PROPAGATION_INITIAL_ORDINAL_CAPACITY 64
 #define LOOM_TYPE_PROPAGATION_INITIAL_LIST_CAPACITY 32
@@ -491,23 +492,17 @@ static iree_status_t loom_type_propagator_refine_property_with_candidate(
       return iree_ok_status();
     case LOOM_PROPERTY_REGISTER_CLASS:
       *out_type = current_type;
-      *out_result = loom_type_is_register(current_type) &&
-                            loom_type_is_register(candidate_type) &&
-                            loom_type_register_payload0(current_type) ==
-                                loom_type_register_payload0(candidate_type) &&
-                            loom_type_register_payload1(current_type) ==
-                                loom_type_register_payload1(candidate_type)
-                        ? LOOM_TYPE_REFINEMENT_UNCHANGED
-                        : LOOM_TYPE_REFINEMENT_CONFLICT;
+      *out_result =
+          loom_low_register_type_same_class(current_type, candidate_type)
+              ? LOOM_TYPE_REFINEMENT_UNCHANGED
+              : LOOM_TYPE_REFINEMENT_CONFLICT;
       return iree_ok_status();
     case LOOM_PROPERTY_REGISTER_UNIT_COUNT:
       *out_type = current_type;
-      *out_result = loom_type_is_register(current_type) &&
-                            loom_type_is_register(candidate_type) &&
-                            loom_type_register_payload1(current_type) ==
-                                loom_type_register_payload1(candidate_type)
-                        ? LOOM_TYPE_REFINEMENT_UNCHANGED
-                        : LOOM_TYPE_REFINEMENT_CONFLICT;
+      *out_result =
+          loom_low_register_type_same_unit_count(current_type, candidate_type)
+              ? LOOM_TYPE_REFINEMENT_UNCHANGED
+              : LOOM_TYPE_REFINEMENT_CONFLICT;
       return iree_ok_status();
     default:
       *out_type = current_type;

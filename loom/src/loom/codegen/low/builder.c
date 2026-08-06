@@ -13,10 +13,9 @@
 #include "loom/ir/module.h"
 #include "loom/target/registers.h"
 
-iree_status_t loom_low_build_register_type(
+static iree_status_t loom_low_validate_register_type_parts(
     const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id,
-    uint32_t unit_count, loom_type_t* out_type) {
-  *out_type = loom_type_none();
+    uint32_t unit_count) {
   if (unit_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "register type unit count must be non-zero");
@@ -27,9 +26,31 @@ iree_status_t loom_low_build_register_type(
                             " is not present in the selected descriptor set",
                             reg_class_id);
   }
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_build_register_type(
+    const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id,
+    uint32_t unit_count, loom_type_t* out_type) {
+  *out_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_low_validate_register_type_parts(
+      descriptor_set, reg_class_id, unit_count));
   *out_type = loom_low_register_type(descriptor_set->stable_id, reg_class_id,
                                      unit_count);
   return iree_ok_status();
+}
+
+iree_status_t loom_low_build_typed_register_type(
+    loom_module_t* module, const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t reg_class_id, uint32_t unit_count, loom_type_t value_type,
+    loom_type_t* out_type) {
+  *out_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(loom_low_validate_register_type_parts(
+      descriptor_set, reg_class_id, unit_count));
+  return loom_module_intern_register_type(
+      module, descriptor_set->stable_id,
+      loom_low_register_type_pack_payload1(reg_class_id, unit_count),
+      value_type, out_type);
 }
 
 iree_status_t loom_low_build_descriptor_implicit_resource_type(

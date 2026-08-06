@@ -1092,6 +1092,7 @@ low_concat = Op(
         SameRegisterClass("sources", "result"),
         RegisterUnitsSumTo("sources", "result"),
     ],
+    verify="loom_low_concat_verify",
     facts="loom_low_concat_facts",
     format=[
         GLUE,

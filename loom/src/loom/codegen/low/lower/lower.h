@@ -1231,6 +1231,12 @@ iree_status_t loom_low_lower_make_register_type(
     loom_low_lower_context_t* context, uint16_t reg_class_id,
     uint32_t unit_count, loom_type_t* out_type);
 
+// Creates a target-low register type carrying a recursively structural
+// semantic value type.
+iree_status_t loom_low_lower_make_typed_register_type(
+    loom_low_lower_context_t* context, uint16_t reg_class_id,
+    uint32_t unit_count, loom_type_t value_type, loom_type_t* out_type);
+
 // Emits a descriptor-backed low.op from a descriptor row resolved during
 // selection.
 iree_status_t loom_low_lower_emit_resolved_descriptor_op(
@@ -1288,6 +1294,12 @@ iree_status_t loom_low_lower_record_memory_report_row(
 iree_status_t loom_low_lower_emit_source_type_unsupported(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     iree_string_view_t field_name, loom_type_t actual_type);
+
+// Emits ERR_TARGET_066 when generic lowering would need to change the carrier
+// width of a typed register without a target-defined semantic relation.
+iree_status_t loom_low_lower_emit_register_width_relation_unsupported(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_type_t actual_type, uint32_t result_unit_count);
 
 // Emits ERR_TARGET_034 for a CFG branch shape rejected by the active
 // target-low policy.
