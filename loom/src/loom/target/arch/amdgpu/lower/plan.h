@@ -857,6 +857,8 @@ typedef struct loom_amdgpu_direct_xor_lane_recipe_t {
 typedef struct loom_amdgpu_subgroup_shuffle_plan_t {
   // Source value moved across subgroup lanes.
   loom_value_id_t value;
+  // Dynamic lane offset interpreted by |mode| when |exact_offset| is absent.
+  loom_value_id_t source_offset;
   // Descriptor row selected for the native cross-lane read.
   loom_low_lower_resolved_descriptor_t descriptor;
   // Result value receiving the moved payload.
@@ -873,8 +875,8 @@ typedef struct loom_amdgpu_subgroup_shuffle_plan_t {
   loom_kernel_subgroup_shuffle_mode_t mode;
   // DPP control or DS swizzle offset used by direct cross-lane packets.
   uint32_t crosslane_immediate;
-  // Exact lane offset or lane index interpreted by mode.
-  uint32_t offset;
+  // Exact lane offset or lane index, or UINT32_MAX when dynamic.
+  uint32_t exact_offset;
   // Exact shuffle segment width from the source op.
   uint32_t width;
   // Exact subgroup width selected by the active target bundle.
