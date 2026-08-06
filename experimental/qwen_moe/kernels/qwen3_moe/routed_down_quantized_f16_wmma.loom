@@ -47,6 +47,99 @@ kernel.decl @qwen3_moe_routed_down_q4k_q8_1_x4(%token_count: index, %input_size:
 
 kernel.decl @qwen3_moe_routed_down_q6k_q8_1_x4(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index) launch(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %route_weights: buffer, %weight: buffer, %output: buffer)
 
+// Acquires the packed words shared by one four-group half of a Q6_K block.
+// Each QL word supplies two groups and the QH word supplies all four.
+func.def inline @qwen3_moe_q6k_wmma_load_half_codes(%weight: buffer, %weight_row_byte_base: offset, %q6_block: index, %q6_half: index, %packet: index) -> (vector<1xi32>, vector<1xi32>, vector<1xi32>) {
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %block_bytes = index.constant 210 : offset
+  %qh_byte_add = index.constant 128 : offset
+  %bounded_half = index.assume %q6_half [range(%q6_half, 0, 1)] : index
+  %bounded_packet = index.assume %packet [range(%packet, 0, 7)] : index
+  %block_byte_add = index.scale %q6_block, %block_bytes : index, offset -> offset
+  %block_byte_base = index.add %weight_row_byte_base, %block_byte_add : offset
+  %qh_byte_base = index.add %block_byte_base, %qh_byte_add : offset
+  %ql_view = buffer.view %weight[%block_byte_base] : buffer -> view<32xi32, #dense>
+  %qh_view = buffer.view %weight[%qh_byte_base] : buffer -> view<16xi32, #dense>
+  %ql_half_word_base = index.mul %bounded_half, %c16 : index
+  %ql0_word_index = index.add %ql_half_word_base, %bounded_packet : index
+  %ql1_word_base = index.add %ql_half_word_base, %c8 : index
+  %ql1_word_index = index.add %ql1_word_base, %bounded_packet : index
+  %qh_half_word_base = index.mul %bounded_half, %c8 : index
+  %qh_word_index = index.add %qh_half_word_base, %bounded_packet : index
+  %ql0_word = vector.load %ql_view[%ql0_word_index] : view<32xi32, #dense> -> vector<1xi32>
+  %ql1_word = vector.load %ql_view[%ql1_word_index] : view<32xi32, #dense> -> vector<1xi32>
+  %qh_word = vector.load %qh_view[%qh_word_index] : view<16xi32, #dense> -> vector<1xi32>
+  func.return %ql0_word, %ql1_word, %qh_word : vector<1xi32>, vector<1xi32>, vector<1xi32>
+}
+
+// Decodes four adjacent values after the surrounding schedule has selected
+// the scale and retained the packed code words at their natural lifetimes.
+func.def inline @qwen3_moe_q6k_wmma_vector4_from_scale_codes(%q6_group: index, %scale_i8: i8, %d_f16: f16, %ql_word: vector<1xi32>, %qh_word: vector<1xi32>) -> (vector<4xf16>) {
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c4_i32v = vector.constant 4 : vector<1xi32>
+  %nibble_mask = vector.constant 252645135 : vector<1xi32>
+  %high_mask = vector.constant 50529027 : vector<1xi32>
+  %c32_f32v = vector.constant 32.0 : vector<4xf32>
+  %bounded_group = index.assume %q6_group [range(%q6_group, 0, 7)] : index
+  %group_in_half = index.rem %bounded_group, %c4 : index
+  %nibble = index.div %group_in_half, %c2 : index
+  %nibble_shift_index = index.mul %nibble, %c4 : index
+  %nibble_shift_i32 = index.cast %nibble_shift_index : index to i32
+  %nibble_shift = vector.splat %nibble_shift_i32 : vector<1xi32>
+  %qh_shift_index = index.mul %group_in_half, %c2 : index
+  %qh_shift_i32 = index.cast %qh_shift_index : index to i32
+  %qh_shift = vector.splat %qh_shift_i32 : vector<1xi32>
+  %ql_shifted = vector.shrui %ql_word, %nibble_shift : vector<1xi32>
+  %ql = vector.andi %ql_shifted, %nibble_mask : vector<1xi32>
+  %qh_shifted = vector.shrui %qh_word, %qh_shift : vector<1xi32>
+  %qh_low = vector.andi %qh_shifted, %high_mask : vector<1xi32>
+  %qh = vector.shli %qh_low, %c4_i32v : vector<1xi32>
+  %code = vector.ori %ql, %qh : vector<1xi32>
+  %code_i8 = vector.bitcast %code : vector<1xi32> to vector<4xi8>
+  %code_f32 = vector.uitofp %code_i8 : vector<4xi8> to vector<4xf32>
+  %centered = vector.subf %code_f32, %c32_f32v : vector<4xf32>
+  %scale = scalar.sitofp %scale_i8 : i8 to f32
+  %d = scalar.extf %d_f16 : f16 to f32
+  %combined_scale = scalar.mulf %scale, %d : f32
+  %combined_scale_vector = vector.splat %combined_scale : vector<4xf32>
+  %values_f32 = vector.mulf %centered, %combined_scale_vector : vector<4xf32>
+  %values = vector.fptrunc %values_f32 : vector<4xf32> to vector<4xf16>
+  func.return %values : vector<4xf16>
+}
+
+// Loads only the group scale and block multiplier while reusing packed words
+// retained by an enclosing four-group half-block schedule.
+func.def inline @qwen3_moe_q6k_wmma_vector4_from_half_codes(%weight: buffer, %weight_row_byte_base: offset, %q6_block: index, %q6_group: index, %packet: index, %ql0_word: vector<1xi32>, %ql1_word: vector<1xi32>, %qh_word: vector<1xi32>) -> (vector<4xf16>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %block_bytes = index.constant 210 : offset
+  %scale_byte_add = index.constant 192 : offset
+  %d_byte_add = index.constant 208 : offset
+  %bounded_group = index.assume %q6_group [range(%q6_group, 0, 7)] : index
+  %bounded_packet = index.assume %packet [range(%packet, 0, 7)] : index
+  %block_byte_add = index.scale %q6_block, %block_bytes : index, offset -> offset
+  %block_byte_base = index.add %weight_row_byte_base, %block_byte_add : offset
+  %scale_byte_base = index.add %block_byte_base, %scale_byte_add : offset
+  %d_byte_base = index.add %block_byte_base, %d_byte_add : offset
+  %scale_view = buffer.view %weight[%scale_byte_base] : buffer -> view<16xi8, #dense>
+  %d_view = buffer.view %weight[%d_byte_base] : buffer -> view<1xf16, #dense>
+  %group_in_half = index.rem %bounded_group, %c4 : index
+  %ql_side = index.rem %group_in_half, %c2 : index
+  %uses_ql1 = index.cmp eq, %ql_side, %c1 : index
+  %ql_word = scf.select %uses_ql1, %ql1_word, %ql0_word : vector<1xi32>
+  %scale_packet_half = index.div %bounded_packet, %c4 : index
+  %scale_group_base = index.mul %bounded_group, %c2 : index
+  %scale_index = index.add %scale_group_base, %scale_packet_half : index
+  %scale_i8 = view.load %scale_view[%scale_index] : view<16xi8, #dense> -> i8
+  %d_f16 = view.load %d_view[%c0] : view<1xf16, #dense> -> f16
+  %values = func.call @qwen3_moe_q6k_wmma_vector4_from_scale_codes(%bounded_group, %scale_i8, %d_f16, %ql_word, %qh_word) : (index, i8, f16, vector<1xi32>, vector<1xi32>) -> (vector<4xf16>)
+  func.return %values : vector<4xf16>
+}
+
 // Shared raw-quantized matrix schedule. Entry points pass a literal weight
 // format so linking and JIT specialization erase the inactive packed decoder.
 func.template<qwen3_moe.routed_down.quantized_prefill.body> device @qwen3_moe_routed_down_quantized_f16_wmma_body(%weight_format: index, %token_count: index, %input: buffer, %expert_table: buffer, %weight: buffer, %output: buffer) {
@@ -201,11 +294,11 @@ func.template<qwen3_moe.routed_down.quantized_prefill.body> device @qwen3_moe_ro
         %next_header3 = scf.select %updates_header3, %loaded_header, %prior_header3 : vector<4xi32>
         scf.yield %next_header0, %next_header1, %next_header2, %next_header3 : vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>
       }
-      %quant_group_outer_count = scf.select %is_q4, %c4, %c8 : index
-      %groups_per_outer = scf.select %is_q4, %c2, %c1 : index
+      %quant_group_outer_count = scf.select %is_q4, %c4, %c2 : index
+      %groups_per_outer = scf.select %is_q4, %c2, %c4 : index
       %block_result00, %block_result01, %block_result10, %block_result11 = scf.for %quant_group_outer = [%c0 to %quant_group_outer_count step %c1](%acc00 = %block_acc00 : vector<8xf16>, %acc01 = %block_acc01 : vector<8xf16>, %acc10 = %block_acc10 : vector<8xf16>, %acc11 = %block_acc11 : vector<8xf16>) -> (vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>) {
         // Q4_K retains one packed code word across its adjacent low/high group
-        // pair. Q6_K specializes this into eight one-group outer iterations.
+        // pair. The Q6 specialization erases this acquisition path.
         %q_word0, %q_word1, %q_word2, %q_word3 = scf.for %code_row_offset = [%c0 to %c64 step %c16](%prior_q_word0 = %c0_i32x1 : vector<1xi32>, %prior_q_word1 = %c0_i32x1 : vector<1xi32>, %prior_q_word2 = %c0_i32x1 : vector<1xi32>, %prior_q_word3 = %c0_i32x1 : vector<1xi32>) -> (vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>) unroll {
           %code_local_row0 = index.add %load_row, %code_row_offset : index
           %code_local_row = index.assume %code_local_row0 [range(%code_local_row0, 0, 63)] : index
@@ -232,6 +325,43 @@ func.template<qwen3_moe.routed_down.quantized_prefill.body> device @qwen3_moe_ro
           %next_q_word3 = scf.select %updates_q_word3, %loaded_q_word, %prior_q_word3 : vector<1xi32>
           scf.yield %next_q_word0, %next_q_word1, %next_q_word2, %next_q_word3 : vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>
         }
+        // Four Q6_K groups in one half-block share a QH word and consume two
+        // nibbles from each of two QL words. Retain the three packed words for
+        // all four groups. The Q4 specialization erases this acquisition path.
+        %q6_ql00, %q6_ql10, %q6_qh0, %q6_ql01, %q6_ql11, %q6_qh1, %q6_ql02, %q6_ql12, %q6_qh2, %q6_ql03, %q6_ql13, %q6_qh3 = scf.for %q6_code_row_offset = [%c0 to %c64 step %c16](%prior_q6_ql00 = %c0_i32x1 : vector<1xi32>, %prior_q6_ql10 = %c0_i32x1 : vector<1xi32>, %prior_q6_qh0 = %c0_i32x1 : vector<1xi32>, %prior_q6_ql01 = %c0_i32x1 : vector<1xi32>, %prior_q6_ql11 = %c0_i32x1 : vector<1xi32>, %prior_q6_qh1 = %c0_i32x1 : vector<1xi32>, %prior_q6_ql02 = %c0_i32x1 : vector<1xi32>, %prior_q6_ql12 = %c0_i32x1 : vector<1xi32>, %prior_q6_qh2 = %c0_i32x1 : vector<1xi32>, %prior_q6_ql03 = %c0_i32x1 : vector<1xi32>, %prior_q6_ql13 = %c0_i32x1 : vector<1xi32>, %prior_q6_qh3 = %c0_i32x1 : vector<1xi32>) -> (vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>) unroll {
+          %q6_code_local_row0 = index.add %load_row, %q6_code_row_offset : index
+          %q6_code_local_row = index.assume %q6_code_local_row0 [range(%q6_code_local_row0, 0, 63)] : index
+          %q6_code_channel = index.add %channel_tile_base, %q6_code_local_row : index
+          %valid_q6_code_channel = index.cmp ult, %q6_code_channel, %bounded_output_size : index
+          %loads_q6_code = scalar.andi %is_q6, %valid_q6_code_channel : i1
+          %loaded_q6_ql0, %loaded_q6_ql1, %loaded_q6_qh = scf.if %loads_q6_code -> (vector<1xi32>, vector<1xi32>, vector<1xi32>) {
+            %q6_half = index.assume %quant_group_outer [range(%quant_group_outer, 0, 1)] : index
+            %q6_code_channel_byte_add = index.mul %q6_code_channel, %weight_row_bytes : index
+            %q6_code_row_byte_index = index.add %expert_byte_base, %q6_code_channel_byte_add : index
+            %q6_code_row_byte_base = index.cast %q6_code_row_byte_index : index to offset
+            %ql0_word, %ql1_word, %qh_word = func.call @qwen3_moe_q6k_wmma_load_half_codes(%weight_noalias, %q6_code_row_byte_base, %quant_block, %q6_half, %load_packet) : (buffer, offset, index, index, index) -> (vector<1xi32>, vector<1xi32>, vector<1xi32>)
+            scf.yield %ql0_word, %ql1_word, %qh_word : vector<1xi32>, vector<1xi32>, vector<1xi32>
+          } else {
+            scf.yield %c0_i32x1, %c0_i32x1, %c0_i32x1 : vector<1xi32>, vector<1xi32>, vector<1xi32>
+          }
+          %updates_q6_code0 = index.cmp eq, %q6_code_row_offset, %c0 : index
+          %updates_q6_code1 = index.cmp eq, %q6_code_row_offset, %c16 : index
+          %updates_q6_code2 = index.cmp eq, %q6_code_row_offset, %c32 : index
+          %updates_q6_code3 = index.cmp eq, %q6_code_row_offset, %c48 : index
+          %next_q6_ql00 = scf.select %updates_q6_code0, %loaded_q6_ql0, %prior_q6_ql00 : vector<1xi32>
+          %next_q6_ql10 = scf.select %updates_q6_code0, %loaded_q6_ql1, %prior_q6_ql10 : vector<1xi32>
+          %next_q6_qh0 = scf.select %updates_q6_code0, %loaded_q6_qh, %prior_q6_qh0 : vector<1xi32>
+          %next_q6_ql01 = scf.select %updates_q6_code1, %loaded_q6_ql0, %prior_q6_ql01 : vector<1xi32>
+          %next_q6_ql11 = scf.select %updates_q6_code1, %loaded_q6_ql1, %prior_q6_ql11 : vector<1xi32>
+          %next_q6_qh1 = scf.select %updates_q6_code1, %loaded_q6_qh, %prior_q6_qh1 : vector<1xi32>
+          %next_q6_ql02 = scf.select %updates_q6_code2, %loaded_q6_ql0, %prior_q6_ql02 : vector<1xi32>
+          %next_q6_ql12 = scf.select %updates_q6_code2, %loaded_q6_ql1, %prior_q6_ql12 : vector<1xi32>
+          %next_q6_qh2 = scf.select %updates_q6_code2, %loaded_q6_qh, %prior_q6_qh2 : vector<1xi32>
+          %next_q6_ql03 = scf.select %updates_q6_code3, %loaded_q6_ql0, %prior_q6_ql03 : vector<1xi32>
+          %next_q6_ql13 = scf.select %updates_q6_code3, %loaded_q6_ql1, %prior_q6_ql13 : vector<1xi32>
+          %next_q6_qh3 = scf.select %updates_q6_code3, %loaded_q6_qh, %prior_q6_qh3 : vector<1xi32>
+          scf.yield %next_q6_ql00, %next_q6_ql10, %next_q6_qh0, %next_q6_ql01, %next_q6_ql11, %next_q6_qh1, %next_q6_ql02, %next_q6_ql12, %next_q6_qh2, %next_q6_ql03, %next_q6_ql13, %next_q6_qh3 : vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>, vector<1xi32>
+        }
         %outer_result00, %outer_result01, %outer_result10, %outer_result11 = scf.for %group_within_outer = [%c0 to %groups_per_outer step %c1](%group_acc00 = %acc00 : vector<8xf16>, %group_acc01 = %acc01 : vector<8xf16>, %group_acc10 = %acc10 : vector<8xf16>, %group_acc11 = %acc11 : vector<8xf16>) -> (vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>) {
           %quant_group_base = index.mul %quant_group_outer, %groups_per_outer : index
           %quant_group0 = index.add %quant_group_base, %group_within_outer : index
@@ -251,6 +381,15 @@ func.template<qwen3_moe.routed_down.quantized_prefill.body> device @qwen3_moe_ro
             %selected_q_word01 = scf.select %selects_row0, %q_word0, %q_word1 : vector<1xi32>
             %selected_q_word23 = scf.select %selects_row2, %q_word2, %q_word3 : vector<1xi32>
             %selected_q_word = scf.select %selects_low_row_pair, %selected_q_word01, %selected_q_word23 : vector<1xi32>
+            %selected_q6_ql0_01 = scf.select %selects_row0, %q6_ql00, %q6_ql01 : vector<1xi32>
+            %selected_q6_ql0_23 = scf.select %selects_row2, %q6_ql02, %q6_ql03 : vector<1xi32>
+            %selected_q6_ql0 = scf.select %selects_low_row_pair, %selected_q6_ql0_01, %selected_q6_ql0_23 : vector<1xi32>
+            %selected_q6_ql1_01 = scf.select %selects_row0, %q6_ql10, %q6_ql11 : vector<1xi32>
+            %selected_q6_ql1_23 = scf.select %selects_row2, %q6_ql12, %q6_ql13 : vector<1xi32>
+            %selected_q6_ql1 = scf.select %selects_low_row_pair, %selected_q6_ql1_01, %selected_q6_ql1_23 : vector<1xi32>
+            %selected_q6_qh01 = scf.select %selects_row0, %q6_qh0, %q6_qh1 : vector<1xi32>
+            %selected_q6_qh23 = scf.select %selects_row2, %q6_qh2, %q6_qh3 : vector<1xi32>
+            %selected_q6_qh = scf.select %selects_low_row_pair, %selected_q6_qh01, %selected_q6_qh23 : vector<1xi32>
             %channel = index.add %channel_tile_base, %local_row : index
             %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
             %weight_values = scf.if %valid_channel -> (vector<4xf16>) {
@@ -258,7 +397,7 @@ func.template<qwen3_moe.routed_down.quantized_prefill.body> device @qwen3_moe_ro
                 %channel_byte_add = index.mul %channel, %weight_row_bytes : index
                 %row_byte_index = index.add %expert_byte_base, %channel_byte_add : index
                 %row_byte_base = index.cast %row_byte_index : index to offset
-                %q6_values = func.call @ggml_q6k_f16_vector4(%weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet) : (buffer, offset, index, index, index) -> (vector<4xf16>)
+                %q6_values = func.call @qwen3_moe_q6k_wmma_vector4_from_half_codes(%weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet, %selected_q6_ql0, %selected_q6_ql1, %selected_q6_qh) : (buffer, offset, index, index, index, vector<1xi32>, vector<1xi32>, vector<1xi32>) -> (vector<4xf16>)
                 scf.yield %q6_values : vector<4xf16>
               } else {
                 %q4_values = func.call @qwen3_moe_q4k_wmma_vector4_from_header_code(%quant_group, %selected_header, %selected_q_word) : (index, vector<4xi32>, vector<1xi32>) -> (vector<4xf16>)
