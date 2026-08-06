@@ -164,6 +164,25 @@ low.func.def target<amdgpu.rdna3.core>(@target) @global_load_saddr_source_reuse_
   s_endpgm
 
 // ====
+// RUN: emit amdgpu-assembly @gfx1170_vcc_dependency_delay strategy=source
+
+amdgpu.target<gfx1170> @target
+low.func.def target<amdgpu.rdna4m.core>(@target) @gfx1170_vcc_dependency_delay(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  %mask = v_cmp_lt_i32 %lhs, %rhs
+  %saved_exec, %active = s_and_saveexec_b64 %mask
+  return
+}
+
+// LLVM classifies gfx1170-gfx1172 as GFX11 targets and runs its S_DELAY_ALU
+// insertion pass for the family. Loom must preserve the same dependent VCC
+// scheduling contract rather than treating RDNA 4m as hazard-free.
+// ----
+  v_cmp_lt_i32 s[0:1], v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
+  s_and_saveexec_b64 s[0:1], s[0:1]
+  s_endpgm
+
+// ====
 // RUN: emit amdgpu-assembly @global_load_saddr_source_reuse_across_branch_assembly strategy=source amdgpu.sgpr=4
 
 amdgpu.target<gfx1100> @target

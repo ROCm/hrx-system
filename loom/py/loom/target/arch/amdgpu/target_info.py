@@ -1127,6 +1127,7 @@ def rdna4m_processor_info(
         default_wavefront_size=32,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA3_GFX11,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
+        scheduling_bits=AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
         occupancy=AMDGPU_OCCUPANCY_RDNA_1024,
     )
 

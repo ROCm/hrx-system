@@ -40,6 +40,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX1250,
     AMDGPU_MATRIX_FEATURES_BY_PROFILE,
     AMDGPU_PROCESSOR_INFOS,
+    AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU,
     AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE,
     AMDGPU_TARGET_ID_FEATURE_SUPPORT_SRAMECC,
     AMDGPU_TARGET_ID_FEATURE_SUPPORT_XNACK,
@@ -179,6 +180,20 @@ def test_rdna4m_processors_publish_gfx12_matrix_contracts() -> None:
     assert set(processors) == {"gfx1170", "gfx1171", "gfx1172"}
     assert all(
         info.features.matrix == AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12
+        for info in processors.values()
+    )
+
+
+def test_rdna4m_processors_publish_delay_alu_scheduling() -> None:
+    processors = {
+        info.processor: info
+        for info in AMDGPU_PROCESSOR_INFOS
+        if info.processor in ("gfx1170", "gfx1171", "gfx1172")
+    }
+
+    assert set(processors) == {"gfx1170", "gfx1171", "gfx1172"}
+    assert all(
+        info.features.scheduling == AMDGPU_PROCESSOR_SCHEDULING_DELAY_ALU
         for info in processors.values()
     )
 
