@@ -22,13 +22,19 @@ class OrdinaryVectorComponentKind(Enum):
 
     BOOLEAN = "boolean"
     SIGNED_INTEGER = "signed_integer"
+    UNSIGNED_INTEGER = "unsigned_integer"
     FLOAT = "float"
     OFFSET = "offset"
 
 
 @dataclass(frozen=True, slots=True)
 class OrdinaryVectorComponentType:
-    """One source component representation admitted by the vector contract."""
+    """One target component representation used by the vector contract.
+
+    Public component types name the Loom source types that may select them.
+    Target-private unsigned views have no source types and remain outside
+    ``ORDINARY_VECTOR_COMPONENT_TYPES``.
+    """
 
     source_types: tuple[str, ...]
     suffix: str
@@ -38,7 +44,15 @@ class OrdinaryVectorComponentType:
     feature_atoms: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.source_types:
+        if (
+            self.kind == OrdinaryVectorComponentKind.UNSIGNED_INTEGER
+            and self.source_types
+        ):
+            raise ValueError("unsigned vector views must be source-ineligible")
+        if (
+            self.kind != OrdinaryVectorComponentKind.UNSIGNED_INTEGER
+            and not self.source_types
+        ):
             raise ValueError("ordinary-vector component requires a source type")
         if self.bit_width <= 0:
             raise ValueError("ordinary-vector component bit width must be positive")
@@ -79,7 +93,7 @@ class OrdinaryVectorComponentType:
         return (2 ** (self.bit_width - 1)) - 1
 
 
-_SIGNED_INTEGER_COMPONENTS = tuple(
+SIGNED_INTEGER_ORDINARY_VECTOR_COMPONENT_TYPES = tuple(
     OrdinaryVectorComponentType(
         source_types=(
             (scalar_pair.source_type, "index")
@@ -117,7 +131,7 @@ BOOLEAN_ORDINARY_VECTOR_COMPONENT_TYPE = OrdinaryVectorComponentType(
 
 ORDINARY_VECTOR_COMPONENT_TYPES = (
     BOOLEAN_ORDINARY_VECTOR_COMPONENT_TYPE,
-    *_SIGNED_INTEGER_COMPONENTS,
+    *SIGNED_INTEGER_ORDINARY_VECTOR_COMPONENT_TYPES,
     OrdinaryVectorComponentType(
         source_types=("offset",),
         suffix="offset64",

@@ -41,6 +41,9 @@ from loom.target.arch.spirv.ordinary_vector import (  # noqa: E402
     OrdinaryVectorInstructionType,
     OrdinaryVectorType,
 )
+from loom.target.arch.spirv.ordinary_vector_integer import (  # noqa: E402
+    ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
+)
 from loom.target.arch.spirv.scalar_alu import (  # noqa: E402
     BOOLEAN_BINARY_OPERATIONS,
     BOOLEAN_CONSTANTS,
@@ -609,7 +612,10 @@ def _ordinary_vector_rows() -> list[_PacketRow]:
             result_count=1,
             immediate_index=(0 if row.component_index_maximum is not None else None),
         )
-        for row in ORDINARY_VECTOR_INSTRUCTIONS
+        for row in (
+            *ORDINARY_VECTOR_INSTRUCTIONS,
+            *ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
+        )
     ]
 
 

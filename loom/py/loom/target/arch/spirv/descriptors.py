@@ -26,6 +26,9 @@ from loom.target.arch.spirv.ordinary_vector import (
     OrdinaryVectorInstruction,
     OrdinaryVectorInstructionType,
 )
+from loom.target.arch.spirv.ordinary_vector_integer import (
+    ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
+)
 from loom.target.arch.spirv.scalar_alu import (
     BOOLEAN_BINARY_OPERATIONS,
     BOOLEAN_CONSTANTS,
@@ -1200,6 +1203,10 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
         *_scalar_binary_descriptors(),
         *_conversion_descriptors(),
         *(_ordinary_vector_descriptor(row) for row in ORDINARY_VECTOR_INSTRUCTIONS),
+        *(
+            _ordinary_vector_descriptor(row)
+            for row in ORDINARY_VECTOR_INTEGER_INSTRUCTIONS
+        ),
         _coordinate_copy_descriptor(),
         _ternary_same_type_descriptor(
             key="spirv.op_imul_add.i32",

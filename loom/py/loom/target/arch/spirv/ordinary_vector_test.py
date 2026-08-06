@@ -125,6 +125,22 @@ def test_component_invariants_reject_invalid_records() -> None:
             scalar_enum="LOOM_SPIRV_SCALAR_TYPE_UNKNOWN",
             bit_width=32,
         )
+    with pytest.raises(ValueError, match="source-ineligible"):
+        OrdinaryVectorComponentType(
+            source_types=("i32",),
+            suffix="u32",
+            kind=OrdinaryVectorComponentKind.UNSIGNED_INTEGER,
+            scalar_enum="LOOM_SPIRV_SCALAR_TYPE_U32",
+            bit_width=32,
+        )
+    unsigned_view = OrdinaryVectorComponentType(
+        source_types=(),
+        suffix="u32",
+        kind=OrdinaryVectorComponentKind.UNSIGNED_INTEGER,
+        scalar_enum="LOOM_SPIRV_SCALAR_TYPE_U32",
+        bit_width=32,
+    )
+    assert unsigned_view.source_types == ()
     assert bool_component.bit_width == 1
 
 

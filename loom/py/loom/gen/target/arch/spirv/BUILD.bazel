@@ -118,6 +118,7 @@ iree_py_binary(
         "//loom/py/loom/target/arch/spirv:cooperative_matrix",
         "//loom/py/loom/target/arch/spirv:descriptors",
         "//loom/py/loom/target/arch/spirv:ordinary_vector",
+        "//loom/py/loom/target/arch/spirv:ordinary_vector_integer",
         "//loom/py/loom/target/arch/spirv:scalar_alu",
         "//loom/py/loom/target/arch/spirv:scalar_constant",
         "//loom/py/loom/target/arch/spirv:scalar_conversion",
