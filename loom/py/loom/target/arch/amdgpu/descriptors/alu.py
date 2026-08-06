@@ -13,20 +13,6 @@ from __future__ import annotations
 
 from .common import *
 
-_DPP_CTRL_IMMEDIATE = Immediate(
-    "dpp_ctrl",
-    ImmediateKind.UNSIGNED,
-    bit_width=9,
-    unsigned_max=0x1FF,
-)
-
-_DPP_BANK_MASK_IMMEDIATE = Immediate(
-    "bank_mask",
-    ImmediateKind.UNSIGNED,
-    bit_width=4,
-    unsigned_max=0xF,
-)
-
 _SDWA_DST_UNUSED_IMMEDIATE = Immediate(
     "dst_unused",
     ImmediateKind.UNSIGNED,

@@ -39,6 +39,7 @@ from .memory import *
 from .rdna3 import *
 from .rdna4 import *
 from .rdna4m import *
+from .rdna35 import *
 from .scalar_float import *
 from .workgroup import *
 
@@ -1478,6 +1479,7 @@ def _gfx115x_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         *_s_float_compare_overlays(),
         *_s_float_conversion_overlays(),
         *_rdna_scalar_domain_fma_overlays(),
+        *_rdna35_dpp16_f32_uniform_rhs_overlays(),
     )
 
 
@@ -1632,6 +1634,19 @@ def _rdna4m_minmax_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
                 encoding_condition="has_dpp16",
             )
             for operation, semantic in (("min", "minnum"), ("max", "maxnum"))
+        ),
+        *(
+            overlay
+            for operation, instruction_name, mnemonic, semantic in (
+                ("min", "V_MIN_NUM_F32", "v_min_num_f32", "minnum"),
+                ("max", "V_MAX_NUM_F32", "v_max_num_f32", "maxnum"),
+            )
+            for overlay in _v_binary_f32_dpp16_uniform_rhs_overlays(
+                operation=operation,
+                instruction_name=instruction_name,
+                mnemonic=mnemonic,
+                semantic=semantic,
+            )
         ),
     )
     numeric_scalar_overlays = (

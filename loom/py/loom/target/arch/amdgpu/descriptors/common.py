@@ -1650,6 +1650,20 @@ _SOURCE_INLINE_U32_IMMEDIATE = _source_inline_u32_immediate()
 _SOURCE_INLINE_U32_16_IMMEDIATE = _source_inline_u32_16_immediate()
 _SOURCE_INLINE_F32_IMMEDIATE = _source_inline_f32_immediate()
 
+_DPP_CTRL_IMMEDIATE = Immediate(
+    "dpp_ctrl",
+    ImmediateKind.UNSIGNED,
+    bit_width=9,
+    unsigned_max=0x1FF,
+)
+
+_DPP_BANK_MASK_IMMEDIATE = Immediate(
+    "bank_mask",
+    ImmediateKind.UNSIGNED,
+    bit_width=4,
+    unsigned_max=0xF,
+)
+
 _LITERAL_U32_IMMEDIATE = replace(
     _U32_IMMEDIATE, encoding_field_id=amdgpu_encoding_field_id("LITERAL")
 )
@@ -3180,6 +3194,8 @@ __all__ = (
     "_D16_PARTIAL_REGISTER_ADDRESSABLE_UNIT_COUNT",
     "_D16_PARTIAL_REGISTER_SIZE_REASON",
     "_DEPCTR_IMMEDIATE",
+    "_DPP_BANK_MASK_IMMEDIATE",
+    "_DPP_CTRL_IMMEDIATE",
     "_DESTRUCTIVE_ACCUMULATOR_CONSTRAINTS",
     "_DESTRUCTIVE_BUFFER_ATOMIC_CONSTRAINTS",
     "_DSCNT_IMMEDIATE",
