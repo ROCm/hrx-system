@@ -82,8 +82,13 @@ LOOM_DEFINE_ISA(loom_pass_where_isa, LOOM_OP_PASS_WHERE)
 LOOM_DEFINE_ATTR_STRING(loom_pass_where_predicate, 0)
 LOOM_DEFINE_ATTR_DICT(loom_pass_where_attrs, 1)
 LOOM_DEFINE_REGION(loom_pass_where_body, 0)
+enum loom_pass_where_build_flag_bits_e {
+  LOOM_PASS_WHERE_BUILD_FLAG_HAS_ATTRS = 1u << 0,
+};
+typedef uint32_t loom_pass_where_build_flags_t;
 iree_status_t loom_pass_where_build(
     loom_builder_t* builder,
+    loom_pass_where_build_flags_t build_flags,
     loom_string_id_t predicate,
     loom_optional loom_named_attr_slice_t attrs,
     loom_location_id_t location,
@@ -127,8 +132,13 @@ iree_status_t loom_pass_call_build(
 LOOM_DEFINE_ISA(loom_pass_run_isa, LOOM_OP_PASS_RUN)
 LOOM_DEFINE_ATTR_STRING(loom_pass_run_key, 0)
 LOOM_DEFINE_ATTR_DICT(loom_pass_run_options, 1)
+enum loom_pass_run_build_flag_bits_e {
+  LOOM_PASS_RUN_BUILD_FLAG_HAS_OPTIONS = 1u << 0,
+};
+typedef uint32_t loom_pass_run_build_flags_t;
 iree_status_t loom_pass_run_build(
     loom_builder_t* builder,
+    loom_pass_run_build_flags_t build_flags,
     loom_string_id_t key,
     loom_optional loom_named_attr_slice_t options,
     loom_location_id_t location,

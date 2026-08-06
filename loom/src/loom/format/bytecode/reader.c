@@ -4293,9 +4293,26 @@ static iree_status_t loom_bytecode_reader_materialize_function_symbol(
   }
 
   loom_attribute_t predicates_attr = loom_attr_absent();
+  uint64_t predicates_offset =
+      loom_bytecode_reader_cursor_absolute_position(cursor);
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_predicate_list_attr(
       reader, cursor, &signature_reader, &predicates_attr));
   if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+  const bool has_predicates =
+      iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES);
+  if (!has_predicates && predicates_attr.count != 0) {
+    return loom_bytecode_reader_emit_invalid_field(
+        reader, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_id,
+        IREE_SV("predicates"), predicates_offset,
+        IREE_SV("nonempty_predicate_list_requires_predicates_flag"));
+  }
+  if (has_predicates &&
+      func_like->predicates_attr_index == LOOM_ATTR_INDEX_NONE) {
+    return loom_bytecode_reader_emit_invalid_field(
+        reader, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_id,
+        IREE_SV("predicates"), predicates_offset,
+        IREE_SV("predicate_flag_requires_funclike_predicates_attr"));
+  }
 
   loom_string_id_t implements_id = LOOM_STRING_ID_INVALID;
   int64_t priority = 0;
@@ -4378,8 +4395,7 @@ static iree_status_t loom_bytecode_reader_materialize_function_symbol(
       func_attrs[import_symbol_attr_index] = loom_attr_string(import_symbol_id);
     }
   }
-  if (!loom_attr_is_absent(predicates_attr) && predicates_attr.count != 0 &&
-      func_like->predicates_attr_index != LOOM_ATTR_INDEX_NONE) {
+  if (has_predicates) {
     func_attrs[func_like->predicates_attr_index] = predicates_attr;
   }
   if (implements_id != LOOM_STRING_ID_INVALID &&
@@ -5050,7 +5066,8 @@ static iree_status_t loom_bytecode_reader_read_symbols(
           LOOM_BYTECODE_SYMBOL_FLAG_IMPORT_SYMBOL |
           LOOM_BYTECODE_SYMBOL_FLAG_RETAIN |
           LOOM_BYTECODE_SYMBOL_FLAG_DECLARATION |
-          LOOM_BYTECODE_SYMBOL_FLAG_TEST_ONLY)) {
+          LOOM_BYTECODE_SYMBOL_FLAG_TEST_ONLY |
+          LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES)) {
       return loom_bytecode_reader_emit_invalid_field(
           reader, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
           IREE_SV("flags"), kind_offset + 2,
@@ -5062,6 +5079,13 @@ static iree_status_t loom_bytecode_reader_read_symbols(
           reader, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
           IREE_SV("flags"), kind_offset + 2,
           IREE_SV("explicit_import_symbol_flag_requires_import_flag"));
+    }
+    if (iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES) &&
+        kind > LOOM_BYTECODE_SYMBOL_FUNC_UKERNEL) {
+      return loom_bytecode_reader_emit_invalid_field(
+          reader, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
+          IREE_SV("flags"), kind_offset + 2,
+          IREE_SV("predicates_flag_requires_function_symbol_kind"));
     }
     if (symbol_metadata) {
       symbol_metadata->kind = (loom_bytecode_symbol_kind_t)kind;

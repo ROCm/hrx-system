@@ -239,6 +239,7 @@ static iree_status_t loom_parse_low_asm_structural_attr_dict(
 
 static iree_status_t loom_parse_low_asm_structural_location_and_build(
     loom_parser_t* parser, loom_text_low_asm_structural_kind_t kind,
+    loom_text_low_asm_structural_build_flags_t build_flags,
     const loom_low_asm_result_names_t* result_names, loom_token_t start_token,
     loom_token_t mnemonic_token, const iree_string_view_t* comments,
     iree_host_size_t comment_count, const loom_value_id_t* operands,
@@ -255,8 +256,8 @@ static iree_status_t loom_parse_low_asm_structural_location_and_build(
 
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(parser->low_asm_environment.vtable->build_structural(
-      parser->low_asm_environment.state, &parser->builder, kind, key, operands,
-      operand_count, attrs, offset, result_type, location, &op));
+      parser->low_asm_environment.state, &parser->builder, kind, build_flags,
+      key, operands, operand_count, attrs, offset, result_type, location, &op));
   if (op == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low asm structural builder returned no operation");
@@ -287,12 +288,16 @@ static iree_status_t loom_parse_low_asm_structural_resource_or_live_in(
   }
 
   loom_named_attr_slice_t attrs = loom_named_attr_slice_empty();
+  loom_text_low_asm_structural_build_flags_t build_flags = 0;
   if (kind == LOOM_TEXT_LOW_ASM_STRUCTURAL_RESOURCE) {
     IREE_RETURN_IF_ERROR(loom_parse_low_asm_structural_attr_dict(
         parser, kind, mnemonic_token, &attrs));
   } else {
     loom_attribute_t attr = {0};
     IREE_RETURN_IF_ERROR(loom_parse_attr_dict(parser, &attr));
+    if (!loom_attr_is_absent(attr)) {
+      build_flags |= LOOM_TEXT_LOW_ASM_STRUCTURAL_BUILD_FLAG_HAS_ATTRIBUTES;
+    }
     attrs = loom_attr_as_dict(attr);
   }
   if (parser->error_count > errors_before) {
@@ -306,8 +311,8 @@ static iree_status_t loom_parse_low_asm_structural_resource_or_live_in(
   }
 
   return loom_parse_low_asm_structural_location_and_build(
-      parser, kind, result_names, start_token, mnemonic_token, comments,
-      comment_count, NULL, 0, attrs, key_token.text, 0, result_type,
+      parser, kind, build_flags, result_names, start_token, mnemonic_token,
+      comments, comment_count, NULL, 0, attrs, key_token.text, 0, result_type,
       parsed_spans);
 }
 
@@ -345,7 +350,7 @@ static iree_status_t loom_parse_low_asm_structural_concat(
   }
 
   return loom_parse_low_asm_structural_location_and_build(
-      parser, LOOM_TEXT_LOW_ASM_STRUCTURAL_CONCAT, result_names, start_token,
+      parser, LOOM_TEXT_LOW_ASM_STRUCTURAL_CONCAT, 0, result_names, start_token,
       mnemonic_token, comments, comment_count, operands.values, operands.count,
       loom_named_attr_slice_empty(), iree_string_view_empty(), 0, result_type,
       parsed_spans);
@@ -401,7 +406,7 @@ static iree_status_t loom_parse_low_asm_structural_slice(
   }
 
   return loom_parse_low_asm_structural_location_and_build(
-      parser, LOOM_TEXT_LOW_ASM_STRUCTURAL_SLICE, result_names, start_token,
+      parser, LOOM_TEXT_LOW_ASM_STRUCTURAL_SLICE, 0, result_names, start_token,
       mnemonic_token, comments, comment_count, &source, 1,
       loom_named_attr_slice_empty(), iree_string_view_empty(), offset,
       result_type, parsed_spans);
@@ -451,7 +456,7 @@ static iree_status_t loom_parse_low_asm_structural_copy(
   }
 
   return loom_parse_low_asm_structural_location_and_build(
-      parser, LOOM_TEXT_LOW_ASM_STRUCTURAL_COPY, result_names, start_token,
+      parser, LOOM_TEXT_LOW_ASM_STRUCTURAL_COPY, 0, result_names, start_token,
       mnemonic_token, comments, comment_count, &source, 1, attrs,
       iree_string_view_empty(), 0, result_type, parsed_spans);
 }
@@ -483,7 +488,7 @@ static iree_status_t loom_parse_low_asm_structural_storage_reserve(
   }
 
   return loom_parse_low_asm_structural_location_and_build(
-      parser, LOOM_TEXT_LOW_ASM_STRUCTURAL_STORAGE_RESERVE, result_names,
+      parser, LOOM_TEXT_LOW_ASM_STRUCTURAL_STORAGE_RESERVE, 0, result_names,
       start_token, mnemonic_token, comments, comment_count, NULL, 0, attrs,
       iree_string_view_empty(), 0, result_type, parsed_spans);
 }
@@ -536,7 +541,7 @@ static iree_status_t loom_parse_low_asm_structural_storage_address(
   }
 
   return loom_parse_low_asm_structural_location_and_build(
-      parser, LOOM_TEXT_LOW_ASM_STRUCTURAL_STORAGE_ADDRESS, result_names,
+      parser, LOOM_TEXT_LOW_ASM_STRUCTURAL_STORAGE_ADDRESS, 0, result_names,
       start_token, mnemonic_token, comments, comment_count, &storage, 1,
       offset_attrs, iree_string_view_empty(), 0, result_type, parsed_spans);
 }
@@ -589,7 +594,7 @@ static iree_status_t loom_parse_low_asm_structural_storage_view(
   }
 
   return loom_parse_low_asm_structural_location_and_build(
-      parser, LOOM_TEXT_LOW_ASM_STRUCTURAL_STORAGE_VIEW, result_names,
+      parser, LOOM_TEXT_LOW_ASM_STRUCTURAL_STORAGE_VIEW, 0, result_names,
       start_token, mnemonic_token, comments, comment_count, &storage, 1, attrs,
       iree_string_view_empty(), 0, result_type, parsed_spans);
 }

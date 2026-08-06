@@ -651,9 +651,9 @@ static iree_status_t loom_amdgpu_emit_workitem_id_live_in(
   IREE_RETURN_IF_ERROR(loom_amdgpu_intern(context, source, &source_id));
   loom_op_t* live_in_op = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_low_live_in_build(loom_low_lower_context_builder(context), source_id,
-                             loom_make_named_attr_slice(NULL, 0), vgpr_type,
-                             source_op->location, &live_in_op));
+      loom_low_live_in_build(loom_low_lower_context_builder(context), 0,
+                             source_id, loom_make_named_attr_slice(NULL, 0),
+                             vgpr_type, source_op->location, &live_in_op));
   *out_low_value_id = loom_low_live_in_result(live_in_op);
   return iree_ok_status();
 }
@@ -670,9 +670,9 @@ static iree_status_t loom_amdgpu_emit_packed_workitem_id_live_in(
   IREE_RETURN_IF_ERROR(loom_amdgpu_intern(context, source, &source_id));
   loom_op_t* live_in_op = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_low_live_in_build(loom_low_lower_context_builder(context), source_id,
-                             loom_make_named_attr_slice(NULL, 0), vgpr_type,
-                             source_op->location, &live_in_op));
+      loom_low_live_in_build(loom_low_lower_context_builder(context), 0,
+                             source_id, loom_make_named_attr_slice(NULL, 0),
+                             vgpr_type, source_op->location, &live_in_op));
   *out_low_value_id = loom_low_live_in_result(live_in_op);
   loom_string_id_t value_name_id = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(
@@ -948,9 +948,9 @@ static iree_status_t loom_amdgpu_emit_dispatch_ptr_live_in(
                          &source_id));
   loom_op_t* live_in_op = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_low_live_in_build(loom_low_lower_context_builder(context), source_id,
-                             loom_make_named_attr_slice(NULL, 0), sgprx2_type,
-                             source_op->location, &live_in_op));
+      loom_low_live_in_build(loom_low_lower_context_builder(context), 0,
+                             source_id, loom_make_named_attr_slice(NULL, 0),
+                             sgprx2_type, source_op->location, &live_in_op));
   *out_low_value_id = loom_low_live_in_result(live_in_op);
   return iree_ok_status();
 }
@@ -970,9 +970,9 @@ static iree_status_t loom_amdgpu_emit_dispatch_id_live_in(
                          &source_id));
   loom_op_t* live_in_op = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_low_live_in_build(loom_low_lower_context_builder(context), source_id,
-                             loom_make_named_attr_slice(NULL, 0), sgprx2_type,
-                             source_op->location, &live_in_op));
+      loom_low_live_in_build(loom_low_lower_context_builder(context), 0,
+                             source_id, loom_make_named_attr_slice(NULL, 0),
+                             sgprx2_type, source_op->location, &live_in_op));
   *out_low_value_id = loom_low_live_in_result(live_in_op);
   return iree_ok_status();
 }
@@ -994,9 +994,9 @@ static iree_status_t loom_amdgpu_emit_sgpr_live_in(
   IREE_RETURN_IF_ERROR(loom_amdgpu_intern(context, source, &source_id));
   loom_op_t* live_in_op = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_low_live_in_build(loom_low_lower_context_builder(context), source_id,
-                             loom_make_named_attr_slice(NULL, 0), sgpr_type,
-                             source_op->location, &live_in_op));
+      loom_low_live_in_build(loom_low_lower_context_builder(context), 0,
+                             source_id, loom_make_named_attr_slice(NULL, 0),
+                             sgpr_type, source_op->location, &live_in_op));
   *out_low_value_id = loom_low_live_in_result(live_in_op);
   return iree_ok_status();
 }

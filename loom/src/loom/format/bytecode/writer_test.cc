@@ -187,7 +187,7 @@ class WriterTest : public ::testing::Test {
     };
     loom_op_t* attrs_op = nullptr;
     IREE_CHECK_OK(loom_test_attrs_build(
-        &body_builder, arg_ids[0],
+        &body_builder, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, arg_ids[0],
         loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)), f32_type,
         LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -971,7 +971,7 @@ TEST_F(WriterTest, OptionalAbsentBodyAttrWrites) {
       loom_region_entry_block(loom_func_like_body(func_like)), &body_builder);
   loom_op_t* attrs_op = nullptr;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &body_builder, arg_ids[0], loom_make_named_attr_slice(nullptr, 0),
+      &body_builder, 0, arg_ids[0], loom_make_named_attr_slice(nullptr, 0),
       f32_type, LOOM_LOCATION_UNKNOWN, &attrs_op));
   const loom_value_id_t result_ids[1] = {loom_op_results(attrs_op)[0]};
   loom_op_t* yield_op = nullptr;
@@ -1242,7 +1242,7 @@ TEST_F(WriterTest, GlobalSymbolWritesDefiningOpPayload) {
   loom_symbol_ref_t symbol = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   loom_op_t* global_op = nullptr;
   IREE_ASSERT_OK(loom_global_constant_build(
-      &builder, symbol, f32_type, /*predicates=*/nullptr,
+      &builder, 0, symbol, f32_type, /*predicates=*/nullptr,
       /*predicates_count=*/0, loom_attr_f64(3.25), LOOM_LOCATION_UNKNOWN,
       &global_op));
 
@@ -1305,9 +1305,10 @@ TEST_F(WriterTest, GlobalSymbolWritesDeclarationLocalValues) {
   IREE_ASSERT_OK(loom_module_add_symbol(module, name_id, &symbol_id));
   loom_symbol_ref_t symbol = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
   loom_op_t* global_op = nullptr;
-  IREE_ASSERT_OK(loom_global_constant_build(&builder, symbol, tile_type,
-                                            predicates, 1, loom_attr_absent(),
-                                            LOOM_LOCATION_UNKNOWN, &global_op));
+  IREE_ASSERT_OK(loom_global_constant_build(
+      &builder, LOOM_GLOBAL_CONSTANT_BUILD_FLAG_HAS_PREDICATES, symbol,
+      tile_type, predicates, 1, loom_attr_absent(), LOOM_LOCATION_UNKNOWN,
+      &global_op));
 
   std::vector<uint8_t> bytes = WriteModule(module);
   size_t offset = SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_SYMBOLS);

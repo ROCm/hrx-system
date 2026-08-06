@@ -1024,6 +1024,9 @@ enum loom_bytecode_symbol_flag_bits_e {
   LOOM_BYTECODE_SYMBOL_FLAG_DECLARATION = 1u << 4,
   // Symbol exists only for test or benchmark tooling.
   LOOM_BYTECODE_SYMBOL_FLAG_TEST_ONLY = 1u << 5,
+  // Function metadata contains an explicitly present predicate list. This
+  // distinguishes an authored empty list from an absent optional attribute.
+  LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES = 1u << 6,
 };
 typedef uint16_t loom_bytecode_symbol_flags_t;
 

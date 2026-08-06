@@ -113,13 +113,16 @@ _FUNC_PURITY_BYTES: list[str | None] = [None, "pure"]
 # Bytecode-only flag bit recording whether an import explicitly wrote its
 # source symbol, even when the source name matches the local symbol name.
 _SYMBOL_FLAG_IMPORT_SYMBOL = 0x0004
-_SYMBOL_SUPPORTED_FLAGS = (
+_SYMBOL_FLAG_PREDICATES = 0x0040
+_SYMBOL_IR_FLAGS = (
     SYMBOL_FLAG_PUBLIC
     | SYMBOL_FLAG_IMPORT
-    | _SYMBOL_FLAG_IMPORT_SYMBOL
     | SYMBOL_FLAG_RETAIN
     | SYMBOL_FLAG_DECLARATION
     | SYMBOL_FLAG_TEST_ONLY
+)
+_SYMBOL_SUPPORTED_FLAGS = (
+    _SYMBOL_IR_FLAGS | _SYMBOL_FLAG_IMPORT_SYMBOL | _SYMBOL_FLAG_PREDICATES
 )
 _SYMBOL_DEFINITION_FLAGS = SYMBOL_FLAG_DECLARATION | SYMBOL_FLAG_TEST_ONLY
 
@@ -888,12 +891,7 @@ class BytecodeReader:
             offset += 2
 
             name = self._strings[name_id]
-            if visibility not in (0, 1):
-                raise BytecodeError(f"unsupported symbol visibility byte: {visibility}")
-            if flags & ~_SYMBOL_SUPPORTED_FLAGS:
-                raise BytecodeError("symbol has unsupported flag bits")
-            if (visibility == 0) != ((flags & SYMBOL_FLAG_PUBLIC) != 0):
-                raise BytecodeError("symbol visibility byte does not match flags")
+            self._validate_symbol_header(flags, kind, visibility)
 
             # Import metadata: source module and symbol for cross-module refs.
             is_import = (flags & SYMBOL_FLAG_IMPORT) != 0
@@ -977,6 +975,9 @@ class BytecodeReader:
                 predicates, offset = self._read_predicate_list(
                     sym_data, offset, module, signature_value_map
                 )
+                predicates_attr_name = self._function_predicates_attr_name(
+                    op_name, flags, predicates
+                )
 
                 implements: str | None = None
                 priority = 0
@@ -1048,8 +1049,8 @@ class BytecodeReader:
                 )
                 if purity_str is not None:
                     op_attrs["purity"] = purity_str
-                if predicates:
-                    op_attrs["predicates"] = predicates
+                if predicates_attr_name is not None:
+                    op_attrs[predicates_attr_name] = predicates
                 if source_module:
                     op_attrs["import_module"] = source_module
                     if flags & _SYMBOL_FLAG_IMPORT_SYMBOL:
@@ -1090,7 +1091,7 @@ class BytecodeReader:
                 symbol = Symbol(
                     name=name,
                     kind=SymbolKind(kind),
-                    flags=flags,
+                    flags=flags & _SYMBOL_IR_FLAGS,
                     op=op,
                     source_module=source_module,
                     source_symbol=source_symbol,
@@ -1152,7 +1153,7 @@ class BytecodeReader:
                 symbol = Symbol(
                     name=name,
                     kind=SymbolKind.GLOBAL,
-                    flags=flags,
+                    flags=flags & _SYMBOL_IR_FLAGS,
                     op=op,
                     source_module=source_module,
                     source_symbol=source_symbol,
@@ -1235,13 +1236,45 @@ class BytecodeReader:
         symbol = Symbol(
             name=name,
             kind=SymbolKind.RECORD,
-            flags=flags,
+            flags=flags & _SYMBOL_IR_FLAGS,
             op=op,
             source_module=source_module,
             source_symbol=source_symbol,
         )
         module.add_symbol(symbol)
         return offset
+
+    def _validate_symbol_header(self, flags: int, kind: int, visibility: int) -> None:
+        """Validate the common symbol record header."""
+        if visibility not in (0, 1):
+            raise BytecodeError(f"unsupported symbol visibility byte: {visibility}")
+        if flags & ~_SYMBOL_SUPPORTED_FLAGS:
+            raise BytecodeError("symbol has unsupported flag bits")
+        if flags & _SYMBOL_FLAG_PREDICATES and kind > 3:
+            raise BytecodeError(
+                "symbol predicates flag requires a function symbol kind"
+            )
+        if (visibility == 0) != ((flags & SYMBOL_FLAG_PUBLIC) != 0):
+            raise BytecodeError("symbol visibility byte does not match flags")
+
+    def _function_predicates_attr_name(
+        self, op_name: str, flags: int, predicates: list[Predicate]
+    ) -> str | None:
+        """Resolve and validate function predicate attribute presence."""
+        has_predicates = bool(flags & _SYMBOL_FLAG_PREDICATES)
+        if predicates and not has_predicates:
+            raise BytecodeError(
+                "nonempty function predicate list requires the predicates flag"
+            )
+        func_like = func_like_interface_for_op(self._op_decls_by_name, op_name)
+        predicates_attr_name = (
+            getattr(func_like, "predicates", None) if func_like is not None else None
+        )
+        if has_predicates and predicates_attr_name is None:
+            raise BytecodeError(
+                "function predicates flag requires a FuncLike predicates attribute"
+            )
+        return predicates_attr_name if has_predicates else None
 
     def _validate_symbol_definition_flags(self, flags: int, op_name: str) -> None:
         """Validate encoded roles against the defining op declaration."""

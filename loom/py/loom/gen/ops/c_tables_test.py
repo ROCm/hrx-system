@@ -1110,22 +1110,70 @@ def test_has_parent_generates_direct_parent_placement() -> None:
     assert (".required_parent_count = IREE_ARRAYSIZE(loom_test_child_required_parents),") in tables_c
 
 
-def test_generate_builders_keep_count_guard_for_optional_aggregate_attrs() -> None:
+def test_generate_builders_use_explicit_flags_for_optional_aggregate_attrs() -> None:
     op = Op(
         "test.attrs",
         group=Dialect("test"),
-        attrs=[AttrDef("dict", "dict", optional=True)],
-        format=[AttrDict("dict")],
+        attrs=[
+            AttrDef("dict", "dict", optional=True),
+            AttrDef("values", ATTR_TYPE_I64_ARRAY, optional=True),
+            AttrDef("payload", ATTR_TYPE_BYTES, optional=True),
+            AttrDef("predicates", ATTR_TYPE_PREDICATE_LIST, optional=True),
+        ],
+        format=[
+            AttrDict("dict"),
+            OptionalGroup([Attr("values")], anchor="values"),
+            OptionalGroup([Attr("payload")], anchor="payload"),
+            OptionalGroup([PredicateList("predicates")], anchor="predicates"),
+        ],
     )
 
     ops_h = generate_ops_h("test", 0, [op])
     builders_c = generate_builders_c("test", [op])
 
-    assert "LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT" not in ops_h
-    assert "loom_test_attrs_build_flags_t build_flags" not in ops_h
-    assert "loom_test_attrs_build_flags_t build_flags" not in builders_c
-    assert "iree_any_bit_set(build_flags" not in builders_c
-    assert "dict.count > 0" in builders_c
+    assert "LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT" in ops_h
+    assert "LOOM_TEST_ATTRS_BUILD_FLAG_HAS_VALUES" in ops_h
+    assert "LOOM_TEST_ATTRS_BUILD_FLAG_HAS_PAYLOAD" in ops_h
+    assert "LOOM_TEST_ATTRS_BUILD_FLAG_HAS_PREDICATES" in ops_h
+    assert "loom_test_attrs_build_flags_t build_flags" in ops_h
+    assert "loom_test_attrs_build_flags_t build_flags" in builders_c
+
+    dict_guard = builders_c.index("iree_any_bit_set(build_flags, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT)")
+    dict_copy = builders_c.index("loom_module_make_canonical_attr_dict(")
+    values_guard = builders_c.index("iree_any_bit_set(build_flags, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_VALUES)")
+    values_copy = builders_c.index("loom_builder_copy_i64_array_attr_storage(")
+    payload_guard = builders_c.index("iree_any_bit_set(build_flags, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_PAYLOAD)")
+    payload_copy = builders_c.index("loom_builder_copy_bytes_attr_storage(")
+    predicates_guard = builders_c.index("iree_any_bit_set(build_flags, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_PREDICATES)")
+    predicates_copy = builders_c.index("loom_builder_copy_predicate_list_attr_storage(")
+
+    assert dict_guard < dict_copy
+    assert values_guard < values_copy
+    assert payload_guard < payload_copy
+    assert predicates_guard < predicates_copy
+    assert "dict.count > 0" not in builders_c
+    assert "values_count > 0" not in builders_c
+    assert "payload.data_length > 0" not in builders_c
+    assert "predicates_count > 0" not in builders_c
+
+
+def test_optional_aggregate_flags_do_not_renumber_existing_fields() -> None:
+    op = Op(
+        "test.attrs",
+        group=Dialect("test"),
+        attrs=[
+            AttrDef("before", ATTR_TYPE_I64, optional=True),
+            AttrDef("dict", "dict", optional=True),
+            AttrDef("after", ATTR_TYPE_STRING, optional=True),
+        ],
+        format=[Attr("before"), AttrDict("dict"), Attr("after")],
+    )
+
+    ops_h = generate_ops_h("test", 0, [op])
+
+    assert "LOOM_TEST_ATTRS_BUILD_FLAG_HAS_BEFORE = 1u << 0" in ops_h
+    assert "LOOM_TEST_ATTRS_BUILD_FLAG_HAS_AFTER = 1u << 1" in ops_h
+    assert "LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT = 1u << 2" in ops_h
 
 
 def test_generate_descriptor_backed_enum_array_surface() -> None:

@@ -120,7 +120,8 @@ class ReaderTest : public ::testing::Test {
     return module;
   }
 
-  loom_op_t* AddSimpleFunction(loom_module_t* module, const char* name) {
+  loom_op_t* AddSimpleFunction(loom_module_t* module, const char* name,
+                               loom_test_func_build_flags_t build_flags = 0) {
     loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
     IREE_CHECK_OK(loom_module_intern_type(module, i32_type, &i32_type));
 
@@ -137,7 +138,7 @@ class ReaderTest : public ::testing::Test {
     loom_type_t result_types[1] = {i32_type};
     loom_op_t* func_op = nullptr;
     IREE_CHECK_OK(loom_test_func_build(
-        &builder, 0, /*visibility=*/0, /*cc=*/0, callee, arg_types,
+        &builder, build_flags, /*visibility=*/0, /*cc=*/0, callee, arg_types,
         IREE_ARRAYSIZE(arg_types), result_types, IREE_ARRAYSIZE(result_types),
         nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op));
     module->symbols.entries[symbol_id].flags = LOOM_SYMBOL_FLAG_PUBLIC;
@@ -167,6 +168,12 @@ class ReaderTest : public ::testing::Test {
   loom_module_t* CreateFunctionModule() {
     loom_module_t* module = CreateModule("reader_func");
     AddSimpleFunction(module, "f");
+    return module;
+  }
+
+  loom_module_t* CreateEmptyPredicateFunctionModule() {
+    loom_module_t* module = CreateModule("reader_empty_predicates");
+    AddSimpleFunction(module, "f", LOOM_TEST_FUNC_BUILD_FLAG_HAS_PREDICATES);
     return module;
   }
 
@@ -336,7 +343,7 @@ class ReaderTest : public ::testing::Test {
     loom_symbol_ref_t symbol = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_op_t* global_op = nullptr;
     IREE_CHECK_OK(loom_global_constant_build(
-        &builder, symbol, index_type, /*predicates=*/nullptr,
+        &builder, 0, symbol, index_type, /*predicates=*/nullptr,
         /*predicates_count=*/0, loom_attr_i64(42), LOOM_LOCATION_UNKNOWN,
         &global_op));
     return module;
@@ -412,8 +419,9 @@ class ReaderTest : public ::testing::Test {
     loom_symbol_ref_t symbol = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
     loom_op_t* global_op = nullptr;
     IREE_CHECK_OK(loom_global_constant_build(
-        &builder, symbol, tile_type, predicates, 1, loom_attr_absent(),
-        LOOM_LOCATION_UNKNOWN, &global_op));
+        &builder, LOOM_GLOBAL_CONSTANT_BUILD_FLAG_HAS_PREDICATES, symbol,
+        tile_type, predicates, 1, loom_attr_absent(), LOOM_LOCATION_UNKNOWN,
+        &global_op));
     return module;
   }
 
@@ -694,7 +702,7 @@ class ReaderTest : public ::testing::Test {
                             loom_region_entry_block(body), &body_builder);
     loom_op_t* attrs_op = nullptr;
     IREE_CHECK_OK(loom_test_attrs_build(
-        &body_builder, arg_ids[0],
+        &body_builder, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, arg_ids[0],
         loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)), f32_type,
         LOOM_LOCATION_UNKNOWN, &attrs_op));
     loom_value_id_t result_id = loom_op_results(attrs_op)[0];
@@ -1048,6 +1056,18 @@ class ReaderTest : public ::testing::Test {
   void WriteU16LE(std::vector<uint8_t>* bytes, size_t offset, uint16_t value) {
     (*bytes)[offset] = (uint8_t)value;
     (*bytes)[offset + 1] = (uint8_t)(value >> 8);
+  }
+
+  size_t FirstSymbolFlagsOffset(const std::vector<uint8_t>& bytes) {
+    size_t offset = SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_SYMBOLS);
+    EXPECT_GT(ReadUVarint(bytes, &offset), 0u);  // symbol_count
+    uint64_t import_count = ReadUVarint(bytes, &offset);
+    uint64_t export_count = ReadUVarint(bytes, &offset);
+    offset += (import_count + export_count) * sizeof(uint64_t);
+    ReadUVarint(bytes, &offset);  // name_id
+    offset += 1;                  // kind
+    offset += 1;                  // visibility
+    return offset;
   }
 
   void WriteU32LE(std::vector<uint8_t>* bytes, size_t offset, uint32_t value) {
@@ -1823,19 +1843,37 @@ TEST_F(ReaderTest, RejectsDefinitionRolesNotDeclaredByOp) {
        }) {
     SCOPED_TRACE(role);
     auto bytes = WriteModule(module);
-    size_t offset = SectionPayloadOffset(bytes, LOOM_BYTECODE_SECTION_SYMBOLS);
-    ASSERT_EQ(ReadUVarint(bytes, &offset), 1u);  // symbol_count
-    uint64_t import_count = ReadUVarint(bytes, &offset);
-    uint64_t export_count = ReadUVarint(bytes, &offset);
-    offset += (import_count + export_count) * sizeof(uint64_t);
-    ReadUVarint(bytes, &offset);  // name_id
-    offset += 1;                  // kind
-    offset += 1;                  // visibility
+    size_t offset = FirstSymbolFlagsOffset(bytes);
     uint16_t flags = ReadU16LE(bytes, offset);
     WriteU16LE(&bytes, offset, flags | role);
 
     ExpectReadError(bytes, "ERR_BYTECODE_006");
   }
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsPredicatesFlagOnNonFunctionSymbol) {
+  loom_module_t* module = CreateGlobalModule();
+  auto bytes = WriteModule(module);
+  size_t flags_offset = FirstSymbolFlagsOffset(bytes);
+  uint16_t flags = ReadU16LE(bytes, flags_offset);
+  WriteU16LE(&bytes, flags_offset,
+             flags | LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES);
+
+  ExpectReadError(bytes, "ERR_BYTECODE_006");
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsNonemptyPredicatesWithoutFlag) {
+  loom_module_t* module = CreatePredicateFunctionModule();
+  auto bytes = WriteModule(module);
+  size_t flags_offset = FirstSymbolFlagsOffset(bytes);
+  uint16_t flags = ReadU16LE(bytes, flags_offset);
+  ASSERT_TRUE(iree_any_bit_set(flags, LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES));
+  WriteU16LE(&bytes, flags_offset,
+             flags & ~LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES);
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
   loom_module_free(module);
 }
 
@@ -2496,6 +2534,10 @@ TEST_F(ReaderTest, CanonicalRoundTripPreservesTypesAttrsAndPredicates) {
   loom_module_t* predicate_module = CreatePredicateFunctionModule();
   ExpectCanonicalBytecodeRoundTrip(predicate_module);
   loom_module_free(predicate_module);
+
+  loom_module_t* empty_predicate_module = CreateEmptyPredicateFunctionModule();
+  ExpectCanonicalBytecodeRoundTrip(empty_predicate_module);
+  loom_module_free(empty_predicate_module);
 }
 
 TEST_F(ReaderTest, ReadsStructuralRegisterValueType) {

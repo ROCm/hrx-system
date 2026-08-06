@@ -1176,26 +1176,24 @@ TEST_F(PrintOpTest, AttrsOpEmptyDict) {
   loom_value_id_t input = def(f32);
 
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &op));
-  // The optional dict builder leaves an empty slice absent.
   EXPECT_EQ(print_op(op, LOOM_TEXT_PRINT_DEFAULT),
             "%1 = test.attrs %0 : f32\n");
 }
 
-TEST_F(PrintOpTest, AttrsOpExplicitEmptyDictCanonicalizesToAbsent) {
+TEST_F(PrintOpTest, AttrsOpExplicitEmptyDictIsPresent) {
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_value_id_t input = def(f32);
 
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
-                                       loom_make_named_attr_slice(NULL, 0), f32,
-                                       LOOM_LOCATION_UNKNOWN, &op));
-  loom_op_attrs(op)[0] = loom_make_canonical_attr_dict(NULL, 0);
+  IREE_ASSERT_OK(loom_test_attrs_build(
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
+      loom_make_named_attr_slice(NULL, 0), f32, LOOM_LOCATION_UNKNOWN, &op));
 
   EXPECT_EQ(print_op(op, LOOM_TEXT_PRINT_DEFAULT),
-            "%1 = test.attrs %0 : f32\n");
+            "%1 = test.attrs %0 {} : f32\n");
 }
 
 TEST_F(PrintOpTest, AttrsOpWithDictEntries) {
@@ -1217,7 +1215,7 @@ TEST_F(PrintOpTest, AttrsOpWithDictEntries) {
   };
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, input,
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
       loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)), f32,
       LOOM_LOCATION_UNKNOWN, &op));
 
@@ -1242,7 +1240,7 @@ TEST_F(PrintOpTest, AttrsOpStringAttrsUseCanonicalEscapes) {
   };
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, input,
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
       loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)), f32,
       LOOM_LOCATION_UNKNOWN, &op));
 
@@ -1268,7 +1266,7 @@ TEST_F(PrintOpTest, AttrsOpStringAttrsRejectInvalidUtf8) {
   };
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, input,
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
       loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)), f32,
       LOOM_LOCATION_UNKNOWN, &op));
 
@@ -1314,7 +1312,7 @@ TEST_F(PrintOpTest, AttrsOpWithNestedDictEntries) {
   };
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, input,
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
       loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)), f32,
       LOOM_LOCATION_UNKNOWN, &op));
 
@@ -1331,7 +1329,7 @@ TEST_F(PrintOpTest,
   loom_value_id_t input = def(f32);
 
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &op));
 
@@ -1347,7 +1345,7 @@ TEST_F(PrintOpTest, AttrsOpWithWrongDictAttrKindReturnsInvalidArgument) {
   loom_value_id_t input = def(f32);
 
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &op));
 
@@ -1576,7 +1574,7 @@ TEST_F(PrintOpTest, FieldCallbackReportsAttrAndRegionSpans) {
   };
   loom_op_t* attrs_op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, input,
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
       loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)), f32,
       LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -2693,7 +2691,7 @@ TEST_F(PrintOpTest, BoundsCheckAttrDictOutOfRange) {
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_value_id_t input = def(f32);
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &op));
   // Corrupt: pretend the op has no attributes.

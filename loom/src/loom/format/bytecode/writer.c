@@ -3450,6 +3450,16 @@ static iree_status_t loom_bytecode_write_symbols_section(
     loom_bytecode_symbol_linkage_t linkage;
     IREE_RETURN_IF_ERROR(
         loom_bytecode_symbol_linkage(module, symbol, &linkage));
+    loom_symbol_kind_t metadata_kind = loom_symbol_bytecode_kind(symbol);
+    bool has_function_metadata =
+        loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
+        loom_symbol_kind_is_function_like(metadata_kind);
+    bool has_global_metadata =
+        loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_GLOBAL) ||
+        metadata_kind == LOOM_SYMBOL_GLOBAL;
+    bool has_record_metadata =
+        loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_RECORD) ||
+        metadata_kind == LOOM_SYMBOL_RECORD;
     uint64_t entry_offset = iree_string_builder_size(builder) - entries_start;
 
     // Track import/export offsets.
@@ -3500,6 +3510,16 @@ static iree_status_t loom_bytecode_write_symbols_section(
         bytecode_flags |= LOOM_BYTECODE_SYMBOL_FLAG_IMPORT_SYMBOL;
       }
     }
+    if (has_function_metadata && symbol->defining_op) {
+      loom_func_like_t func_like =
+          loom_func_like_cast(module, symbol->defining_op);
+      if (loom_func_like_isa(func_like) &&
+          func_like.vtable->predicates_attr_index != LOOM_ATTR_INDEX_NONE &&
+          !loom_attr_is_absent(loom_op_const_attrs(
+              func_like.op)[func_like.vtable->predicates_attr_index])) {
+        bytecode_flags |= LOOM_BYTECODE_SYMBOL_FLAG_PREDICATES;
+      }
+    }
     IREE_RETURN_IF_ERROR(loom_bytecode_emit_u16_le(builder, bytecode_flags));
     if (linkage.is_import) {
       uint32_t import_module_string_id = 0;
@@ -3515,16 +3535,6 @@ static iree_status_t loom_bytecode_write_symbols_section(
     }
 
     // Function metadata.
-    loom_symbol_kind_t metadata_kind = loom_symbol_bytecode_kind(symbol);
-    bool has_function_metadata =
-        loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
-        loom_symbol_kind_is_function_like(metadata_kind);
-    bool has_global_metadata =
-        loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_GLOBAL) ||
-        metadata_kind == LOOM_SYMBOL_GLOBAL;
-    bool has_record_metadata =
-        loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_RECORD) ||
-        metadata_kind == LOOM_SYMBOL_RECORD;
     if (has_function_metadata && symbol->defining_op) {
       loom_func_like_t func_like =
           loom_func_like_cast(module, symbol->defining_op);

@@ -771,11 +771,13 @@ TEST_F(ParserTest, EnumArraysRoundTripStableValuesAndPresentEmpty) {
       "test.enum_array_attrs [low, high, low] "
       "using [middle, <42>, middle]\n"
       "test.enum_array_attrs [] using []\n"
+      "test.enum_array_attrs [] {}\n"
       "test.enum_array_attrs []\n");
   EXPECT_NE(text.find("test.enum_array_attrs [low, high, low] "
                       "using [middle, <42>, middle]"),
             std::string::npos);
   EXPECT_NE(text.find("test.enum_array_attrs [] using []"), std::string::npos);
+  EXPECT_NE(text.find("test.enum_array_attrs [] {}"), std::string::npos);
 
   loom_module_t* module = ParseOk(
       "test.enum_array_attrs [low, high, low] "
@@ -800,6 +802,15 @@ TEST_F(ParserTest, EnumArraysRoundTripStableValuesAndPresentEmpty) {
   EXPECT_EQ(optional.values[2],
             LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_MIDDLE);
   loom_module_free(module);
+}
+
+TEST_F(ParserTest, OptionalPredicateListPreservesPresentEmpty) {
+  std::string text = RoundTrip(
+      "test.func @empty_predicates() where [] {\n"
+      "  test.yield\n"
+      "}\n");
+  EXPECT_NE(text.find("test.func @empty_predicates() where []"),
+            std::string::npos);
 }
 
 TEST_F(ParserTest, OpenScalarEnumRawValueRoundTrips) {

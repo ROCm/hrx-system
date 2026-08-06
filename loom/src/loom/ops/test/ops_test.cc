@@ -684,7 +684,7 @@ TEST_F(BuilderTest, ReplaceAllUsesWithUpdatesTypeAttrs) {
   };
   loom_op_t* attrs_op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, input,
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
       loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)), f32,
       LOOM_LOCATION_UNKNOWN, &attrs_op));
 
@@ -1127,7 +1127,7 @@ TEST_F(BuilderTest, AttrsBuilder) {
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_value_id_t input = DefineValue(f32);
   loom_op_t* op = NULL;
-  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, input,
+  IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, input,
                                        loom_make_named_attr_slice(NULL, 0), f32,
                                        LOOM_LOCATION_UNKNOWN, &op));
   ASSERT_NE(op, nullptr);
@@ -1156,7 +1156,7 @@ TEST_F(BuilderTest, AttrsBuilderCanonicalizesDict) {
   };
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_test_attrs_build(
-      &builder_, input,
+      &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
       loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)), f32,
       LOOM_LOCATION_UNKNOWN, &op));
 
@@ -1187,7 +1187,7 @@ TEST_F(BuilderTest, AttrsBuilderRejectsDuplicateDictKeys) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_test_attrs_build(
-          &builder_, input,
+          &builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT, input,
           loom_make_named_attr_slice(entries, IREE_ARRAYSIZE(entries)), f32,
           LOOM_LOCATION_UNKNOWN, &op));
 }

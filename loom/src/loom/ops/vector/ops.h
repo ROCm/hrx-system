@@ -3292,6 +3292,7 @@ LOOM_DEFINE_ATTR_DICT(loom_vector_fragment_param_names, 1)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_vector_fragment_predicates, 2)
 enum loom_vector_fragment_build_flag_bits_e {
   LOOM_VECTOR_FRAGMENT_BUILD_FLAG_HAS_BLOCKS = 1u << 0,
+  LOOM_VECTOR_FRAGMENT_BUILD_FLAG_HAS_PREDICATES = 1u << 1,
 };
 typedef uint32_t loom_vector_fragment_build_flags_t;
 iree_status_t loom_vector_fragment_build(

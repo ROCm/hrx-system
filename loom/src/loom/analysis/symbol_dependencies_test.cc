@@ -296,8 +296,9 @@ TEST_F(SymbolDependenciesTest, RebuildsAfterAttrMutationAndErase) {
   loom_symbol_ref_t derived_ref = AddSymbol(module.get(), IREE_SV("derived"));
   loom_op_t* derived_op = nullptr;
   IREE_ASSERT_OK(loom_test_record_build(
-      &builder, 0, 0, derived_ref, loom_make_named_attr_slice(&depends_attr, 1),
-      LOOM_LOCATION_UNKNOWN, &derived_op));
+      &builder, LOOM_TEST_RECORD_BUILD_FLAG_HAS_DICT, 0, derived_ref,
+      loom_make_named_attr_slice(&depends_attr, 1), LOOM_LOCATION_UNKNOWN,
+      &derived_op));
 
   loom_symbol_dependency_table_t table = BuildTable(module.get());
   EXPECT_NE(FindEdge(table, derived_ref.symbol_id, base_ref.symbol_id,
@@ -342,8 +343,9 @@ TEST_F(SymbolDependenciesTest, CompactionRemapsRebuiltDependencies) {
   loom_symbol_ref_t owner_ref = AddSymbol(module.get(), IREE_SV("owner"));
   loom_op_t* owner_op = nullptr;
   IREE_ASSERT_OK(loom_test_record_build(
-      &builder, 0, 0, owner_ref, loom_make_named_attr_slice(&depends_attr, 1),
-      LOOM_LOCATION_UNKNOWN, &owner_op));
+      &builder, LOOM_TEST_RECORD_BUILD_FLAG_HAS_DICT, 0, owner_ref,
+      loom_make_named_attr_slice(&depends_attr, 1), LOOM_LOCATION_UNKNOWN,
+      &owner_op));
 
   EXPECT_EQ(dead_ref.symbol_id, 0u);
   EXPECT_EQ(base_ref.symbol_id, 1u);
@@ -435,7 +437,7 @@ TEST_F(SymbolDependenciesTest, TypeAndEncodingRefsUseOneTable) {
   loom_symbol_ref_t owner_ref = AddSymbol(module.get(), IREE_SV("owner"));
   loom_op_t* owner_op = nullptr;
   IREE_ASSERT_OK(loom_test_record_build(
-      &builder, 0, 0, owner_ref,
+      &builder, LOOM_TEST_RECORD_BUILD_FLAG_HAS_DICT, 0, owner_ref,
       loom_make_named_attr_slice(owner_attrs, IREE_ARRAYSIZE(owner_attrs)),
       LOOM_LOCATION_UNKNOWN, &owner_op));
 

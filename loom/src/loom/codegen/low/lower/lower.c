@@ -1930,6 +1930,24 @@ static iree_status_t loom_low_lower_create_func_op(
   if (loom_symbol_ref_is_valid(context->options->target_ref)) {
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TARGET;
   }
+  if (loom_low_lower_function_attr_present(
+          context->source_function,
+          context->source_function.vtable->abi_attrs_attr_index)) {
+    build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI_ATTRS;
+  }
+  if (abi_layout.count > 0) {
+    build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI_LAYOUT;
+  }
+  if (loom_low_lower_function_attr_present(
+          context->source_function,
+          context->source_function.vtable->export_attrs_attr_index)) {
+    build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_ATTRS;
+  }
+  if (loom_low_lower_function_attr_present(
+          context->source_function,
+          context->source_function.vtable->predicates_attr_index)) {
+    build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES;
+  }
   uint8_t retain = 0;
   if (loom_low_lower_context_source_is_retained(context)) {
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_RETAIN;
@@ -1980,6 +1998,11 @@ static iree_status_t loom_low_lower_create_kernel_op(
   if (loom_symbol_ref_is_valid(context->options->target_ref)) {
     build_flags |= LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_TARGET;
   }
+  if (loom_low_lower_function_attr_present(
+          context->source_function,
+          context->source_function.vtable->predicates_attr_index)) {
+    build_flags |= LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_PREDICATES;
+  }
 
   loom_target_workgroup_size_t workgroup_size = {0};
   if (iree_any_bit_set(context->result->static_launch_config_flags,
@@ -2020,6 +2043,9 @@ static iree_status_t loom_low_lower_create_kernel_op(
   IREE_RETURN_IF_ERROR(loom_low_lower_map_abi_layout(
       context, LOOM_LOW_LOWER_ABI_LAYOUT_KIND_KERNEL, arg_types, arg_count,
       /*result_types=*/NULL, /*result_count=*/0, &abi_layout));
+  if (abi_layout.count > 0) {
+    build_flags |= LOOM_LOW_KERNEL_DEF_BUILD_FLAG_HAS_ABI_LAYOUT;
+  }
   loom_string_id_t descriptor_set_key = LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_intern_descriptor_set_key(context, &descriptor_set_key));
@@ -2244,6 +2270,24 @@ iree_status_t loom_low_lower_import_declaration(
     }
     if (loom_symbol_ref_is_valid(options->target_ref)) {
       build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_TARGET;
+    }
+    if (loom_low_lower_function_attr_present(
+            source_declaration,
+            source_declaration.vtable->abi_attrs_attr_index)) {
+      build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS;
+    }
+    if (abi_layout.count > 0) {
+      build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_ABI_LAYOUT;
+    }
+    if (loom_low_lower_function_attr_present(
+            source_declaration,
+            source_declaration.vtable->export_attrs_attr_index)) {
+      build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS;
+    }
+    if (loom_low_lower_function_attr_present(
+            source_declaration,
+            source_declaration.vtable->predicates_attr_index)) {
+      build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES;
     }
     uint8_t retain = 0;
     if (loom_low_lower_context_source_is_retained(&context)) {

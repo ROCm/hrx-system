@@ -1372,6 +1372,19 @@ class TestRoundTrip:
             "test.enum_array_attrs []"
         )
 
+    def test_optional_named_dict_distinguishes_empty_from_absent(self) -> None:
+        present = _parse_op("test.enum_array_attrs [] {}")
+        absent = _parse_op("test.enum_array_attrs []")
+
+        assert len(present.attributes["dict"]) == 0
+        assert "dict" not in absent.attributes
+        assert _op_printer().print_operation(present, Module()) == (
+            "test.enum_array_attrs [] {}"
+        )
+        assert _op_printer().print_operation(absent, Module()) == (
+            "test.enum_array_attrs []"
+        )
+
     def test_open_scalar_enum_raw_value_round_trips(self) -> None:
         self._roundtrip_text("test.record <42> @target\n")
 
@@ -2002,6 +2015,21 @@ class TestParsePredicates:
 
     def _parse_module(self, text: str) -> Module:
         return _op_parser().parse(text)
+
+    def test_optional_predicate_list_distinguishes_empty_from_absent(self) -> None:
+        present_text = "test.func @f() where [] {\n  test.yield\n}\n"
+        absent_text = "test.func @g() {\n  test.yield\n}\n"
+
+        present_module = self._parse_module(present_text)
+        absent_module = self._parse_module(absent_text)
+        present_op = present_module.symbols[0].op
+        absent_op = absent_module.symbols[0].op
+        assert present_op is not None
+        assert absent_op is not None
+        assert present_op.attributes["predicates"] == []
+        assert "predicates" not in absent_op.attributes
+        assert _op_printer().print_module(present_module) == present_text
+        assert _op_printer().print_module(absent_module) == absent_text
 
     def test_single_mul_predicate(self) -> None:
         """Parse a function with where [mul(%M, 16)]."""

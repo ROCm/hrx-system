@@ -518,8 +518,12 @@ static iree_status_t loom_print_low_asm_structural_attr_dict(
 }
 
 static iree_status_t loom_print_low_asm_named_attr_dict(
-    loom_print_context_t* ctx, loom_named_attr_slice_t attrs) {
-  if (attrs.count == 0) {
+    loom_print_context_t* ctx,
+    loom_text_low_asm_structural_build_flags_t build_flags,
+    loom_named_attr_slice_t attrs) {
+  if (!iree_any_bit_set(
+          build_flags,
+          LOOM_TEXT_LOW_ASM_STRUCTURAL_BUILD_FLAG_HAS_ATTRIBUTES)) {
     return iree_ok_status();
   }
   loom_attribute_t attr =
@@ -571,8 +575,8 @@ static iree_status_t loom_print_low_asm_structural_live_in(
   IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "<", true));
   IREE_RETURN_IF_ERROR(loom_print_emit(ctx, statement->structural_key, true));
   IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ">", true));
-  IREE_RETURN_IF_ERROR(
-      loom_print_low_asm_named_attr_dict(ctx, statement->attributes));
+  IREE_RETURN_IF_ERROR(loom_print_low_asm_named_attr_dict(
+      ctx, statement->structural_build_flags, statement->attributes));
   return loom_print_low_asm_structural_result_type(ctx, statement);
 }
 

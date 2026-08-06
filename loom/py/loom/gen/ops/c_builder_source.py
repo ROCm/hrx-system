@@ -42,12 +42,14 @@ def _emit_builder_i64_array_storage(
     storage: str,
     op_name: str,
     field_name: str,
+    indent: str = "",
 ) -> None:
     """Emits C code that copies an i64-array attr payload into the builder."""
-    lines.append(f"  int64_t* {storage} = NULL;")
-    lines.append("  IREE_RETURN_IF_ERROR(loom_builder_copy_i64_array_attr_storage(")
-    lines.append(f'      builder, {source}, {count}, IREE_SV("{op_name} {field_name}"),')
-    lines.append(f"      &{storage}));")
+    lines.append(f"{indent}int64_t* {storage} = NULL;")
+    lines.append(f"{indent}IREE_RETURN_IF_ERROR(")
+    lines.append(f"{indent}    loom_builder_copy_i64_array_attr_storage(")
+    lines.append(f'{indent}        builder, {source}, {count}, IREE_SV("{op_name} {field_name}"),')
+    lines.append(f"{indent}        &{storage}));")
 
 
 def _emit_builder_enum_array_storage(
@@ -74,13 +76,14 @@ def _emit_builder_predicate_list_storage(
     storage: str,
     op_name: str,
     field_name: str,
+    indent: str = "",
 ) -> None:
     """Emits C code that copies a predicate-list attr payload into the builder."""
-    lines.append(f"  loom_predicate_t* {storage} = NULL;")
-    lines.append("  IREE_RETURN_IF_ERROR(")
-    lines.append("      loom_builder_copy_predicate_list_attr_storage(")
-    lines.append(f'          builder, {source}, {count}, IREE_SV("{op_name} {field_name}"),')
-    lines.append(f"          &{storage}));")
+    lines.append(f"{indent}loom_predicate_t* {storage} = NULL;")
+    lines.append(f"{indent}IREE_RETURN_IF_ERROR(")
+    lines.append(f"{indent}    loom_builder_copy_predicate_list_attr_storage(")
+    lines.append(f'{indent}        builder, {source}, {count}, IREE_SV("{op_name} {field_name}"),')
+    lines.append(f"{indent}        &{storage}));")
 
 
 def _emit_builder_bytes_storage(
@@ -90,12 +93,14 @@ def _emit_builder_bytes_storage(
     storage: str,
     op_name: str,
     field_name: str,
+    indent: str = "",
 ) -> None:
     """Emits C code that copies a byte attr payload into the builder."""
-    lines.append(f"  const uint8_t* {storage} = NULL;")
-    lines.append("  IREE_RETURN_IF_ERROR(loom_builder_copy_bytes_attr_storage(")
-    lines.append(f'      builder, {source}, IREE_SV("{op_name} {field_name}"),')
-    lines.append(f"      &{storage}));")
+    lines.append(f"{indent}const uint8_t* {storage} = NULL;")
+    lines.append(f"{indent}IREE_RETURN_IF_ERROR(")
+    lines.append(f"{indent}    loom_builder_copy_bytes_attr_storage(")
+    lines.append(f'{indent}        builder, {source}, IREE_SV("{op_name} {field_name}"),')
+    lines.append(f"{indent}        &{storage}));")
 
 
 _FIXED_RESULT_TYPE_C_EXPRS: dict[TypeConstraint, str] = {
@@ -597,19 +602,29 @@ def _generate_builder_implementation(
             idx = param["attr_index"]
             name = param["name"]
             storage = f"_{name}_storage"
-            _emit_builder_predicate_list_storage(
-                lines,
-                source=name,
-                count=f"{name}_count",
-                storage=storage,
-                op_name=op.name,
-                field_name=name,
-            )
-            if param.get("optional"):
-                lines.append(f"  if ({name}_count > 0) {{")
+            optional_flag = c_builder_model.build_flag_bit_name(prefix, param) if c_builder_model.optional_param_uses_build_flag(param) else ""
+            if optional_flag:
+                lines.append(f"  if (iree_any_bit_set(build_flags, {optional_flag})) {{")
+                _emit_builder_predicate_list_storage(
+                    lines,
+                    source=name,
+                    count=f"{name}_count",
+                    storage=storage,
+                    op_name=op.name,
+                    field_name=name,
+                    indent="    ",
+                )
                 lines.append(f"    loom_op_attrs(*out_op)[{idx}] = loom_attr_predicate_list({storage}, (uint16_t){name}_count);")
                 lines.append("  }")
             else:
+                _emit_builder_predicate_list_storage(
+                    lines,
+                    source=name,
+                    count=f"{name}_count",
+                    storage=storage,
+                    op_name=op.name,
+                    field_name=name,
+                )
                 lines.append(f"  loom_op_attrs(*out_op)[{idx}] = loom_attr_predicate_list({storage}, (uint16_t){name}_count);")
         elif param["kind"] == "index_list":
             static_field = param["static_field"]
@@ -637,7 +652,6 @@ def _generate_builder_implementation(
             idx = param["attr_index"]
             attr_type = param["attr_type"]
             name = param["name"]
-            is_optional = param.get("optional", False)
             constructor_map = {
                 "i64": f"loom_attr_i64({name})",
                 "f64": f"loom_attr_f64({name})",
@@ -655,19 +669,28 @@ def _generate_builder_implementation(
             optional_flag = c_builder_model.build_flag_bit_name(prefix, param) if c_builder_model.optional_param_uses_build_flag(param) else ""
             if attr_type == "i64_array":
                 storage = f"_{name}_storage"
-                _emit_builder_i64_array_storage(
-                    lines,
-                    source=name,
-                    count=f"{name}_count",
-                    storage=storage,
-                    op_name=op.name,
-                    field_name=name,
-                )
-                if is_optional:
-                    lines.append(f"  if ({name}_count > 0) {{")
+                if optional_flag:
+                    lines.append(f"  if (iree_any_bit_set(build_flags, {optional_flag})) {{")
+                    _emit_builder_i64_array_storage(
+                        lines,
+                        source=name,
+                        count=f"{name}_count",
+                        storage=storage,
+                        op_name=op.name,
+                        field_name=name,
+                        indent="    ",
+                    )
                     lines.append(f"    loom_op_attrs(*out_op)[{idx}] = loom_attr_i64_array({storage}, (uint16_t){name}_count);")
                     lines.append("  }")
                 else:
+                    _emit_builder_i64_array_storage(
+                        lines,
+                        source=name,
+                        count=f"{name}_count",
+                        storage=storage,
+                        op_name=op.name,
+                        field_name=name,
+                    )
                     lines.append(f"  loom_op_attrs(*out_op)[{idx}] = loom_attr_i64_array({storage}, (uint16_t){name}_count);")
             elif attr_type == "enum_array":
                 storage = f"_{name}_storage"
@@ -693,8 +716,8 @@ def _generate_builder_implementation(
                     )
                     lines.append(f"  loom_op_attrs(*out_op)[{idx}] = {constructor};")
             elif attr_type == "dict":
-                if is_optional:
-                    lines.append(f"  if ({name}.count > 0) {{")
+                if optional_flag:
+                    lines.append(f"  if (iree_any_bit_set(build_flags, {optional_flag})) {{")
                     lines.append("    IREE_RETURN_IF_ERROR(")
                     lines.append("        loom_module_make_canonical_attr_dict(")
                     lines.append(f"            builder->module, {name},")
@@ -707,18 +730,26 @@ def _generate_builder_implementation(
                     lines.append(f"          &loom_op_attrs(*out_op)[{idx}]));")
             elif attr_type == "bytes":
                 storage = f"_{name}_storage"
-                _emit_builder_bytes_storage(
-                    lines,
-                    source=name,
-                    storage=storage,
-                    op_name=op.name,
-                    field_name=name,
-                )
-                if is_optional:
-                    lines.append(f"  if ({name}.data_length > 0) {{")
+                if optional_flag:
+                    lines.append(f"  if (iree_any_bit_set(build_flags, {optional_flag})) {{")
+                    _emit_builder_bytes_storage(
+                        lines,
+                        source=name,
+                        storage=storage,
+                        op_name=op.name,
+                        field_name=name,
+                        indent="    ",
+                    )
                     lines.append(f"    loom_op_attrs(*out_op)[{idx}] = {constructor};")
                     lines.append("  }")
                 else:
+                    _emit_builder_bytes_storage(
+                        lines,
+                        source=name,
+                        storage=storage,
+                        op_name=op.name,
+                        field_name=name,
+                    )
                     lines.append(f"  loom_op_attrs(*out_op)[{idx}] = {constructor};")
             elif optional_flag:
                 lines.append(f"  if (iree_any_bit_set(build_flags, {optional_flag})) {{")

@@ -546,6 +546,7 @@ LOOM_DEFINE_REGION(loom_test_func_body, 0)
 enum loom_test_func_build_flag_bits_e {
   LOOM_TEST_FUNC_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_TEST_FUNC_BUILD_FLAG_HAS_CC = 1u << 1,
+  LOOM_TEST_FUNC_BUILD_FLAG_HAS_PREDICATES = 1u << 2,
 };
 typedef uint32_t loom_test_func_build_flags_t;
 iree_status_t loom_test_func_build(
@@ -629,6 +630,7 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_test_record_kind, 1, loom_test_record_kind_t)
 LOOM_DEFINE_ATTR_DICT(loom_test_record_dict, 2)
 enum loom_test_record_build_flag_bits_e {
   LOOM_TEST_RECORD_BUILD_FLAG_HAS_KIND = 1u << 0,
+  LOOM_TEST_RECORD_BUILD_FLAG_HAS_DICT = 1u << 1,
 };
 typedef uint32_t loom_test_record_build_flags_t;
 iree_status_t loom_test_record_build(
@@ -646,8 +648,13 @@ LOOM_DEFINE_ISA(loom_test_attrs_isa, LOOM_OP_TEST_ATTRS)
 LOOM_DEFINE_OPERAND(loom_test_attrs_input, 0)
 LOOM_DEFINE_RESULT(loom_test_attrs_result, 0)
 LOOM_DEFINE_ATTR_DICT(loom_test_attrs_dict, 0)
+enum loom_test_attrs_build_flag_bits_e {
+  LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT = 1u << 0,
+};
+typedef uint32_t loom_test_attrs_build_flags_t;
 iree_status_t loom_test_attrs_build(
     loom_builder_t* builder,
+    loom_test_attrs_build_flags_t build_flags,
     loom_value_id_t input,
     loom_optional loom_named_attr_slice_t dict,
     loom_type_t result_type,
@@ -1982,6 +1989,7 @@ LOOM_DEFINE_ATTR_ENUM_ARRAY(loom_test_enum_array_attrs_optional_values, 1)
 LOOM_DEFINE_ATTR_DICT(loom_test_enum_array_attrs_dict, 2)
 enum loom_test_enum_array_attrs_build_flag_bits_e {
   LOOM_TEST_ENUM_ARRAY_ATTRS_BUILD_FLAG_HAS_OPTIONAL_VALUES = 1u << 0,
+  LOOM_TEST_ENUM_ARRAY_ATTRS_BUILD_FLAG_HAS_DICT = 1u << 1,
 };
 typedef uint32_t loom_test_enum_array_attrs_build_flags_t;
 iree_status_t loom_test_enum_array_attrs_build(

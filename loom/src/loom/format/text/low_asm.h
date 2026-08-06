@@ -128,6 +128,12 @@ typedef enum loom_text_low_asm_structural_kind_e {
   LOOM_TEXT_LOW_ASM_STRUCTURAL_STORAGE_VIEW = 8,
 } loom_text_low_asm_structural_kind_t;
 
+enum loom_text_low_asm_structural_build_flag_bits_e {
+  // The structural operation explicitly carries an attribute dictionary.
+  LOOM_TEXT_LOW_ASM_STRUCTURAL_BUILD_FLAG_HAS_ATTRIBUTES = 1u << 0,
+};
+typedef uint32_t loom_text_low_asm_structural_build_flags_t;
+
 typedef struct loom_text_low_asm_structural_attribute_t {
   // Surface attribute name to print in the structural intrinsic dictionary.
   iree_string_view_t name;
@@ -144,6 +150,8 @@ typedef struct loom_text_low_asm_statement_t {
   const loom_op_t* op;
   // Structural intrinsic kind when |kind| is STRUCTURAL.
   loom_text_low_asm_structural_kind_t structural_kind;
+  // Presence flags for optional structural syntax.
+  loom_text_low_asm_structural_build_flags_t structural_build_flags;
   // Structural intrinsic key printed in angle brackets, if any.
   iree_string_view_t structural_key;
   // Static slice offset when |structural_kind| is SLICE.
@@ -256,10 +264,12 @@ typedef iree_status_t (*loom_text_low_asm_structural_attr_descriptor_fn_t)(
 
 typedef iree_status_t (*loom_text_low_asm_build_structural_fn_t)(
     const loom_text_low_asm_environment_state_t* state, loom_builder_t* builder,
-    loom_text_low_asm_structural_kind_t kind, iree_string_view_t key,
-    const loom_value_id_t* operands, iree_host_size_t operand_count,
-    loom_named_attr_slice_t attributes, int64_t offset, loom_type_t result_type,
-    loom_location_id_t location, loom_op_t** out_op);
+    loom_text_low_asm_structural_kind_t kind,
+    loom_text_low_asm_structural_build_flags_t build_flags,
+    iree_string_view_t key, const loom_value_id_t* operands,
+    iree_host_size_t operand_count, loom_named_attr_slice_t attributes,
+    int64_t offset, loom_type_t result_type, loom_location_id_t location,
+    loom_op_t** out_op);
 
 typedef iree_status_t (*loom_text_low_asm_describe_operation_fn_t)(
     const loom_text_low_asm_environment_state_t* state,

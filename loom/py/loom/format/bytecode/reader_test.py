@@ -27,6 +27,7 @@ from loom.format.bytecode.writer import (
     SECTION_ENCODINGS,
     SECTION_IR,
     SECTION_LOCATIONS,
+    SECTION_SYMBOLS,
     write_module,
 )
 from loom.ir import (
@@ -55,6 +56,8 @@ from loom.ir import (
     GroupType,
     Module,
     Operation,
+    Predicate,
+    PredicateArg,
     Region,
     RegisterType,
     ScalarType,
@@ -74,6 +77,8 @@ from loom.ir import (
 )
 from loom.stable_id import stable_id_from_string
 from loom.target.test.descriptors import TEST_LOW_CORE_DESCRIPTOR_SET
+
+_SYMBOL_FLAG_PREDICATES = 1 << 6
 
 _TEST_LOW_CORE_STABLE_ID = stable_id_from_string(TEST_LOW_CORE_DESCRIPTOR_SET.key)
 _TEST_PTR_REGISTER_CLASS_ID = next(
@@ -264,6 +269,22 @@ def _single_op_offset(data: bytes | bytearray) -> int:
     return offset
 
 
+def _first_symbol_flags_offset(data: bytes | bytearray) -> int:
+    """Return the absolute flags offset of the first symbol entry."""
+    module_offset, _module_length = _module_range(data)
+    _entry_offset, section_offset, _section_length = _find_section_entry(
+        data, SECTION_SYMBOLS
+    )
+    offset = module_offset + section_offset
+    symbol_count, offset = decode_varint(data, offset)
+    assert symbol_count > 0
+    import_count, offset = decode_varint(data, offset)
+    export_count, offset = decode_varint(data, offset)
+    offset += (import_count + export_count) * 8
+    _name_id, offset = decode_varint(data, offset)
+    return offset + 2
+
+
 def _make_encoding_alias_module() -> Module:
     """Return a module with one aliased encoding instance."""
     enc = EncodingInstance(name="q8_0", alias="enc", params=(("block", 32),))
@@ -284,6 +305,26 @@ def _make_encoding_alias_module() -> Module:
             ),
         )
     )
+    return module
+
+
+def _make_predicate_function_module() -> Module:
+    """Return a declaration carrying one function predicate."""
+    module = Module(name="test")
+    argument_id = module.add_value(Value(name="M", type=INDEX))
+    predicate = Predicate(
+        kind="mul",
+        args=(
+            PredicateArg(tag="value", value="M"),
+            PredicateArg(tag="const", value=16),
+        ),
+    )
+    operation = Operation(
+        name="func.decl",
+        operands=[argument_id],
+        attributes={"callee": "f", "predicates": [predicate]},
+    )
+    module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DECL, op=operation))
     return module
 
 
@@ -399,6 +440,28 @@ class TestMalformedLocationMode:
         struct.pack_into("<H", data, locations_entry_offset, 0xFF)
 
         with pytest.raises(BytecodeError, match="source locations"):
+            read_module(bytes(data))
+
+
+class TestMalformedSymbolSection:
+    def test_predicates_flag_on_nonfunction_symbol_is_rejected(self) -> None:
+        data = bytearray(write_module(_make_single_op_body_module()))
+        flags_offset = _first_symbol_flags_offset(data)
+        data[flags_offset - 2] = SymbolKind.GLOBAL.value
+        flags = struct.unpack_from("<H", data, flags_offset)[0]
+        struct.pack_into("<H", data, flags_offset, flags | _SYMBOL_FLAG_PREDICATES)
+
+        with pytest.raises(BytecodeError, match="requires a function symbol"):
+            read_module(bytes(data))
+
+    def test_nonempty_predicates_without_flag_are_rejected(self) -> None:
+        data = bytearray(write_module(_make_predicate_function_module()))
+        flags_offset = _first_symbol_flags_offset(data)
+        flags = struct.unpack_from("<H", data, flags_offset)[0]
+        assert flags & _SYMBOL_FLAG_PREDICATES
+        struct.pack_into("<H", data, flags_offset, flags & ~_SYMBOL_FLAG_PREDICATES)
+
+        with pytest.raises(BytecodeError, match="nonempty function predicate"):
             read_module(bytes(data))
 
 

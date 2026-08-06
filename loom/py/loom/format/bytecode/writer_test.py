@@ -1437,6 +1437,23 @@ class TestCrossFormatRoundTrip:
         assert "optional_values" not in body_ops[2].attributes
         assert _roundtrip_text_through_bytecode(text) == text
 
+    def test_empty_optional_aggregates_survive_bytecode(self) -> None:
+        text = (
+            "test.func @empty_predicates() where [] {\n"
+            "  test.enum_array_attrs [] {}\n"
+            "  test.yield\n"
+            "}\n"
+        )
+
+        loaded = _parse_write_read(text)
+        function = loaded.symbols[0].op
+        assert function is not None
+        assert loaded.symbols[0].flags == 0
+        assert function.attributes["predicates"] == []
+        enum_op = function.regions[0].blocks[0].ops[0]
+        assert len(enum_op.attributes["dict"]) == 0
+        assert _roundtrip_text_through_bytecode(text) == text
+
     def test_enum_array_in_generic_dict_is_rejected(self) -> None:
         module = Module(name="test")
         operation = Operation(

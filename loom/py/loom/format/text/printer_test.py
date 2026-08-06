@@ -748,8 +748,7 @@ class TestPrintAttrDict:
             attributes={"dict": {}},
         )
         text = _printer().print_operation(op, module)
-        assert "{" not in text
-        assert text == "%r = test.attrs %x : f32"
+        assert text == "%r = test.attrs %x {} : f32"
 
     def test_no_dict_attr(self) -> None:
         module, [x, r] = _module_with(("x", F32), ("r", F32))

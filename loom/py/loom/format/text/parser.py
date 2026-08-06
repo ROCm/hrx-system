@@ -2406,8 +2406,7 @@ class Parser:
 
                 case PredicateList(field=name):
                     predicates = self._parse_predicate_list()
-                    if predicates:
-                        parsed.attributes[name] = predicates
+                    parsed.attributes[name] = predicates
 
                 case OptionalGroup(elements=inner, anchor=_anchor):
                     if self._optional_group_present(inner, op_decl):

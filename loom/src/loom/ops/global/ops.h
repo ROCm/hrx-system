@@ -35,8 +35,13 @@ LOOM_DEFINE_RESULT(loom_global_constant_type, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_global_constant_symbol, 0)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_global_constant_predicates, 1)
 LOOM_DEFINE_ATTR_ANY(loom_global_constant_initializer, 2)
+enum loom_global_constant_build_flag_bits_e {
+  LOOM_GLOBAL_CONSTANT_BUILD_FLAG_HAS_PREDICATES = 1u << 0,
+};
+typedef uint32_t loom_global_constant_build_flags_t;
 iree_status_t loom_global_constant_build(
     loom_builder_t* builder,
+    loom_global_constant_build_flags_t build_flags,
     loom_symbol_ref_t symbol,
     loom_type_t result_type,
     loom_optional const loom_predicate_t* predicates,
@@ -55,8 +60,13 @@ LOOM_DEFINE_RESULT(loom_global_variable_type, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_global_variable_symbol, 0)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_global_variable_predicates, 1)
 LOOM_DEFINE_ATTR_ANY(loom_global_variable_initializer, 2)
+enum loom_global_variable_build_flag_bits_e {
+  LOOM_GLOBAL_VARIABLE_BUILD_FLAG_HAS_PREDICATES = 1u << 0,
+};
+typedef uint32_t loom_global_variable_build_flags_t;
 iree_status_t loom_global_variable_build(
     loom_builder_t* builder,
+    loom_global_variable_build_flags_t build_flags,
     loom_symbol_ref_t symbol,
     loom_type_t result_type,
     loom_optional const loom_predicate_t* predicates,

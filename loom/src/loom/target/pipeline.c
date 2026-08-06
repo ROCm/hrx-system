@@ -52,7 +52,7 @@ static iree_status_t loom_target_pipeline_resolve_control_flow_lowering(
 static iree_status_t loom_target_pipeline_build_run(loom_builder_t* builder,
                                                     iree_string_view_t key) {
   loom_op_t* run_op = NULL;
-  return loom_pass_ir_build_run(builder, key, loom_named_attr_slice_empty(),
+  return loom_pass_ir_build_run(builder, 0, key, loom_named_attr_slice_empty(),
                                 &run_op);
 }
 
@@ -101,7 +101,8 @@ static iree_status_t loom_target_pipeline_build_run_with_string_option(
       builder, name, value, &option_attr));
   loom_op_t* run_op = NULL;
   return loom_pass_ir_build_run(
-      builder, key, loom_make_named_attr_slice(&option_attr, 1), &run_op);
+      builder, LOOM_PASS_RUN_BUILD_FLAG_HAS_OPTIONS, key,
+      loom_make_named_attr_slice(&option_attr, 1), &run_op);
 }
 
 static iree_status_t loom_target_pipeline_build_target_legalize(
@@ -146,7 +147,7 @@ static iree_status_t loom_target_pipeline_build_target_function_body(
   const loom_target_pipeline_function_body_t* body =
       (const loom_target_pipeline_function_body_t*)user_data;
   loom_op_t* where_op = NULL;
-  return loom_pass_ir_build_where(builder, IREE_SV("target"),
+  return loom_pass_ir_build_where(builder, 0, IREE_SV("target"),
                                   loom_named_attr_slice_empty(),
                                   body->build_body, body->user_data, &where_op);
 }
@@ -275,8 +276,10 @@ static iree_status_t loom_target_pipeline_build_source_to_low(
   }
 
   loom_op_t* run_op = NULL;
-  return loom_pass_ir_build_run(builder, IREE_SV("source-to-low"), option_slice,
-                                &run_op);
+  const loom_pass_run_build_flags_t build_flags =
+      option_count != 0 ? LOOM_PASS_RUN_BUILD_FLAG_HAS_OPTIONS : 0;
+  return loom_pass_ir_build_run(builder, build_flags, IREE_SV("source-to-low"),
+                                option_slice, &run_op);
 }
 
 static iree_status_t loom_target_pipeline_contribute_phase(

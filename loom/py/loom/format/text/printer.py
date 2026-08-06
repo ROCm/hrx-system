@@ -1429,10 +1429,8 @@ class Printer:
                         # Named dict attribute: read the dict value directly.
                         covered_attrs.add(dict_field)
                         dict_value = fields._op.attributes.get(dict_field)
-                        if isinstance(dict_value, Mapping) and dict_value:
-                            attr_str = self._format_named_dict(dict_value, op_decl)
-                            if attr_str:
-                                stream.emit(attr_str)
+                        if isinstance(dict_value, Mapping):
+                            stream.emit(self._format_named_dict(dict_value, op_decl))
                     elif hasattr(fields, "_op"):
                         # Legacy: uncovered attributes from the op's dict.
                         attr_str = self._format_attr_dict(
@@ -1576,9 +1574,9 @@ class Printer:
 
                 case PredicateList(field=name):
                     predicates = fields.attr(name) if hasattr(fields, "attr") else None
-                    if not predicates and hasattr(fields, "_op"):
-                        predicates = fields._op.attributes.get(name, [])
-                    if predicates:
+                    if predicates is None and hasattr(fields, "_op"):
+                        predicates = fields._op.attributes.get(name)
+                    if predicates is not None:
                         stream.emit(_format_predicate_list(predicates))
 
                 case OptionalGroup(elements=inner, anchor=anchor):
@@ -1965,8 +1963,6 @@ class Printer:
 
     def _format_named_dict(self, dict_value: Mapping[str, Any], op_decl: Op) -> str:
         """Format {key = value, ...} from a named dict attribute."""
-        if not dict_value:
-            return ""
         parts: list[str] = []
         for key, value in dict_value.items():
             parts.append(f"{key} = {_format_attr_value(value, None)}")

@@ -86,31 +86,12 @@ static iree_status_t loom_print_predicate_list(
   return iree_ok_status();
 }
 
-static bool loom_print_optional_attr_present(const loom_op_vtable_t* vtable,
-                                             const loom_op_t* op,
+static bool loom_print_optional_attr_present(const loom_op_t* op,
                                              uint16_t attr_index) {
   if (attr_index >= op->attribute_count) {
     return false;
   }
-  loom_attribute_t attr = loom_op_attrs(op)[attr_index];
-  if (loom_attr_is_absent(attr)) {
-    return false;
-  }
-  if (!vtable->attr_descriptors || attr_index >= vtable->attribute_count ||
-      !iree_any_bit_set(vtable->attr_descriptors[attr_index].flags,
-                        LOOM_ATTR_OPTIONAL)) {
-    return true;
-  }
-  switch ((loom_attr_kind_t)attr.kind) {
-    case LOOM_ATTR_DICT:
-    case LOOM_ATTR_I64_ARRAY:
-    case LOOM_ATTR_PREDICATE_LIST:
-      return attr.count > 0;
-    case LOOM_ATTR_BYTES:
-      return attr.reserved_1 > 0;
-    default:
-      return true;
-  }
+  return !loom_attr_is_absent(loom_op_attrs(op)[attr_index]);
 }
 
 static bool loom_print_attr_is_optional(const loom_op_vtable_t* vtable,
@@ -486,9 +467,6 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
               "format ATTR_DICT field_index %u expected DICT attr but found %d",
               element->field_index, (int)dict_attr.kind);
         }
-        if (optional && dict_attr.count == 0) {
-          break;
-        }
         IREE_RETURN_IF_ERROR(loom_print_attr_with_field(
             ctx, &dict_attr, NULL,
             loom_print_field_ref(LOOM_PRINT_FIELD_ATTR, element->field_index)));
@@ -739,8 +717,8 @@ iree_status_t loom_print_format_elements(loom_print_context_t* ctx,
                 loom_op_operand_field_present(vtable, op, element->field_index);
             break;
           case LOOM_ANCHOR_ATTR:
-            present = loom_print_optional_attr_present(vtable, op,
-                                                       element->field_index);
+            present =
+                loom_print_optional_attr_present(op, element->field_index);
             break;
           case LOOM_ANCHOR_REGION: {
             if (element->field_index < op->region_count) {
