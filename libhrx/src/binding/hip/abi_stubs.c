@@ -476,7 +476,9 @@ static void hrx_hip_stream_callback_host_fn(void* user_data) {
 
 HIPAPI const char* hipApiName(uint32_t id) {
   (void)id;
-  return NULL;
+  // API callback identifiers are an external sparse namespace. Keep unknown
+  // identifiers string-valued until authoritative metadata is available.
+  return "unknown";
 }
 
 HIPAPI hipError_t hipBindTexture(size_t* offset, const textureReference* tex,

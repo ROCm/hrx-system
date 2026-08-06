@@ -930,6 +930,7 @@ static hipError_t iree_hip_get_per_thread_stream_state(
 }
 
 static void iree_hip_thread_error_set(hipError_t error, bool sticky) {
+  if (iree_hip_thread_error.sticky && !sticky) return;
   iree_hip_thread_error.last_error = error;
   iree_hip_thread_error.sticky = sticky;
 }
@@ -1056,6 +1057,8 @@ static hipError_t iree_status_to_hip_result(iree_status_t status) {
       return hipErrorNotReady;
     case IREE_STATUS_FAILED_PRECONDITION:
       return hipErrorNotInitialized;
+    case IREE_STATUS_ABORTED:
+      return hipErrorIllegalAddress;
     default:
       return hipErrorUnknown;
   }
@@ -1405,6 +1408,9 @@ static bool iree_hip_no_visible_devices_requested(void) {
 }
 
 static hipError_t iree_hip_ensure_initialized(void) {
+  if (iree_hip_thread_error.sticky) {
+    return iree_hip_thread_error_peek();
+  }
   if (iree_hip_no_visible_devices_requested()) {
     return hipErrorNoDevice;
   }
@@ -1535,6 +1541,21 @@ static hipError_t iree_hip_resolve_per_thread_stream(
   return hipSuccess;
 }
 
+static bool iree_hip_context_contains_stream(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_stream_t* stream) {
+  bool found = false;
+  iree_slim_mutex_lock(&context->stream_list_mutex);
+  for (iree_host_size_t i = 0; i < context->stream_count; ++i) {
+    if (context->streams[i] == stream) {
+      found = true;
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&context->stream_list_mutex);
+  return found;
+}
+
 static hipError_t iree_hip_resolve_stream(
     hipStream_t stream, iree_hal_streaming_stream_t** out_stream) {
   IREE_ASSERT_ARGUMENT(out_stream);
@@ -1550,7 +1571,13 @@ static hipError_t iree_hip_resolve_stream(
   } else if (!stream || stream == hipStreamLegacy) {
     *out_stream = context->default_stream;
   } else {
-    *out_stream = (iree_hal_streaming_stream_t*)stream;
+    iree_hal_streaming_stream_t* explicit_stream =
+        (iree_hal_streaming_stream_t*)stream;
+    if (!iree_hip_context_contains_stream(context, explicit_stream)) {
+      *out_stream = NULL;
+      return hipErrorInvalidResourceHandle;
+    }
+    *out_stream = explicit_stream;
   }
   return hipSuccess;
 }
@@ -3010,7 +3037,10 @@ HIPAPI hipError_t hipDeviceSynchronize(void) {
       "[HIP_API] hipDeviceSynchronize() returned %d (sync_count=%d)\n", result,
       sync_count);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  if (result == hipErrorIllegalAddress) {
+    HIP_RETURN_STICKY_ERROR(result);
+  }
+  HIP_RETURN_ERROR(result);
 }
 
 // Resets the current device and destroys all allocations.
@@ -10413,9 +10443,15 @@ HIPAPI hipError_t hipStreamDestroy(hipStream_t stream) {
       (iree_hal_streaming_stream_t*)stream;
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_streaming_stream_synchronize(streaming_stream));
-  iree_hal_streaming_context_unregister_stream(streaming_stream->context,
-                                               streaming_stream);
-  streaming_stream->context = NULL;
+  iree_hal_streaming_context_t* context = streaming_stream->context;
+  iree_slim_mutex_lock(&streaming_stream->mutex);
+  if (streaming_stream->capture_status !=
+      IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+    iree_hal_streaming_stream_set_capture_status(
+        streaming_stream, IREE_HAL_STREAMING_CAPTURE_STATUS_NONE);
+  }
+  iree_slim_mutex_unlock(&streaming_stream->mutex);
+  iree_hal_streaming_context_unregister_stream(context, streaming_stream);
   iree_hal_streaming_stream_release(streaming_stream);
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -12220,7 +12256,7 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
 
   if (!function_address) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+    HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
   }
 
   // Ensure initialization and get context.
@@ -12235,7 +12271,9 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
   init_result = iree_hip_resolve_stream(stream, &stream_obj);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+    HIP_RETURN_ERROR(init_result == hipErrorInvalidResourceHandle
+                         ? hipErrorInvalidValue
+                         : init_result);
   }
 
   // Resolve the host function pointer to a symbol.
@@ -12281,6 +12319,13 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
   if (!symbol) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidDeviceFunction);
+  }
+
+  if (stream_obj->context->device_entry->max_shared_memory_per_block != 0 &&
+      sharedMemBytes >
+          stream_obj->context->device_entry->max_shared_memory_per_block) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   hipError_t launch_config_result = iree_hip_validate_launch_configuration(
