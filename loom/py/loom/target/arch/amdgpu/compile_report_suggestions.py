@@ -63,7 +63,7 @@ class AmdgpuCompileReportSuggestionProvider:
                 unavailable_reason="unknown_target_key",
             )
 
-        suggestions = []
+        suggestions = list(_suggest_wait_serialization(document))
         for entry in document.entries:
             entry_index = entry["index"]
             entry_name = compile_report_entry_identity(entry).display_name()
@@ -82,6 +82,11 @@ class AmdgpuCompileReportSuggestionProvider:
             )
             if residency_suggestion is not None:
                 suggestions.append(residency_suggestion)
+            communication_suggestion = _suggest_single_subgroup_communication(
+                entry, entry_name, path_prefix
+            )
+            if communication_suggestion is not None:
+                suggestions.append(communication_suggestion)
             wave_suggestion = _suggest_nondefault_wave_size(
                 entry,
                 entry_name,
@@ -100,6 +105,129 @@ class AmdgpuCompileReportSuggestionProvider:
 
 
 AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER = AmdgpuCompileReportSuggestionProvider()
+
+
+def _suggest_wait_serialization(
+    document: CompileReportDocument,
+) -> tuple[CompileReportSuggestion, ...]:
+    rows_value = document.report.get("wait_reason_summary_rows")
+    if rows_value is None:
+        return ()
+    rows = _report_indexed_rows(
+        _report_object(rows_value, "wait_reason_summary_rows"),
+        "wait_reason_summary_rows",
+    )
+    suggestions = []
+    for position, row in enumerate(rows):
+        counter = row.get("counter")
+        reason = row.get("reason")
+        is_vmem_source_reuse = (
+            counter == "vmem_load" and reason == "amdgpu.memory_source_reuse"
+        )
+        is_lds_ssa_use = counter == "lds" and reason == "amdgpu.ssa_use"
+        if not is_vmem_source_reuse and not is_lds_ssa_use:
+            continue
+        row_path = f"wait_reason_summary_rows.rows[{position}]"
+        summary = _report_object(row.get("summary"), f"{row_path}.summary")
+        action_count = _report_integer(
+            summary.get("action_count"), f"{row_path}.summary.action_count"
+        )
+        full_drain_count = _report_integer(
+            summary.get("full_drain_count"),
+            f"{row_path}.summary.full_drain_count",
+        )
+        # Isolated waits are ordinary scheduling fallout. Surface only repeated
+        # full drains that dominate their reason and materially affect the entry.
+        if full_drain_count < 8 or full_drain_count * 2 < action_count:
+            continue
+        function_name = _optional_report_string(
+            row.get("function"), f"{row_path}.function"
+        )
+        entry = _entry_for_function(document, function_name)
+        if entry is None:
+            continue
+        entry_index = entry["index"]
+        wait_plan = _object_at(entry, "wait_plan")
+        if wait_plan is None:
+            continue
+        wait_plan_path = f"entries.rows[{entry_index}].wait_plan"
+        total_full_drain_count = _report_integer(
+            wait_plan.get("full_drain_count"),
+            f"{wait_plan_path}.full_drain_count",
+        )
+        if total_full_drain_count == 0:
+            continue
+        if is_vmem_source_reuse:
+            if full_drain_count * 4 < total_full_drain_count:
+                continue
+            max_full_drain_outstanding = _report_integer(
+                summary.get("max_full_drain_outstanding_before"),
+                f"{row_path}.summary.max_full_drain_outstanding_before",
+            )
+            suggestion_id = "amdgpu.vmem_source_reuse_serialization"
+            action = (
+                "Reduce global-load source-state turnover by consolidating "
+                "or staging loads, preserving independent address state, "
+                "or scheduling more work before source-register reuse; "
+                "then require memory-source full drains to fall before "
+                "benchmarking."
+            )
+            reason_evidence = (
+                CompileReportSuggestionEvidence(
+                    path=(f"{row_path}.summary.max_full_drain_outstanding_before"),
+                    value=max_full_drain_outstanding,
+                ),
+            )
+        else:
+            if full_drain_count * 5 < total_full_drain_count:
+                continue
+            partial_wait_count = _report_integer(
+                summary.get("partial_wait_count"),
+                f"{row_path}.summary.partial_wait_count",
+            )
+            max_outstanding = _report_integer(
+                summary.get("max_outstanding_before"),
+                f"{row_path}.summary.max_outstanding_before",
+            )
+            suggestion_id = "amdgpu.lds_ssa_use_serialization"
+            action = (
+                "Issue independent LDS or DS producers before consuming their "
+                "SSA results so waits can remain partial; then require "
+                "LDS SSA-use full drains to fall before benchmarking."
+            )
+            reason_evidence = (
+                CompileReportSuggestionEvidence(
+                    path=f"{row_path}.summary.partial_wait_count",
+                    value=partial_wait_count,
+                ),
+                CompileReportSuggestionEvidence(
+                    path=f"{row_path}.summary.max_outstanding_before",
+                    value=max_outstanding,
+                ),
+            )
+        suggestions.append(
+            CompileReportSuggestion(
+                suggestion_id=suggestion_id,
+                entry_name=compile_report_entry_identity(entry).display_name(),
+                action=action,
+                evidence=(
+                    CompileReportSuggestionEvidence(
+                        path=f"{row_path}.summary.action_count",
+                        value=action_count,
+                    ),
+                    CompileReportSuggestionEvidence(
+                        path=f"{row_path}.summary.full_drain_count",
+                        value=full_drain_count,
+                    ),
+                    *reason_evidence,
+                    CompileReportSuggestionEvidence(
+                        path=(f"{wait_plan_path}.full_drain_count"),
+                        value=total_full_drain_count,
+                    ),
+                ),
+            )
+        )
+    return tuple(suggestions)
 
 
 def _suggest_spill_traffic(
@@ -258,6 +386,74 @@ def _suggest_nondefault_wave_size(
                 value=default_wave_size,
             ),
         ),
+    )
+
+
+def _suggest_single_subgroup_communication(
+    entry: dict[str, object],
+    entry_name: str,
+    path_prefix: str,
+) -> CompileReportSuggestion | None:
+    workgroup_size = _object_at(entry, "workload", "workgroup_size")
+    target_resources = _object_at(entry, "target_resources")
+    instruction_mix = _object_at(entry, "static_instruction_mix")
+    if workgroup_size is None or target_resources is None or instruction_mix is None:
+        return None
+    flat_workgroup_size = _integer(workgroup_size.get("flat"))
+    subgroup_size = _integer(target_resources.get("subgroup_size"))
+    barrier_count = _integer(instruction_mix.get("barrier_count"))
+    if (
+        flat_workgroup_size is None
+        or flat_workgroup_size == 0
+        or subgroup_size is None
+        or subgroup_size == 0
+        or flat_workgroup_size > subgroup_size
+        or barrier_count is None
+        or barrier_count == 0
+    ):
+        return None
+
+    evidence = [
+        CompileReportSuggestionEvidence(
+            path=f"{path_prefix}.workload.workgroup_size.flat",
+            value=flat_workgroup_size,
+        ),
+        CompileReportSuggestionEvidence(
+            path=f"{path_prefix}.target_resources.subgroup_size",
+            value=subgroup_size,
+        ),
+        CompileReportSuggestionEvidence(
+            path=f"{path_prefix}.static_instruction_mix.barrier_count",
+            value=barrier_count,
+        ),
+    ]
+    local_memory_instruction_count = _integer(instruction_mix.get("local_memory_count"))
+    if local_memory_instruction_count is not None:
+        evidence.append(
+            CompileReportSuggestionEvidence(
+                path=(f"{path_prefix}.static_instruction_mix.local_memory_count"),
+                value=local_memory_instruction_count,
+            )
+        )
+    local_memory_bytes = _integer(entry.get("local_memory_bytes"))
+    if local_memory_bytes is not None:
+        evidence.append(
+            CompileReportSuggestionEvidence(
+                path=f"{path_prefix}.local_memory_bytes",
+                value=local_memory_bytes,
+            )
+        )
+    return CompileReportSuggestion(
+        suggestion_id="amdgpu.single_subgroup_workgroup_communication",
+        entry_name=entry_name,
+        action=(
+            "The workgroup fits within one subgroup but still emits workgroup "
+            "barriers. Inspect whether workgroup exchange or reduction can use "
+            "subgroup operations, or whether the barriers are redundant; then "
+            "require barrier and local-memory traffic to fall before "
+            "benchmarking."
+        ),
+        evidence=tuple(evidence),
     )
 
 

@@ -252,6 +252,85 @@ def _add_fragment_packet_evidence(
     }
 
 
+def _add_vmem_source_reuse_evidence(
+    report: dict[str, object],
+    *,
+    action_count: int,
+    source_reuse_full_drain_count: int,
+    total_full_drain_count: int,
+) -> None:
+    entry = report["entries"]["rows"][0]
+    entry["wait_plan"] = {"full_drain_count": total_full_drain_count}
+    report["wait_reason_summary_rows"] = {
+        "count": 1,
+        "rows": [
+            {
+                "index": 0,
+                "function": "routed_linear",
+                "counter": "vmem_load",
+                "reason": "amdgpu.memory_source_reuse",
+                "summary": {
+                    "action_count": action_count,
+                    "full_drain_count": source_reuse_full_drain_count,
+                    "max_full_drain_outstanding_before": 3,
+                },
+            }
+        ],
+    }
+
+
+def _add_lds_ssa_use_evidence(
+    report: dict[str, object],
+    *,
+    action_count: int,
+    ssa_use_full_drain_count: int,
+    ssa_use_partial_wait_count: int,
+    total_full_drain_count: int,
+    max_outstanding_before: int,
+) -> None:
+    entry = report["entries"]["rows"][0]
+    entry["wait_plan"] = {"full_drain_count": total_full_drain_count}
+    report["wait_reason_summary_rows"] = {
+        "count": 1,
+        "rows": [
+            {
+                "index": 0,
+                "function": "routed_linear",
+                "counter": "lds",
+                "reason": "amdgpu.ssa_use",
+                "summary": {
+                    "action_count": action_count,
+                    "full_drain_count": ssa_use_full_drain_count,
+                    "partial_wait_count": ssa_use_partial_wait_count,
+                    "max_outstanding_before": max_outstanding_before,
+                },
+            }
+        ],
+    }
+
+
+def _add_single_subgroup_communication_evidence(
+    report: dict[str, object],
+    *,
+    flat_workgroup_size: int,
+    barrier_count: int,
+) -> None:
+    entry = report["entries"]["rows"][0]
+    entry["workload"] = {
+        "workgroup_size": {
+            "x": flat_workgroup_size,
+            "y": 1,
+            "z": 1,
+            "flat": flat_workgroup_size,
+        }
+    }
+    entry["local_memory_bytes"] = 528
+    entry["static_instruction_mix"] = {
+        "barrier_count": barrier_count,
+        "local_memory_count": 16,
+    }
+
+
 def test_suggests_ordered_experiments_from_exact_target_evidence() -> None:
     document = parse_compile_report(_compile_report(), source="report.json")
 
@@ -332,6 +411,146 @@ def test_private_memory_is_reported_once_without_spill_evidence() -> None:
         "amdgpu.residency_cliff",
         "amdgpu.nondefault_wave_size",
     ]
+
+
+def test_suggests_dominant_vmem_source_reuse_serialization() -> None:
+    report = _compile_report()
+    _add_vmem_source_reuse_evidence(
+        report,
+        action_count=30,
+        source_reuse_full_drain_count=30,
+        total_full_drain_count=107,
+    )
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    suggestion = result.suggestions[0]
+    assert suggestion.suggestion_id == "amdgpu.vmem_source_reuse_serialization"
+    assert "source-state turnover" in suggestion.action
+    evidence = {item.path: item.value for item in suggestion.evidence}
+    assert evidence["wait_reason_summary_rows.rows[0].summary.full_drain_count"] == 30
+    assert evidence["entries.rows[0].wait_plan.full_drain_count"] == 107
+
+
+@pytest.mark.parametrize(
+    ("source_reuse_full_drain_count", "total_full_drain_count"),
+    [
+        (7, 100),
+        (30, 121),
+    ],
+)
+def test_ignores_sparse_vmem_source_reuse_serialization(
+    source_reuse_full_drain_count: int,
+    total_full_drain_count: int,
+) -> None:
+    report = _compile_report()
+    _add_vmem_source_reuse_evidence(
+        report,
+        action_count=source_reuse_full_drain_count,
+        source_reuse_full_drain_count=source_reuse_full_drain_count,
+        total_full_drain_count=total_full_drain_count,
+    )
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    assert "amdgpu.vmem_source_reuse_serialization" not in {
+        suggestion.suggestion_id for suggestion in result.suggestions
+    }
+
+
+def test_suggests_dominant_lds_ssa_use_serialization() -> None:
+    report = _compile_report()
+    _add_lds_ssa_use_evidence(
+        report,
+        action_count=27,
+        ssa_use_full_drain_count=27,
+        ssa_use_partial_wait_count=0,
+        total_full_drain_count=125,
+        max_outstanding_before=1,
+    )
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    suggestion = result.suggestions[0]
+    assert suggestion.suggestion_id == "amdgpu.lds_ssa_use_serialization"
+    assert "independent LDS or DS producers" in suggestion.action
+    evidence = {item.path: item.value for item in suggestion.evidence}
+    assert evidence["wait_reason_summary_rows.rows[0].summary.full_drain_count"] == 27
+    assert evidence["wait_reason_summary_rows.rows[0].summary.partial_wait_count"] == 0
+    assert evidence["entries.rows[0].wait_plan.full_drain_count"] == 125
+
+
+def test_ignores_pipelined_lds_ssa_uses() -> None:
+    report = _compile_report()
+    _add_lds_ssa_use_evidence(
+        report,
+        action_count=27,
+        ssa_use_full_drain_count=3,
+        ssa_use_partial_wait_count=24,
+        total_full_drain_count=101,
+        max_outstanding_before=4,
+    )
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    assert "amdgpu.lds_ssa_use_serialization" not in {
+        suggestion.suggestion_id for suggestion in result.suggestions
+    }
+
+
+def test_suggests_single_subgroup_workgroup_communication() -> None:
+    report = _compile_report()
+    _add_single_subgroup_communication_evidence(
+        report,
+        flat_workgroup_size=64,
+        barrier_count=4,
+    )
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    suggestion = next(
+        suggestion
+        for suggestion in result.suggestions
+        if suggestion.suggestion_id == "amdgpu.single_subgroup_workgroup_communication"
+    )
+    assert "fits within one subgroup" in suggestion.action
+    evidence = {item.path: item.value for item in suggestion.evidence}
+    assert evidence["entries.rows[0].workload.workgroup_size.flat"] == 64
+    assert evidence["entries.rows[0].target_resources.subgroup_size"] == 64
+    assert evidence["entries.rows[0].static_instruction_mix.barrier_count"] == 4
+    assert evidence["entries.rows[0].static_instruction_mix.local_memory_count"] == 16
+    assert evidence["entries.rows[0].local_memory_bytes"] == 528
+
+
+@pytest.mark.parametrize(
+    ("flat_workgroup_size", "barrier_count"),
+    [
+        (128, 4),
+        (64, 0),
+    ],
+)
+def test_ignores_multi_subgroup_or_barrier_free_communication(
+    flat_workgroup_size: int,
+    barrier_count: int,
+) -> None:
+    report = _compile_report()
+    _add_single_subgroup_communication_evidence(
+        report,
+        flat_workgroup_size=flat_workgroup_size,
+        barrier_count=barrier_count,
+    )
+    document = parse_compile_report(report)
+
+    result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
+
+    assert "amdgpu.single_subgroup_workgroup_communication" not in {
+        suggestion.suggestion_id for suggestion in result.suggestions
+    }
 
 
 def test_fragment_packet_expansion_cites_source_packets_and_pressure() -> None:
