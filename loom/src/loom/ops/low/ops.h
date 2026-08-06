@@ -723,8 +723,6 @@ iree_status_t loom_low_scf_for_build(
     loom_may_consume loom_value_id_t step,
     loom_may_consume const loom_value_id_t* iter_args,
     iree_host_size_t iter_args_count,
-    const loom_type_t* result_types,
-    iree_host_size_t result_count,
     const loom_tied_result_t* tied_results,
     iree_host_size_t tied_result_count,
     loom_optional loom_may_consume loom_value_id_t unroll_factor,

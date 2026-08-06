@@ -959,6 +959,18 @@ def test_generate_builders_keep_array_for_multiple_dynamic_fixed_results() -> No
     assert "result_types_storage" not in builders_c
 
 
+def test_generate_builders_derive_loop_results_from_iter_args() -> None:
+    op = _make_counted_loop_op()
+
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+
+    assert "const loom_type_t* result_types" not in ops_h
+    assert "iree_host_size_t result_count" not in ops_h
+    assert "(uint16_t)iter_args_count" in builders_c
+    assert "loom_module_value_type(builder->module, iter_args[_i])" in builders_c
+
+
 def test_generate_tables_uses_template_param_for_symbol_attrs() -> None:
     op = Op(
         "test.targeted",

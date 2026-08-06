@@ -415,24 +415,6 @@ static iree_status_t loom_loop_fusion_concat_iter_args(
   return iree_ok_status();
 }
 
-static iree_status_t loom_loop_fusion_make_placeholder_result_types(
-    iree_arena_allocator_t* arena, const loom_loop_fusion_for_info_t* first,
-    const loom_loop_fusion_for_info_t* second, loom_type_t** out_result_types,
-    uint16_t* out_count) {
-  uint32_t combined_count =
-      (uint32_t)first->results.count + (uint32_t)second->results.count;
-  *out_count = (uint16_t)combined_count;
-  *out_result_types = NULL;
-  if (combined_count == 0) return iree_ok_status();
-
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, combined_count, sizeof(loom_type_t), (void**)out_result_types));
-  for (uint16_t i = 0; i < combined_count; ++i) {
-    (*out_result_types)[i] = loom_type_none();
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_loop_fusion_map_old_results_to_fused(
     loom_ir_remap_t* remap, const loom_loop_fusion_for_info_t* first,
     const loom_loop_fusion_for_info_t* second, loom_op_t* fused_loop) {
@@ -624,10 +606,7 @@ static iree_status_t loom_loop_fusion_fuse_pair(
   IREE_RETURN_IF_ERROR(loom_loop_fusion_concat_iter_args(
       scratch_arena, first, second, &iter_args, &iter_arg_count));
 
-  loom_type_t* result_types = NULL;
-  uint16_t result_count = 0;
-  IREE_RETURN_IF_ERROR(loom_loop_fusion_make_placeholder_result_types(
-      scratch_arena, first, second, &result_types, &result_count));
+  const uint16_t result_count = iter_arg_count;
 
   loom_value_id_t* provisional_yield_values = NULL;
   if (result_count > 0) {
@@ -674,9 +653,8 @@ static iree_status_t loom_loop_fusion_fuse_pair(
   iree_status_t status = loom_scf_for_build(
       builder, /*build_flags=*/0, first->domain.lower_bound,
       first->domain.upper_bound, first->domain.step, iter_args, iter_arg_count,
-      result_types, result_count, NULL, 0, LOOM_VALUE_ID_INVALID,
-      /*unroll_policy=*/0, /*unroll_schedule=*/0, first->op->location,
-      &fused_loop);
+      NULL, 0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
+      /*unroll_schedule=*/0, first->op->location, &fused_loop);
   if (iree_status_is_ok(status)) {
     status = loom_loop_fusion_copy_result_names(context->module, first, second,
                                                 fused_loop);

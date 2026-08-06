@@ -228,7 +228,7 @@ TEST_F(InterfaceTest, LoopLikeCastReturnsValidForScfFor) {
   loom_op_t* for_op = nullptr;
   IREE_ASSERT_OK(loom_scf_for_build(
       &builder_, /*build_flags=*/0, lower_id, upper_id, step_id, nullptr, 0,
-      nullptr, 0, nullptr, 0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
+      nullptr, 0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
       /*unroll_schedule=*/0, LOOM_LOCATION_UNKNOWN, &for_op));
 
   loom_loop_like_t loop = loom_loop_like_cast(module_, for_op);
@@ -274,7 +274,7 @@ TEST_F(InterfaceTest, LoopLikeAccessorsForScfFor) {
   loom_op_t* for_op = nullptr;
   IREE_ASSERT_OK(loom_scf_for_build(
       &builder_, /*build_flags=*/0, lower_id, upper_id, step_id, nullptr, 0,
-      nullptr, 0, nullptr, 0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
+      nullptr, 0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
       /*unroll_schedule=*/0, LOOM_LOCATION_UNKNOWN, &for_op));
 
   loom_loop_like_t loop = loom_loop_like_cast(module_, for_op);
@@ -308,8 +308,8 @@ TEST_F(InterfaceTest, LoopLikeIterArgsEmpty) {
   IREE_ASSERT_OK(loom_scf_for_build(
       &builder_, /*build_flags=*/0, loom_op_results(lower)[0],
       loom_op_results(upper)[0], loom_op_results(step)[0], nullptr, 0, nullptr,
-      0, nullptr, 0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
-      /*unroll_schedule=*/0, LOOM_LOCATION_UNKNOWN, &for_op));
+      0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      LOOM_LOCATION_UNKNOWN, &for_op));
 
   loom_loop_like_t loop = loom_loop_like_cast(module_, for_op);
   loom_value_slice_t iter_args = loom_loop_like_iter_args(loop);
@@ -325,15 +325,13 @@ TEST_F(InterfaceTest, LoopLikeIterArgsNonEmpty) {
   loom_op_t* init1 = build_i32(20);
   loom_value_id_t init_ids[2] = {loom_op_results(init0)[0],
                                  loom_op_results(init1)[0]};
-  loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
-  loom_type_t result_types[2] = {i32, i32};
 
   loom_op_t* for_op = nullptr;
   IREE_ASSERT_OK(
       loom_scf_for_build(&builder_, LOOM_SCF_FOR_BUILD_FLAG_HAS_UNROLL_FACTOR,
                          loom_op_results(lower)[0], loom_op_results(upper)[0],
-                         loom_op_results(step)[0], init_ids, 2, result_types, 2,
-                         nullptr, 0, loom_op_results(factor)[0],
+                         loom_op_results(step)[0], init_ids, 2, nullptr, 0,
+                         loom_op_results(factor)[0],
                          /*unroll_policy=*/0, /*unroll_schedule=*/0,
                          LOOM_LOCATION_UNKNOWN, &for_op));
 
@@ -342,6 +340,12 @@ TEST_F(InterfaceTest, LoopLikeIterArgsNonEmpty) {
   EXPECT_EQ(iter_args.count, 2);
   EXPECT_EQ(iter_args.values[0], init_ids[0]);
   EXPECT_EQ(iter_args.values[1], init_ids[1]);
+  ASSERT_EQ(for_op->result_count, 2);
+  const loom_value_id_t* results = loom_op_const_results(for_op);
+  for (uint16_t i = 0; i < for_op->result_count; ++i) {
+    EXPECT_TRUE(loom_type_equal(loom_module_value_type(module_, results[i]),
+                                loom_module_value_type(module_, init_ids[i])));
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -384,8 +388,8 @@ TEST_F(InterfaceTest, RegionBranchCastReturnsNullForScfFor) {
   IREE_ASSERT_OK(loom_scf_for_build(
       &builder_, /*build_flags=*/0, loom_op_results(lower)[0],
       loom_op_results(upper)[0], loom_op_results(step)[0], nullptr, 0, nullptr,
-      0, nullptr, 0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0,
-      /*unroll_schedule=*/0, LOOM_LOCATION_UNKNOWN, &for_op));
+      0, LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0, /*unroll_schedule=*/0,
+      LOOM_LOCATION_UNKNOWN, &for_op));
 
   loom_region_branch_t branch = loom_region_branch_cast(module_, for_op);
   EXPECT_FALSE(loom_region_branch_isa(branch));

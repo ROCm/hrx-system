@@ -189,6 +189,29 @@ def static_tied_results(op: Op) -> list[tuple[int, int]]:
     return ties
 
 
+def inferred_variadic_result_type_source(op: Op) -> str | None:
+    """Returns the operand field defining the complete variadic result list.
+
+    IterArgsMatchResults makes both the result count and each result type a
+    function of the corresponding iter operand. Builders for that exact shape
+    should preserve the schema contract instead of accepting a redundant
+    parallel type array from every caller.
+    """
+    if len(op.results) != 1 or not op.results[0].variadic:
+        return None
+    result_name = op.results[0].name
+    matches = [constraint for constraint in op.constraints if constraint.name == "IterArgsMatchResults" and len(constraint.args) == 2 and constraint.args[1] == result_name]
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise ValueError(f"Op '{op.name}': result field '{result_name}' has multiple IterArgsMatchResults constraints")
+    source_name = matches[0].args[0]
+    source = next((operand for operand in op.operands if operand.name == source_name), None)
+    if source is None or not source.variadic or source.optional:
+        raise ValueError(f"Op '{op.name}': IterArgsMatchResults source '{source_name}' must be a required variadic operand field")
+    return source_name
+
+
 def fixed_result_types_fit_single_builder_type(op: Op) -> bool:
     """Returns true when fixed results can be built from one dynamic type.
 
@@ -226,6 +249,7 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
     Each param has: name, kind, c_type, and kind-specific extras.
     """
     layout = compute_layout(op)
+    inferred_result_source = inferred_variadic_result_type_source(op)
     params: list[dict[str, Any]] = []
     implicit_fields = {"iv", "args"}
     covered_attrs: set[str] = set()
@@ -465,12 +489,13 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                         )
 
                 case ResultTypeList(field=name):
-                    params.append(
-                        {
-                            "name": "result_types",
-                            "kind": "result_types",
-                        }
-                    )
+                    if inferred_result_source is None:
+                        params.append(
+                            {
+                                "name": "result_types",
+                                "kind": "result_types",
+                            }
+                        )
                     if has_dynamic_ties:
                         params.append(
                             {
@@ -607,7 +632,7 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
     # in the format spec, we still need a result type parameter so the
     # builder can define result values.
     has_result_param = any(p["kind"] in ("result_type", "result_types") for p in params)
-    if not has_result_param and len(op.results) > 0:
+    if not has_result_param and len(op.results) > 0 and inferred_result_source is None:
         if layout.variadic_result:
             params.append(
                 {

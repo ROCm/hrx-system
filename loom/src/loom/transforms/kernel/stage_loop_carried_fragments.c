@@ -630,7 +630,6 @@ static iree_status_t loom_stage_loop_carried_fragments_rewrite(
   loom_value_slice_t iter_args = loom_scf_for_iter_args(op);
   loom_value_slice_t yielded_values = loom_scf_yield_values(yield);
   loom_block_t* old_block = loom_region_entry_block(loom_scf_for_body(op));
-  const loom_value_id_t* old_results = loom_op_const_results(op);
 
   uint16_t* staged_index_by_ordinal = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -645,21 +644,15 @@ static iree_status_t loom_stage_loop_carried_fragments_rewrite(
 
   uint16_t kept_count = (uint16_t)(op->result_count - staged_fragments->count);
   loom_value_id_t* kept_iter_args = NULL;
-  loom_type_t* kept_result_types = NULL;
   if (kept_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         context->scratch_arena, kept_count, sizeof(*kept_iter_args),
         (void**)&kept_iter_args));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        context->scratch_arena, kept_count, sizeof(*kept_result_types),
-        (void**)&kept_result_types));
   }
   uint16_t kept_ordinal = 0;
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (staged_index_by_ordinal[i] != UINT16_MAX) continue;
     kept_iter_args[kept_ordinal] = iter_args.values[i];
-    kept_result_types[kept_ordinal] =
-        loom_module_value_type(context->module, old_results[i]);
     ++kept_ordinal;
   }
 
@@ -792,9 +785,8 @@ static iree_status_t loom_stage_loop_carried_fragments_rewrite(
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &context->rewriter->builder, build_flags, loom_scf_for_lower_bound(op),
       loom_scf_for_upper_bound(op), loom_scf_for_step(op), kept_iter_args,
-      kept_count, kept_result_types, kept_count, /*tied_results=*/NULL,
-      /*tied_result_count=*/0, unroll_factor, unroll_policy, unroll_schedule,
-      op->location, &new_loop));
+      kept_count, /*tied_results=*/NULL, /*tied_result_count=*/0, unroll_factor,
+      unroll_policy, unroll_schedule, op->location, &new_loop));
 
   loom_region_t* new_body = loom_scf_for_body(new_loop);
   loom_builder_ip_t saved_ip = loom_builder_enter_region(

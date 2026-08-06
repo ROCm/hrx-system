@@ -2678,18 +2678,10 @@ static iree_status_t loom_low_lower_emit_scf_for(
     unroll_policy = (uint8_t)loom_scf_for_unroll_policy(source_op);
   }
 
-  loom_type_t* result_types = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_low_lower_map_op_result_types(context, source_op, &result_types));
-  if (source_op->result_count != 0 && result_types == NULL) {
-    return iree_ok_status();
-  }
-
   loom_op_t* low_for_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_scf_for_build(
       &context->builder, build_flags, low_lower_bound, low_upper_bound,
-      low_step, low_iter_args, iter_args.count, result_types,
-      source_op->result_count, /*tied_results=*/NULL,
+      low_step, low_iter_args, iter_args.count, /*tied_results=*/NULL,
       /*tied_result_count=*/0, low_unroll_factor, unroll_policy,
       source_op->location, &low_for_op));
   IREE_RETURN_IF_ERROR(
