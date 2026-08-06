@@ -1497,16 +1497,30 @@ def _gfx11_generic_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
 
 
 def _rdna4m_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
-    return tuple(
-        overlay
-        for overlay in _gfx115x_core_overlays()
-        if not (overlay.semantic_tag or "").startswith("matrix.")
+    return (
+        *(
+            overlay
+            for overlay in _gfx115x_core_overlays()
+            if not (overlay.semantic_tag or "").startswith("matrix.")
+        ),
+        *_v_cvt_f32_packed8_selection_overlays("ocp", op_sel_field="OP_SEL"),
+        *_v_cvt_pk_packed8_from_f32_overlays("ocp", op_sel_field="OP_SEL"),
+        *(
+            _v_dot4_f32_packed8_overlay(lhs_type=lhs_type, rhs_type=rhs_type)
+            for lhs_type, rhs_type in (
+                ("fp8", "bf8"),
+                ("bf8", "fp8"),
+                ("fp8", "fp8"),
+                ("bf8", "bf8"),
+            )
+        ),
     )
 
 
 def _rdna4m_core_overlay_descriptors(
     spec: AmdgpuIsaFactSource,
 ) -> tuple[Descriptor, ...]:
+    spec = _rdna4m_spec_with_supplemental_instruction_facts(spec)
     return _with_execution_mask_state_reads(
         materialize_amdgpu_descriptor_overlays(spec, _rdna4m_core_overlays())
     )
@@ -1632,7 +1646,7 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
         _v_div_fixup_f32_overlay(),
         _v_cvt_f32_f16_overlay(encoding_name="ENC_VOP3"),
         _v_cvt_f16_f32_overlay(),
-        *_v_cvt_f32_packed8_overlays("ocp"),
+        *_v_cvt_f32_packed8_selection_overlays("ocp", op_sel_field="OPSEL"),
         *_v_cvt_pk_packed8_from_f32_overlays(
             "ocp",
             op_sel_field="OPSEL",
@@ -1870,10 +1884,18 @@ def _rdna4_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
             op_sel_hi_field="OPSEL_HI", lhs_signed=False, rhs_signed=True
         ),
         _v_dot8_u32_u4_overlay(op_sel_hi_field="OPSEL_HI"),
-        _v_dot4_f32_packed8_overlay(lhs_type="fp8", rhs_type="bf8"),
-        _v_dot4_f32_packed8_overlay(lhs_type="bf8", rhs_type="fp8"),
-        _v_dot4_f32_packed8_overlay(lhs_type="fp8", rhs_type="fp8"),
-        _v_dot4_f32_packed8_overlay(lhs_type="bf8", rhs_type="bf8"),
+        _v_dot4_f32_packed8_overlay(
+            lhs_type="fp8", rhs_type="bf8", op_sel_hi_field="OPSEL_HI"
+        ),
+        _v_dot4_f32_packed8_overlay(
+            lhs_type="bf8", rhs_type="fp8", op_sel_hi_field="OPSEL_HI"
+        ),
+        _v_dot4_f32_packed8_overlay(
+            lhs_type="fp8", rhs_type="fp8", op_sel_hi_field="OPSEL_HI"
+        ),
+        _v_dot4_f32_packed8_overlay(
+            lhs_type="bf8", rhs_type="bf8", op_sel_hi_field="OPSEL_HI"
+        ),
         *_with_zero_accumulator_form(
             _v_wmma_f32_16x16x16_f16_overlay(op_sel_hi_field="OPSEL_HI")
         ),

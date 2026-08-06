@@ -1557,7 +1557,10 @@ def _v_dot4_u32_u8_overlay(
 
 
 def _v_dot4_f32_packed8_overlay(
-    *, lhs_type: str, rhs_type: str
+    *,
+    lhs_type: str,
+    rhs_type: str,
+    op_sel_hi_field: str = "OP_SEL_HI",
 ) -> AmdgpuDescriptorOverlay:
     lhs_type_upper = lhs_type.upper()
     rhs_type_upper = rhs_type.upper()
@@ -1573,6 +1576,9 @@ def _v_dot4_f32_packed8_overlay(
             AmdgpuOperandOverlay("SRC0", _vgpr_operand("lhs")),
             AmdgpuOperandOverlay("SRC1", _vgpr_operand("rhs")),
             AmdgpuOperandOverlay("SRC2", _vgpr_const_operand("acc")),
+        ),
+        fixed_encoding_fields=_vop3p_packed_dot_fixed_fields(
+            op_sel_hi_field=op_sel_hi_field
         ),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )

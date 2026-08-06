@@ -1034,6 +1034,18 @@ def test_packed_dot_descriptors_use_packed_dot_schedule_class() -> None:
     assert dot_descriptor_count != 0
 
 
+def test_rdna4_packed_fp8_dots_pin_no_op_modifiers() -> None:
+    descriptors = {
+        overlay.descriptor_key: overlay for overlay in _gfx12_core_overlays()
+    }
+    for lhs_type in ("fp8", "bf8"):
+        for rhs_type in ("fp8", "bf8"):
+            descriptor_key = f"amdgpu.v_dot4_f32_{lhs_type}_{rhs_type}"
+            assert descriptors[descriptor_key].fixed_encoding_fields == (
+                ("OPSEL_HI", 0x7),
+            )
+
+
 def test_mode_control_schedule_class_covers_generated_descriptors() -> None:
     for descriptor_set in _amdgpu_core_descriptor_set_bases():
         schedule_classes = {

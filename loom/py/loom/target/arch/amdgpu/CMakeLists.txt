@@ -238,6 +238,7 @@ iree_py_test(
   SRCS
     "descriptor_overlay_test.py"
     "descriptors/rdna4_test.py"
+    "descriptors/rdna4m_test.py"
     "descriptors_test.py"
     "isa_xml_test.py"
     "low_aliases_test.py"
@@ -245,6 +246,7 @@ iree_py_test(
   ARGS
     "loom.target.arch.amdgpu.descriptor_overlay_test"
     "loom.target.arch.amdgpu.descriptors.rdna4_test"
+    "loom.target.arch.amdgpu.descriptors.rdna4m_test"
     "loom.target.arch.amdgpu.descriptors_test"
     "loom.target.arch.amdgpu.low_aliases_test"
   DEPS
