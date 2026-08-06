@@ -1306,6 +1306,15 @@ static bool loom_amdgpu_select_payload_prefers_vgpr(
           loom_module_value_type(module, source_value_id))) {
     return true;
   }
+  // Statusless module-local queries have no active-bit table. Keep their
+  // select inspection bounded because condition-mask and result placement
+  // query each other.
+  if (analysis == NULL) {
+    return loom_amdgpu_source_value_facts_prefer_vgpr(module, fact_table,
+                                                      source_value_id) ||
+           loom_amdgpu_source_value_directly_prefers_vgpr(
+               module, source_value_id, condition_value_id);
+  }
   return loom_amdgpu_analyzed_source_value_prefers_vgpr(
       module, fact_table, view_regions, analysis, source_value_id);
 }
@@ -2587,7 +2596,10 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
     return false;
   }
 
-  if (iree_any_bit_set(producer_flags,
+  // Recursive select propagation requires the active-bit table because the
+  // selected result can participate in condition-mask classification.
+  if (analysis != NULL &&
+      iree_any_bit_set(producer_flags,
                        LOOM_AMDGPU_SOURCE_PRODUCER_SCF_SELECT) &&
       loom_value_def_index(value) == 0) {
     return loom_amdgpu_analyzed_source_value_prefers_vgpr(
