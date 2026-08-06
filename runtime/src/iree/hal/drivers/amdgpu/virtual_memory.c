@@ -317,7 +317,7 @@ iree_status_t iree_hal_amdgpu_virtual_memory_release(
   const iree_hal_buffer_release_callback_t release_callback =
       iree_hal_amdgpu_virtual_memory_reservation_release_callback(state);
   iree_hal_amdgpu_buffer_disarm_storage(virtual_buffer, release_callback);
-  iree_hal_buffer_destroy(virtual_buffer);
+  iree_hal_buffer_release(virtual_buffer);
   return iree_ok_status();
 }
 
