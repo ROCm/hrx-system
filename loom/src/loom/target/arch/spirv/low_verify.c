@@ -83,6 +83,8 @@ typedef struct loom_spirv_low_verify_state_t {
   loom_spirv_low_verify_structure_flags_t structure_flags;
 } loom_spirv_low_verify_state_t;
 
+#define LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY 32
+
 static uint64_t loom_spirv_low_hash_value_id(loom_value_id_t value_id) {
   uint64_t value = value_id;
   value ^= value >> 33;
@@ -221,26 +223,9 @@ static bool loom_spirv_low_type_is_spirv_id(loom_type_t type) {
              SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID;
 }
 
-static bool loom_spirv_low_register_value_type(
-    loom_type_t type, loom_spirv_value_type_t* out_value_type) {
-  *out_value_type = (loom_spirv_value_type_t){0};
-  if (!loom_low_type_is_register(type) ||
-      loom_low_register_type_descriptor_set_stable_id(type) !=
-          SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID) {
-    return false;
-  }
-  switch (loom_low_register_type_class_id(type)) {
-    case SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID:
-      return false;
-    default:
-      return loom_spirv_value_type_from_reg_class_id(
-          loom_low_register_type_class_id(type), out_value_type);
-  }
-}
-
 static iree_string_view_t loom_spirv_low_value_type_format(
-    loom_spirv_low_verify_state_t* state, loom_spirv_value_type_t value_type) {
-  (void)state;
+    loom_spirv_value_type_t value_type, char* buffer,
+    iree_host_size_t buffer_capacity) {
   switch (value_type.value_class) {
     case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
       return IREE_SV("unknown");
@@ -252,6 +237,17 @@ static iree_string_view_t loom_spirv_low_value_type_format(
       return IREE_SV("storage_buffer_address");
     case LOOM_SPIRV_VALUE_CLASS_SCALAR:
       return loom_spirv_scalar_type_name(value_type.scalar_type);
+    case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+    case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR: {
+      const iree_string_view_t component_name =
+          value_type.value_class == LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR
+              ? IREE_SV("bool")
+              : loom_spirv_scalar_type_name(value_type.scalar_type);
+      iree_snprintf(buffer, buffer_capacity, "v%u%.*s",
+                    (unsigned)value_type.vector.lane_count,
+                    (int)component_name.size, component_name.data);
+      return iree_make_cstring_view(buffer);
+    }
     case LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER:
       return IREE_SV("ptr.physical_storage_buffer");
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
@@ -407,7 +403,8 @@ static iree_status_t loom_spirv_low_prepare_abi_value_type(
       state->skip_body_checks = true;
       return iree_ok_status();
     }
-    if (!loom_spirv_low_register_value_type(low_type, out_value_type)) {
+    if (!loom_spirv_value_type_from_low_register_type(low_type,
+                                                      out_value_type)) {
       IREE_RETURN_IF_ERROR(loom_spirv_low_emit_unsupported_register_type(
           context, state, op, value_id, low_type));
       state->skip_body_checks = true;
@@ -529,6 +526,8 @@ static bool loom_spirv_low_direct_constant_word_count(
       *out_word_count = 2;
       return true;
     case LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS:
+    case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+    case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR:
     case LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
@@ -551,11 +550,13 @@ static iree_status_t loom_spirv_low_emit_raw_bda_returns(
 static iree_status_t loom_spirv_low_emit_raw_bda_direct_value(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     loom_value_id_t value_id, loom_spirv_value_type_t value_type) {
+  char value_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_string(loom_spirv_low_value_type_format(state, value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          value_type, value_type_buffer, sizeof(value_type_buffer))),
   };
   return loom_spirv_low_emit(context, state->function_op, LOOM_ERR_SPIRV_007,
                              params, IREE_ARRAYSIZE(params));
@@ -575,11 +576,13 @@ static iree_status_t loom_spirv_low_emit_raw_bda_constant_count(
 static iree_status_t loom_spirv_low_emit_shader_argument_value(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     loom_value_id_t value_id, loom_spirv_value_type_t value_type) {
+  char value_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_string(loom_spirv_low_value_type_format(state, value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          value_type, value_type_buffer, sizeof(value_type_buffer))),
   };
   return loom_spirv_low_emit(context, state->function_op, LOOM_ERR_SPIRV_022,
                              params, IREE_ARRAYSIZE(params));
@@ -588,11 +591,13 @@ static iree_status_t loom_spirv_low_emit_shader_argument_value(
 static iree_status_t loom_spirv_low_emit_shader_result_value(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     loom_value_id_t value_id, loom_spirv_value_type_t value_type) {
+  char value_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_string(loom_spirv_low_value_type_format(state, value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          value_type, value_type_buffer, sizeof(value_type_buffer))),
   };
   return loom_spirv_low_emit(context, state->function_op, LOOM_ERR_SPIRV_016,
                              params, IREE_ARRAYSIZE(params));
@@ -747,11 +752,13 @@ static iree_status_t loom_spirv_low_emit_resource_result_type(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     const loom_op_t* op, loom_value_id_t value_id,
     loom_spirv_value_type_t value_type) {
+  char value_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_string(loom_spirv_low_value_type_format(state, value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          value_type, value_type_buffer, sizeof(value_type_buffer))),
   };
   return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_011, params,
                              IREE_ARRAYSIZE(params));
@@ -784,7 +791,7 @@ static iree_status_t loom_spirv_low_verify_resource(
 
   const loom_value_id_t result = loom_low_resource_result(op);
   loom_spirv_value_type_t result_type = {0};
-  if (!loom_spirv_low_register_value_type(
+  if (!loom_spirv_value_type_from_low_register_type(
           loom_module_value_type(state->module, result), &result_type)) {
     IREE_RETURN_IF_ERROR(loom_spirv_low_emit_unsupported_register_type(
         context, state, op, result,
@@ -823,6 +830,8 @@ static iree_status_t loom_spirv_low_emit_packet_type_mismatch(
   const iree_string_view_t descriptor_key =
       loom_low_descriptor_packet_diagnostic_key(state->target->descriptor_set,
                                                 packet);
+  char expected_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
+  char actual_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_string(descriptor_key),
@@ -830,10 +839,11 @@ static iree_status_t loom_spirv_low_emit_packet_type_mismatch(
       loom_param_u32(field_index),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_string(
-          loom_spirv_low_value_type_format(state, expected_value_type)),
-      loom_param_string(
-          loom_spirv_low_value_type_format(state, actual_value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          expected_value_type, expected_type_buffer,
+          sizeof(expected_type_buffer))),
+      loom_param_string(loom_spirv_low_value_type_format(
+          actual_value_type, actual_type_buffer, sizeof(actual_type_buffer))),
   };
   return loom_spirv_low_emit(context, packet->op, LOOM_ERR_SPIRV_013, params,
                              IREE_ARRAYSIZE(params));
@@ -850,10 +860,12 @@ static iree_status_t loom_spirv_low_verify_packet_operands(
                                                 operands[i], &actual_type)) {
       continue;
     }
-    if (!loom_spirv_value_type_equal(actual_type, row->operand_types[i])) {
+    const loom_spirv_value_type_t expected_type =
+        loom_spirv_packet_row_operand_type(row, i);
+    if (!loom_spirv_value_type_equal(actual_type, expected_type)) {
       IREE_RETURN_IF_ERROR(loom_spirv_low_emit_packet_type_mismatch(
           context, state, packet, IREE_SV("operand"), i, operands[i],
-          row->operand_types[i], actual_type));
+          expected_type, actual_type));
     }
   }
   return iree_ok_status();
@@ -904,15 +916,18 @@ static iree_status_t loom_spirv_low_emit_return_type_mismatch(
     const loom_op_t* op, uint32_t result_index, loom_value_id_t value_id,
     loom_spirv_value_type_t expected_value_type,
     loom_spirv_value_type_t actual_value_type) {
+  char expected_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
+  char actual_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_u32(result_index),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_string(
-          loom_spirv_low_value_type_format(state, expected_value_type)),
-      loom_param_string(
-          loom_spirv_low_value_type_format(state, actual_value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          expected_value_type, expected_type_buffer,
+          sizeof(expected_type_buffer))),
+      loom_param_string(loom_spirv_low_value_type_format(
+          actual_value_type, actual_type_buffer, sizeof(actual_type_buffer))),
   };
   return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_014, params,
                              IREE_ARRAYSIZE(params));
@@ -945,12 +960,13 @@ static iree_status_t loom_spirv_low_emit_branch_condition_type_mismatch(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     const loom_op_t* op, loom_value_id_t value_id,
     loom_spirv_value_type_t actual_value_type) {
+  char value_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_string(
-          loom_spirv_low_value_type_format(state, actual_value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          actual_value_type, value_type_buffer, sizeof(value_type_buffer))),
   };
   return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_019, params,
                              IREE_ARRAYSIZE(params));
@@ -962,16 +978,19 @@ static iree_status_t loom_spirv_low_emit_branch_payload_type_mismatch(
     loom_value_id_t target_value_id,
     loom_spirv_value_type_t expected_value_type,
     loom_spirv_value_type_t actual_value_type) {
+  char expected_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
+  char actual_type_buffer[LOOM_SPIRV_LOW_VALUE_TYPE_NAME_CAPACITY];
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, source_value_id)),
       loom_param_string(
           loom_low_diagnostic_value_name(state->module, target_value_id)),
-      loom_param_string(
-          loom_spirv_low_value_type_format(state, expected_value_type)),
-      loom_param_string(
-          loom_spirv_low_value_type_format(state, actual_value_type)),
+      loom_param_string(loom_spirv_low_value_type_format(
+          expected_value_type, expected_type_buffer,
+          sizeof(expected_type_buffer))),
+      loom_param_string(loom_spirv_low_value_type_format(
+          actual_value_type, actual_type_buffer, sizeof(actual_type_buffer))),
   };
   return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_020, params,
                              IREE_ARRAYSIZE(params));
@@ -1263,7 +1282,7 @@ static iree_status_t loom_spirv_low_verify_storage_address(
   }
   const loom_value_id_t result = loom_low_storage_address_result(op);
   loom_spirv_value_type_t result_type = {0};
-  if (!loom_spirv_low_register_value_type(
+  if (!loom_spirv_value_type_from_low_register_type(
           loom_module_value_type(state->module, result), &result_type)) {
     return loom_spirv_low_emit_unsupported_register_type(
         context, state, op, result,

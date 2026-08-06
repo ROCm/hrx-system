@@ -2287,11 +2287,19 @@ static iree_status_t loom_low_verify_immediate(
       break;
     }
     case LOOM_LOW_IMMEDIATE_KIND_UNSIGNED:
+      // I64 attributes carry the bits of full-width unsigned immediates.
+      if ((uint64_t)immediate->default_value > immediate->unsigned_max) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "low unsigned immediate %" PRIu32
+                                " default value %" PRId64 " is out of range",
+                                immediate_index, immediate->default_value);
+      }
+      break;
     case LOOM_LOW_IMMEDIATE_KIND_ORDINAL:
       if (immediate->default_value < 0 ||
           (uint64_t)immediate->default_value > immediate->unsigned_max) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "low unsigned immediate %" PRIu32
+                                "low ordinal immediate %" PRIu32
                                 " default value %" PRId64 " is out of range",
                                 immediate_index, immediate->default_value);
       }

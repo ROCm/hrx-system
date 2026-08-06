@@ -144,6 +144,8 @@ low.func.def target<spirv.logical.core>(@generic) abi(shader_entry_point) @kerne
       LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_RAW_BDA_EXECUTABLE |
       LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_BUFFER_DEVICE_ADDRESS |
       LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_FLOAT16 |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_INT8 |
+      LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_INT16 |
       LOOM_SPIRV_VULKAN_HAL_PROFILE_FLAG_SHADER_INT64;
   device_facts.subgroup_size = 32;
   device_facts.max_compute_workgroup_invocations = 256;
@@ -183,6 +185,10 @@ low.func.def target<spirv.logical.core>(@generic) abi(shader_entry_point) @kerne
       &arena_, /*options=*/nullptr, &generic_module, iree_allocator_system()));
   EXPECT_FALSE(
       SpirvModuleHasCapability(generic_module, LOOM_SPIRV_CAPABILITY_FLOAT16));
+  EXPECT_FALSE(
+      SpirvModuleHasCapability(generic_module, LOOM_SPIRV_CAPABILITY_INT8));
+  EXPECT_FALSE(
+      SpirvModuleHasCapability(generic_module, LOOM_SPIRV_CAPABILITY_INT16));
   loom_spirv_module_binary_deinitialize(&generic_module,
                                         iree_allocator_system());
 
@@ -206,6 +212,10 @@ low.func.def target<spirv.logical.core>(@generic) abi(shader_entry_point) @kerne
       &arena_, &options, &exact_module, iree_allocator_system()));
   EXPECT_TRUE(
       SpirvModuleHasCapability(exact_module, LOOM_SPIRV_CAPABILITY_FLOAT16));
+  EXPECT_TRUE(
+      SpirvModuleHasCapability(exact_module, LOOM_SPIRV_CAPABILITY_INT8));
+  EXPECT_TRUE(
+      SpirvModuleHasCapability(exact_module, LOOM_SPIRV_CAPABILITY_INT16));
   loom_spirv_module_binary_deinitialize(&exact_module, iree_allocator_system());
 
   EXPECT_EQ(module->symbols.count, authored_symbol_count);

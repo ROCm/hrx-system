@@ -1263,6 +1263,18 @@ TEST(LowDescriptorsTest, RejectsDefaultOutsideUnsignedImmediateRange) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, AcceptsFullWidthUnsignedDefaultBitPattern) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.immediates[0].kind = LOOM_LOW_IMMEDIATE_KIND_UNSIGNED;
+  tables.immediates[0].flags = LOOM_LOW_IMMEDIATE_FLAG_DEFAULT_VALUE;
+  tables.immediates[0].bit_width = 64;
+  tables.immediates[0].unsigned_max = UINT64_MAX;
+  tables.immediates[0].default_value = INT64_MIN;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsUnknownEffectFlagBits) {
   TestTables tables;
   InitializeTestTables(&tables);

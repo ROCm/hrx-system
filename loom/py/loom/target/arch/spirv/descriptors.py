@@ -19,6 +19,16 @@ from loom.target.arch.spirv.cooperative_matrix import (
     CooperativeMatrixCase,
     cooperative_matrix_descriptor_key,
 )
+from loom.target.arch.spirv.ordinary_vector import (
+    ORDINARY_VECTOR_INSTRUCTIONS,
+    OrdinaryVectorComponentKind,
+    OrdinaryVectorComponentType,
+    OrdinaryVectorInstruction,
+    OrdinaryVectorInstructionType,
+)
+from loom.target.arch.spirv.ordinary_vector_integer import (
+    ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
+)
 from loom.target.arch.spirv.scalar_alu import (
     BOOLEAN_BINARY_OPERATIONS,
     BOOLEAN_CONSTANTS,
@@ -39,6 +49,11 @@ from loom.target.arch.spirv.scalar_alu import (
     IntegerComparePredicate,
     ScalarAluType,
     ScalarBinaryOperation,
+)
+from loom.target.arch.spirv.scalar_constant import (
+    BFLOAT16_CONSTANT_TYPE,
+    FLOAT_CONSTANT_TYPES,
+    FloatConstantType,
 )
 from loom.target.arch.spirv.scalar_conversion import (
     INTEGER_VALUE_VIEW_CONVERSIONS,
@@ -117,6 +132,15 @@ def _integer_constant_immediate(scalar_pair: IntegerAluTypePair) -> Immediate:
         bit_width=scalar_pair.bit_width,
         signed_min=scalar_pair.signed_minimum,
         unsigned_max=scalar_pair.signed_maximum,
+    )
+
+
+def _float_constant_immediate(scalar: FloatConstantType) -> Immediate:
+    return Immediate(
+        f"{scalar.source_type}_bits",
+        ImmediateKind.UNSIGNED,
+        bit_width=scalar.bit_width,
+        unsigned_max=(2**scalar.bit_width) - 1,
     )
 
 
@@ -322,6 +346,16 @@ def _builtin_index_descriptors() -> tuple[Descriptor, ...]:
     )
 
 
+def _coordinate_copy_descriptor() -> Descriptor:
+    key = "spirv.op_copy_object.i32"
+    return _unary_typed_descriptor(
+        key=key,
+        mnemonic="OpCopyObject.i32",
+        semantic_tag=key,
+        operands=(_id_result(), _id_operand("input")),
+    )
+
+
 def _conversion_descriptors() -> tuple[Descriptor, ...]:
     return (
         *(tuple(_conversion_descriptor(row) for row in LOW_SCALAR_CONVERSIONS)),
@@ -367,6 +401,68 @@ def _unary_typed_descriptor(
         operands=operands,
         feature_mask_words=(feature_bits,) if feature_bits else (),
         asm_forms=_asm(results=("dst",), operands=("input",)),
+        schedule_class=_SCHEDULE_ALU,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _ordinary_vector_result(
+    value_type: OrdinaryVectorInstructionType,
+) -> Operand:
+    if (
+        isinstance(value_type, OrdinaryVectorComponentType)
+        and value_type.kind == OrdinaryVectorComponentKind.OFFSET
+    ):
+        return _offset64_result()
+    return _id_result()
+
+
+def _ordinary_vector_operand(
+    field_name: str,
+    value_type: OrdinaryVectorInstructionType,
+) -> Operand:
+    if (
+        isinstance(value_type, OrdinaryVectorComponentType)
+        and value_type.kind == OrdinaryVectorComponentKind.OFFSET
+    ):
+        return _offset64_operand(field_name)
+    return _id_operand(field_name)
+
+
+def _ordinary_vector_descriptor(row: OrdinaryVectorInstruction) -> Descriptor:
+    has_component_index = row.component_index_maximum is not None
+    immediates = (
+        (
+            Immediate(
+                "component_index",
+                ImmediateKind.UNSIGNED,
+                bit_width=32,
+                unsigned_max=row.component_index_maximum,
+            ),
+        )
+        if has_component_index
+        else ()
+    )
+    return Descriptor(
+        key=row.key,
+        mnemonic=row.mnemonic,
+        semantic_tag=row.key,
+        operands=(
+            _ordinary_vector_result(row.result_type),
+            *(
+                _ordinary_vector_operand(name, operand_type)
+                for name, operand_type in zip(
+                    row.operand_names, row.operand_types, strict=True
+                )
+            ),
+        ),
+        immediates=immediates,
+        feature_mask_words=(row.feature_bits,) if row.feature_bits else (),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=row.operand_names,
+            immediates=("component_index",) if has_component_index else (),
+        ),
         schedule_class=_SCHEDULE_ALU,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
@@ -808,6 +904,23 @@ def _integer_constant_descriptor(scalar_pair: IntegerAluTypePair) -> Descriptor:
     )
 
 
+def _float_constant_descriptor(scalar: FloatConstantType) -> Descriptor:
+    key = f"spirv.op_constant.{scalar.suffix}"
+    immediate = _float_constant_immediate(scalar)
+    return Descriptor(
+        key=key,
+        mnemonic=f"OpConstant.{scalar.suffix}",
+        semantic_tag=key,
+        operands=(_id_result(),),
+        op_kind=DescriptorOpKind.CONST,
+        immediates=(immediate,),
+        feature_mask_words=(scalar.feature_bits,) if scalar.feature_bits else (),
+        asm_forms=_asm(results=("dst",), immediates=(immediate.field_name,)),
+        schedule_class=_SCHEDULE_ALU,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _boolean_constant_descriptor(row: BooleanConstant) -> Descriptor:
     key = f"spirv.op_constant_{row.descriptor_suffix}.bool"
     return Descriptor(
@@ -922,6 +1035,19 @@ def _select_descriptors() -> tuple[Descriptor, ...]:
         )
         for scalar in SCALAR_ALU_TYPES
     ]
+    descriptors.append(
+        _select_descriptor(
+            key="spirv.op_select.bf16",
+            mnemonic="OpSelect.bf16",
+            operands=(
+                _id_result(),
+                _id_operand("condition"),
+                _id_operand("true_value"),
+                _id_operand("false_value"),
+            ),
+            feature_bits=BFLOAT16_CONSTANT_TYPE.feature_bits,
+        )
+    )
     descriptors.append(
         _select_descriptor(
             key="spirv.op_select.bool",
@@ -1062,6 +1188,7 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
             _integer_constant_descriptor(scalar_pair)
             for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS
         ),
+        *(_float_constant_descriptor(scalar) for scalar in FLOAT_CONSTANT_TYPES),
         Descriptor(
             key="spirv.op_constant.offset64",
             mnemonic="OpConstant.offset64",
@@ -1075,6 +1202,12 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
         ),
         *_scalar_binary_descriptors(),
         *_conversion_descriptors(),
+        *(_ordinary_vector_descriptor(row) for row in ORDINARY_VECTOR_INSTRUCTIONS),
+        *(
+            _ordinary_vector_descriptor(row)
+            for row in ORDINARY_VECTOR_INTEGER_INSTRUCTIONS
+        ),
+        _coordinate_copy_descriptor(),
         _ternary_same_type_descriptor(
             key="spirv.op_imul_add.i32",
             mnemonic="OpIMulAdd",

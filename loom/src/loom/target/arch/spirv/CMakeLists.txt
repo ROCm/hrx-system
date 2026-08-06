@@ -115,7 +115,6 @@ loom_cc_library(
   DEPS
     ::value_types
     iree::base
-    loom::ir
   PUBLIC
 )
 endif()
@@ -126,10 +125,13 @@ loom_cc_library(
     value_types
   HDRS
     "value_types.h"
+  SRCS
+    "value_types.c"
   DEPS
     ::isa
     ::scalar_types
     iree::base
+    loom::ir
   PUBLIC
 )
 endif()
@@ -180,6 +182,7 @@ loom_cc_library(
     iree::base
     loom::codegen::low::descriptors
     loom::target::arch::spirv::descriptors::descriptors_ids
+    loom::target::registers
   PUBLIC
 )
 endif()
@@ -435,6 +438,7 @@ loom_cc_test(
     loom::codegen::low::descriptors
     loom::target::arch::spirv::descriptors
     loom::target::arch::spirv::records::target_records
+    loom::target::registers
   LABELS
     "iree-build-requirement=loom.target.arch.spirv"
 )
@@ -457,6 +461,7 @@ loom_check_test_suite(
     "test/source_low/corpus/numeric_scalar_f32.loom-test"
     "test/source_low/corpus/numeric_scalar_i32.loom-test"
     "test/source_low/corpus/numeric_scalar_i64.loom-test"
+    "test/source_low/corpus/ordinary_vector_structure.loom-test"
     "test/source_low/low_verify_diagnostics.loom-test"
     "test/source_low/source_low.loom-test"
     "test/source_low/source_low_diagnostics.loom-test"
@@ -474,6 +479,7 @@ loom_check_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_f32.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i32.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/numeric_scalar_i64.loom-test"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/ordinary_vector_structure.loom-test"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/sync_barrier.loom-test"
   TEST_NAME_PREFIX_TO_STRIP
     "test/source_low/"

@@ -137,12 +137,9 @@ static loom_spirv_value_type_t loom_spirv_module_abi_low_register_value_type(
   IREE_ASSERT_EQ(loom_low_register_type_descriptor_set_stable_id(type),
                  SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID);
 
-  const uint16_t register_class_id = loom_low_register_type_class_id(type);
-  IREE_ASSERT_NE(register_class_id, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID);
-
   loom_spirv_value_type_t value_type = {0};
   const bool resolved =
-      loom_spirv_value_type_from_reg_class_id(register_class_id, &value_type);
+      loom_spirv_value_type_from_low_register_type(type, &value_type);
   IREE_ASSERT(resolved);
   return value_type;
 }
@@ -450,6 +447,8 @@ static iree_status_t loom_spirv_module_abi_slot_type_info(
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
     case LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX:
+    case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+    case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR:
     case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
       break;
   }
@@ -521,6 +520,8 @@ static uint8_t loom_spirv_module_abi_slot_constant_word_count(
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
     case LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX:
+    case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+    case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR:
     case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
       break;
   }
@@ -612,6 +613,8 @@ static iree_status_t loom_spirv_module_abi_build_raw_bda_plan(
       case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
       case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
       case LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX:
+      case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+      case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR:
       case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
         IREE_CHECK_UNREACHABLE("verified SPIR-V raw-BDA direct ABI value");
         break;
@@ -929,6 +932,8 @@ static iree_status_t loom_spirv_module_abi_materialize_bda_arg(
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
     case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
     case LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX:
+    case LOOM_SPIRV_VALUE_CLASS_VECTOR:
+    case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR:
     case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
       break;
   }

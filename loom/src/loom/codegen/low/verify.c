@@ -611,7 +611,18 @@ static iree_status_t loom_low_verify_i64_immediate_range(
           function_state, op, immediate_name, attrs_attr_index, value,
           expected_range);
     }
-    case LOOM_LOW_IMMEDIATE_KIND_UNSIGNED:
+    case LOOM_LOW_IMMEDIATE_KIND_UNSIGNED: {
+      // I64 attributes carry the bits of full-width unsigned immediates.
+      if ((uint64_t)value <= immediate->unsigned_max) {
+        return iree_ok_status();
+      }
+      iree_string_view_t expected_range = iree_string_view_empty();
+      IREE_RETURN_IF_ERROR(loom_low_verify_format_unsigned_range(
+          function_state, immediate->unsigned_max, &expected_range));
+      return loom_low_verify_emit_immediate_range_mismatch(
+          function_state, op, immediate_name, attrs_attr_index, value,
+          expected_range);
+    }
     case LOOM_LOW_IMMEDIATE_KIND_ORDINAL: {
       if (value >= 0 && (uint64_t)value <= immediate->unsigned_max) {
         return iree_ok_status();

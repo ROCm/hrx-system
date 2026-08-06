@@ -44,6 +44,7 @@ loom_check_test_suite(
     "numeric_scalar_f32.loom-test"
     "numeric_scalar_i32.loom-test"
     "numeric_scalar_i64.loom-test"
+    "ordinary_vector_structure.loom-test"
     "packed_bitfield.loom-test"
     "packed_bitpack.loom-test"
     "packed_bitunpack.loom-test"

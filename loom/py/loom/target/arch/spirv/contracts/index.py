@@ -21,6 +21,7 @@ from loom.target.arch.spirv.scalar_alu import (
 from loom.target.contracts import (
     AttrProject,
     DescriptorEmitForm,
+    DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
     Guard,
@@ -28,6 +29,7 @@ from loom.target.contracts import (
     OrdinalValueAliasRule,
     ResultTypeBinding,
     Scalar,
+    SourceValueKind,
     TypePattern,
     ValueAliasRule,
     ValueRef,
@@ -215,11 +217,14 @@ def _integer_view_emit(
     output_ref: ValueRef,
     result_type: TypePattern,
 ) -> EmitDescriptorOp:
+    result_type_binding: ResultTypeBinding = result_type
+    if output_ref.kind == SourceValueKind.TEMPORARY:
+        result_type_binding = DescriptorResultType()
     return _emit(
         _descriptor(descriptor_key),
         operands={"input": input_ref},
         results={"dst": output_ref},
-        result_types={"dst": result_type},
+        result_types={"dst": result_type_binding},
     )
 
 
@@ -286,7 +291,7 @@ def _address_to_boolean_cast_rule(
                 truncate,
                 operands={"input": input_ref},
                 results={"dst": ValueRef.temporary("unsigned_low_bits")},
-                result_types={"dst": _I32},
+                result_types={"dst": DescriptorResultType()},
             ),
             _integer_view_emit(
                 "spirv.op_bitcast.u32.i32",
@@ -343,8 +348,20 @@ def _signed_payload_index_cast_rules() -> tuple[DescriptorRule | ValueAliasRule,
         payload_type = Scalar(scalar_pair.source_type)
         suffix = scalar_pair.signed.suffix
         if scalar_pair.bit_width == 32:
-            rules.append(_cast_alias_rule(payload_type, _INDEX))
-            rules.append(_cast_alias_rule(_INDEX, payload_type))
+            rules.append(
+                _cast_descriptor_rule(
+                    payload_type,
+                    _INDEX,
+                    "spirv.op_copy_object.i32",
+                )
+            )
+            rules.append(
+                _cast_descriptor_rule(
+                    _INDEX,
+                    payload_type,
+                    "spirv.op_copy_object.i32",
+                )
+            )
             continue
 
         range_guard = None
@@ -454,7 +471,7 @@ def _payload_offset_cast_rules() -> tuple[DescriptorRule, ...]:
                         from_offset,
                         operands={"input": ValueRef.operand("input")},
                         results={"dst": ValueRef.temporary("unsigned_result")},
-                        result_types={"dst": payload_type},
+                        result_types={"dst": DescriptorResultType()},
                     ),
                     _integer_view_emit(
                         f"spirv.op_bitcast.{unsigned_suffix}.{signed_suffix}",
@@ -531,7 +548,7 @@ def _address_cast_rules() -> tuple[DescriptorRule | ValueAliasRule, ...]:
                     from_offset,
                     operands={"input": ValueRef.operand("input")},
                     results={"dst": ValueRef.temporary("unsigned_result")},
-                    result_types={"dst": _INDEX},
+                    result_types={"dst": DescriptorResultType()},
                 ),
                 _integer_view_emit(
                     "spirv.op_bitcast.u32.i32",
@@ -709,7 +726,7 @@ def _index_unsigned_binary_rule(
                     "rhs": ValueRef.temporary("unsigned_rhs"),
                 },
                 results={"dst": ValueRef.temporary("unsigned_result")},
-                result_types={"dst": _INDEX},
+                result_types={"dst": DescriptorResultType()},
             ),
             _integer_view_emit(
                 "spirv.op_bitcast.u32.i32",

@@ -17,21 +17,21 @@ func.def target(@target) @index_arithmetic(%lhs0: index, %rhs0: index, %stride: 
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 0], spirv_result_value_types = [23, 23, 23, 23, 23, 23, 23, 23, 0]}) @index_arithmetic(%lhs: reg<spirv.id>, %rhs: reg<spirv.id>, %stride: reg<spirv.offset64>) -> (reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.offset64>) asm {
-  %add = OpIAdd %lhs, %rhs
-  %sub = OpISub %lhs, %rhs
-  %mul = OpIMul %lhs, %rhs
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 0], spirv_result_value_types = [23, 23, 23, 23, 23, 23, 23, 23, 0]}) @index_arithmetic(%lhs: reg<spirv.id : index>, %rhs: reg<spirv.id : index>, %stride: reg<spirv.offset64>) -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.offset64>) asm {
+  %add = OpIAdd %lhs, %rhs : reg<spirv.id : index>
+  %sub = OpISub %lhs, %rhs : reg<spirv.id : index>
+  %mul = OpIMul %lhs, %rhs : reg<spirv.id : index>
   %38 = OpBitcast.i32.u32 %lhs
   %39 = OpBitcast.i32.u32 %rhs
   %40 = OpUDiv.u32 %38, %39
-  %div = OpBitcast.u32.i32 %40
+  %div = OpBitcast.u32.i32 %40 : reg<spirv.id : index>
   %44 = OpUMod.u32 %38, %39
-  %rem = OpBitcast.u32.i32 %44
-  %46 = OpSLessThan %lhs, %rhs
-  %min = OpSelect %46, %lhs, %rhs
-  %48 = OpSGreaterThan %lhs, %rhs
-  %max = OpSelect %48, %lhs, %rhs
-  %madd = OpIMulAdd %lhs, %rhs, %sub
+  %rem = OpBitcast.u32.i32 %44 : reg<spirv.id : index>
+  %46 = OpSLessThan %lhs, %rhs : reg<spirv.id : i1>
+  %min = OpSelect %46, %lhs, %rhs : reg<spirv.id : index>
+  %48 = OpSGreaterThan %lhs, %rhs : reg<spirv.id : i1>
+  %max = OpSelect %48, %lhs, %rhs : reg<spirv.id : index>
+  %madd = OpIMulAdd %lhs, %rhs, %sub : reg<spirv.id : index>
   %52 = OpUConvert.u32.offset64 %38
   %scaled = OpIMul.offset64 %52, %stride
   return %add, %sub, %mul, %div, %rem, %min, %max, %madd, %scaled
@@ -73,44 +73,44 @@ func.def target(@target) @index_bitwise(%input: index, %other: index, %amount0: 
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23], spirv_result_value_types = [23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23]}) @index_bitwise(%input: reg<spirv.id>, %other: reg<spirv.id>, %amount: reg<spirv.id>) -> (reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>) asm {
-  %and = OpBitwiseAnd %input, %other
-  %or = OpBitwiseOr %input, %other
-  %xor = OpBitwiseXor %input, %other
-  %shl = OpShiftLeftLogical %input, %amount
-  %shrs = OpShiftRightArithmetic %input, %amount
-  %shru = OpShiftRightLogical %input, %amount
-  %47 = OpConstant.i32 32
-  %48 = OpISub %47, %amount
-  %49 = OpConstant.i32 31
-  %50 = OpBitwiseAnd %48, %49
-  %51 = OpShiftRightLogical %input, %50
-  %rotl = OpBitwiseOr %shl, %51
-  %58 = OpShiftLeftLogical %input, %50
-  %rotr = OpBitwiseOr %shru, %58
-  %60 = OpConstant.i32 1
-  %61 = OpShiftRightLogical %input, %60
-  %62 = OpBitwiseOr %input, %61
-  %63 = OpConstant.i32 2
-  %64 = OpShiftRightLogical %62, %63
-  %65 = OpBitwiseOr %62, %64
-  %66 = OpConstant.i32 4
-  %67 = OpShiftRightLogical %65, %66
-  %68 = OpBitwiseOr %65, %67
-  %69 = OpConstant.i32 8
-  %70 = OpShiftRightLogical %68, %69
-  %71 = OpBitwiseOr %68, %70
-  %72 = OpConstant.i32 16
-  %73 = OpShiftRightLogical %71, %72
-  %74 = OpBitwiseOr %71, %73
-  %75 = OpBitCount %74
-  %clz = OpISub %47, %75
-  %78 = OpConstant.i32 0
-  %79 = OpISub %78, %input
-  %80 = OpBitwiseAnd %input, %79
-  %82 = OpISub %80, %60
-  %ctz = OpBitCount %82
-  %pop = OpBitCount %input
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23], spirv_result_value_types = [23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23]}) @index_bitwise(%input: reg<spirv.id : index>, %other: reg<spirv.id : index>, %amount: reg<spirv.id : index>) -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>) asm {
+  %and = OpBitwiseAnd %input, %other : reg<spirv.id : index>
+  %or = OpBitwiseOr %input, %other : reg<spirv.id : index>
+  %xor = OpBitwiseXor %input, %other : reg<spirv.id : index>
+  %shl = OpShiftLeftLogical %input, %amount : reg<spirv.id : index>
+  %shrs = OpShiftRightArithmetic %input, %amount : reg<spirv.id : index>
+  %shru = OpShiftRightLogical %input, %amount : reg<spirv.id : index>
+  %47 = OpConstant.i32 32 : reg<spirv.id : index>
+  %48 = OpISub %47, %amount : reg<spirv.id : index>
+  %49 = OpConstant.i32 31 : reg<spirv.id : index>
+  %50 = OpBitwiseAnd %48, %49 : reg<spirv.id : index>
+  %51 = OpShiftRightLogical %input, %50 : reg<spirv.id : index>
+  %rotl = OpBitwiseOr %shl, %51 : reg<spirv.id : index>
+  %58 = OpShiftLeftLogical %input, %50 : reg<spirv.id : index>
+  %rotr = OpBitwiseOr %shru, %58 : reg<spirv.id : index>
+  %60 = OpConstant.i32 1 : reg<spirv.id : index>
+  %61 = OpShiftRightLogical %input, %60 : reg<spirv.id : index>
+  %62 = OpBitwiseOr %input, %61 : reg<spirv.id : index>
+  %63 = OpConstant.i32 2 : reg<spirv.id : index>
+  %64 = OpShiftRightLogical %62, %63 : reg<spirv.id : index>
+  %65 = OpBitwiseOr %62, %64 : reg<spirv.id : index>
+  %66 = OpConstant.i32 4 : reg<spirv.id : index>
+  %67 = OpShiftRightLogical %65, %66 : reg<spirv.id : index>
+  %68 = OpBitwiseOr %65, %67 : reg<spirv.id : index>
+  %69 = OpConstant.i32 8 : reg<spirv.id : index>
+  %70 = OpShiftRightLogical %68, %69 : reg<spirv.id : index>
+  %71 = OpBitwiseOr %68, %70 : reg<spirv.id : index>
+  %72 = OpConstant.i32 16 : reg<spirv.id : index>
+  %73 = OpShiftRightLogical %71, %72 : reg<spirv.id : index>
+  %74 = OpBitwiseOr %71, %73 : reg<spirv.id : index>
+  %75 = OpBitCount %74 : reg<spirv.id : index>
+  %clz = OpISub %47, %75 : reg<spirv.id : index>
+  %78 = OpConstant.i32 0 : reg<spirv.id : index>
+  %79 = OpISub %78, %input : reg<spirv.id : index>
+  %80 = OpBitwiseAnd %input, %79 : reg<spirv.id : index>
+  %82 = OpISub %80, %60 : reg<spirv.id : index>
+  %ctz = OpBitCount %82 : reg<spirv.id : index>
+  %pop = OpBitCount %input : reg<spirv.id : index>
   return %and, %or, %xor, %shl, %shrs, %shru, %rotl, %rotr, %clz, %ctz, %pop
 }
 
@@ -133,20 +133,20 @@ func.def target(@target) @index_compare_select(%lhs: index, %rhs: index) -> (i1,
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 23]}) @index_compare_select(%lhs: reg<spirv.id>, %rhs: reg<spirv.id>) -> (reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>) asm {
-  %eq = OpIEqual %lhs, %rhs
-  %ne = OpINotEqual %lhs, %rhs
-  %slt = OpSLessThan %lhs, %rhs
-  %sle = OpSLessThanEqual %lhs, %rhs
-  %sgt = OpSGreaterThan %lhs, %rhs
-  %sge = OpSGreaterThanEqual %lhs, %rhs
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 23]}) @index_compare_select(%lhs: reg<spirv.id : index>, %rhs: reg<spirv.id : index>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : index>) asm {
+  %eq = OpIEqual %lhs, %rhs : reg<spirv.id : i1>
+  %ne = OpINotEqual %lhs, %rhs : reg<spirv.id : i1>
+  %slt = OpSLessThan %lhs, %rhs : reg<spirv.id : i1>
+  %sle = OpSLessThanEqual %lhs, %rhs : reg<spirv.id : i1>
+  %sgt = OpSGreaterThan %lhs, %rhs : reg<spirv.id : i1>
+  %sge = OpSGreaterThanEqual %lhs, %rhs : reg<spirv.id : i1>
   %43 = OpBitcast.i32.u32 %lhs
   %44 = OpBitcast.i32.u32 %rhs
-  %ult = OpULessThan.u32 %43, %44
-  %ule = OpULessThanEqual.u32 %43, %44
-  %ugt = OpUGreaterThan.u32 %43, %44
-  %uge = OpUGreaterThanEqual.u32 %43, %44
-  %selected = OpSelect %ult, %lhs, %rhs
+  %ult = OpULessThan.u32 %43, %44 : reg<spirv.id : i1>
+  %ule = OpULessThanEqual.u32 %43, %44 : reg<spirv.id : i1>
+  %ugt = OpUGreaterThan.u32 %43, %44 : reg<spirv.id : i1>
+  %uge = OpUGreaterThanEqual.u32 %43, %44 : reg<spirv.id : i1>
+  %selected = OpSelect %ult, %lhs, %rhs : reg<spirv.id : index>
   return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected
 }
 
@@ -169,19 +169,19 @@ func.def target(@target) @offset_compare_select(%lhs: offset, %rhs: offset) -> (
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0]}) @offset_compare_select(%lhs: reg<spirv.offset64>, %rhs: reg<spirv.offset64>) -> (reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.id>, reg<spirv.offset64>) asm {
-  %eq = OpIEqual.offset64 %lhs, %rhs
-  %ne = OpINotEqual.offset64 %lhs, %rhs
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0]}) @offset_compare_select(%lhs: reg<spirv.offset64>, %rhs: reg<spirv.offset64>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.offset64>) asm {
+  %eq = OpIEqual.offset64 %lhs, %rhs : reg<spirv.id : i1>
+  %ne = OpINotEqual.offset64 %lhs, %rhs : reg<spirv.id : i1>
   %39 = OpBitcast.offset64.i64 %lhs
   %40 = OpBitcast.offset64.i64 %rhs
-  %slt = OpSLessThan.i64 %39, %40
-  %sle = OpSLessThanEqual.i64 %39, %40
-  %sgt = OpSGreaterThan.i64 %39, %40
-  %sge = OpSGreaterThanEqual.i64 %39, %40
-  %ult = OpULessThan.offset64 %lhs, %rhs
-  %ule = OpULessThanEqual.offset64 %lhs, %rhs
-  %ugt = OpUGreaterThan.offset64 %lhs, %rhs
-  %uge = OpUGreaterThanEqual.offset64 %lhs, %rhs
+  %slt = OpSLessThan.i64 %39, %40 : reg<spirv.id : i1>
+  %sle = OpSLessThanEqual.i64 %39, %40 : reg<spirv.id : i1>
+  %sgt = OpSGreaterThan.i64 %39, %40 : reg<spirv.id : i1>
+  %sge = OpSGreaterThanEqual.i64 %39, %40 : reg<spirv.id : i1>
+  %ult = OpULessThan.offset64 %lhs, %rhs : reg<spirv.id : i1>
+  %ule = OpULessThanEqual.offset64 %lhs, %rhs : reg<spirv.id : i1>
+  %ugt = OpUGreaterThan.offset64 %lhs, %rhs : reg<spirv.id : i1>
+  %uge = OpUGreaterThanEqual.offset64 %lhs, %rhs : reg<spirv.id : i1>
   %selected = OpSelect.offset64 %ult, %lhs, %rhs
   return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected
 }

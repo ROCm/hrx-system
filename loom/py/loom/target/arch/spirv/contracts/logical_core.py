@@ -37,6 +37,9 @@ from loom.target.arch.spirv.contracts.index import (
     SPIRV_INDEX_CONVERSION_RULES,
     SPIRV_INDEX_NUMERIC_RULES,
 )
+from loom.target.arch.spirv.contracts.ordinary_vector import (
+    SPIRV_ORDINARY_VECTOR_CONTRACT_CASES,
+)
 from loom.target.arch.spirv.cooperative_matrix import (
     COOPERATIVE_MATRIX_CASES,
     CooperativeMatrixCase,
@@ -61,6 +64,10 @@ from loom.target.arch.spirv.scalar_alu import (
     ScalarAluType,
     ScalarBinaryOperation,
 )
+from loom.target.arch.spirv.scalar_constant import (
+    FLOAT_CONSTANT_TYPES,
+    FloatConstantType,
+)
 from loom.target.arch.spirv.scalar_conversion import (
     DIRECT_SCALAR_CONVERSIONS,
     UNSIGNED_SCALAR_CONVERSIONS,
@@ -77,6 +84,7 @@ from loom.target.contracts import (
     ContractFragment,
     DescriptorEmitForm,
     DescriptorMatrixRule,
+    DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
     Guard,
@@ -91,9 +99,11 @@ from loom.target.contracts import (
     SourceMemoryDynamicIndexSource,
     SourceMemoryOperation,
     SourceMemoryRootKind,
+    SourceValueKind,
     TypePattern,
     ValueAliasRule,
     ValueElideRule,
+    ValueProject,
     ValueRef,
     Vector,
     View,
@@ -167,12 +177,49 @@ def _integer_constant_rule(scalar_pair: IntegerAluTypePair) -> DescriptorRule:
                 scalar_pair.signed_minimum,
                 scalar_pair.signed_maximum,
             ),
+            *_feature_guards(descriptor),
         ),
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
                 results={"dst": ValueRef.result("result")},
                 immediates={immediate_name: AttrProject.direct("value")},
+                form=DescriptorEmitForm.CONST,
+            ),
+        ),
+    )
+
+
+def _float_constant_bits_project(scalar: FloatConstantType) -> ValueProject:
+    if scalar.source_type == "f16":
+        return ValueProject.float_as_f16_bits("result")
+    if scalar.source_type == "bf16":
+        return ValueProject.float_as_bf16_bits("result")
+    if scalar.source_type == "f32":
+        return ValueProject.float_as_f32_bits("result")
+    if scalar.source_type == "f64":
+        return ValueProject.float_as_f64_bits("result")
+    raise ValueError(f"unsupported SPIR-V float constant type {scalar.source_type}")
+
+
+def _float_constant_rule(scalar: FloatConstantType) -> DescriptorRule:
+    descriptor = _descriptor(f"spirv.op_constant.{scalar.suffix}")
+    return DescriptorRule(
+        source_op=scalar_conversion.scalar_constant,
+        descriptor=descriptor,
+        guards=(
+            Guard.attr_kind("value", "f64"),
+            Guard.value_type("result", Scalar(scalar.source_type)),
+            Guard.value_exact_float("result"),
+            *_feature_guards(descriptor),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                results={"dst": ValueRef.result("result")},
+                immediates={
+                    f"{scalar.source_type}_bits": _float_constant_bits_project(scalar)
+                },
                 form=DescriptorEmitForm.CONST,
             ),
         ),
@@ -199,9 +246,13 @@ def _boolean_constant_rule(row: BooleanConstant) -> DescriptorRule:
 
 
 def _scalar_constant_rules() -> tuple[DescriptorRule, ...]:
-    return tuple(_boolean_constant_rule(row) for row in BOOLEAN_CONSTANTS) + tuple(
-        _integer_constant_rule(scalar_pair)
-        for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS
+    return (
+        tuple(_boolean_constant_rule(row) for row in BOOLEAN_CONSTANTS)
+        + tuple(
+            _integer_constant_rule(scalar_pair)
+            for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS
+        )
+        + tuple(_float_constant_rule(scalar) for scalar in FLOAT_CONSTANT_TYPES)
     )
 
 
@@ -301,11 +352,14 @@ def _integer_view_emit(
     input_ref: ValueRef,
     output_ref: ValueRef,
 ) -> EmitDescriptorOp:
+    result_type_binding: ResultTypeBinding = Scalar(result_type.source_type)
+    if output_ref.kind == SourceValueKind.TEMPORARY:
+        result_type_binding = DescriptorResultType()
     return _descriptor_emit(
         descriptor=_descriptor(_integer_view_key(source_type, result_type)),
         operands={"input": input_ref},
         results={"dst": output_ref},
-        result_types={"dst": Scalar(result_type.source_type)},
+        result_types={"dst": result_type_binding},
     )
 
 
@@ -344,7 +398,7 @@ def _unsigned_binary_rule(
                     "rhs": ValueRef.temporary("unsigned_rhs"),
                 },
                 results={"dst": ValueRef.temporary("unsigned_result")},
-                result_types={"dst": Scalar(scalar_pair.source_type)},
+                result_types={"dst": DescriptorResultType()},
             ),
             _integer_view_emit(
                 source_type=scalar_pair.unsigned,
@@ -381,7 +435,7 @@ def _unsigned_conversion_rule(row: ScalarConversion) -> DescriptorRule:
                     descriptor=descriptor,
                     operands={"input": ValueRef.temporary("unsigned_input")},
                     results={"dst": ValueRef.temporary("unsigned_result")},
-                    result_types={"dst": Scalar(result_pair.source_type)},
+                    result_types={"dst": DescriptorResultType()},
                 ),
                 _integer_view_emit(
                     source_type=result_pair.unsigned,
@@ -430,7 +484,7 @@ def _unsigned_conversion_rule(row: ScalarConversion) -> DescriptorRule:
                     descriptor=descriptor,
                     operands={"input": ValueRef.operand("input")},
                     results={"dst": ValueRef.temporary("unsigned_result")},
-                    result_types={"dst": Scalar(result_pair.source_type)},
+                    result_types={"dst": DescriptorResultType()},
                 ),
                 _integer_view_emit(
                     source_type=result_pair.unsigned,
@@ -1268,6 +1322,7 @@ def _select_rules() -> tuple[DescriptorRule, ...]:
         _select_rule(_scalar_type_pattern(scalar), f"spirv.op_select.{scalar.suffix}")
         for scalar in SCALAR_ALU_TYPES
     ]
+    rules.append(_select_rule(Scalar("bf16"), "spirv.op_select.bf16"))
     rules.append(_select_rule(_I1, "spirv.op_select.bool"))
     return tuple(rules)
 
@@ -1299,6 +1354,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *_builtin_index_rules(),
         *_conversion_rules(),
         *_scalar_binary_rules(),
+        *SPIRV_ORDINARY_VECTOR_CONTRACT_CASES,
         *_compare_rules(),
         *_select_rules(),
         *_storage_buffer_rules(),

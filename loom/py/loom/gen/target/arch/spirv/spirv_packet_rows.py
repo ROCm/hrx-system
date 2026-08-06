@@ -35,6 +35,15 @@ from loom.target.arch.spirv.cooperative_matrix import (  # noqa: E402
     CooperativeMatrixCase,
 )
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET  # noqa: E402
+from loom.target.arch.spirv.ordinary_vector import (  # noqa: E402
+    ORDINARY_VECTOR_INSTRUCTIONS,
+    OrdinaryVectorComponentType,
+    OrdinaryVectorInstructionType,
+    OrdinaryVectorType,
+)
+from loom.target.arch.spirv.ordinary_vector_integer import (  # noqa: E402
+    ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
+)
 from loom.target.arch.spirv.scalar_alu import (  # noqa: E402
     BOOLEAN_BINARY_OPERATIONS,
     BOOLEAN_CONSTANTS,
@@ -54,6 +63,11 @@ from loom.target.arch.spirv.scalar_alu import (  # noqa: E402
     ScalarAluType,
     ScalarBinaryOperation,
 )
+from loom.target.arch.spirv.scalar_constant import (  # noqa: E402
+    BFLOAT16_CONSTANT_TYPE,
+    FLOAT_CONSTANT_TYPES,
+    FloatConstantType,
+)
 from loom.target.arch.spirv.scalar_conversion import (  # noqa: E402
     INTEGER_VALUE_VIEW_CONVERSIONS,
     LOW_SCALAR_CONVERSIONS,
@@ -65,6 +79,9 @@ from loom.target.arch.spirv.scalar_memory import (  # noqa: E402
     StorageBufferScalar,
 )
 from loom.target.low_descriptors import descriptor_set_relative_name  # noqa: E402
+
+_PACKET_MAX_OPERAND_COUNT = 4
+_PACKET_OPERAND_TYPE_CAPACITY = 3
 
 
 def _c_identifier(value: str) -> str:
@@ -93,10 +110,11 @@ def _cooperative_matrix_value(
     return (
         "{.value_class = LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX, "
         f".scalar_type = {scalar_enum}, "
+        ".cooperative_matrix = {"
         f".rows = {rows}, "
         f".columns = {columns}, "
         ".scope = LOOM_SPIRV_SCOPE_SUBGROUP, "
-        f".cooperative_matrix_use = {matrix_use}}}"
+        f".use = {matrix_use}}}}}"
     )
 
 
@@ -106,6 +124,28 @@ def _scalar_value(scalar: StorageBufferScalar) -> str:
 
 def _alu_scalar_value(scalar: ScalarAluType) -> str:
     return _value_type("LOOM_SPIRV_VALUE_CLASS_SCALAR", scalar.scalar_enum)
+
+
+def _ordinary_vector_value(vector_type: OrdinaryVectorType) -> str:
+    component_type = vector_type.component_type
+    return f"{{.value_class = {component_type.vector_value_class}, .scalar_type = {component_type.scalar_enum}, .vector = {{.lane_count = {vector_type.lane_count}}}}}"
+
+
+def _ordinary_vector_component_value(
+    component_type: OrdinaryVectorComponentType,
+) -> str:
+    return _value_type(
+        component_type.scalar_value_class,
+        component_type.scalar_enum,
+    )
+
+
+def _ordinary_vector_instruction_value(
+    value_type: OrdinaryVectorInstructionType,
+) -> str:
+    if isinstance(value_type, OrdinaryVectorType):
+        return _ordinary_vector_value(value_type)
+    return _ordinary_vector_component_value(value_type)
 
 
 def _storage_buffer_address_value() -> str:
@@ -156,7 +196,15 @@ class _PacketRow:
     cooperative_matrix_stride: int = 0
     cooperative_matrix_operands: str | None = None
 
+    def encoded_operand_types(self) -> tuple[str, ...]:
+        if len(self.operand_types) <= _PACKET_OPERAND_TYPE_CAPACITY:
+            return self.operand_types
+        if len(self.operand_types) <= _PACKET_MAX_OPERAND_COUNT and len(set(self.operand_types)) == 1:
+            return self.operand_types[:1]
+        raise ValueError(f"{self.descriptor_key}: packet operand types do not fit")
+
     def render(self) -> str:
+        encoded_operand_types = self.encoded_operand_types()
         lines = [
             f"    [{_descriptor_ref_constant_name(self.descriptor_key)}] =",
             "        {",
@@ -164,10 +212,10 @@ class _PacketRow:
             f"            .form = {self.form},",
             f"            .result_type = {self.result_type or _unknown_value()},",
         ]
-        if self.operand_types:
+        if encoded_operand_types:
             lines.append("            .operand_types =")
             lines.append("                {")
-            lines.extend(f"                    {operand_type}," for operand_type in self.operand_types)
+            lines.extend(f"                    {operand_type}," for operand_type in encoded_operand_types)
             lines.append("                },")
         lines.extend(
             [
@@ -445,11 +493,26 @@ def _integer_constant_row(scalar_pair: IntegerAluTypePair) -> _PacketRow:
     return _PacketRow(
         f"spirv.op_constant.{scalar.suffix}",
         opcode="LOOM_SPIRV_OP_CONSTANT",
-        form="LOOM_SPIRV_PACKET_FORM_INTEGER_CONSTANT",
+        form="LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT",
         result_type=_alu_scalar_value(scalar),
         result_count=1,
         immediate_index=0,
         literal_word_count=scalar_pair.literal_word_count,
+    )
+
+
+def _float_constant_row(scalar: FloatConstantType) -> _PacketRow:
+    return _PacketRow(
+        f"spirv.op_constant.{scalar.suffix}",
+        opcode="LOOM_SPIRV_OP_CONSTANT",
+        form="LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT",
+        result_type=_value_type(
+            "LOOM_SPIRV_VALUE_CLASS_SCALAR",
+            scalar.scalar_enum,
+        ),
+        result_count=1,
+        immediate_index=0,
+        literal_word_count=scalar.literal_word_count,
     )
 
 
@@ -538,6 +601,24 @@ def _conversion_rows() -> list[_PacketRow]:
     return rows
 
 
+def _ordinary_vector_rows() -> list[_PacketRow]:
+    return [
+        _PacketRow(
+            row.key,
+            opcode=row.opcode,
+            form=row.packet_form,
+            result_type=_ordinary_vector_instruction_value(row.result_type),
+            operand_types=tuple(_ordinary_vector_instruction_value(operand_type) for operand_type in row.operand_types),
+            result_count=1,
+            immediate_index=(0 if row.component_index_maximum is not None else None),
+        )
+        for row in (
+            *ORDINARY_VECTOR_INSTRUCTIONS,
+            *ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
+        )
+    ]
+
+
 def _builtin_index_rows() -> list[_PacketRow]:
     return [
         _PacketRow(
@@ -594,6 +675,14 @@ def _coordinate_unary_rows() -> list[_PacketRow]:
         "LOOM_SPIRV_SCALAR_TYPE_S32",
     )
     return [
+        _PacketRow(
+            "spirv.op_copy_object.i32",
+            opcode="LOOM_SPIRV_OP_COPY_OBJECT",
+            form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
+            result_type=i32_value,
+            operand_types=(i32_value,),
+            result_count=1,
+        ),
         _PacketRow(
             "spirv.op_bit_count.i32",
             opcode="LOOM_SPIRV_OP_BIT_COUNT",
@@ -685,6 +774,20 @@ def _select_rows() -> list[_PacketRow]:
         )
         for scalar in SCALAR_ALU_TYPES
     ]
+    bf16_value = _value_type(
+        "LOOM_SPIRV_VALUE_CLASS_SCALAR",
+        BFLOAT16_CONSTANT_TYPE.scalar_enum,
+    )
+    rows.append(
+        _PacketRow(
+            "spirv.op_select.bf16",
+            opcode="LOOM_SPIRV_OP_SELECT",
+            form="LOOM_SPIRV_PACKET_FORM_SELECT",
+            result_type=bf16_value,
+            operand_types=(bool_value, bf16_value, bf16_value),
+            result_count=1,
+        )
+    )
     rows.append(
         _PacketRow(
             "spirv.op_select.bool",
@@ -720,10 +823,11 @@ def _packet_rows() -> tuple[_PacketRow, ...]:
     return (
         *(_boolean_constant_row(row) for row in BOOLEAN_CONSTANTS),
         *(_integer_constant_row(scalar_pair) for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS),
+        *(_float_constant_row(scalar) for scalar in FLOAT_CONSTANT_TYPES),
         _PacketRow(
             "spirv.op_constant.offset64",
             opcode="LOOM_SPIRV_OP_CONSTANT",
-            form="LOOM_SPIRV_PACKET_FORM_INTEGER_CONSTANT",
+            form="LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT",
             result_type=_offset64_value(),
             result_count=1,
             immediate_index=0,
@@ -731,6 +835,7 @@ def _packet_rows() -> tuple[_PacketRow, ...]:
         ),
         *_scalar_binary_rows(),
         *_conversion_rows(),
+        *_ordinary_vector_rows(),
         *_builtin_index_rows(),
         *_coordinate_binary_rows(),
         *_coordinate_unary_rows(),
@@ -769,6 +874,14 @@ def _validate_rows(rows: tuple[_PacketRow, ...]) -> None:
     if missing_row_keys:
         raise ValueError("SPIR-V descriptors are missing packet rows: " + ", ".join(missing_row_keys))
 
+    over_capacity_rows = sorted(row.descriptor_key for row in rows if len(row.operand_types) > _PACKET_MAX_OPERAND_COUNT)
+    if over_capacity_rows:
+        raise ValueError(f"SPIR-V packet rows exceed the {_PACKET_MAX_OPERAND_COUNT}-operand maximum: " + ", ".join(over_capacity_rows))
+
+    unencodable_type_rows = sorted(row.descriptor_key for row in rows if len(row.operand_types) > _PACKET_OPERAND_TYPE_CAPACITY and len(set(row.operand_types)) != 1)
+    if unencodable_type_rows:
+        raise ValueError("SPIR-V packet rows exceed the operand-type capacity without a repeated type: " + ", ".join(unencodable_type_rows))
+
     suffixes = [scalar.suffix for scalar in STORAGE_BUFFER_SCALARS]
     if len(set(suffixes)) != len(suffixes):
         raise ValueError("SPIR-V storage-buffer scalar suffixes must be unique")
@@ -785,6 +898,9 @@ def generate_tables() -> str:
         "// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception",
         "",
         *line_comment_header("//", generator="loom.gen.target.arch.spirv.spirv_packet_rows"),
+        "",
+        f'static_assert(LOOM_SPIRV_PACKET_MAX_OPERAND_COUNT == {_PACKET_MAX_OPERAND_COUNT}, "generated packet operand maximum");',
+        f'static_assert(LOOM_SPIRV_PACKET_OPERAND_TYPE_CAPACITY == {_PACKET_OPERAND_TYPE_CAPACITY}, "generated packet operand-type capacity");',
         "",
         "static const loom_spirv_packet_row_t kSpirvLogicalCorePacketRows[] = {",
         *(row.render() for row in rows),

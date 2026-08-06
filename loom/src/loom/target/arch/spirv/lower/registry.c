@@ -8,6 +8,7 @@
 
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/vector/fragment.h"
 #include "loom/target/arch/spirv/abi.h"
 #include "loom/target/arch/spirv/contracts/logical_core.h"
 #include "loom/target/arch/spirv/contracts/logical_core_lower_rules.h"
@@ -16,6 +17,7 @@
 #include "loom/target/arch/spirv/lower/lower.h"
 #include "loom/target/arch/spirv/lower/matrix.h"
 #include "loom/target/arch/spirv/lower/workgroup.h"
+#include "loom/target/arch/spirv/value_types.h"
 #include "loom/target/registers.h"
 
 static iree_status_t loom_spirv_make_hal_buffer_type(
@@ -36,38 +38,22 @@ static iree_status_t loom_spirv_make_register_type(
                                            out_type);
 }
 
+static iree_status_t loom_spirv_make_typed_register_type(
+    loom_low_lower_context_t* context, uint16_t register_class_id,
+    loom_type_t value_type, loom_type_t* out_type) {
+  return loom_low_lower_make_typed_register_type(context, register_class_id, 1,
+                                                 value_type, out_type);
+}
+
 static bool loom_spirv_source_type_is_id(loom_type_t type) {
-  if (!loom_type_is_scalar(type)) {
-    return false;
-  }
-  const loom_scalar_type_t scalar_type = loom_type_element_type(type);
-  return scalar_type == LOOM_SCALAR_TYPE_I1 ||
-         scalar_type == LOOM_SCALAR_TYPE_I32 ||
-         scalar_type == LOOM_SCALAR_TYPE_INDEX;
+  loom_spirv_value_type_t value_type = {0};
+  return loom_type_is_scalar(type) &&
+         loom_spirv_value_type_from_loom_type(type, &value_type);
 }
 
 static bool loom_spirv_source_type_is_offset64(loom_type_t type) {
   return loom_type_is_scalar(type) &&
          loom_type_element_type(type) == LOOM_SCALAR_TYPE_OFFSET;
-}
-
-static bool loom_spirv_source_type_is_storage_scalar(loom_type_t type) {
-  if (!loom_type_is_scalar(type)) {
-    return false;
-  }
-  switch (loom_type_element_type(type)) {
-    case LOOM_SCALAR_TYPE_I8:
-    case LOOM_SCALAR_TYPE_I16:
-    case LOOM_SCALAR_TYPE_I32:
-    case LOOM_SCALAR_TYPE_I64:
-    case LOOM_SCALAR_TYPE_F16:
-    case LOOM_SCALAR_TYPE_BF16:
-    case LOOM_SCALAR_TYPE_F32:
-    case LOOM_SCALAR_TYPE_F64:
-      return true;
-    default:
-      return false;
-  }
 }
 
 static bool loom_spirv_low_type_is_id_register(loom_type_t type) {
@@ -78,6 +64,18 @@ static bool loom_spirv_low_type_is_id_register(loom_type_t type) {
              SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID;
 }
 
+static bool loom_spirv_source_value_is_cooperative_matrix(
+    loom_low_lower_context_t* context, loom_value_id_t source_value_id) {
+  const loom_value_fact_table_t* fact_table =
+      loom_low_lower_context_fact_table(context);
+  const loom_value_facts_t facts =
+      loom_value_fact_table_lookup(fact_table, source_value_id);
+  loom_vector_fragment_fact_t fragment = {0};
+  return loom_vector_fragment_fact_query_value_facts(&fact_table->context,
+                                                     facts, &fragment) &&
+         loom_vector_fragment_fact_has_matrix_shape(fragment);
+}
+
 static iree_status_t loom_spirv_map_type(void* user_data,
                                          loom_low_lower_context_t* context,
                                          const loom_op_t* source_op,
@@ -85,16 +83,12 @@ static iree_status_t loom_spirv_map_type(void* user_data,
                                          loom_type_t* out_low_type) {
   (void)user_data;
   if (loom_spirv_source_type_is_id(source_type)) {
-    return loom_spirv_make_register_type(
-        context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, out_low_type);
+    return loom_spirv_make_typed_register_type(
+        context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, source_type, out_low_type);
   }
   if (loom_spirv_source_type_is_offset64(source_type)) {
     return loom_spirv_make_register_type(
         context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_OFFSET64, out_low_type);
-  }
-  if (loom_spirv_source_type_is_storage_scalar(source_type)) {
-    return loom_spirv_make_register_type(
-        context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, out_low_type);
   }
   if (loom_type_is_buffer(source_type) || loom_type_is_view(source_type)) {
     return loom_spirv_make_register_type(
@@ -112,8 +106,33 @@ static iree_status_t loom_spirv_map_value(void* user_data,
                                           loom_type_t source_type,
                                           loom_type_t* out_low_type) {
   if (loom_type_is_vector(source_type)) {
-    return loom_spirv_make_register_type(
-        context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, out_low_type);
+    if (loom_func_return_isa(source_op)) {
+      return loom_low_lower_emit_source_type_unsupported(
+          context, source_op, IREE_SV("source"), source_type);
+    }
+    if (loom_spirv_source_value_is_cooperative_matrix(context,
+                                                      source_value_id)) {
+      return loom_spirv_make_register_type(
+          context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, out_low_type);
+    }
+    if (loom_type_rank(source_type) == 1 &&
+        !loom_type_dim_is_dynamic_at(source_type, 0)) {
+      const int64_t lane_count = loom_type_dim_static_size_at(source_type, 0);
+      if (lane_count == 1) {
+        return loom_spirv_map_type(
+            user_data, context, source_op,
+            loom_type_scalar(loom_type_element_type(source_type)),
+            out_low_type);
+      }
+      loom_spirv_value_type_t value_type = {0};
+      if (loom_spirv_value_type_from_loom_type(source_type, &value_type)) {
+        return loom_spirv_make_typed_register_type(
+            context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, source_type,
+            out_low_type);
+      }
+    }
+    return loom_low_lower_emit_source_type_unsupported(
+        context, source_op, IREE_SV("source"), source_type);
   }
   return loom_spirv_map_type(user_data, context, source_op, source_type,
                              out_low_type);
@@ -233,8 +252,7 @@ static iree_status_t loom_spirv_make_argument_value_type_codes(
         memset(codes, 0, arg_count * sizeof(*codes));
       }
       loom_spirv_value_type_t value_type = {0};
-      if (!loom_spirv_abi_value_type_from_source_type(source_type,
-                                                      &value_type) ||
+      if (!loom_spirv_value_type_from_loom_type(source_type, &value_type) ||
           !loom_spirv_abi_value_type_encode(value_type,
                                             &codes[direct_argument_index])) {
         IREE_ASSERT_UNREACHABLE(
@@ -280,7 +298,7 @@ static iree_status_t loom_spirv_make_result_value_type_codes(
     const loom_type_t source_type =
         loom_module_value_type(module, source_results[i]);
     loom_spirv_value_type_t value_type = {0};
-    if (!loom_spirv_abi_value_type_from_source_type(source_type, &value_type) ||
+    if (!loom_spirv_value_type_from_loom_type(source_type, &value_type) ||
         !loom_spirv_abi_value_type_encode(value_type, &codes[i])) {
       IREE_ASSERT_UNREACHABLE(
           "SPIR-V low ABI could not encode a mapped result payload");

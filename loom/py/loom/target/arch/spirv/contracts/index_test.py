@@ -16,8 +16,18 @@ from loom.target.arch.spirv.contracts.index import (
     SPIRV_INDEX_CONVERSION_RULES,
     SPIRV_INDEX_NUMERIC_RULES,
 )
+from loom.target.arch.spirv.contracts.logical_core import (
+    SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT,
+)
 from loom.target.arch.spirv.scalar_alu import INTEGER_COMPARE_PREDICATES
-from loom.target.contracts import ContractCase, GuardKind, OrdinalValueAliasRule
+from loom.target.contracts import (
+    ContractCase,
+    DescriptorResultType,
+    DescriptorRule,
+    GuardKind,
+    OrdinalValueAliasRule,
+    SourceValueKind,
+)
 
 
 def _value_type_element(rule: ContractCase, field: str) -> str:
@@ -97,6 +107,47 @@ def test_index_cast_contract_covers_every_address_boundary_pair() -> None:
     }
 
     assert actual == expected
+
+
+def test_index_i32_casts_preserve_the_semantic_type_boundary() -> None:
+    rules = [
+        rule
+        for rule in SPIRV_INDEX_CONVERSION_RULES
+        if rule.source_op is index.index_cast
+        and {
+            _value_type_element(rule, "input"),
+            _value_type_element(rule, "result"),
+        }
+        == {"i32", "index"}
+    ]
+
+    assert len(rules) == 2
+    assert all(isinstance(rule, DescriptorRule) for rule in rules)
+    assert all(rule.descriptor.key == "spirv.op_copy_object.i32" for rule in rules)
+
+
+def test_spirv_unsigned_temporaries_use_descriptor_result_types() -> None:
+    invalid_bindings = []
+    for case in SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT.cases:
+        if not isinstance(case, DescriptorRule):
+            continue
+        for emit in case.emit:
+            for descriptor_field, value_ref in emit.results.items():
+                if (
+                    value_ref.kind != SourceValueKind.TEMPORARY
+                    or not value_ref.field.startswith("unsigned_")
+                ):
+                    continue
+                result_types = emit.result_types or {}
+                if not isinstance(
+                    result_types.get(descriptor_field), DescriptorResultType
+                ):
+                    invalid_bindings.append(
+                        f"{case.source_op.name}:{emit.descriptor.key}:"
+                        f"{descriptor_field}={value_ref.field}"
+                    )
+
+    assert not invalid_bindings
 
 
 def test_index_assume_uses_ordinal_aliasing() -> None:

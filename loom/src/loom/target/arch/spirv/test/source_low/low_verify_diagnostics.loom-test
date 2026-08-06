@@ -162,6 +162,23 @@ low.func.def target<spirv.logical.core>(@target) abi_layout({spirv_arg_value_typ
 
 spirv.target<vulkan1_3> @target
 
+low.func.def target<spirv.logical.core>(@target) @packet_vector_operand_value_type_mismatch() asm {
+  %one = OpConstant.i32 1 : reg<spirv.id : i32>
+  %values = OpCompositeConstruct.v4i32 %one, %one, %one, %one : reg<spirv.id : vector<4xi32>>
+  %short_values = OpCompositeConstruct.v3i32 %one, %one, %one : reg<spirv.id : vector<3xi32>>
+  %true = OpConstantTrue.bool : reg<spirv.id : i1>
+  %mask = OpCompositeConstruct.v4bool %true, %true, %true, %true : reg<spirv.id : vector<4xi1>>
+  // ERROR@+1: SPIRV/013 {function_name="packet_vector_operand_value_type_mismatch", descriptor_key="spirv.op_select.v4i32", field_kind="operand", field_index="2", value_name="short_values", expected_value_type="v4s32", actual_value_type="v3s32"}
+  %selected = OpSelect.v4i32 %mask, %values, %short_values : reg<spirv.id : vector<4xi32>>
+  return
+}
+
+// ====
+
+// RUN: verify
+
+spirv.target<vulkan1_3> @target
+
 low.func.def target<spirv.logical.core>(@target) abi_layout({spirv_arg_value_types = [18], spirv_result_value_types = [23]}) @return_value_type_mismatch(%value: reg<spirv.id>) -> (reg<spirv.id>) asm {
   // ERROR@+1: SPIRV/014 {function_name="return_value_type_mismatch", result_index="0", value_name="value", expected_value_type="s32", actual_value_type="f32"}
   return %value
