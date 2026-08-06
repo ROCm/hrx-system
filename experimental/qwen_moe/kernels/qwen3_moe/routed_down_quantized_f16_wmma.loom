@@ -35,6 +35,10 @@ kernel.decl @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_
 
 func.decl @qwen3_moe_q4k_wmma_vector4(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group: index, %packet: index) -> (vector<4xf16>)
 
+func.decl @qwen3_moe_q4k_wmma_load_header(%weight: buffer, %row_byte_base: offset, %q4_block: index) -> (vector<4xi32>)
+
+func.decl @qwen3_moe_q4k_wmma_vector4_from_header(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group: index, %packet: index, %header_words: vector<4xi32>) -> (vector<4xf16>)
+
 func.decl @ggml_q6k_f16_vector4(%weight: buffer, %weight_row_byte_base: offset, %q6_block: index, %q6_group: index, %packet: index) -> (vector<4xf16>)
 
 kernel.decl @qwen3_moe_routed_down_q4k_q8_1_x4(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index) launch(%token_count: index, %input_size: index, %route_count: index, %route_id_stride: index, %expert_count: index, %output_size: index, %q8_input: buffer, %route_ids: buffer, %route_weights: buffer, %weight: buffer, %output: buffer)
@@ -68,6 +72,7 @@ func.template<qwen3_moe.routed_down.quantized_prefill.body> device @qwen3_moe_ro
   %c16 = index.constant 16 : index
   %c32 = index.constant 32 : index
   %c40 = index.constant 40 : index
+  %c48 = index.constant 48 : index
   %c63 = index.constant 63 : index
   %c64 = index.constant 64 : index
   %c256 = index.constant 256 : index
@@ -82,6 +87,7 @@ func.template<qwen3_moe.routed_down.quantized_prefill.body> device @qwen3_moe_ro
   %result_stage_bytes = index.constant 1024 : offset
   %c0_i32 = scalar.constant 0 : i32
   %cn1_i32 = scalar.constant -1 : i32
+  %c0_i32x4 = vector.constant 0 : vector<4xi32>
   %c0_f16x4 = vector.constant 0.0 : vector<4xf16>
   %zero_accumulator = vector.constant 0.0 : vector<8xf16>
   %m = index.constant 16 : index
@@ -89,6 +95,7 @@ func.template<qwen3_moe.routed_down.quantized_prefill.body> device @qwen3_moe_ro
   %k = index.constant 16 : index
   %assignment_count = index.mul %bounded_token_count, %bounded_route_count : index
   %assignment_table_byte_base = index.scale %bounded_expert_count, %c4_bytes : index, offset -> offset
+  %is_q4 = index.cmp eq, %weight_format, %c4 : index
   %is_q6 = index.cmp eq, %weight_format, %c6 : index
   %quant_block_bytes = scf.select %is_q6, %q6_block_bytes, %q4_block_bytes : index
   %quant_block_count = index.div %input_size, %c256 : index
@@ -162,6 +169,34 @@ func.template<qwen3_moe.routed_down.quantized_prefill.body> device @qwen3_moe_ro
     %init10 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<8xf16>
     %init11 = vector.fragment<init> %zero_accumulator shape [%m, %n] : vector<8xf16>
     %result00, %result01, %result10, %result11 = scf.for %quant_block = [%c0 to %quant_block_count step %c1](%block_acc00 = %init00 : vector<8xf16>, %block_acc01 = %init01 : vector<8xf16>, %block_acc10 = %init10 : vector<8xf16>, %block_acc11 = %init11 : vector<8xf16>) -> (vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>) {
+      // Four lanes cover the 64 output rows owned by one load packet. Snapshot
+      // each Q4_K block header once and retain it across all eight quant groups.
+      // The Q6 specialization erases this loop with %is_q4=false.
+      %header0, %header1, %header2, %header3 = scf.for %header_row_offset = [%c0 to %c64 step %c16](%prior_header0 = %c0_i32x4 : vector<4xi32>, %prior_header1 = %c0_i32x4 : vector<4xi32>, %prior_header2 = %c0_i32x4 : vector<4xi32>, %prior_header3 = %c0_i32x4 : vector<4xi32>) -> (vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>) unroll {
+        %header_local_row0 = index.add %load_row, %header_row_offset : index
+        %header_local_row = index.assume %header_local_row0 [range(%header_local_row0, 0, 63)] : index
+        %header_channel = index.add %channel_tile_base, %header_local_row : index
+        %valid_header_channel = index.cmp ult, %header_channel, %bounded_output_size : index
+        %loads_q4_header = scalar.andi %is_q4, %valid_header_channel : i1
+        %loaded_header = scf.if %loads_q4_header -> (vector<4xi32>) {
+          %header_channel_byte_add = index.mul %header_channel, %weight_row_bytes : index
+          %header_row_byte_index = index.add %expert_byte_base, %header_channel_byte_add : index
+          %header_row_byte_base = index.cast %header_row_byte_index : index to offset
+          %header_words = func.call @qwen3_moe_q4k_wmma_load_header(%weight_noalias, %header_row_byte_base, %quant_block) : (buffer, offset, index) -> (vector<4xi32>)
+          scf.yield %header_words : vector<4xi32>
+        } else {
+          scf.yield %c0_i32x4 : vector<4xi32>
+        }
+        %updates_header0 = index.cmp eq, %header_row_offset, %c0 : index
+        %updates_header1 = index.cmp eq, %header_row_offset, %c16 : index
+        %updates_header2 = index.cmp eq, %header_row_offset, %c32 : index
+        %updates_header3 = index.cmp eq, %header_row_offset, %c48 : index
+        %next_header0 = scf.select %updates_header0, %loaded_header, %prior_header0 : vector<4xi32>
+        %next_header1 = scf.select %updates_header1, %loaded_header, %prior_header1 : vector<4xi32>
+        %next_header2 = scf.select %updates_header2, %loaded_header, %prior_header2 : vector<4xi32>
+        %next_header3 = scf.select %updates_header3, %loaded_header, %prior_header3 : vector<4xi32>
+        scf.yield %next_header0, %next_header1, %next_header2, %next_header3 : vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>
+      }
       %block_result00, %block_result01, %block_result10, %block_result11 = scf.for %quant_group = [%c0 to %c8 step %c1](%acc00 = %block_acc00 : vector<8xf16>, %acc01 = %block_acc01 : vector<8xf16>, %acc10 = %block_acc10 : vector<8xf16>, %acc11 = %block_acc11 : vector<8xf16>) -> (vector<8xf16>, vector<8xf16>, vector<8xf16>, vector<8xf16>) {
         %block_k_base = index.mul %quant_block, %c256 : index
         %group_k_add = index.mul %quant_group, %c32 : index
@@ -169,6 +204,12 @@ func.template<qwen3_moe.routed_down.quantized_prefill.body> device @qwen3_moe_ro
         scf.for %row_offset = [%c0 to %c64 step %c16] unroll {
           %local_row0 = index.add %load_row, %row_offset : index
           %local_row = index.assume %local_row0 [range(%local_row0, 0, 63)] : index
+          %selects_header0 = index.cmp eq, %row_offset, %c0 : index
+          %selects_header2 = index.cmp eq, %row_offset, %c32 : index
+          %selects_low_header_pair = index.cmp ult, %row_offset, %c32 : index
+          %selected_header01 = scf.select %selects_header0, %header0, %header1 : vector<4xi32>
+          %selected_header23 = scf.select %selects_header2, %header2, %header3 : vector<4xi32>
+          %selected_header = scf.select %selects_low_header_pair, %selected_header01, %selected_header23 : vector<4xi32>
           %channel = index.add %channel_tile_base, %local_row : index
           %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
           %weight_values = scf.if %valid_channel -> (vector<4xf16>) {
@@ -179,7 +220,7 @@ func.template<qwen3_moe.routed_down.quantized_prefill.body> device @qwen3_moe_ro
               %q6_values = func.call @ggml_q6k_f16_vector4(%weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet) : (buffer, offset, index, index, index) -> (vector<4xf16>)
               scf.yield %q6_values : vector<4xf16>
             } else {
-              %q4_values = func.call @qwen3_moe_q4k_wmma_vector4(%weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet) : (buffer, offset, index, index, index) -> (vector<4xf16>)
+              %q4_values = func.call @qwen3_moe_q4k_wmma_vector4_from_header(%weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet, %selected_header) : (buffer, offset, index, index, index, vector<4xi32>) -> (vector<4xf16>)
               scf.yield %q4_values : vector<4xf16>
             }
             scf.yield %decoded : vector<4xf16>
