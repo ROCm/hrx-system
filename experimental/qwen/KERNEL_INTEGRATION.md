@@ -89,8 +89,8 @@ decode-513 programs:
 
 | Stage | Prefill, 512 rows | Decode, 1 row | Canonical source |
 | --- | --- | --- | --- |
-| Token embedding | Fixed Q4_K row decoder | Same | No corpus provider yet; owned bring-up kernel |
-| Attention metadata | Positions, direct K/V cache rows, dense causal mask | Same with nonzero context base | No corpus provider yet; owned bring-up kernel |
+| Token embedding | Fixed Q4_K row decoder | Same | `experimental/qwen/kernels/token_embedding_q4k.loom` (Qwen-owned model endpoint) |
+| Attention metadata | Positions, direct K/V cache rows, dense causal mask | Same with nonzero context base | `experimental/qwen/kernels/attention_metadata.loom` (Qwen-owned request endpoint) |
 | Attention normalization | F32 RMSNorm | Fused RMSNorm and Q8_1 x4 packing | `qwen3_moe/attention_prepare_quantized.loom` |
 | Q/K/V projection | Separate Q4_K query/key and storage-selected Q4_K or Q6_K value WMMA dispatches | One Q8_1 x4 Q/K/V dispatch whose last-arriving head tiles also publish the postprocessed attention inputs | `qwen3_moe/dense_linear_quantized_f16_wmma.loom`, `qwen3_moe/attention_qkv_quantized.loom`, and `qwen3_moe/attention_qkv_postprocess_fused.loom` |
 | RoPE and cache publication | One combined postprocess dispatch | Published by the fused Q/K/V projection | `qwen3_moe/attention_postprocess_f32_f16.loom` and `qwen3_moe/attention_qkv_postprocess_fused.loom` |
@@ -102,7 +102,7 @@ decode-513 programs:
 | Expert tables | One fused assignment/partition publication in layers 0-46; separate terminal-row tables | None; compact route IDs directly select expert rows | `qwen3_moe/routed_gate_up_swiglu_q4k.loom` and `qwen3_moe/expert_table_partition_fused.loom` |
 | Gate/up, SwiGLU, and Q8 packing | Grouped Q4_K F16 WMMA producing F32 SwiGLU rows | Raw Q4_K by Q8_1 x4 direct contraction publishing both F32 SwiGLU rows and their packed physical groups | `qwen3_moe/routed_linear_q4k_f16_wmma.loom`, `qwen3_moe/routed_gate_up_swiglu_q4k.loom`, and `ggml/quantize_q8_1_x4.loom` |
 | Routed down and reduction | Grouped Q4_K or Q6_K F16 WMMA; layers 0-46 fuse weighted reduction, residual update, and next-layer attention normalization | Storage-selected direct Q4_K or Q6_K contraction with route weighting, reduction, and residual update fused; the last-arriving workgroup also publishes the next layer's normalized Q8_1 x4 row | `qwen3_moe/routed_down_quantized_f16_wmma.loom`, `qwen3_moe/routed_down_q4k.loom`, `qwen3_moe/routed_down_q6k.loom`, `qwen3_moe/routed_down_next_q8.loom`, and `qwen3_moe/routed_down_weighted_reduce_next_rmsnorm_f32.loom` |
-| Vocabulary endpoint | Fused RMSNorm/Q8_1 x4 pack, raw Q6_K contraction publishing one maximum pair per eight logits, then compact finite-logit finalization | The final routed-down dispatch publishes the normalized Q8_1 x4 row; the endpoint performs the same partial Q6_K contraction and compact finalization | `qwen3_moe/routed_down_q4k.loom`, `qwen3_moe/routed_down_q6k.loom`, `qwen3_moe/routed_down_next_q8.loom`, `ggml/linear_q6k_q8_1_x4.loom`, and an owned partial-argmax bring-up kernel |
+| Vocabulary endpoint | Fused RMSNorm/Q8_1 x4 pack, raw Q6_K contraction publishing one maximum pair per eight logits, then compact finite-logit finalization | The final routed-down dispatch publishes the normalized Q8_1 x4 row; the endpoint performs the same partial Q6_K contraction and compact finalization | `qwen3_moe/routed_down_q4k.loom`, `qwen3_moe/routed_down_q6k.loom`, `qwen3_moe/routed_down_next_q8.loom`, `ggml/linear_q6k_q8_1_x4.loom`, `experimental/qwen/kernels/vocabulary_q6k_partial_argmax.loom`, and `experimental/qwen/kernels/greedy_argmax.loom` |
 
 ## GGML kernel harvest list
 
