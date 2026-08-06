@@ -200,12 +200,14 @@ typedef struct loom_low_lower_emit_entry_setup_callback_t {
 
 typedef iree_status_t (*loom_low_lower_prepare_branch_fn_t)(
     void* user_data, loom_low_lower_context_t* context,
-    const loom_op_t* source_terminator);
+    const loom_op_t* source_terminator, iree_arena_allocator_t* analysis_arena);
 
 typedef struct loom_low_lower_prepare_branch_callback_t {
   // Optional callback invoked after source blocks have low blocks, before any
   // source body operations are emitted. Targets use this to plan structural
-  // branch expansion and interpose low-only destination blocks.
+  // branch expansion and interpose low-only destination blocks. The analysis
+  // arena is reset immediately after each callback and must not back retained
+  // plans, target state, or emitted IR.
   loom_low_lower_prepare_branch_fn_t fn;
   // Caller-owned payload passed to |fn|.
   void* user_data;

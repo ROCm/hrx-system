@@ -2462,7 +2462,12 @@ static iree_status_t loom_low_lower_prepare_branches(
   if (context->policy->prepare_branch.fn == NULL) {
     return iree_ok_status();
   }
-  for (uint16_t block_index = 0; block_index < source_body->block_count;
+
+  iree_arena_allocator_t analysis_arena;
+  iree_arena_initialize(context->module->arena.block_pool, &analysis_arena);
+  iree_status_t status = iree_ok_status();
+  for (uint16_t block_index = 0;
+       block_index < source_body->block_count && iree_status_is_ok(status);
        ++block_index) {
     const loom_block_t* source_block =
         loom_region_block(source_body, block_index);
@@ -2474,13 +2479,16 @@ static iree_status_t loom_low_lower_prepare_branches(
                                               NULL)) {
       continue;
     }
-    IREE_RETURN_IF_ERROR(context->policy->prepare_branch.fn(
-        context->policy->prepare_branch.user_data, context, source_terminator));
+    status = context->policy->prepare_branch.fn(
+        context->policy->prepare_branch.user_data, context, source_terminator,
+        &analysis_arena);
+    iree_arena_reset(&analysis_arena);
     if (loom_low_lower_context_should_stop(context)) {
-      return iree_ok_status();
+      break;
     }
   }
-  return iree_ok_status();
+  iree_arena_deinitialize(&analysis_arena);
+  return status;
 }
 
 static iree_status_t loom_low_lower_remap_values(
