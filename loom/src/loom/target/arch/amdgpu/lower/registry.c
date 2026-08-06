@@ -727,17 +727,25 @@ LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_vector_slice_dispatch,
                              loom_amdgpu_vector_slice_plan_t,
                              loom_amdgpu_lower_vector_slice)
 
-LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_memory_load_dispatch,
-                               loom_amdgpu_memory_access_plan_t,
-                               loom_amdgpu_select_memory_load_plan)
+static iree_status_t loom_amdgpu_select_memory_load_dispatch(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_lower_dispatch_row_t* row,
+    loom_low_lower_plan_t* out_plan) {
+  (void)row;
+  return loom_amdgpu_select_memory_load_plan(context, source_op, out_plan);
+}
 
 LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_memory_load_dispatch,
                              loom_amdgpu_memory_access_plan_t,
                              loom_amdgpu_lower_memory_load)
 
-LOOM_AMDGPU_DEFINE_DATA_SELECT(loom_amdgpu_select_memory_store_dispatch,
-                               loom_amdgpu_memory_access_plan_t,
-                               loom_amdgpu_select_memory_store_plan)
+static iree_status_t loom_amdgpu_select_memory_store_dispatch(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_lower_dispatch_row_t* row,
+    loom_low_lower_plan_t* out_plan) {
+  (void)row;
+  return loom_amdgpu_select_memory_store_plan(context, source_op, out_plan);
+}
 
 LOOM_AMDGPU_DEFINE_DATA_EMIT(loom_amdgpu_emit_memory_store_dispatch,
                              loom_amdgpu_memory_access_plan_t,

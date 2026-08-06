@@ -446,10 +446,22 @@ TEST_F(SymbolDependenciesTest, TypeAndEncodingRefsUseOneTable) {
       &builder, 0, 0, 0, typed_func_ref, nullptr, 0, &encoded_type, 1, nullptr,
       0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &typed_func_op));
 
+  loom_type_t register_type = {};
+  IREE_ASSERT_OK(loom_module_intern_register_type(
+      module.get(), /*carrier_payload0=*/1,
+      /*carrier_payload1=*/(uint64_t)1 << 16, encoded_type, &register_type));
+  loom_symbol_ref_t register_func_ref =
+      AddSymbol(module.get(), IREE_SV("register_func"));
+  loom_op_t* register_func_op = nullptr;
+  IREE_ASSERT_OK(loom_test_func_build(
+      &builder, 0, 0, 0, register_func_ref, nullptr, 0, &register_type, 1,
+      nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &register_func_op));
+
   loom_symbol_dependency_table_t table = BuildTable(module.get());
   loom_symbol_id_t meta = meta_ref.symbol_id;
   loom_symbol_id_t owner = owner_ref.symbol_id;
   loom_symbol_id_t typed_func = typed_func_ref.symbol_id;
+  loom_symbol_id_t register_func = register_func_ref.symbol_id;
 
   EXPECT_NE(FindEdge(table, owner, meta, LOOM_SYMBOL_DEPENDENCY_EDGE_TYPE_ATTR),
             nullptr);
@@ -459,6 +471,9 @@ TEST_F(SymbolDependenciesTest, TypeAndEncodingRefsUseOneTable) {
   EXPECT_NE(
       FindEdge(table, typed_func, meta, LOOM_SYMBOL_DEPENDENCY_EDGE_VALUE_TYPE),
       nullptr);
+  EXPECT_NE(FindEdge(table, register_func, meta,
+                     LOOM_SYMBOL_DEPENDENCY_EDGE_VALUE_TYPE),
+            nullptr);
   EXPECT_NE(FindEdge(table, LOOM_SYMBOL_ID_INVALID, meta,
                      LOOM_SYMBOL_DEPENDENCY_EDGE_MODULE_ENCODING),
             nullptr);

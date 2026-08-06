@@ -668,7 +668,7 @@ def parse_type_from_tokens(
 
     # Register type keyword?
     if token.kind == TokenKind.BARE_IDENT and token.text == "reg":
-        return _parse_register_type(tokenizer)
+        return _parse_register_type(tokenizer, scope, module, type_registry, mode)
 
     # Registered type (BARE_IDENT like "tile" or OP_NAME like "hal.buffer")?
     if token.kind in (TokenKind.BARE_IDENT, TokenKind.OP_NAME):
@@ -721,7 +721,11 @@ def parse_type_from_tokens(
 
 
 def _resolve_register_type(
-    register_class_name: str, unit_count: int, location: SourceLocation, filename: str
+    register_class_name: str,
+    unit_count: int,
+    value_type: Type | None,
+    location: SourceLocation,
+    filename: str,
 ) -> RegisterType:
     namespace = register_class_name.split(".", 1)[0]
     matches: list[RegisterType] = []
@@ -737,6 +741,7 @@ def _resolve_register_type(
                         register_class_id,
                         unit_count,
                         register_class_name,
+                        value_type,
                     )
                 )
     if not matches:
@@ -756,13 +761,19 @@ def _resolve_register_type(
     return matches[0]
 
 
-def _parse_register_type(tokenizer: Tokenizer) -> tuple[RegisterType, dict[int, int]]:
-    """Parse reg<namespace.class> or reg<namespace.class xN>."""
+def _parse_register_type(
+    tokenizer: Tokenizer,
+    scope: NameScope,
+    module: Module,
+    type_registry: dict[str, TypeDef],
+    mode: TypeParseMode,
+) -> tuple[RegisterType, dict[int, int]]:
+    """Parse reg<namespace.class [xN] [: value_type]>."""
     tokenizer.expect(TokenKind.BARE_IDENT, "reg")
     tokenizer.expect(TokenKind.LANGLE)
     class_token = tokenizer.expect(TokenKind.OP_NAME)
     unit_count = 1
-    if not tokenizer.at(TokenKind.RANGLE):
+    if not tokenizer.at(TokenKind.RANGLE) and not tokenizer.at(TokenKind.COLON):
         suffix_token = tokenizer.expect(TokenKind.BARE_IDENT)
         if suffix_token.text == "x":
             count_token = tokenizer.expect(TokenKind.INTEGER)
@@ -784,13 +795,23 @@ def _parse_register_type(tokenizer: Tokenizer) -> tuple[RegisterType, dict[int, 
                 location,
                 tokenizer._filename,
             )
+    value_type: Type | None = None
+    dim_bindings: dict[int, int] = {}
+    if tokenizer.try_consume(TokenKind.COLON) is not None:
+        value_type, dim_bindings = parse_type_from_tokens(
+            tokenizer, scope, module, type_registry, mode
+        )
     tokenizer.expect(TokenKind.RANGLE)
     try:
         return (
             _resolve_register_type(
-                class_token.text, unit_count, class_token.location, tokenizer._filename
+                class_token.text,
+                unit_count,
+                value_type,
+                class_token.location,
+                tokenizer._filename,
             ),
-            {},
+            dim_bindings,
         )
     except ValueError as err:
         raise ParseError(str(err), class_token.location, tokenizer._filename) from err

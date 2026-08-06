@@ -85,7 +85,8 @@ TEST_F(LowAllocationSpillPlanTest, PredictsSliceReloadBytes) {
                              /*register_class_id=*/0, /*unit_count=*/4);
   IREE_ASSERT_OK(loom_module_intern_type(module, wide_type, &wide_type));
   loom_type_t lane_type =
-      loom_low_register_type_with_unit_count(wide_type, /*unit_count=*/1);
+      loom_low_register_carrier_type_with_unit_count(wide_type,
+                                                     /*unit_count=*/1);
   IREE_ASSERT_OK(loom_module_intern_type(module, lane_type, &lane_type));
 
   loom_value_id_t source_value = LOOM_VALUE_ID_INVALID;
@@ -125,7 +126,8 @@ TEST_F(LowAllocationSpillPlanTest, PredictsDenseSliceReloadTraffic) {
                              /*register_class_id=*/0, /*unit_count=*/8);
   IREE_ASSERT_OK(loom_module_intern_type(module, wide_type, &wide_type));
   loom_type_t lane_type =
-      loom_low_register_type_with_unit_count(wide_type, /*unit_count=*/1);
+      loom_low_register_carrier_type_with_unit_count(wide_type,
+                                                     /*unit_count=*/1);
   IREE_ASSERT_OK(loom_module_intern_type(module, lane_type, &lane_type));
 
   loom_value_id_t source_value = LOOM_VALUE_ID_INVALID;

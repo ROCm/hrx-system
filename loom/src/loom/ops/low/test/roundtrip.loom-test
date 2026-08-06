@@ -44,6 +44,19 @@ low.kernel.def allocation(fixed) schedule(locked) target<test.low.core>(@test_ta
 
 test.target<low_core> @test_target
 
+low.func.decl target<test.low.core>(@test_target) @typed_identity(%value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+
+low.func.def target<test.low.core>(@test_target) @typed_call_and_branch(%value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>) {
+  %called = low.func.call @typed_identity(%value) : (reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+  low.br ^exit(%called: reg<test.i32 : i32>)
+^exit(%result: reg<test.i32 : i32>):
+  low.return %result : reg<test.i32 : i32>
+}
+
+// ====
+
+test.target<low_core> @test_target
+
 low.func.def target<test.low.core>(@test_target) @storage_view(%value: reg<test.i32>) -> (reg<test.i32>) {
   %storage = low.storage.reserve {byte_alignment = 16, byte_length = 64} : low.storage<scratch>
   %whole = low.storage.view %storage {byte_length = 64} : low.storage<scratch> -> low.storage<scratch>

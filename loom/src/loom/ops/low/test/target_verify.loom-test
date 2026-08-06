@@ -128,6 +128,43 @@ low.func.def target<test.low.core>(@test_target) @concat_bad_units(%lo: reg<test
 
 // ====
 
+test.target<low_core> @test_target
+low.func.def target<test.low.core>(@test_target) @typed_structural_identities(%scalar: reg<test.i32 : i32>, %vector: reg<test.i32 x2 : vector<2xi32>>) -> (reg<test.i32 : i32>, reg<test.i32 x2 : vector<2xi32>>) {
+  %copy = low.copy %scalar : reg<test.i32 : i32> -> reg<test.i32 : i32>
+  %slice = low.slice %vector[0] : reg<test.i32 x2 : vector<2xi32>> -> reg<test.i32 x2 : vector<2xi32>>
+  %concat = low.concat(%copy) : (reg<test.i32 : i32>) -> reg<test.i32 : i32>
+  low.return %concat, %slice : reg<test.i32 : i32>, reg<test.i32 x2 : vector<2xi32>>
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target<test.low.core>(@test_target) @typed_copy_rejects_semantic_retyping(%value: reg<test.i32 : i32>) {
+  // ERROR@+1: TYPE/017 {op_name="low.copy", source_type="reg<test.i32 : i32>", result_type="reg<test.i32 : f32>"}
+  %copy = low.copy %value : reg<test.i32 : i32> -> reg<test.i32 : f32>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target<test.low.core>(@test_target) @typed_slice_requires_a_semantic_relation(%value: reg<test.i32 x2 : vector<2xi32>>) {
+  // ERROR@+1: TYPE/017 {op_name="low.slice", source_type="reg<test.i32 x2 : vector<2xi32>>", result_type="reg<test.i32 : i32>"}
+  %lane = low.slice %value[0] : reg<test.i32 x2 : vector<2xi32>> -> reg<test.i32 : i32>
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+low.func.def target<test.low.core>(@test_target) @typed_concat_requires_a_semantic_relation(%lo: reg<test.i32 : i32>, %hi: reg<test.i32 : i32>) {
+  // ERROR@+1: TYPE/017 {op_name="low.concat", source_type="reg<test.i32 : i32>", result_type="reg<test.i32 x2 : vector<2xi32>>"}
+  %pair = low.concat(%lo, %hi) : (reg<test.i32 : i32>, reg<test.i32 : i32>) -> reg<test.i32 x2 : vector<2xi32>>
+  low.return
+}
+
+// ====
+
 test.target<low_core> @test_target {contract_set_key = "missing.low"}
 
 // ERROR@+1: PARSE/034 "unknown Low representation contract"
@@ -213,6 +250,29 @@ low.func.def target<test.low.core>(@test_target) @branch(%arg: reg<test.i32>) {
   // ERROR@+1: STRUCTURE/026 "low.br" "successor 0" "expected reg<test.i64>"
   low.br ^exit(%arg: reg<test.i32>)
 ^exit(%value: reg<test.i64>):
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.decl target<test.low.core>(@test_target) @typed_callee(%value: reg<test.i32 : i32>) -> (reg<test.i32 : i32>)
+
+low.func.def target<test.low.core>(@test_target) @typed_call_mismatch(%value: reg<test.i32 : f32>) {
+  // ERROR@+1: TYPE/001 {field_a="operand 0", type_a="reg<test.i32 : f32>", field_b="callee argument 0", type_b="reg<test.i32 : i32>"}
+  %result = low.func.call @typed_callee(%value) : (reg<test.i32 : f32>) -> (reg<test.i32 : i32>)
+  low.return
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @typed_branch_mismatch(%arg: reg<test.i32 : i32>) {
+  // ERROR@+1: STRUCTURE/026 {op_name="low.br", successor_index="0", argument_index="0", actual_type="reg<test.i32 : i32>", expected_type="reg<test.i32 : f32>"}
+  low.br ^exit(%arg: reg<test.i32 : i32>)
+^exit(%value: reg<test.i32 : f32>):
   low.return
 }
 

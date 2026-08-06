@@ -52,7 +52,7 @@ iree_status_t loom_amdgpu_matrix_fragment_contract_candidates(
   const iree_host_size_t descriptor_count =
       loom_amdgpu_matrix_contract_descriptor_count();
   const loom_amdgpu_matrix_contract_descriptor_t** descriptors = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, descriptor_count, sizeof(*descriptors), (void**)&descriptors));
   iree_host_size_t candidate_count = 0;
   for (iree_host_size_t i = 0; i < descriptor_count; ++i) {

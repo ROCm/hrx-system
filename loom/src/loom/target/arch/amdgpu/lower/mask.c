@@ -898,7 +898,8 @@ static iree_status_t loom_amdgpu_slice_source_lane_if_needed(
       loom_low_lower_context_module(context), low_source);
   if (loom_type_is_register(source_type) &&
       loom_low_register_type_unit_count(source_type) > 1) {
-    source_lane_type = loom_low_register_type_with_unit_count(source_type, 1);
+    source_lane_type =
+        loom_low_register_carrier_type_with_unit_count(source_type, 1);
   }
   return loom_amdgpu_emit_low_slice(context, source_op, low_source, unit_offset,
                                     source_lane_type, out_lane);

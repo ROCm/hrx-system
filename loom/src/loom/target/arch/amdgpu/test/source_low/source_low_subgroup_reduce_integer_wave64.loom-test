@@ -3,15 +3,15 @@
 amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
 
 kernel.def target(@target) @subgroup_reduce_integer_wave64() {
-  %one = index.constant 1 : index
+  %c1 = index.constant 1 : index
   %wave_size = index.constant 64 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%wave_size, %one, %one) : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%wave_size, %c1, %c1) : index
 } launch(%input: buffer, %output: buffer) {
   %lane = kernel.subgroup.lane.id : index
-  %zero = index.constant 0 : index
-  %zero_offset = index.constant 0 : offset
-  %input_view = buffer.view %input[%zero_offset] : buffer -> view<64xi32, #dense>
-  %output_view = buffer.view %output[%zero_offset] : buffer -> view<9xi32, #dense>
+  %c0 = index.constant 0 : index
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<64xi32, #dense>
+  %output_view = buffer.view %output[%base] : buffer -> view<9xi32, #dense>
   %value = view.load %input_view[%lane] : view<64xi32, #dense> -> i32
   %sum = kernel.subgroup.reduce<addi> %value : i32
   %product = kernel.subgroup.reduce<muli> %value : i32
@@ -22,7 +22,7 @@ kernel.def target(@target) @subgroup_reduce_integer_wave64() {
   %bitwise_and = kernel.subgroup.reduce<andi> %value : i32
   %bitwise_or = kernel.subgroup.reduce<ori> %value : i32
   %bitwise_xor = kernel.subgroup.reduce<xori> %value : i32
-  %is_leader = index.cmp eq, %lane, %zero : index
+  %is_leader = index.cmp eq, %lane, %c0 : index
   scf.if %is_leader {
     view.store %sum, %output_view[0] : i32, view<9xi32, #dense>
     view.store %product, %output_view[1] : i32, view<9xi32, #dense>

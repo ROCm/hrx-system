@@ -6,8 +6,6 @@
 
 #include "loom/verify/verify_constraints.h"
 
-#include <string.h>
-
 #include "loom/error/error_catalog.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/target/registers.h"
@@ -18,7 +16,7 @@ static bool loom_constraint_property_equals(
     loom_type_t a, loom_type_t b, loom_constraint_property_t property) {
   switch ((enum loom_constraint_property_e)property) {
     case LOOM_PROPERTY_TYPE:
-      return memcmp(&a, &b, sizeof(loom_type_t)) == 0;
+      return loom_type_equal(a, b);
     case LOOM_PROPERTY_KIND:
       return loom_type_kind(a) == loom_type_kind(b);
     case LOOM_PROPERTY_ELEMENT_TYPE:
@@ -30,14 +28,9 @@ static bool loom_constraint_property_equals(
     case LOOM_PROPERTY_RANK:
       return loom_type_rank(a) == loom_type_rank(b);
     case LOOM_PROPERTY_REGISTER_CLASS:
-      return loom_type_is_register(a) && loom_type_is_register(b) &&
-             loom_type_register_payload0(a) == loom_type_register_payload0(b) &&
-             loom_low_register_type_class_id(a) ==
-                 loom_low_register_type_class_id(b);
+      return loom_low_register_type_same_class(a, b);
     case LOOM_PROPERTY_REGISTER_UNIT_COUNT:
-      return loom_type_is_register(a) && loom_type_is_register(b) &&
-             loom_low_register_type_unit_count(a) ==
-                 loom_low_register_type_unit_count(b);
+      return loom_low_register_type_same_unit_count(a, b);
     default:
       return false;
   }

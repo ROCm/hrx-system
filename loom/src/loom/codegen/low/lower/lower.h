@@ -200,12 +200,14 @@ typedef struct loom_low_lower_emit_entry_setup_callback_t {
 
 typedef iree_status_t (*loom_low_lower_prepare_branch_fn_t)(
     void* user_data, loom_low_lower_context_t* context,
-    const loom_op_t* source_terminator);
+    const loom_op_t* source_terminator, iree_arena_allocator_t* analysis_arena);
 
 typedef struct loom_low_lower_prepare_branch_callback_t {
   // Optional callback invoked after source blocks have low blocks, before any
   // source body operations are emitted. Targets use this to plan structural
-  // branch expansion and interpose low-only destination blocks.
+  // branch expansion and interpose low-only destination blocks. The analysis
+  // arena is reset immediately after each callback and must not back retained
+  // plans, target state, or emitted IR.
   loom_low_lower_prepare_branch_fn_t fn;
   // Caller-owned payload passed to |fn|.
   void* user_data;
@@ -1046,10 +1048,16 @@ bool loom_low_lower_source_value_has_low_mapping(
 void loom_low_lower_require_source_operands_storage(
     loom_low_lower_context_t* context, const loom_op_t* source_op);
 
-// Returns the transient arena for the current lowering run. Storage allocated
-// from the arena remains valid until the current loom_low_lower_function call
-// returns.
-iree_arena_allocator_t* loom_low_lower_context_scratch_arena(
+// Returns the arena retaining state for the current function lowering. Storage
+// allocated from the arena remains valid until loom_low_lower_function returns.
+iree_arena_allocator_t* loom_low_lower_context_function_arena(
+    loom_low_lower_context_t* context);
+
+// Returns the arena for temporary low-IR construction storage. Allocations are
+// invalidated when the active function-construction, source-op, or target setup
+// or finalization callback returns. Callers must ensure every consumer has
+// copied the storage into module-owned IR before returning from that scope.
+iree_arena_allocator_t* loom_low_lower_context_emission_arena(
     loom_low_lower_context_t* context);
 
 // Returns module-scope state shared by the active source-to-low module pass, or
@@ -1057,9 +1065,16 @@ iree_arena_allocator_t* loom_low_lower_context_scratch_arena(
 loom_low_lower_module_state_t* loom_low_lower_context_module_state(
     loom_low_lower_context_t* context);
 
-// Allocates transient storage from the current lowering arena. The allocation
-// remains valid until the current loom_low_lower_function call returns.
-iree_status_t loom_low_lower_allocate_scratch_array(
+// Allocates state retained for the complete function lowering call.
+iree_status_t loom_low_lower_allocate_function_array(
+    loom_low_lower_context_t* context, iree_host_size_t count,
+    iree_host_size_t element_size, void** out_ptr);
+
+// Allocates temporary low-IR construction storage. The allocation is invalid
+// when the active function-construction, source-op, or target setup or
+// finalization callback returns and must not be retained by plans, target
+// state, or emitted IR.
+iree_status_t loom_low_lower_allocate_emission_array(
     loom_low_lower_context_t* context, iree_host_size_t count,
     iree_host_size_t element_size, void** out_ptr);
 
@@ -1172,14 +1187,6 @@ bool loom_low_lower_lookup_branch_plan(loom_low_lower_context_t* context,
                                        const loom_op_t* source_terminator,
                                        loom_low_lower_plan_t* out_plan);
 
-// Creates a module-local symbol derived from the emitted low function symbol.
-// The result is suitable for target-owned function artifacts. |suffix| is
-// appended to the low function name; |index| is then appended in decimal form
-// when |append_index| is true.
-iree_status_t loom_low_lower_create_function_symbol(
-    loom_low_lower_context_t* context, iree_string_view_t suffix,
-    bool append_index, uint32_t index, loom_symbol_ref_t* out_symbol_ref);
-
 // Maps |source_type| through the active policy. A policy that rejects a user
 // type emits a diagnostic and returns loom_type_none() in |out_low_type|.
 iree_status_t loom_low_lower_map_type(loom_low_lower_context_t* context,
@@ -1230,6 +1237,12 @@ iree_status_t loom_low_lower_elide_value(loom_low_lower_context_t* context,
 iree_status_t loom_low_lower_make_register_type(
     loom_low_lower_context_t* context, uint16_t reg_class_id,
     uint32_t unit_count, loom_type_t* out_type);
+
+// Creates a target-low register type carrying a recursively structural
+// semantic value type.
+iree_status_t loom_low_lower_make_typed_register_type(
+    loom_low_lower_context_t* context, uint16_t reg_class_id,
+    uint32_t unit_count, loom_type_t value_type, loom_type_t* out_type);
 
 // Emits a descriptor-backed low.op from a descriptor row resolved during
 // selection.
@@ -1288,6 +1301,12 @@ iree_status_t loom_low_lower_record_memory_report_row(
 iree_status_t loom_low_lower_emit_source_type_unsupported(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     iree_string_view_t field_name, loom_type_t actual_type);
+
+// Emits ERR_TARGET_066 when generic lowering would need to change the carrier
+// width of a typed register without a target-defined semantic relation.
+iree_status_t loom_low_lower_emit_register_width_relation_unsupported(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_type_t actual_type, uint32_t result_unit_count);
 
 // Emits ERR_TARGET_034 for a CFG branch shape rejected by the active
 // target-low policy.

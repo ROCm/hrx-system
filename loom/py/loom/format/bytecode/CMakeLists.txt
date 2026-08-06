@@ -49,4 +49,24 @@ iree_py_test(
     "${PROJECT_SOURCE_DIR}"
 )
 
+iree_py_test(
+  NAME
+    c_interop_test
+  MAIN
+    "c_interop_test.py"
+  SRCS
+    "c_interop_test.py"
+  ARGS
+    "$<TARGET_FILE:loom::tools::loom-format::loom-format>"
+  DEPS
+    loom::py::loom::format::bytecode::bytecode
+    loom::py::loom::dialect::low::low
+    loom::py::loom::format::text::text
+    loom::py::loom::target::test::descriptors
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

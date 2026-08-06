@@ -572,18 +572,14 @@ static iree_status_t loom_vector_bank_sroa_name_slot(loom_rewriter_t* rewriter,
 
 static iree_status_t loom_vector_bank_sroa_build_initial_values(
     loom_vector_bank_sroa_context_t* context, loom_op_t* loop,
-    loom_vector_bank_sroa_plan_t* plan, loom_value_id_t* new_iter_args,
-    loom_type_t* new_result_types) {
+    loom_vector_bank_sroa_plan_t* plan, loom_value_id_t* new_iter_args) {
   loom_value_slice_t old_iter_args = loom_scf_for_iter_args(loop);
-  const loom_value_id_t* old_results = loom_op_const_results(loop);
   uint16_t expanded_ordinal = 0;
   for (uint16_t i = 0; i < plan->carried_count; ++i) {
     loom_vector_bank_sroa_bank_t* bank = &plan->banks[i];
     bank->expanded_base = expanded_ordinal;
     if (!bank->active) {
       new_iter_args[expanded_ordinal] = old_iter_args.values[i];
-      new_result_types[expanded_ordinal] =
-          loom_module_value_type(context->module, old_results[i]);
       ++expanded_ordinal;
       continue;
     }
@@ -600,7 +596,6 @@ static iree_status_t loom_vector_bank_sroa_build_initial_values(
       IREE_RETURN_IF_ERROR(loom_vector_bank_sroa_name_slot(
           context->rewriter, old_iter_args.values[i], payload, slot));
       new_iter_args[expanded_ordinal] = payload;
-      new_result_types[expanded_ordinal] = bank->payload_type;
       ++expanded_ordinal;
     }
   }
@@ -839,15 +834,11 @@ static iree_status_t loom_vector_bank_sroa_rewrite_loop(
 
   loom_builder_set_before(&context->rewriter->builder, loop);
   loom_value_id_t* new_iter_args = NULL;
-  loom_type_t* new_result_types = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       context->scratch_arena, plan->expanded_count, sizeof(*new_iter_args),
       (void**)&new_iter_args));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->scratch_arena, plan->expanded_count, sizeof(*new_result_types),
-      (void**)&new_result_types));
   IREE_RETURN_IF_ERROR(loom_vector_bank_sroa_build_initial_values(
-      context, loop, plan, new_iter_args, new_result_types));
+      context, loop, plan, new_iter_args));
 
   loom_value_id_t unroll_factor = LOOM_VALUE_ID_INVALID;
   loom_scf_for_unroll_policy_t unroll_policy = 0;
@@ -858,9 +849,9 @@ static iree_status_t loom_vector_bank_sroa_rewrite_loop(
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &context->rewriter->builder, build_flags, loom_scf_for_lower_bound(loop),
       loom_scf_for_upper_bound(loop), loom_scf_for_step(loop), new_iter_args,
-      plan->expanded_count, new_result_types, plan->expanded_count,
-      /*tied_results=*/NULL, /*tied_result_count=*/0, unroll_factor,
-      unroll_policy, unroll_schedule, loop->location, &new_loop));
+      plan->expanded_count, /*tied_results=*/NULL, /*tied_result_count=*/0,
+      unroll_factor, unroll_policy, unroll_schedule, loop->location,
+      &new_loop));
 
   loom_builder_ip_t saved_ip = loom_builder_enter_region(
       &context->rewriter->builder, new_loop, loom_scf_for_body(new_loop));

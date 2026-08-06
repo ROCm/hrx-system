@@ -571,5 +571,5 @@ loom_type_t loom_amdgpu_low_register_lane_type(const loom_module_t* module,
   if (!loom_low_type_is_register(low_type)) {
     return loom_type_none();
   }
-  return loom_low_register_type_with_unit_count(low_type, 1);
+  return loom_low_register_carrier_type_with_unit_count(low_type, 1);
 }

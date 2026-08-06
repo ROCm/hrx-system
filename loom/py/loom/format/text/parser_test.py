@@ -100,12 +100,15 @@ def _parse_type(text: str, **kwargs: Any) -> Type:
     return _parse(text, **kwargs)[0]
 
 
-def _test_ptr_register_type(unit_count: int = 1) -> RegisterType:
+def _test_ptr_register_type(
+    unit_count: int = 1, value_type: Type | None = None
+) -> RegisterType:
     return RegisterType(
         _TEST_LOW_CORE_STABLE_ID,
         _TEST_PTR_REGISTER_CLASS_ID,
         unit_count,
         "test.ptr",
+        value_type,
     )
 
 
@@ -491,6 +494,33 @@ class TestParseRegisterType:
 
     def test_multiple_units_with_spaced_suffix(self) -> None:
         assert _parse_type("reg<test.ptr x 4>") == _test_ptr_register_type(4)
+
+    def test_semantic_scalar_type(self) -> None:
+        assert _parse_type("reg<test.ptr : i32>") == _test_ptr_register_type(
+            value_type=I32
+        )
+
+    def test_semantic_vector_type(self) -> None:
+        vector_type = ShapedType(TypeKind.VECTOR, I32, (StaticDim(4),))
+        assert _parse_type("reg<test.ptr x4 : vector<4xi32>>") == (
+            _test_ptr_register_type(4, vector_type)
+        )
+
+    def test_semantic_dialect_type(self) -> None:
+        type_registry = {type_def.name: type_def for type_def in ALL_BUILTIN_TYPES}
+        type_registry["vm.ref"] = TypeDef(
+            name="vm.ref",
+            params=[TypeParam("object", ANY)],
+            format=[TypeOf("object")],
+        )
+        dialect_type = DialectType("vm.ref", (I32,))
+        assert _parse_type(
+            "reg<test.ptr : vm.ref<i32>>", type_registry=type_registry
+        ) == _test_ptr_register_type(value_type=dialect_type)
+
+    def test_semantic_type_is_required_after_colon(self) -> None:
+        with pytest.raises(ParseError, match="expected type"):
+            _parse_type("reg<test.ptr : >")
 
     def test_requires_namespace(self) -> None:
         with pytest.raises(ParseError, match="expected OP_NAME"):

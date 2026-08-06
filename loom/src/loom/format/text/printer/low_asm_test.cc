@@ -176,6 +176,21 @@ TEST_F(LowAsmPrinterTest, PrintsExplicitAmbiguousResultType) {
   loom_module_free(module);
 }
 
+TEST_F(LowAsmPrinterTest, PreservesSemanticRegisterResultTypes) {
+  const char* source =
+      "low.func.def target<test.low.core> @typed(%arg: "
+      "reg<test.i32 : i32>) -> (reg<test.i32 : i32>, "
+      "reg<test.i32 : i32>) asm {\n"
+      "  %value = test.const.i32 7 : reg<test.i32 : i32>\n"
+      "  %tied = test.tied.any %arg\n"
+      "  return %value, %tied\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source);
+  ASSERT_NE(module, nullptr);
+  EXPECT_EQ(PrintModule(module), source);
+  loom_module_free(module);
+}
+
 TEST_F(LowAsmPrinterTest, PrintsZeroImmediateConstAndOperandlessOp) {
   const char* source =
       "low.func.def target<test.low.core> @zero_immediate() -> "

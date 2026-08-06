@@ -446,6 +446,9 @@ iree_status_t loom_low_concat_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
+iree_status_t loom_low_concat_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_LOW_INVOKE: Invoke an explicitly selected translated low function from non-low IR.
 // %result = low.invoke @extern_add(%lhs, %rhs) : (i32, i32) -> (i32)
@@ -720,8 +723,6 @@ iree_status_t loom_low_scf_for_build(
     loom_may_consume loom_value_id_t step,
     loom_may_consume const loom_value_id_t* iter_args,
     iree_host_size_t iter_args_count,
-    const loom_type_t* result_types,
-    iree_host_size_t result_count,
     const loom_tied_result_t* tied_results,
     iree_host_size_t tied_result_count,
     loom_optional loom_may_consume loom_value_id_t unroll_factor,

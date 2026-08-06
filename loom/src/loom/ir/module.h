@@ -373,8 +373,9 @@ const loom_encoding_vtable_t* loom_module_encoding_vtable(
 // argument/result types, and dialect type parameters are interned first so the
 // type table always contains the closure required by serializers. Any
 // heap-backed payload owned by |type| (overflow dims, function signatures,
-// dialect params) is recursively copied into the module arena before storage,
-// so callers may pass temporary or foreign-allocator payloads.
+// dialect params, typed register payloads) is recursively copied into the
+// module arena before storage, so callers may pass temporary or
+// foreign-allocator payloads.
 iree_status_t loom_module_intern_type(loom_module_t* module, loom_type_t type,
                                       loom_type_t* out_interned_type);
 
@@ -396,6 +397,15 @@ iree_status_t loom_module_intern_function_type(loom_module_t* module,
                                                uint16_t arg_count,
                                                const loom_type_t* result_types,
                                                uint16_t result_count,
+                                               loom_type_t* out_interned_type);
+
+// Interns a register type carrying a semantic value type. Carrier payload
+// interpretation remains target-owned. The value type is recursively interned
+// and copied into module-owned storage only when the register type is new.
+iree_status_t loom_module_intern_register_type(loom_module_t* module,
+                                               uint64_t carrier_payload0,
+                                               uint64_t carrier_payload1,
+                                               loom_type_t value_type,
                                                loom_type_t* out_interned_type);
 
 // Adds a location entry to the module's location table and returns

@@ -375,7 +375,7 @@ static iree_status_t loom_amdgpu_spill_lowering_make_chunk_type(
     loom_type_t* out_type) {
   *out_type = loom_type_none();
   loom_type_t chunk_type =
-      loom_low_register_type_with_unit_count(base_type, chunk_units);
+      loom_low_register_carrier_type_with_unit_count(base_type, chunk_units);
   return loom_module_intern_type(module, chunk_type, out_type);
 }
 

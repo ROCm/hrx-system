@@ -91,6 +91,35 @@ TEST_F(RemapTest, RemapsDynamicDimsAndSsaEncodingRefs) {
   EXPECT_EQ(loom_type_encoding_value_id(target_type), target_layout);
 }
 
+TEST_F(RemapTest, RemapsRegisterValueTypesAcrossModules) {
+  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t source_dim = DefineValue(source_, index_type);
+  loom_value_id_t target_dim = DefineValue(target_, index_type);
+  loom_type_t source_value_type =
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
+                          loom_dim_pack_dynamic(source_dim), 0);
+  loom_type_t source_type = {};
+  IREE_ASSERT_OK(loom_module_intern_register_type(
+      source_, /*carrier_payload0=*/42, /*carrier_payload1=*/4,
+      source_value_type, &source_type));
+
+  loom_ir_remap_t remap = InitializeRemap();
+  IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, source_dim, target_dim));
+  loom_type_t target_type = {};
+  IREE_ASSERT_OK(loom_ir_remap_type(&remap, source_type, &target_type));
+
+  EXPECT_TRUE(loom_type_register_has_value_type(target_type));
+  EXPECT_EQ(loom_type_register_payload0(target_type), 42u);
+  EXPECT_EQ(loom_type_register_payload1(target_type), 4u);
+  const loom_type_t* target_value_type =
+      loom_type_register_value_type(target_type);
+  ASSERT_NE(target_value_type, nullptr);
+  ASSERT_TRUE(loom_type_dim_is_dynamic_at(*target_value_type, 0));
+  EXPECT_EQ(loom_type_dim_value_id_at(*target_value_type, 0), target_dim);
+  EXPECT_NE(loom_type_register_data(target_type),
+            loom_type_register_data(source_type));
+}
+
 TEST_F(RemapTest, RejectsSourceValuesDefinedAfterRemapInitialization) {
   loom_ir_remap_t remap = InitializeRemap();
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);

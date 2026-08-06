@@ -945,12 +945,10 @@ static iree_status_t loom_vector_to_scalar_mma_accumulator_loop(
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_mma_build_loop_bounds(
       state, lhs->columns, &lower_bound, &upper_bound, &step));
 
-  loom_type_t accumulator_type =
-      loom_type_scalar(loom_type_element_type(state->vector_type));
   loom_op_t* loop = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
-      step, &init_lane, 1, &accumulator_type, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
+      step, &init_lane, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
       /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
@@ -1010,9 +1008,8 @@ static iree_status_t loom_vector_to_scalar_mma_column_loop(
   loom_op_t* loop = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
-      step, &current_aggregate, 1, &init->type, 1, NULL, 0,
-      LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0, /*unroll_schedule=*/0,
-      state->location, &loop));
+      step, &current_aggregate, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
+      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(
@@ -1056,9 +1053,8 @@ static iree_status_t loom_vector_to_scalar_mma_row_loop(
   loom_op_t* loop = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
-      step, &current_aggregate, 1, &init->type, 1, NULL, 0,
-      LOOM_VALUE_ID_INVALID, /*unroll_policy=*/0, /*unroll_schedule=*/0,
-      state->location, &loop));
+      step, &current_aggregate, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
+      /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 
   loom_builder_ip_t saved = loom_builder_enter_region(
@@ -1103,7 +1099,7 @@ static iree_status_t loom_vector_to_scalar_mma_block_loop(
   loom_op_t* loop = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &state->rewriter->builder, /*build_flags=*/0, lower_bound, upper_bound,
-      step, &init->payload, 1, &init->type, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
+      step, &init->payload, 1, NULL, 0, LOOM_VALUE_ID_INVALID,
       /*unroll_policy=*/0, /*unroll_schedule=*/0, state->location, &loop));
   loom_vector_to_scalar_record_loop_created(state);
 

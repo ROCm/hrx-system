@@ -118,6 +118,7 @@ def _generate_builder_implementation(
     """Generates the C builder function implementation for a complex op."""
     params = c_builder_model.extract_c_params(op, shared_enums)
     layout = compute_layout(op)
+    inferred_result_source = c_builder_model.inferred_variadic_result_type_source(op)
     params_by_name = {str(param.get("field", param["name"])): param for param in params if "name" in param}
     lines: list[str] = []
 
@@ -175,7 +176,7 @@ def _generate_builder_implementation(
             max_value=max_variadic_operand_count,
             label=f"{op.name} operand",
         )
-    if has_variadic_result:
+    if has_variadic_result and inferred_result_source is None:
         _emit_builder_count_check(
             lines,
             count="result_count",
@@ -279,7 +280,9 @@ def _generate_builder_implementation(
         operand_count_expr = str(fixed_operand_count)
 
     # Compute result count expression.
-    if has_variadic_result:
+    if inferred_result_source is not None:
+        result_count_expr = f"(uint16_t){inferred_result_source}_count"
+    elif has_variadic_result:
         result_count_expr = "(uint16_t)result_count"
     else:
         result_count_expr = str(layout.fixed_result_count)
@@ -716,6 +719,14 @@ def _generate_builder_implementation(
                 lines.append("  IREE_RETURN_IF_ERROR(loom_builder_define_results(")
                 lines.append(f"      builder, result_types, {layout.fixed_result_count},")
                 lines.append("      loom_op_results(*out_op)));")
+
+    if inferred_result_source is not None:
+        lines.append(f"  for (iree_host_size_t _i = 0; _i < {inferred_result_source}_count; ++_i) {{")
+        lines.append("    IREE_RETURN_IF_ERROR(loom_builder_define_result(")
+        lines.append("        builder,")
+        lines.append(f"        loom_module_value_type(builder->module, {inferred_result_source}[_i]),")
+        lines.append("        &loom_op_results(*out_op)[_i]));")
+        lines.append("  }")
 
     # Populate tied result metadata.
     if static_ties:

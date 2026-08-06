@@ -157,7 +157,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 19
+FORMAT_VERSION = 20
 PRODUCER = "loom-py"
 
 SYMBOL_FLAG_PUBLIC = 0x0001
@@ -637,8 +637,9 @@ class BytecodeWriter:
                 self._ctx.intern_string(name)
                 for p in params:
                     self._number_type(p)
-            case RegisterType():
-                pass
+            case RegisterType(value_type=value_type):
+                if value_type is not None:
+                    self._number_type(value_type)
             case _:
                 pass
         # Intern the parent AFTER sub-types (ensures sub-types have lower IDs).
@@ -811,10 +812,14 @@ class BytecodeWriter:
                 descriptor_set_stable_id=descriptor_set_stable_id,
                 register_class_id=register_class_id,
                 unit_count=unit_count,
+                value_type=value_type,
             ):
                 buf.write_u8(BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.REGISTER])
                 buf.write_varint(descriptor_set_stable_id)
                 buf.write_varint(register_class_id | (unit_count << 16))
+                buf.write_u8(1 if value_type is not None else 0)
+                if value_type is not None:
+                    buf.write_varint(self._ctx.intern_type(value_type))
             case StorageType(space=space):
                 buf.write_u8(BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.STORAGE])
                 buf.write_u8(space.value)

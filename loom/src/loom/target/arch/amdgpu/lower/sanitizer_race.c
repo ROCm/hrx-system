@@ -801,7 +801,7 @@ static iree_status_t loom_amdgpu_sanitizer_race_branch_to_entry_body(
       interposition->forwarded_arg_count + interposition->target_arg_count;
   loom_value_id_t* args = NULL;
   if (arg_count != 0) {
-    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
         context, arg_count, sizeof(*args), (void**)&args));
   }
   for (uint16_t i = 0; i < interposition->forwarded_arg_count; ++i) {

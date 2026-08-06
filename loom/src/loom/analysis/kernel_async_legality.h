@@ -15,7 +15,6 @@
 #define LOOM_ANALYSIS_KERNEL_ASYNC_LEGALITY_H_
 
 #include "iree/base/api.h"
-#include "iree/base/internal/arena.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/local_value_domain.h"
@@ -27,8 +26,6 @@ extern "C" {
 #endif
 
 typedef struct loom_kernel_async_legality_options_t {
-  // Scratch arena for stream, movement, and view-region analysis storage.
-  iree_arena_allocator_t* arena;
   // Active local value domain for the function being verified.
   const loom_local_value_domain_t* value_domain;
   // Borrowed function-local value facts. The analysis only reads this table.

@@ -1021,7 +1021,7 @@ loom_amdgpu_select_vector_from_elements_fma_mix_half_results(
       continue;
     }
     if (inout_plan->fma_mix_half_results == NULL) {
-      IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+      IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
           context, inout_plan->element_count,
           sizeof(*inout_plan->fma_mix_half_results),
           (void**)&inout_plan->fma_mix_half_results));

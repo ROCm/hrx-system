@@ -6,6 +6,7 @@
 
 #include "loom/analysis/kernel_async_legality.h"
 
+#include "iree/base/internal/arena.h"
 #include "loom/analysis/control_uniformity.h"
 #include "loom/analysis/movement.h"
 #include "loom/error/error_catalog.h"
@@ -28,6 +29,9 @@ typedef struct loom_kernel_async_legality_state_t {
 
   // Caller-owned analysis options.
   const loom_kernel_async_legality_options_t* options;
+
+  // Call-scoped arena owning all legality analysis storage.
+  iree_arena_allocator_t* arena;
 
   // Result object receiving diagnostic and stream counters.
   loom_kernel_async_legality_result_t* result;
@@ -250,7 +254,7 @@ static iree_status_t loom_kernel_async_legality_ensure_movement_analysis(
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_movement_analysis_initialize(
-      state->fact_table, state->options->value_domain, state->options->arena,
+      state->fact_table, state->options->value_domain, state->arena,
       &state->movement_analysis));
   IREE_RETURN_IF_ERROR(
       loom_movement_analysis_analyze(&state->movement_analysis));
@@ -800,12 +804,12 @@ static iree_status_t loom_kernel_async_legality_check_block(
   loom_kernel_async_legality_stream_t stream = {0};
   if (group_capacity > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->options->arena, group_capacity,
+        state->arena, group_capacity,
         sizeof(loom_kernel_async_legality_group_t), (void**)&stream.groups));
   }
   if (endpoint_capacity > 0) {
     IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(state->options->arena, endpoint_capacity,
+        iree_arena_allocate_array(state->arena, endpoint_capacity,
                                   sizeof(loom_kernel_async_legality_endpoint_t),
                                   (void**)&stream.endpoints));
   }
@@ -840,9 +844,9 @@ static iree_status_t loom_kernel_async_legality_check_regions(
     loom_kernel_async_legality_state_t* state, loom_region_t* root_region) {
   loom_kernel_async_legality_region_worklist_t worklist;
   IREE_RETURN_IF_ERROR(loom_kernel_async_legality_region_worklist_initialize(
-      state->options->arena, &worklist));
+      state->arena, &worklist));
   IREE_RETURN_IF_ERROR(loom_kernel_async_legality_region_worklist_push(
-      state->options->arena, &worklist, root_region));
+      state->arena, &worklist, root_region));
 
   loom_region_t* region = NULL;
   while ((region = loom_kernel_async_legality_region_worklist_pop(&worklist))) {
@@ -861,7 +865,7 @@ static iree_status_t loom_kernel_async_legality_check_regions(
         loom_region_t** regions = loom_op_regions(op);
         for (uint8_t i = 0; i < op->region_count; ++i) {
           IREE_RETURN_IF_ERROR(loom_kernel_async_legality_region_worklist_push(
-              state->options->arena, &worklist, regions[i]));
+              state->arena, &worklist, regions[i]));
         }
       }
     }
@@ -886,14 +890,19 @@ iree_status_t loom_kernel_async_legality_verify_function(
   }
   IREE_ASSERT_EQ(options->value_domain->region, body);
 
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(module->arena.block_pool, &arena);
   loom_kernel_async_legality_state_t state = {
       .module = module,
       .function = function,
       .options = options,
+      .arena = &arena,
       .result = out_result,
       .fact_table = options->fact_table,
   };
-  loom_control_uniformity_info_initialize(
-      module, options->fact_table, options->arena, &state.control_uniformity);
-  return loom_kernel_async_legality_check_regions(&state, body);
+  loom_control_uniformity_info_initialize(module, options->fact_table, &arena,
+                                          &state.control_uniformity);
+  iree_status_t status = loom_kernel_async_legality_check_regions(&state, body);
+  iree_arena_deinitialize(&arena);
+  return status;
 }

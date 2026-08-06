@@ -89,7 +89,7 @@ iree_status_t loom_amdgpu_low_legality_verify_memory(
   *out_handled = true;
 
   loom_low_source_memory_access_plan_t source = {0};
-  loom_amdgpu_memory_access_plan_t plan = {0};
+  loom_amdgpu_memory_access_selection_t selection;
   loom_low_source_memory_access_diagnostic_t source_diagnostic = {0};
   loom_amdgpu_memory_access_diagnostic_t diagnostic = {0};
   const loom_view_region_table_t* view_regions = NULL;
@@ -106,7 +106,7 @@ iree_status_t loom_amdgpu_low_legality_verify_memory(
           module, loom_target_low_legality_fact_table(context), descriptor_set,
           view_regions, loom_target_low_legality_function(context), bundle,
           target_facts->properties.instruction_constraints, alloca_layout, op,
-          &source, &plan, &source_diagnostic, &diagnostic)) {
+          &source, &selection, &source_diagnostic, &diagnostic)) {
     bool handled = false;
     if (diagnostic.rejection_bits != 0) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_memory_access_rejection_diagnostic(
@@ -123,8 +123,8 @@ iree_status_t loom_amdgpu_low_legality_verify_memory(
                   diagnostic.rejection_bits);
     return loom_amdgpu_low_legality_reject(context, op, constraint_key);
   }
-  for (uint32_t i = 0; i < plan.packet_count; ++i) {
-    const loom_amdgpu_memory_access_t* access = &plan.packets[i].access;
+  for (uint32_t i = 0; i < selection.packet_count; ++i) {
+    const loom_amdgpu_memory_access_t* access = &selection.packets[i].access;
     loom_amdgpu_memory_cache_policy_attrs_t cache_attrs;
     const loom_amdgpu_memory_cache_policy_resolution_t resolution =
         loom_amdgpu_memory_cache_policy_resolve(descriptor_set, access,

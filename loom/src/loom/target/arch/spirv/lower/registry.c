@@ -208,9 +208,6 @@ static iree_status_t loom_spirv_make_argument_value_type_codes(
     return iree_ok_status();
   }
   int64_t* codes = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
-      context, arg_count, sizeof(*codes), (void**)&codes));
-  memset(codes, 0, arg_count * sizeof(*codes));
 
   loom_module_t* module = loom_low_lower_context_module(context);
   const loom_target_bundle_t* bundle = loom_low_lower_context_bundle(context);
@@ -230,6 +227,11 @@ static iree_status_t loom_spirv_make_argument_value_type_codes(
       IREE_BUILTIN_UNREACHABLE();
     }
     if (loom_spirv_low_type_is_id_register(arg_types[direct_argument_index])) {
+      if (codes == NULL) {
+        IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+            context, arg_count, sizeof(*codes), (void**)&codes));
+        memset(codes, 0, arg_count * sizeof(*codes));
+      }
       loom_spirv_value_type_t value_type = {0};
       if (!loom_spirv_abi_value_type_from_source_type(source_type,
                                                       &value_type) ||
@@ -262,9 +264,6 @@ static iree_status_t loom_spirv_make_result_value_type_codes(
     return iree_ok_status();
   }
   int64_t* codes = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
-      context, result_count, sizeof(*codes), (void**)&codes));
-  memset(codes, 0, result_count * sizeof(*codes));
 
   loom_module_t* module = loom_low_lower_context_module(context);
   const loom_value_id_t* source_results =
@@ -272,6 +271,11 @@ static iree_status_t loom_spirv_make_result_value_type_codes(
   for (iree_host_size_t i = 0; i < result_count; ++i) {
     if (!loom_spirv_low_type_is_id_register(result_types[i])) {
       continue;
+    }
+    if (codes == NULL) {
+      IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+          context, result_count, sizeof(*codes), (void**)&codes));
+      memset(codes, 0, result_count * sizeof(*codes));
     }
     const loom_type_t source_type =
         loom_module_value_type(module, source_results[i]);
@@ -326,7 +330,7 @@ static iree_status_t loom_spirv_map_abi_layout(
   }
 
   loom_named_attr_t* entries = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, added_count, sizeof(*entries), (void**)&entries));
   iree_host_size_t entry_index = 0;
   if (has_arg_payload) {

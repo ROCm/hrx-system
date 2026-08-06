@@ -55,7 +55,6 @@ iree_status_t loom_kernel_async_legality_run(loom_pass_t* pass,
         &fact_table);
   }
   loom_kernel_async_legality_options_t options = {
-      .arena = pass->arena,
       .value_domain = &value_domain,
       .fact_table = fact_table,
       .emitter = pass->diagnostic_emitter,

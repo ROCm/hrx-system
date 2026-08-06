@@ -242,18 +242,18 @@ kernel.def @fp8_finite_storage_scaled_rhs_fragment_decode_bf16() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%input: buffer, %scale: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %sixteen = index.constant 16 : index
+  %c0 = index.constant 0 : index
+  %c16 = index.constant 16 : index
   %input_layout = encoding.layout.strided [1, 16] : encoding<layout>
   %input_schema = encoding.define #matrix_operand<affine=scale_only, element_format=f8e4m3, payload_elements=16, payload_packing=dense_lanes, payload_registers=0, rounding=finite_only, scale_format=f32, scale_group_elements=16, scale_operands=1, scale_topology=block_1d> : encoding<schema>
   %input_storage = encoding.define #physical_storage {layout = %input_layout : encoding<layout>, schema = %input_schema : encoding<schema>} : encoding<storage>
   %input_view = buffer.view %input[%base] : buffer -> view<16x16xf8E4M3, %input_storage>
   %scale_view = buffer.view %scale[%base] : buffer -> view<1xf32, #dense>
   %output_view = buffer.view %output[%base] : buffer -> view<16xbf16, #dense>
-  %scale_scalar = view.load %scale_view[%zero] : view<1xf32, #dense> -> f32
+  %scale_scalar = view.load %scale_view[%c0] : view<1xf32, #dense> -> f32
   %scale_vector = vector.splat %scale_scalar : vector<1xf32>
-  %fragment = vector.fragment.load<rhs> %input_view[%zero, %zero] shape [%sixteen, %sixteen] using {scale = %scale_vector : vector<1xf32>} : view<16x16xf8E4M3, %input_storage> -> vector<16xbf16>
-  vector.store %fragment, %output_view[%zero] : vector<16xbf16>, view<16xbf16, #dense>
+  %fragment = vector.fragment.load<rhs> %input_view[%c0, %c0] shape [%c16, %c16] using {scale = %scale_vector : vector<1xf32>} : view<16x16xf8E4M3, %input_storage> -> vector<16xbf16>
+  vector.store %fragment, %output_view[%c0] : vector<16xbf16>, view<16xbf16, #dense>
   kernel.return
 }
 

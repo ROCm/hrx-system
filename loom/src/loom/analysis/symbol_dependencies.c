@@ -221,6 +221,13 @@ static iree_status_t loom_symbol_dependency_visit_type(
       return loom_symbol_dependency_visit_type_sequence(
           builder, source_symbol_id, loom_type_dialect_params(type),
           loom_type_dialect_param_count(type), kind, attr_index, user_op);
+    case LOOM_TYPE_REGISTER: {
+      const loom_type_t* value_type = loom_type_register_value_type(type);
+      return value_type ? loom_symbol_dependency_visit_type(
+                              builder, source_symbol_id, *value_type, kind,
+                              attr_index, user_op)
+                        : iree_ok_status();
+    }
     default:
       return iree_ok_status();
   }

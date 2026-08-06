@@ -320,6 +320,9 @@
 //
 //   reg<amdgpu.vgpr>                   One AMDGPU VGPR.
 //   reg<amdgpu.vgpr x4>                Four contiguous VGPR-class units.
+//   reg<amdgpu.vgpr : f32>             One VGPR carrying an f32 value.
+//   reg<amdgpu.vgpr x4 : vector<4xf32>>
+//                                      Four VGPRs carrying a vector value.
 //
 // --- Dialect types ---
 //

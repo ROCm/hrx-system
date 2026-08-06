@@ -152,7 +152,7 @@ loom_low_lower_rule_source_memory_materializer_tied_results(
   if (tied_result_count == 0) return iree_ok_status();
 
   loom_tied_result_t* tied_results = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, tied_result_count, sizeof(*tied_results),
       (void**)&tied_results));
   uint16_t tied_result_index = 0;

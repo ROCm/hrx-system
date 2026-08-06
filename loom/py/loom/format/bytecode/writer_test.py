@@ -151,12 +151,15 @@ def _section_kinds(data: bytes | bytearray) -> list[int]:
     return section_kinds
 
 
-def _test_ptr_register_type(unit_count: int = 1) -> RegisterType:
+def _test_ptr_register_type(
+    unit_count: int = 1, value_type: Type | None = None
+) -> RegisterType:
     return RegisterType(
         _TEST_LOW_CORE_STABLE_ID,
         _TEST_PTR_REGISTER_CLASS_ID,
         unit_count,
         "test.ptr",
+        value_type,
     )
 
 
@@ -771,6 +774,17 @@ class TestTypesSection:
 
     def test_register_type(self) -> None:
         self._roundtrip_type(_test_ptr_register_type(4))
+
+    def test_register_scalar_value_type(self) -> None:
+        self._roundtrip_type(_test_ptr_register_type(value_type=I32))
+
+    def test_register_vector_value_type(self) -> None:
+        vector_type = ShapedType(TypeKind.VECTOR, I32, (StaticDim(4),))
+        self._roundtrip_type(_test_ptr_register_type(4, vector_type))
+
+    def test_register_dialect_value_type(self) -> None:
+        dialect_type = DialectType("vm.ref", (I32,))
+        self._roundtrip_type(_test_ptr_register_type(value_type=dialect_type))
 
     def test_pool_static(self) -> None:
         self._roundtrip_type(PoolType(StaticDim(65536)))

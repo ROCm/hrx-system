@@ -111,7 +111,6 @@ loom_cc_test(
     loom::ops::func
     loom::ops::global
     loom::ops::test
-    loom::target::registers
 )
 
 loom_cc_test(

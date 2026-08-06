@@ -477,11 +477,17 @@ static uint32_t loom_bytecode_type_wire_hash(loom_type_t type) {
       }
       return hash;
     }
-    case LOOM_TYPE_REGISTER:
+    case LOOM_TYPE_REGISTER: {
       hash = loom_bytecode_type_hash_mix_u64(hash,
                                              loom_type_register_payload0(type));
-      return loom_bytecode_type_hash_mix_u64(hash,
+      hash = loom_bytecode_type_hash_mix_u64(hash,
                                              loom_type_register_payload1(type));
+      const loom_type_t* value_type = loom_type_register_value_type(type);
+      hash = loom_bytecode_type_hash_mix_u8(hash, value_type ? 1 : 0);
+      return value_type ? loom_bytecode_type_hash_mix_u32(
+                              hash, loom_bytecode_type_wire_hash(*value_type))
+                        : hash;
+    }
     case LOOM_TYPE_STORAGE:
       return loom_bytecode_type_hash_mix_u8(
           hash, (uint8_t)loom_type_storage_space(type));
@@ -571,9 +577,18 @@ static bool loom_bytecode_type_wire_equal(loom_type_t a, loom_type_t b) {
       }
       return true;
     }
-    case LOOM_TYPE_REGISTER:
-      return loom_type_register_payload0(a) == loom_type_register_payload0(b) &&
-             loom_type_register_payload1(a) == loom_type_register_payload1(b);
+    case LOOM_TYPE_REGISTER: {
+      if (loom_type_register_payload0(a) != loom_type_register_payload0(b) ||
+          loom_type_register_payload1(a) != loom_type_register_payload1(b)) {
+        return false;
+      }
+      const loom_type_t* a_value_type = loom_type_register_value_type(a);
+      const loom_type_t* b_value_type = loom_type_register_value_type(b);
+      if (!a_value_type || !b_value_type) {
+        return a_value_type == b_value_type;
+      }
+      return loom_bytecode_type_wire_equal(*a_value_type, *b_value_type);
+    }
     case LOOM_TYPE_STORAGE:
       return loom_type_storage_space(a) == loom_type_storage_space(b);
     case LOOM_TYPE_ENCODING:
@@ -824,8 +839,14 @@ static iree_status_t loom_bytecode_numbering_intern_type(
       }
       break;
     }
-    case LOOM_TYPE_REGISTER:
+    case LOOM_TYPE_REGISTER: {
+      const loom_type_t* value_type = loom_type_register_value_type(type);
+      if (value_type) {
+        IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_type(
+            numbering, *value_type, &unused_id));
+      }
       break;
+    }
     default:
       break;
   }
@@ -3636,6 +3657,16 @@ static iree_status_t loom_bytecode_write_types_section(
             page_writer, loom_type_register_payload0(type)));
         IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
             page_writer, loom_type_register_payload1(type)));
+        const loom_type_t* value_type = loom_type_register_value_type(type);
+        IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
+            page_writer, value_type ? 1 : 0));
+        if (value_type) {
+          uint32_t value_type_id = 0;
+          IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_type(
+              numbering, *value_type, &value_type_id));
+          IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+              page_writer, value_type_id));
+        }
         break;
       }
       case LOOM_TYPE_STORAGE: {

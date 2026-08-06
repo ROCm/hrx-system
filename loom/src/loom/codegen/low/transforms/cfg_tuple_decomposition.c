@@ -81,7 +81,7 @@ static bool loom_low_decompose_cfg_tuples_get_register_tuple_type(
     loom_type_t type, loom_type_t* out_lane_type, uint32_t* out_lane_count) {
   *out_lane_type = loom_type_none();
   *out_lane_count = 0;
-  if (!loom_type_is_register(type)) {
+  if (!loom_type_is_register(type) || loom_type_register_has_value_type(type)) {
     return false;
   }
 
@@ -90,7 +90,7 @@ static bool loom_low_decompose_cfg_tuples_get_register_tuple_type(
     return false;
   }
 
-  *out_lane_type = loom_low_register_type_with_unit_count(type, 1);
+  *out_lane_type = loom_low_register_carrier_type_with_unit_count(type, 1);
   *out_lane_count = lane_count;
   return true;
 }

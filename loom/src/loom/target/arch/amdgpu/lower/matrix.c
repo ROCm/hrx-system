@@ -492,7 +492,7 @@ iree_status_t loom_amdgpu_descriptor_matrix_attrs(
   }
 
   loom_named_attr_t* attrs = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, descriptor->immediate_count, sizeof(*attrs), (void**)&attrs));
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_lower_context_descriptor_set(context);

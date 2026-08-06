@@ -462,6 +462,25 @@ TEST_F(PrintOpTest, PrintRegisterType) {
       /*descriptor_set_stable_id=*/0x2a, /*register_class_id=*/7,
       /*unit_count=*/4);
   EXPECT_EQ(print_type(type, module_), "reg<0x2a:7 x4>");
+
+  loom_type_t vector_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32, loom_dim_pack_static(4), 0);
+  loom_type_t typed_register = loom_type_none();
+  IREE_ASSERT_OK(loom_module_intern_register_type(
+      module_, /*carrier_payload0=*/0x2a,
+      /*carrier_payload1=*/7 | ((uint64_t)4 << 16), vector_type,
+      &typed_register));
+  EXPECT_EQ(print_type(typed_register, module_),
+            "reg<0x2a:7 x4 : vector<4xi32>>");
+
+  loom_type_t dialect_type =
+      loom_type_dialect_opaque(intern("kernel.async.token"));
+  IREE_ASSERT_OK(loom_module_intern_register_type(
+      module_, /*carrier_payload0=*/0x2a,
+      /*carrier_payload1=*/7 | ((uint64_t)1 << 16), dialect_type,
+      &typed_register));
+  EXPECT_EQ(print_type(typed_register, module_),
+            "reg<0x2a:7 : kernel.async.token>");
 }
 
 //===----------------------------------------------------------------------===//

@@ -1191,6 +1191,31 @@ ERR_TARGET_065 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_066: Typed register carrier transform has no semantic relation.
+ERR_TARGET_066 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=66,
+    severity=Severity.ERROR,
+    summary="Typed register carrier transform has no semantic relation.",
+    message=(
+        "target '{target_key}' export '{export_name}' config '{config_key}' "
+        "rejected '{op_name}' in '@{function_name}': generic lowering cannot "
+        "change typed register {actual_type} from {source_unit_count} to "
+        "{result_unit_count} carrier units without a target-defined value "
+        "relation"
+    ),
+    params=(
+        *_TARGET_CONTEXT_PARAMS,
+        ErrorParam("actual_type", ParamKind.TYPE),
+        ErrorParam("source_unit_count", ParamKind.U32),
+        ErrorParam("result_unit_count", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Select a target-specific lowering operation that explicitly produces "
+        "the desired semantic type"
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1249,4 +1274,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_063,
     ERR_TARGET_064,
     ERR_TARGET_065,
+    ERR_TARGET_066,
 )

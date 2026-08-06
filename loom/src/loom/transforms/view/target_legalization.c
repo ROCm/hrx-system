@@ -140,8 +140,8 @@ iree_status_t loom_view_target_legalize_atomic_addf_reference(
   const loom_value_id_t initial_expected = loom_scalar_constant_result(zero_op);
   loom_op_t* loop = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_while_build(
-      &rewriter->builder, &initial_expected, 1, &float_type, 1,
-      /*tied_results=*/NULL, /*tied_result_count=*/0, op->location, &loop));
+      &rewriter->builder, &initial_expected, 1, /*tied_results=*/NULL,
+      /*tied_result_count=*/0, op->location, &loop));
 
   loom_builder_ip_t saved_ip = loom_builder_enter_region(
       &rewriter->builder, loop, loom_scf_while_before(loop));

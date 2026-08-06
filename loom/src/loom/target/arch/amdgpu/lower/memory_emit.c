@@ -1357,7 +1357,7 @@ static iree_status_t loom_amdgpu_emit_memory_flat_wide_dynamic_term(
   }
 
   loom_type_t source_lane_type =
-      loom_low_register_type_with_unit_count(low_index_type, 1);
+      loom_low_register_carrier_type_with_unit_count(low_index_type, 1);
   loom_value_id_t low_lo = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
       context, source_op, low_index, /*offset=*/0, source_lane_type, &low_lo));

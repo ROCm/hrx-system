@@ -672,6 +672,22 @@ iree_status_t loom_ir_remap_type(loom_ir_remap_t* remap,
                                    out_target_type);
   }
 
+  if (kind == LOOM_TYPE_REGISTER) {
+    const loom_type_t* source_value_type =
+        loom_type_register_value_type(source_type);
+    if (!source_value_type) {
+      *out_target_type = source_type;
+      return iree_ok_status();
+    }
+    loom_type_t target_value_type = {};
+    IREE_RETURN_IF_ERROR(
+        loom_ir_remap_type(remap, *source_value_type, &target_value_type));
+    return loom_module_intern_register_type(
+        remap->target_module, loom_type_register_payload0(source_type),
+        loom_type_register_payload1(source_type), target_value_type,
+        out_target_type);
+  }
+
   loom_type_t target_type = source_type;
   bool needs_interned_payload = false;
   loom_overflow_dim_t target_overflow_dims[LOOM_TYPE_MAX_RANK] = {0};

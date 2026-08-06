@@ -972,6 +972,45 @@ TEST_F(ModuleTest, ReplaceValueTypeUsesUpdatesDynamicDims) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, ReplaceValueTypeUsesUpdatesRegisterValueType) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_value_id_t old_dim_id = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t new_dim_id = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_define_value(
+      module, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &old_dim_id));
+  IREE_ASSERT_OK(loom_module_define_value(
+      module, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &new_dim_id));
+  loom_type_t value_type =
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
+                          loom_dim_pack_dynamic(old_dim_id), 0);
+  loom_type_t register_type = {};
+  IREE_ASSERT_OK(loom_module_intern_register_type(
+      module, /*carrier_payload0=*/42, /*carrier_payload1=*/4, value_type,
+      &register_type));
+  loom_value_id_t register_id = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_define_value(module, register_type, &register_id));
+
+  EXPECT_TRUE(loom_module_value_has_type_uses(module, old_dim_id));
+  IREE_ASSERT_OK(
+      loom_module_replace_value_type_uses(module, old_dim_id, new_dim_id));
+
+  loom_type_t replaced_type = loom_module_value_type(module, register_id);
+  const loom_type_t* replaced_value_type =
+      loom_type_register_value_type(replaced_type);
+  ASSERT_NE(replaced_value_type, nullptr);
+  ASSERT_TRUE(loom_type_dim_is_dynamic_at(*replaced_value_type, 0));
+  EXPECT_EQ(loom_type_dim_value_id_at(*replaced_value_type, 0), new_dim_id);
+  EXPECT_EQ(loom_type_register_payload0(replaced_type), 42u);
+  EXPECT_EQ(loom_type_register_payload1(replaced_type), 4u);
+  EXPECT_FALSE(loom_module_value_has_type_uses(module, old_dim_id));
+  EXPECT_TRUE(loom_module_value_has_type_uses(module, new_dim_id));
+
+  loom_module_free(module);
+}
+
 TEST_F(ModuleTest, ReplaceTypeValueReferencesDoesNotMutateCarriers) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
@@ -1721,6 +1760,69 @@ TEST_F(ModuleTest, InternShapedType) {
   EXPECT_TRUE(loom_type_equal(module->types.entries[0],
                               loom_type_scalar(LOOM_SCALAR_TYPE_F32)));
   EXPECT_TRUE(loom_type_equal(module->types.entries[1], interned1));
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, InternRegisterTypeOwnsAndDeduplicatesValueType) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+  loom_string_id_t dialect_name_id = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("dialect.payload"),
+                                           &dialect_name_id));
+  loom_type_t value_type_param = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(4), 0);
+  loom_type_t value_type =
+      loom_type_dialect(dialect_name_id, 1, &value_type_param);
+
+  loom_type_t first = {};
+  IREE_ASSERT_OK(loom_module_intern_register_type(
+      module, /*carrier_payload0=*/42, /*carrier_payload1=*/4, value_type,
+      &first));
+  iree_host_size_t allocation_size = module->arena.total_allocation_size;
+  value_type_param = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
+
+  loom_type_t duplicate_param = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(4), 0);
+  loom_type_t duplicate_value_type =
+      loom_type_dialect(dialect_name_id, 1, &duplicate_param);
+
+  loom_type_t duplicate = {};
+  IREE_ASSERT_OK(loom_module_intern_register_type(
+      module, /*carrier_payload0=*/42, /*carrier_payload1=*/4,
+      duplicate_value_type, &duplicate));
+
+  ASSERT_EQ(module->types.count, 4u);
+  EXPECT_TRUE(loom_type_equal(module->types.entries[0],
+                              loom_type_scalar(LOOM_SCALAR_TYPE_F32)));
+  EXPECT_TRUE(loom_type_equal(module->types.entries[1], duplicate_param));
+  EXPECT_TRUE(loom_type_equal(module->types.entries[2], duplicate_value_type));
+  EXPECT_TRUE(loom_type_equal(module->types.entries[3], first));
+  EXPECT_TRUE(loom_type_equal(first, duplicate));
+  EXPECT_EQ(loom_type_register_data(first), loom_type_register_data(duplicate));
+  EXPECT_EQ(module->arena.total_allocation_size, allocation_size);
+  const loom_type_t* owned_value_type = loom_type_register_value_type(first);
+  ASSERT_NE(owned_value_type, nullptr);
+  ASSERT_TRUE(loom_type_is_dialect(*owned_value_type));
+  ASSERT_EQ(loom_type_dialect_param_count(*owned_value_type), 1u);
+  EXPECT_TRUE(loom_type_equal(loom_type_dialect_params(*owned_value_type)[0],
+                              duplicate_param));
+  EXPECT_NE(loom_type_dialect_params(*owned_value_type), &value_type_param);
+
+  loom_module_free(module);
+}
+
+TEST_F(ModuleTest, InternRegisterTypeRejectsNullTypedPayload) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  loom_type_t malformed_type = loom_type_register_payload_with_value_type(NULL);
+  loom_type_t interned_type = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_module_intern_type(module, malformed_type, &interned_type));
+
   loom_module_free(module);
 }
 

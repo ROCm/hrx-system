@@ -14,6 +14,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/registers.h"
 
 static iree_string_view_t loom_low_lower_nonempty(
     iree_string_view_t value, iree_string_view_t placeholder) {
@@ -109,6 +110,18 @@ iree_status_t loom_low_lower_emit_source_type_unsupported(
   };
   return loom_low_lower_emit_target_context_error(
       context, source_op, LOOM_ERR_TARGET_033, params, IREE_ARRAYSIZE(params));
+}
+
+iree_status_t loom_low_lower_emit_register_width_relation_unsupported(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_type_t actual_type, uint32_t result_unit_count) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_type(actual_type),
+      loom_param_u32(loom_low_register_type_unit_count(actual_type)),
+      loom_param_u32(result_unit_count),
+  };
+  return loom_low_lower_emit_target_context_error(
+      context, source_op, LOOM_ERR_TARGET_066, params, IREE_ARRAYSIZE(params));
 }
 
 iree_status_t loom_low_lower_emit_branch_constraint(
@@ -290,7 +303,7 @@ iree_status_t loom_low_lower_context_view_regions(
   if (!context->lowering.view_regions_initialized) {
     IREE_RETURN_IF_ERROR(loom_view_region_table_initialize(
         context->lowering.fact_table, &context->lowering.value_domain,
-        &context->arena, &context->lowering.view_regions));
+        &context->function_arena, &context->lowering.view_regions));
     context->lowering.view_regions_initialized = true;
   }
   if (!context->lowering.view_regions_analyzed) {
@@ -318,9 +331,16 @@ loom_low_lower_selected_plan_view_t loom_low_lower_context_selected_plan_view(
   };
 }
 
-iree_arena_allocator_t* loom_low_lower_context_scratch_arena(
+iree_arena_allocator_t* loom_low_lower_context_function_arena(
     loom_low_lower_context_t* context) {
-  return &context->arena;
+  return &context->function_arena;
+}
+
+iree_arena_allocator_t* loom_low_lower_context_emission_arena(
+    loom_low_lower_context_t* context) {
+  IREE_ASSERT(context->emission_arena_active,
+              "emission storage requested outside low-IR construction");
+  return &context->emission_arena;
 }
 
 loom_low_lower_module_state_t* loom_low_lower_context_module_state(
@@ -328,15 +348,28 @@ loom_low_lower_module_state_t* loom_low_lower_context_module_state(
   return context->module_state;
 }
 
-iree_status_t loom_low_lower_allocate_scratch_array(
+iree_status_t loom_low_lower_allocate_function_array(
     loom_low_lower_context_t* context, iree_host_size_t count,
     iree_host_size_t element_size, void** out_ptr) {
   *out_ptr = NULL;
   if (count == 0) {
     return iree_ok_status();
   }
-  return iree_arena_allocate_array(&context->arena, count, element_size,
-                                   out_ptr);
+  return iree_arena_allocate_array(&context->function_arena, count,
+                                   element_size, out_ptr);
+}
+
+iree_status_t loom_low_lower_allocate_emission_array(
+    loom_low_lower_context_t* context, iree_host_size_t count,
+    iree_host_size_t element_size, void** out_ptr) {
+  *out_ptr = NULL;
+  if (count == 0) {
+    return iree_ok_status();
+  }
+  IREE_ASSERT(context->emission_arena_active,
+              "emission storage requested outside low-IR construction");
+  return iree_arena_allocate_array(&context->emission_arena, count,
+                                   element_size, out_ptr);
 }
 
 iree_status_t loom_low_lower_allocate_plan_data(
@@ -344,8 +377,8 @@ iree_status_t loom_low_lower_allocate_plan_data(
     void** out_data) {
   IREE_ASSERT_GT(data_length, 0);
   *out_data = NULL;
-  return loom_low_lower_allocate_scratch_array(context, 1, data_length,
-                                               out_data);
+  return loom_low_lower_allocate_function_array(context, 1, data_length,
+                                                out_data);
 }
 
 iree_status_t loom_low_lower_module_state_create(
@@ -466,7 +499,7 @@ iree_status_t loom_low_lower_get_or_allocate_target_state(
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "capacity overflow");
     }
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        &context->arena, context->lowering.target_state_record_count,
+        &context->function_arena, context->lowering.target_state_record_count,
         minimum_capacity, sizeof(*context->lowering.target_state_records),
         &context->lowering.target_state_record_capacity,
         (void**)&context->lowering.target_state_records));
@@ -474,7 +507,7 @@ iree_status_t loom_low_lower_get_or_allocate_target_state(
 
   void* data = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_low_lower_allocate_scratch_array(context, 1, data_length, &data));
+      loom_low_lower_allocate_function_array(context, 1, data_length, &data));
   memset(data, 0, data_length);
   const iree_host_size_t record_index =
       context->lowering.target_state_record_count++;
@@ -555,7 +588,7 @@ iree_status_t loom_low_lower_interpose_entry_block(
   const uint16_t forwarded_arg_count = setup_block->arg_count;
   loom_value_id_t* forwarded_args = NULL;
   if (forwarded_arg_count != 0) {
-    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
         context, forwarded_arg_count, sizeof(*forwarded_args),
         (void**)&forwarded_args));
   }
@@ -572,7 +605,7 @@ iree_status_t loom_low_lower_interpose_entry_block(
 
   loom_value_id_t* target_args = NULL;
   if (target_arg_count != 0) {
-    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
         context, target_arg_count, sizeof(*target_args), (void**)&target_args));
   }
   for (uint16_t i = 0; i < target_arg_count; ++i) {
@@ -695,7 +728,7 @@ iree_status_t loom_low_lower_remap_successor_args(
   IREE_ASSERT_EQ(source_arg_count, low_dest->arg_count);
 
   loom_value_id_t* low_args = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, source_arg_count, sizeof(*low_args), (void**)&low_args));
   for (uint16_t i = 0; i < source_arg_count; ++i) {
     IREE_RETURN_IF_ERROR(
@@ -753,7 +786,7 @@ iree_status_t loom_low_lower_interpose_successor_dest(
   if (interpositions->low_dests == NULL) {
     IREE_ASSERT_EQ(interpositions->low_dest_count, 0);
     interpositions->low_dest_count = source_terminator->successor_count;
-    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
         context, interpositions->low_dest_count,
         sizeof(*interpositions->low_dests),
         (void**)&interpositions->low_dests));
@@ -810,6 +843,14 @@ iree_status_t loom_low_lower_make_register_type(
     uint32_t unit_count, loom_type_t* out_type) {
   return loom_low_build_register_type(context->descriptor_set, reg_class_id,
                                       unit_count, out_type);
+}
+
+iree_status_t loom_low_lower_make_typed_register_type(
+    loom_low_lower_context_t* context, uint16_t reg_class_id,
+    uint32_t unit_count, loom_type_t value_type, loom_type_t* out_type) {
+  return loom_low_build_typed_register_type(
+      loom_low_lower_context_module(context), context->descriptor_set,
+      reg_class_id, unit_count, value_type, out_type);
 }
 
 iree_status_t loom_low_lower_emit_resolved_descriptor_op(
@@ -989,59 +1030,4 @@ iree_status_t loom_low_lower_elide_value(loom_low_lower_context_t* context,
               existing == LOOM_LOW_LOWER_VALUE_ID_ELIDED);
   context->lowering.value_map[source_ordinal] = LOOM_LOW_LOWER_VALUE_ID_ELIDED;
   return iree_ok_status();
-}
-
-static iree_status_t loom_low_lower_create_derived_symbol(
-    loom_low_lower_context_t* context, iree_string_view_t base_name,
-    iree_string_view_t suffix, bool append_index, uint32_t index,
-    loom_symbol_ref_t* out_symbol_ref) {
-  *out_symbol_ref = loom_symbol_ref_null();
-  IREE_ASSERT_FALSE(iree_string_view_is_empty(base_name));
-  IREE_ASSERT_FALSE(iree_string_view_equal(base_name, IREE_SV("<unnamed>")));
-
-  iree_string_builder_t builder;
-  iree_string_builder_initialize(iree_allocator_system(), &builder);
-  iree_status_t status = iree_string_builder_append_string(&builder, base_name);
-  if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_string(&builder, suffix);
-  }
-  if (iree_status_is_ok(status) && append_index) {
-    status = iree_string_builder_append_format(&builder, "%u", (unsigned)index);
-  }
-
-  loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
-  if (iree_status_is_ok(status)) {
-    status = loom_module_intern_string(
-        context->module,
-        iree_make_string_view(iree_string_builder_buffer(&builder),
-                              iree_string_builder_size(&builder)),
-        &name_id);
-  }
-  iree_string_builder_deinitialize(&builder);
-  IREE_RETURN_IF_ERROR(status);
-
-  if (loom_module_find_symbol(context->module, name_id) !=
-      LOOM_SYMBOL_ID_INVALID) {
-    return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
-                            "target-low derived symbol already exists");
-  }
-
-  uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_module_add_symbol(context->module, name_id, &symbol_id));
-  *out_symbol_ref = (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id};
-  return iree_ok_status();
-}
-
-iree_status_t loom_low_lower_create_function_symbol(
-    loom_low_lower_context_t* context, iree_string_view_t suffix,
-    bool append_index, uint32_t index, loom_symbol_ref_t* out_symbol_ref) {
-  *out_symbol_ref = loom_symbol_ref_null();
-  IREE_ASSERT(context->low_func_op != NULL);
-  loom_func_like_t low_function =
-      loom_func_like_cast(context->module, context->low_func_op);
-  iree_string_view_t low_function_name = loom_low_lower_symbol_name(
-      context->module, loom_func_like_callee(low_function));
-  return loom_low_lower_create_derived_symbol(
-      context, low_function_name, suffix, append_index, index, out_symbol_ref);
 }

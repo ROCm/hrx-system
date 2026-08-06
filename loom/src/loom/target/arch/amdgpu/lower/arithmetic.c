@@ -1107,7 +1107,7 @@ static iree_status_t loom_amdgpu_extract_fma_mix_register_unit(
     IREE_BUILTIN_UNREACHABLE();
   }
   const loom_type_t unit_type =
-      loom_low_register_type_with_unit_count(low_source_type, 1);
+      loom_low_register_carrier_type_with_unit_count(low_source_type, 1);
   return loom_amdgpu_emit_low_slice(context, source_op, low_source,
                                     register_offset, unit_type, out_source);
 }
@@ -1349,8 +1349,9 @@ iree_status_t loom_amdgpu_lower_vector_packed_ternary(
   loom_type_t result_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_amdgpu_low_result_type(context, source_op,
                                                    plan->result, &result_type));
-  const loom_type_t packet_type = loom_low_register_type_with_unit_count(
-      result_type, plan->packet_unit_count);
+  const loom_type_t packet_type =
+      loom_low_register_carrier_type_with_unit_count(result_type,
+                                                     plan->packet_unit_count);
 
   loom_value_id_t packet_results[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS];
   for (uint32_t packet_index = 0; packet_index < plan->packet_count;
@@ -1430,7 +1431,7 @@ iree_status_t loom_amdgpu_lower_mulf_mix(
                                                    plan->result, &result_type));
   loom_type_t lane_type = result_type;
   if (plan->lane_count > 1) {
-    lane_type = loom_low_register_type_with_unit_count(result_type, 1);
+    lane_type = loom_low_register_carrier_type_with_unit_count(result_type, 1);
   }
 
   loom_named_attr_t attrs[1] = {0};

@@ -236,8 +236,12 @@ struct loom_low_lower_context_t {
   const loom_low_descriptor_set_t* descriptor_set;
   // Result object receiving counters and emitted low function metadata.
   loom_low_lower_result_t* result;
-  // Scratch arena for transient maps and remapped operand lists.
-  iree_arena_allocator_t arena;
+  // Arena retaining function plans, maps, analyses, and target state.
+  iree_arena_allocator_t function_arena;
+  // Arena reset after each bounded low-IR emission scope.
+  iree_arena_allocator_t emission_arena;
+  // True only while a low-IR builder callback may request emission storage.
+  bool emission_arena_active;
   // Module-scope state shared by source-to-low calls in the current module
   // pass, or NULL when the caller is lowering a standalone function.
   loom_low_lower_module_state_t* module_state;

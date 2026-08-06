@@ -460,6 +460,60 @@ class BytecodeReader:
                 EncodingInstance(name=name, alias=alias, params=tuple(param_list))
             )
 
+    def _resolve_prior_type(self, type_index: int, field_name: str) -> Type:
+        if type_index >= len(self._types):
+            raise BytecodeError(
+                f"{field_name} index {type_index} must refer to a prior type "
+                f"(available: {len(self._types)})"
+            )
+        return self._types[type_index]
+
+    def _read_register_type(self, data: bytes, offset: int) -> tuple[RegisterType, int]:
+        try:
+            descriptor_set_stable_id, offset = decode_varint(data, offset)
+            payload1, offset = decode_varint(data, offset)
+        except ValueError as err:
+            raise BytecodeError(f"malformed register carrier payload: {err}") from err
+        if offset >= len(data):
+            raise BytecodeError("register value type presence is truncated")
+        has_value_type = data[offset]
+        offset += 1
+        register_class_id = payload1 & 0xFFFF
+        unit_count = (payload1 >> 16) & 0xFFFFFFFF
+        if descriptor_set_stable_id == 0:
+            raise BytecodeError("register descriptor set stable ID must be non-zero")
+        if unit_count == 0:
+            raise BytecodeError("register unit count must be non-zero")
+        if payload1 >> 48:
+            raise BytecodeError("register payload reserved bits must be zero")
+        if has_value_type not in (0, 1):
+            raise BytecodeError(
+                f"register has_value_type must be 0 or 1, got {has_value_type}"
+            )
+        value_type = None
+        if has_value_type:
+            try:
+                value_type_index, offset = decode_varint(data, offset)
+            except ValueError as err:
+                raise BytecodeError(
+                    f"malformed register value type reference: {err}"
+                ) from err
+            value_type = self._resolve_prior_type(
+                value_type_index, "register value type"
+            )
+        name = _register_name_for_payload(descriptor_set_stable_id, register_class_id)
+        try:
+            ir_type = RegisterType(
+                descriptor_set_stable_id,
+                register_class_id,
+                unit_count,
+                name,
+                value_type,
+            )
+        except ValueError as err:
+            raise BytecodeError(str(err)) from err
+        return ir_type, offset
+
     def _read_types_section(self, section: tuple[int, bytes]) -> None:
         _, data = section
         offset = 0
@@ -552,11 +606,15 @@ class BytecodeReader:
                     arg_types = []
                     for _ in range(arg_count):
                         type_idx, offset = decode_varint(data, offset)
-                        arg_types.append(self._types[type_idx])
+                        arg_types.append(
+                            self._resolve_prior_type(type_idx, "function argument type")
+                        )
                     result_types = []
                     for _ in range(result_count):
                         type_idx, offset = decode_varint(data, offset)
-                        result_types.append(self._types[type_idx])
+                        result_types.append(
+                            self._resolve_prior_type(type_idx, "function result type")
+                        )
                     ir_type = FunctionType(tuple(arg_types), tuple(result_types))
                 case TypeKind.DIALECT:
                     name_id, offset = decode_varint(data, offset)
@@ -564,35 +622,12 @@ class BytecodeReader:
                     params = []
                     for _ in range(param_count):
                         type_idx, offset = decode_varint(data, offset)
-                        params.append(self._types[type_idx])
+                        params.append(
+                            self._resolve_prior_type(type_idx, "dialect parameter type")
+                        )
                     ir_type = DialectType(self._strings[name_id], tuple(params))
                 case TypeKind.REGISTER:
-                    descriptor_set_stable_id, offset = decode_varint(data, offset)
-                    payload1, offset = decode_varint(data, offset)
-                    register_class_id = payload1 & 0xFFFF
-                    unit_count = (payload1 >> 16) & 0xFFFFFFFF
-                    if descriptor_set_stable_id == 0:
-                        raise BytecodeError(
-                            "register descriptor set stable ID must be non-zero"
-                        )
-                    if unit_count == 0:
-                        raise BytecodeError("register unit count must be non-zero")
-                    if payload1 >> 48:
-                        raise BytecodeError(
-                            "register payload reserved bits must be zero"
-                        )
-                    name = _register_name_for_payload(
-                        descriptor_set_stable_id, register_class_id
-                    )
-                    try:
-                        ir_type = RegisterType(
-                            descriptor_set_stable_id,
-                            register_class_id,
-                            unit_count,
-                            name,
-                        )
-                    except ValueError as err:
-                        raise BytecodeError(str(err)) from err
+                    ir_type, offset = self._read_register_type(data, offset)
                 case TypeKind.STORAGE:
                     space_byte = data[offset]
                     offset += 1

@@ -314,7 +314,7 @@ static iree_status_t loom_amdgpu_dotf_extract_lane(
     IREE_BUILTIN_UNREACHABLE();
   }
   const loom_type_t lane_type =
-      loom_low_register_type_with_unit_count(source_type, 1);
+      loom_low_register_carrier_type_with_unit_count(source_type, 1);
   return loom_amdgpu_emit_low_slice(context, source_op, source, lane, lane_type,
                                     out_lane);
 }

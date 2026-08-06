@@ -142,6 +142,17 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    registers_test
+  SRCS
+    "registers_test.cc"
+  DEPS
+    ::registers
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_library(
   NAME
     launch

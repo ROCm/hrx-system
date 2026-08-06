@@ -284,7 +284,7 @@ static iree_status_t loom_amdgpu_sanitizer_ensure_site_collection(
   loom_module_t* module = loom_low_lower_context_module(context);
   IREE_RETURN_IF_ERROR(loom_sanitizer_site_collection_build_function(
       module, loom_low_lower_context_source_function(context),
-      loom_low_lower_context_scratch_arena(context), &state->site_collection));
+      loom_low_lower_context_function_arena(context), &state->site_collection));
   const iree_host_size_t row_count = state->site_collection.row_count;
   iree_host_size_t total_row_count = 0;
   if (!iree_host_size_checked_add(module_state->site_row_count, row_count,

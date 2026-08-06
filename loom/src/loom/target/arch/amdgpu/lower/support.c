@@ -385,7 +385,7 @@ static iree_status_t loom_amdgpu_source_value_analysis_for_context(
       loom_low_lower_context_fact_table(context),
       loom_low_lower_context_value_domain(context),
       loom_low_lower_context_descriptor_set(context),
-      loom_low_lower_context_scratch_arena(context), analysis));
+      loom_low_lower_context_function_arena(context), analysis));
   *out_analysis = analysis;
   return iree_ok_status();
 }

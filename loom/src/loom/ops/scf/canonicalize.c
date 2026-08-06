@@ -1671,29 +1671,22 @@ static iree_status_t loom_scf_for_forward_loop_carried_results(
   }
 
   loom_value_id_t* kept_iter_args = NULL;
-  loom_type_t* kept_result_types = NULL;
   loom_value_id_t* kept_yielded_values = NULL;
   if (kept_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(rewriter->arena, kept_count,
                                                    sizeof(*kept_iter_args),
                                                    (void**)&kept_iter_args));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(rewriter->arena, kept_count,
-                                                   sizeof(*kept_result_types),
-                                                   (void**)&kept_result_types));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         rewriter->arena, kept_count, sizeof(*kept_yielded_values),
         (void**)&kept_yielded_values));
   }
 
-  const loom_value_id_t* old_results = loom_op_const_results(op);
   uint16_t kept_ordinal = 0;
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (forwarded_results[i]) continue;
     result_map[i] = kept_ordinal;
     iter_arg_map[i] = kept_ordinal;
     kept_iter_args[kept_ordinal] = iter_args.values[i];
-    kept_result_types[kept_ordinal] =
-        loom_module_value_type(rewriter->module, old_results[i]);
     kept_yielded_values[kept_ordinal] = yielded_values.values[i];
     ++kept_ordinal;
   }
@@ -1712,9 +1705,8 @@ static iree_status_t loom_scf_for_forward_loop_carried_results(
   IREE_RETURN_IF_ERROR(loom_scf_for_build(
       &rewriter->builder, build_flags, loom_scf_for_lower_bound(op),
       loom_scf_for_upper_bound(op), loom_scf_for_step(op), kept_iter_args,
-      kept_count, kept_result_types, kept_count, tied_results,
-      tied_result_count, unroll_factor, unroll_policy, unroll_schedule,
-      op->location, &new_loop));
+      kept_count, tied_results, tied_result_count, unroll_factor, unroll_policy,
+      unroll_schedule, op->location, &new_loop));
 
   loom_region_t* new_body = loom_scf_for_body(new_loop);
   loom_builder_ip_t saved_ip =
