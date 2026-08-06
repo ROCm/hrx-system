@@ -25,6 +25,45 @@
 namespace loom {
 namespace {
 
+static iree_status_t ProveSemanticallyEquivalentUpperBound(
+    loom_symbolic_expr_context_t* context, loom_value_id_t relation_value,
+    loom_value_id_t query_value, loom_symbolic_proof_result_t* out_result) {
+  loom_condition_integer_relation_t relation = {
+      /*.relation=*/LOOM_SYMBOLIC_INTEGER_RELATION_LE,
+      /*.left=*/
+      {
+          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+          /*.value_id=*/LOOM_VALUE_ID_INVALID,
+          /*.constant=*/0,
+      },
+      /*.right=*/
+      {
+          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+          /*.value_id=*/relation_value,
+          /*.constant=*/0,
+      },
+  };
+  loom_condition_fact_set_t condition_facts = {
+      /*.integer_relations=*/&relation,
+      /*.integer_relation_count=*/1,
+      /*.integer_relation_capacity=*/1,
+  };
+  context->condition_facts = &condition_facts;
+  loom_symbolic_expr_context_reset(context);
+
+  loom_symbolic_expr_t zero = {};
+  loom_symbolic_expr_constant(0, &zero);
+  loom_symbolic_expr_t query = {};
+  iree_status_t status = loom_symbolic_expr_value(context, query_value, &query);
+  if (iree_status_is_ok(status)) {
+    status = loom_symbolic_expr_prove_le(context, &zero, &query, out_result);
+  }
+
+  context->condition_facts = nullptr;
+  loom_symbolic_expr_context_reset(context);
+  return status;
+}
+
 TEST_F(SymbolicExprTest, AddSubNormalizeAndCancelTerms) {
   loom_value_id_t value_id = DefineIndexValue();
   loom_symbolic_expr_t value_expression = {0};
@@ -51,6 +90,51 @@ TEST_F(SymbolicExprTest, AddSubNormalizeAndCancelTerms) {
   IREE_ASSERT_OK(loom_symbolic_expr_prove_le(
       &expression_context_, &value_plus_eight, &value_plus_four, &proof));
   EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_FALSE);
+}
+
+TEST_F(SymbolicExprTest, SemanticMatchVisitsSharedProducerPairsOnce) {
+  loom_value_id_t source = DefineI64Value();
+  loom_value_id_t left = source;
+  loom_value_id_t right = source;
+  for (int i = 0; i < 16; ++i) {
+    left = BuildScalarAndI(left, left);
+    right = BuildScalarAndI(right, right);
+  }
+
+  loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(ProveSemanticallyEquivalentUpperBound(&expression_context_,
+                                                       left, right, &proof));
+  EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_TRUE);
+}
+
+TEST_F(SymbolicExprTest, SemanticMatchRejectsDistinctProducerLeaves) {
+  loom_value_id_t left = DefineI64Value();
+  loom_value_id_t right = DefineI64Value();
+  for (int i = 0; i < 8; ++i) {
+    left = BuildScalarAndI(left, left);
+    right = BuildScalarAndI(right, right);
+  }
+
+  loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(ProveSemanticallyEquivalentUpperBound(&expression_context_,
+                                                       left, right, &proof));
+  EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_UNKNOWN);
+}
+
+TEST_F(SymbolicExprTest, SemanticMatchRetainsProducerDepthLimit) {
+  loom_value_id_t source = DefineI64Value();
+  loom_value_id_t mask = DefineI64Value();
+  loom_value_id_t left = source;
+  loom_value_id_t right = source;
+  for (int i = 0; i < 17; ++i) {
+    left = BuildScalarAndI(left, mask);
+    right = BuildScalarAndI(right, mask);
+  }
+
+  loom_symbolic_proof_result_t proof = LOOM_SYMBOLIC_PROOF_UNKNOWN;
+  IREE_ASSERT_OK(ProveSemanticallyEquivalentUpperBound(&expression_context_,
+                                                       left, right, &proof));
+  EXPECT_EQ(proof, LOOM_SYMBOLIC_PROOF_UNKNOWN);
 }
 
 TEST_F(SymbolicExprTest, SimplifiesDifferenceToExistingValue) {

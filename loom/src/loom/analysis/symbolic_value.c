@@ -616,67 +616,172 @@ iree_status_t loom_symbolic_values_match(loom_symbolic_expr_context_t* context,
   return iree_ok_status();
 }
 
-// Compares values produced by equivalent deterministic expression trees. This
-// is a bounded fallback for opaque terms in branch-relation proofs: CSE must
-// not move materializations across a convergent barrier, but their pure value
-// semantics remain equivalent.
-static iree_status_t loom_symbolic_values_semantically_match_bounded(
-    loom_symbolic_expr_context_t* context, loom_value_id_t left_value,
-    loom_value_id_t right_value, uint8_t remaining_depth,
-    uint16_t* remaining_pair_count, bool* out_match) {
-  IREE_RETURN_IF_ERROR(
-      loom_symbolic_values_match(context, left_value, right_value, out_match));
-  if (*out_match || remaining_depth == 0 || *remaining_pair_count == 0) {
-    return iree_ok_status();
-  }
+typedef struct loom_symbolic_semantic_match_frame_t {
+  // Left SSA value compared by this frame.
+  loom_value_id_t left_value;
 
-  left_value = loom_symbolic_expr_assumption_source_value(context, left_value);
-  right_value =
-      loom_symbolic_expr_assumption_source_value(context, right_value);
-  if (left_value == right_value) {
-    *out_match = true;
-    return iree_ok_status();
-  }
-  if (!context->module || left_value >= context->module->values.count ||
-      right_value >= context->module->values.count) {
-    return iree_ok_status();
-  }
+  // Right SSA value compared by this frame.
+  loom_value_id_t right_value;
 
-  const loom_value_t* left = loom_module_value(context->module, left_value);
-  const loom_value_t* right = loom_module_value(context->module, right_value);
-  if (loom_value_is_block_arg(left) || loom_value_is_block_arg(right)) {
-    return iree_ok_status();
-  }
-  const loom_op_t* left_op = loom_value_def_op(left);
-  const loom_op_t* right_op = loom_value_def_op(right);
-  if (!loom_symbolic_expr_ops_can_structurally_match(
-          context->module, left_op, right_op, loom_value_def_index(left),
-          loom_value_def_index(right))) {
-    return iree_ok_status();
-  }
+  // Remaining producer depth available to operand frames.
+  uint8_t remaining_depth;
 
-  --*remaining_pair_count;
-  const loom_value_id_t* left_operands = loom_op_const_operands(left_op);
-  const loom_value_id_t* right_operands = loom_op_const_operands(right_op);
-  for (uint16_t i = 0; i < left_op->operand_count; ++i) {
-    bool operands_match = false;
-    IREE_RETURN_IF_ERROR(loom_symbolic_values_semantically_match_bounded(
-        context, left_operands[i], right_operands[i], remaining_depth - 1,
-        remaining_pair_count, &operands_match));
-    if (!operands_match) return iree_ok_status();
+  // Next producer operand requiring comparison.
+  uint16_t next_operand;
+
+  // Structurally matched left producer, or NULL before frame entry.
+  const loom_op_t* left_op;
+
+  // Structurally matched right producer, or NULL before frame entry.
+  const loom_op_t* right_op;
+} loom_symbolic_semantic_match_frame_t;
+
+typedef struct loom_symbolic_semantic_match_pair_t {
+  // Canonically ordered lower SSA value ID.
+  loom_value_id_t lower_value;
+
+  // Canonically ordered upper SSA value ID.
+  loom_value_id_t upper_value;
+} loom_symbolic_semantic_match_pair_t;
+
+#define LOOM_SYMBOLIC_VALUE_SEMANTIC_MATCH_PAIR_TABLE_CAPACITY \
+  (LOOM_SYMBOLIC_VALUE_SEMANTIC_MATCH_PAIR_LIMIT * 2)
+static_assert((LOOM_SYMBOLIC_VALUE_SEMANTIC_MATCH_PAIR_TABLE_CAPACITY &
+               (LOOM_SYMBOLIC_VALUE_SEMANTIC_MATCH_PAIR_TABLE_CAPACITY - 1)) ==
+                  0,
+              "semantic match pair table capacity must be a power of two");
+
+// Inserts a canonically ordered value pair and returns true when it was new.
+// The table remains at most half full because the proof budget bounds inserts.
+static bool loom_symbolic_semantic_match_pair_insert(
+    loom_symbolic_semantic_match_pair_t* pair_table, loom_value_id_t left_value,
+    loom_value_id_t right_value) {
+  const loom_value_id_t lower_value = iree_min(left_value, right_value);
+  const loom_value_id_t upper_value = iree_max(left_value, right_value);
+  const uint32_t hash =
+      lower_value * UINT32_C(0x9E3779B1) ^ upper_value * UINT32_C(0x85EBCA77);
+  iree_host_size_t index =
+      hash & (LOOM_SYMBOLIC_VALUE_SEMANTIC_MATCH_PAIR_TABLE_CAPACITY - 1);
+  for (iree_host_size_t probe = 0;
+       probe < LOOM_SYMBOLIC_VALUE_SEMANTIC_MATCH_PAIR_TABLE_CAPACITY;
+       ++probe) {
+    loom_symbolic_semantic_match_pair_t* pair = &pair_table[index];
+    if (pair->lower_value == LOOM_VALUE_ID_INVALID) {
+      *pair = (loom_symbolic_semantic_match_pair_t){
+          .lower_value = lower_value,
+          .upper_value = upper_value,
+      };
+      return true;
+    }
+    if (pair->lower_value == lower_value && pair->upper_value == upper_value) {
+      return false;
+    }
+    index = (index + 1) &
+            (LOOM_SYMBOLIC_VALUE_SEMANTIC_MATCH_PAIR_TABLE_CAPACITY - 1);
   }
-  *out_match = true;
-  return iree_ok_status();
+  IREE_ASSERT_UNREACHABLE("symbolic semantic match pair table is full");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
+// Compares deterministic producer DAGs when ordinary symbolic cancellation
+// cannot relate their separately materialized values. The explicit depth-first
+// traversal bounds producer depth and distinct pairs while visiting shared DAG
+// pairs only once.
 iree_status_t loom_symbolic_values_semantically_match(
     loom_symbolic_expr_context_t* context, loom_value_id_t left_value,
     loom_value_id_t right_value, bool* out_match) {
+  *out_match = false;
+
+  loom_symbolic_semantic_match_frame_t
+      frames[LOOM_SYMBOLIC_VALUE_SEMANTIC_MATCH_DEPTH_LIMIT + 1] = {
+          {
+              .left_value = left_value,
+              .right_value = right_value,
+              .remaining_depth = LOOM_SYMBOLIC_VALUE_SEMANTIC_MATCH_DEPTH_LIMIT,
+          },
+      };
+  iree_host_size_t frame_count = 1;
+
+  loom_symbolic_semantic_match_pair_t
+      pair_table[LOOM_SYMBOLIC_VALUE_SEMANTIC_MATCH_PAIR_TABLE_CAPACITY];
+  memset(pair_table, 0xFF, sizeof(pair_table));
   uint16_t remaining_pair_count = LOOM_SYMBOLIC_VALUE_SEMANTIC_MATCH_PAIR_LIMIT;
-  return loom_symbolic_values_semantically_match_bounded(
-      context, left_value, right_value,
-      LOOM_SYMBOLIC_VALUE_SEMANTIC_MATCH_DEPTH_LIMIT, &remaining_pair_count,
-      out_match);
+
+  while (frame_count > 0) {
+    loom_symbolic_semantic_match_frame_t* frame = &frames[frame_count - 1];
+    if (frame->left_op != NULL) {
+      if (frame->next_operand == frame->left_op->operand_count) {
+        --frame_count;
+        continue;
+      }
+      const uint16_t operand_index = frame->next_operand++;
+      const loom_value_id_t* left_operands =
+          loom_op_const_operands(frame->left_op);
+      const loom_value_id_t* right_operands =
+          loom_op_const_operands(frame->right_op);
+      IREE_ASSERT_LT(frame_count, IREE_ARRAYSIZE(frames));
+      frames[frame_count++] = (loom_symbolic_semantic_match_frame_t){
+          .left_value = left_operands[operand_index],
+          .right_value = right_operands[operand_index],
+          .remaining_depth = (uint8_t)(frame->remaining_depth - 1),
+      };
+      continue;
+    }
+
+    bool values_match = false;
+    IREE_RETURN_IF_ERROR(loom_symbolic_values_match(
+        context, frame->left_value, frame->right_value, &values_match));
+    if (values_match) {
+      --frame_count;
+      continue;
+    }
+    if (frame->remaining_depth == 0 || remaining_pair_count == 0) {
+      return iree_ok_status();
+    }
+
+    const loom_value_id_t normalized_left =
+        loom_symbolic_expr_assumption_source_value(context, frame->left_value);
+    const loom_value_id_t normalized_right =
+        loom_symbolic_expr_assumption_source_value(context, frame->right_value);
+    if (normalized_left == normalized_right) {
+      --frame_count;
+      continue;
+    }
+    if (!context->module || normalized_left >= context->module->values.count ||
+        normalized_right >= context->module->values.count) {
+      return iree_ok_status();
+    }
+
+    const loom_value_t* left =
+        loom_module_value(context->module, normalized_left);
+    const loom_value_t* right =
+        loom_module_value(context->module, normalized_right);
+    if (loom_value_is_block_arg(left) || loom_value_is_block_arg(right)) {
+      return iree_ok_status();
+    }
+    const loom_op_t* left_op = loom_value_def_op(left);
+    const loom_op_t* right_op = loom_value_def_op(right);
+    if (!loom_symbolic_expr_ops_can_structurally_match(
+            context->module, left_op, right_op, loom_value_def_index(left),
+            loom_value_def_index(right))) {
+      return iree_ok_status();
+    }
+    if (!loom_symbolic_semantic_match_pair_insert(pair_table, normalized_left,
+                                                  normalized_right)) {
+      --frame_count;
+      continue;
+    }
+
+    --remaining_pair_count;
+    frame->left_value = normalized_left;
+    frame->right_value = normalized_right;
+    frame->next_operand = 0;
+    frame->left_op = left_op;
+    frame->right_op = right_op;
+  }
+
+  *out_match = true;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_symbolic_expr_value_matches_constant(
