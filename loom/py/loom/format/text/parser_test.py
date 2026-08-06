@@ -56,6 +56,7 @@ from loom.ir import (
     EncodingInstance,
     EncodingRole,
     EncodingType,
+    EnumArrayAttr,
     FunctionType,
     GroupScope,
     GroupType,
@@ -1348,6 +1349,42 @@ class TestRoundTrip:
             "  test.yield %neg0 : f32\n"
             "}\n"
         )
+
+    def test_enum_arrays_preserve_order_duplicates_and_open_values(self) -> None:
+        text = "test.enum_array_attrs [low, high, low] using [middle, <42>, middle]"
+        op = _parse_op(text)
+        assert op.attributes["required_values"] == EnumArrayAttr([1, 255, 1])
+        assert op.attributes["optional_values"] == EnumArrayAttr([7, 42, 7])
+        printed = _op_printer().print_operation(op, Module())
+        assert printed == text
+        assert _op_printer().print_operation(_parse_op(printed), Module()) == text
+
+    def test_optional_enum_array_distinguishes_empty_from_absent(self) -> None:
+        present = _parse_op("test.enum_array_attrs [] using []")
+        absent = _parse_op("test.enum_array_attrs []")
+
+        assert present.attributes["optional_values"] == EnumArrayAttr()
+        assert "optional_values" not in absent.attributes
+        assert _op_printer().print_operation(present, Module()) == (
+            "test.enum_array_attrs [] using []"
+        )
+        assert _op_printer().print_operation(absent, Module()) == (
+            "test.enum_array_attrs []"
+        )
+
+    def test_open_scalar_enum_raw_value_round_trips(self) -> None:
+        self._roundtrip_text("test.record <42> @target\n")
+
+    def test_closed_enum_array_rejects_raw_value(self) -> None:
+        with pytest.raises(ParseError, match="closed and does not admit raw values"):
+            _parse_op("test.enum_array_attrs [<42>]")
+
+    @pytest.mark.parametrize("value", [-1, 256])
+    def test_open_enum_array_rejects_value_outside_byte_domain(
+        self, value: int
+    ) -> None:
+        with pytest.raises(ParseError, match="outside the byte domain"):
+            _parse_op(f"test.enum_array_attrs [] using [<{value}>]")
 
     def test_operation_and_block_comments(self) -> None:
         self._roundtrip_text(

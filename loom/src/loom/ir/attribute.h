@@ -143,6 +143,30 @@ uint8_t loom_predicate_kind_argument_count(uint8_t kind);
 
 typedef struct loom_named_attr_t loom_named_attr_t;
 
+// A borrowed ordered array of stable enum values.
+//
+// The descriptor of the operation field carrying the array owns the enum
+// domain. Values preserve declaration-independent byte identities, ordering,
+// and duplicates.
+typedef struct loom_enum_array_t {
+  const uint8_t* values;
+  iree_host_size_t count;
+} loom_enum_array_t;
+
+static inline loom_enum_array_t loom_enum_array_empty(void) {
+  loom_enum_array_t array = {0};
+  return array;
+}
+
+static inline loom_enum_array_t loom_make_enum_array(const uint8_t* values,
+                                                     iree_host_size_t count) {
+  loom_enum_array_t array = {
+      /*.values=*/count > 0 ? values : NULL,
+      /*.count=*/count,
+  };
+  return array;
+}
+
 // A borrowed range of named attributes.
 //
 // This is the pass-facing view of DICT attribute entries and the input shape
@@ -214,6 +238,9 @@ typedef enum loom_attr_kind_e {
   // descriptor to bind their enclosing contract, and is not a concrete payload
   // kind in loom_attribute_t values.
   LOOM_ATTR_ANY = 14,
+  // Arena-allocated ordered stable enum values. The operation field descriptor
+  // supplies the enum domain; generic dictionaries cannot carry this kind.
+  LOOM_ATTR_ENUM_ARRAY = 15,
   LOOM_ATTR_COUNT_,
 } loom_attr_kind_t;
 
@@ -226,10 +253,10 @@ typedef enum loom_attr_kind_e {
 // parameters, and anywhere a typed scalar/aggregate is needed.
 //
 // The kind tag (byte 0) determines which union member is active.
-// For I64_ARRAY and PREDICATE_LIST, the count field holds the element count and
-// the payload holds a pointer to arena-allocated storage. For BYTES, reserved_1
-// holds the byte length and the payload holds a pointer to arena-allocated
-// immutable bytes.
+// For I64_ARRAY, ENUM_ARRAY, and PREDICATE_LIST, the count field holds the
+// element count and the payload holds a pointer to arena-allocated storage. For
+// BYTES, reserved_1 holds the byte length and the payload holds a pointer to
+// arena-allocated immutable bytes.
 typedef struct loom_attribute_t {
   uint8_t kind;
   uint8_t reserved_0;
@@ -241,6 +268,7 @@ typedef struct loom_attribute_t {
     loom_string_id_t string_id;
     loom_symbol_ref_t symbol;
     int64_t* i64_array;
+    const uint8_t* enum_array;
     loom_type_id_t type_id;
     uint32_t encoding_id;
     uint32_t scoped_enum;
@@ -349,6 +377,17 @@ static inline loom_attribute_t loom_attr_i64_array(int64_t* values,
   loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_I64_ARRAY);
   attr.count = count;
   attr.i64_array = values;
+  return attr;
+}
+
+// Constructs an enum array attribute. The values array must be arena-allocated
+// and outlive the attribute. A zero-length array is present and canonicalized
+// to a NULL payload, unlike the all-zero absent attribute sentinel.
+static inline loom_attribute_t loom_attr_enum_array(const uint8_t* values,
+                                                    uint16_t count) {
+  loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_ENUM_ARRAY);
+  attr.count = count;
+  attr.enum_array = count > 0 ? values : NULL;
   return attr;
 }
 
@@ -519,6 +558,16 @@ static inline iree_const_byte_span_t loom_attr_as_bytes(loom_attribute_t attr) {
   }
   IREE_ASSERT(attr.kind == LOOM_ATTR_BYTES);
   return iree_make_const_byte_span(attr.bytes, attr.reserved_1);
+}
+
+// Returns the ordered stable values of an ENUM_ARRAY attribute.
+//
+// An absent optional attribute reads as an empty array. Call
+// loom_attr_is_absent when presence matters.
+static inline loom_enum_array_t loom_attr_as_enum_array(loom_attribute_t attr) {
+  if (loom_attr_is_absent(attr)) return loom_enum_array_empty();
+  IREE_ASSERT(attr.kind == LOOM_ATTR_ENUM_ARRAY);
+  return loom_make_enum_array(attr.enum_array, attr.count);
 }
 
 // Returns the dictionary entries of a DICT attribute.

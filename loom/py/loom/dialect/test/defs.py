@@ -58,6 +58,7 @@ from loom.dialect.target import target_record_attrs
 from loom.dsl import (
     ANY,
     ANY_ENCODING,
+    ATTR_TYPE_ENUM_ARRAY,
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64_ARRAY,
     BY_REFERENCE,
@@ -181,6 +182,16 @@ _TemplateFlags = EnumDef(
         EnumCase("trace", 2, doc="Synthetic trace flag."),
     ],
     doc="Synthetic flags for TemplateParamFlags parser/printer coverage.",
+)
+
+_ArrayElement = EnumDef(
+    "ArrayElement",
+    [
+        EnumCase("low", 1, doc="Sparse low value."),
+        EnumCase("middle", 7, doc="Sparse middle value."),
+        EnumCase("high", 255, doc="Maximum stable byte value."),
+    ],
+    doc="Synthetic sparse enum for enum-array lifecycle coverage.",
 )
 
 cmp_predicates = EnumDef(
@@ -1780,6 +1791,44 @@ test_attrs = Op(
 )
 
 # ============================================================================
+# test.enum_array_attrs — descriptor-backed enum-array attributes
+# ============================================================================
+
+test_enum_array_attrs = Op(
+    "test.enum_array_attrs",
+    group=test_ops,
+    doc="Test op with closed and open descriptor-backed enum arrays.",
+    attrs=[
+        AttrDef(
+            "required_values",
+            ATTR_TYPE_ENUM_ARRAY,
+            enum_def=_ArrayElement,
+            doc="Required ordered enum values.",
+        ),
+        AttrDef(
+            "optional_values",
+            ATTR_TYPE_ENUM_ARRAY,
+            enum_def=_ArrayElement,
+            optional=True,
+            open_enum=True,
+            doc="Optional ordered enum values admitting unknown bytes.",
+        ),
+        AttrDef("dict", "dict", optional=True),
+    ],
+    format=[
+        Attr("required_values"),
+        OptionalGroup(
+            [kw("using"), Attr("optional_values")],
+            anchor="optional_values",
+        ),
+        AttrDict("dict"),
+    ],
+    examples=[
+        "test.enum_array_attrs [low, high] using [middle, <42>]",
+    ],
+)
+
+# ============================================================================
 # test.operand_dict — op with keyed SSA operand dictionary
 # ============================================================================
 
@@ -2491,4 +2540,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_fact_finite,
     test_fact_not_subnormal,
     test_fact_cluster_uniform,
+    test_enum_array_attrs,
 )

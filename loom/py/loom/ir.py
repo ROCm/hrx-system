@@ -92,6 +92,7 @@ __all__ = [
     "EncodingInstance",
     # Predicates.
     "CanonicalAttrDict",
+    "EnumArrayAttr",
     "canonicalize_attr_dict",
     "replace_canonical_attr_dict",
     "PredicateArg",
@@ -1054,6 +1055,33 @@ class TiedResult:
 # ============================================================================
 # Canonical attribute dictionaries
 # ============================================================================
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class EnumArrayAttr:
+    """Ordered stable enum values owned by an operation field descriptor."""
+
+    values: tuple[int, ...]
+
+    def __init__(self, values: Iterable[int] = ()) -> None:
+        frozen_values = tuple(values)
+        if len(frozen_values) > 0xFFFF:
+            raise ValueError(
+                f"enum array length {len(frozen_values)} exceeds UINT16_MAX"
+            )
+        for index, value in enumerate(frozen_values):
+            if type(value) is not int or not 0 <= value <= 0xFF:
+                raise ValueError(
+                    f"enum array element {index} must be an integer in "
+                    f"[0, 255], got {value!r}"
+                )
+        object.__setattr__(self, "values", frozen_values)
+
+    def __iter__(self) -> Iterator[int]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
 
 
 class CanonicalAttrDict(Mapping[str, Any]):

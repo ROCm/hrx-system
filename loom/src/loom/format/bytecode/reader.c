@@ -930,7 +930,6 @@ static iree_status_t loom_bytecode_reader_read_attr_value(
     loom_bytecode_body_reader_t* body_reader,
     const loom_attr_descriptor_t* descriptor, uint8_t kind,
     loom_attribute_t* out_attr) {
-  (void)descriptor;
   switch (kind) {
     case LOOM_BYTECODE_ATTR_I64: {
       int64_t value = 0;
@@ -1008,6 +1007,37 @@ static iree_status_t loom_bytecode_reader_read_attr_value(
         if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
       }
       *out_attr = loom_attr_i64_array(values, (uint16_t)count);
+      return iree_ok_status();
+    }
+    case LOOM_BYTECODE_ATTR_ENUM_ARRAY: {
+      uint64_t payload_offset =
+          loom_bytecode_reader_cursor_absolute_position(cursor);
+      if (!descriptor || descriptor->attr_kind != LOOM_ATTR_ENUM_ARRAY) {
+        return loom_bytecode_reader_emit_invalid_field(
+            reader, cursor->range_name, IREE_SV("attribute"), 0,
+            IREE_SV("enum_array"), payload_offset,
+            IREE_SV("enum_array_requires_a_descriptor_backed_operation_field"));
+      }
+      uint64_t count_offset = payload_offset;
+      uint64_t count = 0;
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_reader_read_uvarint(reader, cursor, &count));
+      if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+      if (count > UINT16_MAX || count > IREE_HOST_SIZE_MAX) {
+        return loom_bytecode_reader_emit_count_exceeds(
+            reader, IREE_SV("enum_array"), count, UINT16_MAX, count_offset);
+      }
+      iree_const_byte_span_t span = iree_const_byte_span_empty();
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_reader_read_span(reader, cursor, count, &span));
+      if (loom_bytecode_reader_has_errors(reader)) return iree_ok_status();
+      uint8_t* values = NULL;
+      if (span.data_length > 0) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate(
+            &reader->output_module->arena, span.data_length, (void**)&values));
+        memcpy(values, span.data, span.data_length);
+      }
+      *out_attr = loom_attr_enum_array(values, (uint16_t)span.data_length);
       return iree_ok_status();
     }
     case LOOM_BYTECODE_ATTR_BYTES: {

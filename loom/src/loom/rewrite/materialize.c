@@ -840,6 +840,7 @@ static iree_status_t loom_ir_move_attr_is_available(
     case LOOM_ATTR_ENUM:
     case LOOM_ATTR_SCOPED_ENUM:
     case LOOM_ATTR_I64_ARRAY:
+    case LOOM_ATTR_ENUM_ARRAY:
     case LOOM_ATTR_SYMBOL:
       *out_available = true;
       return iree_ok_status();

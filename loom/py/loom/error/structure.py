@@ -647,6 +647,27 @@ ERR_STRUCTURE_039 = ErrorDef(
     ),
 )
 
+# ERR_STRUCTURE_040: Aggregate attribute count and payload disagree.
+ERR_STRUCTURE_040 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=40,
+    severity=Severity.ERROR,
+    summary="Aggregate attribute count and payload disagree.",
+    message=(
+        "attribute '{attr_name}' has {element_count} elements and payload "
+        "presence {payload_present}"
+    ),
+    params=(
+        ErrorParam("attr_name", ParamKind.STRING),
+        ErrorParam("element_count", ParamKind.U32),
+        ErrorParam("payload_present", ParamKind.BOOL),
+    ),
+    fix_hint=(
+        "Use a non-null payload for a non-empty aggregate and a null payload "
+        "for an empty aggregate"
+    ),
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -686,4 +707,5 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_036,
     ERR_STRUCTURE_038,
     ERR_STRUCTURE_039,
+    ERR_STRUCTURE_040,
 )

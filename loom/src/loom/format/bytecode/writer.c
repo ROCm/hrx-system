@@ -1100,6 +1100,31 @@ static iree_status_t loom_bytecode_get_enum_ordinal(
   return iree_ok_status();
 }
 
+static iree_status_t loom_bytecode_get_enum_array(
+    loom_attribute_t attr, const loom_attr_descriptor_t* descriptor,
+    loom_enum_array_t* out_array) {
+  if (!descriptor || descriptor->attr_kind != LOOM_ATTR_ENUM_ARRAY) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "enum arrays require a descriptor-backed operation field");
+  }
+  if (attr.count > 0 && !attr.enum_array) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "enum array has nonzero count but NULL values");
+  }
+  *out_array = loom_attr_as_enum_array(attr);
+  if (iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < out_array->count; ++i) {
+    if (!loom_attr_descriptor_has_enum_case(descriptor, out_array->values[i])) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "enum array value has no declared case");
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_bytecode_resolve_function_low_descriptor_set(
     const loom_bytecode_numbering_t* numbering, loom_func_like_t func_like,
     const loom_low_repr_descriptor_set_t** out_descriptor_set) {
@@ -1158,7 +1183,6 @@ static iree_status_t loom_bytecode_number_scoped_enum(
 static iree_status_t loom_bytecode_number_attr_value(
     loom_bytecode_numbering_t* numbering, loom_attribute_t attr,
     const loom_attr_descriptor_t* descriptor) {
-  (void)descriptor;
   uint32_t unused_id = 0;
   switch (attr.kind) {
     case LOOM_ATTR_STRING: {
@@ -1168,6 +1192,10 @@ static iree_status_t loom_bytecode_number_attr_value(
     }
     case LOOM_ATTR_ENUM: {
       break;
+    }
+    case LOOM_ATTR_ENUM_ARRAY: {
+      loom_enum_array_t unused_array = loom_enum_array_empty();
+      return loom_bytecode_get_enum_array(attr, descriptor, &unused_array);
     }
     case LOOM_ATTR_SCOPED_ENUM:
       return loom_bytecode_number_scoped_enum(numbering, attr);
@@ -2150,6 +2178,18 @@ static iree_status_t loom_bytecode_write_attr_value(
       IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(writer, ordinal));
       break;
     }
+    case LOOM_ATTR_ENUM_ARRAY: {
+      loom_enum_array_t array = loom_enum_array_empty();
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_get_enum_array(attr, descriptor, &array));
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
+          writer, LOOM_BYTECODE_ATTR_ENUM_ARRAY));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_uvarint(writer, array.count));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write(writer, array.values, array.count));
+      break;
+    }
     case LOOM_ATTR_I64_ARRAY: {
       IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
           writer, LOOM_BYTECODE_ATTR_I64_ARRAY));
@@ -2359,6 +2399,20 @@ static iree_status_t loom_bytecode_emit_attr_value(
       IREE_RETURN_IF_ERROR(
           loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_ENUM));
       IREE_RETURN_IF_ERROR(loom_bytecode_emit_u8(builder, ordinal));
+      break;
+    }
+    case LOOM_ATTR_ENUM_ARRAY: {
+      loom_enum_array_t array = loom_enum_array_empty();
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_get_enum_array(attr, descriptor, &array));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_ENUM_ARRAY));
+      IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, array.count));
+      if (array.count > 0) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
+            builder,
+            iree_make_string_view((const char*)array.values, array.count)));
+      }
       break;
     }
     case LOOM_ATTR_I64_ARRAY: {

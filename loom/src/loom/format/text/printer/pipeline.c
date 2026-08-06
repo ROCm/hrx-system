@@ -145,8 +145,10 @@ static bool loom_print_pipeline_attr_value_is_printable(
     case LOOM_ATTR_BOOL:
       return true;
     case LOOM_ATTR_SCOPED_ENUM:
+    case LOOM_ATTR_ENUM_ARRAY:
       // Representation-scoped enums require their enclosing contract and are
-      // printed only by the owning operation's declarative format.
+      // printed only by the owning operation's declarative format. Enum arrays
+      // likewise require their operation field descriptor.
       return false;
     case LOOM_ATTR_STRING:
       return attr->string_id < ctx->module->strings.count;

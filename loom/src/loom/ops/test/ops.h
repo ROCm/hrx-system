@@ -125,7 +125,8 @@ enum {
   LOOM_OP_TEST_FACT_FINITE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 102),
   LOOM_OP_TEST_FACT_NOT_SUBNORMAL = LOOM_OP_KIND(LOOM_DIALECT_TEST, 103),
   LOOM_OP_TEST_FACT_CLUSTER_UNIFORM = LOOM_OP_KIND(LOOM_DIALECT_TEST, 104),
-  LOOM_OP_TEST_COUNT_ = 105,
+  LOOM_OP_TEST_ENUM_ARRAY_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 105),
+  LOOM_OP_TEST_COUNT_ = 106,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -171,6 +172,23 @@ typedef enum loom_test_target_kind_e {
   LOOM_TEST_TARGET_KIND_QUIRKY = 2,
   LOOM_TEST_TARGET_KIND_COUNT_ = 3,
 } loom_test_target_kind_t;
+
+// Synthetic sparse enum for enum-array lifecycle coverage.
+typedef enum loom_test_enum_array_attrs_required_values_e {
+  LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW = 1,
+  LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_MIDDLE = 7,
+  LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_HIGH = 255,
+  LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_COUNT_ = 256,
+} loom_test_enum_array_attrs_required_values_t;
+
+// Synthetic sparse enum for enum-array lifecycle coverage.
+typedef uint8_t loom_test_enum_array_attrs_optional_values_t;
+typedef enum loom_test_enum_array_attrs_optional_values_e {
+  LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_LOW = 1,
+  LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_MIDDLE = 7,
+  LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_HIGH = 255,
+  LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_COUNT_ = 256,
+} loom_test_enum_array_attrs_optional_values_e;
 
 // LOOM_OP_TEST_ADDI: Test binary integer op.
 // %result = test.addi %lhs, %rhs : i32
@@ -1955,6 +1973,25 @@ iree_status_t loom_test_fact_cluster_uniform_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
+
+// LOOM_OP_TEST_ENUM_ARRAY_ATTRS: Test op with closed and open descriptor-backed enum arrays.
+// test.enum_array_attrs [low, high] using [middle, <42>]
+LOOM_DEFINE_ISA(loom_test_enum_array_attrs_isa, LOOM_OP_TEST_ENUM_ARRAY_ATTRS)
+LOOM_DEFINE_ATTR_ENUM_ARRAY(loom_test_enum_array_attrs_required_values, 0)
+LOOM_DEFINE_ATTR_ENUM_ARRAY(loom_test_enum_array_attrs_optional_values, 1)
+LOOM_DEFINE_ATTR_DICT(loom_test_enum_array_attrs_dict, 2)
+enum loom_test_enum_array_attrs_build_flag_bits_e {
+  LOOM_TEST_ENUM_ARRAY_ATTRS_BUILD_FLAG_HAS_OPTIONAL_VALUES = 1u << 0,
+};
+typedef uint32_t loom_test_enum_array_attrs_build_flags_t;
+iree_status_t loom_test_enum_array_attrs_build(
+    loom_builder_t* builder,
+    loom_test_enum_array_attrs_build_flags_t build_flags,
+    loom_enum_array_t required_values,
+    loom_optional loom_enum_array_t optional_values,
+    loom_optional loom_named_attr_slice_t dict,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 
 // Returns the vtable array for the test dialect.
 const loom_op_vtable_t* const* loom_test_dialect_vtables(

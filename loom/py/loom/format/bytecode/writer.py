@@ -38,6 +38,7 @@ from loom.ir import (
     DynamicEncoding,
     EncodingInstance,
     EncodingType,
+    EnumArrayAttr,
     FileLocation,
     FunctionType,
     FusedLocation,
@@ -131,6 +132,7 @@ ATTR_KIND_DICT = 9
 ATTR_KIND_ENCODING = 10
 ATTR_KIND_BYTES = 11
 ATTR_KIND_SCOPED_ENUM = 12
+ATTR_KIND_ENUM_ARRAY = 13
 
 # Type kind bytes. These must match loom_bytecode_type_kind_e, not just the
 # current Python enum spelling.
@@ -157,7 +159,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 20
+FORMAT_VERSION = 21
 PRODUCER = "loom-py"
 
 SYMBOL_FLAG_PUBLIC = 0x0001
@@ -1235,6 +1237,15 @@ class BytecodeWriter:
             buf.write_u8(ATTR_KIND_ENUM)
             buf.write_u8(value)
             return
+        if attr_type == "enum_array":
+            if not isinstance(value, EnumArrayAttr):
+                raise TypeError(
+                    f"enum-array attribute value must be EnumArrayAttr, got {value!r}"
+                )
+            buf.write_u8(ATTR_KIND_ENUM_ARRAY)
+            buf.write_varint(len(value))
+            buf.write_bytes(bytes(value.values))
+            return
         if attr_type == "scoped_enum":
             if not isinstance(value, str):
                 raise TypeError(
@@ -1279,6 +1290,8 @@ class BytecodeWriter:
             buf.write_u8(ATTR_KIND_BYTES)
             buf.write_varint(len(data))
             buf.write_bytes(data)
+        elif isinstance(value, EnumArrayAttr):
+            raise ValueError("enum arrays require a descriptor-backed operation field")
         elif isinstance(value, Mapping):
             buf.write_u8(ATTR_KIND_DICT)
             buf.write_varint(len(value))

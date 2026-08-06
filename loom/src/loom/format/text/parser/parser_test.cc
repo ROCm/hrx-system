@@ -766,6 +766,63 @@ TEST_F(ParserTest, AttrDictStringEscapesRoundTripDecodedPayload) {
       std::string::npos);
 }
 
+TEST_F(ParserTest, EnumArraysRoundTripStableValuesAndPresentEmpty) {
+  std::string text = RoundTrip(
+      "test.enum_array_attrs [low, high, low] "
+      "using [middle, <42>, middle]\n"
+      "test.enum_array_attrs [] using []\n"
+      "test.enum_array_attrs []\n");
+  EXPECT_NE(text.find("test.enum_array_attrs [low, high, low] "
+                      "using [middle, <42>, middle]"),
+            std::string::npos);
+  EXPECT_NE(text.find("test.enum_array_attrs [] using []"), std::string::npos);
+
+  loom_module_t* module = ParseOk(
+      "test.enum_array_attrs [low, high, low] "
+      "using [middle, <42>, middle]\n");
+  ASSERT_NE(module, nullptr);
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_NE(body, nullptr);
+  ASSERT_EQ(body->op_count, 1u);
+  loom_op_t* op = loom_block_op(body, 0);
+  ASSERT_TRUE(loom_test_enum_array_attrs_isa(op));
+  loom_enum_array_t required = loom_test_enum_array_attrs_required_values(op);
+  ASSERT_EQ(required.count, 3u);
+  EXPECT_EQ(required.values[0], LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW);
+  EXPECT_EQ(required.values[1],
+            LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_HIGH);
+  EXPECT_EQ(required.values[2], LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW);
+  loom_enum_array_t optional = loom_test_enum_array_attrs_optional_values(op);
+  ASSERT_EQ(optional.count, 3u);
+  EXPECT_EQ(optional.values[0],
+            LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_MIDDLE);
+  EXPECT_EQ(optional.values[1], 42u);
+  EXPECT_EQ(optional.values[2],
+            LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_MIDDLE);
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, OpenScalarEnumRawValueRoundTrips) {
+  EXPECT_NE(
+      RoundTrip("test.record <42> @target\n").find("test.record <42> @target"),
+      std::string::npos);
+}
+
+TEST_F(ParserTest, ClosedEnumArrayRejectsRawValue) {
+  const auto& diagnostics = ParseExpectErrors("test.enum_array_attrs [<42>]\n");
+  ASSERT_EQ(diagnostics.size(), 1u);
+  ExpectError(diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 3));
+}
+
+TEST_F(ParserTest, OpenEnumArrayRejectsValueOutsideByteDomain) {
+  const auto& diagnostics =
+      ParseExpectErrors("test.enum_array_attrs [] using [<256>]\n");
+  ASSERT_EQ(diagnostics.size(), 1u);
+  ExpectError(diagnostics[0],
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 3));
+}
+
 TEST_F(ParserTest, AttrDictUnsortedKeysRoundTripInCanonicalOrder) {
   std::string text = RoundTrip(
       "%c = test.constant 0 : f32\n"

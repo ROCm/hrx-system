@@ -227,6 +227,17 @@ static iree_status_t loom_pass_program_copy_attr_value(
       out_value->i64_array = values;
       return iree_ok_status();
     }
+    case LOOM_ATTR_ENUM_ARRAY: {
+      if (source_attr.count == 0) return iree_ok_status();
+      uint8_t* values = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          &compiler->program->arena, source_attr.count, sizeof(*values),
+          (void**)&values));
+      memcpy(values, source_attr.enum_array,
+             source_attr.count * sizeof(*values));
+      out_value->enum_array = values;
+      return iree_ok_status();
+    }
     case LOOM_ATTR_SYMBOL:
       out_value->symbol_value = source_attr.symbol;
       return iree_ok_status();

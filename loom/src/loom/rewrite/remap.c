@@ -909,6 +909,25 @@ static iree_status_t loom_ir_remap_attribute_impl(
       return iree_ok_status();
     }
 
+    case LOOM_ATTR_ENUM_ARRAY: {
+      if (source_attr.count == 0) {
+        out_target_attr->enum_array = NULL;
+        return iree_ok_status();
+      }
+      if (!source_attr.enum_array) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty enum array attribute has a NULL payload");
+      }
+      uint8_t* target_values = NULL;
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate_array(payload_arena, source_attr.count,
+                                    sizeof(uint8_t), (void**)&target_values));
+      memcpy(target_values, source_attr.enum_array, source_attr.count);
+      out_target_attr->enum_array = target_values;
+      return iree_ok_status();
+    }
+
     case LOOM_ATTR_BYTES: {
       const uint32_t byte_length = source_attr.reserved_1;
       if (byte_length == 0) {

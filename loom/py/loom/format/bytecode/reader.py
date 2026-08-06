@@ -60,6 +60,7 @@ from loom.ir import (
     EncodingInstance,
     EncodingRole,
     EncodingType,
+    EnumArrayAttr,
     FileLocation,
     FunctionType,
     FusedLocation,
@@ -1647,6 +1648,7 @@ class BytecodeReader:
         offset: int,
         module: Module | None = None,
         value_map: list[int] | None = None,
+        attr_def: Any | None = None,
     ) -> tuple[Any, int]:
         kind = data[offset]
         offset += 1
@@ -1706,6 +1708,21 @@ class BytecodeReader:
             case 12:  # SCOPED_ENUM
                 string_id, offset = decode_varint(data, offset)
                 return self._strings[string_id], offset
+            case 13:  # ENUM_ARRAY
+                if getattr(attr_def, "attr_type", None) != "enum_array":
+                    raise BytecodeError(
+                        "enum-array attributes require a descriptor-backed "
+                        "operation field"
+                    )
+                count, offset = decode_varint(data, offset)
+                end_offset = offset + count
+                if count > 0xFFFF:
+                    raise BytecodeError(f"enum-array length {count} exceeds UINT16_MAX")
+                if end_offset > len(data):
+                    raise BytecodeError(
+                        f"enum-array length {count} exceeds payload size"
+                    )
+                return EnumArrayAttr(data[offset:end_offset]), end_offset
             case _:
                 raise BytecodeError(f"unknown attr value kind: {kind}")
 
@@ -1761,8 +1778,10 @@ class BytecodeReader:
             key = self._strings[key_id]
             if key in attributes:
                 raise BytecodeError(f"duplicate op attr key: {key!r}")
-            value, offset = self._read_attr_value(data, offset, module, value_map)
             attr_def = self._attr_def_for_op_attr(op_name, key) if op_name else None
+            value, offset = self._read_attr_value(
+                data, offset, module, value_map, attr_def
+            )
             if getattr(attr_def, "attr_type", None) == "enum":
                 value = self._enum_value_for_attr(attr_def, value)
             attributes[key] = value

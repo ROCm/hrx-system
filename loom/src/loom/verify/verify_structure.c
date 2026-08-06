@@ -565,11 +565,12 @@ void loom_verify_successor_targets(loom_verify_state_t* state,
 static bool loom_verify_attr_kind_matches_descriptor(
     loom_attribute_t attr, const loom_attr_descriptor_t* descriptor) {
   if (descriptor->attr_kind == LOOM_ATTR_ANY) {
-    // Scoped enums require an explicit field descriptor so text and bytecode
-    // can resolve their stable key through the enclosing representation
-    // contract. A context-free ANY field cannot carry that contract.
-    return attr.kind > LOOM_ATTR_ABSENT && attr.kind < LOOM_ATTR_ANY &&
-           attr.kind != LOOM_ATTR_SCOPED_ENUM;
+    // Descriptor-backed enums require an explicit field descriptor so text and
+    // bytecode can resolve stable values through the enclosing contract. A
+    // context-free ANY field cannot carry that contract.
+    return attr.kind > LOOM_ATTR_ABSENT && attr.kind < LOOM_ATTR_COUNT_ &&
+           attr.kind != LOOM_ATTR_ANY && attr.kind != LOOM_ATTR_SCOPED_ENUM &&
+           attr.kind != LOOM_ATTR_ENUM_ARRAY;
   }
   return attr.kind == descriptor->attr_kind;
 }
@@ -640,6 +641,39 @@ static void loom_verify_predicate_list_attr(loom_verify_state_t* state,
       loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_022, params,
                                   IREE_ARRAYSIZE(params));
     }
+  }
+}
+
+static void loom_verify_enum_array_attr(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_attr_descriptor_t* descriptor, iree_string_view_t name,
+    uint8_t attr_index, loom_attribute_t attr) {
+  if (attr.kind != LOOM_ATTR_ENUM_ARRAY) return;
+  loom_diagnostic_param_t attr_name_param =
+      loom_verify_param_string_for_diagnostic_field(
+          name, LOOM_DIAGNOSTIC_FIELD_ATTRIBUTE, attr_index);
+  bool payload_present = attr.enum_array != NULL;
+  if ((attr.count != 0) != payload_present) {
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(attr.count),
+        loom_param_bool(payload_present),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_040, params,
+                                IREE_ARRAYSIZE(params));
+    return;
+  }
+  if (iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) return;
+  for (uint16_t element_index = 0; element_index < attr.count;
+       ++element_index) {
+    uint8_t value = attr.enum_array[element_index];
+    if (loom_attr_descriptor_has_enum_case(descriptor, value)) continue;
+    loom_diagnostic_param_t params[] = {
+        attr_name_param,
+        loom_param_u32(value),
+    };
+    loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_010, params,
+                                IREE_ARRAYSIZE(params));
   }
 }
 
@@ -792,6 +826,8 @@ void loom_verify_type_constraints(loom_verify_state_t* state,
                                       IREE_ARRAYSIZE(params));
         }
       }
+      loom_verify_enum_array_attr(state, op, descriptor, attr_name, i,
+                                  attrs[i]);
       loom_verify_predicate_list_attr(state, op, attr_name, i, attrs[i]);
     }
   }

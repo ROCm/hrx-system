@@ -50,6 +50,22 @@ def _emit_builder_i64_array_storage(
     lines.append(f"      &{storage}));")
 
 
+def _emit_builder_enum_array_storage(
+    lines: list[str],
+    *,
+    source: str,
+    storage: str,
+    op_name: str,
+    field_name: str,
+    indent: str = "",
+) -> None:
+    """Emits C code that copies an enum-array attr payload into the builder."""
+    lines.append(f"{indent}const uint8_t* {storage} = NULL;")
+    lines.append(f"{indent}IREE_RETURN_IF_ERROR(loom_builder_copy_enum_array_attr_storage(")
+    lines.append(f'{indent}    builder, {source}, IREE_SV("{op_name} {field_name}"),')
+    lines.append(f"{indent}    &{storage}));")
+
+
 def _emit_builder_predicate_list_storage(
     lines: list[str],
     *,
@@ -628,6 +644,7 @@ def _generate_builder_implementation(
                 "string": f"loom_attr_string({name})",
                 "bool": f"loom_attr_bool({name})",
                 "enum": f"loom_attr_enum({name})",
+                "enum_array": f"loom_attr_enum_array(_{name}_storage, (uint16_t){name}.count)",
                 "symbol": f"loom_attr_symbol({name})",
                 "type": f"loom_attr_type({name})",
                 "encoding": f"loom_attr_encoding({name})",
@@ -652,6 +669,29 @@ def _generate_builder_implementation(
                     lines.append("  }")
                 else:
                     lines.append(f"  loom_op_attrs(*out_op)[{idx}] = loom_attr_i64_array({storage}, (uint16_t){name}_count);")
+            elif attr_type == "enum_array":
+                storage = f"_{name}_storage"
+                if optional_flag:
+                    lines.append(f"  if (iree_any_bit_set(build_flags, {optional_flag})) {{")
+                    _emit_builder_enum_array_storage(
+                        lines,
+                        source=name,
+                        storage=storage,
+                        op_name=op.name,
+                        field_name=name,
+                        indent="    ",
+                    )
+                    lines.append(f"    loom_op_attrs(*out_op)[{idx}] = {constructor};")
+                    lines.append("  }")
+                else:
+                    _emit_builder_enum_array_storage(
+                        lines,
+                        source=name,
+                        storage=storage,
+                        op_name=op.name,
+                        field_name=name,
+                    )
+                    lines.append(f"  loom_op_attrs(*out_op)[{idx}] = {constructor};")
             elif attr_type == "dict":
                 if is_optional:
                     lines.append(f"  if ({name}.count > 0) {{")

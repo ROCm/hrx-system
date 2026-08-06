@@ -374,7 +374,7 @@ def generate_tables_c(
         # a dialect-level shared enum, or a per-op enum typedef, but all three
         # still need one parser/printer keyword table per C symbol name.
         for attr_def in op.attrs:
-            if attr_def.attr_type == "enum" and attr_def.enum_def:
+            if attr_def.attr_type in ("enum", "enum_array") and attr_def.enum_def:
                 array_name = _enum_names_array_name(op, attr_def, shared_enums)
                 if array_name in emitted_enum_case_name_arrays:
                     continue
@@ -419,7 +419,7 @@ def generate_tables_c(
                 if attr_def.open_enum:
                     flag_names.append("LOOM_ATTR_OPEN_ENUM")
                 flags = " | ".join(flag_names) if flag_names else "0"
-                if attr_def.attr_type == "enum" and attr_def.enum_def:
+                if attr_def.attr_type in ("enum", "enum_array") and attr_def.enum_def:
                     enum_names = _enum_names_array_name(op, attr_def, shared_enums)
                     enum_max_value = f"(uint8_t)(IREE_ARRAYSIZE({enum_names}) - 1)"
                 else:

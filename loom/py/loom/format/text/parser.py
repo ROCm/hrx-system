@@ -101,6 +101,7 @@ from loom.ir import (
     DynamicEncoding,
     EncodingInstance,
     EncodingType,
+    EnumArrayAttr,
     FileLocation,
     FunctionType,
     FusedLocation,
@@ -2538,21 +2539,24 @@ class Parser:
                 result = tok.at(TokenKind.LBRACE)
                 return result
             case Attr(field=attr_name):
-                if not tok.at(TokenKind.BARE_IDENT):
-                    return False
-                # For enum attrs, only enter the group if the token is a
-                # valid keyword for that enum. Adjacent optional enum groups
-                # (e.g. visibility then cc) otherwise steal each other's
-                # keywords and produce spurious parse errors.
                 if op_decl is not None:
                     attr_def = op_decl.attr(attr_name)
-                    if (
-                        attr_def is not None
-                        and attr_def.attr_type == "enum"
-                        and attr_def.enum_def is not None
-                    ):
-                        return tok.peek().text in attr_def.enum_def.keywords
-                return True
+                    if attr_def is not None:
+                        if attr_def.attr_type == "enum_array":
+                            return tok.at(TokenKind.LBRACKET)
+                        # Adjacent optional enum groups must only consume a
+                        # declared keyword or an explicit raw open-enum value.
+                        if (
+                            attr_def.attr_type == "enum"
+                            and attr_def.enum_def is not None
+                        ):
+                            if attr_def.open_enum and tok.at(TokenKind.LANGLE):
+                                return True
+                            return (
+                                tok.at(TokenKind.BARE_IDENT)
+                                and tok.peek().text in attr_def.enum_def.keywords
+                            )
+                return tok.at(TokenKind.BARE_IDENT)
             case SymbolRef():
                 return tok.at(TokenKind.SYMBOL)
             case (
@@ -2611,18 +2615,30 @@ class Parser:
                     tok._filename,
                 )
             case "enum":
-                if tok.at(TokenKind.BARE_IDENT) or tok.at(TokenKind.OP_NAME):
-                    ident = tok.next()
-                else:
-                    ident = tok.expect(TokenKind.BARE_IDENT)
-                if attr_def.enum_def and ident.text not in attr_def.enum_def.keywords:
-                    raise ParseError(
-                        f"invalid enum value '{ident.text}', expected one "
-                        f"of {attr_def.enum_def.keywords}",
-                        ident.location,
-                        tok._filename,
+                return self._parse_enum_attr_value(attr_def)
+            case "enum_array":
+                tok.expect(TokenKind.LBRACKET)
+                values: list[int] = []
+                assert attr_def.enum_def is not None
+                value_by_keyword = {
+                    case.keyword: case.value for case in attr_def.enum_def.cases
+                }
+                if not tok.at(TokenKind.RBRACKET):
+                    values.append(
+                        self._parse_enum_array_element(attr_def, value_by_keyword)
                     )
-                return ident.text
+                    while tok.try_consume(TokenKind.COMMA):
+                        if len(values) == 0xFFFF:
+                            raise ParseError(
+                                "enum-array length exceeds UINT16_MAX",
+                                tok.peek().location,
+                                tok._filename,
+                            )
+                        values.append(
+                            self._parse_enum_array_element(attr_def, value_by_keyword)
+                        )
+                tok.expect(TokenKind.RBRACKET)
+                return EnumArrayAttr(values)
             case "symbol":
                 sym = tok.expect(TokenKind.SYMBOL)
                 return sym.text
@@ -2678,6 +2694,60 @@ class Parser:
                 values.append(int(tok.expect(TokenKind.INTEGER).text))
         tok.expect(TokenKind.RBRACKET)
         return values
+
+    def _parse_enum_attr_value(
+        self,
+        attr_def: AttrDef,
+        value_by_keyword: dict[str, int] | None = None,
+    ) -> str | int:
+        """Parse one descriptor-backed enum keyword or raw open value."""
+        tok = self._tokenizer
+        assert attr_def.enum_def is not None
+        if value_by_keyword is None:
+            value_by_keyword = {
+                case.keyword: case.value for case in attr_def.enum_def.cases
+            }
+        if tok.at(TokenKind.LANGLE):
+            opening = tok.next()
+            if not attr_def.open_enum:
+                raise ParseError(
+                    f"enum attribute '{attr_def.name}' is closed and does not "
+                    "admit raw values",
+                    opening.location,
+                    tok._filename,
+                )
+            integer = tok.expect(TokenKind.INTEGER)
+            value = int(integer.text)
+            if not 0 <= value <= 0xFF:
+                raise ParseError(
+                    f"enum value {value} is outside the byte domain [0, 255]",
+                    integer.location,
+                    tok._filename,
+                )
+            tok.expect(TokenKind.RANGLE)
+            return value
+
+        if tok.at(TokenKind.BARE_IDENT) or tok.at(TokenKind.OP_NAME):
+            ident = tok.next()
+        else:
+            ident = tok.expect(TokenKind.BARE_IDENT)
+        if ident.text not in value_by_keyword:
+            raise ParseError(
+                f"invalid enum value '{ident.text}', expected one of "
+                f"{attr_def.enum_def.keywords}",
+                ident.location,
+                tok._filename,
+            )
+        return ident.text
+
+    def _parse_enum_array_element(
+        self, attr_def: AttrDef, value_by_keyword: dict[str, int]
+    ) -> int:
+        """Parse one enum-array element to its stable byte value."""
+        value = self._parse_enum_attr_value(attr_def, value_by_keyword)
+        if isinstance(value, int):
+            return value
+        return value_by_keyword[value]
 
     # --- Result type list ---
 

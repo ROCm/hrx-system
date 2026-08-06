@@ -139,6 +139,8 @@ def attr_type_hint(attr_def: AttrDef | None) -> str:
             return "bool"
         case "enum":
             return "str"
+        case "enum_array":
+            return "Sequence[str | int]"
         case "symbol":
             return "str"
         case "type":

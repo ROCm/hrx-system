@@ -278,9 +278,10 @@ static iree_status_t loom_parse_format_optional_group(
             &vtable->attr_descriptors[first_inner->field_index];
         if (descriptor->attr_kind == LOOM_ATTR_ENUM &&
             descriptor->enum_case_names) {
-          present = false;
-          if (peek.kind == LOOM_TOKEN_BARE_IDENT ||
-              peek.kind == LOOM_TOKEN_OP_NAME) {
+          present = iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM) &&
+                    peek.kind == LOOM_TOKEN_LANGLE;
+          if (!present && (peek.kind == LOOM_TOKEN_BARE_IDENT ||
+                           peek.kind == LOOM_TOKEN_OP_NAME)) {
             iree_host_size_t case_span =
                 loom_attr_descriptor_enum_case_span(descriptor);
             for (iree_host_size_t c = 0; c < case_span; ++c) {
@@ -292,6 +293,8 @@ static iree_status_t loom_parse_format_optional_group(
               }
             }
           }
+        } else if (descriptor->attr_kind == LOOM_ATTR_ENUM_ARRAY) {
+          present = peek.kind == LOOM_TOKEN_LBRACKET;
         } else {
           present = (peek.kind == LOOM_TOKEN_INTEGER ||
                      peek.kind == LOOM_TOKEN_FLOAT ||

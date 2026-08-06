@@ -59,6 +59,8 @@ class ReaderTest : public ::testing::Test {
     size_t attr_kind = 0;
     // Byte offset of the first key inside the nested dict value.
     size_t nested_dict_first_key = 0;
+    // Byte offset of the first value kind inside the nested dict value.
+    size_t nested_dict_first_value_kind = 0;
     // Byte offset of the second key inside the nested dict value.
     size_t nested_dict_second_key = 0;
   };
@@ -267,6 +269,54 @@ class ReaderTest : public ::testing::Test {
         LOOM_LOCATION_UNKNOWN, &record_op));
     loom_op_attrs(record_op)[loom_test_record_kind_ATTR_INDEX] =
         loom_attr_enum(250);
+    return module;
+  }
+
+  loom_module_t* CreateEnumArrayModule() {
+    loom_module_t* module = CreateModule("reader_enum_array");
+    loom_builder_t builder;
+    loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                            &builder);
+    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(loom_builder_intern_string(&builder, IREE_SV("f"), &name_id));
+    uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+    IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    loom_op_t* func_op = nullptr;
+    IREE_CHECK_OK(loom_test_func_build(
+        &builder, 0, /*visibility=*/0, /*cc=*/0, callee,
+        /*arg_types=*/nullptr, /*arg_type_count=*/0,
+        /*result_types=*/nullptr, /*result_type_count=*/0,
+        /*result_dims=*/nullptr, /*result_dim_count=*/0,
+        /*result_encodings=*/nullptr, /*result_encoding_count=*/0,
+        LOOM_LOCATION_UNKNOWN, &func_op));
+    module->symbols.entries[symbol_id].flags = LOOM_SYMBOL_FLAG_PUBLIC;
+    loom_region_t* body =
+        loom_func_like_body(loom_func_like_cast(module, func_op));
+    loom_builder_t body_builder;
+    loom_builder_initialize(module, &module->arena,
+                            loom_region_entry_block(body), &body_builder);
+    const uint8_t required_values[] = {
+        LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW,
+        LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_HIGH,
+        LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW,
+    };
+    const uint8_t optional_values[] = {
+        LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_MIDDLE,
+        42,
+        LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_MIDDLE,
+    };
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(loom_test_enum_array_attrs_build(
+        &body_builder,
+        LOOM_TEST_ENUM_ARRAY_ATTRS_BUILD_FLAG_HAS_OPTIONAL_VALUES,
+        loom_make_enum_array(required_values, IREE_ARRAYSIZE(required_values)),
+        loom_make_enum_array(optional_values, IREE_ARRAYSIZE(optional_values)),
+        loom_named_attr_slice_empty(), LOOM_LOCATION_UNKNOWN, &op));
+    loom_op_t* yield_op = nullptr;
+    IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
+                                        /*value_count=*/0,
+                                        LOOM_LOCATION_UNKNOWN, &yield_op));
     return module;
   }
 
@@ -1135,6 +1185,7 @@ class ReaderTest : public ::testing::Test {
       case 6:   // SYMBOL.
       case 7:   // TYPE.
       case 10:  // ENCODING.
+      case 12:  // SCOPED_ENUM.
         ReadUVarint(bytes, offset);
         break;
       case 3:  // BOOL.
@@ -1157,6 +1208,12 @@ class ReaderTest : public ::testing::Test {
           uint8_t value_kind = bytes[(*offset)++];
           SkipAttributeValue(bytes, offset, value_kind);
         }
+        break;
+      }
+      case 11:    // BYTES.
+      case 13: {  // ENUM_ARRAY.
+        uint64_t count = ReadUVarint(bytes, offset);
+        *offset += count;
         break;
       }
       default:
@@ -1501,6 +1558,7 @@ class ReaderTest : public ::testing::Test {
 
     attr_offsets.nested_dict_first_key = offset;
     ReadUVarint(bytes, &offset);
+    attr_offsets.nested_dict_first_value_kind = offset;
     uint8_t nested_dict_first_kind = bytes[offset++];
     SkipAttributeValue(bytes, &offset, nested_dict_first_kind);
     attr_offsets.nested_dict_second_key = offset;
@@ -2023,6 +2081,47 @@ TEST_F(ReaderTest, EnumAttributesPreserveFutureOrdinals) {
   ASSERT_NE(read_record, nullptr);
   ASSERT_TRUE(loom_test_record_isa(read_record));
   EXPECT_EQ(loom_test_record_kind(read_record), 250u);
+
+  loom_module_free(read_module);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, EnumArraysPreserveStableValuesAndOrder) {
+  loom_module_t* module = CreateEnumArrayModule();
+  auto bytes = WriteModule(module);
+
+  loom_module_t* read_module = nullptr;
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+
+  EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
+  EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
+  ASSERT_NE(read_module, nullptr);
+  ASSERT_EQ(read_module->symbols.count, 1u);
+  loom_op_t* func_op = read_module->symbols.entries[0].defining_op;
+  ASSERT_NE(func_op, nullptr);
+  ASSERT_TRUE(loom_test_func_isa(func_op));
+  loom_region_t* body = loom_test_func_body(func_op);
+  ASSERT_NE(body, nullptr);
+  loom_block_t* entry = loom_region_entry_block(body);
+  ASSERT_NE(entry, nullptr);
+  ASSERT_EQ(entry->op_count, 2u);
+  loom_op_t* op = loom_block_op(entry, 0);
+  ASSERT_TRUE(loom_test_enum_array_attrs_isa(op));
+  loom_enum_array_t required = loom_test_enum_array_attrs_required_values(op);
+  ASSERT_EQ(required.count, 3u);
+  EXPECT_EQ(required.values[0], LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW);
+  EXPECT_EQ(required.values[1],
+            LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_HIGH);
+  EXPECT_EQ(required.values[2], LOOM_TEST_ENUM_ARRAY_ATTRS_REQUIRED_VALUES_LOW);
+  loom_enum_array_t optional = loom_test_enum_array_attrs_optional_values(op);
+  ASSERT_EQ(optional.count, 3u);
+  EXPECT_EQ(optional.values[0],
+            LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_MIDDLE);
+  EXPECT_EQ(optional.values[1], 42u);
+  EXPECT_EQ(optional.values[2],
+            LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_MIDDLE);
 
   loom_module_free(read_module);
   loom_module_free(module);
@@ -2593,6 +2692,29 @@ TEST_F(ReaderTest, RejectsInvalidBodyAttributeKind) {
   bytes[attr_offsets.attr_kind] = 0x7F;
 
   ExpectReadModuleError(bytes, "ERR_BYTECODE_011");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsEnumArrayForNonEnumArrayField) {
+  loom_module_t* module = CreateAttributeFunctionModule();
+  auto bytes = WriteModule(module);
+  BodyOpAttrOffsets attr_offsets = FirstBodyOpAttrOffsets(bytes);
+  bytes[attr_offsets.attr_kind] = LOOM_BYTECODE_ATTR_ENUM_ARRAY;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsEnumArrayNestedInGenericDictionary) {
+  loom_module_t* module = CreateAttributeFunctionModule();
+  auto bytes = WriteModule(module);
+  BodyOpAttrOffsets attr_offsets = FirstBodyOpAttrOffsets(bytes);
+  bytes[attr_offsets.nested_dict_first_value_kind] =
+      LOOM_BYTECODE_ATTR_ENUM_ARRAY;
+
+  ExpectReadModuleError(bytes, "ERR_BYTECODE_006");
 
   loom_module_free(module);
 }

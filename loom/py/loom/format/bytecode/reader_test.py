@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from loom.dialect.test.defs import test_enum_array_attrs
 from loom.format.bytecode.encoding import decode_varint, encode_varint
 from loom.format.bytecode.reader import BytecodeError, BytecodeReader, read_module
 from loom.format.bytecode.writer import (
@@ -47,6 +48,7 @@ from loom.ir import (
     DynamicDim,
     DynamicEncoding,
     EncodingInstance,
+    EnumArrayAttr,
     FileLocation,
     FunctionType,
     GroupScope,
@@ -1590,6 +1592,47 @@ class TestMalformedDictAttributeWireOrder:
         data = bytes([9, 1, 1, 9, 2, 2, 0, 0, 2, 0, 2])
         with pytest.raises(BytecodeError, match="duplicate dict attr key"):
             self._read_dict_value(["", "meta", "axis"], data)
+
+
+class TestEnumArrayAttributeWireFormat:
+    def _read_enum_array(self, data: bytes) -> tuple[EnumArrayAttr, int]:
+        reader = BytecodeReader(b"", op_decls=[test_enum_array_attrs])
+        attr_def = reader._attr_def_for_op_attr(
+            "test.enum_array_attrs", "required_values"
+        )
+        value, offset = reader._read_attr_value(data, 0, attr_def=attr_def)
+        assert isinstance(value, EnumArrayAttr)
+        return value, offset
+
+    def test_reads_ordered_duplicate_values(self) -> None:
+        value, offset = self._read_enum_array(bytes([13, 3, 1, 255, 1]))
+
+        assert value == EnumArrayAttr([1, 255, 1])
+        assert offset == 5
+
+    def test_rejects_oversized_array(self) -> None:
+        data = bytes([13]) + encode_varint(0x10000)
+
+        with pytest.raises(BytecodeError, match="exceeds UINT16_MAX"):
+            self._read_enum_array(data)
+
+    def test_rejects_truncated_array(self) -> None:
+        with pytest.raises(BytecodeError, match="exceeds payload size"):
+            self._read_enum_array(bytes([13, 3, 1]))
+
+    def test_rejects_array_without_field_descriptor(self) -> None:
+        reader = BytecodeReader(b"")
+
+        with pytest.raises(BytecodeError, match="descriptor-backed"):
+            reader._read_attr_value(bytes([13, 0]), 0)
+
+    def test_rejects_array_nested_in_generic_dict(self) -> None:
+        reader = BytecodeReader(b"")
+        reader._strings = ["", "values"]
+        data = bytes([9, 1, 1, 13, 0])
+
+        with pytest.raises(BytecodeError, match="descriptor-backed"):
+            reader._read_attr_value(data, 0)
 
 
 # ============================================================================
