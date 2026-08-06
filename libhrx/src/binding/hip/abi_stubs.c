@@ -403,9 +403,13 @@ static hipError_t hrx_hip_spt_stream_or_explicit(hipStream_t stream,
   return hrx_hip_spt_default_stream(resolved_stream);
 }
 
-static hipError_t hrx_hip_spt_lookup(const char* symbol, void** function,
-                                     void* symbol_status) {
-  if (!symbol || !function) return hipErrorInvalidValue;
+static hipError_t hrx_hip_driver_entry_point_lookup(const char* symbol,
+                                                    void** function,
+                                                    unsigned long long flags,
+                                                    void* symbol_status) {
+  if (!symbol || symbol[0] == '\0' || !function || flags > 2) {
+    return hipErrorInvalidValue;
+  }
 
   // Resolve against this library, not the process-global scope; see
   // iree_hip_self_dl_handle(). Like hipGetProcAddress(), a consumer may dlopen
@@ -426,7 +430,7 @@ static hipError_t hrx_hip_spt_lookup(const char* symbol, void** function,
   char stream_per_thread_symbol[256];
   void* found = NULL;
   size_t symbol_length = strlen(symbol);
-  if (symbol_length < sizeof(stream_per_thread_symbol) - 4 &&
+  if (flags == 2 && symbol_length < sizeof(stream_per_thread_symbol) - 4 &&
       (symbol_length < 4 || strcmp(symbol + symbol_length - 4, "_spt") != 0)) {
     snprintf(stream_per_thread_symbol, sizeof(stream_per_thread_symbol),
              "%s_spt", symbol);
@@ -594,10 +598,12 @@ HIPAPI hipError_t hipDestroyExternalSemaphore(hipExternalSemaphore_t extSem) {
 
 HIPAPI hipError_t hipDeviceComputeCapability(int* major, int* minor,
                                              hipDevice_t device) {
-  (void)major;
-  (void)minor;
-  (void)device;
-  return hipErrorNotSupported;
+  if (!major || !minor) return hipErrorInvalidValue;
+  hipError_t result = hipDeviceGetAttribute(
+      major, hipDeviceAttributeComputeCapabilityMajor, device);
+  if (result != hipSuccess) return result;
+  return hipDeviceGetAttribute(minor, hipDeviceAttributeComputeCapabilityMinor,
+                               device);
 }
 
 HIPAPI hipError_t hipDeviceGetTexture1DLinearMaxWidth(
@@ -753,11 +759,7 @@ HIPAPI hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop,
 HIPAPI hipError_t hipGetDriverEntryPoint(
     const char* symbol, void** funcPtr, unsigned long long flags,
     hipDriverEntryPointQueryResult* status) {
-  (void)symbol;
-  (void)funcPtr;
-  (void)flags;
-  (void)status;
-  return hipErrorNotSupported;
+  return hrx_hip_driver_entry_point_lookup(symbol, funcPtr, flags, status);
 }
 
 HIPAPI hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr,
@@ -1583,12 +1585,6 @@ HIPAPI hipError_t hipProfilerStart(void) { return hipErrorNotSupported; }
 
 HIPAPI hipError_t hipProfilerStop(void) { return hipErrorNotSupported; }
 
-HIPAPI hipError_t hipSetValidDevices(int* device_arr, int len) {
-  (void)device_arr;
-  (void)len;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipSetupArgument(const void* arg, size_t size,
                                    size_t offset) {
   (void)arg;
@@ -1917,8 +1913,7 @@ HIPAPI hipError_t hipGetDriverEntryPoint_spt(const char* symbol,
                                              void** function,
                                              unsigned long long flags,
                                              void* status) {
-  (void)flags;
-  return hrx_hip_spt_lookup(symbol, function, status);
+  return hrx_hip_driver_entry_point_lookup(symbol, function, flags, status);
 }
 
 HIPAPI hipError_t hipGetProcAddress_spt(const char* symbol, void** function,
@@ -1926,7 +1921,7 @@ HIPAPI hipError_t hipGetProcAddress_spt(const char* symbol, void** function,
                                         void* symbol_status) {
   (void)hip_version;
   (void)flags;
-  return hrx_hip_spt_lookup(symbol, function, symbol_status);
+  return hrx_hip_driver_entry_point_lookup(symbol, function, 2, symbol_status);
 }
 
 HIPAPI hipError_t hipLaunchCooperativeKernel_spt(const void* f, dim3 gridDim,
