@@ -346,6 +346,36 @@ loomc_status_t loomc_target_specialization_options_validate_environment(
   return loomc_ok_status();
 }
 
+loomc_status_t loomc_target_specialization_options_make_request_list(
+    const loomc_target_specialization_options_t* options,
+    iree_arena_allocator_t* arena,
+    loom_target_specialization_request_list_t* out_requests) {
+  *out_requests = (loom_target_specialization_request_list_t){0};
+  if (options == NULL || options->specialization_count == 0) {
+    return loomc_ok_status();
+  }
+
+  loom_target_specialization_request_t* requests = NULL;
+  LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(
+      iree_arena_allocate_array(arena, options->specialization_count,
+                                sizeof(*requests), (void**)&requests)));
+  for (loomc_host_size_t i = 0; i < options->specialization_count; ++i) {
+    const loomc_target_specialization_t* specialization =
+        &options->specializations[i];
+    requests[i] = (loom_target_specialization_request_t){
+        .function_name =
+            iree_string_view_from_loomc(specialization->function_symbol),
+        .target_profile = loomc_target_profile_loom_target_profile(
+            specialization->target_profile),
+    };
+  }
+  *out_requests = (loom_target_specialization_request_list_t){
+      .values = requests,
+      .count = options->specialization_count,
+  };
+  return loomc_ok_status();
+}
+
 loomc_status_t loomc_target_pass_registry_initialize(
     const loomc_target_environment_t* target_environment,
     loom_pass_registry_storage_t* out_storage,

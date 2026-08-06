@@ -15,6 +15,7 @@
 #include "loomc/compile.h"
 #include "loomc/context.h"
 #include "loomc/emit.h"
+#include "loomc/launch_config.h"
 #include "loomc/module.h"
 #include "loomc/pass.h"
 #include "loomc/result.h"
@@ -425,6 +426,93 @@ ResultPtr EmitModule(loomc_target_environment_t* target_environment,
                         loomc_allocator_system(), &result);
   LOOMC_EXPECT_OK(status);
   return ResultPtr(result);
+}
+
+TEST(AmdgpuTargetTest, EvaluateLaunchConfigSelectsExactTargetProviders) {
+  TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
+  ContextPtr context = CreateAmdgpuContext(target_environment.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  SourcePtr source = CreateTextSource("target_specialized_launch.loom", R"(
+amdgpu.target<gfx11-generic> @gfx11_wave64 {subgroup_size = 64}
+amdgpu.target<gfx1151> @gfx1151_wave64 {subgroup_size = 64}
+
+func.template<test.experts_per_wave> target(@gfx1151_wave64) priority(20) @two_experts_per_wave(%expert_count: index) -> (index) {
+  %c2 = index.constant 2 : index
+  func.return %c2 : index
+}
+
+func.template<test.experts_per_wave> priority(1) @four_experts_per_wave(%expert_count: index) -> (index) {
+  %c4 = index.constant 4 : index
+  func.return %c4 : index
+}
+
+kernel.def target(@gfx11_wave64) @target_specialized_launch(%expert_count: index) {
+  %c1 = index.constant 1 : index
+  %wave_size = index.constant 64 : index
+  %experts_per_wave = func.apply<test.experts_per_wave>(%expert_count) : (index) -> (index)
+  %workgroup_count = index.div %expert_count, %experts_per_wave : index
+  kernel.launch.config workgroups(%workgroup_count, %c1, %c1) workgroup_size(%wave_size, %c1, %c1) : index
+} launch(%output: buffer) {
+  kernel.return
+}
+)");
+  ModulePtr module =
+      DeserializeModule(context.get(), workspace.get(), source.get());
+
+  struct TargetCase {
+    const char* target;
+    uint32_t expected_workgroup_count;
+  };
+  const TargetCase target_cases[] = {
+      {"gfx1100", 32},
+      {"gfx1151", 64},
+  };
+  for (const TargetCase& target_case : target_cases) {
+    TargetProfilePtr profile =
+        CreateTargetProfile(target_environment.get(), target_case.target);
+    const loomc_target_specialization_t specialization = {
+        /*.function_symbol=*/
+        loomc_make_cstring_view("target_specialized_launch"),
+        /*.target_profile=*/profile.get(),
+    };
+    const loomc_target_specialization_options_t target_options = {
+        /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+        /*.structure_size=*/sizeof(target_options),
+        /*.next=*/nullptr,
+        /*.specializations=*/&specialization,
+        /*.specialization_count=*/1,
+    };
+    const int64_t workload_arguments[] = {128};
+    const loomc_launch_config_eval_options_t options = {
+        /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG_EVAL_OPTIONS,
+        /*.structure_size=*/sizeof(options),
+        /*.next=*/&target_options,
+        /*.function_symbol=*/
+        loomc_make_cstring_view("target_specialized_launch"),
+        /*.config=*/{},
+        /*.workload_arguments=*/workload_arguments,
+        /*.workload_argument_count=*/IREE_ARRAYSIZE(workload_arguments),
+        /*.required_fields=*/
+        LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
+            LOOMC_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE,
+    };
+    loomc_launch_config_t launch_config = {
+        /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+        /*.structure_size=*/sizeof(launch_config),
+    };
+    loomc_result_t* result = nullptr;
+    LOOMC_EXPECT_OK(loomc_module_evaluate_launch_config(
+        module.get(), workspace.get(), &options, loomc_allocator_system(),
+        &launch_config, &result));
+    ResultPtr result_ptr(result);
+    ExpectSucceededResult(result_ptr.get());
+    EXPECT_EQ(launch_config.workgroup_count.x,
+              target_case.expected_workgroup_count)
+        << target_case.target;
+    EXPECT_EQ(launch_config.workgroup_count.y, 1u) << target_case.target;
+    EXPECT_EQ(launch_config.workgroup_count.z, 1u) << target_case.target;
+    EXPECT_EQ(launch_config.workgroup_size.x, 64u) << target_case.target;
+  }
 }
 
 TEST(AmdgpuTargetTest,

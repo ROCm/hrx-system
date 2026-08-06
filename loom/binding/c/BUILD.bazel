@@ -197,6 +197,7 @@ loom_cc_library(
         "//loom/src/loom/target/reporting:artifact_manifest",
         "//loom/src/loom/target/reporting:format",
         "//loom/src/loom/target/reporting:report",
+        "//loom/src/loom/tooling/compile:pipeline",
         "//loom/src/loom/tooling/config",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",

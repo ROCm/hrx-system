@@ -7,11 +7,13 @@
 #ifndef LOOMC_TARGET_STORAGE_H_
 #define LOOMC_TARGET_STORAGE_H_
 
+#include "iree/base/internal/arena.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/pass/registry.h"
 #include "loom/target/function_version.h"
 #include "loom/target/profile.h"
 #include "loom/target/provider.h"
+#include "loom/target/specialization.h"
 #include "loom/target/types.h"
 #include "loomc/target.h"
 #include "visibility.h"
@@ -90,6 +92,14 @@ LOOMC_API_PRIVATE loomc_status_t
 loomc_target_specialization_options_validate_environment(
     const loomc_target_specialization_options_t* options,
     const loomc_target_environment_t* target_environment);
+
+// Materializes internal target specialization requests from public options.
+// The returned list is owned by |arena| and remains valid until it is reset.
+LOOMC_API_PRIVATE loomc_status_t
+loomc_target_specialization_options_make_request_list(
+    const loomc_target_specialization_options_t* options,
+    iree_arena_allocator_t* arena,
+    loom_target_specialization_request_list_t* out_requests);
 
 // Creates a public target profile from a prepared target-family profile. Takes
 // ownership of |target_profile| on entry and calls |deinitialize| on failure or

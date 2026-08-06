@@ -165,8 +165,8 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   loom_run_module_t compile_module;
   // Config-materialized source kernel retained for launch evaluation.
   loom_module_t* launch_config_module;
-  // Exact target facts used to compile the selected function version.
-  const loom_target_facts_t* effective_target_facts;
+  // Exact target facts used to expand and evaluate the launch region.
+  const loom_target_facts_t* launch_config_target_facts;
   // Reusable signed workload arguments used during launch evaluation.
   int64_t* workload_arguments;
   // Backend-produced HAL executable candidate.
@@ -179,6 +179,8 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   loom_run_hal_invocation_options_t invocation_options;
   // Compiler products retained through artifact emission.
   loom_compile_pipeline_result_t pipeline_result;
+  // Expanded-source products retained through launch evaluation.
+  loom_compile_pipeline_result_t launch_config_pipeline_result;
   // Product stage that rejected the compile, when |compile_rejected| is true.
   iree_string_view_t compile_failure_stage;
   // Stable diagnostic category for |compile_rejected|.

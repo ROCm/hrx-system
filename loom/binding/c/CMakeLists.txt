@@ -121,6 +121,7 @@ loom_cc_library(
     loom::target::reporting::report
     loom::target::specialization
     loom::target::types
+    loom::tooling::compile::pipeline
     loom::tooling::config
     loom::util::json
     loom::util::stream
