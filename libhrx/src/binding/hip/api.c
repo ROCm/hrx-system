@@ -1021,6 +1021,7 @@ static hipError_t iree_hip_get_per_thread_stream_state(
 }
 
 static void iree_hip_thread_error_set(hipError_t error, bool sticky) {
+  if (iree_hip_thread_error.sticky && !sticky) return;
   iree_hip_thread_error.last_error = error;
   iree_hip_thread_error.sticky = sticky;
 }
@@ -1144,6 +1145,8 @@ static hipError_t iree_status_to_hip_result(iree_status_t status) {
       return hipErrorNotReady;
     case IREE_STATUS_FAILED_PRECONDITION:
       return hipErrorNotInitialized;
+    case IREE_STATUS_ABORTED:
+      return hipErrorIllegalAddress;
     default:
       return hipErrorUnknown;
   }
@@ -1534,6 +1537,9 @@ static bool iree_hip_no_visible_devices_requested(void) {
 }
 
 static hipError_t iree_hip_ensure_initialized(void) {
+  if (iree_hip_thread_error.sticky) {
+    return iree_hip_thread_error_peek();
+  }
   if (iree_hip_no_visible_devices_requested()) {
     return hipErrorNoDevice;
   }
@@ -3662,7 +3668,10 @@ HIPAPI hipError_t hipDeviceSynchronize(void) {
       "[HIP_API] hipDeviceSynchronize() returned %d (sync_count=%d)\n", result,
       sync_count);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  if (result == hipErrorIllegalAddress) {
+    HIP_RETURN_STICKY_ERROR(result);
+  }
+  HIP_RETURN_ERROR(result);
 }
 
 // Resets the current device and destroys all allocations.
@@ -14225,6 +14234,9 @@ static hipError_t iree_hip_launch_kernel(const void* function_address,
   iree_hip_resolved_stream_t resolved_stream = {0};
   iree_hip_launch_events_t events = {0};
   result = iree_hip_resolve_registered_stream(stream, &resolved_stream);
+  if (result == hipErrorInvalidResourceHandle) {
+    result = hipErrorInvalidValue;
+  }
   if (result == hipSuccess) {
     result = iree_hip_launch_events_acquire(start_event, stop_event,
                                             resolved_stream.context, &events);
