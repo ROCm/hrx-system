@@ -91,6 +91,13 @@ AMDGPU_BLOCKED_LOW_ALIASES = (
         replacement_descriptor_key="amdgpu.v_fmac_f32",
         replacement_mnemonic="v_fmac_f32",
     ),
+    AmdgpuBlockedLowAlias(
+        descriptor_key="amdgpu.v_mul_dx9_zero_f32",
+        asm_mnemonic="v_mul_dx9_zero_f32",
+        alias_semantics="dx9_zero",
+        replacement_descriptor_key="amdgpu.v_mul_f32",
+        replacement_mnemonic="v_mul_f32",
+    ),
 )
 
 
