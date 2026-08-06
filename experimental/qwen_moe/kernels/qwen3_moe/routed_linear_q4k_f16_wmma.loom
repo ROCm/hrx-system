@@ -37,23 +37,32 @@ kernel.decl @qwen3_moe_routed_gate_up_swiglu_q4k_q8(%token_count: index, %route_
 
 func.decl @qwen3_moe_q4k_scale_from_header(%scale0: i32, %scale1: i32, %scale2: i32, %q4_group: index) -> (i32, i32)
 
-// Decodes the four adjacent Q4_K values owned by one load packet from an
-// already-loaded block header. Keeping header acquisition separate makes its
-// 16-byte packet shape explicit and lets matrix schedules choose its lifetime.
-func.def inline @qwen3_moe_q4k_wmma_vector4_from_header(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group: index, %packet: index, %header_words: vector<4xi32>) -> (vector<4xf16>) {
-  %c0 = index.constant 0 : index
-  %c2 = index.constant 2 : index
-  %c4 = index.constant 4 : index
+// Acquires the packed code word shared by one adjacent Q4_K group pair.
+func.def inline @qwen3_moe_q4k_wmma_load_code(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group_pair: index, %packet: index) -> (vector<1xi32>) {
   %c8 = index.constant 8 : index
   %block_bytes = index.constant 144 : offset
   %code_offset = index.constant 16 : offset
-  %q4_mask = vector.constant 252645135 : vector<1xi32>
-  %bounded_group = index.assume %q4_group [range(%q4_group, 0, 7)] : index
+  %bounded_group_pair = index.assume %q4_group_pair [range(%q4_group_pair, 0, 3)] : index
   %bounded_packet = index.assume %packet [range(%packet, 0, 7)] : index
   %block_byte_add = index.scale %q4_block, %block_bytes : index, offset -> offset
   %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
   %code_byte_base = index.add %block_byte_base, %code_offset : offset
   %code_view = buffer.view %weight[%code_byte_base] : buffer -> view<32xi32, #dense>
+  %q_page = index.mul %bounded_group_pair, %c8 : index
+  %q_word_index0 = index.add %q_page, %bounded_packet : index
+  %q_word_index = index.assume %q_word_index0 [range(%q_word_index0, 0, 31)] : index
+  %q_word = vector.load %code_view[%q_word_index] : view<32xi32, #dense> -> vector<1xi32>
+  func.return %q_word : vector<1xi32>
+}
+
+// Decodes the four adjacent Q4_K values owned by one load packet from an
+// already-loaded block header and packed code word. Matrix schedules choose
+// the lifetime of both immutable packets.
+func.def inline @qwen3_moe_q4k_wmma_vector4_from_header_code(%q4_group: index, %header_words: vector<4xi32>, %q_word: vector<1xi32>) -> (vector<4xf16>) {
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %q4_mask = vector.constant 252645135 : vector<1xi32>
+  %bounded_group = index.assume %q4_group [range(%q4_group, 0, 7)] : index
   %header_halves = vector.bitcast %header_words : vector<4xi32> to vector<8xf16>
   %d_f16 = vector.extract %header_halves[0] : vector<8xf16> -> f16
   %dmin_f16 = vector.extract %header_halves[1] : vector<8xf16> -> f16
@@ -62,16 +71,11 @@ func.def inline @qwen3_moe_q4k_wmma_vector4_from_header(%weight: buffer, %row_by
   %scale2 = vector.extract %header_words[3] : vector<4xi32> -> i32
   %d = scalar.extf %d_f16 : f16 to f32
   %dmin = scalar.extf %dmin_f16 : f16 to f32
-  %q_page0 = index.div %bounded_group, %c2 : index
-  %q_page = index.mul %q_page0, %c8 : index
-  %q_word_index0 = index.add %q_page, %bounded_packet : index
-  %q_word_index = index.assume %q_word_index0 [range(%q_word_index0, 0, 31)] : index
   %scale, %minimum = func.call @qwen3_moe_q4k_scale_from_header(%scale0, %scale1, %scale2, %bounded_group) : (i32, i32, i32, index) -> (i32, i32)
   %scale_f32 = scalar.uitofp %scale : i32 to f32
   %minimum_f32 = scalar.uitofp %minimum : i32 to f32
   %d_scale = scalar.mulf %d, %scale_f32 : f32
   %minimum_scale = scalar.mulf %dmin, %minimum_f32 : f32
-  %q_word = vector.load %code_view[%q_word_index] : view<32xi32, #dense> -> vector<1xi32>
   %q_half = index.rem %bounded_group, %c2 : index
   %q_shift_index = index.mul %q_half, %c4 : index
   %q_shift_i32 = index.cast %q_shift_index : index to i32
@@ -97,6 +101,16 @@ func.def inline @qwen3_moe_q4k_wmma_vector4_from_header(%weight: buffer, %row_by
   %half3 = scalar.fptrunc %value3 : f32 to f16
   %result = vector.from_elements %half0, %half1, %half2, %half3 : vector<4xf16>
   func.return %result : vector<4xf16>
+}
+
+// Decodes one group when its caller has retained only the Q4_K block header.
+func.def inline @qwen3_moe_q4k_wmma_vector4_from_header(%weight: buffer, %row_byte_base: offset, %q4_block: index, %q4_group: index, %packet: index, %header_words: vector<4xi32>) -> (vector<4xf16>) {
+  %c2 = index.constant 2 : index
+  %bounded_group = index.assume %q4_group [range(%q4_group, 0, 7)] : index
+  %q4_group_pair = index.div %bounded_group, %c2 : index
+  %q_word = func.call @qwen3_moe_q4k_wmma_load_code(%weight, %row_byte_base, %q4_block, %q4_group_pair, %packet) : (buffer, offset, index, index, index) -> (vector<1xi32>)
+  %values = func.call @qwen3_moe_q4k_wmma_vector4_from_header_code(%bounded_group, %header_words, %q_word) : (index, vector<4xi32>, vector<1xi32>) -> (vector<4xf16>)
+  func.return %values : vector<4xf16>
 }
 
 // Acquires one naturally aligned Q4_K block header as a single 16-byte packet.
