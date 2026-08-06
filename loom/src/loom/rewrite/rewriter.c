@@ -26,6 +26,29 @@ typedef enum loom_rewriter_fact_recompute_flag_bits_e {
 } loom_rewriter_fact_recompute_flag_bits_t;
 typedef uint32_t loom_rewriter_fact_recompute_flags_t;
 
+static bool loom_rewriter_op_summarizes_nested_regions(
+    const loom_op_vtable_t* vtable) {
+  return vtable && (vtable->loop_like || vtable->region_branch);
+}
+
+static bool loom_rewriter_region_branch_summary_is_ready(
+    const loom_rewriter_t* rewriter, loom_op_t* op,
+    const loom_op_vtable_t* vtable) {
+  if (!vtable || !vtable->region_branch) return true;
+  loom_region_branch_t branch = loom_region_branch_cast(rewriter->module, op);
+  for (uint8_t region_index = 0; region_index < op->region_count;
+       ++region_index) {
+    if (!loom_region_branch_region(rewriter->module, branch, region_index)) {
+      continue;
+    }
+    if (!loom_region_branch_region_terminator(rewriter->module, branch,
+                                              region_index)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static iree_status_t loom_rewriter_recompute_op_facts(
     loom_rewriter_t* rewriter, loom_op_t* op,
     loom_rewriter_fact_recompute_flags_t flags) {
@@ -49,10 +72,12 @@ static iree_status_t loom_rewriter_recompute_op_facts(
 // Builder callback
 //===----------------------------------------------------------------------===//
 
-// Callback installed on the builder. Fired by finalize_op after a new
-// op is fully wired. Adds the op to the rewriter's worklist so the
-// driver can attempt patterns on it. When analysis is enabled, also
-// computes facts for the new op's results.
+// Callback installed on the builder. Fired by finalize_op after a new op's
+// direct fields are fully wired. Adds the op to the rewriter's worklist so the
+// driver can attempt patterns on it. When analysis is enabled, also computes
+// facts for ordinary op results and complete structured ops. RegionBranch
+// shells remain on the worklist until callers have populated the regions
+// created by their builders.
 static iree_status_t loom_rewriter_on_op_finalized(void* user_data,
                                                    loom_op_t* op) {
   loom_rewriter_t* rewriter = (loom_rewriter_t*)user_data;
@@ -60,6 +85,10 @@ static iree_status_t loom_rewriter_on_op_finalized(void* user_data,
   IREE_RETURN_IF_ERROR(loom_rewriter_add_to_worklist(rewriter, op));
   IREE_RETURN_IF_ERROR(
       loom_rewriter_add_parent_summary_ops_to_worklist(rewriter, op));
+  const loom_op_vtable_t* vtable = loom_op_vtable(rewriter->module, op);
+  if (!loom_rewriter_region_branch_summary_is_ready(rewriter, op, vtable)) {
+    return iree_ok_status();
+  }
   return loom_rewriter_recompute_op_facts(rewriter, op, /*flags=*/0);
 }
 
@@ -204,7 +233,8 @@ iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
   *out_folded = false;
   if (!rewriter->fact_table) return iree_ok_status();
   const loom_op_vtable_t* vtable = loom_op_vtable(rewriter->module, op);
-  if (!vtable || (!vtable->infer_facts && !vtable->loop_like)) {
+  if (!vtable || (!vtable->infer_facts &&
+                  !loom_rewriter_op_summarizes_nested_regions(vtable))) {
     return iree_ok_status();
   }
 
@@ -399,7 +429,7 @@ static iree_status_t loom_rewriter_add_parent_summary_ops_to_worklist(
   for (loom_op_t* parent = op ? op->parent_op : NULL; parent;
        parent = parent->parent_op) {
     const loom_op_vtable_t* vtable = loom_op_vtable(rewriter->module, parent);
-    if (vtable && vtable->loop_like) {
+    if (loom_rewriter_op_summarizes_nested_regions(vtable)) {
       IREE_RETURN_IF_ERROR(loom_rewriter_add_to_worklist(rewriter, parent));
     }
   }

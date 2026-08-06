@@ -1959,8 +1959,10 @@ typedef struct loom_builder_ip_t {
   loom_op_t* before_op;
 } loom_builder_ip_t;
 
-// Callback invoked when an op is fully constructed (after finalize_op).
-// Used by the rewriter to add newly created ops to its worklist.
+// Callback invoked after an op's direct fields are finalized. Region-owning op
+// builders create their regions before invoking this callback, but callers may
+// populate those regions afterward. Used by the rewriter to add newly created
+// ops to its worklist.
 typedef iree_status_t (*loom_builder_op_fn_t)(void* user_data, loom_op_t* op);
 typedef struct loom_builder_callback_t {
   loom_builder_op_fn_t fn;
@@ -1979,8 +1981,9 @@ typedef struct loom_builder_callback_t {
 // control storage lifetime: linking into a fresh arena, per-thread
 // arenas during parallel compilation, etc.
 //
-// The optional on_op_finalized callback fires after finalize_op
-// completes (uses registered, def pointers set). NULL when unused.
+// The optional on_op_finalized callback fires after finalize_op completes
+// (uses registered, def pointers set). Nested regions may still be empty at
+// this point. NULL when unused.
 typedef struct loom_builder_t {
   loom_module_t* module;
   iree_arena_allocator_t* arena;

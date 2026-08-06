@@ -353,6 +353,229 @@ func.def @while_unchanged_carried_result(%keep_going: i1) -> (i64) {
 
 // ====
 
+// RegionBranch results meet the corresponding yielded facts after analyzing
+// every branch body. Side effects keep the conditional structured so this
+// exercises the branch summary instead of select canonicalization.
+func.def @if_result_meets_yielded_facts(%condition: i1) -> (i64, i64, i64) {
+  %c4 = scalar.constant 4 : i64
+  %c12 = scalar.constant 12 : i64
+  %result = scf.if %condition -> (i64) {
+    test.use %c4 : i64
+    scf.yield %c4 : i64
+  } else {
+    test.use %c12 : i64
+    scf.yield %c12 : i64
+  }
+  %result_lo = test.fact_range_lo %result : i64 -> i64
+  %result_hi = test.fact_range_hi %result : i64 -> i64
+  %result_div = test.fact_divisor %result : i64 -> i64
+  func.return %result_lo, %result_hi, %result_div : i64, i64, i64
+}
+
+// ----
+func.def @if_result_meets_yielded_facts(%condition: i1) -> (i64, i64, i64) {
+  %c4 = scalar.constant 4 : i64
+  %c12 = scalar.constant 12 : i64
+  scf.if %condition {
+    test.use %c4 : i64
+  } else {
+    test.use %c12 : i64
+  }
+  %result_lo = scalar.constant 4 : i64
+  %result_hi = scalar.constant 12 : i64
+  %result_div = scalar.constant 4 : i64
+  func.return %result_lo, %result_hi, %result_div : i64, i64, i64
+}
+
+// ====
+
+// The same generic RegionBranch summary covers every case and the default of a
+// multi-way switch.
+func.def @switch_result_meets_all_regions(%variant: index) -> (i64, i64, i64) {
+  %c8 = scalar.constant 8 : i64
+  %c12 = scalar.constant 12 : i64
+  %c20 = scalar.constant 20 : i64
+  %result = scf.switch %variant -> (i64) {
+    case 0 {
+      test.use %c8 : i64
+      scf.yield %c8 : i64
+    }
+    case 1 {
+      test.use %c12 : i64
+      scf.yield %c12 : i64
+    }
+    default {
+      test.use %c20 : i64
+      scf.yield %c20 : i64
+    }
+  }
+  %result_lo = test.fact_range_lo %result : i64 -> i64
+  %result_hi = test.fact_range_hi %result : i64 -> i64
+  %result_div = test.fact_divisor %result : i64 -> i64
+  func.return %result_lo, %result_hi, %result_div : i64, i64, i64
+}
+
+// ----
+func.def @switch_result_meets_all_regions(%variant: index) -> (i64, i64, i64) {
+  %c8 = scalar.constant 8 : i64
+  %c12 = scalar.constant 12 : i64
+  %c20 = scalar.constant 20 : i64
+  %result = scf.switch %variant -> (i64) {
+    case 0 {
+      test.use %c8 : i64
+      scf.yield %c8 : i64
+    }
+    case 1 {
+      test.use %c12 : i64
+      scf.yield %c12 : i64
+    }
+    default {
+      test.use %c20 : i64
+      scf.yield %c20 : i64
+    }
+  }
+  %result_lo = scalar.constant 8 : i64
+  %result_hi = scalar.constant 20 : i64
+  %result_div = scalar.constant 4 : i64
+  func.return %result_lo, %result_hi, %result_div : i64, i64, i64
+}
+
+// ====
+
+// A lane-local branch selector makes a non-exact merge of different SSA
+// values lane-varying even when each incoming value is uniform.
+kernel.def @if_lane_predicate_different_values_is_varying() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs: i32, %rhs: i32) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
+  %selected = scf.if %condition -> (i32) {
+    test.use %lhs : i32
+    scf.yield %lhs : i32
+  } else {
+    test.use %rhs : i32
+    scf.yield %rhs : i32
+  }
+  %selected_is_varying = test.fact_lane_varying %selected : i32 -> i1
+  %selected_is_uniform = test.fact_subgroup_uniform %selected : i32 -> i1
+  test.use %selected_is_varying, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @if_lane_predicate_different_values_is_varying() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs: i32, %rhs: i32) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
+  scf.if %condition {
+    test.use %lhs : i32
+  } else {
+    test.use %rhs : i32
+  }
+  %selected_is_varying = scalar.constant true : i1
+  %selected_is_uniform = scalar.constant false : i1
+  test.use %selected_is_varying, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ====
+
+// A lane-local selector does not make a result varying when every region
+// yields the same SSA value.
+kernel.def @if_lane_predicate_same_value_stays_uniform() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%value: i32) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
+  %selected = scf.if %condition -> (i32) {
+    test.use %value : i32
+    scf.yield %value : i32
+  } else {
+    test.use %value : i32
+    scf.yield %value : i32
+  }
+  %selected_is_varying = test.fact_lane_varying %selected : i32 -> i1
+  %selected_is_uniform = test.fact_subgroup_uniform %selected : i32 -> i1
+  test.use %selected_is_varying, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @if_lane_predicate_same_value_stays_uniform() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%value: i32) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
+  scf.if %condition {
+    test.use %value : i32
+  } else {
+    test.use %value : i32
+  }
+  %selected_is_varying = scalar.constant false : i1
+  %selected_is_uniform = scalar.constant true : i1
+  test.use %selected_is_varying, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ====
+
+// Boolean branch results retain the stronger lane-predicate classification.
+kernel.def @if_lane_predicate_boolean_result_is_predicate() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs: i1, %rhs: i1) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
+  %selected = scf.if %condition -> (i1) {
+    test.use %lhs : i1
+    scf.yield %lhs : i1
+  } else {
+    test.use %rhs : i1
+    scf.yield %rhs : i1
+  }
+  %selected_is_predicate = test.fact_lane_predicate %selected : i1 -> i1
+  %selected_is_uniform = test.fact_subgroup_uniform %selected : i1 -> i1
+  test.use %selected_is_predicate, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ----
+kernel.def @if_lane_predicate_boolean_result_is_predicate() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%lhs: i1, %rhs: i1) {
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
+  scf.if %condition {
+    test.use %lhs : i1
+  } else {
+    test.use %rhs : i1
+  }
+  %selected_is_predicate = scalar.constant true : i1
+  %selected_is_uniform = scalar.constant false : i1
+  test.use %selected_is_predicate, %selected_is_uniform : i1, i1
+  kernel.return
+}
+
+// ====
+
 // Selecting between different uniform values with a lane-local predicate
 // produces lane-varying data, not a uniform unknown.
 kernel.def @select_lane_predicate_different_values_is_varying() {

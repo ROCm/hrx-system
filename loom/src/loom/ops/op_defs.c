@@ -3062,7 +3062,9 @@ iree_status_t loom_builder_finalize_op(loom_builder_t* builder, loom_op_t* op) {
     loom_module_link_symbol_defining_op(builder->module, op, vtable);
   }
   loom_module_record_op_effects(builder->module, op);
-  // Notify the rewriter (or other listener) that a fully-wired op exists.
+  // Notify the rewriter (or other listener) that the op's direct fields are
+  // fully wired. Callers may populate nested regions after their parent
+  // builder returns.
   if (builder->on_op_finalized.fn) {
     IREE_RETURN_IF_ERROR(
         builder->on_op_finalized.fn(builder->on_op_finalized.user_data, op));
