@@ -151,18 +151,18 @@ func.def inline @qwen3_moe_dense_q4k_wmma_vector4(%weight: buffer, %row_byte_bas
 // Low-fixed-cost Q4_K body shared by the ordinary and completion-fused decode
 // exports. Each wave owns one output channel and contracts a Q8_1 activation
 // row directly against the original GGUF weight row.
-func.template<qwen3_moe.dense.q4k_q8_1_x4.body> device @qwen3_moe_dense_linear_q4k_q8_1_x4_body(%publish_output: i1, %token_count: index, %token0: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+func.template<qwen3_moe.dense.q4k_q8_1_x4.body> device @qwen3_moe_dense_linear_q4k_q8_1_x4_body(%publish_output: i1, %channel_subgroup_count0: index, %token_count: index, %token0: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
   %input_size = config.get @qwen3_moe.dense_quantized.input_size : index
   %output_size = config.get @qwen3_moe.dense_quantized.output_size : index
   %output_accumulation = config.get @qwen3_moe.dense_quantized.output_accumulation : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
+  %channel_subgroup_count = index.assume %channel_subgroup_count0 [range(%channel_subgroup_count0, 1, 32)] : index
   %channel_tile = kernel.workgroup.id<x> : index
   %subgroup0 = kernel.subgroup.id : index
   %lane = kernel.subgroup.lane.id : index
   %c1 = index.constant 1 : index
-  %c8 = index.constant 8 : index
   %c128 = index.constant 128 : index
   %c144 = index.constant 144 : index
   %c256 = index.constant 256 : index
@@ -170,8 +170,8 @@ func.template<qwen3_moe.dense.q4k_q8_1_x4.body> device @qwen3_moe_dense_linear_q
   %c0_f32 = scalar.constant 0.0 : f32
   %c0_offset = index.constant 0 : offset
   %token, %launch_token_count = index.assume %token0, %bounded_token_count [lt(%token0, %bounded_token_count)] : index, index
-  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
-  %channel_base = index.mul %channel_tile, %c8 : index
+  %subgroup, %body_channel_subgroup_count = index.assume %subgroup0, %channel_subgroup_count [lt(%subgroup0, %channel_subgroup_count)] : index, index
+  %channel_base = index.mul %channel_tile, %body_channel_subgroup_count : index
   %channel = index.add %channel_base, %subgroup : index
   %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
   %lane_i32 = index.cast %lane : index to i32
@@ -234,9 +234,10 @@ kernel.def target(@qwen3_moe_dense_gfx11_wave32) @qwen3_moe_dense_linear_q4k_q8_
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
   %token0 = kernel.workgroup.id<y> : index
   %c0 = index.constant 0 : index
+  %c8 = index.constant 8 : index
   %valid_token = index.cmp ult, %token0, %bounded_token_count : index
   %safe_token = scf.select %valid_token, %token0, %c0 : index
-  func.apply<qwen3_moe.dense.q4k_q8_1_x4.body>(%valid_token, %bounded_token_count, %safe_token, %q8_input, %weight, %output) : (i1, index, index, buffer, buffer, buffer)
+  func.apply<qwen3_moe.dense.q4k_q8_1_x4.body>(%valid_token, %c8, %bounded_token_count, %safe_token, %q8_input, %weight, %output) : (i1, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -245,23 +246,24 @@ kernel.def target(@qwen3_moe_dense_gfx11_wave32) @qwen3_moe_dense_linear_q4k_q8_
 kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_dense_linear_q4k_q8_1_x4_next_q8(%token_count: index) {
   %output_size = config.get @qwen3_moe.dense_quantized.output_size : index
   %c1 = index.constant 1 : index
-  %c8 = index.constant 8 : index
-  %c256 = index.constant 256 : index
-  %output_tiles = index.div %output_size, %c8 : index
-  kernel.launch.config workgroups(%output_tiles, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+  %c16 = index.constant 16 : index
+  %c512 = index.constant 512 : index
+  %output_tiles = index.div %output_size, %c16 : index
+  kernel.launch.config workgroups(%output_tiles, %c1, %c1) workgroup_size(%c512, %c1, %c1) : index
 } launch(%token_count: index, %q8_input: buffer, %weight: buffer, %output: buffer, %norm_weight: buffer, %normalized_output: buffer, %completion_counter: buffer, %next_q8_output: buffer) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 1)] : index
   %publish_output = scalar.constant true : i1
   %projection_token = kernel.workgroup.id<y> : index
-  func.apply<qwen3_moe.dense.q4k_q8_1_x4.body>(%publish_output, %bounded_token_count, %projection_token, %q8_input, %weight, %output) : (i1, index, index, buffer, buffer, buffer)
+  %channel_subgroup_count = index.constant 16 : index
+  func.apply<qwen3_moe.dense.q4k_q8_1_x4.body>(%publish_output, %channel_subgroup_count, %bounded_token_count, %projection_token, %q8_input, %weight, %output) : (i1, index, index, index, buffer, buffer, buffer)
   %output_size0 = config.get @qwen3_moe.dense_quantized.output_size : index
   %output_size = index.assume %output_size0 [range(%output_size0, 128, 32768), mul(%output_size0, 128)] : index
   %token0 = kernel.workgroup.id<y> : index
   %token = index.assume %token0 [lt(%token0, %bounded_token_count)] : index
   %c0 = index.constant 0 : index
-  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
   %workitem = kernel.workitem.id<x> : index
-  %output_tile_count = index.div %output_size, %c8 : index
+  %output_tile_count = index.div %output_size, %c16 : index
   %is_arrival_workitem = index.cmp eq, %workitem, %c0 : index
   %c0_i32 = scalar.constant 0 : i32
   %c1_i32 = scalar.constant 1 : i32
@@ -289,7 +291,7 @@ kernel.def target(@qwen3_moe_attention_prepare_gfx11_wave32) @qwen3_moe_dense_li
   scf.if %is_last_output_tile {
     kernel.barrier<global> {ordering = acquire, scope = workgroup}
     %publish_normalized = scalar.constant true : i1
-    func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>(%publish_normalized, %c8, %bounded_token_count, %token, %output_noalias, %norm_weight_noalias, %normalized_output_noalias, %next_q8_output_noalias) : (i1, index, index, index, buffer, buffer, buffer, buffer)
+    func.apply<qwen3_moe.rmsnorm_quantize_q8_1_x4.body>(%publish_normalized, %c16, %bounded_token_count, %token, %output_noalias, %norm_weight_noalias, %normalized_output_noalias, %next_q8_output_noalias) : (i1, index, index, index, buffer, buffer, buffer, buffer)
     // Reset only after every normalized F32 and Q8 store completes.
     kernel.barrier<global> {ordering = release, scope = workgroup}
     scf.if %is_arrival_workitem {

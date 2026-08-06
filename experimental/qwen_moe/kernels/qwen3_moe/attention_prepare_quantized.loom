@@ -115,11 +115,10 @@ func.template<qwen3_moe.rmsnorm_quantize_q8_1_x4.body> device @qwen3_moe_rmsnorm
   %hidden_size0 = config.get @qwen3_moe.model.hidden_size : index
   %epsilon = config.get @qwen3_moe.model.rms_epsilon : f32
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
-  %reduction_subgroup_count = index.assume %reduction_subgroup_count0 [range(%reduction_subgroup_count0, 1, 8)] : index
+  %reduction_subgroup_count = index.assume %reduction_subgroup_count0 [range(%reduction_subgroup_count0, 1, 16)] : index
   %hidden_size = index.assume %hidden_size0 [range(%hidden_size0, 128, 32768), mul(%hidden_size0, 128)] : index
   %workitem = kernel.workitem.id<x> : index
   %subgroup0 = kernel.subgroup.id : index
-  %subgroup = index.assume %subgroup0 [range(%subgroup0, 0, 7)] : index
   %lane = kernel.subgroup.lane.id : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -129,17 +128,18 @@ func.template<qwen3_moe.rmsnorm_quantize_q8_1_x4.body> device @qwen3_moe_rmsnorm
   %c16 = index.constant 16 : index
   %c32 = index.constant 32 : index
   %c128 = index.constant 128 : index
-  %c256 = index.constant 256 : index
-  %c1024 = index.constant 1024 : index
   %group_bytes = index.constant 144 : index
   %payload_byte_add = index.constant 16 : index
-  %scratch_d_byte_add = index.constant 1024 : offset
-  %scratch_bytes = index.constant 1152 : offset
+  %scratch_d_byte_add = index.constant 2048 : offset
+  %scratch_bytes = index.constant 2304 : offset
   %c0_offset = index.constant 0 : offset
   %c0_f32 = scalar.constant 0.0 : f32
   %c1_f32 = scalar.constant 1.0 : f32
   %c127 = scalar.constant 127.0 : f32
   %c0_f32x4 = vector.constant 0.0 : vector<4xf32>
+  %subgroup, %body_reduction_subgroup_count = index.assume %subgroup0, %reduction_subgroup_count [lt(%subgroup0, %reduction_subgroup_count)] : index, index
+  %workgroup_size = index.mul %body_reduction_subgroup_count, %c32 : index
+  %stripe_size = index.mul %workgroup_size, %c4 : index
   %valid_token = index.cmp ult, %token0, %bounded_token_count : index
   %safe_token0 = scf.select %valid_token, %token0, %c0 : index
   %token, %launch_token_count = index.assume %safe_token0, %bounded_token_count [lt(%safe_token0, %bounded_token_count)] : index, index
@@ -153,10 +153,10 @@ func.template<qwen3_moe.rmsnorm_quantize_q8_1_x4.body> device @qwen3_moe_rmsnorm
   %weight_view = buffer.view %weight_noalias[%c0_offset] : buffer -> view<[%hidden_size]xf32, #dense>
   %normalized_output_view = buffer.view %normalized_output[%c0_offset] : buffer -> view<[%launch_token_count]x[%hidden_size]xf32, #dense>
   %scratch = buffer.alloca %scratch_bytes {base_alignment = 16, memory_space = workgroup} : buffer
-  %scratch_values = buffer.view %scratch[%c0_offset] : buffer -> view<256xf32, #dense>
-  %scratch_d = buffer.view %scratch[%scratch_d_byte_add] : buffer -> view<32xf32, #dense>
+  %scratch_values = buffer.view %scratch[%c0_offset] : buffer -> view<512xf32, #dense>
+  %scratch_d = buffer.view %scratch[%scratch_d_byte_add] : buffer -> view<64xf32, #dense>
   // Reduce the complete row before any block-local quantization.
-  %thread_sum = scf.for %channel = [%workitem to %hidden_size step %c256](%running_sum = %c0_f32 : f32) -> (f32) {
+  %thread_sum = scf.for %channel = [%workitem to %hidden_size step %workgroup_size](%running_sum = %c0_f32 : f32) -> (f32) {
     %value = view.load %input_view[%token, %channel] : view<[%launch_token_count]x[%hidden_size]xf32, #dense> -> f32
     %square = scalar.mulf<reassoc|nnan|ninf|nsz> %value, %value : f32
     %next_sum = scalar.addf<reassoc|nnan|ninf|nsz> %running_sum, %square : f32
@@ -165,14 +165,14 @@ func.template<qwen3_moe.rmsnorm_quantize_q8_1_x4.body> device @qwen3_moe_rmsnorm
   %subgroup_sum = kernel.subgroup.reduce<addf> %thread_sum : f32
   %is_subgroup_leader = index.cmp eq, %lane, %c0 : index
   scf.if %is_subgroup_leader {
-    view.store %subgroup_sum, %scratch_values[%subgroup] : f32, view<256xf32, #dense>
+    view.store %subgroup_sum, %scratch_values[%subgroup] : f32, view<512xf32, #dense>
   }
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
   %is_reduction_subgroup = index.cmp eq, %subgroup, %c0 : index
-  %is_reduction_lane = index.cmp ult, %lane, %reduction_subgroup_count : index
+  %is_reduction_lane = index.cmp ult, %lane, %body_reduction_subgroup_count : index
   %loads_subgroup_sum = scalar.andi %is_reduction_subgroup, %is_reduction_lane : i1
   %subgroup_partial = scf.if %loads_subgroup_sum -> (f32) {
-    %value = view.load %scratch_values[%lane] : view<256xf32, #dense> -> f32
+    %value = view.load %scratch_values[%lane] : view<512xf32, #dense> -> f32
     scf.yield %value : f32
   } else {
     scf.yield %c0_f32 : f32
@@ -183,16 +183,16 @@ func.template<qwen3_moe.rmsnorm_quantize_q8_1_x4.body> device @qwen3_moe_rmsnorm
     %mean = scalar.divf<reassoc|nnan|ninf|nsz|arcp> %row_sum, %hidden_size_f32 : f32
     %biased_mean = scalar.addf<reassoc|nnan|ninf|nsz> %mean, %epsilon : f32
     %scale = scalar.rsqrtf<nnan|ninf|nsz|afn> %biased_mean : f32
-    view.store %scale, %scratch_values[%c0] : f32, view<256xf32, #dense>
+    view.store %scale, %scratch_values[%c0] : f32, view<512xf32, #dense>
   }
   kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
-  %row_scale = view.load %scratch_values[%c0] : view<256xf32, #dense> -> f32
+  %row_scale = view.load %scratch_values[%c0] : view<512xf32, #dense> -> f32
   %row_scale_vector = vector.splat %row_scale : vector<4xf32>
   %publishes_normalized = scalar.andi %publish_normalized, %valid_token : i1
-  // Reuse one scratch frame for each 1024-element stripe. Hidden sizes need
+  // Reuse one scratch frame for each workgroup-sized stripe. Hidden sizes need
   // only be divisible by 128; inactive workitems in the final stripe carry
   // zeros and never publish.
-  scf.for %stripe_base = [%c0 to %hidden_size step %c1024] {
+  scf.for %stripe_base = [%c0 to %hidden_size step %stripe_size] {
     %word_element_add = index.mul %workitem, %c4 : index
     %channel = index.add %stripe_base, %word_element_add : index
     %valid_word = index.cmp ult, %channel, %hidden_size : index
@@ -206,7 +206,7 @@ func.template<qwen3_moe.rmsnorm_quantize_q8_1_x4.body> device @qwen3_moe_rmsnorm
     }
     %absolute_values = vector.absf %normalized : vector<4xf32>
     %thread_max = vector.reduce<maxnumf> %absolute_values, %c0_f32 : vector<4xf32>, f32
-    view.store %thread_max, %scratch_values[%workitem] : f32, view<256xf32, #dense>
+    view.store %thread_max, %scratch_values[%workitem] : f32, view<512xf32, #dense>
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
     %word_in_block = index.rem %workitem, %c8 : index
     %block_in_stripe = index.div %workitem, %c8 : index
@@ -214,14 +214,14 @@ func.template<qwen3_moe.rmsnorm_quantize_q8_1_x4.body> device @qwen3_moe_rmsnorm
     %writes_block_d = scalar.andi %valid_word, %is_block_leader : i1
     scf.if %writes_block_d {
       %cohort_base = index.mul %block_in_stripe, %c8 : index
-      %cohort_maxima = vector.load %scratch_values[%cohort_base] : view<256xf32, #dense> -> vector<8xf32>
+      %cohort_maxima = vector.load %scratch_values[%cohort_base] : view<512xf32, #dense> -> vector<8xf32>
       %amax = vector.reduce<maxnumf> %cohort_maxima, %c0_f32 : vector<8xf32>, f32
       %d = scalar.divf<reassoc|nnan|ninf|nsz|arcp> %amax, %c127 : f32
-      view.store %d, %scratch_d[%block_in_stripe] : f32, view<32xf32, #dense>
+      view.store %d, %scratch_d[%block_in_stripe] : f32, view<64xf32, #dense>
     }
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
     %d = scf.if %valid_word -> (f32) {
-      %block_d = view.load %scratch_d[%block_in_stripe] : view<32xf32, #dense> -> f32
+      %block_d = view.load %scratch_d[%block_in_stripe] : view<64xf32, #dense> -> f32
       scf.yield %block_d : f32
     } else {
       scf.yield %c0_f32 : f32
@@ -256,12 +256,12 @@ func.template<qwen3_moe.rmsnorm_quantize_q8_1_x4.body> device @qwen3_moe_rmsnorm
       vector.store %packed_word, %group_qs[%packed_word_index] : vector<1xi32>, view<32xi32, #dense>
     }
     %thread_quantized_sum = vector.reduce<addf> %rounded_values, %c0_f32 : vector<4xf32>, f32
-    view.store %thread_quantized_sum, %scratch_values[%workitem] : f32, view<256xf32, #dense>
+    view.store %thread_quantized_sum, %scratch_values[%workitem] : f32, view<512xf32, #dense>
     kernel.barrier<workgroup> {ordering = acq_rel, scope = workgroup}
     %publishes_block_ds = scalar.andi %writes_block_d, %valid_token : i1
     scf.if %publishes_block_ds {
       %cohort_base = index.mul %block_in_stripe, %c8 : index
-      %cohort_sums = vector.load %scratch_values[%cohort_base] : view<256xf32, #dense> -> vector<8xf32>
+      %cohort_sums = vector.load %scratch_values[%cohort_base] : view<512xf32, #dense> -> vector<8xf32>
       %quantized_sum = vector.reduce<addf> %cohort_sums, %c0_f32 : vector<8xf32>, f32
       %s = scalar.mulf<reassoc|nnan|ninf|nsz> %quantized_sum, %d : f32
       %q8_block = index.div %channel, %c32 : index
