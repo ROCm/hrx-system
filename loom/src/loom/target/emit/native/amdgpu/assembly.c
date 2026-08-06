@@ -3154,7 +3154,7 @@ static iree_status_t loom_amdgpu_append_vopd_binary_component(
   return loom_amdgpu_append_vopd_vgpr(context, component->vsrc1);
 }
 
-static iree_status_t loom_amdgpu_append_vopd_mov_component(
+static iree_status_t loom_amdgpu_append_vopd_inline_mov_component(
     const loom_native_assembly_packet_context_t* context,
     const loom_amdgpu_vopd_component_t* component,
     iree_string_view_t mnemonic) {
@@ -3163,6 +3163,16 @@ static iree_status_t loom_amdgpu_append_vopd_mov_component(
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
   return iree_string_builder_append_format(context->builder, "%" PRIu32,
                                            component->immediate_u32);
+}
+
+static iree_status_t loom_amdgpu_append_vopd_register_mov_component(
+    const loom_native_assembly_packet_context_t* context,
+    const loom_amdgpu_vopd_component_t* component,
+    iree_string_view_t mnemonic) {
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_mnemonic(context, mnemonic));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_vopd_vgpr(context, component->vdst));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_append_comma(context));
+  return loom_amdgpu_append_vopd_vgpr(context, component->src0);
 }
 
 static iree_status_t loom_amdgpu_append_vopd_component(
@@ -3177,7 +3187,7 @@ static iree_status_t loom_amdgpu_append_vopd_component(
   }
   const iree_string_view_t mnemonic =
       loom_amdgpu_vopd_component_assembly_mnemonic(context, info);
-  switch (info->form) {
+  switch (component->form) {
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_TIED_ACCUMULATE:
       return loom_amdgpu_append_vopd_tied_accumulate_component(
           context, component, mnemonic);
@@ -3191,8 +3201,11 @@ static iree_status_t loom_amdgpu_append_vopd_component(
       return loom_amdgpu_append_vopd_binary_component(context, component,
                                                       mnemonic);
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_INLINE_MOV:
-      return loom_amdgpu_append_vopd_mov_component(context, component,
-                                                   mnemonic);
+      return loom_amdgpu_append_vopd_inline_mov_component(context, component,
+                                                          mnemonic);
+    case LOOM_AMDGPU_VOPD_COMPONENT_FORM_REGISTER_MOV:
+      return loom_amdgpu_append_vopd_register_mov_component(context, component,
+                                                            mnemonic);
     default:
       IREE_ASSERT_UNREACHABLE(
           "AMDGPU VOPD component metadata must use a known form");

@@ -23,11 +23,56 @@
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
 
-typedef struct loom_amdgpu_vopd_candidate_component_t {
-  // Descriptor-independent metadata row for this component.
+typedef enum loom_amdgpu_vopd_component_source_bits_e {
+  // Component has no register source operands.
+  LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_NONE = 0u,
+  // Component source 0 is a VGPR and participates in VOPD constraints.
+  LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_SRC0 = 1u << 0,
+  // Component source 1 is a VGPR and participates in VOPD constraints.
+  LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_VSRC1 = 1u << 1,
+  // Component has both VOPD source operands modeled as VGPRs.
+  LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY =
+      LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_SRC0 |
+      LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_VSRC1,
+} loom_amdgpu_vopd_component_source_bits_t;
+typedef uint8_t loom_amdgpu_vopd_component_source_mask_t;
+
+typedef enum loom_amdgpu_vopd_component_rule_flag_bits_e {
+  // Component rule has no additional planning capabilities.
+  LOOM_AMDGPU_VOPD_COMPONENT_FLAG_NONE = 0u,
+  // SRC0 and VSRC1 may be exchanged without changing component semantics.
+  LOOM_AMDGPU_VOPD_COMPONENT_FLAG_COMMUTABLE_SOURCES = 1u << 0,
+  // A same-op dual move routes its Y source through the SRC2 cache.
+  LOOM_AMDGPU_VOPD_COMPONENT_FLAG_DUAL_MOV_SRC2_CACHE = 1u << 1,
+} loom_amdgpu_vopd_component_rule_flag_bits_t;
+typedef uint8_t loom_amdgpu_vopd_component_rule_flags_t;
+
+// Operand layout for VOPD component forms whose sources are row-defined.
+typedef struct loom_amdgpu_vopd_component_operand_layout_t {
+  // Operand index of the accumulator tied to the result register.
+  uint8_t accumulator_index;
+  // Operand index of the source encoded in the VOPD SRC0 field.
+  uint8_t src0_index;
+  // Operand index of the source encoded in the VOPD VSRC1 field.
+  uint8_t vsrc1_index;
+} loom_amdgpu_vopd_component_operand_layout_t;
+
+typedef struct loom_amdgpu_vopd_component_rule_t {
+  // Canonical native facts for the component opcode.
   const loom_amdgpu_vopd_component_info_t* info;
-  // VOPD operation id encoded in this component slot.
-  uint16_t op;
+  // Operand/register form selected by this source descriptor.
+  loom_amdgpu_vopd_component_form_t form;
+  // Operand indexes interpreted by forms with row-defined source layout.
+  loom_amdgpu_vopd_component_operand_layout_t operands;
+  // Source operand slots that contain real VGPRs.
+  loom_amdgpu_vopd_component_source_mask_t source_register_mask;
+  // Descriptor-derived component planning capabilities.
+  loom_amdgpu_vopd_component_rule_flags_t flags;
+} loom_amdgpu_vopd_component_rule_t;
+
+typedef struct loom_amdgpu_vopd_candidate_component_t {
+  // Descriptor-local rule that decoded this component.
+  const loom_amdgpu_vopd_component_rule_t* rule;
   // Destination VGPR.
   uint16_t vdst;
   // First explicit source VGPR before unified-source encoding bias.
@@ -36,8 +81,6 @@ typedef struct loom_amdgpu_vopd_candidate_component_t {
   uint16_t vsrc1;
   // Unified source selector for forms without a VGPR SRC0.
   uint16_t src0_selector;
-  // Source operand slots that contain real VGPRs.
-  uint8_t source_register_mask;
   // Component-local payload flags.
   loom_amdgpu_vopd_pair_flags_t flags;
   // Component literal payload when LOOM_AMDGPU_VOPD_PAIR_FLAG_LITERAL is set.
@@ -109,11 +152,6 @@ typedef struct loom_amdgpu_vopd_trans_result_vgpr_t {
   // Dense active-list position for this physical VGPR while valid.
   uint32_t active_list_index;
 } loom_amdgpu_vopd_trans_result_vgpr_t;
-
-typedef struct loom_amdgpu_vopd_component_rule_t {
-  // Descriptor-independent VOPD component facts.
-  loom_amdgpu_vopd_component_info_t info;
-} loom_amdgpu_vopd_component_rule_t;
 
 typedef struct loom_amdgpu_vopd_component_descriptor_lookup_range_t {
   // First descriptor-ordinal lookup row for this descriptor-set ordinal.
@@ -189,37 +227,60 @@ typedef struct loom_amdgpu_vopd_plan_builder_t {
   loom_amdgpu_vopd_packet_t* packets;
 } loom_amdgpu_vopd_plan_builder_t;
 
-#define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                      \
-    row_index_value, op_value, same_op_reason_value, op_name_value,           \
-    same_op_reason_name_value, assembly_mnemonic_value,                       \
-    numeric_minmax_mnemonic_value, form_value, accumulator_index_value,       \
-    src0_index_value, vsrc1_index_value, lane_mask_value, pairing_mask_value, \
-    source_register_mask_value, flags_value)                                  \
-  [row_index_value] = {                                                       \
-      .info =                                                                 \
-          {                                                                   \
-              .op = op_value,                                                 \
-              .same_op_reason = same_op_reason_value,                         \
-              .op_name = IREE_SVL(op_name_value),                             \
-              .same_op_reason_name = IREE_SVL(same_op_reason_name_value),     \
-              .assembly_mnemonic = IREE_SVL(assembly_mnemonic_value),         \
-              .numeric_minmax_mnemonic =                                      \
-                  IREE_SVL(numeric_minmax_mnemonic_value),                    \
-              .form = form_value,                                             \
-              .operands =                                                     \
-                  {                                                           \
-                      .accumulator_index = accumulator_index_value,           \
-                      .src0_index = src0_index_value,                         \
-                      .vsrc1_index = vsrc1_index_value,                       \
-                  },                                                          \
-              .lane_mask = lane_mask_value,                                   \
-              .pairing_mask = pairing_mask_value,                             \
-              .source_register_mask = source_register_mask_value,             \
-              .flags = flags_value,                                           \
-          },                                                                  \
+#define LOOM_AMDGPU_VOPD_COMPONENT_INFO_RULE(                             \
+    row_index_value, op_value, same_op_reason_value, op_name_value,       \
+    same_op_reason_name_value, assembly_mnemonic_value,                   \
+    numeric_minmax_mnemonic_value, lane_mask_value, pairing_mask_value)   \
+  [row_index_value] = {                                                   \
+      .op = op_value,                                                     \
+      .same_op_reason = same_op_reason_value,                             \
+      .op_name = IREE_SVL(op_name_value),                                 \
+      .same_op_reason_name = IREE_SVL(same_op_reason_name_value),         \
+      .assembly_mnemonic = IREE_SVL(assembly_mnemonic_value),             \
+      .numeric_minmax_mnemonic = IREE_SVL(numeric_minmax_mnemonic_value), \
+      .lane_mask = lane_mask_value,                                       \
+      .pairing_mask = pairing_mask_value,                                 \
   },
+#define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                    \
+    row_index_value, info_index_value, form_value, accumulator_index_value, \
+    src0_index_value, vsrc1_index_value, source_register_mask_value,        \
+    flags_value)
 #define LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(same_op_reason_value, \
                                                row_index_value)
+
+static const loom_amdgpu_vopd_component_info_t kVopdComponentInfos[] = {
+#include "loom/target/arch/amdgpu/descriptors/vopd_component_rules.inl"
+};
+
+#undef LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE
+#undef LOOM_AMDGPU_VOPD_COMPONENT_RULE
+#undef LOOM_AMDGPU_VOPD_COMPONENT_INFO_RULE
+
+static_assert(IREE_ARRAYSIZE(kVopdComponentInfos) < UINT8_MAX,
+              "VOPD component info indexes use uint8_t + 1 sentinels");
+
+#define LOOM_AMDGPU_VOPD_COMPONENT_INFO_RULE(                       \
+    row_index_value, op_value, same_op_reason_value, op_name_value, \
+    same_op_reason_name_value, assembly_mnemonic_value,             \
+    numeric_minmax_mnemonic_value, lane_mask_value, pairing_mask_value)
+#define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                    \
+    row_index_value, info_index_value, form_value, accumulator_index_value, \
+    src0_index_value, vsrc1_index_value, source_register_mask_value,        \
+    flags_value)                                                            \
+  [row_index_value] = {                                                     \
+      .info = &kVopdComponentInfos[info_index_value],                       \
+      .form = form_value,                                                   \
+      .operands =                                                           \
+          {                                                                 \
+              .accumulator_index = accumulator_index_value,                 \
+              .src0_index = src0_index_value,                               \
+              .vsrc1_index = vsrc1_index_value,                             \
+          },                                                                \
+      .source_register_mask = source_register_mask_value,                   \
+      .flags = flags_value,                                                 \
+  },
+#define LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(same_op_reason_value, \
+                                               info_index_value)
 
 static const loom_amdgpu_vopd_component_rule_t kVopdComponentRules[] = {
 #include "loom/target/arch/amdgpu/descriptors/vopd_component_rules.inl"
@@ -227,9 +288,10 @@ static const loom_amdgpu_vopd_component_rule_t kVopdComponentRules[] = {
 
 #undef LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE
 #undef LOOM_AMDGPU_VOPD_COMPONENT_RULE
+#undef LOOM_AMDGPU_VOPD_COMPONENT_INFO_RULE
 
 static_assert(IREE_ARRAYSIZE(kVopdComponentRules) < UINT8_MAX,
-              "VOPD component row indexes use uint8_t + 1 sentinels");
+              "VOPD component rule indexes use uint8_t + 1 sentinels");
 
 #define LOOM_AMDGPU_VOPD_COMPONENT_DESCRIPTOR_LOOKUP( \
     rule_index_plus_one_value)                        \
@@ -348,67 +410,74 @@ static const loom_amdgpu_vopd_pair_affinity_row_t kVopdPairAffinities[] = {
 
 #undef LOOM_AMDGPU_VOPD_PAIR_AFFINITY
 
-#define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                      \
-    row_index_value, op_value, same_op_reason_value, op_name_value,           \
-    same_op_reason_name_value, assembly_mnemonic_value,                       \
-    numeric_minmax_mnemonic_value, form_value, accumulator_index_value,       \
-    src0_index_value, vsrc1_index_value, lane_mask_value, pairing_mask_value, \
-    source_register_mask_value, flags_value)                                  \
+#define LOOM_AMDGPU_VOPD_COMPONENT_INFO_RULE(                           \
+    row_index_value, op_value, same_op_reason_value, op_name_value,     \
+    same_op_reason_name_value, assembly_mnemonic_value,                 \
+    numeric_minmax_mnemonic_value, lane_mask_value, pairing_mask_value) \
   [op_value] = (uint8_t)((row_index_value) + 1),
+#define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                    \
+    row_index_value, info_index_value, form_value, accumulator_index_value, \
+    src0_index_value, vsrc1_index_value, source_register_mask_value,        \
+    flags_value)
 #define LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(same_op_reason_value, \
-                                               row_index_value)
+                                               info_index_value)
 
 static const uint8_t
-    kVopdComponentRuleIndexByOp[LOOM_AMDGPU_VOPD_OP_MIN_I32 + 1] = {
+    kVopdComponentInfoIndexByOp[LOOM_AMDGPU_VOPD_OP_MIN_I32 + 1] = {
 #include "loom/target/arch/amdgpu/descriptors/vopd_component_rules.inl"
 };
 
 #undef LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE
 #undef LOOM_AMDGPU_VOPD_COMPONENT_RULE
+#undef LOOM_AMDGPU_VOPD_COMPONENT_INFO_RULE
 
-#define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                      \
-    row_index_value, op_value, same_op_reason_value, op_name_value,           \
-    same_op_reason_name_value, assembly_mnemonic_value,                       \
-    numeric_minmax_mnemonic_value, form_value, accumulator_index_value,       \
-    src0_index_value, vsrc1_index_value, lane_mask_value, pairing_mask_value, \
-    source_register_mask_value, flags_value)
+#define LOOM_AMDGPU_VOPD_COMPONENT_INFO_RULE(                       \
+    row_index_value, op_value, same_op_reason_value, op_name_value, \
+    same_op_reason_name_value, assembly_mnemonic_value,             \
+    numeric_minmax_mnemonic_value, lane_mask_value, pairing_mask_value)
+#define LOOM_AMDGPU_VOPD_COMPONENT_RULE(                                    \
+    row_index_value, info_index_value, form_value, accumulator_index_value, \
+    src0_index_value, vsrc1_index_value, source_register_mask_value,        \
+    flags_value)
 #define LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE(same_op_reason_value, \
-                                               row_index_value)      \
-  [same_op_reason_value] = (uint8_t)((row_index_value) + 1),
+                                               info_index_value)     \
+  [same_op_reason_value] = (uint8_t)((info_index_value) + 1),
 
-static const uint8_t kVopdComponentRuleIndexBySameOpReason
+static const uint8_t kVopdComponentInfoIndexBySameOpReason
     [LOOM_AMDGPU_VOPD_PAIR_REASON_DUAL_DOT2_F32_BF16 + 1] = {
 #include "loom/target/arch/amdgpu/descriptors/vopd_component_rules.inl"
 };
 
 #undef LOOM_AMDGPU_VOPD_COMPONENT_REASON_RULE
 #undef LOOM_AMDGPU_VOPD_COMPONENT_RULE
+#undef LOOM_AMDGPU_VOPD_COMPONENT_INFO_RULE
 
 static const loom_amdgpu_vopd_component_info_t*
-loom_amdgpu_vopd_component_info_for_rule_index(uint8_t rule_index) {
-  if (rule_index == 0) {
+loom_amdgpu_vopd_component_info_for_index_plus_one(
+    uint8_t info_index_plus_one) {
+  if (info_index_plus_one == 0) {
     return NULL;
   }
-  return &kVopdComponentRules[rule_index - 1].info;
+  return &kVopdComponentInfos[info_index_plus_one - 1];
 }
 
 const loom_amdgpu_vopd_component_info_t* loom_amdgpu_vopd_component_info_for_op(
     uint16_t op) {
-  if (op >= IREE_ARRAYSIZE(kVopdComponentRuleIndexByOp)) {
+  if (op >= IREE_ARRAYSIZE(kVopdComponentInfoIndexByOp)) {
     return NULL;
   }
-  return loom_amdgpu_vopd_component_info_for_rule_index(
-      kVopdComponentRuleIndexByOp[op]);
+  return loom_amdgpu_vopd_component_info_for_index_plus_one(
+      kVopdComponentInfoIndexByOp[op]);
 }
 
 static const loom_amdgpu_vopd_component_info_t*
 loom_amdgpu_vopd_component_info_for_reason(
     loom_amdgpu_vopd_pair_reason_t reason) {
-  if (reason >= IREE_ARRAYSIZE(kVopdComponentRuleIndexBySameOpReason)) {
+  if (reason >= IREE_ARRAYSIZE(kVopdComponentInfoIndexBySameOpReason)) {
     return NULL;
   }
-  return loom_amdgpu_vopd_component_info_for_rule_index(
-      kVopdComponentRuleIndexBySameOpReason[reason]);
+  return loom_amdgpu_vopd_component_info_for_index_plus_one(
+      kVopdComponentInfoIndexBySameOpReason[reason]);
 }
 
 iree_string_view_t loom_amdgpu_vopd_packet_role_name(
@@ -1197,6 +1266,20 @@ static bool loom_amdgpu_vopd_bank_compatible(uint16_t x_register,
   return (x_register & bank_mask) != (y_register & bank_mask);
 }
 
+static bool loom_amdgpu_vopd_components_share_source_cache(
+    const loom_amdgpu_vopd_candidate_component_t* x,
+    const loom_amdgpu_vopd_candidate_component_t* y,
+    loom_amdgpu_vopd_component_source_mask_t source_mask) {
+  if (source_mask != LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_SRC0 ||
+      x->rule->info->op != y->rule->info->op) {
+    return true;
+  }
+  const loom_amdgpu_vopd_component_rule_flags_t shared_flags =
+      x->rule->flags & y->rule->flags;
+  return !iree_any_bit_set(shared_flags,
+                           LOOM_AMDGPU_VOPD_COMPONENT_FLAG_DUAL_MOV_SRC2_CACHE);
+}
+
 static loom_amdgpu_vopd_register_constraint_flags_t
 loom_amdgpu_vopd_register_constraint_flags(
     const loom_amdgpu_vopd_candidate_pair_t* candidate) {
@@ -1205,9 +1288,13 @@ loom_amdgpu_vopd_register_constraint_flags(
     flags |= LOOM_AMDGPU_VOPD_REGISTER_CONSTRAINT_FLAG_DESTINATION_PARITY;
   }
   const loom_amdgpu_vopd_component_source_mask_t paired_source_registers =
-      candidate->x.source_register_mask & candidate->y.source_register_mask;
+      candidate->x.rule->source_register_mask &
+      candidate->y.rule->source_register_mask;
   if (iree_any_bit_set(paired_source_registers,
                        LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_SRC0) &&
+      loom_amdgpu_vopd_components_share_source_cache(
+          &candidate->x, &candidate->y,
+          LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_SRC0) &&
       !loom_amdgpu_vopd_bank_compatible(candidate->x.src0, candidate->y.src0,
                                         3)) {
     flags |= LOOM_AMDGPU_VOPD_REGISTER_CONSTRAINT_FLAG_SRC0_BANK;
@@ -1218,22 +1305,22 @@ loom_amdgpu_vopd_register_constraint_flags(
                                         3)) {
     flags |= LOOM_AMDGPU_VOPD_REGISTER_CONSTRAINT_FLAG_VSRC1_BANK;
   }
-  if (iree_any_bit_set(candidate->y.source_register_mask,
+  if (iree_any_bit_set(candidate->y.rule->source_register_mask,
                        LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_SRC0) &&
       candidate->x.vdst == candidate->y.src0) {
     flags |= LOOM_AMDGPU_VOPD_REGISTER_CONSTRAINT_FLAG_X_DESTINATION_Y_SRC0;
   }
-  if (iree_any_bit_set(candidate->y.source_register_mask,
+  if (iree_any_bit_set(candidate->y.rule->source_register_mask,
                        LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_VSRC1) &&
       candidate->x.vdst == candidate->y.vsrc1) {
     flags |= LOOM_AMDGPU_VOPD_REGISTER_CONSTRAINT_FLAG_X_DESTINATION_Y_VSRC1;
   }
-  if (iree_any_bit_set(candidate->x.source_register_mask,
+  if (iree_any_bit_set(candidate->x.rule->source_register_mask,
                        LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_SRC0) &&
       candidate->y.vdst == candidate->x.src0) {
     flags |= LOOM_AMDGPU_VOPD_REGISTER_CONSTRAINT_FLAG_Y_DESTINATION_X_SRC0;
   }
-  if (iree_any_bit_set(candidate->x.source_register_mask,
+  if (iree_any_bit_set(candidate->x.rule->source_register_mask,
                        LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_VSRC1) &&
       candidate->y.vdst == candidate->x.vsrc1) {
     flags |= LOOM_AMDGPU_VOPD_REGISTER_CONSTRAINT_FLAG_Y_DESTINATION_X_VSRC1;
@@ -1243,7 +1330,7 @@ loom_amdgpu_vopd_register_constraint_flags(
 
 static void loom_amdgpu_vopd_swap_component_sources(
     loom_amdgpu_vopd_candidate_component_t* component) {
-  IREE_ASSERT(iree_all_bits_set(component->info->source_register_mask,
+  IREE_ASSERT(iree_all_bits_set(component->rule->source_register_mask,
                                 LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_BINARY));
   const uint16_t src0 = component->src0;
   component->src0 = component->vsrc1;
@@ -1259,10 +1346,10 @@ static bool loom_amdgpu_vopd_try_register_orientations(
   }
 
   const bool can_swap_x =
-      iree_any_bit_set(candidate->x.info->flags,
+      iree_any_bit_set(candidate->x.rule->flags,
                        LOOM_AMDGPU_VOPD_COMPONENT_FLAG_COMMUTABLE_SOURCES);
   const bool can_swap_y =
-      iree_any_bit_set(candidate->y.info->flags,
+      iree_any_bit_set(candidate->y.rule->flags,
                        LOOM_AMDGPU_VOPD_COMPONENT_FLAG_COMMUTABLE_SOURCES);
   if (can_swap_x) {
     loom_amdgpu_vopd_swap_component_sources(&candidate->x);
@@ -1322,15 +1409,15 @@ static bool loom_amdgpu_vopd_literal_immediate_index(
 static bool loom_amdgpu_vopd_read_tied_accumulate_component(
     const loom_amdgpu_vopd_plan_builder_t* builder,
     const loom_low_packet_view_t* packet,
-    const loom_amdgpu_vopd_component_info_t* info,
+    const loom_amdgpu_vopd_component_rule_t* rule,
     loom_amdgpu_vopd_candidate_component_t* out_component) {
   *out_component = (loom_amdgpu_vopd_candidate_component_t){0};
 
   const loom_op_t* op = packet->node->op;
   if (op->result_count != 1 || packet->descriptor->immediate_count != 0 ||
-      info->operands.accumulator_index >= op->operand_count ||
-      info->operands.src0_index >= op->operand_count ||
-      info->operands.vsrc1_index >= op->operand_count) {
+      rule->operands.accumulator_index >= op->operand_count ||
+      rule->operands.src0_index >= op->operand_count ||
+      rule->operands.vsrc1_index >= op->operand_count) {
     return false;
   }
   const loom_value_id_t* results = loom_op_const_results(op);
@@ -1339,13 +1426,13 @@ static bool loom_amdgpu_vopd_read_tied_accumulate_component(
       loom_amdgpu_vopd_map_assignment(builder->allocation, results[0]);
   const loom_low_allocation_assignment_t* accumulator_assignment =
       loom_amdgpu_vopd_map_assignment(
-          builder->allocation, operands[info->operands.accumulator_index]);
+          builder->allocation, operands[rule->operands.accumulator_index]);
   const loom_low_allocation_assignment_t* src0_assignment =
       loom_amdgpu_vopd_map_assignment(builder->allocation,
-                                      operands[info->operands.src0_index]);
+                                      operands[rule->operands.src0_index]);
   const loom_low_allocation_assignment_t* vsrc1_assignment =
       loom_amdgpu_vopd_map_assignment(builder->allocation,
-                                      operands[info->operands.vsrc1_index]);
+                                      operands[rule->operands.vsrc1_index]);
   if (!loom_amdgpu_vopd_assignments_match(result_assignment,
                                           accumulator_assignment)) {
     return false;
@@ -1439,7 +1526,7 @@ static bool loom_amdgpu_vopd_read_binary_vgpr_component(
   return true;
 }
 
-static bool loom_amdgpu_vopd_read_mov_component(
+static bool loom_amdgpu_vopd_read_inline_mov_component(
     const loom_amdgpu_vopd_plan_builder_t* builder,
     const loom_low_packet_view_t* packet,
     loom_amdgpu_vopd_candidate_component_t* out_component) {
@@ -1468,6 +1555,31 @@ static bool loom_amdgpu_vopd_read_mov_component(
   return true;
 }
 
+static bool loom_amdgpu_vopd_read_register_mov_component(
+    const loom_amdgpu_vopd_plan_builder_t* builder,
+    const loom_low_packet_view_t* packet,
+    loom_amdgpu_vopd_candidate_component_t* out_component) {
+  *out_component = (loom_amdgpu_vopd_candidate_component_t){0};
+
+  const loom_op_t* op = packet->node->op;
+  if (op->result_count != 1 || op->operand_count != 1 ||
+      packet->descriptor->immediate_count != 0) {
+    return false;
+  }
+  const loom_value_id_t* results = loom_op_const_results(op);
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  const loom_low_allocation_assignment_t* result_assignment =
+      loom_amdgpu_vopd_map_assignment(builder->allocation, results[0]);
+  const loom_low_allocation_assignment_t* source_assignment =
+      loom_amdgpu_vopd_map_assignment(builder->allocation, operands[0]);
+  if (!loom_amdgpu_vopd_assignment_single_physical_vgpr(result_assignment,
+                                                        &out_component->vdst)) {
+    return false;
+  }
+  return loom_amdgpu_vopd_assignment_single_physical_vgpr(source_assignment,
+                                                          &out_component->src0);
+}
+
 static bool loom_amdgpu_vopd_read_component(
     const loom_amdgpu_vopd_plan_builder_t* builder,
     const loom_low_packet_view_t* packet,
@@ -1490,10 +1602,10 @@ static bool loom_amdgpu_vopd_read_component(
     return false;
   }
   bool eligible = false;
-  switch (rule->info.form) {
+  switch (rule->form) {
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_TIED_ACCUMULATE:
       eligible = loom_amdgpu_vopd_read_tied_accumulate_component(
-          builder, packet, &rule->info, out_component);
+          builder, packet, rule, out_component);
       break;
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_FMAAK_LITERAL:
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_FMAMK_LITERAL:
@@ -1505,8 +1617,12 @@ static bool loom_amdgpu_vopd_read_component(
                                                              out_component);
       break;
     case LOOM_AMDGPU_VOPD_COMPONENT_FORM_INLINE_MOV:
-      eligible =
-          loom_amdgpu_vopd_read_mov_component(builder, packet, out_component);
+      eligible = loom_amdgpu_vopd_read_inline_mov_component(builder, packet,
+                                                            out_component);
+      break;
+    case LOOM_AMDGPU_VOPD_COMPONENT_FORM_REGISTER_MOV:
+      eligible = loom_amdgpu_vopd_read_register_mov_component(builder, packet,
+                                                              out_component);
       break;
     default:
       IREE_ASSERT_UNREACHABLE("AMDGPU VOPD component rule has unknown form");
@@ -1515,9 +1631,7 @@ static bool loom_amdgpu_vopd_read_component(
   if (!eligible) {
     return false;
   }
-  out_component->info = &rule->info;
-  out_component->op = rule->info.op;
-  out_component->source_register_mask = rule->info.source_register_mask;
+  out_component->rule = rule;
   return true;
 }
 
@@ -1525,8 +1639,8 @@ static bool loom_amdgpu_vopd_pair_reason_for_components(
     const loom_amdgpu_vopd_candidate_component_t* first,
     const loom_amdgpu_vopd_candidate_component_t* second,
     loom_amdgpu_vopd_pair_reason_t* out_reason) {
-  return loom_amdgpu_vopd_component_infos_pair_reason(first->info, second->info,
-                                                      out_reason);
+  return loom_amdgpu_vopd_component_infos_pair_reason(
+      first->rule->info, second->rule->info, out_reason);
 }
 
 static bool loom_amdgpu_vopd_resolve_pair_literal(
@@ -1608,10 +1722,10 @@ static loom_amdgpu_vopd_component_t loom_amdgpu_vopd_final_component(
     const loom_amdgpu_vopd_plan_builder_t* builder,
     const loom_amdgpu_vopd_candidate_component_t* candidate) {
   uint16_t src0_selector = 0;
-  if (candidate->info->form == LOOM_AMDGPU_VOPD_COMPONENT_FORM_INLINE_MOV) {
+  if (candidate->rule->form == LOOM_AMDGPU_VOPD_COMPONENT_FORM_INLINE_MOV) {
     src0_selector = candidate->src0_selector;
   } else {
-    IREE_ASSERT(iree_any_bit_set(candidate->source_register_mask,
+    IREE_ASSERT(iree_any_bit_set(candidate->rule->source_register_mask,
                                  LOOM_AMDGPU_VOPD_COMPONENT_SOURCE_SRC0));
     const loom_low_descriptor_set_t* descriptor_set =
         builder->schedule->target.descriptor_set;
@@ -1625,7 +1739,8 @@ static loom_amdgpu_vopd_component_t loom_amdgpu_vopd_final_component(
         (uint16_t)(encoding_table->vector_source_vgpr0 + candidate->src0);
   }
   return (loom_amdgpu_vopd_component_t){
-      .op = candidate->op,
+      .op = candidate->rule->info->op,
+      .form = candidate->rule->form,
       .vdst = candidate->vdst,
       .src0 = candidate->src0,
       .vsrc1 = candidate->vsrc1,
@@ -1667,7 +1782,7 @@ static loom_amdgpu_vopd_rejection_component_t
 loom_amdgpu_vopd_rejection_component_from_candidate(
     const loom_amdgpu_vopd_candidate_component_t* component) {
   return (loom_amdgpu_vopd_rejection_component_t){
-      .op = component->op,
+      .op = component->rule->info->op,
       .vdst = component->vdst,
       .src0 = component->src0,
       .vsrc1 = component->vsrc1,

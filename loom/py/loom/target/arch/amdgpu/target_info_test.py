@@ -26,6 +26,7 @@ from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_ARITHMETIC,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_COMPARE,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_CONVERSION,
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_DUAL_MOV_SRC2_CACHE,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS,
     AMDGPU_DESCRIPTOR_SET_INFOS,
     AMDGPU_GENERIC_MATRIX_FEATURE_EXCLUSIONS,
@@ -142,6 +143,23 @@ def test_numeric_minmax_mnemonics_are_scoped_to_rdna4_and_newer() -> None:
         info.generator_target
         for info in AMDGPU_DESCRIPTOR_SET_INFOS
         if info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_NUMERIC_MINMAX_MNEMONICS
+    }
+    assert flagged_generator_targets == {
+        "rdna4m",
+        "rdna4",
+        "rdna4_gfx1250_a0",
+        "rdna4_gfx1251",
+        "rdna4_gfx125x",
+        "gfx12_generic",
+        "gfx12_5_generic",
+    }
+
+
+def test_vopd_dual_move_src2_cache_is_scoped_to_gfx117x_and_newer() -> None:
+    flagged_generator_targets = {
+        info.generator_target
+        for info in AMDGPU_DESCRIPTOR_SET_INFOS
+        if info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_VOPD_DUAL_MOV_SRC2_CACHE
     }
     assert flagged_generator_targets == {
         "rdna4m",
