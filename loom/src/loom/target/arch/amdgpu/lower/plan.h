@@ -1254,11 +1254,13 @@ typedef struct loom_amdgpu_memory_packet_plan_t {
   uint32_t source_register_offset;
 } loom_amdgpu_memory_packet_plan_t;
 
+// Immutable function-retained direct-memory packet plan.
 typedef struct loom_amdgpu_memory_access_plan_t {
-  // Direct memory packets emitted in increasing source-register order.
-  loom_amdgpu_memory_packet_plan_t packets[LOOM_AMDGPU_MAX_MEMORY_PACKET_COUNT];
   // Number of populated packet plans.
   uint32_t packet_count;
+  // Direct memory packets emitted in increasing source-register order. The
+  // function-retained allocation contains exactly |packet_count| entries.
+  loom_amdgpu_memory_packet_plan_t packets[];
 } loom_amdgpu_memory_access_plan_t;
 
 typedef enum loom_amdgpu_fragment_memory_packet_flag_bits_e {

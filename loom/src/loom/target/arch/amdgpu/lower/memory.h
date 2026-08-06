@@ -28,6 +28,15 @@ extern "C" {
 typedef struct loom_amdgpu_source_alloca_layout_t
     loom_amdgpu_source_alloca_layout_t;
 
+// Bounded caller-owned workspace for selecting one direct memory plan. The
+// workspace lives only for one selection call and is never retained.
+typedef struct loom_amdgpu_memory_access_selection_t {
+  // Packet candidates populated in increasing source-register order.
+  loom_amdgpu_memory_packet_plan_t packets[LOOM_AMDGPU_MAX_MEMORY_PACKET_COUNT];
+  // Number of populated packet candidates.
+  uint32_t packet_count;
+} loom_amdgpu_memory_access_selection_t;
+
 typedef struct loom_amdgpu_memory_dynamic_term_sequence_t {
   // Dynamic terms selected for emission in address-expression order.
   const loom_low_source_memory_dynamic_term_t*
@@ -164,7 +173,8 @@ bool loom_amdgpu_source_memory_offset_fits_u32(
     const loom_low_source_memory_access_plan_t* source,
     int64_t static_byte_offset);
 
-// Selects a complete AMDGPU memory packet sequence from source IR and facts.
+// Selects a complete AMDGPU memory packet sequence from source IR and facts
+// into caller-owned bounded workspace.
 bool loom_amdgpu_memory_access_plan_select(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_low_descriptor_set_t* descriptor_set,
@@ -174,7 +184,7 @@ bool loom_amdgpu_memory_access_plan_select(
     const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     const loom_op_t* source_op,
     loom_low_source_memory_access_plan_t* out_source,
-    loom_amdgpu_memory_access_plan_t* out_plan,
+    loom_amdgpu_memory_access_selection_t* out_selection,
     loom_low_source_memory_access_diagnostic_t* out_source_diagnostic,
     loom_amdgpu_memory_access_diagnostic_t* out_diagnostic);
 
@@ -389,15 +399,15 @@ void loom_amdgpu_memory_report_row_populate_storage_schema(
     const loom_low_source_memory_access_plan_t* source,
     loom_low_lower_memory_report_row_t* row);
 
-// Selects an AMDGPU source memory-load packet plan.
+// Selects and retains an exact-sized AMDGPU source memory-load packet plan.
 iree_status_t loom_amdgpu_select_memory_load_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_memory_access_plan_t* out_plan, bool* out_selected);
+    loom_low_lower_plan_t* out_plan);
 
-// Selects an AMDGPU source memory-store packet plan.
+// Selects and retains an exact-sized AMDGPU source memory-store packet plan.
 iree_status_t loom_amdgpu_select_memory_store_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_memory_access_plan_t* out_plan, bool* out_selected);
+    loom_low_lower_plan_t* out_plan);
 
 // Lowers a source memory-load op to an AMDGPU memory packet.
 iree_status_t loom_amdgpu_lower_memory_load(
