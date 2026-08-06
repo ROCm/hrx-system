@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:python.bzl", "iree_py_library")
+load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -42,6 +42,7 @@ iree_py_library(
         ":cooperative_matrix",
         ":features",
         ":scalar_alu",
+        ":scalar_constant",
         ":scalar_conversion",
         ":scalar_memory",
         "//loom/py/loom/target:low_descriptors",
@@ -102,6 +103,32 @@ iree_py_library(
     ],
     deps = [
         ":features",
+    ],
+)
+
+iree_py_library(
+    name = "scalar_constant",
+    srcs = [
+        "__init__.py",
+        "scalar_constant.py",
+    ],
+    deps = [
+        ":features",
+        ":scalar_alu",
+    ],
+)
+
+iree_py_test(
+    name = "scalar_constant_test",
+    size = "small",
+    srcs = [
+        "scalar_constant_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.spirv.scalar_constant_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":scalar_constant",
     ],
 )
 

@@ -54,6 +54,10 @@ from loom.target.arch.spirv.scalar_alu import (  # noqa: E402
     ScalarAluType,
     ScalarBinaryOperation,
 )
+from loom.target.arch.spirv.scalar_constant import (  # noqa: E402
+    FLOAT_CONSTANT_TYPES,
+    FloatConstantType,
+)
 from loom.target.arch.spirv.scalar_conversion import (  # noqa: E402
     INTEGER_VALUE_VIEW_CONVERSIONS,
     LOW_SCALAR_CONVERSIONS,
@@ -445,11 +449,26 @@ def _integer_constant_row(scalar_pair: IntegerAluTypePair) -> _PacketRow:
     return _PacketRow(
         f"spirv.op_constant.{scalar.suffix}",
         opcode="LOOM_SPIRV_OP_CONSTANT",
-        form="LOOM_SPIRV_PACKET_FORM_INTEGER_CONSTANT",
+        form="LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT",
         result_type=_alu_scalar_value(scalar),
         result_count=1,
         immediate_index=0,
         literal_word_count=scalar_pair.literal_word_count,
+    )
+
+
+def _float_constant_row(scalar: FloatConstantType) -> _PacketRow:
+    return _PacketRow(
+        f"spirv.op_constant.{scalar.suffix}",
+        opcode="LOOM_SPIRV_OP_CONSTANT",
+        form="LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT",
+        result_type=_value_type(
+            "LOOM_SPIRV_VALUE_CLASS_SCALAR",
+            scalar.scalar_enum,
+        ),
+        result_count=1,
+        immediate_index=0,
+        literal_word_count=scalar.literal_word_count,
     )
 
 
@@ -728,10 +747,11 @@ def _packet_rows() -> tuple[_PacketRow, ...]:
     return (
         *(_boolean_constant_row(row) for row in BOOLEAN_CONSTANTS),
         *(_integer_constant_row(scalar_pair) for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS),
+        *(_float_constant_row(scalar) for scalar in FLOAT_CONSTANT_TYPES),
         _PacketRow(
             "spirv.op_constant.offset64",
             opcode="LOOM_SPIRV_OP_CONSTANT",
-            form="LOOM_SPIRV_PACKET_FORM_INTEGER_CONSTANT",
+            form="LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT",
             result_type=_offset64_value(),
             result_count=1,
             immediate_index=0,

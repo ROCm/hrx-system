@@ -25,7 +25,7 @@ extern "C" {
 
 typedef enum loom_spirv_packet_form_e {
   LOOM_SPIRV_PACKET_FORM_UNSUPPORTED = 0,
-  LOOM_SPIRV_PACKET_FORM_INTEGER_CONSTANT = 1,
+  LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT = 1,
   LOOM_SPIRV_PACKET_FORM_BINARY_SAME_TYPE = 2,
   LOOM_SPIRV_PACKET_FORM_PTR_ACCESS_CHAIN = 3,
   LOOM_SPIRV_PACKET_FORM_LOAD_ALIGNED = 4,
@@ -58,7 +58,7 @@ typedef struct loom_spirv_packet_row_t {
   uint8_t operand_count;
   // Descriptor-local immediate index read by the row.
   uint8_t immediate_index;
-  // Number of literal words emitted for INTEGER_CONSTANT rows.
+  // Number of literal words emitted for SCALAR_CONSTANT rows.
   uint8_t literal_word_count;
   // Alignment operand for aligned memory access rows.
   uint8_t memory_alignment;

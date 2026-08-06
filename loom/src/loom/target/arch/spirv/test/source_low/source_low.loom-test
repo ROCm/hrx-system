@@ -142,9 +142,47 @@ func.def target(@target_scalar_payloads) @spirv_scalar_payload_abi(%flag: i1, %i
   func.return %flag, %i8, %i16, %i32, %i64, %f16, %bf16, %f32, %f64 : i1, i8, i16, i32, i64, f16, bf16, f32, f64
 }
 
+func.def target(@target_scalar_payloads) @spirv_scalar_float_constants(%f16_output: buffer, %bf16_output: buffer, %f32_output: buffer, %f64_output: buffer) {
+  %output_base = index.constant 0 : offset
+  %f16_output_aligned = buffer.assume.alignment %f16_output {minimum_alignment = 2} : buffer
+  %bf16_output_aligned = buffer.assume.alignment %bf16_output {minimum_alignment = 2} : buffer
+  %f32_output_aligned = buffer.assume.alignment %f32_output {minimum_alignment = 4} : buffer
+  %f64_output_aligned = buffer.assume.alignment %f64_output {minimum_alignment = 8} : buffer
+  %f16 = scalar.constant -1.5 : f16
+  %bf16 = scalar.constant 1.5 : bf16
+  %f32 = scalar.constant 3.25 : f32
+  %f64 = scalar.constant -0.125 : f64
+  %f16_view = buffer.view %f16_output_aligned[%output_base] : buffer -> view<1xf16, #dense>
+  %bf16_view = buffer.view %bf16_output_aligned[%output_base] : buffer -> view<1xbf16, #dense>
+  %f32_view = buffer.view %f32_output_aligned[%output_base] : buffer -> view<1xf32, #dense>
+  %f64_view = buffer.view %f64_output_aligned[%output_base] : buffer -> view<1xf64, #dense>
+  view.store %f16, %f16_view[0] : f16, view<1xf16, #dense>
+  view.store %bf16, %bf16_view[0] : bf16, view<1xbf16, #dense>
+  view.store %f32, %f32_view[0] : f32, view<1xf32, #dense>
+  view.store %f64, %f64_view[0] : f64, view<1xf64, #dense>
+  func.return
+}
+
 // ----
 low.func.def target<spirv.logical.core>(@target_scalar_payloads) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [1, 21, 22, 23, 24, 17, 20, 18, 19], spirv_result_value_types = [1, 21, 22, 23, 24, 17, 20, 18, 19]}) @spirv_scalar_payload_abi(%flag: reg<spirv.id : i1>, %i8: reg<spirv.id : i8>, %i16: reg<spirv.id : i16>, %i32: reg<spirv.id : i32>, %i64: reg<spirv.id : i64>, %f16: reg<spirv.id : f16>, %bf16: reg<spirv.id : bf16>, %f32: reg<spirv.id : f32>, %f64: reg<spirv.id : f64>) -> (reg<spirv.id : i1>, reg<spirv.id : i8>, reg<spirv.id : i16>, reg<spirv.id : i32>, reg<spirv.id : i64>, reg<spirv.id : f16>, reg<spirv.id : bf16>, reg<spirv.id : f32>, reg<spirv.id : f64>) asm {
   return %flag, %i8, %i16, %i32, %i64, %f16, %bf16, %f32, %f64
+}
+
+low.func.def target<spirv.logical.core>(@target_scalar_payloads) abi(shader_entry_point) @spirv_scalar_float_constants(%f16_output_aligned: reg<spirv.ptr.storage_buffer>, %bf16_output_aligned: reg<spirv.ptr.storage_buffer>, %f32_output_aligned: reg<spirv.ptr.storage_buffer>, %f64_output_aligned: reg<spirv.ptr.storage_buffer>) asm {
+  %f16 = OpConstant.f16 48640 : reg<spirv.id : f16>
+  %bf16 = OpConstant.bf16 16320 : reg<spirv.id : bf16>
+  %f32 = OpConstant.f32 1078984704 : reg<spirv.id : f32>
+  %f64 = OpConstant.f64 -4629700416936869888 : reg<spirv.id : f64>
+  %61 = OpConstant.offset64 0
+  %62 = OpPtrAccessChain.storage_buffer.f16.byte_offset %f16_output_aligned, %61
+  OpStore.storage_buffer.f16 %62, %f16
+  %64 = OpPtrAccessChain.storage_buffer.bf16.byte_offset %bf16_output_aligned, %61
+  OpStore.storage_buffer.bf16 %64, %bf16
+  %66 = OpPtrAccessChain.storage_buffer.f32.byte_offset %f32_output_aligned, %61
+  OpStore.storage_buffer.f32 %66, %f32
+  %68 = OpPtrAccessChain.storage_buffer.f64.byte_offset %f64_output_aligned, %61
+  OpStore.storage_buffer.f64 %68, %f64
+  return
 }
 
 // ====

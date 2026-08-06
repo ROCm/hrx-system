@@ -61,6 +61,10 @@ from loom.target.arch.spirv.scalar_alu import (
     ScalarAluType,
     ScalarBinaryOperation,
 )
+from loom.target.arch.spirv.scalar_constant import (
+    FLOAT_CONSTANT_TYPES,
+    FloatConstantType,
+)
 from loom.target.arch.spirv.scalar_conversion import (
     DIRECT_SCALAR_CONVERSIONS,
     UNSIGNED_SCALAR_CONVERSIONS,
@@ -96,6 +100,7 @@ from loom.target.contracts import (
     TypePattern,
     ValueAliasRule,
     ValueElideRule,
+    ValueProject,
     ValueRef,
     Vector,
     View,
@@ -169,12 +174,49 @@ def _integer_constant_rule(scalar_pair: IntegerAluTypePair) -> DescriptorRule:
                 scalar_pair.signed_minimum,
                 scalar_pair.signed_maximum,
             ),
+            *_feature_guards(descriptor),
         ),
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
                 results={"dst": ValueRef.result("result")},
                 immediates={immediate_name: AttrProject.direct("value")},
+                form=DescriptorEmitForm.CONST,
+            ),
+        ),
+    )
+
+
+def _float_constant_bits_project(scalar: FloatConstantType) -> ValueProject:
+    if scalar.source_type == "f16":
+        return ValueProject.float_as_f16_bits("result")
+    if scalar.source_type == "bf16":
+        return ValueProject.float_as_bf16_bits("result")
+    if scalar.source_type == "f32":
+        return ValueProject.float_as_f32_bits("result")
+    if scalar.source_type == "f64":
+        return ValueProject.float_as_f64_bits("result")
+    raise ValueError(f"unsupported SPIR-V float constant type {scalar.source_type}")
+
+
+def _float_constant_rule(scalar: FloatConstantType) -> DescriptorRule:
+    descriptor = _descriptor(f"spirv.op_constant.{scalar.suffix}")
+    return DescriptorRule(
+        source_op=scalar_conversion.scalar_constant,
+        descriptor=descriptor,
+        guards=(
+            Guard.attr_kind("value", "f64"),
+            Guard.value_type("result", Scalar(scalar.source_type)),
+            Guard.value_exact_float("result"),
+            *_feature_guards(descriptor),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                results={"dst": ValueRef.result("result")},
+                immediates={
+                    f"{scalar.source_type}_bits": _float_constant_bits_project(scalar)
+                },
                 form=DescriptorEmitForm.CONST,
             ),
         ),
@@ -201,9 +243,13 @@ def _boolean_constant_rule(row: BooleanConstant) -> DescriptorRule:
 
 
 def _scalar_constant_rules() -> tuple[DescriptorRule, ...]:
-    return tuple(_boolean_constant_rule(row) for row in BOOLEAN_CONSTANTS) + tuple(
-        _integer_constant_rule(scalar_pair)
-        for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS
+    return (
+        tuple(_boolean_constant_rule(row) for row in BOOLEAN_CONSTANTS)
+        + tuple(
+            _integer_constant_rule(scalar_pair)
+            for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS
+        )
+        + tuple(_float_constant_rule(scalar) for scalar in FLOAT_CONSTANT_TYPES)
     )
 
 

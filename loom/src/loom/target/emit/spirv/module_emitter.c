@@ -422,7 +422,7 @@ static iree_status_t loom_spirv_emit_load_packet_operands(
   return iree_ok_status();
 }
 
-static iree_status_t loom_spirv_emit_integer_constant_packet(
+static iree_status_t loom_spirv_emit_scalar_constant_packet(
     loom_spirv_emit_state_t* state, const loom_low_descriptor_packet_t* packet,
     const loom_spirv_packet_row_t* row) {
   int64_t value = 0;
@@ -909,8 +909,8 @@ static iree_status_t loom_spirv_emit_descriptor_packet(
   IREE_ASSERT(row != NULL);
   loom_spirv_emit_validate_packet_shape(op, packet, row);
   switch (row->form) {
-    case LOOM_SPIRV_PACKET_FORM_INTEGER_CONSTANT:
-      return loom_spirv_emit_integer_constant_packet(state, packet, row);
+    case LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT:
+      return loom_spirv_emit_scalar_constant_packet(state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_BOOLEAN_CONSTANT:
       return loom_spirv_emit_boolean_constant_packet(state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_BINARY_SAME_TYPE:

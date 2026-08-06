@@ -1466,6 +1466,14 @@ low.func.def target<spirv.logical.core>(@target_scalar_payloads) abi(shader_entr
   return %flag, %i8, %i16, %i32, %i64, %f16, %bf16, %f32, %f64
 }
 
+low.func.def target<spirv.logical.core>(@target_scalar_payloads) abi(shader_entry_point) @spirv_scalar_float_constants() asm {
+  %f16 = OpConstant.f16 48640 : reg<spirv.id : f16>
+  %bf16 = OpConstant.bf16 16320 : reg<spirv.id : bf16>
+  %f32 = OpConstant.f32 1078984704 : reg<spirv.id : f32>
+  %f64 = OpConstant.f64 -4629700416936869888 : reg<spirv.id : f64>
+  return
+}
+
 // ----
                OpCapability Shader
                OpCapability VulkanMemoryModel
@@ -1485,7 +1493,9 @@ low.func.def target<spirv.logical.core>(@target_scalar_payloads) abi(shader_entr
                OpExtension "SPV_KHR_bfloat16"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
                OpEntryPoint GLCompute %spirv_scalar_payload_abi "spirv_scalar_payload_abi"
+               OpEntryPoint GLCompute %spirv_scalar_float_constants "spirv_scalar_float_constants"
                OpExecutionMode %spirv_scalar_payload_abi LocalSize 1 1 1
+               OpExecutionMode %spirv_scalar_float_constants LocalSize 1 1 1
                OpName %spirv_scalar_payload_abi "spirv_scalar_payload_abi"
                OpName %flag "flag"
                OpName %i8 "i8"
@@ -1496,6 +1506,11 @@ low.func.def target<spirv.logical.core>(@target_scalar_payloads) abi(shader_entr
                OpName %bf16 "bf16"
                OpName %f32 "f32"
                OpName %f64 "f64"
+               OpName %spirv_scalar_float_constants "spirv_scalar_float_constants"
+               OpName %f16_0 "f16"
+               OpName %bf16_0 "bf16"
+               OpName %f32_0 "f32"
+               OpName %f64_0 "f64"
                OpMemberDecorate %_struct_6 0 Offset 0
                OpDecorate %_struct_6 Block
                OpDecorate %4 DescriptorSet 0
@@ -1603,6 +1618,10 @@ low.func.def target<spirv.logical.core>(@target_scalar_payloads) abi(shader_entr
        %void = OpTypeVoid
          %55 = OpTypeFunction %void
       %int_1 = OpConstant %int 1
+      %f16_0 = OpConstant %half -0x1.8p+0
+     %bf16_0 = OpConstant %bfloat16 0x1.8p+0
+      %f32_0 = OpConstant %float 3.25
+      %f64_0 = OpConstant %double -0.125
 %spirv_scalar_payload_abi = OpFunction %void None %55
          %56 = OpLabel
          %57 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
@@ -1643,6 +1662,10 @@ low.func.def target<spirv.logical.core>(@target_scalar_payloads) abi(shader_entr
                OpStore %85 %f32 Aligned 4
          %86 = OpAccessChain %_ptr_StorageBuffer_double %53 %int_0
                OpStore %86 %f64 Aligned 8
+               OpReturn
+               OpFunctionEnd
+%spirv_scalar_float_constants = OpFunction %void None %55
+         %88 = OpLabel
                OpReturn
                OpFunctionEnd
 

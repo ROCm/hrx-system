@@ -39,6 +39,7 @@ iree_py_library(
     loom::py::loom::target::arch::spirv::cooperative_matrix
     loom::py::loom::target::arch::spirv::features
     loom::py::loom::target::arch::spirv::scalar_alu
+    loom::py::loom::target::arch::spirv::scalar_constant
     loom::py::loom::target::arch::spirv::scalar_conversion
     loom::py::loom::target::arch::spirv::scalar_memory
     loom::py::loom::target::low_descriptors
@@ -94,6 +95,37 @@ iree_py_library(
     "scalar_alu.py"
   DEPS
     loom::py::loom::target::arch::spirv::features
+)
+
+iree_py_library(
+  NAME
+    scalar_constant
+  SRCS
+    "__init__.py"
+    "scalar_constant.py"
+  DEPS
+    loom::py::loom::target::arch::spirv::features
+    loom::py::loom::target::arch::spirv::scalar_alu
+)
+
+iree_py_test(
+  NAME
+    scalar_constant_test
+  MAIN
+    "../../../tools/pytest_style_runner.py"
+  SRCS
+    "scalar_constant_test.py"
+    "../../../tools/pytest_style_runner.py"
+  ARGS
+    "loom.target.arch.spirv.scalar_constant_test"
+  DEPS
+    loom::py::loom::target::arch::spirv::scalar_constant
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
 )
 
 iree_py_library(

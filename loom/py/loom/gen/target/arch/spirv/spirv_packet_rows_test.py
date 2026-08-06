@@ -30,6 +30,7 @@ from loom.target.arch.spirv.scalar_alu import (
     SIGNED_INTEGER_COMPARE_PREDICATES,
     UNSIGNED_ORDERED_INTEGER_COMPARE_PREDICATES,
 )
+from loom.target.arch.spirv.scalar_constant import FLOAT_CONSTANT_TYPES
 from loom.target.arch.spirv.scalar_memory import STORAGE_BUFFER_SCALARS
 from loom.target.low_descriptors import Descriptor
 
@@ -149,6 +150,19 @@ def test_generation_emits_scalar_memory_packet_rows() -> None:
 
     assert "LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS" in tables
     assert "LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER" in tables
+
+
+def test_generation_emits_complete_float_constant_packet_rows() -> None:
+    tables = generate_tables()
+
+    for scalar in FLOAT_CONSTANT_TYPES:
+        row = _generated_row(tables, f"spirv.op_constant.{scalar.suffix}")
+        assert "LOOM_SPIRV_PACKET_FORM_SCALAR_CONSTANT" in row
+        assert scalar.scalar_enum in row
+        assert f".literal_word_count = {scalar.literal_word_count}" in row
+
+        descriptor = _descriptor(f"spirv.op_constant.{scalar.suffix}")
+        assert descriptor.feature_mask_words == ((scalar.feature_bits,) if scalar.feature_bits else ())
 
 
 def test_generation_uses_byte_strides_for_cooperative_matrix_rows() -> None:

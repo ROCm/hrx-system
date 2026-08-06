@@ -30,6 +30,7 @@ iree_py_library(
     loom::py::loom::target::arch::spirv::cooperative_matrix
     loom::py::loom::target::arch::spirv::descriptors
     loom::py::loom::target::arch::spirv::scalar_alu
+    loom::py::loom::target::arch::spirv::scalar_constant
     loom::py::loom::target::arch::spirv::scalar_conversion
     loom::py::loom::target::arch::spirv::scalar_memory
     loom::py::loom::target::contracts::contracts

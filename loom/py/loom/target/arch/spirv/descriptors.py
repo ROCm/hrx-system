@@ -40,6 +40,10 @@ from loom.target.arch.spirv.scalar_alu import (
     ScalarAluType,
     ScalarBinaryOperation,
 )
+from loom.target.arch.spirv.scalar_constant import (
+    FLOAT_CONSTANT_TYPES,
+    FloatConstantType,
+)
 from loom.target.arch.spirv.scalar_conversion import (
     INTEGER_VALUE_VIEW_CONVERSIONS,
     LOW_SCALAR_CONVERSIONS,
@@ -117,6 +121,15 @@ def _integer_constant_immediate(scalar_pair: IntegerAluTypePair) -> Immediate:
         bit_width=scalar_pair.bit_width,
         signed_min=scalar_pair.signed_minimum,
         unsigned_max=scalar_pair.signed_maximum,
+    )
+
+
+def _float_constant_immediate(scalar: FloatConstantType) -> Immediate:
+    return Immediate(
+        f"{scalar.source_type}_bits",
+        ImmediateKind.UNSIGNED,
+        bit_width=scalar.bit_width,
+        unsigned_max=(2**scalar.bit_width) - 1,
     )
 
 
@@ -818,6 +831,23 @@ def _integer_constant_descriptor(scalar_pair: IntegerAluTypePair) -> Descriptor:
     )
 
 
+def _float_constant_descriptor(scalar: FloatConstantType) -> Descriptor:
+    key = f"spirv.op_constant.{scalar.suffix}"
+    immediate = _float_constant_immediate(scalar)
+    return Descriptor(
+        key=key,
+        mnemonic=f"OpConstant.{scalar.suffix}",
+        semantic_tag=key,
+        operands=(_id_result(),),
+        op_kind=DescriptorOpKind.CONST,
+        immediates=(immediate,),
+        feature_mask_words=(scalar.feature_bits,) if scalar.feature_bits else (),
+        asm_forms=_asm(results=("dst",), immediates=(immediate.field_name,)),
+        schedule_class=_SCHEDULE_ALU,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _boolean_constant_descriptor(row: BooleanConstant) -> Descriptor:
     key = f"spirv.op_constant_{row.descriptor_suffix}.bool"
     return Descriptor(
@@ -1072,6 +1102,7 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
             _integer_constant_descriptor(scalar_pair)
             for scalar_pair in INTEGER_SCALAR_ALU_TYPE_PAIRS
         ),
+        *(_float_constant_descriptor(scalar) for scalar in FLOAT_CONSTANT_TYPES),
         Descriptor(
             key="spirv.op_constant.offset64",
             mnemonic="OpConstant.offset64",
