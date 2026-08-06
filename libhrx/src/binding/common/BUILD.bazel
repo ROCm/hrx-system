@@ -46,6 +46,7 @@ hrx_cc_library(
         "init.c",
         "kernel_arguments.c",
         "kpack.c",
+        "managed_global.c",
         "mem_pool.c",
         "memory.c",
         "module.c",
@@ -62,6 +63,7 @@ hrx_cc_library(
         "internal.h",
         "kernel_arguments.h",
         "kpack.h",
+        "managed_global.h",
         "memory.h",
         "stream.h",
         "tls.h",
@@ -137,6 +139,17 @@ hrx_cc_test(
 hrx_cc_test(
     name = "fat_binary_test",
     srcs = ["fat_binary_test.cc"],
+    deps = [
+        ":common",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "managed_global_test",
+    srcs = ["managed_global_test.cc"],
     deps = [
         ":common",
         "//runtime/src/iree/base",

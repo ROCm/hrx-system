@@ -152,6 +152,9 @@ typedef struct iree_hal_streaming_context_symbol_entry_t {
   void* key;
   // Compiled symbol associated with the registration key.
   iree_hal_streaming_symbol_t* symbol;
+  // True when |symbol| is managed storage copied back to its registered host
+  // storage after synchronization.
+  bool synchronize_managed_data_to_host;
 } iree_hal_streaming_context_symbol_entry_t;
 
 // Per-context cache of compiled symbols.
@@ -160,14 +163,19 @@ typedef struct iree_hal_streaming_context_symbol_entry_t {
 typedef struct iree_hal_streaming_context_symbol_map_t {
   // Hash table: host pointer -> compiled symbol on the context device.
   iree_hal_streaming_context_symbol_entry_t* entries;
+  // Number of slots allocated in |entries|.
   iree_host_size_t capacity;
+  // Number of live entries in |entries|.
   iree_host_size_t count;
+  // Number of entries requiring managed storage refresh.
+  iree_host_size_t managed_symbol_count;
 
   // List of modules loaded into this context.
   iree_hal_streaming_context_module_entry_t* modules;
 
-  // Notification list linkage.
+  // Next map receiving global registry notifications.
   struct iree_hal_streaming_context_symbol_map_t* next;
+  // Previous map receiving global registry notifications.
   struct iree_hal_streaming_context_symbol_map_t* prev;
 
   // Associated context (not owned).
@@ -176,6 +184,7 @@ typedef struct iree_hal_streaming_context_symbol_map_t {
   // Global registry the map is tracking.
   iree_hal_streaming_global_symbol_registry_t* registry;
 
+  // Allocator used for map-owned storage.
   iree_allocator_t host_allocator;
 } iree_hal_streaming_context_symbol_map_t;
 
@@ -2232,8 +2241,12 @@ typedef struct iree_hal_streaming_symbol_registration_t {
     } function;
     // Variable-specific metadata (only valid if type == GLOBAL/DATA).
     struct {
+      // Registered variable size in bytes.
       size_t size;
+      // Required variable alignment in bytes.
       uint32_t alignment;
+      // Host storage used to initialize and refresh a managed variable.
+      void* managed_initial_value;
     } variable;
   } params;
 } iree_hal_streaming_symbol_registration_t;
@@ -2312,7 +2325,8 @@ iree_status_t iree_hal_streaming_global_symbol_registry_insert_variable(
 iree_status_t iree_hal_streaming_global_symbol_registry_insert_managed_variable(
     iree_hal_streaming_global_symbol_registry_t* registry,
     iree_hal_streaming_module_registration_t* module, void* host_variable,
-    const char* device_name, size_t size, uint32_t alignment);
+    const char* device_name, size_t size, uint32_t alignment,
+    void* managed_initial_value);
 
 // Looks up the registration type for a host-side variable pointer.
 bool iree_hal_streaming_global_symbol_registry_query_variable(

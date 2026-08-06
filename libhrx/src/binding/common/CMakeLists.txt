@@ -36,6 +36,7 @@ iree_cc_library(
     "internal.h"
     "kernel_arguments.h"
     "kpack.h"
+    "managed_global.h"
     "memory.h"
     "stream.h"
     "tls.h"
@@ -51,6 +52,7 @@ iree_cc_library(
     "init.c"
     "kernel_arguments.c"
     "kpack.c"
+    "managed_global.c"
     "mem_pool.c"
     "memory.c"
     "module.c"
@@ -139,6 +141,19 @@ iree_cc_test(
     fat_binary_test
   SRCS
     "fat_binary_test.cc"
+  DEPS
+    ::common
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
+iree_cc_test(
+  NAME
+    managed_global_test
+  SRCS
+    "managed_global_test.cc"
   DEPS
     ::common
     iree::base
