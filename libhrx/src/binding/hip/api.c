@@ -1733,6 +1733,41 @@ HIPAPI hipError_t hipGetDevice(int* device) {
   return hipSuccess;
 }
 
+static IREE_THREAD_LOCAL bool iree_hip_device_was_explicitly_selected = false;
+
+static hipError_t iree_hip_set_current_device(int device,
+                                              bool explicit_selection) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  hipError_t init_result = iree_hip_ensure_initialized();
+  if (init_result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(init_result);
+  }
+
+  iree_hal_streaming_device_t* device_obj =
+      iree_hal_streaming_device_entry(device);
+  if (!device_obj) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  }
+
+  iree_hal_streaming_context_t* primary_context = NULL;
+  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_streaming_device_get_or_create_primary_context(device_obj,
+                                                              &primary_context),
+      hipErrorOutOfMemory);
+
+  iree_hal_streaming_context_set_current(primary_context);
+  if (explicit_selection) {
+    iree_hip_device_was_explicitly_selected = true;
+  }
+
+  IREE_TRACE_ZONE_END(z0);
+  return hipSuccess;
+}
+
 // Sets the current device for the calling thread.
 //
 // Parameters:
@@ -1761,37 +1796,29 @@ HIPAPI hipError_t hipGetDevice(int* device) {
 //
 // See also: hipGetDevice, hipGetDeviceCount, hipDeviceReset.
 HIPAPI hipError_t hipSetDevice(int device) {
-  IREE_TRACE_ZONE_BEGIN(z0);
+  return iree_hip_set_current_device(device, /*explicit_selection=*/true);
+}
 
-  // First ensure runtime is initialized.
-  // hipSetDevice() is often the first HIP call in applications.
-  hipError_t init_result = iree_hip_ensure_initialized();
-  if (init_result != hipSuccess) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(init_result);
+HIPAPI hipError_t hipSetValidDevices(int* device_arr, int len) {
+  int device_count = 0;
+  hipError_t result = hipGetDeviceCount(&device_count);
+  if (result != hipSuccess) return result;
+  if (len < 0 || len > device_count || (len > 0 && !device_arr)) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Get the device.
-  iree_hal_streaming_device_t* device_obj =
-      iree_hal_streaming_device_entry(device);
-  if (!device_obj) {
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  for (int i = 0; i < len; ++i) {
+    if (device_arr[i] < 0 || device_arr[i] >= device_count) {
+      HIP_RETURN_ERROR(hipErrorInvalidDevice);
+    }
   }
 
-  // Get or create the primary context lazily.
-  iree_hal_streaming_context_t* primary_context = NULL;
-  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
-      z0,
-      iree_hal_streaming_device_get_or_create_primary_context(device_obj,
-                                                              &primary_context),
-      hipErrorOutOfMemory);
-
-  // Switch to the primary context for the device.
-  iree_hal_streaming_context_set_current(primary_context);
-
-  IREE_TRACE_ZONE_END(z0);
-  return hipSuccess;
+  // The valid-device list selects the initial device for this thread. An
+  // explicit hipSetDevice call takes precedence over later preference lists.
+  if (iree_hip_device_was_explicitly_selected) return hipSuccess;
+  const int selected_device = len > 0 ? device_arr[0] : 0;
+  return iree_hip_set_current_device(selected_device,
+                                     /*explicit_selection=*/false);
 }
 
 // Gets the number of HIP-capable devices.
@@ -3045,6 +3072,12 @@ HIPAPI hipError_t hipDeviceReset(void) {
 // Device flags
 //===----------------------------------------------------------------------===//
 
+static bool iree_hip_context_flags_are_valid(unsigned int flags);
+static iree_hal_streaming_context_flags_t
+iree_hal_streaming_hip_context_flags_to_internal(unsigned int hip_flags);
+static unsigned int iree_hip_context_flags_from_internal(
+    iree_hal_streaming_context_flags_t flags);
+
 // Sets flags for the current device.
 //
 // Parameters:
@@ -3068,24 +3101,29 @@ HIPAPI hipError_t hipDeviceReset(void) {
 HIPAPI hipError_t hipSetDeviceFlags(unsigned int flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Ensure initialization.
-  hipError_t init_result = iree_hip_ensure_initialized();
+  if (!iree_hip_context_flags_are_valid(flags)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t init_result = iree_hip_ensure_context(&context);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
 
-  // Get current context to check if device is already active.
-  iree_hal_streaming_context_t* context = iree_hal_streaming_context_current();
-  if (context != NULL) {
-    // Device already has an active context - can't change flags.
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorSetOnActiveProcess);
-  }
-
-  // For now, we accept the flags but don't enforce them.
-  // The streaming backend uses its own scheduling model.
-  (void)flags;
+  // Host mapping and local-memory resize are fixed backend properties. Device
+  // flag updates retain only the scheduling mode, as reported by HIP on this
+  // architecture.
+  const iree_hal_streaming_context_flags_t internal_flags =
+      iree_hal_streaming_hip_context_flags_to_internal(flags &
+                                                       hipDeviceScheduleMask);
+  HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
+      z0,
+      iree_hal_streaming_device_set_primary_context_flags(
+          context->device_ordinal, &internal_flags),
+      hipErrorInvalidValue);
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -3112,16 +3150,14 @@ HIPAPI hipError_t hipGetDeviceFlags(unsigned int* flags) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Ensure initialization.
-  hipError_t init_result = iree_hip_ensure_initialized();
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t init_result = iree_hip_ensure_context(&context);
   if (init_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
 
-  // Return default flags (auto scheduling).
-  // The streaming backend doesn't currently track user-set flags.
-  *flags = 0;  // hipDeviceScheduleAuto
+  *flags = iree_hip_context_flags_from_internal(context->flags);
 
   IREE_TRACE_ZONE_END(z0);
   return hipSuccess;
@@ -3149,7 +3185,11 @@ HIPAPI hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig) {
 
 // Sets the shared memory configuration for the current device.
 HIPAPI hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config) {
-  (void)config;
+  if (config != hipSharedMemBankSizeDefault &&
+      config != hipSharedMemBankSizeFourByte &&
+      config != hipSharedMemBankSizeEightByte) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
   return hipSuccess;  // No-op on AMD
 }
 
@@ -3158,7 +3198,7 @@ HIPAPI hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* config) {
   if (!config) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  *config = hipSharedMemBankSizeDefault;
+  *config = hipSharedMemBankSizeFourByte;
   return hipSuccess;
 }
 
@@ -3311,34 +3351,13 @@ HIPAPI hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev,
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
-  // Convert HIP flags to strongly-typed internal flags.
-  iree_hal_streaming_context_flags_t internal_flags = {0};
-
-  // Extract scheduling mode from lower bits.
-  unsigned int sched_flags = flags & 0x07;
-  switch (sched_flags) {
-    case hipDeviceScheduleAuto:
-      internal_flags.scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO;
-      break;
-    case hipDeviceScheduleSpin:
-      internal_flags.scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN;
-      break;
-    case hipDeviceScheduleYield:
-      internal_flags.scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_YIELD;
-      break;
-    case hipDeviceScheduleBlockingSync:
-      internal_flags.scheduling_mode =
-          IREE_HAL_STREAMING_SCHEDULING_MODE_BLOCKING_SYNC;
-      break;
-    default:
-      internal_flags.scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO;
-      break;
+  if (!iree_hip_context_flags_are_valid(flags)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // Extract other flags.
-  internal_flags.map_host_memory = (flags & hipDeviceMapHost) != 0;
-  internal_flags.resize_local_mem_to_max =
-      (flags & hipDeviceLmemResizeToMax) != 0;
+  const iree_hal_streaming_context_flags_t internal_flags =
+      iree_hal_streaming_hip_context_flags_to_internal(flags);
 
   // Set the primary context flags.
   HIP_RETURN_STATUS_AND_END_ZONE_IF_ERROR(
@@ -3401,34 +3420,7 @@ HIPAPI hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev,
       hipErrorInvalidDevice);
 
   if (flags) {
-    // Convert internal flags back to HIP flags.
-    unsigned int hip_flags = 0;
-
-    // Set scheduling mode.
-    switch (internal_flags.scheduling_mode) {
-      case IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO:
-        hip_flags |= hipDeviceScheduleAuto;
-        break;
-      case IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN:
-        hip_flags |= hipDeviceScheduleSpin;
-        break;
-      case IREE_HAL_STREAMING_SCHEDULING_MODE_YIELD:
-        hip_flags |= hipDeviceScheduleYield;
-        break;
-      case IREE_HAL_STREAMING_SCHEDULING_MODE_BLOCKING_SYNC:
-        hip_flags |= hipDeviceScheduleBlockingSync;
-        break;
-    }
-
-    // Set other flags.
-    if (internal_flags.map_host_memory) {
-      hip_flags |= hipDeviceMapHost;
-    }
-    if (internal_flags.resize_local_mem_to_max) {
-      hip_flags |= hipDeviceLmemResizeToMax;
-    }
-
-    *flags = hip_flags;
+    *flags = iree_hip_context_flags_from_internal(internal_flags);
   }
 
   if (active) {
@@ -3543,6 +3535,21 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
 //===----------------------------------------------------------------------===//
 
 // Helper function to convert HIP context flags to internal flags.
+static bool iree_hip_context_flags_are_valid(unsigned int flags) {
+  const unsigned int known_flags =
+      hipDeviceScheduleMask | hipDeviceMapHost | hipDeviceLmemResizeToMax;
+  if ((flags & ~known_flags) != 0) return false;
+  switch (flags & hipDeviceScheduleMask) {
+    case hipDeviceScheduleAuto:
+    case hipDeviceScheduleSpin:
+    case hipDeviceScheduleYield:
+    case hipDeviceScheduleBlockingSync:
+      return true;
+    default:
+      return false;
+  }
+}
+
 static iree_hal_streaming_context_flags_t
 iree_hal_streaming_hip_context_flags_to_internal(unsigned int hip_flags) {
   iree_hal_streaming_context_flags_t flags = {0};
@@ -3573,6 +3580,28 @@ iree_hal_streaming_hip_context_flags_to_internal(unsigned int hip_flags) {
   }
 
   return flags;
+}
+
+static unsigned int iree_hip_context_flags_from_internal(
+    iree_hal_streaming_context_flags_t flags) {
+  unsigned int hip_flags = 0;
+  switch (flags.scheduling_mode) {
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO:
+      hip_flags = hipDeviceScheduleAuto;
+      break;
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN:
+      hip_flags = hipDeviceScheduleSpin;
+      break;
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_YIELD:
+      hip_flags = hipDeviceScheduleYield;
+      break;
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_BLOCKING_SYNC:
+      hip_flags = hipDeviceScheduleBlockingSync;
+      break;
+  }
+  if (flags.map_host_memory) hip_flags |= hipDeviceMapHost;
+  if (flags.resize_local_mem_to_max) hip_flags |= hipDeviceLmemResizeToMax;
+  return hip_flags;
 }
 
 // Creates a new HIP context for a device.
