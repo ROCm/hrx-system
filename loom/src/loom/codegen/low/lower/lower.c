@@ -1078,7 +1078,12 @@ static iree_status_t loom_low_lower_record_selected_rule_plan(
     IREE_ASSERT(source_memory_state != NULL);
     IREE_ASSERT_EQ(source_memory_state->source_op, source_op);
     IREE_ASSERT(source_memory_state->plan_available);
-    source_memory_access = source_memory_state->access_plan;
+    loom_low_source_memory_access_plan_t* retained_source_memory_access = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_plan_data(
+        context, sizeof(*retained_source_memory_access),
+        (void**)&retained_source_memory_access));
+    *retained_source_memory_access = *source_memory_state->access_plan;
+    source_memory_access = retained_source_memory_access;
   }
   loom_low_lower_record_selected_plan(
       context, (loom_low_lower_selected_plan_t){
@@ -1297,12 +1302,8 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
           context, &match_context.view_regions));
       view_regions_resolved = true;
     }
-    if (rule_set->source_memory_count != 0 &&
-        source_memory_state->access_plan == NULL) {
-      IREE_RETURN_IF_ERROR(loom_low_lower_allocate_scratch_array(
-          context, 1, sizeof(*source_memory_state->access_plan),
-          (void**)&source_memory_state->access_plan));
-    }
+    IREE_ASSERT(rule_set->source_memory_count == 0 ||
+                source_memory_state->access_plan != NULL);
     loom_low_lower_rule_selection_t rule_selection = {0};
     IREE_RETURN_IF_ERROR(
         loom_low_lower_rule_set_select_rule_range_with_match_context(
@@ -1707,9 +1708,10 @@ static iree_status_t loom_low_lower_plan_op(loom_low_lower_context_t* context,
 
   const loom_low_lower_rule_set_t* failed_rule_set = NULL;
   loom_low_lower_rule_selection_t failed_rule_selection = {0};
+  loom_low_source_memory_access_plan_t source_memory_access;
   loom_low_lower_rule_source_memory_state_t source_memory_state;
   loom_low_lower_rule_source_memory_state_initialize(
-      source_op, /*access_plan_storage=*/NULL, &source_memory_state);
+      source_op, &source_memory_access, &source_memory_state);
   bool selected_rule = false;
   if (context->contract_index.case_count != 0) {
     IREE_RETURN_IF_ERROR(loom_low_lower_plan_op_from_contract_index(
