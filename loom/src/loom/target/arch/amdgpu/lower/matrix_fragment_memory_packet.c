@@ -253,9 +253,9 @@ typedef uint32_t loom_amdgpu_fp8_16bit_capabilities_t;
 enum loom_amdgpu_fp8_16bit_capability_bits_e {
   LOOM_AMDGPU_FP8_16BIT_CAPABILITY_NONE = 0u,
   LOOM_AMDGPU_FP8_16BIT_CAPABILITY_IDENTITY_E8M0_PK8_BF16 = 1u << 0,
-  LOOM_AMDGPU_FP8_16BIT_CAPABILITY_IDENTITY_SCALEF32_BF16_PAIR = 1u << 1,
+  LOOM_AMDGPU_FP8_16BIT_CAPABILITY_SCALEF32_BF16_PAIR = 1u << 1,
   LOOM_AMDGPU_FP8_16BIT_CAPABILITY_IDENTITY_E8M0_PK8_F16 = 1u << 2,
-  LOOM_AMDGPU_FP8_16BIT_CAPABILITY_IDENTITY_SCALEF32_F16_PAIR = 1u << 3,
+  LOOM_AMDGPU_FP8_16BIT_CAPABILITY_SCALEF32_F16_PAIR = 1u << 3,
   LOOM_AMDGPU_FP8_16BIT_CAPABILITY_NATIVE_F16_PAIR = 1u << 4,
 };
 
@@ -269,10 +269,9 @@ loom_amdgpu_fragment_memory_fp8_decode_packet_flags(
           LOOM_AMDGPU_FP8_16BIT_CAPABILITY_IDENTITY_E8M0_PK8_BF16)) {
     return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_IDENTITY_E8M0_PK8_BF16;
   }
-  if (iree_any_bit_set(
-          capabilities,
-          LOOM_AMDGPU_FP8_16BIT_CAPABILITY_IDENTITY_SCALEF32_BF16_PAIR)) {
-    return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_IDENTITY_SCALEF32_BF16_PAIR;
+  if (iree_any_bit_set(capabilities,
+                       LOOM_AMDGPU_FP8_16BIT_CAPABILITY_SCALEF32_BF16_PAIR)) {
+    return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_SCALEF32_BF16_PAIR;
   }
   const bool prefer_packed_bf16 =
       loom_amdgpu_fp8_prefers_packed_bf16_pair_decode(decode_plan,
@@ -337,10 +336,9 @@ loom_amdgpu_fragment_memory_fp8_to_f16_decode_packet_flags(
           LOOM_AMDGPU_FP8_16BIT_CAPABILITY_IDENTITY_E8M0_PK8_F16)) {
     return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_IDENTITY_E8M0_PK8_F16;
   }
-  if (iree_any_bit_set(
-          capabilities,
-          LOOM_AMDGPU_FP8_16BIT_CAPABILITY_IDENTITY_SCALEF32_F16_PAIR)) {
-    return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_IDENTITY_SCALEF32_F16_PAIR;
+  if (iree_any_bit_set(capabilities,
+                       LOOM_AMDGPU_FP8_16BIT_CAPABILITY_SCALEF32_F16_PAIR)) {
+    return LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_SCALEF32_F16_PAIR;
   }
   if (iree_any_bit_set(capabilities,
                        LOOM_AMDGPU_FP8_16BIT_CAPABILITY_NATIVE_F16_PAIR)) {
@@ -1048,18 +1046,17 @@ void loom_amdgpu_fragment_memory_apply_fp8_load_strategy_flags(
       LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
   loom_amdgpu_fp8_16bit_capabilities_t capabilities =
       LOOM_AMDGPU_FP8_16BIT_CAPABILITY_NONE;
-  const bool has_identity_scalef32_descriptor =
+  const bool has_scalef32_descriptor =
       descriptor_set != NULL &&
       loom_amdgpu_fp8_scalef32_descriptor_ref(plan->descriptor_source_format,
                                               result_element_type,
                                               &scalef32_descriptor_ref) &&
       loom_amdgpu_descriptor_set_has_ref(descriptor_set,
                                          scalef32_descriptor_ref);
-  if (has_identity_scalef32_descriptor) {
-    capabilities |=
-        result_is_f16
-            ? LOOM_AMDGPU_FP8_16BIT_CAPABILITY_IDENTITY_SCALEF32_F16_PAIR
-            : LOOM_AMDGPU_FP8_16BIT_CAPABILITY_IDENTITY_SCALEF32_BF16_PAIR;
+  if (has_scalef32_descriptor) {
+    capabilities |= result_is_f16
+                        ? LOOM_AMDGPU_FP8_16BIT_CAPABILITY_SCALEF32_F16_PAIR
+                        : LOOM_AMDGPU_FP8_16BIT_CAPABILITY_SCALEF32_BF16_PAIR;
   }
   loom_amdgpu_descriptor_ref_t e8m0_pk8_descriptor_ref =
       LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
@@ -1098,12 +1095,35 @@ void loom_amdgpu_fragment_memory_apply_fp8_load_strategy_flags(
         loom_amdgpu_fp8_decode_value_flags_from_facts(source_facts);
   }
 
-  const loom_amdgpu_fragment_memory_packet_flags_t packet_flags =
-      result_is_f16
-          ? loom_amdgpu_fragment_memory_fp8_to_f16_decode_packet_flags(
-                &decode_plan, capabilities, decode_value_flags)
-          : loom_amdgpu_fragment_memory_fp8_decode_packet_flags(
-                &decode_plan, capabilities, decode_value_flags);
+  loom_amdgpu_fragment_memory_packet_flags_t packet_flags = 0;
+  if (plan->fp8_load_scale_source != LOOM_VALUE_ID_INVALID) {
+    if (has_scalef32_descriptor) {
+      packet_flags =
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_SCALEF32_BF16_PAIR;
+    } else if (iree_any_bit_set(
+                   decode_plan.flags,
+                   LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_F32_PAIR)) {
+      packet_flags =
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_F32_PAIR;
+      if (iree_any_bit_set(
+              decode_plan.flags,
+              LOOM_AMDGPU_FP8_DECODE_PLAN_FLAG_HAS_NATIVE_BF16_PACK)) {
+        packet_flags |=
+            LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_BF16_PACK;
+      }
+    } else {
+      packet_flags = loom_amdgpu_fragment_memory_fp8_decode_packet_flags(
+          &decode_plan, LOOM_AMDGPU_FP8_16BIT_CAPABILITY_NONE,
+          decode_value_flags);
+    }
+  } else {
+    packet_flags =
+        result_is_f16
+            ? loom_amdgpu_fragment_memory_fp8_to_f16_decode_packet_flags(
+                  &decode_plan, capabilities, decode_value_flags)
+            : loom_amdgpu_fragment_memory_fp8_decode_packet_flags(
+                  &decode_plan, capabilities, decode_value_flags);
+  }
   if (packet_flags == 0) {
     return;
   }
@@ -1177,14 +1197,14 @@ static const loom_amdgpu_fragment_memory_fp8_strategy_row_t
         },
         {
             .packet_flags =
-                LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_IDENTITY_SCALEF32_F16_PAIR,
+                LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_SCALEF32_F16_PAIR,
             .strategy_key = IREE_SVL("fp8_identity_scalef32_f16_pair"),
             .properties =
                 LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_STRATEGY_PROPERTY_NO_FALLBACK,
         },
         {
             .packet_flags =
-                LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_IDENTITY_SCALEF32_BF16_PAIR,
+                LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_SCALEF32_BF16_PAIR,
             .strategy_key = IREE_SVL("fp8_identity_scalef32_bf16_pair"),
             .properties =
                 LOOM_AMDGPU_FRAGMENT_MEMORY_FP8_STRATEGY_PROPERTY_NO_FALLBACK,
@@ -1282,11 +1302,49 @@ loom_amdgpu_fragment_memory_fp8_full_decode_fallback_reason(
   return iree_string_view_empty();
 }
 
+static iree_string_view_t loom_amdgpu_fragment_memory_fp8_scalef32_strategy_key(
+    loom_amdgpu_fragment_memory_packet_flags_t packet_flags) {
+  if (iree_any_bit_set(
+          packet_flags,
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_SCALEF32_BF16_PAIR)) {
+    return IREE_SV("fp8_scalef32_native_bf16_pair");
+  }
+  if (iree_any_bit_set(
+          packet_flags,
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_F32_PAIR)) {
+    return iree_any_bit_set(
+               packet_flags,
+               LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_NATIVE_BF16_PACK)
+               ? IREE_SV("fp8_scalef32_native_f32_pair_native_bf16_pack")
+               : IREE_SV("fp8_scalef32_native_f32_pair_manual_bf16_pack");
+  }
+  if (iree_any_bit_set(
+          packet_flags,
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_PACKED_BF16_DECODE)) {
+    return iree_any_bit_set(
+               packet_flags,
+               LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_EXACT_BF16_VIA_F16)
+               ? IREE_SV(
+                     "fp8_scalef32_software_packed_bf16_decode_exact_via_f16")
+               : IREE_SV("fp8_scalef32_software_packed_bf16_decode");
+  }
+  if (iree_any_bit_set(
+          packet_flags,
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKET_FLAG_FP8_FULL_BF16_DECODE)) {
+    return IREE_SV("fp8_scalef32_software_full_bf16_decode");
+  }
+  return iree_string_view_empty();
+}
+
 static iree_string_view_t loom_amdgpu_fragment_memory_packet_strategy_key(
     const loom_amdgpu_fragment_memory_plan_t* plan,
     const loom_amdgpu_fragment_memory_packet_plan_t* packet) {
   if (loom_amdgpu_fragment_memory_payload_form_is_load_fp8_to_16bit(
           plan->payload_form)) {
+    if (plan->fp8_load_scale_source != LOOM_VALUE_ID_INVALID) {
+      return loom_amdgpu_fragment_memory_fp8_scalef32_strategy_key(
+          packet->flags);
+    }
     const loom_amdgpu_fragment_memory_fp8_strategy_row_t* strategy_row =
         loom_amdgpu_fragment_memory_lookup_fp8_strategy_row(packet->flags);
     if (strategy_row != NULL) {

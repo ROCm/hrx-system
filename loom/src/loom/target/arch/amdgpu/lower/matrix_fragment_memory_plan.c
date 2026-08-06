@@ -1469,6 +1469,52 @@ loom_amdgpu_fragment_memory_narrowed_result_sources(
   return sources;
 }
 
+static bool loom_amdgpu_fragment_memory_fp8_load_scale_source(
+    const loom_value_fact_table_t* fact_table, loom_value_id_t payload,
+    loom_amdgpu_fragment_memory_payload_form_t payload_form,
+    loom_scalar_type_t view_element_type,
+    const loom_value_fact_storage_schema_t* view_storage_schema,
+    const loom_matrix_fragment_role_layout_t* role_layout,
+    loom_value_id_t* out_scale_source) {
+  *out_scale_source = LOOM_VALUE_ID_INVALID;
+  if (!loom_amdgpu_fragment_memory_payload_form_is_load_fp8_to_16bit(
+          payload_form) ||
+      view_storage_schema == NULL) {
+    return true;
+  }
+
+  const loom_value_fact_encoded_operand_schema_t schema =
+      view_storage_schema->encoded_operand;
+  if (schema.scale_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE &&
+      schema.secondary_scale_format == LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE &&
+      schema.affine_policy == LOOM_VALUE_FACT_AFFINE_POLICY_NONE) {
+    return true;
+  }
+  if (payload_form !=
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_LOAD_FP8_TO_BF16 ||
+      !loom_amdgpu_fp8_encoded_operand_schema_matches(
+          schema, view_element_type, role_layout->payload_element_count,
+          LOOM_AMDGPU_FP8_ENCODED_OPERAND_SCHEMA_KIND_SCALE_F32) ||
+      fact_table == NULL) {
+    return false;
+  }
+
+  loom_vector_fragment_fact_t fragment_fact;
+  if (!loom_vector_fragment_fact_query_value_facts(
+          &fact_table->context,
+          loom_value_fact_table_lookup(fact_table, payload), &fragment_fact)) {
+    return false;
+  }
+  if (!iree_any_bit_set(fragment_fact.auxiliary.present_keys,
+                        LOOM_VECTOR_ENCODING_AUXILIARY_KEY_BIT_SCALE)) {
+    return false;
+  }
+  const loom_value_id_t scale_source =
+      fragment_fact.auxiliary.values[LOOM_VECTOR_ENCODING_AUXILIARY_KEY_SCALE];
+  *out_scale_source = scale_source;
+  return true;
+}
+
 static bool loom_amdgpu_fragment_memory_analyze(
     const loom_amdgpu_fragment_memory_environment_t* environment,
     const loom_amdgpu_fragment_memory_source_t* source,
@@ -1530,6 +1576,15 @@ static bool loom_amdgpu_fragment_memory_analyze(
   IREE_ASSERT_TRUE(role_layout != NULL);
   IREE_ASSERT_LE(role_layout->register_count,
                  LOOM_AMDGPU_MAX_MATRIX_FRAGMENT_32BIT_REGISTERS);
+  loom_value_id_t fp8_load_scale_source = LOOM_VALUE_ID_INVALID;
+  if (!loom_amdgpu_fragment_memory_fp8_load_scale_source(
+          environment->fact_table, source->payload, payload_form,
+          view_element_type,
+          has_view_storage_schema ? &view_storage_schema : NULL, role_layout,
+          &fp8_load_scale_source)) {
+    return loom_amdgpu_fragment_memory_reject(diagnostic,
+                                              IREE_SV("fragment_memory.scale"));
+  }
   if (!loom_amdgpu_fragment_memory_payload_matches(
           payload_type, view_type,
           has_view_storage_schema ? &view_storage_schema : NULL, operation_kind,
@@ -1665,6 +1720,7 @@ static bool loom_amdgpu_fragment_memory_analyze(
         .layout_kind = layout->kind,
         .source = source_access,
         .payload = source->payload,
+        .fp8_load_scale_source = fp8_load_scale_source,
         .view_rank = access.view_rank,
         .register_count = role_layout->register_count,
         .payload_register_count = payload_register_count,
