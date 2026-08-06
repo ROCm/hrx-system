@@ -128,6 +128,23 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    handle_registry
+  HDRS
+    "handle_registry.h"
+  SRCS
+    "handle_registry.c"
+  DEPS
+    iree::base
+    iree::base::threading
+    libhrx_defs
+  INCLUDES
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../..>"
+  PUBLIC
+)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 iree_cc_library(
   NAME
@@ -144,6 +161,7 @@ iree_cc_library(
     "api_metadata.c"
   DEPS
     ::blocking_printf_provider
+    ::handle_registry
     ::launch_params
     iree::base
     iree::base::threading
@@ -164,6 +182,18 @@ iree_cc_library(
   PUBLIC
 )
 endif()
+
+iree_cc_test(
+  NAME
+    handle_registry_test
+  SRCS
+    "handle_registry_test.cc"
+  DEPS
+    ::handle_registry
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
 
 if(TARGET libhrx_src_binding_hip_amdhip64)
 set_target_properties(libhrx_src_binding_hip_amdhip64 PROPERTIES
@@ -331,6 +361,7 @@ endif()
 # the exact artifact under test, and make sure that artifact is built first.
 # The build-tree path is only valid for the in-tree CTest run.
 foreach(_hrx_hip_dso_test
+    libhrx_src_binding_hip_hip_api_name_test
     libhrx_src_binding_hip_hip_get_proc_address_test
     libhrx_src_binding_hip_hip_launch_validation_api_test)
   if(TARGET ${_hrx_hip_dso_test})

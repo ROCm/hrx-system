@@ -249,11 +249,12 @@ struct iree_hal_streaming_context_t {
   // Host allocator.
   iree_allocator_t host_allocator;
 
-  // Stream tracking (non-owning references - streams are not retained).
-  // NOTE: Streams are NOT retained by this list to avoid reference cycles.
-  // Streams must unregister themselves before destruction.
-  iree_hal_streaming_stream_t** streams;  // Non-owning pointers.
+  // Streams retained by the context until explicitly unregistered. Streams
+  // retain no context reference, so this ownership is acyclic.
+  iree_hal_streaming_stream_t** streams;
+  // Number of retained streams in |streams|.
   iree_host_size_t stream_count;
+  // Number of allocated entries in |streams|.
   iree_host_size_t stream_capacity;
 
   // Dedicated mutex for stream list access.
@@ -491,12 +492,10 @@ typedef struct iree_hal_streaming_stream_t {
   iree_hal_streaming_synchronization_policy_t synchronization_policy;
   // HIP stream scheduling priority hint.
   int priority;
-  // Number of 32-bit entries in |cu_mask|; zero until CU-mask APIs attach
-  // state.
+  // Number of 32-bit entries in |cu_mask|.
   iree_host_size_t cu_mask_count;
-  // Optional HIP CU mask owned by this stream; NULL means default device mask.
-  // The stream CU-mask API follow-up will populate/query this value; command
-  // scheduling in this layer does not consume it.
+  // Optional compute-unit mask owned by this stream; NULL selects the device
+  // default. This records the requested stream property for API queries.
   uint32_t* cu_mask;
   // Stable HIP stream identifier, unique within this context.
   unsigned long long stream_id;
@@ -1478,10 +1477,11 @@ iree_status_t iree_hal_streaming_context_disable_peer_access(
 iree_status_t iree_hal_streaming_context_register_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
 
-// Unregisters a stream from the context.
-// Called during stream destruction.
+// Unregisters a stream from the context and releases the list's reference.
+// Returns true only to the caller that removed the stream. This lets public
+// handle destruction atomically reject stale or concurrently destroyed handles.
 // Synchronization: none (thread-safe internal locking).
-void iree_hal_streaming_context_unregister_stream(
+bool iree_hal_streaming_context_unregister_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
 
 iree_status_t iree_hal_streaming_context_allocate_capture_id(

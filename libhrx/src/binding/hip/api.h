@@ -358,6 +358,8 @@ typedef enum hipStreamFlags {
   hipStreamNonBlocking = 0x01
 } hipStreamFlags_t;
 
+typedef union hipStreamBatchMemOpParams_union hipStreamBatchMemOpParams;
+
 #define hipStreamPerThread ((hipStream_t)2)
 #define hipStreamLegacy ((hipStream_t)1)
 
@@ -399,6 +401,8 @@ typedef enum hipEventFlags {
   hipEventReleaseToDevice = 0x40000000,
   hipEventReleaseToSystem = 0x80000000
 } hipEventFlags_t;
+
+#define hipEventDisableSystemFence 0x20000000u
 
 typedef enum hipDeviceP2PAttr {
   hipDevP2PAttrPerformanceRank = 0,
@@ -1072,6 +1076,16 @@ typedef union hipLaunchAttributeValue {
   const hipExtDynDataPrefetchConfig* dynDataPrefetch;
 } hipLaunchAttributeValue;
 
+#define hipStreamAttrID hipLaunchAttributeID
+#define hipStreamAttributeAccessPolicyWindow \
+  hipLaunchAttributeAccessPolicyWindow
+#define hipStreamAttributeSynchronizationPolicy \
+  hipLaunchAttributeSynchronizationPolicy
+#define hipStreamAttributeMemSyncDomainMap hipLaunchAttributeMemSyncDomainMap
+#define hipStreamAttributeMemSyncDomain hipLaunchAttributeMemSyncDomain
+#define hipStreamAttributePriority hipLaunchAttributePriority
+#define hipStreamAttrValue hipLaunchAttributeValue
+
 #define hipKernelNodeAttrID hipLaunchAttributeID
 #define hipKernelNodeAttributeAccessPolicyWindow \
   hipLaunchAttributeAccessPolicyWindow
@@ -1484,6 +1498,9 @@ HIPAPI hipError_t hipStreamWaitValue32(hipStream_t stream, void* ptr,
 HIPAPI hipError_t hipStreamWaitValue64(hipStream_t stream, void* ptr,
                                        uint64_t value, unsigned int flags,
                                        uint64_t mask);
+HIPAPI hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
+                                      hipStreamBatchMemOpParams* param_array,
+                                      unsigned int flags);
 HIPAPI hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream,
                                                uint32_t cuMaskSize,
                                                const uint32_t* cuMask);

@@ -663,10 +663,10 @@ iree_status_t iree_hal_streaming_context_allocate_capture_id(
   return iree_ok_status();
 }
 
-void iree_hal_streaming_context_unregister_stream(
+bool iree_hal_streaming_context_unregister_stream(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_stream_t* stream) {
-  if (!context || !stream) return;
+  if (!context || !stream) return false;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   bool found = false;
@@ -692,6 +692,7 @@ void iree_hal_streaming_context_unregister_stream(
   }
 
   IREE_TRACE_ZONE_END(z0);
+  return found;
 }
 
 bool iree_hal_streaming_context_has_peer_contexts(
@@ -1048,6 +1049,11 @@ iree_status_t iree_hal_streaming_context_query(
       context, &streams_copy, &count);
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(query_status);
        ++i) {
+    // The legacy default stream does not order with non-blocking streams.
+    if (iree_any_bit_set(streams_copy[i]->flags,
+                         IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING)) {
+      continue;
+    }
     int stream_status = 0;
     query_status =
         iree_hal_streaming_stream_query(streams_copy[i], &stream_status);

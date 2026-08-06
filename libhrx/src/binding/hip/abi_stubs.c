@@ -122,7 +122,6 @@ typedef struct hipMemcpy3DBatchOp {
 } hipMemcpy3DBatchOp;
 typedef struct hipResourceDesc hipResourceDesc;
 typedef struct hipResourceViewDesc hipResourceViewDesc;
-typedef struct hipStreamBatchMemOpParams hipStreamBatchMemOpParams;
 typedef struct hipTextureDesc hipTextureDesc;
 typedef struct hipDevResource_st hipDevResource;
 typedef struct hipDevSmResourceGroupParams_st hipDevSmResourceGroupParams;
@@ -132,8 +131,6 @@ typedef int hipFunction_attribute;
 typedef int hipJitInputType;
 typedef int hipLibraryOption;
 typedef int hipMemRangeHandleType;
-typedef int hipStreamAttrID;
-typedef int hipStreamAttrValue;
 typedef void (*hipStreamCallback_t)(hipStream_t stream, hipError_t status,
                                     void* user_data);
 enum hipTextureAddressMode {
@@ -1820,46 +1817,12 @@ HIPAPI hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr,
   return hipSuccess;
 }
 
-HIPAPI hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
-                                      hipStreamBatchMemOpParams* paramArray,
-                                      unsigned int flags) {
-  (void)stream;
-  (void)count;
-  (void)paramArray;
-  (void)flags;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
-  (void)dst;
-  (void)src;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipStreamGetAttribute(hipStream_t stream,
-                                        hipStreamAttrID attr,
-                                        hipStreamAttrValue* value_out) {
-  (void)stream;
-  (void)attr;
-  (void)value_out;
-  return hipErrorNotSupported;
-}
-
 HIPAPI hipError_t hipStreamGetDevResource(hipStream_t stream,
                                           hipDevResource* resource,
                                           hipDevResourceType type) {
   (void)stream;
   (void)resource;
   (void)type;
-  return hipErrorNotSupported;
-}
-
-HIPAPI hipError_t hipStreamSetAttribute(hipStream_t stream,
-                                        hipStreamAttrID attr,
-                                        const hipStreamAttrValue* value) {
-  (void)stream;
-  (void)attr;
-  (void)value;
   return hipErrorNotSupported;
 }
 
