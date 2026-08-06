@@ -191,6 +191,81 @@ def test_diff_json_preserves_qualified_target_identity(
     assert view["changed_entry_count"] == 1
 
 
+def test_diff_target_comparison_preserves_both_specializations(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    _write_report(
+        baseline_path,
+        target_key="gfx1100",
+        target_record="amdgpu.rdna3.core",
+    )
+    _write_report(
+        candidate_path,
+        target_key="gfx1151",
+        target_record="amdgpu.rdna3_5.core",
+    )
+
+    assert (
+        main(
+            [
+                "diff",
+                str(baseline_path),
+                str(candidate_path),
+                "--comparison=target",
+                "--format=json",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    view = json.loads(captured.out)
+    assert captured.err == ""
+    assert view["comparison_mode"] == "target"
+    assert view["targets"]["baseline"]["target_key"] == "gfx1100"
+    assert view["targets"]["candidate"]["target_key"] == "gfx1151"
+    assert view["changed_entry_count"] == 0
+    assert view["unchanged_entry_count"] == 1
+
+
+def test_diff_target_comparison_rejects_workload_changes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    _write_report(
+        baseline_path,
+        target_key="gfx1100",
+        target_record="amdgpu.rdna3.core",
+    )
+    _write_report(
+        candidate_path,
+        target_key="gfx1151",
+        target_record="amdgpu.rdna3_5.core",
+    )
+    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+    candidate["workload"]["workgroup_count"]["x"] = 8
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "diff",
+                str(baseline_path),
+                str(candidate_path),
+                "--comparison=target",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "workload" in captured.err
+
+
 def test_rejects_unversioned_report(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

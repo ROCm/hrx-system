@@ -13,17 +13,24 @@ from enum import Enum
 
 from loom.reporting.compile_report import (
     COMPILE_REPORT_SCHEMA_VERSION,
+    CompileReportComparisonMode,
     CompileReportDocument,
     CompileReportEntryIdentity,
     compile_report_entry_identity,
     match_compile_report_entries,
+    report_common_identity_json,
     report_identity_json,
+    report_target_identity_json,
 )
 from loom.reporting.compile_report_bank_service import (
     append_bank_service_diff_text,
     append_bank_service_show_text,
     build_bank_service_diff,
     build_bank_service_show,
+)
+from loom.reporting.compile_report_capabilities import (
+    append_target_capability_diff_text,
+    build_target_capability_diff,
 )
 
 SHOW_KIND = "loom.compile_report.show"
@@ -404,9 +411,10 @@ def build_compile_report_show(
 def build_compile_report_diff(
     baseline: CompileReportDocument,
     candidate: CompileReportDocument,
+    comparison_mode: CompileReportComparisonMode = CompileReportComparisonMode.EXACT,
 ) -> dict[str, object]:
-    """Builds a deterministic diff after enforcing exact comparability."""
-    pairs = match_compile_report_entries(baseline, candidate)
+    """Builds a deterministic diff under the selected identity contract."""
+    pairs = match_compile_report_entries(baseline, candidate, comparison_mode)
     entries = []
     unchanged_entry_count = 0
     for pair in pairs:
@@ -438,14 +446,24 @@ def build_compile_report_diff(
         "missing_evidence": "omitted_metrics_are_unavailable",
         "baseline_source": baseline.source,
         "candidate_source": candidate.source,
-        "identity": report_identity_json(baseline),
+        "comparison_mode": comparison_mode.value,
+        "identity": report_common_identity_json(baseline, comparison_mode),
         "changed_entry_count": len(entries),
         "unchanged_entry_count": unchanged_entry_count,
         "entries": entries,
     }
+    if comparison_mode is CompileReportComparisonMode.TARGET:
+        view["targets"] = {
+            "baseline": report_target_identity_json(baseline),
+            "candidate": report_target_identity_json(candidate),
+        }
     bank_service = build_bank_service_diff(baseline, candidate)
     if bank_service is not None:
         view["bank_service"] = bank_service
+    if comparison_mode is CompileReportComparisonMode.TARGET:
+        target_capabilities = build_target_capability_diff(baseline, candidate)
+        if target_capabilities is not None:
+            view["target_capabilities"] = target_capabilities
     return view
 
 
@@ -511,13 +529,43 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
         "Loom compile report diff",
         f"  baseline: {view['baseline_source']}",
         f"  candidate: {view['candidate_source']}",
-        f"  target: {_format_target(identity)}",
-        f"  specialization: {_format_specialization(identity)}",
-        (
-            f"  entries: {view['changed_entry_count']} changed, "
-            f"{view['unchanged_entry_count']} unchanged"
-        ),
     ]
+    if view.get("comparison_mode") == CompileReportComparisonMode.TARGET.value:
+        targets = _expect_dict(view["targets"])
+        baseline_target = _expect_dict(targets["baseline"])
+        candidate_target = _expect_dict(targets["candidate"])
+        lines.extend(
+            (
+                "  comparison: target specialization",
+                f"  baseline target: {_format_target(baseline_target)}",
+                (
+                    "  baseline specialization: "
+                    f"{_format_specialization(baseline_target)}"
+                ),
+                f"  candidate target: {_format_target(candidate_target)}",
+                (
+                    "  candidate specialization: "
+                    f"{_format_specialization(candidate_target)}"
+                ),
+            )
+        )
+    else:
+        lines.extend(
+            (
+                f"  target: {_format_target(identity)}",
+                f"  specialization: {_format_specialization(identity)}",
+            )
+        )
+    lines.append(
+        f"  entries: {view['changed_entry_count']} changed, "
+        f"{view['unchanged_entry_count']} unchanged"
+    )
+    if (
+        view.get("comparison_mode") == CompileReportComparisonMode.TARGET.value
+        and view["changed_entry_count"] == 0
+        and view["unchanged_entry_count"] != 0
+    ):
+        lines.append("  reported entry evidence: unchanged")
     for entry_value in _expect_list(view["entries"]):
         entry = _expect_dict(entry_value)
         entry_identity = _expect_dict(entry["identity"])
@@ -538,6 +586,9 @@ def format_compile_report_diff_text(view: dict[str, object]) -> str:
     bank_service = view.get("bank_service")
     if isinstance(bank_service, dict):
         append_bank_service_diff_text(lines, bank_service)
+    target_capabilities = view.get("target_capabilities")
+    if isinstance(target_capabilities, dict):
+        append_target_capability_diff_text(lines, target_capabilities)
     return "\n".join(lines) + "\n"
 
 

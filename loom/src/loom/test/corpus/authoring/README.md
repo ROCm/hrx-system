@@ -133,13 +133,25 @@ loom-compile-report \
 The JSON views are sparse so they can feed an autoresearch loop without
 replaying the full report. Omitted metrics are unavailable, not zero. `diff`
 requires exact schema, target, config, workload, and entry identity; it has no
-force mode for unlike compilations. `suggest` uses only explicitly registered
-target providers and reports unavailable target interpretation instead of
-guessing from bundle names. Findings carry an evidence tier. The default output
-contains only target models backed by public documentation or silicon
-calibration; `--include-experimental` additionally admits exact compiler proofs
-against hardware-unvalidated models. That opt-in is useful for pre-silicon
-search, but hardware timing still decides whether a candidate is adopted.
+force mode for unlike compilations. To compare two target specializations of
+the same source, config, workload, artifact family, and target family, select
+the bounded target comparison explicitly:
+
+```bash
+loom-compile-report \
+  diff /tmp/gfx1100.compile-report.json \
+       /tmp/gfx1151.compile-report.json --comparison=target
+```
+
+That mode permits only target key, bundle, snapshot, and target configuration
+identity to vary and renders both specializations. All other identity remains
+strict. `suggest` uses only explicitly registered target providers and reports
+unavailable target interpretation instead of guessing from bundle names.
+Findings carry an evidence tier. The default output contains only target models
+backed by public documentation or silicon calibration;
+`--include-experimental` additionally admits exact compiler proofs against
+hardware-unvalidated models. That opt-in is useful for pre-silicon search, but
+hardware timing still decides whether a candidate is adopted.
 
 Version-zero reports are ephemeral diagnostics co-versioned with the compiler.
 Regenerate them after changing compiler versions. Use the full report and

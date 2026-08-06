@@ -11,10 +11,15 @@ from copy import deepcopy
 import pytest
 
 from loom.reporting.compile_report import (
+    CompileReportComparisonMode,
     CompileReportError,
     IncomparableCompileReportsError,
     match_compile_report_entries,
     parse_compile_report,
+)
+from loom.reporting.compile_report_capabilities import (
+    append_target_capability_diff_text,
+    build_target_capability_diff,
 )
 from loom.reporting.compile_report_view import (
     build_compile_report_diff,
@@ -163,6 +168,57 @@ def _compile_report() -> dict[str, object]:
     }
 
 
+def _set_target_capabilities(
+    report: dict[str, object],
+    *,
+    processor: str,
+    descriptor_set: str,
+    matrix_features: tuple[str, ...] = (),
+) -> None:
+    rows = [
+        {
+            "index": 0,
+            "function": "routed_linear",
+            "target_family": "AMDGPU",
+            "namespace": "amdgpu",
+            "key": "processor",
+            "value_kind": "string",
+            "value_string": processor,
+        },
+        {
+            "index": 1,
+            "function": "routed_linear",
+            "target_family": "AMDGPU",
+            "namespace": "amdgpu",
+            "key": "descriptor_set",
+            "value_kind": "string",
+            "value_string": descriptor_set,
+        },
+        {
+            "index": 2,
+            "function": "routed_linear",
+            "target_family": "AMDGPU",
+            "namespace": "target",
+            "key": "subgroup_size",
+            "value_kind": "u64",
+            "value_u64": 64,
+        },
+    ]
+    for matrix_feature in matrix_features:
+        rows.append(
+            {
+                "index": len(rows),
+                "function": "routed_linear",
+                "target_family": "AMDGPU",
+                "namespace": "amdgpu.matrix_feature",
+                "key": matrix_feature,
+                "value_kind": "bool",
+                "value_bool": True,
+            }
+        )
+    report["target_capability_rows"] = {"count": len(rows), "rows": rows}
+
+
 def test_parses_direct_and_benchmark_envelope_reports() -> None:
     report = _compile_report()
     direct = parse_compile_report(report, source="direct.json")
@@ -270,6 +326,145 @@ def test_rejects_incomparable_reports(mutate, message: str) -> None:
 
     with pytest.raises(IncomparableCompileReportsError, match=message):
         match_compile_report_entries(baseline, candidate)
+
+
+def test_target_comparison_permits_only_target_specialization_identity() -> None:
+    baseline = parse_compile_report(_compile_report(), source="baseline.json")
+    candidate_report = _compile_report()
+    candidate_report["target_key"] = "gfx1151"
+    candidate_report["target_bundle"] = "gfx11_5_wave64"
+    candidate_report["target_snapshot"] = "gfx11_5_wave64"
+    candidate_report["target_config"] = "gfx11_5_wave64"
+    candidate_entry = candidate_report["entries"]["rows"][0]
+    candidate_entry["target_bundle"] = "gfx11_5_wave64"
+    candidate_entry["target_snapshot"] = "gfx11_5_wave64"
+    candidate_entry["target_config"] = "gfx11_5_wave64"
+    candidate = parse_compile_report(candidate_report, source="candidate.json")
+
+    pairs = match_compile_report_entries(
+        baseline,
+        candidate,
+        CompileReportComparisonMode.TARGET,
+    )
+    view = build_compile_report_diff(
+        baseline,
+        candidate,
+        CompileReportComparisonMode.TARGET,
+    )
+
+    assert len(pairs) == 1
+    assert view["comparison_mode"] == "target"
+    assert view["identity"]["target_family"] == "AMDGPU"
+    assert "target_key" not in view["identity"]
+    assert view["targets"]["baseline"]["target_key"] == "gfx11-generic"
+    assert view["targets"]["candidate"]["target_key"] == "gfx1151"
+    assert view["changed_entry_count"] == 0
+    assert view["unchanged_entry_count"] == 1
+    text = format_compile_report_diff_text(view)
+    assert "comparison: target specialization" in text
+    assert "baseline target: AMDGPU/gfx11-generic via amdgpu-hal" in text
+    assert "candidate target: AMDGPU/gfx1151 via amdgpu-hal" in text
+    assert "reported entry evidence: unchanged" in text
+
+
+def test_target_comparison_diffs_selected_capabilities() -> None:
+    baseline_report = _compile_report()
+    _set_target_capabilities(
+        baseline_report,
+        processor="gfx1100",
+        descriptor_set="amdgpu.rdna3.core",
+        matrix_features=("wmma-gfx11",),
+    )
+    baseline = parse_compile_report(baseline_report, source="baseline.json")
+    candidate_report = _compile_report()
+    candidate_report["target_key"] = "gfx1151"
+    _set_target_capabilities(
+        candidate_report,
+        processor="gfx1151",
+        descriptor_set="amdgpu.rdna3_5.core",
+        matrix_features=("wmma-gfx12", "swmmac-gfx12"),
+    )
+    candidate = parse_compile_report(candidate_report, source="candidate.json")
+
+    capability_diff = build_target_capability_diff(baseline, candidate)
+
+    assert capability_diff is not None
+    assert capability_diff["changed_count"] == 5
+    assert capability_diff["unchanged_count"] == 1
+    assert capability_diff["rows"][0]["identity"]["key"] == "descriptor_set"
+    assert capability_diff["rows"][0]["baseline"] == {
+        "kind": "string",
+        "value": "amdgpu.rdna3.core",
+    }
+    assert capability_diff["rows"][1]["identity"]["key"] == "processor"
+    assert capability_diff["rows"][2] == {
+        "identity": {
+            "namespace": "amdgpu.matrix_feature",
+            "key": "swmmac-gfx12",
+            "function": "routed_linear",
+            "target_family": "AMDGPU",
+        },
+        "status": "added",
+        "candidate": {"kind": "bool", "value": True},
+    }
+    assert capability_diff["rows"][3]["identity"]["key"] == "wmma-gfx11"
+    assert capability_diff["rows"][3]["status"] == "removed"
+    assert capability_diff["rows"][4]["identity"]["key"] == "wmma-gfx12"
+    assert capability_diff["rows"][4]["status"] == "added"
+    lines: list[str] = []
+    append_target_capability_diff_text(lines, capability_diff)
+    text = "\n".join(lines)
+    assert "rows: 5 changed, 1 unchanged" in text
+    assert "'amdgpu.rdna3.core' -> 'amdgpu.rdna3_5.core'" in text
+    assert "amdgpu.matrix_feature.wmma-gfx11: removed true" in text
+    assert "amdgpu.matrix_feature.wmma-gfx12: added true" in text
+
+    view = build_compile_report_diff(
+        baseline,
+        candidate,
+        CompileReportComparisonMode.TARGET,
+    )
+    assert view["target_capabilities"] == capability_diff
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda report: report.__setitem__("target_family", "SPIR-V"),
+            "target_family",
+        ),
+        (
+            lambda report: report.__setitem__("backend", "spirv-hal"),
+            "backend",
+        ),
+        (
+            lambda report: report["config_bindings"]["rows"][0].__setitem__(
+                "value", "1024"
+            ),
+            "config_bindings",
+        ),
+        (
+            lambda report: report["entries"]["rows"][0]["workload"][
+                "workgroup_count"
+            ].__setitem__("x", 6),
+            "workload",
+        ),
+    ],
+)
+def test_target_comparison_rejects_non_target_changes(mutate, message: str) -> None:
+    baseline = parse_compile_report(_compile_report())
+    candidate_report = _compile_report()
+    candidate_report["target_key"] = "gfx1151"
+    mutate(candidate_report)
+    candidate = parse_compile_report(candidate_report)
+
+    with pytest.raises(IncomparableCompileReportsError, match=message):
+        match_compile_report_entries(
+            baseline,
+            candidate,
+            CompileReportComparisonMode.TARGET,
+        )
 
 
 def test_show_separates_facts_analysis_and_unavailable_evidence() -> None:

@@ -122,6 +122,30 @@ bool HasTargetCapabilityU64(const loom_target_compile_report_t& report,
   return false;
 }
 
+bool HasTargetCapabilityBool(const loom_target_compile_report_t& report,
+                             const char* namespace_name,
+                             iree_string_view_t expected_key, bool value) {
+  const iree_string_view_t expected_namespace =
+      iree_make_cstring_view(namespace_name);
+  for (const loom_target_compile_report_vec_t* vec =
+           report.target_capability_rows.head;
+       vec != nullptr; vec = vec->next) {
+    const loom_target_compile_report_target_capability_row_t* rows =
+        static_cast<const loom_target_compile_report_target_capability_row_t*>(
+            loom_target_compile_report_vec_const_rows(vec));
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      const loom_target_compile_report_target_capability_row_t& row = rows[i];
+      if (row.value_kind == LOOM_TARGET_COMPILE_REPORT_CAPABILITY_VALUE_BOOL &&
+          iree_string_view_equal(row.namespace_name, expected_namespace) &&
+          iree_string_view_equal(row.key, expected_key) &&
+          (row.value_u64 != 0) == value) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 bool HasWaitCounter(const loom_target_compile_report_t& report,
                     uint32_t counter_id, const char* counter_name) {
   const iree_string_view_t expected_name = iree_make_cstring_view(counter_name);
@@ -1251,18 +1275,16 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
     const char* processor_name;
     // Matrix feature profile expected for |processor_name|.
     const char* profile_name;
-    // Active matrix feature expected for |processor_name|.
-    const char* feature_name;
     // Native FP8/BF8 support kind expected for |processor_name|.
     const char* fp8_bf8_native_kind;
   };
   static constexpr MatrixFeatureReportCase kCases[] = {
-      {"gfx942", "mfma-gfx940", "mfma-gfx940-fp8", "unscaled"},
-      {"gfx950", "mfma-gfx950", "mfma-gfx950-scale-f8f6f4", "unscaled_scaled"},
-      {"gfx1100", "wmma-gfx11", "wmma-gfx11", "none"},
-      {"gfx1200", "wmma-gfx12", "wmma-gfx12", "unscaled"},
-      {"gfx1250", "wmma-gfx1250", "wmma-gfx1250-scale-f8f6f4",
-       "unscaled_scaled"},
+      {"gfx942", "mfma-gfx940", "unscaled"},
+      {"gfx950", "mfma-gfx950", "unscaled_scaled"},
+      {"gfx1100", "wmma-gfx11", "none"},
+      {"gfx1170", "wmma-gfx12", "unscaled"},
+      {"gfx1200", "wmma-gfx12", "unscaled"},
+      {"gfx1250", "wmma-gfx1250", "unscaled_scaled"},
   };
 
   iree_host_size_t checked_count = 0;
@@ -1302,9 +1324,6 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
     EXPECT_TRUE(HasTargetCapabilityString(
         report, "amdgpu", "matrix_feature_profile", test_case.profile_name))
         << test_case.processor_name;
-    EXPECT_TRUE(HasTargetCapabilityString(report, "amdgpu", "matrix_feature",
-                                          test_case.feature_name))
-        << test_case.processor_name;
     EXPECT_TRUE(HasTargetCapabilityString(report, "amdgpu",
                                           "matrix_fp8_native_kind",
                                           test_case.fp8_bf8_native_kind))
@@ -1320,6 +1339,19 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
     EXPECT_TRUE(HasTargetCapabilityU64(report, "amdgpu", "matrix_feature_bits",
                                        feature_bits))
         << test_case.processor_name;
+    for (iree_host_size_t i = 0; i < loom_amdgpu_matrix_feature_info_count();
+         ++i) {
+      const loom_amdgpu_matrix_feature_info_t* feature_info =
+          loom_amdgpu_matrix_feature_info_at(i);
+      ASSERT_NE(feature_info, nullptr);
+      if (!iree_all_bits_set(feature_bits, feature_info->feature_bit)) {
+        continue;
+      }
+      EXPECT_TRUE(HasTargetCapabilityBool(report, "amdgpu.matrix_feature",
+                                          feature_info->name, true))
+          << test_case.processor_name << ": "
+          << StringViewToString(feature_info->name);
+    }
     loom_amdgpu_hal_kernel_library_deinitialize(&library,
                                                 iree_allocator_system());
     loom_target_compile_report_deinitialize(&report);
