@@ -15,18 +15,103 @@ from loom.target.arch.amdgpu.descriptors.common import (
 )
 from loom.target.arch.amdgpu.descriptors.rdna4m import (
     _AMDGPU_RDNA4M_CORE_DESCRIPTOR_SET_BASE,
+    _RDNA4M_IEEE_MINMAX_INSTRUCTION_ROWS,
+    _RDNA4M_NUMERIC_MINMAX_INSTRUCTION_ROWS,
     _RDNA4M_SUPPLEMENTAL_FP8_INSTRUCTIONS,
     _RDNA4M_SUPPLEMENTAL_MATRIX_INSTRUCTIONS,
 )
 from loom.target.arch.amdgpu.descriptors.sets import (
     _gfx115x_core_overlays,
     _rdna4m_core_overlays,
+    _rdna4m_minmax_overlays,
 )
 from loom.target.low_descriptors import (
     IssueUse,
     LatencyKind,
     ModelQuality,
 )
+
+
+def test_rdna4m_minmax_manifest_matches_llvm_mc_opcodes() -> None:
+    assert _RDNA4M_NUMERIC_MINMAX_INSTRUCTION_ROWS == (
+        ("V_MIN_F32", "V_MIN_NUM_F32", 0x00F),
+        ("V_MAX_F32", "V_MAX_NUM_F32", 0x010),
+        ("V_MIN_F16", "V_MIN_NUM_F16", 0x03A),
+        ("V_MAX_F16", "V_MAX_NUM_F16", 0x039),
+        ("V_MIN_F64", "V_MIN_NUM_F64", 0x329),
+        ("V_MAX_F64", "V_MAX_NUM_F64", 0x32A),
+        ("V_PK_MIN_F16", "V_PK_MIN_NUM_F16", 0x011),
+        ("V_PK_MAX_F16", "V_PK_MAX_NUM_F16", 0x012),
+        ("V_MIN3_F32", "V_MIN3_NUM_F32", 0x219),
+        ("V_MAX3_F32", "V_MAX3_NUM_F32", 0x21C),
+        ("V_MIN3_F16", "V_MIN3_NUM_F16", 0x249),
+        ("V_MAX3_F16", "V_MAX3_NUM_F16", 0x24C),
+        ("V_MED3_F32", "V_MED3_NUM_F32", 0x231),
+        ("V_MED3_F16", "V_MED3_NUM_F16", 0x232),
+        ("V_MINMAX_F32", "V_MINMAX_NUM_F32", 0x25F),
+        ("V_MAXMIN_F32", "V_MAXMIN_NUM_F32", 0x25E),
+        ("V_MINMAX_F16", "V_MINMAX_NUM_F16", 0x261),
+        ("V_MAXMIN_F16", "V_MAXMIN_NUM_F16", 0x260),
+    )
+    assert _RDNA4M_IEEE_MINMAX_INSTRUCTION_ROWS == (
+        ("V_MIN_F32", "V_MINIMUM_F32", 0x365),
+        ("V_MAX_F32", "V_MAXIMUM_F32", 0x366),
+        ("V_MIN_F16", "V_MINIMUM_F16", 0x367),
+        ("V_MAX_F16", "V_MAXIMUM_F16", 0x368),
+        ("V_MIN_F64", "V_MINIMUM_F64", 0x341),
+        ("V_MAX_F64", "V_MAXIMUM_F64", 0x342),
+        ("V_PK_MIN_F16", "V_PK_MINIMUM_F16", 0x01D),
+        ("V_PK_MAX_F16", "V_PK_MAXIMUM_F16", 0x01E),
+        ("V_MIN3_F32", "V_MINIMUM3_F32", 0x22D),
+        ("V_MAX3_F32", "V_MAXIMUM3_F32", 0x22E),
+        ("V_MIN3_F16", "V_MINIMUM3_F16", 0x22F),
+        ("V_MAX3_F16", "V_MAXIMUM3_F16", 0x230),
+        ("V_MINMAX_F32", "V_MINIMUMMAXIMUM_F32", 0x26C),
+        ("V_MAXMIN_F32", "V_MAXIMUMMINIMUM_F32", 0x26D),
+        ("V_MINMAX_F16", "V_MINIMUMMAXIMUM_F16", 0x26E),
+        ("V_MAXMIN_F16", "V_MAXIMUMMINIMUM_F16", 0x26F),
+    )
+
+
+def test_rdna4m_minmax_overlays_replace_legacy_instruction_names() -> None:
+    minmax_overlays = _rdna4m_minmax_overlays()
+    expected_instruction_names = {
+        instruction_name
+        for _, instruction_name, _ in (
+            *_RDNA4M_NUMERIC_MINMAX_INSTRUCTION_ROWS,
+            *_RDNA4M_IEEE_MINMAX_INSTRUCTION_ROWS,
+        )
+    }
+    expected_overlays = {overlay.descriptor_key: overlay for overlay in minmax_overlays}
+    core_overlays = _rdna4m_core_overlays()
+    core_family_overlays = tuple(
+        overlay
+        for overlay in core_overlays
+        if overlay.descriptor_key in expected_overlays
+    )
+    legacy_instruction_names = {
+        source_name
+        for source_name, instruction_name, _ in (
+            *_RDNA4M_NUMERIC_MINMAX_INSTRUCTION_ROWS,
+            *_RDNA4M_IEEE_MINMAX_INSTRUCTION_ROWS,
+        )
+        if source_name != instruction_name
+    }
+
+    assert {overlay.instruction_name for overlay in minmax_overlays} == (
+        expected_instruction_names
+    )
+    assert legacy_instruction_names.isdisjoint(
+        overlay.instruction_name for overlay in core_overlays
+    )
+    assert len(core_family_overlays) == len(expected_overlays)
+    assert {
+        overlay.descriptor_key: overlay.instruction_name
+        for overlay in core_family_overlays
+    } == {
+        descriptor_key: overlay.instruction_name
+        for descriptor_key, overlay in expected_overlays.items()
+    }
 
 
 def test_rdna4m_fp8_manifest_matches_llvm_mc_opcodes() -> None:

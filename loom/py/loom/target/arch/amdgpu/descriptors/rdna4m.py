@@ -140,6 +140,103 @@ def _rdna4m_supplemental_instruction(
     )
 
 
+_RDNA4M_NUMERIC_MINMAX_INSTRUCTION_ROWS = (
+    ("V_MIN_F32", "V_MIN_NUM_F32", 0x00F),
+    ("V_MAX_F32", "V_MAX_NUM_F32", 0x010),
+    ("V_MIN_F16", "V_MIN_NUM_F16", 0x03A),
+    ("V_MAX_F16", "V_MAX_NUM_F16", 0x039),
+    ("V_MIN_F64", "V_MIN_NUM_F64", 0x329),
+    ("V_MAX_F64", "V_MAX_NUM_F64", 0x32A),
+    ("V_PK_MIN_F16", "V_PK_MIN_NUM_F16", 0x011),
+    ("V_PK_MAX_F16", "V_PK_MAX_NUM_F16", 0x012),
+    ("V_MIN3_F32", "V_MIN3_NUM_F32", 0x219),
+    ("V_MAX3_F32", "V_MAX3_NUM_F32", 0x21C),
+    ("V_MIN3_F16", "V_MIN3_NUM_F16", 0x249),
+    ("V_MAX3_F16", "V_MAX3_NUM_F16", 0x24C),
+    ("V_MED3_F32", "V_MED3_NUM_F32", 0x231),
+    ("V_MED3_F16", "V_MED3_NUM_F16", 0x232),
+    ("V_MINMAX_F32", "V_MINMAX_NUM_F32", 0x25F),
+    ("V_MAXMIN_F32", "V_MAXMIN_NUM_F32", 0x25E),
+    ("V_MINMAX_F16", "V_MINMAX_NUM_F16", 0x261),
+    ("V_MAXMIN_F16", "V_MAXMIN_NUM_F16", 0x260),
+)
+
+_RDNA4M_IEEE_MINMAX_INSTRUCTION_ROWS = (
+    ("V_MIN_F32", "V_MINIMUM_F32", 0x365),
+    ("V_MAX_F32", "V_MAXIMUM_F32", 0x366),
+    ("V_MIN_F16", "V_MINIMUM_F16", 0x367),
+    ("V_MAX_F16", "V_MAXIMUM_F16", 0x368),
+    ("V_MIN_F64", "V_MINIMUM_F64", 0x341),
+    ("V_MAX_F64", "V_MAXIMUM_F64", 0x342),
+    ("V_PK_MIN_F16", "V_PK_MINIMUM_F16", 0x01D),
+    ("V_PK_MAX_F16", "V_PK_MAXIMUM_F16", 0x01E),
+    ("V_MIN3_F32", "V_MINIMUM3_F32", 0x22D),
+    ("V_MAX3_F32", "V_MAXIMUM3_F32", 0x22E),
+    ("V_MIN3_F16", "V_MINIMUM3_F16", 0x22F),
+    ("V_MAX3_F16", "V_MAXIMUM3_F16", 0x230),
+    ("V_MINMAX_F32", "V_MINIMUMMAXIMUM_F32", 0x26C),
+    ("V_MAXMIN_F32", "V_MAXIMUMMINIMUM_F32", 0x26D),
+    ("V_MINMAX_F16", "V_MINIMUMMAXIMUM_F16", 0x26E),
+    ("V_MAXMIN_F16", "V_MAXIMUMMINIMUM_F16", 0x26F),
+)
+
+
+def _rdna4m_retarget_instruction(
+    instruction: AmdgpuIsaInstruction,
+    instruction_name: str,
+    opcode: int,
+) -> AmdgpuIsaInstruction:
+    return replace(
+        instruction,
+        name=instruction_name,
+        aliases=(),
+        encodings=tuple(
+            replace(encoding, opcode=opcode) for encoding in instruction.encodings
+        ),
+    )
+
+
+def _rdna4m_retarget_vop3_family_instruction(
+    instruction: AmdgpuIsaInstruction,
+    instruction_name: str,
+    opcode: int,
+) -> AmdgpuIsaInstruction:
+    instruction = replace(
+        instruction,
+        encodings=tuple(
+            encoding
+            for encoding in instruction.encodings
+            if encoding.encoding_name in ("ENC_VOP3", "ENC_VOP3P")
+            or encoding.encoding_name.startswith("VOP3")
+        ),
+    )
+    return _rdna4m_retarget_instruction(instruction, instruction_name, opcode)
+
+
+def _rdna4m_minmax_instructions(
+    spec: AmdgpuIsaFactSource,
+) -> tuple[AmdgpuIsaInstruction, ...]:
+    instructions = spec.instruction_map()
+    return (
+        *(
+            _rdna4m_retarget_instruction(
+                instructions[source_name], instruction_name, opcode
+            )
+            for source_name, instruction_name, opcode in (
+                _RDNA4M_NUMERIC_MINMAX_INSTRUCTION_ROWS
+            )
+        ),
+        *(
+            _rdna4m_retarget_vop3_family_instruction(
+                instructions[source_name], instruction_name, opcode
+            )
+            for source_name, instruction_name, opcode in (
+                _RDNA4M_IEEE_MINMAX_INSTRUCTION_ROWS
+            )
+        ),
+    )
+
+
 _RDNA4M_FP8_DECODE_ROWS = (
     ("V_CVT_F32_FP8", 0x6C, 0x1EC, "FMT_NUM_FP8", 8, "FMT_NUM_F32", 32),
     ("V_CVT_F32_BF8", 0x6D, 0x1ED, "FMT_NUM_BF8", 8, "FMT_NUM_F32", 32),
@@ -412,18 +509,41 @@ _RDNA4M_SUPPLEMENTAL_INSTRUCTIONS = (
 def _rdna4m_spec_with_supplemental_instruction_facts(
     spec: AmdgpuIsaFactSource,
 ) -> AmdgpuIsaFactSource:
+    minmax_instructions = _rdna4m_minmax_instructions(spec)
+    numeric_minmax_instructions = minmax_instructions[
+        : len(_RDNA4M_NUMERIC_MINMAX_INSTRUCTION_ROWS)
+    ]
+    replacement_instructions = {
+        source_name: instruction
+        for (source_name, _, _), instruction in zip(
+            _RDNA4M_NUMERIC_MINMAX_INSTRUCTION_ROWS,
+            numeric_minmax_instructions,
+            strict=True,
+        )
+    }
     supplemental_instructions = {
         instruction.name: instruction
-        for instruction in _RDNA4M_SUPPLEMENTAL_INSTRUCTIONS
+        for instruction in (
+            *_RDNA4M_SUPPLEMENTAL_INSTRUCTIONS,
+            *minmax_instructions[len(numeric_minmax_instructions) :],
+        )
     }
-    instructions = tuple(
-        supplemental_instructions.pop(instruction.name, instruction)
-        for instruction in spec.instructions
-    )
+    instructions: list[AmdgpuIsaInstruction] = []
+    for instruction in spec.instructions:
+        replacement = replacement_instructions.pop(instruction.name, None)
+        if replacement is None:
+            replacement = supplemental_instructions.pop(instruction.name, instruction)
+        instructions.append(replacement)
 
-    # AMD's current ISA archive has no RDNA 4m XML. These narrow facts replace
-    # reused gfx11 instruction names whose register ABI changed and append new
-    # instructions, all proven by LLVM MC for gfx1170-gfx1172.
+    if replacement_instructions:
+        raise ValueError(
+            "RDNA 4m min/max donors are absent from the RDNA 3.5 fact source: "
+            + ", ".join(sorted(replacement_instructions))
+        )
+
+    # AMD's current ISA archive has no RDNA 4m XML. These narrow facts retarget
+    # reused gfx11 physical operand profiles and append the IEEE variants, all
+    # proven by LLVM MC for gfx1170-gfx1172.
     return replace(
         spec,
         instructions=(*instructions, *supplemental_instructions.values()),
@@ -503,7 +623,10 @@ _AMDGPU_RDNA4M_CORE_DESCRIPTOR_SET_BASE = _rdna4m_core_descriptor_set(
 
 __all__ = (
     "_AMDGPU_RDNA4M_CORE_DESCRIPTOR_SET_BASE",
+    "_RDNA4M_IEEE_MINMAX_INSTRUCTION_ROWS",
+    "_RDNA4M_NUMERIC_MINMAX_INSTRUCTION_ROWS",
     "_RDNA4M_SUPPLEMENTAL_FP8_INSTRUCTIONS",
     "_RDNA4M_SUPPLEMENTAL_MATRIX_INSTRUCTIONS",
+    "_rdna4m_minmax_instructions",
     "_rdna4m_spec_with_supplemental_instruction_facts",
 )

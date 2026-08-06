@@ -91,6 +91,20 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_max_f32",
     "amdgpu.v_max_f32.lit",
     "amdgpu.v_max_f32.src0_inline",
+    "amdgpu.v_min_f16",
+    "amdgpu.v_max_f16",
+    "amdgpu.v_min_f64",
+    "amdgpu.v_max_f64",
+    "amdgpu.v_minimum_f16",
+    "amdgpu.v_maximum_f16",
+    "amdgpu.v_minimum_f32",
+    "amdgpu.v_maximum_f32",
+    "amdgpu.v_minimum_f64",
+    "amdgpu.v_maximum_f64",
+    "amdgpu.v_maxmin_num_f16",
+    "amdgpu.v_maxmin_num_f32",
+    "amdgpu.v_maximumminimum_f16",
+    "amdgpu.v_maximumminimum_f32",
     "amdgpu.v_add_f16",
     "amdgpu.v_sub_f16",
     "amdgpu.v_mul_f16",
@@ -1634,6 +1648,89 @@ def _ternary_rule(
                 },
                 results={"dst": ValueRef.result("result")},
                 form=_emit_form(type_pattern),
+            ),
+        ),
+    )
+
+
+def _native_clampf_rule(
+    source_op: Op,
+    type_pattern: TypePattern,
+    mode: str,
+    descriptor_key: str,
+) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
+
+    def operand(field: str) -> ValueRef:
+        if type_pattern in (_F32, _VEC_F32, _VEC_F32_STATIC):
+            return _f32_vgpr_operand(field)
+        return ValueRef.operand(field)
+
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        report_key=_report_key(source_op, f"native_{mode}_clamp"),
+        guards=(
+            Guard.enum_attr_equals("mode", mode),
+            *_typed_guards(("value", "lower", "upper", "result"), type_pattern),
+            Guard.descriptor_available(descriptor),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    "a": operand("value"),
+                    "b": operand("lower"),
+                    "c": operand("upper"),
+                },
+                results={"dst": ValueRef.result("result")},
+                form=_emit_form(type_pattern),
+            ),
+        ),
+    )
+
+
+def _packed_f16_clampf_rule(
+    mode: str,
+    maximum_descriptor_key: str,
+    minimum_descriptor_key: str,
+) -> DescriptorRule:
+    maximum_descriptor = _descriptor(maximum_descriptor_key)
+    minimum_descriptor = _descriptor(minimum_descriptor_key)
+    return DescriptorRule(
+        source_op=vector.vector_clampf,
+        descriptor=minimum_descriptor,
+        report_key=_report_key(vector.vector_clampf, f"packed_f16_{mode}_clamp"),
+        guards=(
+            Guard.enum_attr_equals("mode", mode),
+            *_typed_guards(("value", "lower", "upper", "result"), _VEC_F16_PACKED),
+            Guard.value_static_dim0_multiple(
+                "result",
+                2,
+                diagnostic=_VEC_F16_PACKED_DIAGNOSTIC,
+            ),
+            Guard.descriptor_available(maximum_descriptor),
+            Guard.descriptor_available(minimum_descriptor),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=maximum_descriptor,
+                operands={
+                    "lhs": ValueRef.operand("value"),
+                    "rhs": ValueRef.operand("lower"),
+                },
+                results={"dst": ValueRef.temporary("lower_clamped")},
+                result_types={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.PER_LANE,
+            ),
+            EmitDescriptorOp(
+                descriptor=minimum_descriptor,
+                operands={
+                    "lhs": ValueRef.temporary("lower_clamped"),
+                    "rhs": ValueRef.operand("upper"),
+                },
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.PER_LANE,
             ),
         ),
     )
@@ -3376,6 +3473,107 @@ def _f32_vector_sub_literal_rules() -> tuple[DescriptorRule, ...]:
     )
 
 
+def _minmax_family_rules() -> tuple[DescriptorRule, ...]:
+    rules: list[DescriptorRule] = []
+    for source_op, descriptor_operation in (
+        (scalar_arithmetic.scalar_minnumf, "min"),
+        (scalar_arithmetic.scalar_maxnumf, "max"),
+    ):
+        for type_pattern, type_suffix in ((_F16, "f16"), (_F64, "f64")):
+            rules.append(
+                _binary_rule(
+                    source_op,
+                    type_pattern,
+                    f"amdgpu.v_{descriptor_operation}_{type_suffix}",
+                )
+            )
+    for source_op, descriptor_operation in (
+        (vector.vector_minnumf, "min"),
+        (vector.vector_maxnumf, "max"),
+    ):
+        for type_pattern, type_suffix in (
+            (_VEC_F16_PACKED_STORAGE, "f16"),
+            (_VEC_F64_STATIC, "f64"),
+        ):
+            rules.append(
+                _binary_rule(
+                    source_op,
+                    type_pattern,
+                    f"amdgpu.v_{descriptor_operation}_{type_suffix}",
+                )
+            )
+
+    for source_op, descriptor_operation in (
+        (scalar_arithmetic.scalar_minimumf, "minimum"),
+        (scalar_arithmetic.scalar_maximumf, "maximum"),
+    ):
+        for type_pattern, type_suffix in (
+            (_F16, "f16"),
+            (_F32, "f32"),
+            (_F64, "f64"),
+        ):
+            rules.append(
+                _binary_rule(
+                    source_op,
+                    type_pattern,
+                    f"amdgpu.v_{descriptor_operation}_{type_suffix}",
+                )
+            )
+    for source_op, descriptor_operation in (
+        (vector.vector_minimumf, "minimum"),
+        (vector.vector_maximumf, "maximum"),
+    ):
+        for type_pattern, type_suffix in (
+            (_VEC_F16_PACKED_STORAGE, "f16"),
+            (_VEC_F32, "f32"),
+            (_VEC_F64_STATIC, "f64"),
+        ):
+            rules.append(
+                _binary_rule(
+                    source_op,
+                    type_pattern,
+                    f"amdgpu.v_{descriptor_operation}_{type_suffix}",
+                )
+            )
+
+    for source_op, type_pattern, type_suffix in (
+        (scalar_arithmetic.scalar_clampf, _F16, "f16"),
+        (scalar_arithmetic.scalar_clampf, _F32, "f32"),
+        (vector.vector_clampf, _VEC_F32, "f32"),
+    ):
+        rules.append(
+            _native_clampf_rule(
+                source_op,
+                type_pattern,
+                "number",
+                f"amdgpu.v_maxmin_num_{type_suffix}",
+            )
+        )
+        rules.append(
+            _native_clampf_rule(
+                source_op,
+                type_pattern,
+                "ieee",
+                f"amdgpu.v_maximumminimum_{type_suffix}",
+            )
+        )
+    rules.extend(
+        (
+            _packed_f16_clampf_rule(
+                "number",
+                "amdgpu.v_pk_maxnum_f16",
+                "amdgpu.v_pk_minnum_f16",
+            ),
+            _packed_f16_clampf_rule(
+                "ieee",
+                "amdgpu.v_pk_maximum_f16",
+                "amdgpu.v_pk_minimum_f16",
+            ),
+        )
+    )
+    return tuple(rules)
+
+
 def _rules() -> tuple[ContractCase, ...]:
     rules: list[ContractCase] = []
     for type_pattern, type_suffix in ((_F16, "f16"), (_F32, "f32")):
@@ -3537,6 +3735,7 @@ def _rules() -> tuple[ContractCase, ...]:
             ),
         )
     )
+    rules.extend(_minmax_family_rules())
     for source_op, descriptor_key in (
         (vector.vector_addf, "amdgpu.v_add_f32.lit"),
         (vector.vector_mulf, "amdgpu.v_mul_f32.lit"),

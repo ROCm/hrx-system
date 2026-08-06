@@ -1606,13 +1606,114 @@ def _gfx12_wmma_16x16_overlays(
     )
 
 
+def _rdna4m_minmax_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    numeric_f32_overlays = (
+        _v_min_f32_overlay(instruction_name="V_MIN_NUM_F32", mnemonic="v_min_num_f32"),
+        _v_min_f32_literal_overlay(
+            instruction_name="V_MIN_NUM_F32", mnemonic="v_min_num_f32"
+        ),
+        _v_min_f32_src0_inline_overlay(
+            instruction_name="V_MIN_NUM_F32", mnemonic="v_min_num_f32"
+        ),
+        _v_max_f32_overlay(instruction_name="V_MAX_NUM_F32", mnemonic="v_max_num_f32"),
+        _v_max_f32_literal_overlay(
+            instruction_name="V_MAX_NUM_F32", mnemonic="v_max_num_f32"
+        ),
+        _v_max_f32_src0_inline_overlay(
+            instruction_name="V_MAX_NUM_F32", mnemonic="v_max_num_f32"
+        ),
+        *(
+            _v_binary_f32_dpp_overlay(
+                descriptor_key=f"amdgpu.v_{operation}_f32.dpp16",
+                instruction_name=f"V_{operation.upper()}_NUM_F32",
+                mnemonic=f"v_{operation}_num_f32",
+                semantic_tag=f"float.{semantic}.f32",
+                encoding_name="VOP2_VOP_DPP16",
+                encoding_condition="has_dpp16",
+            )
+            for operation, semantic in (("min", "minnum"), ("max", "maxnum"))
+        ),
+    )
+    numeric_scalar_overlays = (
+        *(
+            _v_commutative_binary_f16_overlay(
+                descriptor_key=f"amdgpu.v_{operation}_f16",
+                instruction_name=f"V_{operation.upper()}_NUM_F16",
+                mnemonic=f"v_{operation}_num_f16",
+                semantic_tag=f"float.{semantic}.f16",
+            )
+            for operation, semantic in (("min", "minnum"), ("max", "maxnum"))
+        ),
+        *(
+            _v_commutative_binary_vop3_float_overlay(
+                descriptor_key=f"amdgpu.v_{operation}_f64",
+                instruction_name=f"V_{operation.upper()}_NUM_F64",
+                mnemonic=f"v_{operation}_num_f64",
+                semantic_tag=f"float.{semantic}.f64",
+                element_bit_width=64,
+            )
+            for operation, semantic in (("min", "minnum"), ("max", "maxnum"))
+        ),
+    )
+    ieee_scalar_overlays = tuple(
+        _v_commutative_binary_vop3_float_overlay(
+            descriptor_key=f"amdgpu.v_{operation}_{type_suffix}",
+            instruction_name=f"V_{operation.upper()}_{type_suffix.upper()}",
+            mnemonic=f"v_{operation}_{type_suffix}",
+            semantic_tag=f"float.{operation}.{type_suffix}",
+            element_bit_width=element_bit_width,
+        )
+        for type_suffix, element_bit_width in (("f16", 16), ("f32", 32), ("f64", 64))
+        for operation in ("minimum", "maximum")
+    )
+    ternary_overlays = tuple(
+        _v_ternary_float_overlay(
+            descriptor_key=f"amdgpu.v_{operation}_{type_suffix}",
+            instruction_name=f"V_{operation.upper()}_{type_suffix.upper()}",
+            mnemonic=f"v_{operation}_{type_suffix}",
+            semantic_tag=f"float.{operation}.{type_suffix}",
+            element_bit_width=element_bit_width,
+        )
+        for type_suffix, element_bit_width in (("f16", 16), ("f32", 32))
+        for operation in (
+            "min3_num",
+            "max3_num",
+            "med3_num",
+            "minmax_num",
+            "maxmin_num",
+            "minimum3",
+            "maximum3",
+            "minimummaximum",
+            "maximumminimum",
+        )
+    )
+    return (
+        *numeric_f32_overlays,
+        *numeric_scalar_overlays,
+        _v_pk_minnum_f16_overlay(
+            instruction_name="V_PK_MIN_NUM_F16", mnemonic="v_pk_min_num_f16"
+        ),
+        _v_pk_maxnum_f16_overlay(
+            instruction_name="V_PK_MAX_NUM_F16", mnemonic="v_pk_max_num_f16"
+        ),
+        *ieee_scalar_overlays,
+        _v_pk_minimum_f16_overlay(),
+        _v_pk_maximum_f16_overlay(),
+        *ternary_overlays,
+    )
+
+
 def _rdna4m_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
+    minmax_overlays = _rdna4m_minmax_overlays()
+    minmax_descriptor_keys = {overlay.descriptor_key for overlay in minmax_overlays}
     return (
         *(
             overlay
             for overlay in _gfx115x_core_overlays()
             if not (overlay.semantic_tag or "").startswith("matrix.")
+            and overlay.descriptor_key not in minmax_descriptor_keys
         ),
+        *minmax_overlays,
         *_v_cvt_f32_packed8_selection_overlays("ocp", op_sel_field="OP_SEL"),
         *_v_cvt_pk_packed8_from_f32_overlays("ocp", op_sel_field="OP_SEL"),
         *(
@@ -2603,6 +2704,7 @@ __all__ = (
     "_gfx12_core_overlays",
     "_rdna4m_core_overlay_descriptors",
     "_rdna4m_core_overlays",
+    "_rdna4m_minmax_overlays",
     "_gfx12_generic_core_overlay_descriptors",
     "_gfx12_generic_core_overlays",
     "_gfx940_core_overlay_descriptors",

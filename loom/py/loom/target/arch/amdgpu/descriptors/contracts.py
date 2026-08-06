@@ -192,6 +192,7 @@ _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS: dict[
     **_contract_overlay_builders_from_overlays(_s_cmp_i32_overlays()),
     **_contract_overlay_builders_from_overlays(_s_cmp_u64_overlays()),
     **_contract_overlay_builders_from_overlays(_v_cmp_overlays()),
+    **_contract_overlay_builders_from_overlays(_rdna4m_minmax_overlays()),
 }
 
 

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
 from loom.target.arch.amdgpu.contracts.arithmetic import (
@@ -206,6 +207,73 @@ def test_packed_f16_arithmetic_rules_publish_native_pk_ops() -> None:
 
     maximum_positions = _descriptor_sequence_positions(compiled, vector.vector_maximumf)
     assert maximum_positions[("amdgpu.v_pk_maximum_f16",)] == 0
+
+
+def test_ieee_minmax_rules_publish_direct_scalar_and_vector_ops() -> None:
+    compiled = _compiled_arithmetic_rules()
+
+    for source_op, descriptors in (
+        (
+            scalar_arithmetic.scalar_minimumf,
+            {
+                "amdgpu.v_minimum_f16",
+                "amdgpu.v_minimum_f32",
+                "amdgpu.v_minimum_f64",
+            },
+        ),
+        (
+            scalar_arithmetic.scalar_maximumf,
+            {
+                "amdgpu.v_maximum_f16",
+                "amdgpu.v_maximum_f32",
+                "amdgpu.v_maximum_f64",
+            },
+        ),
+        (
+            vector.vector_minimumf,
+            {
+                "amdgpu.v_pk_minimum_f16",
+                "amdgpu.v_minimum_f32",
+                "amdgpu.v_minimum_f64",
+            },
+        ),
+        (
+            vector.vector_maximumf,
+            {
+                "amdgpu.v_pk_maximum_f16",
+                "amdgpu.v_maximum_f32",
+                "amdgpu.v_maximum_f64",
+            },
+        ),
+    ):
+        published_descriptors = {
+            descriptor
+            for sequence in _descriptor_sequence_positions(compiled, source_op)
+            for descriptor in sequence
+        }
+        assert descriptors <= published_descriptors
+
+
+def test_clamp_rules_publish_distinct_number_and_ieee_ops() -> None:
+    compiled = _compiled_arithmetic_rules()
+
+    scalar_positions = _descriptor_sequence_positions(
+        compiled, scalar_arithmetic.scalar_clampf
+    )
+    vector_positions = _descriptor_sequence_positions(compiled, vector.vector_clampf)
+    assert ("amdgpu.v_maxmin_num_f16",) in scalar_positions
+    assert ("amdgpu.v_maximumminimum_f16",) in scalar_positions
+    for positions in (scalar_positions, vector_positions):
+        assert ("amdgpu.v_maxmin_num_f32",) in positions
+        assert ("amdgpu.v_maximumminimum_f32",) in positions
+    assert (
+        "amdgpu.v_pk_maxnum_f16",
+        "amdgpu.v_pk_minnum_f16",
+    ) in vector_positions
+    assert (
+        "amdgpu.v_pk_maximum_f16",
+        "amdgpu.v_pk_minimum_f16",
+    ) in vector_positions
 
 
 def test_packed_f32_arithmetic_rules_publish_native_pk_ops() -> None:

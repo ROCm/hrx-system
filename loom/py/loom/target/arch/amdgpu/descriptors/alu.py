@@ -1009,21 +1009,13 @@ def _v_med3_num_f32_overlay(
     instruction_name: str = "V_MED3_F32",
     mnemonic: str = "v_med3_f32",
 ) -> AmdgpuDescriptorOverlay:
-    return AmdgpuDescriptorOverlay(
+    return _v_ternary_float_overlay(
         descriptor_key="amdgpu.v_med3_num_f32",
         instruction_name=instruction_name,
         mnemonic=mnemonic,
-        encoding_name="ENC_VOP3",
         semantic_tag="float.med3_num.f32",
-        schedule_class=_SCHEDULE_VALU,
-        operands=(
-            AmdgpuOperandOverlay("VDST", _vgpr_result()),
-            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("a")),
-            AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("b")),
-            AmdgpuOperandOverlay("SRC2", _sgpr_vgpr_operand("c")),
-        ),
+        element_bit_width=32,
         constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
-        flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
 
@@ -2609,6 +2601,7 @@ def _v_binary_f16_overlay(
     instruction_name: str,
     mnemonic: str,
     semantic_tag: str,
+    constraints: tuple[Constraint, ...] = (),
 ) -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key=descriptor_key,
@@ -2622,7 +2615,24 @@ def _v_binary_f16_overlay(
             AmdgpuOperandOverlay("SRC0", _f16_vgpr_operand("lhs")),
             AmdgpuOperandOverlay("VSRC1", _f16_vgpr_operand("rhs")),
         ),
+        constraints=constraints,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_commutative_binary_f16_overlay(
+    *,
+    descriptor_key: str,
+    instruction_name: str,
+    mnemonic: str,
+    semantic_tag: str,
+) -> AmdgpuDescriptorOverlay:
+    return _v_binary_f16_overlay(
+        descriptor_key=descriptor_key,
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
+        semantic_tag=semantic_tag,
+        constraints=_REMATERIALIZABLE_COMMUTABLE_BINARY_CONSTRAINTS,
     )
 
 
@@ -2868,61 +2878,85 @@ def _v_mul_f16_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
-def _v_min_f32_overlay() -> AmdgpuDescriptorOverlay:
+def _v_min_f32_overlay(
+    *,
+    instruction_name: str = "V_MIN_F32",
+    mnemonic: str = "v_min_f32",
+) -> AmdgpuDescriptorOverlay:
     return _v_binary_f32_overlay(
         descriptor_key="amdgpu.v_min_f32",
-        instruction_name="V_MIN_F32",
-        mnemonic="v_min_f32",
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
         semantic_tag="float.minnum.f32",
         constraints=_REMATERIALIZABLE_COMMUTABLE_BINARY_CONSTRAINTS,
     )
 
 
-def _v_min_f32_literal_overlay() -> AmdgpuDescriptorOverlay:
+def _v_min_f32_literal_overlay(
+    *,
+    instruction_name: str = "V_MIN_F32",
+    mnemonic: str = "v_min_f32",
+) -> AmdgpuDescriptorOverlay:
     return _v_binary_literal_overlay(
         descriptor_key="amdgpu.v_min_f32.lit",
-        instruction_name="V_MIN_F32",
-        mnemonic="v_min_f32",
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
         semantic_tag="float.minnum.f32",
         constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
-def _v_min_f32_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
+def _v_min_f32_src0_inline_overlay(
+    *,
+    instruction_name: str = "V_MIN_F32",
+    mnemonic: str = "v_min_f32",
+) -> AmdgpuDescriptorOverlay:
     return _v_binary_src0_inline_f32_overlay(
         descriptor_key="amdgpu.v_min_f32.src0_inline",
-        instruction_name="V_MIN_F32",
-        mnemonic="v_min_f32",
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
         semantic_tag="float.minnum.f32",
         constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
-def _v_max_f32_overlay() -> AmdgpuDescriptorOverlay:
+def _v_max_f32_overlay(
+    *,
+    instruction_name: str = "V_MAX_F32",
+    mnemonic: str = "v_max_f32",
+) -> AmdgpuDescriptorOverlay:
     return _v_binary_f32_overlay(
         descriptor_key="amdgpu.v_max_f32",
-        instruction_name="V_MAX_F32",
-        mnemonic="v_max_f32",
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
         semantic_tag="float.maxnum.f32",
         constraints=_REMATERIALIZABLE_COMMUTABLE_BINARY_CONSTRAINTS,
     )
 
 
-def _v_max_f32_literal_overlay() -> AmdgpuDescriptorOverlay:
+def _v_max_f32_literal_overlay(
+    *,
+    instruction_name: str = "V_MAX_F32",
+    mnemonic: str = "v_max_f32",
+) -> AmdgpuDescriptorOverlay:
     return _v_binary_literal_overlay(
         descriptor_key="amdgpu.v_max_f32.lit",
-        instruction_name="V_MAX_F32",
-        mnemonic="v_max_f32",
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
         semantic_tag="float.maxnum.f32",
         constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
 
 
-def _v_max_f32_src0_inline_overlay() -> AmdgpuDescriptorOverlay:
+def _v_max_f32_src0_inline_overlay(
+    *,
+    instruction_name: str = "V_MAX_F32",
+    mnemonic: str = "v_max_f32",
+) -> AmdgpuDescriptorOverlay:
     return _v_binary_src0_inline_f32_overlay(
         descriptor_key="amdgpu.v_max_f32.src0_inline",
-        instruction_name="V_MAX_F32",
-        mnemonic="v_max_f32",
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
         semantic_tag="float.maxnum.f32",
         constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
     )
@@ -3895,6 +3929,97 @@ def _f16_sgpr_operand(field_name: str) -> Operand:
     return _sgpr_operand(field_name, register_part=_REG_PART_SGPR_LOW16)
 
 
+def _v_float_vop3_result(element_bit_width: int) -> Operand:
+    if element_bit_width == 16:
+        return _f16_vgpr_result()
+    if element_bit_width in (32, 64):
+        return _vgpr_result(units=element_bit_width // 32)
+    raise ValueError(f"unsupported VOP3 float width {element_bit_width}")
+
+
+def _v_float_vop3_operand(field_name: str, element_bit_width: int) -> Operand:
+    if element_bit_width == 16:
+        return _f16_vgpr_operand(field_name)
+    if element_bit_width in (32, 64):
+        return _sgpr_vgpr_operand(field_name, units=element_bit_width // 32)
+    raise ValueError(f"unsupported VOP3 float width {element_bit_width}")
+
+
+def _v_binary_vop3_float_overlay(
+    *,
+    descriptor_key: str,
+    instruction_name: str,
+    mnemonic: str,
+    semantic_tag: str,
+    element_bit_width: int,
+    constraints: tuple[Constraint, ...] = (),
+) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=descriptor_key,
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
+        encoding_name="ENC_VOP3",
+        semantic_tag=semantic_tag,
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _v_float_vop3_result(element_bit_width)),
+            AmdgpuOperandOverlay(
+                "SRC0", _v_float_vop3_operand("lhs", element_bit_width)
+            ),
+            AmdgpuOperandOverlay(
+                "SRC1", _v_float_vop3_operand("rhs", element_bit_width)
+            ),
+        ),
+        constraints=constraints,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
+def _v_commutative_binary_vop3_float_overlay(
+    *,
+    descriptor_key: str,
+    instruction_name: str,
+    mnemonic: str,
+    semantic_tag: str,
+    element_bit_width: int,
+) -> AmdgpuDescriptorOverlay:
+    return _v_binary_vop3_float_overlay(
+        descriptor_key=descriptor_key,
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
+        semantic_tag=semantic_tag,
+        element_bit_width=element_bit_width,
+        constraints=_REMATERIALIZABLE_COMMUTABLE_BINARY_CONSTRAINTS,
+    )
+
+
+def _v_ternary_float_overlay(
+    *,
+    descriptor_key: str,
+    instruction_name: str,
+    mnemonic: str,
+    semantic_tag: str,
+    element_bit_width: int,
+    constraints: tuple[Constraint, ...] = (),
+) -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key=descriptor_key,
+        instruction_name=instruction_name,
+        mnemonic=mnemonic,
+        encoding_name="ENC_VOP3",
+        semantic_tag=semantic_tag,
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _v_float_vop3_result(element_bit_width)),
+            AmdgpuOperandOverlay("SRC0", _v_float_vop3_operand("a", element_bit_width)),
+            AmdgpuOperandOverlay("SRC1", _v_float_vop3_operand("b", element_bit_width)),
+            AmdgpuOperandOverlay("SRC2", _v_float_vop3_operand("c", element_bit_width)),
+        ),
+        constraints=constraints,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 def _s_fmac_f16_overlay() -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key="amdgpu.s_fmac_f16",
@@ -3932,20 +4057,12 @@ def _s_fmac_f16_overlay() -> AmdgpuDescriptorOverlay:
 
 
 def _v_fma_f16_overlay() -> AmdgpuDescriptorOverlay:
-    return AmdgpuDescriptorOverlay(
+    return _v_ternary_float_overlay(
         descriptor_key="amdgpu.v_fma_f16",
         instruction_name="V_FMA_F16",
         mnemonic="v_fma_f16",
-        encoding_name="ENC_VOP3",
         semantic_tag="float.fma.f16",
-        schedule_class=_SCHEDULE_VALU,
-        operands=(
-            AmdgpuOperandOverlay("VDST", _f16_vgpr_result()),
-            AmdgpuOperandOverlay("SRC0", _f16_vgpr_operand("a")),
-            AmdgpuOperandOverlay("SRC1", _f16_vgpr_operand("b")),
-            AmdgpuOperandOverlay("SRC2", _f16_vgpr_operand("c")),
-        ),
-        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        element_bit_width=16,
     )
 
 
@@ -6646,6 +6763,7 @@ __all__ = (
     "_v_binary_src0_inline_f32_overlay",
     "_v_binary_src0_inline_overlay",
     "_v_binary_u32_overlay",
+    "_v_binary_vop3_float_overlay",
     "_v_cmp_f32_overlay",
     "_v_cmp_f32_source_overlays",
     "_v_cmp_i32_overlay",
@@ -6657,6 +6775,8 @@ __all__ = (
     "_v_cmp_source_inline_overlay",
     "_v_cmp_u32_overlay",
     "_v_cmp_u32_source_overlays",
+    "_v_commutative_binary_f16_overlay",
+    "_v_commutative_binary_vop3_float_overlay",
     "_v_cndmask_b32_literal_inline_overlay",
     "_v_cndmask_b32_overlay",
     "_v_cndmask_b32_overlays",
@@ -6823,6 +6943,7 @@ __all__ = (
     "_v_subrev_f32_overlays",
     "_v_subrev_f32_src0_inline_overlay",
     "_v_sub_u32_overlay",
+    "_v_ternary_float_overlay",
     "_v_unary_f32_overlay",
     "_v_xor_b32_literal_overlay",
     "_v_xor_b32_overlay",
