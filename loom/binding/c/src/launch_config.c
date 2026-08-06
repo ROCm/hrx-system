@@ -108,13 +108,12 @@ loomc_launch_config_field_flags_from_kernel(
   return public_fields;
 }
 
-static bool loomc_launch_config_options_have_specialization(
+static bool loomc_launch_config_options_require_module_clone(
     const loomc_launch_config_resolved_options_t* options) {
   const loomc_config_options_t* config = options->config;
-  return options->workload_argument_count != 0 ||
-         (config != NULL && (config->binding_count != 0 ||
-                             !loomc_string_view_is_empty(config->json_object) ||
-                             config->flags != 0));
+  return config != NULL && (config->binding_count != 0 ||
+                            !loomc_string_view_is_empty(config->json_object) ||
+                            config->flags != 0);
 }
 
 static loomc_status_t loomc_launch_config_validate_result(
@@ -332,8 +331,10 @@ loomc_status_t loomc_module_evaluate_launch_config(
 
   const loom_module_t* source_internal_module =
       loomc_module_const_loom_module(module);
-  if (source_internal_module != NULL &&
-      !loomc_launch_config_options_have_specialization(&resolved_options)) {
+  const bool requires_module_clone =
+      loomc_launch_config_options_require_module_clone(&resolved_options);
+  if (source_internal_module != NULL && !requires_module_clone &&
+      resolved_options.workload_argument_count == 0) {
     bool direct_evaluated = false;
     loom_kernel_launch_config_t kernel_config = {0};
     const loom_kernel_launch_config_options_t kernel_options =
@@ -355,15 +356,18 @@ loomc_status_t loomc_module_evaluate_launch_config(
   }
 
   loomc_module_t* scratch_module = NULL;
-  loomc_status_t status =
-      loomc_module_clone(module, workspace, allocator, &scratch_module);
-  loom_module_t* internal_module =
-      loomc_status_is_ok(status) ? loomc_module_loom_module(scratch_module)
-                                 : NULL;
-  if (loomc_status_is_ok(status)) {
+  loomc_status_t status = loomc_ok_status();
+  const loom_module_t* internal_module = source_internal_module;
+  if (internal_module == NULL || requires_module_clone) {
+    status = loomc_module_clone(module, workspace, allocator, &scratch_module);
+    internal_module = loomc_status_is_ok(status)
+                          ? loomc_module_const_loom_module(scratch_module)
+                          : NULL;
+  }
+  if (loomc_status_is_ok(status) && scratch_module != NULL) {
     const loomc_config_apply_to_module_options_t config_options = {
         .config = resolved_options.config,
-        .module = internal_module,
+        .module = loomc_module_loom_module(scratch_module),
         .result = result,
         .diagnostic_code = loomc_make_cstring_view("CONFIG/INVALID"),
         .block_pool = loomc_workspace_block_pool(workspace),
