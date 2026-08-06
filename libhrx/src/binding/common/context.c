@@ -794,14 +794,6 @@ iree_status_t iree_hal_streaming_context_flush(
   }
 
   iree_hal_streaming_context_release_stream_snapshot(context, streams, count);
-  if (!iree_status_is_ok(status)) {
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
-
-  if (context->default_stream) {
-    status = iree_hal_streaming_stream_flush(context->default_stream);
-  }
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -905,21 +897,8 @@ static iree_status_t iree_hal_streaming_context_synchronize_streams(
   iree_hal_streaming_context_release_stream_snapshot(context, streams_copy,
                                                      count);
 
-  if (!iree_status_is_ok(status)) {
-    IREE_TRACE_ZONE_END(z0);
-    return status;
-  }
-
-  // Also synchronize the default stream, which may not be in the streams list.
-  // The legacy default stream always participates in its own ordering.
-  if (context->default_stream) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0,
-        iree_hal_streaming_stream_synchronize_flushed(context->default_stream));
-  }
-
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 iree_status_t iree_hal_streaming_context_synchronize(

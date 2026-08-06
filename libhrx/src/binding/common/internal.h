@@ -249,10 +249,10 @@ struct iree_hal_streaming_context_t {
   // Host allocator.
   iree_allocator_t host_allocator;
 
-  // Stream tracking (non-owning references - streams are not retained).
-  // NOTE: Streams are NOT retained by this list to avoid reference cycles.
-  // Streams must unregister themselves before destruction.
-  iree_hal_streaming_stream_t** streams;  // Non-owning pointers.
+  // Registered streams. Each entry owns one stream reference, allowing context
+  // operations to take retained snapshots while streams are concurrently
+  // unregistered by their owners.
+  iree_hal_streaming_stream_t** streams;
   iree_host_size_t stream_count;
   iree_host_size_t stream_capacity;
 
@@ -482,7 +482,8 @@ typedef struct iree_hal_streaming_stream_t {
   // Reference counting.
   iree_atomic_ref_count_t ref_count;
 
-  // Parent context, unowned (to avoid cycles).
+  // Parent context, unowned. Remains valid while the stream is registered or
+  // while a context operation holds a retained snapshot of the stream.
   iree_hal_streaming_context_t* context;
 
   // HIP stream creation flags.
@@ -1472,14 +1473,13 @@ iree_status_t iree_hal_streaming_context_disable_peer_access(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_context_t* peer_context);
 
-// Registers a stream with the context (non-owning).
-// Called during stream creation. Does NOT retain the stream.
+// Registers a stream with the context and retains it for the list.
+// Called during stream creation.
 // Synchronization: none (thread-safe internal locking).
 iree_status_t iree_hal_streaming_context_register_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
 
-// Unregisters a stream from the context.
-// Called during stream destruction.
+// Unregisters a stream from the context and releases the list reference.
 // Synchronization: none (thread-safe internal locking).
 void iree_hal_streaming_context_unregister_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);

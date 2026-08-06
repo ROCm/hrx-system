@@ -360,17 +360,6 @@ static void iree_hal_streaming_stream_destroy(
     iree_hal_streaming_stream_t* stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  iree_hal_streaming_context_t* context = stream->context;
-  if (context) {
-    iree_status_ignore(iree_hal_streaming_stream_synchronize(stream));
-    if (stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
-      iree_hal_streaming_stream_set_capture_status(
-          stream, IREE_HAL_STREAMING_CAPTURE_STATUS_NONE);
-    }
-    stream->context = NULL;
-    iree_hal_streaming_context_unregister_stream(context, stream);
-  }
-
   // Clean up recorded events.
   if (stream->recorded_events) {
     for (iree_host_size_t i = 0; i < stream->event_count; ++i) {
