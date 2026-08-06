@@ -13,6 +13,8 @@
 // by dense and routed projections; prefill schedules can reuse the inline
 // packed-row primitive while staging weights across multiple activation rows.
 // The shared packer is linked beside this module.
+amdgpu.target<gfx11-generic> @ggml_q6k_q8_gfx11_wave64 {subgroup_size = 64}
+
 config.decl @ggml.linear_q6k_q8_1_x4.token_capacity : %value: index where [range(%value, 1, 2048)]
 
 config.decl @ggml.linear_q6k_q8_1_x4.output_capacity : %value: index where [range(%value, 1, 262144)]
@@ -208,6 +210,45 @@ func.def inline @ggml_q6k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, 
   func.return %result : f32
 }
 
+// Maps four Q6_K blocks across the four 16-lane partitions of a wave64. Each
+// physical lane contracts the pair of virtual wave32 lanes that own the same
+// packed positions in the low and high halves of one block. The subgroup
+// reduction therefore combines four complete blocks per loop iteration while
+// preserving the canonical wave32 unpacking and dot-product primitive.
+func.def inline @ggml_q6k_q8_1_x4_row_lane_wave64_block4(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32) {
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
+  %bounded_lane = index.assume %lane [range(%lane, 0, 63)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %c256 = index.constant 256 : index
+  %c0_f32 = scalar.constant 0.0 : f32
+  %block_count = index.div %bounded_input_size, %c256 : index
+  %padded_block_count = index.add %block_count, %c3 : index
+  %iteration_count = index.div %padded_block_count, %c4 : index
+  %block_in_iteration = index.div %bounded_lane, %c16 : index
+  %virtual_lane0 = index.rem %bounded_lane, %c16 : index
+  %virtual_lane1 = index.add %virtual_lane0, %c16 : index
+  %result = scf.for %iteration = [%c0 to %iteration_count step %c1](%row_acc = %c0_f32 : f32) -> (f32) {
+    %block_base = index.mul %iteration, %c4 : index
+    %block0 = index.add %block_base, %block_in_iteration : index
+    %valid_block = index.cmp ult, %block0, %block_count : index
+    %block_acc = scf.if %valid_block -> (f32) {
+      %low = func.call @ggml_q6k_q8_1_x4_block_lane(%weight, %weight_row_byte_base, %q8_input, %q8_row_byte_base, %block0, %virtual_lane0) : (buffer, offset, buffer, offset, index, index) -> (f32)
+      %high = func.call @ggml_q6k_q8_1_x4_block_lane(%weight, %weight_row_byte_base, %q8_input, %q8_row_byte_base, %block0, %virtual_lane1) : (buffer, offset, buffer, offset, index, index) -> (f32)
+      %sum = scalar.addf<reassoc|nnan|ninf|nsz> %low, %high : f32
+      scf.yield %sum : f32
+    } else {
+      scf.yield %c0_f32 : f32
+    }
+    %next = scalar.addf<reassoc|nnan|ninf|nsz> %row_acc, %block_acc : f32
+    scf.yield %next : f32
+  }
+  func.return %result : f32
+}
+
 // Contracts one output channel for the calling Q6_K projection kernel. The
 // caller owns publication so the same canonical contraction can feed either a
 // dense logits tensor or an endpoint reduction.
@@ -294,6 +335,61 @@ kernel.def @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %ou
   kernel.return
 }
 
+// Wave64 vocabulary schedule matching llama.cpp Vulkan's one-row workgroup and
+// four-block concurrency on AMD targets with native wave64 execution.
+kernel.def target(@ggml_q6k_q8_gfx11_wave64) @ggml_linear_q6k_q8_1_x4_wave64_block4(%token_count: index, %input_size: index, %output_size: index) {
+  %token_capacity = config.get @ggml.linear_q6k_q8_1_x4.token_capacity : index
+  %output_capacity = config.get @ggml.linear_q6k_q8_1_x4.output_capacity : index
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%output_capacity, %token_capacity, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+  %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
+  %token_capacity = config.get @ggml.linear_q6k_q8_1_x4.token_capacity : index
+  %output_capacity = config.get @ggml.linear_q6k_q8_1_x4.output_capacity : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144), le(%output_size, %output_capacity)] : index
+  %token = kernel.workgroup.id<y> : index
+  %channel = kernel.workgroup.id<x> : index
+  %lane = kernel.subgroup.lane.id : index
+  %valid_token = index.cmp ult, %token, %bounded_token_count : index
+  %valid_channel = index.cmp ult, %channel, %bounded_output_size : index
+  %publish_output = scalar.andi %valid_token, %valid_channel : i1
+  %c0 = index.constant 0 : index
+  %c128 = index.constant 128 : index
+  %c144 = index.constant 144 : index
+  %c210 = index.constant 210 : index
+  %c256 = index.constant 256 : index
+  %safe_token = scf.select %valid_token, %token, %c0 : index
+  %safe_channel = scf.select %valid_channel, %channel, %c0 : index
+  %q6_block_count = index.div %bounded_input_size, %c256 : index
+  %weight_row_byte_count = index.mul %q6_block_count, %c210 : index
+  %weight_row_byte_index = index.mul %safe_channel, %weight_row_byte_count : index
+  %weight_row_byte_base = index.cast %weight_row_byte_index : index to offset
+  %q8_group_count = index.div %bounded_input_size, %c128 : index
+  %q8_row_byte_count = index.mul %q8_group_count, %c144 : index
+  %q8_row_byte_index = index.mul %safe_token, %q8_row_byte_count : index
+  %q8_row_byte_base = index.cast %q8_row_byte_index : index to offset
+  %lane_acc = scf.if %publish_output -> (f32) {
+    %value = func.call @ggml_q6k_q8_1_x4_row_lane_wave64_block4(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
+    scf.yield %value : f32
+  } else {
+    %c0_f32 = scalar.constant 0.0 : f32
+    scf.yield %c0_f32 : f32
+  }
+  %dot = kernel.subgroup.reduce<addf> %lane_acc : f32
+  %is_lane_zero = index.cmp eq, %lane, %c0 : index
+  scf.if %publish_output {
+    scf.if %is_lane_zero {
+      %c0_offset = index.constant 0 : offset
+      %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%bounded_token_count]x[%bounded_output_size]xf32, #dense>
+      view.store %dot, %output_view[%token, %channel] : f32, view<[%bounded_token_count]x[%bounded_output_size]xf32, #dense>
+    }
+  }
+  kernel.return
+}
+
 // Uniform packed bytes exercise both low/high Q6 fields and signed per-group
 // scales. The output width crosses the eight-wave tile boundary, while K=2048
 // covers the exact mixed-format dense V contraction depth.
@@ -305,10 +401,13 @@ check.case public @ggml_linear_q6k_q8_1_x4_nonzero_tail_case {
   %q8_input = check.generate.fill value(0) : tensor<2x2304xi8>
   %weight = check.generate.fill value(-86) : tensor<9x8x210xi8>
   %output = check.generate.fill value(0.0) : tensor<2x9xf32>
+  %wave64_output = check.generate.fill value(0.0) : tensor<2x9xf32>
   %expected = check.generate.fill value(358.1715087890625) : tensor<2x9xf32>
   kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %input_size](%token_count, %input_size, %input, %q8_input) : [index, index](index, index, tensor<2x2048xf32>, tensor<2x2304xi8>)
   kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %q8_input, %weight, %output) : [index, index, index](index, index, index, tensor<2x2304xi8>, tensor<9x8x210xi8>, tensor<2x9xf32>)
+  kernel.launch @ggml_linear_q6k_q8_1_x4_wave64_block4[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %q8_input, %weight, %wave64_output) : [index, index, index](index, index, index, tensor<2x2304xi8>, tensor<9x8x210xi8>, tensor<2x9xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.25) rtol(9.9999999999999995e-07) nan(same) : tensor<2x9xf32>
+  check.expect.close actual(%wave64_output) expected(%expected) atol(0.25) rtol(9.9999999999999995e-07) nan(same) : tensor<2x9xf32>
   check.return
 }
 
@@ -322,6 +421,34 @@ check.case public @ggml_linear_q6k_q8_1_x4_benchmark_case {
   %expected = check.generate.fill value(0.0) : tensor<[%token_count]x2048xf32>
   kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %q8_input, %weight, %output) : [index, index, index](index, index, index, tensor<[%token_count]x864xi8>, tensor<2048x3x210xi8>, tensor<[%token_count]x2048xf32>)
   check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<[%token_count]x2048xf32>
+  check.return
+}
+
+// Production vocabulary shape used to compare the eight-row wave32 baseline
+// with the one-row wave64 block schedule without model-runtime overhead.
+check.case public @ggml_linear_q6k_q8_1_x4_vocabulary_wave32_benchmark_case {
+  %token_count = check.literal value(1) : index
+  %input_size = check.literal value(2048) : index
+  %output_size = check.literal value(151936) : index
+  %q8_input = check.generate.fill value(1) : tensor<1x2304xi8>
+  %weight = check.generate.fill value(0) : tensor<151936x8x210xi8>
+  %output = check.generate.fill value(1.0) : tensor<1x151936xf32>
+  %expected = check.generate.fill value(0.0) : tensor<1x151936xf32>
+  kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %q8_input, %weight, %output) : [index, index, index](index, index, index, tensor<1x2304xi8>, tensor<151936x8x210xi8>, tensor<1x151936xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x151936xf32>
+  check.return
+}
+
+check.case public @ggml_linear_q6k_q8_1_x4_vocabulary_wave64_block4_benchmark_case {
+  %token_count = check.literal value(1) : index
+  %input_size = check.literal value(2048) : index
+  %output_size = check.literal value(151936) : index
+  %q8_input = check.generate.fill value(1) : tensor<1x2304xi8>
+  %weight = check.generate.fill value(0) : tensor<151936x8x210xi8>
+  %output = check.generate.fill value(1.0) : tensor<1x151936xf32>
+  %expected = check.generate.fill value(0.0) : tensor<1x151936xf32>
+  kernel.launch @ggml_linear_q6k_q8_1_x4_wave64_block4[%token_count, %input_size, %output_size](%token_count, %input_size, %output_size, %q8_input, %weight, %output) : [index, index, index](index, index, index, tensor<1x2304xi8>, tensor<151936x8x210xi8>, tensor<1x151936xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<1x151936xf32>
   check.return
 }
 
@@ -347,6 +474,10 @@ check.case public @ggml_linear_q6k_q8_1_x4_dense_v_benchmark_case {
 check.benchmark<@ggml_linear_q6k_q8_1_x4_nonzero_tail_case> @ggml_linear_q6k_q8_1_x4_small
 
 check.benchmark<@ggml_linear_q6k_q8_1_x4_benchmark_case> @ggml_linear_q6k_q8_1_x4_decode {token_count = 1}
+
+check.benchmark<@ggml_linear_q6k_q8_1_x4_vocabulary_wave32_benchmark_case> @ggml_linear_q6k_q8_1_x4_vocabulary_wave32
+
+check.benchmark<@ggml_linear_q6k_q8_1_x4_vocabulary_wave64_block4_benchmark_case> @ggml_linear_q6k_q8_1_x4_vocabulary_wave64_block4
 
 check.benchmark<@ggml_linear_q6k_q8_1_x4_benchmark_case> @ggml_linear_q6k_q8_1_x4_prefill_32 {token_count = 32}
 
