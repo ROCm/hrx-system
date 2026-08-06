@@ -1520,11 +1520,10 @@ iree_status_t iree_hal_streaming_context_synchronize_legacy_default(
 // This flushes and waits for every context registered in the process.
 iree_status_t iree_hal_streaming_context_synchronize_all(void);
 
-// Synchronizes blocking streams that implicitly serialize with the legacy
-// default stream.
-iree_status_t iree_hal_streaming_context_synchronize_blocking_streams(
-    iree_hal_streaming_context_t* context,
-    iree_hal_streaming_stream_t* except_stream);
+// Orders future work on |stream| after work already enqueued on each blocking
+// stream in the context. Non-blocking streams and |stream| are excluded.
+iree_status_t iree_hal_streaming_context_wait_blocking_streams(
+    iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
 
 // Queries whether any stream in the context still has queued work.
 iree_status_t iree_hal_streaming_context_query(

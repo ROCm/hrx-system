@@ -1670,7 +1670,7 @@ static bool iree_hip_event_unregister(hipEvent_t event) {
                                          (uintptr_t)event);
 }
 
-static hipError_t iree_hip_synchronize_legacy_stream_dependencies(
+static hipError_t iree_hip_order_legacy_stream_dependencies(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_stream_t* stream) {
   if (!context || !stream || !context->default_stream ||
@@ -1680,13 +1680,13 @@ static hipError_t iree_hip_synchronize_legacy_stream_dependencies(
 
   iree_status_t status = iree_ok_status();
   if (stream == context->default_stream) {
-    status = iree_hal_streaming_context_synchronize_blocking_streams(context,
-                                                                     stream);
+    status = iree_hal_streaming_context_wait_blocking_streams(context, stream);
   } else if (!iree_any_bit_set(stream->flags,
                                IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING) &&
              context->default_stream->capture_status ==
                  IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
-    status = iree_hal_streaming_stream_synchronize(context->default_stream);
+    status =
+        iree_hal_streaming_stream_wait_stream(stream, context->default_stream);
   }
   return iree_status_to_hip_result(status);
 }
@@ -6540,7 +6540,7 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
   }
 
   hipError_t dependency_result =
-      iree_hip_synchronize_legacy_stream_dependencies(context, stream_obj);
+      iree_hip_order_legacy_stream_dependencies(context, stream_obj);
   if (dependency_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(dependency_result);
@@ -12834,7 +12834,7 @@ HIPAPI hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
       .flags = IREE_HAL_STREAMING_DISPATCH_FLAG_ARGS_ARRAY,
   };
   hipError_t dependency_result =
-      iree_hip_synchronize_legacy_stream_dependencies(context, stream_obj);
+      iree_hip_order_legacy_stream_dependencies(context, stream_obj);
   if (dependency_result != hipSuccess) {
     iree_hal_streaming_stream_release(stream_obj);
     IREE_TRACE_ZONE_END(z0);
@@ -13128,7 +13128,7 @@ HIPAPI hipError_t hipModuleLaunchKernel(
       .flags = dispatch_flags,
   };
   hipError_t dependency_result =
-      iree_hip_synchronize_legacy_stream_dependencies(context, stream_obj);
+      iree_hip_order_legacy_stream_dependencies(context, stream_obj);
   if (dependency_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(dependency_result);

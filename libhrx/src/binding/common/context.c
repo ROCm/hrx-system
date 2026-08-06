@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "common/internal.h"
+#include "common/stream.h"
 
 //===----------------------------------------------------------------------===//
 // Global state
@@ -1004,10 +1005,11 @@ iree_status_t iree_hal_streaming_context_synchronize_all(void) {
   return status;
 }
 
-iree_status_t iree_hal_streaming_context_synchronize_blocking_streams(
+iree_status_t iree_hal_streaming_context_wait_blocking_streams(
     iree_hal_streaming_context_t* context,
-    iree_hal_streaming_stream_t* except_stream) {
+    iree_hal_streaming_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_streaming_stream_t** streams_copy = NULL;
@@ -1020,15 +1022,16 @@ iree_status_t iree_hal_streaming_context_synchronize_blocking_streams(
   }
 
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
-    iree_hal_streaming_stream_t* stream = streams_copy[i];
-    if (!stream || stream == except_stream ||
-        stream == context->default_stream ||
-        iree_any_bit_set(stream->flags,
+    iree_hal_streaming_stream_t* source_stream = streams_copy[i];
+    if (!source_stream || source_stream == stream ||
+        source_stream == context->default_stream ||
+        iree_any_bit_set(source_stream->flags,
                          IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING) ||
-        stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+        source_stream->capture_status !=
+            IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
       continue;
     }
-    status = iree_hal_streaming_stream_synchronize(stream);
+    status = iree_hal_streaming_stream_wait_stream(stream, source_stream);
   }
 
   iree_hal_streaming_context_release_stream_snapshot(context, streams_copy,

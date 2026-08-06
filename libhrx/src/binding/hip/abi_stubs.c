@@ -391,16 +391,12 @@ static hipError_t hrx_hip_validate_mipmapped_array_descriptor(
   return hrx_hip_mipmapped_array_level_size(descriptor, 0, &ignored_size);
 }
 
-static IREE_THREAD_LOCAL hipStream_t hrx_hip_spt_stream = NULL;
-
 static hipError_t hrx_hip_spt_default_stream(hipStream_t* stream) {
   if (!stream) return hipErrorInvalidValue;
-  if (!hrx_hip_spt_stream) {
-    hipError_t result =
-        hipStreamCreateWithFlags(&hrx_hip_spt_stream, hipStreamNonBlocking);
-    if (result != hipSuccess) return result;
-  }
-  *stream = hrx_hip_spt_stream;
+  // The public sentinel is resolved by the regular entry points through the
+  // shared per-thread stream state. Keeping that state in one place gives
+  // reset and context changes the same lifetime behavior for every API form.
+  *stream = hipStreamPerThread;
   return hipSuccess;
 }
 
