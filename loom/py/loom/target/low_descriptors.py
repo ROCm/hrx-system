@@ -12,9 +12,9 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from loom.ir import ScalarTypeKind
 from loom.stable_id import stable_id_from_string
 
-LOW_DESCRIPTOR_SET_ABI_VERSION = 31
 LOW_DESCRIPTOR_ENCODING_ID_NONE = (2**16) - 1
 LOW_DESCRIPTOR_SET_ORDINAL_NONE = (2**16) - 1
 
@@ -392,6 +392,24 @@ class NativeAsmValue:
 
 
 @dataclass(frozen=True, slots=True)
+class AsmResultValueType:
+    """Exact semantic result type reconstructed by target asm.
+
+    A zero vector lane count denotes a scalar. A positive lane count denotes
+    a static rank-1 vector of the same scalar element type.
+    """
+
+    element_type: ScalarTypeKind
+    vector_lane_count: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.element_type, ScalarTypeKind):
+            raise ValueError("asm result element type must be a ScalarTypeKind")
+        if self.vector_lane_count < 0 or self.vector_lane_count > (2**16) - 1:
+            raise ValueError("asm result vector lane count must fit u16")
+
+
+@dataclass(frozen=True, slots=True)
 class AsmForm:
     mnemonic: str | None = None
     native_assembly_mnemonic: str | None = None
@@ -399,6 +417,7 @@ class AsmForm:
     operands: tuple[str, ...] = ()
     immediates: tuple[AsmImmediate, ...] = ()
     native_assembly_values: tuple[NativeAsmValue, ...] = ()
+    result_value_types: tuple[AsmResultValueType | None, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

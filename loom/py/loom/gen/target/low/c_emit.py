@@ -23,6 +23,7 @@ from loom.gen.target.low.compiled import (
 )
 from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_SET_ORDINAL_NONE,
+    AsmResultValueType,
     Descriptor,
     DescriptorSet,
     Hazard,
@@ -318,6 +319,7 @@ def _asm_form_row_lines(
             f".native_assembly_mnemonic_string_offset = {c_spelling.optional_string_expr(pool, asm_form.native_assembly_mnemonic_label)},",
             f".descriptor_ordinal = {asm_form.descriptor_ordinal},",
             f".result_operand_index_start = {asm_form.result_index_start},",
+            f".result_value_type_start = {asm_form.result_value_type_start if asm_form.result_value_type_start is not None else 'LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE'},",
             f".result_operand_index_count = {len(asm_form.result_indices)},",
             f".operand_index_start = {asm_form.operand_index_start},",
             f".operand_index_count = {len(asm_form.operand_indices)},",
@@ -328,6 +330,25 @@ def _asm_form_row_lines(
         ]
         for asm_form in asm_forms
     ]
+
+
+def _asm_result_value_type_row_lines(
+    value_types: Sequence[AsmResultValueType | None],
+) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for value_type in value_types:
+        if value_type is None:
+            rows.append([".kind = LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_NONE,"])
+            continue
+        kind = "LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_VECTOR" if value_type.vector_lane_count else "LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR"
+        row = [
+            f".kind = {kind},",
+            f".element_type = LOOM_SCALAR_TYPE_{value_type.element_type.name},",
+        ]
+        if value_type.vector_lane_count:
+            row.append(f".vector_lane_count = {value_type.vector_lane_count},")
+        rows.append(row)
+    return rows
 
 
 def _native_asm_value_row_lines(
@@ -752,6 +773,13 @@ def emit_source_for_views(
         )
     _emit_array(
         lines,
+        "loom_low_asm_result_value_type_t",
+        spec.c_table_prefix,
+        "AsmResultValueTypes",
+        _asm_result_value_type_row_lines(compiled.asm_result_value_types),
+    )
+    _emit_array(
+        lines,
         "loom_low_asm_immediate_t",
         spec.c_table_prefix,
         "AsmImmediates",
@@ -816,6 +844,7 @@ def emit_source_for_views(
         "pressure_deltas": "pressure_delta_count",
         "asm_forms": "asm_form_count",
         "asm_operand_indices": "asm_operand_index_count",
+        "asm_result_value_types": "asm_result_value_type_count",
         "asm_immediates": "asm_immediate_count",
         "native_asm_values": "native_asm_value_count",
         "encoding_field_values": "encoding_field_value_count",
@@ -884,6 +913,11 @@ def emit_source_for_views(
             view_lines.append(f"    .asm_forms = k{asm_form_table_prefix}AsmForms,")
             view_lines.append(f"    .asm_form_count = IREE_ARRAYSIZE(k{asm_form_table_prefix}AsmForms),")
             append_optional_table("asm_operand_indices", "AsmOperandIndices", view_lines)
+            append_optional_table(
+                "asm_result_value_types",
+                "AsmResultValueTypes",
+                view_lines,
+            )
             append_optional_table("asm_immediates", "AsmImmediates", view_lines)
             append_optional_table("native_asm_values", "NativeAsmValues", view_lines)
         append_optional_table("encoding_field_values", "EncodingFieldValues", view_lines)

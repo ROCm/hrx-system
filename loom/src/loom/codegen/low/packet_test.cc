@@ -43,7 +43,11 @@ void InitializePacketTestState(PacketTestState* state) {
   state->descriptors[1].canonical_asm_form_ordinal = 0;
 
   state->asm_forms[0].descriptor_ordinal = 1;
+  state->asm_forms[0].result_value_type_start =
+      LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE;
   state->asm_forms[1].descriptor_ordinal = 0;
+  state->asm_forms[1].result_value_type_start =
+      LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE;
 
   state->descriptor_set.descriptors = state->descriptors;
   state->descriptor_set.descriptor_count = IREE_ARRAYSIZE(state->descriptors);

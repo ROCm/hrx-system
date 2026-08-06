@@ -178,6 +178,9 @@ static iree_status_t loom_low_verify_tables_present(
       descriptor_set->asm_operand_indices,
       descriptor_set->asm_operand_index_count, "asm_operand_indices"));
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
+      descriptor_set->asm_result_value_types,
+      descriptor_set->asm_result_value_type_count, "asm_result_value_types"));
+  IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
       descriptor_set->asm_immediates, descriptor_set->asm_immediate_count,
       "asm_immediates"));
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
@@ -691,6 +694,52 @@ static iree_status_t loom_low_verify_asm_form(
       asm_form->result_operand_index_start,
       asm_form->result_operand_index_count,
       descriptor_set->asm_operand_index_count, "asm_operand_indices"));
+  if (asm_form->result_value_type_start !=
+      LOOM_LOW_ASM_RESULT_VALUE_TYPE_START_NONE) {
+    if (asm_form->result_operand_index_count == 0) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low asm form %" PRIu32
+          " declares exact result value types but has no results",
+          asm_form_index);
+    }
+    IREE_RETURN_IF_ERROR(loom_low_verify_span(
+        asm_form->result_value_type_start, asm_form->result_operand_index_count,
+        descriptor_set->asm_result_value_type_count, "asm_result_value_types"));
+    bool has_exact_value_type = false;
+    for (uint16_t i = 0; i < asm_form->result_operand_index_count; ++i) {
+      const loom_low_asm_result_value_type_t* value_type =
+          &descriptor_set
+               ->asm_result_value_types[asm_form->result_value_type_start + i];
+      if (value_type->kind == LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_NONE) {
+        continue;
+      }
+      has_exact_value_type = true;
+      const uint16_t result_operand_index =
+          descriptor_set
+              ->asm_operand_indices[asm_form->result_operand_index_start + i];
+      for (uint16_t j = 0; j < descriptor->constraint_count; ++j) {
+        const loom_low_constraint_t* constraint =
+            &descriptor_set->constraints[descriptor->constraint_start + j];
+        if (constraint->lhs_operand_index == result_operand_index &&
+            (constraint->kind == LOOM_LOW_CONSTRAINT_KIND_TIED ||
+             constraint->kind == LOOM_LOW_CONSTRAINT_KIND_DESTRUCTIVE)) {
+          return iree_make_status(
+              IREE_STATUS_INVALID_ARGUMENT,
+              "low asm form %" PRIu32 " result %" PRIu16
+              " has both an exact result value type and operand inference",
+              asm_form_index, i);
+        }
+      }
+    }
+    if (!has_exact_value_type) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low asm form %" PRIu32
+          " exact result value type span contains only absent rows",
+          asm_form_index);
+    }
+  }
   IREE_RETURN_IF_ERROR(loom_low_verify_span(
       asm_form->operand_index_start, asm_form->operand_index_count,
       descriptor_set->asm_operand_index_count, "asm_operand_indices"));
@@ -719,16 +768,61 @@ static iree_status_t loom_low_verify_asm_form(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_verify_asm_result_value_type(
+    const loom_low_asm_result_value_type_t* value_type,
+    uint32_t value_type_index) {
+  switch (value_type->kind) {
+    case LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_NONE:
+      if (value_type->element_type != 0 || value_type->vector_lane_count != 0) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "absent low asm result value type %" PRIu32
+                                " must have zero element type and lane count",
+                                value_type_index);
+      }
+      return iree_ok_status();
+    case LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_SCALAR:
+      if (value_type->element_type >= LOOM_SCALAR_TYPE_COUNT_ ||
+          value_type->vector_lane_count != 0) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "scalar low asm result value type %" PRIu32
+            " must have a valid element type and zero lane count",
+            value_type_index);
+      }
+      return iree_ok_status();
+    case LOOM_LOW_ASM_RESULT_VALUE_TYPE_KIND_VECTOR:
+      if (value_type->element_type >= LOOM_SCALAR_TYPE_COUNT_ ||
+          value_type->vector_lane_count == 0) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "vector low asm result value type %" PRIu32
+            " must have a valid element type and non-zero lane count",
+            value_type_index);
+      }
+      return iree_ok_status();
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low asm result value type %" PRIu32
+                              " has unknown kind %u",
+                              value_type_index, (unsigned)value_type->kind);
+  }
+}
+
 static iree_status_t loom_low_verify_asm_forms(
     const loom_low_descriptor_set_t* descriptor_set) {
+  for (uint32_t i = 0; i < descriptor_set->asm_result_value_type_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_low_verify_asm_result_value_type(
+        &descriptor_set->asm_result_value_types[i], i));
+  }
   if (descriptor_set->asm_form_count == 0) {
     if (descriptor_set->asm_operand_index_count != 0 ||
+        descriptor_set->asm_result_value_type_count != 0 ||
         descriptor_set->asm_immediate_count != 0 ||
         descriptor_set->native_asm_value_count != 0) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "low descriptor set has asm operand, immediate, or native value rows "
-          "but no asm forms");
+          "low descriptor set has asm operand, result type, immediate, or "
+          "native value rows but no asm forms");
     }
     return iree_ok_status();
   }

@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from loom.ir import ScalarTypeKind
 from loom.target.low_descriptors import (
     AsmForm,
     AsmImmediate,
+    AsmResultValueType,
     Constraint,
     ConstraintKind,
     Descriptor,
@@ -97,6 +99,7 @@ def _asm(
     results: tuple[str, ...] = (),
     operands: tuple[str, ...] = (),
     immediates: tuple[str | AsmImmediate, ...] = (),
+    result_value_types: tuple[AsmResultValueType | None, ...] = (),
 ) -> tuple[AsmForm, ...]:
     return (
         AsmForm(
@@ -108,6 +111,7 @@ def _asm(
                 else AsmImmediate(immediate)
                 for immediate in immediates
             ),
+            result_value_types=result_value_types,
         ),
     )
 
@@ -772,7 +776,11 @@ TEST_LOW_SPV_OP_IADD_I32_DESCRIPTOR = Descriptor(
     mnemonic="OpIAdd",
     semantic_tag="spirv.op_iadd.i32",
     operands=(_i32_result(), _i32_operand("lhs"), _i32_operand("rhs")),
-    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    asm_forms=_asm(
+        results=("dst",),
+        operands=("lhs", "rhs"),
+        result_value_types=(AsmResultValueType(ScalarTypeKind.I32),),
+    ),
     schedule_class=_SCHEDULE_SCALAR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
