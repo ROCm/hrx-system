@@ -476,94 +476,28 @@ static bool loom_symbolic_expr_constant_value(
 // Value expansion
 //===----------------------------------------------------------------------===//
 
-static iree_status_t loom_symbolic_expr_from_binary_value(
-    loom_symbolic_expr_context_t* context, loom_value_id_t left_value,
-    loom_value_id_t right_value, bool subtract,
-    loom_symbolic_expr_t* out_expression) {
-  loom_symbolic_expr_t left_expression = {0};
-  loom_symbolic_expr_t right_expression = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_symbolic_expr_from_value(context, left_value, &left_expression));
-  IREE_RETURN_IF_ERROR(
-      loom_symbolic_expr_from_value(context, right_value, &right_expression));
-  return loom_symbolic_expr_add_or_sub(
-      context, &left_expression, &right_expression, subtract, out_expression);
-}
-
-static iree_status_t loom_symbolic_expr_from_mul_value(
+static iree_status_t loom_symbolic_expr_multiply(
     loom_symbolic_expr_context_t* context, loom_value_id_t result_value,
-    loom_value_id_t left_value, loom_value_id_t right_value,
+    const loom_symbolic_expr_t* left_expression,
+    const loom_symbolic_expr_t* right_expression,
     loom_symbolic_expr_t* out_expression) {
-  loom_symbolic_expr_t left_expression = {0};
-  loom_symbolic_expr_t right_expression = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_symbolic_expr_from_value(context, left_value, &left_expression));
-  IREE_RETURN_IF_ERROR(
-      loom_symbolic_expr_from_value(context, right_value, &right_expression));
   int64_t left_constant = 0;
   int64_t right_constant = 0;
-  if (loom_symbolic_expr_constant_value(&left_expression, &left_constant)) {
-    return loom_symbolic_expr_mul_i64(context, &right_expression, left_constant,
+  if (loom_symbolic_expr_constant_value(left_expression, &left_constant)) {
+    return loom_symbolic_expr_mul_i64(context, right_expression, left_constant,
                                       out_expression);
   }
-  if (loom_symbolic_expr_constant_value(&right_expression, &right_constant)) {
-    return loom_symbolic_expr_mul_i64(context, &left_expression, right_constant,
+  if (loom_symbolic_expr_constant_value(right_expression, &right_constant)) {
+    return loom_symbolic_expr_mul_i64(context, left_expression, right_constant,
                                       out_expression);
   }
   return loom_symbolic_expr_value(context, result_value, out_expression);
 }
 
-static iree_status_t loom_symbolic_expr_from_madd_value(
-    loom_symbolic_expr_context_t* context, loom_value_id_t result_value,
-    loom_value_id_t a_value, loom_value_id_t b_value, loom_value_id_t c_value,
-    loom_symbolic_expr_t* out_expression) {
-  loom_symbolic_expr_t product_expression = {0};
-  IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_mul_value(
-      context, result_value, a_value, b_value, &product_expression));
-  if (product_expression.term_count == 1 &&
-      product_expression.terms[0].value_id == result_value &&
-      product_expression.constant == 0) {
-    return loom_symbolic_expr_value(context, result_value, out_expression);
-  }
-  loom_symbolic_expr_t c_expression = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_symbolic_expr_from_value(context, c_value, &c_expression));
-  return loom_symbolic_expr_add(context, &product_expression, &c_expression,
-                                out_expression);
-}
-
-static iree_status_t loom_symbolic_expr_from_shli_value(
-    loom_symbolic_expr_context_t* context, loom_value_id_t result_value,
-    loom_value_id_t left_value, loom_value_id_t right_value,
-    loom_symbolic_expr_t* out_expression) {
-  loom_symbolic_expr_t right_expression = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_symbolic_expr_from_value(context, right_value, &right_expression));
-  int64_t shift_amount = 0;
-  if (!loom_symbolic_expr_constant_value(&right_expression, &shift_amount) ||
-      shift_amount < 0 || shift_amount > 62) {
-    return loom_symbolic_expr_value(context, result_value, out_expression);
-  }
-  loom_symbolic_expr_t left_expression = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_symbolic_expr_from_value(context, left_value, &left_expression));
-  return loom_symbolic_expr_mul_i64(context, &left_expression,
-                                    INT64_C(1) << shift_amount, out_expression);
-}
-
-static iree_status_t loom_symbolic_expr_from_select_value(
-    loom_symbolic_expr_context_t* context, loom_value_id_t result_value,
-    loom_value_id_t condition_value, loom_value_id_t true_value,
-    loom_value_id_t false_value, loom_symbolic_expr_t* out_expression) {
-  loom_symbolic_expr_t condition_expression = {0};
-  IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(context, condition_value,
-                                                     &condition_expression));
-  int64_t condition = 0;
-  if (loom_symbolic_expr_constant_value(&condition_expression, &condition)) {
-    return loom_symbolic_expr_from_value(
-        context, condition ? true_value : false_value, out_expression);
-  }
-  return loom_symbolic_expr_value(context, result_value, out_expression);
+static bool loom_symbolic_expr_is_result_symbol(
+    const loom_symbolic_expr_t* expression, loom_value_id_t value_id) {
+  return expression->constant == 0 && expression->term_count == 1 &&
+         expression->terms[0].value_id == value_id;
 }
 
 static iree_status_t loom_symbolic_expr_attach_identity_relation_value(
@@ -581,46 +515,116 @@ static iree_status_t loom_symbolic_expr_attach_identity_relation_value(
                                         expression->facts, expression);
 }
 
-static iree_status_t loom_symbolic_expr_from_assume_value(
-    loom_symbolic_expr_context_t* context, const loom_value_slice_t values,
-    loom_value_id_t result_value, uint16_t result_index,
-    loom_symbolic_expr_t* out_expression) {
-  if (result_index >= values.count) {
+typedef enum loom_symbolic_expr_expansion_kind_e {
+  LOOM_SYMBOLIC_EXPR_EXPANSION_IDENTITY = 0,
+  LOOM_SYMBOLIC_EXPR_EXPANSION_ASSUME,
+  LOOM_SYMBOLIC_EXPR_EXPANSION_ADD,
+  LOOM_SYMBOLIC_EXPR_EXPANSION_SUBTRACT,
+  LOOM_SYMBOLIC_EXPR_EXPANSION_MULTIPLY,
+  LOOM_SYMBOLIC_EXPR_EXPANSION_MULTIPLY_ADD,
+  LOOM_SYMBOLIC_EXPR_EXPANSION_SHIFT_LEFT,
+  LOOM_SYMBOLIC_EXPR_EXPANSION_NEGATE,
+  LOOM_SYMBOLIC_EXPR_EXPANSION_SELECT,
+} loom_symbolic_expr_expansion_kind_t;
+
+typedef enum loom_symbolic_expr_expansion_stage_e {
+  LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_BEGIN = 0,
+  LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_FIRST_OPERAND,
+  LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_SECOND_OPERAND,
+  LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_THIRD_OPERAND,
+} loom_symbolic_expr_expansion_stage_t;
+
+typedef struct loom_symbolic_expr_expansion_frame_t {
+  // SSA value whose expression this frame computes.
+  loom_value_id_t value_id;
+
+  // Operation-specific expansion category.
+  loom_symbolic_expr_expansion_kind_t kind;
+
+  // Continuation stage within the operation-specific expansion.
+  loom_symbolic_expr_expansion_stage_t stage;
+
+  // Producer values consumed in operation-specific order.
+  loom_value_id_t operand_values[3];
+
+  // Partial expression retained while a later operand is expanded.
+  loom_symbolic_expr_t intermediate_expression;
+
+  // Exact shift amount retained while the shifted value is expanded.
+  int64_t shift_amount;
+} loom_symbolic_expr_expansion_frame_t;
+
+#define LOOM_SYMBOLIC_EXPR_EXPANSION_INLINE_FRAME_CAPACITY 8
+
+static iree_status_t loom_symbolic_expr_expansion_request_value(
+    loom_symbolic_expr_context_t* context,
+    iree_arena_allocator_t* transient_arena, loom_value_id_t value_id,
+    loom_symbolic_expr_expansion_frame_t** inout_frames,
+    iree_host_size_t* inout_frame_count, iree_host_size_t* inout_frame_capacity,
+    loom_symbolic_expr_t* out_expression, bool* out_pending) {
+  *out_pending = false;
+  if (!context->module || value_id >= context->module->values.count) {
     loom_symbolic_expr_unknown(loom_value_facts_unknown(), out_expression);
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_symbolic_expr_from_value(
-      context, values.values[result_index], out_expression));
-  return loom_symbolic_expr_attach_identity_relation_value(
-      context, result_value, out_expression);
+
+  IREE_RETURN_IF_ERROR(
+      loom_symbolic_expr_ensure_memo_capacity(context, value_id + 1));
+  loom_symbolic_expr_memo_entry_t* memo_entry =
+      &context->memo_entries[value_id];
+  if (memo_entry->state == LOOM_SYMBOLIC_EXPR_MEMO_READY) {
+    *out_expression = memo_entry->expression;
+    return iree_ok_status();
+  }
+  if (memo_entry->state == LOOM_SYMBOLIC_EXPR_MEMO_VISITING) {
+    return loom_symbolic_expr_value(context, value_id, out_expression);
+  }
+
+  if (*inout_frame_count == *inout_frame_capacity) {
+    void* frames = *inout_frames;
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        transient_arena, *inout_frame_count, *inout_frame_count + 1,
+        sizeof(**inout_frames), inout_frame_capacity, &frames));
+    *inout_frames = (loom_symbolic_expr_expansion_frame_t*)frames;
+  }
+
+  memo_entry->state = LOOM_SYMBOLIC_EXPR_MEMO_VISITING;
+  (*inout_frames)[(*inout_frame_count)++] =
+      (loom_symbolic_expr_expansion_frame_t){
+          .value_id = value_id,
+          .stage = LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_BEGIN,
+      };
+  *out_pending = true;
+  return iree_ok_status();
 }
 
-static iree_status_t loom_symbolic_expr_from_value_uncached(
-    loom_symbolic_expr_context_t* context, loom_value_id_t value_id,
-    loom_symbolic_expr_t* out_expression) {
+static iree_status_t loom_symbolic_expr_expansion_prepare_frame(
+    loom_symbolic_expr_context_t* context,
+    loom_symbolic_expr_expansion_frame_t* frame,
+    loom_symbolic_expr_t* out_expression, bool* out_complete) {
+  *out_complete = false;
   loom_value_facts_t facts =
-      loom_symbolic_expr_context_lookup_facts(context, value_id);
+      loom_symbolic_expr_context_lookup_facts(context, frame->value_id);
   int64_t exact_value = 0;
   if (loom_symbolic_expr_exact_integer_facts(facts, &exact_value)) {
     loom_symbolic_expr_constant(exact_value, out_expression);
     out_expression->facts = facts;
-    return iree_ok_status();
-  }
-  if (!context->module || value_id >= context->module->values.count) {
-    loom_symbolic_expr_unknown(facts, out_expression);
+    *out_complete = true;
     return iree_ok_status();
   }
 
-  const loom_value_t* value = loom_module_value(context->module, value_id);
+  const loom_value_t* value =
+      loom_module_value(context->module, frame->value_id);
   if (loom_value_is_block_arg(value)) {
-    return loom_symbolic_expr_value(context, value_id, out_expression);
+    *out_complete = true;
+    return loom_symbolic_expr_value(context, frame->value_id, out_expression);
   }
   const loom_op_t* defining_op = loom_value_def_op(value);
   if (!defining_op) {
-    return loom_symbolic_expr_value(context, value_id, out_expression);
+    *out_complete = true;
+    return loom_symbolic_expr_value(context, frame->value_id, out_expression);
   }
 
-  iree_status_t status = iree_ok_status();
   switch (defining_op->kind) {
     case LOOM_OP_INDEX_CONSTANT: {
       loom_attribute_t value_attr = loom_index_constant_value(defining_op);
@@ -628,49 +632,58 @@ static iree_status_t loom_symbolic_expr_from_value_uncached(
         loom_symbolic_expr_constant(loom_attr_as_i64(value_attr),
                                     out_expression);
       } else {
-        status = loom_symbolic_expr_value(context, value_id, out_expression);
+        IREE_RETURN_IF_ERROR(
+            loom_symbolic_expr_value(context, frame->value_id, out_expression));
       }
+      *out_complete = true;
       break;
     }
     case LOOM_OP_INDEX_CAST:
-      status = loom_symbolic_expr_from_value(
-          context, loom_index_cast_input(defining_op), out_expression);
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_IDENTITY;
+      frame->operand_values[0] = loom_index_cast_input(defining_op);
       break;
-    case LOOM_OP_INDEX_ASSUME:
-      status = loom_symbolic_expr_from_assume_value(
-          context, loom_index_assume_values(defining_op), value_id,
-          loom_value_def_index(value), out_expression);
+    case LOOM_OP_INDEX_ASSUME: {
+      loom_value_slice_t values = loom_index_assume_values(defining_op);
+      uint16_t result_index = loom_value_def_index(value);
+      if (result_index >= values.count) {
+        *out_complete = true;
+        return loom_symbolic_expr_value(context, frame->value_id,
+                                        out_expression);
+      }
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_ASSUME;
+      frame->operand_values[0] = values.values[result_index];
       break;
+    }
     case LOOM_OP_INDEX_ADD:
-      status = loom_symbolic_expr_from_binary_value(
-          context, loom_index_add_lhs(defining_op),
-          loom_index_add_rhs(defining_op), false, out_expression);
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_ADD;
+      frame->operand_values[0] = loom_index_add_lhs(defining_op);
+      frame->operand_values[1] = loom_index_add_rhs(defining_op);
       break;
     case LOOM_OP_INDEX_SUB:
-      status = loom_symbolic_expr_from_binary_value(
-          context, loom_index_sub_lhs(defining_op),
-          loom_index_sub_rhs(defining_op), true, out_expression);
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_SUBTRACT;
+      frame->operand_values[0] = loom_index_sub_lhs(defining_op);
+      frame->operand_values[1] = loom_index_sub_rhs(defining_op);
       break;
     case LOOM_OP_INDEX_MUL:
-      status = loom_symbolic_expr_from_mul_value(
-          context, value_id, loom_index_mul_lhs(defining_op),
-          loom_index_mul_rhs(defining_op), out_expression);
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_MULTIPLY;
+      frame->operand_values[0] = loom_index_mul_lhs(defining_op);
+      frame->operand_values[1] = loom_index_mul_rhs(defining_op);
       break;
     case LOOM_OP_INDEX_SCALE:
-      status = loom_symbolic_expr_from_mul_value(
-          context, value_id, loom_index_scale_index(defining_op),
-          loom_index_scale_stride(defining_op), out_expression);
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_MULTIPLY;
+      frame->operand_values[0] = loom_index_scale_index(defining_op);
+      frame->operand_values[1] = loom_index_scale_stride(defining_op);
       break;
     case LOOM_OP_INDEX_MADD:
-      status = loom_symbolic_expr_from_madd_value(
-          context, value_id, loom_index_madd_a(defining_op),
-          loom_index_madd_b(defining_op), loom_index_madd_c(defining_op),
-          out_expression);
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_MULTIPLY_ADD;
+      frame->operand_values[0] = loom_index_madd_a(defining_op);
+      frame->operand_values[1] = loom_index_madd_b(defining_op);
+      frame->operand_values[2] = loom_index_madd_c(defining_op);
       break;
     case LOOM_OP_INDEX_SHLI:
-      status = loom_symbolic_expr_from_shli_value(
-          context, value_id, loom_index_shli_lhs(defining_op),
-          loom_index_shli_rhs(defining_op), out_expression);
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_SHIFT_LEFT;
+      frame->operand_values[0] = loom_index_shli_lhs(defining_op);
+      frame->operand_values[1] = loom_index_shli_rhs(defining_op);
       break;
     case LOOM_OP_SCALAR_CONSTANT: {
       loom_attribute_t value_attr = loom_scalar_constant_value(defining_op);
@@ -678,65 +691,217 @@ static iree_status_t loom_symbolic_expr_from_value_uncached(
         loom_symbolic_expr_constant(loom_attr_as_i64(value_attr),
                                     out_expression);
       } else {
-        status = loom_symbolic_expr_value(context, value_id, out_expression);
+        IREE_RETURN_IF_ERROR(
+            loom_symbolic_expr_value(context, frame->value_id, out_expression));
       }
+      *out_complete = true;
       break;
     }
     case LOOM_OP_SCALAR_ADDI:
-      status = loom_symbolic_expr_from_binary_value(
-          context, loom_scalar_addi_lhs(defining_op),
-          loom_scalar_addi_rhs(defining_op), false, out_expression);
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_ADD;
+      frame->operand_values[0] = loom_scalar_addi_lhs(defining_op);
+      frame->operand_values[1] = loom_scalar_addi_rhs(defining_op);
       break;
     case LOOM_OP_SCALAR_SUBI:
-      status = loom_symbolic_expr_from_binary_value(
-          context, loom_scalar_subi_lhs(defining_op),
-          loom_scalar_subi_rhs(defining_op), true, out_expression);
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_SUBTRACT;
+      frame->operand_values[0] = loom_scalar_subi_lhs(defining_op);
+      frame->operand_values[1] = loom_scalar_subi_rhs(defining_op);
       break;
     case LOOM_OP_SCALAR_MULI:
-      status = loom_symbolic_expr_from_mul_value(
-          context, value_id, loom_scalar_muli_lhs(defining_op),
-          loom_scalar_muli_rhs(defining_op), out_expression);
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_MULTIPLY;
+      frame->operand_values[0] = loom_scalar_muli_lhs(defining_op);
+      frame->operand_values[1] = loom_scalar_muli_rhs(defining_op);
       break;
-    case LOOM_OP_SCALAR_NEGI: {
-      loom_symbolic_expr_t input_expression = {0};
-      status = loom_symbolic_expr_from_value(
-          context, loom_scalar_negi_input(defining_op), &input_expression);
-      if (iree_status_is_ok(status)) {
-        status = loom_symbolic_expr_mul_i64(context, &input_expression, -1,
-                                            out_expression);
+    case LOOM_OP_SCALAR_NEGI:
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_NEGATE;
+      frame->operand_values[0] = loom_scalar_negi_input(defining_op);
+      break;
+    case LOOM_OP_SCALAR_FMAI:
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_MULTIPLY_ADD;
+      frame->operand_values[0] = loom_scalar_fmai_a(defining_op);
+      frame->operand_values[1] = loom_scalar_fmai_b(defining_op);
+      frame->operand_values[2] = loom_scalar_fmai_c(defining_op);
+      break;
+    case LOOM_OP_SCALAR_ASSUME: {
+      loom_value_slice_t values = loom_scalar_assume_values(defining_op);
+      uint16_t result_index = loom_value_def_index(value);
+      if (result_index >= values.count) {
+        *out_complete = true;
+        return loom_symbolic_expr_value(context, frame->value_id,
+                                        out_expression);
       }
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_ASSUME;
+      frame->operand_values[0] = values.values[result_index];
       break;
     }
-    case LOOM_OP_SCALAR_FMAI:
-      status = loom_symbolic_expr_from_madd_value(
-          context, value_id, loom_scalar_fmai_a(defining_op),
-          loom_scalar_fmai_b(defining_op), loom_scalar_fmai_c(defining_op),
-          out_expression);
-      break;
-    case LOOM_OP_SCALAR_ASSUME:
-      status = loom_symbolic_expr_from_assume_value(
-          context, loom_scalar_assume_values(defining_op), value_id,
-          loom_value_def_index(value), out_expression);
-      break;
     case LOOM_OP_SCF_SELECT:
-      status = loom_symbolic_expr_from_select_value(
-          context, value_id, loom_scf_select_condition(defining_op),
-          loom_scf_select_true_value(defining_op),
-          loom_scf_select_false_value(defining_op), out_expression);
+      frame->kind = LOOM_SYMBOLIC_EXPR_EXPANSION_SELECT;
+      frame->operand_values[0] = loom_scf_select_condition(defining_op);
+      frame->operand_values[1] = loom_scf_select_true_value(defining_op);
+      frame->operand_values[2] = loom_scf_select_false_value(defining_op);
       break;
     default:
-      status = loom_symbolic_expr_value(context, value_id, out_expression);
+      *out_complete = true;
+      return loom_symbolic_expr_value(context, frame->value_id, out_expression);
+  }
+  if (!*out_complete) {
+    frame->stage = LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_FIRST_OPERAND;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_symbolic_expr_expansion_step(
+    loom_symbolic_expr_context_t* context,
+    iree_arena_allocator_t* transient_arena,
+    loom_symbolic_expr_expansion_frame_t** inout_frames,
+    iree_host_size_t* inout_frame_count, iree_host_size_t* inout_frame_capacity,
+    loom_symbolic_expr_t* out_expression, bool* out_complete) {
+  *out_complete = false;
+  loom_symbolic_expr_expansion_frame_t* frame =
+      &(*inout_frames)[*inout_frame_count - 1];
+  if (frame->stage == LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_BEGIN) {
+    return loom_symbolic_expr_expansion_prepare_frame(
+        context, frame, out_expression, out_complete);
+  }
+
+  loom_symbolic_expr_t operand_expression = {0};
+  bool operand_pending = false;
+  switch (frame->stage) {
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_FIRST_OPERAND:
+      switch (frame->kind) {
+        case LOOM_SYMBOLIC_EXPR_EXPANSION_IDENTITY:
+        case LOOM_SYMBOLIC_EXPR_EXPANSION_ASSUME:
+        case LOOM_SYMBOLIC_EXPR_EXPANSION_NEGATE: {
+          IREE_RETURN_IF_ERROR(loom_symbolic_expr_expansion_request_value(
+              context, transient_arena, frame->operand_values[0], inout_frames,
+              inout_frame_count, inout_frame_capacity, &operand_expression,
+              &operand_pending));
+          if (operand_pending) return iree_ok_status();
+          *out_expression = operand_expression;
+          if (frame->kind == LOOM_SYMBOLIC_EXPR_EXPANSION_ASSUME) {
+            IREE_RETURN_IF_ERROR(
+                loom_symbolic_expr_attach_identity_relation_value(
+                    context, frame->value_id, out_expression));
+          } else if (frame->kind == LOOM_SYMBOLIC_EXPR_EXPANSION_NEGATE) {
+            IREE_RETURN_IF_ERROR(loom_symbolic_expr_mul_i64(
+                context, &operand_expression, -1, out_expression));
+          }
+          *out_complete = true;
+          return iree_ok_status();
+        }
+        case LOOM_SYMBOLIC_EXPR_EXPANSION_ADD:
+        case LOOM_SYMBOLIC_EXPR_EXPANSION_SUBTRACT:
+        case LOOM_SYMBOLIC_EXPR_EXPANSION_MULTIPLY:
+        case LOOM_SYMBOLIC_EXPR_EXPANSION_MULTIPLY_ADD: {
+          IREE_RETURN_IF_ERROR(loom_symbolic_expr_expansion_request_value(
+              context, transient_arena, frame->operand_values[0], inout_frames,
+              inout_frame_count, inout_frame_capacity, &operand_expression,
+              &operand_pending));
+          if (operand_pending) return iree_ok_status();
+          frame->intermediate_expression = operand_expression;
+          frame->stage = LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_SECOND_OPERAND;
+          return iree_ok_status();
+        }
+        case LOOM_SYMBOLIC_EXPR_EXPANSION_SHIFT_LEFT: {
+          IREE_RETURN_IF_ERROR(loom_symbolic_expr_expansion_request_value(
+              context, transient_arena, frame->operand_values[1], inout_frames,
+              inout_frame_count, inout_frame_capacity, &operand_expression,
+              &operand_pending));
+          if (operand_pending) return iree_ok_status();
+          if (!loom_symbolic_expr_constant_value(&operand_expression,
+                                                 &frame->shift_amount) ||
+              frame->shift_amount < 0 || frame->shift_amount > 62) {
+            *out_complete = true;
+            return loom_symbolic_expr_value(context, frame->value_id,
+                                            out_expression);
+          }
+          frame->stage = LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_SECOND_OPERAND;
+          return iree_ok_status();
+        }
+        case LOOM_SYMBOLIC_EXPR_EXPANSION_SELECT: {
+          IREE_RETURN_IF_ERROR(loom_symbolic_expr_expansion_request_value(
+              context, transient_arena, frame->operand_values[0], inout_frames,
+              inout_frame_count, inout_frame_capacity, &operand_expression,
+              &operand_pending));
+          if (operand_pending) return iree_ok_status();
+          int64_t condition = 0;
+          if (!loom_symbolic_expr_constant_value(&operand_expression,
+                                                 &condition)) {
+            *out_complete = true;
+            return loom_symbolic_expr_value(context, frame->value_id,
+                                            out_expression);
+          }
+          frame->operand_values[0] =
+              condition ? frame->operand_values[1] : frame->operand_values[2];
+          frame->stage = LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_SECOND_OPERAND;
+          return iree_ok_status();
+        }
+      }
+      break;
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_SECOND_OPERAND: {
+      if (frame->kind == LOOM_SYMBOLIC_EXPR_EXPANSION_SHIFT_LEFT ||
+          frame->kind == LOOM_SYMBOLIC_EXPR_EXPANSION_SELECT) {
+        IREE_RETURN_IF_ERROR(loom_symbolic_expr_expansion_request_value(
+            context, transient_arena, frame->operand_values[0], inout_frames,
+            inout_frame_count, inout_frame_capacity, &operand_expression,
+            &operand_pending));
+        if (operand_pending) return iree_ok_status();
+        if (frame->kind == LOOM_SYMBOLIC_EXPR_EXPANSION_SHIFT_LEFT) {
+          IREE_RETURN_IF_ERROR(loom_symbolic_expr_mul_i64(
+              context, &operand_expression, INT64_C(1) << frame->shift_amount,
+              out_expression));
+        } else {
+          *out_expression = operand_expression;
+        }
+        *out_complete = true;
+        return iree_ok_status();
+      }
+
+      IREE_RETURN_IF_ERROR(loom_symbolic_expr_expansion_request_value(
+          context, transient_arena, frame->operand_values[1], inout_frames,
+          inout_frame_count, inout_frame_capacity, &operand_expression,
+          &operand_pending));
+      if (operand_pending) return iree_ok_status();
+      if (frame->kind == LOOM_SYMBOLIC_EXPR_EXPANSION_ADD ||
+          frame->kind == LOOM_SYMBOLIC_EXPR_EXPANSION_SUBTRACT) {
+        IREE_RETURN_IF_ERROR(loom_symbolic_expr_add_or_sub(
+            context, &frame->intermediate_expression, &operand_expression,
+            frame->kind == LOOM_SYMBOLIC_EXPR_EXPANSION_SUBTRACT,
+            out_expression));
+        *out_complete = true;
+        return iree_ok_status();
+      }
+
+      IREE_RETURN_IF_ERROR(loom_symbolic_expr_multiply(
+          context, frame->value_id, &frame->intermediate_expression,
+          &operand_expression, out_expression));
+      if (frame->kind == LOOM_SYMBOLIC_EXPR_EXPANSION_MULTIPLY ||
+          loom_symbolic_expr_is_result_symbol(out_expression,
+                                              frame->value_id)) {
+        *out_complete = true;
+        return iree_ok_status();
+      }
+      frame->intermediate_expression = *out_expression;
+      frame->stage = LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_THIRD_OPERAND;
+      return iree_ok_status();
+    }
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_THIRD_OPERAND: {
+      IREE_RETURN_IF_ERROR(loom_symbolic_expr_expansion_request_value(
+          context, transient_arena, frame->operand_values[2], inout_frames,
+          inout_frame_count, inout_frame_capacity, &operand_expression,
+          &operand_pending));
+      if (operand_pending) return iree_ok_status();
+      IREE_RETURN_IF_ERROR(
+          loom_symbolic_expr_add(context, &frame->intermediate_expression,
+                                 &operand_expression, out_expression));
+      *out_complete = true;
+      return iree_ok_status();
+    }
+    case LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_BEGIN:
       break;
   }
-  if (iree_status_is_ok(status)) {
-    if (!loom_symbolic_expr_is_linear(out_expression)) {
-      status = loom_symbolic_expr_value(context, value_id, out_expression);
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    loom_symbolic_expr_override_facts(context, value_id, out_expression);
-  }
-  return status;
+  IREE_ASSERT_UNREACHABLE("invalid symbolic expression expansion state");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 iree_status_t loom_symbolic_expr_from_value(
@@ -757,18 +922,53 @@ iree_status_t loom_symbolic_expr_from_value(
     return loom_symbolic_expr_value(context, value_id, out_expression);
   }
 
+  loom_symbolic_expr_expansion_frame_t
+      inline_frames[LOOM_SYMBOLIC_EXPR_EXPANSION_INLINE_FRAME_CAPACITY];
+  inline_frames[0] = (loom_symbolic_expr_expansion_frame_t){
+      .value_id = value_id,
+      .stage = LOOM_SYMBOLIC_EXPR_EXPANSION_STAGE_BEGIN,
+  };
+  loom_symbolic_expr_expansion_frame_t* frames = inline_frames;
+  iree_host_size_t frame_count = 1;
+  iree_host_size_t frame_capacity = IREE_ARRAYSIZE(inline_frames);
+  iree_arena_allocator_t transient_arena;
+  iree_arena_initialize(context->arena->block_pool, &transient_arena);
+
   entry->state = LOOM_SYMBOLIC_EXPR_MEMO_VISITING;
-  iree_status_t status =
-      loom_symbolic_expr_from_value_uncached(context, value_id, out_expression);
-  // Recursive expansion can grow and move the memo table when a lower value ID
-  // expands through a producer with a higher value ID. Reacquire the entry
-  // before publishing the completed expression.
-  entry = &context->memo_entries[value_id];
-  if (iree_status_is_ok(status)) {
-    entry->expression = *out_expression;
-    entry->state = LOOM_SYMBOLIC_EXPR_MEMO_READY;
-  } else {
-    entry->state = LOOM_SYMBOLIC_EXPR_MEMO_EMPTY;
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) && frame_count > 0) {
+    loom_symbolic_expr_t expression = {0};
+    bool frame_complete = false;
+    status = loom_symbolic_expr_expansion_step(
+        context, &transient_arena, &frames, &frame_count, &frame_capacity,
+        &expression, &frame_complete);
+    if (!iree_status_is_ok(status) || !frame_complete) continue;
+
+    loom_value_id_t completed_value = frames[frame_count - 1].value_id;
+    if (!loom_symbolic_expr_is_linear(&expression)) {
+      status = loom_symbolic_expr_value(context, completed_value, &expression);
+    }
+    if (iree_status_is_ok(status)) {
+      loom_symbolic_expr_override_facts(context, completed_value, &expression);
+      loom_symbolic_expr_memo_entry_t* completed_entry =
+          &context->memo_entries[completed_value];
+      completed_entry->expression = expression;
+      completed_entry->state = LOOM_SYMBOLIC_EXPR_MEMO_READY;
+      --frame_count;
+    }
   }
+
+  if (iree_status_is_ok(status)) {
+    *out_expression = context->memo_entries[value_id].expression;
+  } else {
+    for (iree_host_size_t i = 0; i < frame_count; ++i) {
+      loom_symbolic_expr_memo_entry_t* pending_entry =
+          &context->memo_entries[frames[i].value_id];
+      if (pending_entry->state == LOOM_SYMBOLIC_EXPR_MEMO_VISITING) {
+        pending_entry->state = LOOM_SYMBOLIC_EXPR_MEMO_EMPTY;
+      }
+    }
+  }
+  iree_arena_deinitialize(&transient_arena);
   return status;
 }

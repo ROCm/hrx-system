@@ -128,6 +128,31 @@ TEST_F(SymbolicExprTest, MemoGrowthPreservesOuterExpansion) {
   EXPECT_EQ(memoized_expression.terms, expression.terms);
 }
 
+TEST_F(SymbolicExprTest, DeepProducerChainExpandsIteratively) {
+  loom_value_id_t source = DefineI64Value();
+  loom_value_id_t value = source;
+  for (int i = 0; i < 4096; ++i) {
+    loom_op_t* negate_op = nullptr;
+    IREE_ASSERT_OK(loom_scalar_negi_build(
+        &builder_, value, loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+        LOOM_LOCATION_UNKNOWN, &negate_op));
+    value = loom_scalar_negi_result(negate_op);
+  }
+
+  loom_symbolic_expr_t expression = {0};
+  IREE_ASSERT_OK(
+      loom_symbolic_expr_from_value(&expression_context_, value, &expression));
+  ASSERT_TRUE(loom_symbolic_expr_is_linear(&expression));
+  ASSERT_EQ(expression.term_count, 1);
+  EXPECT_EQ(expression.terms[0].coefficient, 1);
+  EXPECT_EQ(expression.terms[0].value_id, source);
+
+  loom_symbolic_expr_t memoized_expression = {0};
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(&expression_context_, value,
+                                               &memoized_expression));
+  EXPECT_EQ(memoized_expression.terms, expression.terms);
+}
+
 TEST_F(SymbolicExprTest, ExpandsIndexMaddWithConstantMultiplier) {
   loom_value_id_t row = DefineIndexValue();
   loom_value_id_t column = DefineIndexValue();
@@ -157,6 +182,63 @@ TEST_F(SymbolicExprTest, DynamicMultiplyFallsBackToResultSymbol) {
                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                       LOOM_LOCATION_UNKNOWN, &mul_op));
   loom_value_id_t result = loom_index_mul_result(mul_op);
+
+  loom_symbolic_expr_t expression = {0};
+  IREE_ASSERT_OK(
+      loom_symbolic_expr_from_value(&expression_context_, result, &expression));
+
+  ASSERT_TRUE(loom_symbolic_expr_is_linear(&expression));
+  ASSERT_EQ(expression.term_count, 1);
+  EXPECT_EQ(expression.terms[0].coefficient, 1);
+  EXPECT_EQ(expression.terms[0].value_id, result);
+}
+
+TEST_F(SymbolicExprTest, DynamicMaddFallsBackToResultSymbol) {
+  loom_value_id_t left = DefineIndexValue();
+  loom_value_id_t right = DefineIndexValue();
+  loom_value_id_t addend = DefineIndexValue();
+  loom_op_t* madd_op = nullptr;
+  IREE_ASSERT_OK(loom_index_madd_build(&builder_, left, right, addend,
+                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                                       LOOM_LOCATION_UNKNOWN, &madd_op));
+  loom_value_id_t result = loom_index_madd_result(madd_op);
+
+  loom_symbolic_expr_t expression = {0};
+  IREE_ASSERT_OK(
+      loom_symbolic_expr_from_value(&expression_context_, result, &expression));
+
+  ASSERT_TRUE(loom_symbolic_expr_is_linear(&expression));
+  ASSERT_EQ(expression.term_count, 1);
+  EXPECT_EQ(expression.terms[0].coefficient, 1);
+  EXPECT_EQ(expression.terms[0].value_id, result);
+}
+
+TEST_F(SymbolicExprTest, ExpandsShiftWithExactAmount) {
+  loom_value_id_t value = DefineIndexValue();
+  loom_value_id_t shift = loom_index_constant_result(BuildIndexConstant(3));
+  loom_op_t* shift_op = nullptr;
+  IREE_ASSERT_OK(loom_index_shli_build(&builder_, value, shift,
+                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                                       LOOM_LOCATION_UNKNOWN, &shift_op));
+
+  loom_symbolic_expr_t expression = {0};
+  IREE_ASSERT_OK(loom_symbolic_expr_from_value(
+      &expression_context_, loom_index_shli_result(shift_op), &expression));
+
+  ASSERT_TRUE(loom_symbolic_expr_is_linear(&expression));
+  ASSERT_EQ(expression.term_count, 1);
+  EXPECT_EQ(expression.terms[0].coefficient, 8);
+  EXPECT_EQ(expression.terms[0].value_id, value);
+}
+
+TEST_F(SymbolicExprTest, DynamicShiftFallsBackToResultSymbol) {
+  loom_value_id_t value = DefineIndexValue();
+  loom_value_id_t shift = DefineIndexValue();
+  loom_op_t* shift_op = nullptr;
+  IREE_ASSERT_OK(loom_index_shli_build(&builder_, value, shift,
+                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                                       LOOM_LOCATION_UNKNOWN, &shift_op));
+  loom_value_id_t result = loom_index_shli_result(shift_op);
 
   loom_symbolic_expr_t expression = {0};
   IREE_ASSERT_OK(
