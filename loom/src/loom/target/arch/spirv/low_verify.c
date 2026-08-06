@@ -221,23 +221,6 @@ static bool loom_spirv_low_type_is_spirv_id(loom_type_t type) {
              SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID;
 }
 
-static bool loom_spirv_low_register_value_type(
-    loom_type_t type, loom_spirv_value_type_t* out_value_type) {
-  *out_value_type = (loom_spirv_value_type_t){0};
-  if (!loom_low_type_is_register(type) ||
-      loom_low_register_type_descriptor_set_stable_id(type) !=
-          SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID) {
-    return false;
-  }
-  switch (loom_low_register_type_class_id(type)) {
-    case SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID:
-      return false;
-    default:
-      return loom_spirv_value_type_from_reg_class_id(
-          loom_low_register_type_class_id(type), out_value_type);
-  }
-}
-
 static iree_string_view_t loom_spirv_low_value_type_format(
     loom_spirv_low_verify_state_t* state, loom_spirv_value_type_t value_type) {
   (void)state;
@@ -407,7 +390,8 @@ static iree_status_t loom_spirv_low_prepare_abi_value_type(
       state->skip_body_checks = true;
       return iree_ok_status();
     }
-    if (!loom_spirv_low_register_value_type(low_type, out_value_type)) {
+    if (!loom_spirv_value_type_from_low_register_type(low_type,
+                                                      out_value_type)) {
       IREE_RETURN_IF_ERROR(loom_spirv_low_emit_unsupported_register_type(
           context, state, op, value_id, low_type));
       state->skip_body_checks = true;
@@ -784,7 +768,7 @@ static iree_status_t loom_spirv_low_verify_resource(
 
   const loom_value_id_t result = loom_low_resource_result(op);
   loom_spirv_value_type_t result_type = {0};
-  if (!loom_spirv_low_register_value_type(
+  if (!loom_spirv_value_type_from_low_register_type(
           loom_module_value_type(state->module, result), &result_type)) {
     IREE_RETURN_IF_ERROR(loom_spirv_low_emit_unsupported_register_type(
         context, state, op, result,
@@ -1263,7 +1247,7 @@ static iree_status_t loom_spirv_low_verify_storage_address(
   }
   const loom_value_id_t result = loom_low_storage_address_result(op);
   loom_spirv_value_type_t result_type = {0};
-  if (!loom_spirv_low_register_value_type(
+  if (!loom_spirv_value_type_from_low_register_type(
           loom_module_value_type(state->module, result), &result_type)) {
     return loom_spirv_low_emit_unsupported_register_type(
         context, state, op, result,

@@ -133,18 +133,19 @@ loom_cc_library(
     visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY,
     deps = [
         ":value_types",
-        "//loom/src/loom/ir",
         "//runtime/src/iree/base",
     ],
 )
 
 loom_cc_library(
     name = "value_types",
+    srcs = ["value_types.c"],
     hdrs = ["value_types.h"],
-    visibility = _SPIRV_EMIT_VISIBILITY,
+    visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY,
     deps = [
         ":isa",
         ":scalar_types",
+        "//loom/src/loom/ir",
         "//runtime/src/iree/base",
     ],
 )
@@ -179,6 +180,7 @@ loom_cc_library(
         ":scalar_types",
         ":value_types",
         "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target:registers",
         "//loom/src/loom/target/arch/spirv/descriptors:descriptors_ids",
         "//runtime/src/iree/base",
     ],
@@ -367,6 +369,7 @@ loom_cc_test(
     deps = [
         ":registers",
         "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/target:registers",
         "//loom/src/loom/target/arch/spirv/descriptors",
         "//loom/src/loom/target/arch/spirv/records:target_records",
         "//runtime/src/iree/testing:gtest",

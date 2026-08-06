@@ -6,15 +6,15 @@
 
 // SPIR-V target-local value typing.
 //
-// Logical SPIR-V low registers describe storage classes such as `spirv.id`;
-// they deliberately do not encode every scalar payload carried by an SSA ID.
-// Target-owned descriptor rows, ABI metadata, and emission tables use this
-// compact value-type record when a specific payload is required.
+// Logical SPIR-V low registers describe storage classes such as `spirv.id`.
+// Structural register payloads and target-owned packet rows map into this
+// compact value-type record for verification and binary emission.
 
 #ifndef LOOM_TARGET_ARCH_SPIRV_VALUE_TYPES_H_
 #define LOOM_TARGET_ARCH_SPIRV_VALUE_TYPES_H_
 
 #include "iree/base/api.h"
+#include "loom/ir/types.h"
 #include "loom/target/arch/spirv/isa.h"
 #include "loom/target/arch/spirv/scalar_types.h"
 
@@ -57,6 +57,12 @@ typedef struct loom_spirv_value_type_t {
   // Cooperative matrix use operand.
   loom_spirv_cooperative_matrix_use_t cooperative_matrix_use;
 } loom_spirv_value_type_t;
+
+// Maps a public Loom scalar type to its canonical SPIR-V value type. Returns
+// false for types that need target-specific aggregate semantics or have no
+// logical SPIR-V representation.
+bool loom_spirv_value_type_from_loom_type(
+    loom_type_t type, loom_spirv_value_type_t* out_value_type);
 
 enum loom_spirv_abi_value_type_code_e {
   // No payload metadata is attached to this ABI position.

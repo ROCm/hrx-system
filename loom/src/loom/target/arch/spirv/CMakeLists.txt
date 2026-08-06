@@ -115,7 +115,6 @@ loom_cc_library(
   DEPS
     ::value_types
     iree::base
-    loom::ir
   PUBLIC
 )
 endif()
@@ -126,10 +125,13 @@ loom_cc_library(
     value_types
   HDRS
     "value_types.h"
+  SRCS
+    "value_types.c"
   DEPS
     ::isa
     ::scalar_types
     iree::base
+    loom::ir
   PUBLIC
 )
 endif()
@@ -180,6 +182,7 @@ loom_cc_library(
     iree::base
     loom::codegen::low::descriptors
     loom::target::arch::spirv::descriptors::descriptors_ids
+    loom::target::registers
   PUBLIC
 )
 endif()
@@ -435,6 +438,7 @@ loom_cc_test(
     loom::codegen::low::descriptors
     loom::target::arch::spirv::descriptors
     loom::target::arch::spirv::records::target_records
+    loom::target::registers
   LABELS
     "iree-build-requirement=loom.target.arch.spirv"
 )

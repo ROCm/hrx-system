@@ -45,6 +45,7 @@ loom_cc_library(
     loom::target::arch::spirv::facts
     loom::target::arch::spirv::registers
     loom::target::arch::spirv::scalar_types
+    loom::target::arch::spirv::value_types
     loom::target::registers
     loom::util::fact_table
   PUBLIC

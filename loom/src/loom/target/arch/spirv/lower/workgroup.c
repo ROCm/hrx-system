@@ -15,6 +15,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/spirv/abi.h"
 #include "loom/target/arch/spirv/registers.h"
+#include "loom/target/arch/spirv/value_types.h"
 #include "loom/util/fact_table.h"
 
 typedef enum loom_spirv_workgroup_plan_kind_e {
@@ -58,7 +59,7 @@ static bool loom_spirv_workgroup_view_scalar_type(
     return false;
   }
   loom_spirv_value_type_t value_type = {0};
-  if (!loom_spirv_abi_value_type_from_source_type(
+  if (!loom_spirv_value_type_from_loom_type(
           loom_type_scalar(loom_type_element_type(view_type)), &value_type) ||
       value_type.value_class != LOOM_SPIRV_VALUE_CLASS_SCALAR) {
     return false;

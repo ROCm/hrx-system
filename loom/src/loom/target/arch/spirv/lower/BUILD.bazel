@@ -50,6 +50,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/spirv:facts",
         "//loom/src/loom/target/arch/spirv:registers",
         "//loom/src/loom/target/arch/spirv:scalar_types",
+        "//loom/src/loom/target/arch/spirv:value_types",
         "//loom/src/loom/target/arch/spirv/contracts",
         "//loom/src/loom/target/arch/spirv/descriptors",
         "//loom/src/loom/target/arch/spirv/descriptors:descriptors_ids",

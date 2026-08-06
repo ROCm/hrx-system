@@ -16,6 +16,7 @@
 #include "loom/target/arch/spirv/lower/lower.h"
 #include "loom/target/arch/spirv/lower/matrix.h"
 #include "loom/target/arch/spirv/lower/workgroup.h"
+#include "loom/target/arch/spirv/value_types.h"
 #include "loom/target/registers.h"
 
 static iree_status_t loom_spirv_make_hal_buffer_type(
@@ -233,8 +234,7 @@ static iree_status_t loom_spirv_make_argument_value_type_codes(
         memset(codes, 0, arg_count * sizeof(*codes));
       }
       loom_spirv_value_type_t value_type = {0};
-      if (!loom_spirv_abi_value_type_from_source_type(source_type,
-                                                      &value_type) ||
+      if (!loom_spirv_value_type_from_loom_type(source_type, &value_type) ||
           !loom_spirv_abi_value_type_encode(value_type,
                                             &codes[direct_argument_index])) {
         IREE_ASSERT_UNREACHABLE(
@@ -280,7 +280,7 @@ static iree_status_t loom_spirv_make_result_value_type_codes(
     const loom_type_t source_type =
         loom_module_value_type(module, source_results[i]);
     loom_spirv_value_type_t value_type = {0};
-    if (!loom_spirv_abi_value_type_from_source_type(source_type, &value_type) ||
+    if (!loom_spirv_value_type_from_loom_type(source_type, &value_type) ||
         !loom_spirv_abi_value_type_encode(value_type, &codes[i])) {
       IREE_ASSERT_UNREACHABLE(
           "SPIR-V low ABI could not encode a mapped result payload");
