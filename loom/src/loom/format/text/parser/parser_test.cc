@@ -2341,13 +2341,13 @@ TEST_F(ParserTest, UnknownTypeName) {
   EXPECT_EQ(GetStringParam(diagnostics[0], 0), "foobar");
 }
 
-TEST_F(ParserTest, UnknownEncodingRole) {
+TEST_F(ParserTest, UndeclaredEncodingRole) {
   const auto& diagnostics =
       ParseExpectErrors("%c = test.constant 0 : encoding<address>\n");
   ASSERT_GE(diagnostics.size(), 1u);
   ExpectError(diagnostics[0],
-              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 18));
-  EXPECT_EQ(GetStringParam(diagnostics[0], 0), "encoding role");
+              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 17));
+  EXPECT_EQ(GetStringParam(diagnostics[0], 0), "role");
   EXPECT_EQ(GetStringParam(diagnostics[0], 1), "address");
 }
 

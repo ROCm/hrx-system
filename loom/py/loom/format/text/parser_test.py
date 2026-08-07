@@ -461,6 +461,9 @@ class TestParseBufferType:
 
 
 class TestParseStorageType:
+    def test_stack(self) -> None:
+        assert _parse_type("low.storage<stack>") == StorageType(StorageSpace.STACK)
+
     def test_workgroup(self) -> None:
         assert _parse_type("low.storage<workgroup>") == StorageType(
             StorageSpace.WORKGROUP
@@ -470,7 +473,7 @@ class TestParseStorageType:
         assert _parse_type("low.storage<private>") == StorageType(StorageSpace.PRIVATE)
 
     def test_unknown_space_fails(self) -> None:
-        with pytest.raises(ParseError, match="storage space"):
+        with pytest.raises(ParseError, match="invalid enum value 'lds'"):
             _parse_type("low.storage<lds>")
 
 
@@ -2059,8 +2062,8 @@ class TestParseEncodingType:
         assert isinstance(result_type, EncodingType)
         assert result_type.role == EncodingRole.LAYOUT
 
-    def test_unknown_encoding_role_raises(self) -> None:
-        with pytest.raises(ParseError, match="unknown encoding role"):
+    def test_undeclared_encoding_role_raises(self) -> None:
+        with pytest.raises(ParseError, match="invalid enum value 'address'"):
             _parse_type("encoding<address>")
 
 

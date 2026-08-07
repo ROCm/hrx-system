@@ -3229,6 +3229,26 @@ iree_status_t loom_module_make_parameterized_type(
         "non-empty parameterized type has a NULL slot pointer");
   }
 
+  if (descriptor->ir_kind != LOOM_TYPE_PARAMETERIZED) {
+    if (!loom_type_kind_is_valid(descriptor->ir_kind) ||
+        descriptor->ir_kind == LOOM_TYPE_DIALECT || parameter_count != 1 ||
+        descriptor->parameter_descriptors[0].attr_kind != LOOM_ATTR_ENUM) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "compact parameterized type descriptor has an "
+                              "invalid representation");
+    }
+    IREE_RETURN_IF_ERROR(loom_module_validate_attr_descriptor_value(
+        &descriptor->parameter_descriptors[0], parameters[0]));
+    const uint8_t payload = loom_attr_is_absent(parameters[0])
+                                ? 0
+                                : loom_attr_as_enum(parameters[0]);
+    loom_type_t type = {0};
+    type.header = loom_type_make_raw_header(descriptor->ir_kind, payload, 0,
+                                            descriptor->type_flags);
+    *out_type = type;
+    return iree_ok_status();
+  }
+
   iree_arena_checkpoint_t checkpoint =
       iree_arena_checkpoint_save(&module->arena);
   loom_attribute_t* canonical_parameters = NULL;

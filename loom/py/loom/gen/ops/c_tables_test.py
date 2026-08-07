@@ -19,6 +19,7 @@ from loom.assembly import (
     FuncArgs,
     OperandDict,
     OptionalGroup,
+    Param,
     PredicateList,
     Ref,
     Region,
@@ -198,13 +199,44 @@ def test_generate_type_registry_emits_type_semantics() -> None:
     assert ".contract_families = LOOM_CONTRACT_KERNEL_ASYNC," in type_registry_tables_c
 
 
-def test_generate_type_registry_emits_builtin_type_name_table() -> None:
+def test_generate_type_registry_emits_builtin_type_descriptor_table() -> None:
     type_def = TypeDef(name="test.tensor", ir_kind="tensor")
 
     _, _, type_registry_tables_c = generate_type_registry([type_def])
 
-    assert "loom_type_registry_builtin_names[LOOM_TYPE_COUNT_]" in type_registry_tables_c
-    assert '[LOOM_TYPE_TENSOR] = IREE_SVL("test.tensor"),' in type_registry_tables_c
+    assert "loom_type_registry_builtin_descriptors[LOOM_TYPE_COUNT_]" in type_registry_tables_c
+    assert "[LOOM_TYPE_TENSOR] = &loom_type_test_tensor_descriptor," in type_registry_tables_c
+
+
+def test_generate_type_registry_emits_compact_enum_descriptor() -> None:
+    class CompactValue:
+        def __init__(self, mode: int = 0) -> None:
+            self.mode = mode
+
+    mode = EnumDef(
+        "Mode",
+        [EnumCase("fast", 1), EnumCase("precise", 2)],
+        c_type="loom_mode_t",
+        c_const_prefix="LOOM_MODE",
+        c_include="loom/mode.h",
+    )
+    type_def = TypeDef(
+        name="test.compact",
+        ir_kind="encoding",
+        python_type=CompactValue,
+        params=[AttrDef("mode", ATTR_TYPE_ENUM, enum_def=mode, optional=True)],
+        format=[OptionalGroup([Param("mode")], anchor="mode")],
+    )
+
+    type_registry_h, _, type_registry_tables_c = generate_type_registry([type_def])
+
+    assert "loom_test_compact_type_mode_name" in type_registry_h
+    assert "loom_test_compact_type_mode_parse" in type_registry_h
+    assert "loom_test_compact_type_make" not in type_registry_h
+    assert ".ir_kind = LOOM_TYPE_ENCODING," in type_registry_tables_c
+    assert ".type_flags = LOOM_TYPE_FLAG_INLINE_DIMS," in type_registry_tables_c
+    assert ".flags = LOOM_PARAMETERIZED_TYPE_OMIT_EMPTY_PARAMETER_LIST," in type_registry_tables_c
+    assert "[LOOM_TYPE_ENCODING] = &loom_type_test_compact_descriptor," in type_registry_tables_c
 
 
 def test_generate_type_registry_rejects_duplicate_builtin_type_names() -> None:

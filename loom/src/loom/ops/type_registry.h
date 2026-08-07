@@ -14,6 +14,7 @@
 #include "loom/ir/parameterized_type.h"
 #include "loom/ir/types.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ir/types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -79,9 +80,41 @@ typedef struct loom_type_descriptor_t {
   // Number of entries in |format_elements|.
   uint8_t format_element_count;
 
-  // Parameter schema for LOOM_TYPE_PARAMETERIZED, otherwise NULL.
+  // Descriptor-backed parameter schema, or NULL when not declared.
   const loom_parameterized_type_descriptor_t* parameterized;
 } loom_type_descriptor_t;
+
+extern const loom_parameterized_type_descriptor_t loom_encoding_type_parameterized_descriptor;
+static inline iree_string_view_t loom_encoding_type_role_name(loom_encoding_role_t value) {
+  loom_bstring_t name = loom_attr_descriptor_enum_case_name(
+      &loom_encoding_type_parameterized_descriptor.parameter_descriptors[0], (uint8_t)value);
+  return name ? loom_bstring_view(name) : iree_string_view_empty();
+}
+static inline bool loom_encoding_type_role_parse(iree_string_view_t name, loom_encoding_role_t* out_value) {
+  uint8_t value = 0;
+  if (!loom_attr_descriptor_find_enum_case(
+          &loom_encoding_type_parameterized_descriptor.parameter_descriptors[0], name, &value)) {
+    return false;
+  }
+  *out_value = (loom_encoding_role_t)value;
+  return true;
+}
+
+extern const loom_parameterized_type_descriptor_t loom_low_storage_type_parameterized_descriptor;
+static inline iree_string_view_t loom_low_storage_type_space_name(loom_storage_space_t value) {
+  loom_bstring_t name = loom_attr_descriptor_enum_case_name(
+      &loom_low_storage_type_parameterized_descriptor.parameter_descriptors[0], (uint8_t)value);
+  return name ? loom_bstring_view(name) : iree_string_view_empty();
+}
+static inline bool loom_low_storage_type_space_parse(iree_string_view_t name, loom_storage_space_t* out_value) {
+  uint8_t value = 0;
+  if (!loom_attr_descriptor_find_enum_case(
+          &loom_low_storage_type_parameterized_descriptor.parameter_descriptors[0], name, &value)) {
+    return false;
+  }
+  *out_value = (loom_storage_space_t)value;
+  return true;
+}
 
 // Synthetic scope for parameterized value coverage.
 typedef enum loom_test_scope_type_scope_e {
@@ -110,12 +143,12 @@ typedef enum loom_test_matrix_type_scope_e {
   LOOM_TEST_MATRIX_TYPE_SCOPE_COUNT_ = 3,
 } loom_test_matrix_type_scope_t;
 
+extern const loom_parameterized_type_descriptor_t loom_test_matrix_type_parameterized_descriptor;
 enum loom_test_matrix_type_build_flag_bits_e {
   LOOM_TEST_MATRIX_TYPE_BUILD_FLAG_HAS_TARGET = 1u << 0,
 };
 typedef uint32_t loom_test_matrix_type_build_flags_t;
 
-extern const loom_parameterized_type_descriptor_t loom_test_matrix_type_parameterized_descriptor;
 static inline bool loom_test_matrix_type_isa(loom_type_t type) {
   return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_test_matrix_type_parameterized_descriptor;
 }
@@ -147,13 +180,13 @@ iree_status_t loom_test_matrix_type_make(
     loom_symbol_ref_t target,
     loom_type_t* out_type);
 
+extern const loom_parameterized_type_descriptor_t loom_test_array_type_parameterized_descriptor;
 enum loom_test_array_type_build_flag_bits_e {
   LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_ALIGNMENT = 1u << 0,
   LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_METADATA = 1u << 1,
 };
 typedef uint32_t loom_test_array_type_build_flags_t;
 
-extern const loom_parameterized_type_descriptor_t loom_test_array_type_parameterized_descriptor;
 static inline bool loom_test_array_type_isa(loom_type_t type) {
   return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_test_array_type_parameterized_descriptor;
 }
@@ -199,6 +232,11 @@ const loom_type_registry_entry_t* loom_type_registry_entries(void);
 // Returns the descriptor on success, NULL if not found.
 const loom_type_descriptor_t* loom_type_registry_lookup(
     iree_string_view_t name);
+
+// Looks up a registered built-in descriptor by runtime type kind.
+// Returns NULL for dialect, generic parameterized, or invalid kinds.
+const loom_type_descriptor_t* loom_type_registry_lookup_builtin(
+    loom_type_kind_t kind);
 
 // Resolves the type-owned value fact domain for |type|, or NULL if the
 // registered type has no extension fact domain.

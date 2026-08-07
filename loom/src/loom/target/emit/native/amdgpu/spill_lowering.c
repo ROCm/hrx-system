@@ -14,6 +14,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/type_registry.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -176,8 +177,8 @@ static iree_status_t loom_amdgpu_spill_lowering_emit_unsupported_storage_space(
     const loom_amdgpu_spill_lowering_context_t* context, const loom_op_t* op,
     loom_value_id_t storage_value_id,
     const loom_amdgpu_storage_layout_reference_t* storage_reference) {
-  const iree_string_view_t storage_space = iree_make_cstring_view(
-      loom_storage_space_name(storage_reference->reservation.space));
+  const iree_string_view_t storage_space =
+      loom_low_storage_type_space_name(storage_reference->reservation.space);
   if (context->emitter.fn == NULL) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,

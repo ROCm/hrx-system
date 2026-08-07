@@ -16,6 +16,7 @@
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/rematerialization.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/type_registry.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
 #include "loom/target/function_version.h"
@@ -229,7 +230,7 @@ static iree_status_t loom_low_materialize_allocation_parse_storage_space(
     iree_string_view_t token,
     loom_low_materialize_allocation_parse_context_t* context) {
   loom_storage_space_t storage_space = LOOM_STORAGE_SPACE_COUNT_;
-  if (!loom_storage_space_parse(token, &storage_space)) {
+  if (!loom_low_storage_type_space_parse(token, &storage_space)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "pass 'low-materialize-allocation' option 'spill-storage-spaces' "

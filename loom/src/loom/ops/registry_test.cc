@@ -457,6 +457,7 @@ TEST(TypeRegistry, LookupBuiltinTypes) {
   desc = loom_type_registry_lookup(iree_make_cstring_view("tile"));
   ASSERT_NE(desc, nullptr);
   EXPECT_EQ(desc->ir_kind, LOOM_TYPE_TILE);
+  EXPECT_EQ(loom_type_registry_lookup_builtin(LOOM_TYPE_TILE), desc);
   EXPECT_EQ(desc->param_count, 3);
   EXPECT_NE(desc->format_elements, nullptr);
   EXPECT_GT(desc->format_element_count, 0);
@@ -491,6 +492,31 @@ TEST(TypeRegistry, LookupBuiltinTypes) {
   ASSERT_NE(desc, nullptr);
   EXPECT_EQ(desc->ir_kind, LOOM_TYPE_POOL);
   EXPECT_EQ(desc->param_count, 1);
+
+  desc = loom_type_registry_lookup(iree_make_cstring_view("encoding"));
+  ASSERT_NE(desc, nullptr);
+  EXPECT_EQ(desc->ir_kind, LOOM_TYPE_ENCODING);
+  EXPECT_EQ(loom_type_registry_lookup_builtin(LOOM_TYPE_ENCODING), desc);
+  EXPECT_EQ(desc->parameterized, &loom_encoding_type_parameterized_descriptor);
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_encoding_type_role_name(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT),
+      IREE_SV("layout")));
+
+  desc = loom_type_registry_lookup(iree_make_cstring_view("low.storage"));
+  ASSERT_NE(desc, nullptr);
+  EXPECT_EQ(desc->ir_kind, LOOM_TYPE_STORAGE);
+  EXPECT_EQ(loom_type_registry_lookup_builtin(LOOM_TYPE_STORAGE), desc);
+  EXPECT_EQ(desc->parameterized,
+            &loom_low_storage_type_parameterized_descriptor);
+  loom_storage_space_t storage_space = LOOM_STORAGE_SPACE_COUNT_;
+  EXPECT_TRUE(
+      loom_low_storage_type_space_parse(IREE_SV("workgroup"), &storage_space));
+  EXPECT_EQ(storage_space, LOOM_STORAGE_SPACE_WORKGROUP);
+
+  EXPECT_EQ(loom_type_registry_lookup_builtin(LOOM_TYPE_DIALECT), nullptr);
+  EXPECT_EQ(loom_type_registry_lookup_builtin(LOOM_TYPE_PARAMETERIZED),
+            nullptr);
+  EXPECT_EQ(loom_type_registry_lookup_builtin(LOOM_TYPE_COUNT_), nullptr);
 }
 
 TEST(TypeRegistry, LookupDialectType) {

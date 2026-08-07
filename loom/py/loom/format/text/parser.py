@@ -80,7 +80,6 @@ from loom.ir import (
     ATTR_AGGREGATE_MAX_NESTING_DEPTH,
     BUFFER_TYPE,
     ENCODING_LAYOUT_TYPE,
-    ENCODING_ROLE_BY_NAME,
     ENCODING_SCHEMA_TYPE,
     ENCODING_STORAGE_TYPE,
     ENCODING_TRANSFORM_TYPE,
@@ -94,7 +93,6 @@ from loom.ir import (
     NONE_TYPE,
     OFFSET,
     PREDICATE_KINDS,
-    STORAGE_SPACE_BY_NAME,
     VALUE_DEF_BLOCK_NONE,
     Block,
     CanonicalAttrDict,
@@ -111,7 +109,6 @@ from loom.ir import (
     OpaqueLocation,
     Operation,
     ParameterizedAttr,
-    ParameterizedType,
     PlaceholderType,
     PoolType,
     Predicate,
@@ -122,7 +119,6 @@ from loom.ir import (
     ScalarTypeKind,
     ShapedType,
     StaticDim,
-    StorageType,
     SymbolName,
     TaggedLocation,
     Type,
@@ -991,21 +987,6 @@ def parse_type_from_tokens(
             tokenizer.next()
             return ScalarType(scalar_kind), {}
 
-    # Encoding type keyword?
-    if token.kind == TokenKind.BARE_IDENT and token.text == "encoding":
-        tokenizer.next()
-        if tokenizer.try_consume(TokenKind.LANGLE) is None:
-            return ENCODING_TYPE, {}
-        role_token = tokenizer.expect(TokenKind.BARE_IDENT)
-        role = ENCODING_ROLE_BY_NAME.get(role_token.text)
-        if role is None:
-            raise ParseError(
-                f"unknown encoding role: {role_token.text!r}",
-                role_token.location,
-            )
-        tokenizer.expect(TokenKind.RANGLE)
-        return EncodingType(role), {}
-
     # Register type keyword?
     if token.kind == TokenKind.BARE_IDENT and token.text == "reg":
         return _parse_register_type(
@@ -1026,6 +1007,15 @@ def parse_type_from_tokens(
                 return BUFFER_TYPE, {}
             if type_def.is_opaque:
                 return DialectType(type_def.name), {}
+            if type_def.omits_empty_parameter_list and not tokenizer.at(
+                TokenKind.LANGLE
+            ):
+                try:
+                    return type_def(), {}
+                except (TypeError, ValueError) as error:
+                    raise ParseError(
+                        str(error), token.location, tokenizer._filename
+                    ) from error
             tokenizer.expect(TokenKind.LANGLE)
             # Shape-grammar types parse from the token stream using in_dim_list
             # for 'x' separators. Other types use the interior tokenizer
@@ -1493,21 +1483,9 @@ def _parse_type_interior(
 
     if type_def.uses_attribute_parameters:
         try:
-            return ParameterizedType(type_def, parsed_attrs), {}
+            return type_def(**parsed_attrs), {}
         except (TypeError, ValueError) as error:
             raise ParseError(str(error), location, filename) from error
-
-    # Dispatch based on ir_kind.
-    if type_def.ir_kind == "storage" and "space" in parsed_attrs:
-        space_name = parsed_attrs["space"]
-        storage_space = STORAGE_SPACE_BY_NAME.get(space_name)
-        if storage_space is None:
-            raise ParseError(
-                f"unknown storage space '{space_name}'",
-                location,
-                filename,
-            )
-        return StorageType(storage_space), {}
 
     return DialectType(type_def.name, tuple(parsed_params)), {}
 

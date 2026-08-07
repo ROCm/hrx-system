@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Descriptor-backed attribute field schemas shared by operations,
-// parameterized attributes, and generic parameterized types.
+// parameterized attributes, and descriptor-backed types.
 
 #ifndef LOOM_IR_ATTRIBUTE_SCHEMA_H_
 #define LOOM_IR_ATTRIBUTE_SCHEMA_H_
@@ -108,6 +108,23 @@ static inline loom_bstring_t loom_attr_descriptor_enum_case_name(
 static inline bool loom_attr_descriptor_has_enum_case(
     const loom_attr_descriptor_t* descriptor, uint8_t value) {
   return loom_attr_descriptor_enum_case_name(descriptor, value) != NULL;
+}
+
+// Resolves a declared enum keyword to its byte value. Returns false when the
+// keyword is not declared by |descriptor|.
+static inline bool loom_attr_descriptor_find_enum_case(
+    const loom_attr_descriptor_t* descriptor, iree_string_view_t keyword,
+    uint8_t* out_value) {
+  const iree_host_size_t case_span =
+      loom_attr_descriptor_enum_case_span(descriptor);
+  for (iree_host_size_t i = 0; i < case_span; ++i) {
+    loom_bstring_t case_name = descriptor->enum_case_names[i];
+    if (case_name && loom_bstring_equal(case_name, keyword)) {
+      *out_value = (uint8_t)i;
+      return true;
+    }
+  }
+  return false;
 }
 
 // Returns the attribute name as a string view.

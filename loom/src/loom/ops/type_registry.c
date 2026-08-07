@@ -17,12 +17,12 @@ const loom_type_registry_entry_t* loom_type_registry_entries(void) {
   return loom_type_registry_entries_storage;
 }
 
-static iree_string_view_t loom_type_registry_builtin_name(
+const loom_type_descriptor_t* loom_type_registry_lookup_builtin(
     loom_type_kind_t kind) {
   if (!loom_type_kind_is_valid(kind)) {
-    return iree_string_view_empty();
+    return NULL;
   }
-  return loom_type_registry_builtin_names[kind];
+  return loom_type_registry_builtin_descriptors[kind];
 }
 
 const loom_type_descriptor_t* loom_type_registry_lookup(
@@ -49,21 +49,18 @@ const loom_value_fact_domain_t* loom_type_registry_resolve_fact_domain(
     const loom_module_t* module, loom_type_t type) {
   (void)user_data;
   (void)context;
-  iree_string_view_t name = iree_string_view_empty();
   if (loom_type_is_dialect(type)) {
     const loom_string_id_t name_id = loom_type_dialect_name_id(type);
     if (module == NULL || name_id == LOOM_STRING_ID_INVALID ||
         (iree_host_size_t)name_id >= module->strings.count) {
       return NULL;
     }
-    name = module->strings.entries[name_id];
-  } else {
-    name = loom_type_registry_builtin_name(loom_type_kind(type));
+    const loom_type_descriptor_t* descriptor =
+        loom_type_registry_lookup(module->strings.entries[name_id]);
+    return descriptor != NULL ? descriptor->fact_domain : NULL;
   }
-  if (iree_string_view_is_empty(name)) {
-    return NULL;
-  }
-  const loom_type_descriptor_t* descriptor = loom_type_registry_lookup(name);
+  const loom_type_descriptor_t* descriptor =
+      loom_type_registry_lookup_builtin(loom_type_kind(type));
   return descriptor != NULL ? descriptor->fact_domain : NULL;
 }
 

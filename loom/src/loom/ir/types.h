@@ -72,8 +72,8 @@
 // position (`tile<4xf32, %enc>`, `view<[%N]xf32, %layout>`). Encoding values
 // may use role-qualified types (`encoding<layout>`, `encoding<schema>`,
 // `encoding<storage>`, `encoding<transform>`) so op signatures can declare the
-// exact role they consume. It is parsed as a built-in keyword rather than as a
-// parameterized TypeDef registry entry.
+// exact role they consume. Its optional role parameter is declared in the
+// built-in type registry while its value remains packed into the type header.
 // Static attachments use only attribute parameters:
 //
 //   tile<256xi8, #q8_0<block=32>>
@@ -121,8 +121,10 @@
 // payload fields as a register-class identity plus contiguous unit count.
 //
 // Generic parameterized types use dims[0] for an immutable array of attribute
-// parameter slots and dims[1] for their static family descriptor. Their public
-// text layout is declarative metadata and does not affect storage identity.
+// parameter slots and dims[1] for their static family descriptor. Compact
+// descriptor-backed built-ins may instead carry one enum parameter in the
+// header payload byte. Their public text layout is declarative metadata and
+// does not affect storage identity.
 //
 // Type equality is structural: callers should use loom_type_equal() on the
 // by-value representation. The module type table deduplicates equal entries,
@@ -293,13 +295,6 @@ static inline bool loom_encoding_role_is_valid(loom_encoding_role_t role) {
   return (uint32_t)role < LOOM_ENCODING_ROLE_COUNT_;
 }
 
-// Returns the short text spelling for an encoding role, or NULL if invalid.
-const char* loom_encoding_role_name(loom_encoding_role_t role);
-
-// Parses the short text spelling for an encoding role.
-bool loom_encoding_role_parse(iree_string_view_t text,
-                              loom_encoding_role_t* out_role);
-
 // Function-local storage space. Stored in the element_type byte of the type
 // header for LOOM_TYPE_STORAGE.
 enum loom_storage_space_e {
@@ -320,13 +315,6 @@ typedef uint8_t loom_storage_space_t;
 static inline bool loom_storage_space_is_valid(loom_storage_space_t space) {
   return (uint32_t)space < LOOM_STORAGE_SPACE_COUNT_;
 }
-
-// Returns the short text spelling for a storage space, or NULL if invalid.
-const char* loom_storage_space_name(loom_storage_space_t space);
-
-// Parses the short text spelling for a storage space.
-bool loom_storage_space_parse(iree_string_view_t text,
-                              loom_storage_space_t* out_space);
 
 // Type flags (packed into header bits 20-23).
 enum loom_type_flags_e {
@@ -431,8 +419,13 @@ static inline loom_type_kind_t loom_type_kind(loom_type_t type) {
   return (loom_type_kind_t)(type.header & 0xFF);
 }
 
+// Returns the kind-specific byte stored in header bits 8-15.
+static inline uint8_t loom_type_payload(loom_type_t type) {
+  return (uint8_t)((type.header >> 8) & 0xFF);
+}
+
 static inline loom_scalar_type_t loom_type_element_type(loom_type_t type) {
-  return (loom_scalar_type_t)((type.header >> 8) & 0xFF);
+  return (loom_scalar_type_t)loom_type_payload(type);
 }
 
 static inline uint8_t loom_type_rank(loom_type_t type) {
@@ -454,13 +447,13 @@ static inline bool loom_type_is_all_static(loom_type_t type) {
 // Returns the role for an encoding type. Only valid when
 // kind == LOOM_TYPE_ENCODING.
 static inline loom_encoding_role_t loom_type_encoding_role(loom_type_t type) {
-  return (loom_encoding_role_t)((type.header >> 8) & 0xFF);
+  return (loom_encoding_role_t)loom_type_payload(type);
 }
 
 // Returns the storage space for a storage type. Only valid when
 // kind == LOOM_TYPE_STORAGE.
 static inline loom_storage_space_t loom_type_storage_space(loom_type_t type) {
-  return (loom_storage_space_t)((type.header >> 8) & 0xFF);
+  return (loom_storage_space_t)loom_type_payload(type);
 }
 
 static inline uint32_t loom_type_make_raw_header(loom_type_kind_t kind,

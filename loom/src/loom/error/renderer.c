@@ -204,15 +204,7 @@ iree_status_t loom_type_format_minimal(loom_type_t type, void* user_data,
       if (role == LOOM_ENCODING_ROLE_UNKNOWN) {
         return loom_output_stream_write_cstring(stream, "encoding");
       }
-      const char* role_name = loom_encoding_role_name(role);
-      if (role_name) {
-        IREE_RETURN_IF_ERROR(
-            loom_output_stream_write_cstring(stream, "encoding<"));
-        IREE_RETURN_IF_ERROR(
-            loom_output_stream_write_cstring(stream, role_name));
-        return loom_output_stream_write_cstring(stream, ">");
-      }
-      return loom_output_stream_write_cstring(stream, "encoding<?>");
+      return loom_output_stream_write_cstring(stream, "encoding<...>");
     }
     case LOOM_TYPE_POOL:
       return loom_output_stream_write_cstring(stream, "pool<...>");

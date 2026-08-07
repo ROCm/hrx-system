@@ -1945,6 +1945,55 @@ TEST_F(ModuleTest, ParameterizedTypeBuilderInternsDescriptorIndexedSlots) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, CompactParameterizedTypeBuilderPacksWithoutAllocation) {
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
+                                      NULL, iree_allocator_system(), &module));
+
+  const iree_host_size_t allocation_size = module->arena.used_allocation_size;
+  loom_attribute_t role = loom_attr_enum(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT);
+  loom_type_t encoding_type = {0};
+  IREE_ASSERT_OK(loom_module_make_parameterized_type(
+      module, &loom_encoding_type_parameterized_descriptor, &role, 1,
+      &encoding_type));
+  EXPECT_TRUE(loom_type_equal(
+      encoding_type,
+      loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT)));
+  EXPECT_EQ(module->arena.used_allocation_size, allocation_size);
+
+  role = loom_attr_absent();
+  IREE_ASSERT_OK(loom_module_make_parameterized_type(
+      module, &loom_encoding_type_parameterized_descriptor, &role, 1,
+      &encoding_type));
+  EXPECT_TRUE(loom_type_equal(encoding_type, loom_type_encoding()));
+  EXPECT_EQ(module->arena.used_allocation_size, allocation_size);
+
+  loom_attribute_t space = loom_attr_enum(LOOM_STORAGE_SPACE_WORKGROUP);
+  loom_type_t storage_type = {0};
+  IREE_ASSERT_OK(loom_module_make_parameterized_type(
+      module, &loom_low_storage_type_parameterized_descriptor, &space, 1,
+      &storage_type));
+  EXPECT_TRUE(loom_type_equal(storage_type,
+                              loom_type_storage(LOOM_STORAGE_SPACE_WORKGROUP)));
+  space = loom_attr_enum(LOOM_STORAGE_SPACE_STACK);
+  IREE_ASSERT_OK(loom_module_make_parameterized_type(
+      module, &loom_low_storage_type_parameterized_descriptor, &space, 1,
+      &storage_type));
+  EXPECT_TRUE(loom_type_equal(storage_type,
+                              loom_type_storage(LOOM_STORAGE_SPACE_STACK)));
+  EXPECT_EQ(module->arena.used_allocation_size, allocation_size);
+
+  role = loom_attr_enum(99);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_module_make_parameterized_type(
+          module, &loom_encoding_type_parameterized_descriptor, &role, 1,
+          &encoding_type));
+  EXPECT_EQ(module->arena.used_allocation_size, allocation_size);
+
+  loom_module_free(module);
+}
+
 TEST_F(ModuleTest, InternStringRejectsInvalidSentinelIdButKeepsDedupWorking) {
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,

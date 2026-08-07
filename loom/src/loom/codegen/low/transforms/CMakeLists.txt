@@ -29,6 +29,7 @@ loom_cc_library(
     loom::codegen::low::rematerialization
     loom::ir
     loom::ops::low
+    loom::ops::type_registry
     loom::pass::pipeline
     loom::pass::registry
     loom::pass::types

@@ -52,7 +52,6 @@ __all__ = [
     "BufferType",
     "BUFFER_TYPE",
     "StorageSpace",
-    "STORAGE_SPACE_BY_NAME",
     "StorageType",
     "PoolType",
     "FunctionType",
@@ -61,7 +60,6 @@ __all__ = [
     "DialectType",
     "ParameterizedType",
     "EncodingRole",
-    "ENCODING_ROLE_BY_NAME",
     "EncodingType",
     "ENCODING_TYPE",
     "ENCODING_LAYOUT_TYPE",
@@ -433,23 +431,6 @@ class StorageSpace(IntEnum):
     PRIVATE = 2
     WORKGROUP = 3
 
-    @property
-    def text(self) -> str:
-        """The canonical text representation for printing."""
-        return _STORAGE_SPACE_NAMES[self]
-
-
-_STORAGE_SPACE_NAMES: dict[StorageSpace, str] = {
-    StorageSpace.STACK: "stack",
-    StorageSpace.SCRATCH: "scratch",
-    StorageSpace.PRIVATE: "private",
-    StorageSpace.WORKGROUP: "workgroup",
-}
-
-STORAGE_SPACE_BY_NAME: dict[str, StorageSpace] = {
-    name: space for space, name in _STORAGE_SPACE_NAMES.items()
-}
-
 
 @dataclass(frozen=True, slots=True)
 class StorageType:
@@ -465,7 +446,9 @@ class StorageType:
         return TypeKind.STORAGE
 
     def __repr__(self) -> str:
-        return f"low.storage<{self.space.text}>"
+        from loom.format.text.printer import print_type
+
+        return print_type(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -655,26 +638,6 @@ class EncodingRole(IntEnum):
     STORAGE = 3
     TRANSFORM = 4
 
-    @property
-    def text(self) -> str:
-        match self:
-            case EncodingRole.UNKNOWN:
-                return ""
-            case EncodingRole.LAYOUT:
-                return "layout"
-            case EncodingRole.SCHEMA:
-                return "schema"
-            case EncodingRole.STORAGE:
-                return "storage"
-            case EncodingRole.TRANSFORM:
-                return "transform"
-        raise ValueError(f"unknown encoding role: {self!r}")
-
-
-ENCODING_ROLE_BY_NAME: dict[str, EncodingRole] = {
-    role.text: role for role in EncodingRole if role != EncodingRole.UNKNOWN
-}
-
 
 @dataclass(frozen=True, slots=True)
 class EncodingType:
@@ -696,9 +659,9 @@ class EncodingType:
         return TypeKind.ENCODING
 
     def __repr__(self) -> str:
-        if self.role != EncodingRole.UNKNOWN:
-            return f"encoding<{self.role.text}>"
-        return "encoding"
+        from loom.format.text.printer import print_type
+
+        return print_type(self)
 
 
 # Singletons for encoding type variants.
