@@ -115,6 +115,45 @@ func.def public @call_exported_abi(%kept: index, %apparently_dead: index) {
 
 // ====
 
+// A kernel launch exposes its trailing device ABI operands as a semantic call
+// edge, while the leading workload slice remains separate. Kernel entries are
+// implicit artifact exports, so local launch facts cannot narrow their bodies
+// or remove apparently unused ABI arguments.
+kernel.def @exported_kernel(%workload: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workload, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%aligned: index, %externally_used: index) {
+  %c16 = index.constant 16 : index
+  %remainder = index.rem %aligned, %c16 : index
+  test.use %remainder : index
+  kernel.return
+}
+
+func.def public @launch_exported_kernel(%workload: index, %aligned: index, %apparently_dead: index) {
+  %assumed = index.assume %aligned [mul(%aligned, 16)] : index
+  kernel.launch @exported_kernel[%workload](%assumed, %apparently_dead) : [index](index, index)
+  func.return
+}
+
+// ----
+kernel.def @exported_kernel(%workload: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workload, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%aligned: index, %externally_used: index) {
+  %c16 = index.constant 16 : index
+  %remainder = index.rem %aligned, %c16 : index
+  test.use %remainder : index
+  kernel.return
+}
+
+func.def public @launch_exported_kernel(%workload: index, %aligned: index, %apparently_dead: index) {
+  %assumed = index.assume %aligned [mul(%aligned, 16)] : index
+  kernel.launch @exported_kernel[%workload](%assumed, %apparently_dead) : [index](index, index)
+  func.return
+}
+
+// ====
+
 // When private callers disagree on the exact value, the boundary join keeps
 // useful weaker facts such as divisibility. That is enough to prune alignment
 // checks without pretending both calls returned the same constant.

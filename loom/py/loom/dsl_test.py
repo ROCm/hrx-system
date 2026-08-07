@@ -602,11 +602,11 @@ class TestInterfaces:
         interface = CallLikeInterface(
             callee="callee",
             operands="operands",
-            results="results",
+            results=None,
         )
         assert interface.callee == "callee"
         assert interface.operands == "operands"
-        assert interface.results == "results"
+        assert interface.results is None
         assert interface.purity is None
         assert interface.kind == CallLikeKind.SEMANTIC
 

@@ -58,6 +58,8 @@ from loom.dsl import (
     VECTOR,
     VIEW,
     AttrDef,
+    CallLikeInterface,
+    CallLikeKind,
     ContractFamily,
     Dialect,
     EnumCase,
@@ -1881,6 +1883,14 @@ kernel_launch = Op(
         ),
     ],
     traits=[UNKNOWN_EFFECTS, NoAncestor("kernel.def")],
+    interfaces=[
+        CallLikeInterface(
+            callee="callee",
+            operands="arguments",
+            results=None,
+            kind=CallLikeKind.SEMANTIC,
+        )
+    ],
     verify="loom_kernel_launch_verify",
     format=[
         SymbolRef("callee"),

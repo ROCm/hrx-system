@@ -318,6 +318,8 @@ def _resolve_interface_field(
 ) -> str:
     """Resolves one interface field to its emitted C initializer value."""
     py_value = getattr(iface, field_spec.py_field)
+    if isinstance(iface, CallLikeInterface) and field_spec.py_field == "results" and py_value is None:
+        return "0"
     if _interface_soft_default_is_absent(op, iface, field_spec, py_value):
         return "255"
     if field_spec.kind == "attr":
@@ -441,6 +443,11 @@ def _validate_call_like_interface(op: Op, iface: CallLikeInterface, interface_na
         raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.operands!r} must be variadic")
     if operand_index + 1 != len(op.operands):
         raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.operands!r} must be the trailing operand field")
+
+    if iface.results is None:
+        if op.results:
+            raise ValueError(f"{interface_name} on {op.name!r}: results=None requires the operation to declare no results")
+        return
 
     result_index = c_queries.resolve_result_index(op, iface.results, interface_name)
     result = op.results[result_index]

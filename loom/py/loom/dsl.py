@@ -3823,16 +3823,17 @@ class CallLikeInterface(NamedTuple):
     """Interface for direct symbol call-like ops.
 
     The named operand/result fields are trailing slices containing call
-    arguments and call results. The generator resolves their starting offsets
-    and emits a loom_call_like_vtable_t in .rodata.
+    arguments and call results. A result field of None denotes an operation
+    with no results. The generator resolves the slice starting offsets and
+    emits a loom_call_like_vtable_t in .rodata.
     """
 
     # Symbol ref attr naming the direct callee.
     callee: str
     # Variadic operand field holding call arguments.
     operands: str
-    # Variadic result field holding call results.
-    results: str
+    # Variadic result field holding call results, or None for no-result calls.
+    results: str | None
     # Optional purity enum attr. None if not applicable.
     purity: str | None = None
     # Optional temperature enum attr. None if not applicable.
