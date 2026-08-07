@@ -1731,6 +1731,11 @@ CUDAAPI CUresult cuMemset(void* dst, int value, size_t sizeBytes) {
   iree_status_t status = iree_hal_streaming_memory_memset(
       context, (iree_hal_streaming_deviceptr_t)dst, sizeBytes, &pattern,
       sizeof(pattern), context->default_stream);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_memory_complete_synchronous_memset(
+        context, (iree_hal_streaming_deviceptr_t)dst, sizeBytes,
+        context->default_stream);
+  }
 
   CUresult result = iree_status_to_cu_result(status);
   if (!iree_status_is_ok(status)) {
@@ -1827,6 +1832,11 @@ CUDAAPI CUresult cuMemsetD8(CUdeviceptr dstDevice, unsigned char uc, size_t N) {
   iree_status_t status = iree_hal_streaming_memory_memset(
       context, (iree_hal_streaming_deviceptr_t)dstDevice, N * 1, &uc, 1,
       context->default_stream);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_memory_complete_synchronous_memset(
+        context, (iree_hal_streaming_deviceptr_t)dstDevice, N,
+        context->default_stream);
+  }
 
   CUresult result = iree_status_to_cu_result(status);
   IREE_TRACE_ZONE_END(z0);
@@ -1842,9 +1852,20 @@ CUDAAPI CUresult cuMemsetD16(CUdeviceptr dstDevice, unsigned short us,
     return CUDA_ERROR_INVALID_CONTEXT;
   }
 
+  iree_host_size_t byte_count = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(N, 2, &byte_count))) {
+    IREE_TRACE_ZONE_END(z0);
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+
   iree_status_t status = iree_hal_streaming_memory_memset(
-      context, (iree_hal_streaming_deviceptr_t)dstDevice, N * 2, &us, 2,
+      context, (iree_hal_streaming_deviceptr_t)dstDevice, byte_count, &us, 2,
       context->default_stream);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_memory_complete_synchronous_memset(
+        context, (iree_hal_streaming_deviceptr_t)dstDevice, byte_count,
+        context->default_stream);
+  }
 
   CUresult result = iree_status_to_cu_result(status);
   IREE_TRACE_ZONE_END(z0);
@@ -1859,9 +1880,20 @@ CUDAAPI CUresult cuMemsetD32(CUdeviceptr dstDevice, unsigned int ui, size_t N) {
     return CUDA_ERROR_INVALID_CONTEXT;
   }
 
+  iree_host_size_t byte_count = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(N, 4, &byte_count))) {
+    IREE_TRACE_ZONE_END(z0);
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+
   iree_status_t status = iree_hal_streaming_memory_memset(
-      context, (iree_hal_streaming_deviceptr_t)dstDevice, N * 4, &ui, 4,
+      context, (iree_hal_streaming_deviceptr_t)dstDevice, byte_count, &ui, 4,
       context->default_stream);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_memory_complete_synchronous_memset(
+        context, (iree_hal_streaming_deviceptr_t)dstDevice, byte_count,
+        context->default_stream);
+  }
 
   CUresult result = iree_status_to_cu_result(status);
   IREE_TRACE_ZONE_END(z0);
@@ -1896,8 +1928,14 @@ CUDAAPI CUresult cuMemsetD16Async(CUdeviceptr dstDevice, unsigned short us,
     return CUDA_ERROR_INVALID_CONTEXT;
   }
 
+  iree_host_size_t byte_count = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(N, 2, &byte_count))) {
+    IREE_TRACE_ZONE_END(z0);
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+
   iree_status_t status = iree_hal_streaming_memory_memset(
-      context, (iree_hal_streaming_deviceptr_t)dstDevice, N * 2, &us, 2,
+      context, (iree_hal_streaming_deviceptr_t)dstDevice, byte_count, &us, 2,
       hStream ? (iree_hal_streaming_stream_t*)hStream
               : context->default_stream);
 
@@ -1915,8 +1953,14 @@ CUDAAPI CUresult cuMemsetD32Async(CUdeviceptr dstDevice, unsigned int ui,
     return CUDA_ERROR_INVALID_CONTEXT;
   }
 
+  iree_host_size_t byte_count = 0;
+  if (IREE_UNLIKELY(!iree_host_size_checked_mul(N, 4, &byte_count))) {
+    IREE_TRACE_ZONE_END(z0);
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+
   iree_status_t status = iree_hal_streaming_memory_memset(
-      context, (iree_hal_streaming_deviceptr_t)dstDevice, N * 4, &ui, 4,
+      context, (iree_hal_streaming_deviceptr_t)dstDevice, byte_count, &ui, 4,
       hStream ? (iree_hal_streaming_stream_t*)hStream
               : context->default_stream);
 

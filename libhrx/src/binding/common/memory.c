@@ -1588,21 +1588,6 @@ iree_status_t iree_hal_streaming_memory_allocate_managed(
   return iree_ok_status();
 }
 
-static void iree_hal_streaming_repeat_pattern(void* dst,
-                                              iree_device_size_t length,
-                                              const void* pattern,
-                                              iree_host_size_t pattern_length) {
-  if (pattern_length == 1) {
-    memset(dst, *(const uint8_t*)pattern, length);
-    return;
-  }
-  uint8_t* dest = (uint8_t*)dst;
-  for (iree_device_size_t i = 0; i < length; i += pattern_length) {
-    iree_device_size_t copy_size = iree_min(pattern_length, length - i);
-    memcpy(dest + i, pattern, copy_size);
-  }
-}
-
 static iree_status_t iree_hal_streaming_context_ensure_pageable_h2d_staging(
     iree_hal_streaming_context_t* context, iree_device_size_t size,
     iree_hal_streaming_buffer_t** out_staging) {
@@ -1829,6 +1814,29 @@ iree_status_t iree_hal_streaming_memory_host_flags(
   return status;
 }
 
+static iree_status_t iree_hal_streaming_memory_lookup_memset_range(
+    iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
+    iree_device_size_t length, iree_hal_streaming_context_t** out_owner_context,
+    iree_hal_streaming_buffer_ref_t* out_dst_ref) {
+  *out_owner_context = NULL;
+  iree_status_t lookup_status =
+      iree_hal_streaming_memory_lookup_range(context, dst, length, out_dst_ref);
+  if (!iree_status_is_ok(lookup_status) &&
+      iree_status_code(lookup_status) == IREE_STATUS_NOT_FOUND) {
+    iree_status_ignore(lookup_status);
+    lookup_status = iree_hal_streaming_memory_lookup_range_across_contexts(
+        dst, length, out_owner_context, out_dst_ref);
+    if (iree_status_is_ok(lookup_status)) {
+      if (!out_dst_ref->buffer->is_managed) {
+        iree_hal_streaming_context_release(*out_owner_context);
+        *out_owner_context = NULL;
+        lookup_status = iree_status_from_code(IREE_STATUS_NOT_FOUND);
+      }
+    }
+  }
+  return lookup_status;
+}
+
 iree_status_t iree_hal_streaming_memory_memset(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
     iree_device_size_t length, const void* pattern,
@@ -1867,54 +1875,21 @@ iree_status_t iree_hal_streaming_memory_memset(
   // HIP pointers, so a device switch after allocation must still resolve them.
   iree_hal_streaming_buffer_ref_t dst_ref;
   iree_hal_streaming_context_t* owner_context = NULL;
-  iree_status_t lookup_status =
-      iree_hal_streaming_memory_lookup_range(context, dst, length, &dst_ref);
-  if (!iree_status_is_ok(lookup_status) &&
-      iree_status_code(lookup_status) == IREE_STATUS_NOT_FOUND) {
-    iree_status_ignore(lookup_status);
-    lookup_status = iree_hal_streaming_memory_lookup_range_across_contexts(
-        dst, length, &owner_context, &dst_ref);
-    if (iree_status_is_ok(lookup_status)) {
-      if (!dst_ref.buffer->is_managed) {
-        iree_hal_streaming_context_release(owner_context);
-        owner_context = NULL;
-        lookup_status = iree_status_from_code(IREE_STATUS_NOT_FOUND);
-      }
-    }
-  }
+  iree_status_t lookup_status = iree_hal_streaming_memory_lookup_memset_range(
+      context, dst, length, &owner_context, &dst_ref);
   if (!iree_status_is_ok(lookup_status)) {
     iree_hal_streaming_context_release(owner_context);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, lookup_status, "resolving `dst` buffer ref %p", (void*)dst);
   }
 
-  if (dst_ref.buffer->is_managed && dst_ref.buffer->host_ptr) {
-    iree_status_t sync_status = iree_hal_streaming_stream_synchronize(stream);
-    if (!iree_status_is_ok(sync_status)) {
-      iree_hal_streaming_context_release(owner_context);
-      IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, sync_status);
-    }
-    uint8_t* dest = (uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset;
-    iree_hal_streaming_repeat_pattern(dest, length, pattern, pattern_length);
-    iree_hal_streaming_context_release(owner_context);
-    IREE_TRACE_ZONE_END(z0);
-    return iree_ok_status();
-  }
-
-  // Fallback for imported host memory that could not be represented as a HAL
-  // buffer.
+  // Host allocations must be queue-visible to preserve stream ordering.
   if (!dst_ref.buffer->buffer) {
-    if (dst_ref.buffer->host_ptr) {
-      uint8_t* dest = (uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset;
-      iree_hal_streaming_repeat_pattern(dest, length, pattern, pattern_length);
-      iree_hal_streaming_context_release(owner_context);
-      IREE_TRACE_ZONE_END(z0);
-      return iree_ok_status();
-    }
     iree_hal_streaming_context_release(owner_context);
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                             "no buffer available for memset"));
+        z0, iree_make_status(
+                IREE_STATUS_FAILED_PRECONDITION,
+                "memset destination is not represented by a HAL buffer"));
   }
 
   iree_slim_mutex_lock(&stream->mutex);
@@ -1936,6 +1911,32 @@ iree_status_t iree_hal_streaming_memory_memset(
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
+}
+
+iree_status_t iree_hal_streaming_memory_complete_synchronous_memset(
+    iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
+    iree_device_size_t length, iree_hal_streaming_stream_t* stream) {
+  IREE_ASSERT_ARGUMENT(context);
+  IREE_ASSERT_ARGUMENT(dst);
+  IREE_ASSERT_ARGUMENT(stream);
+
+  iree_hal_streaming_buffer_ref_t dst_ref;
+  iree_hal_streaming_context_t* owner_context = NULL;
+  iree_status_t status = iree_hal_streaming_memory_lookup_memset_range(
+      context, dst, length, &owner_context, &dst_ref);
+  if (iree_status_is_ok(status)) {
+    const bool requires_synchronous_completion =
+        dst_ref.buffer->is_managed || dst_ref.offset != 0 ||
+        (dst_ref.buffer->memory_type & IREE_HAL_MEMORY_TYPE_HOST_LOCAL) != 0;
+    if (requires_synchronous_completion) {
+      status =
+          stream == context->default_stream
+              ? iree_hal_streaming_context_synchronize_legacy_default(context)
+              : iree_hal_streaming_stream_synchronize(stream);
+    }
+  }
+  iree_hal_streaming_context_release(owner_context);
+  return status;
 }
 
 iree_status_t iree_hal_streaming_memory_memcpy(

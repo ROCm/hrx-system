@@ -1881,11 +1881,18 @@ iree_status_t iree_hal_streaming_memory_host_flags(
     iree_hal_streaming_context_t* context, void* ptr,
     iree_hal_streaming_host_register_flags_t* out_flags);
 
-// Synchronization: stream or blocking (async if stream, sync if NULL stream).
+// Records a stream-ordered fill.
 iree_status_t iree_hal_streaming_memory_memset(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
     iree_device_size_t length, const void* pattern,
     iree_host_size_t pattern_length, iree_hal_streaming_stream_t* stream);
+
+// Applies synchronous memset completion semantics to an already-recorded
+// destination range. Host-backed, managed, and offset destinations wait;
+// base device allocations remain asynchronous with respect to the host.
+iree_status_t iree_hal_streaming_memory_complete_synchronous_memset(
+    iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
+    iree_device_size_t length, iree_hal_streaming_stream_t* stream);
 
 // Synchronization: stream or blocking (async if stream, sync if NULL stream).
 iree_status_t iree_hal_streaming_memory_memcpy(
