@@ -16,11 +16,21 @@ extern "C" {
 
 typedef struct iree_hal_streaming_buffer_t iree_hal_streaming_buffer_t;
 typedef struct iree_hal_streaming_context_t iree_hal_streaming_context_t;
+typedef struct iree_hal_streaming_stream_t iree_hal_streaming_stream_t;
 
 // Allocates queue-visible host staging memory.
 iree_status_t iree_hal_streaming_memory_allocate_host_staging(
     iree_hal_streaming_context_t* context, iree_host_size_t size,
     iree_hal_streaming_buffer_t** out_buffer);
+
+// Enqueues a pitched host-to-device copy from queue-visible host memory.
+// Returns IREE_STATUS_UNAVAILABLE when |src| is not represented by a host-local
+// HAL buffer, allowing the caller to use an owned staging path instead.
+iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
+    iree_hal_streaming_context_t* context, uint64_t dst,
+    iree_device_size_t dst_pitch, const void* src, iree_device_size_t src_pitch,
+    iree_device_size_t width, iree_host_size_t height,
+    iree_hal_streaming_stream_t* stream);
 
 // Registers an HRX virtual-address reservation in the streaming pointer table.
 // The wrapper retains both |context| and |virtual_buffer|. The reservation

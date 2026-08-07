@@ -34,6 +34,7 @@
 #include "common/graph.h"
 #include "common/internal.h"
 #include "common/managed_global.h"
+#include "common/memory.h"
 #include "common/tls.h"
 #include "hrx_runtime.h"
 #include "iree/base/threading/call_once.h"
@@ -6904,6 +6905,18 @@ HIPAPI hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
       kind == hipMemcpyDeviceToHost &&
       iree_hip_memcpy_destination_is_pageable(context, dst, dst_span);
 
+  if (kind == hipMemcpyHostToDevice) {
+    iree_status_t batched_status = iree_hal_streaming_memcpy_host_to_device_2d(
+        context, (iree_hal_streaming_deviceptr_t)dst, dpitch, src, spitch,
+        width, height, stream_obj);
+    if (!iree_status_is_unavailable(batched_status)) {
+      hipError_t result = iree_status_to_hip_result(batched_status);
+      IREE_TRACE_ZONE_END(z0);
+      return result;
+    }
+    iree_status_ignore(batched_status);
+  }
+
   if (kind == hipMemcpyDeviceToHost) {
     iree_status_t packed_status = iree_hal_streaming_memcpy_device_to_host_2d(
         context, dst, dpitch, (iree_hal_streaming_deviceptr_t)src, spitch,
@@ -7116,6 +7129,17 @@ static hipError_t iree_hip_memcpy3d_staged_rows(
   for (size_t z = 0; z < depth && iree_status_is_ok(status); ++z) {
     uint8_t* dst_slice = dst_base + z * dst_slice_pitch;
     const uint8_t* src_slice = src_base + z * src_slice_pitch;
+    if (stream) {
+      iree_status_t batched_status =
+          iree_hal_streaming_memcpy_host_to_device_2d(
+              dst_context, (iree_hal_streaming_deviceptr_t)dst_slice, dst_pitch,
+              src_slice, src_pitch, width, height, stream);
+      if (!iree_status_is_unavailable(batched_status)) {
+        status = batched_status;
+        continue;
+      }
+      iree_status_ignore(batched_status);
+    }
     for (size_t y = 0; y < height && iree_status_is_ok(status); ++y) {
       status = iree_hal_streaming_memcpy_host_to_device(
           dst_context,
