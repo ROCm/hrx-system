@@ -44,6 +44,7 @@ iree_py_library(
         "errors.py",
         "fields.py",
         "ir.py",
+        "scalar_type.py",
         "stable_id.py",
         "verify.py",
     ],

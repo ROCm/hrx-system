@@ -56,6 +56,8 @@ loom_cc_library(
     "scalar_type.h"
     "semantics.h"
     "types.h"
+  TEXTUAL_HDRS
+    "scalar_type_table.inc"
   SRCS
     "attribute.c"
     "context.c"

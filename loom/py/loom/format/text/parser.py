@@ -125,6 +125,7 @@ from loom.ir import (
     TypeKind,
     Value,
     binding_element_type,
+    parse_scalar_type_kind,
     rebuild_value_metadata,
     record_operation_value_metadata,
     symbol_from_operation,
@@ -426,27 +427,6 @@ def _parse_static_encoding_from_tokens(
     instance = EncodingInstance(name=token.text, params=params)
     module.add_encoding(instance)
     return instance
-
-
-# ============================================================================
-# Scalar type name table (fixed, finite set — not pluggable)
-# ============================================================================
-
-_SCALAR_NAMES: dict[str, ScalarTypeKind] = {
-    "index": ScalarTypeKind.INDEX,
-    "offset": ScalarTypeKind.OFFSET,
-    "i1": ScalarTypeKind.I1,
-    "i8": ScalarTypeKind.I8,
-    "i16": ScalarTypeKind.I16,
-    "i32": ScalarTypeKind.I32,
-    "i64": ScalarTypeKind.I64,
-    "f8E4M3": ScalarTypeKind.F8E4M3,
-    "f8E5M2": ScalarTypeKind.F8E5M2,
-    "f16": ScalarTypeKind.F16,
-    "bf16": ScalarTypeKind.BF16,
-    "f32": ScalarTypeKind.F32,
-    "f64": ScalarTypeKind.F64,
-}
 
 
 def _implicit_terminator_name(op_decl: Op) -> str | None:
@@ -947,7 +927,7 @@ def _parse_type_encoding_from_tokens(
 def _is_type_start(token: Token, type_registry: dict[str, TypeDef]) -> bool:
     """Check if a token could start a type expression."""
     if token.kind == TokenKind.BARE_IDENT:
-        if token.text in _SCALAR_NAMES:
+        if parse_scalar_type_kind(token.text) is not None:
             return True
         if token.text == "encoding":
             return True
@@ -982,7 +962,7 @@ def parse_type_from_tokens(
 
     # Scalar type keyword?
     if token.kind == TokenKind.BARE_IDENT:
-        scalar_kind = _SCALAR_NAMES.get(token.text)
+        scalar_kind = parse_scalar_type_kind(token.text)
         if scalar_kind is not None:
             tokenizer.next()
             return ScalarType(scalar_kind), {}
@@ -1582,7 +1562,7 @@ def _parse_shaped_type_from_tokens(
 
     # Parse element type (in_dim_list is false here).
     element_token = tokenizer.expect(TokenKind.BARE_IDENT)
-    scalar_kind = _SCALAR_NAMES.get(element_token.text)
+    scalar_kind = parse_scalar_type_kind(element_token.text)
     if scalar_kind is None:
         raise ParseError(
             f"unknown element type '{element_token.text}' in shaped type",

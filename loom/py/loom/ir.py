@@ -25,6 +25,12 @@ from dataclasses import dataclass, field
 from enum import IntEnum, unique
 from typing import Any
 
+from loom.scalar_type import (
+    ScalarTypeKind,
+    parse_scalar_type_kind,
+    scalar_type_name,
+)
+
 __all__ = [
     # Scalar types.
     "ScalarTypeKind",
@@ -139,62 +145,6 @@ __all__ = [
 # ============================================================================
 # Scalar types
 # ============================================================================
-
-
-@unique
-class ScalarTypeKind(IntEnum):
-    """Scalar element type kind.
-
-    Values match loom_scalar_type_e in ir/types.h. These are internal
-    compiler values, NOT bytecode-stable.
-
-    Ordered: address types, integers by width, floats by width.
-    """
-
-    INDEX = 0
-    OFFSET = 1
-    I1 = 2
-    I8 = 3
-    I16 = 4
-    I32 = 5
-    I64 = 6
-    F8E4M3 = 7
-    F8E5M2 = 8
-    F16 = 9
-    BF16 = 10
-    F32 = 11
-    F64 = 12
-
-
-# Scalar type name -> enum mapping.
-_SCALAR_NAMES: dict[str, ScalarTypeKind] = {
-    "index": ScalarTypeKind.INDEX,
-    "offset": ScalarTypeKind.OFFSET,
-    "i1": ScalarTypeKind.I1,
-    "i8": ScalarTypeKind.I8,
-    "i16": ScalarTypeKind.I16,
-    "i32": ScalarTypeKind.I32,
-    "i64": ScalarTypeKind.I64,
-    "f8E4M3": ScalarTypeKind.F8E4M3,
-    "f8E5M2": ScalarTypeKind.F8E5M2,
-    "f16": ScalarTypeKind.F16,
-    "bf16": ScalarTypeKind.BF16,
-    "f32": ScalarTypeKind.F32,
-    "f64": ScalarTypeKind.F64,
-}
-
-# Reverse mapping.
-_SCALAR_KIND_NAMES: dict[ScalarTypeKind, str] = {v: k for k, v in _SCALAR_NAMES.items()}
-
-
-def scalar_type_name(kind: ScalarTypeKind) -> str:
-    """Return the textual name for a scalar type kind."""
-    return _SCALAR_KIND_NAMES[kind]
-
-
-def parse_scalar_type_kind(name: str) -> ScalarTypeKind | None:
-    """Parse a scalar type name, returning None if not recognized."""
-    return _SCALAR_NAMES.get(name)
 
 
 # ============================================================================

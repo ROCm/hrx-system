@@ -43,6 +43,7 @@ from loom.gen.ops.c_dialect import (
 from loom.gen.ops.c_names import (
     c_dialect_path as _c_dialect_path,
 )
+from loom.gen.ops.c_scalar_types import generate_scalar_type_table_inc
 from loom.gen.ops.keywords import generate_keyword_enum_inc, generate_keyword_table_inc
 from loom.gen.ops.model import (
     GenerationModel,
@@ -55,6 +56,7 @@ from loom.gen.support.files import write_text_file as _write_file
 __all__ = [
     "generate_ops_h",
     "generate_sharded_tables_c",
+    "generate_scalar_type_table_inc",
     "generate_tables_aggregator_c",
     "generate_tables_c",
     "generate_tables_h",
@@ -131,6 +133,7 @@ def _checked_in_output_contents(model: GenerationModel) -> dict[Path, str]:
         "keyword_table.inc",
     ):
         outputs[registry_dir / filename] = registry_contents[filename]
+    outputs[output_root / "ir" / "scalar_type_table.inc"] = generate_scalar_type_table_inc()
     return outputs
 
 

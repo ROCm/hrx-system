@@ -106,6 +106,7 @@ from loom.gen.ops import model as c_table_model
 from loom.gen.ops.c_builders import generate_builders_c
 from loom.gen.ops.c_enums import TYPE_CONSTRAINT_MAP
 from loom.gen.ops.c_registry import generate_op_registry
+from loom.gen.ops.c_scalar_types import generate_scalar_type_table_inc
 from loom.gen.ops.c_tables import (
     generate_ops_h,
     generate_sharded_tables_c,
@@ -113,6 +114,7 @@ from loom.gen.ops.c_tables import (
     generate_tables_c,
     generate_type_registry,
 )
+from loom.scalar_type import ScalarTypeKind
 
 
 @contextmanager
@@ -155,6 +157,16 @@ def test_load_dialect_generation_calls_only_requested_loader() -> None:
 
 def test_type_constraint_map_covers_every_constraint() -> None:
     assert set(TYPE_CONSTRAINT_MAP) == set(TypeConstraint)
+
+
+def test_generate_scalar_type_table_uses_length_partitioned_classification() -> None:
+    generated = generate_scalar_type_table_inc()
+
+    assert "loom_scalar_type_names[LOOM_SCALAR_TYPE_COUNT_]" in generated
+    assert "switch (name.size)" in generated
+    assert "iree_string_view_equal" in generated
+    assert "for (" not in generated
+    assert generated.count("ordinal does not match Python") == len(ScalarTypeKind)
 
 
 def test_generate_type_registry_emits_fact_domain_pointer() -> None:

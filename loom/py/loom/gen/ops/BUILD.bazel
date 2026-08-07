@@ -59,6 +59,7 @@ C_TABLES_SRCS = [
     "c_parameter_values.py",
     "c_queries.py",
     "c_registry.py",
+    "c_scalar_types.py",
     "c_symbols.py",
     "c_tables.py",
     "c_traits.py",

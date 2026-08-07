@@ -31,10 +31,17 @@ enum class SyntaxWorkload {
   kTaggedLocations,
 };
 
-static constexpr std::array<const char*, 13> kScalarTypeNames = {
-    "index",  "offset", "i1",  "i8",   "i16", "i32", "i64",
-    "f8E4M3", "f8E5M2", "f16", "bf16", "f32", "f64",
-};
+static constexpr int64_t kScalarClassificationBatchCount = 4096;
+
+static std::array<iree_string_view_t, LOOM_SCALAR_TYPE_COUNT_>
+BuildScalarTypeNameViews() {
+  std::array<iree_string_view_t, LOOM_SCALAR_TYPE_COUNT_> names;
+  for (int i = 0; i < LOOM_SCALAR_TYPE_COUNT_; ++i) {
+    names[(size_t)i] =
+        iree_make_cstring_view(loom_scalar_type_name((loom_scalar_type_t)i));
+  }
+  return names;
+}
 
 static constexpr std::array<const char*, 5> kShapedTypeNames = {
     "vector<16xbf16>",
@@ -112,7 +119,9 @@ static std::string BuildSyntaxModule(SyntaxWorkload workload,
     source.append(" = test.constant 0 : ");
     switch (workload) {
       case SyntaxWorkload::kScalarTypes: {
-        source.append(kScalarTypeNames[(size_t)i % kScalarTypeNames.size()]);
+        const loom_scalar_type_t scalar_type =
+            (loom_scalar_type_t)(i % LOOM_SCALAR_TYPE_COUNT_);
+        source.append(loom_scalar_type_name(scalar_type));
         break;
       }
       case SyntaxWorkload::kShapedTypes:
@@ -184,27 +193,35 @@ static void BenchmarkPrintModule(benchmark::State& state,
 }
 
 static void BM_ScalarTypeClassifyKnown(benchmark::State& state) {
+  const auto type_names = BuildScalarTypeNameViews();
   for (auto _ : state) {
-    for (const char* type_name : kScalarTypeNames) {
-      loom_scalar_type_t type = 0;
-      bool matched =
-          loom_scalar_type_parse(iree_make_cstring_view(type_name), &type);
-      benchmark::DoNotOptimize(matched);
-      benchmark::DoNotOptimize(type);
+    for (int64_t batch = 0; batch < kScalarClassificationBatchCount; ++batch) {
+      for (iree_string_view_t type_name : type_names) {
+        benchmark::DoNotOptimize(type_name);
+        loom_scalar_type_t type = 0;
+        bool matched = loom_scalar_type_parse(type_name, &type);
+        benchmark::DoNotOptimize(matched);
+        benchmark::DoNotOptimize(type);
+      }
     }
   }
-  state.SetItemsProcessed(state.iterations() * kScalarTypeNames.size());
+  state.SetItemsProcessed(state.iterations() * LOOM_SCALAR_TYPE_COUNT_ *
+                          kScalarClassificationBatchCount);
 }
 BENCHMARK(BM_ScalarTypeClassifyKnown);
 
 static void BM_ScalarTypeClassifyMiss(benchmark::State& state) {
   for (auto _ : state) {
-    loom_scalar_type_t type = 0;
-    bool matched = loom_scalar_type_parse(IREE_SV("not_a_scalar_type"), &type);
-    benchmark::DoNotOptimize(matched);
-    benchmark::DoNotOptimize(type);
+    for (int64_t batch = 0; batch < kScalarClassificationBatchCount; ++batch) {
+      iree_string_view_t type_name = IREE_SV("not_a_scalar_type");
+      benchmark::DoNotOptimize(type_name);
+      loom_scalar_type_t type = 0;
+      bool matched = loom_scalar_type_parse(type_name, &type);
+      benchmark::DoNotOptimize(matched);
+      benchmark::DoNotOptimize(type);
+    }
   }
-  state.SetItemsProcessed(state.iterations());
+  state.SetItemsProcessed(state.iterations() * kScalarClassificationBatchCount);
 }
 BENCHMARK(BM_ScalarTypeClassifyMiss);
 
