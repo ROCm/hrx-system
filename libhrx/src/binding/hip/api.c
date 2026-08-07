@@ -5957,7 +5957,7 @@ static hipError_t iree_hip_validate_known_memcpy_range(
     return iree_status_to_hip_result(status);
   }
   iree_status_ignore(status);
-  return hipSuccess;
+  return hipErrorInvalidValue;
 }
 
 static hipError_t iree_hip_validate_memcpy_ranges(
@@ -7127,44 +7127,12 @@ static hipError_t iree_hip_memcpy3d_staged_rows(
 }
 
 static bool iree_hip_memcpy3d_is_device_to_device(
-    const hipMemcpy3DParms* params) {
-  switch (params->kind) {
-    case hipMemcpyDeviceToDevice:
-    case hipMemcpyDeviceToDeviceNoCU:
-      return true;
-    case hipMemcpyDefault:
-      break;
-    default:
-      return false;
-  }
-
-  iree_hal_streaming_context_t* dst_context = NULL;
-  iree_hal_streaming_buffer_ref_t dst_ref = {0};
-  iree_status_t dst_status =
-      iree_hal_streaming_memory_lookup_range_across_contexts(
-          (iree_hal_streaming_deviceptr_t)params->dstPtr.ptr, 1, &dst_context,
-          &dst_ref);
-  iree_hal_streaming_context_t* src_context = NULL;
-  iree_hal_streaming_buffer_ref_t src_ref = {0};
-  iree_status_t src_status =
-      iree_hal_streaming_memory_lookup_range_across_contexts(
-          (iree_hal_streaming_deviceptr_t)params->srcPtr.ptr, 1, &src_context,
-          &src_ref);
-  const bool result =
-      iree_status_is_ok(dst_status) && iree_status_is_ok(src_status) &&
-      (dst_ref.buffer->memory_type & IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL) &&
-      (src_ref.buffer->memory_type & IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
-  if (iree_status_is_ok(dst_status)) {
-    iree_hal_streaming_context_release(dst_context);
-  } else {
-    iree_status_ignore(dst_status);
-  }
-  if (iree_status_is_ok(src_status)) {
-    iree_hal_streaming_context_release(src_context);
-  } else {
-    iree_status_ignore(src_status);
-  }
-  return result;
+    iree_hal_streaming_context_t* context, const hipMemcpy3DParms* params) {
+  hipMemcpyKind resolved_kind = hipMemcpyDefault;
+  return iree_hip_resolve_memcpy_kind(context, params->dstPtr.ptr,
+                                      params->srcPtr.ptr, params->kind,
+                                      &resolved_kind) == hipSuccess &&
+         resolved_kind == hipMemcpyDeviceToDevice;
 }
 
 HIPAPI hipError_t hipMemcpy3D(const hipMemcpy3DParms* p) {
@@ -7201,7 +7169,8 @@ HIPAPI hipError_t hipMemcpy3D(const hipMemcpy3DParms* p) {
     HIP_RETURN_ERROR(hipErrorStreamCaptureImplicit);
   }
 
-  const bool device_to_device = iree_hip_memcpy3d_is_device_to_device(p);
+  const bool device_to_device =
+      iree_hip_memcpy3d_is_device_to_device(context, p);
   hipError_t result = hipMemcpy3DAsync(p, NULL);
   if (result == hipSuccess && !device_to_device) {
     result = hipDeviceSynchronize();
@@ -8337,7 +8306,7 @@ HIPAPI hipError_t hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffsetDst,
                                           size_t width, size_t height,
                                           hipMemcpyKind kind) {
   if (!dst || !src) {
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+    HIP_RETURN_ERROR(hipErrorInvalidHandle);
   }
   if (width == 0 || height == 0) return hipSuccess;
   size_t src_element_offset = 0;
@@ -8775,7 +8744,9 @@ static hipError_t iree_hip_memset_3d(hipPitchedPtr pitchedDevPtr, int value,
         hipMemsetAsync(pitchedDevPtr.ptr, value, byte_count, stream);
     if (linear_result == hipSuccess && !is_async) {
       iree_status_t sync_status =
-          iree_hal_streaming_context_synchronize_legacy_default(context);
+          iree_hal_streaming_memory_complete_synchronous_memset(
+              context, (iree_hal_streaming_deviceptr_t)pitchedDevPtr.ptr,
+              byte_span, context->default_stream);
       linear_result = iree_memset_status_to_hip_result(sync_status);
     }
     IREE_TRACE_ZONE_END(z0);
@@ -8801,7 +8772,9 @@ static hipError_t iree_hip_memset_3d(hipPitchedPtr pitchedDevPtr, int value,
 
   if (!is_async) {
     iree_status_t sync_status =
-        iree_hal_streaming_context_synchronize_legacy_default(context);
+        iree_hal_streaming_memory_complete_synchronous_memset(
+            context, (iree_hal_streaming_deviceptr_t)pitchedDevPtr.ptr,
+            byte_span, context->default_stream);
     result = iree_memset_status_to_hip_result(sync_status);
   }
 
