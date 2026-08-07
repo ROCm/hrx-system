@@ -22,8 +22,6 @@ static iree_string_view_t loom_liveness_type_kind_name(
       return IREE_SV("tile");
     case LOOM_TYPE_TENSOR:
       return IREE_SV("tensor");
-    case LOOM_TYPE_GROUP:
-      return IREE_SV("group");
     case LOOM_TYPE_FUNCTION:
       return IREE_SV("function");
     case LOOM_TYPE_DIALECT:

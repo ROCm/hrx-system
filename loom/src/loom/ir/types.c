@@ -8,17 +8,6 @@
 
 #include <string.h>
 
-const char* loom_group_scope_name(loom_group_scope_t scope) {
-  static const char* const names[] = {
-      [LOOM_GROUP_SCOPE_WORKGROUP] = "workgroup",
-      [LOOM_GROUP_SCOPE_SUBGROUP] = "subgroup",
-  };
-  static_assert(IREE_ARRAYSIZE(names) == LOOM_GROUP_SCOPE_COUNT_,
-                "group scope names out of sync with enum");
-  if (scope < LOOM_GROUP_SCOPE_COUNT_) return names[scope];
-  return NULL;
-}
-
 const char* loom_encoding_role_name(loom_encoding_role_t role) {
   static const char* const names[] = {
       [LOOM_ENCODING_ROLE_UNKNOWN] = "",

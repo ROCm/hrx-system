@@ -58,8 +58,6 @@ from loom.ir import (
     EncodingType,
     EnumArrayAttr,
     FunctionType,
-    GroupScope,
-    GroupType,
     Module,
     Operation,
     RegisterType,
@@ -435,23 +433,6 @@ class TestParseEncoding:
 
 
 # ============================================================================
-# Group types
-# ============================================================================
-
-
-class TestParseGroupType:
-    def test_basic(self) -> None:
-        result = _parse_type("group<workgroup>")
-        assert isinstance(result, GroupType)
-        assert result.scope == GroupScope.WORKGROUP
-
-    def test_subgroup(self) -> None:
-        result = _parse_type("group<subgroup>")
-        assert isinstance(result, GroupType)
-        assert result.scope == GroupScope.SUBGROUP
-
-
-# ============================================================================
 # Buffer type
 # ============================================================================
 
@@ -645,9 +626,6 @@ class TestTypeRoundTrip:
         self._roundtrip("vector<4x16xf32>")
         self._roundtrip("view<256xi8>")
         self._roundtrip("tile<f32>")
-
-    def test_group_roundtrip(self) -> None:
-        self._roundtrip("group<workgroup>")
 
     def test_buffer_roundtrip(self) -> None:
         self._roundtrip("buffer")

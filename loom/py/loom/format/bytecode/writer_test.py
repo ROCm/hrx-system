@@ -82,8 +82,6 @@ from loom.ir import (
     EnumArrayAttr,
     FileLocation,
     FunctionType,
-    GroupScope,
-    GroupType,
     LocationTable,
     Module,
     Operation,
@@ -750,12 +748,6 @@ class TestTypesSection:
         self._roundtrip_type(
             ShapedType(TypeKind.TILE, F32, (StaticDim(4),), encoding=enc)
         )
-
-    def test_group_type(self) -> None:
-        self._roundtrip_type(GroupType(GroupScope.WORKGROUP))
-
-    def test_group_subgroup(self) -> None:
-        self._roundtrip_type(GroupType(GroupScope.SUBGROUP))
 
     def test_function_type(self) -> None:
         self._roundtrip_type(FunctionType((F32, I32), (F32,)))

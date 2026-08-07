@@ -2557,20 +2557,6 @@ TEST_F(ParserTest, PoolDimReportsRealPosition) {
   EXPECT_EQ(diagnostics[0].origin_column, 26u);
 }
 
-TEST_F(ParserTest, GroupScopeReportsRealPosition) {
-  // group<bad> — BARE_IDENT "bad" at column 27 (after "group<").
-  // Line 2: %r = test.cast %x : group<bad> to i32
-  //                              21    2627
-  const auto& diagnostics = ParseExpectErrors(
-      "%x = test.constant 0 : i32\n"
-      "%r = test.cast %x : group<bad> to i32\n");
-  ASSERT_GE(diagnostics.size(), 1u);
-  ExpectError(diagnostics[0],
-              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 18));
-  EXPECT_EQ(diagnostics[0].origin_line, 2u);
-  EXPECT_EQ(diagnostics[0].origin_column, 27u);
-}
-
 //===----------------------------------------------------------------------===//
 // Error recovery
 //===----------------------------------------------------------------------===//

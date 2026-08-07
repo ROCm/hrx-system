@@ -524,8 +524,6 @@ iree_string_view_t loom_target_compile_report_type_kind_name(
       return IREE_SV("encoding");
     case LOOM_TYPE_DIALECT:
       return IREE_SV("dialect");
-    case LOOM_TYPE_GROUP:
-      return IREE_SV("group");
     case LOOM_TYPE_POOL:
       return IREE_SV("pool");
     case LOOM_TYPE_REGISTER:

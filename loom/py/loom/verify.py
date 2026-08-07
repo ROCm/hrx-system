@@ -28,7 +28,6 @@ from loom.ir import (
     DynamicEncoding,
     EncodingRole,
     EncodingType,
-    GroupType,
     Module,
     Operation,
     PoolType,
@@ -908,8 +907,6 @@ def type_satisfies_constraint(value_type: Type, constraint: TypeConstraint) -> b
         return True
     if constraint == TypeConstraint.BUFFER:
         return isinstance(value_type, BufferType)
-    if constraint == TypeConstraint.GROUP:
-        return isinstance(value_type, GroupType)
     if constraint == TypeConstraint.POOL:
         return isinstance(value_type, PoolType)
     if constraint == TypeConstraint.REGISTER:

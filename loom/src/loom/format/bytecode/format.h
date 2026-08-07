@@ -317,7 +317,7 @@ typedef enum loom_bytecode_section_kind_e {
 //   [type_count: varint]
 //   For each type:
 //     [kind: byte]
-//       0 = none, 1 = scalar, 2 = tile, 3 = tensor, 4 = group,
+//       0 = none, 1 = scalar, 2 = tile, 3 = tensor, 4 = unassigned,
 //       5 = function, 6 = dialect, 7 = encoding, 8 = pool,
 //       9 = vector, 10 = view, 11 = buffer, 12 = register,
 //       13 = storage
@@ -335,7 +335,6 @@ typedef enum loom_bytecode_section_kind_e {
 //       For each dim (rank times):
 //         [is_dynamic: byte]      (0 = static, 1 = dynamic)
 //         (if static: [size: varint]))
-//     (GROUP: [scope: byte]       (loom_bytecode_group_scope_t))
 //     (FUNCTION:
 //       [arg_count: varint]
 //       [result_count: varint]
@@ -861,7 +860,7 @@ typedef enum loom_bytecode_type_kind_e {
   LOOM_BYTECODE_TYPE_SCALAR = 1,
   LOOM_BYTECODE_TYPE_TILE = 2,
   LOOM_BYTECODE_TYPE_TENSOR = 3,
-  LOOM_BYTECODE_TYPE_GROUP = 4,
+  // Value 4 is intentionally unassigned and must not be reused.
   LOOM_BYTECODE_TYPE_FUNCTION = 5,
   LOOM_BYTECODE_TYPE_DIALECT = 6,
   LOOM_BYTECODE_TYPE_ENCODING = 7,
@@ -872,13 +871,6 @@ typedef enum loom_bytecode_type_kind_e {
   LOOM_BYTECODE_TYPE_REGISTER = 12,
   LOOM_BYTECODE_TYPE_STORAGE = 13,
 } loom_bytecode_type_kind_t;
-
-// Group scope byte in the TYPES section (GROUP payload).
-// Append-only; do not reorder.
-typedef enum loom_bytecode_group_scope_e {
-  LOOM_BYTECODE_GROUP_SCOPE_WORKGROUP = 0,
-  LOOM_BYTECODE_GROUP_SCOPE_SUBGROUP = 1,
-} loom_bytecode_group_scope_t;
 
 // Encoding role byte in the TYPES section (ENCODING payload).
 // Append-only; do not reorder.

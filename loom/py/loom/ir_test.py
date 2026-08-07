@@ -47,8 +47,6 @@ from loom.ir import (
     FileLocation,
     FunctionType,
     FusedLocation,
-    GroupScope,
-    GroupType,
     LocationTable,
     Module,
     OpaqueLocation,
@@ -264,16 +262,9 @@ class TestShapedTypes:
 # ============================================================================
 
 
-class TestGroupType:
-    def test_basic(self) -> None:
-        t = GroupType(GroupScope.WORKGROUP)
-        assert t.scope == GroupScope.WORKGROUP
-        assert t.type_kind == TypeKind.GROUP
-        assert repr(t) == "group<workgroup>"
-
-    def test_equality(self) -> None:
-        assert GroupType(GroupScope.WORKGROUP) == GroupType(GroupScope.WORKGROUP)
-        assert GroupType(GroupScope.WORKGROUP) != GroupType(GroupScope.SUBGROUP)
+def test_unassigned_type_kind_is_invalid() -> None:
+    with pytest.raises(ValueError, match="4 is not a valid TypeKind"):
+        TypeKind(4)
 
 
 class TestFunctionType:

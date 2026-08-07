@@ -29,7 +29,7 @@ typedef enum loom_type_format_kind_e {
   LOOM_TYPE_FMT_SCALAR = 1,      // Element type keyword: f32, i8.
   LOOM_TYPE_FMT_ENCODING = 2,    // Encoding ref: #q8_0 or %enc.
   LOOM_TYPE_FMT_TYPE = 3,         // Recursive type: vm.ref<T>.
-  LOOM_TYPE_FMT_ATTR = 4,         // Bare identifier: group<workgroup>.
+  LOOM_TYPE_FMT_ATTR = 4,         // Bare identifier attribute.
   LOOM_TYPE_FMT_KEYWORD = 5,      // Literal punctuation/word.
   LOOM_TYPE_FMT_OPTIONAL = 6,     // Conditional elements.
   LOOM_TYPE_FMT_GLUE = 7,         // Suppress space.

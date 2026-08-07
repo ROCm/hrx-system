@@ -19,7 +19,7 @@ const loom_type_registry_entry_t* loom_type_registry_entries(void) {
 
 static iree_string_view_t loom_type_registry_builtin_name(
     loom_type_kind_t kind) {
-  if (kind >= LOOM_TYPE_COUNT_) {
+  if (!loom_type_kind_is_valid(kind)) {
     return iree_string_view_empty();
   }
   return loom_type_registry_builtin_names[kind];

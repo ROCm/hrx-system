@@ -450,9 +450,6 @@ static uint32_t loom_bytecode_type_wire_hash(loom_type_t type) {
       }
       return hash;
     }
-    case LOOM_TYPE_GROUP:
-      return loom_bytecode_type_hash_mix_u8(
-          hash, (uint8_t)loom_type_group_scope(type));
     case LOOM_TYPE_FUNCTION: {
       const loom_func_type_data_t* data = loom_type_func_data(type);
       if (!data) return hash;
@@ -541,8 +538,6 @@ static bool loom_bytecode_type_wire_equal(loom_type_t a, loom_type_t b) {
     case LOOM_TYPE_POOL:
       return loom_bytecode_type_dim_wire_equal(loom_type_dim(a, 0),
                                                loom_type_dim(b, 0));
-    case LOOM_TYPE_GROUP:
-      return loom_type_group_scope(a) == loom_type_group_scope(b);
     case LOOM_TYPE_FUNCTION: {
       const loom_func_type_data_t* a_data = loom_type_func_data(a);
       const loom_func_type_data_t* b_data = loom_type_func_data(b);
@@ -819,9 +814,6 @@ static iree_status_t loom_bytecode_numbering_intern_type(
       }
       break;
     }
-    case LOOM_TYPE_GROUP:
-      // Group scope is serialized as a byte, not a string. No interning.
-      break;
     case LOOM_TYPE_DIALECT: {
       // Intern the dialect type name string.
       loom_string_id_t name_id = loom_type_dialect_name_id(type);
@@ -1805,9 +1797,6 @@ static iree_status_t loom_bytecode_type_kind_byte(loom_type_kind_t kind,
       return iree_ok_status();
     case LOOM_TYPE_BUFFER:
       *out_byte = LOOM_BYTECODE_TYPE_BUFFER;
-      return iree_ok_status();
-    case LOOM_TYPE_GROUP:
-      *out_byte = LOOM_BYTECODE_TYPE_GROUP;
       return iree_ok_status();
     case LOOM_TYPE_FUNCTION:
       *out_byte = LOOM_BYTECODE_TYPE_FUNCTION;
@@ -3665,12 +3654,6 @@ static iree_status_t loom_bytecode_write_types_section(
                 page_writer, (uint64_t)loom_type_dim_static_size_at(type, i)));
           }
         }
-        break;
-      }
-      case LOOM_TYPE_GROUP: {
-        loom_group_scope_t scope = loom_type_group_scope(type);
-        IREE_RETURN_IF_ERROR(
-            loom_bytecode_page_writer_write_u8(page_writer, (uint8_t)scope));
         break;
       }
       case LOOM_TYPE_FUNCTION: {

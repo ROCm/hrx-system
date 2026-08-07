@@ -491,11 +491,6 @@ TEST(TypeRegistry, LookupBuiltinTypes) {
   ASSERT_NE(desc, nullptr);
   EXPECT_EQ(desc->ir_kind, LOOM_TYPE_POOL);
   EXPECT_EQ(desc->param_count, 1);
-
-  desc = loom_type_registry_lookup(iree_make_cstring_view("group"));
-  ASSERT_NE(desc, nullptr);
-  EXPECT_EQ(desc->ir_kind, LOOM_TYPE_GROUP);
-  EXPECT_EQ(desc->param_count, 1);
 }
 
 TEST(TypeRegistry, LookupDialectType) {

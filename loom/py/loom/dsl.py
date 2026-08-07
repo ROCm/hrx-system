@@ -73,7 +73,6 @@ __all__ = [
     "OFFSET",
     "ADDRESS",
     "ANY",
-    "GROUP",
     "ANY_ENCODING",
     "ENCODING_LAYOUT",
     "ENCODING_SCHEMA",
@@ -298,7 +297,6 @@ class TypeConstraint(Enum):
       OFFSET   → ScalarType with kind=OFFSET
       ADDRESS  → ScalarType with kind in {INDEX, OFFSET}
       ANY      → any type
-      GROUP    → GroupType
       ANY_ENCODING → any EncodingType
       ENCODING_LAYOUT → EncodingType with role=layout
       ENCODING_SCHEMA → EncodingType with role=schema
@@ -342,7 +340,6 @@ class TypeConstraint(Enum):
     OFFSET = "offset"
     ADDRESS = "address"
     ANY = "any"
-    GROUP = "group"
     ANY_ENCODING = "encoding"
     ENCODING_LAYOUT = "encoding<layout>"
     ENCODING_SCHEMA = "encoding<schema>"
@@ -381,7 +378,6 @@ INDEX = TypeConstraint.INDEX
 OFFSET = TypeConstraint.OFFSET
 ADDRESS = TypeConstraint.ADDRESS
 ANY = TypeConstraint.ANY
-GROUP = TypeConstraint.GROUP
 ANY_ENCODING = TypeConstraint.ANY_ENCODING
 ENCODING_LAYOUT = TypeConstraint.ENCODING_LAYOUT
 ENCODING_SCHEMA = TypeConstraint.ENCODING_SCHEMA
@@ -1400,7 +1396,6 @@ _RESOURCE_TYPE_CONSTRAINTS = frozenset(
         TypeConstraint.BUFFER,
         TypeConstraint.VIEW,
         TypeConstraint.TENSOR,
-        TypeConstraint.GROUP,
         TypeConstraint.ANY,
     }
 )

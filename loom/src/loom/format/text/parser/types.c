@@ -656,36 +656,6 @@ static iree_status_t loom_parse_pool_type(loom_parser_t* parser,
 }
 
 //===----------------------------------------------------------------------===//
-// Group type parsing
-//===----------------------------------------------------------------------===//
-
-// Parses a group type from the token stream. Called after LANGLE has
-// been consumed. Consumes tokens through RANGLE.
-static iree_status_t loom_parse_group_type(loom_parser_t* parser,
-                                           loom_type_t* out_type) {
-  loom_token_t scope_token;
-  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BARE_IDENT, &scope_token);
-  loom_type_t type = {0};
-  if (iree_string_view_equal(scope_token.text, IREE_SV("workgroup"))) {
-    type.header = loom_type_make_raw_header(LOOM_TYPE_GROUP,
-                                            LOOM_GROUP_SCOPE_WORKGROUP, 0, 0);
-  } else if (iree_string_view_equal(scope_token.text, IREE_SV("subgroup"))) {
-    type.header = loom_type_make_raw_header(LOOM_TYPE_GROUP,
-                                            LOOM_GROUP_SCOPE_SUBGROUP, 0, 0);
-  } else {
-    loom_diagnostic_param_t params[] = {
-        loom_param_string(IREE_SV("group scope")),
-        loom_param_string(scope_token.text),
-    };
-    return loom_parser_emit(parser, LOOM_ERR_PARSE_018, params,
-                            IREE_ARRAYSIZE(params), scope_token);
-  }
-  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RANGLE, NULL);
-  *out_type = type;
-  return iree_ok_status();
-}
-
-//===----------------------------------------------------------------------===//
 // Storage type parsing
 //===----------------------------------------------------------------------===//
 
@@ -981,7 +951,7 @@ static iree_status_t loom_parse_register_type(loom_parser_t* parser,
 }
 
 // Consumes keyword, expects LANGLE, dispatches to the type-specific
-// parser. Shared entry for tile, tensor, vector, view, pool, and group.
+// parser. Shared entry for tile, tensor, vector, view, pool, and storage.
 static iree_status_t loom_parse_angle_bracketed_type(
     loom_parser_t* parser, loom_type_kind_t kind, loom_type_parse_mode_t mode,
     loom_type_t* out_type) {
@@ -993,8 +963,6 @@ static iree_status_t loom_parse_angle_bracketed_type(
   iree_status_t status;
   if (kind == LOOM_TYPE_POOL) {
     status = loom_parse_pool_type(parser, mode, out_type);
-  } else if (kind == LOOM_TYPE_GROUP) {
-    status = loom_parse_group_type(parser, out_type);
   } else if (kind == LOOM_TYPE_STORAGE) {
     status = loom_parse_storage_type(parser, out_type);
   } else {
@@ -1021,7 +989,6 @@ static iree_status_t loom_parse_registered_type(loom_parser_t* parser,
     case LOOM_TYPE_VECTOR:
     case LOOM_TYPE_VIEW:
     case LOOM_TYPE_POOL:
-    case LOOM_TYPE_GROUP:
     case LOOM_TYPE_STORAGE:
       return loom_parse_angle_bracketed_type(parser, descriptor->ir_kind, mode,
                                              out_type);

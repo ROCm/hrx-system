@@ -1463,9 +1463,6 @@ static iree_status_t loom_bytecode_reader_decode_type_kind(
     case LOOM_BYTECODE_TYPE_TENSOR:
       *out_kind = LOOM_TYPE_TENSOR;
       return iree_ok_status();
-    case LOOM_BYTECODE_TYPE_GROUP:
-      *out_kind = LOOM_TYPE_GROUP;
-      return iree_ok_status();
     case LOOM_BYTECODE_TYPE_FUNCTION:
       *out_kind = LOOM_TYPE_FUNCTION;
       return iree_ok_status();
@@ -1708,22 +1705,6 @@ static iree_status_t loom_bytecode_reader_read_types(
         IREE_RETURN_IF_ERROR(loom_bytecode_reader_build_shaped_type(
             reader, kind, (loom_scalar_type_t)element_type, rank, attachment,
             encoding_instance, dims, &type, attachment_offset));
-        break;
-      }
-      case LOOM_TYPE_GROUP: {
-        uint8_t scope = 0;
-        uint64_t scope_offset =
-            loom_bytecode_reader_cursor_absolute_position(&cursor);
-        IREE_RETURN_IF_ERROR(
-            loom_bytecode_reader_read_u8(reader, &cursor, &scope));
-        if (scope >= LOOM_GROUP_SCOPE_COUNT_) {
-          return loom_bytecode_reader_emit_enum_value(
-              reader, IREE_SV("group_scope"), scope, LOOM_GROUP_SCOPE_COUNT_,
-              scope_offset);
-        }
-        type.header = loom_type_make_raw_header(
-            LOOM_TYPE_GROUP, scope, 0,
-            LOOM_TYPE_FLAG_INLINE_DIMS | LOOM_TYPE_FLAG_ALL_STATIC);
         break;
       }
       case LOOM_TYPE_FUNCTION: {
