@@ -430,6 +430,9 @@ typedef enum hipLimit_t {
   hipLimitDevRuntimePendingLaunchCount = 0x04,
   hipLimitMaxL2FetchGranularity = 0x05,
   hipLimitPersistingL2CacheSize = 0x06,
+  hipExtLimitScratchMin = 0x1000,
+  hipExtLimitScratchMax = 0x1001,
+  hipExtLimitScratchCurrent = 0x1002,
   hipLimitRange
 } hipLimit_t;
 

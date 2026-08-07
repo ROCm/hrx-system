@@ -74,6 +74,39 @@ static void iree_hip_sanitize_device_name(char* name) {
   }
 }
 
+static const iree_hal_physical_device_identity_t*
+iree_hip_physical_device_identity(
+    const iree_hal_streaming_device_t* device) {
+  const iree_hal_device_identity_spec_t* logical_identity =
+      iree_hal_device_spec_identity(iree_hal_device_spec(device->hal_device));
+  if (!logical_identity || logical_identity->physical_device_count == 0) {
+    return NULL;
+  }
+  for (iree_host_size_t i = 0; i < logical_identity->physical_device_count;
+       ++i) {
+    const iree_hal_physical_device_spec_t* physical_device =
+        &logical_identity->physical_devices[i];
+    if (physical_device->physical_ordinal == device->ordinal) {
+      return &physical_device->identity;
+    }
+  }
+  // A logical device containing one physical device has an unambiguous
+  // identity even when its backend ordinal differs from the HIP ordinal.
+  if (logical_identity->physical_device_count == 1) {
+    return &logical_identity->physical_devices[0].identity;
+  }
+  return NULL;
+}
+
+static void iree_hip_format_device_uuid(const iree_hal_uuid_t* source,
+                                        hipUUID* target) {
+  static const char kHexDigits[] = "0123456789abcdef";
+  for (iree_host_size_t i = 0; i < sizeof(target->bytes) / 2; ++i) {
+    target->bytes[i * 2] = kHexDigits[source->bytes[i] >> 4];
+    target->bytes[i * 2 + 1] = kHexDigits[source->bytes[i] & 0x0F];
+  }
+}
+
 HIPAPI int hrx_hip_binding_active(void) { return 1; }
 
 HIPAPI void hrx_hip_binding_info(hrx_hip_info_t* out_info) {
@@ -2233,6 +2266,8 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
 
   const bool is_gfx1100 = strncmp(prop->gcnArchName, "gfx1100", 7) == 0;
   const bool is_gfx942 = strncmp(prop->gcnArchName, "gfx942", 6) == 0;
+  const iree_hal_physical_device_identity_t* physical_identity =
+      iree_hip_physical_device_identity(device_obj);
   prop->totalGlobalMem = (size_t)total_memory;
   prop->sharedMemPerBlock = device_obj->max_shared_memory_per_block;
   prop->regsPerBlock = device_obj->max_registers_per_block;
@@ -2301,9 +2336,19 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   prop->surfaceAlignment = 0;
   prop->concurrentKernels = 1;
   prop->ECCEnabled = 0;
-  prop->pciBusID = is_gfx1100 ? 227 : device;
-  prop->pciDeviceID = 0;
-  prop->pciDomainID = 0;
+  if (physical_identity &&
+      iree_all_bits_set(
+          physical_identity->flags,
+          IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS)) {
+    prop->pciBusID = physical_identity->pci.bus;
+    prop->pciDeviceID = physical_identity->pci.device;
+    prop->pciDomainID = physical_identity->pci.domain;
+  }
+  if (physical_identity &&
+      iree_all_bits_set(physical_identity->flags,
+                        IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_UUID)) {
+    iree_hip_format_device_uuid(&physical_identity->uuid, &prop->uuid);
+  }
   prop->tccDriver = 0;
   prop->asyncEngineCount = 2;
   prop->unifiedAddressing = 1;
@@ -2418,6 +2463,9 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
   if (!value) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  if ((int)attr < 0) {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
 
   // Ensure HIP is initialized.
   hipError_t init_result = iree_hip_ensure_initialized();
@@ -2434,6 +2482,8 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
   // Map attributes to device properties.
   const bool is_gfx1100 = strncmp(device_obj->gcn_arch_name, "gfx1100", 7) == 0;
   const bool is_gfx942 = strncmp(device_obj->gcn_arch_name, "gfx942", 6) == 0;
+  const iree_hal_physical_device_identity_t* physical_identity =
+      iree_hip_physical_device_identity(device_obj);
   switch (attr) {
     case hipDeviceAttributeMaxThreadsPerBlock:
       *value = device_obj->max_threads_per_block;
@@ -2463,6 +2513,9 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = 1;
       break;
     case hipDeviceAttributeCanUseHostPointerForRegisteredMem:
+      *value = 1;
+      break;
+    case hipDeviceAttributeConcurrentKernels:
       *value = 1;
       break;
     case hipDeviceAttributeHostNativeAtomicSupported:
@@ -2515,6 +2568,26 @@ HIPAPI hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t attr,
       *value = device_obj->total_memory > 2147483647ull
                    ? 2147483647
                    : (int)device_obj->total_memory;
+      break;
+    case hipDeviceAttributeTotalConstantMemory:
+      *value = 64 * 1024;
+      break;
+    case hipDeviceAttributePciBusId:
+    case hipDeviceAttributePciDeviceId:
+    case hipDeviceAttributePciDomainID:
+      if (!physical_identity ||
+          !iree_all_bits_set(
+              physical_identity->flags,
+              IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS)) {
+        HIP_RETURN_ERROR(hipErrorNotSupported);
+      }
+      if (attr == hipDeviceAttributePciBusId) {
+        *value = physical_identity->pci.bus;
+      } else if (attr == hipDeviceAttributePciDeviceId) {
+        *value = physical_identity->pci.device;
+      } else {
+        *value = physical_identity->pci.domain;
+      }
       break;
     case hipDeviceAttributeManagedMemory:
       *value = 1;
@@ -2642,6 +2715,10 @@ HIPAPI hipError_t hipDeviceGetName(char* name, int len, int device) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(init_result);
   }
+  if (!iree_hal_streaming_device_entry(device)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  }
 
   iree_status_t status = iree_hal_streaming_device_name(
       (iree_hal_streaming_device_ordinal_t)device, name, (size_t)len);
@@ -2664,7 +2741,7 @@ HIPAPI hipError_t hipDeviceGetName(char* name, int len, int device) {
 //  - hipSuccess: UUID retrieved successfully.
 //  - hipErrorInvalidValue: uuid is NULL.
 //  - hipErrorInvalidDevice: Invalid device handle.
-//  - hipErrorNotSupported: UUID not supported (current implementation).
+//  - hipErrorNotSupported: The backend did not publish a stable UUID.
 //
 // Synchronization: This operation is synchronous.
 //
@@ -2676,14 +2753,23 @@ HIPAPI hipError_t hipDeviceGetName(char* name, int len, int device) {
 //
 // Multi-GPU: Each physical device has a unique UUID.
 //
-// Note: Currently not implemented in StreamHAL.
-//
 // See also: hipDeviceGet, hipGetDeviceProperties.
 HIPAPI hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t dev) {
-  // UUID support is not currently implemented.
-  (void)uuid;
-  (void)dev;
-  HIP_RETURN_ERROR(hipErrorNotSupported);
+  if (!uuid) HIP_RETURN_ERROR(hipErrorInvalidValue);
+  hipError_t init_result = iree_hip_ensure_initialized();
+  if (init_result != hipSuccess) return init_result;
+  iree_hal_streaming_device_t* device =
+      iree_hal_streaming_device_entry(dev);
+  if (!device) HIP_RETURN_ERROR(hipErrorInvalidDevice);
+  const iree_hal_physical_device_identity_t* physical_identity =
+      iree_hip_physical_device_identity(device);
+  if (!physical_identity ||
+      !iree_all_bits_set(physical_identity->flags,
+                         IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_UUID)) {
+    HIP_RETURN_ERROR(hipErrorNotSupported);
+  }
+  iree_hip_format_device_uuid(&physical_identity->uuid, uuid);
+  return hipSuccess;
 }
 
 // Gets the total memory of a compute device.
@@ -2913,6 +2999,11 @@ HIPAPI hipError_t hipDeviceEnablePeerAccess(int peerDevice,
                                             unsigned int flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  if (flags != 0) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
   // Get the current context.
   // Ensure initialization and get context.
   iree_hal_streaming_context_t* context = NULL;
@@ -3018,7 +3109,6 @@ HIPAPI hipError_t hipDeviceDisablePeerAccess(int peerDevice) {
 }
 
 // Gets the PCI bus ID string for a device.
-// Returns a placeholder string since we don't have real PCI info.
 HIPAPI hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device) {
   if (!pciBusId || len <= 0) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
@@ -3034,9 +3124,20 @@ HIPAPI hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device) {
     HIP_RETURN_ERROR(hipErrorInvalidDevice);
   }
 
-  // Return a placeholder PCI bus ID.
-  // Format: domain:bus:device.function (e.g., "0000:00:00.0")
-  int written = snprintf(pciBusId, len, "0000:00:0%d.0", device);
+  const iree_hal_physical_device_identity_t* physical_identity =
+      iree_hip_physical_device_identity(
+          iree_hal_streaming_device_entry(device));
+  if (!physical_identity ||
+      !iree_all_bits_set(
+          physical_identity->flags,
+          IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS)) {
+    HIP_RETURN_ERROR(hipErrorNotSupported);
+  }
+  int written = snprintf(pciBusId, len, "%04x:%02x:%02x.%01x",
+                         physical_identity->pci.domain,
+                         physical_identity->pci.bus,
+                         physical_identity->pci.device,
+                         physical_identity->pci.function);
   if (written < 0 || written >= len) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -3044,16 +3145,41 @@ HIPAPI hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device) {
 }
 
 // Gets the device ordinal for a PCI bus ID string.
-// We return device 0 for any valid-looking bus ID.
 HIPAPI hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId) {
   if (!device || !pciBusId) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
-  // For simplicity, just return device 0.
-  // A proper implementation would parse the bus ID and match it.
-  *device = 0;
-  return hipSuccess;
+  unsigned int domain = 0;
+  unsigned int bus = 0;
+  unsigned int pci_device = 0;
+  unsigned int function = 0;
+  int consumed = 0;
+  if (sscanf(pciBusId, "%4x:%2x:%2x.%1x%n", &domain, &bus, &pci_device,
+             &function, &consumed) != 4 ||
+      pciBusId[consumed] != '\0') {
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+
+  int device_count = 0;
+  hipError_t count_result = hipGetDeviceCount(&device_count);
+  if (count_result != hipSuccess) return count_result;
+  for (int i = 0; i < device_count; ++i) {
+    const iree_hal_physical_device_identity_t* physical_identity =
+        iree_hip_physical_device_identity(iree_hal_streaming_device_entry(i));
+    if (physical_identity &&
+        iree_all_bits_set(
+            physical_identity->flags,
+            IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_PCI_ADDRESS) &&
+        physical_identity->pci.domain == domain &&
+        physical_identity->pci.bus == bus &&
+        physical_identity->pci.device == pci_device &&
+        physical_identity->pci.function == function) {
+      *device = i;
+      return hipSuccess;
+    }
+  }
+  HIP_RETURN_ERROR(hipErrorInvalidValue);
 }
 
 // Gets the range of stream priorities supported by the device.
@@ -4332,6 +4458,15 @@ HIPAPI hipError_t hipDeviceGetLimit(size_t* pValue, hipLimit_t limit) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  if (limit == hipLimitRange) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (iree_hip_limit_to_internal(limit) ==
+      (iree_hal_streaming_context_limit_t)-1) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorUnsupportedLimit);
+  }
 
   // Get current context.
   // Ensure initialization and get context.
@@ -4381,6 +4516,16 @@ HIPAPI hipError_t hipDeviceGetLimit(size_t* pValue, hipLimit_t limit) {
 // See also: hipDeviceGetLimit, hipFuncSetAttribute.
 HIPAPI hipError_t hipDeviceSetLimit(hipLimit_t limit, size_t value) {
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (limit == hipLimitRange) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (iree_hip_limit_to_internal(limit) ==
+      (iree_hal_streaming_context_limit_t)-1) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorUnsupportedLimit);
+  }
 
   // Get current context.
   // Ensure initialization and get context.
@@ -22867,7 +23012,7 @@ HIPAPI hipError_t hipDeviceSetMemPool(int device, hipMemPool_t pool) {
       iree_hal_streaming_device_entry(device);
   if (!device_obj) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   iree_status_t status =
@@ -22923,7 +23068,7 @@ HIPAPI hipError_t hipDeviceGetMemPool(hipMemPool_t* pool, int device) {
   iree_hal_streaming_device_t* device_obj =
       iree_hal_streaming_device_entry(device);
   if (!device_obj) {
-    HIP_RETURN_ERROR(hipErrorInvalidDevice);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   iree_status_t status =
