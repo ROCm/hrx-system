@@ -211,31 +211,61 @@ BENCHMARK(BM_ScalarTypeClassifyMiss);
 static void BM_ParseScalarTypes(benchmark::State& state) {
   BenchmarkParseModule(state, SyntaxWorkload::kScalarTypes);
 }
-BENCHMARK(BM_ParseScalarTypes)->Arg(1000)->Arg(10000);
+BENCHMARK(BM_ParseScalarTypes)
+    ->Arg(16)
+    ->Arg(100)
+    ->Arg(1000)
+    ->Arg(10000)
+    ->Arg(100000);
 
 static void BM_PrintScalarTypes(benchmark::State& state) {
   BenchmarkPrintModule(state, SyntaxWorkload::kScalarTypes);
 }
-BENCHMARK(BM_PrintScalarTypes)->Arg(1000)->Arg(10000);
+BENCHMARK(BM_PrintScalarTypes)
+    ->Arg(16)
+    ->Arg(100)
+    ->Arg(1000)
+    ->Arg(10000)
+    ->Arg(100000);
 
 static void BM_ParseShapedTypes(benchmark::State& state) {
   BenchmarkParseModule(state, SyntaxWorkload::kShapedTypes);
 }
-BENCHMARK(BM_ParseShapedTypes)->Arg(1000)->Arg(10000);
+BENCHMARK(BM_ParseShapedTypes)
+    ->Arg(16)
+    ->Arg(100)
+    ->Arg(1000)
+    ->Arg(10000)
+    ->Arg(100000);
 
 static void BM_PrintShapedTypes(benchmark::State& state) {
   BenchmarkPrintModule(state, SyntaxWorkload::kShapedTypes);
 }
-BENCHMARK(BM_PrintShapedTypes)->Arg(1000)->Arg(10000);
+BENCHMARK(BM_PrintShapedTypes)
+    ->Arg(16)
+    ->Arg(100)
+    ->Arg(1000)
+    ->Arg(10000)
+    ->Arg(100000);
 
 static void BM_ParseTaggedLocations(benchmark::State& state) {
   BenchmarkParseModule(state, SyntaxWorkload::kTaggedLocations);
 }
-BENCHMARK(BM_ParseTaggedLocations)->Arg(1000)->Arg(10000);
+BENCHMARK(BM_ParseTaggedLocations)
+    ->Arg(16)
+    ->Arg(100)
+    ->Arg(1000)
+    ->Arg(10000)
+    ->Arg(100000);
 
 static void BM_PrintTaggedLocations(benchmark::State& state) {
   BenchmarkPrintModule(state, SyntaxWorkload::kTaggedLocations);
 }
-BENCHMARK(BM_PrintTaggedLocations)->Arg(1000)->Arg(10000);
+BENCHMARK(BM_PrintTaggedLocations)
+    ->Arg(16)
+    ->Arg(100)
+    ->Arg(1000)
+    ->Arg(10000)
+    ->Arg(100000);
 
 }  // namespace

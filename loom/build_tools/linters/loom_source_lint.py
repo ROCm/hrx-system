@@ -71,7 +71,14 @@ MODULE_VALUE_CARDINALITY_PATTERN = re.compile(
 STORAGE_OR_RESET_PATTERNS = [
     re.compile(r"\biree_arena_allocate(?:_array)?\s*\("),
     re.compile(r"\biree_arena_grow_array\s*\("),
-    re.compile(r"\biree_allocator_(?:malloc|realloc|calloc|malloc_aligned)\s*\("),
+    re.compile(
+        r"\biree_allocator_(?:"
+        r"malloc(?:_array)?(?:_uninitialized)?|"
+        r"realloc(?:_array)?|"
+        r"(?:malloc|realloc)_aligned|"
+        r"calloc|malloc_with_trailing|malloc_struct_array|grow_array"
+        r")\s*\("
+    ),
     re.compile(r"\bmemset\s*\("),
     re.compile(r"\biree_bitfield_[A-Za-z0-9_]*\s*\("),
 ]
@@ -201,6 +208,23 @@ APPROVED_STATEMENTS = [
         "loom/src/loom/ir/module.c",
         re.compile(r"\bmodule->values\.capacity\b"),
         "core module value-table and module-owned scratch storage",
+    ),
+    ApprovedStatement(
+        "loom/src/loom/format/text/printer/name_plan.c",
+        re.compile(
+            r"\biree_arena_allocate_array\s*\(\s*&out_plan->arena,\s*"
+            r"module->values\.count,\s*sizeof\(\*out_plan->resolutions\)"
+        ),
+        "canonical per-print SSA name resolution indexed by value ID",
+    ),
+    ApprovedStatement(
+        "loom/src/loom/format/text/printer/name_plan.c",
+        re.compile(
+            r"\bmemset\s*\(\s*out_plan->resolutions,\s*0,\s*"
+            r"module->values\.count\s*\*\s*"
+            r"sizeof\(\*out_plan->resolutions\)"
+        ),
+        "canonical per-print SSA name resolution initialization",
     ),
     ApprovedStatement(
         "loom/src/loom/pass/interpreter.c",

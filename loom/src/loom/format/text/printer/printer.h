@@ -11,8 +11,9 @@
 // code. The printer is read-only over the IR (unless location capture
 // is enabled, which updates op locations to point at the output).
 //
-// All output goes through a loom_output_stream_t — zero heap
-// allocations in the print path.
+// All output goes through a loom_output_stream_t. Modules whose SSA values use
+// generated names require no printer-owned heap allocations. Explicit names
+// are canonicalized once into a compact value-indexed plan before emission.
 
 #ifndef LOOM_FORMAT_TEXT_PRINTER_PRINTER_H_
 #define LOOM_FORMAT_TEXT_PRINTER_PRINTER_H_

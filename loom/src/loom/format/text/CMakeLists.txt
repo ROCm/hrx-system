@@ -98,6 +98,8 @@ loom_cc_benchmark(
     loom::ir
     loom::ops::test
     loom::util::stream
+  ARGS
+    "--benchmark_filter=BM_(ScalarTypeClassify.*|(Parse|Print)(ScalarTypes|ShapedTypes|TaggedLocations)/16)"
   TESTONLY
 )
 
