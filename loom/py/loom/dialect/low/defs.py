@@ -133,6 +133,11 @@ LowResourceImportKind = EnumDef(
             4,
             doc="IREE HAL dispatch binding payload materialized as a register value.",
         ),
+        EnumCase(
+            "command_input",
+            5,
+            doc="Command-program materialization input selected by result register class and dense index.",
+        ),
     ],
     doc="Target-provided ABI resource imported into a low function body.",
 )
@@ -1344,6 +1349,7 @@ low_resource = Op(
         "%binding = low.resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>",
         "%dynamic = low.resource<hal_binding> extent(%extent) {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>",
         "%swizzled = low.resource<hal_binding> {index = 1, source_type = hal.buffer, cache_swizzle_stride = 64} : reg<amdgpu.sgpr x2>",
+        "%fixed = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>",
     ],
 )
 

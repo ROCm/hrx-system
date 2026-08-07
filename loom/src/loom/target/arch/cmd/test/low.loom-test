@@ -1,23 +1,23 @@
 // RUN: verify
 
-target.generic<reference> @command_target {contract_set_key = "cmd.core"}
+target.generic<reference> @command_target {abi = command_program, contract_set_key = "cmd.core"}
 
 // A Q/K/V preparation wave follows one scratch initialization wave. The
 // executable and entry values are symbol-free ABI inputs, and the argument
 // lists preserve variable kernel arity without making low packets variadic.
-low.func.def target<cmd.core>(@command_target) @qkv_two_wave(
-    %parameters: reg<cmd.buffer>,
-    %input: reg<cmd.binding>,
-    %scratch: reg<cmd.binding>,
-    %query_output: reg<cmd.binding>,
-    %key_output: reg<cmd.binding>,
-    %value_output: reg<cmd.binding>,
-    %query_executable: reg<cmd.executable>,
-    %query_entry: reg<cmd.entry>,
-    %key_executable: reg<cmd.executable>,
-    %key_entry: reg<cmd.entry>,
-    %value_executable: reg<cmd.executable>,
-    %value_entry: reg<cmd.entry>) {
+low.func.def target<cmd.core>(@command_target) abi(command_program) @qkv_two_wave() {
+  %parameters = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>
+  %input = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %scratch = low.resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %query_output = low.resource<command_input> {index = 2, source_type = buffer} : reg<cmd.binding>
+  %key_output = low.resource<command_input> {index = 3, source_type = buffer} : reg<cmd.binding>
+  %value_output = low.resource<command_input> {index = 4, source_type = buffer} : reg<cmd.binding>
+  %query_executable = low.resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %query_entry = low.resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %key_executable = low.resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %key_entry = low.resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %value_executable = low.resource<command_input> {index = 2, source_type = index} : reg<cmd.executable>
+  %value_entry = low.resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
   %zero_u32 = low.const<cmd.constant.u32> {value = 0} : reg<cmd.u32>
   %one_u32 = low.const<cmd.constant.u32> {value = 1} : reg<cmd.u32>
   %workgroup_count_x = low.const<cmd.constant.u32> {value = 32} : reg<cmd.u32>
@@ -58,12 +58,12 @@ low.func.def target<cmd.core>(@command_target) @qkv_two_wave(
 
 // ====
 
-target.generic<reference> @command_target {contract_set_key = "cmd.core"}
+target.generic<reference> @command_target {abi = command_program, contract_set_key = "cmd.core"}
 
-low.func.def target<cmd.core>(@command_target) @indirect_modes(
-    %launch_counts: reg<cmd.binding>,
-    %executable: reg<cmd.executable>,
-    %entry: reg<cmd.entry>) {
+low.func.def target<cmd.core>(@command_target) abi(command_program) @indirect_modes() {
+  %launch_counts = low.resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %executable = low.resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %entry = low.resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
   %zero = low.const<cmd.constant.u64> {value = 0} : reg<cmd.u64>
   %count_length = low.const<cmd.constant.u64> {value = 12} : reg<cmd.u64>
   %count_ref = low.op<cmd.buffer.ref.binding>(%launch_counts, %zero, %count_length) : (reg<cmd.binding>, reg<cmd.u64>, reg<cmd.u64>) -> reg<cmd.buffer_ref>
