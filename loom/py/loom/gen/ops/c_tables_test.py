@@ -64,6 +64,7 @@ from loom.dsl import (
     EnumCase,
     EnumDef,
     FuncLikeInterface,
+    FuncLikeInterfaceFlag,
     HasParent,
     IterArgsMatchResults,
     LiteralMatchesElementType,
@@ -1549,6 +1550,27 @@ def test_generate_tables_emits_func_like_representation_contract() -> None:
 
     assert ".callee_attr_index = 0," in tables_c
     assert ".repr_contract_attr_index = 1," in tables_c
+
+
+def test_generate_tables_emits_func_like_flags() -> None:
+    op = Op(
+        "test.kernel",
+        group=Dialect("test"),
+        attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+        operands=[Operand("args", ANY, variadic=True)],
+        interfaces=[
+            FuncLikeInterface(
+                callee="callee",
+                args="args",
+                flags=(FuncLikeInterfaceFlag.KERNEL_ENTRY,),
+            )
+        ],
+        format=[FuncArgs("args")],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert ".flags = LOOM_FUNC_LIKE_FLAG_KERNEL_ENTRY," in tables_c
 
 
 def test_generate_tables_rejects_non_string_representation_contract() -> None:

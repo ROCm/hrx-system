@@ -40,18 +40,9 @@ static bool loom_symbol_pruning_symbol_is_erasable_with_options(
     if (!loom_func_like_isa(function)) {
       return true;
     }
-    if (loom_func_like_is_kernel_entry(function)) {
-      return false;
-    }
-    if (loom_func_like_visibility(function) != 0) {
-      return false;
-    }
+    if (!loom_func_like_is_module_internal(function)) return false;
     if (loom_symbol_pruning_retain_target_source_entries(options) &&
         loom_symbol_pruning_function_is_target_source_entry(function)) {
-      return false;
-    }
-    if (loom_func_like_export_symbol(function) != LOOM_STRING_ID_INVALID ||
-        loom_func_like_export_attrs(function).count > 0) {
       return false;
     }
     return true;

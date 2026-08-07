@@ -63,6 +63,7 @@ from loom.dsl import (
     EnumCase,
     EnumDef,
     FuncLikeInterface,
+    FuncLikeInterfaceFlag,
     HasAncestor,
     HasParent,
     ImplicitTerminator,
@@ -324,6 +325,7 @@ kernel_def = Op(
             export_linkage="export_linkage",
             predicates="predicates",
             body="body",
+            flags=(FuncLikeInterfaceFlag.KERNEL_ENTRY,),
         )
     ],
     verify="loom_kernel_def_verify",

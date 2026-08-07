@@ -235,6 +235,7 @@ __all__ = [
     # Interfaces.
     "CallLikeInterface",
     "CallLikeKind",
+    "FuncLikeInterfaceFlag",
     "FuncLikeInterface",
     "InlinePolicy",
     "LoopLikeInterface",
@@ -3842,6 +3843,15 @@ class CallLikeInterface(NamedTuple):
     kind: CallLikeKind = CallLikeKind.SEMANTIC
 
 
+@unique
+class FuncLikeInterfaceFlag(Enum):
+    """Semantic roles carried by a function-like operation kind."""
+
+    # The operation defines an executable kernel entry. Kernel entries have an
+    # implicit artifact export and a kernel ABI even without explicit attrs.
+    KERNEL_ENTRY = "kernel_entry"
+
+
 class FuncLikeInterface(NamedTuple):
     """Interface for function-like ops (def, decl, template, ukernel).
 
@@ -3898,6 +3908,8 @@ class FuncLikeInterface(NamedTuple):
     # operand-backed signature owns every op operand; kernel declarations may
     # divide those definitions between this ABI field and their workload field.
     args: str | None = None
+    # Semantic roles intrinsic to the operation kind.
+    flags: tuple[FuncLikeInterfaceFlag, ...] = ()
 
 
 @unique

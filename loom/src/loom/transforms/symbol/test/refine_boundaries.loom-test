@@ -85,6 +85,36 @@ func.def public @calls_public() -> (index) {
 
 // ====
 
+// An artifact export is externally callable even when the source symbol has
+// private module visibility. Local callers therefore cannot narrow or prune
+// its ABI.
+test.target<low_core> @export_target
+
+func.def target(@export_target) abi(object_function) export("exported_abi") @exported_abi(%kept: index, %externally_used: index) {
+  test.use %kept : index
+  func.return
+}
+
+func.def public @call_exported_abi(%kept: index, %apparently_dead: index) {
+  func.call @exported_abi(%kept, %apparently_dead) : (index, index)
+  func.return
+}
+
+// ----
+test.target<low_core> @export_target
+
+func.def target(@export_target) abi(object_function) export("exported_abi") @exported_abi(%kept: index, %externally_used: index) {
+  test.use %kept : index
+  func.return
+}
+
+func.def public @call_exported_abi(%kept: index, %apparently_dead: index) {
+  func.call @exported_abi(%kept, %apparently_dead) : (index, index)
+  func.return
+}
+
+// ====
+
 // When private callers disagree on the exact value, the boundary join keeps
 // useful weaker facts such as divisibility. That is enough to prune alignment
 // checks without pretending both calls returned the same constant.
