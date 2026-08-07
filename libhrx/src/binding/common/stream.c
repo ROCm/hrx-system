@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "common/stream.h"
+
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -720,6 +722,63 @@ iree_status_t iree_hal_streaming_stream_wait_submitted(
   return iree_ok_status();
 }
 
+typedef struct iree_hal_streaming_cross_device_event_wait_t {
+  // Resource retained by the queued host call until it runs or is cancelled.
+  iree_hal_resource_t resource;
+
+  // Event whose device-owned semaphore is being waited on.
+  iree_hal_streaming_event_t* event;
+
+  // Event payload captured when the stream wait was enqueued.
+  uint64_t signal_value;
+} iree_hal_streaming_cross_device_event_wait_t;
+
+static void iree_hal_streaming_cross_device_event_wait_destroy(
+    iree_hal_resource_t* base_resource) {
+  iree_hal_streaming_cross_device_event_wait_t* wait =
+      (iree_hal_streaming_cross_device_event_wait_t*)base_resource;
+  iree_hal_streaming_event_release(wait->event);
+  iree_allocator_free(iree_allocator_system(), wait);
+}
+
+static const iree_hal_resource_vtable_t
+    iree_hal_streaming_cross_device_event_wait_vtable = {
+        .destroy = iree_hal_streaming_cross_device_event_wait_destroy,
+};
+
+static iree_status_t iree_hal_streaming_cross_device_event_wait_call(
+    void* user_data, const uint64_t args[4],
+    iree_hal_host_call_context_t* call_context) {
+  (void)args;
+  (void)call_context;
+  iree_hal_streaming_cross_device_event_wait_t* wait =
+      (iree_hal_streaming_cross_device_event_wait_t*)user_data;
+  return iree_hal_semaphore_wait(wait->event->semaphore, wait->signal_value,
+                                 iree_infinite_timeout(),
+                                 IREE_ASYNC_WAIT_FLAG_NONE);
+}
+
+static iree_status_t iree_hal_streaming_stream_wait_cross_device_event(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event,
+    uint64_t signal_value) {
+  iree_hal_streaming_cross_device_event_wait_t* wait = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(iree_allocator_system(),
+                                             sizeof(*wait), (void**)&wait));
+  iree_hal_resource_initialize(
+      &iree_hal_streaming_cross_device_event_wait_vtable, &wait->resource);
+  wait->event = event;
+  wait->signal_value = signal_value;
+  iree_hal_streaming_event_retain(event);
+
+  const uint64_t args[4] = {0, 0, 0, 0};
+  const iree_hal_host_call_t call = iree_hal_make_host_call_with_resource(
+      iree_hal_streaming_cross_device_event_wait_call, wait, &wait->resource);
+  iree_status_t status = iree_hal_streaming_queue_host_call(
+      stream, call, args, IREE_HAL_HOST_CALL_FLAG_RELAXED);
+  iree_hal_resource_release(&wait->resource);
+  return status;
+}
+
 iree_status_t iree_hal_streaming_stream_wait_event(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_event_t* event) {
   IREE_ASSERT_ARGUMENT(stream);
@@ -799,6 +858,28 @@ iree_status_t iree_hal_streaming_stream_wait_event(
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_hal_streaming_stream_reserve_memory_reuse_dependency(
                 stream, source_stream_id, &added_memory_reuse_dependency));
+  }
+
+  // HAL semaphore objects are owned by the physical device that created them
+  // and cannot be submitted directly to another device's queue. Preserve
+  // stream ordering with a host call on the waiting stream; its timeline is
+  // signaled only after the source device's event semaphore reaches the
+  // payload captured above.
+  if (event->context->device != stream->context->device) {
+    iree_status_t status = iree_hal_streaming_stream_wait_cross_device_event(
+        stream, event, source_timeline_value);
+    if (!iree_status_is_ok(status) && added_memory_reuse_dependency) {
+      iree_hal_streaming_stream_remove_uncommitted_memory_reuse_dependency(
+          stream, source_stream_id);
+    }
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
+    if (source_stream_id != 0 && source_stream_id != stream->stream_id &&
+        source_timeline_value != 0) {
+      iree_hal_streaming_stream_record_memory_reuse_dependency(
+          stream, source_stream_id, source_timeline_value);
+    }
+    IREE_TRACE_ZONE_END(z0);
+    return iree_ok_status();
   }
 
   // Flush the stream to ensure all prior operations are submitted.
