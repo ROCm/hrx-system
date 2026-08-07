@@ -23953,10 +23953,12 @@ static void* iree_hip_self_dl_handle_cached = NULL;
 static iree_once_flag iree_hip_self_dl_handle_once = IREE_ONCE_FLAG_INIT;
 static void iree_hip_init_self_dl_handle(void) {
   Dl_info info;
-  // dladdr() on a symbol we define yields the path to this library; reopening
-  // it with RTLD_NOLOAD returns a handle to the already-resident module (the
-  // extra reference intentionally pins the always-loaded HIP runtime).
-  if (dladdr((void*)&hipGetProcAddress, &info) != 0 && info.dli_fname) {
+  // Use a private symbol as the module anchor. Public HIP symbols are
+  // preemptible and may resolve to another runtime already loaded in the
+  // process. Reopening this module with RTLD_NOLOAD returns a scoped handle;
+  // the extra reference intentionally pins the always-loaded HIP runtime.
+  if (dladdr((void*)&iree_hip_init_self_dl_handle, &info) != 0 &&
+      info.dli_fname) {
     iree_hip_self_dl_handle_cached =
         dlopen(info.dli_fname, RTLD_LAZY | RTLD_NOLOAD);
   }
