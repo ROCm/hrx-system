@@ -128,6 +128,45 @@ static iree_status_t CaptureValueRef(loom_value_id_t value_id,
   return iree_ok_status();
 }
 
+TEST(TypesTest, MayReferenceValuesConservativelyClassifiesTypes) {
+  loom_type_t scalar = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
+  loom_type_t static_vector = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(4), 0);
+  loom_type_t dynamic_vector = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_dynamic(7), 0);
+  loom_type_t dynamic_view = loom_type_shaped_1d(
+      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(4), 0);
+  dynamic_view.encoding_id = 9;
+  dynamic_view.encoding_flags = LOOM_ENCODING_FLAG_SSA;
+  loom_type_t static_pool = loom_type_pool(loom_dim_pack_static(4096));
+  loom_type_t dynamic_pool = loom_type_pool(loom_dim_pack_dynamic(11));
+  loom_register_type_data_t register_data = {42, 4, scalar};
+  loom_type_t function_type = {};
+  function_type.header = loom_type_make_raw_header(LOOM_TYPE_FUNCTION, 0, 0,
+                                                   LOOM_TYPE_FLAG_ALL_STATIC);
+  loom_type_t dialect_type = {};
+  dialect_type.header = loom_type_make_raw_header(LOOM_TYPE_DIALECT, 0, 0,
+                                                  LOOM_TYPE_FLAG_ALL_STATIC);
+  loom_type_t parameterized_type = {};
+  parameterized_type.header = loom_type_make_raw_header(
+      LOOM_TYPE_PARAMETERIZED, 0, 0, LOOM_TYPE_FLAG_ALL_STATIC);
+
+  EXPECT_FALSE(loom_type_may_reference_values(loom_type_none()));
+  EXPECT_FALSE(loom_type_may_reference_values(scalar));
+  EXPECT_FALSE(loom_type_may_reference_values(static_vector));
+  EXPECT_FALSE(loom_type_may_reference_values(static_pool));
+  EXPECT_FALSE(
+      loom_type_may_reference_values(loom_type_register_payload(42, 4)));
+  EXPECT_TRUE(loom_type_may_reference_values(dynamic_vector));
+  EXPECT_TRUE(loom_type_may_reference_values(dynamic_view));
+  EXPECT_TRUE(loom_type_may_reference_values(dynamic_pool));
+  EXPECT_TRUE(loom_type_may_reference_values(
+      loom_type_register_payload_with_value_type(&register_data)));
+  EXPECT_TRUE(loom_type_may_reference_values(function_type));
+  EXPECT_TRUE(loom_type_may_reference_values(dialect_type));
+  EXPECT_TRUE(loom_type_may_reference_values(parameterized_type));
+}
+
 class ModuleTypesTest : public ::testing::Test {
  protected:
   void SetUp() override {

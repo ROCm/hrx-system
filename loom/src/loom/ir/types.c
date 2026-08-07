@@ -457,12 +457,6 @@ static bool loom_type_has_value_ref_dims(loom_type_t type) {
   return loom_type_is_shaped(type) || loom_type_is_pool(type);
 }
 
-static bool loom_type_is_value_ref_free_leaf(loom_type_t type) {
-  return loom_type_is_scalar(type) ||
-         (loom_type_is_shaped(type) && loom_type_is_all_static(type) &&
-          !loom_type_has_ssa_encoding(type));
-}
-
 static iree_status_t loom_type_walk_value_ref_sequence(
     const loom_module_t* module, const loom_type_t* types, uint16_t type_count,
     loom_type_value_ref_callback_t callback, void* user_data) {
@@ -488,6 +482,7 @@ iree_status_t loom_type_walk_value_refs(const loom_module_t* module,
 
   loom_type_kind_t kind = loom_type_kind(type);
   if (!loom_type_kind_is_valid(kind)) return iree_ok_status();
+  if (!loom_type_may_reference_values(type)) return iree_ok_status();
 
   switch (kind) {
     case LOOM_TYPE_FUNCTION: {
@@ -516,10 +511,9 @@ iree_status_t loom_type_walk_value_refs(const loom_module_t* module,
 
     case LOOM_TYPE_REGISTER: {
       const loom_type_t* value_type = loom_type_register_value_type(type);
-      return value_type && !loom_type_is_value_ref_free_leaf(*value_type)
-                 ? loom_type_walk_value_refs(module, *value_type, callback,
-                                             user_data)
-                 : iree_ok_status();
+      return value_type ? loom_type_walk_value_refs(module, *value_type,
+                                                    callback, user_data)
+                        : iree_ok_status();
     }
 
     default:
@@ -600,6 +594,7 @@ bool loom_type_references_value(const loom_module_t* module, loom_type_t type,
   if (!module) return false;
   loom_type_kind_t kind = loom_type_kind(type);
   if (!loom_type_kind_is_valid(kind)) return false;
+  if (!loom_type_may_reference_values(type)) return false;
 
   switch (kind) {
     case LOOM_TYPE_FUNCTION: {
@@ -630,7 +625,7 @@ bool loom_type_references_value(const loom_module_t* module, loom_type_t type,
 
     case LOOM_TYPE_REGISTER: {
       const loom_type_t* value_type = loom_type_register_value_type(type);
-      return value_type && !loom_type_is_value_ref_free_leaf(*value_type) &&
+      return value_type &&
              loom_type_references_value(module, *value_type, value_id);
     }
 

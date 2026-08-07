@@ -845,6 +845,24 @@ static inline const loom_type_t* loom_type_register_value_type(
   return data ? &data->value_type : NULL;
 }
 
+// Returns true if |type| may embed SSA value references. A false result proves
+// the type is reference-free. Compound types return true conservatively so
+// callers that need exact references can walk their nested payloads.
+static inline bool loom_type_may_reference_values(loom_type_t type) {
+  switch (loom_type_kind(type)) {
+    case LOOM_TYPE_FUNCTION:
+    case LOOM_TYPE_DIALECT:
+    case LOOM_TYPE_PARAMETERIZED:
+      return true;
+    case LOOM_TYPE_REGISTER:
+      return loom_type_register_has_value_type(type);
+    default:
+      return ((loom_type_is_shaped(type) || loom_type_is_pool(type)) &&
+              !loom_type_is_all_static(type)) ||
+             loom_type_has_ssa_encoding(type);
+  }
+}
+
 // Creates a pool type with a single block_size dimension.
 // Uses rank=1 and stores the packed dim in dims[0], following the same
 // packing as shaped types (loom_dim_pack_static / loom_dim_pack_dynamic).
