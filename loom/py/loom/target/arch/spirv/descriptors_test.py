@@ -20,6 +20,9 @@ from loom.target.arch.spirv.ordinary_vector import (
     OrdinaryVectorComponentType,
     OrdinaryVectorType,
 )
+from loom.target.arch.spirv.ordinary_vector_bit_layout import (
+    ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS,
+)
 from loom.target.arch.spirv.ordinary_vector_integer import (
     ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
 )
@@ -120,6 +123,7 @@ def test_result_asm_recipes_cover_every_spirv_descriptor_family() -> None:
         *ORDINARY_VECTOR_INSTRUCTIONS,
         *ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
         *ORDINARY_VECTOR_INTEGER_CONVERSION_INSTRUCTIONS,
+        *ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS,
     ):
         component_type = (
             row.result_type.component_type

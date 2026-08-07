@@ -28,6 +28,9 @@ from loom.target.arch.spirv.ordinary_vector import (
     OrdinaryVectorInstructionType,
     OrdinaryVectorType,
 )
+from loom.target.arch.spirv.ordinary_vector_bit_layout import (
+    ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS,
+)
 from loom.target.arch.spirv.ordinary_vector_integer import (
     ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
 )
@@ -1344,6 +1347,10 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
         *(
             _ordinary_vector_descriptor(row)
             for row in ORDINARY_VECTOR_INTEGER_CONVERSION_INSTRUCTIONS
+        ),
+        *(
+            _ordinary_vector_descriptor(row)
+            for row in ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS
         ),
         _coordinate_copy_descriptor(),
         _ternary_same_type_descriptor(

@@ -30,6 +30,9 @@ from loom.target.arch.spirv.ordinary_vector import (
     OrdinaryVectorInstructionType,
     OrdinaryVectorType,
 )
+from loom.target.arch.spirv.ordinary_vector_bit_layout import (
+    ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS,
+)
 from loom.target.arch.spirv.ordinary_vector_integer import (
     ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
 )
@@ -621,10 +624,10 @@ def test_generation_emits_complete_ordinary_vector_structural_matrix() -> None:
 def _expected_ordinary_vector_value(
     value_type: OrdinaryVectorInstructionType,
 ) -> str:
-    assert isinstance(value_type, OrdinaryVectorType)
-    vector_type = value_type
-    component_type = vector_type.component_type
-    return f"{{.value_class = {component_type.vector_value_class}, .scalar_type = {component_type.scalar_enum}, .vector = {{.lane_count = {vector_type.lane_count}}}}}"
+    if isinstance(value_type, OrdinaryVectorType):
+        component_type = value_type.component_type
+        return f"{{.value_class = {component_type.vector_value_class}, .scalar_type = {component_type.scalar_enum}, .vector = {{.lane_count = {value_type.lane_count}}}}}"
+    return f"{{.value_class = {value_type.scalar_value_class}, .scalar_type = {value_type.scalar_enum}}}"
 
 
 def _assert_generated_ordinary_vector_instructions(
@@ -638,9 +641,6 @@ def _assert_generated_ordinary_vector_instructions(
     assert descriptors_by_key.keys() == instruction_keys
 
     for instruction in instructions:
-        assert isinstance(instruction.result_type, OrdinaryVectorType)
-        assert all(isinstance(operand_type, OrdinaryVectorType) for operand_type in instruction.operand_types)
-
         row = packet_rows_by_key[instruction.key]
         assert row.opcode == instruction.opcode
         assert row.form == instruction.packet_form
@@ -665,6 +665,11 @@ def test_generation_emits_complete_ordinary_vector_integer_matrix() -> None:
 def test_generation_emits_complete_ordinary_vector_integer_conversions() -> None:
     assert len(ORDINARY_VECTOR_INTEGER_CONVERSION_INSTRUCTIONS) == 54
     _assert_generated_ordinary_vector_instructions(ORDINARY_VECTOR_INTEGER_CONVERSION_INSTRUCTIONS)
+
+
+def test_generation_emits_complete_ordinary_vector_bit_layout_rows() -> None:
+    assert len(ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS) == 102
+    _assert_generated_ordinary_vector_instructions(ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS)
 
 
 def test_generation_compacts_only_repeated_four_operand_types() -> None:
