@@ -1133,7 +1133,9 @@ static hipError_t hrx_status_to_hip_result(hrx_status_t status) {
 
 static bool iree_hip_capture_is_visible_to_thread(
     const iree_hal_streaming_stream_t* stream, uintptr_t thread_id) {
-  if (stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE) {
+  // Invalidation stops graph recording but does not end the capture sequence.
+  // Capture restrictions remain visible until hipStreamEndCapture clears it.
+  if (stream->capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
     return false;
   }
   return stream->capture_mode == IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL ||
@@ -9781,8 +9783,27 @@ HIPAPI hipError_t hipMemcpyToSymbol(const void* symbol, const void* src,
                                     hipMemcpyKind kind) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  hipError_t result =
-      hipMemcpyToSymbolAsync(symbol, src, sizeBytes, offset, kind, NULL);
+  // Preserve the asynchronous API's basic validation and zero-length
+  // behavior before applying the synchronous capture restriction.
+  if (sizeBytes == 0 || !symbol || !src) {
+    hipError_t result =
+        hipMemcpyToSymbolAsync(symbol, src, sizeBytes, offset, kind, NULL);
+    IREE_TRACE_ZONE_END(z0);
+    return result;
+  }
+
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t result = iree_hip_ensure_context(&context);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
+  if (iree_hip_context_invalidate_visible_captures(context)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorStreamCaptureImplicit);
+  }
+
+  result = hipMemcpyToSymbolAsync(symbol, src, sizeBytes, offset, kind, NULL);
 
   if (result == hipSuccess) {
     result = hipDeviceSynchronize();
@@ -9865,8 +9886,27 @@ HIPAPI hipError_t hipMemcpyFromSymbol(void* dst, const void* symbol,
                                       hipMemcpyKind kind) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  hipError_t result =
-      hipMemcpyFromSymbolAsync(dst, symbol, sizeBytes, offset, kind, NULL);
+  // Preserve the asynchronous API's basic validation and zero-length
+  // behavior before applying the synchronous capture restriction.
+  if (sizeBytes == 0 || !dst || !symbol) {
+    hipError_t result =
+        hipMemcpyFromSymbolAsync(dst, symbol, sizeBytes, offset, kind, NULL);
+    IREE_TRACE_ZONE_END(z0);
+    return result;
+  }
+
+  iree_hal_streaming_context_t* context = NULL;
+  hipError_t result = iree_hip_ensure_context(&context);
+  if (result != hipSuccess) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(result);
+  }
+  if (iree_hip_context_invalidate_visible_captures(context)) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorStreamCaptureImplicit);
+  }
+
+  result = hipMemcpyFromSymbolAsync(dst, symbol, sizeBytes, offset, kind, NULL);
 
   if (result == hipSuccess) {
     result = hipDeviceSynchronize();
