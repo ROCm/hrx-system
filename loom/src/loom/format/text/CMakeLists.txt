@@ -84,6 +84,23 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_benchmark(
+  NAME
+    type_syntax_benchmark
+  SRCS
+    "type_syntax_benchmark.cc"
+  DEPS
+    ::parser
+    ::printer
+    iree::base
+    iree::base::internal::arena
+    iree::testing::benchmark_main
+    loom::ir
+    loom::ops::test
+    loom::util::stream
+  TESTONLY
+)
+
 loom_cc_fuzz(
   NAME
     parser_fuzz
