@@ -2124,6 +2124,11 @@ TEST_F(ModuleTest, InternRegisterTypeOwnsAndDeduplicatesValueType) {
       module, /*carrier_payload0=*/42, /*carrier_payload1=*/4, value_type,
       &first));
   iree_host_size_t allocation_size = module->arena.total_allocation_size;
+  loom_type_t canonical_again = {};
+  IREE_ASSERT_OK(loom_module_intern_type(module, first, &canonical_again));
+  EXPECT_EQ(loom_type_register_data(first),
+            loom_type_register_data(canonical_again));
+  EXPECT_EQ(module->arena.total_allocation_size, allocation_size);
   value_type_param = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
 
   loom_type_t duplicate_param = loom_type_shaped_1d(

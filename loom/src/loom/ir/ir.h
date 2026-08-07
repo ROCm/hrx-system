@@ -2247,6 +2247,10 @@ typedef struct loom_module_t {
   // construction. Arena-allocated, lazy-initialized on first use.
   loom_intern_table_t string_intern;
   loom_intern_table_t type_intern;
+
+  // One-based IDs of the two most-recent typed-register types, newest first.
+  // Zero denotes an empty slot and keeps zero-initialized modules inert.
+  uint32_t recent_register_type_ordinals[2];
 } loom_module_t;
 
 // Returns a pointer to a value by ID.
