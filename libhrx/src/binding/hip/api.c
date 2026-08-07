@@ -1588,6 +1588,41 @@ static hipError_t iree_hip_resolve_stream(
   return hipSuccess;
 }
 
+static iree_once_flag iree_hip_stream_registry_once = IREE_ONCE_FLAG_INIT;
+static iree_hip_handle_registry_t iree_hip_stream_registry;
+
+static void iree_hip_stream_registry_initialize(void) {
+  iree_hip_handle_registry_initialize(&iree_hip_stream_registry);
+}
+
+static void iree_hip_stream_handle_retain(uintptr_t handle) {
+  iree_hal_streaming_stream_retain((iree_hal_streaming_stream_t*)handle);
+}
+
+static iree_status_t iree_hip_stream_register(
+    iree_hal_streaming_stream_t* stream) {
+  iree_call_once(&iree_hip_stream_registry_once,
+                 iree_hip_stream_registry_initialize);
+  return iree_hip_handle_registry_insert(&iree_hip_stream_registry,
+                                         (uintptr_t)stream);
+}
+
+static bool iree_hip_stream_unregister(iree_hal_streaming_stream_t* stream) {
+  iree_call_once(&iree_hip_stream_registry_once,
+                 iree_hip_stream_registry_initialize);
+  return iree_hip_handle_registry_remove(&iree_hip_stream_registry,
+                                         (uintptr_t)stream);
+}
+
+static void iree_hip_stream_discard_unpublished(
+    iree_hal_streaming_stream_t* stream) {
+  if (!stream) return;
+  iree_hal_streaming_context_t* context = stream->context;
+  iree_hal_streaming_context_unregister_stream(context, stream);
+  stream->context = NULL;
+  iree_hal_streaming_stream_release(stream);
+}
+
 static hipError_t iree_hip_resolve_registered_stream(
     hipStream_t stream, iree_hal_streaming_stream_t** out_stream) {
   IREE_ASSERT_ARGUMENT(out_stream);
@@ -1610,17 +1645,17 @@ static hipError_t iree_hip_resolve_registered_stream(
 
   iree_hal_streaming_stream_t* stream_object =
       (iree_hal_streaming_stream_t*)stream;
-  bool found = false;
-  iree_slim_mutex_lock(&context->stream_list_mutex);
-  for (iree_host_size_t i = 0; i < context->stream_count; ++i) {
-    if (context->streams[i] == stream_object) {
-      iree_hal_streaming_stream_retain(stream_object);
-      found = true;
-      break;
-    }
+  iree_call_once(&iree_hip_stream_registry_once,
+                 iree_hip_stream_registry_initialize);
+  if (!iree_hip_handle_registry_lookup_retain(&iree_hip_stream_registry,
+                                              (uintptr_t)stream_object,
+                                              iree_hip_stream_handle_retain)) {
+    return hipErrorInvalidResourceHandle;
   }
-  iree_slim_mutex_unlock(&context->stream_list_mutex);
-  if (!found) return hipErrorInvalidResourceHandle;
+  if (!stream_object->context) {
+    iree_hal_streaming_stream_release(stream_object);
+    return hipErrorContextIsDestroyed;
+  }
 
   *out_stream = stream_object;
   return hipSuccess;
@@ -10311,7 +10346,12 @@ HIPAPI hipError_t hipStreamCreate(hipStream_t* stream) {
       &stream_obj);
 
   if (iree_status_is_ok(status)) {
+    status = iree_hip_stream_register(stream_obj);
+  }
+  if (iree_status_is_ok(status)) {
     *stream = (hipStream_t)stream_obj;
+  } else {
+    iree_hip_stream_discard_unpublished(stream_obj);
   }
 
   hipError_t result = iree_status_to_hip_result(status);
@@ -10384,7 +10424,12 @@ HIPAPI hipError_t hipStreamCreateWithFlags(hipStream_t* stream,
       context->host_allocator, &stream_obj);
 
   if (iree_status_is_ok(status)) {
+    status = iree_hip_stream_register(stream_obj);
+  }
+  if (iree_status_is_ok(status)) {
     *stream = (hipStream_t)stream_obj;
+  } else {
+    iree_hip_stream_discard_unpublished(stream_obj);
   }
 
   hipError_t result = iree_status_to_hip_result(status);
@@ -10463,7 +10508,12 @@ HIPAPI hipError_t hipStreamCreateWithPriority(hipStream_t* stream,
       &stream_obj);
 
   if (iree_status_is_ok(status)) {
+    status = iree_hip_stream_register(stream_obj);
+  }
+  if (iree_status_is_ok(status)) {
     *stream = (hipStream_t)stream_obj;
+  } else {
+    iree_hip_stream_discard_unpublished(stream_obj);
   }
 
   hipError_t result = iree_status_to_hip_result(status);
@@ -10503,17 +10553,24 @@ HIPAPI hipError_t hipStreamDestroy(hipStream_t stream) {
     HIP_RETURN_ERROR(hipErrorInvalidResourceHandle);
   }
 
-  iree_hal_streaming_context_t* context = NULL;
-  hipError_t result = iree_hip_ensure_context(&context);
+  iree_hal_streaming_stream_t* streaming_stream = NULL;
+  hipError_t result =
+      iree_hip_resolve_registered_stream(stream, &streaming_stream);
   if (result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
   }
 
-  iree_hal_streaming_stream_t* streaming_stream =
-      (iree_hal_streaming_stream_t*)stream;
-  if (!iree_hal_streaming_context_unregister_stream(context,
-                                                    streaming_stream)) {
+  iree_status_t status =
+      iree_hal_streaming_stream_synchronize(streaming_stream);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_stream_release(streaming_stream);
+    result = iree_status_to_hip_result(status);
+    IREE_TRACE_ZONE_END(z0);
+    return result;
+  }
+  if (!iree_hip_stream_unregister(streaming_stream)) {
+    iree_hal_streaming_stream_release(streaming_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidResourceHandle);
   }
@@ -10521,12 +10578,14 @@ HIPAPI hipError_t hipStreamDestroy(hipStream_t stream) {
   // Removing the handle prevents new API calls from retaining the stream.
   // Existing retained users keep the context association valid until the last
   // reference performs object teardown.
-  iree_status_t status =
-      iree_hal_streaming_stream_synchronize(streaming_stream);
+  iree_hal_streaming_context_t* context = streaming_stream->context;
+  iree_hal_streaming_context_unregister_stream(context, streaming_stream);
+  streaming_stream->context = NULL;
+  // Release the registry lookup reference and the public handle reference.
   iree_hal_streaming_stream_release(streaming_stream);
-  result = iree_status_to_hip_result(status);
+  iree_hal_streaming_stream_release(streaming_stream);
   IREE_TRACE_ZONE_END(z0);
-  return result;
+  return hipSuccess;
 }
 
 // Queries the priority of a stream.
