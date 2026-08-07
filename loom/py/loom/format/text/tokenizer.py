@@ -11,7 +11,7 @@ its kind, text, and source location (line:col) for error reporting.
 
 This is a single-pass scanner with one character of lookahead. No
 regex. The scanner handles all disambiguation:
-  - '#' letter → HASH_ATTR, '#' digit is invalid
+  - '#' letter → HASH_ATTR (including dotted names), '#' digit is invalid
   - '-' '>' → ARROW, '-' digit → negative number
   - identifier '.' identifier → OP_NAME, bare identifier → BARE_IDENT
   - '-' may continue identifiers for descriptor keys such as pass names
@@ -67,7 +67,7 @@ class TokenKind(IntEnum):
     # References.
     SSA_VALUE = 3  # %name, %0, %arg0
     SYMBOL = 4  # @name
-    HASH_ATTR = 5  # #q8_0, #enc
+    HASH_ATTR = 5  # #q8_0, #test.options, #enc
     BLOCK_LABEL = 6  # ^bb0, ^entry
 
     # Identifiers.
@@ -539,12 +539,12 @@ class Tokenizer:
         """Scan #name (hash attr).
 
         Token text is the bare name without the '#' sigil:
-        #q8_0 -> "q8_0".
+        #q8_0 -> "q8_0", #test.options -> "test.options".
         """
         self._advance()  # skip #
         name_start = self._position
         if _is_ident_start(self._char()):
-            while _is_ident_continue_no_dot(self._char()):
+            while _is_ident_continue(self._char()):
                 self._advance()
             text = self._source[name_start : self._position]
             return self._make_token(TokenKind.HASH_ATTR, text, location)

@@ -138,18 +138,35 @@ static bool loom_print_pipeline_symbol_attr(const loom_print_context_t* ctx,
 
 static bool loom_print_pipeline_attr_value_is_printable(
     const loom_print_context_t* ctx, const loom_attribute_t* attr,
-    uint8_t nesting_depth) {
+    const loom_attr_descriptor_t* descriptor, uint8_t nesting_depth) {
   switch ((loom_attr_kind_t)attr->kind) {
     case LOOM_ATTR_I64:
     case LOOM_ATTR_F64:
     case LOOM_ATTR_BOOL:
       return true;
     case LOOM_ATTR_SCOPED_ENUM:
-    case LOOM_ATTR_ENUM_ARRAY:
       // Representation-scoped enums require their enclosing contract and are
-      // printed only by the owning operation's declarative format. Enum arrays
-      // likewise require their operation field descriptor.
+      // printed only by the owning operation's declarative format.
       return false;
+    case LOOM_ATTR_ENUM:
+      return descriptor && descriptor->attr_kind == LOOM_ATTR_ENUM &&
+             (loom_attr_descriptor_has_enum_case(descriptor,
+                                                 loom_attr_as_enum(*attr)) ||
+              iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM));
+    case LOOM_ATTR_ENUM_ARRAY: {
+      if (!descriptor || descriptor->attr_kind != LOOM_ATTR_ENUM_ARRAY ||
+          (attr->count > 0 && !attr->enum_array)) {
+        return false;
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        if (!loom_attr_descriptor_has_enum_case(descriptor,
+                                                attr->enum_array[i]) &&
+            !iree_any_bit_set(descriptor->flags, LOOM_ATTR_OPEN_ENUM)) {
+          return false;
+        }
+      }
+      return true;
+    }
     case LOOM_ATTR_STRING:
       return attr->string_id < ctx->module->strings.count;
     case LOOM_ATTR_I64_ARRAY:
@@ -186,16 +203,47 @@ static bool loom_print_pipeline_attr_value_is_printable(
                 ctx->module->strings.entries[entry->name_id],
                 /*allow_dot=*/false) ||
             !loom_print_pipeline_attr_value_is_printable(
-                ctx, &entry->value, (uint8_t)(nesting_depth + 1))) {
+                ctx, &entry->value, /*descriptor=*/NULL,
+                (uint8_t)(nesting_depth + 1))) {
+          return false;
+        }
+      }
+      return true;
+    }
+    case LOOM_ATTR_PARAMETERIZED: {
+      if (nesting_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          !ctx->module->context) {
+        return false;
+      }
+      const loom_parameterized_attr_descriptor_t* family_descriptor =
+          loom_context_resolve_parameterized_attr(
+              ctx->module->context, loom_attr_as_parameterized_kind(*attr));
+      if (!family_descriptor ||
+          attr->count != family_descriptor->parameter_count ||
+          (attr->count > 0 && !attr->parameterized_slots)) {
+        return false;
+      }
+      for (uint8_t i = 0; i < family_descriptor->parameter_count; ++i) {
+        const loom_attr_descriptor_t* parameter_descriptor =
+            &family_descriptor->parameter_descriptors[i];
+        const loom_attribute_t* parameter = &attr->parameterized_slots[i];
+        if (loom_attr_is_absent(*parameter)) {
+          if (!iree_any_bit_set(parameter_descriptor->flags,
+                                LOOM_ATTR_OPTIONAL)) {
+            return false;
+          }
+          continue;
+        }
+        if (!loom_print_pipeline_attr_value_is_printable(
+                ctx, parameter, parameter_descriptor,
+                (uint8_t)(nesting_depth + 1))) {
           return false;
         }
       }
       return true;
     }
     case LOOM_ATTR_ABSENT:
-    case LOOM_ATTR_ENUM:
     case LOOM_ATTR_PREDICATE_LIST:
-    case LOOM_ATTR_PARAMETERIZED:
     case LOOM_ATTR_ANY:
     case LOOM_ATTR_COUNT_:
       return false;
@@ -217,7 +265,7 @@ static bool loom_print_pipeline_dict_attr(const loom_print_context_t* ctx,
   }
   if (!descriptor || descriptor->attr_kind != LOOM_ATTR_DICT ||
       attr->kind != LOOM_ATTR_DICT ||
-      !loom_print_pipeline_attr_value_is_printable(ctx, attr,
+      !loom_print_pipeline_attr_value_is_printable(ctx, attr, descriptor,
                                                    /*nesting_depth=*/0)) {
     return false;
   }

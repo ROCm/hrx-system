@@ -62,6 +62,7 @@ from loom.dsl import (
     AttrDef,
     FuncLikeInterface,
     Op,
+    ParameterizedAttrDef,
     ShapeParam,
     TypeConstraint,
     TypeDef,
@@ -107,6 +108,7 @@ from loom.ir import (
     Module,
     OpaqueLocation,
     Operation,
+    ParameterizedAttr,
     PlaceholderType,
     PoolType,
     Predicate,
@@ -159,7 +161,7 @@ __all__ = [
 _CURRENT_ALIASES: dict[str, EncodingInstance] | None = None
 _CURRENT_KNOWN_ENCODINGS: set[str] | None = None
 
-_ATTR_DICT_MAX_NESTING_DEPTH = 16
+_ATTR_AGGREGATE_MAX_NESTING_DEPTH = 8
 
 
 def _parse_special_float(text: str) -> float | None:
@@ -250,10 +252,10 @@ def _parse_generic_attr_value_from_tokens(
         return values
     if tokenizer.at(TokenKind.LBRACE):
         open_brace_token = tokenizer.next()
-        if attr_dict_nesting_depth >= _ATTR_DICT_MAX_NESTING_DEPTH:
+        if attr_dict_nesting_depth >= _ATTR_AGGREGATE_MAX_NESTING_DEPTH:
             raise ParseError(
-                "attribute dict nesting exceeds maximum depth "
-                f"{_ATTR_DICT_MAX_NESTING_DEPTH}",
+                "aggregate attribute nesting exceeds maximum depth "
+                f"{_ATTR_AGGREGATE_MAX_NESTING_DEPTH}",
                 open_brace_token.location,
                 filename,
             )
@@ -1262,6 +1264,7 @@ class Parser:
     def __init__(self) -> None:
         self._op_registry: dict[str, Op] = {}
         self._type_registry: dict[str, TypeDef] = {}
+        self._parameterized_attr_registry: dict[str, ParameterizedAttrDef] = {}
         self._layouts: dict[str, FieldLayout] = {}
         self._scope: NameScope = NameScope()
         self._module: Module = Module()
@@ -1282,6 +1285,13 @@ class Parser:
         """Register type declarations."""
         for td in types:
             self._type_registry[td.name] = td
+
+    def register_parameterized_attrs(
+        self, definitions: Sequence[ParameterizedAttrDef]
+    ) -> None:
+        """Register descriptor-backed parameterized attribute families."""
+        for definition in definitions:
+            self._parameterized_attr_registry[definition.name] = definition
 
     def register_encodings(self, names: Sequence[str]) -> None:
         """Register known encoding names for validation."""
@@ -1355,10 +1365,13 @@ class Parser:
         tok = self._tokenizer
         alias_tok = tok.expect(TokenKind.HASH_ATTR)
         tok.expect(TokenKind.EQUALS)
-        if alias_tok.text in self._known_encodings:
+        if (
+            alias_tok.text in self._known_encodings
+            or alias_tok.text in self._parameterized_attr_registry
+        ):
             raise ParseError(
                 "invalid encoding alias definition: "
-                "alias name shadows a registered encoding family",
+                "alias name shadows a registered attribute family",
                 alias_tok.location,
                 tok._filename,
             )
@@ -2655,6 +2668,22 @@ class Parser:
                         self._known_encodings if self._known_encodings else None
                     ),
                 )
+            case "dict":
+                if not tok.at(TokenKind.LBRACE):
+                    token = tok.peek()
+                    raise ParseError(
+                        f"expected attribute dictionary, got {token.kind.name}",
+                        token.location,
+                        tok._filename,
+                    )
+                return self._parse_any_attr_value(
+                    attr_dict_nesting_depth=attr_dict_nesting_depth
+                )
+            case "parameterized":
+                return self._parse_parameterized_attr(
+                    attr_def.parameterized_attr,
+                    aggregate_nesting_depth=attr_dict_nesting_depth,
+                )
             case "any":
                 return self._parse_any_attr_value(
                     attr_dict_nesting_depth=attr_dict_nesting_depth
@@ -2666,12 +2695,125 @@ class Parser:
 
     def _parse_any_attr_value(self, attr_dict_nesting_depth: int = 0) -> Any:
         """Parse any attribute value (type-agnostic)."""
+        tok = self._tokenizer
+        if tok.at(TokenKind.HASH_ATTR):
+            family = self._parameterized_attr_registry.get(tok.peek().text)
+            if family is not None:
+                return self._parse_parameterized_attr(
+                    family,
+                    aggregate_nesting_depth=attr_dict_nesting_depth,
+                )
+        if tok.at(TokenKind.LBRACE):
+            opening = tok.next()
+            if attr_dict_nesting_depth >= _ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+                raise ParseError(
+                    "aggregate attribute nesting exceeds maximum depth "
+                    f"{_ATTR_AGGREGATE_MAX_NESTING_DEPTH}",
+                    opening.location,
+                    tok._filename,
+                )
+            entries: list[tuple[str, Any]] = []
+            seen_keys: set[str] = set()
+            while not tok.at(TokenKind.RBRACE):
+                key_token = tok.expect(TokenKind.BARE_IDENT)
+                if key_token.text in seen_keys:
+                    raise ParseError(
+                        f"duplicate attribute dict key '{key_token.text}'",
+                        key_token.location,
+                        tok._filename,
+                    )
+                seen_keys.add(key_token.text)
+                tok.expect(TokenKind.EQUALS)
+                entries.append(
+                    (
+                        key_token.text,
+                        self._parse_any_attr_value(
+                            attr_dict_nesting_depth=attr_dict_nesting_depth + 1
+                        ),
+                    )
+                )
+                if not tok.try_consume(TokenKind.COMMA):
+                    break
+            tok.expect(TokenKind.RBRACE)
+            return CanonicalAttrDict(entries)
         return _parse_generic_attr_value_from_tokens(
-            self._tokenizer,
+            tok,
             self._module,
-            self._tokenizer._filename,
+            tok._filename,
             attr_dict_nesting_depth=attr_dict_nesting_depth,
         )
+
+    def _parse_parameterized_attr(
+        self,
+        expected_definition: ParameterizedAttrDef | None,
+        *,
+        aggregate_nesting_depth: int,
+    ) -> ParameterizedAttr:
+        """Parse one registered descriptor-backed parameterized attribute."""
+        tok = self._tokenizer
+        family_token = tok.expect(TokenKind.HASH_ATTR)
+        definition = self._parameterized_attr_registry.get(family_token.text)
+        if definition is None:
+            raise ParseError(
+                f"unknown parameterized attribute family '{family_token.text}'",
+                family_token.location,
+                tok._filename,
+            )
+        if (
+            expected_definition is not None
+            and definition.name != expected_definition.name
+        ):
+            raise ParseError(
+                f"expected parameterized attribute family "
+                f"'{expected_definition.name}', got '{definition.name}'",
+                family_token.location,
+                tok._filename,
+            )
+
+        opening = tok.expect(TokenKind.LANGLE)
+        if aggregate_nesting_depth >= _ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+            raise ParseError(
+                "aggregate attribute nesting exceeds maximum depth "
+                f"{_ATTR_AGGREGATE_MAX_NESTING_DEPTH}",
+                opening.location,
+                tok._filename,
+            )
+
+        descriptors = {parameter.name: parameter for parameter in definition.parameters}
+        parameters: dict[str, Any] = {}
+        if not tok.at(TokenKind.RANGLE):
+            while True:
+                name_token = tok.expect(TokenKind.BARE_IDENT)
+                parameter = descriptors.get(name_token.text)
+                if parameter is None:
+                    raise ParseError(
+                        f"unknown parameter '{name_token.text}' for "
+                        f"'{definition.name}'",
+                        name_token.location,
+                        tok._filename,
+                    )
+                if name_token.text in parameters:
+                    raise ParseError(
+                        f"duplicate parameter '{name_token.text}' for "
+                        f"'{definition.name}'",
+                        name_token.location,
+                        tok._filename,
+                    )
+                tok.expect(TokenKind.EQUALS)
+                value = self._parse_attr_value(
+                    parameter,
+                    attr_dict_nesting_depth=aggregate_nesting_depth + 1,
+                )
+                if parameter.attr_type == "symbol":
+                    value = SymbolName(value)
+                parameters[name_token.text] = value
+                if not tok.try_consume(TokenKind.COMMA):
+                    break
+        closing = tok.expect(TokenKind.RANGLE)
+        try:
+            return ParameterizedAttr(definition, parameters)
+        except (TypeError, ValueError) as error:
+            raise ParseError(str(error), closing.location, tok._filename) from error
 
     def _parse_i64_array(self) -> list[int]:
         """Parse [int, int, ...] array."""

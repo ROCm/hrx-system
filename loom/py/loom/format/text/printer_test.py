@@ -13,7 +13,7 @@ import pytest
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.encoding import ALL_ENCODING_OPS
 from loom.dialect.func import ALL_FUNC_OPS
-from loom.dialect.test import ALL_TEST_OPS
+from loom.dialect.test import ALL_TEST_OPS, ALL_TEST_PARAMETERIZED_ATTRS
 from loom.format.text.parser import Parser
 from loom.format.text.printer import Printer, print_type
 from loom.ir import (
@@ -92,6 +92,7 @@ def _module_parser() -> Parser:
     parser.register_ops(ALL_TEST_OPS)
     parser.register_ops(ALL_FUNC_OPS)
     parser.register_types(ALL_BUILTIN_TYPES)
+    parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
     return parser
 
 

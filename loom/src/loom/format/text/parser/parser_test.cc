@@ -22,6 +22,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
 #include "loom/testing/diagnostic_matchers.h"
 #include "loom/util/stream.h"
 
@@ -59,13 +60,7 @@ class ParserTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
-    {
-      iree_host_size_t count = 0;
-      const loom_op_vtable_t* const* vtables =
-          loom_test_dialect_vtables(&count);
-      IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_TEST,
-                                                   vtables, (uint16_t)count));
-    }
+    IREE_ASSERT_OK(loom_test_dialect_register(&context_));
     IREE_ASSERT_OK(loom_context_register_encoding_vtable(
         &context_, &kDenseEncodingVtable));
     IREE_ASSERT_OK(
@@ -802,6 +797,116 @@ TEST_F(ParserTest, EnumArraysRoundTripStableValuesAndPresentEmpty) {
   EXPECT_EQ(optional.values[2],
             LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_MIDDLE);
   loom_module_free(module);
+}
+
+TEST_F(ParserTest, ParameterizedAttrsRoundTripInDeclarationOrder) {
+  std::string text = RoundTrip(
+      "test.parameterized_attr "
+      "#test.options<tile = #test.tile<width = 16>, element_type = bf16, "
+      "scopes = [subgroup, <254>], mode = fast>\n");
+  EXPECT_NE(text.find("test.parameterized_attr "
+                      "#test.options<mode = fast, scopes = [subgroup, <254>], "
+                      "element_type = bf16, tile = #test.tile<width = 16>>"),
+            std::string::npos);
+
+  loom_module_t* module = ParseOk(
+      "test.parameterized_attr "
+      "#test.options<mode = fast, scopes = [subgroup, <254>], "
+      "element_type = bf16, tile = #test.tile<width = 16>>\n");
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_EQ(body->op_count, 1u);
+  loom_op_t* op = loom_block_op(body, 0);
+  ASSERT_TRUE(loom_test_parameterized_attr_isa(op));
+  loom_attribute_t options = loom_test_parameterized_attr_options(op);
+  ASSERT_TRUE(loom_test_options_attr_isa(options));
+  EXPECT_EQ(loom_test_options_attr_mode(options), LOOM_TEST_OPTIONS_MODE_FAST);
+  ASSERT_TRUE(loom_test_options_attr_has_scopes(options));
+  loom_enum_array_t scopes = loom_test_options_attr_scopes(options);
+  ASSERT_EQ(scopes.count, 2u);
+  EXPECT_EQ(scopes.values[0], LOOM_TEST_OPTIONS_SCOPES_SUBGROUP);
+  EXPECT_EQ(scopes.values[1], 254u);
+  ASSERT_TRUE(loom_test_options_attr_has_element_type(options));
+  ASSERT_TRUE(loom_test_options_attr_has_tile(options));
+  loom_attribute_t tile = loom_test_options_attr_tile(options);
+  ASSERT_TRUE(loom_test_tile_attr_isa(tile));
+  EXPECT_EQ(loom_test_tile_attr_width(tile), 16);
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, ParameterizedAttrsPreservePresentEmptyAndGenericNesting) {
+  loom_module_t* module = ParseOk(
+      "test.parameterized_attr "
+      "#test.options<mode = fast, scopes = []>\n"
+      "test.parameterized_attr #test.options<mode = fast>\n"
+      "test.enum_array_attrs [] "
+      "{options = #test.options<mode = precise>}\n");
+  loom_block_t* body = loom_module_block(module);
+  ASSERT_EQ(body->op_count, 3u);
+
+  loom_attribute_t present =
+      loom_test_parameterized_attr_options(loom_block_op(body, 0));
+  ASSERT_TRUE(loom_test_options_attr_has_scopes(present));
+  EXPECT_EQ(loom_test_options_attr_scopes(present).count, 0u);
+  loom_attribute_t absent =
+      loom_test_parameterized_attr_options(loom_block_op(body, 1));
+  EXPECT_FALSE(loom_test_options_attr_has_scopes(absent));
+
+  std::string text = PrintModule(module);
+  EXPECT_NE(text.find("{options = #test.options<mode = precise>}"),
+            std::string::npos);
+  loom_module_free(module);
+}
+
+TEST_F(ParserTest, ParameterizedAttrsRejectMalformedInput) {
+  struct MalformedCase {
+    const char* source;
+    const char* actual_token;
+    const char* expected;
+  } cases[] = {
+      {
+          "test.parameterized_attr #test.unknown<mode = fast>\n",
+          "#test.unknown",
+          "a registered parameterized attribute family",
+      },
+      {
+          "test.parameterized_attr "
+          "#test.options<mode = fast, nope = 1>\n",
+          "nope",
+          "a parameter declared by '#test.options'",
+      },
+      {
+          "test.parameterized_attr "
+          "#test.options<mode = fast, mode = precise>\n",
+          "mode",
+          "each parameter at most once",
+      },
+      {
+          "test.parameterized_attr #test.options<scopes = []>\n",
+          ">",
+          "required parameter 'mode'",
+      },
+      {
+          "test.parameterized_attr #test.options<mode = <42>>\n",
+          "<",
+          "a declared enum keyword",
+      },
+      {
+          "test.parameterized_attr "
+          "#test.options<mode = fast, "
+          "tile = #test.options<mode = precise>>\n",
+          "#test.options",
+          "'#test.tile'",
+      },
+  };
+  for (const MalformedCase& test_case : cases) {
+    SCOPED_TRACE(test_case.source);
+    const auto& diagnostics = ParseExpectErrors(test_case.source);
+    ASSERT_FALSE(diagnostics.empty());
+    ExpectError(diagnostics.front(),
+                loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 3));
+    EXPECT_EQ(GetStringParam(diagnostics.front(), 0), test_case.actual_token);
+    EXPECT_EQ(GetStringParam(diagnostics.front(), 1), test_case.expected);
+  }
 }
 
 TEST_F(ParserTest, OptionalPredicateListPreservesPresentEmpty) {
@@ -2243,13 +2348,20 @@ TEST_F(ParserTest, InlineEncoding) {
   }
 }
 
-TEST_F(ParserTest, EncodingAliasCannotShadowRegisteredFamily) {
-  const auto& diagnostics = ParseExpectErrors("#q8_0 = #dense\n");
-  ASSERT_GE(diagnostics.size(), 1u);
-  ExpectError(diagnostics[0],
-              loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 14));
-  EXPECT_EQ(GetStringParam(diagnostics[0], 0),
-            "alias name shadows a registered encoding family");
+TEST_F(ParserTest, EncodingAliasCannotShadowRegisteredAttributeFamily) {
+  const char* sources[] = {
+      "#q8_0 = #dense\n",
+      "#test.options = #dense\n",
+  };
+  for (const char* source : sources) {
+    SCOPED_TRACE(source);
+    const auto& diagnostics = ParseExpectErrors(source);
+    ASSERT_GE(diagnostics.size(), 1u);
+    ExpectError(diagnostics[0],
+                loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 14));
+    EXPECT_EQ(GetStringParam(diagnostics[0], 0),
+              "alias name shadows a registered attribute family");
+  }
 }
 
 TEST_F(ParserTest, DuplicateEncodingAliasDefinitionFails) {

@@ -90,6 +90,7 @@ from loom.ir import (
     Module,
     NoneType,
     Operation,
+    ParameterizedAttr,
     PoolType,
     Predicate,
     PredicateArg,
@@ -532,11 +533,12 @@ def _format_attr_value(value: Any, attr_def: AttrDef | None = None) -> str:
             + "]"
         )
     if attr_def is not None and attr_def.attr_type == "symbol":
-        if not isinstance(value, str):
-            raise TypeError(f"symbol attribute value must be a string: {value!r}")
-        if value.startswith("@"):
+        if not isinstance(value, str | SymbolName):
+            raise TypeError(f"symbol attribute value must be a symbol: {value!r}")
+        symbol_name = str(value)
+        if symbol_name.startswith("@"):
             raise ValueError(f"symbol attribute value must not include '@': {value!r}")
-        return "@" + value
+        return "@" + symbol_name
     if attr_def is not None and attr_def.attr_type == "type":
         if not isinstance(value, _IR_TYPE_CLASSES):
             raise TypeError(f"type attribute value must be a Type: {value!r}")
@@ -557,6 +559,17 @@ def _format_attr_value(value: Any, attr_def: AttrDef | None = None) -> str:
         return f'bytes("{bytes(value).hex()}")'
     if isinstance(value, EnumArrayAttr):
         raise ValueError("enum arrays require a descriptor-backed operation field")
+    if isinstance(value, ParameterizedAttr):
+        parameters = []
+        for parameter, slot in zip(
+            value.definition.parameters, value.slots, strict=True
+        ):
+            if slot is None:
+                continue
+            parameters.append(
+                f"{parameter.name} = {_format_attr_value(slot, parameter)}"
+            )
+        return f"#{value.family_name}<" + ", ".join(parameters) + ">"
     if isinstance(value, str):
         return _format_string_literal(value)
     if isinstance(value, list | tuple):
@@ -617,7 +630,20 @@ def _is_pipeline_printable_name(value: Any, *, allow_dot: bool) -> bool:
     return True
 
 
-def _is_pipeline_printable_attr_value(value: Any) -> bool:
+def _is_pipeline_printable_attr_value(
+    value: Any, attr_def: AttrDef | None = None
+) -> bool:
+    if attr_def is not None and attr_def.attr_type in ("enum", "enum_array"):
+        return True
+    if attr_def is not None and attr_def.attr_type == "symbol":
+        return _is_pipeline_printable_name(str(value), allow_dot=False)
+    if isinstance(value, ParameterizedAttr):
+        return all(
+            slot is None or _is_pipeline_printable_attr_value(slot, parameter)
+            for parameter, slot in zip(
+                value.definition.parameters, value.slots, strict=True
+            )
+        )
     if isinstance(value, bool | int | float | str | bytes | bytearray):
         return True
     if isinstance(value, list | tuple):

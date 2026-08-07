@@ -1054,6 +1054,52 @@ iree_status_t loom_print_attr(loom_output_stream_t* stream,
     case LOOM_ATTR_ENCODING:
       return loom_print_static_encoding(stream, module,
                                         loom_attr_as_encoding_id(*attr));
+    case LOOM_ATTR_PARAMETERIZED: {
+      if (!module || !module->context) {
+        return iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "printing a parameterized attribute requires a module context");
+      }
+      const loom_parameterized_attr_descriptor_t* family_descriptor =
+          loom_context_resolve_parameterized_attr(
+              module->context, loom_attr_as_parameterized_kind(*attr));
+      if (!family_descriptor) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute has unknown family kind %u",
+            (unsigned)loom_attr_as_parameterized_kind(*attr));
+      }
+      if (attr->count != family_descriptor->parameter_count ||
+          (attr->count > 0 && !attr->parameterized_slots)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "parameterized attribute '%.*s' has malformed slot storage",
+            (int)loom_bstring_view(family_descriptor->name).size,
+            loom_bstring_view(family_descriptor->name).data);
+      }
+
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '#'));
+      IREE_RETURN_IF_ERROR(loom_output_stream_write(
+          stream, loom_bstring_view(family_descriptor->name)));
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '<'));
+      bool has_previous_parameter = false;
+      for (uint8_t i = 0; i < family_descriptor->parameter_count; ++i) {
+        const loom_attribute_t* parameter = &attr->parameterized_slots[i];
+        if (loom_attr_is_absent(*parameter)) continue;
+        if (has_previous_parameter) {
+          IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ", "));
+        }
+        const loom_attr_descriptor_t* parameter_descriptor =
+            &family_descriptor->parameter_descriptors[i];
+        IREE_RETURN_IF_ERROR(loom_output_stream_write(
+            stream, loom_attr_descriptor_name(parameter_descriptor)));
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, " = "));
+        IREE_RETURN_IF_ERROR(
+            loom_print_attr(stream, parameter, module, parameter_descriptor));
+        has_previous_parameter = true;
+      }
+      return loom_output_stream_write_char(stream, '>');
+    }
     case LOOM_ATTR_DICT: {
       if (attr->count > 0 && !attr->dict_entries) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

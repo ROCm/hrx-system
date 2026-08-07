@@ -892,7 +892,7 @@ static iree_status_t loom_tokenizer_scan_hash(loom_tokenizer_t* t,
   // Token text starts after the '#' prefix.
   iree_host_size_t name_start = t->position;
 
-  // Hash attr: #q8_0, #enc.
+  // Hash attr: #q8_0, #test.options, #enc.
   if (!loom_is_ident_start(loom_tokenizer_char(t))) {
     loom_diagnostic_param_t params[] = {
         loom_param_string(IREE_SV("#")),
@@ -903,7 +903,7 @@ static iree_status_t loom_tokenizer_scan_hash(loom_tokenizer_t* t,
     *out_token = loom_tokenizer_make_error_token(t);
     return iree_ok_status();
   }
-  while (loom_is_ident_continue_no_dot(loom_tokenizer_char(t))) {
+  while (loom_is_ident_continue(loom_tokenizer_char(t))) {
     ++t->position;
     ++t->column;
   }
