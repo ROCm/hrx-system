@@ -57,7 +57,7 @@ typedef struct loom_type_format_element_t {
 // the IR type kind to construct, parameter count, and
 // format elements describing the type interior syntax.
 typedef struct loom_type_descriptor_t {
-  // B-string name: [length]"tile", [length]"hal.buffer".
+  // B-string name with a trailing '<' outside its declared length.
   const uint8_t* name;
 
   // What IR type kind to construct when parsing.

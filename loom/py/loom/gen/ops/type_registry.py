@@ -271,7 +271,7 @@ def generate_type_registry(
     header.append("// the IR type kind to construct, parameter count, and")
     header.append("// format elements describing the type interior syntax.")
     header.append("typedef struct loom_type_descriptor_t {")
-    header.append('  // B-string name: [length]"tile", [length]"hal.buffer".')
+    header.append("  // B-string name with a trailing '<' outside its declared length.")
     header.append("  const uint8_t* name;")
     header.append("")
     header.append("  // What IR type kind to construct when parsing.")
@@ -358,7 +358,9 @@ def generate_type_registry(
     for type_def in all_types:
         ident = _type_c_ident(type_def.name)
         name_len = len(type_def.name)
-        source.append(f'static const uint8_t loom_type_{ident}_name[] = "\\x{name_len:02x}" "{type_def.name}";')
+        # Reuse the C string terminator slot outside the B-string payload.
+        storage_length = name_len + 2
+        source.append(f'static const uint8_t loom_type_{ident}_name[{storage_length}] = "\\x{name_len:02x}" "{type_def.name}<";')
 
     source.append("")
 

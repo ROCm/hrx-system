@@ -519,6 +519,16 @@ TEST(TypeRegistry, LookupBuiltinTypes) {
   EXPECT_EQ(loom_type_registry_lookup_builtin(LOOM_TYPE_COUNT_), nullptr);
 }
 
+TEST(TypeRegistry, RegisteredNamesCarryOpeningAngleByte) {
+  const loom_type_registry_entry_t* entries = loom_type_registry_entries();
+  const iree_host_size_t entry_count = loom_type_registry_count();
+  for (iree_host_size_t i = 0; i < entry_count; ++i) {
+    const loom_type_descriptor_t* descriptor = entries[i].descriptor;
+    const iree_string_view_t name = loom_bstring_view(descriptor->name);
+    EXPECT_EQ(descriptor->name[name.size + 1], '<');
+  }
+}
+
 TEST(TypeRegistry, LookupDialectType) {
   const loom_type_descriptor_t* desc =
       loom_type_registry_lookup(iree_make_cstring_view("hal.buffer"));
