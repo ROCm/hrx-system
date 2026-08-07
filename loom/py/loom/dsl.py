@@ -3077,6 +3077,32 @@ class TypeDef:
     ) -> None:
         frozen_params = tuple(params)
         frozen_format = tuple(format)
+        attribute_parameters = tuple(
+            parameter for parameter in frozen_params if isinstance(parameter, AttrDef)
+        )
+        if attribute_parameters and len(attribute_parameters) != len(frozen_params):
+            raise ValueError(
+                f"TypeDef '{name}': descriptor-backed AttrDef parameters cannot "
+                "be mixed with representation-specific type parameters"
+            )
+        if attribute_parameters and ir_kind != "dialect":
+            raise ValueError(
+                f"TypeDef '{name}': descriptor-backed parameters require the "
+                "generic dialect representation"
+            )
+        if len(attribute_parameters) > 0xFF:
+            raise ValueError(
+                f"TypeDef '{name}': {len(attribute_parameters)} parameters "
+                "exceed the uint8_t slot limit"
+            )
+        optional_parameter_count = sum(
+            parameter.optional for parameter in attribute_parameters
+        )
+        if optional_parameter_count > 64:
+            raise ValueError(
+                f"TypeDef '{name}': {optional_parameter_count} optional "
+                "parameters exceed the uint64_t C builder flag limit"
+            )
         parameter_names = [parameter.name for parameter in frozen_params]
         if len(set(parameter_names)) != len(parameter_names):
             raise ValueError(f"TypeDef '{name}': duplicate parameter name")
@@ -3089,11 +3115,40 @@ class TypeDef:
                 f"{', '.join(sorted(unknown_format_fields))}"
             )
         parameter_by_name = {parameter.name: parameter for parameter in frozen_params}
-        for field in _collect_parameter_format_fields(frozen_format):
+        parameter_format_fields = _collect_parameter_format_field_sequence(
+            frozen_format
+        )
+        for field in parameter_format_fields:
             if not isinstance(parameter_by_name[field], AttrDef):
                 raise ValueError(
                     f"TypeDef '{name}': Param('{field}') requires an AttrDef parameter"
                 )
+        if attribute_parameters:
+            if len(set(parameter_format_fields)) != len(parameter_format_fields):
+                raise ValueError(
+                    f"TypeDef '{name}': each descriptor-backed parameter must "
+                    "appear exactly once in the assembly format"
+                )
+            omitted_parameters = set(parameter_names) - set(parameter_format_fields)
+            if omitted_parameters:
+                raise ValueError(
+                    f"TypeDef '{name}': assembly format omits descriptor-backed "
+                    f"parameter(s): {', '.join(sorted(omitted_parameters))}"
+                )
+            for parameter in attribute_parameters:
+                if parameter.attr_type not in _PARAMETERIZED_ATTR_PARAMETER_TYPES:
+                    raise ValueError(
+                        f"TypeDef '{name}': parameter '{parameter.name}' has "
+                        f"unsupported kind '{parameter.attr_type}'"
+                    )
+                if (
+                    parameter.attr_type == ATTR_TYPE_PARAMETERIZED
+                    and parameter.parameterized_attr is None
+                ):
+                    raise ValueError(
+                        f"TypeDef '{name}': nested parameter "
+                        f"'{parameter.name}' requires an exact parameterized_attr"
+                    )
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "doc", doc)
         object.__setattr__(self, "params", frozen_params)
@@ -3115,6 +3170,23 @@ class TypeDef:
     def is_parameterized(self) -> bool:
         """True if this type has angle-bracket syntax."""
         return len(self.format) > 0
+
+    @property
+    def uses_attribute_parameters(self) -> bool:
+        """True when this type uses the generic descriptor-backed storage."""
+
+        return bool(self.params) and isinstance(self.params[0], AttrDef)
+
+    def __call__(self, **parameters: Any) -> Any:
+        """Constructs one immutable descriptor-backed value of this type."""
+
+        if not self.uses_attribute_parameters:
+            raise TypeError(
+                f"TypeDef '{self.name}' does not use descriptor-backed parameters"
+            )
+        from loom.ir import ParameterizedType
+
+        return ParameterizedType(self, parameters)
 
     def param(self, name: str) -> TypeParamDef | None:
         """Find a parameter by name."""
@@ -3231,27 +3303,27 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
     return fields
 
 
-def _collect_parameter_format_fields(
+def _collect_parameter_format_field_sequence(
     elements: tuple[FormatElement, ...],
-) -> set[str]:
-    """Collects fields consumed through descriptor-backed Param elements."""
+) -> tuple[str, ...]:
+    """Collects Param fields in assembly order, retaining duplicates."""
 
     from loom.assembly import Clause, OptionalGroup, Param, Scope
 
-    fields: set[str] = set()
+    fields: list[str] = []
     for element in elements:
         match element:
             case Param(field=field):
-                fields.add(field)
+                fields.append(field)
             case (
                 Clause(elements=nested)
                 | OptionalGroup(elements=nested)
                 | Scope(elements=nested)
             ):
-                fields |= _collect_parameter_format_fields(nested)
+                fields.extend(_collect_parameter_format_field_sequence(nested))
             case _:
                 pass
-    return fields
+    return tuple(fields)
 
 
 def _collect_func_args_fields(elements: tuple[FormatElement, ...]) -> set[str]:

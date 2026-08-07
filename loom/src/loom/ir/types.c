@@ -8,6 +8,10 @@
 
 #include <string.h>
 
+#include "loom/ir/attribute.h"
+#include "loom/ir/module.h"
+#include "loom/ir/parameterized_type.h"
+
 const char* loom_encoding_role_name(loom_encoding_role_t role) {
   static const char* const names[] = {
       [LOOM_ENCODING_ROLE_UNKNOWN] = "",
@@ -159,6 +163,25 @@ bool loom_type_equal(loom_type_t a, loom_type_t b) {
              loom_type_sequence_equal(loom_type_dialect_params(a),
                                       loom_type_dialect_params(b), param_count);
     }
+    case LOOM_TYPE_PARAMETERIZED: {
+      if (loom_type_parameterized_descriptor(a) !=
+          loom_type_parameterized_descriptor(b)) {
+        return false;
+      }
+      uint8_t parameter_count = loom_type_parameterized_parameter_count(a);
+      const loom_attribute_t* a_parameters =
+          loom_type_parameterized_parameters(a);
+      const loom_attribute_t* b_parameters =
+          loom_type_parameterized_parameters(b);
+      if (parameter_count == 0) return true;
+      if (!a_parameters || !b_parameters) return a_parameters == b_parameters;
+      for (uint8_t i = 0; i < parameter_count; ++i) {
+        if (!loom_attribute_equal(&a_parameters[i], &b_parameters[i])) {
+          return false;
+        }
+      }
+      return true;
+    }
     case LOOM_TYPE_REGISTER: {
       const loom_register_type_data_t* a_data = loom_type_register_data(a);
       const loom_register_type_data_t* b_data = loom_type_register_data(b);
@@ -226,22 +249,114 @@ static bool loom_type_encoding_equal_after_value_remap(
 }
 
 static bool loom_type_sequence_equal_after_value_remap(
-    const loom_type_t* source_types, const loom_type_t* target_types,
-    uint16_t type_count, const loom_type_value_remap_t* remap) {
+    const loom_module_t* module, const loom_type_t* source_types,
+    const loom_type_t* target_types, uint16_t type_count,
+    const loom_type_value_remap_t* remap) {
   if (type_count == 0) return true;
   if (!source_types || !target_types) return source_types == target_types;
   for (uint16_t i = 0; i < type_count; ++i) {
-    if (!loom_type_equal_after_value_remap(source_types[i], target_types[i],
-                                           remap)) {
+    if (!loom_type_equal_after_value_remap(module, source_types[i],
+                                           target_types[i], remap)) {
       return false;
     }
   }
   return true;
 }
 
-bool loom_type_equal_after_value_remap(loom_type_t source_type,
+static bool loom_attribute_equal_after_value_remap(
+    const loom_module_t* module, loom_attribute_t source_attr,
+    loom_attribute_t target_attr, uint8_t depth,
+    const loom_type_value_remap_t* remap) {
+  if (source_attr.kind != target_attr.kind) return false;
+  switch ((loom_attr_kind_t)source_attr.kind) {
+    case LOOM_ATTR_TYPE:
+      if (source_attr.type_id == LOOM_TYPE_ID_INVALID ||
+          target_attr.type_id == LOOM_TYPE_ID_INVALID ||
+          source_attr.type_id >= module->types.count ||
+          target_attr.type_id >= module->types.count) {
+        return false;
+      }
+      return loom_type_equal_after_value_remap(
+          module, module->types.entries[source_attr.type_id],
+          module->types.entries[target_attr.type_id], remap);
+
+    case LOOM_ATTR_PREDICATE_LIST:
+      if (source_attr.count != target_attr.count ||
+          (source_attr.count > 0 &&
+           (!source_attr.predicate_list || !target_attr.predicate_list))) {
+        return false;
+      }
+      for (uint16_t i = 0; i < source_attr.count; ++i) {
+        const loom_predicate_t* source = &source_attr.predicate_list[i];
+        const loom_predicate_t* target = &target_attr.predicate_list[i];
+        if (source->kind != target->kind ||
+            source->arg_count != target->arg_count ||
+            memcmp(source->arg_tags, target->arg_tags,
+                   sizeof(source->arg_tags)) != 0) {
+          return false;
+        }
+        for (uint8_t j = 0; j < source->arg_count; ++j) {
+          if (source->arg_tags[j] == LOOM_PRED_ARG_VALUE) {
+            if (source->args[j] < 0 || target->args[j] < 0 ||
+                (loom_value_id_t)target->args[j] !=
+                    loom_type_remap_value(remap,
+                                          (loom_value_id_t)source->args[j])) {
+              return false;
+            }
+          } else if (source->args[j] != target->args[j]) {
+            return false;
+          }
+        }
+      }
+      return true;
+
+    case LOOM_ATTR_DICT:
+      if (source_attr.count != target_attr.count ||
+          depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (source_attr.count > 0 &&
+           (!source_attr.dict_entries || !target_attr.dict_entries))) {
+        return false;
+      }
+      for (uint16_t i = 0; i < source_attr.count; ++i) {
+        if (source_attr.dict_entries[i].name_id !=
+                target_attr.dict_entries[i].name_id ||
+            !loom_attribute_equal_after_value_remap(
+                module, source_attr.dict_entries[i].value,
+                target_attr.dict_entries[i].value, (uint8_t)(depth + 1),
+                remap)) {
+          return false;
+        }
+      }
+      return true;
+
+    case LOOM_ATTR_PARAMETERIZED:
+      if (source_attr.reserved_1 != target_attr.reserved_1 ||
+          source_attr.count != target_attr.count ||
+          depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH ||
+          (source_attr.count > 0 && (!source_attr.parameterized_slots ||
+                                     !target_attr.parameterized_slots))) {
+        return false;
+      }
+      for (uint16_t i = 0; i < source_attr.count; ++i) {
+        if (!loom_attribute_equal_after_value_remap(
+                module, source_attr.parameterized_slots[i],
+                target_attr.parameterized_slots[i], (uint8_t)(depth + 1),
+                remap)) {
+          return false;
+        }
+      }
+      return true;
+
+    default:
+      return loom_attribute_equal(&source_attr, &target_attr);
+  }
+}
+
+bool loom_type_equal_after_value_remap(const loom_module_t* module,
+                                       loom_type_t source_type,
                                        loom_type_t target_type,
                                        const loom_type_value_remap_t* remap) {
+  if (!module) return false;
   if (remap && remap->count > 0 &&
       (!remap->source_values || !remap->target_values)) {
     return false;
@@ -271,7 +386,8 @@ bool loom_type_equal_after_value_remap(loom_type_t source_type,
       return source_data->arg_count == target_data->arg_count &&
              source_data->result_count == target_data->result_count &&
              loom_type_sequence_equal_after_value_remap(
-                 source_data->types, target_data->types, type_count, remap);
+                 module, source_data->types, target_data->types, type_count,
+                 remap);
     }
 
     case LOOM_TYPE_DIALECT: {
@@ -284,7 +400,7 @@ bool loom_type_equal_after_value_remap(loom_type_t source_type,
       uint16_t param_count = loom_type_dialect_param_count(source_type);
       return param_count == loom_type_dialect_param_count(target_type) &&
              loom_type_sequence_equal_after_value_remap(
-                 loom_type_dialect_params(source_type),
+                 module, loom_type_dialect_params(source_type),
                  loom_type_dialect_params(target_type), param_count, remap);
     }
 
@@ -305,8 +421,35 @@ bool loom_type_equal_after_value_remap(loom_type_t source_type,
       if (!source_data || !target_data) return source_data == target_data;
       return source_data->carrier_payload0 == target_data->carrier_payload0 &&
              source_data->carrier_payload1 == target_data->carrier_payload1 &&
-             loom_type_equal_after_value_remap(source_data->value_type,
+             loom_type_equal_after_value_remap(module, source_data->value_type,
                                                target_data->value_type, remap);
+    }
+
+    case LOOM_TYPE_PARAMETERIZED: {
+      if (source_type.header != target_type.header ||
+          source_type.encoding_flags != target_type.encoding_flags ||
+          loom_type_parameterized_descriptor(source_type) !=
+              loom_type_parameterized_descriptor(target_type)) {
+        return false;
+      }
+      uint8_t parameter_count =
+          loom_type_parameterized_parameter_count(source_type);
+      const loom_attribute_t* source_parameters =
+          loom_type_parameterized_parameters(source_type);
+      const loom_attribute_t* target_parameters =
+          loom_type_parameterized_parameters(target_type);
+      if (parameter_count == 0) return true;
+      if (!source_parameters || !target_parameters) {
+        return source_parameters == target_parameters;
+      }
+      for (uint8_t i = 0; i < parameter_count; ++i) {
+        if (!loom_attribute_equal_after_value_remap(
+                module, source_parameters[i], target_parameters[i],
+                /*depth=*/1, remap)) {
+          return false;
+        }
+      }
+      return true;
     }
 
     default:
@@ -384,19 +527,23 @@ static bool loom_type_has_value_ref_dims(loom_type_t type) {
 }
 
 static iree_status_t loom_type_walk_value_ref_sequence(
-    const loom_type_t* types, uint16_t type_count,
+    const loom_module_t* module, const loom_type_t* types, uint16_t type_count,
     loom_type_value_ref_callback_t callback, void* user_data) {
   if (!types) return iree_ok_status();
   for (uint16_t i = 0; i < type_count; ++i) {
     IREE_RETURN_IF_ERROR(
-        loom_type_walk_value_refs(types[i], callback, user_data));
+        loom_type_walk_value_refs(module, types[i], callback, user_data));
   }
   return iree_ok_status();
 }
 
-iree_status_t loom_type_walk_value_refs(loom_type_t type,
+iree_status_t loom_type_walk_value_refs(const loom_module_t* module,
+                                        loom_type_t type,
                                         loom_type_value_ref_callback_t callback,
                                         void* user_data) {
+  if (!module) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "module is NULL");
+  }
   if (!callback) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "type value reference callback is NULL");
@@ -410,20 +557,31 @@ iree_status_t loom_type_walk_value_refs(loom_type_t type,
       const loom_func_type_data_t* data = loom_type_func_data(type);
       if (!data) return iree_ok_status();
       return loom_type_walk_value_ref_sequence(
-          data->types, (uint16_t)(data->arg_count + data->result_count),
+          module, data->types, (uint16_t)(data->arg_count + data->result_count),
           callback, user_data);
     }
 
     case LOOM_TYPE_DIALECT:
       return loom_type_walk_value_ref_sequence(
-          loom_type_dialect_params(type), loom_type_dialect_param_count(type),
-          callback, user_data);
+          module, loom_type_dialect_params(type),
+          loom_type_dialect_param_count(type), callback, user_data);
+
+    case LOOM_TYPE_PARAMETERIZED: {
+      const loom_attribute_t* parameters =
+          loom_type_parameterized_parameters(type);
+      uint8_t parameter_count = loom_type_parameterized_parameter_count(type);
+      for (uint8_t i = 0; i < parameter_count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_module_walk_attribute_value_refs(
+            module, parameters[i], callback, user_data));
+      }
+      return iree_ok_status();
+    }
 
     case LOOM_TYPE_REGISTER: {
       const loom_type_t* value_type = loom_type_register_value_type(type);
-      return value_type
-                 ? loom_type_walk_value_refs(*value_type, callback, user_data)
-                 : iree_ok_status();
+      return value_type ? loom_type_walk_value_refs(module, *value_type,
+                                                    callback, user_data)
+                        : iree_ok_status();
     }
 
     default:
@@ -446,15 +604,62 @@ iree_status_t loom_type_walk_value_refs(loom_type_t type,
 
 static bool loom_type_sequence_references_value(const loom_type_t* types,
                                                 uint16_t type_count,
+                                                const loom_module_t* module,
                                                 loom_value_id_t value_id) {
   if (!types) return false;
   for (uint16_t i = 0; i < type_count; ++i) {
-    if (loom_type_references_value(types[i], value_id)) return true;
+    if (loom_type_references_value(module, types[i], value_id)) return true;
   }
   return false;
 }
 
-bool loom_type_references_value(loom_type_t type, loom_value_id_t value_id) {
+static bool loom_attribute_references_value(const loom_module_t* module,
+                                            loom_attribute_t attr,
+                                            uint8_t depth,
+                                            loom_value_id_t value_id) {
+  switch ((loom_attr_kind_t)attr.kind) {
+    case LOOM_ATTR_TYPE:
+      return attr.type_id != LOOM_TYPE_ID_INVALID &&
+             attr.type_id < module->types.count &&
+             loom_type_references_value(
+                 module, module->types.entries[attr.type_id], value_id);
+    case LOOM_ATTR_PREDICATE_LIST:
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        const loom_predicate_t* predicate = &attr.predicate_list[i];
+        for (uint8_t j = 0; j < predicate->arg_count; ++j) {
+          if (predicate->arg_tags[j] == LOOM_PRED_ARG_VALUE &&
+              (loom_value_id_t)predicate->args[j] == value_id) {
+            return true;
+          }
+        }
+      }
+      return false;
+    case LOOM_ATTR_DICT:
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) return false;
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        if (loom_attribute_references_value(module, attr.dict_entries[i].value,
+                                            (uint8_t)(depth + 1), value_id)) {
+          return true;
+        }
+      }
+      return false;
+    case LOOM_ATTR_PARAMETERIZED:
+      if (depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) return false;
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        if (loom_attribute_references_value(module, attr.parameterized_slots[i],
+                                            (uint8_t)(depth + 1), value_id)) {
+          return true;
+        }
+      }
+      return false;
+    default:
+      return false;
+  }
+}
+
+bool loom_type_references_value(const loom_module_t* module, loom_type_t type,
+                                loom_value_id_t value_id) {
+  if (!module) return false;
   loom_type_kind_t kind = loom_type_kind(type);
   if (!loom_type_kind_is_valid(kind)) return false;
 
@@ -463,18 +668,32 @@ bool loom_type_references_value(loom_type_t type, loom_value_id_t value_id) {
       const loom_func_type_data_t* data = loom_type_func_data(type);
       if (!data) return false;
       return loom_type_sequence_references_value(
-          data->types, (uint16_t)(data->arg_count + data->result_count),
+          data->types, (uint16_t)(data->arg_count + data->result_count), module,
           value_id);
     }
 
     case LOOM_TYPE_DIALECT:
       return loom_type_sequence_references_value(
           loom_type_dialect_params(type), loom_type_dialect_param_count(type),
-          value_id);
+          module, value_id);
+
+    case LOOM_TYPE_PARAMETERIZED: {
+      const loom_attribute_t* parameters =
+          loom_type_parameterized_parameters(type);
+      uint8_t parameter_count = loom_type_parameterized_parameter_count(type);
+      for (uint8_t i = 0; i < parameter_count; ++i) {
+        if (loom_attribute_references_value(module, parameters[i], /*depth=*/1,
+                                            value_id)) {
+          return true;
+        }
+      }
+      return false;
+    }
 
     case LOOM_TYPE_REGISTER: {
       const loom_type_t* value_type = loom_type_register_value_type(type);
-      return value_type && loom_type_references_value(*value_type, value_id);
+      return value_type &&
+             loom_type_references_value(module, *value_type, value_id);
     }
 
     default:
@@ -553,6 +772,20 @@ uint32_t loom_type_hash(loom_type_t type) {
       hash = loom_type_hash_mix_u32(hash, loom_type_dialect_name_id(type));
       return loom_type_hash_mix_sequence(hash, loom_type_dialect_params(type),
                                          loom_type_dialect_param_count(type));
+    case LOOM_TYPE_PARAMETERIZED: {
+      const loom_parameterized_type_descriptor_t* descriptor =
+          loom_type_parameterized_descriptor(type);
+      hash = loom_type_hash_mix_u64(hash, (uint64_t)(uintptr_t)descriptor);
+      uint8_t parameter_count = loom_type_parameterized_parameter_count(type);
+      const loom_attribute_t* parameters =
+          loom_type_parameterized_parameters(type);
+      if (!parameters) return hash;
+      for (uint8_t i = 0; i < parameter_count; ++i) {
+        hash =
+            loom_type_hash_mix_u32(hash, loom_attribute_hash(&parameters[i]));
+      }
+      return hash;
+    }
     case LOOM_TYPE_REGISTER: {
       const loom_register_type_data_t* data = loom_type_register_data(type);
       if (loom_type_register_has_value_type(type)) {

@@ -10,7 +10,13 @@ import math
 
 import pytest
 
-from loom.dialect.test import test_options_attr, test_tile_attr
+from loom.dialect.test import (
+    test_array_type,
+    test_matrix_type,
+    test_options_attr,
+    test_scope_type,
+    test_tile_attr,
+)
 from loom.ir import (
     BF16,
     BUFFER_TYPE,
@@ -53,6 +59,7 @@ from loom.ir import (
     OpaqueLocation,
     Operation,
     ParameterizedAttr,
+    ParameterizedType,
     PoolType,
     Predicate,
     PredicateArg,
@@ -700,6 +707,52 @@ class TestParameterizedAttr:
         assert lhs == rhs
         assert hash(lhs) == hash(rhs)
         assert {lhs, rhs} == {lhs}
+
+
+class TestParameterizedType:
+    def test_constructs_positional_and_mixed_format_families(self) -> None:
+        scope = test_scope_type(scope="subgroup")
+        matrix = test_matrix_type(
+            element_type=BF16,
+            scope="workgroup",
+            rows=16,
+        )
+
+        assert isinstance(scope, ParameterizedType)
+        assert scope.type_kind == TypeKind.PARAMETERIZED
+        assert scope.slots == (2,)
+        assert matrix.family_name == "test.matrix"
+        assert matrix.present_items() == (
+            ("element_type", BF16),
+            ("scope", 1),
+            ("rows", 16),
+        )
+
+    def test_equality_hash_and_validation_use_named_schema(self) -> None:
+        lhs = test_matrix_type(element_type=BF16, scope="subgroup", rows=16)
+        rhs = test_matrix_type(element_type=BF16, scope=2, rows=16)
+
+        assert lhs == rhs
+        assert hash(lhs) == hash(rhs)
+        with pytest.raises(TypeError, match="missing required parameter 'rows'"):
+            test_matrix_type(element_type=BF16, scope="subgroup")
+        with pytest.raises(TypeError, match=r"unknown parameter.*columns"):
+            test_matrix_type(
+                element_type=BF16,
+                scope="subgroup",
+                rows=16,
+                columns=16,
+            )
+
+    def test_optional_parameter_has_explicit_presence(self) -> None:
+        packed = test_array_type(element_type=BF16)
+        aligned = test_array_type(element_type=BF16, alignment=16)
+
+        assert packed.slots == (BF16, None)
+        assert not packed.has("alignment")
+        assert packed.get("alignment") is None
+        assert aligned.has("alignment")
+        assert aligned.get("alignment") == 16
 
 
 class TestOperations:

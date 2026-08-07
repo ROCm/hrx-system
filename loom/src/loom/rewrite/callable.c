@@ -273,6 +273,16 @@ static bool loom_callable_attr_may_reference_symbol_in_mode(
         }
       }
       return false;
+    case LOOM_ATTR_PARAMETERIZED:
+      if (attr->count > 0 && !attr->parameterized_slots) return true;
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        if (loom_callable_attr_may_reference_symbol_in_mode(
+                module, &attr->parameterized_slots[i], target_ref, mode,
+                (uint8_t)(depth + 1))) {
+          return true;
+        }
+      }
+      return false;
     case LOOM_ATTR_ENCODING: {
       const loom_encoding_t* encoding =
           loom_module_encoding(module, attr->encoding_id);

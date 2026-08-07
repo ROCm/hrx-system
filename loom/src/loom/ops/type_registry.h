@@ -11,6 +11,7 @@
 #define LOOM_OPS_TYPE_REGISTRY_H_
 
 #include "iree/base/api.h"
+#include "loom/ir/parameterized_type.h"
 #include "loom/ir/types.h"
 #include "loom/ops/op_defs.h"
 
@@ -19,6 +20,7 @@ extern "C" {
 #endif
 
 typedef struct loom_value_fact_domain_t loom_value_fact_domain_t;
+typedef struct loom_module_t loom_module_t;
 
 // Format element kinds for type interiors (inside <...>).
 // These are separate from op format elements because type
@@ -33,6 +35,8 @@ typedef enum loom_type_format_kind_e {
   LOOM_TYPE_FMT_KEYWORD = 5,      // Literal punctuation/word.
   LOOM_TYPE_FMT_OPTIONAL = 6,     // Conditional elements.
   LOOM_TYPE_FMT_GLUE = 7,         // Suppress space.
+  LOOM_TYPE_FMT_PARAM = 8,        // Descriptor-backed attribute value.
+  LOOM_TYPE_FMT_PARAM_KEY = 9,    // Descriptor-backed parameter name.
 } loom_type_format_kind_t;
 
 // A 4-byte format element for type interiors. Same layout
@@ -74,7 +78,87 @@ typedef struct loom_type_descriptor_t {
 
   // Number of entries in |format_elements|.
   uint8_t format_element_count;
+
+  // Parameter schema for LOOM_TYPE_PARAMETERIZED, otherwise NULL.
+  const loom_parameterized_type_descriptor_t* parameterized;
 } loom_type_descriptor_t;
+
+// Synthetic scope for parameterized value coverage.
+typedef enum loom_test_scope_type_scope_e {
+  LOOM_TEST_SCOPE_TYPE_SCOPE_WORKGROUP = 1,
+  LOOM_TEST_SCOPE_TYPE_SCOPE_SUBGROUP = 2,
+  LOOM_TEST_SCOPE_TYPE_SCOPE_COUNT_ = 3,
+} loom_test_scope_type_scope_t;
+
+extern const loom_parameterized_type_descriptor_t loom_test_scope_type_parameterized_descriptor;
+static inline bool loom_test_scope_type_isa(loom_type_t type) {
+  return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_test_scope_type_parameterized_descriptor;
+}
+enum { LOOM_TEST_SCOPE_TYPE_SCOPE_PARAMETER_INDEX = 0 };
+static inline loom_test_scope_type_scope_t loom_test_scope_type_scope(loom_type_t type) {
+  return (loom_test_scope_type_scope_t)loom_attr_as_enum(loom_type_parameterized_parameters(type)[LOOM_TEST_SCOPE_TYPE_SCOPE_PARAMETER_INDEX]);
+}
+iree_status_t loom_test_scope_type_make(
+    loom_module_t* module,
+    loom_test_scope_type_scope_t scope,
+    loom_type_t* out_type);
+
+// Synthetic scope for parameterized value coverage.
+typedef enum loom_test_matrix_type_scope_e {
+  LOOM_TEST_MATRIX_TYPE_SCOPE_WORKGROUP = 1,
+  LOOM_TEST_MATRIX_TYPE_SCOPE_SUBGROUP = 2,
+  LOOM_TEST_MATRIX_TYPE_SCOPE_COUNT_ = 3,
+} loom_test_matrix_type_scope_t;
+
+extern const loom_parameterized_type_descriptor_t loom_test_matrix_type_parameterized_descriptor;
+static inline bool loom_test_matrix_type_isa(loom_type_t type) {
+  return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_test_matrix_type_parameterized_descriptor;
+}
+enum { LOOM_TEST_MATRIX_TYPE_ELEMENT_TYPE_PARAMETER_INDEX = 0 };
+static inline loom_type_id_t loom_test_matrix_type_element_type(loom_type_t type) {
+  return loom_attr_as_type_id(loom_type_parameterized_parameters(type)[LOOM_TEST_MATRIX_TYPE_ELEMENT_TYPE_PARAMETER_INDEX]);
+}
+enum { LOOM_TEST_MATRIX_TYPE_SCOPE_PARAMETER_INDEX = 1 };
+static inline loom_test_matrix_type_scope_t loom_test_matrix_type_scope(loom_type_t type) {
+  return (loom_test_matrix_type_scope_t)loom_attr_as_enum(loom_type_parameterized_parameters(type)[LOOM_TEST_MATRIX_TYPE_SCOPE_PARAMETER_INDEX]);
+}
+enum { LOOM_TEST_MATRIX_TYPE_ROWS_PARAMETER_INDEX = 2 };
+static inline int64_t loom_test_matrix_type_rows(loom_type_t type) {
+  return loom_attr_as_i64(loom_type_parameterized_parameters(type)[LOOM_TEST_MATRIX_TYPE_ROWS_PARAMETER_INDEX]);
+}
+iree_status_t loom_test_matrix_type_make(
+    loom_module_t* module,
+    loom_type_id_t element_type,
+    loom_test_matrix_type_scope_t scope,
+    int64_t rows,
+    loom_type_t* out_type);
+
+enum loom_test_array_type_build_flag_bits_e {
+  LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_ALIGNMENT = 1u << 0,
+};
+typedef uint32_t loom_test_array_type_build_flags_t;
+
+extern const loom_parameterized_type_descriptor_t loom_test_array_type_parameterized_descriptor;
+static inline bool loom_test_array_type_isa(loom_type_t type) {
+  return loom_type_is_parameterized(type) && loom_type_parameterized_descriptor(type) == &loom_test_array_type_parameterized_descriptor;
+}
+enum { LOOM_TEST_ARRAY_TYPE_ELEMENT_TYPE_PARAMETER_INDEX = 0 };
+static inline loom_type_id_t loom_test_array_type_element_type(loom_type_t type) {
+  return loom_attr_as_type_id(loom_type_parameterized_parameters(type)[LOOM_TEST_ARRAY_TYPE_ELEMENT_TYPE_PARAMETER_INDEX]);
+}
+enum { LOOM_TEST_ARRAY_TYPE_ALIGNMENT_PARAMETER_INDEX = 1 };
+static inline bool loom_test_array_type_has_alignment(loom_type_t type) {
+  return !loom_attr_is_absent(loom_type_parameterized_parameters(type)[LOOM_TEST_ARRAY_TYPE_ALIGNMENT_PARAMETER_INDEX]);
+}
+static inline int64_t loom_test_array_type_alignment(loom_type_t type) {
+  return loom_attr_as_i64(loom_type_parameterized_parameters(type)[LOOM_TEST_ARRAY_TYPE_ALIGNMENT_PARAMETER_INDEX]);
+}
+iree_status_t loom_test_array_type_make(
+    loom_module_t* module,
+    loom_test_array_type_build_flags_t build_flags,
+    loom_type_id_t element_type,
+    int64_t alignment,
+    loom_type_t* out_type);
 
 // Entry in the sorted type registry.
 typedef struct loom_type_registry_entry_t {

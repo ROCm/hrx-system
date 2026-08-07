@@ -1631,8 +1631,8 @@ TEST_F(BuilderTest, EraseWithTypeUsedResultFails) {
                         loom_op_erase(module_, dim_op));
 
   EXPECT_EQ(dim_op->flags & LOOM_OP_FLAG_DEAD, 0u);
-  EXPECT_TRUE(
-      loom_type_references_value(loom_module_value_type(module_, vector), dim));
+  EXPECT_TRUE(loom_type_references_value(
+      module_, loom_module_value_type(module_, vector), dim));
 }
 
 TEST_F(BuilderTest, ComputeUses) {

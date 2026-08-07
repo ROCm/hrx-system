@@ -14,6 +14,17 @@ from typing import Any
 
 from loom.dsl import ContractFamily, TypeDef, TypeSemantic
 from loom.gen.assembly.tokens import KEYWORD_MAP
+from loom.gen.ops.c_names import c_dialect_path
+from loom.gen.ops.c_parameterized_types import (
+    generate_header_lines as _generate_parameterized_type_header_lines,
+)
+from loom.gen.ops.c_parameterized_types import (
+    generate_metadata_lines as _generate_parameterized_type_metadata_lines,
+)
+from loom.gen.ops.c_parameterized_types import (
+    generate_source_lines as _generate_parameterized_type_source_lines,
+)
+from loom.gen.ops.c_parameterized_types import type_descriptor_symbol
 from loom.gen.support.generated_file import line_comment_header
 
 COPYRIGHT = """\
@@ -100,6 +111,7 @@ def _translate_type_format_elements(
         Glue,
         Keyword,
         OptionalGroup,
+        Param,
         ScalarOf,
         ShapeOf,
         TypeOf,
@@ -122,11 +134,15 @@ def _translate_type_format_elements(
                 return [f"{{LOOM_TYPE_FMT_TYPE, {param_index(field)}, 0}}"]
             case Attr(field=field):
                 return [f"{{LOOM_TYPE_FMT_ATTR, {param_index(field)}, 0}}"]
+            case Param(field=field):
+                return [f"{{LOOM_TYPE_FMT_PARAM, {param_index(field)}, 0}}"]
             case Glue():
                 return ["{LOOM_TYPE_FMT_GLUE, 0, 0}"]
             case Keyword(text=text):
                 kw_name = KEYWORD_MAP.get(text)
                 if kw_name is None:
+                    if text in param_names:
+                        return [f"{{LOOM_TYPE_FMT_PARAM_KEY, {param_index(text)}, 0}}"]
                     raise ValueError(f"unknown keyword in type format: {text!r}")
                 return [f"{{LOOM_TYPE_FMT_KEYWORD, 0, {kw_name}}}"]
             case Clause(name=name, elements=elements):
@@ -207,14 +223,26 @@ def generate_type_registry(
     header.append("#define LOOM_OPS_TYPE_REGISTRY_H_")
     header.append("")
     header.append('#include "iree/base/api.h"')
+    header.append('#include "loom/ir/parameterized_type.h"')
     header.append('#include "loom/ir/types.h"')
     header.append('#include "loom/ops/op_defs.h"')
+    enum_includes = sorted(
+        {
+            parameter.enum_def.c_include
+            for type_def in all_types
+            if type_def.uses_attribute_parameters
+            for parameter in type_def.params
+            if parameter.enum_def is not None and parameter.enum_def.c_include is not None
+        }
+    )
+    header.extend(f'#include "{include}"' for include in enum_includes)
     header.append("")
     header.append("#ifdef __cplusplus")
     header.append('extern "C" {')
     header.append("#endif")
     header.append("")
     header.append("typedef struct loom_value_fact_domain_t loom_value_fact_domain_t;")
+    header.append("typedef struct loom_module_t loom_module_t;")
     header.append("")
     header.append("// Format element kinds for type interiors (inside <...>).")
     header.append("// These are separate from op format elements because type")
@@ -229,6 +257,8 @@ def generate_type_registry(
     header.append("  LOOM_TYPE_FMT_KEYWORD = 5,      // Literal punctuation/word.")
     header.append("  LOOM_TYPE_FMT_OPTIONAL = 6,     // Conditional elements.")
     header.append("  LOOM_TYPE_FMT_GLUE = 7,         // Suppress space.")
+    header.append("  LOOM_TYPE_FMT_PARAM = 8,        // Descriptor-backed attribute value.")
+    header.append("  LOOM_TYPE_FMT_PARAM_KEY = 9,    // Descriptor-backed parameter name.")
     header.append("} loom_type_format_kind_t;")
     header.append("")
     header.append("// A 4-byte format element for type interiors. Same layout")
@@ -270,8 +300,12 @@ def generate_type_registry(
     header.append("")
     header.append("  // Number of entries in |format_elements|.")
     header.append("  uint8_t format_element_count;")
+    header.append("")
+    header.append("  // Parameter schema for LOOM_TYPE_PARAMETERIZED, otherwise NULL.")
+    header.append("  const loom_parameterized_type_descriptor_t* parameterized;")
     header.append("} loom_type_descriptor_t;")
     header.append("")
+    header.extend(_generate_parameterized_type_header_lines(all_types))
     header.append("// Entry in the sorted type registry.")
     header.append("typedef struct loom_type_registry_entry_t {")
     header.append("  iree_string_view_t name;")
@@ -310,6 +344,17 @@ def generate_type_registry(
 
     source = [GENERATED_HEADER]
     source.append('#include "loom/ops/type_registry_tables.h"')
+    source.append('#include "loom/ir/module.h"')
+    nested_attr_headers = sorted(
+        {
+            f"loom/{c_dialect_path(parameter.parameterized_attr.group)}/ops.h"
+            for type_def in all_types
+            if type_def.uses_attribute_parameters
+            for parameter in type_def.params
+            if parameter.parameterized_attr is not None
+        }
+    )
+    source.extend(f'#include "{path}"' for path in nested_attr_headers)
     source.append("")
 
     for type_def in all_types:
@@ -318,6 +363,8 @@ def generate_type_registry(
         source.append(f'static const uint8_t loom_type_{ident}_name[] = "\\x{name_len:02x}" "{type_def.name}";')
 
     source.append("")
+
+    source.extend(_generate_parameterized_type_metadata_lines(all_types))
 
     fact_domain_symbols = sorted({fact_domain for type_def in all_types if (fact_domain := _type_fact_domain_symbol(type_def)) is not None})
     if fact_domain_symbols:
@@ -337,7 +384,7 @@ def generate_type_registry(
 
     for type_def in all_types:
         ident = _type_c_ident(type_def.name)
-        ir_kind = _IR_KIND_MAP[type_def.ir_kind]
+        ir_kind = "LOOM_TYPE_PARAMETERIZED" if type_def.uses_attribute_parameters else _IR_KIND_MAP[type_def.ir_kind]
         param_count = len(type_def.params)
         fact_domain = _type_fact_domain_symbol(type_def)
         if type_def.format:
@@ -358,8 +405,12 @@ def generate_type_registry(
         if format_ref != "NULL":
             source.append(f"    .format_elements = {format_ref},")
             source.append(f"    .format_element_count = {format_count},")
+        if type_def.uses_attribute_parameters:
+            source.append(f"    .parameterized = &{type_descriptor_symbol(type_def)},")
         source.append("};")
         source.append("")
+
+    source.extend(_generate_parameterized_type_source_lines(all_types))
 
     sorted_types = sorted(all_types, key=lambda type_def: type_def.name)
     source.append("const loom_type_registry_entry_t")

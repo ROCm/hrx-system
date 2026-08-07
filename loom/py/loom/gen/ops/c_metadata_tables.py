@@ -127,25 +127,6 @@ def _emit_dialect_table_accessors(
     lines.append("")
 
 
-# Maps Python symbol interface names to C interface flag constants.
-SYMBOL_INTERFACE_MAP: dict[str, str] = {
-    "func_like": "LOOM_SYMBOL_INTERFACE_FUNC_LIKE",
-    "callable": "LOOM_SYMBOL_INTERFACE_CALLABLE",
-    "global": "LOOM_SYMBOL_INTERFACE_GLOBAL",
-    "executable": "LOOM_SYMBOL_INTERFACE_EXECUTABLE",
-    "record": "LOOM_SYMBOL_INTERFACE_RECORD",
-    "rodata": "LOOM_SYMBOL_INTERFACE_RODATA",
-    "target": "LOOM_SYMBOL_INTERFACE_TARGET",
-    "config": "LOOM_SYMBOL_INTERFACE_CONFIG",
-    "kernel": "LOOM_SYMBOL_INTERFACE_KERNEL",
-}
-
-
-def _symbol_interface_flags(interfaces: Sequence[str]) -> str:
-    flags = [SYMBOL_INTERFACE_MAP[interface] for interface in interfaces]
-    return " | ".join(flags) if flags else "0"
-
-
 def _symbol_retain_attr_index(op: Op) -> int | None:
     """Returns the optional retain marker attribute index for a symbol op."""
 
@@ -267,7 +248,7 @@ def _emit_parameterized_attr_tables(
                     parameter.enum_def,
                 )
             if parameter.symbol_ref is not None:
-                flags = _symbol_interface_flags(parameter.symbol_ref.interfaces)
+                flags = c_symbols.symbol_interface_flags(parameter.symbol_ref.interfaces)
                 lines.append(f"static const loom_symbol_reference_descriptor_t {prefix}_{parameter.name}_symbol_ref = {{{_bstring_expr(parameter.symbol_ref.name)}, {flags}}};")
 
         if attr_def.parameters:
@@ -484,7 +465,7 @@ def generate_tables_c(
         for attr_def in non_flags:
             if attr_def.symbol_ref is None:
                 continue
-            flags = _symbol_interface_flags(attr_def.symbol_ref.interfaces)
+            flags = c_symbols.symbol_interface_flags(attr_def.symbol_ref.interfaces)
             descriptor_name = f"{prefix}_{attr_def.name}_symbol_ref"
             lines.append(f"static const loom_symbol_reference_descriptor_t {descriptor_name} = {{{_bstring_expr(attr_def.symbol_ref.name)}, {flags}}};")
 
@@ -606,7 +587,7 @@ def generate_tables_c(
             retain_attr_index = _symbol_retain_attr_index(op)
             value_contract_indices = _symbol_value_contract_indices(op)
             kernel_contract_indices = _symbol_kernel_contract_indices(op)
-            flags = _symbol_interface_flags(op.symbol_def.interfaces)
+            flags = c_symbols.symbol_interface_flags(op.symbol_def.interfaces)
             fact_domain = c_symbols.symbol_fact_domain_symbol(op)
             lines.append(f"static const loom_symbol_definition_descriptor_t {prefix}_symbol_def = {{")
             lines.append(f"    .name = {_bstring_expr(op.symbol_def.name)},")

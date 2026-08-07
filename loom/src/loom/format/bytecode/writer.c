@@ -1485,7 +1485,7 @@ static iree_status_t loom_bytecode_collect_global_value_type_refs(
     loom_value_id_t value_id = list->values[(*scan_index)++];
     loom_type_t type = loom_module_value_type(list->module, value_id);
     IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
-        type, loom_bytecode_collect_global_type_value_ref, list));
+        list->module, type, loom_bytecode_collect_global_type_value_ref, list));
   }
   return iree_ok_status();
 }

@@ -13,6 +13,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/type_registry.h"
 
 namespace loom {
 namespace {
@@ -118,6 +119,39 @@ TEST_F(RemapTest, RemapsRegisterValueTypesAcrossModules) {
   EXPECT_EQ(loom_type_dim_value_id_at(*target_value_type, 0), target_dim);
   EXPECT_NE(loom_type_register_data(target_type),
             loom_type_register_data(source_type));
+}
+
+TEST_F(RemapTest, RemapsTypesNestedInParameterizedTypeSlots) {
+  loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t source_dim = DefineValue(source_, index_type);
+  loom_value_id_t target_dim = DefineValue(target_, index_type);
+  loom_type_t source_vector_type =
+      loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
+                          loom_dim_pack_dynamic(source_dim), 0);
+  loom_type_id_t source_vector_type_id = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_intern_type_id(source_, source_vector_type,
+                                            &source_vector_type_id));
+  loom_type_t source_array_type = {};
+  IREE_ASSERT_OK(loom_test_array_type_make(
+      source_, LOOM_TEST_ARRAY_TYPE_BUILD_FLAG_HAS_ALIGNMENT,
+      source_vector_type_id, /*alignment=*/32, &source_array_type));
+
+  loom_ir_remap_t remap = InitializeRemap();
+  IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, source_dim, target_dim));
+  loom_type_t target_array_type = {};
+  IREE_ASSERT_OK(
+      loom_ir_remap_type(&remap, source_array_type, &target_array_type));
+
+  ASSERT_TRUE(loom_test_array_type_isa(target_array_type));
+  EXPECT_TRUE(loom_test_array_type_has_alignment(target_array_type));
+  EXPECT_EQ(loom_test_array_type_alignment(target_array_type), 32);
+  loom_type_id_t target_vector_type_id =
+      loom_test_array_type_element_type(target_array_type);
+  ASSERT_LT(target_vector_type_id, target_->types.count);
+  loom_type_t target_vector_type =
+      target_->types.entries[target_vector_type_id];
+  ASSERT_TRUE(loom_type_dim_is_dynamic_at(target_vector_type, 0));
+  EXPECT_EQ(loom_type_dim_value_id_at(target_vector_type, 0), target_dim);
 }
 
 TEST_F(RemapTest, RejectsSourceValuesDefinedAfterRemapInitialization) {

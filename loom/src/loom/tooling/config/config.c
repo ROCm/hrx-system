@@ -527,6 +527,17 @@ static iree_status_t loom_tooling_config_copy_attr(
           loom_make_named_attr_slice(target_entries, source_attr.count),
           out_attr);
     }
+    case LOOM_ATTR_PARAMETERIZED: {
+      loom_attribute_t target_slots[UINT8_MAX];
+      for (uint16_t i = 0; i < source_attr.count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_tooling_config_copy_attr(
+            source_module, target_module, source_attr.parameterized_slots[i],
+            (uint8_t)(depth + 1), &target_slots[i]));
+      }
+      return loom_module_make_parameterized_attr(
+          target_module, (loom_parameterized_attr_kind_t)source_attr.reserved_1,
+          target_slots, source_attr.count, out_attr);
+    }
     case LOOM_ATTR_ENCODING: {
       uint16_t target_encoding_id = 0;
       IREE_RETURN_IF_ERROR(loom_tooling_config_copy_encoding(

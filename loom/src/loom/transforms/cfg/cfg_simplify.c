@@ -1059,8 +1059,8 @@ static bool loom_cfg_simplify_branch_args_match_dest(
     loom_type_t actual_type = loom_module_value_type(state->module, actual_id);
     loom_type_t expected_type =
         loom_module_value_type(state->module, expected_id);
-    if (!loom_type_equal_after_value_remap(expected_type, actual_type,
-                                           &remap)) {
+    if (!loom_type_equal_after_value_remap(state->module, expected_type,
+                                           actual_type, &remap)) {
       return false;
     }
   }
@@ -1109,8 +1109,8 @@ static iree_status_t loom_cfg_simplify_validate_block_arg_replacements(
     loom_type_t old_type = loom_module_value_type(state->module, old_arg);
     loom_type_t replacement_type =
         loom_module_value_type(state->module, replacement);
-    if (!loom_type_equal_after_value_remap(old_type, replacement_type,
-                                           &remap)) {
+    if (!loom_type_equal_after_value_remap(state->module, old_type,
+                                           replacement_type, &remap)) {
       return iree_ok_status();
     }
   }
@@ -1488,14 +1488,15 @@ static bool loom_cfg_simplify_values_equal_after_map(
 }
 
 static bool loom_cfg_simplify_types_equal_after_map(
-    const loom_cfg_simplify_value_map_t* map, loom_type_t source_type,
-    loom_type_t target_type) {
+    const loom_module_t* module, const loom_cfg_simplify_value_map_t* map,
+    loom_type_t source_type, loom_type_t target_type) {
   loom_type_value_remap_t remap = {
       .source_values = map->source_values,
       .target_values = map->target_values,
       .count = map->count,
   };
-  return loom_type_equal_after_value_remap(source_type, target_type, &remap);
+  return loom_type_equal_after_value_remap(module, source_type, target_type,
+                                           &remap);
 }
 
 static bool loom_cfg_simplify_op_is_alpha_mergeable(
@@ -1632,8 +1633,8 @@ static bool loom_cfg_simplify_ops_equal_after_map(
         loom_module_value_type(state->module, source_results[i]);
     loom_type_t target_type =
         loom_module_value_type(state->module, target_results[i]);
-    if (!loom_cfg_simplify_types_equal_after_map(map, source_type,
-                                                 target_type)) {
+    if (!loom_cfg_simplify_types_equal_after_map(state->module, map,
+                                                 source_type, target_type)) {
       return false;
     }
   }
@@ -1659,8 +1660,8 @@ static bool loom_cfg_simplify_block_args_equal_after_map(
         state->module, loom_block_arg_id(source_block, i));
     loom_type_t target_type = loom_module_value_type(
         state->module, loom_block_arg_id(target_block, i));
-    if (!loom_cfg_simplify_types_equal_after_map(map, source_type,
-                                                 target_type)) {
+    if (!loom_cfg_simplify_types_equal_after_map(state->module, map,
+                                                 source_type, target_type)) {
       return false;
     }
   }
@@ -1868,7 +1869,8 @@ static bool loom_cfg_simplify_type_allows_replacement(
       .target_values = &replacement,
       .count = 1,
   };
-  return loom_type_equal_after_value_remap(old_type, replacement_type, &remap);
+  return loom_type_equal_after_value_remap(module, old_type, replacement_type,
+                                           &remap);
 }
 
 static bool loom_cfg_simplify_pred_branches_to_block(

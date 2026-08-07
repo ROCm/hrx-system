@@ -121,13 +121,13 @@ static iree_status_t loom_kernel_emit_launch_related(
 }
 
 static bool loom_kernel_launch_type_matches(
-    loom_type_t actual_type, loom_type_t expected_type,
-    const loom_type_value_remap_t* value_remap) {
+    const loom_module_t* module, loom_type_t actual_type,
+    loom_type_t expected_type, const loom_type_value_remap_t* value_remap) {
   if (loom_type_kind(actual_type) == LOOM_TYPE_TENSOR &&
       loom_type_kind(expected_type) == LOOM_TYPE_BUFFER) {
     return true;
   }
-  return loom_type_equal_after_value_remap(expected_type, actual_type,
+  return loom_type_equal_after_value_remap(module, expected_type, actual_type,
                                            value_remap);
 }
 
@@ -160,7 +160,7 @@ static iree_status_t loom_kernel_verify_launch_operand_group(
         loom_module_value_type(module, actual_values.values[i]);
     loom_type_t expected_type =
         loom_module_value_type(module, expected_values[i]);
-    if (loom_kernel_launch_type_matches(actual_type, expected_type,
+    if (loom_kernel_launch_type_matches(module, actual_type, expected_type,
                                         &value_remap)) {
       continue;
     }

@@ -38,6 +38,7 @@ from loom.assembly import (
     IndexList,
     OperandDict,
     OptionalGroup,
+    Param,
     PredicateList,
     Ref,
     Refs,
@@ -122,6 +123,7 @@ from loom.dsl import (
     SymbolReference,
     TargetLikeInterface,
     TiedResult,
+    TypeDef,
     Writes,
     YieldCountMatchesResults,
     YieldElementTypesMatchResults,
@@ -256,6 +258,58 @@ test_options_attr = ParameterizedAttrDef(
 ALL_TEST_PARAMETERIZED_ATTRS = (
     test_tile_attr,
     test_options_attr,
+)
+
+test_scope_type = TypeDef(
+    "test.scope",
+    params=[
+        AttrDef("scope", ATTR_TYPE_ENUM, enum_def=_ParameterizedScope),
+    ],
+    format=[Param("scope")],
+    doc="Positional descriptor-backed type parameter witness.",
+)
+
+test_matrix_type = TypeDef(
+    "test.matrix",
+    params=[
+        AttrDef("element_type", "type"),
+        AttrDef("scope", ATTR_TYPE_ENUM, enum_def=_ParameterizedScope),
+        AttrDef("rows", "i64"),
+    ],
+    format=[
+        Param("element_type"),
+        COMMA,
+        kw("scope"),
+        EQUALS,
+        Param("scope"),
+        COMMA,
+        kw("rows"),
+        EQUALS,
+        Param("rows"),
+    ],
+    doc="Mixed positional and keyed descriptor-backed type witness.",
+)
+
+test_array_type = TypeDef(
+    "test.array",
+    params=[
+        AttrDef("element_type", "type"),
+        AttrDef("alignment", "i64", optional=True),
+    ],
+    format=[
+        Param("element_type"),
+        OptionalGroup(
+            [COMMA, kw("alignment"), EQUALS, Param("alignment")],
+            anchor="alignment",
+        ),
+    ],
+    doc="Optional keyed descriptor-backed type parameter witness.",
+)
+
+ALL_TEST_TYPES = (
+    test_scope_type,
+    test_matrix_type,
+    test_array_type,
 )
 
 cmp_predicates = EnumDef(

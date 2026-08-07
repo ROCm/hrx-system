@@ -157,7 +157,8 @@ static bool loom_symbol_equivalence_types_equal(
       .target_values = state->values.rhs,
       .count = state->values.count,
   };
-  return loom_type_equal_after_value_remap(lhs_type, rhs_type, &remap);
+  return loom_type_equal_after_value_remap(state->module, lhs_type, rhs_type,
+                                           &remap);
 }
 
 static iree_status_t loom_symbol_equivalence_map_block(
@@ -262,6 +263,21 @@ static iree_status_t loom_symbol_equivalence_compare_attributes(
             state, &lhs_entry->value, &rhs_entry->value, depth + 1,
             &entry_equivalent));
         if (!entry_equivalent) return iree_ok_status();
+      }
+      *out_equivalent = true;
+      return iree_ok_status();
+    case LOOM_ATTR_PARAMETERIZED:
+      if (lhs_attr->reserved_1 != rhs_attr->reserved_1 ||
+          lhs_attr->count != rhs_attr->count ||
+          depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
+        return iree_ok_status();
+      }
+      for (uint16_t i = 0; i < lhs_attr->count; ++i) {
+        bool slot_equivalent = false;
+        IREE_RETURN_IF_ERROR(loom_symbol_equivalence_compare_attributes(
+            state, &lhs_attr->parameterized_slots[i],
+            &rhs_attr->parameterized_slots[i], depth + 1, &slot_equivalent));
+        if (!slot_equivalent) return iree_ok_status();
       }
       *out_equivalent = true;
       return iree_ok_status();

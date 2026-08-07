@@ -59,6 +59,7 @@ __all__ = [
     "NoneType",
     "RegisterType",
     "DialectType",
+    "ParameterizedType",
     "EncodingRole",
     "ENCODING_ROLE_BY_NAME",
     "EncodingType",
@@ -249,7 +250,8 @@ class TypeKind(IntEnum):
     BUFFER = 11
     REGISTER = 12
     STORAGE = 13
-    PLACEHOLDER = 14
+    PARAMETERIZED = 14
+    PLACEHOLDER = 15
 
 
 # ============================================================================
@@ -556,6 +558,93 @@ class DialectType:
         return self.name
 
 
+@dataclass(frozen=True, slots=True, init=False, eq=False)
+class ParameterizedType:
+    """Immutable descriptor-backed generic type value.
+
+    The declaration format controls whether each named slot is printed
+    positionally or with a key. Storage and identity always use declaration-
+    order slots so generated accessors require no lookup.
+    """
+
+    definition: Any
+    _slots: tuple[Any, ...]
+
+    def __init__(self, definition: Any, parameters: Mapping[str, Any]) -> None:
+        from loom.dsl import TypeDef
+
+        if (
+            not isinstance(definition, TypeDef)
+            or not definition.uses_attribute_parameters
+        ):
+            raise TypeError(
+                "ParameterizedType definition must be a descriptor-backed "
+                f"TypeDef, got {definition!r}"
+            )
+        object.__setattr__(self, "definition", definition)
+        object.__setattr__(
+            self,
+            "_slots",
+            _canonicalize_parameterized_slots(
+                definition.name, definition.params, parameters
+            ),
+        )
+
+    @property
+    def type_kind(self) -> TypeKind:
+        return TypeKind.PARAMETERIZED
+
+    @property
+    def family_name(self) -> str:
+        return self.definition.name
+
+    @property
+    def slots(self) -> tuple[Any, ...]:
+        return tuple(
+            None if value is _ABSENT_PARAMETERIZED_VALUE else value
+            for value in self._slots
+        )
+
+    def has(self, parameter_name: str) -> bool:
+        return (
+            self._slots[self._parameter_index(parameter_name)]
+            is not _ABSENT_PARAMETERIZED_VALUE
+        )
+
+    def get(self, parameter_name: str, default: Any = None) -> Any:
+        value = self._slots[self._parameter_index(parameter_name)]
+        return default if value is _ABSENT_PARAMETERIZED_VALUE else value
+
+    def present_items(self) -> tuple[tuple[str, Any], ...]:
+        return tuple(
+            (parameter.name, value)
+            for parameter, value in zip(
+                self.definition.params, self._slots, strict=True
+            )
+            if value is not _ABSENT_PARAMETERIZED_VALUE
+        )
+
+    def _parameter_index(self, parameter_name: str) -> int:
+        for index, parameter in enumerate(self.definition.params):
+            if parameter.name == parameter_name:
+                return index
+        raise KeyError(parameter_name)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ParameterizedType):
+            return NotImplemented
+        return self.family_name == other.family_name and self._slots == other._slots
+
+    def __hash__(self) -> int:
+        return hash((self.family_name, self._slots))
+
+    def __repr__(self) -> str:
+        parameters = ", ".join(
+            f"{name}={value!r}" for name, value in self.present_items()
+        )
+        return f"{self.family_name}<{parameters}>"
+
+
 @unique
 class EncodingRole(IntEnum):
     """Semantic role carried by an encoding SSA value type."""
@@ -678,6 +767,7 @@ type Type = (
     | FunctionType
     | RegisterType
     | DialectType
+    | ParameterizedType
     | EncodingType
     | PoolType
     | PlaceholderType
@@ -1049,36 +1139,14 @@ class ParameterizedAttr:
                 "ParameterizedAttr definition must be a ParameterizedAttrDef, "
                 f"got {type(definition).__name__}"
             )
-        if not isinstance(parameters, Mapping):
-            raise TypeError(
-                f"{definition.name}: parameters must be a mapping, got "
-                f"{type(parameters).__name__}"
-            )
-
-        parameter_names = {parameter.name for parameter in definition.parameters}
-        unknown_names = sorted(set(parameters) - parameter_names)
-        if unknown_names:
-            raise TypeError(
-                f"{definition.name}: unknown parameter(s): {', '.join(unknown_names)}"
-            )
-
-        slots: list[Any] = []
-        for parameter in definition.parameters:
-            if parameter.name not in parameters:
-                if parameter.optional:
-                    slots.append(_ABSENT_PARAMETERIZED_VALUE)
-                    continue
-                raise TypeError(
-                    f"{definition.name}: missing required parameter '{parameter.name}'"
-                )
-            slots.append(
-                _canonicalize_parameterized_value(
-                    definition.name, parameter, parameters[parameter.name]
-                )
-            )
-
         object.__setattr__(self, "definition", definition)
-        object.__setattr__(self, "_slots", tuple(slots))
+        object.__setattr__(
+            self,
+            "_slots",
+            _canonicalize_parameterized_slots(
+                definition.name, definition.parameters, parameters
+            ),
+        )
 
     @property
     def family_name(self) -> str:
@@ -1169,6 +1237,43 @@ def _canonicalize_parameterized_enum_value(
     return value
 
 
+def _canonicalize_parameterized_slots(
+    family_name: str,
+    descriptors: Iterable[Any],
+    parameters: Mapping[str, Any],
+) -> tuple[Any, ...]:
+    """Canonicalizes a named parameter mapping into immutable ordered slots."""
+
+    if not isinstance(parameters, Mapping):
+        raise TypeError(
+            f"{family_name}: parameters must be a mapping, got "
+            f"{type(parameters).__name__}"
+        )
+    frozen_descriptors = tuple(descriptors)
+    parameter_names = {parameter.name for parameter in frozen_descriptors}
+    unknown_names = sorted(set(parameters) - parameter_names)
+    if unknown_names:
+        raise TypeError(
+            f"{family_name}: unknown parameter(s): {', '.join(unknown_names)}"
+        )
+
+    slots: list[Any] = []
+    for descriptor in frozen_descriptors:
+        if descriptor.name not in parameters:
+            if descriptor.optional:
+                slots.append(_ABSENT_PARAMETERIZED_VALUE)
+                continue
+            raise TypeError(
+                f"{family_name}: missing required parameter '{descriptor.name}'"
+            )
+        slots.append(
+            _canonicalize_parameterized_value(
+                family_name, descriptor, parameters[descriptor.name]
+            )
+        )
+    return tuple(slots)
+
+
 def _canonicalize_parameterized_value(
     family_name: str, parameter: Any, value: Any
 ) -> Any:
@@ -1232,6 +1337,7 @@ def _canonicalize_parameterized_value(
                     FunctionType,
                     RegisterType,
                     DialectType,
+                    ParameterizedType,
                     EncodingType,
                     PoolType,
                     PlaceholderType,

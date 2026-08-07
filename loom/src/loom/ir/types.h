@@ -120,6 +120,10 @@
 // compares both forms structurally; target-low helpers interpret the carrier
 // payload fields as a register-class identity plus contiguous unit count.
 //
+// Generic parameterized types use dims[0] for an immutable array of attribute
+// parameter slots and dims[1] for their static family descriptor. Their public
+// text layout is declarative metadata and does not affect storage identity.
+//
 // Type equality is structural: callers should use loom_type_equal() on the
 // by-value representation. The module type table deduplicates equal entries,
 // but pointer identity only applies to table entries themselves, not arbitrary
@@ -134,6 +138,11 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+struct loom_attribute_t;
+typedef struct loom_module_t loom_module_t;
+typedef struct loom_parameterized_type_descriptor_t
+    loom_parameterized_type_descriptor_t;
 
 //===----------------------------------------------------------------------===//
 // IDs
@@ -248,6 +257,7 @@ enum loom_type_kind_e {
   LOOM_TYPE_BUFFER = 11,    // buffer (opaque storage identity)
   LOOM_TYPE_REGISTER = 12,  // reg<amdgpu.vgpr x4> (target-owned low payload)
   LOOM_TYPE_STORAGE = 13,   // low.storage<workgroup> (function-local storage)
+  LOOM_TYPE_PARAMETERIZED = 14,  // Generic descriptor-backed type.
   LOOM_TYPE_COUNT_,
 };
 
@@ -592,6 +602,10 @@ static inline bool loom_type_is_pool(loom_type_t type) {
   return loom_type_kind(type) == LOOM_TYPE_POOL;
 }
 
+static inline bool loom_type_is_parameterized(loom_type_t type) {
+  return loom_type_kind(type) == LOOM_TYPE_PARAMETERIZED;
+}
+
 // Returns true if the type is shaped (has rank, dims, element type):
 // tile, tensor, vector, or view. Scalar types are NOT shaped.
 static inline bool loom_type_is_shaped(loom_type_t type) {
@@ -671,7 +685,8 @@ bool loom_type_equal(loom_type_t a, loom_type_t b);
 // reference a sibling result (`view<4xf32, %layout>`) while each region yields
 // an equivalent branch-local value (`view<4xf32, %branch_layout>`). The helper
 // is allocation-free and does not intern remapped types.
-bool loom_type_equal_after_value_remap(loom_type_t source_type,
+bool loom_type_equal_after_value_remap(const loom_module_t* module,
+                                       loom_type_t source_type,
                                        loom_type_t target_type,
                                        const loom_type_value_remap_t* remap);
 
@@ -692,12 +707,14 @@ typedef iree_status_t (*loom_type_value_ref_callback_t)(
 // register value types. References are reported in structural order and are
 // not deduplicated: a type that mentions the same value twice emits two
 // callbacks.
-iree_status_t loom_type_walk_value_refs(loom_type_t type,
+iree_status_t loom_type_walk_value_refs(const loom_module_t* module,
+                                        loom_type_t type,
                                         loom_type_value_ref_callback_t callback,
                                         void* user_data);
 
 // Returns true if |type| embeds a reference to |value_id|.
-bool loom_type_references_value(loom_type_t type, loom_value_id_t value_id);
+bool loom_type_references_value(const loom_module_t* module, loom_type_t type,
+                                loom_value_id_t value_id);
 
 // Returns true if two types have the same encoding (same encoding_id
 // and encoding_flags). Both types having no encoding counts as equal.
@@ -973,6 +990,42 @@ static inline uint16_t loom_type_dialect_param_count(loom_type_t type) {
 // Returns the type parameter array (may be NULL if param_count == 0).
 static inline const loom_type_t* loom_type_dialect_params(loom_type_t type) {
   return (const loom_type_t*)(uintptr_t)type.dims[0];
+}
+
+//===----------------------------------------------------------------------===//
+// Generic parameterized type construction and accessors
+//===----------------------------------------------------------------------===//
+
+// Creates a descriptor-backed generic type from immutable parameter slots.
+// The descriptor and slot array must outlive the type.
+static inline loom_type_t loom_type_parameterized(
+    const loom_parameterized_type_descriptor_t* descriptor,
+    uint8_t parameter_count, const struct loom_attribute_t* parameters) {
+  loom_type_t type = {0};
+  type.header = loom_type_make_raw_header(LOOM_TYPE_PARAMETERIZED, 0, 0,
+                                          LOOM_TYPE_FLAG_INLINE_DIMS);
+  type.encoding_flags = parameter_count;
+  type.dims[0] = (uint64_t)(uintptr_t)parameters;
+  type.dims[1] = (uint64_t)(uintptr_t)descriptor;
+  return type;
+}
+
+// Returns the static family descriptor.
+static inline const loom_parameterized_type_descriptor_t*
+loom_type_parameterized_descriptor(loom_type_t type) {
+  return (const loom_parameterized_type_descriptor_t*)(uintptr_t)type.dims[1];
+}
+
+// Returns the number of descriptor-indexed parameter slots.
+static inline uint8_t loom_type_parameterized_parameter_count(
+    loom_type_t type) {
+  return (uint8_t)type.encoding_flags;
+}
+
+// Returns the immutable parameter slot array.
+static inline const struct loom_attribute_t* loom_type_parameterized_parameters(
+    loom_type_t type) {
+  return (const struct loom_attribute_t*)(uintptr_t)type.dims[0];
 }
 
 #ifdef __cplusplus

@@ -402,6 +402,39 @@ static iree_status_t loom_low_packet_json_write_attr(
       }
       return loom_json_object_end(&object);
     }
+    case LOOM_ATTR_PARAMETERIZED: {
+      const loom_parameterized_attr_descriptor_t* descriptor =
+          loom_context_resolve_parameterized_attr(
+              module->context,
+              (loom_parameterized_attr_kind_t)attr->reserved_1);
+      loom_json_object_writer_t object;
+      IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+      IREE_RETURN_IF_ERROR(
+          loom_json_object_begin_field(&object, IREE_SV("family")));
+      if (descriptor) {
+        IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
+            stream, loom_bstring_view(descriptor->name)));
+      } else {
+        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "null"));
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_json_object_begin_field(&object, IREE_SV("parameters")));
+      loom_json_object_writer_t parameters;
+      IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &parameters));
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        iree_string_view_t name = IREE_SV("<unknown>");
+        if (descriptor && i < descriptor->parameter_count) {
+          name =
+              loom_attr_descriptor_name(&descriptor->parameter_descriptors[i]);
+        }
+        IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&parameters, name));
+        IREE_RETURN_IF_ERROR(loom_low_packet_json_write_attr(
+            module, type_print_options, &attr->parameterized_slots[i], stream,
+            (uint8_t)(depth + 1)));
+      }
+      IREE_RETURN_IF_ERROR(loom_json_object_end(&parameters));
+      return loom_json_object_end(&object);
+    }
     case LOOM_ATTR_ENCODING: {
       const loom_encoding_t* encoding =
           loom_module_encoding(module, (uint16_t)attr->encoding_id);

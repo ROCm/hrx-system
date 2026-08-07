@@ -1522,6 +1522,32 @@ class TestTypeDef:
         )
 
         assert type_def.param("rows") == AttrDef("rows", "i64")
+        assert type_def.uses_attribute_parameters
+
+    def test_descriptor_parameters_reject_mixed_storage_schemas(self) -> None:
+        from loom.dsl import TypeParam
+
+        with _raises(ValueError, match="cannot be mixed"):
+            TypeDef(
+                "test.wrapper",
+                params=[TypeParam("value"), AttrDef("mode", "i64")],
+                format=[TypeOf("value"), COMMA, Param("mode")],
+            )
+
+    def test_descriptor_parameters_require_exactly_one_format_reference(self) -> None:
+        with _raises(ValueError, match="must appear exactly once"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("value", "type")],
+                format=[Param("value"), COMMA, Param("value")],
+            )
+
+        with _raises(ValueError, match="assembly format omits"):
+            TypeDef(
+                "test.wrapper",
+                params=[AttrDef("value", "type")],
+                format=[kw("empty")],
+            )
 
     def test_param_format_requires_descriptor_parameter(self) -> None:
         from loom.dsl import TypeParam

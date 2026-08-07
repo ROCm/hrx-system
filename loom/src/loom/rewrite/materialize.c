@@ -794,8 +794,9 @@ static iree_status_t loom_ir_move_remapped_type_is_available(
       .availability = query,
       .available = true,
   };
-  IREE_RETURN_IF_ERROR(loom_type_walk_value_refs(
-      source_type, loom_ir_move_check_type_ref, &type_query));
+  IREE_RETURN_IF_ERROR(
+      loom_type_walk_value_refs(query->remap->source_module, source_type,
+                                loom_ir_move_check_type_ref, &type_query));
   *out_available = type_query.available;
   return iree_ok_status();
 }
@@ -842,6 +843,7 @@ static iree_status_t loom_ir_move_attr_is_available(
     case LOOM_ATTR_I64_ARRAY:
     case LOOM_ATTR_ENUM_ARRAY:
     case LOOM_ATTR_SYMBOL:
+    case LOOM_ATTR_BYTES:
       *out_available = true;
       return iree_ok_status();
     case LOOM_ATTR_TYPE:
@@ -860,6 +862,18 @@ static iree_status_t loom_ir_move_attr_is_available(
       for (uint16_t i = 0; i < attr->count; ++i) {
         IREE_RETURN_IF_ERROR(loom_ir_move_attr_is_available(
             query, &attr->dict_entries[i].value, (uint8_t)(depth + 1),
+            out_available));
+        if (!*out_available) return iree_ok_status();
+      }
+      *out_available = true;
+      return iree_ok_status();
+    case LOOM_ATTR_PARAMETERIZED:
+      if (attr->count > 0 && !attr->parameterized_slots) {
+        return iree_ok_status();
+      }
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_ir_move_attr_is_available(
+            query, &attr->parameterized_slots[i], (uint8_t)(depth + 1),
             out_available));
         if (!*out_available) return iree_ok_status();
       }
