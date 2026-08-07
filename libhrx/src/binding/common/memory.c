@@ -146,6 +146,22 @@ static void iree_hal_streaming_buffer_release_context(
   }
 }
 
+static iree_status_t iree_hal_streaming_buffer_begin_allocation_lifetime(
+    iree_hal_streaming_buffer_t* buffer) {
+  static iree_atomic_uint64_t next_allocation_id = IREE_ATOMIC_VAR_INIT(1);
+  const uint64_t allocation_id =
+      iree_atomic_fetch_add(&next_allocation_id, 1, iree_memory_order_relaxed);
+  if (IREE_UNLIKELY(allocation_id > UINT32_MAX)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "process exhausted 32-bit allocation identifiers");
+  }
+
+  buffer->allocation_id = (uint32_t)allocation_id;
+  iree_atomic_store(&buffer->synchronous_memory_operations, 0,
+                    iree_memory_order_relaxed);
+  return iree_ok_status();
+}
+
 // Wraps an HRX buffer in a stream buffer and caches exported pointer metadata.
 static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
     iree_hal_streaming_context_t* context, hrx_buffer_t hrx_buf,
@@ -288,6 +304,10 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
     }
   }
   (void)have_host_ptr;
+
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_buffer_begin_allocation_lifetime(wrapper);
+  }
 
   if (iree_status_is_ok(status)) {
     // Register buffer in context's mapping table.
@@ -823,6 +843,12 @@ static iree_status_t iree_hal_streaming_memory_try_reuse_pending_free(
            (allow_opportunistic != 0 && free_op->is_ready));
     }
     if (can_reuse) {
+      iree_status_t status =
+          iree_hal_streaming_buffer_begin_allocation_lifetime(buffer);
+      if (!iree_status_is_ok(status)) {
+        iree_slim_mutex_unlock(&context->pending_free_mutex);
+        return status;
+      }
       hrx_status_t insert_status = hrx_buffer_table_insert(
           &context->buffer_table, buffer->device_ptr, buffer->host_ptr,
           buffer->size, buffer->hrx_buf, buffer);

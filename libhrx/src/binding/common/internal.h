@@ -826,6 +826,9 @@ typedef struct iree_hal_streaming_buffer_t {
   // Size reported by API metadata queries.
   iree_device_size_t logical_size;
 
+  // Process-unique identifier for the current logical allocation lifetime.
+  uint32_t allocation_id;
+
   // HAL buffer (alias for hrx_buf->hal_buffer when hrx_buf is set).
   iree_hal_buffer_t* buffer;
 

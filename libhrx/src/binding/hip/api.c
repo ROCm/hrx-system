@@ -14053,13 +14053,14 @@ HIPAPI hipError_t hipPointerGetAttribute(void* data,
     } else {
       switch (metadata.kind) {
         case IREE_HIP_POINTER_METADATA_BUFFER:
-          *(size_t*)data = metadata.buffer_ref.buffer->logical_size;
+          *(uint32_t*)data = (uint32_t)metadata.buffer_ref.buffer->logical_size;
           break;
         case IREE_HIP_POINTER_METADATA_ARRAY:
-          *(size_t*)data = metadata.array ? metadata.array->allocation_size : 0;
+          *(uint32_t*)data =
+              metadata.array ? (uint32_t)metadata.array->allocation_size : 0;
           break;
         case IREE_HIP_POINTER_METADATA_STATIC_MANAGED:
-          *(size_t*)data = metadata.symbol_size;
+          *(uint32_t*)data = (uint32_t)metadata.symbol_size;
           break;
         case IREE_HIP_POINTER_METADATA_UNREGISTERED_HOST:
         case IREE_HIP_POINTER_METADATA_INVALID:
@@ -14114,7 +14115,7 @@ HIPAPI hipError_t hipPointerGetAttribute(void* data,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_IS_MANAGED: {
-      *(unsigned int*)data = buffer_ref.buffer->is_managed ? 1 : 0;
+      *(bool*)data = buffer_ref.buffer->is_managed;
       break;
     }
     case HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR: {
@@ -14130,24 +14131,23 @@ HIPAPI hipError_t hipPointerGetAttribute(void* data,
     }
     case HIP_POINTER_ATTRIBUTE_RANGE_SIZE: {
       // Return the size of the allocation.
-      *(size_t*)data = buffer_ref.buffer->logical_size;
+      *(uint32_t*)data = (uint32_t)buffer_ref.buffer->logical_size;
       break;
     }
     case HIP_POINTER_ATTRIBUTE_MAPPED: {
       // This attribute describes whether the allocation has a runtime-visible
       // device mapping, not whether it also has a host alias.
-      *(unsigned int*)data = 1;
+      *(bool*)data = true;
       break;
     }
     case HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS: {
-      *(unsigned int*)data = (unsigned int)iree_atomic_load(
-          &buffer_ref.buffer->synchronous_memory_operations,
-          iree_memory_order_acquire);
+      *(bool*)data =
+          iree_atomic_load(&buffer_ref.buffer->synchronous_memory_operations,
+                           iree_memory_order_acquire) != 0;
       break;
     }
     case HIP_POINTER_ATTRIBUTE_BUFFER_ID: {
-      // Return a unique buffer ID (use pointer as ID).
-      *(unsigned long long*)data = (unsigned long long)buffer_ref.buffer;
+      *(uint32_t*)data = buffer_ref.buffer->allocation_id;
       break;
     }
     case HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS: {
