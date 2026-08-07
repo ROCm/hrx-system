@@ -1337,6 +1337,11 @@ loom_named_attr_slice_t loom_func_like_export_attrs(loom_func_like_t func);
 // symbol attribute.
 bool loom_func_like_is_kernel_entry(loom_func_like_t func);
 
+// Returns true when all possible callers and references to |func| are owned by
+// the current module. Imports, public functions, explicit exports, and kernel
+// entries are externally reachable.
+bool loom_func_like_is_module_internal(loom_func_like_t func);
+
 // Returns true and assigns the export linkage enum value when present.
 bool loom_func_like_export_linkage(loom_func_like_t func, uint8_t* out_linkage);
 

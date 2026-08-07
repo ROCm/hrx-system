@@ -19,6 +19,7 @@ from loom.dsl import (
     CallLikeKind,
     EffectKind,
     FuncLikeInterface,
+    FuncLikeInterfaceFlag,
     LoopLikeInterface,
     MemoryAccessInterface,
     MemoryAccessOperationKind,
@@ -156,6 +157,7 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("implements", "implements_attr_index", "attr"),
             InterfaceFieldSpec("priority", "priority_attr_index", "attr"),
             InterfaceFieldSpec("args", "args_operand_field_index", "operand"),
+            InterfaceFieldSpec("flags", "flags", "func_like_flags"),
         ),
     ),
     InterfaceSpec(
@@ -316,6 +318,8 @@ def _resolve_interface_field(
 ) -> str:
     """Resolves one interface field to its emitted C initializer value."""
     py_value = getattr(iface, field_spec.py_field)
+    if isinstance(iface, CallLikeInterface) and field_spec.py_field == "results" and py_value is None:
+        return "0"
     if _interface_soft_default_is_absent(op, iface, field_spec, py_value):
         return "255"
     if field_spec.kind == "attr":
@@ -344,6 +348,13 @@ def _resolve_interface_field(
         if not isinstance(py_value, CallLikeKind):
             raise ValueError(f"{interface_name} field {field_spec.py_field!r}: expected CallLikeKind, got {py_value!r}")
         return CALL_LIKE_KIND_MAP[py_value]
+    if field_spec.kind == "func_like_flags":
+        if not isinstance(py_value, tuple) or not all(isinstance(flag, FuncLikeInterfaceFlag) for flag in py_value):
+            raise ValueError(f"{interface_name} field {field_spec.py_field!r}: expected tuple[FuncLikeInterfaceFlag, ...], got {py_value!r}")
+        flag_names = {
+            FuncLikeInterfaceFlag.KERNEL_ENTRY: "LOOM_FUNC_LIKE_FLAG_KERNEL_ENTRY",
+        }
+        return " | ".join(flag_names[flag] for flag in py_value) or "0"
     if field_spec.kind == "c_ptr":
         if isinstance(iface, TargetLikeInterface) and field_spec.py_field == "descriptor" and iface.bundle_table is not None:
             descriptor = iface.descriptor or f"{c_prefix(op)}_target_like_descriptor"
@@ -432,6 +443,11 @@ def _validate_call_like_interface(op: Op, iface: CallLikeInterface, interface_na
         raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.operands!r} must be variadic")
     if operand_index + 1 != len(op.operands):
         raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.operands!r} must be the trailing operand field")
+
+    if iface.results is None:
+        if op.results:
+            raise ValueError(f"{interface_name} on {op.name!r}: results=None requires the operation to declare no results")
+        return
 
     result_index = c_queries.resolve_result_index(op, iface.results, interface_name)
     result = op.results[result_index]

@@ -1048,10 +1048,20 @@ loom_named_attr_slice_t loom_func_like_export_attrs(loom_func_like_t func) {
 }
 
 bool loom_func_like_is_kernel_entry(loom_func_like_t func) {
-  if (!func.op) return false;
-  const loom_op_kind_t kernel_def = LOOM_OP_KIND(LOOM_DIALECT_KERNEL, 0);
-  const loom_op_kind_t low_kernel_def = LOOM_OP_KIND(LOOM_DIALECT_LOW, 1);
-  return func.op->kind == kernel_def || func.op->kind == low_kernel_def;
+  return func.vtable &&
+         iree_any_bit_set(func.vtable->flags, LOOM_FUNC_LIKE_FLAG_KERNEL_ENTRY);
+}
+
+bool loom_func_like_is_module_internal(loom_func_like_t func) {
+  if (!loom_func_like_isa(func) || loom_func_like_is_kernel_entry(func) ||
+      loom_func_like_visibility(func) != 0 ||
+      loom_func_like_import_module(func) != LOOM_STRING_ID_INVALID ||
+      loom_func_like_import_symbol(func) != LOOM_STRING_ID_INVALID ||
+      loom_func_like_export_symbol(func) != LOOM_STRING_ID_INVALID ||
+      loom_func_like_export_attrs(func).count > 0) {
+    return false;
+  }
+  return true;
 }
 
 bool loom_func_like_export_linkage(loom_func_like_t func,

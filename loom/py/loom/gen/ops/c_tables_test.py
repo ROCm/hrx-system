@@ -65,6 +65,7 @@ from loom.dsl import (
     EnumCase,
     EnumDef,
     FuncLikeInterface,
+    FuncLikeInterfaceFlag,
     HasParent,
     IterArgsMatchResults,
     LiteralMatchesElementType,
@@ -1558,6 +1559,27 @@ def test_generate_tables_emits_call_like_interface() -> None:
     assert ".kind = LOOM_CALL_LIKE_KIND_SEMANTIC," in tables_c
 
 
+def test_generate_tables_emits_no_result_call_like_interface() -> None:
+    op = Op(
+        "test.call",
+        group=Dialect("test"),
+        attrs=[AttrDef("callee", "symbol")],
+        operands=[Operand("operands", ANY, variadic=True)],
+        interfaces=[
+            CallLikeInterface(
+                callee="callee",
+                operands="operands",
+                results=None,
+            ),
+        ],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert ".operand_offset = 0," in tables_c
+    assert ".result_offset = 0," in tables_c
+
+
 def test_generate_tables_emits_func_like_representation_contract() -> None:
     op = Op(
         "test.func",
@@ -1581,6 +1603,27 @@ def test_generate_tables_emits_func_like_representation_contract() -> None:
 
     assert ".callee_attr_index = 0," in tables_c
     assert ".repr_contract_attr_index = 1," in tables_c
+
+
+def test_generate_tables_emits_func_like_flags() -> None:
+    op = Op(
+        "test.kernel",
+        group=Dialect("test"),
+        attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+        operands=[Operand("args", ANY, variadic=True)],
+        interfaces=[
+            FuncLikeInterface(
+                callee="callee",
+                args="args",
+                flags=(FuncLikeInterfaceFlag.KERNEL_ENTRY,),
+            )
+        ],
+        format=[FuncArgs("args")],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert ".flags = LOOM_FUNC_LIKE_FLAG_KERNEL_ENTRY," in tables_c
 
 
 def test_generate_tables_rejects_non_string_representation_contract() -> None:
@@ -1920,6 +1963,26 @@ def test_generate_tables_rejects_call_like_non_variadic_result() -> None:
     )
 
     with _raises_value_error(r"CallLikeInterface on 'test\.call': result 'result' must be variadic"):
+        generate_tables_c("test", 0, [op])
+
+
+def test_generate_tables_rejects_no_result_call_like_with_results() -> None:
+    op = Op(
+        "test.call",
+        group=Dialect("test"),
+        attrs=[AttrDef("callee", "symbol")],
+        operands=[Operand("operands", ANY, variadic=True)],
+        results=[Result("result", ANY)],
+        interfaces=[
+            CallLikeInterface(
+                callee="callee",
+                operands="operands",
+                results=None,
+            ),
+        ],
+    )
+
+    with _raises_value_error(r"CallLikeInterface on 'test\.call': results=None requires the operation to declare no results"):
         generate_tables_c("test", 0, [op])
 
 

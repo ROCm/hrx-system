@@ -840,7 +840,7 @@ static iree_status_t loom_refine_boundaries_build_graph(
     info->argument_ids =
         loom_func_like_arg_ids(function, &info->argument_count);
     info->result_count = function.op->result_count;
-    info->is_internal = loom_func_like_visibility(function) == 0;
+    info->is_internal = loom_func_like_is_module_internal(function);
     IREE_RETURN_IF_ERROR(loom_refine_boundaries_collect_argument_projections(
         module, info, arena));
     if (info->result_count > 0) {

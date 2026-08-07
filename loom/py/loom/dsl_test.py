@@ -98,6 +98,7 @@ from loom.dsl import (
     EnumDef,
     FreshResult,
     FuncLikeInterface,
+    FuncLikeInterfaceFlag,
     HasAllStaticRankOneVector,
     HasAllStaticVector,
     HasAncestor,
@@ -602,11 +603,11 @@ class TestInterfaces:
         interface = CallLikeInterface(
             callee="callee",
             operands="operands",
-            results="results",
+            results=None,
         )
         assert interface.callee == "callee"
         assert interface.operands == "operands"
-        assert interface.results == "results"
+        assert interface.results is None
         assert interface.purity is None
         assert interface.kind == CallLikeKind.SEMANTIC
 
@@ -614,6 +615,14 @@ class TestInterfaces:
         assert CallLikeKind.SEMANTIC.value == "semantic"
         assert CallLikeKind.LOW_INTERNAL.value == "low_internal"
         assert CallLikeKind.LOW_INVOKE.value == "low_invoke"
+
+    def test_func_like_interface_flags(self) -> None:
+        interface = FuncLikeInterface(
+            callee="callee",
+            flags=(FuncLikeInterfaceFlag.KERNEL_ENTRY,),
+        )
+
+        assert interface.flags == (FuncLikeInterfaceFlag.KERNEL_ENTRY,)
 
     def test_target_like_interface_defaults_to_no_extensions(self) -> None:
         interface = TargetLikeInterface(symbol="symbol", selector="kind")

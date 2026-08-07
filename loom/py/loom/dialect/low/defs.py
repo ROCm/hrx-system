@@ -74,6 +74,7 @@ from loom.dsl import (
     EnumCase,
     EnumDef,
     FuncLikeInterface,
+    FuncLikeInterfaceFlag,
     ImplicitTerminator,
     IterArgsMatchResults,
     LoopLikeInterface,
@@ -477,6 +478,7 @@ _KERNEL_FUNC_LIKE_COMMON: dict[str, Any] = dict(
     export_symbol="export_symbol",
     export_linkage="export_linkage",
     predicates="predicates",
+    flags=(FuncLikeInterfaceFlag.KERNEL_ENTRY,),
 )
 
 # ============================================================================

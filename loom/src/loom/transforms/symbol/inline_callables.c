@@ -197,14 +197,7 @@ static bool loom_inline_symbol_is_transferable(const loom_module_t* module,
   if (!loom_func_like_isa(function)) {
     return false;
   }
-  if (loom_func_like_visibility(function) != 0) {
-    return false;
-  }
-  if (loom_func_like_export_symbol(function) != LOOM_STRING_ID_INVALID ||
-      loom_func_like_export_attrs(function).count > 0) {
-    return false;
-  }
-  return true;
+  return loom_func_like_is_module_internal(function);
 }
 
 static iree_string_view_t loom_inline_blocker_code(

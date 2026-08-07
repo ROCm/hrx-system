@@ -235,6 +235,7 @@ __all__ = [
     # Interfaces.
     "CallLikeInterface",
     "CallLikeKind",
+    "FuncLikeInterfaceFlag",
     "FuncLikeInterface",
     "InlinePolicy",
     "LoopLikeInterface",
@@ -3932,16 +3933,17 @@ class CallLikeInterface(NamedTuple):
     """Interface for direct symbol call-like ops.
 
     The named operand/result fields are trailing slices containing call
-    arguments and call results. The generator resolves their starting offsets
-    and emits a loom_call_like_vtable_t in .rodata.
+    arguments and call results. A result field of None denotes an operation
+    with no results. The generator resolves the slice starting offsets and
+    emits a loom_call_like_vtable_t in .rodata.
     """
 
     # Symbol ref attr naming the direct callee.
     callee: str
     # Variadic operand field holding call arguments.
     operands: str
-    # Variadic result field holding call results.
-    results: str
+    # Variadic result field holding call results, or None for no-result calls.
+    results: str | None
     # Optional purity enum attr. None if not applicable.
     purity: str | None = None
     # Optional temperature enum attr. None if not applicable.
@@ -3950,6 +3952,15 @@ class CallLikeInterface(NamedTuple):
     inline_policy: str | None = None
     # Semantic class used by analyses to opt into only the call shapes they own.
     kind: CallLikeKind = CallLikeKind.SEMANTIC
+
+
+@unique
+class FuncLikeInterfaceFlag(Enum):
+    """Semantic roles carried by a function-like operation kind."""
+
+    # The operation defines an executable kernel entry. Kernel entries have an
+    # implicit artifact export and a kernel ABI even without explicit attrs.
+    KERNEL_ENTRY = "kernel_entry"
 
 
 class FuncLikeInterface(NamedTuple):
@@ -4008,6 +4019,8 @@ class FuncLikeInterface(NamedTuple):
     # operand-backed signature owns every op operand; kernel declarations may
     # divide those definitions between this ABI field and their workload field.
     args: str | None = None
+    # Semantic roles intrinsic to the operation kind.
+    flags: tuple[FuncLikeInterfaceFlag, ...] = ()
 
 
 @unique

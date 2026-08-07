@@ -58,11 +58,14 @@ from loom.dsl import (
     VECTOR,
     VIEW,
     AttrDef,
+    CallLikeInterface,
+    CallLikeKind,
     ContractFamily,
     Dialect,
     EnumCase,
     EnumDef,
     FuncLikeInterface,
+    FuncLikeInterfaceFlag,
     HasAncestor,
     HasParent,
     ImplicitTerminator,
@@ -324,6 +327,7 @@ kernel_def = Op(
             export_linkage="export_linkage",
             predicates="predicates",
             body="body",
+            flags=(FuncLikeInterfaceFlag.KERNEL_ENTRY,),
         )
     ],
     verify="loom_kernel_def_verify",
@@ -1879,6 +1883,14 @@ kernel_launch = Op(
         ),
     ],
     traits=[UNKNOWN_EFFECTS, NoAncestor("kernel.def")],
+    interfaces=[
+        CallLikeInterface(
+            callee="callee",
+            operands="arguments",
+            results=None,
+            kind=CallLikeKind.SEMANTIC,
+        )
+    ],
     verify="loom_kernel_launch_verify",
     format=[
         SymbolRef("callee"),
