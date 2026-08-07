@@ -13,7 +13,7 @@
 #include "loom/target/arch/spirv/cooperative_properties.h"
 #include "loom/target/arch/spirv/facts.h"
 
-static bool loom_spirv_contract_numeric_scalar_type(
+bool loom_spirv_matrix_component_type(
     loom_contract_numeric_type_t numeric_type,
     loom_spirv_scalar_type_t* out_scalar_type) {
   *out_scalar_type = LOOM_SPIRV_SCALAR_TYPE_UNKNOWN;
@@ -51,6 +51,10 @@ static bool loom_spirv_contract_numeric_scalar_type(
     default:
       return false;
   }
+}
+
+loom_spirv_scope_t loom_spirv_matrix_scope(void) {
+  return LOOM_SPIRV_SCOPE_SUBGROUP;
 }
 
 static bool loom_spirv_contract_numeric_is_signed_integer(
@@ -252,20 +256,20 @@ static bool loom_spirv_cooperative_matrix_query_from_contract(
     return false;
   }
 
-  if (!loom_spirv_contract_numeric_scalar_type(
-          contract_request->lhs.numeric_type, &out_query->lhs_type) ||
-      !loom_spirv_contract_numeric_scalar_type(
-          contract_request->rhs.numeric_type, &out_query->rhs_type) ||
-      !loom_spirv_contract_numeric_scalar_type(
+  if (!loom_spirv_matrix_component_type(contract_request->lhs.numeric_type,
+                                        &out_query->lhs_type) ||
+      !loom_spirv_matrix_component_type(contract_request->rhs.numeric_type,
+                                        &out_query->rhs_type) ||
+      !loom_spirv_matrix_component_type(
           contract_request->accumulator.numeric_type,
           &out_query->accumulator_type) ||
-      !loom_spirv_contract_numeric_scalar_type(
-          contract_request->result.numeric_type, &out_query->result_type)) {
+      !loom_spirv_matrix_component_type(contract_request->result.numeric_type,
+                                        &out_query->result_type)) {
     out_diagnostic->rejection_bits = LOOM_CONTRACT_REJECTION_NUMERIC;
     return false;
   }
 
-  out_query->scope = LOOM_SPIRV_SCOPE_SUBGROUP;
+  out_query->scope = loom_spirv_matrix_scope();
   out_query->layout = LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_KHR;
   out_query->storage_class = LOOM_SPIRV_STORAGE_CLASS_PHYSICAL_STORAGE_BUFFER;
   out_query->operand_flags =

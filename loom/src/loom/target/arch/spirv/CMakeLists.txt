@@ -132,6 +132,7 @@ loom_cc_library(
     ::scalar_types
     iree::base
     loom::ir
+    loom::ops::type_registry
   PUBLIC
 )
 endif()
@@ -420,6 +421,24 @@ loom_cc_test(
     ::scalar_types
     iree::testing::gtest
     iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_test(
+  NAME
+    value_types_test
+  SRCS
+    "value_types_test.cc"
+  DEPS
+    ::value_types
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::type_registry
   LABELS
     "iree-build-requirement=loom.target.arch.spirv"
 )

@@ -91,7 +91,11 @@ loom_generated_cc_library(
 loom_cc_library(
     name = "isa",
     hdrs = ["isa.h"],
-    visibility = _SPIRV_EMIT_VISIBILITY + _TYPE_REGISTRY_VISIBILITY,
+    visibility = (
+        _SPIRV_EMIT_VISIBILITY +
+        _SPIRV_LOWER_VISIBILITY +
+        _TYPE_REGISTRY_VISIBILITY
+    ),
 )
 
 loom_generated_textual_header(
@@ -154,6 +158,7 @@ loom_cc_library(
         ":isa",
         ":scalar_types",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
         "//runtime/src/iree/base",
     ],
 )
@@ -366,6 +371,19 @@ loom_cc_test(
     srcs = ["scalar_types_test.cc"],
     deps = [
         ":scalar_types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "value_types_test",
+    srcs = ["value_types_test.cc"],
+    deps = [
+        ":value_types",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

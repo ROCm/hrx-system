@@ -148,7 +148,7 @@ low.kernel.def target<spirv.logical.core>(@hal_target_compact_matrix) workgroup_
   %input_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %17 = OpPtrAccessChain.storage_buffer.f32.byte_offset %input_aligned, %byte_offset_aligned
-  %fragment = OpCooperativeMatrixLoadKHR.init.f16.16x16x16.f32.subgroup.row_major %17
+  %fragment = OpCooperativeMatrixLoadKHR.init.f16.16x16x16.f32.subgroup.row_major %17 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
   %19 = OpPtrAccessChain.storage_buffer.f32.byte_offset %output_aligned, %byte_offset_aligned
   OpCooperativeMatrixStoreKHR.result.f16.16x16x16.f32.subgroup.row_major %19, %fragment
   return

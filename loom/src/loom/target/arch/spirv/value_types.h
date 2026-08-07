@@ -76,9 +76,9 @@ typedef struct loom_spirv_value_type_t {
 static_assert(sizeof(loom_spirv_value_type_t) == 20,
               "SPIR-V value types must remain compact");
 
-// Maps a public Loom scalar or native ordinary-vector type to its canonical
-// SPIR-V value type. Returns false for types that need other target-specific
-// aggregate semantics or have no logical SPIR-V representation.
+// Maps a public Loom scalar, native ordinary-vector, or SPIR-V aggregate type
+// to its canonical target-local value type. Returns false when the public type
+// is malformed or has no logical SPIR-V representation.
 bool loom_spirv_value_type_from_loom_type(
     loom_type_t type, loom_spirv_value_type_t* out_value_type);
 

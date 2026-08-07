@@ -11,6 +11,7 @@
 
 #include "loom/analysis/contract.h"
 #include "loom/ir/module.h"
+#include "loom/ops/vector/fragment.h"
 #include "loom/util/fact_table.h"
 
 #ifdef __cplusplus
@@ -41,6 +42,16 @@ typedef struct loom_contract_vector_mma_options_t {
   // Fallback and target primitive selection policy.
   loom_lowering_policy_t policy;
 } loom_contract_vector_mma_options_t;
+
+// Projects one matrix fragment into its target-independent operand contract.
+// The caller supplies the already-indexed fragment fact and the semantic role
+// of the value at its use site. This is the canonical numeric interpretation
+// shared by whole-matrix contract construction and target value typing.
+bool loom_contract_vector_operand_from_fragment(
+    const loom_module_t* module, loom_value_id_t value_id,
+    loom_vector_fragment_fact_t fragment, loom_contract_operand_role_t role,
+    loom_contract_operand_t* out_operand,
+    loom_contract_rejection_bits_t* out_rejection_bits);
 
 // Maps vector.mma plus fragment value facts to a generic matrix contract.
 //

@@ -391,7 +391,7 @@ static bool loom_contract_vector_operand_adapt_schema_to_typed_payload(
   return true;
 }
 
-static bool loom_contract_vector_operand_from_fragment(
+bool loom_contract_vector_operand_from_fragment(
     const loom_module_t* module, loom_value_id_t value_id,
     loom_vector_fragment_fact_t fact, loom_contract_operand_role_t role,
     loom_contract_operand_t* out_operand,

@@ -6,6 +6,8 @@
 
 #include "loom/target/arch/spirv/value_types.h"
 
+#include "loom/ops/type_registry.h"
+
 static bool loom_spirv_numeric_scalar_type_from_loom_scalar_type(
     loom_scalar_type_t type, loom_spirv_scalar_type_t* out_scalar_type) {
   *out_scalar_type = LOOM_SPIRV_SCALAR_TYPE_UNKNOWN;
@@ -52,6 +54,32 @@ bool loom_spirv_value_type_from_loom_type(
   *out_value_type = (loom_spirv_value_type_t){
       /*.value_class=*/LOOM_SPIRV_VALUE_CLASS_UNKNOWN,
   };
+  if (loom_spirv_cooperative_matrix_type_isa(type)) {
+    const int64_t rows = loom_spirv_cooperative_matrix_type_rows(type);
+    const int64_t columns = loom_spirv_cooperative_matrix_type_columns(type);
+    const loom_spirv_scalar_type_t component_type =
+        loom_spirv_cooperative_matrix_type_component_type(type);
+    const loom_spirv_scope_t scope =
+        loom_spirv_cooperative_matrix_type_scope(type);
+    const loom_spirv_cooperative_matrix_use_t use =
+        loom_spirv_cooperative_matrix_type_use(type);
+    if (rows <= 0 || rows > UINT16_MAX || columns <= 0 ||
+        columns > UINT16_MAX) {
+      return false;
+    }
+    *out_value_type = (loom_spirv_value_type_t){
+        .value_class = LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX,
+        .scalar_type = component_type,
+        .cooperative_matrix =
+            {
+                .rows = (uint16_t)rows,
+                .columns = (uint16_t)columns,
+                .scope = scope,
+                .use = use,
+            },
+    };
+    return true;
+  }
   if (loom_type_is_scalar(type)) {
     if (loom_type_element_type(type) == LOOM_SCALAR_TYPE_I1) {
       *out_value_type = (loom_spirv_value_type_t){

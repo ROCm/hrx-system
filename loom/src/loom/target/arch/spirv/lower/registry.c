@@ -8,6 +8,7 @@
 
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/type_registry.h"
 #include "loom/ops/vector/fragment.h"
 #include "loom/target/arch/spirv/abi.h"
 #include "loom/target/arch/spirv/contracts/logical_core.h"
@@ -63,16 +64,91 @@ static bool loom_spirv_low_type_is_id_register(loom_type_t type) {
              SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID;
 }
 
-static bool loom_spirv_source_value_is_cooperative_matrix(
-    loom_low_lower_context_t* context, loom_value_id_t source_value_id) {
-  const loom_value_fact_table_t* fact_table =
-      loom_low_lower_context_fact_table(context);
+static bool loom_spirv_source_value_fragment(
+    const loom_value_fact_table_t* fact_table, loom_value_id_t source_value_id,
+    loom_vector_fragment_fact_t* out_fragment) {
   const loom_value_facts_t facts =
       loom_value_fact_table_lookup(fact_table, source_value_id);
-  loom_vector_fragment_fact_t fragment = {0};
   return loom_vector_fragment_fact_query_value_facts(&fact_table->context,
-                                                     facts, &fragment) &&
-         loom_vector_fragment_fact_has_matrix_shape(fragment);
+                                                     facts, out_fragment) &&
+         loom_vector_fragment_fact_has_matrix_shape(*out_fragment);
+}
+
+static bool loom_spirv_fragment_dimension(
+    const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
+    uint16_t* out_dimension) {
+  int64_t dimension = 0;
+  if (value_id == LOOM_VALUE_ID_INVALID ||
+      !loom_value_facts_as_exact_i64(
+          loom_value_fact_table_lookup(fact_table, value_id), &dimension) ||
+      dimension <= 0 || dimension > UINT16_MAX) {
+    return false;
+  }
+  *out_dimension = (uint16_t)dimension;
+  return true;
+}
+
+static bool loom_spirv_fragment_role(
+    loom_vector_fragment_fact_t fragment,
+    loom_contract_operand_role_t* out_contract_role,
+    loom_spirv_cooperative_matrix_use_t* out_use) {
+  if (fragment.role_flags == LOOM_VECTOR_FRAGMENT_ROLE_FLAG_LHS) {
+    *out_contract_role = LOOM_CONTRACT_OPERAND_ROLE_LHS;
+    *out_use = LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_AKHR;
+    return true;
+  }
+  if (fragment.role_flags == LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RHS) {
+    *out_contract_role = LOOM_CONTRACT_OPERAND_ROLE_RHS;
+    *out_use = LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_BKHR;
+    return true;
+  }
+  if (loom_vector_fragment_fact_is_accumulator_like(fragment)) {
+    *out_contract_role = LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR;
+    *out_use = LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_ACCUMULATOR_KHR;
+    return true;
+  }
+  return false;
+}
+
+static bool loom_spirv_fragment_matrix_payload(
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t source_value_id, loom_vector_fragment_fact_t fragment,
+    uint16_t* out_rows, uint16_t* out_columns,
+    loom_spirv_scalar_type_t* out_component_type,
+    loom_spirv_cooperative_matrix_use_t* out_use) {
+  if (!loom_spirv_fragment_dimension(
+          fact_table, loom_vector_fragment_fact_row_value(fragment),
+          out_rows) ||
+      !loom_spirv_fragment_dimension(
+          fact_table, loom_vector_fragment_fact_column_value(fragment),
+          out_columns)) {
+    return false;
+  }
+  if (fragment.shape_rank == 3) {
+    uint16_t block_count = 0;
+    if (!loom_spirv_fragment_dimension(
+            fact_table, loom_vector_fragment_fact_block_value(fragment),
+            &block_count) ||
+        block_count != 1) {
+      return false;
+    }
+  }
+
+  loom_contract_operand_role_t contract_role =
+      LOOM_CONTRACT_OPERAND_ROLE_UNKNOWN;
+  if (!loom_spirv_fragment_role(fragment, &contract_role, out_use)) {
+    return false;
+  }
+  loom_contract_operand_t contract_operand = {0};
+  loom_contract_rejection_bits_t rejection_bits = LOOM_CONTRACT_REJECTION_NONE;
+  if (!loom_contract_vector_operand_from_fragment(
+          module, source_value_id, fragment, contract_role, &contract_operand,
+          &rejection_bits) ||
+      !loom_spirv_matrix_component_type(contract_operand.numeric_type,
+                                        out_component_type)) {
+    return false;
+  }
+  return true;
 }
 
 static iree_status_t loom_spirv_map_type(void* user_data,
@@ -116,8 +192,28 @@ static iree_status_t loom_spirv_map_value(void* user_data,
       return loom_low_lower_emit_source_type_unsupported(
           context, source_op, IREE_SV("source"), source_type);
     }
-    if (loom_spirv_source_value_is_cooperative_matrix(context,
-                                                      source_value_id)) {
+    loom_vector_fragment_fact_t fragment = {0};
+    const loom_value_fact_table_t* fact_table =
+        loom_low_lower_context_fact_table(context);
+    if (loom_spirv_source_value_fragment(fact_table, source_value_id,
+                                         &fragment)) {
+      uint16_t rows = 0;
+      uint16_t columns = 0;
+      loom_spirv_scalar_type_t component_type = LOOM_SPIRV_SCALAR_TYPE_UNKNOWN;
+      loom_spirv_cooperative_matrix_use_t use =
+          LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MAX;
+      if (loom_spirv_fragment_matrix_payload(
+              loom_low_lower_context_module(context), fact_table,
+              source_value_id, fragment, &rows, &columns, &component_type,
+              &use)) {
+        loom_type_t matrix_type = loom_type_none();
+        IREE_RETURN_IF_ERROR(loom_spirv_cooperative_matrix_type_make(
+            loom_low_lower_context_module(context), rows, columns,
+            component_type, loom_spirv_matrix_scope(), use, &matrix_type));
+        return loom_spirv_make_typed_register_type(
+            context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, matrix_type,
+            out_low_type);
+      }
       return loom_spirv_make_register_type(
           context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, out_low_type);
     }
