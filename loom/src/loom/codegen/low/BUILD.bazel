@@ -239,6 +239,7 @@ loom_cc_library(
     hdrs = ["storage_layout.h"],
     deps = [
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -426,6 +427,7 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

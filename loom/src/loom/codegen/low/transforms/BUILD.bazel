@@ -29,6 +29,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:rematerialization",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/pass:pipeline",
         "//loom/src/loom/pass:registry",

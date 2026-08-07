@@ -192,6 +192,7 @@ loom_cc_library(
     loom::error::emitter
     loom::ir
     loom::ops::low
+    loom::ops::type_registry
     loom::rewrite::rewriter
     loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::refs::target_refs
@@ -343,6 +344,7 @@ loom_cc_library(
     loom::codegen::low::storage_layout
     loom::error::emitter
     loom::error::error_defs
+    loom::ops::type_registry
     loom::target::arch::amdgpu::error_defs
     loom::target::arch::amdgpu::refs::target_refs
   PUBLIC

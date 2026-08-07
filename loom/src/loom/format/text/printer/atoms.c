@@ -345,22 +345,6 @@ static iree_status_t loom_print_scalar_type(loom_output_stream_t* stream,
   return loom_output_stream_write_cstring(stream, name);
 }
 
-static iree_status_t loom_print_encoding_type(loom_output_stream_t* stream,
-                                              loom_type_t type) {
-  loom_encoding_role_t role = loom_type_encoding_role(type);
-  if (role == LOOM_ENCODING_ROLE_UNKNOWN) {
-    return loom_output_stream_write_cstring(stream, "encoding");
-  }
-  const char* role_name = loom_encoding_role_name(role);
-  if (!role_name) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unknown encoding role %d", (int)role);
-  }
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "encoding<"));
-  IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, role_name));
-  return loom_output_stream_write_char(stream, '>');
-}
-
 static bool loom_print_is_bare_identifier_start(char c) {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' ||
          c == '$';
@@ -749,22 +733,9 @@ static iree_status_t loom_text_print_type_impl(
       }
       return loom_output_stream_write_cstring(stream, ">");
     }
-    case LOOM_TYPE_STORAGE: {
-      const char* space_name =
-          loom_storage_space_name(loom_type_storage_space(type));
-      if (!space_name) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "unknown storage space %d",
-                                (int)loom_type_storage_space(type));
-      }
-      IREE_RETURN_IF_ERROR(
-          loom_output_stream_write_cstring(stream, "low.storage<"));
-      IREE_RETURN_IF_ERROR(
-          loom_output_stream_write_cstring(stream, space_name));
-      return loom_output_stream_write_cstring(stream, ">");
-    }
+    case LOOM_TYPE_STORAGE:
     case LOOM_TYPE_ENCODING:
-      return loom_print_encoding_type(stream, type);
+      return loom_print_descriptor_backed_type(type, module, stream, ctx);
     case LOOM_TYPE_BUFFER:
       return loom_output_stream_write_cstring(stream, "buffer");
     case LOOM_TYPE_POOL: {

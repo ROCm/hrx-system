@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Descriptor-backed attribute field schemas shared by operations,
-// parameterized attributes, and generic parameterized types.
+// parameterized attributes, and descriptor-backed types.
 
 #ifndef LOOM_IR_ATTRIBUTE_SCHEMA_H_
 #define LOOM_IR_ATTRIBUTE_SCHEMA_H_

@@ -10,6 +10,7 @@
 
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/storage_layout.h"
+#include "loom/ops/type_registry.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/emit/native/amdgpu/register_class.h"
@@ -54,7 +55,7 @@ loom_amdgpu_native_preflight_emit_unsupported_storage_space(
     const loom_amdgpu_native_preflight_options_t* options,
     loom_amdgpu_native_preflight_t* preflight) {
   const iree_string_view_t storage_space =
-      iree_make_cstring_view(loom_storage_space_name(reservation->space));
+      loom_low_storage_type_space_name(reservation->space);
   if (!options || options->emitter.fn == NULL) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,

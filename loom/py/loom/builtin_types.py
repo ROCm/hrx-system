@@ -7,10 +7,10 @@
 """Built-in loom type declarations.
 
 These TypeDefs define the textual format for the core loom types.
-Scalar types (f32, i32, index) and the first-class ``encoding`` SSA
-type are keywords, not TypeDefs. Core named types such as tile<...>,
-tensor<...>, vector<...>, view<...>, bare buffer, and pool<...>, plus dotted
-dialect types such as hal.buffer and vm.ref<...>, are TypeDefs.
+Scalar types (f32, i32, index) are keywords, not TypeDefs. Core named types
+such as encoding, tile<...>, tensor<...>, vector<...>, view<...>, bare buffer,
+and pool<...>, plus dotted dialect types such as hal.buffer and vm.ref<...>,
+are TypeDefs.
 
 Dialect-specific types are declared in their respective dialect files
 (e.g., dialect/hal/, dialect/vm/) using the same TypeDef pattern.
@@ -18,24 +18,29 @@ Dialect-specific types are declared in their respective dialect files
 
 from loom.assembly import (
     COMMA,
-    Attr,
     EncodingOf,
     OptionalGroup,
+    Param,
     ScalarOf,
     ShapeOf,
     kw,
 )
 from loom.dsl import (
-    ANY,
+    ATTR_TYPE_ENUM,
+    AttrDef,
     EncodingParam,
+    EnumCase,
+    EnumDef,
     ScalarParam,
     ShapeParam,
     TypeDef,
-    TypeParam,
 )
+from loom.ir import EncodingRole, EncodingType, StorageSpace, StorageType
 
 __all__ = [
     "ALL_BUILTIN_TYPES",
+    # Encoding type.
+    "encoding_type",
     # Shaped types.
     "tile_type",
     "tensor_type",
@@ -48,6 +53,40 @@ __all__ = [
     # Storage type.
     "storage_type",
 ]
+
+# ============================================================================
+# encoding<role> - encoding SSA value role
+# ============================================================================
+
+EncodingRoleAttr = EnumDef(
+    "EncodingRole",
+    [
+        EnumCase("layout", EncodingRole.LAYOUT.value),
+        EnumCase("schema", EncodingRole.SCHEMA.value),
+        EnumCase("storage", EncodingRole.STORAGE.value),
+        EnumCase("transform", EncodingRole.TRANSFORM.value),
+    ],
+    doc="Semantic role carried by an encoding SSA value type.",
+    c_type="loom_encoding_role_t",
+    c_const_prefix="LOOM_ENCODING_ROLE",
+    c_include="loom/ir/types.h",
+)
+
+encoding_type = TypeDef(
+    name="encoding",
+    doc="Encoding SSA value with an optional semantic role.",
+    ir_kind="encoding",
+    python_type=EncodingType,
+    params=[
+        AttrDef(
+            "role",
+            ATTR_TYPE_ENUM,
+            enum_def=EncodingRoleAttr,
+            optional=True,
+        )
+    ],
+    format=[OptionalGroup([Param("role")], anchor="role")],
+)
 
 # ============================================================================
 # tile<...> — tile-level aggregate value
@@ -168,12 +207,27 @@ pool_type = TypeDef(
 # low.storage<space> — function-local byte storage
 # ============================================================================
 
+StorageSpaceAttr = EnumDef(
+    "StorageSpace",
+    [
+        EnumCase("stack", StorageSpace.STACK.value),
+        EnumCase("scratch", StorageSpace.SCRATCH.value),
+        EnumCase("private", StorageSpace.PRIVATE.value),
+        EnumCase("workgroup", StorageSpace.WORKGROUP.value),
+    ],
+    doc="Function-local byte storage space.",
+    c_type="loom_storage_space_t",
+    c_const_prefix="LOOM_STORAGE_SPACE",
+    c_include="loom/ir/types.h",
+)
+
 storage_type = TypeDef(
     name="low.storage",
     doc="Function-local byte storage handle.",
     ir_kind="storage",
-    params=[TypeParam("space", ANY)],
-    format=[Attr("space")],
+    python_type=StorageType,
+    params=[AttrDef("space", ATTR_TYPE_ENUM, enum_def=StorageSpaceAttr)],
+    format=[Param("space")],
     fact_domain="loom_storage_fact_domain",
 )
 
@@ -182,6 +236,7 @@ storage_type = TypeDef(
 # ============================================================================
 
 ALL_BUILTIN_TYPES: tuple[TypeDef, ...] = (
+    encoding_type,
     tile_type,
     tensor_type,
     vector_type,

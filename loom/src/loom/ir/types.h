@@ -295,13 +295,6 @@ static inline bool loom_encoding_role_is_valid(loom_encoding_role_t role) {
   return (uint32_t)role < LOOM_ENCODING_ROLE_COUNT_;
 }
 
-// Returns the short text spelling for an encoding role, or NULL if invalid.
-const char* loom_encoding_role_name(loom_encoding_role_t role);
-
-// Parses the short text spelling for an encoding role.
-bool loom_encoding_role_parse(iree_string_view_t text,
-                              loom_encoding_role_t* out_role);
-
 // Function-local storage space. Stored in the element_type byte of the type
 // header for LOOM_TYPE_STORAGE.
 enum loom_storage_space_e {
@@ -322,13 +315,6 @@ typedef uint8_t loom_storage_space_t;
 static inline bool loom_storage_space_is_valid(loom_storage_space_t space) {
   return (uint32_t)space < LOOM_STORAGE_SPACE_COUNT_;
 }
-
-// Returns the short text spelling for a storage space, or NULL if invalid.
-const char* loom_storage_space_name(loom_storage_space_t space);
-
-// Parses the short text spelling for a storage space.
-bool loom_storage_space_parse(iree_string_view_t text,
-                              loom_storage_space_t* out_space);
 
 // Type flags (packed into header bits 20-23).
 enum loom_type_flags_e {

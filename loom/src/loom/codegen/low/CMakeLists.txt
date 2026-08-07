@@ -234,6 +234,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::ir
     loom::ops::low
+    loom::ops::type_registry
   PUBLIC
 )
 
@@ -446,6 +447,7 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::ops::op_defs
+    loom::ops::type_registry
   PUBLIC
 )
 

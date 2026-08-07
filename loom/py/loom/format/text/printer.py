@@ -246,12 +246,8 @@ def print_type(
                 else f" : {print_type(value_type, context, type_registry)}"
             )
             return f"reg<{reg_class}{unit_suffix}{value_suffix}>"
-        case StorageType():
-            return repr(ir_type)
         case NoneType():
             return "none"
-        case EncodingType():
-            return repr(ir_type)
         case ParameterizedType():
             return _print_descriptor_backed_type(
                 ir_type, ir_type.definition, context, type_registry

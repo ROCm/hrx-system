@@ -8,6 +8,7 @@
 
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/type_registry.h"
 
 iree_host_size_t loom_low_storage_space_set_names(
     loom_low_storage_space_set_t set, iree_host_size_t capacity,
@@ -25,8 +26,7 @@ iree_host_size_t loom_low_storage_space_set_names(
       continue;
     }
     if (count < capacity) {
-      out_names[count] =
-          iree_make_cstring_view(loom_storage_space_name(storage_space));
+      out_names[count] = loom_low_storage_type_space_name(storage_space);
     }
     ++count;
   }

@@ -16,6 +16,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/type_registry.h"
 
 typedef struct loom_low_materialized_spill_slot_t {
   // SSA value ID produced by the generated low.storage.reserve op.
@@ -185,8 +186,7 @@ static iree_status_t loom_low_allocation_emit_unsupported_spill_storage_space(
       loom_param_string(loom_low_diagnostic_value_class_name(
           table->target.descriptor_set, assignment->value_class)),
       loom_param_string(loom_low_spill_slot_space_name(plan->slot_space)),
-      loom_param_string(
-          iree_make_cstring_view(loom_storage_space_name(storage_space))),
+      loom_param_string(loom_low_storage_type_space_name(storage_space)),
       loom_param_string_list(supported_storage_space_names,
                              supported_storage_space_count),
   };

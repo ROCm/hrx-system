@@ -14,6 +14,7 @@
 #include "loom/ir/parameterized_type.h"
 #include "loom/ir/types.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ir/types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -82,6 +83,38 @@ typedef struct loom_type_descriptor_t {
   // Descriptor-backed parameter schema, or NULL when not declared.
   const loom_parameterized_type_descriptor_t* parameterized;
 } loom_type_descriptor_t;
+
+extern const loom_parameterized_type_descriptor_t loom_encoding_type_parameterized_descriptor;
+static inline iree_string_view_t loom_encoding_type_role_name(loom_encoding_role_t value) {
+  loom_bstring_t name = loom_attr_descriptor_enum_case_name(
+      &loom_encoding_type_parameterized_descriptor.parameter_descriptors[0], (uint8_t)value);
+  return name ? loom_bstring_view(name) : iree_string_view_empty();
+}
+static inline bool loom_encoding_type_role_parse(iree_string_view_t name, loom_encoding_role_t* out_value) {
+  uint8_t value = 0;
+  if (!loom_attr_descriptor_find_enum_case(
+          &loom_encoding_type_parameterized_descriptor.parameter_descriptors[0], name, &value)) {
+    return false;
+  }
+  *out_value = (loom_encoding_role_t)value;
+  return true;
+}
+
+extern const loom_parameterized_type_descriptor_t loom_low_storage_type_parameterized_descriptor;
+static inline iree_string_view_t loom_low_storage_type_space_name(loom_storage_space_t value) {
+  loom_bstring_t name = loom_attr_descriptor_enum_case_name(
+      &loom_low_storage_type_parameterized_descriptor.parameter_descriptors[0], (uint8_t)value);
+  return name ? loom_bstring_view(name) : iree_string_view_empty();
+}
+static inline bool loom_low_storage_type_space_parse(iree_string_view_t name, loom_storage_space_t* out_value) {
+  uint8_t value = 0;
+  if (!loom_attr_descriptor_find_enum_case(
+          &loom_low_storage_type_parameterized_descriptor.parameter_descriptors[0], name, &value)) {
+    return false;
+  }
+  *out_value = (loom_storage_space_t)value;
+  return true;
+}
 
 // Synthetic scope for parameterized value coverage.
 typedef enum loom_test_scope_type_scope_e {
