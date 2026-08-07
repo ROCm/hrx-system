@@ -28,6 +28,7 @@
 
 #include "binding/hip/binding_internal.h"
 #include "binding/hip/blocking_printf_provider.h"
+#include "binding/hip/dynamic_logging.h"
 #include "binding/hip/launch_params.h"
 #include "binding/hip/legacy_launch_state.h"
 #include "common/graph.h"
@@ -45,13 +46,13 @@
 #endif
 
 #if IREE_HIP_VERBOSE_DEBUG
-#define HIP_DEBUG_LOG(fmt, ...)          \
-  do {                                   \
-    fprintf(stderr, fmt, ##__VA_ARGS__); \
-    fflush(stderr);                      \
+#define HIP_DEBUG_LOG(format, ...)          \
+  do {                                      \
+    fprintf(stderr, format, ##__VA_ARGS__); \
+    fflush(stderr);                         \
   } while (0)
 #else
-#define HIP_DEBUG_LOG(fmt, ...) ((void)0)
+#define HIP_DEBUG_LOG(format, ...) ((void)0)
 #endif
 
 //===----------------------------------------------------------------------===//
@@ -1154,23 +1155,25 @@ static hipError_t iree_hip_thread_error_peek(void) {
 }
 
 // Helper macro to set thread-local error and return.
-#define HIP_RETURN_ERROR(error)               \
-  do {                                        \
-    hipError_t _err = (error);                \
-    if (_err != hipSuccess) {                 \
-      iree_hip_thread_error_set(_err, false); \
-    }                                         \
-    return _err;                              \
+#define HIP_RETURN_ERROR(error)                                        \
+  do {                                                                 \
+    hipError_t _err = (error);                                         \
+    if (_err != hipSuccess) {                                          \
+      iree_hip_thread_error_set(_err, false);                          \
+    }                                                                  \
+    HRX_HIP_DYNAMIC_LOG("[HIP_API] %s returned %d\n", __func__, _err); \
+    return _err;                                                       \
   } while (0)
 
 // Helper macro to set sticky thread-local error and return.
-#define HIP_RETURN_STICKY_ERROR(error)       \
-  do {                                       \
-    hipError_t _err = (error);               \
-    if (_err != hipSuccess) {                \
-      iree_hip_thread_error_set(_err, true); \
-    }                                        \
-    return _err;                             \
+#define HIP_RETURN_STICKY_ERROR(error)                                 \
+  do {                                                                 \
+    hipError_t _err = (error);                                         \
+    if (_err != hipSuccess) {                                          \
+      iree_hip_thread_error_set(_err, true);                           \
+    }                                                                  \
+    HRX_HIP_DYNAMIC_LOG("[HIP_API] %s returned %d\n", __func__, _err); \
+    return _err;                                                       \
   } while (0)
 
 #define _GET_ARG_COUNT_2(_1, _2, COUNT, ...) COUNT
