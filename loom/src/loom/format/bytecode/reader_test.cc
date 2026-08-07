@@ -2604,6 +2604,14 @@ TEST_F(ReaderTest, ReadsSsaEncodingBindings) {
 
 TEST_F(ReaderTest, ReadsCoResultDynamicDimBindings) {
   loom_module_t* module = CreateCoResultDimFunctionModule();
+  loom_op_t* source_func_op = module->symbols.entries[0].defining_op;
+  loom_region_t* source_body = loom_test_func_body(source_func_op);
+  loom_op_t* source_deflate_op = loom_region_entry_block(source_body)->first_op;
+  loom_value_slice_t source_results =
+      loom_test_deflate_results(source_deflate_op);
+  ASSERT_EQ(source_results.count, 2u);
+  EXPECT_TRUE(
+      loom_module_value_has_type_uses(module, source_results.values[1]));
   auto bytes = WriteModule(module);
 
   loom_module_t* read_module = nullptr;
@@ -2629,6 +2637,7 @@ TEST_F(ReaderTest, ReadsCoResultDynamicDimBindings) {
       loom_module_value_type(read_module, results.values[0]);
   ASSERT_TRUE(loom_type_dim_is_dynamic_at(output_type, 0));
   EXPECT_EQ(loom_type_dim_value_id_at(output_type, 0), results.values[1]);
+  EXPECT_TRUE(loom_module_value_has_type_uses(read_module, results.values[1]));
 
   loom_module_free(read_module);
   loom_module_free(module);

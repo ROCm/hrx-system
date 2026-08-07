@@ -3027,15 +3027,8 @@ iree_status_t loom_builder_finalize_op(loom_builder_t* builder, loom_op_t* op) {
           loom_value_def_make_op(op, i);
     }
   }
-  for (uint16_t i = 0; i < op->result_count; ++i) {
-    if (results[i] != LOOM_VALUE_ID_INVALID) {
-      loom_type_t result_type =
-          loom_module_value_type(builder->module, results[i]);
-      if (!loom_type_may_reference_values(result_type)) continue;
-      IREE_RETURN_IF_ERROR(
-          loom_module_refresh_value_type_uses(builder->module, results[i]));
-    }
-  }
+  // Result type uses are installed when values are defined or their types
+  // change. Finalization only assigns the operation definition site.
   IREE_RETURN_IF_ERROR(
       loom_module_note_op_attribute_value_refs(builder->module, op));
   // Successor-bearing ops make their enclosing region unstructured CFG.
