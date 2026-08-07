@@ -126,7 +126,6 @@ loom_cc_library(
     loom::codegen::low::target_binding
     loom::ir
     loom::ops::low
-    loom::target::arch::spirv::abi
     loom::target::arch::spirv::descriptors::descriptors_ids
     loom::target::arch::spirv::registers
     loom::target::arch::spirv::scalar_types

@@ -37,7 +37,6 @@ loom_cc_library(
     loom::ops::low
     loom::ops::type_registry
     loom::ops::vector
-    loom::target::arch::spirv::abi
     loom::target::arch::spirv::contracts
     loom::target::arch::spirv::cooperative_properties
     loom::target::arch::spirv::descriptors

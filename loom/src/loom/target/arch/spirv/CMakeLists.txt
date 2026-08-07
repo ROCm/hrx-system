@@ -109,19 +109,6 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV)
 loom_cc_library(
   NAME
-    abi
-  HDRS
-    "abi.h"
-  DEPS
-    ::value_types
-    iree::base
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_SPIRV)
-loom_cc_library(
-  NAME
     value_types
   HDRS
     "value_types.h"
@@ -311,7 +298,6 @@ loom_cc_library(
   SRCS
     "low_verify.c"
   DEPS
-    ::abi
     ::error_defs
     ::module_contract
     ::packet_rows

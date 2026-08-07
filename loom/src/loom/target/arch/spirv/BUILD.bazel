@@ -140,16 +140,6 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "abi",
-    hdrs = ["abi.h"],
-    visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY,
-    deps = [
-        ":value_types",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
     name = "value_types",
     srcs = ["value_types.c"],
     hdrs = ["value_types.h"],
@@ -286,7 +276,6 @@ loom_cc_library(
     hdrs = ["low_verify.h"],
     visibility = _SPIRV_TOOLING_VISIBILITY,
     deps = [
-        ":abi",
         ":error_defs",
         ":module_contract",
         ":packet_rows",

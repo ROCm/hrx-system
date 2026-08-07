@@ -10,7 +10,7 @@ func.def target(@target) @index_constants() -> (index, index, offset) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [23, 23, 0]}) @index_constants() -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.offset64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_constants() -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.offset64>) asm {
   %minimum = OpConstant.i32 -2147483648 : reg<spirv.id : index>
   %maximum = OpConstant.i32 2147483647 : reg<spirv.id : index>
   %byte_limit = OpConstant.offset64 9223372036854775807
@@ -26,7 +26,7 @@ func.def target(@target) @index_assume_ordinals(%coordinate0: index, %byte_offse
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 0], spirv_result_value_types = [23, 0]}) @index_assume_ordinals(%coordinate: reg<spirv.id : index>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : index>, reg<spirv.offset64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_assume_ordinals(%coordinate: reg<spirv.id : index>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : index>, reg<spirv.offset64>) asm {
   return %coordinate, %byte_offset
 }
 
@@ -42,7 +42,7 @@ func.def target(@target) @boolean_address_cast_family(%flag: i1, %coordinate: in
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [1, 23, 0], spirv_result_value_types = [23, 0, 1, 1]}) @boolean_address_cast_family(%flag: reg<spirv.id : i1>, %coordinate: reg<spirv.id : index>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : index>, reg<spirv.offset64>, reg<spirv.id : i1>, reg<spirv.id : i1>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @boolean_address_cast_family(%flag: reg<spirv.id : i1>, %coordinate: reg<spirv.id : index>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.id : index>, reg<spirv.offset64>, reg<spirv.id : i1>, reg<spirv.id : i1>) asm {
   %18 = OpConstant.i32 1 : reg<spirv.id : index>
   %19 = OpConstant.i32 0 : reg<spirv.id : index>
   %flag_index = OpSelect %flag, %18, %19 : reg<spirv.id : index>
@@ -75,7 +75,7 @@ func.def target(@target) @index_payload_cast_family(%i8: i8, %i16: i16, %i32: i3
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [21, 22, 23, 24, 23], spirv_result_value_types = [23, 23, 23, 23, 21, 22, 23, 24]}) @index_payload_cast_family(%i8: reg<spirv.id : i8>, %i16: reg<spirv.id : i16>, %i32: reg<spirv.id : i32>, %i64: reg<spirv.id : i64>, %coordinate: reg<spirv.id : index>) -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : i8>, reg<spirv.id : i16>, reg<spirv.id : i32>, reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_payload_cast_family(%i8: reg<spirv.id : i8>, %i16: reg<spirv.id : i16>, %i32: reg<spirv.id : i32>, %i64: reg<spirv.id : i64>, %coordinate: reg<spirv.id : index>) -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : i8>, reg<spirv.id : i16>, reg<spirv.id : i32>, reg<spirv.id : i64>) asm {
   %from_i8 = OpSConvert.i8.i32 %i8 : reg<spirv.id : index>
   %from_i16 = OpSConvert.i16.i32 %i16 : reg<spirv.id : index>
   %from_i32 = OpCopyObject.i32 %i32 : reg<spirv.id : index>
@@ -104,7 +104,7 @@ func.def target(@target) @offset_payload_cast_family(%i8: i8, %i16: i16, %i32: i
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [21, 22, 23, 24, 0], spirv_result_value_types = [0, 0, 0, 0, 21, 22, 23, 24]}) @offset_payload_cast_family(%i8: reg<spirv.id : i8>, %i16: reg<spirv.id : i16>, %i32: reg<spirv.id : i32>, %i64: reg<spirv.id : i64>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.id : i8>, reg<spirv.id : i16>, reg<spirv.id : i32>, reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset_payload_cast_family(%i8: reg<spirv.id : i8>, %i16: reg<spirv.id : i16>, %i32: reg<spirv.id : i32>, %i64: reg<spirv.id : i64>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.offset64>, reg<spirv.id : i8>, reg<spirv.id : i16>, reg<spirv.id : i32>, reg<spirv.id : i64>) asm {
   %35 = OpBitcast.i8.u8 %i8
   %from_i8 = OpUConvert.u8.offset64 %35
   %37 = OpBitcast.i16.u16 %i16
@@ -133,7 +133,7 @@ func.def target(@target) @address_domain_cast_family(%coordinate0: index, %byte_
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 0], spirv_result_value_types = [0, 23]}) @address_domain_cast_family(%coordinate: reg<spirv.id : index>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.offset64>, reg<spirv.id : index>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @address_domain_cast_family(%coordinate: reg<spirv.id : index>, %byte_offset: reg<spirv.offset64>) -> (reg<spirv.offset64>, reg<spirv.id : index>) asm {
   %12 = OpBitcast.i32.u32 %coordinate
   %as_offset = OpUConvert.u32.offset64 %12
   %14 = OpUConvert.offset64.u32 %byte_offset

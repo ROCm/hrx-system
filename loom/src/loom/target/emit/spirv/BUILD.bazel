@@ -120,7 +120,6 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
-        "//loom/src/loom/target/arch/spirv:abi",
         "//loom/src/loom/target/arch/spirv:registers",
         "//loom/src/loom/target/arch/spirv:scalar_types",
         "//loom/src/loom/target/arch/spirv:value_types",

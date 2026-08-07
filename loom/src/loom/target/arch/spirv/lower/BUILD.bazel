@@ -45,7 +45,6 @@ loom_cc_library(
         "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/target:registers",
-        "//loom/src/loom/target/arch/spirv:abi",
         "//loom/src/loom/target/arch/spirv:cooperative_properties",
         "//loom/src/loom/target/arch/spirv:error_defs",
         "//loom/src/loom/target/arch/spirv:facts",

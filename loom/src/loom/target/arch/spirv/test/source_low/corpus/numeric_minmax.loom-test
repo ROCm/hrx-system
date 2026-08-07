@@ -74,7 +74,7 @@ func.def target(@target) @index_minmax_sgpr(%lhs0: index, %rhs0: index) -> (inde
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @index_minmax_sgpr(%lhs: reg<spirv.id : index>, %rhs: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_minmax_sgpr(%lhs: reg<spirv.id : index>, %rhs: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
   %11 = OpSLessThan %lhs, %rhs
   %min = OpSelect %11, %lhs, %rhs : reg<spirv.id : index>
   %13 = OpSGreaterThan %lhs, %rhs
@@ -93,7 +93,7 @@ func.def target(@target) @scf_select_sgpr(%lhs: i32, %rhs: i32, %a: i32, %b: i32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23, 23], spirv_result_value_types = [23]}) @scf_select_sgpr(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %a: reg<spirv.id : i32>, %b: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scf_select_sgpr(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %a: reg<spirv.id : i32>, %b: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %cond = OpSLessThan %lhs, %rhs
   %selected = OpSelect %cond, %a, %b
   return %selected
@@ -109,7 +109,7 @@ func.def target(@target) @scf_select_i64_sgpr(%lhs: i32, %rhs: i32, %a: i64, %b:
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 24, 24], spirv_result_value_types = [24]}) @scf_select_i64_sgpr(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %a: reg<spirv.id : i64>, %b: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scf_select_i64_sgpr(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %a: reg<spirv.id : i64>, %b: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
   %cond = OpSLessThan %lhs, %rhs
   %selected = OpSelect.i64 %cond, %a, %b
   return %selected
@@ -133,7 +133,7 @@ func.def target(@target) @scf_select_q6_nibble_i8(%code: i32, %use_high: i32) ->
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [21]}) @scf_select_q6_nibble_i8(%code: reg<spirv.id : i32>, %use_high: reg<spirv.id : i32>) -> (reg<spirv.id : i8>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scf_select_q6_nibble_i8(%code: reg<spirv.id : i32>, %use_high: reg<spirv.id : i32>) -> (reg<spirv.id : i8>) asm {
   %low_selector = OpConstant.i32 0
   %nibble_shift = OpConstant.i32 4
   %mask = OpConstant.i32 15
@@ -162,7 +162,7 @@ func.def target(@target) @scf_select_scale_piece_i16(%packed: i32, %use_high: i3
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [22]}) @scf_select_scale_piece_i16(%packed: reg<spirv.id : i32>, %use_high: reg<spirv.id : i32>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scf_select_scale_piece_i16(%packed: reg<spirv.id : i32>, %use_high: reg<spirv.id : i32>) -> (reg<spirv.id : i16>) asm {
   %low_selector = OpConstant.i32 0
   %halfword_shift = OpConstant.i32 16
   %low = OpSConvert.i32.i16 %packed
@@ -374,7 +374,7 @@ func.def target(@target) @scf_select_i1_true_condition(%true_value: f32, %false_
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [18, 18], spirv_result_value_types = [18]}) @scf_select_i1_true_condition(%true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scf_select_i1_true_condition(%true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
   return %true_value
 }
 
@@ -388,7 +388,7 @@ func.def target(@target) @scf_select_i1_false_condition_constant(%true_value: f3
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [18, 18], spirv_result_value_types = [18]}) @scf_select_i1_false_condition_constant(%true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scf_select_i1_false_condition_constant(%true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
   return %false_value
 }
 
@@ -406,7 +406,7 @@ func.def target(@target) @scf_select_i1_scc_condition(%lhs: i32, %rhs: i32, %alt
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23, 18, 18], spirv_result_value_types = [18]}) @scf_select_i1_scc_condition(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %alt: reg<spirv.id : i32>, %true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scf_select_i1_scc_condition(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %alt: reg<spirv.id : i32>, %true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
   %inactive_condition = OpConstant.i32 0
   %condition = OpSLessThan %lhs, %rhs
   %lhs_nonzero = OpINotEqual %lhs, %inactive_condition

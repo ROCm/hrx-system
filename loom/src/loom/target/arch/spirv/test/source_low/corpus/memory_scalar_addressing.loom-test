@@ -15,7 +15,7 @@ func.def target(@target) @scalar_static_rank2_i32(%input: buffer, %output: buffe
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [23]}) @scalar_static_rank2_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_static_rank2_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>) -> (reg<spirv.id : i32>) asm {
   %16 = OpConstant.offset64 32
   %17 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %16
   %loaded = OpLoad.storage_buffer.i32 %17
@@ -41,7 +41,7 @@ func.def target(@target) @scalar_dynamic_view_base_i32(%input: buffer, %output: 
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [23]}) @scalar_dynamic_view_base_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %base_aligned: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_dynamic_view_base_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %base_aligned: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
   %15 = OpConstant.offset64 8
   %16 = OpIAdd.offset64 %base_aligned, %15
   %17 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %16
@@ -69,7 +69,7 @@ func.def target(@target) @scalar_materialized_view_base_suffix_i32(%input: buffe
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [23]}) @scalar_materialized_view_base_suffix_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %base_aligned: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_materialized_view_base_suffix_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %base_aligned: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
   %bias = OpConstant.offset64 4
   %biased_base = OpIAdd.offset64 %base_aligned, %bias
   %18 = OpConstant.offset64 8
@@ -99,7 +99,7 @@ func.def target(@target) @scalar_dynamic_index_i32(%input: buffer, %output: buff
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [0, 0, 23], spirv_result_value_types = [23]}) @scalar_dynamic_index_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %element_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_dynamic_index_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %element_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
   %15 = OpBitcast.i32.u32 %element_bounded
   %16 = OpUConvert.u32.offset64 %15
   %17 = OpConstant.offset64 4
@@ -128,7 +128,7 @@ func.def target(@target) @scalar_mixed_rank2_i32(%input: buffer, %output: buffer
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [0, 0, 0, 23, 23], spirv_result_value_types = [23]}) @scalar_mixed_rank2_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %base_aligned: reg<spirv.offset64>, %row_bounded: reg<spirv.id : index>, %column_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_mixed_rank2_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %base_aligned: reg<spirv.offset64>, %row_bounded: reg<spirv.id : index>, %column_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
   %27 = OpBitcast.i32.u32 %row_bounded
   %28 = OpUConvert.u32.offset64 %27
   %29 = OpConstant.offset64 32
@@ -164,7 +164,7 @@ func.def target(@target) @scalar_dynamic_stride_i32(%input: buffer, %output: buf
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [0, 0, 23, 23, 23], spirv_result_value_types = [23]}) @scalar_dynamic_stride_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %columns_bounded: reg<spirv.id : index>, %row_bounded: reg<spirv.id : index>, %column_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_dynamic_stride_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %columns_bounded: reg<spirv.id : index>, %row_bounded: reg<spirv.id : index>, %column_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
   %21 = OpBitcast.i32.u32 %row_bounded
   %22 = OpUConvert.u32.offset64 %21
   %23 = OpBitcast.i32.u32 %columns_bounded
@@ -203,7 +203,7 @@ func.def target(@target) @scalar_subview_dynamic_index_i32(%input: buffer, %outp
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [0, 0, 0, 23], spirv_result_value_types = [23]}) @scalar_subview_dynamic_index_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %base_aligned: reg<spirv.offset64>, %element_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_subview_dynamic_index_i32(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %base_aligned: reg<spirv.offset64>, %element_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
   %21 = OpBitcast.i32.u32 %element_bounded
   %22 = OpUConvert.u32.offset64 %21
   %23 = OpConstant.offset64 4

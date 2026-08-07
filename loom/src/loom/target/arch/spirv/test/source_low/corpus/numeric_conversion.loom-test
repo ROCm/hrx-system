@@ -322,7 +322,7 @@ func.def target(@target) @scalar_uitofp_i32(%input: i32) -> (f32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23], spirv_result_value_types = [18]}) @scalar_uitofp_i32(%input: reg<spirv.id : i32>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_uitofp_i32(%input: reg<spirv.id : i32>) -> (reg<spirv.id : f32>) asm {
   %5 = OpBitcast.i32.u32 %input
   %converted = OpConvertUToF.u32.f32 %5
   return %converted
@@ -337,7 +337,7 @@ func.def target(@target) @scalar_uitofp_i8(%input: i8) -> (f32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [21], spirv_result_value_types = [18]}) @scalar_uitofp_i8(%input: reg<spirv.id : i8>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_uitofp_i8(%input: reg<spirv.id : i8>) -> (reg<spirv.id : f32>) asm {
   %5 = OpBitcast.i8.u8 %input
   %converted = OpConvertUToF.u8.f32 %5
   return %converted
@@ -352,7 +352,7 @@ func.def target(@target) @scalar_uitofp_i16(%input: i16) -> (f32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [22], spirv_result_value_types = [18]}) @scalar_uitofp_i16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_uitofp_i16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : f32>) asm {
   %5 = OpBitcast.i16.u16 %input
   %converted = OpConvertUToF.u16.f32 %5
   return %converted
@@ -367,7 +367,7 @@ func.def target(@target) @scalar_sitofp_i32(%input: i32) -> (f32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23], spirv_result_value_types = [18]}) @scalar_sitofp_i32(%input: reg<spirv.id : i32>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_sitofp_i32(%input: reg<spirv.id : i32>) -> (reg<spirv.id : f32>) asm {
   %converted = OpConvertSToF.i32.f32 %input
   return %converted
 }
@@ -381,7 +381,7 @@ func.def target(@target) @scalar_sitofp_i32_to_f16(%input: i32) -> (f16) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23], spirv_result_value_types = [17]}) @scalar_sitofp_i32_to_f16(%input: reg<spirv.id : i32>) -> (reg<spirv.id : f16>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_sitofp_i32_to_f16(%input: reg<spirv.id : i32>) -> (reg<spirv.id : f16>) asm {
   %converted = OpConvertSToF.i32.f16 %input
   return %converted
 }
@@ -412,7 +412,7 @@ func.def target(@target) @scalar_sitofp_i16(%input: i16) -> (f32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [22], spirv_result_value_types = [18]}) @scalar_sitofp_i16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_sitofp_i16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : f32>) asm {
   %converted = OpConvertSToF.i16.f32 %input
   return %converted
 }
@@ -426,7 +426,7 @@ func.def target(@target) @scalar_fptosi_i32(%input: f32) -> (i32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [18], spirv_result_value_types = [23]}) @scalar_fptosi_i32(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_fptosi_i32(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i32>) asm {
   %converted = OpConvertFToS.f32.i32 %input
   return %converted
 }
@@ -440,7 +440,7 @@ func.def target(@target) @scalar_fptoui_i32(%input: f32) -> (i32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [18], spirv_result_value_types = [23]}) @scalar_fptoui_i32(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_fptoui_i32(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i32>) asm {
   %5 = OpConvertFToU.f32.u32 %input
   %converted = OpBitcast.u32.i32 %5
   return %converted
@@ -455,7 +455,7 @@ func.def target(@target) @scalar_fptosi_i8(%input: f32) -> (i8) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [18], spirv_result_value_types = [21]}) @scalar_fptosi_i8(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i8>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_fptosi_i8(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i8>) asm {
   %converted = OpConvertFToS.f32.i8 %input
   return %converted
 }
@@ -469,7 +469,7 @@ func.def target(@target) @scalar_fptosi_i16(%input: f32) -> (i16) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [18], spirv_result_value_types = [22]}) @scalar_fptosi_i16(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_fptosi_i16(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i16>) asm {
   %converted = OpConvertFToS.f32.i16 %input
   return %converted
 }
@@ -483,7 +483,7 @@ func.def target(@target) @scalar_fptoui_i8(%input: f32) -> (i8) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [18], spirv_result_value_types = [21]}) @scalar_fptoui_i8(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i8>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_fptoui_i8(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i8>) asm {
   %5 = OpConvertFToU.f32.u8 %input
   %converted = OpBitcast.u8.i8 %5
   return %converted
@@ -498,7 +498,7 @@ func.def target(@target) @scalar_fptoui_i16(%input: f32) -> (i16) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [18], spirv_result_value_types = [22]}) @scalar_fptoui_i16(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_fptoui_i16(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i16>) asm {
   %5 = OpConvertFToU.f32.u16 %input
   %converted = OpBitcast.u16.i16 %5
   return %converted
@@ -513,7 +513,7 @@ func.def target(@target) @scalar_trunci_i32_to_i8(%input: i32) -> (i8) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23], spirv_result_value_types = [21]}) @scalar_trunci_i32_to_i8(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i8>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_trunci_i32_to_i8(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i8>) asm {
   %converted = OpSConvert.i32.i8 %input
   return %converted
 }
@@ -527,7 +527,7 @@ func.def target(@target) @scalar_trunci_i16_to_i8(%input: i16) -> (i8) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [22], spirv_result_value_types = [21]}) @scalar_trunci_i16_to_i8(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i8>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_trunci_i16_to_i8(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i8>) asm {
   %converted = OpSConvert.i16.i8 %input
   return %converted
 }
@@ -541,7 +541,7 @@ func.def target(@target) @scalar_trunci_i32_to_i16(%input: i32) -> (i16) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23], spirv_result_value_types = [22]}) @scalar_trunci_i32_to_i16(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_trunci_i32_to_i16(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i16>) asm {
   %converted = OpSConvert.i32.i16 %input
   return %converted
 }
@@ -555,7 +555,7 @@ func.def target(@target) @scalar_trunci_i64_to_i8(%input: i64) -> (i8) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [24], spirv_result_value_types = [21]}) @scalar_trunci_i64_to_i8(%input: reg<spirv.id : i64>) -> (reg<spirv.id : i8>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_trunci_i64_to_i8(%input: reg<spirv.id : i64>) -> (reg<spirv.id : i8>) asm {
   %converted = OpSConvert.i64.i8 %input
   return %converted
 }
@@ -569,7 +569,7 @@ func.def target(@target) @scalar_trunci_i64_to_i16(%input: i64) -> (i16) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [24], spirv_result_value_types = [22]}) @scalar_trunci_i64_to_i16(%input: reg<spirv.id : i64>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_trunci_i64_to_i16(%input: reg<spirv.id : i64>) -> (reg<spirv.id : i16>) asm {
   %converted = OpSConvert.i64.i16 %input
   return %converted
 }
@@ -583,7 +583,7 @@ func.def target(@target) @scalar_trunci_i64_to_i32(%input: i64) -> (i32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [24], spirv_result_value_types = [23]}) @scalar_trunci_i64_to_i32(%input: reg<spirv.id : i64>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_trunci_i64_to_i32(%input: reg<spirv.id : i64>) -> (reg<spirv.id : i32>) asm {
   %converted = OpSConvert.i64.i32 %input
   return %converted
 }
@@ -631,7 +631,7 @@ func.def target(@target) @scalar_extf_f16(%input: f16) -> (f32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [17], spirv_result_value_types = [18]}) @scalar_extf_f16(%input: reg<spirv.id : f16>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extf_f16(%input: reg<spirv.id : f16>) -> (reg<spirv.id : f32>) asm {
   %converted = OpFConvert.f16.f32 %input
   return %converted
 }
@@ -754,7 +754,7 @@ func.def target(@target) @scalar_bitcast_f32_to_i32(%input: f32) -> (i32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [18], spirv_result_value_types = [23]}) @scalar_bitcast_f32_to_i32(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_bitcast_f32_to_i32(%input: reg<spirv.id : f32>) -> (reg<spirv.id : i32>) asm {
   %bits = OpBitcast.f32.i32 %input
   return %bits
 }
@@ -768,7 +768,7 @@ func.def target(@target) @scalar_bitcast_i64_to_f64(%input: i64) -> (f64) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [24], spirv_result_value_types = [19]}) @scalar_bitcast_i64_to_f64(%input: reg<spirv.id : i64>) -> (reg<spirv.id : f64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_bitcast_i64_to_f64(%input: reg<spirv.id : i64>) -> (reg<spirv.id : f64>) asm {
   %value = OpBitcast.i64.f64 %input
   return %value
 }
@@ -782,7 +782,7 @@ func.def target(@target) @scalar_bitcast_f64_to_i64(%input: f64) -> (i64) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [19], spirv_result_value_types = [24]}) @scalar_bitcast_f64_to_i64(%input: reg<spirv.id : f64>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_bitcast_f64_to_i64(%input: reg<spirv.id : f64>) -> (reg<spirv.id : i64>) asm {
   %bits = OpBitcast.f64.i64 %input
   return %bits
 }
@@ -796,7 +796,7 @@ func.def target(@target) @scalar_bitcast_f16_to_i16(%input: f16) -> (i16) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [17], spirv_result_value_types = [22]}) @scalar_bitcast_f16_to_i16(%input: reg<spirv.id : f16>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_bitcast_f16_to_i16(%input: reg<spirv.id : f16>) -> (reg<spirv.id : i16>) asm {
   %bits = OpBitcast.f16.i16 %input
   return %bits
 }
@@ -810,7 +810,7 @@ func.def target(@target) @scalar_bitcast_i16_to_f16(%input: i16) -> (f16) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [22], spirv_result_value_types = [17]}) @scalar_bitcast_i16_to_f16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : f16>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_bitcast_i16_to_f16(%input: reg<spirv.id : i16>) -> (reg<spirv.id : f16>) asm {
   %half = OpBitcast.i16.f16 %input
   return %half
 }
@@ -842,7 +842,7 @@ func.def target(@target) @scalar_extsi_i8_to_i16(%input: i8) -> (i16) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [21], spirv_result_value_types = [22]}) @scalar_extsi_i8_to_i16(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extsi_i8_to_i16(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i16>) asm {
   %converted = OpSConvert.i8.i16 %input
   return %converted
 }
@@ -856,7 +856,7 @@ func.def target(@target) @scalar_extsi_i8_to_i32(%input: i8) -> (i32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [21], spirv_result_value_types = [23]}) @scalar_extsi_i8_to_i32(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extsi_i8_to_i32(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i32>) asm {
   %converted = OpSConvert.i8.i32 %input
   return %converted
 }
@@ -870,7 +870,7 @@ func.def target(@target) @scalar_extsi_i8_to_i64(%input: i8) -> (i64) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [21], spirv_result_value_types = [24]}) @scalar_extsi_i8_to_i64(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extsi_i8_to_i64(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i64>) asm {
   %converted = OpSConvert.i8.i64 %input
   return %converted
 }
@@ -884,7 +884,7 @@ func.def target(@target) @scalar_extsi_i16_to_i32(%input: i16) -> (i32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [22], spirv_result_value_types = [23]}) @scalar_extsi_i16_to_i32(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extsi_i16_to_i32(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i32>) asm {
   %converted = OpSConvert.i16.i32 %input
   return %converted
 }
@@ -898,7 +898,7 @@ func.def target(@target) @scalar_extsi_i16_to_i64(%input: i16) -> (i64) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [22], spirv_result_value_types = [24]}) @scalar_extsi_i16_to_i64(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extsi_i16_to_i64(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i64>) asm {
   %converted = OpSConvert.i16.i64 %input
   return %converted
 }
@@ -912,7 +912,7 @@ func.def target(@target) @scalar_extsi_i32_to_i64(%input: i32) -> (i64) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23], spirv_result_value_types = [24]}) @scalar_extsi_i32_to_i64(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extsi_i32_to_i64(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i64>) asm {
   %converted = OpSConvert.i32.i64 %input
   return %converted
 }
@@ -926,7 +926,7 @@ func.def target(@target) @scalar_extui_i8_to_i16(%input: i8) -> (i16) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [21], spirv_result_value_types = [22]}) @scalar_extui_i8_to_i16(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i16>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extui_i8_to_i16(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i16>) asm {
   %5 = OpBitcast.i8.u8 %input
   %6 = OpUConvert.u8.u16 %5
   %converted = OpBitcast.u16.i16 %6
@@ -942,7 +942,7 @@ func.def target(@target) @scalar_extui_i8_to_i32(%input: i8) -> (i32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [21], spirv_result_value_types = [23]}) @scalar_extui_i8_to_i32(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extui_i8_to_i32(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i32>) asm {
   %5 = OpBitcast.i8.u8 %input
   %6 = OpUConvert.u8.u32 %5
   %converted = OpBitcast.u32.i32 %6
@@ -958,7 +958,7 @@ func.def target(@target) @scalar_extui_i8_to_i64(%input: i8) -> (i64) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [21], spirv_result_value_types = [24]}) @scalar_extui_i8_to_i64(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extui_i8_to_i64(%input: reg<spirv.id : i8>) -> (reg<spirv.id : i64>) asm {
   %5 = OpBitcast.i8.u8 %input
   %6 = OpUConvert.u8.u64 %5
   %converted = OpBitcast.u64.i64 %6
@@ -974,7 +974,7 @@ func.def target(@target) @scalar_extui_i16_to_i32(%input: i16) -> (i32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [22], spirv_result_value_types = [23]}) @scalar_extui_i16_to_i32(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extui_i16_to_i32(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i32>) asm {
   %5 = OpBitcast.i16.u16 %input
   %6 = OpUConvert.u16.u32 %5
   %converted = OpBitcast.u32.i32 %6
@@ -990,7 +990,7 @@ func.def target(@target) @scalar_extui_i16_to_i64(%input: i16) -> (i64) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [22], spirv_result_value_types = [24]}) @scalar_extui_i16_to_i64(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extui_i16_to_i64(%input: reg<spirv.id : i16>) -> (reg<spirv.id : i64>) asm {
   %5 = OpBitcast.i16.u16 %input
   %6 = OpUConvert.u16.u64 %5
   %converted = OpBitcast.u64.i64 %6
@@ -1006,7 +1006,7 @@ func.def target(@target) @scalar_extui_i32_to_i64(%input: i32) -> (i64) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23], spirv_result_value_types = [24]}) @scalar_extui_i32_to_i64(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_extui_i32_to_i64(%input: reg<spirv.id : i32>) -> (reg<spirv.id : i64>) asm {
   %5 = OpBitcast.i32.u32 %input
   %6 = OpUConvert.u32.u64 %5
   %converted = OpBitcast.u64.i64 %6

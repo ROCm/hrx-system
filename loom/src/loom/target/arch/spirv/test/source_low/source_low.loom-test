@@ -14,7 +14,7 @@ func.def target(@target) @spirv_i32_arithmetic(%lhs: i32, %rhs: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_i32_arithmetic(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_i32_arithmetic(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %bias = OpConstant.i32 7
   %sum = OpIAdd %lhs, %rhs
   %difference = OpISub %lhs, %rhs
@@ -36,7 +36,7 @@ func.def target(@target) @spirv_i32_compare_select(%lhs: i32, %rhs: i32) -> (i32
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_i32_compare_select(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_i32_compare_select(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %less = OpSLessThan %lhs, %rhs
   %selected = OpSelect %less, %lhs, %rhs
   return %selected
@@ -59,7 +59,7 @@ func.def target(@target) @spirv_i32_if_else(%lhs: i32, %rhs: i32, %a: i32, %b: i
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23, 23], spirv_result_value_types = [23]}) @spirv_i32_if_else(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %a: reg<spirv.id : i32>, %b: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_i32_if_else(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %a: reg<spirv.id : i32>, %b: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %less = OpSLessThan %lhs, %rhs
   %result = low.scf.if %less -> (reg<spirv.id : i32>) {
     %sum = OpIAdd %a, %b
@@ -85,7 +85,7 @@ func.def target(@target) @spirv_index_counted_loop(%start: index, %limit: index,
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23], spirv_result_value_types = [23]}) @spirv_index_counted_loop(%start: reg<spirv.id : index>, %limit: reg<spirv.id : index>, %seed: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_index_counted_loop(%start: reg<spirv.id : index>, %limit: reg<spirv.id : index>, %seed: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
   %step = OpConstant.i32 1 : reg<spirv.id : index>
   %sum = low.scf.for [%start to %limit step %step] iter_args(%seed: reg<spirv.id : index>) -> (reg<spirv.id : index>) do(%i: reg<spirv.id : index>, %acc: reg<spirv.id : index>) {
     %next = OpIAdd %acc, %i : reg<spirv.id : index>
@@ -111,7 +111,7 @@ func.def target(@target_unsigned) @spirv_unsigned_integer_views(%lhs: i32, %rhs:
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target_unsigned) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23, 23], spirv_result_value_types = [23, 23, 1, 1]}) @spirv_unsigned_integer_views(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %index: reg<spirv.id : index>, %limit: reg<spirv.id : index>) -> (reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i1>, reg<spirv.id : i1>) asm {
+low.func.def target<spirv.logical.core>(@target_unsigned) abi(shader_entry_point) @spirv_unsigned_integer_views(%lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %index: reg<spirv.id : index>, %limit: reg<spirv.id : index>) -> (reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i1>, reg<spirv.id : i1>) asm {
   %24 = OpBitcast.i32.u32 %lhs
   %25 = OpBitcast.i32.u32 %rhs
   %26 = OpUDiv.u32 %24, %25
@@ -164,7 +164,7 @@ func.def target(@target_scalar_payloads) @spirv_scalar_float_constants(%f16_outp
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target_scalar_payloads) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [1, 21, 22, 23, 24, 17, 20, 18, 19], spirv_result_value_types = [1, 21, 22, 23, 24, 17, 20, 18, 19]}) @spirv_scalar_payload_abi(%flag: reg<spirv.id : i1>, %i8: reg<spirv.id : i8>, %i16: reg<spirv.id : i16>, %i32: reg<spirv.id : i32>, %i64: reg<spirv.id : i64>, %f16: reg<spirv.id : f16>, %bf16: reg<spirv.id : bf16>, %f32: reg<spirv.id : f32>, %f64: reg<spirv.id : f64>) -> (reg<spirv.id : i1>, reg<spirv.id : i8>, reg<spirv.id : i16>, reg<spirv.id : i32>, reg<spirv.id : i64>, reg<spirv.id : f16>, reg<spirv.id : bf16>, reg<spirv.id : f32>, reg<spirv.id : f64>) asm {
+low.func.def target<spirv.logical.core>(@target_scalar_payloads) abi(shader_entry_point) @spirv_scalar_payload_abi(%flag: reg<spirv.id : i1>, %i8: reg<spirv.id : i8>, %i16: reg<spirv.id : i16>, %i32: reg<spirv.id : i32>, %i64: reg<spirv.id : i64>, %f16: reg<spirv.id : f16>, %bf16: reg<spirv.id : bf16>, %f32: reg<spirv.id : f32>, %f64: reg<spirv.id : f64>) -> (reg<spirv.id : i1>, reg<spirv.id : i8>, reg<spirv.id : i16>, reg<spirv.id : i32>, reg<spirv.id : i64>, reg<spirv.id : f16>, reg<spirv.id : bf16>, reg<spirv.id : f32>, reg<spirv.id : f64>) asm {
   return %flag, %i8, %i16, %i32, %i64, %f16, %bf16, %f32, %f64
 }
 
@@ -201,7 +201,7 @@ kernel.def target(@hal_target_scalar_payloads) @spirv_hal_direct_scalar_payload_
 }
 
 // ----
-low.kernel.def target<spirv.logical.core>(@hal_target_scalar_payloads) abi_layout({spirv_arg_value_types = [21, 0]}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @spirv_hal_direct_scalar_payload_abi(%i8: reg<spirv.id : i8>, %byte_offset_aligned: reg<spirv.offset64>) asm {
+low.kernel.def target<spirv.logical.core>(@hal_target_scalar_payloads) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @spirv_hal_direct_scalar_payload_abi(%i8: reg<spirv.id : i8>, %byte_offset_aligned: reg<spirv.offset64>) asm {
   %output_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %10 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output_aligned, %byte_offset_aligned
   OpStore.storage_buffer.i8 %10, %i8
@@ -221,7 +221,7 @@ func.def target(@target) @spirv_index_arithmetic(%index: index, %factor: index) 
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @spirv_index_arithmetic(%index: reg<spirv.id : index>, %factor: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_index_arithmetic(%index: reg<spirv.id : index>, %factor: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
   %index_adjustment = OpConstant.i32 1 : reg<spirv.id : index>
   %previous = OpISub %index, %index_adjustment : reg<spirv.id : index>
   %scaled = OpIMul %previous, %factor : reg<spirv.id : index>
@@ -263,7 +263,7 @@ func.def target(@target) @spirv_offset_addressing(%base: buffer, %row: offset) -
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [23]}) @spirv_offset_addressing(%base_aligned: reg<spirv.ptr.storage_buffer>, %row_aligned: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_offset_addressing(%base_aligned: reg<spirv.ptr.storage_buffer>, %row_aligned: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
   %column = OpConstant.offset64 4
   %byte_offset = OpIAdd.offset64 %row_aligned, %column
   %14 = OpPtrAccessChain.storage_buffer.i32.byte_offset %base_aligned, %byte_offset
@@ -337,7 +337,7 @@ func.def target(@target) @spirv_storage_buffer_i32_roundtrip(%input: buffer, %ou
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [23]}) @spirv_storage_buffer_i32_roundtrip(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %byte_offset_aligned: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_storage_buffer_i32_roundtrip(%input_aligned: reg<spirv.ptr.storage_buffer>, %output_aligned: reg<spirv.ptr.storage_buffer>, %byte_offset_aligned: reg<spirv.offset64>) -> (reg<spirv.id : i32>) asm {
   %15 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %byte_offset_aligned
   %loaded = OpLoad.storage_buffer.i32 %15
   %incremented = OpIAdd %loaded, %loaded

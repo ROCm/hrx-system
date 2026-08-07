@@ -14,7 +14,7 @@ func.def target(@target) @workgroup_static_rank2_i32(%value: i32) -> (i32) {
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23], spirv_result_value_types = [23]}) @workgroup_static_rank2_i32(%value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @workgroup_static_rank2_i32(%value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %scratch = storage {byte_alignment = 4, byte_length = 256} : low.storage<workgroup>
   %scratch_view = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
   %13 = OpConstant.i32 21 : reg<spirv.id : index>
@@ -46,7 +46,7 @@ func.def target(@target) @workgroup_dynamic_base_and_index_i32(%value: i32, %bas
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23], spirv_result_value_types = [23]}) @workgroup_dynamic_base_and_index_i32(%value: reg<spirv.id : i32>, %base_element_bounded: reg<spirv.id : index>, %element_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @workgroup_dynamic_base_and_index_i32(%value: reg<spirv.id : i32>, %base_element_bounded: reg<spirv.id : index>, %element_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
   %scratch = storage {byte_alignment = 4, byte_length = 128} : low.storage<workgroup>
   %scratch_view = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
   %21 = OpIAdd %base_element_bounded, %element_bounded : reg<spirv.id : index>
@@ -77,7 +77,7 @@ func.def target(@target) @workgroup_dynamic_stride_rank2_i32(%value: i32, %colum
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23, 23], spirv_result_value_types = [23]}) @workgroup_dynamic_stride_rank2_i32(%value: reg<spirv.id : i32>, %column_count_bounded: reg<spirv.id : index>, %row_bounded: reg<spirv.id : index>, %column_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @workgroup_dynamic_stride_rank2_i32(%value: reg<spirv.id : i32>, %column_count_bounded: reg<spirv.id : index>, %row_bounded: reg<spirv.id : index>, %column_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
   %scratch = storage {byte_alignment = 4, byte_length = 128} : low.storage<workgroup>
   %scratch_view = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
   %20 = OpIMul %row_bounded, %column_count_bounded : reg<spirv.id : index>
@@ -110,7 +110,7 @@ func.def target(@target) @workgroup_subview_refine_i32(%value: i32, %element: in
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [23]}) @workgroup_subview_refine_i32(%value: reg<spirv.id : i32>, %element_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @workgroup_subview_refine_i32(%value: reg<spirv.id : i32>, %element_bounded: reg<spirv.id : index>) -> (reg<spirv.id : i32>) asm {
   %scratch = storage {byte_alignment = 4, byte_length = 64} : low.storage<workgroup>
   %scratch_refined = storage_address %scratch : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
   %16 = OpConstant.i32 3 : reg<spirv.id : index>
@@ -152,7 +152,7 @@ func.def target(@target) @workgroup_integer_scalar_widths(%value_i8: i8, %value_
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [21, 22, 23, 24], spirv_result_value_types = [21, 22, 23, 24]}) @workgroup_integer_scalar_widths(%value_i8: reg<spirv.id : i8>, %value_i16: reg<spirv.id : i16>, %value_i32: reg<spirv.id : i32>, %value_i64: reg<spirv.id : i64>) -> (reg<spirv.id : i8>, reg<spirv.id : i16>, reg<spirv.id : i32>, reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @workgroup_integer_scalar_widths(%value_i8: reg<spirv.id : i8>, %value_i16: reg<spirv.id : i16>, %value_i32: reg<spirv.id : i32>, %value_i64: reg<spirv.id : i64>) -> (reg<spirv.id : i8>, reg<spirv.id : i16>, reg<spirv.id : i32>, reg<spirv.id : i64>) asm {
   %scratch_i8 = storage {byte_alignment = 1, byte_length = 16} : low.storage<workgroup>
   %scratch_i16 = storage {byte_alignment = 2, byte_length = 16} : low.storage<workgroup>
   %scratch_i32 = storage {byte_alignment = 4, byte_length = 16} : low.storage<workgroup>
@@ -210,7 +210,7 @@ func.def target(@target) @workgroup_float_scalar_widths(%value_f16: f16, %value_
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [17, 20, 18, 19], spirv_result_value_types = [17, 20, 18, 19]}) @workgroup_float_scalar_widths(%value_f16: reg<spirv.id : f16>, %value_bf16: reg<spirv.id : bf16>, %value_f32: reg<spirv.id : f32>, %value_f64: reg<spirv.id : f64>) -> (reg<spirv.id : f16>, reg<spirv.id : bf16>, reg<spirv.id : f32>, reg<spirv.id : f64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @workgroup_float_scalar_widths(%value_f16: reg<spirv.id : f16>, %value_bf16: reg<spirv.id : bf16>, %value_f32: reg<spirv.id : f32>, %value_f64: reg<spirv.id : f64>) -> (reg<spirv.id : f16>, reg<spirv.id : bf16>, reg<spirv.id : f32>, reg<spirv.id : f64>) asm {
   %scratch_f16 = storage {byte_alignment = 2, byte_length = 16} : low.storage<workgroup>
   %scratch_bf16 = storage {byte_alignment = 2, byte_length = 16} : low.storage<workgroup>
   %scratch_f32 = storage {byte_alignment = 4, byte_length = 16} : low.storage<workgroup>

@@ -1748,12 +1748,6 @@ static iree_status_t loom_spirv_emit_function_state_initialize(
         module_state->scratch_arena);
   }
   if (iree_status_is_ok(status)) {
-    loom_spirv_module_abi_context_t context =
-        loom_spirv_emit_abi_context(out_state);
-    status = loom_spirv_module_abi_prepare_value_types(
-        &context, loom_region_const_entry_block(body), &out_state->abi_plan);
-  }
-  if (iree_status_is_ok(status)) {
     status = loom_spirv_emit_prepare_immediate_name_ids(out_state);
   }
   if (!iree_status_is_ok(status)) {

@@ -17,7 +17,7 @@ func.def target(@target) @index_arithmetic(%lhs0: index, %rhs0: index, %stride: 
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 0], spirv_result_value_types = [23, 23, 23, 23, 23, 23, 23, 23, 0]}) @index_arithmetic(%lhs: reg<spirv.id : index>, %rhs: reg<spirv.id : index>, %stride: reg<spirv.offset64>) -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.offset64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_arithmetic(%lhs: reg<spirv.id : index>, %rhs: reg<spirv.id : index>, %stride: reg<spirv.offset64>) -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.offset64>) asm {
   %add = OpIAdd %lhs, %rhs : reg<spirv.id : index>
   %sub = OpISub %lhs, %rhs : reg<spirv.id : index>
   %mul = OpIMul %lhs, %rhs : reg<spirv.id : index>
@@ -73,7 +73,7 @@ func.def target(@target) @index_bitwise(%input: index, %other: index, %amount0: 
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23, 23], spirv_result_value_types = [23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23]}) @index_bitwise(%input: reg<spirv.id : index>, %other: reg<spirv.id : index>, %amount: reg<spirv.id : index>) -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_bitwise(%input: reg<spirv.id : index>, %other: reg<spirv.id : index>, %amount: reg<spirv.id : index>) -> (reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>, reg<spirv.id : index>) asm {
   %and = OpBitwiseAnd %input, %other : reg<spirv.id : index>
   %or = OpBitwiseOr %input, %other : reg<spirv.id : index>
   %xor = OpBitwiseXor %input, %other : reg<spirv.id : index>
@@ -133,7 +133,7 @@ func.def target(@target) @index_compare_select(%lhs: index, %rhs: index) -> (i1,
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [23, 23], spirv_result_value_types = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 23]}) @index_compare_select(%lhs: reg<spirv.id : index>, %rhs: reg<spirv.id : index>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : index>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @index_compare_select(%lhs: reg<spirv.id : index>, %rhs: reg<spirv.id : index>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : index>) asm {
   %eq = OpIEqual %lhs, %rhs
   %ne = OpINotEqual %lhs, %rhs
   %slt = OpSLessThan %lhs, %rhs
@@ -169,7 +169,7 @@ func.def target(@target) @offset_compare_select(%lhs: offset, %rhs: offset) -> (
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_result_value_types = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0]}) @offset_compare_select(%lhs: reg<spirv.offset64>, %rhs: reg<spirv.offset64>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.offset64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @offset_compare_select(%lhs: reg<spirv.offset64>, %rhs: reg<spirv.offset64>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.offset64>) asm {
   %eq = OpIEqual.offset64 %lhs, %rhs
   %ne = OpINotEqual.offset64 %lhs, %rhs
   %39 = OpBitcast.offset64.i64 %lhs

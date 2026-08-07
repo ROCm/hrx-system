@@ -80,14 +80,6 @@ typedef struct loom_spirv_module_abi_plan_t {
   loom_spirv_module_abi_slot_t* results;
   // Number of entries in results.
   iree_host_size_t result_count;
-  // Decoded ABI value types for entry block arguments.
-  loom_spirv_value_type_t* arg_value_types;
-  // Number of decoded argument value types.
-  iree_host_size_t arg_value_type_count;
-  // Decoded ABI value types for function results.
-  loom_spirv_value_type_t* result_value_types;
-  // Number of decoded result value types.
-  iree_host_size_t result_value_type_count;
   // Number of HAL binding-table entries required by raw-BDA resources.
   uint16_t bda_binding_count;
   // Number of 32-bit HAL inline constants consumed by direct scalar arguments.
@@ -114,11 +106,6 @@ typedef struct loom_spirv_module_abi_context_t {
   // Function-local Loom value to SPIR-V value-ref table.
   loom_spirv_module_value_table_t* value_table;
 } loom_spirv_module_abi_context_t;
-
-// Decodes boundary value types from low function ABI attributes into |plan|.
-iree_status_t loom_spirv_module_abi_prepare_value_types(
-    const loom_spirv_module_abi_context_t* context,
-    const loom_block_t* entry_block, loom_spirv_module_abi_plan_t* plan);
 
 // Builds descriptor declarations or raw-BDA root declarations for |plan|.
 iree_status_t loom_spirv_module_abi_build_plan(
