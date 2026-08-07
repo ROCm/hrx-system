@@ -86,10 +86,6 @@ from loom.ir import (
     ENCODING_TYPE,
     I1,
     INDEX,
-    LOCATION_TAG_SANITIZER_SITE,
-    LOCATION_TAG_TEMPLATE_INSTANTIATION,
-    LOCATION_TAG_TILE_LOWERING,
-    LOCATION_TAG_UKERNEL_SELECTION,
     NONE_TYPE,
     OFFSET,
     PREDICATE_KINDS,
@@ -133,15 +129,9 @@ from loom.ir import (
 from loom.ir import (
     TiedResult as IRTiedResult,
 )
+from loom.location_tag import parse_builtin_location_tag
 from loom.stable_id import stable_id_from_string
 from loom.target.descriptor_sets import DESCRIPTOR_SET_REGISTRATIONS
-
-_LOCATION_TAG_NAMES = {
-    "sanitizer_site": LOCATION_TAG_SANITIZER_SITE,
-    "template_instantiation": LOCATION_TAG_TEMPLATE_INSTANTIATION,
-    "tile_lowering": LOCATION_TAG_TILE_LOWERING,
-    "ukernel_selection": LOCATION_TAG_UKERNEL_SELECTION,
-}
 
 __all__ = [
     "ParseError",
@@ -2495,13 +2485,13 @@ class Parser:
         tag_token = tok.peek()
         if tag_token.kind == TokenKind.BARE_IDENT:
             tag_name = tok.expect(TokenKind.BARE_IDENT).text
-            if tag_name not in _LOCATION_TAG_NAMES:
+            tag = parse_builtin_location_tag(tag_name)
+            if tag is None:
                 raise ParseError(
                     f"unknown tagged location tag {tag_name!r}",
                     tag_token.location,
                     tok._filename,
                 )
-            tag = _LOCATION_TAG_NAMES[tag_name]
         else:
             tag = int(tok.expect(TokenKind.INTEGER).text)
             if tag <= 0 or tag > 0xFFFF:

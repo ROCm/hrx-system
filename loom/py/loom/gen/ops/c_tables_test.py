@@ -105,6 +105,7 @@ from loom.dsl import (
 from loom.gen.ops import model as c_table_model
 from loom.gen.ops.c_builders import generate_builders_c
 from loom.gen.ops.c_enums import TYPE_CONSTRAINT_MAP
+from loom.gen.ops.c_location_tags import generate_location_tag_table_inc
 from loom.gen.ops.c_registry import generate_op_registry
 from loom.gen.ops.c_scalar_types import generate_scalar_type_table_inc
 from loom.gen.ops.c_tables import (
@@ -114,6 +115,7 @@ from loom.gen.ops.c_tables import (
     generate_tables_c,
     generate_type_registry,
 )
+from loom.location_tag import BuiltinLocationTag
 from loom.scalar_type import ScalarTypeKind
 
 
@@ -167,6 +169,16 @@ def test_generate_scalar_type_table_uses_length_partitioned_classification() -> 
     assert "iree_string_view_equal" in generated
     assert "for (" not in generated
     assert generated.count("ordinal does not match Python") == len(ScalarTypeKind)
+
+
+def test_generate_location_tag_table_preserves_open_enum_boundary() -> None:
+    generated = generate_location_tag_table_inc()
+
+    assert "switch (tag)" in generated
+    assert "switch (name.size)" in generated
+    assert "LOOM_LOCATION_TAG_USER_BASE" in generated
+    assert "iree_string_view_equal" in generated
+    assert generated.count("value does not match Python") == len(BuiltinLocationTag)
 
 
 def test_generate_type_registry_emits_fact_domain_pointer() -> None:

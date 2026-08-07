@@ -25,6 +25,13 @@ from dataclasses import dataclass, field
 from enum import IntEnum, unique
 from typing import Any
 
+from loom.location_tag import (
+    LOCATION_TAG_SANITIZER_SITE,
+    LOCATION_TAG_TEMPLATE_INSTANTIATION,
+    LOCATION_TAG_TILE_LOWERING,
+    LOCATION_TAG_UKERNEL_SELECTION,
+    LOCATION_TAG_USER_BASE,
+)
 from loom.scalar_type import (
     ScalarTypeKind,
     parse_scalar_type_kind,
@@ -729,13 +736,6 @@ class LocationKind(IntEnum):
 
 # Location flag bits (matches loom_location_flag_bits_e in ir.h).
 LOCATION_FLAG_SYNTHETIC = 1 << 0
-
-# Built-in tagged location payload tags (matches loom_location_tag_e).
-LOCATION_TAG_SANITIZER_SITE = 0x0001
-LOCATION_TAG_TEMPLATE_INSTANTIATION = 0x0002
-LOCATION_TAG_TILE_LOWERING = 0x0003
-LOCATION_TAG_UKERNEL_SELECTION = 0x0004
-LOCATION_TAG_USER_BASE = 0x8000
 
 
 @dataclass(frozen=True, slots=True)

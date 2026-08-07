@@ -40,6 +40,7 @@ from loom.gen.ops.c_dialect import (
     generate_tables_c,
     generate_tables_h,
 )
+from loom.gen.ops.c_location_tags import generate_location_tag_table_inc
 from loom.gen.ops.c_names import (
     c_dialect_path as _c_dialect_path,
 )
@@ -54,6 +55,7 @@ from loom.gen.ops.type_registry import generate_type_registry
 from loom.gen.support.files import write_text_file as _write_file
 
 __all__ = [
+    "generate_location_tag_table_inc",
     "generate_ops_h",
     "generate_sharded_tables_c",
     "generate_scalar_type_table_inc",
@@ -134,6 +136,7 @@ def _checked_in_output_contents(model: GenerationModel) -> dict[Path, str]:
     ):
         outputs[registry_dir / filename] = registry_contents[filename]
     outputs[output_root / "ir" / "scalar_type_table.inc"] = generate_scalar_type_table_inc()
+    outputs[output_root / "ir" / "location_tag_table.inc"] = generate_location_tag_table_inc()
     return outputs
 
 

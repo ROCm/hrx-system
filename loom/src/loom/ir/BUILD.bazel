@@ -72,7 +72,10 @@ loom_cc_library(
         "semantics.h",
         "types.h",
     ],
-    textual_hdrs = ["scalar_type_table.inc"],
+    textual_hdrs = [
+        "location_tag_table.inc",
+        "scalar_type_table.inc",
+    ],
     deps = [
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/util:bstring",

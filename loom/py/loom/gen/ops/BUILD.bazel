@@ -51,6 +51,7 @@ C_TABLES_SRCS = [
     "c_enums.py",
     "c_format.py",
     "c_interfaces.py",
+    "c_location_tags.py",
     "c_metadata_tables.py",
     "c_names.py",
     "c_ops_header.py",
