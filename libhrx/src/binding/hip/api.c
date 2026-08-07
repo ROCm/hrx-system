@@ -5801,7 +5801,7 @@ static hipError_t iree_hip_resolve_memcpy_kind(
       *out_kind = kind;
       return hipSuccess;
     }
-    return hipErrorInvalidValue;
+    return hipErrorInvalidMemcpyDirection;
   }
 
   iree_hal_streaming_buffer_ref_t dst_ref;
@@ -6162,9 +6162,13 @@ static hipError_t iree_hip_lookup_memcpy_range_with_owner(
   return hipSuccess;
 }
 
-static hipError_t iree_hip_try_managed_d2d(
+// Handles D2D copies that cannot use the current context's command stream.
+// Managed allocations copy through their host-visible backing. Ordinary
+// allocations owned by different contexts use the same staged path as peer
+// copies. Same-context ordinary allocations remain on the direct copy path.
+static hipError_t iree_hip_try_managed_or_cross_context_d2d(
     iree_hal_streaming_context_t* context, void* dst, const void* src,
-    size_t size, bool* out_handled) {
+    size_t size, iree_hal_streaming_stream_t* stream, bool* out_handled) {
   *out_handled = false;
   iree_hal_streaming_context_t* dst_context = NULL;
   iree_hal_streaming_context_t* src_context = NULL;
@@ -6183,9 +6187,14 @@ static hipError_t iree_hip_try_managed_d2d(
   const bool dst_is_managed = dst_ref.buffer->is_managed;
   const bool src_is_managed = src_ref.buffer->is_managed;
   if (!dst_is_managed && !src_is_managed) {
+    if (dst_context != src_context) {
+      *out_handled = true;
+      result = iree_hip_memcpy_peer_staged(dst_context, dst, src_context, src,
+                                           size, stream);
+    }
     iree_hal_streaming_context_release(src_context);
     iree_hal_streaming_context_release(dst_context);
-    return hipSuccess;
+    return result;
   }
   *out_handled = true;
 
@@ -6314,6 +6323,12 @@ HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
     HIP_RETURN_ERROR(range_result);
   }
 
+  if (dst == src && (kind == hipMemcpyHostToHost ||
+                     kind == hipMemcpyDeviceToDevice)) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
   bool handled = false;
   hipError_t special_result = hipSuccess;
   if (kind == hipMemcpyHostToDevice) {
@@ -6323,8 +6338,8 @@ HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
     special_result =
         iree_hip_try_cross_context_d2h(context, dst, src, sizeBytes, &handled);
   } else if (kind == hipMemcpyDeviceToDevice) {
-    special_result =
-        iree_hip_try_managed_d2d(context, dst, src, sizeBytes, &handled);
+    special_result = iree_hip_try_managed_or_cross_context_d2d(
+        context, dst, src, sizeBytes, NULL, &handled);
   }
   if (handled || special_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
@@ -6479,6 +6494,12 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
     HIP_RETURN_ERROR(range_result);
   }
 
+  if (dst == src && (kind == hipMemcpyHostToHost ||
+                     kind == hipMemcpyDeviceToDevice)) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
+
   const bool pageable_d2h =
       kind == hipMemcpyDeviceToHost &&
       stream_obj->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE &&
@@ -6500,8 +6521,8 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
       special_result = iree_hip_try_cross_context_d2h(context, dst, src,
                                                       sizeBytes, &handled);
     } else if (kind == hipMemcpyDeviceToDevice) {
-      special_result =
-          iree_hip_try_managed_d2d(context, dst, src, sizeBytes, &handled);
+      special_result = iree_hip_try_managed_or_cross_context_d2d(
+          context, dst, src, sizeBytes, stream_obj, &handled);
     }
     if (handled || special_result != hipSuccess) {
       IREE_TRACE_ZONE_END(z0);
@@ -20851,6 +20872,14 @@ static hipError_t iree_hip_graph_convert_driver_memcpy3d_params(
 
 HIPAPI hipError_t hipDrvMemcpy3D(const iree_hip_driver_memcpy3d_t* pCopy) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (!pCopy) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (pCopy->WidthInBytes == 0 || pCopy->Height == 0 || pCopy->Depth == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
   hipMemcpy3DParms params;
   hipError_t result =
       iree_hip_graph_convert_driver_memcpy3d_params(pCopy, &params);
@@ -20867,6 +20896,14 @@ HIPAPI hipError_t hipDrvMemcpy3D(const iree_hip_driver_memcpy3d_t* pCopy) {
 HIPAPI hipError_t hipDrvMemcpy3DAsync(const iree_hip_driver_memcpy3d_t* pCopy,
                                       hipStream_t stream) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  if (!pCopy) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (pCopy->WidthInBytes == 0 || pCopy->Height == 0 || pCopy->Depth == 0) {
+    IREE_TRACE_ZONE_END(z0);
+    return hipSuccess;
+  }
   hipMemcpy3DParms params;
   hipError_t result =
       iree_hip_graph_convert_driver_memcpy3d_params(pCopy, &params);
