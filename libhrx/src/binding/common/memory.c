@@ -1141,9 +1141,9 @@ static iree_status_t iree_hal_streaming_pending_free_release_list(
 }
 
 iree_status_t iree_hal_streaming_memory_release_completed_async_frees(
+    iree_hal_streaming_context_t* context,
     iree_hal_streaming_stream_t* stream) {
   iree_hal_streaming_deferred_device_free_t* completed_frees = NULL;
-  iree_hal_streaming_context_t* context = stream->context;
 
   iree_slim_mutex_lock(&context->pending_free_mutex);
   iree_hal_streaming_deferred_device_free_t** current =

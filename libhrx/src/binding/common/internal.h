@@ -258,10 +258,11 @@ struct iree_hal_streaming_context_t {
   // Host allocator.
   iree_allocator_t host_allocator;
 
-  // Stream tracking (non-owning references - streams are not retained).
-  // NOTE: Streams are NOT retained by this list to avoid reference cycles.
-  // Streams must unregister themselves before destruction.
-  iree_hal_streaming_stream_t** streams;  // Non-owning pointers.
+  // Stream tracking. The list owns one reference to every registered stream so
+  // context-wide operations can take stable snapshots while streams are being
+  // destroyed concurrently. Streams explicitly unregister before releasing
+  // their caller-owned reference, avoiding a context/stream reference cycle.
+  iree_hal_streaming_stream_t** streams;
   iree_host_size_t stream_count;
   iree_host_size_t stream_capacity;
 
@@ -1485,8 +1486,8 @@ iree_status_t iree_hal_streaming_context_disable_peer_access(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_context_t* peer_context);
 
-// Registers a stream with the context (non-owning).
-// Called during stream creation. Does NOT retain the stream.
+// Registers a stream with the context and retains it until unregistration.
+// Called during stream creation.
 // Synchronization: none (thread-safe internal locking).
 iree_status_t iree_hal_streaming_context_register_stream(
     iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
@@ -1631,10 +1632,18 @@ iree_status_t iree_hal_streaming_stream_begin_locked(
 // Synchronization: none (submits to queue, non-blocking).
 iree_status_t iree_hal_streaming_stream_flush(
     iree_hal_streaming_stream_t* stream);
+// Flushes a retained stream snapshot using the context that owns the snapshot.
+// This remains valid if concurrent stream destruction detaches |stream|.
+iree_status_t iree_hal_streaming_stream_flush_in_context(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_context_t* context);
 
 // Synchronization: none (queries stream status, non-blocking).
 iree_status_t iree_hal_streaming_stream_query(
     iree_hal_streaming_stream_t* stream, int* status);
+// Queries a retained stream snapshot using the context that owns the snapshot.
+iree_status_t iree_hal_streaming_stream_query_in_context(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_context_t* context,
+    int* status);
 
 // Synchronization: stream (blocks until stream idle).
 iree_status_t iree_hal_streaming_stream_synchronize(
@@ -1642,6 +1651,12 @@ iree_status_t iree_hal_streaming_stream_synchronize(
 // Synchronizes stream work that the caller has already flushed/submitted.
 iree_status_t iree_hal_streaming_stream_synchronize_flushed(
     iree_hal_streaming_stream_t* stream);
+// Synchronizes a retained stream snapshot using the context that owns the
+// snapshot. |flush_context| controls whether all context streams are submitted
+// before waiting.
+iree_status_t iree_hal_streaming_stream_synchronize_in_context(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_context_t* context,
+    bool flush_context);
 
 // Wait for already-submitted work on this stream to complete.
 // Does NOT flush in-progress recordings - safe to call from other threads.
@@ -1820,7 +1835,7 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
 // Releases completed stream-ordered frees retained for conservative reuse.
 // Synchronization: stream (requires |stream| to be idle).
 iree_status_t iree_hal_streaming_memory_release_completed_async_frees(
-    iree_hal_streaming_stream_t* stream);
+    iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream);
 
 // Releases every terminal stream-ordered free owned by |context|.
 // Synchronization: all context streams have reached terminal queue state.

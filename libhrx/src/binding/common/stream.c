@@ -450,9 +450,11 @@ iree_status_t iree_hal_streaming_stream_begin(
   return status;
 }
 
-iree_status_t iree_hal_streaming_stream_flush(
-    iree_hal_streaming_stream_t* stream) {
+iree_status_t iree_hal_streaming_stream_flush_in_context(
+    iree_hal_streaming_stream_t* stream,
+    iree_hal_streaming_context_t* context) {
   IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(context);
   IREE_TRACE_ZONE_BEGIN(z0);
   const int timing_enabled = hrx_launch_timing_enabled();
   const uint64_t timing_start_ns =
@@ -501,12 +503,11 @@ iree_status_t iree_hal_streaming_stream_flush(
 
     timing_step_ns = timing_enabled ? hrx_launch_timing_now_ns() : 0;
     status = iree_hal_device_queue_execute(
-        stream->context->device, queue_affinity, wait_semaphores,
-        signal_semaphores, stream->command_buffer,
-        iree_hal_buffer_binding_table_empty(), IREE_HAL_EXECUTE_FLAG_NONE);
+        context->device, queue_affinity, wait_semaphores, signal_semaphores,
+        stream->command_buffer, iree_hal_buffer_binding_table_empty(),
+        IREE_HAL_EXECUTE_FLAG_NONE);
     if (iree_status_is_ok(status)) {
-      status =
-          iree_hal_device_queue_flush(stream->context->device, queue_affinity);
+      status = iree_hal_device_queue_flush(context->device, queue_affinity);
     }
     if (timing_enabled) {
       timing_execute_ns += hrx_launch_timing_now_ns() - timing_step_ns;
@@ -544,12 +545,21 @@ iree_status_t iree_hal_streaming_stream_flush(
   return status;
 }
 
-iree_status_t iree_hal_streaming_stream_query(
-    iree_hal_streaming_stream_t* stream, int* status) {
+iree_status_t iree_hal_streaming_stream_flush(
+    iree_hal_streaming_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(stream);
+  return iree_hal_streaming_stream_flush_in_context(stream, stream->context);
+}
+
+iree_status_t iree_hal_streaming_stream_query_in_context(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_context_t* context,
+    int* status) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(status);
 
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_stream_flush(stream));
+  IREE_RETURN_IF_ERROR(
+      iree_hal_streaming_stream_flush_in_context(stream, context));
 
   uint64_t current_value = 0;
   iree_status_t query_status =
@@ -574,9 +584,18 @@ iree_status_t iree_hal_streaming_stream_query(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_streaming_stream_synchronize_impl(
-    iree_hal_streaming_stream_t* stream, bool flush_context) {
+iree_status_t iree_hal_streaming_stream_query(
+    iree_hal_streaming_stream_t* stream, int* status) {
   IREE_ASSERT_ARGUMENT(stream);
+  return iree_hal_streaming_stream_query_in_context(stream, stream->context,
+                                                    status);
+}
+
+static iree_status_t iree_hal_streaming_stream_synchronize_impl(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_context_t* context,
+    bool flush_context) {
+  IREE_ASSERT_ARGUMENT(stream);
+  IREE_ASSERT_ARGUMENT(context);
   IREE_TRACE_ZONE_BEGIN(z0);
   const int timing_enabled = hrx_launch_timing_enabled();
   const uint64_t timing_start_ns =
@@ -591,8 +610,7 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
     // buffer recording. Before waiting on a stream, submit all pending work in
     // the same context so stream-ordered dependencies and device-side waits can
     // make forward progress without repeatedly flushing unrelated contexts.
-    iree_status_t flush_status =
-        iree_hal_streaming_context_flush(stream->context);
+    iree_status_t flush_status = iree_hal_streaming_context_flush(context);
     if (timing_enabled) {
       timing_flush_ns += hrx_launch_timing_now_ns() - timing_step_ns;
     }
@@ -645,7 +663,8 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
   iree_slim_mutex_unlock(&stream->mutex);
 
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_memory_release_completed_async_frees(stream));
+      z0,
+      iree_hal_streaming_memory_release_completed_async_frees(context, stream));
 
   if (timing_enabled) {
     ++g_hrx_launch_timing.sync_count;
@@ -661,14 +680,21 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
 
 iree_status_t iree_hal_streaming_stream_synchronize(
     iree_hal_streaming_stream_t* stream) {
-  return iree_hal_streaming_stream_synchronize_impl(stream,
+  return iree_hal_streaming_stream_synchronize_impl(stream, stream->context,
                                                     /*flush_context=*/true);
 }
 
 iree_status_t iree_hal_streaming_stream_synchronize_flushed(
     iree_hal_streaming_stream_t* stream) {
-  return iree_hal_streaming_stream_synchronize_impl(stream,
+  return iree_hal_streaming_stream_synchronize_impl(stream, stream->context,
                                                     /*flush_context=*/false);
+}
+
+iree_status_t iree_hal_streaming_stream_synchronize_in_context(
+    iree_hal_streaming_stream_t* stream, iree_hal_streaming_context_t* context,
+    bool flush_context) {
+  return iree_hal_streaming_stream_synchronize_impl(stream, context,
+                                                    flush_context);
 }
 
 iree_status_t iree_hal_streaming_stream_wait_submitted(
