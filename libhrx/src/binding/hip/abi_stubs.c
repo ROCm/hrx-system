@@ -534,9 +534,50 @@ HIPAPI hipError_t hipChooseDeviceR0000(int* device,
 
 HIPAPI hipError_t hipChooseDeviceR0600(int* device,
                                        const hipDeviceProp_tR0600* properties) {
-  (void)device;
-  (void)properties;
-  return hipErrorNotSupported;
+  if (!device || !properties) return hipErrorInvalidValue;
+
+  int device_count = 0;
+  hipError_t result = hipGetDeviceCount(&device_count);
+  if (result != hipSuccess) return result;
+
+  *device = 0;
+  unsigned int best_match_count = 0;
+  for (int i = 0; i < device_count; ++i) {
+    hipDeviceProp_t current = {0};
+    result = hipGetDeviceProperties(&current, i);
+    if (result != hipSuccess) return result;
+
+    unsigned int requested_count = 0;
+    unsigned int match_count = 0;
+#define HRX_HIP_MATCH_MINIMUM(field)                         \
+  do {                                                       \
+    if (properties->field != 0) {                            \
+      ++requested_count;                                     \
+      if (current.field >= properties->field) ++match_count; \
+    }                                                        \
+  } while (0)
+    HRX_HIP_MATCH_MINIMUM(major);
+    HRX_HIP_MATCH_MINIMUM(minor);
+    HRX_HIP_MATCH_MINIMUM(totalGlobalMem);
+    HRX_HIP_MATCH_MINIMUM(sharedMemPerBlock);
+    HRX_HIP_MATCH_MINIMUM(maxThreadsPerBlock);
+    HRX_HIP_MATCH_MINIMUM(totalConstMem);
+    HRX_HIP_MATCH_MINIMUM(multiProcessorCount);
+    HRX_HIP_MATCH_MINIMUM(maxThreadsPerMultiProcessor);
+    HRX_HIP_MATCH_MINIMUM(memoryClockRate);
+    HRX_HIP_MATCH_MINIMUM(memoryBusWidth);
+    HRX_HIP_MATCH_MINIMUM(l2CacheSize);
+    HRX_HIP_MATCH_MINIMUM(regsPerBlock);
+    HRX_HIP_MATCH_MINIMUM(maxSharedMemoryPerMultiProcessor);
+    HRX_HIP_MATCH_MINIMUM(warpSize);
+#undef HRX_HIP_MATCH_MINIMUM
+
+    if (requested_count == match_count && match_count > best_match_count) {
+      *device = i;
+      best_match_count = match_count;
+    }
+  }
+  return hipSuccess;
 }
 
 HIPAPI hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim,
