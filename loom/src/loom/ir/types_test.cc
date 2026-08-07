@@ -192,6 +192,26 @@ TEST_F(ModuleTypesTest, RegisterValueTypeParticipatesInStructuralLifecycle) {
   ASSERT_EQ(capture.count, 1u);
   EXPECT_EQ(capture.values[0], 7u);
 
+  loom_register_type_data_t scalar_data = {
+      42, 4, loom_type_scalar(LOOM_SCALAR_TYPE_I32)};
+  loom_type_t scalar = loom_type_register_payload_with_value_type(&scalar_data);
+  EXPECT_FALSE(loom_type_references_value(module_, scalar, 7));
+  capture = {};
+  IREE_ASSERT_OK(
+      loom_type_walk_value_refs(module_, scalar, CaptureValueRef, &capture));
+  EXPECT_EQ(capture.count, 0u);
+
+  loom_type_t static_vector_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32, loom_dim_pack_static(4), 0);
+  loom_register_type_data_t static_vector_data = {42, 4, static_vector_type};
+  loom_type_t static_vector =
+      loom_type_register_payload_with_value_type(&static_vector_data);
+  EXPECT_FALSE(loom_type_references_value(module_, static_vector, 7));
+  capture = {};
+  IREE_ASSERT_OK(loom_type_walk_value_refs(module_, static_vector,
+                                           CaptureValueRef, &capture));
+  EXPECT_EQ(capture.count, 0u);
+
   loom_value_id_t source_values[] = {7};
   loom_value_id_t target_values[] = {9};
   loom_type_value_remap_t remap = {

@@ -11,7 +11,6 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
-#include "loom/target/arch/spirv/abi.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/error_catalog.h"
 #include "loom/target/arch/spirv/module_contract.h"
@@ -71,10 +70,6 @@ typedef struct loom_spirv_low_verify_state_t {
   iree_string_view_t function_name;
   // Exact SPIR-V value types indexed by compact hash table.
   loom_spirv_low_value_type_table_t value_types;
-  // Exact ABI result value types.
-  loom_spirv_value_type_t* result_value_types;
-  // Number of entries in result_value_types.
-  iree_host_size_t result_value_type_count;
   // True when the resolved function target uses HAL raw-BDA resources.
   bool raw_bda_hal_kernel;
   // True after a function-level diagnostic makes body-local checks unreliable.
@@ -215,14 +210,6 @@ static loom_type_t loom_spirv_low_module_type_attr(const loom_module_t* module,
   return module->types.entries[type_id];
 }
 
-static bool loom_spirv_low_type_is_spirv_id(loom_type_t type) {
-  return loom_low_type_is_register(type) &&
-         loom_low_register_type_descriptor_set_stable_id(type) ==
-             SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID &&
-         loom_low_register_type_class_id(type) ==
-             SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID;
-}
-
 static iree_string_view_t loom_spirv_low_value_type_format(
     loom_spirv_value_type_t value_type, char* buffer,
     iree_host_size_t buffer_capacity) {
@@ -260,21 +247,6 @@ static iree_string_view_t loom_spirv_low_value_type_format(
   return IREE_SV("unknown");
 }
 
-static const loom_named_attr_t* loom_spirv_low_find_boundary_attr(
-    const loom_module_t* module, loom_named_attr_slice_t attrs,
-    iree_string_view_t attr_name) {
-  const loom_string_id_t name_id = loom_module_lookup_string(module, attr_name);
-  if (name_id == LOOM_STRING_ID_INVALID) {
-    return NULL;
-  }
-  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
-    if (attrs.entries[i].name_id == name_id) {
-      return &attrs.entries[i];
-    }
-  }
-  return NULL;
-}
-
 static loom_named_attr_slice_t loom_spirv_low_boundary_attrs(
     const loom_op_t* function_op) {
   if (loom_low_kernel_def_isa(function_op)) {
@@ -294,85 +266,23 @@ static iree_status_t loom_spirv_low_emit(loom_low_verify_context_t* context,
   return loom_low_verify_context_emit(context, op, error, params, param_count);
 }
 
-static iree_status_t loom_spirv_low_emit_malformed_abi_attr(
-    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_op_t* op, iree_string_view_t attr_name,
-    iree_host_size_t expected_count) {
+static iree_status_t loom_spirv_low_emit_abi_layout(
+    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state) {
   loom_diagnostic_param_t params[] = {
       loom_param_string(state->function_name),
-      loom_param_string(attr_name),
-      loom_param_u32((uint32_t)expected_count),
   };
-  return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_001, params,
-                             IREE_ARRAYSIZE(params));
+  return loom_spirv_low_emit(context, state->function_op, LOOM_ERR_SPIRV_030,
+                             params, IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_spirv_low_lookup_abi_value_type_attr(
-    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    iree_string_view_t attr_name, iree_host_size_t expected_count,
-    const loom_attribute_t** out_attr, bool* out_malformed) {
-  *out_attr = NULL;
-  *out_malformed = false;
-  const loom_named_attr_t* entry = loom_spirv_low_find_boundary_attr(
-      state->module, loom_spirv_low_boundary_attrs(state->function_op),
-      attr_name);
-  if (entry == NULL) {
+static iree_status_t loom_spirv_low_verify_empty_abi_layout(
+    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state) {
+  if (loom_spirv_low_boundary_attrs(state->function_op).count == 0) {
     return iree_ok_status();
   }
-  const loom_attribute_t* attr = &entry->value;
-  if (attr->kind != LOOM_ATTR_I64_ARRAY || attr->count != expected_count ||
-      (attr->count != 0 && attr->i64_array == NULL)) {
-    IREE_RETURN_IF_ERROR(loom_spirv_low_emit_malformed_abi_attr(
-        context, state, state->function_op, attr_name, expected_count));
-    *out_malformed = true;
-    return iree_ok_status();
-  }
-  *out_attr = attr;
+  IREE_RETURN_IF_ERROR(loom_spirv_low_emit_abi_layout(context, state));
+  state->skip_body_checks = true;
   return iree_ok_status();
-}
-
-static iree_status_t loom_spirv_low_emit_missing_abi_value_type(
-    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_op_t* op, iree_string_view_t attr_name,
-    loom_value_id_t value_id) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(state->function_name),
-      loom_param_string(attr_name),
-      loom_param_string(
-          loom_low_diagnostic_value_name(state->module, value_id)),
-  };
-  return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_002, params,
-                             IREE_ARRAYSIZE(params));
-}
-
-static iree_status_t loom_spirv_low_emit_non_id_abi_value_type(
-    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_op_t* op, iree_string_view_t attr_name, loom_value_id_t value_id,
-    int64_t value_code) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(state->function_name),
-      loom_param_string(attr_name),
-      loom_param_string(
-          loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_i64(value_code),
-  };
-  return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_003, params,
-                             IREE_ARRAYSIZE(params));
-}
-
-static iree_status_t loom_spirv_low_emit_invalid_abi_value_type(
-    loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_op_t* op, iree_string_view_t attr_name, loom_value_id_t value_id,
-    int64_t value_code) {
-  loom_diagnostic_param_t params[] = {
-      loom_param_string(state->function_name),
-      loom_param_string(attr_name),
-      loom_param_string(
-          loom_low_diagnostic_value_name(state->module, value_id)),
-      loom_param_i64(value_code),
-  };
-  return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_004, params,
-                             IREE_ARRAYSIZE(params));
 }
 
 static iree_status_t loom_spirv_low_emit_unsupported_register_type(
@@ -388,42 +298,16 @@ static iree_status_t loom_spirv_low_emit_unsupported_register_type(
                              IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_spirv_low_prepare_abi_value_type(
+static iree_status_t loom_spirv_low_decode_boundary_value_type(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
-    const loom_op_t* op, iree_string_view_t attr_name,
-    const loom_attribute_t* attr, iree_host_size_t attr_index,
     loom_value_id_t value_id, loom_spirv_value_type_t* out_value_type) {
-  loom_type_t low_type = loom_module_value_type(state->module, value_id);
-  *out_value_type = (loom_spirv_value_type_t){0};
-  if (!loom_spirv_low_type_is_spirv_id(low_type)) {
-    if (attr != NULL && attr->i64_array[attr_index] != 0) {
-      IREE_RETURN_IF_ERROR(loom_spirv_low_emit_non_id_abi_value_type(
-          context, state, op, attr_name, value_id,
-          attr->i64_array[attr_index]));
-      state->skip_body_checks = true;
-      return iree_ok_status();
-    }
-    if (!loom_spirv_value_type_from_low_register_type(low_type,
-                                                      out_value_type)) {
-      IREE_RETURN_IF_ERROR(loom_spirv_low_emit_unsupported_register_type(
-          context, state, op, value_id, low_type));
-      state->skip_body_checks = true;
-    }
+  const loom_type_t low_type = loom_module_value_type(state->module, value_id);
+  if (loom_spirv_value_type_from_low_register_type(low_type, out_value_type)) {
     return iree_ok_status();
   }
-  if (attr == NULL) {
-    IREE_RETURN_IF_ERROR(loom_spirv_low_emit_missing_abi_value_type(
-        context, state, op, attr_name, value_id));
-    state->skip_body_checks = true;
-    return iree_ok_status();
-  }
-  if (!loom_spirv_abi_value_type_decode(attr->i64_array[attr_index],
-                                        out_value_type) ||
-      out_value_type->value_class == LOOM_SPIRV_VALUE_CLASS_UNKNOWN) {
-    IREE_RETURN_IF_ERROR(loom_spirv_low_emit_invalid_abi_value_type(
-        context, state, op, attr_name, value_id, attr->i64_array[attr_index]));
-    state->skip_body_checks = true;
-  }
+  IREE_RETURN_IF_ERROR(loom_spirv_low_emit_unsupported_register_type(
+      context, state, state->function_op, value_id, low_type));
+  state->skip_body_checks = true;
   return iree_ok_status();
 }
 
@@ -432,22 +316,11 @@ static iree_status_t loom_spirv_low_seed_entry_args(
   if (state->entry_block == NULL) {
     return iree_ok_status();
   }
-  const loom_attribute_t* attr = NULL;
-  bool malformed = false;
-  IREE_RETURN_IF_ERROR(loom_spirv_low_lookup_abi_value_type_attr(
-      context, state, IREE_SV(LOOM_SPIRV_ABI_ARG_VALUE_TYPES_ATTR_NAME),
-      state->entry_block->arg_count, &attr, &malformed));
-  if (malformed) {
-    state->skip_body_checks = true;
-    return iree_ok_status();
-  }
   for (uint16_t i = 0; i < state->entry_block->arg_count; ++i) {
     const loom_value_id_t value_id = loom_block_arg_id(state->entry_block, i);
     loom_spirv_value_type_t value_type = {0};
-    IREE_RETURN_IF_ERROR(loom_spirv_low_prepare_abi_value_type(
-        context, state, state->function_op,
-        IREE_SV(LOOM_SPIRV_ABI_ARG_VALUE_TYPES_ATTR_NAME), attr, i, value_id,
-        &value_type));
+    IREE_RETURN_IF_ERROR(loom_spirv_low_decode_boundary_value_type(
+        context, state, value_id, &value_type));
     if (value_type.value_class != LOOM_SPIRV_VALUE_CLASS_UNKNOWN) {
       IREE_RETURN_IF_ERROR(loom_spirv_low_value_type_table_define(
           &state->value_types, value_id, value_type, state->arena));
@@ -456,33 +329,24 @@ static iree_status_t loom_spirv_low_seed_entry_args(
   return iree_ok_status();
 }
 
-static iree_status_t loom_spirv_low_prepare_result_value_types(
+static iree_status_t loom_spirv_low_verify_result_value_types(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state) {
-  const iree_host_size_t result_count = state->function_op->result_count;
-  if (result_count == 0) {
-    return iree_ok_status();
-  }
-  const loom_attribute_t* attr = NULL;
-  bool malformed = false;
-  IREE_RETURN_IF_ERROR(loom_spirv_low_lookup_abi_value_type_attr(
-      context, state, IREE_SV(LOOM_SPIRV_ABI_RESULT_VALUE_TYPES_ATTR_NAME),
-      result_count, &attr, &malformed));
-  if (malformed) {
-    state->skip_body_checks = true;
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->arena, result_count, sizeof(*state->result_value_types),
-      (void**)&state->result_value_types));
-  state->result_value_type_count = result_count;
   const loom_value_id_t* results = loom_op_const_results(state->function_op);
-  for (iree_host_size_t i = 0; i < result_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_spirv_low_prepare_abi_value_type(
-        context, state, state->function_op,
-        IREE_SV(LOOM_SPIRV_ABI_RESULT_VALUE_TYPES_ATTR_NAME), attr, i,
-        results[i], &state->result_value_types[i]));
+  for (uint16_t i = 0; i < state->function_op->result_count; ++i) {
+    loom_spirv_value_type_t value_type = {0};
+    IREE_RETURN_IF_ERROR(loom_spirv_low_decode_boundary_value_type(
+        context, state, results[i], &value_type));
   }
   return iree_ok_status();
+}
+
+static loom_spirv_value_type_t loom_spirv_low_verified_boundary_value_type(
+    const loom_spirv_low_verify_state_t* state, loom_value_id_t value_id) {
+  loom_spirv_value_type_t value_type = {0};
+  const bool decoded = loom_spirv_value_type_from_low_register_type(
+      loom_module_value_type(state->module, value_id), &value_type);
+  IREE_ASSERT(decoded);
+  return value_type;
 }
 
 static bool loom_spirv_low_value_type_is_direct_scalar(
@@ -658,11 +522,12 @@ static iree_status_t loom_spirv_low_verify_abi_shape(
   }
 
   const loom_value_id_t* results = loom_op_const_results(state->function_op);
-  for (iree_host_size_t i = 0; i < state->result_value_type_count; ++i) {
-    if (!loom_spirv_low_value_type_is_direct_scalar(
-            state->result_value_types[i])) {
+  for (uint16_t i = 0; i < state->function_op->result_count; ++i) {
+    const loom_spirv_value_type_t result_value_type =
+        loom_spirv_low_verified_boundary_value_type(state, results[i]);
+    if (!loom_spirv_low_value_type_is_direct_scalar(result_value_type)) {
       IREE_RETURN_IF_ERROR(loom_spirv_low_emit_shader_result_value(
-          context, state, results[i], state->result_value_types[i]));
+          context, state, results[i], result_value_type));
     }
   }
   return iree_ok_status();
@@ -936,21 +801,22 @@ static iree_status_t loom_spirv_low_emit_return_type_mismatch(
 static iree_status_t loom_spirv_low_verify_return(
     loom_low_verify_context_t* context, loom_spirv_low_verify_state_t* state,
     const loom_op_t* op) {
-  if (op->operand_count != state->result_value_type_count) {
+  if (op->operand_count != state->function_op->result_count) {
     return iree_ok_status();
   }
   const loom_value_id_t* operands = loom_op_const_operands(op);
+  const loom_value_id_t* results = loom_op_const_results(state->function_op);
   for (uint16_t i = 0; i < op->operand_count; ++i) {
     loom_spirv_value_type_t actual_type = {0};
     if (!loom_spirv_low_value_type_table_lookup(&state->value_types,
                                                 operands[i], &actual_type)) {
       continue;
     }
-    if (!loom_spirv_value_type_equal(actual_type,
-                                     state->result_value_types[i])) {
+    const loom_spirv_value_type_t expected_type =
+        loom_spirv_low_verified_boundary_value_type(state, results[i]);
+    if (!loom_spirv_value_type_equal(actual_type, expected_type)) {
       IREE_RETURN_IF_ERROR(loom_spirv_low_emit_return_type_mismatch(
-          context, state, op, i, operands[i], state->result_value_types[i],
-          actual_type));
+          context, state, op, i, operands[i], expected_type, actual_type));
     }
   }
   return iree_ok_status();
@@ -1394,9 +1260,13 @@ static iree_status_t loom_spirv_low_begin_function(
   if (state->body != NULL && state->body->block_count > 0) {
     state->entry_block = loom_region_const_entry_block(state->body);
   }
+  IREE_RETURN_IF_ERROR(loom_spirv_low_verify_empty_abi_layout(context, state));
+  if (state->skip_body_checks) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_spirv_low_seed_entry_args(context, state));
   IREE_RETURN_IF_ERROR(
-      loom_spirv_low_prepare_result_value_types(context, state));
+      loom_spirv_low_verify_result_value_types(context, state));
   if (state->skip_body_checks) {
     return iree_ok_status();
   }

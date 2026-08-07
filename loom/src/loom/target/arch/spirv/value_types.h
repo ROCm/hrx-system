@@ -76,88 +76,11 @@ typedef struct loom_spirv_value_type_t {
 static_assert(sizeof(loom_spirv_value_type_t) == 20,
               "SPIR-V value types must remain compact");
 
-// Maps a public Loom scalar or native ordinary-vector type to its canonical
-// SPIR-V value type. Returns false for types that need other target-specific
-// aggregate semantics or have no logical SPIR-V representation.
+// Maps a public Loom scalar, native ordinary-vector, or SPIR-V aggregate type
+// to its canonical target-local value type. Returns false when the public type
+// is malformed or has no logical SPIR-V representation.
 bool loom_spirv_value_type_from_loom_type(
     loom_type_t type, loom_spirv_value_type_t* out_value_type);
-
-enum loom_spirv_abi_value_type_code_e {
-  // No payload metadata is attached to this ABI position.
-  LOOM_SPIRV_ABI_VALUE_TYPE_NONE = 0,
-  // Boolean payload represented by an i32 ABI field when materialized through
-  // descriptor or push-constant storage.
-  LOOM_SPIRV_ABI_VALUE_TYPE_BOOL = 1,
-  // First code value reserved for scalar payloads.
-  LOOM_SPIRV_ABI_VALUE_TYPE_SCALAR_BASE = 16,
-};
-
-static inline int64_t loom_spirv_abi_value_type_code_from_scalar(
-    loom_spirv_scalar_type_t scalar_type) {
-  return LOOM_SPIRV_ABI_VALUE_TYPE_SCALAR_BASE + (int64_t)scalar_type;
-}
-
-static inline bool loom_spirv_abi_value_type_encode(
-    loom_spirv_value_type_t value_type, int64_t* out_code) {
-  *out_code = LOOM_SPIRV_ABI_VALUE_TYPE_NONE;
-  switch (value_type.value_class) {
-    case LOOM_SPIRV_VALUE_CLASS_SCALAR:
-      if (loom_spirv_scalar_type_descriptor(value_type.scalar_type) == NULL) {
-        return false;
-      }
-      *out_code =
-          loom_spirv_abi_value_type_code_from_scalar(value_type.scalar_type);
-      return true;
-    case LOOM_SPIRV_VALUE_CLASS_BOOL:
-      *out_code = LOOM_SPIRV_ABI_VALUE_TYPE_BOOL;
-      return true;
-    case LOOM_SPIRV_VALUE_CLASS_VECTOR:
-    case LOOM_SPIRV_VALUE_CLASS_BOOL_VECTOR:
-      return false;
-    case LOOM_SPIRV_VALUE_CLASS_UNKNOWN:
-    case LOOM_SPIRV_VALUE_CLASS_OFFSET64:
-    case LOOM_SPIRV_VALUE_CLASS_STORAGE_BUFFER_ADDRESS:
-    case LOOM_SPIRV_VALUE_CLASS_PTR_PHYSICAL_STORAGE_BUFFER:
-    case LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX:
-    case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP:
-    case LOOM_SPIRV_VALUE_CLASS_PTR_WORKGROUP_ARRAY:
-      return true;
-  }
-  return false;
-}
-
-static inline bool loom_spirv_abi_value_type_decode(
-    int64_t code, loom_spirv_value_type_t* out_value_type) {
-  *out_value_type = (loom_spirv_value_type_t){
-      /*.value_class=*/LOOM_SPIRV_VALUE_CLASS_UNKNOWN,
-  };
-  if (code == LOOM_SPIRV_ABI_VALUE_TYPE_NONE) {
-    return true;
-  }
-  if (code == LOOM_SPIRV_ABI_VALUE_TYPE_BOOL) {
-    *out_value_type = (loom_spirv_value_type_t){
-        /*.value_class=*/LOOM_SPIRV_VALUE_CLASS_BOOL,
-    };
-    return true;
-  }
-  if (code <= LOOM_SPIRV_ABI_VALUE_TYPE_SCALAR_BASE) {
-    return false;
-  }
-  const int64_t scalar_code = code - LOOM_SPIRV_ABI_VALUE_TYPE_SCALAR_BASE;
-  if (scalar_code > UINT8_MAX) {
-    return false;
-  }
-  const loom_spirv_scalar_type_t scalar_type =
-      (loom_spirv_scalar_type_t)scalar_code;
-  if (loom_spirv_scalar_type_descriptor(scalar_type) == NULL) {
-    return false;
-  }
-  *out_value_type = (loom_spirv_value_type_t){
-      /*.value_class=*/LOOM_SPIRV_VALUE_CLASS_SCALAR,
-      /*.scalar_type=*/scalar_type,
-  };
-  return true;
-}
 
 // Returns true when |lhs| and |rhs| name the same target-local SPIR-V value
 // type.

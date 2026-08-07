@@ -13,7 +13,6 @@
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/low/ops.h"
-#include "loom/target/arch/spirv/abi.h"
 #include "loom/target/arch/spirv/registers.h"
 #include "loom/target/arch/spirv/value_types.h"
 #include "loom/util/fact_table.h"

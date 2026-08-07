@@ -2783,6 +2783,53 @@ typedef iree_status_t (*loom_module_type_clone_fn_t)(loom_module_t* module,
                                                      const void* clone_context,
                                                      loom_type_t* out_type);
 
+static void loom_module_note_recent_register_type(loom_module_t* module,
+                                                  loom_type_id_t type_id) {
+  IREE_ASSERT(type_id < module->types.count);
+  IREE_ASSERT(loom_type_is_register(module->types.entries[type_id]));
+  IREE_ASSERT(
+      loom_type_register_has_value_type(module->types.entries[type_id]));
+  const uint32_t ordinal = type_id + 1;
+  if (module->recent_register_type_ordinals[0] == ordinal) return;
+  module->recent_register_type_ordinals[1] =
+      module->recent_register_type_ordinals[0];
+  module->recent_register_type_ordinals[0] = ordinal;
+}
+
+static bool loom_type_has_same_storage(loom_type_t lhs, loom_type_t rhs) {
+  return lhs.header == rhs.header && lhs.encoding_id == rhs.encoding_id &&
+         lhs.encoding_flags == rhs.encoding_flags &&
+         lhs.dims[0] == rhs.dims[0] && lhs.dims[1] == rhs.dims[1];
+}
+
+static loom_type_id_t loom_module_find_recent_register_type_exact(
+    const loom_module_t* module, loom_type_t type) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(module->recent_register_type_ordinals); ++i) {
+    const uint32_t ordinal = module->recent_register_type_ordinals[i];
+    if (ordinal == 0) continue;
+    const loom_type_id_t type_id = ordinal - 1;
+    if (loom_type_has_same_storage(module->types.entries[type_id], type)) {
+      return type_id;
+    }
+  }
+  return LOOM_TYPE_ID_INVALID;
+}
+
+static loom_type_id_t loom_module_find_recent_register_type_structural(
+    const loom_module_t* module, loom_type_t type) {
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(module->recent_register_type_ordinals); ++i) {
+    const uint32_t ordinal = module->recent_register_type_ordinals[i];
+    if (ordinal == 0) continue;
+    const loom_type_id_t type_id = ordinal - 1;
+    if (loom_type_equal(module->types.entries[type_id], type)) {
+      return type_id;
+    }
+  }
+  return LOOM_TYPE_ID_INVALID;
+}
+
 // Compares one interned module type against a temporary by-value candidate.
 static bool loom_type_equal_fn(const void* context, uint32_t index) {
   const loom_type_equal_context_t* ctx =
@@ -3098,6 +3145,15 @@ static iree_status_t loom_module_retain_type_from_context(
 static iree_status_t loom_module_intern_type_with_dependencies(
     loom_module_t* module, loom_type_t type, loom_type_t* out_interned_type,
     loom_type_id_t* out_type_id) {
+  if (loom_type_is_register(type) && loom_type_register_has_value_type(type)) {
+    const loom_type_id_t recent_type_id =
+        loom_module_find_recent_register_type_exact(module, type);
+    if (recent_type_id != LOOM_TYPE_ID_INVALID) {
+      *out_interned_type = module->types.entries[recent_type_id];
+      if (out_type_id) *out_type_id = recent_type_id;
+      return iree_ok_status();
+    }
+  }
   switch (loom_type_kind(type)) {
     case LOOM_TYPE_TILE:
     case LOOM_TYPE_TENSOR:
@@ -3327,9 +3383,17 @@ iree_status_t loom_module_intern_register_type(loom_module_t* module,
       .carrier_payload1 = carrier_payload1,
       .value_type = value_type,
   };
-  return loom_module_intern_type(
-      module, loom_type_register_payload_with_value_type(&data),
-      out_interned_type);
+  const loom_type_t type = loom_type_register_payload_with_value_type(&data);
+  loom_type_id_t type_id =
+      loom_module_find_recent_register_type_structural(module, type);
+  if (type_id == LOOM_TYPE_ID_INVALID) {
+    IREE_RETURN_IF_ERROR(loom_module_intern_type_with_dependencies(
+        module, type, out_interned_type, &type_id));
+  } else {
+    *out_interned_type = module->types.entries[type_id];
+  }
+  loom_module_note_recent_register_type(module, type_id);
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//

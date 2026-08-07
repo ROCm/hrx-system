@@ -140,6 +140,8 @@ loom_token_kind_t loom_keyword_token_kind(uint16_t keyword_id) {
       return LOOM_TOKEN_LBRACE;
     case LOOM_KW_RBRACE:
       return LOOM_TOKEN_RBRACE;
+    case LOOM_KW_X:
+      return LOOM_TOKEN_DIM_X;
     default:
       return LOOM_TOKEN_BARE_IDENT;
   }
@@ -167,6 +169,12 @@ iree_status_t loom_parse_keyword(loom_parser_t* parser, uint16_t keyword_id) {
       return loom_parser_expect(parser, LOOM_TOKEN_LBRACE, NULL);
     case LOOM_KW_RBRACE:
       return loom_parser_expect(parser, LOOM_TOKEN_RBRACE, NULL);
+    case LOOM_KW_X: {
+      parser->tokenizer.in_dim_list = true;
+      iree_status_t status = loom_parser_expect(parser, LOOM_TOKEN_DIM_X, NULL);
+      parser->tokenizer.in_dim_list = false;
+      return status;
+    }
     default: {
       // Text keyword; match as BARE_IDENT.
       loom_bstring_t keyword_bstring =

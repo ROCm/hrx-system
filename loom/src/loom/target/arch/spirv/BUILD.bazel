@@ -27,8 +27,14 @@ package(
 )
 
 exports_files(
-    ["isa.h"],
-    visibility = ["//loom/py/loom/gen/target/arch/spirv:__pkg__"],
+    [
+        "isa.h",
+        "scalar_types.h",
+    ],
+    visibility = [
+        "//loom/py/loom/gen/target/arch/spirv:__pkg__",
+        "//loom/py/loom/target/arch/spirv:__pkg__",
+    ],
 )
 
 _SPIRV_CHECK_PACKAGE_VISIBILITY = ["//loom/src/loom/target/arch/spirv/check:__pkg__"]
@@ -57,6 +63,8 @@ _SPIRV_TOOLING_VISIBILITY = [
     "//loom/src/loom/tooling/target/spirv/execution:__pkg__",
 ]
 
+_TYPE_REGISTRY_VISIBILITY = ["//loom/src/loom/ops:__pkg__"]
+
 #===------------------------------------------------------------------------===#
 # SPIR-V low descriptors
 #===------------------------------------------------------------------------===#
@@ -83,7 +91,11 @@ loom_generated_cc_library(
 loom_cc_library(
     name = "isa",
     hdrs = ["isa.h"],
-    visibility = _SPIRV_EMIT_VISIBILITY,
+    visibility = (
+        _SPIRV_EMIT_VISIBILITY +
+        _SPIRV_LOWER_VISIBILITY +
+        _TYPE_REGISTRY_VISIBILITY
+    ),
 )
 
 loom_generated_textual_header(
@@ -119,20 +131,10 @@ loom_cc_library(
     name = "scalar_types",
     srcs = ["scalar_types.c"],
     hdrs = ["scalar_types.h"],
-    visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY,
+    visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY + _TYPE_REGISTRY_VISIBILITY,
     deps = [
         ":features",
         "//loom/src/loom/util:numeric_format",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
-    name = "abi",
-    hdrs = ["abi.h"],
-    visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY,
-    deps = [
-        ":value_types",
         "//runtime/src/iree/base",
     ],
 )
@@ -146,6 +148,7 @@ loom_cc_library(
         ":isa",
         ":scalar_types",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
         "//runtime/src/iree/base",
     ],
 )
@@ -273,7 +276,6 @@ loom_cc_library(
     hdrs = ["low_verify.h"],
     visibility = _SPIRV_TOOLING_VISIBILITY,
     deps = [
-        ":abi",
         ":error_defs",
         ":module_contract",
         ":packet_rows",
@@ -364,6 +366,19 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "value_types_test",
+    srcs = ["value_types_test.cc"],
+    deps = [
+        ":value_types",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:type_registry",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "registers_test",
     srcs = ["registers_test.cc"],
     deps = [
@@ -396,6 +411,7 @@ loom_check_test_suite(
         "test/source_low/low_verify_diagnostics.loom-test",
         "test/source_low/source_low.loom-test",
         "test/source_low/source_low_diagnostics.loom-test",
+        "test/source_low/structural_value_types_bytecode.loom-test",
         "test/source_low/structured_control.loom-test",
         "test/source_low/target_legalize.loom-test",
         "test/source_low/workgroup_storage.loom-test",

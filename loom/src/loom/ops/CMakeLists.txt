@@ -246,6 +246,8 @@ loom_generated_cc_library(
     loom::ir
     loom::ops::buffer
     loom::ops::vector
+    loom::target::arch::spirv::isa
+    loom::target::arch::spirv::scalar_types
     loom::util::fact_table
 )
 

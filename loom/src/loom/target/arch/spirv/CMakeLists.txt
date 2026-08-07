@@ -109,19 +109,6 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV)
 loom_cc_library(
   NAME
-    abi
-  HDRS
-    "abi.h"
-  DEPS
-    ::value_types
-    iree::base
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_SPIRV)
-loom_cc_library(
-  NAME
     value_types
   HDRS
     "value_types.h"
@@ -132,6 +119,7 @@ loom_cc_library(
     ::scalar_types
     iree::base
     loom::ir
+    loom::ops::type_registry
   PUBLIC
 )
 endif()
@@ -310,7 +298,6 @@ loom_cc_library(
   SRCS
     "low_verify.c"
   DEPS
-    ::abi
     ::error_defs
     ::module_contract
     ::packet_rows
@@ -428,6 +415,24 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV)
 loom_cc_test(
   NAME
+    value_types_test
+  SRCS
+    "value_types_test.cc"
+  DEPS
+    ::value_types
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::type_registry
+  LABELS
+    "iree-build-requirement=loom.target.arch.spirv"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_test(
+  NAME
     registers_test
   SRCS
     "registers_test.cc"
@@ -465,6 +470,7 @@ loom_check_test_suite(
     "test/source_low/low_verify_diagnostics.loom-test"
     "test/source_low/source_low.loom-test"
     "test/source_low/source_low_diagnostics.loom-test"
+    "test/source_low/structural_value_types_bytecode.loom-test"
     "test/source_low/structured_control.loom-test"
     "test/source_low/target_legalize.loom-test"
     "test/source_low/workgroup_storage.loom-test"

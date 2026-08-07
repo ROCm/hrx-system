@@ -10,7 +10,7 @@ func.def target(@target) @scalar_i64_bitwise_sgpr(%lhs: i64, %rhs: i64) -> (i64,
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [24, 24], spirv_result_value_types = [24, 24, 24]}) @scalar_i64_bitwise_sgpr(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i64>, reg<spirv.id : i64>, reg<spirv.id : i64>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_bitwise_sgpr(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i64>, reg<spirv.id : i64>, reg<spirv.id : i64>) asm {
   %and = OpBitwiseAnd.i64 %lhs, %rhs
   %or = OpBitwiseOr.i64 %and, %lhs
   %xor = OpBitwiseXor.i64 %or, %rhs
@@ -72,7 +72,7 @@ func.def target(@target) @scalar_i64_compare_eq_scc(%lhs: i64, %rhs: i64) -> (i1
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [24, 24], spirv_result_value_types = [1]}) @scalar_i64_compare_eq_scc(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i1>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_compare_eq_scc(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i1>) asm {
   %cmp = OpIEqual.i64 %lhs, %rhs
   return %cmp
 }
@@ -86,7 +86,7 @@ func.def target(@target) @scalar_i64_compare_ne_scc(%lhs: i64, %rhs: i64) -> (i1
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [24, 24], spirv_result_value_types = [1]}) @scalar_i64_compare_ne_scc(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i1>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_compare_ne_scc(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i1>) asm {
   %cmp = OpINotEqual.i64 %lhs, %rhs
   return %cmp
 }
@@ -100,7 +100,7 @@ func.def target(@target) @scalar_i64_compare_slt_return(%lhs: i64, %rhs: i64) ->
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [24, 24], spirv_result_value_types = [1]}) @scalar_i64_compare_slt_return(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i1>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_compare_slt_return(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>) -> (reg<spirv.id : i1>) asm {
   %cmp = OpSLessThan.i64 %lhs, %rhs
   return %cmp
 }
@@ -119,7 +119,7 @@ func.def target(@target) @scalar_i64_compare_slt_if(%lhs: i64, %rhs: i64, %then_
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [24, 24, 23, 23], spirv_result_value_types = [23]}) @scalar_i64_compare_slt_if(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>, %then_value: reg<spirv.id : i32>, %else_value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_compare_slt_if(%lhs: reg<spirv.id : i64>, %rhs: reg<spirv.id : i64>, %then_value: reg<spirv.id : i32>, %else_value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
   %cmp = OpSLessThan.i64 %lhs, %rhs
   %result = OpSelect %cmp, %then_value, %else_value
   return %result
@@ -136,7 +136,7 @@ func.def target(@target) @scalar_i64_compare_constant_select(%lhs: i64, %true_va
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) abi_layout({spirv_arg_value_types = [24, 18, 18], spirv_result_value_types = [18]}) @scalar_i64_compare_constant_select(%lhs: reg<spirv.id : i64>, %true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_i64_compare_constant_select(%lhs: reg<spirv.id : i64>, %true_value: reg<spirv.id : f32>, %false_value: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
   %limit = OpConstant.i64 4294967296
   %12 = OpBitcast.i64.u64 %lhs
   %13 = OpBitcast.i64.u64 %limit

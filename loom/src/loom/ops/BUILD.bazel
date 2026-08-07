@@ -216,6 +216,8 @@ loom_generated_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/vector",
+        "//loom/src/loom/target/arch/spirv:isa",
+        "//loom/src/loom/target/arch/spirv:scalar_types",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
     ],

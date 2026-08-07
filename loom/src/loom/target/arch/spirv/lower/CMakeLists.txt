@@ -35,14 +35,15 @@ loom_cc_library(
     loom::ops::func
     loom::ops::kernel
     loom::ops::low
+    loom::ops::type_registry
     loom::ops::vector
-    loom::target::arch::spirv::abi
     loom::target::arch::spirv::contracts
     loom::target::arch::spirv::cooperative_properties
     loom::target::arch::spirv::descriptors
     loom::target::arch::spirv::descriptors::descriptors_ids
     loom::target::arch::spirv::error_defs
     loom::target::arch::spirv::facts
+    loom::target::arch::spirv::isa
     loom::target::arch::spirv::registers
     loom::target::arch::spirv::scalar_types
     loom::target::arch::spirv::value_types

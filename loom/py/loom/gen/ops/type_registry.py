@@ -215,10 +215,13 @@ def generate_type_registry(
     header.append("#ifndef LOOM_OPS_TYPE_REGISTRY_H_")
     header.append("#define LOOM_OPS_TYPE_REGISTRY_H_")
     header.append("")
-    header.append('#include "iree/base/api.h"')
-    header.append('#include "loom/ir/parameterized_type.h"')
-    header.append('#include "loom/ir/types.h"')
-    header.append('#include "loom/ops/op_defs.h"')
+    base_includes = (
+        "iree/base/api.h",
+        "loom/ir/parameterized_type.h",
+        "loom/ir/types.h",
+        "loom/ops/op_defs.h",
+    )
+    header.extend(f'#include "{include}"' for include in base_includes)
     enum_includes = sorted(
         {
             parameter.enum_def.c_include
@@ -227,6 +230,7 @@ def generate_type_registry(
             for parameter in type_def.params
             if parameter.enum_def is not None and parameter.enum_def.c_include is not None
         }
+        - set(base_includes)
     )
     header.extend(f'#include "{include}"' for include in enum_includes)
     header.append("")

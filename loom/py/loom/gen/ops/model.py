@@ -235,12 +235,14 @@ def _load_all_types() -> list[Any]:
     from loom.dialect.kernel import ALL_KERNEL_TYPES
     from loom.dialect.test import ALL_TEST_TYPES
     from loom.target.arch.ireevm.dialect import ALL_IREEVM_TYPES
+    from loom.target.arch.spirv.dialect import ALL_SPIRV_TYPES
 
     return [
         *ALL_BUILTIN_TYPES,
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
         *ALL_TEST_TYPES,
+        *ALL_SPIRV_TYPES,
         *ALL_IREEVM_TYPES,
     ]
 

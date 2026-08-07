@@ -962,7 +962,11 @@ static bool loom_parse_type_format_keyword_try_consume(
     loom_tokenizer_t* tokenizer, uint16_t keyword_id) {
   loom_token_kind_t expected_kind = loom_keyword_token_kind(keyword_id);
   if (expected_kind != LOOM_TOKEN_BARE_IDENT) {
-    return loom_tokenizer_try_consume(tokenizer, expected_kind);
+    bool was_in_dim_list = tokenizer->in_dim_list;
+    if (expected_kind == LOOM_TOKEN_DIM_X) tokenizer->in_dim_list = true;
+    bool consumed = loom_tokenizer_try_consume(tokenizer, expected_kind);
+    tokenizer->in_dim_list = was_in_dim_list;
+    return consumed;
   }
   loom_bstring_t keyword = loom_keyword_bstring((loom_keyword_id_t)keyword_id);
   return keyword && loom_tokenizer_try_consume_keyword(
