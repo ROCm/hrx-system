@@ -187,7 +187,6 @@ class OpCallable:
         values = _validate_and_normalize_kwargs(self._signature, kwargs)
         attributes: dict[str, Any] = {}
         operands: list[ValueRef | int] = []
-        operand_segment_counts: list[int] = []
         successors: list[Block] = []
         func_args: list[ValueRef | int] = []
         block_args_by_region: dict[str, Sequence[tuple[str, Type]]] = {}
@@ -243,6 +242,8 @@ class OpCallable:
                     block_args_by_region[region_field] = value or []
                 case BuilderParamKind.FUNC_ARGS:
                     func_args.extend(value or [])
+                    if param.end_attr_field is not None:
+                        attributes[param.end_attr_field] = len(func_args)
                 case BuilderParamKind.PREDICATE_LIST:
                     if value:
                         attributes[param.name] = value
@@ -269,49 +270,7 @@ class OpCallable:
                         f"{param.kind.name}"
                     )
 
-        params_by_name = {
-            param.operand_field or param.name: param for param in self._signature.params
-        }
-        layout = compute_layout(op)
-        if layout.segmented_operands:
-            for operand in op.operands:
-                operand_param = params_by_name.get(operand.name)
-                if operand_param is None:
-                    operand_segment_counts.append(0)
-                    continue
-                before_count = len(operands)
-                value = values.get(operand_param.name)
-                self._append_operand_param(
-                    op, operand_param, value, operands, attributes
-                )
-                operand_segment_counts.append(len(operands) - before_count)
-        else:
-            optional_operand_tail_closed = False
-            for operand in op.operands:
-                operand_param = params_by_name.get(operand.name)
-                if operand_param is None:
-                    continue
-                value = values.get(operand_param.name)
-                if (
-                    operand_param.kind == BuilderParamKind.OPERAND
-                    and value is None
-                    and not operand_param.required
-                ):
-                    optional_operand_tail_closed = True
-                    continue
-                if (
-                    operand_param.kind == BuilderParamKind.OPERAND
-                    and value is not None
-                    and optional_operand_tail_closed
-                ):
-                    raise ValueError(
-                        f"{op.name}: optional operand '{operand_param.name}' "
-                        "cannot be present after an earlier optional operand "
-                        "was omitted"
-                    )
-                self._append_operand_param(
-                    op, operand_param, value, operands, attributes
-                )
+        operand_segment_counts = self._append_operands(op, values, operands, attributes)
 
         results = values.get("results")
         result_names = _normalize_result_names(
@@ -333,6 +292,73 @@ class OpCallable:
             regions=regions,
             location_id=values.get("location_id"),
         )
+
+    def _append_operands(
+        self,
+        op: Op,
+        values: dict[str, Any],
+        operands: list[ValueRef | int],
+        attributes: dict[str, Any],
+    ) -> list[int]:
+        """Appends operand fields in storage order and returns segment counts."""
+        params_by_field: dict[str, list[BuilderParam]] = {}
+        for param in self._signature.params:
+            field = param.operand_field or param.name
+            params_by_field.setdefault(field, []).append(param)
+        operand_segment_counts: list[int] = []
+        layout = compute_layout(op)
+        if layout.segmented_operands:
+            for operand in op.operands:
+                operand_params = params_by_field.get(operand.name, [])
+                if not operand_params:
+                    operand_segment_counts.append(0)
+                    continue
+                before_count = len(operands)
+                for operand_param in operand_params:
+                    value = values.get(operand_param.name)
+                    self._append_operand_param(
+                        op, operand_param, value, operands, attributes
+                    )
+                    if operand_param.end_attr_field is not None:
+                        attributes[operand_param.end_attr_field] = (
+                            len(operands) - before_count
+                        )
+                operand_segment_counts.append(len(operands) - before_count)
+        else:
+            optional_operand_tail_closed = False
+            for operand in op.operands:
+                operand_params = params_by_field.get(operand.name, [])
+                if not operand_params:
+                    continue
+                before_count = len(operands)
+                for operand_param in operand_params:
+                    value = values.get(operand_param.name)
+                    if (
+                        operand_param.kind == BuilderParamKind.OPERAND
+                        and value is None
+                        and not operand_param.required
+                    ):
+                        optional_operand_tail_closed = True
+                        continue
+                    if (
+                        operand_param.kind == BuilderParamKind.OPERAND
+                        and value is not None
+                        and optional_operand_tail_closed
+                    ):
+                        raise ValueError(
+                            f"{op.name}: optional operand "
+                            f"'{operand_param.name}' cannot be present after an "
+                            "earlier optional operand was omitted"
+                        )
+                    self._append_operand_param(
+                        op, operand_param, value, operands, attributes
+                    )
+                    if operand_param.end_attr_field is not None:
+                        attributes[operand_param.end_attr_field] = (
+                            len(operands) - before_count
+                        )
+
+        return operand_segment_counts
 
     def _append_operand_param(
         self,

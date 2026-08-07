@@ -1130,6 +1130,99 @@ def test_generate_callable_symbol_interface() -> None:
     assert (".interfaces = LOOM_SYMBOL_INTERFACE_FUNC_LIKE | LOOM_SYMBOL_INTERFACE_CALLABLE,") in tables_c
 
 
+def test_generate_body_signature_partition() -> None:
+    op = Op(
+        "test.partitioned_function",
+        group=Dialect("test"),
+        traits=[SYMBOL_DEFINE],
+        attrs=[
+            AttrDef("callee", ATTR_TYPE_SYMBOL),
+            AttrDef("specialization_count", ATTR_TYPE_I64),
+        ],
+        symbol_def=SymbolDefinition(
+            field="callee",
+            name="function",
+            interfaces=["func_like", "callable"],
+        ),
+        regions=[RegionDef("body")],
+        interfaces=[FuncLikeInterface(callee="callee", body="body")],
+        format=[
+            SymbolRef("callee"),
+            FuncArgs(
+                "args",
+                group="specializations",
+                end_attr="specialization_count",
+            ),
+            FuncArgs(
+                "args",
+                group="arguments",
+                start_attr="specialization_count",
+            ),
+            Region("body"),
+        ],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+    ops_h = generate_ops_h("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+
+    assert ("{LOOM_FORMAT_KIND_FUNC_ARGS, 255, LOOM_FORMAT_FUNC_ARGS_DATA(255, 1)}") in tables_c
+    assert ("{LOOM_FORMAT_KIND_FUNC_ARGS, 255, LOOM_FORMAT_FUNC_ARGS_DATA(1, 255)}") in tables_c
+    assert "const loom_type_t* specializations_types" in ops_h
+    assert "iree_host_size_t specializations_types_count" in ops_h
+    assert "const loom_type_t* arguments_types" in ops_h
+    assert "iree_host_size_t arguments_types_count" in ops_h
+    assert "int64_t specialization_count" not in ops_h
+    assert "_i < specializations_types_count" in builders_c
+    assert "_i < arguments_types_count" in builders_c
+    assert ("loom_op_attrs(*out_op)[1] = loom_attr_i64((int64_t)(specializations_types_count));") in builders_c
+
+
+def test_generate_operand_signature_partition() -> None:
+    op = Op(
+        "test.partitioned_declaration",
+        group=Dialect("test"),
+        traits=[SYMBOL_DEFINE],
+        operands=[Operand("args", ANY, variadic=True)],
+        attrs=[
+            AttrDef("callee", ATTR_TYPE_SYMBOL),
+            AttrDef("specialization_count", ATTR_TYPE_I64),
+        ],
+        symbol_def=SymbolDefinition(
+            field="callee",
+            name="function",
+            interfaces=["func_like", "callable"],
+            flags=[SymbolDefinitionFlag.DECLARATION],
+        ),
+        interfaces=[FuncLikeInterface(callee="callee", args="args")],
+        format=[
+            SymbolRef("callee"),
+            FuncArgs(
+                "args",
+                group="specializations",
+                end_attr="specialization_count",
+            ),
+            FuncArgs(
+                "args",
+                group="arguments",
+                start_attr="specialization_count",
+            ),
+        ],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+    builders_c = generate_builders_c("test", [op])
+
+    assert ("{LOOM_FORMAT_KIND_FUNC_ARGS, 0, LOOM_FORMAT_FUNC_ARGS_DATA(255, 1)}") in tables_c
+    assert ("{LOOM_FORMAT_KIND_FUNC_ARGS, 0, LOOM_FORMAT_FUNC_ARGS_DATA(1, 255)}") in tables_c
+    assert "uint32_t variadic_operand_count_32 = 0;" in builders_c
+    assert ("variadic_operand_count_32 += (uint32_t)specializations_types_count;") in builders_c
+    assert ("variadic_operand_count_32 += (uint32_t)arguments_types_count;") in builders_c
+    assert "uint16_t variadic_operand_offset = 0;" in builders_c
+    assert ("variadic_operand_offset += (uint16_t)specializations_types_count;") in builders_c
+    assert ("loom_op_attrs(*out_op)[1] = loom_attr_i64((int64_t)(specializations_types_count));") in builders_c
+
+
 def test_generate_tables_emits_symbol_value_contract_indices() -> None:
     op = Op(
         "test.value",
@@ -2009,7 +2102,8 @@ def test_generate_tables_emits_call_like_interface() -> None:
     assert "static const loom_call_like_vtable_t loom_test_call_call_like" in tables_c
     assert ".callee_attr_index = 0," in tables_c
     assert ".purity_attr_index = 255," in tables_c
-    assert ".operand_offset = 0," in tables_c
+    assert ".operand_field_index = 0," in tables_c
+    assert ".operand_segment_count = 0," in tables_c
     assert ".result_offset = 0," in tables_c
     assert ".kind = LOOM_CALL_LIKE_KIND_SEMANTIC," in tables_c
 
@@ -2031,7 +2125,8 @@ def test_generate_tables_emits_no_result_call_like_interface() -> None:
 
     tables_c = generate_tables_c("test", 0, [op])
 
-    assert ".operand_offset = 0," in tables_c
+    assert ".operand_field_index = 0," in tables_c
+    assert ".operand_segment_count = 0," in tables_c
     assert ".result_offset = 0," in tables_c
 
 
@@ -2399,6 +2494,54 @@ def test_generate_tables_rejects_call_like_non_variadic_operand() -> None:
 
     with _raises_value_error(r"CallLikeInterface on 'test\.call': operand 'operand' must be variadic"):
         generate_tables_c("test", 0, [op])
+
+
+def test_generate_tables_accepts_call_like_trailing_operand_groups() -> None:
+    op = Op(
+        "test.call",
+        group=Dialect("test"),
+        attrs=[AttrDef("callee", "symbol")],
+        operands=[
+            Operand("specializations", ANY, variadic=True),
+            Operand("bindings", ANY, variadic=True),
+        ],
+        interfaces=[
+            CallLikeInterface(
+                callee="callee",
+                operands="specializations",
+                results=None,
+            ),
+        ],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert ".operand_field_index = 0," in tables_c
+    assert ".operand_segment_count = 2," in tables_c
+
+
+def test_generate_tables_resolves_call_like_after_variable_operand_group() -> None:
+    op = Op(
+        "test.call",
+        group=Dialect("test"),
+        attrs=[AttrDef("callee", "symbol")],
+        operands=[
+            Operand("metadata", ANY, variadic=True),
+            Operand("arguments", ANY, variadic=True),
+        ],
+        interfaces=[
+            CallLikeInterface(
+                callee="callee",
+                operands="arguments",
+                results=None,
+            ),
+        ],
+    )
+
+    tables_c = generate_tables_c("test", 0, [op])
+
+    assert ".operand_field_index = 1," in tables_c
+    assert ".operand_segment_count = 2," in tables_c
 
 
 def test_generate_tables_rejects_call_like_non_variadic_result() -> None:

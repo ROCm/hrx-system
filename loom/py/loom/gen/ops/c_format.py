@@ -259,9 +259,18 @@ def translate_format_elements(op: Op) -> list[tuple[str, int, str]]:
                         raise ValueError(f"Op '{op.name}': BlockArgs region field '{name}' is not a region field")
                     elements.append(("LOOM_FORMAT_KIND_BLOCK_ARGS", index, "0"))
 
-                case FuncArgs(field=name):
+                case FuncArgs(
+                    field=name,
+                    start_attr=start_attr,
+                    end_attr=end_attr,
+                ):
                     field_index = c_queries.resolve_func_args_operand_index(op, name)
-                    elements.append(("LOOM_FORMAT_KIND_FUNC_ARGS", field_index, "0"))
+                    start_attr_index = c_queries.resolve_attr_index(op, start_attr, "FuncArgs")
+                    end_attr_index = c_queries.resolve_attr_index(op, end_attr, "FuncArgs")
+                    data = "0"
+                    if start_attr is not None or end_attr is not None:
+                        data = f"LOOM_FORMAT_FUNC_ARGS_DATA({start_attr_index}, {end_attr_index})"
+                    elements.append(("LOOM_FORMAT_KIND_FUNC_ARGS", field_index, data))
 
                 case PredicateList(field=name):
                     _field_kind, index = resolve_field(name)

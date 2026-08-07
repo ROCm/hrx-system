@@ -164,6 +164,9 @@ enum loom_format_kind_e {
   // data = binding kind (CAPTURE or ELEMENT).
   LOOM_FORMAT_KIND_BINDING_LIST = 12,
   // Function argument definitions: (%a: type, %b: type).
+  // data = optional start/end i64 attribute indices packed by
+  // LOOM_FORMAT_FUNC_ARGS_DATA. The boundaries project a contiguous slice
+  // from a body-backed function signature.
   LOOM_FORMAT_KIND_FUNC_ARGS = 13,
   // Where-clause predicates: [mul(%M, 16), ...].
   LOOM_FORMAT_KIND_PREDICATE_LIST = 14,
@@ -275,6 +278,20 @@ enum loom_format_index_list_data_bits_e {
 #define LOOM_FORMAT_INDEX_LIST_HAS_LEADING_GLUE(data) \
   (!iree_any_bit_set((data), LOOM_FORMAT_INDEX_LIST_DATA_NO_LEADING_GLUE))
 
+// Packs optional start/end attribute indices for a FUNC_ARGS element. Each
+// byte stores index + 1 so zero remains the absent sentinel.
+#define LOOM_FORMAT_FUNC_ARGS_ATTR_BYTE(attr_index) \
+  ((uint16_t)((attr_index) == LOOM_ATTR_INDEX_NONE  \
+                  ? 0u                              \
+                  : ((uint16_t)(attr_index) + 1u)))
+#define LOOM_FORMAT_FUNC_ARGS_DATA(start_attr_index, end_attr_index)     \
+  ((uint16_t)((LOOM_FORMAT_FUNC_ARGS_ATTR_BYTE(start_attr_index) << 8) | \
+              LOOM_FORMAT_FUNC_ARGS_ATTR_BYTE(end_attr_index)))
+#define LOOM_FORMAT_FUNC_ARGS_START_ATTR_INDEX(data) \
+  ((uint8_t)(((data) >> 8) - 1u))
+#define LOOM_FORMAT_FUNC_ARGS_END_ATTR_INDEX(data) \
+  ((uint8_t)(((data) & 0xFFu) - 1u))
+
 // Surface syntax selected by a REGION format element. This affects only text
 // parsing/printing; the in-memory representation is always an ordinary
 // loom_region_t.
@@ -311,6 +328,7 @@ typedef enum loom_region_syntax_e {
 //   REGION_TABLE:   packed keys attr index and fixed default region index.
 //   REGION:         loom_region_syntax_t parser/printer selector.
 //   BINDING_LIST:   binding kind (CAPTURE=0, ELEMENT=1).
+//   FUNC_ARGS:      packed optional start/end i64 attribute indices.
 //   OPTIONAL_GROUP: (skip_count << 2) | anchor_category.
 typedef struct loom_format_element_t {
   loom_format_kind_t kind;
@@ -1155,14 +1173,14 @@ void loom_call_like_set_callee(loom_module_t* module, loom_call_like_t call,
                                loom_symbol_ref_t callee);
 
 // Returns the trailing call argument slice, or an empty slice if |call| is not
-// valid or the recorded offset is malformed for the op instance.
+// valid or the recorded field is malformed for the op instance.
 loom_value_slice_t loom_call_like_operands(loom_call_like_t call);
 
 // Returns the trailing call result slice, or an empty slice if |call| is not
 // valid or the recorded offset is malformed for the op instance.
 loom_value_slice_t loom_call_like_results(loom_call_like_t call);
 
-// Returns the operand offset where call arguments begin.
+// Resolves the flat operand offset where call arguments begin.
 uint16_t loom_call_like_operand_offset(loom_call_like_t call);
 
 // Returns the result offset where call results begin.

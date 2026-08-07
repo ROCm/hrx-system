@@ -952,9 +952,9 @@ enum loom_call_like_kind_e {
   LOOM_CALL_LIKE_KIND_LOW_INVOKE = 3,
 };
 
-// Interface descriptor for direct symbol call-like ops. The operand and result
-// offsets identify trailing call argument/result slices, so generic analyses
-// can read call edges without knowing dialect-specific op names.
+// Interface descriptor for direct symbol call-like ops. The operand field and
+// result offset identify trailing call argument/result slices, so generic
+// analyses can read call edges without knowing dialect-specific op names.
 typedef struct loom_call_like_vtable_t {
   // Index of the symbol ref attr that names the direct callee.
   uint8_t callee_attr_index;
@@ -970,14 +970,19 @@ typedef struct loom_call_like_vtable_t {
   // absent.
   uint8_t inline_policy_attr_index;
 
-  // Operand offset where call arguments begin.
-  uint8_t operand_offset;
+  // Operand field where call arguments begin. All later operand fields are
+  // also part of the call argument slice.
+  uint8_t operand_field_index;
 
   // Result offset where call results begin.
   uint8_t result_offset;
 
   // Semantic class used by analyses to opt into the call shapes they own.
   loom_call_like_kind_t kind;
+
+  // Number of operand segments stored on segmented call ops. Zero when
+  // |operand_field_index| is a flat fixed or trailing variadic field.
+  uint8_t operand_segment_count;
 } loom_call_like_vtable_t;
 
 // Fat reference to a direct call-like op. 16 bytes, passed by value.

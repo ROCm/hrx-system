@@ -1077,8 +1077,8 @@ iree_status_t loom_parser_walk_format(loom_parser_t* parser,
       }
 
       case LOOM_FORMAT_KIND_FUNC_ARGS: {
-        IREE_RETURN_IF_ERROR(
-            loom_parse_format_func_args(parser, vtable, element, parsed));
+        IREE_RETURN_IF_ERROR(loom_parse_format_func_args(
+            parser, vtable, element, pending_func_arg_start, parsed));
         break;
       }
 

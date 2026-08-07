@@ -38,6 +38,10 @@ static bool loom_print_format_element_covers_attr(
       return element->data == attr_index;
     case LOOM_FORMAT_KIND_ATTR_TABLE:
       return element->data == attr_index;
+    case LOOM_FORMAT_KIND_FUNC_ARGS:
+      return LOOM_FORMAT_FUNC_ARGS_START_ATTR_INDEX(element->data) ==
+                 attr_index ||
+             LOOM_FORMAT_FUNC_ARGS_END_ATTR_INDEX(element->data) == attr_index;
     case LOOM_FORMAT_KIND_ATTR_DICT:
       if (iree_any_bit_set(element->data, LOOM_ATTR_DICT_FORMAT_INLINE_ATTRS)) {
         return false;

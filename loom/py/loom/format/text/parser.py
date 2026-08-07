@@ -2009,6 +2009,8 @@ class Parser:
                 return key == attr_name or stable_id == attr_name
             case IndexList(static=name):
                 return name == attr_name
+            case FuncArgs(start_attr=start_attr, end_attr=end_attr):
+                return start_attr == attr_name or end_attr == attr_name
             case (
                 OperandDict(names=name) | AttrTable(keys=name) | RegionTable(keys=name)
             ):
@@ -2890,7 +2892,7 @@ class Parser:
                 case BlockArgs(region=name):
                     self._parse_block_args(parsed, name)
 
-                case FuncArgs(field=name):
+                case FuncArgs(field=name, end_attr=end_attr):
                     tok.expect(TokenKind.LPAREN)
                     arg_ids: list[int] = []
                     if not tok.at(TokenKind.RPAREN):
@@ -2914,6 +2916,12 @@ class Parser:
                                 tok._filename,
                             )
                         parsed.operand_fields.setdefault(name, []).extend(arg_ids)
+                    if end_attr is not None:
+                        parsed.attributes[end_attr] = (
+                            len(parsed.operand_fields[name])
+                            if field_desc is not None
+                            else len(parsed.func_arg_ids)
+                        )
 
                 case PredicateList(field=name):
                     predicates = self._parse_predicate_list()

@@ -122,7 +122,7 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("purity", "purity_attr_index", "attr"),
             InterfaceFieldSpec("temperature", "temperature_attr_index", "attr"),
             InterfaceFieldSpec("inline_policy", "inline_policy_attr_index", "attr"),
-            InterfaceFieldSpec("operands", "operand_offset", "operand"),
+            InterfaceFieldSpec("operands", "operand_field_index", "operand"),
             InterfaceFieldSpec("results", "result_offset", "result"),
             InterfaceFieldSpec("kind", "kind", "call_kind"),
         ),
@@ -443,14 +443,11 @@ def _memory_access_operation_kind(op: Op, iface: MemoryAccessInterface, interfac
 
 
 def _validate_call_like_interface(op: Op, iface: CallLikeInterface, interface_name: str) -> None:
-    """Validates CallLikeInterface's trailing variadic slice contract."""
+    """Validates CallLikeInterface's trailing argument-slice contract."""
     operand_index = c_queries.resolve_operand_index(op, iface.operands, interface_name)
     operand = op.operands[operand_index]
     if not operand.variadic:
         raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.operands!r} must be variadic")
-    if operand_index + 1 != len(op.operands):
-        raise ValueError(f"{interface_name} on {op.name!r}: operand {iface.operands!r} must be the trailing operand field")
-
     if iface.results is None:
         if op.results:
             raise ValueError(f"{interface_name} on {op.name!r}: results=None requires the operation to declare no results")
@@ -619,6 +616,10 @@ def emit_interface_vtable(op: Op, spec: InterfaceSpec, lines: list[str]) -> None
         layout = compute_layout(op)
         segment_count = len(op.operands) if iface.args is not None and layout.segmented_operands else 0
         lines.append(f"    .args_operand_segment_count = {segment_count},")
+    if isinstance(iface, CallLikeInterface):
+        layout = compute_layout(op)
+        segment_count = len(op.operands) if layout.segmented_operands else 0
+        lines.append(f"    .operand_segment_count = {segment_count},")
     if isinstance(iface, LoopLikeInterface):
         layout = compute_layout(op)
         lines.append(f"    .operand_field_count = {len(op.operands)},")

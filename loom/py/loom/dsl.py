@@ -42,10 +42,13 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, unique
-from typing import Any, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 from loom.assembly import FormatElement, OptionalGroup
 from loom.errors import ErrorDef
+
+if TYPE_CHECKING:
+    from loom.assembly import FuncArgs
 
 __all__ = [
     # Type constraints.
@@ -3824,8 +3827,14 @@ def _collect_format_fields(elements: tuple[FormatElement, ...]) -> set[str]:
                 fields.add(f)
             case Region(field=f):
                 fields.add(f)
-            case BindingList(field=f) | BlockArgs(region=f) | FuncArgs(field=f):
+            case BindingList(field=f) | BlockArgs(region=f):
                 fields.add(f)
+            case FuncArgs(field=f, start_attr=start_attr, end_attr=end_attr):
+                fields.add(f)
+                if start_attr is not None:
+                    fields.add(start_attr)
+                if end_attr is not None:
+                    fields.add(end_attr)
             case PredicateList(field=f):
                 fields.add(f)
             case IndexList(dynamic=d, static=s):
@@ -3896,6 +3905,95 @@ def _collect_func_args_fields(elements: tuple[FormatElement, ...]) -> set[str]:
             case _:
                 pass
     return fields
+
+
+def _collect_func_args_elements(
+    elements: tuple[FormatElement, ...],
+) -> tuple[FuncArgs, ...]:
+    """Collects FuncArgs elements in assembly order."""
+    from loom.assembly import Clause, FuncArgs, OptionalGroup, Scope
+
+    func_args: list[FuncArgs] = []
+    for element in elements:
+        match element:
+            case FuncArgs():
+                func_args.append(element)
+            case (
+                Clause(elements=nested)
+                | OptionalGroup(elements=nested)
+                | Scope(elements=nested)
+            ):
+                func_args.extend(_collect_func_args_elements(nested))
+            case _:
+                pass
+    return tuple(func_args)
+
+
+def _validate_func_args_partitions(
+    op_name: str,
+    format_elements: tuple[FormatElement, ...],
+    attrs: tuple[AttrDef, ...],
+) -> None:
+    """Validates contiguous function argument partitions."""
+    func_args = _collect_func_args_elements(format_elements)
+    if not any(
+        element.start_attr is not None or element.end_attr is not None
+        for element in func_args
+    ):
+        return
+
+    effective_groups = [element.group or element.field for element in func_args]
+    if any(not group for group in effective_groups) or len(
+        set(effective_groups)
+    ) != len(effective_groups):
+        raise ValueError(
+            f"Op '{op_name}': projected FuncArgs groups require distinct "
+            "non-empty group names"
+        )
+
+    groups_by_field: dict[str, list[FuncArgs]] = {}
+    for element in func_args:
+        groups_by_field.setdefault(element.field, []).append(element)
+    for field, field_groups in groups_by_field.items():
+        if not any(
+            element.start_attr is not None or element.end_attr is not None
+            for element in field_groups
+        ):
+            continue
+        previous_end: str | None = None
+        for index, element in enumerate(field_groups):
+            group = element.group or field
+            if element.start_attr != previous_end:
+                expected = (
+                    repr(previous_end) if previous_end is not None else "no start attr"
+                )
+                raise ValueError(
+                    f"Op '{op_name}': FuncArgs group '{group}' must use "
+                    f"{expected} as its start boundary"
+                )
+            if index + 1 < len(field_groups) and element.end_attr is None:
+                raise ValueError(
+                    f"Op '{op_name}': FuncArgs group '{group}' requires an "
+                    "end boundary before the next group"
+                )
+            previous_end = element.end_attr
+        if previous_end is not None:
+            raise ValueError(
+                f"Op '{op_name}': the final projected FuncArgs group for "
+                f"field '{field}' must extend to the end of the function "
+                "signature"
+            )
+
+    attrs_by_name = {attr.name: attr for attr in attrs}
+    for element in func_args:
+        if element.end_attr is None:
+            continue
+        attr = attrs_by_name.get(element.end_attr)
+        if attr is None or attr.attr_type != ATTR_TYPE_I64 or attr.optional:
+            raise ValueError(
+                f"Op '{op_name}': FuncArgs boundary '{element.end_attr}' must "
+                "name a required i64 attribute"
+            )
 
 
 def _validate_no_nested_scope(
@@ -5209,6 +5307,7 @@ class Op:
         )
         _validate_scoped_enum_fields(name, frozen_format, frozen_attrs)
         _validate_attr_params_fields(name, frozen_format, frozen_attrs)
+        _validate_func_args_partitions(name, frozen_format, frozen_attrs)
         # Validate that format elements reference declared fields.
         if frozen_format:
             _validate_format_fields(

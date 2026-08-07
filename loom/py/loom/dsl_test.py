@@ -2803,6 +2803,104 @@ class TestSymbolKernelContract:
                 format=[SymbolRef("callee"), Region("body")],
             )
 
+    def test_body_signature_may_have_contiguous_argument_groups(self) -> None:
+        op = Op(
+            "test.partitioned_function",
+            traits=[SYMBOL_DEFINE],
+            attrs=[
+                AttrDef("callee", ATTR_TYPE_SYMBOL),
+                AttrDef("specialization_count", "i64"),
+            ],
+            symbol_def=SymbolDefinition(
+                field="callee",
+                name="function",
+                interfaces=["func_like", "callable"],
+            ),
+            regions=[RegionDef("body")],
+            interfaces=[FuncLikeInterface(callee="callee", body="body")],
+            format=[
+                SymbolRef("callee"),
+                FuncArgs(
+                    "args",
+                    group="specializations",
+                    end_attr="specialization_count",
+                ),
+                FuncArgs(
+                    "args",
+                    group="arguments",
+                    start_attr="specialization_count",
+                ),
+                Region("body"),
+            ],
+        )
+
+        assert op.attr("specialization_count") is not None
+
+    def test_body_signature_partition_requires_matching_boundaries(self) -> None:
+        with _raises(ValueError, match="must use 'specialization_count'"):
+            Op(
+                "test.partitioned_function",
+                traits=[SYMBOL_DEFINE],
+                attrs=[
+                    AttrDef("callee", ATTR_TYPE_SYMBOL),
+                    AttrDef("specialization_count", "i64"),
+                    AttrDef("wrong_count", "i64"),
+                ],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="function",
+                    interfaces=["func_like", "callable"],
+                ),
+                regions=[RegionDef("body")],
+                interfaces=[FuncLikeInterface(callee="callee", body="body")],
+                format=[
+                    SymbolRef("callee"),
+                    FuncArgs(
+                        "args",
+                        group="specializations",
+                        end_attr="specialization_count",
+                    ),
+                    FuncArgs(
+                        "args",
+                        group="arguments",
+                        start_attr="wrong_count",
+                    ),
+                    Region("body"),
+                ],
+            )
+
+    def test_body_signature_partition_requires_i64_boundary(self) -> None:
+        with _raises(ValueError, match="must name a required i64 attribute"):
+            Op(
+                "test.partitioned_function",
+                traits=[SYMBOL_DEFINE],
+                attrs=[
+                    AttrDef("callee", ATTR_TYPE_SYMBOL),
+                    AttrDef("specialization_count", "string"),
+                ],
+                symbol_def=SymbolDefinition(
+                    field="callee",
+                    name="function",
+                    interfaces=["func_like", "callable"],
+                ),
+                regions=[RegionDef("body")],
+                interfaces=[FuncLikeInterface(callee="callee", body="body")],
+                format=[
+                    SymbolRef("callee"),
+                    FuncArgs(
+                        "args",
+                        group="specializations",
+                        end_attr="specialization_count",
+                    ),
+                    FuncArgs(
+                        "args",
+                        group="arguments",
+                        start_attr="specialization_count",
+                    ),
+                    Region("body"),
+                ],
+            )
+
     def test_requires_exactly_one_workload_signature_storage(self) -> None:
         with _raises(ValueError, match="exactly one"):
             SymbolKernelContract()

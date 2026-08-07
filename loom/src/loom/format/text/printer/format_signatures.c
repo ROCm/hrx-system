@@ -195,6 +195,28 @@ iree_status_t loom_print_func_args(loom_print_context_t* ctx,
   } else {
     arg_ids = loom_print_func_arg_ids(op, vtable, &arg_count);
   }
+  const uint8_t start_attr_index =
+      LOOM_FORMAT_FUNC_ARGS_START_ATTR_INDEX(element->data);
+  const uint8_t end_attr_index =
+      LOOM_FORMAT_FUNC_ARGS_END_ATTR_INDEX(element->data);
+  int64_t start = 0;
+  int64_t end = arg_count;
+  if (start_attr_index != LOOM_ATTR_INDEX_NONE) {
+    start = loom_attr_as_i64(loom_op_const_attrs(op)[start_attr_index]);
+  }
+  if (end_attr_index != LOOM_ATTR_INDEX_NONE) {
+    end = loom_attr_as_i64(loom_op_const_attrs(op)[end_attr_index]);
+  }
+  if (start < 0 || end < start || end > arg_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "function argument slice [%" PRId64 ", %" PRId64
+                            ") is outside signature with %u arguments",
+                            start, end, arg_count);
+  }
+  if (start > 0) {
+    arg_ids += start;
+  }
+  arg_count = (uint16_t)(end - start);
   IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "(", true));
   for (uint16_t j = 0; j < arg_count; ++j) {
     if (j > 0) {

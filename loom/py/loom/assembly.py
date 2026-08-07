@@ -523,10 +523,24 @@ class FuncArgs:
     parameters). There is no '= %existing_value' part — the names
     and types are the definitions themselves.
 
+    A function stores one ordered argument list in its body entry block or a
+    declaration operand field. ``start_attr`` and ``end_attr`` optionally
+    project a contiguous group from that list so an authored signature can
+    distinguish arguments with different lifecycle semantics without changing
+    the generic function ABI. The referenced i64 attributes store prefix
+    boundaries; an omitted start is zero and an omitted end is the full
+    argument count.
+
+    ``group`` gives a projected group its semantic builder name. It has no IR
+    storage of its own and defaults to ``field`` for ordinary signatures.
+
     For builders: maps to a list of (name, type) pairs.
     """
 
     field: str
+    group: str | None = None
+    start_attr: str | None = None
+    end_attr: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

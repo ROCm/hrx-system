@@ -637,10 +637,13 @@ void loom_call_like_set_callee(loom_module_t* module, loom_call_like_t call,
 }
 
 loom_value_slice_t loom_call_like_operands(loom_call_like_t call) {
-  if (!call.vtable || call.vtable->operand_offset > call.op->operand_count) {
+  if (!call.vtable) {
     return (loom_value_slice_t){0};
   }
-  uint16_t offset = call.vtable->operand_offset;
+  uint16_t offset = loom_call_like_operand_offset(call);
+  if (offset > call.op->operand_count) {
+    return (loom_value_slice_t){0};
+  }
   return (loom_value_slice_t){
       .values = loom_op_operands(call.op) + offset,
       .count = (uint16_t)(call.op->operand_count - offset),
@@ -662,7 +665,20 @@ uint16_t loom_call_like_operand_offset(loom_call_like_t call) {
   if (!call.vtable) {
     return 0;
   }
-  return call.vtable->operand_offset;
+  uint8_t field_index = call.vtable->operand_field_index;
+  if (call.vtable->operand_segment_count == 0) {
+    return field_index;
+  }
+  if (field_index >= call.vtable->operand_segment_count) {
+    return UINT16_MAX;
+  }
+  const uint16_t* segment_counts =
+      loom_op_const_operand_segment_counts(call.op);
+  uint16_t offset = 0;
+  for (uint8_t i = 0; i < field_index; ++i) {
+    offset += segment_counts[i];
+  }
+  return offset;
 }
 
 uint16_t loom_call_like_result_offset(loom_call_like_t call) {

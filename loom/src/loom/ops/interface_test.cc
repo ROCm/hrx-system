@@ -17,6 +17,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
@@ -54,6 +55,9 @@ class InterfaceTest : public ::testing::Test {
                                                  vtables, (uint16_t)count));
     vtables = loom_scf_dialect_vtables(&count);
     IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_SCF,
+                                                 vtables, (uint16_t)count));
+    vtables = loom_kernel_dialect_vtables(&count);
+    IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_KERNEL,
                                                  vtables, (uint16_t)count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
 
@@ -189,6 +193,26 @@ TEST_F(InterfaceTest, CallLikeCastReturnsNullForNonCall) {
   EXPECT_FALSE(loom_call_like_isa(call));
   EXPECT_EQ(call.op, nullptr);
   EXPECT_EQ(call.vtable, nullptr);
+}
+
+TEST_F(InterfaceTest, CallLikeResolvesSegmentedOperandField) {
+  loom_value_id_t workloads[] = {
+      loom_op_results(build_index(16))[0],
+      loom_op_results(build_index(32))[0],
+  };
+  loom_value_id_t arguments[] = {
+      loom_op_results(build_i32(42))[0],
+  };
+  loom_op_t* launch_op = nullptr;
+  IREE_ASSERT_OK(loom_kernel_launch_build(
+      &builder_, func_ref_, workloads, IREE_ARRAYSIZE(workloads), arguments,
+      IREE_ARRAYSIZE(arguments), LOOM_LOCATION_UNKNOWN, &launch_op));
+
+  loom_call_like_t call = loom_call_like_cast(module_, launch_op);
+  EXPECT_EQ(loom_call_like_operand_offset(call), 2);
+  loom_value_slice_t operands = loom_call_like_operands(call);
+  ASSERT_EQ(operands.count, 1);
+  EXPECT_EQ(operands.values[0], arguments[0]);
 }
 
 TEST_F(InterfaceTest, CallLikeCastReturnsNullForNullOp) {

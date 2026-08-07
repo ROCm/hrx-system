@@ -1791,9 +1791,37 @@ class Printer:
                         self._format_block_args(fields, name, module), glue=True
                     )
 
-                case FuncArgs(field=name):
+                case FuncArgs(
+                    field=name,
+                    start_attr=start_attr,
+                    end_attr=end_attr,
+                ):
                     assert isinstance(fields, ResolvedFields)
+                    if start_attr is not None:
+                        covered_attrs.add(start_attr)
+                    if end_attr is not None:
+                        covered_attrs.add(end_attr)
                     arg_names, _arg_types, arg_value_ids = fields.func_args(name)
+                    start = fields.attr(start_attr) if start_attr is not None else 0
+                    end = (
+                        fields.attr(end_attr)
+                        if end_attr is not None
+                        else len(arg_value_ids)
+                    )
+                    if (
+                        not isinstance(start, int)
+                        or not isinstance(end, int)
+                        or start < 0
+                        or end < start
+                        or end > len(arg_value_ids)
+                    ):
+                        raise ValueError(
+                            f"Op '{op_decl.name}' function argument slice "
+                            f"[{start}, {end}) is outside its "
+                            f"{len(arg_value_ids)} arguments."
+                        )
+                    arg_names = arg_names[start:end]
+                    arg_value_ids = arg_value_ids[start:end]
                     arg_strs: list[str] = []
                     for i, arg_value_id in enumerate(arg_value_ids):
                         type_str = self._print_value_type(arg_value_id, module)

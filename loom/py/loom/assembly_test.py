@@ -209,6 +209,20 @@ class TestFuncArgs:
     def test_construct(self) -> None:
         fa = FuncArgs("args")
         assert fa.field == "args"
+        assert fa.group is None
+        assert fa.start_attr is None
+        assert fa.end_attr is None
+
+    def test_construct_projected_group(self) -> None:
+        fa = FuncArgs(
+            "args",
+            group="bindings",
+            start_attr="specialization_count",
+        )
+        assert fa.field == "args"
+        assert fa.group == "bindings"
+        assert fa.start_attr == "specialization_count"
+        assert fa.end_attr is None
 
 
 class TestPredicateList:
