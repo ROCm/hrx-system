@@ -519,6 +519,9 @@ typedef struct hrx_mem_pool_s {
   // Pass-through HAL pool serving allocations larger than the TLSF slab size.
   iree_hal_pool_t* oversized_hal_pool;
 
+  // VMM slab provider retained across HAL pool trimming and recreation.
+  iree_hal_slab_provider_t* vmm_slab_provider;
+
   // Largest request routed to |hal_pool| rather than |oversized_hal_pool|.
   iree_device_size_t suballocation_max_size;
 
@@ -551,6 +554,10 @@ typedef struct hrx_mem_pool_s {
 
   // Peak backing bytes charged to live allocations.
   uint64_t used_mem_high;
+
+  // Per-device access granted to allocations owned by this pool. The owning
+  // device always has read/write access regardless of this table.
+  hrx_memory_access_t device_access[HRX_MAX_DEVICES];
 
   // Platform-native pool handle, if one is imported or exported.
   void* platform_handle;

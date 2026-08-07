@@ -155,3 +155,15 @@ hrx_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+hrx_cc_test(
+    name = "mem_pool_test",
+    srcs = ["mem_pool_test.cc"],
+    deps = [
+        ":hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

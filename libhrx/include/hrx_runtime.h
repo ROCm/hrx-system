@@ -1031,6 +1031,20 @@ HRX_API hrx_status_t hrx_mem_pool_get_attribute(hrx_mem_pool_t pool,
 HRX_API hrx_status_t hrx_mem_pool_set_attribute(hrx_mem_pool_t pool,
                                                 hrx_mem_pool_attr_t attr,
                                                 uint64_t value);
+
+// Grants |device| read or read/write access to allocations owned by |pool|.
+// The owning device may only be assigned read/write access. Removing access is
+// not supported because imported device mappings remain live with allocations.
+HRX_API hrx_status_t hrx_mem_pool_set_device_access(hrx_mem_pool_t pool,
+                                                    hrx_device_t device,
+                                                    hrx_memory_access_t access);
+
+// Returns the access granted to |device| for allocations owned by |pool|.
+// Devices without an explicit grant report HRX_MEMORY_ACCESS_NONE, while the
+// owning device always reports read/write access.
+HRX_API hrx_status_t hrx_mem_pool_get_device_access(
+    hrx_mem_pool_t pool, hrx_device_t device, hrx_memory_access_t* out_access);
+
 HRX_API hrx_status_t hrx_mem_pool_trim(hrx_mem_pool_t pool,
                                        size_t min_bytes_to_keep);
 

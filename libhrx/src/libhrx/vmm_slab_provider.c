@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 
+#include "hrx_internal.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/buffer.h"
 
@@ -32,11 +33,22 @@ typedef struct hrx_vmm_slab_provider_t {
   // Cumulative number of slabs released through the VMM allocator interface.
   iree_atomic_int64_t total_released;
 
+  // Slabs currently published to the owning HAL pools.
+  hrx_vmm_slab_t* active_slab_head;
+
+  // Allocators whose device agents have access to every active slab.
+  iree_hal_allocator_t* access_allocators[HRX_MAX_DEVICES];
+
+  // Protection associated with each entry in |access_allocators|.
+  iree_hal_memory_protection_t access_protections[HRX_MAX_DEVICES];
+
   // Slabs whose native teardown failed and must retain their live handles.
   // Protected by |mutex| and retried by provider trimming and destruction.
   hrx_vmm_slab_t* failed_release_head;
 
-  // Serializes access to |failed_release_head|.
+  // Serializes active slabs, failed releases, and persistent access policy.
+  // Platform VMM calls are made while held only on rare slab acquisition,
+  // release, and pool-access paths so policy changes cannot miss a slab.
   iree_slim_mutex_t mutex;
 } hrx_vmm_slab_provider_t;
 
@@ -58,6 +70,9 @@ struct hrx_vmm_slab_t {
 
   // Next slab retained after a failed release attempt.
   hrx_vmm_slab_t* next_failed_release;
+
+  // Next slab currently published by the provider.
+  hrx_vmm_slab_t* next_active;
 };
 
 static const iree_hal_slab_provider_vtable_t hrx_vmm_slab_provider_vtable;
@@ -91,6 +106,11 @@ static void hrx_vmm_slab_provider_destroy(
             "VMM slab provider destroyed with live resources retained after "
             "native teardown failure\n");
     return;
+  }
+  IREE_ASSERT(provider->active_slab_head == NULL,
+              "VMM slab provider destroyed with active slabs");
+  for (iree_host_size_t i = 0; i < HRX_MAX_DEVICES; ++i) {
+    iree_hal_allocator_release(provider->access_allocators[i]);
   }
   iree_slim_mutex_deinitialize(&provider->mutex);
   iree_hal_allocator_release(provider->allocator);
@@ -145,6 +165,24 @@ static void hrx_vmm_slab_provider_retain_failed_release(
   slab->next_failed_release = provider->failed_release_head;
   provider->failed_release_head = slab;
   iree_slim_mutex_unlock(&provider->mutex);
+}
+
+static void hrx_vmm_slab_provider_remove_active_locked(
+    hrx_vmm_slab_provider_t* provider, hrx_vmm_slab_t* slab) {
+  hrx_vmm_slab_t** current = &provider->active_slab_head;
+  while (*current && *current != slab) current = &(*current)->next_active;
+  IREE_ASSERT(*current == slab, "released VMM slab is not active");
+  *current = slab->next_active;
+  slab->next_active = NULL;
+}
+
+static iree_status_t hrx_vmm_slab_provider_protect_slab(
+    iree_hal_allocator_t* accessor_allocator, hrx_vmm_slab_t* slab,
+    iree_hal_memory_protection_t protection) {
+  return iree_hal_allocator_virtual_memory_protect(
+      accessor_allocator, slab->virtual_buffer, /*virtual_offset=*/0,
+      slab->allocation_size, IREE_HAL_QUEUE_AFFINITY_ANY,
+      IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE, protection);
 }
 
 static iree_status_t hrx_vmm_slab_provider_retry_failed_releases(
@@ -237,6 +275,22 @@ static iree_status_t hrx_vmm_slab_provider_acquire_slab(
         "VMM allocator returned a reservation without a device address");
   }
 
+  if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&provider->mutex);
+    for (iree_host_size_t i = 0;
+         i < HRX_MAX_DEVICES && iree_status_is_ok(status); ++i) {
+      if (!provider->access_allocators[i]) continue;
+      status = hrx_vmm_slab_provider_protect_slab(
+          provider->access_allocators[i], slab,
+          provider->access_protections[i]);
+    }
+    if (iree_status_is_ok(status)) {
+      slab->next_active = provider->active_slab_head;
+      provider->active_slab_head = slab;
+    }
+    iree_slim_mutex_unlock(&provider->mutex);
+  }
+
   if (!iree_status_is_ok(status)) {
     iree_status_t release_status =
         hrx_vmm_slab_provider_release_slab_state(provider, slab);
@@ -263,6 +317,9 @@ static void hrx_vmm_slab_provider_release_slab(
   hrx_vmm_slab_provider_t* provider = hrx_vmm_slab_provider_cast(base_provider);
   hrx_vmm_slab_t* virtual_slab =
       (hrx_vmm_slab_t*)(uintptr_t)slab->provider_handle;
+  iree_slim_mutex_lock(&provider->mutex);
+  hrx_vmm_slab_provider_remove_active_locked(provider, virtual_slab);
+  iree_slim_mutex_unlock(&provider->mutex);
   iree_status_t status =
       hrx_vmm_slab_provider_release_slab_state(provider, virtual_slab);
   if (iree_status_is_ok(status)) {
@@ -423,6 +480,7 @@ iree_status_t hrx_vmm_slab_provider_create(
       .page_size = page_size,
       .total_acquired = IREE_ATOMIC_VAR_INIT(0),
       .total_released = IREE_ATOMIC_VAR_INIT(0),
+      .active_slab_head = NULL,
       .failed_release_head = NULL,
   };
   iree_slim_mutex_initialize(&provider->mutex);
@@ -431,6 +489,71 @@ iree_status_t hrx_vmm_slab_provider_create(
   iree_hal_allocator_retain(provider->allocator);
   *out_provider = &provider->base;
   return iree_ok_status();
+}
+
+iree_status_t hrx_vmm_slab_provider_set_access(
+    iree_hal_slab_provider_t* base_provider, iree_host_size_t device_ordinal,
+    iree_hal_allocator_t* accessor_allocator,
+    iree_hal_memory_protection_t protection) {
+  IREE_ASSERT_ARGUMENT(base_provider);
+  IREE_ASSERT_ARGUMENT(accessor_allocator);
+  if (device_ordinal >= HRX_MAX_DEVICES) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "VMM slab access device ordinal is out of range");
+  }
+  if (protection != IREE_HAL_MEMORY_PROTECTION_READ &&
+      protection != IREE_HAL_MEMORY_PROTECTION_READ_WRITE) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported VMM slab access protection");
+  }
+
+  hrx_vmm_slab_provider_t* provider = hrx_vmm_slab_provider_cast(base_provider);
+  iree_slim_mutex_lock(&provider->mutex);
+  iree_hal_allocator_t* previous_allocator =
+      provider->access_allocators[device_ordinal];
+  const iree_hal_memory_protection_t previous_protection =
+      provider->access_protections[device_ordinal];
+  if (previous_allocator == accessor_allocator &&
+      previous_protection == protection) {
+    iree_slim_mutex_unlock(&provider->mutex);
+    return iree_ok_status();
+  }
+  iree_status_t status = iree_ok_status();
+  for (hrx_vmm_slab_t* slab = provider->active_slab_head;
+       slab && iree_status_is_ok(status); slab = slab->next_active) {
+    status = hrx_vmm_slab_provider_protect_slab(accessor_allocator, slab,
+                                                protection);
+  }
+  if (!iree_status_is_ok(status)) {
+    // Restore the policy represented before this call. Clearing the new
+    // accessor first also handles a replacement allocator whose agent set is
+    // different from the allocator retained in the policy slot.
+    iree_status_t rollback_status = iree_ok_status();
+    for (hrx_vmm_slab_t* slab = provider->active_slab_head; slab;
+         slab = slab->next_active) {
+      rollback_status = iree_status_join(
+          rollback_status,
+          hrx_vmm_slab_provider_protect_slab(accessor_allocator, slab,
+                                             IREE_HAL_MEMORY_PROTECTION_NONE));
+      if (previous_allocator) {
+        rollback_status = iree_status_join(
+            rollback_status,
+            hrx_vmm_slab_provider_protect_slab(previous_allocator, slab,
+                                               previous_protection));
+      }
+    }
+    status = iree_status_join(status, rollback_status);
+  }
+  if (iree_status_is_ok(status)) {
+    if (provider->access_allocators[device_ordinal] != accessor_allocator) {
+      iree_hal_allocator_retain(accessor_allocator);
+      iree_hal_allocator_release(provider->access_allocators[device_ordinal]);
+      provider->access_allocators[device_ordinal] = accessor_allocator;
+    }
+    provider->access_protections[device_ordinal] = protection;
+  }
+  iree_slim_mutex_unlock(&provider->mutex);
+  return status;
 }
 
 static const iree_hal_slab_provider_vtable_t hrx_vmm_slab_provider_vtable = {

@@ -153,6 +153,27 @@ static bool hrx_mem_pool_uses_virtual_memory_slabs(
          !iree_hal_asan_pool_options_is_enabled(&queue_pool_backend->asan);
 }
 
+static iree_status_t hrx_mem_pool_apply_vmm_access_policy_locked(
+    hrx_mem_pool_t pool, iree_hal_slab_provider_t* slab_provider) {
+  for (iree_host_size_t i = 0; i < HRX_MAX_DEVICES; ++i) {
+    const hrx_memory_access_t access = pool->device_access[i];
+    if (access == HRX_MEMORY_ACCESS_NONE ||
+        i == (iree_host_size_t)pool->device->ordinal) {
+      continue;
+    }
+    hrx_device_t device = NULL;
+    IREE_RETURN_IF_ERROR(
+        hrx_status_to_iree(hrx_gpu_device_get((int)i, &device)));
+    const iree_hal_memory_protection_t protection =
+        iree_all_bits_set(access, HRX_MEMORY_ACCESS_WRITE)
+            ? IREE_HAL_MEMORY_PROTECTION_READ_WRITE
+            : IREE_HAL_MEMORY_PROTECTION_READ;
+    IREE_RETURN_IF_ERROR(hrx_vmm_slab_provider_set_access(
+        slab_provider, i, device->allocator.hal_allocator, protection));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t hrx_mem_pool_ensure_hal_pools_locked(hrx_mem_pool_t pool) {
   if (pool->hal_pool && pool->oversized_hal_pool) return iree_ok_status();
   IREE_ASSERT(!pool->hal_pool);
@@ -171,7 +192,7 @@ static iree_status_t hrx_mem_pool_ensure_hal_pools_locked(hrx_mem_pool_t pool) {
   IREE_RETURN_IF_ERROR(hrx_mem_pool_query_range_length(pool, &range_length));
 
   iree_hal_slab_provider_t* slab_provider = backend.slab_provider;
-  bool owns_slab_provider = false;
+  bool created_slab_provider = false;
   if (hrx_mem_pool_uses_virtual_memory_slabs(pool, &backend)) {
     const iree_hal_buffer_params_t physical_buffer_params = {
         .usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
@@ -179,10 +200,20 @@ static iree_status_t hrx_mem_pool_ensure_hal_pools_locked(hrx_mem_pool_t pool) {
         .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
         .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
     };
-    IREE_RETURN_IF_ERROR(hrx_vmm_slab_provider_create(
-        pool->device->allocator.hal_allocator, physical_buffer_params,
-        iree_allocator_system(), &slab_provider));
-    owns_slab_provider = true;
+    if (pool->vmm_slab_provider) {
+      slab_provider = pool->vmm_slab_provider;
+    } else {
+      IREE_RETURN_IF_ERROR(hrx_vmm_slab_provider_create(
+          pool->device->allocator.hal_allocator, physical_buffer_params,
+          iree_allocator_system(), &slab_provider));
+      created_slab_provider = true;
+      iree_status_t status =
+          hrx_mem_pool_apply_vmm_access_policy_locked(pool, slab_provider);
+      if (!iree_status_is_ok(status)) {
+        iree_hal_slab_provider_release(slab_provider);
+        return status;
+      }
+    }
   }
   if (!slab_provider) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -203,7 +234,9 @@ static iree_status_t hrx_mem_pool_ensure_hal_pools_locked(hrx_mem_pool_t pool) {
       options, slab_provider, backend.notification, backend.epoch_query,
       iree_allocator_system(), &hal_pool);
   if (!iree_status_is_ok(status)) {
-    if (owns_slab_provider) iree_hal_slab_provider_release(slab_provider);
+    if (created_slab_provider) {
+      iree_hal_slab_provider_release(slab_provider);
+    }
     return status;
   }
 
@@ -217,10 +250,12 @@ static iree_status_t hrx_mem_pool_ensure_hal_pools_locked(hrx_mem_pool_t pool) {
       iree_allocator_system(), &oversized_hal_pool);
   if (!iree_status_is_ok(status)) {
     iree_hal_pool_release(hal_pool);
-    if (owns_slab_provider) iree_hal_slab_provider_release(slab_provider);
+    if (created_slab_provider) {
+      iree_hal_slab_provider_release(slab_provider);
+    }
     return status;
   }
-  if (owns_slab_provider) iree_hal_slab_provider_release(slab_provider);
+  if (created_slab_provider) pool->vmm_slab_provider = slab_provider;
 
   pool->hal_pool = hal_pool;
   pool->oversized_hal_pool = oversized_hal_pool;
@@ -270,6 +305,7 @@ hrx_status_t hrx_mem_pool_create(hrx_device_t device,
 static void hrx_mem_pool_destroy(hrx_mem_pool_s* pool) {
   iree_hal_pool_release(pool->hal_pool);
   iree_hal_pool_release(pool->oversized_hal_pool);
+  iree_hal_slab_provider_release(pool->vmm_slab_provider);
   hrx_device_release(pool->device);
   iree_slim_mutex_deinitialize(&pool->mutex);
   free(pool);
@@ -388,6 +424,72 @@ hrx_status_t hrx_mem_pool_set_attribute(hrx_mem_pool_t pool,
 
   iree_slim_mutex_unlock(&pool->mutex);
   return status;
+}
+
+hrx_status_t hrx_mem_pool_set_device_access(hrx_mem_pool_t pool,
+                                            hrx_device_t device,
+                                            hrx_memory_access_t access) {
+  if (!pool || !device) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "pool or device is NULL");
+  }
+  if (device->type != pool->device->type || device->ordinal < 0 ||
+      device->ordinal >= HRX_MAX_DEVICES) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "device does not belong to the pool's device set");
+  }
+  const hrx_memory_access_t read_write_access =
+      HRX_MEMORY_ACCESS_READ | HRX_MEMORY_ACCESS_WRITE;
+  if (access != HRX_MEMORY_ACCESS_READ && access != read_write_access) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "memory pool access must be read or read/write");
+  }
+  if (device->ordinal == pool->device->ordinal && access != read_write_access) {
+    return hrx_make_status(
+        HRX_STATUS_INVALID_ARGUMENT,
+        "the pool's owning device requires read/write access");
+  }
+
+  iree_slim_mutex_lock(&pool->mutex);
+  hrx_status_t status = hrx_ok_status();
+  if (pool->vmm_slab_provider && device->ordinal != pool->device->ordinal) {
+    const iree_hal_memory_protection_t protection =
+        iree_all_bits_set(access, HRX_MEMORY_ACCESS_WRITE)
+            ? IREE_HAL_MEMORY_PROTECTION_READ_WRITE
+            : IREE_HAL_MEMORY_PROTECTION_READ;
+    status = hrx_status_from_iree(hrx_vmm_slab_provider_set_access(
+        pool->vmm_slab_provider, (iree_host_size_t)device->ordinal,
+        device->allocator.hal_allocator, protection));
+  }
+  if (hrx_status_is_ok(status)) {
+    pool->device_access[device->ordinal] = access;
+  }
+  iree_slim_mutex_unlock(&pool->mutex);
+  return status;
+}
+
+hrx_status_t hrx_mem_pool_get_device_access(hrx_mem_pool_t pool,
+                                            hrx_device_t device,
+                                            hrx_memory_access_t* out_access) {
+  if (!pool || !device || !out_access) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "pool, device, or out_access is NULL");
+  }
+  *out_access = HRX_MEMORY_ACCESS_NONE;
+  if (device->type != pool->device->type || device->ordinal < 0 ||
+      device->ordinal >= HRX_MAX_DEVICES) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "device does not belong to the pool's device set");
+  }
+
+  if (device->ordinal == pool->device->ordinal) {
+    *out_access = HRX_MEMORY_ACCESS_READ | HRX_MEMORY_ACCESS_WRITE;
+    return hrx_ok_status();
+  }
+  iree_slim_mutex_lock(&pool->mutex);
+  *out_access = pool->device_access[device->ordinal];
+  iree_slim_mutex_unlock(&pool->mutex);
+  return hrx_ok_status();
 }
 
 //===----------------------------------------------------------------------===//

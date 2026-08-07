@@ -958,16 +958,21 @@ static iree_status_t iree_hal_streaming_lookup_kernel_buffer_ref(
     if (!iree_status_is_ok(status)) return status;
   } else {
     iree_status_ignore(status);
-    if (!iree_hal_streaming_context_has_peer_contexts(context)) {
-      return iree_status_from_code(IREE_STATUS_NOT_FOUND);
-    }
     status = iree_hal_streaming_memory_lookup_range_across_contexts(
         (iree_hal_streaming_deviceptr_t)(uintptr_t)device_ptr, 1,
         &owner_context, &stream_ref);
     if (!iree_status_is_ok(status)) return status;
-    if (!iree_hal_streaming_context_can_access_peer(context, owner_context)) {
+    if (stream_ref.buffer->allocation_pool) {
+      status = iree_hal_streaming_memory_validate_pool_access(
+          stream_ref.buffer, context->device_ordinal,
+          HRX_MEMORY_ACCESS_READ | HRX_MEMORY_ACCESS_WRITE);
+    } else if (!iree_hal_streaming_context_can_access_peer(context,
+                                                           owner_context)) {
+      status = iree_status_from_code(IREE_STATUS_NOT_FOUND);
+    }
+    if (!iree_status_is_ok(status)) {
       iree_hal_streaming_context_release(owner_context);
-      return iree_status_from_code(IREE_STATUS_NOT_FOUND);
+      return status;
     }
   }
 
