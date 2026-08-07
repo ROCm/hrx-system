@@ -8,9 +8,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-
-from loom.gen.support.c import c_string_arg
+from loom.gen.support.c import c_string_arg, c_string_classifier_lines
 from loom.gen.support.generated_file import line_comment_header
 from loom.scalar_type import SCALAR_TYPE_SPELLINGS, ScalarTypeKind
 
@@ -62,23 +60,13 @@ def generate_scalar_type_table_inc() -> str:
     lines.extend(["};", ""])
 
     lines.append("static loom_scalar_type_t loom_scalar_type_classify_name(iree_string_view_t name) {")
-    by_length: dict[int, list[ScalarTypeCase]] = defaultdict(list)
-    for case in cases:
-        by_length[len(case[1])].append(case)
-    lines.append("  switch (name.size) {")
-    for spelling_length, length_cases in sorted(by_length.items()):
-        lines.append(f"    case {spelling_length}:")
-        for kind, spelling in length_cases:
-            lines.append(f"      if (iree_string_view_equal(name, IREE_SV({c_string_arg(spelling)}))) {{")
-            lines.append(f"        return {_c_constant(kind)};")
-            lines.append("      }")
-        lines.append("      break;")
     lines.extend(
-        [
-            "  }",
-            "  return LOOM_SCALAR_TYPE_COUNT_;",
-            "}",
-            "",
-        ]
+        c_string_classifier_lines(
+            tuple((spelling, _c_constant(kind)) for kind, spelling in cases),
+            input_name="name",
+            unmatched_result="LOOM_SCALAR_TYPE_COUNT_",
+            indent="  ",
+        )
     )
+    lines.extend(["}", ""])
     return "\n".join(lines)

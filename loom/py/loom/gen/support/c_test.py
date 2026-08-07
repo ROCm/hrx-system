@@ -15,6 +15,7 @@ from loom.gen.support.c import (
     c_identifier_parts,
     c_pascal_identifier,
     c_string_arg,
+    c_string_classifier_lines,
     c_string_literal,
     c_string_view,
 )
@@ -54,6 +55,41 @@ def test_c_string_literal_escapes_c_control_characters() -> None:
     assert c_string_arg("hello") == '"hello"'
     assert c_string_view("hello") == 'IREE_SVL("hello")'
     assert c_string_view("hello", macro="LOOM_SV") == 'LOOM_SV("hello")'
+
+
+def test_c_string_classifier_lines_partitions_by_length() -> None:
+    assert c_string_classifier_lines(
+        (("b", "RESULT_B"), ("aa", "RESULT_AA"), ("a", "RESULT_A")),
+        input_name="name",
+        unmatched_result="RESULT_NONE",
+        indent="  ",
+    ) == [
+        "  switch (name.size) {",
+        "    case 1:",
+        '      if (iree_string_view_equal(name, IREE_SV("b"))) {',
+        "        return RESULT_B;",
+        "      }",
+        '      if (iree_string_view_equal(name, IREE_SV("a"))) {',
+        "        return RESULT_A;",
+        "      }",
+        "      break;",
+        "    case 2:",
+        '      if (iree_string_view_equal(name, IREE_SV("aa"))) {',
+        "        return RESULT_AA;",
+        "      }",
+        "      break;",
+        "  }",
+        "  return RESULT_NONE;",
+    ]
+
+
+def test_c_string_classifier_lines_rejects_duplicate_spelling() -> None:
+    with pytest.raises(ValueError, match=r"duplicate.*'same'"):
+        c_string_classifier_lines(
+            (("same", "RESULT_A"), ("same", "RESULT_B")),
+            input_name="name",
+            unmatched_result="RESULT_NONE",
+        )
 
 
 @pytest.mark.parametrize(

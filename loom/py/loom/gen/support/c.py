@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict
+from collections.abc import Sequence
 from enum import Enum
 
 
@@ -63,6 +65,42 @@ def c_string_arg(value: str) -> str:
 def c_string_view(value: str, *, macro: str = "IREE_SVL") -> str:
     """Returns a C string-view literal expression."""
     return f'{macro}("{c_string_literal(value)}")'
+
+
+def c_string_classifier_lines(
+    cases: Sequence[tuple[str, str]],
+    *,
+    input_name: str,
+    unmatched_result: str,
+    indent: str = "",
+) -> list[str]:
+    """Emits a length-partitioned exact string classifier returning C values."""
+    if not cases:
+        raise ValueError("C string classifier must contain at least one case")
+    if not input_name or not unmatched_result:
+        raise ValueError("C string classifier expressions must not be empty")
+
+    cases_by_length: dict[int, list[tuple[str, str]]] = defaultdict(list)
+    seen_spellings: set[str] = set()
+    for spelling, result in cases:
+        if spelling in seen_spellings:
+            raise ValueError(f"duplicate C string classifier spelling: {spelling!r}")
+        if not result:
+            raise ValueError(f"empty C result expression for spelling {spelling!r}")
+        seen_spellings.add(spelling)
+        cases_by_length[len(spelling)].append((spelling, result))
+
+    lines = [f"{indent}switch ({input_name}.size) {{"]
+    for spelling_length, length_cases in sorted(cases_by_length.items()):
+        lines.append(f"{indent}  case {spelling_length}:")
+        for spelling, result in length_cases:
+            lines.append(f"{indent}    if (iree_string_view_equal({input_name}, IREE_SV({c_string_arg(spelling)}))) {{")
+            lines.append(f"{indent}      return {result};")
+            lines.append(f"{indent}    }}")
+        lines.append(f"{indent}    break;")
+    lines.append(f"{indent}}}")
+    lines.append(f"{indent}return {unmatched_result};")
+    return lines
 
 
 def c_i64_literal(value: int) -> str:
