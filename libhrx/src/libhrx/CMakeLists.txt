@@ -208,6 +208,20 @@ iree_cc_test(
     libhrx_defs
 )
 
+iree_cc_test(
+  NAME
+    mem_pool_test
+  SRCS
+    "mem_pool_test.cc"
+  DEPS
+    ::hrx_static
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
 
 if(IREE_HAL_DRIVER_AMDGPU)

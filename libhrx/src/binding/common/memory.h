@@ -63,12 +63,34 @@ iree_status_t iree_hal_streaming_memory_import_buffer_for_context(
     iree_hal_streaming_context_t* context, iree_hal_streaming_buffer_t* buffer,
     iree_hal_buffer_t** out_buffer, uint64_t* out_device_ptr);
 
+// Verifies that |accessor_device_ordinal| has all |required_access| bits for a
+// pool allocation. Non-pool allocations have no allocation-specific policy.
+iree_status_t iree_hal_streaming_memory_validate_pool_access(
+    iree_hal_streaming_buffer_t* buffer,
+    iree_host_size_t accessor_device_ordinal,
+    hrx_memory_access_t required_access);
+
+// Enqueues a device-to-host copy from a HAL buffer already represented on the
+// stream's device. Runtime-owned staging keeps arbitrary host destinations off
+// the device queue and publishes the completed bytes in stream order.
+iree_status_t iree_hal_streaming_memcpy_buffer_to_host(
+    iree_hal_streaming_stream_t* stream, void* dst,
+    iree_hal_buffer_t* src_buffer, iree_device_size_t src_offset,
+    iree_device_size_t size);
+
 // Grants |accessor_context|'s device access to all ordinary device allocations
 // currently published by |owner_context|. The caller must serialize this scan
 // with ordinary device-allocation publication.
 iree_status_t iree_hal_streaming_memory_grant_peer_access(
     iree_hal_streaming_context_t* owner_context,
     iree_hal_streaming_context_t* accessor_context);
+
+// Records |access| for |accessor_device_ordinal| and imports all existing
+// allocations owned by |pool| into that device. New pool allocations apply the
+// same policy when they are published.
+iree_status_t iree_hal_streaming_memory_set_pool_access(
+    hrx_mem_pool_t pool, iree_host_size_t owner_device_ordinal,
+    iree_host_size_t accessor_device_ordinal, hrx_memory_access_t access);
 
 #ifdef __cplusplus
 }  // extern "C"

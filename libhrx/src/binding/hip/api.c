@@ -6112,6 +6112,12 @@ static hipError_t iree_hip_try_cross_context_h2d(
     return hipSuccess;
   }
   *out_handled = true;
+  status = iree_hal_streaming_memory_validate_pool_access(
+      dst_ref.buffer, context->device_ordinal, HRX_MEMORY_ACCESS_WRITE);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_context_release(owner_context);
+    return iree_status_to_hip_result(status);
+  }
   if (dst_ref.buffer->host_ptr &&
       iree_any_bit_set((iree_hal_memory_type_t)dst_ref.buffer->memory_type,
                        IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
@@ -6138,8 +6144,10 @@ static hipError_t iree_hip_try_cross_context_h2d(
   const uint8_t* src_ptr = (const uint8_t*)src;
   iree_device_size_t remaining = size;
   iree_device_size_t offset = 0;
-  iree_status_t transfer_status =
-      iree_hal_streaming_context_synchronize(owner_context);
+  // The pointer owner and the context issuing the synchronous copy may be on
+  // different devices. Work that produces or consumes the foreign allocation
+  // can therefore be queued outside the owner context.
+  iree_status_t transfer_status = iree_hal_streaming_context_synchronize_all();
   while (remaining > 0 && iree_status_is_ok(transfer_status)) {
     const iree_device_size_t chunk_size = 4 * 1024 * 1024;
     const iree_device_size_t this_chunk =
@@ -6157,7 +6165,7 @@ static hipError_t iree_hip_try_cross_context_h2d(
 
 static hipError_t iree_hip_try_cross_context_d2h(
     iree_hal_streaming_context_t* context, void* dst, const void* src,
-    size_t size, bool* out_handled) {
+    size_t size, iree_hal_streaming_stream_t* stream, bool* out_handled) {
   *out_handled = false;
   iree_hal_streaming_buffer_ref_t current_ref;
   iree_status_t status = iree_hal_streaming_memory_lookup_range(
@@ -6179,6 +6187,12 @@ static hipError_t iree_hip_try_cross_context_d2h(
     return hipSuccess;
   }
   *out_handled = true;
+  status = iree_hal_streaming_memory_validate_pool_access(
+      src_ref.buffer, context->device_ordinal, HRX_MEMORY_ACCESS_READ);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_context_release(owner_context);
+    return iree_status_to_hip_result(status);
+  }
   if (src_ref.buffer->host_ptr &&
       iree_any_bit_set((iree_hal_memory_type_t)src_ref.buffer->memory_type,
                        IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
@@ -6204,11 +6218,24 @@ static hipError_t iree_hip_try_cross_context_d2h(
     return iree_status_to_hip_result(sync_status);
   }
 
+  if (stream) {
+    iree_hal_buffer_t* imported_buffer = NULL;
+    status = iree_hal_streaming_memory_import_buffer_for_context(
+        stream->context, src_ref.buffer, &imported_buffer, NULL);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_memcpy_buffer_to_host(
+          stream, dst, imported_buffer, src_ref.offset, size);
+    }
+    iree_hal_streaming_context_release(owner_context);
+    return iree_status_to_hip_result(status);
+  }
+
   uint8_t* dst_ptr = (uint8_t*)dst;
   iree_device_size_t remaining = size;
   iree_device_size_t offset = 0;
-  iree_status_t transfer_status =
-      iree_hal_streaming_context_synchronize(owner_context);
+  // Foreign pool allocations can be used by streams on devices other than the
+  // owner. Complete that work before issuing the blocking owner-device copy.
+  iree_status_t transfer_status = iree_hal_streaming_context_synchronize_all();
   while (remaining > 0 && iree_status_is_ok(transfer_status)) {
     const iree_device_size_t chunk_size = 4 * 1024 * 1024;
     const iree_device_size_t this_chunk =
@@ -6277,10 +6304,18 @@ static hipError_t iree_hip_try_managed_or_cross_context_d2d(
   const bool dst_is_managed = dst_ref.buffer->is_managed;
   const bool src_is_managed = src_ref.buffer->is_managed;
   if (!dst_is_managed && !src_is_managed) {
-    if (dst_context != src_context) {
+    if (dst_context != context || src_context != context) {
       *out_handled = true;
-      result = iree_hip_memcpy_peer_staged(dst_context, dst, src_context, src,
-                                           size, stream);
+      if (stream) {
+        iree_status_t status = iree_hal_streaming_memcpy_peer(
+            dst_context, (iree_hal_streaming_deviceptr_t)(uintptr_t)dst,
+            src_context, (iree_hal_streaming_deviceptr_t)(uintptr_t)src, size,
+            stream);
+        result = iree_status_to_hip_result(status);
+      } else {
+        result = iree_hip_memcpy_peer_staged(dst_context, dst, src_context, src,
+                                             size, stream);
+      }
     }
     iree_hal_streaming_context_release(src_context);
     iree_hal_streaming_context_release(dst_context);
@@ -6425,8 +6460,8 @@ HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
     special_result =
         iree_hip_try_cross_context_h2d(context, dst, src, sizeBytes, &handled);
   } else if (kind == hipMemcpyDeviceToHost) {
-    special_result =
-        iree_hip_try_cross_context_d2h(context, dst, src, sizeBytes, &handled);
+    special_result = iree_hip_try_cross_context_d2h(
+        context, dst, src, sizeBytes, /*stream=*/NULL, &handled);
   } else if (kind == hipMemcpyDeviceToDevice) {
     special_result = iree_hip_try_managed_or_cross_context_d2d(
         context, dst, src, sizeBytes, NULL, &handled);
@@ -6601,11 +6636,15 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
       special_result = iree_hip_try_cross_context_h2d(context, dst, src,
                                                       sizeBytes, &handled);
     } else if (kind == hipMemcpyDeviceToHost) {
-      special_result = iree_hip_try_cross_context_d2h(context, dst, src,
-                                                      sizeBytes, &handled);
+      special_result = iree_hip_try_cross_context_d2h(
+          context, dst, src, sizeBytes, stream_obj, &handled);
     } else if (kind == hipMemcpyDeviceToDevice) {
       special_result = iree_hip_try_managed_or_cross_context_d2d(
           context, dst, src, sizeBytes, stream_obj, &handled);
+    }
+    if (handled && special_result == hipSuccess && pageable_d2h) {
+      special_result = iree_status_to_hip_result(
+          iree_hal_streaming_stream_synchronize(stream_obj));
     }
     if (handled || special_result != hipSuccess) {
       IREE_TRACE_ZONE_END(z0);
@@ -22800,23 +22839,52 @@ HIPAPI hipError_t hipMemPoolSetAccess(hipMemPool_t pool,
   if (result == hipSuccess && count > (size_t)device_count) {
     result = hipErrorInvalidDevice;
   }
+  // Validate the complete descriptor list before changing the pool. This
+  // prevents a later malformed descriptor from leaving an earlier grant
+  // applied even though the call reports an argument error.
   for (size_t i = 0; result == hipSuccess && i < count; ++i) {
-    if (map[i].location.type != hipMemLocationTypeDevice ||
-        (map[i].flags != hipMemAccessFlagsProtNone &&
-         map[i].flags != hipMemAccessFlagsProtRead &&
-         map[i].flags != hipMemAccessFlagsProtReadWrite)) {
+    if (map[i].location.type != hipMemLocationTypeDevice) {
+      result = hipErrorInvalidValue;
+    } else if (map[i].flags == hipMemAccessFlagsProtNone) {
+      result = hipErrorInvalidDevice;
+    } else if (map[i].flags != hipMemAccessFlagsProtRead &&
+               map[i].flags != hipMemAccessFlagsProtReadWrite) {
       result = hipErrorInvalidValue;
     } else if (map[i].location.id < 0 || map[i].location.id >= device_count) {
       result = hipErrorInvalidDevice;
-    } else if (map[i].location.id != pool_handle->device_ordinal) {
-      // Cross-device pool mappings require direct peer access. The streaming
-      // runtime does not advertise a peer path without a backend capability
-      // source that can establish that mapping.
-      result = hipErrorNotSupported;
-    } else if (map[i].flags != hipMemAccessFlagsProtReadWrite) {
+    } else if (map[i].location.id == pool_handle->device_ordinal &&
+               map[i].flags != hipMemAccessFlagsProtReadWrite) {
       result = hipErrorInvalidDevice;
+    } else if (map[i].location.id != pool_handle->device_ordinal) {
+      bool can_access = false;
+      iree_status_t status = iree_hal_streaming_device_can_access_peer(
+          (iree_hal_streaming_device_ordinal_t)map[i].location.id,
+          (iree_hal_streaming_device_ordinal_t)pool_handle->device_ordinal,
+          &can_access);
+      if (!iree_status_is_ok(status)) {
+        result = iree_status_to_hip_result(status);
+      } else if (!can_access) {
+        result = hipErrorInvalidDevice;
+      }
     }
   }
+
+  hrx_mem_pool_t hrx_pool = NULL;
+  if (result == hipSuccess) {
+    result = iree_hip_mem_pool_retain_backend(pool_handle, &hrx_pool);
+  }
+  for (size_t i = 0; result == hipSuccess && i < count; ++i) {
+    hrx_memory_access_t access = HRX_MEMORY_ACCESS_READ;
+    if (map[i].flags == hipMemAccessFlagsProtReadWrite) {
+      access |= HRX_MEMORY_ACCESS_WRITE;
+    }
+    iree_status_t status = iree_hal_streaming_memory_set_pool_access(
+        hrx_pool,
+        (iree_hal_streaming_device_ordinal_t)pool_handle->device_ordinal,
+        (iree_hal_streaming_device_ordinal_t)map[i].location.id, access);
+    result = iree_status_to_hip_result(status);
+  }
+  hrx_mem_pool_release(hrx_pool);
   iree_hip_mem_pool_release(pool_handle);
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(result);
@@ -22859,13 +22927,34 @@ HIPAPI hipError_t hipMemPoolGetAccess(hipMemAccessFlags* flags,
         (location->id < 0 || location->id >= device_count)) {
       result = hipErrorInvalidValue;
     }
-    if (result == hipSuccess && location->id != pool_handle->device_ordinal) {
-      result = hipErrorNotSupported;
-    }
-    if (result == hipSuccess) {
-      *flags = hipMemAccessFlagsProtReadWrite;
+  }
+
+  hrx_mem_pool_t hrx_pool = NULL;
+  if (result == hipSuccess) {
+    result = iree_hip_mem_pool_retain_backend(pool_handle, &hrx_pool);
+  }
+  hrx_memory_access_t access = HRX_MEMORY_ACCESS_NONE;
+  if (result == hipSuccess) {
+    iree_hal_streaming_device_t* device =
+        iree_hal_streaming_device_entry(location->id);
+    if (!device) {
+      result = hipErrorInvalidValue;
+    } else {
+      iree_status_t status = HRX_CALL(hrx_mem_pool_get_device_access(
+          hrx_pool, device->hrx_device, &access));
+      result = iree_status_to_hip_result(status);
     }
   }
+  if (result == hipSuccess) {
+    if (iree_all_bits_set(access, HRX_MEMORY_ACCESS_WRITE)) {
+      *flags = hipMemAccessFlagsProtReadWrite;
+    } else if (iree_all_bits_set(access, HRX_MEMORY_ACCESS_READ)) {
+      *flags = hipMemAccessFlagsProtRead;
+    } else {
+      *flags = hipMemAccessFlagsProtNone;
+    }
+  }
+  hrx_mem_pool_release(hrx_pool);
   iree_hip_mem_pool_release(pool_handle);
   IREE_TRACE_ZONE_END(z0);
   HIP_RETURN_ERROR(result);
