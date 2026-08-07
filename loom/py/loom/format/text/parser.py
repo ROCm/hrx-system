@@ -76,6 +76,7 @@ from loom.format.text.tokenizer import (
     TokenKind,
 )
 from loom.ir import (
+    ATTR_AGGREGATE_MAX_NESTING_DEPTH,
     BUFFER_TYPE,
     ENCODING_LAYOUT_TYPE,
     ENCODING_ROLE_BY_NAME,
@@ -160,8 +161,6 @@ __all__ = [
 # in the call chain. Reset to None/empty between parses.
 _CURRENT_ALIASES: dict[str, EncodingInstance] | None = None
 _CURRENT_KNOWN_ENCODINGS: set[str] | None = None
-
-_ATTR_AGGREGATE_MAX_NESTING_DEPTH = 8
 
 
 def _parse_special_float(text: str) -> float | None:
@@ -252,10 +251,10 @@ def _parse_generic_attr_value_from_tokens(
         return values
     if tokenizer.at(TokenKind.LBRACE):
         open_brace_token = tokenizer.next()
-        if attr_dict_nesting_depth >= _ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+        if attr_dict_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
             raise ParseError(
                 "aggregate attribute nesting exceeds maximum depth "
-                f"{_ATTR_AGGREGATE_MAX_NESTING_DEPTH}",
+                f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}",
                 open_brace_token.location,
                 filename,
             )
@@ -2705,10 +2704,10 @@ class Parser:
                 )
         if tok.at(TokenKind.LBRACE):
             opening = tok.next()
-            if attr_dict_nesting_depth >= _ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+            if attr_dict_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
                 raise ParseError(
                     "aggregate attribute nesting exceeds maximum depth "
-                    f"{_ATTR_AGGREGATE_MAX_NESTING_DEPTH}",
+                    f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}",
                     opening.location,
                     tok._filename,
                 )
@@ -2771,10 +2770,10 @@ class Parser:
             )
 
         opening = tok.expect(TokenKind.LANGLE)
-        if aggregate_nesting_depth >= _ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+        if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
             raise ParseError(
                 "aggregate attribute nesting exceeds maximum depth "
-                f"{_ATTR_AGGREGATE_MAX_NESTING_DEPTH}",
+                f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}",
                 opening.location,
                 tok._filename,
             )

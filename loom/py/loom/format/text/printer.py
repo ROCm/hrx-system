@@ -558,7 +558,7 @@ def _format_attr_value(value: Any, attr_def: AttrDef | None = None) -> str:
     if isinstance(value, bytes | bytearray):
         return f'bytes("{bytes(value).hex()}")'
     if isinstance(value, EnumArrayAttr):
-        raise ValueError("enum arrays require a descriptor-backed operation field")
+        raise ValueError("enum arrays require a descriptor-backed field")
     if isinstance(value, ParameterizedAttr):
         parameters = []
         for parameter, slot in zip(

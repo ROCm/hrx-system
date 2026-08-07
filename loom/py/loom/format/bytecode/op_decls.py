@@ -63,6 +63,37 @@ def build_op_decl_map(op_decls: Iterable[Any] | None = None) -> dict[str, Any]:
     return result
 
 
+def build_parameterized_attr_def_map(
+    op_decls_by_name: Mapping[str, Any],
+    parameterized_attrs: Iterable[Any] | None = None,
+) -> dict[str, Any]:
+    """Return reachable parameterized attribute declarations by stable name."""
+    pending = list(parameterized_attrs or ())
+    for op_decl in op_decls_by_name.values():
+        for attr_def in getattr(op_decl, "attrs", ()):
+            definition = getattr(attr_def, "parameterized_attr", None)
+            if definition is not None:
+                pending.append(definition)
+
+    result: dict[str, Any] = {}
+    while pending:
+        definition = pending.pop()
+        existing = result.get(definition.name)
+        if existing is not None:
+            if existing != definition:
+                raise ValueError(
+                    "parameterized attribute family "
+                    f"{definition.name!r} has conflicting declarations"
+                )
+            continue
+        result[definition.name] = definition
+        for parameter in definition.parameters:
+            nested_definition = getattr(parameter, "parameterized_attr", None)
+            if nested_definition is not None:
+                pending.append(nested_definition)
+    return result
+
+
 def symbol_def_for_op(op_decls_by_name: Mapping[str, Any], op_name: str) -> Any:
     """Return the generated symbol definition descriptor for ``op_name``."""
     op_decl = op_decls_by_name.get(op_name)

@@ -17,7 +17,11 @@ from typing import Any
 
 import pytest
 
-from loom.dialect.test.defs import test_enum_array_attrs
+from loom.dialect.test.defs import (
+    test_enum_array_attrs,
+    test_options_attr,
+    test_parameterized_attr,
+)
 from loom.format.bytecode.encoding import decode_varint, encode_varint
 from loom.format.bytecode.reader import BytecodeError, BytecodeReader, read_module
 from loom.format.bytecode.writer import (
@@ -54,6 +58,7 @@ from loom.ir import (
     FunctionType,
     Module,
     Operation,
+    ParameterizedAttr,
     Predicate,
     PredicateArg,
     Region,
@@ -1687,6 +1692,74 @@ class TestEnumArrayAttributeWireFormat:
 
         with pytest.raises(BytecodeError, match="descriptor-backed"):
             reader._read_attr_value(data, 0)
+
+
+class TestParameterizedAttributeWireFormat:
+    def _reader(self, strings: list[str]) -> tuple[BytecodeReader, Any]:
+        reader = BytecodeReader(
+            b"", op_decls=[test_parameterized_attr, test_enum_array_attrs]
+        )
+        reader._strings = strings
+        attr_def = reader._attr_def_for_op_attr("test.parameterized_attr", "options")
+        return reader, attr_def
+
+    def test_reads_named_slots_in_declaration_order(self) -> None:
+        reader, attr_def = self._reader(["", "test.options", "mode"])
+        data = bytes([14, 1, 1, 2, 4, 1])
+
+        value, offset = reader._read_attr_value(data, 0, attr_def=attr_def)
+
+        assert isinstance(value, ParameterizedAttr)
+        assert value.definition is test_options_attr
+        assert value.get("mode") == 1
+        assert offset == len(data)
+
+    def test_rejects_unknown_family(self) -> None:
+        reader, attr_def = self._reader(["", "test.unknown"])
+
+        with pytest.raises(BytecodeError, match="is not registered"):
+            reader._read_attr_value(bytes([14, 1, 0]), 0, attr_def=attr_def)
+
+    def test_rejects_wrong_family_for_field(self) -> None:
+        reader, attr_def = self._reader(["", "test.tile"])
+
+        with pytest.raises(BytecodeError, match="does not match field contract"):
+            reader._read_attr_value(bytes([14, 1, 0]), 0, attr_def=attr_def)
+
+    def test_rejects_parameterized_value_for_other_field_kind(self) -> None:
+        reader, _ = self._reader(["", "test.options"])
+        enum_array_def = reader._attr_def_for_op_attr(
+            "test.enum_array_attrs", "required_values"
+        )
+
+        with pytest.raises(BytecodeError, match="does not match the field contract"):
+            reader._read_attr_value(bytes([14, 1, 0]), 0, attr_def=enum_array_def)
+
+    def test_rejects_unknown_parameter(self) -> None:
+        reader, attr_def = self._reader(["", "test.options", "unknown"])
+
+        with pytest.raises(BytecodeError, match="unknown parameter"):
+            reader._read_attr_value(bytes([14, 1, 1, 2]), 0, attr_def=attr_def)
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            bytes([14, 1, 2, 2, 4, 1, 2, 4, 1]),
+            bytes([14, 1, 2, 3, 13, 0, 2, 4, 1]),
+        ],
+        ids=["duplicate", "out_of_order"],
+    )
+    def test_rejects_noncanonical_parameter_order(self, data: bytes) -> None:
+        reader, attr_def = self._reader(["", "test.options", "mode", "scopes"])
+
+        with pytest.raises(BytecodeError, match="not in declaration order"):
+            reader._read_attr_value(data, 0, attr_def=attr_def)
+
+    def test_rejects_missing_required_parameter(self) -> None:
+        reader, attr_def = self._reader(["", "test.options"])
+
+        with pytest.raises(BytecodeError, match="missing required parameter 'mode'"):
+            reader._read_attr_value(bytes([14, 1, 0]), 0, attr_def=attr_def)
 
 
 # ============================================================================

@@ -23,6 +23,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
 
 namespace loom {
 namespace {
@@ -94,8 +95,7 @@ class ReaderTest : public ::testing::Test {
                     loom_func_dialect_op_semantics);
     RegisterDialect(context, LOOM_DIALECT_GLOBAL, loom_global_dialect_vtables,
                     loom_global_dialect_op_semantics);
-    RegisterDialect(context, LOOM_DIALECT_TEST, loom_test_dialect_vtables,
-                    loom_test_dialect_op_semantics);
+    IREE_ASSERT_OK(loom_test_dialect_register(context));
     IREE_ASSERT_OK(loom_context_finalize(context));
   }
 
@@ -281,25 +281,7 @@ class ReaderTest : public ::testing::Test {
 
   loom_module_t* CreateEnumArrayModule() {
     loom_module_t* module = CreateModule("reader_enum_array");
-    loom_builder_t builder;
-    loom_builder_initialize(module, &module->arena, loom_module_block(module),
-                            &builder);
-    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
-    IREE_CHECK_OK(loom_builder_intern_string(&builder, IREE_SV("f"), &name_id));
-    uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
-    IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
-    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
-    loom_op_t* func_op = nullptr;
-    IREE_CHECK_OK(loom_test_func_build(
-        &builder, 0, /*visibility=*/0, /*cc=*/0, callee,
-        /*arg_types=*/nullptr, /*arg_type_count=*/0,
-        /*result_types=*/nullptr, /*result_type_count=*/0,
-        /*result_dims=*/nullptr, /*result_dim_count=*/0,
-        /*result_encodings=*/nullptr, /*result_encoding_count=*/0,
-        LOOM_LOCATION_UNKNOWN, &func_op));
-    module->symbols.entries[symbol_id].flags = LOOM_SYMBOL_FLAG_PUBLIC;
-    loom_region_t* body =
-        loom_func_like_body(loom_func_like_cast(module, func_op));
+    loom_region_t* body = AddVoidFunction(module, "f");
     loom_builder_t body_builder;
     loom_builder_initialize(module, &module->arena,
                             loom_region_entry_block(body), &body_builder);
@@ -325,6 +307,82 @@ class ReaderTest : public ::testing::Test {
                                         /*value_count=*/0,
                                         LOOM_LOCATION_UNKNOWN, &yield_op));
     return module;
+  }
+
+  loom_module_t* CreateParameterizedAttrModule() {
+    loom_module_t* module = CreateModule("reader_parameterized_attr");
+    loom_region_t* body = AddVoidFunction(module, "parameterized");
+    loom_builder_t body_builder;
+    loom_builder_initialize(module, &module->arena,
+                            loom_region_entry_block(body), &body_builder);
+
+    loom_type_id_t bf16_type_id = LOOM_TYPE_ID_INVALID;
+    IREE_CHECK_OK(loom_module_intern_type_id(
+        module, loom_type_scalar(LOOM_SCALAR_TYPE_BF16), &bf16_type_id));
+    loom_attribute_t tile = loom_attr_absent();
+    IREE_CHECK_OK(loom_test_tile_attr_make(module, 16, &tile));
+    const uint8_t scopes[] = {
+        LOOM_TEST_OPTIONS_SCOPES_SUBGROUP,
+        254,
+    };
+    loom_attribute_t full_options = loom_attr_absent();
+    IREE_CHECK_OK(loom_test_options_attr_make(
+        module,
+        LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES |
+            LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_ELEMENT_TYPE |
+            LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_TILE,
+        LOOM_TEST_OPTIONS_MODE_FAST,
+        loom_make_enum_array(scopes, IREE_ARRAYSIZE(scopes)), bf16_type_id,
+        tile, &full_options));
+    loom_op_t* full_op = nullptr;
+    IREE_CHECK_OK(loom_test_parameterized_attr_build(
+        &body_builder, full_options, LOOM_LOCATION_UNKNOWN, &full_op));
+
+    loom_attribute_t empty_options = loom_attr_absent();
+    IREE_CHECK_OK(loom_test_options_attr_make(
+        module, LOOM_TEST_OPTIONS_ATTR_BUILD_FLAG_HAS_SCOPES,
+        LOOM_TEST_OPTIONS_MODE_PRECISE, loom_enum_array_empty(),
+        LOOM_TYPE_ID_INVALID, loom_attr_absent(), &empty_options));
+    loom_op_t* empty_op = nullptr;
+    IREE_CHECK_OK(loom_test_parameterized_attr_build(
+        &body_builder, empty_options, LOOM_LOCATION_UNKNOWN, &empty_op));
+
+    loom_attribute_t absent_options = loom_attr_absent();
+    IREE_CHECK_OK(loom_test_options_attr_make(
+        module, /*build_flags=*/0, LOOM_TEST_OPTIONS_MODE_FAST,
+        loom_enum_array_empty(), LOOM_TYPE_ID_INVALID, loom_attr_absent(),
+        &absent_options));
+    loom_op_t* absent_op = nullptr;
+    IREE_CHECK_OK(loom_test_parameterized_attr_build(
+        &body_builder, absent_options, LOOM_LOCATION_UNKNOWN, &absent_op));
+
+    loom_op_t* yield_op = nullptr;
+    IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
+                                        /*value_count=*/0,
+                                        LOOM_LOCATION_UNKNOWN, &yield_op));
+    return module;
+  }
+
+  loom_region_t* AddVoidFunction(loom_module_t* module, const char* name) {
+    loom_builder_t builder;
+    loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                            &builder);
+    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(loom_builder_intern_string(
+        &builder, iree_make_cstring_view(name), &name_id));
+    uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+    IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
+    loom_symbol_ref_t callee = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+    loom_op_t* func_op = nullptr;
+    IREE_CHECK_OK(loom_test_func_build(
+        &builder, 0, /*visibility=*/0, /*cc=*/0, callee,
+        /*arg_types=*/nullptr, /*arg_type_count=*/0,
+        /*result_types=*/nullptr, /*result_type_count=*/0,
+        /*result_dims=*/nullptr, /*result_dim_count=*/0,
+        /*result_encodings=*/nullptr, /*result_encoding_count=*/0,
+        LOOM_LOCATION_UNKNOWN, &func_op));
+    module->symbols.entries[symbol_id].flags = LOOM_SYMBOL_FLAG_PUBLIC;
+    return loom_func_like_body(loom_func_like_cast(module, func_op));
   }
 
   loom_module_t* CreateGlobalModule() {
@@ -2160,6 +2218,58 @@ TEST_F(ReaderTest, EnumArraysPreserveStableValuesAndOrder) {
   EXPECT_EQ(optional.values[1], 42u);
   EXPECT_EQ(optional.values[2],
             LOOM_TEST_ENUM_ARRAY_ATTRS_OPTIONAL_VALUES_MIDDLE);
+
+  loom_module_free(read_module);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, ParameterizedAttrsPreserveNamedSlotsAndPresence) {
+  loom_module_t* module = CreateParameterizedAttrModule();
+  auto bytes = WriteModule(module);
+
+  loom_module_t* read_module = nullptr;
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+
+  EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
+  EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
+  ASSERT_NE(read_module, nullptr);
+  ASSERT_EQ(read_module->symbols.count, 1u);
+  loom_op_t* func_op = read_module->symbols.entries[0].defining_op;
+  ASSERT_NE(func_op, nullptr);
+  loom_block_t* entry = loom_region_entry_block(loom_test_func_body(func_op));
+  ASSERT_NE(entry, nullptr);
+  ASSERT_EQ(entry->op_count, 4u);
+
+  loom_attribute_t full =
+      loom_test_parameterized_attr_options(loom_block_op(entry, 0));
+  ASSERT_TRUE(loom_test_options_attr_isa(full));
+  EXPECT_EQ(loom_test_options_attr_mode(full), LOOM_TEST_OPTIONS_MODE_FAST);
+  ASSERT_TRUE(loom_test_options_attr_has_scopes(full));
+  loom_enum_array_t scopes = loom_test_options_attr_scopes(full);
+  ASSERT_EQ(scopes.count, 2u);
+  EXPECT_EQ(scopes.values[0], LOOM_TEST_OPTIONS_SCOPES_SUBGROUP);
+  EXPECT_EQ(scopes.values[1], 254u);
+  ASSERT_TRUE(loom_test_options_attr_has_element_type(full));
+  const loom_type_id_t element_type_id =
+      loom_test_options_attr_element_type(full);
+  ASSERT_LT(element_type_id, read_module->types.count);
+  EXPECT_TRUE(loom_type_equal(read_module->types.entries[element_type_id],
+                              loom_type_scalar(LOOM_SCALAR_TYPE_BF16)));
+  ASSERT_TRUE(loom_test_options_attr_has_tile(full));
+  loom_attribute_t tile = loom_test_options_attr_tile(full);
+  ASSERT_TRUE(loom_test_tile_attr_isa(tile));
+  EXPECT_EQ(loom_test_tile_attr_width(tile), 16);
+
+  loom_attribute_t present_empty =
+      loom_test_parameterized_attr_options(loom_block_op(entry, 1));
+  ASSERT_TRUE(loom_test_options_attr_has_scopes(present_empty));
+  EXPECT_EQ(loom_test_options_attr_scopes(present_empty).count, 0u);
+
+  loom_attribute_t absent =
+      loom_test_parameterized_attr_options(loom_block_op(entry, 2));
+  EXPECT_FALSE(loom_test_options_attr_has_scopes(absent));
 
   loom_module_free(read_module);
   loom_module_free(module);

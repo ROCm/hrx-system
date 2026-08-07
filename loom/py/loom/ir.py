@@ -89,6 +89,7 @@ __all__ = [
     "EncodingInstance",
     # Predicates.
     "CanonicalAttrDict",
+    "ATTR_AGGREGATE_MAX_NESTING_DEPTH",
     "EnumArrayAttr",
     "ParameterizedAttr",
     "canonicalize_attr_dict",
@@ -1016,6 +1017,9 @@ class TiedResult:
 # ============================================================================
 
 
+ATTR_AGGREGATE_MAX_NESTING_DEPTH = 8
+
+
 class _AbsentParameterizedValue:
     """Private sentinel preserving optional absence in immutable slot tuples."""
 
@@ -1224,7 +1228,6 @@ def _canonicalize_parameterized_value(
                     ScalarType,
                     ShapedType,
                     BufferType,
-                    GroupType,
                     StorageType,
                     FunctionType,
                     RegisterType,

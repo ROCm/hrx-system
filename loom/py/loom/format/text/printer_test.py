@@ -776,7 +776,7 @@ class TestPrintAttrDict:
             attributes={"dict": {"modes": EnumArrayAttr([1, 7])}},
         )
 
-        with pytest.raises(ValueError, match="descriptor-backed operation field"):
+        with pytest.raises(ValueError, match="descriptor-backed field"):
             _printer().print_operation(op, module)
 
 

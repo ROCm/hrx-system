@@ -31,6 +31,7 @@ from loom.format.bytecode.op_decls import (
     symbol_def_for_op,
 )
 from loom.ir import (
+    ATTR_AGGREGATE_MAX_NESTING_DEPTH,
     Block,
     BufferType,
     DialectType,
@@ -46,6 +47,7 @@ from loom.ir import (
     NoneType,
     OpaqueLocation,
     Operation,
+    ParameterizedAttr,
     PoolType,
     Predicate,
     PredicateArg,
@@ -131,6 +133,7 @@ ATTR_KIND_ENCODING = 10
 ATTR_KIND_BYTES = 11
 ATTR_KIND_SCOPED_ENUM = 12
 ATTR_KIND_ENUM_ARRAY = 13
+ATTR_KIND_PARAMETERIZED = 14
 
 # Type kind bytes. These must match loom_bytecode_type_kind_e, not just the
 # current Python enum spelling.
@@ -156,7 +159,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 21
+FORMAT_VERSION = 22
 PRODUCER = "loom-py"
 
 SYMBOL_FLAG_PUBLIC = 0x0001
@@ -643,11 +646,30 @@ class BytecodeWriter:
         # Intern the parent AFTER sub-types (ensures sub-types have lower IDs).
         self._ctx.intern_type(ir_type)
 
-    def _number_attr_value(self, value: Any, attr_def: Any | None = None) -> None:
+    def _number_attr_value(
+        self,
+        value: Any,
+        attr_def: Any | None = None,
+        aggregate_nesting_depth: int = 0,
+    ) -> None:
         """Intern strings referenced by attribute values."""
         if getattr(attr_def, "attr_type", None) == "enum":
             return
-        if isinstance(value, str):
+        if isinstance(value, ParameterizedAttr):
+            if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+                raise ValueError(
+                    "aggregate attribute nesting exceeds maximum depth "
+                    f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
+                )
+            self._ctx.intern_string(value.family_name)
+            for parameter, slot in zip(
+                value.definition.parameters, value.slots, strict=True
+            ):
+                if slot is None:
+                    continue
+                self._ctx.intern_string(parameter.name)
+                self._number_attr_value(slot, parameter, aggregate_nesting_depth + 1)
+        elif isinstance(value, str):
             self._ctx.intern_string(value)
         elif isinstance(value, bytes | bytearray):
             pass
@@ -656,9 +678,16 @@ class BytecodeWriter:
         elif isinstance(value, EncodingInstance):
             self._number_encoding_instance(value)
         elif isinstance(value, Mapping):
+            if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+                raise ValueError(
+                    "aggregate attribute nesting exceeds maximum depth "
+                    f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
+                )
             for k, v in value.items():
                 self._ctx.intern_string(k)
-                self._number_attr_value(v)
+                self._number_attr_value(
+                    v, aggregate_nesting_depth=aggregate_nesting_depth + 1
+                )
         elif isinstance(value, list | tuple):
             for item in value:
                 self._number_attr_value(item)
@@ -1179,15 +1208,98 @@ class BytecodeWriter:
         for region in op.regions:
             self._write_region(buf, region, value_numbers)
 
+    def _write_parameterized_attr_value(
+        self,
+        buf: ByteBuffer,
+        value: ParameterizedAttr,
+        value_numbers_by_name: dict[str, int] | None,
+        attr_def: Any | None,
+        aggregate_nesting_depth: int,
+    ) -> None:
+        """Write a descriptor-backed parameterized attribute value."""
+        if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+            raise ValueError(
+                "aggregate attribute nesting exceeds maximum depth "
+                f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
+            )
+        attr_type = getattr(attr_def, "attr_type", None)
+        if attr_def is not None and attr_type != "parameterized":
+            raise TypeError(
+                "parameterized attribute value does not match the field contract"
+            )
+        expected_definition = getattr(attr_def, "parameterized_attr", None)
+        if attr_def is not None and (
+            expected_definition is None or expected_definition.name != value.family_name
+        ):
+            raise TypeError(
+                "parameterized attribute family "
+                f"{value.family_name!r} does not match the field contract"
+            )
+        buf.write_u8(ATTR_KIND_PARAMETERIZED)
+        buf.write_varint(self._ctx.strings[value.family_name])
+        present_items = value.present_items()
+        buf.write_varint(len(present_items))
+        parameter_by_name = {
+            parameter.name: parameter for parameter in value.definition.parameters
+        }
+        for parameter_name, parameter_value in present_items:
+            buf.write_varint(self._ctx.strings[parameter_name])
+            self._write_attr_value(
+                buf,
+                parameter_value,
+                value_numbers_by_name,
+                parameter_by_name[parameter_name],
+                aggregate_nesting_depth + 1,
+            )
+
+    def _write_dict_attr_value(
+        self,
+        buf: ByteBuffer,
+        value: Mapping[str, Any],
+        value_numbers_by_name: dict[str, int] | None,
+        aggregate_nesting_depth: int,
+    ) -> None:
+        """Write a canonical generic attribute dictionary."""
+        if aggregate_nesting_depth >= ATTR_AGGREGATE_MAX_NESTING_DEPTH:
+            raise ValueError(
+                "aggregate attribute nesting exceeds maximum depth "
+                f"{ATTR_AGGREGATE_MAX_NESTING_DEPTH}"
+            )
+        buf.write_u8(ATTR_KIND_DICT)
+        buf.write_varint(len(value))
+        for key, item in value.items():
+            buf.write_varint(self._ctx.intern_string(key))
+            self._write_attr_value(
+                buf,
+                item,
+                value_numbers_by_name,
+                aggregate_nesting_depth=aggregate_nesting_depth + 1,
+            )
+
     def _write_attr_value(
         self,
         buf: ByteBuffer,
         value: Any,
         value_numbers_by_name: dict[str, int] | None = None,
         attr_def: Any | None = None,
+        aggregate_nesting_depth: int = 0,
     ) -> None:
         """Write an attribute value with its kind byte."""
         attr_type = getattr(attr_def, "attr_type", None)
+        if isinstance(value, ParameterizedAttr):
+            self._write_parameterized_attr_value(
+                buf,
+                value,
+                value_numbers_by_name,
+                attr_def,
+                aggregate_nesting_depth,
+            )
+            return
+        if attr_type == "parameterized":
+            raise TypeError(
+                "parameterized attribute field requires ParameterizedAttr, "
+                f"got {value!r}"
+            )
         if attr_type == "predicate_list":
             if not isinstance(value, list) or not all(
                 isinstance(predicate, Predicate) for predicate in value
@@ -1295,14 +1407,11 @@ class BytecodeWriter:
             buf.write_varint(len(data))
             buf.write_bytes(data)
         elif isinstance(value, EnumArrayAttr):
-            raise ValueError("enum arrays require a descriptor-backed operation field")
+            raise ValueError("enum arrays require a descriptor-backed field")
         elif isinstance(value, Mapping):
-            buf.write_u8(ATTR_KIND_DICT)
-            buf.write_varint(len(value))
-            # Nested dict attrs are also canonicalized up front.
-            for k, v in value.items():
-                buf.write_varint(self._ctx.intern_string(k))
-                self._write_attr_value(buf, v, value_numbers_by_name)
+            self._write_dict_attr_value(
+                buf, value, value_numbers_by_name, aggregate_nesting_depth
+            )
         elif isinstance(value, EncodingInstance):
             buf.write_u8(ATTR_KIND_ENCODING)
             buf.write_varint(self._module.add_encoding(value) + 1)

@@ -15,11 +15,11 @@ from pathlib import Path
 
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.low import ALL_LOW_OPS
-from loom.dialect.test import ALL_TEST_OPS
+from loom.dialect.test import ALL_TEST_OPS, ALL_TEST_PARAMETERIZED_ATTRS
 from loom.format.bytecode.reader import read_module
 from loom.format.bytecode.writer import write_module
 from loom.format.text.parser import Parser
-from loom.ir import EnumArrayAttr, Module, RegisterType
+from loom.ir import BF16, EnumArrayAttr, Module, ParameterizedAttr, RegisterType
 
 
 def _run_loom_format(arguments: list[object]) -> subprocess.CompletedProcess[str]:
@@ -41,6 +41,7 @@ def _typed_register_module() -> tuple[Module, RegisterType]:
     parser.register_ops(ALL_LOW_OPS)
     parser.register_ops(ALL_TEST_OPS)
     parser.register_types(ALL_BUILTIN_TYPES)
+    parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
     module = parser.parse(
         "low.func.decl target<test.low.core> "
         "@typed_identity(%arg: reg<test.ptr : vector<4xi16>>) -> "
@@ -48,8 +49,16 @@ def _typed_register_module() -> tuple[Module, RegisterType]:
         "test.func @enum_arrays() {\n"
         "  test.enum_array_attrs [low, high, low] "
         "using [middle, <42>, middle]\n"
+        "  test.parameterized_attr "
+        "#test.options<mode = fast, scopes = [subgroup, <254>], "
+        "element_type = bf16, tile = #test.tile<width = 16>>\n"
+        "  test.parameterized_attr "
+        "#test.options<mode = precise, scopes = []>\n"
+        "  test.parameterized_attr #test.options<mode = fast>\n"
         "  test.yield\n"
         "}\n"
+        "test.record @parameterized_record "
+        "{options = #test.options<mode = precise, scopes = []>}\n"
     )
     register_types = [
         value.type for value in module.values if isinstance(value.type, RegisterType)
@@ -95,6 +104,46 @@ def main() -> None:
             raise AssertionError("required enum array did not survive C bytecode")
         if enum_op.attributes["optional_values"] != EnumArrayAttr([7, 42, 7]):
             raise AssertionError("open enum array did not survive C bytecode")
+        options = [
+            op.attributes["options"]
+            for op in enum_function.regions[0].blocks[0].ops[1:4]
+        ]
+        if not all(isinstance(value, ParameterizedAttr) for value in options):
+            raise AssertionError("Python reader did not recover parameterized attrs")
+        first, present_empty, absent = options
+        if first.get("mode") != 1 or first.get("scopes") != EnumArrayAttr([2, 254]):
+            raise AssertionError(
+                "parameterized enum payload did not survive C bytecode"
+            )
+        if first.get("element_type") != BF16:
+            raise AssertionError(
+                "parameterized type payload did not survive C bytecode"
+            )
+        tile = first.get("tile")
+        if not isinstance(tile, ParameterizedAttr) or tile.get("width") != 16:
+            raise AssertionError("nested parameterized attr did not survive C bytecode")
+        if (
+            not present_empty.has("scopes")
+            or present_empty.get("scopes") != EnumArrayAttr()
+        ):
+            raise AssertionError("present empty parameter did not survive C bytecode")
+        if absent.has("scopes"):
+            raise AssertionError("absent parameter became present in C bytecode")
+        record = next(
+            symbol.op
+            for symbol in loaded.symbols
+            if symbol.name == "parameterized_record"
+        )
+        if record is None:
+            raise AssertionError("Python reader did not recover parameterized_record")
+        record_options = record.attributes["dict"]["options"]
+        if not isinstance(record_options, ParameterizedAttr):
+            raise AssertionError("record dict lost its parameterized attribute")
+        if (
+            not record_options.has("scopes")
+            or record_options.get("scopes") != EnumArrayAttr()
+        ):
+            raise AssertionError("record dict lost present empty parameter")
 
 
 if __name__ == "__main__":

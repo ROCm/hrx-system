@@ -30,7 +30,7 @@ from loom.dialect.low import ALL_LOW_OPS
 from loom.dialect.pass_ import ALL_PASS_OPS
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.target import ALL_TARGET_OPS
-from loom.dialect.test import ALL_TEST_OPS
+from loom.dialect.test import ALL_TEST_OPS, ALL_TEST_PARAMETERIZED_ATTRS
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dsl import (
     ANY,
@@ -85,6 +85,7 @@ from loom.ir import (
     LocationTable,
     Module,
     Operation,
+    ParameterizedAttr,
     PlaceholderType,
     PoolType,
     Region,
@@ -194,6 +195,7 @@ def _text_parser(
     if include_pass:
         _append_unique(ops, ALL_PASS_OPS)
     parser.register_ops(ops)
+    parser.register_parameterized_attrs(ALL_TEST_PARAMETERIZED_ATTRS)
     types = list(ALL_BUILTIN_TYPES)
     if include_kernel:
         _append_unique(types, ALL_KERNEL_TYPES)
@@ -1429,6 +1431,39 @@ class TestCrossFormatRoundTrip:
         assert "optional_values" not in body_ops[2].attributes
         assert _roundtrip_text_through_bytecode(text) == text
 
+    def test_parameterized_attrs_survive_bytecode_with_named_slots(self) -> None:
+        text = (
+            "test.func @parameterized() {\n"
+            "  test.parameterized_attr "
+            "#test.options<mode = fast, scopes = [subgroup, <254>], "
+            "element_type = bf16, tile = #test.tile<width = 16>>\n"
+            "  test.parameterized_attr "
+            "#test.options<mode = precise, scopes = []>\n"
+            "  test.parameterized_attr #test.options<mode = fast>\n"
+            "  test.yield\n"
+            "}\n"
+        )
+        loaded = _parse_write_read(text)
+        function = next(
+            symbol.op for symbol in loaded.symbols if symbol.name == "parameterized"
+        )
+        assert function is not None
+        body_ops = function.regions[0].blocks[0].ops
+        first = body_ops[0].attributes["options"]
+        present_empty = body_ops[1].attributes["options"]
+        absent = body_ops[2].attributes["options"]
+        assert isinstance(first, ParameterizedAttr)
+        assert first.family_name == "test.options"
+        assert first.get("mode") == 1
+        assert first.get("scopes") == EnumArrayAttr([2, 254])
+        assert first.get("element_type") == BF16
+        assert isinstance(first.get("tile"), ParameterizedAttr)
+        assert first.get("tile").get("width") == 16
+        assert present_empty.has("scopes")
+        assert present_empty.get("scopes") == EnumArrayAttr()
+        assert not absent.has("scopes")
+        assert _roundtrip_text_through_bytecode(text) == text
+
     def test_empty_optional_aggregates_survive_bytecode(self) -> None:
         text = (
             "test.func @empty_predicates() where [] {\n"
@@ -1460,7 +1495,7 @@ class TestCrossFormatRoundTrip:
         )
         module.add_symbol(Symbol(name="f", kind=SymbolKind.FUNC_DEF, op=function))
 
-        with pytest.raises(ValueError, match="descriptor-backed operation field"):
+        with pytest.raises(ValueError, match="descriptor-backed field"):
             write_module(module)
 
     def test_record_symbol_survives_bytecode(self) -> None:
